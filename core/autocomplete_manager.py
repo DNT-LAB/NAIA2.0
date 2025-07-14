@@ -3,9 +3,43 @@ from PyQt6.QtCore import QObject, QEvent, Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QListWidget, QWidget, QLineEdit, QTextEdit
 from PyQt6.QtGui import QTextCursor, QKeyEvent
 
+# ✅ 전역 인스턴스 (싱글턴 패턴 대체)
+_autocomplete_manager = None
+
+def get_autocomplete_manager(app_context=None, main_window=None):
+    """
+    AutoCompleteManager의 전역 인스턴스를 반환합니다.
+    최초 호출 시에만 인스턴스를 생성하고, 이후로는 동일한 객체를 반환합니다.
+    
+    Args:
+        app_context: AppContext 인스턴스 (새로운 방식)
+        main_window: MainWindow 인스턴스 (기존 방식, 폴백용)
+    
+    Returns:
+        AutoCompleteManager: 전역 자동완성 관리자 인스턴스
+    """
+    global _autocomplete_manager
+    if _autocomplete_manager is None:
+        print("🔍 AutoCompleteManager 전역 인스턴스 생성 중...")
+        _autocomplete_manager = AutoCompleteManager(app_context=app_context, main_window=main_window)
+    else:
+        print("✅ AutoCompleteManager 기존 전역 인스턴스 반환")
+    return _autocomplete_manager
+
+def reset_autocomplete_manager():
+    """
+    테스트나 재초기화를 위해 전역 인스턴스를 리셋합니다.
+    주의: 실제 운영에서는 사용하지 마세요.
+    """
+    global _autocomplete_manager
+    if _autocomplete_manager:
+        print("🔄 AutoCompleteManager 전역 인스턴스 리셋")
+        _autocomplete_manager = None
+
 class AutoCompleteManager(QObject):
     """
-    애플리케이션 전체의 텍스트 입력 위젯에 대한 자동완성 기능을 관리하는 싱글턴 클래스.
+    애플리케이션 전체의 텍스트 입력 위젯에 대한 자동완성 기능을 관리하는 클래스.
+    ✅ 싱글턴 패턴을 제거하여 Python 3.12 호환성 문제 해결
     이벤트 필터를 사용하여 모든 QLineEdit, QTextEdit의 입력을 감지하고,
     TagDataManager와 WildcardManager를 통해 추천 목록을 제공합니다.
     
@@ -14,23 +48,42 @@ class AutoCompleteManager(QObject):
     2. 위젯 이름을 ignored_widget_names에 추가
     3. 부모 위젯 이름을 ignored_parent_names에 추가
     """
-    _instance = None
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self, main_window=None):
+    def __init__(self, app_context=None, main_window=None):
+        """
+        AutoCompleteManager 초기화     
+        Args:
+            app_context: AppContext 인스턴스 (권장)
+            main_window: MainWindow 인스턴스 (기존 호환성용)
+        """
+        # ✅ 싱글턴 패턴 제거로 안전한 부모 클래스 초기화
         super().__init__()
+        print("✅ QObject 초기화 성공 (싱글턴 패턴 제거됨)")
 
+        # ✅ 중복 초기화 방지 (인스턴스 레벨)
         if hasattr(self, '_initialized'):
-            return
-        
-        if not main_window:
+            print("⚠️ AutoCompleteManager 이미 초기화됨 - 건너뜀")
             return
 
-        self.main_window = main_window
+        # ✅ 매개변수 처리 (기존 호환성 유지)
+        if app_context:
+            self.main_window = app_context.main_window
+            # app_context에서 필요한 객체들 가져오기
+            self.tag_data_manager = getattr(app_context, 'tag_data_manager', None) or getattr(self.main_window, 'tag_data_manager', None)
+            self.wildcard_manager = getattr(app_context, 'wildcard_manager', None) or getattr(self.main_window, 'wildcard_manager', None)
+        elif main_window:
+            self.main_window = main_window
+            self.tag_data_manager = getattr(main_window, 'tag_data_manager', None)
+            self.wildcard_manager = getattr(main_window, 'wildcard_manager', None)
+        else:
+            print("❌ app_context 또는 main_window가 필요합니다")
+            return
+
+        if not self.main_window:
+            print("❌ main_window를 찾을 수 없습니다")
+            return
+
+        # ✅ 기존 코드와 동일한 초기화 로직
         self.popup = self._create_popup()
         self.timer = QTimer()
         self.timer.setSingleShot(True)
@@ -39,7 +92,7 @@ class AutoCompleteManager(QObject):
         self.current_widget = None
         self.active_token_info = {}
 
-        # 🆕 자동완성 제외 설정
+        # 자동완성 제외 설정
         self.ignored_widget_names = {
             "password_input", 
             "api_key_input", 
@@ -54,9 +107,16 @@ class AutoCompleteManager(QObject):
             "password_dialog"
         }
 
-        QApplication.instance().installEventFilter(self)
+        # 이벤트 필터 설치
+        app_instance = QApplication.instance()
+        if app_instance:
+            app_instance.installEventFilter(self)
+            print("✅ AutoCompleteManager 이벤트 필터 설치 완료")
+        else:
+            print("⚠️ QApplication 인스턴스를 찾을 수 없음")
+
         self._initialized = True
-        print("✅ AutoCompleteManager initialized and installed event filter.")
+        print("✅ AutoCompleteManager 초기화 완료!")
 
     def _create_popup(self) -> QListWidget:
         """자동완성 목록을 보여줄 팝업 위젯 생성"""
@@ -93,11 +153,12 @@ class AutoCompleteManager(QObject):
         return list_widget
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """이벤트 필터: 텍스트 입력 위젯에서 자동완성 트리거"""
         # 감시 대상이 QLineEdit 또는 QTextEdit인지 확인
         if not isinstance(watched, (QLineEdit, QTextEdit)):
             return super().eventFilter(watched, event)
         
-        # 🆕 자동완성 제외 위젯 확인
+        # 자동완성 제외 위젯 확인
         if self._should_ignore_widget(watched):
             return super().eventFilter(watched, event)
         
@@ -174,18 +235,21 @@ class AutoCompleteManager(QObject):
             return
             
         self.active_token_info = token_info
-        
-        # 🔥 핵심 수정: 실제 토큰 텍스트를 전달
         target_text = token_info['stripped_text']
         
         # wildcard_manager가 있다면 추가 와일드카드도 전달
         additional_wildcards = None
-        if hasattr(self.main_window, 'wildcard_manager') and self.main_window.wildcard_manager:
-            additional_wildcards = getattr(self.main_window.wildcard_manager, 'wildcard_dict_tree', None)
+        if self.wildcard_manager:
+            additional_wildcards = getattr(self.wildcard_manager, 'wildcard_dict_tree', None)
         
         # TagDataManager를 통해 매칭 결과 가져오기
         try:
-            matches = self.main_window.tag_data_manager.find_top_matches(
+            if not self.tag_data_manager:
+                print("⚠️ tag_data_manager가 없습니다")
+                self.popup.hide()
+                return
+                
+            matches = self.tag_data_manager.find_top_matches(
                 target_text, 
                 additional_wildcards=additional_wildcards
             )
@@ -199,7 +263,7 @@ class AutoCompleteManager(QObject):
             self.popup.hide()
             return
             
-        # 🆕 팝업에 결과 표시 (태그명 + count 포함)
+        # 팝업에 결과 표시 (태그명 + count 포함)
         self.popup.clear()
         self._populate_popup_with_counts(matches)
         self.popup_at_cursor()
@@ -230,7 +294,6 @@ class AutoCompleteManager(QObject):
                 count_text = str(count)
             
             # 아이템 텍스트 구성: 태그명은 왼쪽, count는 오른쪽
-            # 충분한 공간을 확보하기 위해 패딩 조정
             display_text = f"{tag:<40} {count_text:>8}"
             
             item = QListWidgetItem(display_text)
@@ -238,7 +301,7 @@ class AutoCompleteManager(QObject):
             # 실제 태그명만 별도로 저장 (완성 시 사용)
             item.setData(Qt.ItemDataRole.UserRole, tag)
             
-            # 텍스트 색상 설정 (count 부분을 회색으로)
+            # 툴팁 설정
             item.setToolTip(f"태그: {tag}\n사용 횟수: {count:,}")
             
             self.popup.addItem(item)
@@ -343,8 +406,7 @@ class AutoCompleteManager(QObject):
         }
 
     def _strip_brackets(self, keyword: str) -> tuple[str, str, str]:
-        """단어 앞뒤의 괄호를 분리합니다. 입력값이 문자열이 아닐 경우를 대비합니다."""
-        # 입력값이 문자열이 아닐 경우를 대비한 안전장치
+        """단어 앞뒤의 괄호를 분리합니다."""
         if not isinstance(keyword, str):
             return "", "", ""
 

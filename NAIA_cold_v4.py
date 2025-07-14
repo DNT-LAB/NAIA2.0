@@ -18,7 +18,7 @@ from ui.collapsible import CollapsibleBox
 from ui.right_view import RightView
 from ui.resolution_manager_dialog import ResolutionManagerDialog
 from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator
-from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
 from core.autocomplete_manager import AutoCompleteManager
@@ -29,6 +29,7 @@ from core.prompt_generation_controller import PromptGenerationController
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
 cfg_rescale_validator = QDoubleValidator(-1.0, 1.0, 2)
+_autocomplete_manager = None
 
 # 웹엔진 관련 설정 (QApplication 생성 전에 필요)
 def setup_webengine():
@@ -38,6 +39,8 @@ def setup_webengine():
     
     # QApplication 생성 전 필수 설정
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
+    os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
     
     # WebEngine 모듈 사전 로드
     try:
@@ -80,6 +83,13 @@ def load_custom_fonts():
         print(f"Pretendard-Bold.otf 파일을 찾을 수 없습니다: {bold_font_path}")
     
     return fonts_loaded
+
+
+def get_autocomplete_manager(app_context=None):
+    global _autocomplete_manager
+    if _autocomplete_manager is None:
+        _autocomplete_manager = AutoCompleteManager(app_context)  # 1회만 생성
+    return _autocomplete_manager
 
 class ModernMainWindow(QMainWindow):
     def __init__(self):
@@ -128,14 +138,50 @@ class ModernMainWindow(QMainWindow):
             self.middle_section_controller.module_instances
         )
         self.app_context.middle_section_controller = self.middle_section_controller
-        
-        # [신규] 자동완성 관리자 초기화
-        self.autocomplete_manager = AutoCompleteManager(main_window=self)
 
         self.prompt_gen_controller = PromptGenerationController(self.app_context)
 
         self.connect_signals()
 
+        # ✅ 2. AutoCompleteManager 초기화 방식 변경
+        print("🔍 AutoCompleteManager 전역 인스턴스 요청 중...")
+        try:
+            # 새로운 getter 패턴 사용
+            self.autocomplete_manager = get_autocomplete_manager(app_context=self.app_context)
+            
+            if hasattr(self.autocomplete_manager, '_initialized') and self.autocomplete_manager._initialized:
+                print("✅ AutoCompleteManager 전역 인스턴스 사용 준비 완료!")
+                self.status_bar.showMessage("✨ 자동완성 기능이 활성화되었습니다.", 3000)
+            else:
+                print("⚠️ AutoCompleteManager 초기화 불완전")
+                self.autocomplete_manager = None
+                self.status_bar.showMessage("⚠️ 자동완성 기능을 사용할 수 없습니다.", 3000)
+                
+        except Exception as e:
+            print(f"❌ AutoCompleteManager 전역 인스턴스 요청 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 폴백: 기존 방식으로 다시 시도 (하위 호환성)
+            print("🔄 기존 방식으로 폴백 시도...")
+            try:
+                self.autocomplete_manager = get_autocomplete_manager(main_window=self)
+                if hasattr(self.autocomplete_manager, '_initialized') and self.autocomplete_manager._initialized:
+                    print("✅ AutoCompleteManager 기존 방식 폴백 성공!")
+                    self.status_bar.showMessage("✨ 자동완성 기능이 활성화되었습니다 (폴백).", 3000)
+                else:
+                    self.autocomplete_manager = None
+            except Exception as e2:
+                print(f"❌ AutoCompleteManager 폴백도 실패: {e2}")
+                self.autocomplete_manager = None
+                self.status_bar.showMessage("❌ 자동완성 기능을 사용할 수 없습니다.", 5000)
+
+    # 자동완성 기능 사용 가능 여부를 확인하는 헬퍼 메서드
+    def is_autocomplete_available(self) -> bool:
+        """자동완성 기능이 사용 가능한지 확인합니다."""
+        return (self.autocomplete_manager is not None and 
+                hasattr(self.autocomplete_manager, '_initialized') and
+                self.autocomplete_manager._initialized)
 
     def init_ui(self):
         central_widget = QWidget()
@@ -1338,6 +1384,7 @@ class ModernMainWindow(QMainWindow):
         """생성 지연 시간 변경 시 처리"""
         print(f"생성 지연 시간 변경: {delay}초")
         # 필요시 추가 처리 로직
+
 
 if __name__ == "__main__":
     # 기존 환경 설정들...

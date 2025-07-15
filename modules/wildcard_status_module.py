@@ -13,6 +13,7 @@ class WildcardStatusModule(BaseMiddleModule):
         super().__init__()
         self.history_textbox: QTextEdit = None
         self.state_textbox: QTextEdit = None
+        self.ignore_save_load = True 
 
     def get_title(self) -> str:
         return "🃏 와일드카드 사용 현황"

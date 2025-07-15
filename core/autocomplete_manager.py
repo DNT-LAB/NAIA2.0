@@ -6,6 +6,8 @@ from PyQt6.QtGui import QTextCursor, QKeyEvent
 # ✅ 전역 인스턴스 (싱글턴 패턴 대체)
 _autocomplete_manager = None
 
+# 1. autocomplete_manager.py의 get_autocomplete_manager() 함수 수정
+
 def get_autocomplete_manager(app_context=None, main_window=None):
     """
     AutoCompleteManager의 전역 인스턴스를 반환합니다.
@@ -19,6 +21,17 @@ def get_autocomplete_manager(app_context=None, main_window=None):
         AutoCompleteManager: 전역 자동완성 관리자 인스턴스
     """
     global _autocomplete_manager
+    
+    # 🆕 메인 윈도우가 완전히 초기화된 후에만 생성 (빈 윈도우 방지)
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance()
+    
+    # 조건을 더 엄격하게: main_window와 app_context 모두 있어야 하고, 메인 윈도우가 표시되어야 함
+    if (not app or not main_window or not app_context or 
+        not hasattr(main_window, 'isVisible') or not main_window.isVisible()):
+        print("⚠️ 메인 윈도우가 완전히 초기화되지 않아 AutoCompleteManager 생성을 건너뜁니다.")
+        return None
+    
     if _autocomplete_manager is None:
         print("🔍 AutoCompleteManager 전역 인스턴스 생성 중...")
         _autocomplete_manager = AutoCompleteManager(app_context=app_context, main_window=main_window)
@@ -26,11 +39,9 @@ def get_autocomplete_manager(app_context=None, main_window=None):
         print("✅ AutoCompleteManager 기존 전역 인스턴스 반환")
     return _autocomplete_manager
 
+
 def reset_autocomplete_manager():
-    """
-    테스트나 재초기화를 위해 전역 인스턴스를 리셋합니다.
-    주의: 실제 운영에서는 사용하지 마세요.
-    """
+    """전역 인스턴스를 리셋합니다."""
     global _autocomplete_manager
     if _autocomplete_manager:
         print("🔄 AutoCompleteManager 전역 인스턴스 리셋")
@@ -50,73 +61,87 @@ class AutoCompleteManager(QObject):
     """
 
     def __init__(self, app_context=None, main_window=None):
-        """
-        AutoCompleteManager 초기화     
-        Args:
-            app_context: AppContext 인스턴스 (권장)
-            main_window: MainWindow 인스턴스 (기존 호환성용)
-        """
-        # ✅ 싱글턴 패턴 제거로 안전한 부모 클래스 초기화
+        # 🆕 QApplication 체크 추가 (빈 윈도우 방지)
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if not app:
+            print("❌ AutoCompleteManager: QApplication이 없습니다.")
+            return
+        
         super().__init__()
-        print("✅ QObject 초기화 성공 (싱글턴 패턴 제거됨)")
-
-        # ✅ 중복 초기화 방지 (인스턴스 레벨)
-        if hasattr(self, '_initialized'):
-            print("⚠️ AutoCompleteManager 이미 초기화됨 - 건너뜀")
-            return
-
-        # ✅ 매개변수 처리 (기존 호환성 유지)
-        if app_context:
-            self.main_window = app_context.main_window
-            # app_context에서 필요한 객체들 가져오기
-            self.tag_data_manager = getattr(app_context, 'tag_data_manager', None) or getattr(self.main_window, 'tag_data_manager', None)
-            self.wildcard_manager = getattr(app_context, 'wildcard_manager', None) or getattr(self.main_window, 'wildcard_manager', None)
-        elif main_window:
-            self.main_window = main_window
-            self.tag_data_manager = getattr(main_window, 'tag_data_manager', None)
-            self.wildcard_manager = getattr(main_window, 'wildcard_manager', None)
-        else:
-            print("❌ app_context 또는 main_window가 필요합니다")
-            return
-
-        if not self.main_window:
-            print("❌ main_window를 찾을 수 없습니다")
-            return
-
-        # ✅ 기존 코드와 동일한 초기화 로직
-        self.popup = self._create_popup()
-        self.timer = QTimer()
-        self.timer.setSingleShot(True)
-        self.timer.timeout.connect(self.show_completions)
         
+        # 앱 컨텍스트 설정
+        self.app_context = app_context
+        self.main_window = main_window or (app_context.main_window if app_context else None)
+        
+        # 데이터 매니저 참조
+        self.tag_data_manager = None
+        self.wildcard_manager = None
+        
+        # 🆕 초기화 지연 (메인 윈도우가 완전히 준비된 후)
+        self._initialized = False
+        
+        # 자동완성 리스트 위젯 (지연 생성)
+        self.suggestion_list = None
+        
+        # 현재 활성 위젯
         self.current_widget = None
-        self.active_token_info = {}
-
-        # 자동완성 제외 설정
-        self.ignored_widget_names = {
-            "password_input", 
-            "api_key_input", 
-            "login_field",
-            "secret_input"
-        }
+        self.current_suggestions = []
         
-        self.ignored_parent_names = {
-            "login_dialog",
-            "settings_panel", 
-            "api_management_tab",
-            "password_dialog"
-        }
+        # 설정
+        self.min_chars = 2
+        self.max_suggestions = 10
 
-        # 이벤트 필터 설치
-        app_instance = QApplication.instance()
-        if app_instance:
-            app_instance.installEventFilter(self)
-            print("✅ AutoCompleteManager 이벤트 필터 설치 완료")
-        else:
-            print("⚠️ QApplication 인스턴스를 찾을 수 없음")
+        self.popup = None
+        
+        # 무시할 위젯 이름들
+        self.ignored_widget_names = [
+            "search_input", "exclude_input", "negative_prompt", 
+            "delay_input", "repeat_input", "timer_input", "count_input"
+        ]
+        
+        # 🆕 지연 초기화 타이머
+        self.init_timer = QTimer()
+        self.init_timer.setSingleShot(True)
+        self.init_timer.timeout.connect(self._delayed_initialize)
+        self.init_timer.start(1000)  # 1초 후 초기화
 
-        self._initialized = True
-        print("✅ AutoCompleteManager 초기화 완료!")
+    def _delayed_initialize(self):
+        """🆕 지연 초기화 - 메인 윈도우가 완전히 준비된 후 실행"""
+        try:
+            if not self._initialized:
+                self.timer = QTimer()
+                self.timer.setSingleShot(True)
+                self._setup_data_managers()
+                self._setup_event_filter()
+                self.timer.timeout.connect(self.show_completions)
+                self._initialized = True
+                print("✅ AutoCompleteManager 지연 초기화 완료")
+        except Exception as e:
+            print(f"❌ AutoCompleteManager 초기화 실패: {e}")
+    
+    def _setup_data_managers(self):
+        """데이터 매니저 설정"""
+        try:
+            if self.app_context:
+                self.tag_data_manager = getattr(self.app_context, 'tag_data_manager', None)
+                self.wildcard_manager = getattr(self.app_context, 'wildcard_manager', None)
+            elif self.main_window:
+                self.tag_data_manager = getattr(self.main_window, 'tag_data_manager', None)
+                self.wildcard_manager = getattr(self.main_window, 'wildcard_manager', None)
+        except Exception as e:
+            print(f"⚠️ AutoCompleteManager 데이터 매니저 설정 실패: {e}")
+
+    def _setup_event_filter(self):
+        """🆕 이벤트 필터 설정 - 안전하게 처리"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                app.installEventFilter(self)
+                print("✅ AutoCompleteManager 이벤트 필터 설치 완료")
+        except Exception as e:
+            print(f"❌ AutoCompleteManager 이벤트 필터 설치 실패: {e}")
 
     def _create_popup(self) -> QListWidget:
         """자동완성 목록을 보여줄 팝업 위젯 생성"""
@@ -154,6 +179,9 @@ class AutoCompleteManager(QObject):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """이벤트 필터: 텍스트 입력 위젯에서 자동완성 트리거"""
+        if not self._initialized:
+            return False
+
         # 감시 대상이 QLineEdit 또는 QTextEdit인지 확인
         if not isinstance(watched, (QLineEdit, QTextEdit)):
             return super().eventFilter(watched, event)
@@ -163,7 +191,7 @@ class AutoCompleteManager(QObject):
             return super().eventFilter(watched, event)
         
         # 팝업이 보이는 경우, 키보드 네비게이션을 최우선으로 처리
-        if self.popup.isVisible() and event.type() == QEvent.Type.KeyPress:
+        if self.popup is not None and self.popup.isVisible() and event.type() == QEvent.Type.KeyPress:
             if self.handle_popup_navigation(event):
                 return True # 이벤트 소비
 
@@ -172,7 +200,7 @@ class AutoCompleteManager(QObject):
             self.on_key_release(watched, event)
         elif event.type() == QEvent.Type.FocusOut:
             # 약간의 지연을 주어, 팝업 클릭 시 바로 닫히지 않도록 함
-            QTimer.singleShot(100, lambda: self.popup.hide() if not self.popup.hasFocus() else None)
+            QTimer.singleShot(100, lambda: self.popup.hide() if self.popup and not self.popup.hasFocus() else None)
 
         return super().eventFilter(watched, event)
 
@@ -188,12 +216,12 @@ class AutoCompleteManager(QObject):
             return True
         
         # 3. 부모 위젯들 중 제외 목록에 있는 경우
-        parent = widget.parent()
-        while parent:
-            parent_name = parent.objectName() if hasattr(parent, 'objectName') else None
-            if parent_name and parent_name in self.ignored_parent_names:
-                return True
-            parent = parent.parent()
+        # parent = widget.parent()
+        # while parent:
+        #     parent_name = parent.objectName() if hasattr(parent, 'objectName') else None
+        #     if parent_name and parent_name in self.ignored_parent_names:
+        #         return True
+        #     parent = parent.parent()
         
         # 4. 위젯이 비밀번호 입력 모드인 경우
         if isinstance(widget, QLineEdit) and widget.echoMode() == QLineEdit.EchoMode.Password:
@@ -227,7 +255,11 @@ class AutoCompleteManager(QObject):
         """자동완성 목록을 표시하는 메서드"""
         if not self.current_widget: 
             return
-            
+
+        # 💡 [수정] 팝업이 없을 경우에만 생성 (지연 초기화)
+        if self.popup is None:
+            self.popup = self._create_popup()
+
         # 현재 활성 토큰 정보 가져오기
         token_info = self._get_active_token_info(self.current_widget)
         if not token_info or len(token_info['stripped_text']) < 1:

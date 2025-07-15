@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QVBoxLayout, QWidget
 from ui.collapsible import EnhancedCollapsibleBox  # 수정된 import
 from ui.detached_window import DetachedWindow  # 추가 import
 from interfaces.base_module import BaseMiddleModule
+from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext 
 
 class MiddleSectionController:
@@ -28,10 +29,32 @@ class MiddleSectionController:
         # 분리된 모듈들을 추적하기 위한 딕셔너리
         self.detached_modules = {}  # {module_title: DetachedWindow}
         self.module_boxes = {}      # {module_title: EnhancedCollapsibleBox}
+
+        self.app_context.subscribe("api_mode_changed", self.on_api_mode_changed)
         
         if not os.path.exists(modules_dir):
             os.makedirs(modules_dir)
             print(f"📁 모듈 디렉토리 생성: {modules_dir}")
+
+    def on_api_mode_changed(self, data: dict):
+        """API 모드가 변경될 때 각 모듈의 가시성을 업데이트합니다."""
+        new_mode = data.get("new_mode")
+        if not new_mode:
+            return
+
+        print(f"🎨 MiddleSectionController: API 모드 변경 감지 -> {new_mode}")
+        
+        # self.module_instances 대신 self.module_boxes를 기준으로 순회
+        for title, box in self.module_boxes.items():
+            # module_instances 리스트에서 해당 모듈 인스턴스 찾기
+            module_instance = next((inst for inst in self.module_instances if inst.get_title() == title), None)
+
+            if module_instance:
+                # is_compatible_with_mode 메서드는 BaseMiddleModule에 기본 구현이 있으므로 안전하게 호출 가능
+                is_compatible = module_instance.is_compatible_with_mode(new_mode)
+                box.setVisible(is_compatible)
+                visibility_status = "표시" if is_compatible else "숨김"
+                print(f"  - '{title}' 모듈 가시성 설정: {visibility_status}")
 
     def load_modules(self) -> None:
         """모듈 디렉토리에서 *_module.py 파일들을 로드"""
@@ -77,10 +100,46 @@ class MiddleSectionController:
                 traceback.print_exc()
                 continue
 
-    def initialize_modules_with_context(self, context: 'AppContext'):
-        """로드된 모든 모듈 인스턴스에 AppContext를 주입합니다."""
-        for inst in self.module_instances:
-            inst.initialize_with_context(context)
+    def initialize_modules_with_context(self, app_context):
+        """모듈 인스턴스들에 컨텍스트를 주입하고 ModeAwareModule들을 등록합니다."""
+        print(f"🔗 {len(self.module_instances)}개 모듈에 컨텍스트 주입 시작...")
+        
+        for module_instance in self.module_instances:  # ✅ .values() 제거 (리스트이므로)
+            # 🆕 app_context 설정
+            module_instance.app_context = app_context
+            
+            # ModeAwareModule을 상속한 모듈들을 자동으로 등록
+            if isinstance(module_instance, ModeAwareModule):
+                app_context.mode_manager.register_module(module_instance)
+                
+                # 초기 모드 설정
+                current_mode = app_context.get_api_mode()
+                module_instance.current_mode = current_mode
+                
+                print(f"🔗 모드 대응 모듈 초기화: {module_instance.get_title()}")
+                print(f"   - NAI 호환: {module_instance.NAI_compatibility}")
+                print(f"   - WEBUI 호환: {module_instance.WEBUI_compatibility}")
+            
+            # 🆕 일반 모듈도 가시성 제어를 위해 app_context 설정
+            else:
+                # 현재 모드에 따른 가시성 설정
+                current_mode = app_context.get_api_mode()
+                if hasattr(module_instance, 'widget') and hasattr(module_instance, 'NAI_compatibility'):
+                    should_be_visible = (
+                        (current_mode == "NAI" and getattr(module_instance, 'NAI_compatibility', True)) or
+                        (current_mode == "WEBUI" and getattr(module_instance, 'WEBUI_compatibility', True))
+                    )
+                    if module_instance.widget and hasattr(module_instance.widget, 'setVisible'):
+                        module_instance.widget.setVisible(should_be_visible)
+            
+            # 기존 on_initialize 호출 (이미 build_ui에서 호출되었지만 안전을 위해)
+            if hasattr(module_instance, 'on_initialize'):
+                try:
+                    module_instance.on_initialize()
+                except Exception as e:
+                    print(f"⚠️ 모듈 재초기화 오류 ({module_instance.__class__.__name__}): {e}")
+        
+        print(f"✅ 컨텍스트 주입 완료. 등록된 ModeAware 모듈: {len(app_context.mode_manager.registered_modules)}개")
 
     def build_ui(self, layout: QVBoxLayout) -> None:
         """모듈들을 EnhancedCollapsibleBox로 감싸서 UI 구성"""

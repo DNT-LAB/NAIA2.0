@@ -133,3 +133,4 @@ secrets.json
 *.7z
 run_NAIA_test_only.bat
 py_file_merger.py
+NAIA_api_timestamps.json

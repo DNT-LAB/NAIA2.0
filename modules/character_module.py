@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from interfaces.base_module import BaseMiddleModule
+from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor
@@ -51,16 +52,23 @@ class NAID4CharacterInput(QWidget):
         remove_btn.clicked.connect(lambda: self.remove_callback(self))
         layout.addWidget(remove_btn)
 
-# 나머지 CharacterModule 클래스는 동일하게 유지
-class CharacterModule(BaseMiddleModule):
-    """👤 NAID4 캐릭터 관리 모듈"""
-    
+class CharacterModule(BaseMiddleModule, ModeAwareModule):
     def __init__(self):
-        super().__init__()
-        self.settings_file = os.path.join('save', 'CharacterModule.json')
-        self.character_widgets: List[NAID4CharacterInput] = []
+        BaseMiddleModule.__init__(self)
+        ModeAwareModule.__init__(self)
+        
+        # 🆕 ModeAwareModule 필수 속성들
+        self.settings_base_filename = "CharacterModule"
+        self.current_mode = "NAI"  # 기본값
+        
+        # 🆕 호환성 설정 (NAI만 호환, WEBUI 비호환)
+        self.NAI_compatibility = True
+        self.WEBUI_compatibility = False
+        
+        # 기존 속성들
         self.scroll_layout: QVBoxLayout = None
         self.wildcard_processor: WildcardProcessor = None
+        self.character_widgets: List[NAID4CharacterInput] = []  # 🆕 누락된 속성 추가
         
         # UI 위젯 인스턴스 변수
         self.activate_checkbox: QCheckBox = None
@@ -74,38 +82,92 @@ class CharacterModule(BaseMiddleModule):
     def get_order(self) -> int:
         return 3
     
+    def get_module_name(self) -> str:
+        """ModeAwareModule 인터페이스 구현"""
+        return self.get_title()
+    
     def initialize_with_context(self, context: AppContext):
-        super().initialize_with_context(context)
-        self.wildcard_processor = WildcardProcessor(self.context.main_window.wildcard_manager)
-        self.context.subscribe("random_prompt_triggered", self.on_random_prompt_triggered)
+        """기존 메서드 유지"""
+        self.app_context = context  # 🆕 app_context 설정
+        self.wildcard_processor = WildcardProcessor(context.main_window.wildcard_manager)
+        context.subscribe("random_prompt_triggered", self.on_random_prompt_triggered)
     
     def on_initialize(self):
-        super().on_initialize()
-        # [수정] 위젯이 생성된 후에 load_settings 호출되도록 변경 (create_widget 마지막으로 이동)
+        if hasattr(self, 'app_context') and self.app_context:
+            # 모드 변경 이벤트는 이미 ModeAwareModuleManager에서 자동 구독됨
+            print(f"✅ {self.get_title()}: AppContext 연결 완료")
+            
+            # 초기 가시성 설정
+            current_mode = self.app_context.get_api_mode()
+            if self.widget:
+                self.update_visibility_for_mode(current_mode)
+
+    def collect_current_settings(self) -> Dict[str, Any]:
+        """현재 UI 상태에서 설정 수집"""
+        if not self.activate_checkbox:
+            return {}
+        
+        char_data = []
+        for widget in self.character_widgets:
+            char_data.append({
+                "prompt": widget.prompt_textbox.toPlainText(),
+                "uc": widget.uc_textbox.toPlainText(),
+                "is_enabled": widget.active_checkbox.isChecked()
+            })
+        
+        return {
+            "is_active": self.activate_checkbox.isChecked(),
+            "reroll_on_generate": self.reroll_on_generate_checkbox.isChecked() if self.reroll_on_generate_checkbox else False,
+            "character_frames": char_data
+        }
+    
+    def apply_settings(self, settings: Dict[str, Any]):
+        """설정을 UI에 적용"""
+        if not self.activate_checkbox:
+            return
+            
+        self.activate_checkbox.setChecked(settings.get("is_active", False))
+        
+        if self.reroll_on_generate_checkbox:
+            self.reroll_on_generate_checkbox.setChecked(settings.get("reroll_on_generate", False))
+        
+        # 기존 캐릭터 위젯들 제거
+        for widget in self.character_widgets[:]:
+            self.remove_character_widget(widget)
+        
+        # 캐릭터 프레임 복원
+        character_frames_data = settings.get("character_frames", [])
+        if not character_frames_data:
+            self.add_character_widget()  # 기본 위젯 하나 추가
+        else:
+            for frame_data in character_frames_data:
+                self.add_character_widget(
+                    prompt_text=frame_data.get("prompt", ""),
+                    uc_text=frame_data.get("uc", ""),
+                    is_enabled=frame_data.get("is_enabled", True)
+                )
 
     def create_widget(self, parent: QWidget) -> QWidget:
-        widget = QWidget()
+        widget = QWidget(parent)
         main_layout = QVBoxLayout(widget)
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
         # --- 상단 옵션 영역 ---
-        options_frame = QFrame()
-        # [수정] QHBoxLayout 대신 QGridLayout 사용
+        options_frame = QFrame(widget)
         options_layout = QGridLayout(options_frame)
         options_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 체크박스 및 버튼 위젯 생성 (기존과 동일)
+        # 체크박스 및 버튼 위젯 생성
         self.activate_checkbox = QCheckBox("캐릭터 프롬프트 옵션을 활성화 합니다. (NAID4 이상)")
         self.activate_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         
-        # [수정] 체크박스 텍스트를 더 명확하게 변경
         self.reroll_on_generate_checkbox = QCheckBox("[랜덤]대신 [생성]시에 와일드카드를 개봉합니다.")
         self.reroll_on_generate_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         
         self.reroll_button = QPushButton("🔄️ 미리보기 갱신") 
         self.reroll_button.setStyleSheet(DARK_STYLES['secondary_button'])
-        self.reroll_button.setFixedWidth(200) # [수정] 버튼 너비 고정
+        self.reroll_button.setFixedWidth(200)
         self.reroll_button.clicked.connect(self.process_and_update_view)
 
         options_layout.addWidget(self.activate_checkbox, 0, 0, 1, 2)
@@ -114,11 +176,11 @@ class CharacterModule(BaseMiddleModule):
 
         main_layout.addWidget(options_frame)
 
-        # [수정] QScrollArea 제거 -> 위젯들이 담길 컨테이너와 레이아웃만 생성
-        char_widgets_container = QWidget()
+        # 캐릭터 위젯 컨테이너
+        char_widgets_container = QWidget(widget)
         self.scroll_layout = QVBoxLayout(char_widgets_container)
         self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.scroll_layout.setContentsMargins(0, 5, 0, 5) # 상하 여백 추가
+        self.scroll_layout.setContentsMargins(0, 5, 0, 5)
         
         add_button = QPushButton("+ 캐릭터 추가")
         add_button.setStyleSheet(DARK_STYLES['secondary_button'])
@@ -137,14 +199,27 @@ class CharacterModule(BaseMiddleModule):
         self.processed_prompt_display.setFixedHeight(240)
         main_layout.addWidget(self.processed_prompt_display)
 
-        self.load_settings()
+        # 🆕 생성된 위젯 저장 (가시성 제어용)
+        self.widget = widget
+        
+        # 🆕 UI 생성 완료 후 즉시 가시성 설정
+        if hasattr(self, 'app_context') and self.app_context:
+            current_mode = self.app_context.get_api_mode()
+            should_be_visible = self.is_compatible_with_mode(current_mode)
+            widget.setVisible(should_be_visible)
+            print(f"🔍 CharacterModule 초기 가시성: {should_be_visible} (모드: {current_mode})")
+        
+        # 모드별 설정 로드
+        self.load_mode_settings()
+        
+        # 기본 캐릭터 위젯 추가
         if not self.character_widgets:
             self.add_character_widget()
 
         return widget
 
     def process_and_update_view(self) -> PromptContext:
-        """[신규] 와일드카드를 처리하고 UI를 업데이트하는 핵심 메소드"""
+        """와일드카드를 처리하고 UI를 업데이트하는 핵심 메소드"""
         if not self.activate_checkbox or not self.activate_checkbox.isChecked():
             self.processed_prompt_display.clear()
             self.last_processed_data = {'characters': [], 'uc': []}
@@ -166,14 +241,13 @@ class CharacterModule(BaseMiddleModule):
         return temp_context
 
     def on_random_prompt_triggered(self):
-        """[신규] '랜덤 프롬프트' 버튼 클릭 시 호출되는 이벤트 핸들러"""
-        # "생성 시 Reroll"이 체크되어 있지 *않을* 경우에만 와일드카드를 갱신합니다.
+        """'랜덤 프롬프트' 버튼 클릭 시 호출되는 이벤트 핸들러"""
         if self.activate_checkbox.isChecked() and not self.reroll_on_generate_checkbox.isChecked():
             print("🔄️ 랜덤 프롬프트 요청으로 캐릭터 와일드카드를 갱신합니다.")
             self.process_and_update_view()
 
     def get_parameters(self) -> dict:
-        """[수정] 모듈의 파라미터를 반환합니다."""
+        """모듈의 파라미터를 반환합니다."""
         if not self.activate_checkbox or not self.activate_checkbox.isChecked():
             return {"characters": None}
 
@@ -185,9 +259,9 @@ class CharacterModule(BaseMiddleModule):
             temp_context = None
 
         # 메인 컨텍스트에 와일드카드 처리 결과 병합
-        if temp_context and self.context.current_prompt_context:
-            self.context.current_prompt_context.wildcard_history.update(temp_context.wildcard_history)
-            self.context.current_prompt_context.wildcard_state.update(temp_context.wildcard_state)
+        if temp_context and hasattr(self, 'app_context') and self.app_context.current_prompt_context:
+            self.app_context.current_prompt_context.wildcard_history.update(temp_context.wildcard_history)
+            self.app_context.current_prompt_context.wildcard_state.update(temp_context.wildcard_state)
 
         return self.last_processed_data
 
@@ -201,7 +275,6 @@ class CharacterModule(BaseMiddleModule):
 
     def add_character_widget(self, prompt_text: str = "", uc_text: str = "", is_enabled: bool = True):
         char_id = len(self.character_widgets) + 1
-        # [수정] 부모 위젯을 self.scroll_layout.parentWidget()으로 올바르게 참조
         char_widget = NAID4CharacterInput(char_id, self.remove_character_widget, self.scroll_layout.parentWidget())
         char_widget.prompt_textbox.setText(prompt_text)
         char_widget.uc_textbox.setText(uc_text)
@@ -221,59 +294,3 @@ class CharacterModule(BaseMiddleModule):
         for i, widget in enumerate(self.character_widgets):
             widget.char_id = i + 1
             widget.active_checkbox.setText(f"C{widget.char_id}")
-
-    def save_settings(self):
-        """[수정] UI 위젯이 생성되었는지 확인 후 저장"""
-        if not self.activate_checkbox: return
-
-        char_data = []
-        for widget in self.character_widgets:
-            char_data.append({
-                "prompt": widget.prompt_textbox.toPlainText(),
-                "uc": widget.uc_textbox.toPlainText(),
-                "is_enabled": widget.active_checkbox.isChecked()
-            })
-
-        settings = {
-            "is_active": self.activate_checkbox.isChecked(),
-            "reroll_on_generate": self.reroll_on_generate_checkbox.isChecked(),
-            "character_frames": char_data
-        }
-
-        try:
-            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"❌ '{self.get_title()}' 설정 저장 실패: {e}")
-
-    def load_settings(self):
-        """[수정] JSON 파일에서 설정을 불러올 때, 키워드 인자를 명시하여 add_character_widget을 호출합니다."""
-        if not os.path.exists(self.settings_file) or not self.activate_checkbox:
-            return
-
-        try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-            
-            self.activate_checkbox.setChecked(settings.get("is_active", False))
-            self.reroll_on_generate_checkbox.setChecked(settings.get("reroll_on_generate", False))
-            
-            for widget in self.character_widgets[:]:
-                self.remove_character_widget(widget)
-            
-            char_frames = settings.get("character_frames", [])
-            if not char_frames:
-                self.add_character_widget() # 인자 없이 호출 -> 기본값 사용
-            else:
-                for frame_data in char_frames:
-                    # ✅ 키워드 인자를 명시하여 각 인자에 올바른 값을 전달합니다.
-                    self.add_character_widget(
-                        prompt_text=frame_data.get("prompt", ""),
-                        uc_text=frame_data.get("uc", ""),
-                        is_enabled=frame_data.get("is_enabled", True)
-                    )
-            
-            print(f"✅ '{self.get_title()}' 설정 로드 완료.")
-        except Exception as e:
-            print(f"❌ '{self.get_title()}' 설정 로드 실패: {e}")

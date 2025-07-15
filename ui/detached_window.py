@@ -57,8 +57,8 @@ class DetachedWindow(QMainWindow):
         """독립 창 UI 초기화"""
         # ✅ 창 제목에 독립 창임을 명시
         self.setWindowTitle(f"NAIA - {self.tab_title} (독립 창)")
-        self.setMinimumSize(800, 600)
-        self.resize(1200, 800)
+        # self.setMinimumSize(800, 600)
+        # self.resize(1200, 800)
         
         # 어두운 테마 적용
         self.setStyleSheet(f"""

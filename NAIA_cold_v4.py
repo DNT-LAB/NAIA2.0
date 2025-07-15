@@ -24,6 +24,7 @@ from core.autocomplete_manager import AutoCompleteManager
 from core.tag_data_manager import TagDataManager
 from core.wildcard_manager import WildcardManager
 from core.prompt_generation_controller import PromptGenerationController
+from utils.load_generation_params import GenerationParamsManager
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
@@ -122,16 +123,12 @@ class ModernMainWindow(QMainWindow):
         # [신규] 데이터 및 와일드카드 관리자 초기화
         self.tag_data_manager = TagDataManager()
         self.wildcard_manager = WildcardManager()
-        self.app_context = AppContext(self, self.wildcard_manager)
+        self.app_context = AppContext(self, self.wildcard_manager, self.tag_data_manager)
 
         self.init_ui()
         
-        # [신규] 앱 시작 시 마지막 상태 로드
-        self.load_generation_parameters()
-        self.load_last_search_state()
-
         # MiddleSectionController가 모듈 인스턴스들을 가지고 있음
-        # self.middle_section_controller.initialize_modules_with_context(self.app_context)
+        self.middle_section_controller.initialize_modules_with_context(self.app_context)
         self.generation_controller = GenerationController(
             self.app_context,
             self.middle_section_controller.module_instances
@@ -141,39 +138,23 @@ class ModernMainWindow(QMainWindow):
         self.prompt_gen_controller = PromptGenerationController(self.app_context)
 
         self.connect_signals()
+        # 🆕 메인 생성 파라미터 모드 관리자 추가
+        self.generation_params_manager = GenerationParamsManager(self)
+        
+        # AppContext에 모드 변경 이벤트 구독
+        self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
+        
+        # 초기 설정 로드 (NAI 모드)
+        self.generation_params_manager.load_mode_settings("NAI")
+
+        # [신규] 앱 시작 시 마지막 상태 로드
+        # self.load_generation_parameters()
+        self.load_last_search_state()
 
         # ✅ 2. AutoCompleteManager 초기화 방식 변경
         print("🔍 AutoCompleteManager 전역 인스턴스 요청 중...")
-        try:
-            # 새로운 getter 패턴 사용
-            self.autocomplete_manager = get_autocomplete_manager(app_context=self.app_context)
-            
-            if hasattr(self.autocomplete_manager, '_initialized') and self.autocomplete_manager._initialized:
-                print("✅ AutoCompleteManager 전역 인스턴스 사용 준비 완료!")
-                self.status_bar.showMessage("✨ 자동완성 기능이 활성화되었습니다.", 3000)
-            else:
-                print("⚠️ AutoCompleteManager 초기화 불완전")
-                self.autocomplete_manager = None
-                self.status_bar.showMessage("⚠️ 자동완성 기능을 사용할 수 없습니다.", 3000)
-                
-        except Exception as e:
-            print(f"❌ AutoCompleteManager 전역 인스턴스 요청 실패: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            # 폴백: 기존 방식으로 다시 시도 (하위 호환성)
-            print("🔄 기존 방식으로 폴백 시도...")
-            try:
-                self.autocomplete_manager = get_autocomplete_manager(main_window=self)
-                if hasattr(self.autocomplete_manager, '_initialized') and self.autocomplete_manager._initialized:
-                    print("✅ AutoCompleteManager 기존 방식 폴백 성공!")
-                    self.status_bar.showMessage("✨ 자동완성 기능이 활성화되었습니다 (폴백).", 3000)
-                else:
-                    self.autocomplete_manager = None
-            except Exception as e2:
-                print(f"❌ AutoCompleteManager 폴백도 실패: {e2}")
-                self.autocomplete_manager = None
-                self.status_bar.showMessage("❌ 자동완성 기능을 사용할 수 없습니다.", 5000)
+        # 새로운 getter 패턴 사용
+        self.autocomplete_manager = get_autocomplete_manager(app_context=self.app_context)
 
     # 자동완성 기능 사용 가능 여부를 확인하는 헬퍼 메서드
     def is_autocomplete_available(self) -> bool:
@@ -470,7 +451,7 @@ class ModernMainWindow(QMainWindow):
         container_layout.setSpacing(0)
         
         # 1. 투명 배경의 확장 버튼 프레임
-        self.expand_button_frame = QFrame()
+        self.expand_button_frame = QFrame(container)
         self.expand_button_frame.setStyleSheet(DARK_STYLES['transparent_frame'])
         expand_button_layout = QHBoxLayout(self.expand_button_frame)
         expand_button_layout.setContentsMargins(8, 4, 8, 4)
@@ -490,7 +471,7 @@ class ModernMainWindow(QMainWindow):
         container_layout.addWidget(self.expand_button_frame)
         
         # 2. 확장 가능한 생성 파라미터 영역
-        self.params_area = QWidget()
+        self.params_area = QWidget(container)
         self.params_area.setVisible(False)  # 기본적으로 숨김
         self.params_area.setStyleSheet(DARK_STYLES['compact_card'])
         
@@ -669,7 +650,7 @@ class ModernMainWindow(QMainWindow):
         container_layout.addWidget(self.params_area)
         
         # 3. 기존 생성 제어 프레임
-        generation_control_frame = QFrame()
+        generation_control_frame = QFrame(container)
         generation_control_frame.setStyleSheet(DARK_STYLES['compact_card'])
         gen_control_layout = QVBoxLayout(generation_control_frame)
         gen_control_layout.setContentsMargins(12, 12, 12, 12)
@@ -731,20 +712,97 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage("Custom API 파라미터 입력이 비활성화되었습니다.")
     
     def toggle_search_mode(self, mode):
-        """NAI/WEBUI 검색 모드 토글"""
+        """NAI/WEBUI 검색 모드 토글 (수정된 버전)"""
         if mode == "NAI":
             self.nai_toggle_btn.setChecked(True)
             self.webui_toggle_btn.setChecked(False)
             self.nai_toggle_btn.setStyleSheet(self.toggle_active_style)
             self.webui_toggle_btn.setStyleSheet(self.toggle_inactive_style)
             self.status_bar.showMessage("NAI 모드로 전환되었습니다.")
+            self.app_context.set_api_mode(mode)
         elif mode == "WEBUI":
-            self.nai_toggle_btn.setChecked(False)
-            self.webui_toggle_btn.setChecked(True)
-            self.nai_toggle_btn.setStyleSheet(self.toggle_inactive_style)
-            self.webui_toggle_btn.setStyleSheet(self.toggle_active_style)
-            self.status_bar.showMessage("WEBUI 모드로 전환되었습니다.")
-    
+            # WEBUI 모드 선택 시 연결 테스트 수행
+            try:
+                api_management = None
+                tab_was_open = False
+                
+                if hasattr(self, 'image_window') and self.image_window:
+                    # 이미 열린 API 관리 탭 찾기
+                    for i in range(self.image_window.tab_widget.count()):
+                        widget = self.image_window.tab_widget.widget(i)
+                        if hasattr(widget, '__class__') and 'APIManagementWindow' in widget.__class__.__name__:
+                            api_management = widget
+                            tab_was_open = True
+                            break
+                    
+                    # 🔒 스텔스 모드: API 관리 탭이 없으면 임시로 생성 (UI에 표시하지 않음)
+                    if not api_management:
+                        from ui.api_management_window import APIManagementWindow
+                        api_management = APIManagementWindow(self.app_context, self)
+                    
+                    if api_management and hasattr(api_management, 'webui_url_input'):
+                        # 저장된 WEBUI URL 가져오기 (스텔스 모드에서는 키링에서 직접 로드)
+                        if not tab_was_open:
+                            # 탭이 열려있지 않은 경우 키링에서 직접 가져오기
+                            webui_url = self.app_context.secure_token_manager.get_token('webui_url')
+                        else:
+                            # 탭이 열려있는 경우 UI에서 가져오기
+                            webui_url = api_management.webui_url_input.text().strip()
+                        
+                        if not webui_url:
+                            # URL이 없는 경우에만 API 관리 창으로 이동
+                            self.status_bar.showMessage("⚠️ WEBUI URL을 먼저 설정해주세요.", 5000)
+                            self.open_search_management()
+                            return
+                        
+                        # WebUI 연결 테스트
+                        self.status_bar.showMessage("🔄 WEBUI 연결을 확인하는 중...", 3000)
+                        validated_url = self.test_webui(webui_url)
+                        
+                        if validated_url:
+                            # ✅ 연결 성공 시 WEBUI 모드로 전환
+                            self.nai_toggle_btn.setChecked(False)
+                            self.webui_toggle_btn.setChecked(True)
+                            self.nai_toggle_btn.setStyleSheet(self.toggle_inactive_style)
+                            self.webui_toggle_btn.setStyleSheet(self.toggle_active_style)
+                            self.status_bar.showMessage(f"✅ WEBUI 모드로 전환되었습니다. ({validated_url})", 5000)
+                            
+                            # 검증된 URL을 키링에 저장
+                            clean_url = validated_url.replace('https://', '').replace('http://', '')
+                            self.app_context.secure_token_manager.save_token('webui_url', clean_url)
+                            
+                            # 🔒 연결 성공 시: 스텔스 모드로 생성된 경우 탭을 닫지 않음 (원래 없었으므로)
+                            # 기존에 열려있던 탭인 경우에만 선택적으로 닫기 가능 (여기서는 유지)
+                            
+                        else:
+                            # ❌ 연결 실패 시에만 API 관리 창으로 이동
+                            self.status_bar.showMessage(f"❌ WEBUI 연결 실패: {webui_url}", 5000)
+                            
+                            # 스텔스 모드로 생성된 경우에만 탭 열기
+                            if not tab_was_open:
+                                self.open_search_management()
+                            
+                            # 오류 메시지 표시
+                            QMessageBox.critical(
+                                self, 
+                                "WEBUI 연결 실패", 
+                                f"WebUI 서버에 연결할 수 없습니다.\n\n"
+                                f"확인할 사항:\n"
+                                f"• WebUI가 실행 중인지 확인\n"
+                                f"• 주소가 올바른지 확인: {webui_url}\n"
+                                f"• API 접근이 활성화되어 있는지 확인\n\n"
+                                f"API 관리 탭에서 올바른 주소를 입력해주세요."
+                            )
+                    else:
+                        # API 관리 기능을 사용할 수 없는 경우
+                        self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
+                        self.open_search_management()
+                self.app_context.set_api_mode(mode)
+            except Exception as e:
+                print(f"❌ WEBUI 모드 전환 중 오류: {e}")
+                self.status_bar.showMessage(f"❌ WEBUI 모드 전환 실패: {str(e)}", 5000)
+                self.open_search_management()
+
     def open_search_management(self):
         if self.image_window and hasattr(self.image_window, 'add_api_management_tab'):
             self.image_window.add_api_management_tab()
@@ -1183,108 +1241,35 @@ class ModernMainWindow(QMainWindow):
         self.status_bar.showMessage(f"❌ 생성 오류: {error_message}", 5000)
         self.random_prompt_btn.setEnabled(True)
 
-    def closeEvent(self, event):
-        """애플리케이션 종료 시 처리"""
-        print("🔌 애플리케이션 종료... 모든 설정을 저장합니다.")
-        
-        # 자동화 중단
-        if self.automation_module:
-            self.automation_module.automation_controller.stop_automation()
-            
-        # [신규] 분리된 모듈 창들 정리
-        if self.middle_section_controller:
-            self.middle_section_controller.close_all_detached_modules()
-            
-        self.save_generation_parameters()
-        
-        # MiddleSectionController를 통해 모든 모듈의 설정 저장
-        if self.middle_section_controller:
-            self.middle_section_controller.save_all_module_settings()
-
-        event.accept()
-
-    def save_generation_parameters(self):
-        """현재 생성 파라미터 UI의 상태를 JSON 파일에 저장합니다."""
-        print("🔧 생성 파라미터 설정 저장 중...")
-        try:
-            # get_main_parameters를 호출하여 현재 UI의 모든 값을 가져옵니다.
-            params_to_save = self.get_main_parameters()
-            
-            # 실제 생성에만 쓰이는 값은 저장할 필요 없으므로 제거합니다.
-            params_to_save.pop('seed', None)
-
-            for text, checkbox in self.generation_checkboxes.items():
-                # JSON에 저장할 고유한 key 생성 (예: gen_cb_프롬프트 고정)
-                key = f"gen_cb_{text}"
-                params_to_save[key] = checkbox.isChecked()
-            params_to_save['random_resolution_checked'] = self.random_resolution_checkbox.isChecked()
-            params_to_save['auto_fit_resolution_checked'] = self.auto_fit_resolution_checkbox.isChecked()
-            params_to_save['resolutions'] = self.resolutions
-
-            save_dir = 'save'
-            os.makedirs(save_dir, exist_ok=True)
-            filepath = os.path.join(save_dir, 'generation_params.json')
-
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(params_to_save, f, indent=4, ensure_ascii=False)
-            
-            print(f"  - 생성 파라미터 저장 완료: {filepath}")
-        except Exception as e:
-            print(f"  - ❌ 생성 파라미터 저장 실패: {e}")
-
     def load_generation_parameters(self):
-        """JSON 파일에서 생성 파라미터를 불러와 UI에 적용합니다."""
-        filepath = os.path.join('save', 'generation_params.json')
-        if not os.path.exists(filepath):
-            return
-
-        print("🔧 저장된 생성 파라미터 로드 중...")
+        # 기존 방식 대신 모드별 로드
+        current_mode = self.app_context.get_api_mode()
+        self.generation_params_manager.load_mode_settings(current_mode)
+    
+    def save_generation_parameters(self):
+        # 기존 방식 대신 모드별 저장
+        current_mode = self.app_context.get_api_mode()
+        self.generation_params_manager.save_mode_settings(current_mode)
+    
+    def closeEvent(self, event):
+        # 프로그램 종료 시 현재 모드 설정 저장
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                params = json.load(f)
+            # [추가] 분리된 모든 모듈 창 닫기 요청
+            if self.middle_section_controller:
+                self.middle_section_controller.close_all_detached_modules()
 
-            # UI가 먼저 생성되어야 하므로, self.resolutions가 존재하는지 확인
-            if hasattr(self, 'resolutions'):
-                loaded_resolutions = params.get('resolutions')
-                # 유효한 리스트인지 확인
-                if isinstance(loaded_resolutions, list) and loaded_resolutions:
-                    self.resolutions = loaded_resolutions
-                    self.resolution_combo.clear()
-                    self.resolution_combo.addItems(self.resolutions)
-
-            # 딕셔너리에서 값을 읽어와 각 위젯에 설정
-            self.main_prompt_textedit.setText(params.get('input', ''))
-            self.negative_prompt_textedit.setText(params.get('negative_prompt', ''))
-            self.model_combo.setCurrentText(params.get('model', 'NAID4.5'))
-            self.scheduler_combo.setCurrentText(params.get('scheduler', 'native'))
-            self.sampler_combo.setCurrentText(params.get('sampler', 'k_euler_ancestral'))
-            self.resolution_combo.setCurrentText(params.get('resolution', '832x1216'))
-            self.steps_input.setText(str(params.get('steps', '28')))
-            self.cfg_input.setText(str(params.get('cfg_scale', '5.0')))
-            self.cfg_rescale_input.setText(str(params.get('cfg_rescale', '0.4')))
+            current_mode = self.app_context.get_api_mode()
+            self.generation_params_manager.save_mode_settings(current_mode)
             
-            # 시드 관련 UI 상태 복원
-            self.seed_input.setText(params.get('seed_input_text', '-1'))
-            self.seed_fix_checkbox.setChecked(params.get('seed_fix_checked', False))
-            self.custom_api_checkbox.setChecked(params.get('use_custom_api_params', False))
-            self.custom_script_textbox.setText(params.get('custom_api_params', ''))
-
-            # 랜덤 해상도 및 해상도 자동 맞춤 체크박스 로드 추가
-            self.random_resolution_checkbox.setChecked(params.get('random_resolution_checked', False))
-            self.auto_fit_resolution_checkbox.setChecked(params.get('auto_fit_resolution_checked', False))
-
-            # NAID Option 체크박스 복원
-            for option_key, checkbox in self.advanced_checkboxes.items():
-                checkbox.setChecked(params.get(option_key, False))
-
-            # [신규] 하단 생성 제어 영역의 체크박스 상태 복원
-            for text, checkbox in self.generation_checkboxes.items():
-                key = f"gen_cb_{text}"
-                checkbox.setChecked(params.get(key, False))
-
-            print("  - 생성 파라미터 로드 완료.")
+            # 모든 모드 대응 모듈들 설정 저장
+            self.app_context.mode_manager.save_all_current_mode()
+            
+            print(f"💾 프로그램 종료 시 {current_mode} 모드 설정 저장 완료")
+            
         except Exception as e:
-            print(f"  - ❌ 생성 파라미터 로드 실패: {e}")
+            print(f"❌ 설정 저장 중 오류: {e}")
+        
+        event.accept()
 
     def on_resolution_detected(self, width: int, height: int):
         """컨트롤러로부터 받은 해상도를 콤보박스에 적용합니다."""
@@ -1388,6 +1373,29 @@ class ModernMainWindow(QMainWindow):
         """생성 지연 시간 변경 시 처리"""
         print(f"생성 지연 시간 변경: {delay}초")
         # 필요시 추가 처리 로직
+
+    def test_webui(self, url):
+        """WebUI 연결 테스트 함수"""
+        import requests
+        # ignore http or https, check both.
+        url = url.replace('http://', '').replace('https://', '').rstrip('/')
+        # just checking connection, so any api is okay.
+        try:
+            res = requests.get(f"https://{url}/sdapi/v1/progress?skip_current_image=true", timeout=1)
+            if res.status_code == 200 and 'progress' in res.json():
+                return f'https://{url}'
+            else:
+                raise Exception('invalid status')
+        except Exception:
+            try:
+                res = requests.get(f"http://{url}/sdapi/v1/progress?skip_current_image=true", timeout=1)
+                if res.status_code == 200 and 'progress' in res.json():
+                    return f'http://{url}'
+                else:
+                    raise Exception('invalid status')
+            except Exception:
+                pass
+        return None
 
 
 if __name__ == "__main__":

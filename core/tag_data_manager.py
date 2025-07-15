@@ -16,6 +16,7 @@ class TagDataManager:
         self.limited_generals = dict(list(generals.items())[:16000])
         self.limited_generals.update(dict(list(character_dict_count.items())[:15000]))
         self.limited_generals.update(artist_dict)
+        self.limited_generals.update(copyright_dict)
         
         self.artist_dict = artist_dict
         self.character_dict_count = character_dict_count

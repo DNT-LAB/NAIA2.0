@@ -2,7 +2,6 @@ import __init__
 import sys
 import os
 import json
-import ctypes
 import pandas as pd
 import random
 from PyQt6.QtWidgets import (
@@ -32,7 +31,7 @@ cfg_rescale_validator = QDoubleValidator(-1.0, 1.0, 2)
 _autocomplete_manager = None
 
 # 웹엔진 관련 설정 (QApplication 생성 전에 필요)
-def setup_webengine():
+def setup_webengine():  
     """WebEngine 설정"""
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QApplication
@@ -216,7 +215,7 @@ class ModernMainWindow(QMainWindow):
         main_layout.addWidget(splitter)
 
     def create_middle_section(self):
-        """중간 섹션: 동적 모듈 로드 및 CollapsibleBox 하위로 배치"""
+        """중간 섹션: 동적 모듈 로드 및 EnhancedCollapsibleBox 하위로 배치"""
         
         # 스크롤 영역 설정 (기존과 동일)
         middle_scroll_area = QScrollArea()
@@ -230,7 +229,6 @@ class ModernMainWindow(QMainWindow):
         middle_layout.setContentsMargins(6, 6, 6, 6)
         middle_layout.setSpacing(6)
 
-        # 🔥 핵심 수정: 기존 하드코딩된 모듈들 제거하고 동적 로딩으로 변경
         try:
             # 모듈 디렉토리 경로
             modules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'modules')
@@ -244,9 +242,9 @@ class ModernMainWindow(QMainWindow):
 
             # 상태 메시지 업데이트
             loaded_count = len(self.middle_section_controller.module_instances)
-            self.status_bar.showMessage(f"✅ 모듈 시스템 활성화: {loaded_count}개 모듈 로드 완료")
+            self.status_bar.showMessage(f"✅ 모듈 시스템 활성화: {loaded_count}개 모듈 로드 완료 (분리 기능 포함)")
             
-            print(f"🎉 모듈 시스템 성공적으로 활성화! {loaded_count}개 모듈 로드됨")
+            print(f"🎉 모듈 시스템 성공적으로 활성화! {loaded_count}개 모듈 로드됨 (분리 기능 활성화)")
             
         except Exception as e:
             print(f"❌ 모듈 시스템 오류: {e}")
@@ -1186,13 +1184,19 @@ class ModernMainWindow(QMainWindow):
         self.random_prompt_btn.setEnabled(True)
 
     def closeEvent(self, event):
+        """애플리케이션 종료 시 처리"""
         print("🔌 애플리케이션 종료... 모든 설정을 저장합니다.")
         
         # 자동화 중단
         if self.automation_module:
             self.automation_module.automation_controller.stop_automation()
             
+        # [신규] 분리된 모듈 창들 정리
+        if self.middle_section_controller:
+            self.middle_section_controller.close_all_detached_modules()
+            
         self.save_generation_parameters()
+        
         # MiddleSectionController를 통해 모든 모듈의 설정 저장
         if self.middle_section_controller:
             self.middle_section_controller.save_all_module_settings()

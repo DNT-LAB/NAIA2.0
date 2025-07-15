@@ -1,0 +1,135 @@
+# Python 관련 파일들
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 특정 데이터 폴더 무시
+data/tags/
+
+# 가상환경 폴더
+temp/
+save/
+venv/
+env/
+ENV/
+.venv/
+
+# 배포 관련
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# 단위 테스트 / 커버리지 보고서
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# 환경 변수 파일
+.env
+.env.local
+.env.*.local
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# PyCharm
+.idea/
+
+# Visual Studio Code
+.vscode/
+
+# OS 관련 파일들
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 로그 파일
+*.log
+
+# 임시 파일
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# 데이터베이스
+*.db
+*.sqlite
+*.sqlite3
+
+# 설정 파일 (민감한 정보 포함 가능)
+config.ini
+config.json
+secrets.json
+
+# 모델 파일 (크기가 클 수 있음)
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.pt
+*.pth
+
+# 압축 파일
+*.zip
+*.tar.gz
+*.rar
+*.7z
+run_NAIA_test_only.bat
+py_file_merger.py

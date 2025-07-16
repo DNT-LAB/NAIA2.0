@@ -245,6 +245,221 @@ DARK_STYLES = {
             background-color: #0D47A1;
         }}
     """,
+    # theme.py의 DARK_STYLES 딕셔너리에 추가할 스타일들
+
+    'compact_button': f"""
+        QPushButton {{
+            background-color: {DARK_COLORS['bg_tertiary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-weight: 500;
+            color: {DARK_COLORS['text_primary']};
+            font-size: 16px;
+            min-height: 20px;
+        }}
+        QPushButton:hover {{
+            background-color: {DARK_COLORS['bg_hover']};
+            border: 1px solid {DARK_COLORS['border_light']};
+        }}
+        QPushButton:pressed {{
+            background-color: {DARK_COLORS['bg_pressed']};
+        }}
+        QPushButton:disabled {{
+            background-color: {DARK_COLORS['bg_secondary']};
+            color: {DARK_COLORS['text_disabled']};
+            border: 1px solid {DARK_COLORS['border']};
+        }}
+    """,
+
+    'compact_combobox': f"""
+        QComboBox {{
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: {DARK_COLORS['text_primary']};
+            font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 16px;
+            min-height: 20px;
+        }}
+        QComboBox:hover {{
+            border: 1px solid {DARK_COLORS['border_light']};
+            background-color: {DARK_COLORS['bg_hover']};
+        }}
+        QComboBox:focus {{
+            border: 2px solid {DARK_COLORS['accent_blue']};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 20px;
+            padding-right: 5px;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid {DARK_COLORS['text_secondary']};
+            width: 0px;
+            height: 0px;
+        }}
+        QComboBox::down-arrow:hover {{
+            border-top: 5px solid {DARK_COLORS['text_primary']};
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            color: {DARK_COLORS['text_primary']};
+            selection-background-color: {DARK_COLORS['accent_blue']};
+            selection-color: {DARK_COLORS['text_primary']};
+            font-size: 16px;
+            padding: 4px;
+        }}
+        QComboBox QAbstractItemView::item {{
+            padding: 6px 12px;
+            border: none;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: {DARK_COLORS['bg_hover']};
+        }}
+    """,
+
+    'compact_spinbox': f"""
+        QSpinBox, QDoubleSpinBox {{
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: {DARK_COLORS['text_primary']};
+            font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 16px;
+            min-height: 20px;
+        }}
+        QSpinBox:hover, QDoubleSpinBox:hover {{
+            border: 1px solid {DARK_COLORS['border_light']};
+            background-color: {DARK_COLORS['bg_hover']};
+        }}
+        QSpinBox:focus, QDoubleSpinBox:focus {{
+            border: 2px solid {DARK_COLORS['accent_blue']};
+        }}
+        QSpinBox::up-button, QDoubleSpinBox::up-button {{
+            background-color: {DARK_COLORS['bg_tertiary']};
+            border: none;
+            border-left: 1px solid {DARK_COLORS['border']};
+            border-top-right-radius: 3px;
+            width: 16px;
+            padding: 2px;
+        }}
+        QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {{
+            background-color: {DARK_COLORS['bg_hover']};
+        }}
+        QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-bottom: 4px solid {DARK_COLORS['text_secondary']};
+            width: 0px;
+            height: 0px;
+        }}
+        QSpinBox::up-arrow:hover, QDoubleSpinBox::up-arrow:hover {{
+            border-bottom: 4px solid {DARK_COLORS['text_primary']};
+        }}
+        QSpinBox::down-button, QDoubleSpinBox::down-button {{
+            background-color: {DARK_COLORS['bg_tertiary']};
+            border: none;
+            border-left: 1px solid {DARK_COLORS['border']};
+            border-bottom-right-radius: 3px;
+            width: 16px;
+            padding: 2px;
+        }}
+        QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+            background-color: {DARK_COLORS['bg_hover']};
+        }}
+        QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 4px solid {DARK_COLORS['text_secondary']};
+            width: 0px;
+            height: 0px;
+        }}
+        QSpinBox::down-arrow:hover, QDoubleSpinBox::down-arrow:hover {{
+            border-top: 4px solid {DARK_COLORS['text_primary']};
+        }}
+    """,
+
+    'compact_slider': f"""
+        QSlider {{
+            background: transparent;
+            outline: none;
+        }}
+        QSlider::groove:horizontal {{
+            background: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            height: 8px;
+            border-radius: 4px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {DARK_COLORS['accent_blue']};
+            border: 1px solid {DARK_COLORS['border_light']};
+            width: 18px;
+            height: 18px;
+            margin: -6px 0;
+            border-radius: 9px;
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {DARK_COLORS['accent_blue_hover']};
+            border: 2px solid {DARK_COLORS['accent_blue_light']};
+        }}
+        QSlider::handle:horizontal:pressed {{
+            background: {DARK_COLORS['accent_blue_hover']};
+        }}
+        QSlider::sub-page:horizontal {{
+            background: {DARK_COLORS['accent_blue']};
+            border: 1px solid {DARK_COLORS['border']};
+            height: 8px;
+            border-radius: 4px;
+        }}
+        QSlider::add-page:horizontal {{
+            background: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            height: 8px;
+            border-radius: 4px;
+        }}
+        /* 수직 슬라이더 스타일 */
+        QSlider::groove:vertical {{
+            background: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            width: 8px;
+            border-radius: 4px;
+        }}
+        QSlider::handle:vertical {{
+            background: {DARK_COLORS['accent_blue']};
+            border: 1px solid {DARK_COLORS['border_light']};
+            width: 18px;
+            height: 18px;
+            margin: 0 -6px;
+            border-radius: 9px;
+        }}
+        QSlider::handle:vertical:hover {{
+            background: {DARK_COLORS['accent_blue_hover']};
+            border: 2px solid {DARK_COLORS['accent_blue_light']};
+        }}
+        QSlider::sub-page:vertical {{
+            background: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            width: 8px;
+            border-radius: 4px;
+        }}
+        QSlider::add-page:vertical {{
+            background: {DARK_COLORS['accent_blue']};
+            border: 1px solid {DARK_COLORS['border']};
+            width: 8px;
+            border-radius: 4px;
+        }}
+    """,
 }
 
 CUSTOM = {
@@ -369,5 +584,37 @@ CUSTOM = {
                 font-weight: 500;
                 background-color: {DARK_COLORS['bg_primary']};
             }}
-        """
+        """,
+
+        "params_title": f"""
+        QLabel {{
+            font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            color: {DARK_COLORS['text_primary']};
+            padding: 4px 0px;
+            border-bottom: 1px solid {DARK_COLORS['border']};
+            margin-bottom: 8px;
+        }}
+    """,
+    
+    "param_label_style": f"""
+        QLabel {{
+            font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            color: {DARK_COLORS['text_primary']};
+            padding: 2px 4px;
+        }}
+    """,
+    
+    "naid_options_label": f"""
+        QLabel {{
+            font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            color: {DARK_COLORS['text_primary']};
+            padding: 4px 8px;
+        }}
+    """,
 }

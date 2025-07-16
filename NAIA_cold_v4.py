@@ -7,7 +7,7 @@ import random
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
-    QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox
+    QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox, QSpinBox, QSlider, QDoubleSpinBox
 )
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
@@ -96,6 +96,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("NAIA v2.0.0 Dev")
         self.setGeometry(100, 100, 1900, 1000)
+        self.params_expanded = False
         
         # 어두운 테마 적용
         self.setStyleSheet(CUSTOM["main"])
@@ -339,14 +340,14 @@ class ModernMainWindow(QMainWindow):
         search_layout = QVBoxLayout()
         search_layout.setSpacing(6)
         
-        search_label = QLabel("검색 키워드:")
+        search_label = QLabel("검색 키워드")
         search_label.setStyleSheet(DARK_STYLES['label_style'])
         search_layout.addWidget(search_label)
         self.search_input = QLineEdit()
         self.search_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
         search_layout.addWidget(self.search_input)
         
-        exclude_label = QLabel("제외 키워드:")
+        exclude_label = QLabel("제외 키워드")
         exclude_label.setStyleSheet(DARK_STYLES['label_style'])
         search_layout.addWidget(exclude_label)
         self.exclude_input = QLineEdit()
@@ -479,11 +480,12 @@ class ModernMainWindow(QMainWindow):
         params_layout.setContentsMargins(12, 12, 12, 12)
         params_layout.setSpacing(8)
         
-        # 생성 파라미터 내용 - 강화된 버전
+        # 생성 파라미터 제목
         params_title = QLabel("🎛️ 생성 파라미터")
         params_title.setStyleSheet(CUSTOM["params_title"])
         params_layout.addWidget(params_title)
         
+        # 파라미터 그리드 레이아웃
         params_grid = QGridLayout()
         params_grid.setSpacing(8)
         
@@ -491,133 +493,171 @@ class ModernMainWindow(QMainWindow):
         param_label_style = CUSTOM["param_label_style"]
         
         # === 첫 번째 행: 모델 선택 + 스케줄러 ===
-        model_label = QLabel("모델 선택:")
+        model_label = QLabel("모델 선택")
         model_label.setStyleSheet(param_label_style)
         params_grid.addWidget(model_label, 0, 0)
         
-        self.model_combo = QComboBox() # QComboBox -> self.model_combo
-        self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F","NAID4.0C", "NAID3"])
+        self.model_combo = QComboBox()
+        self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
         self.model_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         params_grid.addWidget(self.model_combo, 0, 1)
         
-        scheduler_label = QLabel("스케줄러:")
+        scheduler_label = QLabel("스케줄러")
         scheduler_label.setStyleSheet(param_label_style)
         params_grid.addWidget(scheduler_label, 0, 2)
         
         self.scheduler_combo = QComboBox()
-        self.scheduler_combo.addItems(["karras","native", "exponential", "polyexponential"])
+        self.scheduler_combo.addItems(["karras", "native", "exponential", "polyexponential"])
         self.scheduler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         params_grid.addWidget(self.scheduler_combo, 0, 3)
         
-        # === 두 번째 행: 해상도 + 랜덤 해상도 + 관리 ===
-        resolution_label = QLabel("해상도:")
+        # === 두 번째 행: 해상도 + 랜덤 해상도 ===
+        resolution_label = QLabel("해상도")
         resolution_label.setStyleSheet(param_label_style)
         params_grid.addWidget(resolution_label, 1, 0)
         
-        self.resolution_combo = QComboBox() # QComboBox -> self.resolution_combo
-        self.resolutions = ["1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216", "1088 x 960", "1152 x 896", "1216 x 832"]
+        self.resolution_combo = QComboBox()
+        self.resolutions = ["1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216", 
+                        "1088 x 960", "1152 x 896", "1216 x 832"]
         self.resolution_combo.addItems(self.resolutions)
         self.resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        self.resolution_combo.setEditable(True)
         params_grid.addWidget(self.resolution_combo, 1, 1)
         
-        # 해상도 관련 컨트롤들
-        resolution_controls_layout = QHBoxLayout()
-        resolution_controls_layout.setSpacing(6)
-        
+        # 랜덤 해상도 체크박스
         self.random_resolution_checkbox = QCheckBox("랜덤 해상도")
         self.random_resolution_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-        resolution_controls_layout.addWidget(self.random_resolution_checkbox)
+        params_grid.addWidget(self.random_resolution_checkbox, 1, 2)
         
-        manage_resolution_btn = QPushButton("관리")
-        manage_resolution_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-        manage_resolution_btn.setFixedHeight(36)  # 30 → 36으로 증가
-        manage_resolution_btn.clicked.connect(self.open_resolution_manager)
-        resolution_controls_layout.addWidget(manage_resolution_btn)
+        # 해상도 관리 버튼
+        resolution_manage_btn = QPushButton("해상도 관리")
+        resolution_manage_btn.setStyleSheet(DARK_STYLES['compact_button'])
+        resolution_manage_btn.setFixedWidth(100)
+        resolution_manage_btn.clicked.connect(self.open_resolution_manager) 
+        params_grid.addWidget(resolution_manage_btn, 1, 3)
         
-        resolution_controls_widget = QWidget()
-        resolution_controls_widget.setLayout(resolution_controls_layout)
-        params_grid.addWidget(resolution_controls_widget, 1, 2, 1, 2)  # 2칸 차지
-        
-        # === 세 번째 행: 스텝 수 + 샘플러 ===
-        steps_label = QLabel("스텝 수:")
-        steps_label.setStyleSheet(param_label_style)
-        params_grid.addWidget(steps_label, 2, 0)
-        
-        self.steps_input = QLineEdit("28") # QLineEdit -> self.steps_input
-        self.steps_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
-        self.steps_input.setValidator(step_validator)
-        self.steps_input.setProperty("autocomplete_ignore", True) # 자동완성 무시 속성 설정
-        params_grid.addWidget(self.steps_input, 2, 1)
-        
-        sampler_label = QLabel("샘플러:")
+        # === 세 번째 행: 샘플러 + Steps ===
+        sampler_label = QLabel("샘플러")
         sampler_label.setStyleSheet(param_label_style)
-        params_grid.addWidget(sampler_label, 2, 2)
+        params_grid.addWidget(sampler_label, 2, 0)
         
-        self.sampler_combo = QComboBox() # QComboBox -> self.sampler_combo
-        self.sampler_combo.addItems(["k_euler_ancestral","k_euler", "k_dpmpp_2s_ancestral", "k_dpmpp_2m_sde", "k_dpmpp_2m",  "k_dpmpp_sde"])
+        self.sampler_combo = QComboBox()
+        # NAI 기본 샘플러들로 시작 (WEBUI 모드 전환 시 동적으로 변경됨)
+        self.sampler_combo.addItems(["k_euler_ancestral", "k_euler", "k_dpmpp_2m", 
+                                    "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "ddim_v3"])
         self.sampler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        params_grid.addWidget(self.sampler_combo, 2, 3)
+        params_grid.addWidget(self.sampler_combo, 2, 1)
+        
+        steps_label = QLabel("Steps")
+        steps_label.setStyleSheet(param_label_style)
+        params_grid.addWidget(steps_label, 2, 2)
+        
+        self.steps_spinbox = QSpinBox()
+        self.steps_spinbox.setRange(1, 150)
+        self.steps_spinbox.setValue(28)
+        self.steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        params_grid.addWidget(self.steps_spinbox, 2, 3)
         
         # === 네 번째 행: CFG Scale + CFG Rescale ===
-        cfg_label = QLabel("CFG Scale:")
+        cfg_label = QLabel("CFG Scale")
         cfg_label.setStyleSheet(param_label_style)
         params_grid.addWidget(cfg_label, 3, 0)
         
-        self.cfg_input = QLineEdit("5.0") # QLineEdit -> self.cfg_input
-        self.cfg_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
-        self.cfg_input.setValidator(cfg_validator)
-        self.cfg_input.setProperty("autocomplete_ignore", True) # 자동완성 무시 속성 설정
-        params_grid.addWidget(self.cfg_input, 3, 1)
+        # CFG Scale 슬라이더 컨테이너
+        cfg_container = QWidget()
+        cfg_container_layout = QHBoxLayout(cfg_container)
+        cfg_container_layout.setContentsMargins(0, 0, 0, 0)
+        cfg_container_layout.setSpacing(5)
         
-        cfg_rescale_label = QLabel("CFG Rescale:")
-        cfg_rescale_label.setStyleSheet(param_label_style)
-        params_grid.addWidget(cfg_rescale_label, 3, 2)
+        self.cfg_scale_slider = QSlider(Qt.Orientation.Horizontal)
+        self.cfg_scale_slider.setRange(10, 100)  # 1.0 ~ 30.0을 10 ~ 300으로 표현
+        self.cfg_scale_slider.setValue(50)  # 기본값 5.0
+        self.cfg_scale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        cfg_container_layout.addWidget(self.cfg_scale_slider)
         
-        self.cfg_rescale_input = QLineEdit("0.4") # QLineEdit -> self.cfg_rescale_input
-        self.cfg_rescale_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
-        self.cfg_rescale_input.setValidator(cfg_rescale_validator)
-        self.cfg_rescale_input.setProperty("autocomplete_ignore", True) # 자동완성 무시 속성 설정
-        params_grid.addWidget(self.cfg_rescale_input, 3, 3)
-
-        # [신규] === 다섯 번째 행: 시드 + 시드 고정 ===
-        seed_label = QLabel("시드:")
+        # CFG 값 표시 라벨
+        self.cfg_value_label = QLabel("5.0")
+        self.cfg_value_label.setStyleSheet(param_label_style)
+        self.cfg_value_label.setFixedWidth(50)  # 30 → 40으로 증가
+        self.cfg_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cfg_container_layout.addWidget(self.cfg_value_label)
+        
+        # CFG 슬라이더 값 변경 시 라벨 업데이트
+        self.cfg_scale_slider.valueChanged.connect(
+            lambda value: self.cfg_value_label.setText(f"{value/10:.1f}")
+        )
+        
+        params_grid.addWidget(cfg_container, 3, 1)
+        
+        # CFG Rescale (NAI 전용) 라벨
+        self.cfg_rescale_label = QLabel("CFG Rescale")
+        self.cfg_rescale_label.setStyleSheet(param_label_style)
+        params_grid.addWidget(self.cfg_rescale_label, 3, 2)
+        
+        # CFG Rescale 슬라이더 컨테이너
+        rescale_container = QWidget()
+        rescale_container_layout = QHBoxLayout(rescale_container)
+        rescale_container_layout.setContentsMargins(0, 0, 0, 0)
+        rescale_container_layout.setSpacing(5)
+        
+        self.cfg_rescale_slider = QSlider(Qt.Orientation.Horizontal)
+        self.cfg_rescale_slider.setRange(-25, 100)  # 0.0 ~ 1.0을 0 ~ 100으로 표현
+        self.cfg_rescale_slider.setValue(45)  # 기본값 0.2
+        self.cfg_rescale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        rescale_container_layout.addWidget(self.cfg_rescale_slider)
+        
+        # CFG Rescale 값 표시 라벨
+        self.cfg_rescale_value_label = QLabel("0.40")
+        self.cfg_rescale_value_label.setStyleSheet(param_label_style)
+        self.cfg_rescale_value_label.setFixedWidth(50)  # 30 → 40으로 증가
+        self.cfg_rescale_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rescale_container_layout.addWidget(self.cfg_rescale_value_label)
+        
+        # CFG Rescale 슬라이더 값 변경 시 라벨 업데이트
+        self.cfg_rescale_slider.valueChanged.connect(
+            lambda value: self.cfg_rescale_value_label.setText(f"{value/100:.2f}")
+        )
+        
+        params_grid.addWidget(rescale_container, 3, 3)
+        self.nai_rescale_ui = [self.cfg_rescale_label, rescale_container]
+        
+        # === 다섯 번째 행: 시드 입력 + 시드 고정 ===
+        seed_label = QLabel("시드")
         seed_label.setStyleSheet(param_label_style)
         params_grid.addWidget(seed_label, 4, 0)
         
-        self.seed_input = QLineEdit("-1")
+        self.seed_input = QLineEdit("0")
         self.seed_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
+        self.seed_input.setPlaceholderText("0 = 랜덤")
         self.seed_input.setProperty("autocomplete_ignore", True)
         params_grid.addWidget(self.seed_input, 4, 1)
         
-        # 시드 관련 컨트롤들을 담을 QHBoxLayout
+        # 시드 관련 체크박스들
         seed_controls_layout = QHBoxLayout()
-        seed_controls_layout.setContentsMargins(0, 0, 0, 0)
-        seed_controls_layout.setSpacing(10)
-
+        seed_controls_layout.setSpacing(12)
+        
         self.seed_fix_checkbox = QCheckBox("시드 고정")
         self.seed_fix_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-        
-        # "해상도 자동 맞춤" 체크박스 추가
-        self.auto_fit_resolution_checkbox = QCheckBox("해상도 자동 맞춤")
-        self.auto_fit_resolution_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-
         seed_controls_layout.addWidget(self.seed_fix_checkbox)
+        
+        self.auto_fit_resolution_checkbox = QCheckBox("자동 해상도 맞춤")
+        self.auto_fit_resolution_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         seed_controls_layout.addWidget(self.auto_fit_resolution_checkbox)
+        
         seed_controls_layout.addStretch()
-
-        params_grid.addLayout(seed_controls_layout, 4, 2, 1, 2) # 2칸 차지
+        
+        params_grid.addLayout(seed_controls_layout, 4, 2, 1, 2)  # 2칸 차지
         
         params_layout.addLayout(params_grid)
         
-        # === NAID Option 라인 ===
-        naid_options_layout = QHBoxLayout()
-        naid_options_layout.setSpacing(12)
+        # === NAID Option / Hires Option 라인 (모드별 전환) ===
+        # 섹션 라벨 (모드에 따라 텍스트 변경)
+        self.option_section_label = QLabel("NAID Option")
+        self.option_section_label.setStyleSheet(CUSTOM["naid_options_label"])
         
-        # NAID Option 라벨
-        naid_options_label = QLabel("NAID Option:")
-        naid_options_label.setStyleSheet(CUSTOM["naid_options_label"])
-        naid_options_layout.addWidget(naid_options_label)
+        # NAI 모드 전용 레이아웃
+        self.naid_option_layout = QHBoxLayout()
+        self.naid_option_layout.setSpacing(12)
+        self.naid_option_layout.addWidget(self.option_section_label)
         
         # 4개의 NAID 옵션 체크박스
         naid_options = ["SMEA", "DYN", "VAR+", "DECRISP"]
@@ -626,11 +666,135 @@ class ModernMainWindow(QMainWindow):
         for option in naid_options:
             checkbox = QCheckBox(option)
             checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-            naid_options_layout.addWidget(checkbox)
+            self.naid_option_layout.addWidget(checkbox)
             self.advanced_checkboxes[option] = checkbox
         
-        naid_options_layout.addStretch()  # 오른쪽 여백
-        params_layout.addLayout(naid_options_layout)
+        self.naid_option_layout.addStretch()  # 오른쪽 여백
+        
+        # 🔥 수정: WEBUI 모드 전용 레이아웃을 2행으로 분리
+        self.hires_option_widget = QWidget()
+        self.hires_option_widget_layout = QVBoxLayout(self.hires_option_widget)
+        self.hires_option_widget_layout.setSpacing(8)
+        self.hires_option_widget_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 첫 번째 행: Hires-fix 활성화 + 배율 + 업스케일러
+        self.hires_option_layout_row1 = QHBoxLayout()
+        self.hires_option_layout_row1.setSpacing(8)
+        
+        # Hires-fix 활성화 체크박스
+        self.enable_hr_checkbox = QCheckBox("Hires-fix 활성화")
+        self.enable_hr_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.hires_option_layout_row1.addWidget(self.enable_hr_checkbox)
+        
+        # 구분선
+        separator1 = QLabel("|")
+        separator1.setStyleSheet(param_label_style)
+        self.hires_option_layout_row1.addWidget(separator1)
+        
+        # HR Scale 스핀박스
+        hr_scale_label = QLabel("배율")
+        hr_scale_label.setStyleSheet(param_label_style)
+        self.hires_option_layout_row1.addWidget(hr_scale_label)
+        
+        self.hr_scale_spinbox = QDoubleSpinBox()
+        self.hr_scale_spinbox.setRange(1.0, 4.0)
+        self.hr_scale_spinbox.setSingleStep(0.1)
+        self.hr_scale_spinbox.setValue(1.5)
+        self.hr_scale_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.hr_scale_spinbox.setFixedWidth(80)
+        self.hires_option_layout_row1.addWidget(self.hr_scale_spinbox)
+        
+        # 구분선
+        separator2 = QLabel("|")
+        separator2.setStyleSheet(param_label_style)
+        self.hires_option_layout_row1.addWidget(separator2)
+        
+        # HR 업스케일러 콤보박스
+        hr_upscaler_label = QLabel("업스케일러")
+        hr_upscaler_label.setStyleSheet(param_label_style)
+        self.hires_option_layout_row1.addWidget(hr_upscaler_label)
+        
+        self.hr_upscaler_combo = QComboBox()
+        self.hr_upscaler_combo.addItems(["Lanczos", "Nearest", "ESRGAN_4x", "LDSR", "SwinIR_4x"])
+        self.hr_upscaler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.hr_upscaler_combo.setMinimumWidth(120)
+        self.hires_option_layout_row1.addWidget(self.hr_upscaler_combo)
+        
+        self.hires_option_layout_row1.addStretch()
+        
+        # 두 번째 행: Hires Steps + Denoising Strength
+        self.hires_option_layout_row2 = QHBoxLayout()
+        self.hires_option_layout_row2.setSpacing(8)
+        
+        # Hires Steps 스핀박스
+        hires_steps_label = QLabel("Hires Steps")
+        hires_steps_label.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(hires_steps_label)
+        
+        self.hires_steps_spinbox = QSpinBox()
+        self.hires_steps_spinbox.setRange(0, 150)
+        self.hires_steps_spinbox.setValue(0)  # 기본값 0 (use same as generation)
+        self.hires_steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.hires_steps_spinbox.setFixedWidth(80)
+        self.hires_option_layout_row2.addWidget(self.hires_steps_spinbox)
+        
+        # 구분선
+        separator3 = QLabel("|")
+        separator3.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(separator3)
+        
+        # Denoising Strength 슬라이더 (이동)
+        denoising_label = QLabel("Denoise")
+        denoising_label.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(denoising_label)
+        
+        # Denoising 슬라이더 컨테이너
+        denoising_container = QWidget()
+        denoising_container_layout = QHBoxLayout(denoising_container)
+        denoising_container_layout.setContentsMargins(0, 0, 0, 0)
+        denoising_container_layout.setSpacing(5)
+        
+        self.denoising_strength_slider = QSlider(Qt.Orientation.Horizontal)
+        self.denoising_strength_slider.setRange(0, 100)  # 0.0 ~ 1.0을 0~100으로 표현
+        self.denoising_strength_slider.setValue(50)  # 기본값 0.5
+        self.denoising_strength_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        self.denoising_strength_slider.setMinimumWidth(80)
+        denoising_container_layout.addWidget(self.denoising_strength_slider)
+        
+        # 슬라이더 값 표시 라벨
+        self.denoising_value_label = QLabel("0.50")
+        self.denoising_value_label.setStyleSheet(param_label_style)
+        self.denoising_value_label.setFixedWidth(50)
+        self.denoising_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        denoising_container_layout.addWidget(self.denoising_value_label)
+        
+        # 슬라이더 값 변경 시 라벨 업데이트
+        self.denoising_strength_slider.valueChanged.connect(
+            lambda value: self.denoising_value_label.setText(f"{value/100:.2f}")
+        )
+        
+        self.hires_option_layout_row2.addWidget(denoising_container)
+        self.hires_option_layout_row2.addStretch()
+        
+        # 위젯에 두 행 추가
+        self.hires_option_widget_layout.addLayout(self.hires_option_layout_row1)
+        self.hires_option_widget_layout.addLayout(self.hires_option_layout_row2)
+        
+        # 모드별 위젯 그룹 정리 (visibility 제어용)
+        self.naid_option_widgets = [
+            self.option_section_label
+        ] + list(self.advanced_checkboxes.values())
+        
+        self.hires_option_widgets = [
+            self.hires_option_widget  # 전체 위젯 컨테이너만 포함
+        ]
+        
+        # 기본적으로 NAI 모드로 시작 (WEBUI 위젯들 숨김)
+        self.hires_option_widget.setVisible(False)
+        
+        # 레이아웃에 추가
+        params_layout.addLayout(self.naid_option_layout)
+        params_layout.addWidget(self.hires_option_widget)
         
         # === Custom API 파라미터 섹션 ===
         self.custom_api_checkbox = QCheckBox("Add custom/override api parameters")
@@ -670,23 +834,108 @@ class ModernMainWindow(QMainWindow):
         gen_control_layout.addLayout(gen_button_layout)
         gen_control_layout.addSpacing(12)
         
+        # 🔥 수정: 체크박스 레이아웃을 화면 너비에 맞춰 조정
         gen_checkbox_layout = QHBoxLayout()
         gen_checkbox_layout.setSpacing(12)
         
         self.generation_checkboxes = {}
         checkbox_texts = ["프롬프트 고정", "자동 생성", "터보 옵션", "와일드카드 단독 모드"]
-        for cb_text in checkbox_texts:
+        
+        # 체크박스들을 균등하게 배치
+        for i, cb_text in enumerate(checkbox_texts):
             cb = QCheckBox(cb_text)
             cb.setStyleSheet(DARK_STYLES['dark_checkbox'])
-            gen_checkbox_layout.addWidget(cb)
+            gen_checkbox_layout.addWidget(cb, 1)  # stretch factor 1로 균등 배치
             self.generation_checkboxes[cb_text] = cb
+            #터보모드 미지원 상태이므로 조건문으로 block 처리
+            if cb_text == "터보 옵션":
+                cb.setEnabled(False)
 
+        # 오른쪽 여백을 위한 stretch (제거하지 않음)
         gen_checkbox_layout.addStretch()
         gen_control_layout.addLayout(gen_checkbox_layout)
         
         container_layout.addWidget(generation_control_frame)
         
         return container
+
+    def get_main_parameters(self) -> dict:
+        """메인 UI의 파라미터들을 수집하여 딕셔너리로 반환합니다."""
+        params = {}
+        try:
+            # 해상도 파싱 - 공백 처리 개선
+            resolution_text = self.resolution_combo.currentText()
+            if " x " in resolution_text:
+                width_str, height_str = resolution_text.split(" x ")
+                width, height = int(width_str.strip()), int(height_str.strip())
+            else:
+                # 기본값 설정
+                width, height = 1024, 1024
+            
+            # 시드 처리
+            if self.seed_fix_checkbox.isChecked():
+                try:
+                    seed_value = int(self.seed_input.text())
+                except ValueError:
+                    seed_value = -1
+            else:
+                seed_value = random.randint(0, 9999999999)
+                self.seed_input.setText(str(seed_value))
+
+            # 프롬프트 처리 (쉼표 기준 정리)
+            processed_input = ', '.join([item.strip() for item in self.main_prompt_textedit.toPlainText().split(',') if item.strip()])
+            processed_negative_prompt = ', '.join([item.strip() for item in self.negative_prompt_textedit.toPlainText().split(',') if item.strip()])
+
+            # 🔧 수정: 실제 위젯 이름에 맞게 파라미터 수집
+            params = {
+                "action": "generate",
+                "access_token": "",
+                "input": processed_input,
+                "negative_prompt": processed_negative_prompt,
+                "model": self.model_combo.currentText(),
+                "scheduler": self.scheduler_combo.currentText(),
+                "sampler": self.sampler_combo.currentText(),
+                "resolution": self.resolution_combo.currentText(),  # UI 표시용
+                "width": width,
+                "height": height,
+                "seed": seed_value,
+                "random_resolution": self.random_resolution_checkbox.isChecked(),
+                "steps": self.steps_spinbox.value(),
+                "cfg_scale": self.cfg_scale_slider.value() / 10.0,  # 슬라이더 값(10~300) → 실제 값(1.0~30.0)
+                "cfg_rescale": self.cfg_rescale_slider.value() / 100.0,  # 슬라이더 값(0~100) → 실제 값(0.0~1.0)
+                
+                # 고급 체크박스들 (딕셔너리에서 직접 접근)
+                "SMEA": self.advanced_checkboxes["SMEA"].isChecked(),
+                "DYN": self.advanced_checkboxes["DYN"].isChecked(),
+                "VAR+": self.advanced_checkboxes["VAR+"].isChecked(),
+                "DECRISP": self.advanced_checkboxes["DECRISP"].isChecked(),
+                
+                # 커스텀 API 파라미터
+                "use_custom_api_params": self.custom_api_checkbox.isChecked(),
+                "custom_api_params": self.custom_script_textbox.toPlainText()
+            }
+            
+            # 🆕 추가: WEBUI 전용 파라미터들 (해당 모드일 때만)
+            if hasattr(self, 'enable_hr_checkbox'):
+                params.update({
+                    "enable_hr": self.enable_hr_checkbox.isChecked(),
+                    "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 1.5,
+                    "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Lanczos",
+                    "denoising_strength": self.denoising_strength_slider.value() / 100.0 if hasattr(self, 'denoising_strength_slider') else 0.5,
+                    "hires_steps": self.hires_steps_spinbox.value() if hasattr(self, 'hires_steps_spinbox') else 0
+                })
+                
+            # 🆕 추가: 자동 해상도 맞춤 옵션
+            if hasattr(self, 'auto_fit_resolution_checkbox'):
+                params["auto_fit_resolution"] = self.auto_fit_resolution_checkbox.isChecked()
+                
+        except (ValueError, KeyError, AttributeError) as e:
+            print(f"❌ 파라미터 수집 오류: {e}")
+            # 오류 발생 시 사용자에게 알림
+            self.status_bar.showMessage(f"⚠️ 생성 파라미터 값에 오류가 있습니다: {e}", 5000)
+            return {}  # 빈 딕셔너리 반환
+
+        return params
     
     def toggle_params_panel(self):
         """생성 파라미터 패널 토글"""
@@ -719,7 +968,10 @@ class ModernMainWindow(QMainWindow):
             self.nai_toggle_btn.setStyleSheet(self.toggle_active_style)
             self.webui_toggle_btn.setStyleSheet(self.toggle_inactive_style)
             self.status_bar.showMessage("NAI 모드로 전환되었습니다.")
+            
+            # 🔧 수정: AppContext 모드 변경 -> 자동으로 GenerationParamsManager 콜백 호출
             self.app_context.set_api_mode(mode)
+            
         elif mode == "WEBUI":
             # WEBUI 모드 선택 시 연결 테스트 수행
             try:
@@ -771,8 +1023,8 @@ class ModernMainWindow(QMainWindow):
                             clean_url = validated_url.replace('https://', '').replace('http://', '')
                             self.app_context.secure_token_manager.save_token('webui_url', clean_url)
                             
-                            # 🔒 연결 성공 시: 스텔스 모드로 생성된 경우 탭을 닫지 않음 (원래 없었으므로)
-                            # 기존에 열려있던 탭인 경우에만 선택적으로 닫기 가능 (여기서는 유지)
+                            # 🔧 수정: AppContext 모드 변경 -> 자동으로 GenerationParamsManager 콜백 호출
+                            self.app_context.set_api_mode(mode)
                             
                         else:
                             # ❌ 연결 실패 시에만 API 관리 창으로 이동
@@ -783,6 +1035,7 @@ class ModernMainWindow(QMainWindow):
                                 self.open_search_management()
                             
                             # 오류 메시지 표시
+                            from PyQt6.QtWidgets import QMessageBox
                             QMessageBox.critical(
                                 self, 
                                 "WEBUI 연결 실패", 
@@ -797,7 +1050,7 @@ class ModernMainWindow(QMainWindow):
                         # API 관리 기능을 사용할 수 없는 경우
                         self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
                         self.open_search_management()
-                self.app_context.set_api_mode(mode)
+                        
             except Exception as e:
                 print(f"❌ WEBUI 모드 전환 중 오류: {e}")
                 self.status_bar.showMessage(f"❌ WEBUI 모드 전환 실패: {str(e)}", 5000)
@@ -836,6 +1089,7 @@ class ModernMainWindow(QMainWindow):
         self.prompt_gen_controller.resolution_detected.connect(self.on_resolution_detected)
         self.image_window.load_prompt_to_main_ui.connect(self.set_positive_prompt)
         self.image_window.instant_generation_requested.connect(self.on_instant_generation_requested)
+        self.connect_checkbox_signals()
 
     def set_positive_prompt(self, prompt: str):
         """전달받은 프롬프트를 메인 UI의 프롬프트 입력창에 설정합니다."""
@@ -843,12 +1097,20 @@ class ModernMainWindow(QMainWindow):
         print(f"📋 프롬프트 불러오기 완료.")
         self.status_bar.showMessage("프롬프트가 성공적으로 로드되었습니다.", 3000)
 
-    # [수정] get_main_parameters 메서드 완성
     def get_main_parameters(self) -> dict:
         """메인 UI의 파라미터들을 수집하여 딕셔너리로 반환합니다."""
         params = {}
         try:
-            width, height = map(int, self.resolution_combo.currentText().split('x'))
+            # 해상도 파싱 - 공백 처리 개선
+            resolution_text = self.resolution_combo.currentText()
+            if " x " in resolution_text:
+                width_str, height_str = resolution_text.split(" x ")
+                width, height = int(width_str.strip()), int(height_str.strip())
+            else:
+                # 기본값 설정
+                width, height = 1024, 1024
+            
+            # 시드 처리
             if self.seed_fix_checkbox.isChecked():
                 try:
                     seed_value = int(self.seed_input.text())
@@ -858,85 +1120,175 @@ class ModernMainWindow(QMainWindow):
                 seed_value = random.randint(0, 9999999999)
                 self.seed_input.setText(str(seed_value))
 
+            # 프롬프트 처리 (쉼표 기준 정리)
             processed_input = ', '.join([item.strip() for item in self.main_prompt_textedit.toPlainText().split(',') if item.strip()])
             processed_negative_prompt = ', '.join([item.strip() for item in self.negative_prompt_textedit.toPlainText().split(',') if item.strip()])
 
+            # 🔧 수정: 실제 위젯 이름에 맞게 파라미터 수집
             params = {
-                "action" : "generate",
-                "access_token" : "",
-                "input" : processed_input,
-                "negative_prompt" : processed_negative_prompt,
+                "action": "generate",
+                "access_token": "",
+                "input": processed_input,
+                "negative_prompt": processed_negative_prompt,
                 "model": self.model_combo.currentText(),
                 "scheduler": self.scheduler_combo.currentText(),
                 "sampler": self.sampler_combo.currentText(),
-                "resolution": self.resolution_combo.currentText(), # UI 표시용
+                "resolution": self.resolution_combo.currentText(),  # UI 표시용
                 "width": width,
                 "height": height,
                 "seed": seed_value,
                 "random_resolution": self.random_resolution_checkbox.isChecked(),
-                "steps": int(self.steps_input.text()),
-                "cfg_scale": float(self.cfg_input.text()),
-                "cfg_rescale": float(self.cfg_rescale_input.text()),
+                "steps": self.steps_spinbox.value(),
+                "cfg_scale": self.cfg_scale_slider.value() / 10.0,  # 슬라이더 값(10~300) → 실제 값(1.0~30.0)
+                "cfg_rescale": self.cfg_rescale_slider.value() / 100.0,  # 슬라이더 값(0~100) → 실제 값(0.0~1.0)
+                
+                # 고급 체크박스들 (딕셔너리에서 직접 접근)
                 "SMEA": self.advanced_checkboxes["SMEA"].isChecked(),
                 "DYN": self.advanced_checkboxes["DYN"].isChecked(),
                 "VAR+": self.advanced_checkboxes["VAR+"].isChecked(),
                 "DECRISP": self.advanced_checkboxes["DECRISP"].isChecked(),
+                
+                # 커스텀 API 파라미터
                 "use_custom_api_params": self.custom_api_checkbox.isChecked(),
                 "custom_api_params": self.custom_script_textbox.toPlainText()
             }
-        except (ValueError, KeyError) as e:
+            
+            # 🆕 추가: WEBUI 전용 파라미터들 (해당 모드일 때만)
+            if hasattr(self, 'enable_hr_checkbox'):
+                params.update({
+                    "enable_hr": self.enable_hr_checkbox.isChecked(),
+                    "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 1.5,
+                    "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Lanczos",
+                    "denoising_strength": self.denoising_strength_slider.value() / 100.0 if hasattr(self, 'denoising_strength_slider') else 0.5
+                })
+                
+            # 🆕 추가: 자동 해상도 맞춤 옵션
+            if hasattr(self, 'auto_fit_resolution_checkbox'):
+                params["auto_fit_resolution"] = self.auto_fit_resolution_checkbox.isChecked()
+                
+        except (ValueError, KeyError, AttributeError) as e:
             print(f"❌ 파라미터 수집 오류: {e}")
             # 오류 발생 시 사용자에게 알림
             self.status_bar.showMessage(f"⚠️ 생성 파라미터 값에 오류가 있습니다: {e}", 5000)
-            return {} # 빈 딕셔너리 반환
+            return {}  # 빈 딕셔너리 반환
 
         return params
 
     # update_ui_with_result 메서드 수정
     def update_ui_with_result(self, result: dict):
         """APIService의 결과를 받아 UI에 업데이트하고 히스토리에 추가"""
-        if self.image_window:
+        try:
+            print("🔍 디버그: update_ui_with_result 시작")
+            
+            if not self.image_window:
+                print("❌ image_window가 None입니다.")
+                return
+                
             image_object = result.get("image")
             info_text = result.get("info", "")
             source_row = result.get("source_row")
             raw_bytes = result.get("raw_bytes")
 
             if image_object is None:
+                print("❌ image_object가 None입니다.")
                 return
 
-            # 현재 결과 업데이트
-            self.image_window.update_image(image_object)
-            self.image_window.update_info(info_text)
+            print("🔍 디버그: 이미지 객체 검증 완료")
             
-            # 히스토리에 추가
-            self.image_window.add_to_history(image_object, raw_bytes, info_text, source_row)
+            # 이미지 업데이트 (안전하게)
+            try:
+                self.image_window.update_image(image_object)
+                print("🔍 디버그: 이미지 업데이트 완료")
+            except Exception as e:
+                print(f"❌ 이미지 업데이트 실패: {e}")
+                return
+                
+            # 정보 업데이트
+            try:
+                self.image_window.update_info(info_text)
+                print("🔍 디버그: 정보 업데이트 완료")
+            except Exception as e:
+                print(f"❌ 정보 업데이트 실패: {e}")
+                
+            # 히스토리 추가
+            try:
+                print(f"🔍 히스토리 추가 시도:")
+                print(f"  - image_object type: {type(image_object)}")
+                print(f"  - raw_bytes type: {type(raw_bytes)}, length: {len(raw_bytes) if raw_bytes else 'None'}")
+                print(f"  - info_text type: {type(info_text)}, length: {len(info_text) if info_text else 'None'}")
+                print(f"  - source_row type: {type(source_row)}")
+                
+                self.image_window.add_to_history(image_object, raw_bytes, info_text, source_row)
+                print("🔍 디버그: 히스토리 추가 완료")
+            except Exception as e:
+                print(f"❌ 히스토리 추가 실패: {e}")
+                import traceback
+                traceback.print_exc()
             
-        self.status_bar.showMessage("🎉 생성 완료!")
-        
-        # [수정] 자동화 모듈에서 반복 생성 처리
-        if self.automation_module:
-            # 반복 생성 처리 후 다음 프롬프트 진행 여부 확인
-            should_proceed_to_next = self.automation_module.notify_generation_completed()
+            self.status_bar.showMessage("🎉 생성 완료!")
             
-            # 반복이 완료되지 않았으면 자동 생성 사이클 중단
-            if should_proceed_to_next is False:
-                return  # 동일 프롬프트 반복 중이므로 다음 프롬프트로 진행하지 않음
-        
-        # [신규] 자동화 지연 시간 적용 후 자동 생성 체크 (반복 완료 시에만)
-        if self.automation_module and self.automation_module.automation_controller.is_running:
-            delay = self.automation_module.get_generation_delay()
-            if delay > 0:
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
-            else:
-                self._check_and_trigger_auto_generation()
-        else:
-            # 기존 자동 생성 사이클 체크
-            self._check_and_trigger_auto_generation()
+            print("🔍 디버그: 자동화 모듈 처리 시작")
+            
+            # 자동화 모듈 처리 (안전하게)
+            if self.automation_module:
+                try:
+                    should_proceed_to_next = self.automation_module.notify_generation_completed()
+                    if should_proceed_to_next is False:
+                        print("🔍 디버그: 반복 생성 중이므로 return")
+                        return
+                except Exception as e:
+                    print(f"❌ 자동화 모듈 notify_generation_completed 실패: {e}")
+                    return
+            
+            print("🔍 디버그: 자동 생성 체크 시작")
+            
+            # 자동 생성 체크
+            try:
+                if self.automation_module and self.automation_module.automation_controller.is_running:
+                    delay = self.automation_module.get_generation_delay()
+                    if delay > 0:
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
+                    else:
+                        self._check_and_trigger_auto_generation()
+                else:
+                    self._check_and_trigger_auto_generation()
+            except Exception as e:
+                print(f"❌ 자동 생성 체크 실패: {e}")
+                
+            print("🔍 디버그: update_ui_with_result 완료")
+            
+        except Exception as e:
+            print(f"❌ update_ui_with_result 전체 에러: {e}")
+            import traceback
+            traceback.print_exc()
+            self.status_bar.showMessage(f"❌ 결과 처리 오류: {e}")
 
     def _check_and_trigger_auto_generation(self):
         """자동 생성 조건을 확인하고 조건이 만족되면 다음 사이클을 시작합니다."""
+        # 조건 확인: "자동 생성"이 체크되어 있고 "프롬프트 고정"이 체크되어 있지 않음
+        auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
+        prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
+        
+        if not auto_generate_checkbox.isChecked():
+            return  # 자동 생성 체크박스가 없으면 종료
+
         try:
+            if (hasattr(self, 'generation_controller') and 
+                self.generation_controller.is_generating):
+                print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
+                # 약간의 지연 후 다시 시도
+                QTimer.singleShot(500, self._trigger_auto_image_generation)
+                return
+                
+            # [추가] 스레드 상태 확인
+            if (hasattr(self, 'generation_controller') and 
+                self.generation_controller.generation_thread and 
+                self.generation_controller.generation_thread.isRunning()):
+                print("🔄 이전 스레드가 아직 실행 중이므로 잠시 대기...")
+                QTimer.singleShot(200, self._trigger_auto_image_generation)
+                return
+
             # [신규] 반복 생성 중인지 확인 - 반복 중이면 자동 생성 건너뛰기
             if (self.automation_module and 
                 hasattr(self.automation_module, 'current_repeat_count') and 
@@ -947,16 +1299,9 @@ class ModernMainWindow(QMainWindow):
             # [신규] 중복 실행 방지 - 시간 기반 체크
             import time
             current_time = time.time()
-            if self.auto_generation_in_progress or (current_time - self.last_auto_generation_time) < 1.0:
-                print(f"⚠️ 자동 생성 중복 방지: in_progress={self.auto_generation_in_progress}, time_diff={current_time - self.last_auto_generation_time:.2f}s")
-                return
-            
-            # 조건 확인: "자동 생성"이 체크되어 있고 "프롬프트 고정"이 체크되어 있지 않음
-            auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
-            prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
-            
-            if not auto_generate_checkbox:
-                return  # 자동 생성 체크박스가 없으면 종료
+            # if self.auto_generation_in_progress or (current_time - self.last_auto_generation_time) < 1.0:
+            #     print(f"⚠️ 자동 생성 중복 방지: in_progress={self.auto_generation_in_progress}, time_diff={current_time - self.last_auto_generation_time:.2f}s")
+            #     return
                 
             if auto_generate_checkbox.isChecked() and not prompt_fixed_checkbox.isChecked():
                 # 검색 결과가 있는지 확인
@@ -970,12 +1315,11 @@ class ModernMainWindow(QMainWindow):
                 # [신규] 자동 생성 플래그 설정
                 self.auto_generation_in_progress = True
                 self.last_auto_generation_time = current_time
-                
                 self.status_bar.showMessage("🔄 자동 생성: 다음 프롬프트 생성 중...")
                 
                 # 다음 프롬프트 생성 요청
                 settings = {
-                    'prompt_fixed': False,  # 자동 생성 시에는 항상 False
+                    'prompt_fixed': False, 
                     'auto_generate': True,
                     'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
                     'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
@@ -985,6 +1329,11 @@ class ModernMainWindow(QMainWindow):
                 # 프롬프트 생성 컨트롤러에 자동 생성 플래그 설정
                 self.prompt_gen_controller.auto_generation_requested = True
                 self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
+            elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():
+                self.auto_generation_in_progress = True
+                self.last_auto_generation_time = current_time
+                self.status_bar.showMessage("🔄 자동 생성: 프롬프트 고정이 체크되어 있어 생성 단계로 넘어갑니다...")
+                self._trigger_auto_image_generation()
                 
         except Exception as e:
             # [신규] 오류 시 플래그 해제
@@ -1258,6 +1607,8 @@ class ModernMainWindow(QMainWindow):
             if self.middle_section_controller:
                 self.middle_section_controller.close_all_detached_modules()
 
+            self.image_window.close_all_detached_windows()
+
             current_mode = self.app_context.get_api_mode()
             self.generation_params_manager.save_mode_settings(current_mode)
             
@@ -1396,6 +1747,35 @@ class ModernMainWindow(QMainWindow):
             except Exception:
                 pass
         return None
+    
+    def connect_checkbox_signals(self):
+        """체크박스 시그널을 연결하는 메서드 (init에서 호출)"""
+        try:
+            prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
+            if prompt_fixed_checkbox:
+                prompt_fixed_checkbox.toggled.connect(self.update_random_prompt_button_state)
+                
+            # 초기 상태 설정
+            self.update_random_prompt_button_state()
+            
+        except Exception as e:
+            print(f"❌ 체크박스 시그널 연결 오류: {e}")
+
+    def update_random_prompt_button_state(self):
+        """generation_checkboxes 상태에 따라 random_prompt_btn을 활성화/비활성화"""
+        try:
+            # "프롬프트 고정" 체크박스가 체크되어 있으면 버튼 비활성화
+            prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
+            
+            if prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked():
+                self.random_prompt_btn.setEnabled(False)
+                self.random_prompt_btn.setText("프롬프트 고정됨")
+            else:
+                self.random_prompt_btn.setEnabled(True)
+                self.random_prompt_btn.setText("랜덤/다음 프롬프트")
+                
+        except Exception as e:
+            print(f"❌ 버튼 상태 업데이트 오류: {e}")
 
 
 if __name__ == "__main__":

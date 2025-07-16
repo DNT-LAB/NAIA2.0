@@ -23,7 +23,9 @@ class GenerationParamsManager:
     def collect_current_settings(self) -> Dict[str, Any]:
         """메인 윈도우에서 현재 생성 파라미터 수집"""
         try:
-            # 기본 파라미터들
+            mw = self.main_window
+
+            # 기본 파라미터들로 시작
             settings = {
                 "action": "generate",
                 "access_token": "",
@@ -40,8 +42,13 @@ class GenerationParamsManager:
                 ]
             }
             
-            # 메인 윈도우에서 현재 설정된 값들 수집
-            mw = self.main_window
+            # Input (main_prompt_textedit) 수집
+            if hasattr(mw, 'main_prompt_textedit') and mw.main_prompt_textedit:
+                settings["input"] = mw.main_prompt_textedit.toPlainText()
+            
+            # Negative Prompt 수집
+            if hasattr(mw, 'negative_prompt_textedit') and mw.negative_prompt_textedit:
+                settings["negative_prompt"] = mw.negative_prompt_textedit.toPlainText()
             
             # 모델 설정
             if hasattr(mw, 'model_combo') and mw.model_combo:
@@ -71,21 +78,32 @@ class GenerationParamsManager:
                 settings["width"] = 1024
                 settings["height"] = 1024
             
-            # Steps 설정
+            # 🔧 수정: Steps 설정 - 실제 위젯명(steps_spinbox) 사용
             if hasattr(mw, 'steps_spinbox') and mw.steps_spinbox:
-                settings["steps"] = mw.steps_spinbox.value()
+                try:
+                    settings["steps"] = mw.steps_spinbox.value()
+                except AttributeError:
+                    settings["steps"] = 28
             else:
                 settings["steps"] = 28
             
-            # CFG Scale 설정
-            if hasattr(mw, 'cfg_scale_spinbox') and mw.cfg_scale_spinbox:
-                settings["cfg_scale"] = mw.cfg_scale_spinbox.value()
+            # 🔧 수정: CFG Scale 설정 - 슬라이더 값을 적절히 변환
+            if hasattr(mw, 'cfg_scale_slider') and mw.cfg_scale_slider:
+                try:
+                    # 슬라이더 값(10~300)을 실제 CFG 값(1.0~30.0)으로 변환
+                    settings["cfg_scale"] = mw.cfg_scale_slider.value() / 10.0
+                except AttributeError:
+                    settings["cfg_scale"] = 5.0
             else:
                 settings["cfg_scale"] = 5.0
             
-            # CFG Rescale 설정
-            if hasattr(mw, 'cfg_rescale_spinbox') and mw.cfg_rescale_spinbox:
-                settings["cfg_rescale"] = mw.cfg_rescale_spinbox.value()
+            # 🔧 수정: CFG Rescale 설정 - 슬라이더 값을 적절히 변환
+            if hasattr(mw, 'cfg_rescale_slider') and mw.cfg_rescale_slider:
+                try:
+                    # 슬라이더 값(0~100)을 실제 rescale 값(0.0~1.0)으로 변환
+                    settings["cfg_rescale"] = mw.cfg_rescale_slider.value() / 100.0
+                except AttributeError:
+                    settings["cfg_rescale"] = 0.4
             else:
                 settings["cfg_rescale"] = 0.4
             
@@ -100,92 +118,192 @@ class GenerationParamsManager:
                 settings["scheduler"] = mw.scheduler_combo.currentText()
             else:
                 settings["scheduler"] = "karras"
+
+            # Seed 관련 설정
+            if hasattr(mw, 'seed_input') and mw.seed_input:
+                try:
+                    settings["seed"] = int(mw.seed_input.text())
+                except (ValueError, AttributeError):
+                    settings["seed"] = -1
+            else:
+                settings["seed"] = -1
+
+            if hasattr(mw, 'seed_fix_checkbox') and mw.seed_fix_checkbox:
+                settings["seed_fixed"] = mw.seed_fix_checkbox.isChecked()
+            else:
+                settings["seed_fixed"] = False
             
-            # Negative Prompt 설정
-            if hasattr(mw, 'main_negative_textedit') and mw.main_negative_textedit:
-                settings["negative_prompt"] = mw.main_negative_textedit.toPlainText()
-            
-            # 고급 옵션들 (체크박스)
-            advanced_options = ["SMEA", "DYN", "VAR+", "DECRISP"]
-            for option in advanced_options:
-                checkbox_attr = f'{option.lower().replace("+", "_plus")}_checkbox'
-                if hasattr(mw, checkbox_attr):
-                    checkbox = getattr(mw, checkbox_attr)
-                    settings[option] = checkbox.isChecked() if checkbox else False
-                else:
+            # 🔧 수정: 고급 옵션들 - 딕셔너리에서 직접 접근
+            if hasattr(mw, 'advanced_checkboxes') and mw.advanced_checkboxes:
+                advanced_options = ["SMEA", "DYN", "VAR+", "DECRISP"]
+                for option in advanced_options:
+                    checkbox = mw.advanced_checkboxes.get(option)
+                    if checkbox and hasattr(checkbox, 'isChecked'):
+                        settings[option] = checkbox.isChecked()
+                    else:
+                        settings[option] = False
+            else:
+                # 기본값 설정
+                for option in ["SMEA", "DYN", "VAR+", "DECRISP"]:
                     settings[option] = False
+            
+            # Random Resolution 체크박스
+            if hasattr(mw, 'random_resolution_checkbox') and mw.random_resolution_checkbox:
+                settings["random_resolution"] = mw.random_resolution_checkbox.isChecked()
+            else:
+                settings["random_resolution"] = False
+
+            # Auto Fit Resolution 체크박스
+            if hasattr(mw, 'auto_fit_resolution_checkbox') and mw.auto_fit_resolution_checkbox:
+                settings["auto_fit_resolution_checked"] = mw.auto_fit_resolution_checkbox.isChecked()
+            else:
+                settings["auto_fit_resolution_checked"] = False
+            
+            # 커스텀 API 파라미터
+            if hasattr(mw, 'custom_api_checkbox') and mw.custom_api_checkbox:
+                settings["use_custom_api_params"] = mw.custom_api_checkbox.isChecked()
+            else:
+                settings["use_custom_api_params"] = False
+
+            if hasattr(mw, 'custom_script_textbox') and mw.custom_script_textbox:
+                settings["custom_api_params"] = mw.custom_script_textbox.toPlainText()
+            else:
+                settings["custom_api_params"] = ""
             
             # 생성 제어 체크박스들
             if hasattr(mw, 'generation_checkboxes') and mw.generation_checkboxes:
                 gen_checkboxes = mw.generation_checkboxes
-                settings["gen_cb_프롬프트 고정"] = gen_checkboxes.get("프롬프트 고정", {}).get('checked', False) if isinstance(gen_checkboxes.get("프롬프트 고정"), dict) else gen_checkboxes.get("프롬프트 고정", False) if hasattr(gen_checkboxes.get("프롬프트 고정"), 'isChecked') else False
-                settings["gen_cb_자동 생성"] = gen_checkboxes.get("자동 생성", {}).get('checked', False) if isinstance(gen_checkboxes.get("자동 생성"), dict) else gen_checkboxes.get("자동 생성", False) if hasattr(gen_checkboxes.get("자동 생성"), 'isChecked') else False
-                settings["gen_cb_터보 옵션"] = gen_checkboxes.get("터보 옵션", {}).get('checked', False) if isinstance(gen_checkboxes.get("터보 옵션"), dict) else gen_checkboxes.get("터보 옵션", False) if hasattr(gen_checkboxes.get("터보 옵션"), 'isChecked') else False
-                settings["gen_cb_와일드카드 단독 모드"] = gen_checkboxes.get("와일드카드 단독 모드", {}).get('checked', False) if isinstance(gen_checkboxes.get("와일드카드 단독 모드"), dict) else gen_checkboxes.get("와일드카드 단독 모드", False) if hasattr(gen_checkboxes.get("와일드카드 단독 모드"), 'isChecked') else False
                 
-                # 실제 QCheckBox 객체인 경우 처리
-                for key in ["프롬프트 고정", "자동 생성", "터보 옵션", "와일드카드 단독 모드"]:
+                checkbox_keys = ["프롬프트 고정", "자동 생성", "터보 옵션", "와일드카드 단독 모드"]
+                for key in checkbox_keys:
                     checkbox = gen_checkboxes.get(key)
-                    if hasattr(checkbox, 'isChecked'):
+                    if checkbox and hasattr(checkbox, 'isChecked'):
                         settings[f"gen_cb_{key}"] = checkbox.isChecked()
+                    else:
+                        settings[f"gen_cb_{key}"] = False
             else:
                 settings["gen_cb_프롬프트 고정"] = False
                 settings["gen_cb_자동 생성"] = False
                 settings["gen_cb_터보 옵션"] = False
                 settings["gen_cb_와일드카드 단독 모드"] = False
+
+            # WEBUI 전용 파라미터 수집
+            if hasattr(mw, 'enable_hr_checkbox'):
+                settings["enable_hr"] = mw.enable_hr_checkbox.isChecked()
+            else:
+                settings["enable_hr"] = False
+            
+            if hasattr(mw, 'hr_scale_spinbox'):
+                settings["hr_scale"] = mw.hr_scale_spinbox.value()
+            else:
+                settings["hr_scale"] = 1.5
+            
+            if hasattr(mw, 'hr_upscaler_combo'):
+                settings["hr_upscaler"] = mw.hr_upscaler_combo.currentText()
+            else:
+                settings["hr_upscaler"] = "Lanczos"
+            
+            if hasattr(mw, 'denoising_strength_slider'):
+                settings["denoising_strength"] = mw.denoising_strength_slider.value() / 100.0
+            else:
+                settings["denoising_strength"] = 0.5
+            
+            # 🔥 추가: hires_steps 파라미터 수집
+            if hasattr(mw, 'hires_steps_spinbox'):
+                settings["hires_steps"] = mw.hires_steps_spinbox.value()
+            else:
+                settings["hires_steps"] = 0
             
             return settings
             
         except Exception as e:
             print(f"❌ 생성 파라미터 수집 중 오류: {e}")
             return self._get_default_settings()
-    
+
     def _get_default_settings(self) -> Dict[str, Any]:
-        """기본 설정값 반환"""
+        """기본 설정값 반환 (모든 파라미터 포함)"""
         return {
+            # 기본 액션 정보
             "action": "generate",
             "access_token": "",
+            
+            # 프롬프트 관련
             "input": "",
             "negative_prompt": "",
+            
+            # 모델 및 샘플링 설정
             "model": "NAID4.5F",
             "scheduler": "karras",
             "sampler": "k_euler_ancestral",
+            
+            # 해상도 관련
             "resolution": "1024 x 1024",
             "width": 1024,
             "height": 1024,
             "random_resolution": False,
-            "steps": 28,
-            "cfg_scale": 5.0,
-            "cfg_rescale": 0.4,
-            "SMEA": False,
-            "DYN": False,
-            "VAR+": False,
-            "DECRISP": False,
-            "use_custom_api_params": False,
-            "custom_api_params": "",
-            "gen_cb_프롬프트 고정": False,
-            "gen_cb_자동 생성": False,
-            "gen_cb_터보 옵션": False,
-            "gen_cb_와일드카드 단독 모드": False,
-            "random_resolution_checked": False,
             "auto_fit_resolution_checked": False,
             "resolutions": [
                 "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
                 "1088 x 960", "1152 x 896", "1216 x 832"
-            ]
+            ],
+            
+            # 생성 파라미터
+            "steps": 28,
+            "cfg_scale": 5.0,
+            "cfg_rescale": 0.4,
+            
+            # 시드 관련
+            "seed": -1,
+            "seed_fixed": False,
+            
+            # NAI 고급 옵션들
+            "SMEA": False,
+            "DYN": False,
+            "VAR+": False,
+            "DECRISP": False,
+            
+            # 커스텀 API 파라미터
+            "use_custom_api_params": False,
+            "custom_api_params": "",
+            
+            # 생성 제어 체크박스들
+            "gen_cb_프롬프트 고정": False,
+            "gen_cb_자동 생성": False,
+            "gen_cb_터보 옵션": False,
+            "gen_cb_와일드카드 단독 모드": False,
+            
+            # 기타 체크박스들
+            "random_resolution_checked": False,
+            
+            # WEBUI 전용 파라미터들
+            "enable_hr": False,
+            "hr_scale": 1.5,
+            "hr_upscaler": "Lanczos",
+            "denoising_strength": 0.5,
+            "hires_steps": 14,  # 🔥 추가
         }
+
     
     def apply_settings(self, settings: Dict[str, Any]):
         """설정을 메인 윈도우 UI에 적용"""
         try:
             mw = self.main_window
             
-            # 모델 설정
+            # Input (main_prompt_textedit) 로드 
+            if hasattr(mw, 'main_prompt_textedit') and mw.main_prompt_textedit:
+                mw.main_prompt_textedit.setPlainText(settings.get("input", ""))
+            
+            # Negative Prompt 설정
+            if hasattr(mw, 'negative_prompt_textedit') and mw.negative_prompt_textedit:
+                mw.negative_prompt_textedit.setPlainText(settings.get("negative_prompt", ""))
+            
+            # 🔧 수정: 모델 설정 - 현재 목록에 있는 항목만 선택
             if hasattr(mw, 'model_combo') and mw.model_combo:
                 model = settings.get("model", "NAID4.5F")
                 index = mw.model_combo.findText(model)
                 if index >= 0:
                     mw.model_combo.setCurrentIndex(index)
+                    print(f"✅ 모델 설정 적용: {model}")
             
             # 해상도 설정
             if hasattr(mw, 'resolution_combo') and mw.resolution_combo:
@@ -194,44 +312,70 @@ class GenerationParamsManager:
                 if index >= 0:
                     mw.resolution_combo.setCurrentIndex(index)
             
-            # Steps 설정
+            # 🔧 수정: Steps 설정 - 실제 위젯명(steps_spinbox) 사용
             if hasattr(mw, 'steps_spinbox') and mw.steps_spinbox:
-                mw.steps_spinbox.setValue(settings.get("steps", 28))
+                mw.steps_spinbox.setValue(int(settings.get("steps", 28)))
             
-            # CFG Scale 설정
-            if hasattr(mw, 'cfg_scale_spinbox') and mw.cfg_scale_spinbox:
-                mw.cfg_scale_spinbox.setValue(settings.get("cfg_scale", 5.0))
+            # 🔧 수정: CFG Scale 설정 - 슬라이더 값으로 변환하여 설정
+            if hasattr(mw, 'cfg_scale_slider') and mw.cfg_scale_slider:
+                cfg_value = float(settings.get("cfg_scale", 5.0))
+                # 실제 CFG 값(1.0~30.0)을 슬라이더 값(10~300)으로 변환
+                slider_value = int(cfg_value * 10)
+                mw.cfg_scale_slider.setValue(slider_value)
             
-            # CFG Rescale 설정
-            if hasattr(mw, 'cfg_rescale_spinbox') and mw.cfg_rescale_spinbox:
-                mw.cfg_rescale_spinbox.setValue(settings.get("cfg_rescale", 0.4))
+            # 🔧 수정: CFG Rescale 설정 - 슬라이더 값으로 변환하여 설정
+            if hasattr(mw, 'cfg_rescale_slider') and mw.cfg_rescale_slider:
+                rescale_value = float(settings.get("cfg_rescale", 0.4))
+                # 실제 rescale 값(0.0~1.0)을 슬라이더 값(0~100)으로 변환
+                slider_value = int(rescale_value * 100)
+                mw.cfg_rescale_slider.setValue(slider_value)
             
-            # Sampler 설정
+            # 🔧 수정: Sampler 설정 - 현재 목록에 있는 항목만 선택
             if hasattr(mw, 'sampler_combo') and mw.sampler_combo:
                 sampler = settings.get("sampler", "k_euler_ancestral")
                 index = mw.sampler_combo.findText(sampler)
                 if index >= 0:
                     mw.sampler_combo.setCurrentIndex(index)
+                    print(f"✅ 샘플러 설정 적용: {sampler}")
             
-            # Scheduler 설정
+            # 🔧 수정: Scheduler 설정 - 현재 목록에 있는 항목만 선택
             if hasattr(mw, 'scheduler_combo') and mw.scheduler_combo:
                 scheduler = settings.get("scheduler", "karras")
                 index = mw.scheduler_combo.findText(scheduler)
                 if index >= 0:
                     mw.scheduler_combo.setCurrentIndex(index)
+                    print(f"✅ 스케줄러 설정 적용: {scheduler}")
             
-            # Negative Prompt 설정
-            if hasattr(mw, 'main_negative_textedit') and mw.main_negative_textedit:
-                mw.main_negative_textedit.setPlainText(settings.get("negative_prompt", ""))
+            # Seed 관련 설정 적용
+            if hasattr(mw, 'seed_input') and mw.seed_input:
+                seed_value = settings.get("seed", -1)
+                mw.seed_input.setText(str(seed_value))
+
+            if hasattr(mw, 'seed_fix_checkbox') and mw.seed_fix_checkbox:
+                mw.seed_fix_checkbox.setChecked(settings.get("seed_fixed", False))
             
-            # 고급 옵션들 (체크박스)
-            advanced_options = ["SMEA", "DYN", "VAR+", "DECRISP"]
-            for option in advanced_options:
-                checkbox_attr = f'{option.lower().replace("+", "_plus")}_checkbox'
-                if hasattr(mw, checkbox_attr):
-                    checkbox = getattr(mw, checkbox_attr)
+            # 🔧 수정: 고급 옵션들 - 딕셔너리에서 직접 접근
+            if hasattr(mw, 'advanced_checkboxes') and mw.advanced_checkboxes:
+                advanced_options = ["SMEA", "DYN", "VAR+", "DECRISP"]
+                for option in advanced_options:
+                    checkbox = mw.advanced_checkboxes.get(option)
                     if checkbox and hasattr(checkbox, 'setChecked'):
                         checkbox.setChecked(settings.get(option, False))
+            
+            # Random Resolution 체크박스 적용
+            if hasattr(mw, 'random_resolution_checkbox') and mw.random_resolution_checkbox:
+                mw.random_resolution_checkbox.setChecked(settings.get("random_resolution", False))
+
+            # Auto Fit Resolution 체크박스 적용
+            if hasattr(mw, 'auto_fit_resolution_checkbox') and mw.auto_fit_resolution_checkbox:
+                mw.auto_fit_resolution_checkbox.setChecked(settings.get("auto_fit_resolution_checked", False))
+            
+            # 커스텀 API 파라미터 적용
+            if hasattr(mw, 'custom_api_checkbox') and mw.custom_api_checkbox:
+                mw.custom_api_checkbox.setChecked(settings.get("use_custom_api_params", False))
+
+            if hasattr(mw, 'custom_script_textbox') and mw.custom_script_textbox:
+                mw.custom_script_textbox.setPlainText(settings.get("custom_api_params", ""))
             
             # 생성 제어 체크박스들
             if hasattr(mw, 'generation_checkboxes') and mw.generation_checkboxes:
@@ -246,6 +390,29 @@ class GenerationParamsManager:
                     checkbox = mw.generation_checkboxes.get(checkbox_name)
                     if checkbox and hasattr(checkbox, 'setChecked'):
                         checkbox.setChecked(should_check)
+
+            # WEBUI 전용 파라미터 적용
+            if hasattr(mw, 'enable_hr_checkbox'):
+                mw.enable_hr_checkbox.setChecked(settings.get("enable_hr", False))
+            
+            if hasattr(mw, 'hr_scale_spinbox'):
+                mw.hr_scale_spinbox.setValue(settings.get("hr_scale", 1.5))
+            
+            # 🔧 수정: 업스케일러 설정 - 현재 목록에 있는 항목만 선택
+            if hasattr(mw, 'hr_upscaler_combo'):
+                hr_upscaler = settings.get("hr_upscaler", "Lanczos")
+                index = mw.hr_upscaler_combo.findText(hr_upscaler)
+                if index >= 0:
+                    mw.hr_upscaler_combo.setCurrentIndex(index)
+                    print(f"✅ 업스케일러 설정 적용: {hr_upscaler}")
+            
+            if hasattr(mw, 'denoising_strength_slider'):
+                denoising_value = int(settings.get("denoising_strength", 0.5) * 100)
+                mw.denoising_strength_slider.setValue(denoising_value)
+            
+            # 🔥 추가: hires_steps 파라미터 적용
+            if hasattr(mw, 'hires_steps_spinbox'):
+                mw.hires_steps_spinbox.setValue(settings.get("hires_steps", 0))
             
             print(f"✅ 생성 파라미터 UI 적용 완료")
             
@@ -282,6 +449,12 @@ class GenerationParamsManager:
                 print(f"⚠️ 메인 생성 파라미터 {mode} 모드 설정 파일이 없습니다. 기본값 사용.")
                 # 기본값 적용
                 default_settings = self._get_default_settings()
+                # 🔧 수정: 모드 전환 로직을 먼저 실행
+                if mode == "WEBUI":
+                    self.load_webui_dynamic_options()
+                    self.update_ui_for_webui_mode()
+                elif mode == "NAI":
+                    self.update_ui_for_nai_mode()
                 self.apply_settings(default_settings)
                 return
             
@@ -291,16 +464,35 @@ class GenerationParamsManager:
             # 해당 모드의 설정 가져오기
             mode_settings = data.get(mode, {})
             if mode_settings:
+                # 🔧 수정: 모드 전환 로직을 먼저 실행 후 설정 적용
+                if mode == "WEBUI":
+                    self.load_webui_dynamic_options()
+                    self.update_ui_for_webui_mode()
+                elif mode == "NAI":
+                    self.update_ui_for_nai_mode()
+                
+                # 모드 전환 완료 후 설정 적용
                 self.apply_settings(mode_settings)
                 print(f"✅ 메인 생성 파라미터 {mode} 모드 설정 로드 완료")
             else:
                 print(f"⚠️ 메인 생성 파라미터 {mode} 모드 설정이 파일에 없습니다. 기본값 사용.")
+                # 🔧 수정: 기본값 적용 시에도 모드 전환 로직 실행
+                if mode == "WEBUI":
+                    self.load_webui_dynamic_options()
+                    self.update_ui_for_webui_mode()
+                elif mode == "NAI":
+                    self.update_ui_for_nai_mode()
                 default_settings = self._get_default_settings()
                 self.apply_settings(default_settings)
                 
         except Exception as e:
             print(f"❌ 메인 생성 파라미터 {mode} 모드 설정 로드 실패: {e}")
             # 오류 시 기본값 적용
+            if mode == "WEBUI":
+                self.load_webui_dynamic_options()
+                self.update_ui_for_webui_mode()
+            elif mode == "NAI":
+                self.update_ui_for_nai_mode()
             default_settings = self._get_default_settings()
             self.apply_settings(default_settings)
     
@@ -323,3 +515,267 @@ class GenerationParamsManager:
         # 2. 새 모드와 호환되는 경우에만 설정 로드
         if self.is_compatible_with_mode(new_mode):
             self.load_mode_settings(new_mode)
+
+    def load_webui_dynamic_options(self):
+        """WEBUI API에서 동적 옵션들을 로드하여 UI에 적용"""
+        try:
+            from core.webui_utils import WebuiAPIUtils
+            
+            # 키링에서 WEBUI URL 가져오기
+            webui_url = self.main_window.app_context.secure_token_manager.get_token('webui_url')
+            if not webui_url:
+                print("⚠️ WEBUI URL이 설정되지 않았습니다.")
+                return
+            if not webui_url.startswith("http"):
+                webui_url = "https://" + webui_url
+            
+            mw = self.main_window
+            
+            # 1. 모델 리스트 및 현재 모델 업데이트
+            model_list = WebuiAPIUtils.get_model_list(webui_url)
+            current_model = WebuiAPIUtils.get_current_model(webui_url)
+            
+            if model_list and hasattr(mw, 'model_combo'):
+                # 🔧 수정: 현재 선택값 보존
+                current_model_text = mw.model_combo.currentText()
+                mw.model_combo.clear()
+                mw.model_combo.addItems(model_list)
+                
+                # 복원 우선순위: 1) API 현재 모델, 2) 이전 선택값, 3) 첫 번째 항목
+                if current_model:
+                    index = mw.model_combo.findText(current_model)
+                    if index >= 0:
+                        mw.model_combo.setCurrentIndex(index)
+                        print(f"✅ 모델을 API 현재 모델로 설정: {current_model}")
+                    else:
+                        # API 현재 모델이 리스트에 없을 때 이전 선택값 시도
+                        index = mw.model_combo.findText(current_model_text)
+                        if index >= 0:
+                            mw.model_combo.setCurrentIndex(index)
+                            print(f"✅ 모델을 이전 선택값으로 복원: {current_model_text}")
+                else:
+                    # API 현재 모델이 없을 때 이전 선택값 시도
+                    index = mw.model_combo.findText(current_model_text)
+                    if index >= 0:
+                        mw.model_combo.setCurrentIndex(index)
+                        print(f"✅ 모델을 이전 선택값으로 복원: {current_model_text}")
+                
+                print(f"✅ WEBUI 모델 목록 업데이트: {len(model_list)}개")
+            
+            # 2. 샘플러 리스트 업데이트
+            sampler_list = WebuiAPIUtils.get_sampler_list(webui_url)
+            if sampler_list and hasattr(mw, 'sampler_combo'):
+                # 🔧 수정: 현재 선택값 보존 후 콤보박스 업데이트
+                current_sampler = mw.sampler_combo.currentText()
+                mw.sampler_combo.clear()
+                mw.sampler_combo.addItems(sampler_list)
+                
+                # 이전 선택값 복원 시도
+                index = mw.sampler_combo.findText(current_sampler)
+                if index >= 0:
+                    mw.sampler_combo.setCurrentIndex(index)
+                    print(f"✅ 샘플러 복원: {current_sampler}")
+                else:
+                    # 기본값 설정 (Euler a)
+                    euler_index = mw.sampler_combo.findText("Euler a")
+                    if euler_index >= 0:
+                        mw.sampler_combo.setCurrentIndex(euler_index)
+                        print(f"✅ 샘플러를 기본값으로 설정: Euler a")
+                
+                print(f"✅ WEBUI 샘플러 목록 업데이트: {len(sampler_list)}개")
+            
+            # 3. 스케줄러 리스트 업데이트
+            scheduler_list = WebuiAPIUtils.get_schedulers_list(webui_url)
+            if scheduler_list and hasattr(mw, 'scheduler_combo'):
+                # 🔧 수정: 현재 선택값 보존 후 콤보박스 업데이트
+                current_scheduler = mw.scheduler_combo.currentText()
+                mw.scheduler_combo.clear()
+                mw.scheduler_combo.addItems(scheduler_list)
+                
+                # 이전 선택값 복원 시도
+                index = mw.scheduler_combo.findText(current_scheduler)
+                if index >= 0:
+                    mw.scheduler_combo.setCurrentIndex(index)
+                    print(f"✅ 스케줄러 복원: {current_scheduler}")
+                else:
+                    # 기본값 설정 (SGM Uniform)
+                    sgm_index = mw.scheduler_combo.findText("SGM Uniform")
+                    if sgm_index >= 0:
+                        mw.scheduler_combo.setCurrentIndex(sgm_index)
+                        print(f"✅ 스케줄러를 기본값으로 설정: SGM Uniform")
+                
+                print(f"✅ WEBUI 스케줄러 목록 업데이트: {len(scheduler_list)}개")
+            
+            # 4. 업스케일러 리스트 업데이트 (Hires-fix용)
+            upscaler_list = WebuiAPIUtils.get_upscaler_list(webui_url)
+            if upscaler_list and hasattr(mw, 'hr_upscaler_combo'):
+                # 🔧 수정: 현재 선택값 보존 후 콤보박스 업데이트
+                current_upscaler = mw.hr_upscaler_combo.currentText()
+                mw.hr_upscaler_combo.clear()
+                mw.hr_upscaler_combo.addItems(upscaler_list)
+                
+                # 이전 선택값 복원 시도
+                index = mw.hr_upscaler_combo.findText(current_upscaler)
+                if index >= 0:
+                    mw.hr_upscaler_combo.setCurrentIndex(index)
+                    print(f"✅ 업스케일러 복원: {current_upscaler}")
+                else:
+                    # 기본값 설정 (첫 번째 항목)
+                    if mw.hr_upscaler_combo.count() > 0:
+                        mw.hr_upscaler_combo.setCurrentIndex(0)
+                        print(f"✅ 업스케일러를 기본값으로 설정: {mw.hr_upscaler_combo.currentText()}")
+                
+                print(f"✅ WEBUI 업스케일러 목록 업데이트: {len(upscaler_list)}개")
+            
+        except Exception as e:
+            print(f"❌ WEBUI 동적 옵션 로드 실패: {e}")
+
+    def update_ui_for_nai_mode(self):
+        """UI를 NAI 모드로 전환"""
+        try:
+            mw = self.main_window
+            
+            # 1. Hires Option 영역 숨기기
+            if hasattr(mw, 'hires_option_widgets'):
+                for widget in mw.hires_option_widgets:
+                    widget.setVisible(False)
+            
+            # 2. NAID Option 영역 표시
+            if hasattr(mw, 'naid_option_widgets'):
+                for widget in mw.naid_option_widgets:
+                    widget.setVisible(True)
+            if hasattr(mw, 'nai_rescale_ui'):
+                for widget in mw.nai_rescale_ui:
+                    widget.setVisible(True)
+            
+            # 3. 라벨 텍스트 변경
+            if hasattr(mw, 'option_section_label'):
+                mw.option_section_label.setText("NAID Option:")
+            
+            # 4. NAI 고정 옵션들 복원
+            if hasattr(mw, 'model_combo'):
+                nai_models = ["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"]
+                mw.model_combo.clear()
+                mw.model_combo.addItems(nai_models)
+            
+            if hasattr(mw, 'sampler_combo'):
+                nai_samplers = ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "k_dpmpp_2s_ancestral", 
+                            "k_dpmpp_sde", "ddim_v3"]
+                mw.sampler_combo.clear()
+                mw.sampler_combo.addItems(nai_samplers)
+            
+            if hasattr(mw, 'scheduler_combo'):
+                nai_schedulers = ["native", "karras", "exponential", "polyexponential"]
+                mw.scheduler_combo.clear()
+                mw.scheduler_combo.addItems(nai_schedulers)
+            
+            print("✅ UI가 NAI 모드로 전환되었습니다.")
+            
+        except Exception as e:
+            print(f"❌ NAI 모드 UI 전환 실패: {e}")
+
+    def update_ui_for_webui_mode(self):
+        """UI를 WEBUI 모드로 전환"""
+        try:
+            mw = self.main_window
+            
+            # 1. NAID Option 영역 숨기기
+            if hasattr(mw, 'naid_option_widgets'):
+                for widget in mw.naid_option_widgets:
+                    widget.setVisible(False)
+            if hasattr(mw, 'nai_rescale_ui'):
+                for widget in mw.nai_rescale_ui:
+                    widget.setVisible(False)
+            
+            # 2. Hires Option 영역 표시
+            if hasattr(mw, 'hires_option_widgets'):
+                for widget in mw.hires_option_widgets:
+                    widget.setVisible(True)
+            
+            # 3. 라벨 텍스트 변경
+            if hasattr(mw, 'option_section_label'):
+                mw.option_section_label.setText("Hires Option:")
+            
+            print("✅ UI가 WEBUI 모드로 전환되었습니다.")
+            
+        except Exception as e:
+            print(f"❌ WEBUI 모드 UI 전환 실패: {e}")
+
+    def update_ui_for_nai_mode(self):
+        """UI를 NAI 모드로 전환"""
+        try:
+            mw = self.main_window
+            
+            # 1. Hires Option 영역 숨기기
+            if hasattr(mw, 'hires_option_widgets'):
+                for widget in mw.hires_option_widgets:
+                    widget.setVisible(False)
+            
+            # 2. NAID Option 영역 표시
+            if hasattr(mw, 'naid_option_widgets'):
+                for widget in mw.naid_option_widgets:
+                    widget.setVisible(True)
+            if hasattr(mw, 'nai_rescale_ui'):
+                for widget in mw.nai_rescale_ui:
+                    widget.setVisible(True)
+            
+            # 3. 라벨 텍스트 변경
+            if hasattr(mw, 'option_section_label'):
+                mw.option_section_label.setText("NAID Option:")
+            
+            # 🔧 수정: NAI 고정 옵션들 복원 시 현재 선택값 보존
+            if hasattr(mw, 'model_combo'):
+                current_model = mw.model_combo.currentText()
+                nai_models = ["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"]
+                mw.model_combo.clear()
+                mw.model_combo.addItems(nai_models)
+                
+                # 이전 선택값 복원
+                index = mw.model_combo.findText(current_model)
+                if index >= 0:
+                    mw.model_combo.setCurrentIndex(index)
+                    print(f"✅ NAI 모델 복원: {current_model}")
+                else:
+                    # 기본값 설정
+                    mw.model_combo.setCurrentIndex(0)
+                    print(f"✅ NAI 모델을 기본값으로 설정: {mw.model_combo.currentText()}")
+            
+            if hasattr(mw, 'sampler_combo'):
+                current_sampler = mw.sampler_combo.currentText()
+                nai_samplers = ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "k_dpmpp_2s_ancestral", 
+                            "k_dpmpp_sde", "ddim_v3"]
+                mw.sampler_combo.clear()
+                mw.sampler_combo.addItems(nai_samplers)
+                
+                # 이전 선택값 복원
+                index = mw.sampler_combo.findText(current_sampler)
+                if index >= 0:
+                    mw.sampler_combo.setCurrentIndex(index)
+                    print(f"✅ NAI 샘플러 복원: {current_sampler}")
+                else:
+                    # 기본값 설정
+                    mw.sampler_combo.setCurrentIndex(0)
+                    print(f"✅ NAI 샘플러를 기본값으로 설정: {mw.sampler_combo.currentText()}")
+            
+            if hasattr(mw, 'scheduler_combo'):
+                current_scheduler = mw.scheduler_combo.currentText()
+                nai_schedulers = ["native", "karras", "exponential", "polyexponential"]
+                mw.scheduler_combo.clear()
+                mw.scheduler_combo.addItems(nai_schedulers)
+                
+                # 이전 선택값 복원
+                index = mw.scheduler_combo.findText(current_scheduler)
+                if index >= 0:
+                    mw.scheduler_combo.setCurrentIndex(index)
+                    print(f"✅ NAI 스케줄러 복원: {current_scheduler}")
+                else:
+                    # 기본값 설정 (karras)
+                    karras_index = mw.scheduler_combo.findText("karras")
+                    if karras_index >= 0:
+                        mw.scheduler_combo.setCurrentIndex(karras_index)
+                        print(f"✅ NAI 스케줄러를 기본값으로 설정: karras")
+            
+            print("✅ UI가 NAI 모드로 전환되었습니다.")
+            
+        except Exception as e:
+            print(f"❌ NAI 모드 UI 전환 실패: {e}")

@@ -5,6 +5,7 @@ import piexif.helper
 import json
 import re
 from PyQt6.QtCore import QThread, QObject, pyqtSignal
+import pandas as pd
 
 class GenerationWorker(QObject):
     """API 호출을 담당하는 워커 클래스"""
@@ -107,7 +108,6 @@ class GenerationWorker(QObject):
 
         return "AI 생성 이미지가 아니거나, 인식할 수 있는 메타데이터가 없습니다."
 
-
 class GenerationController:
     def __init__(self, context: 'AppContext', module_instances: list):
         self.context = context
@@ -139,8 +139,15 @@ class GenerationController:
 
             source_row = self.context.current_source_row
             if source_row is None:
-                self.context.main_window.status_bar.showMessage("❌ 먼저 [랜덤/다음 프롬프트] 버튼을 눌러주세요.")
-                return
+                empty_data = {
+                    'general': None,
+                    'character': None,
+                    'copyright': None,
+                    'artist': None,
+                    'meta': None
+                }
+                source_row = pd.Series(empty_data, name="wildcard_standalone")
+                self.context.main_window.status_bar.showMessage("빈 source_row를 생성했습니다.")
 
             for module in self.module_instances:
                 module_params = module.get_parameters()

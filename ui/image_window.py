@@ -492,19 +492,46 @@ class ImageWindow(QWidget):
 
     def update_image(self, image: Image.Image):
         """
-        [수정] 이 메서드는 ImageWindow의 것입니다.
-        외부의 요청을 받아, 자식 위젯인 self.main_image_label에 일을 시킵니다.
+        WebP 등 다양한 형식을 지원하는 안전한 이미지 업데이트
         """
         if not isinstance(image, Image.Image):
             self.main_image_label.setFullPixmap(None)
             return
             
         try:
-            q_image = ImageQt.ImageQt(image)
+            # WebP 형식인 경우 PNG로 변환
+            if hasattr(image, 'format') and image.format == 'WEBP':
+                print("🔄 WebP 이미지를 PNG로 변환 중...")
+                import io
+                png_buffer = io.BytesIO()
+                # RGBA 모드로 변환하여 투명도 처리
+                if image.mode != 'RGBA':
+                    image = image.convert('RGBA')
+                image.save(png_buffer, format='PNG')
+                png_buffer.seek(0)
+                
+                # PNG로 변환된 이미지 다시 열기
+                converted_image = Image.open(png_buffer)
+                q_image = ImageQt.ImageQt(converted_image)
+                png_buffer.close()
+            else:
+                # PNG나 기타 형식은 기존 방식 사용
+                q_image = ImageQt.ImageQt(image)
+            
             pixmap = QPixmap.fromImage(q_image)
+            
+            if pixmap.isNull():
+                print("❌ QPixmap 변환 실패")
+                self.main_image_label.setText("이미지를 표시할 수 없습니다.")
+                return
+                
             self.main_image_label.setFullPixmap(pixmap)
+            print("✅ 이미지 업데이트 완료")
+            
         except Exception as e:
             print(f"❌ 이미지 표시 오류: {e}")
+            import traceback
+            traceback.print_exc()
             self.main_image_label.setText("이미지를 표시할 수 없습니다.")
 
     def update_info(self, text: str):
@@ -521,8 +548,34 @@ class ImageWindow(QWidget):
 
     # [신규] 썸네일 생성 로직
     def create_thumbnail_with_background(self, source_image: Image.Image) -> QPixmap:
-        # PIL 이미지를 QPixmap으로 변환
-        source_pixmap = QPixmap.fromImage(ImageQt.ImageQt(source_image))
+        """WebP 등 다양한 형식을 지원하는 안전한 썸네일 생성"""
+        # WebP 형식인 경우 PNG로 변환
+        if hasattr(source_image, 'format') and source_image.format == 'WEBP':
+            print("🔄 WebP 이미지를 PNG로 변환 중...")
+            # 메모리 내에서 PNG로 변환
+            import io
+            png_buffer = io.BytesIO()
+            # RGBA 모드로 변환하여 투명도 처리
+            if source_image.mode != 'RGBA':
+                source_image = source_image.convert('RGBA')
+            source_image.save(png_buffer, format='PNG')
+            png_buffer.seek(0)
+            
+            # PNG로 변환된 이미지 다시 열기
+            converted_image = Image.open(png_buffer)
+            source_pixmap = QPixmap.fromImage(ImageQt.ImageQt(converted_image))
+            png_buffer.close()
+        else:
+            # PNG나 기타 형식은 기존 방식 사용
+            source_pixmap = QPixmap.fromImage(ImageQt.ImageQt(source_image))
+        
+        # 썸네일이 제대로 생성되었는지 확인
+        if source_pixmap.isNull():
+            print("❌ 썸네일 생성 실패: QPixmap이 null입니다.")
+            # 기본 플레이스홀더 이미지 생성
+            placeholder = QPixmap(128, 128)
+            placeholder.fill(QColor("gray"))
+            return placeholder
         
         # 1. 원본 비율을 유지하며 가장 긴 쪽이 128px이 되도록 리사이즈
         scaled_pixmap = source_pixmap.scaled(
@@ -544,6 +597,7 @@ class ImageWindow(QWidget):
         painter.drawPixmap(x, y, scaled_pixmap)
         painter.end()
         
+        print("✅ 썸네일 생성 완료")
         return canvas
 
     def add_to_history(self, image: Image.Image, raw_bytes: bytes, info: str, source_row: pd.Series):

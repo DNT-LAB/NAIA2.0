@@ -26,6 +26,8 @@ class APIService:
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
         
         print(f"🛰️ APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
+        print(f"   📋 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
+            f"모델: {parameters.get('model', 'N/A')}, 샘플러: {parameters.get('sampler', 'N/A')}")
 
         if api_mode == "NAI":
             return self._call_nai_api(parameters)
@@ -166,12 +168,138 @@ class APIService:
             return {'status': 'error', 'message': str(e)}
 
     def _call_webui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Stable Diffusion WebUI API를 호출합니다. (TODO)"""
-        print("🚧 WebUI API 호출 기능은 아직 구현되지 않았습니다.")
-        # TODO: WebUI API 페이로드 구성 및 요청 로직 구현
-        # url = params.get('credential')
-        # response = requests.post(f"{url}/sdapi/v1/txt2img", json=webui_payload)
-        return {'status': 'error', 'message': 'WebUI API 기능은 미구현 상태입니다.'}
+        """Stable Diffusion WebUI API를 호출합니다."""
+        try:
+            webui_url = params.get('credential')
+            if not webui_url:
+                raise ValueError("WEBUI URL이 제공되지 않았습니다.")
+            if not webui_url.startswith("http"):
+                webui_url = f"https://{webui_url}"
+            
+            # WEBUI API 엔드포인트 URL 구성
+            api_endpoint = f"{webui_url}/sdapi/v1/txt2img"
+            
+            # WEBUI API 페이로드 구성
+            payload = {
+                "prompt": params.get('input', ''),
+                "negative_prompt": params.get('negative_prompt', ''),
+                "width": params.get('width', 1024),
+                "height": params.get('height', 1216),
+                "steps": params.get('steps', 28),
+                "cfg_scale": params.get('cfg_scale', 5.0),
+                "seed": params.get('seed', -1),  # WEBUI는 -1이 랜덤 시드
+                "sampler_name": params.get('sampler', 'Euler a'),
+                "scheduler": params.get('scheduler', 'SGM Uniform'),
+                "n_iter": 1,  # 배치 수
+                "batch_size": 1,  # 배치 크기
+                "restore_faces": False,
+                "tiling": False,
+                "enable_hr": params.get('enable_hr', False),
+                "denoising_strength": params.get('denoising_strength', 0.5),
+                "save_images": True,
+                "send_images": True,
+                "do_not_save_samples": False,
+                "do_not_save_grid": True
+            }
+            
+            # Hires-fix 관련 파라미터 (enable_hr이 True인 경우에만)
+            if payload["enable_hr"]:
+                payload.update({
+                    "hr_scale": params.get('hr_scale', 1.5),
+                    "hr_upscaler": params.get('hr_upscaler', 'Lanczos'),
+                    "hr_second_pass_steps": params.get('steps', 28) // 2,  # 일반적으로 절반
+                    "hr_resize_x": int(payload["width"] * params.get('hr_scale', 1.5)),
+                    "hr_resize_y": int(payload["height"] * params.get('hr_scale', 1.5))
+                })
+            
+            # Custom API 파라미터 병합 (있는 경우)
+            if params.get('use_custom_api_params', False):
+                custom_params_text = params.get('custom_api_params', '')
+                if custom_params_text.strip():
+                    try:
+                        import json
+                        custom_params = json.loads(custom_params_text)
+                        if isinstance(custom_params, dict):
+                            payload.update(custom_params)
+                            print(f"✅ Custom API 파라미터 적용됨: {len(custom_params)}개")
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ Custom API 파라미터 JSON 파싱 실패: {e}")
+            
+            print(f"📤 WEBUI API 요청 페이로드 요약:")
+            print(f"   - 엔드포인트: {api_endpoint}")
+            print(f"   - 해상도: {payload['width']}x{payload['height']}")
+            print(f"   - 샘플러: {payload['sampler_name']}")
+            print(f"   - 스케줄러: {payload['scheduler']}")
+            print(f"   - Steps: {payload['steps']}, CFG: {payload['cfg_scale']}")
+            print(f"   - Hires-fix: {payload['enable_hr']}")
+            
+            # API 요청 전송
+            headers = {
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(
+                api_endpoint,
+                headers=headers,
+                json=payload,
+                timeout=300  # WEBUI는 생성 시간이 더 오래 걸릴 수 있음
+            )
+            response.raise_for_status()
+            
+            # 응답 처리
+            result = response.json()
+            
+            if 'images' in result and len(result['images']) > 0:
+                # 첫 번째 이미지 데이터 추출
+                image_b64 = result['images'][0]
+                
+                # Base64 디코딩
+                import base64
+                from io import BytesIO
+                from PIL import Image
+                
+                image_data = base64.b64decode(image_b64)
+                image = Image.open(BytesIO(image_data))
+                
+                # 생성 정보 추출 (있는 경우)
+                info_text = result.get('info', '')
+                if info_text:
+                    print(f"📋 WEBUI 생성 정보: {info_text[:100]}...")
+                
+                return {
+                    'status': 'success', 
+                    'image': image, 
+                    'raw_bytes': image_data,
+                    'generation_info': info_text
+                }
+            else:
+                raise Exception("응답에서 이미지를 찾을 수 없습니다.")
+        
+        except requests.exceptions.HTTPError as e:
+            error_message = f"WEBUI API 오류 (HTTP {e.response.status_code})"
+            if e.response.text:
+                try:
+                    error_data = e.response.json()
+                    if 'detail' in error_data:
+                        error_message += f": {error_data['detail']}"
+                    elif 'error' in error_data:
+                        error_message += f": {error_data['error']}"
+                    else:
+                        error_message += f": {e.response.text}"
+                except:
+                    error_message += f": {e.response.text}"
+            
+            print(f"❌ {error_message}")
+            return {'status': 'error', 'message': error_message}
+            
+        except requests.exceptions.Timeout:
+            error_message = "WEBUI API 요청 시간 초과 (5분)"
+            print(f"❌ {error_message}")
+            return {'status': 'error', 'message': error_message}
+            
+        except Exception as e:
+            print(f"❌ WEBUI API 호출 중 예외 발생: {e}")
+            return {'status': 'error', 'message': str(e)}
 
     def _process_nai_response(self, content: bytes) -> Dict[str, Any] | None:
         """NAI API의 응답(zip)을 처리하여 PIL Image와 원본 바이트를 반환합니다."""

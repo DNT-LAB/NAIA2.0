@@ -283,6 +283,75 @@ class RightView(QWidget):
         layout.addStretch()
         
         return placeholder
+    
+    def close_all_detached_windows(self):
+        """모든 분리된 탭 창을 복귀시킵니다 (앱 종료 시 호출)"""
+        print("🔄 분리된 탭들을 메인 창으로 복귀시킵니다...")
+        
+        # 복귀할 탭들의 리스트를 미리 생성 (딕셔너리가 변경되므로)
+        windows_to_reattach = list(self.detached_windows.items())
+        
+        for tab_index, window in windows_to_reattach:
+            try:
+                tab_title = window.tab_title
+                print(f"  - {tab_title} 탭 복귀 시도 중...")
+                
+                # DetachedWindow에서 원본 위젯 가져오기
+                original_widget = window.get_original_widget()
+                
+                if original_widget and tab_index in self.detached_widgets:
+                    # reattach_tab 로직을 직접 실행
+                    original_widget_stored, original_title = self.detached_widgets[tab_index]
+                    
+                    # 플레이스홀더 제거
+                    placeholder = self.tab_widget.widget(tab_index)
+                    self.tab_widget.removeTab(tab_index)
+                    if placeholder:
+                        placeholder.deleteLater()
+                        
+                    # 원본 위젯을 탭으로 복귀
+                    original_widget.setParent(self)
+                    self.tab_widget.insertTab(tab_index, original_widget, original_title)
+                    
+                    # 복귀된 탭을 활성화
+                    self.tab_widget.setCurrentIndex(tab_index)
+                    
+                    # 추적 딕셔너리에서 제거
+                    del self.detached_widgets[tab_index]
+                    
+                    # 창 닫기 (이벤트 차단하여 reattach_tab 중복 호출 방지)
+                    window.blockSignals(True)
+                    window.close()
+                    window.blockSignals(False)
+                    
+                    print(f"  ✅ {tab_title} 탭 복귀 완료")
+                    
+                    # ImageWindow인 경우 추가 처리
+                    if hasattr(original_widget, '__class__') and 'ImageWindow' in original_widget.__class__.__name__:
+                        print("     - ImageWindow 복귀 후 시그널 연결 확인 완료")
+                        
+                else:
+                    print(f"  ⚠️ {tab_title} 탭 복귀 실패: 위젯 또는 추적 정보를 찾을 수 없음")
+                    # 창만 닫기
+                    window.blockSignals(True)
+                    window.close()
+                    window.blockSignals(False)
+                    
+            except Exception as e:
+                print(f"  ❌ {tab_title if 'tab_title' in locals() else 'Unknown'} 탭 복귀 실패: {e}")
+                try:
+                    # 오류 발생시에도 창은 닫기
+                    window.blockSignals(True)
+                    window.close()
+                    window.blockSignals(False)
+                except:
+                    pass
+        
+        # 추적 딕셔너리 정리
+        self.detached_windows.clear()
+        self.detached_widgets.clear()
+        print("✅ 모든 분리된 탭 복귀 완료")
+
 
     def force_reattach_tab(self, tab_title: str):
         """플레이스홀더의 버튼을 통한 강제 복귀"""

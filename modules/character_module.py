@@ -133,7 +133,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         
         # 기존 캐릭터 위젯들 제거
         for widget in self.character_widgets[:]:
-            self.remove_character_widget(widget)
+            self._remove_character_widget_internal(widget)
         
         # 캐릭터 프레임 복원
         character_frames_data = settings.get("character_frames", [])
@@ -283,6 +283,13 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, char_widget)
         self.character_widgets.append(char_widget)
         self.update_widget_ids()
+
+    def _remove_character_widget_internal(self, widget_to_remove):
+        """내부용 위젯 제거 메서드 (최소 개수 제한 없음)"""
+        if widget_to_remove in self.character_widgets:
+            self.character_widgets.remove(widget_to_remove)
+            widget_to_remove.deleteLater()
+            self.update_widget_ids()
 
     def remove_character_widget(self, widget_to_remove):
         if len(self.character_widgets) > 1:

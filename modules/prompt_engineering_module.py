@@ -151,6 +151,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         for text in self.option_key_map.keys():
             cb = QCheckBox(text)
+            cb.setStyleSheet(parent.get_dark_style('dark_checkbox'))
             layout.addWidget(cb)
             self.preprocessing_checkboxes[text] = cb
 
@@ -331,3 +332,4 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             current_mode = self.app_context.get_api_mode()
             if self.widget:
                 self.update_visibility_for_mode(current_mode)
+        self.load_mode_settings()

@@ -1178,8 +1178,6 @@ class ModernMainWindow(QMainWindow):
     def update_ui_with_result(self, result: dict):
         """APIService의 결과를 받아 UI에 업데이트하고 히스토리에 추가"""
         try:
-            print("🔍 디버그: update_ui_with_result 시작")
-            
             if not self.image_window:
                 print("❌ image_window가 None입니다.")
                 return
@@ -1192,13 +1190,8 @@ class ModernMainWindow(QMainWindow):
             if image_object is None:
                 print("❌ image_object가 None입니다.")
                 return
-
-            print("🔍 디버그: 이미지 객체 검증 완료")
-            
-            # 이미지 업데이트 (안전하게)
             try:
                 self.image_window.update_image(image_object)
-                print("🔍 디버그: 이미지 업데이트 완료")
             except Exception as e:
                 print(f"❌ 이미지 업데이트 실패: {e}")
                 return
@@ -1206,20 +1199,17 @@ class ModernMainWindow(QMainWindow):
             # 정보 업데이트
             try:
                 self.image_window.update_info(info_text)
-                print("🔍 디버그: 정보 업데이트 완료")
             except Exception as e:
                 print(f"❌ 정보 업데이트 실패: {e}")
                 
             # 히스토리 추가
             try:
-                print(f"🔍 히스토리 추가 시도:")
                 print(f"  - image_object type: {type(image_object)}")
                 print(f"  - raw_bytes type: {type(raw_bytes)}, length: {len(raw_bytes) if raw_bytes else 'None'}")
                 print(f"  - info_text type: {type(info_text)}, length: {len(info_text) if info_text else 'None'}")
                 print(f"  - source_row type: {type(source_row)}")
                 
                 self.image_window.add_to_history(image_object, raw_bytes, info_text, source_row)
-                print("🔍 디버그: 히스토리 추가 완료")
             except Exception as e:
                 print(f"❌ 히스토리 추가 실패: {e}")
                 import traceback
@@ -1227,21 +1217,16 @@ class ModernMainWindow(QMainWindow):
             
             self.status_bar.showMessage("🎉 생성 완료!")
             
-            print("🔍 디버그: 자동화 모듈 처리 시작")
-            
             # 자동화 모듈 처리 (안전하게)
             if self.automation_module:
                 try:
                     should_proceed_to_next = self.automation_module.notify_generation_completed()
                     if should_proceed_to_next is False:
-                        print("🔍 디버그: 반복 생성 중이므로 return")
                         return
                 except Exception as e:
                     print(f"❌ 자동화 모듈 notify_generation_completed 실패: {e}")
                     return
-            
-            print("🔍 디버그: 자동 생성 체크 시작")
-            
+
             # 자동 생성 체크
             try:
                 if self.automation_module and self.automation_module.automation_controller.is_running:
@@ -1255,9 +1240,7 @@ class ModernMainWindow(QMainWindow):
                     self._check_and_trigger_auto_generation()
             except Exception as e:
                 print(f"❌ 자동 생성 체크 실패: {e}")
-                
-            print("🔍 디버그: update_ui_with_result 완료")
-            
+
         except Exception as e:
             print(f"❌ update_ui_with_result 전체 에러: {e}")
             import traceback
@@ -1278,7 +1261,7 @@ class ModernMainWindow(QMainWindow):
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
                 # 약간의 지연 후 다시 시도
-                QTimer.singleShot(500, self._trigger_auto_image_generation)
+                QTimer.singleShot(500, self._check_and_trigger_auto_generation)
                 return
                 
             # [추가] 스레드 상태 확인
@@ -1286,7 +1269,7 @@ class ModernMainWindow(QMainWindow):
                 self.generation_controller.generation_thread and 
                 self.generation_controller.generation_thread.isRunning()):
                 print("🔄 이전 스레드가 아직 실행 중이므로 잠시 대기...")
-                QTimer.singleShot(200, self._trigger_auto_image_generation)
+                QTimer.singleShot(200, self._check_and_trigger_auto_generation)
                 return
 
             # [신규] 반복 생성 중인지 확인 - 반복 중이면 자동 생성 건너뛰기

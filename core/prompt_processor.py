@@ -26,7 +26,7 @@ class PromptProcessor:
         context = self._step_2_fit_resolution(context)
         context = self._run_hooks('post_processing', context)
         context = self._step_3_expand_wildcards(context)
-        
+        context = self._run_hooks('after_wildcard', context)
         context.final_prompt = self._step_final_format(context)
         
         return context

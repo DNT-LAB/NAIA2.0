@@ -6,7 +6,7 @@ DARK_COLORS = {
     'bg_hover': '#404040',        # 호버 상태
     'bg_pressed': '#4A4A4A',      # 눌린 상태
     'text_primary': '#FFFFFF',    # 주요 텍스트 (흰색)
-    'text_secondary': '#B0B0B0',  # 보조 텍스트 (회색)
+    'text_secondary': "#B0B0B0",  # 보조 텍스트 (회색)
     'text_disabled': '#666666',   # 비활성 텍스트
     'accent_blue': '#1976D2',     # 강조 파란색
     'accent_blue_hover': '#1565C0',

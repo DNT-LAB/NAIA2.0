@@ -135,3 +135,4 @@ run_NAIA_test_only.bat
 py_file_merger.py
 NAIA_api_timestamps.json
 /output
+naia_temp_rows.parquet

@@ -1,6 +1,6 @@
 import requests
 import zipfile
-import io
+import io, time
 from PIL import Image
 from typing import Dict, Any, TYPE_CHECKING
 
@@ -22,19 +22,32 @@ class APIService:
     def call_generation_api(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
+        최대 5회까지 예외 발생 시 재시도합니다.
         """
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
-        
         print(f"🛰️ APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
         print(f"   📋 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
             f"모델: {parameters.get('model', 'N/A')}, 샘플러: {parameters.get('sampler', 'N/A')}")
 
-        if api_mode == "NAI":
-            return self._call_nai_api(parameters)
-        elif api_mode == "WEBUI":
-            return self._call_webui_api(parameters)
-        else:
-            return {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+        max_retries = 5
+        last_exception = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                if api_mode == "NAI":
+                    return self._call_nai_api(parameters)
+                elif api_mode == "WEBUI":
+                    return self._call_webui_api(parameters)
+                else:
+                    return {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+            except Exception as e:
+                print(f"⚠️ API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
+                last_exception = e
+                if attempt < max_retries:
+                    time.sleep(1)  # 1초 대기 후 재시도 (필요에 따라 시간 조정 가능)
+                else:
+                    # 마지막 시도에서도 실패하면 에러 반환
+                    return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 {max_retries}회 초과): {e}"}
 
     def _call_nai_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다."""

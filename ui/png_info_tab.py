@@ -1,3 +1,4 @@
+from typing import Union
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, 
     QTextEdit, QFileDialog, QMessageBox, QSplitter, QFrame, QScrollArea,
@@ -5,12 +6,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
-from PIL import Image
+from PIL import Image, ImageQt, ImageGrab
 from PIL.PngImagePlugin import PngInfo
 from ui.theme import DARK_COLORS, DARK_STYLES
 import json
 import re
 import os
+import io
 import urllib.request
 import tempfile
 import piexif
@@ -62,10 +64,7 @@ class ImageDownloader(QObject):
 
     def convert_to_png_with_metadata(self, image_bytes):
         """바이트 데이터를 메타데이터 보존하여 PNG로 변환"""
-        import io
         from PIL.PngImagePlugin import PngInfo
-        import piexif
-        import piexif.helper
         
         # 바이트에서 이미지 열기
         image_stream = io.BytesIO(image_bytes)
@@ -493,24 +492,33 @@ class PngInfoTab(QWidget):
             
             # 이미지가 클립보드에 있는지 확인
             if mime_data.hasImage():
-                # QPixmap으로 이미지 가져오기
-                pixmap = clipboard.pixmap()
-                if not pixmap.isNull():
-                    # 임시 PNG 파일로 저장
-                    temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-                    temp_path = temp_file.name
-                    temp_file.close()
-                    
-                    # QPixmap을 PNG로 저장
-                    if pixmap.save(temp_path, 'PNG'):
-                        self.load_image_from_path(temp_path)
-                        print(f"✅ 클립보드 이미지 로드 완료: {temp_path}")
-                    else:
-                        QMessageBox.warning(self, "오류", "이미지를 임시 파일로 저장할 수 없습니다.")
-                else:
-                    QMessageBox.warning(self, "오류", "클립보드의 이미지를 읽을 수 없습니다.")
-            
-            # URL이 클립보드에 있는 경우 (웹 이미지)
+                # Use ImageGrab.grabclipboard() to preserve EXIF metadata
+                # or one can use clipboard.image()
+                pil_image = ImageGrab.grabclipboard()
+
+                # 메타데이터 추출
+                geninfo, metadata = self.read_info_from_image(pil_image)
+
+                # 드롭 영역에 이미지 표시 (PIL Image 직접 전달)
+                self.drop_area.set_image(pil_image)
+
+                # 원본 데이터 표시
+                self.display_raw_metadata(metadata, geninfo)
+
+                # 파라미터 파싱 및 표시
+                if geninfo:
+                    parsed_params = self.parse_generation_parameters(geninfo)
+                    self.current_parameters = parsed_params
+                    self.display_parsed_parameters(parsed_params)
+                    self.display_copy_text(parsed_params, geninfo)
+
+                    # 시그널 발송
+                    self.parameters_extracted.emit(parsed_params)
+
+                self.current_image_path = None  # 클립보드 이미지는 경로가 없음
+                print("✅ 클립보드 이미지 로드 완료")
+
+            # URL이 클립보드에 있는 경우 (웹 이미지) - 파일이 아닌 웹 URL
             elif mime_data.hasUrls():
                 urls = mime_data.urls()
                 if urls:
@@ -532,7 +540,7 @@ class PngInfoTab(QWidget):
                 
         except Exception as e:
             QMessageBox.critical(self, "오류", f"클립보드에서 이미지를 가져오는 중 오류:\n{str(e)}")
-            print(f"❌ 클립보드 붙여넣기 오류: {e}")
+            print(f"❌클립보드 붙여넣기 오류: {str(e)}")
     
     def download_and_load_image(self, url):
         """웹 이미지 다운로드를 완전 비동기로 실행"""
@@ -1097,10 +1105,20 @@ class ImageDropArea(QLabel):
         finally:
             self.dragLeaveEvent(event) # 스타일 초기화
     
-    def set_image(self, image_path):
-        """이미지 표시"""
+    def set_image(self, image_input: Union[str, Image.Image]) -> None:
+        """이미지 표시 - 파일 경로 또는 PIL Image 객체 모두 지원"""
         try:
-            pixmap = QPixmap(image_path)
+            # PIL Image 객체인 경우
+            if isinstance(image_input, Image.Image):
+                # PIL Image를 QImage로 변환
+                qimage = ImageQt.ImageQt(image_input)
+                pixmap = QPixmap.fromImage(qimage)
+                tooltip = "PIL Image"
+            # 파일 경로인 경우
+            else:
+                pixmap = QPixmap(image_input)
+                tooltip = f"📁 {os.path.basename(image_input)}"
+            
             if not pixmap.isNull():
                 scaled_pixmap = pixmap.scaled(
                     self.size(), 
@@ -1108,7 +1126,7 @@ class ImageDropArea(QLabel):
                     Qt.TransformationMode.SmoothTransformation
                 )
                 self.setPixmap(scaled_pixmap)
-                self.setToolTip(f"📁 {os.path.basename(image_path)}")
+                self.setToolTip(tooltip)
                 
                 # 이미지가 로드되면 스타일 변경
                 self.setStyleSheet(f"""

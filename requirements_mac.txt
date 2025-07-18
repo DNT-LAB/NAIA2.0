@@ -50,3 +50,4 @@ tzdata==2025.2
 urllib3==2.4.0
 watchdog==6.0.0
 zipp==3.23.0
+websocket-client

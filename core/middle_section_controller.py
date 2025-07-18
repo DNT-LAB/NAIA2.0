@@ -127,7 +127,8 @@ class MiddleSectionController:
                 if hasattr(module_instance, 'widget') and hasattr(module_instance, 'NAI_compatibility'):
                     should_be_visible = (
                         (current_mode == "NAI" and getattr(module_instance, 'NAI_compatibility', True)) or
-                        (current_mode == "WEBUI" and getattr(module_instance, 'WEBUI_compatibility', True))
+                        (current_mode == "WEBUI" and getattr(module_instance, 'WEBUI_compatibility', True)) or
+                        (current_mode == "COMFYUI" and getattr(module_instance, 'COMFYUI_compatibility', True))
                     )
                     if module_instance.widget and hasattr(module_instance.widget, 'setVisible'):
                         module_instance.widget.setVisible(should_be_visible)

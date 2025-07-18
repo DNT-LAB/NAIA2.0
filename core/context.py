@@ -47,8 +47,8 @@ class AppContext:
         self.subscribers: Dict[str, List[Callable]] = {}
 
     def set_api_mode(self, mode: str):
-        """API 모드를 변경하고 모든 구독자에게 알림"""
-        if mode in ["NAI", "WEBUI"] and mode != self.current_api_mode:
+        """API 모드를 변경하고 모든 구독자에게 알림 (ComfyUI 지원 추가)"""
+        if mode in ["NAI", "WEBUI", "COMFYUI"] and mode != self.current_api_mode:
             old_mode = self.current_api_mode
             self.current_api_mode = mode
             

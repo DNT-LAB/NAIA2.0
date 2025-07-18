@@ -128,7 +128,10 @@ class GenerationController:
         try:
             # --- 1 ~ 4 단계: 파라미터 수집 및 유효성 검사 ---
             api_mode = self.context.main_window.get_current_api_mode()
-            credential = self.context.secure_token_manager.get_token('nai_token' if api_mode == "NAI" else 'webui_url')
+            if api_mode == "NAI": token = 'nai_token'
+            elif api_mode == "COMFYUI": token = 'comfyui_url'
+            else: token = 'webui_url'
+            credential = self.context.secure_token_manager.get_token(token)
             if not credential:
                 self.context.main_window.status_bar.showMessage(f"❌ {api_mode} 인증 정보가 없습니다.")
                 return

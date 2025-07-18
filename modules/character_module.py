@@ -64,6 +64,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         # 🆕 호환성 설정 (NAI만 호환, WEBUI 비호환)
         self.NAI_compatibility = True
         self.WEBUI_compatibility = False
+        self.COMFYUI_compatibility = False
         
         # 기존 속성들
         self.scroll_layout: QVBoxLayout = None

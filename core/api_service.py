@@ -2,7 +2,9 @@ import requests
 import zipfile
 import io, time
 from PIL import Image
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Dict, Any, TYPE_CHECKING, List
+from core.comfyui_service import ComfyUIService
+from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 
 if TYPE_CHECKING:
     from core.context import AppContext
@@ -12,13 +14,15 @@ class APIService:
     # [추가] 생성자에서 AppContext를 받도록 수정
     def __init__(self, app_context: 'AppContext'):
         self.app_context = app_context
-    """
-    API 호출을 전담하는 서비스.
-    컨트롤러로부터 받은 파라미터를 기반으로 API에 맞는 최종 페이로드를 생성하고,
-    네트워크 요청을 보낸 뒤 응답을 처리합니다.
-    """
-    NAI_V3_API_URL = "https://image.novelai.net/ai/generate-image"
-    
+        """
+        API 호출을 전담하는 서비스.
+        컨트롤러로부터 받은 파라미터를 기반으로 API에 맞는 최종 페이로드를 생성하고,
+        네트워크 요청을 보낸 뒤 응답을 처리합니다.
+        """
+        self.NAI_V3_API_URL = "https://image.novelai.net/ai/generate-image"
+        self.comfyui_service = None
+        self.workflow_manager = ComfyUIWorkflowManager()
+
     def call_generation_api(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
@@ -38,6 +42,8 @@ class APIService:
                     return self._call_nai_api(parameters)
                 elif api_mode == "WEBUI":
                     return self._call_webui_api(parameters)
+                elif api_mode == "COMFYUI":  # 🆕 새로 추가
+                    return self._call_comfyui_api(parameters)
                 else:
                     return {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
             except Exception as e:
@@ -325,3 +331,66 @@ class APIService:
         except Exception as e:
             print(f"응답 데이터(zip) 처리 실패: {e}")
             return None
+
+    def _call_comfyui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """ComfyUI API를 호출합니다."""
+        try:
+            # 1. ComfyUI 서버 URL 가져오기
+            comfyui_url = params.get('credential')
+            if not comfyui_url:
+                raise ValueError("ComfyUI 서버 URL이 제공되지 않았습니다.")
+            
+            # URL 정규화 (http:// 프로토콜 추가)
+            if not comfyui_url.startswith("http"):
+                comfyui_url = f"http://{comfyui_url}"
+            
+            # 2. ComfyUI 서비스 초기화
+            if not self.comfyui_service or self.comfyui_service.server_url != comfyui_url:
+                self.comfyui_service = ComfyUIService(comfyui_url)
+            
+            # 3. 연결 테스트
+            if not self.comfyui_service.test_connection():
+                raise Exception("ComfyUI 서버에 연결할 수 없습니다.")
+            
+            # 4. 워크플로우 생성
+            workflow = self.workflow_manager.create_workflow_from_params(params)
+            
+            # 5. 워크플로우 유효성 검사
+            if not self.workflow_manager.validate_workflow(workflow):
+                raise Exception("워크플로우 유효성 검사 실패")
+            
+            # 디버그 정보 출력
+            model_sampling = workflow.get('8', {}).get('inputs', {})
+            sampling_mode = model_sampling.get('sampling', 'eps')
+            zsnr = model_sampling.get('zsnr', False)
+            
+            print(f"📤 ComfyUI 워크플로우 생성 완료:")
+            print(f"   - 해상도: {workflow['5']['inputs']['width']}x{workflow['5']['inputs']['height']}")
+            print(f"   - 모델: {workflow['1']['inputs']['ckpt_name']}")
+            print(f"   - 샘플러: {workflow['4']['inputs']['sampler_name']}")
+            print(f"   - 스텝: {workflow['4']['inputs']['steps']}, CFG: {workflow['4']['inputs']['cfg']}")
+            print(f"   - 샘플링 모드: {sampling_mode}, ZSNR: {zsnr}")
+            
+            # 6. 진행률 콜백 설정
+            def progress_callback(current: int, total: int):
+                # 메인 윈도우에 진행률 업데이트 (필요시 구현)
+                progress_percent = int((current / total) * 100) if total > 0 else 0
+                print(f"🔄 ComfyUI 생성 진행률: {progress_percent}% ({current}/{total})")
+            
+            # 7. 이미지 생성 실행
+            result = self.comfyui_service.generate_image(workflow, progress_callback)
+            
+            if result and result['status'] == 'success':
+                print(f"✅ ComfyUI 이미지 생성 완료: {result['filename']}")
+                return result
+            else:
+                error_msg = result.get('message', '알 수 없는 오류') if result else 'API 호출 실패'
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            print(f"❌ ComfyUI API 호출 중 예외 발생: {e}")
+            return {'status': 'error', 'message': str(e)}
+        finally:
+            # WebSocket 연결 정리
+            if self.comfyui_service:
+                self.comfyui_service.disconnect_websocket()

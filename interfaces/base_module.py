@@ -13,6 +13,7 @@ class BaseMiddleModule(ABC):
         # 🆕 필수: 모든 모듈은 호환성 플래그를 가져야 함
         self.NAI_compatibility = True    # 기본값: NAI 호환
         self.WEBUI_compatibility = True  # 기본값: WEBUI 호환
+        self.COMFYUI_compatibility = True
         
         # 기존 속성들
         self.app_context = None
@@ -57,4 +58,6 @@ class BaseMiddleModule(ABC):
             return getattr(self, 'NAI_compatibility', True)
         elif mode == "WEBUI":
             return getattr(self, 'WEBUI_compatibility', True)
+        elif mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
+            return getattr(self, 'COMFYUI_compatibility', True)
         return True # 알 수 없는 모드일 경우 기본적으로 표시

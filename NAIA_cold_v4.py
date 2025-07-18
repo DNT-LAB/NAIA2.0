@@ -296,44 +296,53 @@ class ModernMainWindow(QMainWindow):
         # === API 관리 레이아웃 (상단) ===
         api_layout = QHBoxLayout()
         api_layout.setSpacing(6)
-        
+
         # NAI 토글 버튼
         self.nai_toggle_btn = QPushButton("NAI")
         self.nai_toggle_btn.setCheckable(True)
         self.nai_toggle_btn.setChecked(True)  # 기본값: NAI 선택
-        self.nai_toggle_btn.setFixedHeight(38)  # 32 → 38로 증가
+        self.nai_toggle_btn.setFixedHeight(38)
         self.nai_toggle_btn.clicked.connect(lambda: self.toggle_search_mode("NAI"))
-        
+
         # WEBUI 토글 버튼
         self.webui_toggle_btn = QPushButton("WEBUI")
         self.webui_toggle_btn.setCheckable(True)
         self.webui_toggle_btn.setChecked(False)
-        self.webui_toggle_btn.setFixedHeight(38)  # 32 → 38로 증가
+        self.webui_toggle_btn.setFixedHeight(38)
         self.webui_toggle_btn.clicked.connect(lambda: self.toggle_search_mode("WEBUI"))
-        
+
+        # 🆕 ComfyUI 토글 버튼 추가
+        self.comfyui_toggle_btn = QPushButton("COMFYUI")
+        self.comfyui_toggle_btn.setCheckable(True)
+        self.comfyui_toggle_btn.setChecked(False)
+        self.comfyui_toggle_btn.setFixedHeight(38)
+        self.comfyui_toggle_btn.clicked.connect(lambda: self.toggle_search_mode("COMFYUI"))
+
         # API 관리 버튼
         api_manage_btn = QPushButton("API 관리")
-        api_manage_btn.setFixedHeight(38)  # 32 → 38로 증가
+        api_manage_btn.setFixedHeight(38)
         api_manage_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         api_manage_btn.clicked.connect(self.open_search_management)
-        
-        # 토글 버튼 스타일 정의 (폰트 크기 증가)
+
+        # 토글 버튼 스타일 정의
         toggle_active_style = CUSTOM["toggle_active_style"]
         toggle_inactive_style = CUSTOM["toggle_inactive_style"]
-        
+
         # 초기 스타일 적용
         self.nai_toggle_btn.setStyleSheet(toggle_active_style)
         self.webui_toggle_btn.setStyleSheet(toggle_inactive_style)
-        
+        self.comfyui_toggle_btn.setStyleSheet(toggle_inactive_style)  # 🆕 추가
+
         # 스타일을 나중에 사용하기 위해 저장
         self.toggle_active_style = toggle_active_style
         self.toggle_inactive_style = toggle_inactive_style
-        
-        # 균일한 column 사이즈로 배치
-        api_layout.addWidget(self.nai_toggle_btn, 1)  # 동일한 stretch factor
-        api_layout.addWidget(self.webui_toggle_btn, 1)  # 동일한 stretch factor
-        api_layout.addWidget(api_manage_btn, 1)  # 동일한 stretch factor
-        
+
+        # 🔧 수정: 4개 버튼을 균등하게 배치 (API 관리 버튼 포함)
+        api_layout.addWidget(self.nai_toggle_btn, 1)
+        api_layout.addWidget(self.webui_toggle_btn, 1)
+        api_layout.addWidget(self.comfyui_toggle_btn, 1)  # 🆕 추가
+        api_layout.addWidget(api_manage_btn, 1)
+
         search_main_layout.addLayout(api_layout)
         
         # === 기존 검색 레이아웃 (하단) ===
@@ -780,21 +789,71 @@ class ModernMainWindow(QMainWindow):
         self.hires_option_widget_layout.addLayout(self.hires_option_layout_row1)
         self.hires_option_widget_layout.addLayout(self.hires_option_layout_row2)
         
-        # 모드별 위젯 그룹 정리 (visibility 제어용)
+        # Comfyui
+        self.comfyui_option_widget = QWidget()
+        self.comfyui_option_widget_layout = QVBoxLayout(self.comfyui_option_widget)
+        self.comfyui_option_widget_layout.setContentsMargins(0, 0, 0, 0)
+        self.comfyui_option_widget_layout.setSpacing(8)
+
+        # ComfyUI 섹션 제목
+        comfyui_section_label = QLabel("🎨 ComfyUI 옵션")
+        comfyui_section_label.setStyleSheet(DARK_STYLES['label_style'].replace("font-size: 19px;", "font-size: 18px; font-weight: 600;"))
+        self.comfyui_option_widget_layout.addWidget(comfyui_section_label)
+
+        # v-prediction 체크박스
+        self.v_prediction_checkbox = QCheckBox("v-prediction")
+        self.v_prediction_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.v_prediction_checkbox.setToolTip("v-prediction 샘플링 모드를 사용합니다 (최신 AI 모델 지원)")
+        self.comfyui_option_widget_layout.addWidget(self.v_prediction_checkbox)
+
+        # ZSNR 체크박스
+        self.zsnr_checkbox = QCheckBox("ZSNR (Zero SNR)")
+        self.zsnr_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.zsnr_checkbox.setToolTip("Zero Signal-to-Noise Ratio 옵션을 사용합니다")
+        self.comfyui_option_widget_layout.addWidget(self.zsnr_checkbox)
+
+        # 🔧 향후 확장을 위한 업스케일러 섹션 (비활성화 상태)
+        comfyui_upscaler_label = QLabel("업스케일러 (미구현)")
+        comfyui_upscaler_label.setStyleSheet(DARK_STYLES['label_style'] + "color: #888888;")
+        comfyui_upscaler_label.setEnabled(False)
+        self.comfyui_option_widget_layout.addWidget(comfyui_upscaler_label)
+
+        self.comfyui_upscaler_section = QWidget()
+        self.comfyui_upscaler_section.setEnabled(False)
+        comfyui_upscaler_layout = QHBoxLayout(self.comfyui_upscaler_section)
+        comfyui_upscaler_layout.setContentsMargins(0, 0, 0, 0)
+
+        comfyui_upscaler_combo = QComboBox()
+        #comfyui_upscaler_combo.addItem("향후 업데이트 예정")
+        comfyui_upscaler_combo.setStyleSheet(DARK_STYLES['compact_lineedit'] + "color: #888888;")
+        comfyui_upscaler_combo.setEnabled(False)
+        #comfyui_upscaler_layout.addWidget(comfyui_upscaler_combo)
+        comfyui_upscaler_layout.addStretch()
+
+        self.comfyui_option_widget_layout.addWidget(self.comfyui_upscaler_section)
+
+        # 모드별 위젯 그룹 정리 (기존 코드 수정)
         self.naid_option_widgets = [
             self.option_section_label
         ] + list(self.advanced_checkboxes.values())
-        
+
         self.hires_option_widgets = [
             self.hires_option_widget  # 전체 위젯 컨테이너만 포함
         ]
-        
-        # 기본적으로 NAI 모드로 시작 (WEBUI 위젯들 숨김)
+
+        # 🆕 ComfyUI 위젯 그룹 추가
+        self.comfyui_option_widgets = [
+            self.comfyui_option_widget  # 전체 ComfyUI 위젯 컨테이너
+        ]
+
+        # 기본적으로 NAI 모드로 시작 (다른 모드 위젯들 숨김)
         self.hires_option_widget.setVisible(False)
-        
-        # 레이아웃에 추가
+        self.comfyui_option_widget.setVisible(False)  # 🆕 ComfyUI 위젯도 기본 숨김
+
+        # 레이아웃에 추가 (기존 코드에 ComfyUI 위젯 추가)
         params_layout.addLayout(self.naid_option_layout)
         params_layout.addWidget(self.hires_option_widget)
+        params_layout.addWidget(self.comfyui_option_widget)  # 🆕 ComfyUI 위젯 추가
         
         # === Custom API 파라미터 섹션 ===
         self.custom_api_checkbox = QCheckBox("Add custom/override api parameters")
@@ -961,19 +1020,31 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage("Custom API 파라미터 입력이 비활성화되었습니다.")
     
     def toggle_search_mode(self, mode):
-        """NAI/WEBUI 검색 모드 토글 (수정된 버전)"""
+        """NAI/WEBUI/COMFYUI 검색 모드 토글 (ComfyUI 지원 추가)"""
         if mode == "NAI":
+            # NAI 모드 활성화
             self.nai_toggle_btn.setChecked(True)
             self.webui_toggle_btn.setChecked(False)
+            self.comfyui_toggle_btn.setChecked(False)  # 🆕 추가
+            
+            # 스타일 적용
             self.nai_toggle_btn.setStyleSheet(self.toggle_active_style)
             self.webui_toggle_btn.setStyleSheet(self.toggle_inactive_style)
-            self.status_bar.showMessage("NAI 모드로 전환되었습니다.")
+            self.comfyui_toggle_btn.setStyleSheet(self.toggle_inactive_style)  # 🆕 추가
             
-            # 🔧 수정: AppContext 모드 변경 -> 자동으로 GenerationParamsManager 콜백 호출
+            # UI 위젯 표시/숨김
+            for widget in self.naid_option_widgets:
+                widget.setVisible(True)
+            for widget in self.hires_option_widgets:
+                widget.setVisible(False)
+            for widget in self.comfyui_option_widgets:  # 🆕 추가
+                widget.setVisible(False)
+            
+            self.status_bar.showMessage("NAI 모드로 전환되었습니다.")
             self.app_context.set_api_mode(mode)
             
         elif mode == "WEBUI":
-            # WEBUI 모드 선택 시 연결 테스트 수행
+            # WEBUI 모드 선택 시 연결 테스트 수행 (기존 로직 유지)
             try:
                 api_management = None
                 tab_was_open = False
@@ -987,22 +1058,19 @@ class ModernMainWindow(QMainWindow):
                             tab_was_open = True
                             break
                     
-                    # 🔒 스텔스 모드: API 관리 탭이 없으면 임시로 생성 (UI에 표시하지 않음)
+                    # 스텔스 모드: API 관리 탭이 없으면 임시로 생성
                     if not api_management:
                         from ui.api_management_window import APIManagementWindow
                         api_management = APIManagementWindow(self.app_context, self)
                     
                     if api_management and hasattr(api_management, 'webui_url_input'):
-                        # 저장된 WEBUI URL 가져오기 (스텔스 모드에서는 키링에서 직접 로드)
+                        # 저장된 WEBUI URL 가져오기
                         if not tab_was_open:
-                            # 탭이 열려있지 않은 경우 키링에서 직접 가져오기
                             webui_url = self.app_context.secure_token_manager.get_token('webui_url')
                         else:
-                            # 탭이 열려있는 경우 UI에서 가져오기
                             webui_url = api_management.webui_url_input.text().strip()
                         
                         if not webui_url:
-                            # URL이 없는 경우에만 API 관리 창으로 이동
                             self.status_bar.showMessage("⚠️ WEBUI URL을 먼저 설정해주세요.", 5000)
                             self.open_search_management()
                             return
@@ -1015,22 +1083,31 @@ class ModernMainWindow(QMainWindow):
                             # ✅ 연결 성공 시 WEBUI 모드로 전환
                             self.nai_toggle_btn.setChecked(False)
                             self.webui_toggle_btn.setChecked(True)
+                            self.comfyui_toggle_btn.setChecked(False)  # 🆕 추가
+                            
+                            # 스타일 적용
                             self.nai_toggle_btn.setStyleSheet(self.toggle_inactive_style)
                             self.webui_toggle_btn.setStyleSheet(self.toggle_active_style)
+                            self.comfyui_toggle_btn.setStyleSheet(self.toggle_inactive_style)  # 🆕 추가
+                            
+                            # UI 위젯 표시/숨김
+                            for widget in self.naid_option_widgets:
+                                widget.setVisible(False)
+                            for widget in self.hires_option_widgets:
+                                widget.setVisible(True)
+                            for widget in self.comfyui_option_widgets:  # 🆕 추가
+                                widget.setVisible(False)
+                            
                             self.status_bar.showMessage(f"✅ WEBUI 모드로 전환되었습니다. ({validated_url})", 5000)
                             
                             # 검증된 URL을 키링에 저장
                             clean_url = validated_url.replace('https://', '').replace('http://', '')
                             self.app_context.secure_token_manager.save_token('webui_url', clean_url)
-                            
-                            # 🔧 수정: AppContext 모드 변경 -> 자동으로 GenerationParamsManager 콜백 호출
                             self.app_context.set_api_mode(mode)
                             
                         else:
                             # ❌ 연결 실패 시에만 API 관리 창으로 이동
                             self.status_bar.showMessage(f"❌ WEBUI 연결 실패: {webui_url}", 5000)
-                            
-                            # 스텔스 모드로 생성된 경우에만 탭 열기
                             if not tab_was_open:
                                 self.open_search_management()
                             
@@ -1047,13 +1124,100 @@ class ModernMainWindow(QMainWindow):
                                 f"API 관리 탭에서 올바른 주소를 입력해주세요."
                             )
                     else:
-                        # API 관리 기능을 사용할 수 없는 경우
                         self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
                         self.open_search_management()
                         
             except Exception as e:
                 print(f"❌ WEBUI 모드 전환 중 오류: {e}")
                 self.status_bar.showMessage(f"❌ WEBUI 모드 전환 실패: {str(e)}", 5000)
+                self.open_search_management()
+        
+        elif mode == "COMFYUI":  # 🆕 ComfyUI 모드 - 동적 로딩 추가
+            # ComfyUI 모드 선택 시 연결 테스트 및 동적 옵션 로드
+            try:
+                api_management = None
+                tab_was_open = False
+                
+                if hasattr(self, 'image_window') and self.image_window:
+                    # 이미 열린 API 관리 탭 찾기
+                    for i in range(self.image_window.tab_widget.count()):
+                        widget = self.image_window.tab_widget.widget(i)
+                        if hasattr(widget, '__class__') and 'APIManagementWindow' in widget.__class__.__name__:
+                            api_management = widget
+                            tab_was_open = True
+                            break
+                    
+                    # 스텔스 모드: API 관리 탭이 없으면 임시로 생성
+                    if not api_management:
+                        from ui.api_management_window import APIManagementWindow
+                        api_management = APIManagementWindow(self.app_context, self)
+                    
+                    if api_management and hasattr(api_management, 'comfyui_url_input'):
+                        # 저장된 ComfyUI URL 가져오기
+                        if not tab_was_open:
+                            comfyui_url = self.app_context.secure_token_manager.get_token('comfyui_url')
+                        else:
+                            comfyui_url = api_management.comfyui_url_input.text().strip()
+                        
+                        if not comfyui_url:
+                            self.status_bar.showMessage("⚠️ ComfyUI URL을 먼저 설정해주세요.", 5000)
+                            self.open_search_management()
+                            return
+                        
+                        # ComfyUI 연결 테스트
+                        self.status_bar.showMessage("🔄 ComfyUI 연결을 확인하는 중...", 3000)
+                        validated_url = self.test_comfyui(comfyui_url)
+                        
+                        if validated_url:
+                            # ✅ 연결 성공 시 ComfyUI 모드로 전환
+                            self.nai_toggle_btn.setChecked(False)
+                            self.webui_toggle_btn.setChecked(False)
+                            self.comfyui_toggle_btn.setChecked(True)
+                            
+                            # 스타일 적용
+                            self.nai_toggle_btn.setStyleSheet(self.toggle_inactive_style)
+                            self.webui_toggle_btn.setStyleSheet(self.toggle_inactive_style)
+                            self.comfyui_toggle_btn.setStyleSheet(self.toggle_active_style)
+                            
+                            # UI 위젯 표시/숨김
+                            for widget in self.naid_option_widgets:
+                                widget.setVisible(False)
+                            for widget in self.hires_option_widgets:
+                                widget.setVisible(False)
+                            for widget in self.comfyui_option_widgets:
+                                widget.setVisible(True)
+                            
+                            self.status_bar.showMessage(f"✅ ComfyUI 모드로 전환되었습니다. ({comfyui_url})", 5000)
+                            
+                            # 검증된 URL을 키링에 저장
+                            self.app_context.secure_token_manager.save_token('comfyui_url', comfyui_url)
+                            self.app_context.set_api_mode(mode)
+
+                        else:
+                            # ❌ 연결 실패
+                            self.status_bar.showMessage(f"❌ ComfyUI 연결 실패: {comfyui_url}", 5000)
+                            if not tab_was_open:
+                                self.open_search_management()
+                            
+                            # 오류 메시지 표시
+                            from PyQt6.QtWidgets import QMessageBox
+                            QMessageBox.critical(
+                                self, 
+                                "ComfyUI 연결 실패", 
+                                f"ComfyUI 서버에 연결할 수 없습니다.\n\n"
+                                f"확인할 사항:\n"
+                                f"• ComfyUI가 실행 중인지 확인\n"
+                                f"• 주소가 올바른지 확인: {comfyui_url}\n"
+                                f"• 포트 번호가 정확한지 확인 (기본: 8188)\n\n"
+                                f"API 관리 탭에서 올바른 주소를 입력해주세요."
+                            )
+                    else:
+                        self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
+                        self.open_search_management()
+                        
+            except Exception as e:
+                print(f"❌ ComfyUI 모드 전환 중 오류: {e}")
+                self.status_bar.showMessage(f"❌ ComfyUI 모드 전환 실패: {str(e)}", 5000)
                 self.open_search_management()
 
     def open_search_management(self):
@@ -1124,7 +1288,7 @@ class ModernMainWindow(QMainWindow):
             processed_input = ', '.join([item.strip() for item in self.main_prompt_textedit.toPlainText().split(',') if item.strip()])
             processed_negative_prompt = ', '.join([item.strip() for item in self.negative_prompt_textedit.toPlainText().split(',') if item.strip()])
 
-            # 🔧 수정: 실제 위젯 이름에 맞게 파라미터 수집
+            # 🔧 기존 구조 유지: 실제 위젯 이름에 맞게 파라미터 수집
             params = {
                 "action": "generate",
                 "access_token": "",
@@ -1159,13 +1323,39 @@ class ModernMainWindow(QMainWindow):
                     "enable_hr": self.enable_hr_checkbox.isChecked(),
                     "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 1.5,
                     "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Lanczos",
-                    "denoising_strength": self.denoising_strength_slider.value() / 100.0 if hasattr(self, 'denoising_strength_slider') else 0.5
+                    "denoising_strength": self.denoising_strength_slider.value() / 100.0 if hasattr(self, 'denoising_strength_slider') else 0.5,
+                    "hires_steps": self.hires_steps_spinbox.value() if hasattr(self, 'hires_steps_spinbox') else 0
                 })
                 
-            # 🆕 추가: 자동 해상도 맞춤 옵션
+            # 🆕 추가: ComfyUI 전용 파라미터들 (현재 모드가 ComfyUI일 때만)
+            current_mode = self.get_current_api_mode()
+            if current_mode == "COMFYUI":
+                if hasattr(self, 'v_prediction_checkbox') and hasattr(self, 'zsnr_checkbox'):
+                    params.update({
+                        "sampling_mode": "v_prediction" if self.v_prediction_checkbox.isChecked() else "eps",
+                        "zsnr": self.zsnr_checkbox.isChecked(),
+                        "filename_prefix": "NAIA_ComfyUI"  # 기본 파일명 접두사
+                    })
+                    
+                    # 디버그 정보
+                    print(f"🎨 ComfyUI 파라미터 수집 완료:")
+                    print(f"   - 샘플링 모드: {params['sampling_mode']}")
+                    print(f"   - ZSNR: {params['zsnr']}")
+                    print(f"   - 해상도: {params['width']}x{params['height']}")
+                    print(f"   - 스텝: {params['steps']}, CFG: {params['cfg_scale']}")
+                else:
+                    # ComfyUI 위젯이 아직 초기화되지 않은 경우 기본값 사용
+                    params.update({
+                        "sampling_mode": "eps",
+                        "zsnr": False,
+                        "filename_prefix": "NAIA_ComfyUI"
+                    })
+                    print("⚠️ ComfyUI 위젯이 초기화되지 않아 기본값을 사용합니다.")
+
+            # 🆕 추가: 자동 해상도 맞춤 옵션 (모든 모드 공통)
             if hasattr(self, 'auto_fit_resolution_checkbox'):
                 params["auto_fit_resolution"] = self.auto_fit_resolution_checkbox.isChecked()
-                
+                    
         except (ValueError, KeyError, AttributeError) as e:
             print(f"❌ 파라미터 수집 오류: {e}")
             # 오류 발생 시 사용자에게 알림
@@ -1643,12 +1833,17 @@ class ModernMainWindow(QMainWindow):
     # [신규] 현재 활성화된 API 모드를 반환하는 메서드
     def get_current_api_mode(self) -> str:
         """
-        현재 선택된 토글 버튼에 따라 'NAI' 또는 'WEBUI' 문자열을 반환합니다.
+        현재 선택된 토글 버튼에 따라 'NAI', 'WEBUI', 또는 'COMFYUI' 문자열을 반환합니다.
         """
         if self.nai_toggle_btn.isChecked():
             return "NAI"
-        else:
+        elif self.webui_toggle_btn.isChecked():
             return "WEBUI"
+        elif self.comfyui_toggle_btn.isChecked():  # 🆕 ComfyUI 지원 추가
+            return "COMFYUI"
+        else:
+            # 기본값은 NAI (안전장치)
+            return "NAI"
         
     def connect_automation_signals(self):
         """자동화 모듈과의 시그널 연결"""
@@ -1731,6 +1926,52 @@ class ModernMainWindow(QMainWindow):
                 pass
         return None
     
+    def test_comfyui(self, url):
+        """ComfyUI 연결 테스트 함수 (test_webui와 유사한 패턴)"""
+        import requests
+        
+        # URL 정규화 및 프로토콜 테스트
+        test_urls = []
+        clean_url = url.replace('https://', '').replace('http://', '')
+        
+        # 포트가 없으면 기본 ComfyUI 포트(8188) 추가
+        if ':' not in clean_url:
+            clean_url = f"{clean_url}:8188"
+        
+        # HTTP와 HTTPS 모두 테스트
+        test_urls.append(f"http://{clean_url}")
+        test_urls.append(f"https://{clean_url}")
+        
+        for test_url in test_urls:
+            try:
+                print(f"🔍 ComfyUI 연결 테스트: {test_url}")
+                
+                # /system_stats 엔드포인트로 연결 테스트
+                response = requests.get(f"{test_url}/system_stats", timeout=8)
+                
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        # ComfyUI 응답 구조 확인
+                        if 'system' in data or 'devices' in data:
+                            print(f"✅ ComfyUI 연결 성공: {test_url}")
+                            return test_url
+                    except json.JSONDecodeError:
+                        continue
+                
+            except requests.exceptions.ConnectTimeout:
+                print(f"⏰ ComfyUI 연결 시간 초과: {test_url}")
+                continue
+            except requests.exceptions.ConnectionError:
+                print(f"❌ ComfyUI 연결 실패: {test_url}")
+                continue
+            except Exception as e:
+                print(f"❌ ComfyUI 테스트 중 예외: {test_url} - {e}")
+                continue
+        
+        print(f"❌ 모든 ComfyUI 연결 시도 실패: {url}")
+        return None
+
     def connect_checkbox_signals(self):
         """체크박스 시그널을 연결하는 메서드 (init에서 호출)"""
         try:

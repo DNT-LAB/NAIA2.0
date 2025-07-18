@@ -15,6 +15,7 @@ class GenerationParamsManager:
         # 호환성 설정 (둘 다 호환)
         self.NAI_compatibility = True
         self.WEBUI_compatibility = True
+        self.COMFYUI_compatibility = True
         
     def get_mode_aware_filename(self, mode: str) -> str:
         """모드별 설정 파일명 생성"""
@@ -187,6 +188,19 @@ class GenerationParamsManager:
                 settings["gen_cb_터보 옵션"] = False
                 settings["gen_cb_와일드카드 단독 모드"] = False
 
+            # 🆕 ComfyUI 모드일 때 ComfyUI 전용 파라미터 수집
+            current_mode = mw.get_current_api_mode() if hasattr(mw, 'get_current_api_mode') else "NAI"
+            if current_mode == "COMFYUI":
+                if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
+                    settings["v_prediction"] = mw.v_prediction_checkbox.isChecked()
+                else:
+                    settings["v_prediction"] = False
+                
+                if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
+                    settings["zsnr"] = mw.zsnr_checkbox.isChecked()
+                else:
+                    settings["zsnr"] = False
+
             # WEBUI 전용 파라미터 수집
             if hasattr(mw, 'enable_hr_checkbox'):
                 settings["enable_hr"] = mw.enable_hr_checkbox.isChecked()
@@ -271,6 +285,10 @@ class GenerationParamsManager:
             "gen_cb_자동 생성": False,
             "gen_cb_터보 옵션": False,
             "gen_cb_와일드카드 단독 모드": False,
+
+            #comfyui
+            "v_prediction": False,
+            "zsnr": False,
             
             # 기타 체크박스들
             "random_resolution_checked": False,
@@ -413,6 +431,12 @@ class GenerationParamsManager:
             # 🔥 추가: hires_steps 파라미터 적용
             if hasattr(mw, 'hires_steps_spinbox'):
                 mw.hires_steps_spinbox.setValue(settings.get("hires_steps", 0))
+
+            if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
+                mw.v_prediction_checkbox.setChecked(settings.get("v_prediction", False))
+            
+            if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
+                mw.zsnr_checkbox.setChecked(settings.get("zsnr", False))
             
             print(f"✅ 생성 파라미터 UI 적용 완료")
             
@@ -455,6 +479,9 @@ class GenerationParamsManager:
                     self.update_ui_for_webui_mode()
                 elif mode == "NAI":
                     self.update_ui_for_nai_mode()
+                elif mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
+                    self.load_comfyui_dynamic_options()
+                    self.update_ui_for_comfyui_mode()
                 self.apply_settings(default_settings)
                 return
             
@@ -470,6 +497,9 @@ class GenerationParamsManager:
                     self.update_ui_for_webui_mode()
                 elif mode == "NAI":
                     self.update_ui_for_nai_mode()
+                elif mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
+                    self.load_comfyui_dynamic_options()
+                    self.update_ui_for_comfyui_mode()
                 
                 # 모드 전환 완료 후 설정 적용
                 self.apply_settings(mode_settings)
@@ -482,6 +512,9 @@ class GenerationParamsManager:
                     self.update_ui_for_webui_mode()
                 elif mode == "NAI":
                     self.update_ui_for_nai_mode()
+                elif mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
+                    self.load_comfyui_dynamic_options()
+                    self.update_ui_for_comfyui_mode()
                 default_settings = self._get_default_settings()
                 self.apply_settings(default_settings)
                 
@@ -493,19 +526,24 @@ class GenerationParamsManager:
                 self.update_ui_for_webui_mode()
             elif mode == "NAI":
                 self.update_ui_for_nai_mode()
+            elif mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
+                self.load_comfyui_dynamic_options()
+                self.update_ui_for_comfyui_mode()
             default_settings = self._get_default_settings()
             self.apply_settings(default_settings)
     
     def is_compatible_with_mode(self, mode: str) -> bool:
-        """해당 모드와 호환되는지 확인"""
+        """주어진 모드와 현재 설정이 호환되는지 확인 (ComfyUI 지원 추가)"""
         if mode == "NAI":
             return self.NAI_compatibility
         elif mode == "WEBUI":
             return self.WEBUI_compatibility
+        elif mode == "COMFYUI":  # 🆕 ComfyUI 호환성 확인
+            return self.COMFYUI_compatibility
         return False
     
     def on_mode_changed(self, old_mode: str, new_mode: str):
-        """모드 변경 시 호출되는 콜백"""
+        """API 모드 변경 시 호출되는 콜백 (ComfyUI 지원 추가)"""
         print(f"🔄 메인 생성 파라미터 모드 변경: {old_mode} → {new_mode}")
         
         # 1. 이전 모드와 호환되었던 경우에만 설정 저장
@@ -515,6 +553,16 @@ class GenerationParamsManager:
         # 2. 새 모드와 호환되는 경우에만 설정 로드
         if self.is_compatible_with_mode(new_mode):
             self.load_mode_settings(new_mode)
+        
+        # 3. 모드별 UI 업데이트
+        if new_mode == "NAI":
+            self.update_ui_for_nai_mode()
+        elif new_mode == "WEBUI":
+            self.load_webui_dynamic_options()
+            self.update_ui_for_webui_mode()
+        elif new_mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
+            self.load_comfyui_dynamic_options()
+            self.update_ui_for_comfyui_mode()
 
     def load_webui_dynamic_options(self):
         """WEBUI API에서 동적 옵션들을 로드하여 UI에 적용"""
@@ -629,6 +677,139 @@ class GenerationParamsManager:
             
         except Exception as e:
             print(f"❌ WEBUI 동적 옵션 로드 실패: {e}")
+
+    def load_comfyui_dynamic_options(self):
+        """🆕 ComfyUI API에서 동적 옵션들을 로드하여 UI에 적용"""
+        try:
+            from core.comfyui_utils import ComfyUIAPIUtils
+            
+            # 키링에서 ComfyUI URL 가져오기
+            comfyui_url = self.main_window.app_context.secure_token_manager.get_token('comfyui_url')
+            if not comfyui_url:
+                print("⚠️ ComfyUI URL이 설정되지 않았습니다.")
+                return
+            
+            # URL 정규화
+            if not comfyui_url.startswith("http"):
+                comfyui_url = f"http://{comfyui_url}"
+            
+            mw = self.main_window
+            
+            # 1. 모델 리스트 업데이트
+            model_list = ComfyUIAPIUtils.get_model_list(comfyui_url)
+            if model_list and hasattr(mw, 'model_combo'):
+                # 현재 선택값 보존
+                current_model = mw.model_combo.currentText()
+                mw.model_combo.clear()
+                mw.model_combo.addItems(model_list)
+                
+                # 이전 선택값 복원 시도
+                index = mw.model_combo.findText(current_model)
+                if index >= 0:
+                    mw.model_combo.setCurrentIndex(index)
+                    print(f"✅ ComfyUI 모델 복원: {current_model}")
+                else:
+                    # 기본값 설정 (첫 번째 모델)
+                    if mw.model_combo.count() > 0:
+                        mw.model_combo.setCurrentIndex(0)
+                        print(f"✅ ComfyUI 모델을 기본값으로 설정: {mw.model_combo.currentText()}")
+                
+                print(f"✅ ComfyUI 모델 목록 업데이트: {len(model_list)}개")
+            else:
+                print("⚠️ ComfyUI 모델 목록을 가져올 수 없습니다.")
+            
+            # 2. 샘플러 리스트 업데이트
+            sampler_list = ComfyUIAPIUtils.get_sampler_list(comfyui_url)
+            if sampler_list and hasattr(mw, 'sampler_combo'):
+                # 현재 선택값 보존
+                current_sampler = mw.sampler_combo.currentText()
+                mw.sampler_combo.clear()
+                mw.sampler_combo.addItems(sampler_list)
+                
+                # 이전 선택값 복원 시도
+                index = mw.sampler_combo.findText(current_sampler)
+                if index >= 0:
+                    mw.sampler_combo.setCurrentIndex(index)
+                    print(f"✅ ComfyUI 샘플러 복원: {current_sampler}")
+                else:
+                    # euler을 기본값으로 설정
+                    euler_index = mw.sampler_combo.findText("euler")
+                    if euler_index >= 0:
+                        mw.sampler_combo.setCurrentIndex(euler_index)
+                        print(f"✅ ComfyUI 샘플러를 기본값으로 설정: euler")
+                    elif mw.sampler_combo.count() > 0:
+                        mw.sampler_combo.setCurrentIndex(0)
+                        print(f"✅ ComfyUI 샘플러를 첫 번째 항목으로 설정: {mw.sampler_combo.currentText()}")
+                
+                print(f"✅ ComfyUI 샘플러 목록 업데이트: {len(sampler_list)}개")
+            else:
+                print("⚠️ ComfyUI 샘플러 목록을 가져올 수 없습니다.")
+            
+            # 3. 스케줄러 리스트 업데이트
+            scheduler_list = ComfyUIAPIUtils.get_scheduler_list(comfyui_url)
+            if scheduler_list and hasattr(mw, 'scheduler_combo'):
+                # 현재 선택값 보존
+                current_scheduler = mw.scheduler_combo.currentText()
+                mw.scheduler_combo.clear()
+                mw.scheduler_combo.addItems(scheduler_list)
+                
+                # 이전 선택값 복원 시도
+                index = mw.scheduler_combo.findText(current_scheduler)
+                if index >= 0:
+                    mw.scheduler_combo.setCurrentIndex(index)
+                    print(f"✅ ComfyUI 스케줄러 복원: {current_scheduler}")
+                else:
+                    # normal을 기본값으로 설정
+                    normal_index = mw.scheduler_combo.findText("normal")
+                    if normal_index >= 0:
+                        mw.scheduler_combo.setCurrentIndex(normal_index)
+                        print(f"✅ ComfyUI 스케줄러를 기본값으로 설정: normal")
+                    elif mw.scheduler_combo.count() > 0:
+                        mw.scheduler_combo.setCurrentIndex(0)
+                        print(f"✅ ComfyUI 스케줄러를 첫 번째 항목으로 설정: {mw.scheduler_combo.currentText()}")
+                
+                print(f"✅ ComfyUI 스케줄러 목록 업데이트: {len(scheduler_list)}개")
+            else:
+                print("⚠️ ComfyUI 스케줄러 목록을 가져올 수 없습니다.")
+            
+            # 4. 시스템 정보 로그 (선택사항)
+            system_info = ComfyUIAPIUtils.get_system_info(comfyui_url)
+            if system_info:
+                print(f"🎨 ComfyUI 시스템 정보 확인됨")
+                # GPU, 메모리 정보 등을 로그에 출력 (필요시)
+            
+        except Exception as e:
+            print(f"❌ ComfyUI 동적 옵션 로드 실패: {e}")
+
+    def update_ui_for_comfyui_mode(self):
+        """🆕 UI를 ComfyUI 모드로 전환"""
+        try:
+            mw = self.main_window
+            
+            # 1. NAI/WEBUI Option 영역 숨기기
+            if hasattr(mw, 'naid_option_widgets'):
+                for widget in mw.naid_option_widgets:
+                    widget.setVisible(False)
+            if hasattr(mw, 'hires_option_widgets'):
+                for widget in mw.hires_option_widgets:
+                    widget.setVisible(False)
+            if hasattr(mw, 'nai_rescale_ui'):
+                for widget in mw.nai_rescale_ui:
+                    widget.setVisible(False)
+            
+            # 2. ComfyUI Option 영역 표시
+            if hasattr(mw, 'comfyui_option_widgets'):
+                for widget in mw.comfyui_option_widgets:
+                    widget.setVisible(True)
+
+            # 4. 라벨 텍스트 변경
+            if hasattr(mw, 'option_section_label'):
+                mw.option_section_label.setText("🎨 ComfyUI 옵션:")
+            
+            print("✅ UI가 ComfyUI 모드로 전환되었습니다.")
+            
+        except Exception as e:
+            print(f"❌ ComfyUI 모드 UI 전환 실패: {e}")
 
     def update_ui_for_nai_mode(self):
         """UI를 NAI 모드로 전환"""

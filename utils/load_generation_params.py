@@ -189,17 +189,15 @@ class GenerationParamsManager:
                 settings["gen_cb_와일드카드 단독 모드"] = False
 
             # 🆕 ComfyUI 모드일 때 ComfyUI 전용 파라미터 수집
-            current_mode = mw.get_current_api_mode() if hasattr(mw, 'get_current_api_mode') else "NAI"
-            if current_mode == "COMFYUI":
-                if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
-                    settings["v_prediction"] = mw.v_prediction_checkbox.isChecked()
-                else:
-                    settings["v_prediction"] = False
-                
-                if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
-                    settings["zsnr"] = mw.zsnr_checkbox.isChecked()
-                else:
-                    settings["zsnr"] = False
+            if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
+                settings["v_prediction"] = mw.v_prediction_checkbox.isChecked()
+            else:
+                settings["v_prediction"] = False
+            
+            if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
+                settings["zsnr"] = mw.zsnr_checkbox.isChecked()
+            else:
+                settings["zsnr"] = False
 
             # WEBUI 전용 파라미터 수집
             if hasattr(mw, 'enable_hr_checkbox'):

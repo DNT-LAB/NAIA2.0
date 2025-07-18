@@ -359,6 +359,8 @@ class AutoCompleteManager(QObject):
         info = self.active_token_info
         
         # 괄호 구조 복원
+        if not self.app_context.current_api_mode == "NAI":
+            completion_text = completion_text.replace('(', '\(').replace(')', '\)')
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
 
         if isinstance(widget, QTextEdit):

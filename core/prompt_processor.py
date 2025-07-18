@@ -118,6 +118,11 @@ class PromptProcessor:
 
         # --- 이하 기존 로직 ---        
         all_tags = context.get_all_tags()
+        if not self.app_context.current_api_mode == "NAI":
+            for i, tag in enumerate(all_tags):
+                if "(" in tag and ")" in tag: 
+                    if '\(' not in tag: 
+                        all_tags[i] = tag.replace('(', '\(').replace(')', '\)')
         seen = set()
         final_tags = []
 

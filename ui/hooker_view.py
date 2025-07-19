@@ -782,7 +782,7 @@ class HookerView(QWidget):
             self.capture_context(stage_name, modified_context, previous_context)
 
             # ⬇️ 최종 단계가 끝난 후, 캐릭터 모듈의 UI 업데이트 메서드 호출
-            if self.is_naid4_mode and self.char_module:
+            if self.is_naid4_mode and self.char_module and not self.char_module.reroll_on_generate_checkbox.isChecked():
                 print("🔄️ Hooker 파이프라인 완료. 캐릭터 모듈 UI를 최종 갱신합니다.")
                 self.char_module.hooker_update_prompt()
 

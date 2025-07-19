@@ -27,6 +27,8 @@ class PromptProcessor:
         context = self._run_hooks('post_processing', context)
         context = self._step_3_expand_wildcards(context)
         context = self._run_hooks('after_wildcard', context)
+        context = self._step_4_final_format(context)
+        context = self._run_hooks('final_hookpoint', context)
         context.final_prompt = self._step_final_format(context)
         
         return context
@@ -71,12 +73,9 @@ class PromptProcessor:
         context.prefix_tags = self.wildcard_processor.expand_tags(context.prefix_tags, context)
         context.postfix_tags = self.wildcard_processor.expand_tags(context.postfix_tags, context)
         return context
-
-    def _step_final_format(self, context: PromptContext) -> str:
-        """모든 태그를 조합하여 최종 문자열로 포맷팅하는 단계"""
-        
-        # [추가] Step 3에서 처리된 global_append_tags를 main_tags의 끝에 추가합니다.
-        # 이 작업은 다른 모든 처리보다 먼저 수행되어야 합니다.
+    
+    def _step_4_final_format(self, context: PromptContext) -> PromptContext:
+        """모든 태그를 조합하여 최종 리스트로 포맷팅하는 단계"""
         if context.global_append_tags:
             context.main_tags.extend(context.global_append_tags)
 
@@ -116,7 +115,10 @@ class PromptProcessor:
         context.main_tags = converted_main_tags
         context.prefix_tags = sorted_person_tags + context.prefix_tags
 
-        # --- 이하 기존 로직 ---        
+        return context
+
+    def _step_final_format(self, context: PromptContext) -> str:
+        """모든 태그를 조합하여 최종 문자열로 포맷팅하는 단계"""
         all_tags = context.get_all_tags()
         if not self.app_context.current_api_mode == "NAI":
             for i, tag in enumerate(all_tags):

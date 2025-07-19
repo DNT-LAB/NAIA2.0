@@ -1,5 +1,6 @@
 import os
 import json
+import copy
 import pandas as pd
 from typing import List, Dict, Any
 from PyQt6.QtWidgets import (
@@ -76,6 +77,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.reroll_on_generate_checkbox: QCheckBox = None
         self.processed_prompt_display: QTextEdit = None
         self.last_processed_data: dict = {'characters': [], 'uc': []}
+        self.modifiable_clone: dict = {'characters': [], 'uc': []}
 
     def get_title(self) -> str:
         return "👤 NAID4 캐릭터"
@@ -190,7 +192,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         
         main_layout.addWidget(char_widgets_container)
 
-        processed_label = QLabel("최종 적용될 캐릭터 프롬프트 (와일드카드 처리 후)")
+        processed_label = QLabel("최종 적용될 캐릭터 프롬프트 (와일드카드/Hook 처리 후)")
         processed_label.setStyleSheet(DARK_STYLES['label_style'])
         main_layout.addWidget(processed_label)
 
@@ -224,6 +226,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         if not self.activate_checkbox or not self.activate_checkbox.isChecked():
             self.processed_prompt_display.clear()
             self.last_processed_data = {'characters': [], 'uc': []}
+            self.modifiable_clone = {'characters': [], 'uc': []} # ⬅️ 비활성화 시 복제본도 초기화
             return None
 
         temp_context = PromptContext(source_row=pd.Series(), settings={})
@@ -238,6 +241,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
                 processed_ucs.append(', '.join(self.wildcard_processor.expand_tags(uc_tags, temp_context)))
         
         self.last_processed_data = {'characters': processed_prompts, 'uc': processed_ucs}
+        self.modifiable_clone = copy.deepcopy(self.last_processed_data)
         self.update_processed_display(processed_prompts, processed_ucs)
         return temp_context
 
@@ -264,7 +268,14 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.current_prompt_context.wildcard_history.update(temp_context.wildcard_history)
             self.app_context.current_prompt_context.wildcard_state.update(temp_context.wildcard_state)
 
-        return self.last_processed_data
+        return self.modifiable_clone
+    
+    def hooker_update_prompt(self):
+        # ⬇️ Hooker에 의해 수정된 최종 결과를 UI에 업데이트하는 로직 추가
+        if self.modifiable_clone:
+            final_prompts = self.modifiable_clone.get('characters', [])
+            final_ucs = self.modifiable_clone.get('uc', [])
+            self.update_processed_display(final_prompts, final_ucs)
 
     def update_processed_display(self, prompts: List[str], ucs: List[str]):
         """처리된 프롬프트를 하단 텍스트 박스에 표시합니다."""

@@ -409,12 +409,33 @@ class ModernMainWindow(QMainWindow):
         search_result_layout.addWidget(self.result_label1)
         search_result_layout.addWidget(self.result_label2)
         search_result_layout.addStretch(1)
+
+        self.save_settings_btn = QPushButton("💾 설정 저장")
+        self.save_settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #5CBF60;
+            }
+            QPushButton:pressed {
+                background-color: #3E8E41;
+            }
+        """)
+        self.save_settings_btn.setToolTip("현재 모든 설정을 저장합니다")
         
         self.restore_btn = QPushButton("복원")
         self.restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         self.deep_search_btn = QPushButton("심층검색")
         self.deep_search_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         
+        search_result_layout.addWidget(self.save_settings_btn)
         search_result_layout.addWidget(self.restore_btn)
         search_result_layout.addWidget(self.deep_search_btn)
         top_layout.addWidget(search_result_frame)
@@ -1240,6 +1261,7 @@ class ModernMainWindow(QMainWindow):
 
     def connect_signals(self):
         self.search_btn.clicked.connect(self.trigger_search)
+        self.save_settings_btn.clicked.connect(self.save_all_current_settings)
         self.restore_btn.clicked.connect(self.restore_search_results)
         self.deep_search_btn.clicked.connect(self.open_depth_search_tab)
         self.random_prompt_btn.clicked.connect(self.trigger_random_prompt)
@@ -2000,6 +2022,89 @@ class ModernMainWindow(QMainWindow):
                 
         except Exception as e:
             print(f"❌ 버튼 상태 업데이트 오류: {e}")
+
+    def save_all_current_settings(self):
+        """현재 모든 설정을 저장하는 메서드"""
+        try:
+            current_mode = self.app_context.get_api_mode()
+            
+            # 버튼 상태 변경 (저장 중 표시)
+            self.save_settings_btn.setText("💾 저장 중...")
+            self.save_settings_btn.setEnabled(False)
+            
+            saved_items = []
+            failed_items = []
+            
+            # 1. 메인 생성 파라미터 저장
+            try:
+                self.generation_params_manager.save_mode_settings(current_mode)
+                saved_items.append("메인 생성 파라미터")
+            except Exception as e:
+                failed_items.append(f"메인 생성 파라미터: {str(e)}")
+            
+            # 2. 모든 ModeAware 모듈 설정 저장
+            if self.app_context and self.app_context.mode_manager:
+                try:
+                    self.app_context.mode_manager.save_all_current_mode()
+                    
+                    # 저장된 모듈 수 계산
+                    mode_aware_count = len(self.app_context.mode_manager.registered_modules)
+                    if mode_aware_count > 0:
+                        saved_items.append(f"모드 인식 모듈 ({mode_aware_count}개)")
+                    
+                except Exception as e:
+                    failed_items.append(f"모드 인식 모듈: {str(e)}")
+               
+            # 결과 메시지 생성
+            if saved_items and not failed_items:
+                # 모든 저장 성공
+                message = f"✅ 설정 저장 완료 ({current_mode} 모드)\n저장된 항목: {', '.join(saved_items)}"
+                self.status_bar.showMessage(f"✅ 모든 설정이 저장되었습니다 ({current_mode} 모드)", 4000)
+                
+            elif saved_items and failed_items:
+                # 일부 저장 성공, 일부 실패
+                message = f"⚠️ 설정 부분 저장 완료 ({current_mode} 모드)\n✅ 저장됨: {', '.join(saved_items)}\n❌ 실패: {', '.join(failed_items)}"
+                self.status_bar.showMessage(f"⚠️ 일부 설정 저장 실패", 4000)
+                
+            else:
+                # 모든 저장 실패
+                message = f"❌ 설정 저장 실패 ({current_mode} 모드)\n실패 항목: {', '.join(failed_items)}"
+                self.status_bar.showMessage("❌ 설정 저장 실패", 4000)
+            
+            print(message)
+            
+            # 성공한 항목이 있으면 토스트 메시지도 표시
+            if saved_items:
+                # QMessageBox로 간단한 알림 표시 (자동으로 사라지지 않음, 사용자가 확인 필요)
+                from PyQt6.QtWidgets import QMessageBox
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setWindowTitle("설정 저장 완료")
+                msg.setText(f"현재 모드({current_mode})의 설정이 저장되었습니다.")
+                
+                details = f"저장된 항목:\n• " + "\n• ".join(saved_items)
+                if failed_items:
+                    details += f"\n\n실패한 항목:\n• " + "\n• ".join(failed_items)
+                msg.setDetailedText(details)
+                
+                # 자동으로 닫히도록 타이머 설정 (3초 후 자동 닫기)
+                from PyQt6.QtCore import QTimer
+                timer = QTimer()
+                timer.timeout.connect(msg.accept)
+                timer.setSingleShot(True)
+                timer.start(3000)  # 3초 후 자동 닫기
+                
+                msg.exec()
+            
+        except Exception as e:
+            error_message = f"❌ 설정 저장 중 예외 발생: {str(e)}"
+            print(error_message)
+            self.status_bar.showMessage("❌ 설정 저장 중 오류 발생", 4000)
+            
+        finally:
+            # 버튼 상태 복원
+            self.save_settings_btn.setText("💾 설정 저장")
+            self.save_settings_btn.setEnabled(True)
 
 
 if __name__ == "__main__":

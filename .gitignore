@@ -136,3 +136,4 @@ py_file_merger.py
 NAIA_api_timestamps.json
 /output
 naia_temp_rows.parquet
+/ui/hooker/filter_dict

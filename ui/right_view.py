@@ -13,6 +13,7 @@ from ui.api_management_window import APIManagementWindow
 from ui.depth_search_window import DepthSearchWindow
 from ui.web_view import BrowserTab
 from ui.detached_window import DetachedWindow
+from ui.hooker_view import HookerView
 from core.search_result_model import SearchResultModel
 from ui.png_info_tab import PngInfoTab
 import pandas as pd
@@ -132,7 +133,11 @@ class RightView(QWidget):
         self.png_info_tab = PngInfoTab(self)
         self.png_info_tab.parameters_extracted.connect(self.on_png_parameters_extracted)
         self.png_info_tab_index = self.tab_widget.addTab(self.png_info_tab, "📝 PNG Info")
-        
+
+        #Hooker
+        self.hooker_tab = HookerView(self.app_context, self)
+        self.hooker_tab_index = self.tab_widget.addTab(self.hooker_tab, "🔍 Hooker")
+    
         print("✅ 모든 탭(ImageWindow 포함) 분리 기능 활성화")
 
     def detach_tab(self, tab_index: int):
@@ -393,6 +398,83 @@ class RightView(QWidget):
 
         api_window = APIManagementWindow(self.app_context, self)
         tab_index = self.tab_widget.addTab(api_window, "⚙️ API 관리")
+
+        close_button = QPushButton("✕")
+        close_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 9px;
+                font-family: Arial, sans-serif;
+                font-weight: bold;
+                font-size: 14px;
+                color: #B0B0B0;
+                padding: 0px 4px;
+            }
+            QPushButton:hover {
+                background-color: #F44336;
+                color: white;
+            }
+        """)
+        close_button.setFixedSize(18, 18)
+        close_button.setToolTip("탭 닫기")
+        
+        # [신규] 탭 바의 오른쪽에 닫기 버튼 추가
+        self.tab_widget.tabBar().setTabButton(tab_index, QTabBar.ButtonPosition.RightSide, close_button)
+        
+        # [신규] 버튼 클릭 시 close_tab 메서드를 호출하도록 연결 (람다 함수 사용)
+        close_button.clicked.connect(lambda: self.close_tab(tab_index))
         
         # 닫기 버튼 추가 로직 등은 기존 구현 유지
         self.tab_widget.setCurrentIndex(tab_index)
+
+    def add_depth_search_tab(self, search_result: SearchResultModel, main_window):
+        """심층 검색 탭을 추가하거나, 이미 있으면 해당 탭으로 전환합니다."""
+        for i in range(self.tab_widget.count()):
+            if isinstance(self.tab_widget.widget(i), DepthSearchWindow):
+                self.tab_widget.setCurrentIndex(i)
+                return
+
+        depth_search_window = DepthSearchWindow(search_result, main_window)
+        # DepthSearchWindow의 시그널을 MainWindow의 슬롯에 연결
+        depth_search_window.results_assigned.connect(main_window.on_depth_search_results_assigned)
+
+        tab_index = self.tab_widget.addTab(depth_search_window, "🔬 심층 검색")
+        
+        # [신규] 해당 탭에만 표시될 닫기 버튼 생성
+        close_button = QPushButton("✕")
+        close_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 9px;
+                font-family: Arial, sans-serif;
+                font-weight: bold;
+                font-size: 14px;
+                color: #B0B0B0;
+                padding: 0px 4px;
+            }
+            QPushButton:hover {
+                background-color: #F44336;
+                color: white;
+            }
+        """)
+        close_button.setFixedSize(18, 18)
+        close_button.setToolTip("탭 닫기")
+        
+        # [신규] 탭 바의 오른쪽에 닫기 버튼 추가
+        self.tab_widget.tabBar().setTabButton(tab_index, QTabBar.ButtonPosition.RightSide, close_button)
+        
+        # [신규] 버튼 클릭 시 close_tab 메서드를 호출하도록 연결 (람다 함수 사용)
+        close_button.clicked.connect(lambda: self.close_tab(tab_index))
+
+        self.tab_widget.setCurrentIndex(tab_index)
+    
+    def close_tab(self, index: int):
+        """탭 닫기 요청을 처리합니다."""
+        widget_to_close = self.tab_widget.widget(index)
+        
+        # API 관리 또는 심층 검색 탭만 닫기 허용
+        if isinstance(widget_to_close, (APIManagementWindow, DepthSearchWindow)):
+            self.tab_widget.removeTab(index)
+            widget_to_close.deleteLater()

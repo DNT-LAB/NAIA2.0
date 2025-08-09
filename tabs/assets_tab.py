@@ -255,13 +255,64 @@ class StableImageWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pixmap = None
+        self._pil_image = None  # Store PIL image for clipboard operations
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Enable context menu
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
 
     def setPixmap(self, pixmap: QPixmap):
         if pixmap and not pixmap.isNull():
             self._pixmap = pixmap
+            # Convert to PIL image for clipboard operations
+            self._convert_to_pil()
         else:
             self._pixmap = None
+            self._pil_image = None
+        self.update()
+    
+    def _convert_to_pil(self):
+        """Convert QPixmap to PIL Image preserving transparency"""
+        if not self._pixmap:
+            self._pil_image = None
+            return
+        
+        # Convert QPixmap to QImage first to ensure RGBA format
+        from PyQt6.QtCore import QBuffer, QIODevice
+        from PyQt6.QtGui import QImage
+        import io
+        
+        # Convert QPixmap to QImage with RGBA format
+        q_image = self._pixmap.toImage()
+        q_image = q_image.convertToFormat(QImage.Format.Format_RGBA8888)
+        
+        # Save QImage to buffer as PNG
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.ReadWrite)
+        q_image.save(buffer, 'PNG')
+        
+        # Get bytes from QBuffer
+        byte_array = buffer.data()
+        buffer.close()
+        
+        # Convert bytes to PIL Image and ensure RGBA
+        pil_buffer = io.BytesIO(byte_array.data())
+        self._pil_image = Image.open(pil_buffer)
+        if self._pil_image.mode != 'RGBA':
+            self._pil_image = self._pil_image.convert('RGBA')
+    
+    def setPilImage(self, pil_image: Image.Image):
+        """Set image from PIL Image"""
+        if pil_image:
+            self._pil_image = pil_image
+            # Convert to QPixmap
+            from PIL.ImageQt import ImageQt
+            q_image = ImageQt(pil_image.convert("RGBA"))
+            self._pixmap = QPixmap.fromImage(q_image)
+        else:
+            self._pixmap = None
+            self._pil_image = None
         self.update()
 
     def paintEvent(self, event):
@@ -286,6 +337,150 @@ class StableImageWidget(QWidget):
         y = (widget_size.height() - scaled_pixmap.height()) // 2
         painter.drawPixmap(x, y, scaled_pixmap)
         painter.end()
+    
+    def show_context_menu(self, pos: QPoint):
+        """Show right-click context menu"""
+        if not self._pixmap or not self._pil_image:
+            return
+        
+        menu = QMenu(self)
+        
+        # Style menu with white text
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2b2b2b;
+                color: white;
+                border: 1px solid #555;
+            }
+            QMenu::item {
+                padding: 5px 20px;
+                color: white;
+            }
+            QMenu::item:selected {
+                background-color: #4a4a4a;
+            }
+        """)
+        
+        # Copy to clipboard action (PNG only for transparency)
+        copy_png_action = QAction("📋 클립보드에 복사", self)
+        copy_png_action.triggered.connect(lambda: self.copy_image_to_clipboard())
+        
+        # Save as PNG action for better transparency support
+        save_png_action = QAction("💾 PNG로 저장 (투명도 유지)", self)
+        save_png_action.triggered.connect(lambda: self.save_image_as_png())
+        
+        menu.addAction(copy_png_action)
+        menu.addSeparator()
+        menu.addAction(save_png_action)
+        
+        menu.exec(self.mapToGlobal(pos))
+    
+    def copy_image_to_clipboard(self):
+        """Copy image to clipboard with better compatibility"""
+        if not self._pil_image:
+            return
+        
+        import io
+        from PyQt6.QtCore import QMimeData, QByteArray
+        from PyQt6.QtGui import QImage
+        
+        try:
+            # Ensure RGBA mode
+            if self._pil_image.mode != 'RGBA':
+                img_with_alpha = self._pil_image.convert('RGBA')
+            else:
+                img_with_alpha = self._pil_image
+            
+            # Method 1: Create QImage directly for better alpha handling
+            # Convert PIL to bytes
+            buf = io.BytesIO()
+            img_with_alpha.save(buf, format='PNG')
+            png_data = buf.getvalue()
+            
+            # Create QImage from PNG data (preserves alpha better)
+            qimage = QImage()
+            qimage.loadFromData(png_data)
+            
+            # Create QMimeData for multi-format clipboard
+            mime_data = QMimeData()
+            
+            # Add as QImage (best for Qt apps and some Windows apps)
+            mime_data.setImageData(qimage)
+            
+            # Also add raw PNG data (for web browsers and other apps)
+            mime_data.setData('image/png', QByteArray(png_data))
+            
+            # Set to clipboard
+            clipboard = QApplication.clipboard()
+            clipboard.setMimeData(mime_data)
+            
+            print(f"✅ 이미지가 클립보드에 복사되었습니다. (PNG with transparency)")
+            print(f"   - Image size: {img_with_alpha.size}")
+            print(f"   - Mode: {img_with_alpha.mode}")
+            print(f"   - Has transparency: {img_with_alpha.mode == 'RGBA'}")
+            
+            # Show status message if parent has status bar
+            parent = self.parent()
+            while parent:
+                if hasattr(parent, 'app_context') and hasattr(parent.app_context, 'main_window'):
+                    parent.app_context.main_window.status_bar.showMessage(
+                        "✅ 이미지가 클립보드에 복사되었습니다. (투명도 지원)", 3000
+                    )
+                    break
+                parent = parent.parent()
+                
+        except Exception as e:
+            print(f"❌ 클립보드 복사 실패: {e}")
+            QMessageBox.warning(self, "오류", f"클립보드 복사 실패: {e}")
+    
+    def save_image_as_png(self):
+        """Save image as PNG file with transparency preserved"""
+        if not self._pil_image:
+            return
+        
+        from PyQt6.QtWidgets import QFileDialog
+        from datetime import datetime
+        
+        try:
+            # Ensure RGBA mode for transparency
+            if self._pil_image.mode != 'RGBA':
+                img_with_alpha = self._pil_image.convert('RGBA')
+            else:
+                img_with_alpha = self._pil_image
+            
+            # Generate default filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"image_{timestamp}.png"
+            
+            # Open save dialog
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "PNG 이미지 저장",
+                default_filename,
+                "PNG Images (*.png);;All Files (*.*)"
+            )
+            
+            if file_path:
+                # Save as PNG with transparency
+                img_with_alpha.save(file_path, 'PNG')
+                
+                print(f"✅ 이미지가 저장되었습니다: {file_path}")
+                print(f"   - Size: {img_with_alpha.size}")
+                print(f"   - Mode: {img_with_alpha.mode} (투명도 유지)")
+                
+                # Show status message
+                parent = self.parent()
+                while parent:
+                    if hasattr(parent, 'app_context') and hasattr(parent.app_context, 'main_window'):
+                        parent.app_context.main_window.status_bar.showMessage(
+                            f"✅ PNG 파일로 저장됨 (투명도 유지): {file_path}", 3000
+                        )
+                        break
+                    parent = parent.parent()
+                
+        except Exception as e:
+            print(f"❌ 이미지 저장 실패: {e}")
+            QMessageBox.critical(self, "오류", f"이미지 저장 실패: {e}")
 
 
 class AssetsTabModule(BaseTabModule):
@@ -770,6 +965,10 @@ class AssetsTab(QWidget):
         
         # assets 하위 폴더들 찾기
         for folder in sorted(self.assets_base_dir.iterdir()):
+            if folder.name == 'Preset' and folder.is_dir():
+                continue
+            if folder.name == '__pycache__' and folder.is_dir():
+                continue
             if folder.is_dir() and not folder.name.startswith('.'):
                 self.save_path_combo.addItem(folder.name)
     
@@ -932,14 +1131,18 @@ class AssetsTab(QWidget):
                         pass
                     # 변환 실패 시 원본 이미지 사용
             
-            # ImageQt를 통한 변환
+            # Store PIL image and convert to pixmap
+            self.current_image = image
+            
+            # Use setPilImage to properly store both PIL and QPixmap
+            self.output_image_widget.setPilImage(image)
+            
+            # Also get the pixmap for backward compatibility
             q_image = ImageQt(image)
             pixmap = QPixmap.fromImage(q_image)
             
             if not pixmap.isNull():
-                self.current_image = image
                 self.current_pixmap = pixmap
-                self.output_image_widget.setPixmap(pixmap)
                 self.save_btn.setEnabled(True)
                 
                 # rembg가 사용 가능하면 배경 제거 버튼도 활성화

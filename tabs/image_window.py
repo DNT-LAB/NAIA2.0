@@ -7,9 +7,9 @@ from io import BytesIO
 import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
-    QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog
+    QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent
 from PIL import Image, ImageQt
 from ui.theme import DARK_STYLES, DARK_COLORS
@@ -1093,12 +1093,109 @@ class ImageWindow(QWidget):
         send_to_inpaint_action.triggered.connect(self._emit_send_to_inpaint)
         menu.addAction(send_to_inpaint_action)
         
+        # Add Send to Sketchbook action
+        send_to_sketchbook_action = QAction("🖌️ Send to Sketchbook (NAI)", self)
+        send_to_sketchbook_action.triggered.connect(self._send_to_sketchbook)
+        menu.addAction(send_to_sketchbook_action)
+        
         menu.exec(self.main_image_label.mapToGlobal(pos))
 
     def _emit_send_to_inpaint(self):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
+    
+    def _send_to_sketchbook(self):
+        """Send current image to Sketchbook with prompts for inpaint mode."""
+        if not self.current_history_item:
+            return
+        
+        # Get prompts from the current item
+        main_prompt = ""
+        negative_prompt = ""
+        
+        if (hasattr(self.current_history_item, 'prompt_context') and 
+            self.current_history_item.prompt_context):
+            # Get main_prompt and negative_prompt from context
+            main_prompt = self.current_history_item.prompt_context.get('main_prompt', '')
+            negative_prompt = self.current_history_item.prompt_context.get('negative_prompt', '')
+        
+        # If main_prompt is empty, try to extract from info_text
+        if not main_prompt and self.current_history_item.info_text:
+            info_parts = self.current_history_item.info_text.split('Negative prompt:')
+            if len(info_parts) > 0:
+                main_prompt = info_parts[0].strip()
+            if len(info_parts) > 1:
+                # Extract negative prompt (up to Steps: or end)
+                neg_part = info_parts[1].split('Steps:')[0].strip()
+                negative_prompt = neg_part
+        
+        # Save image to temp file
+        import tempfile
+        import os
+        
+        temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        
+        # Save PIL Image to temp file
+        if self.current_history_item.image:
+            self.current_history_item.image.save(temp_path, 'PNG')
+            
+            # Access Sketchbook through Assets tab via RightView
+            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'image_window'):
+                right_view = self.app_context.main_window.image_window
+                if hasattr(right_view, 'tab_controller'):
+                    # Get Assets tab
+                    assets_tab = right_view.tab_controller.get_tab_instance('AssetsTabModule')
+                    if assets_tab and hasattr(assets_tab, 'widget') and hasattr(assets_tab.widget, 'sketchbook_widget'):
+                        sketchbook = assets_tab.widget.sketchbook_widget
+                        
+                        # Check if Sketchbook has layers
+                        if hasattr(sketchbook, 'canvas') and sketchbook.canvas.layers:
+                            QMessageBox.warning(self, "전송 실패", 
+                                              "Sketchbook에 레이어가 이미 존재합니다.\n"
+                                              "인페인트 모드를 사용하려면 Sketchbook을 비워주세요.")
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+                            return
+                        
+                        # Add image to Sketchbook
+                        image_name = f"Inpaint_{os.path.basename(temp_path)}"
+                        sketchbook.add_image_from_path(temp_path, image_name)
+                        
+                        # Store prompts (will be applied when user manually enables inpaint mode)
+                        sketchbook.set_inpaint_prompts(main_prompt, negative_prompt)
+                        
+                        # Switch to Assets tab and show Sketchbook
+                        right_view.tab_controller.switch_to_tab('AssetsTabModule')
+                        
+                        # If Assets tab has tab widget, switch to Sketchbook tab
+                        if hasattr(assets_tab.widget, 'tab_widget'):
+                            # Find Sketchbook tab index
+                            for i in range(assets_tab.widget.tab_widget.count()):
+                                if assets_tab.widget.tab_widget.tabText(i) == "✏️ Sketchbook":
+                                    assets_tab.widget.tab_widget.setCurrentIndex(i)
+                                    break
+                        
+                        print(f"✅ Image sent to Sketchbook with prompts")
+                        print(f"   Main prompt: {main_prompt[:50]}...")
+                        print(f"   Negative prompt: {negative_prompt[:50]}...")
+                    else:
+                        QMessageBox.warning(self, "오류", "Sketchbook 탭을 찾을 수 없습니다.")
+            
+            # Clean up temp file after a delay
+            QTimer.singleShot(1000, lambda: self._cleanup_temp_file(temp_path))
+    
+    def _cleanup_temp_file(self, path):
+        """Clean up temporary file."""
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+        except:
+            pass
 
     def _load_current_prompt(self):
         """🆕 현재 표시 중인 이미지의 프롬프트를 불러옵니다 - main_prompt 우선 사용"""

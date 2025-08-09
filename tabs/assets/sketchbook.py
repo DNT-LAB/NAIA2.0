@@ -1212,6 +1212,8 @@ class SketchbookWidget(QWidget):
         self.pending_bbox = None    # Store pending bounding box
         self.undo_stack = []        # Undo history
         self.redo_stack = []        # Redo history
+        self.stored_main_prompt = ""     # Store prompt for later use
+        self.stored_negative_prompt = ""  # Store negative prompt for later use
         self.setup_ui()
         self.connect_signals()
 
@@ -1330,6 +1332,23 @@ class SketchbookWidget(QWidget):
 
     def export_composite(self) -> Optional[QPixmap]:
         return self.canvas.export_composite()
+    
+    def set_inpaint_prompts(self, main_prompt: str, negative_prompt: str):
+        """Set prompts for inpaint mode (without automatically enabling it)."""
+        # Store prompts for later use
+        self.stored_main_prompt = main_prompt
+        self.stored_negative_prompt = negative_prompt
+        
+        # If inpaint control window already exists, set the prompts
+        if self.inpaint_control_window:
+            if hasattr(self.inpaint_control_window, 'main_prompt'):
+                self.inpaint_control_window.main_prompt.setPlainText(main_prompt)
+            if hasattr(self.inpaint_control_window, 'negative_prompt'):
+                self.inpaint_control_window.negative_prompt.setPlainText(negative_prompt)
+        
+        print(f"✅ Inpaint prompts stored (will be used when inpaint mode is enabled):")
+        print(f"   Main: {main_prompt[:50]}...")
+        print(f"   Negative: {negative_prompt[:50]}...")
     
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
@@ -1527,6 +1546,14 @@ class SketchbookWidget(QWidget):
                 self.inpaint_control_window.generate_clicked.connect(self._on_inpaint_generate)
                 self.inpaint_control_window.result_accepted.connect(self._on_inpaint_result_accepted)
                 self.inpaint_control_window.result_cancelled.connect(self._on_inpaint_result_cancelled)
+            
+            # Apply stored prompts if they exist
+            if hasattr(self, 'stored_main_prompt') and hasattr(self, 'stored_negative_prompt'):
+                if hasattr(self.inpaint_control_window, 'main_prompt'):
+                    self.inpaint_control_window.main_prompt.setPlainText(self.stored_main_prompt)
+                if hasattr(self.inpaint_control_window, 'negative_prompt'):
+                    self.inpaint_control_window.negative_prompt.setPlainText(self.stored_negative_prompt)
+                print(f"✅ Applied stored prompts to inpaint control window")
             
             # Position window at bottom of canvas
             canvas_geom = self.canvas.geometry()

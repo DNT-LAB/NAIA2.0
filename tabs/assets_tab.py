@@ -697,9 +697,16 @@ class AssetsTab(QWidget):
         self.sketchbook_btn.clicked.connect(self._send_to_sketchbook)
         self.sketchbook_btn.setEnabled(False)  # 이미지 선택 전까지 비활성화
         
+        # Add Character Prompt 버튼
+        self.char_prompt_btn = QPushButton("👤 Add Character Prompt")
+        self.char_prompt_btn.setStyleSheet(dynamic_styles.get('secondary_button', DARK_STYLES.get('secondary_button', '')))
+        self.char_prompt_btn.clicked.connect(self._open_character_prompt_editor)
+        self.char_prompt_btn.setEnabled(False)  # 이미지 선택 전까지 비활성화
+        
         button_layout.addStretch()
         button_layout.addWidget(self.inpaint_btn)
         button_layout.addWidget(self.sketchbook_btn)
+        button_layout.addWidget(self.char_prompt_btn)
         button_layout.addStretch()
         
         main_layout.addLayout(button_layout)
@@ -770,7 +777,8 @@ class AssetsTab(QWidget):
         self.positive_prompt = QTextEdit()
         self.positive_prompt.setPlaceholderText("Positive prompt 입력...")
         self.positive_prompt.setStyleSheet(dynamic_styles.get('compact_textedit', DARK_STYLES.get('compact_textedit', '')))
-        self.positive_prompt.setMaximumHeight(get_scaled_size(120))
+        self.positive_prompt.setMinimumHeight(get_scaled_size(60))
+        # Removed maximum height to allow resizing
         
         # Negative Prompt
         neg_label = QLabel("Negative Prompt")
@@ -779,7 +787,8 @@ class AssetsTab(QWidget):
         self.negative_prompt = QTextEdit()
         self.negative_prompt.setPlaceholderText("Negative prompt 입력...")
         self.negative_prompt.setStyleSheet(dynamic_styles.get('compact_textedit', DARK_STYLES.get('compact_textedit', '')))
-        self.negative_prompt.setMaximumHeight(get_scaled_size(120))
+        self.negative_prompt.setMinimumHeight(get_scaled_size(60))
+        # Removed maximum height to allow resizing
         
         # 해상도 선택
         resolution_label = QLabel("해상도 (오버라이드)")
@@ -789,7 +798,7 @@ class AssetsTab(QWidget):
         self.resolution_combo.setStyleSheet(dynamic_styles.get('compact_combobox', DARK_STYLES.get('compact_combobox', '')))
         
         resolutions = [
-            "1024 x 1024",  # 기본값
+            "1024 x 1024", "768 x 1344", "704 x 1472",  # 기본값
             "--- High Resolution ---",
             "1472 x 1472", "1088 x 1920", "1280 x 1664", "1344 x 1536",
             "1536 x 1344", "1664 x 1280", "1920 x 1088",
@@ -889,11 +898,35 @@ class AssetsTab(QWidget):
         preset_btn_layout.addWidget(self.save_preset_btn)
         preset_btn_layout.addWidget(self.delete_preset_btn)
         
+        # 프롬프트용 수직 Splitter 생성
+        prompt_splitter = QSplitter(Qt.Orientation.Vertical)
+        prompt_splitter.setChildrenCollapsible(False)
+        
+        # Positive prompt 위젯 그룹
+        pos_widget = QWidget()
+        pos_layout = QVBoxLayout(pos_widget)
+        pos_layout.setContentsMargins(0, 0, 0, 0)
+        pos_layout.setSpacing(2)
+        pos_layout.addWidget(pos_label)
+        pos_layout.addWidget(self.positive_prompt)
+        
+        # Negative prompt 위젯 그룹
+        neg_widget = QWidget()
+        neg_layout = QVBoxLayout(neg_widget)
+        neg_layout.setContentsMargins(0, 0, 0, 0)
+        neg_layout.setSpacing(2)
+        neg_layout.addWidget(neg_label)
+        neg_layout.addWidget(self.negative_prompt)
+        
+        # Splitter에 추가
+        prompt_splitter.addWidget(pos_widget)
+        prompt_splitter.addWidget(neg_widget)
+        
+        # 초기 비율 설정 (60:40)
+        prompt_splitter.setSizes([200, 150])
+        
         # 레이아웃 구성
-        layout.addWidget(pos_label)
-        layout.addWidget(self.positive_prompt)
-        layout.addWidget(neg_label)
-        layout.addWidget(self.negative_prompt)
+        layout.addWidget(prompt_splitter)
         layout.addWidget(resolution_label)
         layout.addWidget(self.resolution_combo)
         layout.addWidget(self.generate_btn)
@@ -942,6 +975,10 @@ class AssetsTab(QWidget):
                     continue
                 if item_path.name == '__pycache__' and item_path.is_dir():
                     continue
+                # JSON 파일은 표시하지 않음 (character prompt 파일들)
+                if item_path.suffix.lower() == '.json':
+                    continue
+                    
                 tree_item = QTreeWidgetItem(parent_item)
                 
                 if item_path.is_dir():
@@ -1391,7 +1428,11 @@ class AssetsTab(QWidget):
             return
         
         # 선택된 아이템의 경로 가져오기
-        item_path = Path(item.data(0, Qt.ItemDataRole.UserRole))
+        path_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not path_data:
+            return
+        
+        item_path = Path(path_data)
         if not item_path:
             return
         
@@ -1991,6 +2032,7 @@ except Exception as e:
             # 버튼 활성화
             self.inpaint_btn.setEnabled(True)
             self.sketchbook_btn.setEnabled(True)
+            self.char_prompt_btn.setEnabled(True)
             
             print(f"✅ 이미지 View 탭에서 표시 완료: {image_path.name}")
             
@@ -2000,6 +2042,7 @@ except Exception as e:
             # 오류 시 버튼 비활성화
             self.inpaint_btn.setEnabled(False)
             self.sketchbook_btn.setEnabled(False)
+            self.char_prompt_btn.setEnabled(False)
     
     def _send_to_inpaint(self):
         """Send to inpaint 버튼 클릭 처리 - 메인 윈도우의 inpaint 팝업과 동일한 동작"""
@@ -2051,25 +2094,50 @@ except Exception as e:
                 QMessageBox.warning(self, "경고", "선택된 이미지가 없습니다.")
                 return
             
+            # Check for accompanying JSON file with character prompt
+            json_path = self.current_selected_image_path.with_suffix('.json')
+            character_prompt_data = None
+            
+            if json_path.exists():
+                try:
+                    import json
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        character_prompt_data = json.load(f)
+                    print(f"✅ Loaded character prompt from: {json_path}")
+                except Exception as e:
+                    print(f"⚠️ Failed to load character prompt: {e}")
+            
             # Sketchbook 탭으로 전환
             self.tab_widget.setCurrentIndex(2)  # Sketchbook 탭은 인덱스 2
             
             # Sketchbook 위젯에 이미지 추가
             if hasattr(self, 'sketchbook_widget'):
                 image_name = self.current_selected_image_path.stem  # 확장자 제외한 파일명
-                # add_image_from_path returns None, not a success boolean
-                self.sketchbook_widget.add_image_from_path(
-                    str(self.current_selected_image_path), 
-                    image_name
-                )
+                
+                # Use new method if character prompt exists, otherwise use existing method
+                if character_prompt_data:
+                    self.sketchbook_widget.add_image_from_path_with_prompt(
+                        str(self.current_selected_image_path), 
+                        image_name,
+                        character_prompt_data
+                    )
+                else:
+                    self.sketchbook_widget.add_image_from_path(
+                        str(self.current_selected_image_path), 
+                        image_name
+                    )
                 
                 print(f"✏️ Sketchbook에 이미지 추가: {self.current_selected_image_path.name}")
+                if character_prompt_data:
+                    print(f"   📝 Character prompt attached")
+                
                 QMessageBox.information(
                     self, 
                     "성공", 
                     f"이미지가 Sketchbook에 새 레이어로 추가되었습니다.\n\n"
                     f"파일: {self.current_selected_image_path.name}\n"
-                    f"레이어명: {image_name}"
+                    f"레이어명: {image_name}" +
+                    ("\n📝 Character prompt 포함" if character_prompt_data else "")
                 )
             else:
                 QMessageBox.warning(self, "오류", "Sketchbook 위젯을 찾을 수 없습니다.")
@@ -2077,3 +2145,29 @@ except Exception as e:
         except Exception as e:
             print(f"❌ Send to Sketchbook 오류: {e}")
             QMessageBox.critical(self, "오류", f"Sketchbook 전송 실패:\n{str(e)}")
+    
+    def _open_character_prompt_editor(self):
+        """Open Character Prompt Editor for current image"""
+        try:
+            if not hasattr(self, 'current_selected_image_path') or not self.current_selected_image_path:
+                QMessageBox.warning(self, "경고", "선택된 이미지가 없습니다.")
+                return
+            
+            # Import and create editor window
+            from tabs.character_prompt_editor import CharacterPromptEditor
+            
+            # Create and show editor
+            self.char_editor = CharacterPromptEditor(str(self.current_selected_image_path), self)
+            self.char_editor.saved.connect(self._on_character_prompt_saved)
+            self.char_editor.show()
+            
+            print(f"✅ Opened character prompt editor for: {self.current_selected_image_path}")
+            
+        except Exception as e:
+            print(f"❌ Character Prompt Editor 오류: {e}")
+            QMessageBox.critical(self, "오류", f"Character Prompt Editor 열기 실패:\n{str(e)}")
+    
+    def _on_character_prompt_saved(self, json_path: str):
+        """Handle character prompt save event"""
+        print(f"✅ Character prompt saved: {json_path}")
+        # Optionally refresh or update UI if needed

@@ -157,25 +157,43 @@ class APIService:
                     }
                 })
 
-                # 캐릭터 모듈 처리 (기존과 동일)
-                char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
-                if char_module and char_module.activate_checkbox.isChecked():
-                    print("✅ 캐릭터 모듈 활성화됨. 파라미터를 가져옵니다.")
-                    char_params = char_module.get_parameters()
+                # 캐릭터 모듈 처리 - Sketchbook character prompts take priority
+                if params.get('sketchbook_character_prompts'):
+                    # Use sketchbook character prompts instead of character module
+                    print("📝 Using Sketchbook character prompts instead of Character Module")
+                    sketchbook_prompts = params['sketchbook_character_prompts']
                     
-                    if char_params and char_params.get("characters"):
-                        characters = char_params["characters"]
-                        ucs = char_params["uc"]
+                    for prompt, uc in sketchbook_prompts:
+                        api_parameters['v4_prompt']['caption']['char_captions'].append({
+                            'char_caption': prompt,
+                            'centers': [{"x": 0.5, "y": 0.5}]
+                        })
+                        api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                            'char_caption': uc or "",
+                            'centers': [{"x": 0.5, "y": 0.5}]
+                        })
+                    
+                    print(f"✅ Added {len(sketchbook_prompts)} Sketchbook character prompts")
+                else:
+                    # Fall back to regular character module
+                    char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                    if char_module and char_module.activate_checkbox.isChecked():
+                        print("✅ 캐릭터 모듈 활성화됨. 파라미터를 가져옵니다.")
+                        char_params = char_module.get_parameters()
                         
-                        for i, prompt in enumerate(characters):
-                            api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                'char_caption': prompt,
-                                'centers': [{"x": 0.5, "y": 0.5}]
-                            })
-                            api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                'char_caption': ucs[i] if i < len(ucs) else "",
-                                'centers': [{"x": 0.5, "y": 0.5}]
-                            })
+                        if char_params and char_params.get("characters"):
+                            characters = char_params["characters"]
+                            ucs = char_params["uc"]
+                            
+                            for i, prompt in enumerate(characters):
+                                api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                    'char_caption': prompt,
+                                    'centers': [{"x": 0.5, "y": 0.5}]
+                                })
+                                api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                    'char_caption': ucs[i] if i < len(ucs) else "",
+                                    'centers': [{"x": 0.5, "y": 0.5}]
+                                })
             
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):

@@ -4,9 +4,9 @@ Layer panel UI for Sketchbook module
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QListWidget, 
                             QListWidgetItem, QPushButton, QLabel, QAbstractItemView,
-                            QMenu, QCheckBox)
+                            QMenu, QCheckBox, QColorDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtGui import QAction, QPixmap, QColor
 from typing import Dict, Optional
 from .sketchbook_types import LayerData
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -19,6 +19,11 @@ class LayerPanel(QWidget):
     layer_order_changed = pyqtSignal(str, int)
     layer_delete_requested = pyqtSignal(str)
     layer_center_requested = pyqtSignal(str)
+    layers_merge_requested = pyqtSignal(str, list)  # target_layer_id, source_layer_ids
+    layer_remove_bg_requested = pyqtSignal(str)  # layer_id for background removal
+    layer_save_variation_requested = pyqtSignal(str)  # layer_id for saving as variation
+    layer_set_background_color = pyqtSignal(str, str)  # layer_id, color_hex
+    layer_remove_background_color = pyqtSignal(str)  # layer_id for removing background color
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -135,10 +140,11 @@ class LayerPanel(QWidget):
         layout.addWidget(name_label)
         layout.addStretch()
         
-        # Store references in item data
+        # Store references in item data (only store layer_id, not QObjects)
         item.setData(Qt.ItemDataRole.UserRole, layer_data.id)
-        item.setData(Qt.ItemDataRole.UserRole + 1, checkbox)  # Store checkbox reference
-        item.setData(Qt.ItemDataRole.UserRole + 2, name_label)  # Store label reference
+        # Store widget references in widget itself, not in item data
+        widget.checkbox = checkbox
+        widget.name_label = name_label
         
         # Set item size hint
         item.setSizeHint(widget.sizeHint())
@@ -193,10 +199,10 @@ class LayerPanel(QWidget):
         for i in range(self.layer_list.count()):
             item = self.layer_list.item(i)
             if item.data(Qt.ItemDataRole.UserRole) == layer_id:
-                # Update checkbox state
-                checkbox = item.data(Qt.ItemDataRole.UserRole + 1)
-                if checkbox and isinstance(checkbox, QCheckBox):
-                    checkbox.setChecked(visible)
+                # Update checkbox state through widget
+                widget = self.layer_list.itemWidget(item)
+                if widget and hasattr(widget, 'checkbox'):
+                    widget.checkbox.setChecked(visible)
                 
                 # Update stored data
                 if layer_id in self.layers_data:
@@ -242,6 +248,9 @@ class LayerPanel(QWidget):
         layer_id = item.data(Qt.ItemDataRole.UserRole)
         layer_data = self.layers_data.get(layer_id)
         
+        print(f"🔍 Context menu for layer: {layer_id}")
+        print(f"   Visible layers: {sum(1 for lid in self.layers_data.values() if lid.visible)}")
+        
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
@@ -271,6 +280,37 @@ class LayerPanel(QWidget):
         center_action = QAction("🎯 화면 가운데로", menu)
         center_action.triggered.connect(lambda: self._request_center_layer(item))
         menu.addAction(center_action)
+        
+        # Add Remove Background action
+        remove_bg_action = QAction("🗑️ 배경 제거", menu)
+        remove_bg_action.triggered.connect(lambda: self._request_remove_background(layer_id))
+        menu.addAction(remove_bg_action)
+        
+        # Add Set Background Color action
+        set_bg_color_action = QAction("🎨 배경색 설정", menu)
+        set_bg_color_action.triggered.connect(lambda: self._request_set_background_color(layer_id))
+        menu.addAction(set_bg_color_action)
+        
+        # Add Remove Background Color action (only if background color is set)
+        if layer_data and hasattr(layer_data, 'background_color') and layer_data.background_color:
+            remove_bg_color_action = QAction("🚫 배경색 제거", menu)
+            remove_bg_color_action.triggered.connect(lambda: self._request_remove_background_color(layer_id))
+            menu.addAction(remove_bg_color_action)
+        
+        # Add Save as Variation action (only for layers with active character prompts)
+        if (layer_data and hasattr(layer_data, 'character_prompt') and 
+            layer_data.character_prompt and hasattr(layer_data, 'prompt_activated') and
+            layer_data.prompt_activated):
+            save_variation_action = QAction("💾 Variation으로 저장", menu)
+            save_variation_action.triggered.connect(lambda: self._request_save_variation(layer_id))
+            menu.addAction(save_variation_action)
+        
+        # Add Merge Layers action if there are multiple visible layers
+        visible_count = sum(1 for lid in self.layers_data.values() if lid.visible)
+        if visible_count > 1:
+            merge_action = QAction(f"🔀 표시된 레이어 병합 ({visible_count}개)", menu)
+            merge_action.triggered.connect(lambda: self._merge_visible_layers(layer_id))
+            menu.addAction(merge_action)
         
         # Add separator
         menu.addSeparator()
@@ -335,11 +375,11 @@ class LayerPanel(QWidget):
             for i in range(self.layer_list.count()):
                 item = self.layer_list.item(i)
                 if item.data(Qt.ItemDataRole.UserRole) == layer_id:
-                    # Update name label color
-                    name_label = item.data(Qt.ItemDataRole.UserRole + 2)
-                    if name_label and isinstance(name_label, QLabel):
+                    # Update name label color through widget
+                    widget = self.layer_list.itemWidget(item)
+                    if widget and hasattr(widget, 'name_label'):
                         text_color = "#FFD700" if activated else "white"
-                        name_label.setStyleSheet(f"color: {text_color}; font-size: {get_scaled_font_size(14)}px;")
+                        widget.name_label.setStyleSheet(f"color: {text_color}; font-size: {get_scaled_font_size(14)}px;")
                     break
             
             print(f"{'✅' if activated else '❌'} Character prompt {'activated' if activated else 'deactivated'} for layer: {layer_id}")
@@ -357,3 +397,54 @@ class LayerPanel(QWidget):
             layer_data.active_properties[prop_key] = checked
             
             print(f"{'✅' if checked else '❌'} Property '{prop_key}' {'enabled' if checked else 'disabled'} for layer: {layer_id}")
+    
+    def _merge_visible_layers(self, target_layer_id: str):
+        """Merge all visible layers into the target layer"""
+        # Collect visible layer IDs (excluding the target)
+        source_layer_ids = []
+        for layer_id, layer_data in self.layers_data.items():
+            if layer_data.visible and layer_id != target_layer_id:
+                source_layer_ids.append(layer_id)
+        
+        if source_layer_ids:
+            # Emit signal to request merge
+            self.layers_merge_requested.emit(target_layer_id, source_layer_ids)
+            print(f"🔀 Merging {len(source_layer_ids)} visible layers into layer: {target_layer_id}")
+    
+    def _request_remove_background(self, layer_id: str):
+        """Request background removal for a layer"""
+        self.layer_remove_bg_requested.emit(layer_id)
+        print(f"🗑️ Background removal requested for layer: {layer_id}")
+    
+    def _request_save_variation(self, layer_id: str):
+        """Request saving layer as character variation"""
+        self.layer_save_variation_requested.emit(layer_id)
+        print(f"💾 Save as variation requested for layer: {layer_id}")
+    
+    def _request_set_background_color(self, layer_id: str):
+        """Request setting background color for a layer"""
+        # Get current color if exists (default to #777777)
+        layer_data = self.layers_data.get(layer_id)
+        current_color = QColor("#DDDDDD")  # Default color
+        
+        if layer_data and hasattr(layer_data, 'background_color') and layer_data.background_color:
+            current_color = QColor(layer_data.background_color)
+        
+        # Show color dialog
+        color = QColorDialog.getColor(
+            current_color, 
+            self, 
+            "배경색 선택",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel
+        )
+        
+        if color.isValid():
+            # Emit signal with layer_id and hex color
+            color_hex = color.name(QColor.NameFormat.HexArgb)
+            self.layer_set_background_color.emit(layer_id, color_hex)
+            print(f"🎨 Background color set for layer {layer_id}: {color_hex}")
+    
+    def _request_remove_background_color(self, layer_id: str):
+        """Request removing background color from a layer"""
+        self.layer_remove_background_color.emit(layer_id)
+        print(f"🚫 Background color removal requested for layer: {layer_id}")

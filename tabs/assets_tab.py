@@ -703,10 +703,19 @@ class AssetsTab(QWidget):
         self.char_prompt_btn.clicked.connect(self._open_character_prompt_editor)
         self.char_prompt_btn.setEnabled(False)  # 이미지 선택 전까지 비활성화
         
+        # Variations 콤보박스 (기본적으로 숨김)
+        self.variations_combo = QComboBox()
+        self.variations_combo.setMinimumWidth(get_scaled_size(150))
+        self.variations_combo.setStyleSheet(dynamic_styles.get('compact_combobox', DARK_STYLES.get('compact_combobox', '')))
+        self.variations_combo.currentTextChanged.connect(self._on_variation_selected)
+        self.variations_combo.setVisible(False)  # 기본적으로 숨김
+        self.current_variation = None  # 현재 선택된 variation 추적
+        
         button_layout.addStretch()
         button_layout.addWidget(self.inpaint_btn)
         button_layout.addWidget(self.sketchbook_btn)
         button_layout.addWidget(self.char_prompt_btn)
+        button_layout.addWidget(self.variations_combo)
         button_layout.addStretch()
         
         main_layout.addLayout(button_layout)
@@ -973,10 +982,17 @@ class AssetsTab(QWidget):
                 # Preset 폴더는 표시하지 않음
                 if item_path.name == 'Preset' and item_path.is_dir():
                     continue
+                if item_path.name == 'sketchbook' and item_path.is_dir():
+                    continue
                 if item_path.name == '__pycache__' and item_path.is_dir():
                     continue
                 # JSON 파일은 표시하지 않음 (character prompt 파일들)
                 if item_path.suffix.lower() == '.json':
+                    continue
+                if item_path.suffix.lower() == '.py':
+                    continue
+                # _variations 폴더는 표시하지 않음 (variation 이미지들)
+                if item_path.is_dir() and '_variations' in item_path.name:
                     continue
                     
                 tree_item = QTreeWidgetItem(parent_item)
@@ -2028,11 +2044,15 @@ except Exception as e:
             
             # 현재 선택된 이미지 저장 (버튼 활성화를 위해)
             self.current_selected_image_path = image_path
+            self.current_variation = None  # 새 이미지 선택 시 variation 초기화
             
             # 버튼 활성화
             self.inpaint_btn.setEnabled(True)
             self.sketchbook_btn.setEnabled(True)
             self.char_prompt_btn.setEnabled(True)
+            
+            # Variations 콤보박스 체크 및 설정
+            self._check_and_setup_variations(image_path)
             
             print(f"✅ 이미지 View 탭에서 표시 완료: {image_path.name}")
             
@@ -2043,6 +2063,7 @@ except Exception as e:
             self.inpaint_btn.setEnabled(False)
             self.sketchbook_btn.setEnabled(False)
             self.char_prompt_btn.setEnabled(False)
+            self.variations_combo.setVisible(False)
     
     def _send_to_inpaint(self):
         """Send to inpaint 버튼 클릭 처리 - 메인 윈도우의 inpaint 팝업과 동일한 동작"""
@@ -2097,6 +2118,7 @@ except Exception as e:
             # Check for accompanying JSON file with character prompt
             json_path = self.current_selected_image_path.with_suffix('.json')
             character_prompt_data = None
+            selected_property = None  # Track selected variation property
             
             if json_path.exists():
                 try:
@@ -2104,6 +2126,11 @@ except Exception as e:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         character_prompt_data = json.load(f)
                     print(f"✅ Loaded character prompt from: {json_path}")
+                    
+                    # If a variation is selected, get the property name
+                    if self.current_variation and self.current_variation != "-- Default --":
+                        selected_property = self.current_variation
+                        print(f"   📌 Selected variation property: {selected_property}")
                 except Exception as e:
                     print(f"⚠️ Failed to load character prompt: {e}")
             
@@ -2114,16 +2141,29 @@ except Exception as e:
             if hasattr(self, 'sketchbook_widget'):
                 image_name = self.current_selected_image_path.stem  # 확장자 제외한 파일명
                 
+                # Determine which image path to use
+                image_path_to_add = str(self.current_selected_image_path)
+                
+                # If variation is selected, use variation image path
+                if selected_property:
+                    variations_folder = self.current_selected_image_path.parent / f"{self.current_selected_image_path.stem}_variations"
+                    variation_image = variations_folder / f"{selected_property}.png"
+                    if variation_image.exists():
+                        image_path_to_add = str(variation_image)
+                        image_name = f"{self.current_selected_image_path.stem}_{selected_property}"
+                        print(f"   🎨 Using variation image: {variation_image.name}")
+                
                 # Use new method if character prompt exists, otherwise use existing method
                 if character_prompt_data:
                     self.sketchbook_widget.add_image_from_path_with_prompt(
-                        str(self.current_selected_image_path), 
+                        image_path_to_add, 
                         image_name,
-                        character_prompt_data
+                        character_prompt_data,
+                        selected_property  # Pass selected property for auto-check
                     )
                 else:
                     self.sketchbook_widget.add_image_from_path(
-                        str(self.current_selected_image_path), 
+                        image_path_to_add, 
                         image_name
                     )
                 
@@ -2170,4 +2210,147 @@ except Exception as e:
     def _on_character_prompt_saved(self, json_path: str):
         """Handle character prompt save event"""
         print(f"✅ Character prompt saved: {json_path}")
+        # Re-check variations when JSON is saved/updated
+        if hasattr(self, 'current_selected_image_path') and self.current_selected_image_path:
+            self._check_and_setup_variations(self.current_selected_image_path)
+    
+    def _check_and_setup_variations(self, image_path: Path):
+        """Check if variations exist and setup combo box"""
+        try:
+            # Temporarily disconnect signal to avoid triggering during setup
+            try:
+                self.variations_combo.blockSignals(True)
+            except:
+                pass
+            
+            # Reset combo box
+            self.variations_combo.clear()
+            self.variations_combo.setVisible(False)
+            
+            # Check if JSON file exists
+            json_path = image_path.with_suffix('.json')
+            if not json_path.exists():
+                return
+            
+            # Check if variations folder exists
+            variations_folder = image_path.parent / f"{image_path.stem}_variations"
+            if not variations_folder.exists() or not variations_folder.is_dir():
+                return
+            
+            # Get all PNG files in variations folder
+            variation_files = list(variations_folder.glob("*.png"))
+            if not variation_files:
+                return
+            
+            # Setup combo box
+            self.variations_combo.addItem("-- Default --")
+            
+            for var_file in sorted(variation_files):
+                self.variations_combo.addItem(var_file.stem)
+            
+            # Show combo box
+            self.variations_combo.setVisible(True)
+            
+            # Re-enable signals after setup
+            try:
+                self.variations_combo.blockSignals(False)
+            except:
+                pass
+            
+            print(f"📂 Found {len(variation_files)} variations for {image_path.name}")
+            
+        except Exception as e:
+            print(f"❌ Error checking variations: {e}")
+            self.variations_combo.setVisible(False)
+            # Re-enable signals even on error
+            try:
+                self.variations_combo.blockSignals(False)
+            except:
+                pass
+    
+    def _display_image_without_variation_check(self, image_path: Path):
+        """Display image without checking for variations (to avoid infinite loop)"""
+        try:
+            # PIL로 이미지 로드
+            pil_image = Image.open(image_path)
+            
+            # WEBP를 PNG로 변환 (Qt 호환성을 위해)
+            if hasattr(pil_image, 'format') and pil_image.format == 'WEBP':
+                import io
+                png_buffer = io.BytesIO()
+                pil_image = pil_image.convert('RGBA')
+                pil_image.save(png_buffer, format='PNG')
+                png_buffer.seek(0)
+                pil_image = Image.open(png_buffer)
+                pil_image.load()  # Force load data before closing buffer
+                png_buffer.close()
+            
+            # Qt QPixmap으로 변환
+            image_qt = ImageQt(pil_image)
+            pixmap = QPixmap.fromImage(image_qt)
+            
+            # View 위젯에 표시
+            self.view_image_widget.setPixmap(pixmap)
+            
+            # 파일 경로 라벨 업데이트
+            self.current_file_label.setText(f"📁 {image_path.name}")
+            
+        except Exception as e:
+            print(f"❌ Error displaying image: {e}")
+            self.current_file_label.setText(f"❌ 이미지 로드 실패: {image_path.name}")
+    
+    def _on_variation_selected(self, text: str):
+        """Handle variation selection from combo box"""
+        try:
+            if not text or not hasattr(self, 'current_selected_image_path'):
+                return
+            
+            self.current_variation = text if text != "-- Default --" else None
+            
+            if text == "-- Default --":
+                # Load original image without re-checking variations
+                self._display_image_without_variation_check(self.current_selected_image_path)
+                print(f"🔄 Switched to default image")
+            else:
+                # Load variation image
+                variations_folder = self.current_selected_image_path.parent / f"{self.current_selected_image_path.stem}_variations"
+                variation_image = variations_folder / f"{text}.png"
+                
+                if variation_image.exists():
+                    # Load variation image but keep original path reference
+                    try:
+                        pil_image = Image.open(variation_image)
+                        
+                        # Convert to QPixmap
+                        if hasattr(pil_image, 'format') and pil_image.format == 'WEBP':
+                            import io
+                            png_buffer = io.BytesIO()
+                            pil_image = pil_image.convert('RGBA')
+                            pil_image.save(png_buffer, format='PNG')
+                            png_buffer.seek(0)
+                            pil_image = Image.open(png_buffer)
+                            pil_image.load()
+                            png_buffer.close()
+                        
+                        image_qt = ImageQt(pil_image)
+                        pixmap = QPixmap.fromImage(image_qt)
+                        
+                        # Display variation image
+                        self.view_image_widget.setPixmap(pixmap)
+                        
+                        # Update label to show variation
+                        self.current_file_label.setText(f"📁 {self.current_selected_image_path.name} → {text}")
+                        
+                        print(f"🎨 Switched to variation: {text}")
+                    except Exception as e:
+                        print(f"❌ Error loading variation image: {e}")
+                        # Revert to default
+                        self.variations_combo.setCurrentText("-- Default --")
+                else:
+                    print(f"⚠️ Variation image not found: {variation_image}")
+                    # Revert to default
+                    self.variations_combo.setCurrentText("-- Default --")
+                    
+        except Exception as e:
+            print(f"❌ Error selecting variation: {e}")
         # Optionally refresh or update UI if needed

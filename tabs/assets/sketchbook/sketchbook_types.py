@@ -42,6 +42,8 @@ class LayerData:
     character_prompt: Optional[dict] = None  # Character prompt data from JSON
     prompt_activated: bool = True  # Whether prompt is active (default True if has prompt)
     active_properties: Optional[dict] = None  # Track which properties are active
+    background_color: Optional[str] = None  # Background color in hex format (e.g., "#777777" or "#ff777777" with alpha)
+    original_image_path_before_bg: Optional[str] = None  # Original image path before background color was applied
 
     def __post_init__(self):
         if self.id is None:

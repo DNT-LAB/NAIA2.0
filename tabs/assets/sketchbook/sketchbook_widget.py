@@ -3,6 +3,7 @@ Main widget for Sketchbook module - integrates all components
 """
 
 import os
+import io
 import tempfile
 import datetime
 from typing import Optional, List, Tuple
@@ -10,8 +11,8 @@ from dataclasses import dataclass
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                             QComboBox, QLabel, QFileDialog, QMessageBox,
-                            QSplitter, QProgressDialog, QApplication)
-from PyQt6.QtCore import Qt, QPointF, pyqtSignal, QThread
+                            QSplitter, QProgressDialog, QApplication, QDialog)
+from PyQt6.QtCore import Qt, QPointF, pyqtSignal, QThread, QBuffer
 from PyQt6.QtGui import QPixmap, QClipboard
 
 from PIL import Image
@@ -142,6 +143,11 @@ class SketchbookWidget(QWidget):
         self.layer_panel.layer_order_changed.connect(self.canvas.update_layer_order)
         self.layer_panel.layer_delete_requested.connect(self._on_delete_layer)
         self.layer_panel.layer_center_requested.connect(self.center_layer)
+        self.layer_panel.layers_merge_requested.connect(self._on_merge_layers)
+        self.layer_panel.layer_remove_bg_requested.connect(self._on_remove_background)
+        self.layer_panel.layer_save_variation_requested.connect(self._on_save_variation)
+        self.layer_panel.layer_set_background_color.connect(self._on_set_background_color)
+        self.layer_panel.layer_remove_background_color.connect(self._on_remove_background_color)
 
     # --- Event Handlers ---
     
@@ -166,6 +172,420 @@ class SketchbookWidget(QWidget):
         # Remove from both canvas and panel
         self.canvas.remove_layer(layer_id)
         self.layer_panel.remove_layer(layer_id)
+    
+    def _on_merge_layers(self, target_layer_id: str, source_layer_ids: list):
+        """Merge multiple layers into a single layer"""
+        try:
+            from PIL import Image
+            import tempfile
+            
+            # Get target layer
+            if target_layer_id not in self.canvas.layers:
+                print(f"⚠️ Target layer {target_layer_id} not found")
+                return
+            
+            target_layer = self.canvas.layers[target_layer_id]
+            
+            # Collect all layers to merge (target + sources)
+            all_layer_ids = [target_layer_id] + source_layer_ids
+            layers_to_merge = []
+            
+            for lid in all_layer_ids:
+                if lid in self.canvas.layers:
+                    layers_to_merge.append(self.canvas.layers[lid])
+            
+            if len(layers_to_merge) < 2:
+                print("⚠️ Not enough layers to merge")
+                return
+            
+            # Sort layers by z-order (lowest first for proper compositing)
+            layers_to_merge.sort(key=lambda l: l.layer_data.z_order)
+            
+            # Create composite image at canvas size with white background
+            canvas_w, canvas_h = self.canvas.current_canvas_size
+            # Start with white background to avoid transparency issues
+            composite = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 255))
+            
+            # Composite each layer
+            for layer in layers_to_merge:
+                if not layer.layer_data.visible:
+                    continue
+                
+                # Get layer's pixmap as PIL Image
+                pixmap = layer.pixmap()
+                
+                # Convert QPixmap to PIL Image
+                buffer = QBuffer()
+                buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+                pixmap.save(buffer, "PNG")
+                buffer.close()
+                
+                img_bytes = buffer.data().data()
+                layer_img = Image.open(io.BytesIO(img_bytes))
+                
+                # Get layer position in scene coordinates
+                pos = layer.pos()
+                x = int(pos.x())
+                y = int(pos.y())
+                
+                # Apply layer's transform (scale)
+                if layer.layer_data.scale != 1.0:
+                    new_w = int(layer_img.width * layer.layer_data.scale)
+                    new_h = int(layer_img.height * layer.layer_data.scale)
+                    layer_img = layer_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                
+                # Paste layer onto composite using alpha_composite for proper blending
+                # This ensures transparent areas blend properly with white background
+                if layer_img.mode == 'RGBA':
+                    # Create a temporary image at the same size as composite
+                    temp = Image.new('RGBA', composite.size, (0, 0, 0, 0))
+                    temp.paste(layer_img, (x, y))
+                    # Use alpha_composite to properly blend with background
+                    composite = Image.alpha_composite(composite, temp)
+                else:
+                    # For non-RGBA images, just paste normally
+                    composite.paste(layer_img, (x, y))
+            
+            # Save composite to temporary file
+            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            temp_path = temp_file.name
+            temp_file.close()
+            composite.save(temp_path, 'PNG')
+            
+            # Store undo data for all layers
+            undo_data = []
+            for lid in all_layer_ids:
+                if lid in self.canvas.layers:
+                    undo_data.append(('delete_layer', self.canvas.layers[lid].layer_data))
+            self.undo_stack.append(('merge_layers', undo_data))
+            self.redo_stack.clear()
+            
+            # Remove all source layers
+            for lid in source_layer_ids:
+                self.canvas.remove_layer(lid)
+                self.layer_panel.remove_layer(lid)
+            
+            # Update target layer with merged image
+            target_layer.layer_data.image_path = temp_path
+            target_layer.layer_data.position = (0, 0)
+            target_layer.layer_data.scale = 1.0
+            target_layer.layer_data.rotation = 0.0
+            target_layer.layer_data.original_size = (canvas_w, canvas_h)
+            
+            # Reload the merged image
+            pixmap = QPixmap(temp_path)
+            target_layer.layer_data.pixmap = pixmap
+            target_layer.setPixmap(pixmap)
+            target_layer.setPos(0, 0)
+            target_layer.resetTransform()  # Use Qt's built-in resetTransform method
+            
+            # Update layer name
+            target_layer.layer_data.name = f"Merged_{target_layer.layer_data.name[:20]}"
+            self.layer_panel.update_layer_name(target_layer.layer_data.id, target_layer.layer_data.name)
+            
+            # No need to clear checkbox states since we use visibility for merging
+            
+            print(f"✅ Successfully merged {len(source_layer_ids) + 1} layers")
+            
+        except Exception as e:
+            print(f"❌ Error merging layers: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_remove_background(self, layer_id: str):
+        """Remove background from a layer using assets_tab's rembg functionality"""
+        try:
+            # Check if layer exists
+            if layer_id not in self.canvas.layers:
+                print(f"⚠️ Layer {layer_id} not found")
+                return
+            
+            layer = self.canvas.layers[layer_id]
+            layer_data = layer.layer_data
+            
+            # Check if the parent widget (AssetsTab) has the background removal functionality
+            parent_tab = self.parent()
+            while parent_tab and not hasattr(parent_tab, '_run_rembg_process'):
+                parent_tab = parent_tab.parent()
+            
+            if not parent_tab or not hasattr(parent_tab, '_run_rembg_process'):
+                QMessageBox.warning(self, "기능 없음", 
+                    "배경 제거 기능을 사용할 수 없습니다.\n"
+                    "Assets Workshop 탭에서 rembg 패키지를 먼저 설치해주세요.")
+                return
+            
+            # Save layer image to temporary file
+            import tempfile
+            temp_input = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            temp_output = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            
+            # Get the layer's pixmap and save it
+            pixmap = layer.pixmap()
+            pixmap.save(temp_input.name, 'PNG')
+            temp_input.close()
+            
+            # Show progress dialog
+            progress = QProgressDialog("배경을 제거하는 중...", None, 0, 0, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.show()
+            QApplication.processEvents()
+            
+            try:
+                # Run background removal using parent's method
+                success = parent_tab._run_rembg_process(temp_input.name, temp_output.name)
+                
+                if success and os.path.exists(temp_output.name):
+                    # Load the result
+                    result_pixmap = QPixmap(temp_output.name)
+                    
+                    if not result_pixmap.isNull():
+                        # Update layer with result
+                        layer_data.pixmap = result_pixmap
+                        layer_data.image_path = temp_output.name
+                        layer.setPixmap(result_pixmap)
+                        
+                        # Update layer name to indicate background removed
+                        layer_data.name = f"BG_Removed_{layer_data.name[:15]}"
+                        self.layer_panel.update_layer_name(layer_id, layer_data.name)
+                        
+                        print(f"✅ Background removed successfully for layer: {layer_id}")
+                        QMessageBox.information(self, "성공", "배경이 성공적으로 제거되었습니다.")
+                    else:
+                        QMessageBox.warning(self, "오류", "결과 이미지를 로드할 수 없습니다.")
+                else:
+                    QMessageBox.warning(self, "실패", "배경 제거에 실패했습니다.")
+                    
+            finally:
+                progress.close()
+                # Clean up temp files (but keep the output if successful)
+                try:
+                    os.unlink(temp_input.name)
+                except:
+                    pass
+                
+        except Exception as e:
+            print(f"❌ Error removing background: {e}")
+            QMessageBox.critical(self, "오류", f"배경 제거 중 오류 발생:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_set_background_color(self, layer_id: str, color_hex: str):
+        """Set background color for a layer"""
+        try:
+            from PIL import Image, ImageDraw
+            import tempfile
+            
+            # Check if layer exists
+            if layer_id not in self.canvas.layers:
+                print(f"⚠️ Layer {layer_id} not found")
+                return
+            
+            layer = self.canvas.layers[layer_id]
+            layer_data = layer.layer_data
+            
+            # Store original image path before applying background (if not already stored)
+            if not hasattr(layer_data, 'original_image_path_before_bg') or not layer_data.original_image_path_before_bg:
+                # Save current image as original if this is the first background application
+                original_file = tempfile.NamedTemporaryFile(suffix='_original.png', delete=False)
+                original_filename = original_file.name
+                original_file.close()
+                
+                current_pixmap = layer.pixmap()
+                current_pixmap.save(original_filename, 'PNG')
+                layer_data.original_image_path_before_bg = original_filename
+                print(f"📁 Saved original image to: {original_filename}")
+            
+            # Load the original image (not the current one with potential background)
+            from PyQt6.QtGui import QPixmap
+            original_pixmap = QPixmap(layer_data.original_image_path_before_bg)
+            if original_pixmap.isNull():
+                print(f"⚠️ Could not load original image")
+                return
+            
+            # Get layer dimensions
+            layer_width = original_pixmap.width()
+            layer_height = original_pixmap.height()
+            
+            # Create a new image with background color
+            # Parse the hex color (supports alpha)
+            from PyQt6.QtGui import QColor
+            qcolor = QColor(color_hex)
+            
+            # Create PIL image with background
+            background = Image.new('RGBA', (layer_width, layer_height), 
+                                  (qcolor.red(), qcolor.green(), qcolor.blue(), qcolor.alpha()))
+            
+            # Convert original pixmap to PIL Image
+            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            temp_filename = temp_file.name
+            temp_file.close()
+            
+            original_pixmap.save(temp_filename, 'PNG')
+            foreground = Image.open(temp_filename)
+            
+            # Composite the foreground over the background
+            if foreground.mode != 'RGBA':
+                foreground = foreground.convert('RGBA')
+            
+            # Use alpha_composite to properly blend with transparency
+            result = Image.alpha_composite(background, foreground)
+            
+            # Save the result to a new temp file
+            result_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            result_filename = result_file.name
+            result_file.close()
+            result.save(result_filename, 'PNG')
+            
+            # Update the layer with new image
+            new_pixmap = QPixmap(result_filename)
+            
+            if not new_pixmap.isNull():
+                # Update the layer's pixmap
+                layer.setPixmap(new_pixmap)
+                
+                # Store the background color in layer data for future reference
+                layer_data.background_color = color_hex
+                
+                # Update the layer's image path to the new temp file (but keep original)
+                layer_data.image_path = result_filename
+                
+                print(f"✅ Background color {color_hex} applied to layer: {layer_id}")
+            else:
+                print(f"❌ Failed to apply background color to layer: {layer_id}")
+            
+            # Clean up original temp file
+            try:
+                import os
+                os.unlink(temp_filename)
+                foreground.close()
+                result.close()
+            except:
+                pass
+                
+        except Exception as e:
+            print(f"❌ Error setting background color: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_remove_background_color(self, layer_id: str):
+        """Remove background color from a layer (restore original transparency)"""
+        try:
+            # Check if layer exists
+            if layer_id not in self.canvas.layers:
+                print(f"⚠️ Layer {layer_id} not found")
+                return
+            
+            layer = self.canvas.layers[layer_id]
+            layer_data = layer.layer_data
+            
+            # Check if layer has a background color set
+            if not hasattr(layer_data, 'background_color') or not layer_data.background_color:
+                print(f"⚠️ Layer {layer_id} has no background color to remove")
+                return
+            
+            print(f"🔍 Attempting to restore original image for layer: {layer_id}")
+            print(f"   Background color was: {layer_data.background_color}")
+            
+            # Check if we have the original image path (before background was applied)
+            if hasattr(layer_data, 'original_image_path_before_bg') and layer_data.original_image_path_before_bg:
+                # Restore from original image
+                original_path = layer_data.original_image_path_before_bg
+                print(f"   Original image path: {original_path}")
+                
+                from PyQt6.QtGui import QPixmap
+                import os
+                
+                # Verify file exists
+                if not os.path.exists(original_path):
+                    print(f"❌ Original file not found: {original_path}")
+                    layer_data.background_color = None
+                    layer_data.original_image_path_before_bg = None
+                    return
+                
+                original_pixmap = QPixmap(original_path)
+                
+                if not original_pixmap.isNull():
+                    # Update the layer with original image
+                    layer.setPixmap(original_pixmap)
+                    
+                    # Save original to a new temp file for current image_path
+                    import tempfile
+                    restored_file = tempfile.NamedTemporaryFile(suffix='_restored.png', delete=False)
+                    restored_filename = restored_file.name
+                    restored_file.close()
+                    original_pixmap.save(restored_filename, 'PNG')
+                    
+                    # Update layer data
+                    layer_data.image_path = restored_filename
+                    layer_data.background_color = None
+                    # Keep original_image_path_before_bg for future use
+                    
+                    # Force canvas update
+                    layer.update()
+                    if hasattr(self.canvas, 'update'):
+                        self.canvas.update()
+                    
+                    print(f"✅ Background color removed from layer: {layer_id}")
+                    print(f"   Restored image saved to: {restored_filename}")
+                else:
+                    print(f"❌ Failed to load original pixmap from: {original_path}")
+                    layer_data.background_color = None
+            else:
+                # No original path stored
+                print(f"⚠️ No original image path stored for layer: {layer_id}")
+                layer_data.background_color = None
+                print(f"✅ Background color flag cleared for layer: {layer_id}")
+            
+        except Exception as e:
+            print(f"❌ Error removing background color: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_save_variation(self, layer_id: str):
+        """Save layer as character variation"""
+        try:
+            # Check if layer exists
+            if layer_id not in self.canvas.layers:
+                print(f"⚠️ Layer {layer_id} not found")
+                return
+            
+            layer = self.canvas.layers[layer_id]
+            layer_data = layer.layer_data
+            
+            # Check if layer has character prompt data
+            if not (hasattr(layer_data, 'character_prompt') and layer_data.character_prompt and
+                   hasattr(layer_data, 'prompt_activated') and layer_data.prompt_activated):
+                QMessageBox.warning(self, "캐릭터 정보 없음", 
+                    "이 레이어에는 활성화된 캐릭터 프롬프트 정보가 없습니다.")
+                return
+            
+            # Get layer's current pixmap
+            layer_pixmap = layer.pixmap()
+            if layer_pixmap.isNull():
+                QMessageBox.warning(self, "이미지 없음", 
+                    "레이어에서 이미지를 가져올 수 없습니다.")
+                return
+            
+            # Import and show the save variation dialog
+            try:
+                from tabs.assets.save_variation_dialog import SaveAsVariationDialog
+                
+                dialog = SaveAsVariationDialog(layer_data, layer_pixmap, self)
+                result = dialog.exec()
+                
+                if result == QDialog.DialogCode.Accepted:
+                    print(f"✅ Variation saved successfully for layer: {layer_id}")
+                    
+            except ImportError as e:
+                print(f"❌ Could not import SaveAsVariationDialog: {e}")
+                QMessageBox.critical(self, "모듈 오류", 
+                    "Variation 저장 다이얼로그를 로드할 수 없습니다.")
+                
+        except Exception as e:
+            print(f"❌ Error saving variation: {e}")
+            QMessageBox.critical(self, "오류", f"Variation 저장 중 오류 발생:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def on_canvas_size_changed(self, size_text: str):
         """Handle canvas size change"""
@@ -243,6 +663,8 @@ class SketchbookWidget(QWidget):
             # QMessageBox.warning(self, "오류", "마스크가 비어있습니다. 인페인트 영역을 그려주세요.")
             print("⚠️ Mask is empty - please draw inpaint area")
             if self.inpaint_control_window:
+                # Show prompts again since generation didn't start
+                self.inpaint_control_window.show_prompts()
                 self.inpaint_control_window.show()
                 # Flash or highlight to draw attention
                 self.inpaint_control_window.activateWindow()
@@ -265,6 +687,9 @@ class SketchbookWidget(QWidget):
             print("⚠️ Canvas is empty")
             if self.canvas.inpaint_layer:
                 self.canvas.inpaint_layer.setVisible(True)
+            if self.inpaint_control_window:
+                # Show prompts again since generation didn't start
+                self.inpaint_control_window.show_prompts()
             return
         
         # Restore inpaint layer visibility
@@ -282,9 +707,7 @@ class SketchbookWidget(QWidget):
         self.progress_dialog.setCancelButton(None)
         self.progress_dialog.show()
         
-        # Hide inpaint control window during generation
-        if self.inpaint_control_window:
-            self.inpaint_control_window.hide()
+        # Note: Control window stays visible but with prompts hidden (already done in generate_inpaint)
         
         # Import and create worker thread
         from .sketchbook_inpaint_worker import InpaintGenerationWorker
@@ -395,9 +818,9 @@ class SketchbookWidget(QWidget):
             self.preview_layer_id = self.canvas.add_layer(temp_data)
             self.layer_panel.add_layer(temp_data)
             
-            # Show accept/cancel buttons
+            # Show accept/cancel buttons (control window stays visible with hidden prompts)
             if self.inpaint_control_window:
-                self.inpaint_control_window.show()
+                # Window is already visible, just show result buttons
                 self.inpaint_control_window.show_result_buttons(True)
             
             print(f"✅ Temporary result layer added at position ({x_pos}, {y_pos})")
@@ -530,7 +953,8 @@ class SketchbookWidget(QWidget):
         return layer_id
     
     def add_image_from_path_with_prompt(self, image_path: str, layer_name: Optional[str] = None, 
-                                        character_prompt: Optional[dict] = None) -> Optional[str]:
+                                        character_prompt: Optional[dict] = None,
+                                        selected_property: Optional[str] = None) -> Optional[str]:
         """Add an image as a new layer with character prompt data"""
         if not os.path.exists(image_path):
             print(f"⚠️ Image file not found: {image_path}")
@@ -551,6 +975,14 @@ class SketchbookWidget(QWidget):
             prompt_activated=True if character_prompt else False
         )
         
+        # If a specific property is selected, mark it as active
+        if selected_property and character_prompt:
+            properties = character_prompt.get('properties', {})
+            if selected_property in properties:
+                # Initialize active_properties with the selected property checked
+                layer_data.active_properties = {selected_property: True}
+                print(f"   ✓ Auto-checked property: {selected_property}")
+        
         layer_id = self.canvas.add_layer(layer_data)
         self.layer_panel.add_layer(layer_data)
         
@@ -561,6 +993,8 @@ class SketchbookWidget(QWidget):
         print(f"✅ Added layer: {layer_name} (ID: {layer_id}, Z: {layer_data.z_order})")
         if character_prompt:
             print(f"   📝 With character prompt")
+            if selected_property:
+                print(f"   📌 Selected variation: {selected_property}")
         return layer_id
 
     def clear_canvas(self):

@@ -4,7 +4,7 @@ Inpaint control window for Sketchbook module
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, 
                             QPushButton, QLabel, QSlider, QButtonGroup, QWidget)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
@@ -20,6 +20,7 @@ class InpaintControlWindow(QDialog):
         self.parent_widget = parent
         self.setWindowTitle("인페인트 설정")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        self.prompt_widgets_visible = True  # Track prompt visibility state
         self.setup_ui()
         self._auto_fill_prompts_if_empty()
         
@@ -29,6 +30,7 @@ class InpaintControlWindow(QDialog):
         
         # Column 1: Control Area
         control_widget = QWidget()
+        control_widget.setMaximumWidth(250)  # Set max width to prevent stretching
         control_layout = QVBoxLayout(control_widget)
         control_layout.setContentsMargins(5, 5, 5, 5)
         
@@ -117,9 +119,9 @@ class InpaintControlWindow(QDialog):
         self.cancel_button.setVisible(False)
         control_layout.addWidget(self.cancel_button)
         
-        # Column 2: Main Prompt
-        prompt_widget = QWidget()
-        prompt_layout = QVBoxLayout(prompt_widget)
+        # Column 2: Main Prompt (store as instance variable for visibility control)
+        self.prompt_widget = QWidget()
+        prompt_layout = QVBoxLayout(self.prompt_widget)
         prompt_layout.setContentsMargins(5, 5, 5, 5)
         
         prompt_layout.addWidget(QLabel("Main Prompt:"))
@@ -127,9 +129,9 @@ class InpaintControlWindow(QDialog):
         self.main_prompt_edit.setMinimumWidth(480)
         prompt_layout.addWidget(self.main_prompt_edit)
         
-        # Column 3: Negative Prompt
-        negative_widget = QWidget()
-        negative_layout = QVBoxLayout(negative_widget)
+        # Column 3: Negative Prompt (store as instance variable for visibility control)
+        self.negative_widget = QWidget()
+        negative_layout = QVBoxLayout(self.negative_widget)
         negative_layout.setContentsMargins(5, 5, 5, 5)
         
         negative_layout.addWidget(QLabel("Negative Prompt:"))
@@ -139,13 +141,13 @@ class InpaintControlWindow(QDialog):
         
         # Add columns to main layout
         main_layout.addWidget(control_widget)
-        main_layout.addWidget(prompt_widget)
-        main_layout.addWidget(negative_widget)
+        main_layout.addWidget(self.prompt_widget)
+        main_layout.addWidget(self.negative_widget)
         
         # Set column stretch ratios (1:2:2)
         main_layout.setStretchFactor(control_widget, 1)
-        main_layout.setStretchFactor(prompt_widget, 2)
-        main_layout.setStretchFactor(negative_widget, 2)
+        main_layout.setStretchFactor(self.prompt_widget, 2)
+        main_layout.setStretchFactor(self.negative_widget, 2)
         
         # Apply styling
         ds = get_dynamic_styles()
@@ -161,7 +163,7 @@ class InpaintControlWindow(QDialog):
                       self.rect_button, self.move_button]:
             button.setStyleSheet(ds.get('secondary_button', ''))
         
-        self.resize(900, 400)
+        self.resize(1200, 600)
     
     def on_mode_changed(self, button):
         """Handle drawing mode change"""
@@ -247,6 +249,9 @@ class InpaintControlWindow(QDialog):
             self.parent_widget.stored_main_prompt = main_prompt
             self.parent_widget.stored_negative_prompt = negative_prompt
             
+            # Hide prompts after generation starts
+            self.hide_prompts()
+            
             # Call parent's generation method
             if hasattr(self.parent_widget, 'generate_inpaint'):
                 self.parent_widget.generate_inpaint(main_prompt, negative_prompt, strength)
@@ -264,18 +269,41 @@ class InpaintControlWindow(QDialog):
         """Handle accept button click"""
         self.result_accepted.emit()
         self.show_result_buttons(False)
+        # Show prompts again after accepting
+        self.show_prompts()
     
     def _on_cancel_result(self):
         """Handle cancel button click"""
         self.result_cancelled.emit()
         self.show_result_buttons(False)
+        # Show prompts again after cancelling
+        self.show_prompts()
+    
+    def hide_prompts(self):
+        """Hide prompt widgets to reveal canvas below"""
+        self.prompt_widget.setVisible(False)
+        self.negative_widget.setVisible(False)
+        self.prompt_widgets_visible = False
+        # Force window to resize to minimum size when prompts are hidden
+        self.adjustSize()  # Adjust to content size
+        self.setFixedWidth(260)  # Fix width to prevent stretching
+    
+    def show_prompts(self):
+        """Show prompt widgets"""
+        self.prompt_widget.setVisible(True)
+        self.negative_widget.setVisible(True)
+        self.prompt_widgets_visible = True
+        # Restore normal window sizing
+        self.setMinimumWidth(0)  # Remove width constraint
+        self.setMaximumWidth(16777215)  # Qt's default maximum
+        self.resize(1200, 600)  # Resize back to normal (matching setup_ui)
     
     def closeEvent(self, event):
         """Handle window close"""
         # If there are visible result buttons, it means there's a pending result
         if self.accept_button.isVisible() or self.cancel_button.isVisible():
-            # Emit cancel signal to restore mask and remove temp layer
-            self.result_cancelled.emit()
+            # When closing with pending result, ACCEPT it (not cancel)
+            self.result_accepted.emit()
             self.show_result_buttons(False)
         
         # Disable inpaint mode when closing the control window

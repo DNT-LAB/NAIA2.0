@@ -10,7 +10,7 @@ import base64
 
 class InpaintGenerationWorker(QThread):
     """Worker thread for inpaint image generation"""
-    generation_finished = pyqtSignal(Image.Image, tuple)  # image, bounding_box
+    generation_finished = pyqtSignal(Image.Image, Image.Image, tuple)  # combined_image, server_original, bounding_box
     generation_error = pyqtSignal(str)
     progress_update = pyqtSignal(str)
     
@@ -95,11 +95,12 @@ class InpaintGenerationWorker(QThread):
                 if result.get('status') == 'success':
                     generated_image = result.get('image')
                     if generated_image:
-                        # Apply mask with feathering and crop to bounding box
-                        final_img = self._apply_mask_with_feathering_and_crop(
-                            generated_image, self.mask_img, bbox
+                        # Combine with original image using mask
+                        final_img = self._combine_with_original(
+                            generated_image, self.composite_img, self.mask_img, bbox
                         )
-                        self.generation_finished.emit(final_img, bbox)
+                        # Emit both combined result and server original
+                        self.generation_finished.emit(final_img, generated_image, bbox)
                     else:
                         self.generation_error.emit("생성된 이미지를 찾을 수 없습니다.")
                 else:
@@ -221,5 +222,34 @@ class InpaintGenerationWorker(QThread):
         
         # Crop to bounding box
         cropped = full_result.crop(bbox)
+        
+        return cropped
+    
+    def _combine_with_original(self, generated_img: Image.Image, original_img: Image.Image, 
+                               mask_img: Image.Image, bbox: tuple, feather_pixels: int = 6) -> Image.Image:
+        """Combine generated image with original using mask"""
+        from PIL import ImageFilter
+        
+        # Ensure all images are RGBA
+        if generated_img.mode != 'RGBA':
+            generated_img = generated_img.convert('RGBA')
+        if original_img.mode != 'RGBA':
+            original_img = original_img.convert('RGBA')
+        
+        # Convert mask to L mode if needed
+        if mask_img.mode != 'L':
+            mask_img = mask_img.convert('L')
+        
+        # Apply Gaussian blur for feathering
+        feathered_mask = mask_img.filter(ImageFilter.GaussianBlur(radius=feather_pixels))
+        
+        # Create result image starting with original
+        result = original_img.copy()
+        
+        # Paste generated image using feathered mask
+        result.paste(generated_img, (0, 0), feathered_mask)
+        
+        # Crop to bounding box
+        cropped = result.crop(bbox)
         
         return cropped

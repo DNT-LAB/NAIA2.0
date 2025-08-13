@@ -112,6 +112,8 @@ class PromptProcessor:
         }
         
         converted_main_tags = [tag_conversion_map.get(tag, tag) for tag in new_main_tags]
+        if converted_main_tags:
+            converted_main_tags.insert(0, '#랜덤프롬프트')  # Ensure 'main tags' is always the first tag
         
         # 4. context 최종 업데이트
         context.main_tags = converted_main_tags

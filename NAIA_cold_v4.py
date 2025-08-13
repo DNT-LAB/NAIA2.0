@@ -1978,11 +1978,42 @@ class ModernMainWindow(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(f"❌ 자동 이미지 생성 오류: {e}")
             print(f"자동 이미지 생성 오류: {e}")
+
+    def _highlight_prompt_text(self, text: str) -> str:
+        """주어진 텍스트에서 '#'으로 시작하는 부분을 연노랑색으로 하이라이트하는 HTML을 생성합니다."""
+        # HTML 특수 문자를 이스케이프하여 '<lora...>'
+        escaped_text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        parts = []
+        last_index = 0
+        while True:
+            start_hash = escaped_text.find('#', last_index)
+            if start_hash == -1:
+                parts.append(escaped_text[last_index:])
+                break
+
+            parts.append(escaped_text[last_index:start_hash])
+
+            end_comma = escaped_text.find(',', start_hash)
+            
+            if end_comma == -1:
+                segment = escaped_text[start_hash:]
+                last_index = len(escaped_text)
+            else:
+                segment = escaped_text[start_hash:end_comma]
+                last_index = end_comma
+            
+            # 하이라이트 태그 적용 (연노랑 배경, 검은색 텍스트)
+            parts.append(f'<span style="background-color: #FFFFE0; color: #000000;">{segment}</span>')
+
+        # 모든 부분을 합치고, 줄바꿈을 <br>로 변환하여 HTML 형식에 맞춥니다.
+        return "".join(parts).replace('\n', '<br>')
         
     # on_prompt_generated 메서드에 플래그 해제 추가
     def on_prompt_generated(self, prompt_text: str):
-        """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트"""
-        self.main_prompt_textedit.setText(prompt_text)
+        """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트 (하이라이트 기능 추가)"""
+        highlighted_html = self._highlight_prompt_text(prompt_text)
+        self.main_prompt_textedit.setHtml(highlighted_html)
         
         # [신규] 새 프롬프트 생성 시 반복 카운터 리셋
         if self.automation_module:
@@ -1997,6 +2028,12 @@ class ModernMainWindow(QMainWindow):
             self.prompt_gen_controller.auto_generation_requested = False
 
             char_module = self.middle_section_controller.get_module_instance("CharacterModule")
+            if (char_module and 
+                hasattr(char_module, 'is_auto_mode_active') and 
+                char_module.is_auto_mode_active()):
+                
+                # 자동 생성 모드에서 이미지 생성 트리거
+                self._trigger_auto_image_generation()
             if (char_module and 
                 char_module.activate_checkbox.isChecked() and 
                 not char_module.reroll_on_generate_checkbox.isChecked()):

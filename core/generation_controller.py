@@ -455,8 +455,13 @@ class GenerationController:
             from core.wildcard_processor import WildcardProcessor
             wildcard_processor = WildcardProcessor(self.context.wildcard_manager)
             
-            # 1. 전체 문자열을 콤마로 분해하여 태그 리스트 생성 (기존 방식과 동일)
-            input_tags = [tag.strip() for tag in input_text.split(',') if tag.strip()]
+            # 1. 전체 문자열을 콤마로 분해하여 태그 리스트 생성 (주석 및 개행문자 처리)
+            cleaned_tags = []
+            for tag in input_text.split(','):
+                processed_tag = tag.replace('\n', '').strip()
+                if processed_tag and not processed_tag.startswith('#'):
+                    cleaned_tags.append(processed_tag)
+            input_tags = cleaned_tags
             
             # 2. expand_tags 호출하여 완전한 와일드카드 확장 수행 (기존 방식과 동일)
             expanded_tags = wildcard_processor.expand_tags(input_tags, prompt_context)

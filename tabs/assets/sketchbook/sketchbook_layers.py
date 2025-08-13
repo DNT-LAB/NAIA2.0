@@ -18,6 +18,9 @@ class ImageLayerItem(QGraphicsPixmapItem):
         # Initialize selection state first (before setting flags)
         self._selected = False
         self.handles = []
+        self.crop_handles = []
+        self._crop_mode = False
+        self._crop_rect = None  # Store crop rectangle
         
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
@@ -48,6 +51,7 @@ class ImageLayerItem(QGraphicsPixmapItem):
         
         # Create selection handles
         self._create_handles()
+        self._create_crop_handles()
 
     def _create_handles(self):
         """Create resize handles (initially hidden)"""
@@ -56,15 +60,36 @@ class ImageLayerItem(QGraphicsPixmapItem):
             handle = ResizeHandle(self, pos)
             handle.setVisible(False)
             self.handles.append(handle)
+    
+    def _create_crop_handles(self):
+        """Create crop handles (initially hidden)"""
+        positions = ['tl', 'tm', 'tr', 'ml', 'mr', 'bl', 'bm', 'br']
+        for pos in positions:
+            handle = CropHandle(self, pos)
+            handle.setVisible(False)
+            self.crop_handles.append(handle)
 
     def set_selected(self, selected: bool):
         """Set selection state and show/hide handles"""
         self._selected = selected
         self.setSelected(selected)
-        for handle in self.handles:
-            handle.setVisible(selected)
-            if selected:
-                handle.update_position()
+        
+        if self._crop_mode:
+            # In crop mode, show crop handles
+            for handle in self.handles:
+                handle.setVisible(False)
+            for handle in self.crop_handles:
+                handle.setVisible(selected)
+                if selected:
+                    handle.update_position()
+        else:
+            # Normal mode, show resize handles
+            for handle in self.crop_handles:
+                handle.setVisible(False)
+            for handle in self.handles:
+                handle.setVisible(selected)
+                if selected:
+                    handle.update_position()
 
     def set_scale_about_center(self, scale: float):
         """Scale while keeping center position"""
@@ -153,6 +178,131 @@ class ImageLayerItem(QGraphicsPixmapItem):
                 )
         
         super().mouseReleaseEvent(event)
+    
+    def set_crop_mode(self, enabled: bool):
+        """Toggle crop mode for this layer"""
+        self._crop_mode = enabled
+        
+        if enabled:
+            # Initialize crop rect to full image bounds
+            if not self._crop_rect:
+                self._crop_rect = QRectF(self.boundingRect())
+            
+            # Hide resize handles, show crop handles
+            for handle in self.handles:
+                handle.setVisible(False)
+            
+            if self._selected:
+                for handle in self.crop_handles:
+                    handle.setVisible(True)
+                    handle.update_position()
+        else:
+            # Hide crop handles, show resize handles if selected
+            for handle in self.crop_handles:
+                handle.setVisible(False)
+            
+            if self._selected:
+                for handle in self.handles:
+                    handle.setVisible(True)
+                    handle.update_position()
+    
+    def apply_crop(self):
+        """Apply the current crop rectangle to the pixmap"""
+        if not self._crop_rect or not self._crop_mode:
+            return False
+        
+        current_pixmap = self.pixmap()
+        if current_pixmap.isNull():
+            return False
+        
+        # Convert crop rect to pixmap coordinates
+        crop_rect = self._crop_rect.toRect()
+        
+        # Ensure crop rect is within pixmap bounds
+        pixmap_rect = current_pixmap.rect()
+        crop_rect = crop_rect.intersected(pixmap_rect)
+        
+        if crop_rect.isEmpty():
+            return False
+        
+        # Create cropped pixmap
+        cropped_pixmap = current_pixmap.copy(crop_rect)
+        
+        # Update the pixmap
+        self.setPixmap(cropped_pixmap)
+        
+        # Update layer data
+        self.layer_data.pixmap = cropped_pixmap
+        self.layer_data.original_size = (cropped_pixmap.width(), cropped_pixmap.height())
+        
+        # Reset crop rect and exit crop mode
+        self._crop_rect = None
+        self.set_crop_mode(False)
+        
+        # Update handles
+        for handle in self.handles:
+            handle.update_position()
+        
+        return True
+    
+    def cancel_crop(self):
+        """Cancel crop operation and reset"""
+        self._crop_rect = None
+        self.set_crop_mode(False)
+    
+    def paint(self, painter, option, widget):
+        """Custom paint to show crop overlay"""
+        super().paint(painter, option, widget)
+        
+        if self._crop_mode and self._crop_rect and self._selected:
+            # Draw crop overlay
+            painter.save()
+            
+            # Get full image rect
+            full_rect = self.boundingRect()
+            
+            # Create paths for overlay regions (areas outside crop rect)
+            from PyQt6.QtGui import QPainterPath
+            full_path = QPainterPath()
+            full_path.addRect(full_rect)
+            
+            crop_path = QPainterPath()
+            crop_path.addRect(self._crop_rect)
+            
+            # Subtract crop area from full area
+            overlay_path = full_path.subtracted(crop_path)
+            
+            # Draw semi-transparent overlay
+            overlay_color = QColor(0, 0, 0, 100)  # Semi-transparent black
+            painter.fillPath(overlay_path, overlay_color)
+            
+            # Draw crop rect border
+            painter.setPen(QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            painter.drawRect(self._crop_rect)
+            
+            # Draw corner grips for better visibility
+            grip_size = 3
+            grip_color = QColor(255, 255, 255)
+            painter.setPen(QPen(grip_color, 2))
+            painter.setBrush(QBrush(grip_color))
+            
+            # Draw corner squares
+            corners = [
+                self._crop_rect.topLeft(),
+                self._crop_rect.topRight(),
+                self._crop_rect.bottomLeft(),
+                self._crop_rect.bottomRight()
+            ]
+            for corner in corners:
+                # Convert to integers for drawRect
+                x = int(corner.x() - grip_size)
+                y = int(corner.y() - grip_size)
+                w = int(grip_size * 2)
+                h = int(grip_size * 2)
+                painter.drawRect(x, y, w, h)
+            
+            painter.restore()
 
 
 class ResizeHandle(QGraphicsRectItem):
@@ -295,6 +445,131 @@ class ResizeHandle(QGraphicsRectItem):
         self._press_scale = 1.0
         self._press_scene_pos = None
         self._dir_scene = None
+
+
+class CropHandle(QGraphicsRectItem):
+    """Interactive crop handle for adjusting crop area"""
+    
+    def __init__(self, layer_item: ImageLayerItem, position: str):
+        super().__init__(-6, -6, 12, 12)
+        self.layer_item = layer_item
+        self.position = position
+        self.setParentItem(layer_item)
+        
+        # Visual style - yellow for crop handles
+        self.setPen(QPen(Qt.PenStyle.NoPen))
+        self.setBrush(QBrush(QColor(255, 200, 0)))  # Yellow/gold color
+        self.setAcceptHoverEvents(True)
+        self._set_cursor_for_position()
+        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.setZValue(1001)  # Slightly above resize handles
+        
+        # For drag tracking
+        self._press_pos = None
+        self._press_crop_rect = None
+    
+    def _set_cursor_for_position(self):
+        """Set appropriate cursor based on handle position"""
+        cursor_map = {
+            'tl': Qt.CursorShape.SizeFDiagCursor,
+            'tr': Qt.CursorShape.SizeBDiagCursor,
+            'bl': Qt.CursorShape.SizeBDiagCursor,
+            'br': Qt.CursorShape.SizeFDiagCursor,
+            'tm': Qt.CursorShape.SizeVerCursor,
+            'bm': Qt.CursorShape.SizeVerCursor,
+            'ml': Qt.CursorShape.SizeHorCursor,
+            'mr': Qt.CursorShape.SizeHorCursor
+        }
+        self.setCursor(cursor_map.get(self.position, Qt.CursorShape.CrossCursor))
+    
+    def hoverEnterEvent(self, event):
+        """Change appearance on hover"""
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setRect(-7, -7, 14, 14)
+        self.setBrush(QBrush(QColor(255, 220, 0)))  # Brighter yellow
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        """Reset when not hovering"""
+        self.unsetCursor()
+        self.setRect(-6, -6, 12, 12)
+        self.setBrush(QBrush(QColor(255, 200, 0)))
+        super().hoverLeaveEvent(event)
+    
+    def update_position(self):
+        """Update handle position based on crop rect"""
+        if not self.layer_item._crop_rect:
+            return
+        
+        rect = self.layer_item._crop_rect
+        
+        positions = {
+            'tl': (rect.left(), rect.top()),
+            'tm': (rect.center().x(), rect.top()),
+            'tr': (rect.right(), rect.top()),
+            'ml': (rect.left(), rect.center().y()),
+            'mr': (rect.right(), rect.center().y()),
+            'bl': (rect.left(), rect.bottom()),
+            'bm': (rect.center().x(), rect.bottom()),
+            'br': (rect.right(), rect.bottom()),
+        }
+        
+        if self.position in positions:
+            x, y = positions[self.position]
+            self.setPos(x, y)
+    
+    def mousePressEvent(self, event):
+        """Start crop adjustment"""
+        self._press_pos = event.pos()
+        if self.layer_item._crop_rect:
+            self._press_crop_rect = QRectF(self.layer_item._crop_rect)
+    
+    def mouseMoveEvent(self, event):
+        """Handle crop area adjustment"""
+        if not self._press_crop_rect:
+            return
+        
+        # Calculate movement in parent coordinates
+        current_pos = self.mapToParent(event.pos())
+        
+        # Get image bounds
+        img_bounds = self.layer_item.boundingRect()
+        
+        # Update crop rect based on handle position
+        new_rect = QRectF(self._press_crop_rect)
+        
+        if 'l' in self.position:  # Left edge
+            new_left = min(current_pos.x(), new_rect.right() - 10)
+            new_left = max(img_bounds.left(), new_left)
+            new_rect.setLeft(new_left)
+        elif 'r' in self.position:  # Right edge
+            new_right = max(current_pos.x(), new_rect.left() + 10)
+            new_right = min(img_bounds.right(), new_right)
+            new_rect.setRight(new_right)
+        
+        if 't' in self.position:  # Top edge
+            new_top = min(current_pos.y(), new_rect.bottom() - 10)
+            new_top = max(img_bounds.top(), new_top)
+            new_rect.setTop(new_top)
+        elif 'b' in self.position:  # Bottom edge
+            new_bottom = max(current_pos.y(), new_rect.top() + 10)
+            new_bottom = min(img_bounds.bottom(), new_bottom)
+            new_rect.setBottom(new_bottom)
+        
+        # Update crop rect
+        self.layer_item._crop_rect = new_rect
+        
+        # Update all crop handles
+        for handle in self.layer_item.crop_handles:
+            handle.update_position()
+        
+        # Trigger repaint to show updated overlay
+        self.layer_item.update()
+    
+    def mouseReleaseEvent(self, event):
+        """End crop adjustment"""
+        self._press_pos = None
+        self._press_crop_rect = None
 
 
 class CanvasRootItem(QGraphicsRectItem):

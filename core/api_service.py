@@ -29,6 +29,20 @@ class APIService:
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
         최대 5회까지 예외 발생 시 재시도합니다.
         """
+        # 입력 프롬프트에서 주석 및 개행문자 처리
+        if 'input' in parameters and isinstance(parameters['input'], str):
+            original_prompt = parameters['input']
+            cleaned_tags = []
+            for tag in original_prompt.split(','):
+                processed_tag = tag.replace('\n', '').strip()
+                if processed_tag and not processed_tag.startswith('#'):
+                    cleaned_tags.append(processed_tag)
+            
+            cleaned_prompt = ', '.join(cleaned_tags)
+            if original_prompt != cleaned_prompt:
+                parameters['input'] = cleaned_prompt
+                print(f"🧹 APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
+        
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
         print(f"🛰️ APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
         print(f"   📋 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "

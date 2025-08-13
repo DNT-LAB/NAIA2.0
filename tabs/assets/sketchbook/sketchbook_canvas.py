@@ -201,6 +201,12 @@ class SketchbookCanvas(QGraphicsView):
         if layer_id in self.layers:
             self.layers[layer_id].set_selected(True)
             self.selected_layer_id = layer_id
+    
+    def get_selected_layer(self):
+        """Get the currently selected layer"""
+        if self.selected_layer_id and self.selected_layer_id in self.layers:
+            return self.layers[self.selected_layer_id]
+        return None
 
     def update_layer_visibility(self, layer_id: str, visible: bool):
         """Update layer visibility"""
@@ -240,9 +246,15 @@ class SketchbookCanvas(QGraphicsView):
         
         # Temporarily hide all handles before rendering
         handles_visibility = []
+        crop_handles_visibility = []
         for layer_id, layer_item in self.layers.items():
+            # Hide resize handles
             for handle in layer_item.handles:
                 handles_visibility.append((handle, handle.isVisible()))
+                handle.setVisible(False)
+            # Hide crop handles
+            for handle in layer_item.crop_handles:
+                crop_handles_visibility.append((handle, handle.isVisible()))
                 handle.setVisible(False)
         
         # Also hide the inpaint layer temporarily if it exists
@@ -267,6 +279,10 @@ class SketchbookCanvas(QGraphicsView):
         
         # Restore handle visibility
         for handle, was_visible in handles_visibility:
+            handle.setVisible(was_visible)
+        
+        # Restore crop handle visibility
+        for handle, was_visible in crop_handles_visibility:
             handle.setVisible(was_visible)
         
         return pixmap

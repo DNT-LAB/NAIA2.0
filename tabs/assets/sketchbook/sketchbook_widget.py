@@ -37,7 +37,7 @@ class SketchbookWidget(QWidget):
         self.stored_main_prompt = ""
         self.stored_negative_prompt = ""
         self.inpaint_worker = None
-        self.progress_dialog = None
+        # progress_dialog removed - no longer using blocking dialog
         self.pending_result = None
         self.pending_bbox = None
         
@@ -75,6 +75,9 @@ class SketchbookWidget(QWidget):
         
         layout.addWidget(content_splitter)
         
+        # Initialize results manager (single instance)
+        self.results_manager = None
+        
         # Apply styling
         self.apply_styling()
 
@@ -109,6 +112,24 @@ class SketchbookWidget(QWidget):
         self.inpaint_button.toggled.connect(self._on_inpaint_mode_toggled)
         layout.addWidget(self.inpaint_button)
         
+        # Crop button
+        self.crop_button = QPushButton("✂️ 자르기")
+        self.crop_button.setCheckable(True)
+        self.crop_button.toggled.connect(self._on_crop_mode_toggled)
+        layout.addWidget(self.crop_button)
+        
+        # Crop apply button (initially hidden)
+        self.apply_crop_button = QPushButton("✅ 자르기 적용")
+        self.apply_crop_button.clicked.connect(self._apply_crop)
+        self.apply_crop_button.setVisible(False)
+        layout.addWidget(self.apply_crop_button)
+        
+        # Crop cancel button (initially hidden)
+        self.cancel_crop_button = QPushButton("❌ 자르기 취소")
+        self.cancel_crop_button.clicked.connect(self._cancel_crop)
+        self.cancel_crop_button.setVisible(False)
+        layout.addWidget(self.cancel_crop_button)
+        
         layout.addStretch()
         
         # Clear button
@@ -123,7 +144,8 @@ class SketchbookWidget(QWidget):
         ds = get_dynamic_styles()
         
         # Style buttons
-        for button in [self.add_button, self.export_button, self.clear_button]:
+        for button in [self.add_button, self.export_button, self.clear_button, 
+                      self.crop_button, self.apply_crop_button, self.cancel_crop_button]:
             button.setStyleSheet(ds.get('secondary_button', ''))
         
         self.inpaint_button.setStyleSheet(ds.get('primary_button', ''))
@@ -615,10 +637,76 @@ class SketchbookWidget(QWidget):
             # Disable inpaint mode and remove mask layer
             self.canvas.enable_inpaint_mode(False)
             
-            # Hide control window if exists
+            # Hide control window if exists (just hide, don't destroy)
             if self.inpaint_control_window:
-                self.inpaint_control_window.close()
-                self.inpaint_control_window = None
+                self.inpaint_control_window.hide()
+    
+    def _on_crop_mode_toggled(self, checked: bool):
+        """Handle crop mode toggle"""
+        if checked:
+            # Disable inpaint mode if active
+            if self.inpaint_button.isChecked():
+                self.inpaint_button.setChecked(False)
+            
+            # Get selected layer
+            selected_layer = self.canvas.get_selected_layer()
+            if not selected_layer:
+                QMessageBox.information(self, "알림", "자르기할 레이어를 먼저 선택하세요.")
+                self.crop_button.setChecked(False)
+                return
+            
+            # Enable crop mode for selected layer
+            selected_layer.set_crop_mode(True)
+            
+            # Show crop control buttons
+            self.apply_crop_button.setVisible(True)
+            self.cancel_crop_button.setVisible(True)
+            
+            # Disable other controls during crop
+            self.add_button.setEnabled(False)
+            self.export_button.setEnabled(False)
+            self.inpaint_button.setEnabled(False)
+            self.canvas_combo.setEnabled(False)
+            self.clear_button.setEnabled(False)
+        else:
+            self._cancel_crop()
+    
+    def _apply_crop(self):
+        """Apply crop to selected layer"""
+        selected_layer = self.canvas.get_selected_layer()
+        if selected_layer and selected_layer._crop_mode:
+            success = selected_layer.apply_crop()
+            if success:
+                # Exit crop mode
+                self.crop_button.setChecked(False)
+                self._hide_crop_controls()
+                
+                # Record for undo (add to undo stack)
+                self.undo_stack.append(('crop_layer', selected_layer.layer_data.id))
+                print(f"✂️ Layer cropped: {selected_layer.layer_data.name}")
+            else:
+                QMessageBox.warning(self, "오류", "자르기를 적용할 수 없습니다.")
+    
+    def _cancel_crop(self):
+        """Cancel crop operation"""
+        selected_layer = self.canvas.get_selected_layer()
+        if selected_layer:
+            selected_layer.cancel_crop()
+        
+        self.crop_button.setChecked(False)
+        self._hide_crop_controls()
+    
+    def _hide_crop_controls(self):
+        """Hide crop control buttons and re-enable other controls"""
+        self.apply_crop_button.setVisible(False)
+        self.cancel_crop_button.setVisible(False)
+        
+        # Re-enable other controls
+        self.add_button.setEnabled(True)
+        self.export_button.setEnabled(True)
+        self.inpaint_button.setEnabled(True)
+        self.canvas_combo.setEnabled(True)
+        self.clear_button.setEnabled(True)
 
     def _show_inpaint_controls(self):
         """Show inpaint control window"""
@@ -628,9 +716,18 @@ class SketchbookWidget(QWidget):
         if not self.inpaint_control_window:
             self.inpaint_control_window = InpaintControlWindow(self)
             
-            # Connect result signals
-            self.inpaint_control_window.result_accepted.connect(self._on_inpaint_result_accepted)
-            self.inpaint_control_window.result_cancelled.connect(self._on_inpaint_result_cancelled)
+            # Connect seed fix sync
+            if hasattr(self.app_context, 'main_window'):
+                main_window = self.app_context.main_window
+                if hasattr(main_window, 'seed_fix_checkbox'):
+                    # Sync initial state
+                    self.inpaint_control_window.sync_seed_fix_from_main(
+                        main_window.seed_fix_checkbox.isChecked()
+                    )
+                    # Connect for future changes
+                    main_window.seed_fix_checkbox.toggled.connect(
+                        self.inpaint_control_window.sync_seed_fix_from_main
+                    )
             
             # Set stored prompts if available
             if self.stored_main_prompt or self.stored_negative_prompt:
@@ -639,7 +736,8 @@ class SketchbookWidget(QWidget):
                     self.stored_negative_prompt
                 )
         
-        self.inpaint_control_window.show()
+        # Use the show_window method to properly show the window
+        self.inpaint_control_window.show_window()
     
     def update_brush_size_display(self, size: int):
         """Update brush size display in control window"""
@@ -658,17 +756,12 @@ class SketchbookWidget(QWidget):
         mask = self.canvas.get_inpaint_mask()
         small_mask = self.canvas.get_small_inpaint_mask()
         
+        # Mask check is now done early in control window, so this shouldn't happen
+        # But keep as safety check
         if not mask:
-            # Issue [3]: If no mask exists, show the control window again
-            # QMessageBox.warning(self, "오류", "마스크가 비어있습니다. 인페인트 영역을 그려주세요.")
-            print("⚠️ Mask is empty - please draw inpaint area")
+            print("⚠️ Mask is empty - this should have been caught earlier")
             if self.inpaint_control_window:
-                # Show prompts again since generation didn't start
-                self.inpaint_control_window.show_prompts()
-                self.inpaint_control_window.show()
-                # Flash or highlight to draw attention
-                self.inpaint_control_window.activateWindow()
-                self.inpaint_control_window.raise_()
+                self.inpaint_control_window.set_generating(False)
             return
         
         # Get active character prompts from sketchbook layers
@@ -683,13 +776,14 @@ class SketchbookWidget(QWidget):
         # Get composite image without inpaint layer
         composite = self.canvas.export_composite()
         if not composite:
-            # QMessageBox.warning(self, "오류", "캔버스가 비어있습니다.")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "오류", "캔버스가 비어있습니다.")
             print("⚠️ Canvas is empty")
             if self.canvas.inpaint_layer:
                 self.canvas.inpaint_layer.setVisible(True)
+            # Reset generation state
             if self.inpaint_control_window:
-                # Show prompts again since generation didn't start
-                self.inpaint_control_window.show_prompts()
+                self.inpaint_control_window.set_generating(False)
             return
         
         # Restore inpaint layer visibility
@@ -701,11 +795,8 @@ class SketchbookWidget(QWidget):
         mask_img = self._qpixmap_to_pil(mask)
         small_mask_img = self._qpixmap_to_pil(small_mask) if small_mask else None
         
-        # Show progress dialog
-        self.progress_dialog = QProgressDialog("인페인트 이미지 생성 중...", "취소", 0, 0, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self.progress_dialog.setCancelButton(None)
-        self.progress_dialog.show()
+        # No progress dialog - just update control window state
+        # The control window will show "생성중..." on its button
         
         # Note: Control window stays visible but with prompts hidden (already done in generate_inpaint)
         
@@ -756,49 +847,136 @@ class SketchbookWidget(QWidget):
         return img_copy
     
     def _on_inpaint_progress_update(self, message: str):
-        """Update progress dialog with status message"""
-        if self.progress_dialog:
-            self.progress_dialog.setLabelText(message)
+        """Update progress status message"""
+        # Just log the progress, no dialog to update
+        print(f"🔄 {message}")
     
     def _on_inpaint_generation_error(self, error_msg: str):
         """Handle generation error"""
-        if self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
-        
-        # QMessageBox.critical(self, "생성 오류", f"인페인트 생성 실패:\n{error_msg}")
+        # Show error message without blocking dialog
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "생성 오류", f"인페인트 생성 실패:\n{error_msg}")
         print(f"❌ Inpaint generation error: {error_msg}")
+        
+        # Notify control window of failure
+        if self.inpaint_control_window:
+            self.inpaint_control_window.on_generation_complete(success=False)
         
         # Clean up worker
         if self.inpaint_worker:
             self.inpaint_worker.deleteLater()
             self.inpaint_worker = None
     
-    def _on_inpaint_generation_finished(self, result_img: Image, bbox: tuple):
-        """Handle successful generation - add as temporary result layer"""
-        if self.progress_dialog:
-            self.progress_dialog.close()
-            self.progress_dialog = None
+    def _on_inpaint_generation_finished(self, result_img: Image, server_original: Image, bbox: tuple):
+        """Handle successful generation - show in separate window"""
+        # Check if we should update virtual layer
+        should_update_virtual = False
+        if self.inpaint_control_window:
+            # ONLY update virtual layer during sequential generation
+            # Check if this is a sequential generation AND virtual layer update is enabled
+            if hasattr(self.inpaint_control_window, 'is_sequential_generating'):
+                if self.inpaint_control_window.is_sequential_generating:
+                    # During sequential generation, check current generation data
+                    if hasattr(self.inpaint_control_window, 'current_generation_data'):
+                        data = self.inpaint_control_window.current_generation_data
+                        if data and data.update_virtual_layer:
+                            should_update_virtual = True
         
-        # Store pending result
-        self.pending_result = result_img
-        self.pending_bbox = bbox
+        # Keep mask visible for potential additional generations
+        # Users can manually clear it if they want
         
-        # Issue [1]: Don't clear mask immediately - save it for potential cancellation
-        # Store the mask state before clearing
-        if self.canvas.inpaint_layer:
-            self.stored_mask_grid = [row[:] for row in self.canvas.inpaint_layer.mask_grid]
-            self.canvas.clear_inpaint_mask()
+        # Collect generation parameters for retry feature
+        generation_params = {}
+        if self.inpaint_control_window:
+            if hasattr(self.inpaint_control_window, 'current_generation_data'):
+                data = self.inpaint_control_window.current_generation_data
+                if data:
+                    generation_params = {
+                        'main_prompt': data.main_prompt,
+                        'negative_prompt': data.negative_prompt,
+                        'strength': data.strength
+                    }
         
-        # Create temporary result layer
+        # Add result to unified manager window
         try:
-            import tempfile
-            import datetime
+            from .inpaint_results_manager import InpaintResultsManager
             
-            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-            result_img.save(temp_file.name, 'PNG')
-            temp_path = temp_file.name
-            temp_file.close()
+            # Create manager if it doesn't exist
+            if not self.results_manager:
+                self.results_manager = InpaintResultsManager(self)
+                self.results_manager.result_added.connect(self._add_result_to_canvas)
+            
+            # Debug: Check parameter types before calling add_result
+            print(f"Debug: result_img type: {type(result_img)}")
+            print(f"Debug: bbox type: {type(bbox)}, value: {bbox}")
+            print(f"Debug: generation_params type: {type(generation_params)}")
+            print(f"Debug: server_original type: {type(server_original)}")
+            
+            # Add new result with generation parameters and server original
+            self.results_manager.add_result(result_img, bbox, generation_params, server_original)
+            
+            print(f"✅ Inpaint result added to results manager")
+            
+            # Auto-update virtual layer if checkbox was checked
+            # This happens synchronously before notifying completion
+            if should_update_virtual:
+                # Create temporary file for the result
+                import tempfile
+                temp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+                result_img.save(temp.name, 'PNG')
+                temp.close()
+                
+                # Add to canvas as virtual layer (this will delete existing virtual layers first)
+                self._add_virtual_layer_to_canvas(temp.name, bbox)
+                print(f"✅ Auto-updated virtual layer")
+            
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "오류", f"결과 표시 중 오류:\n{str(e)}")
+            print(f"❌ Error showing result: {e}")
+        
+        # Notify control window of completion AFTER virtual layer update
+        if self.inpaint_control_window:
+            self.inpaint_control_window.on_generation_complete(success=True)
+        
+        # Clean up worker
+        if self.inpaint_worker:
+            self.inpaint_worker.deleteLater()
+            self.inpaint_worker = None
+    
+    def _delete_virtual_layers(self):
+        """Delete all virtual inpaint layers from canvas"""
+        try:
+            # Find and remove ONLY virtual layers (starting with "Virtual_Inpaint_")
+            # Regular inpaint results start with just "Inpaint_"
+            layers_to_remove = []
+            for layer_id, layer_item in self.canvas.layers.items():
+                if hasattr(layer_item, 'layer_data') and layer_item.layer_data:
+                    # Only delete virtual layers, not regular inpaint results
+                    if layer_item.layer_data.name.startswith("Virtual_Inpaint_"):
+                        layers_to_remove.append(layer_id)
+            
+            # Remove found layers
+            for layer_id in layers_to_remove:
+                self.canvas.remove_layer(layer_id)
+                # Also remove from layer panel
+                self.layer_panel.remove_layer(layer_id)
+                print(f"🗑️ Removed virtual layer: {layer_id}")
+            
+            if layers_to_remove:
+                print(f"✅ Deleted {len(layers_to_remove)} virtual layer(s)")
+            
+        except Exception as e:
+            print(f"⚠️ Error deleting virtual layers: {e}")
+    
+    def _add_virtual_layer_to_canvas(self, image_path: str, bbox: tuple):
+        """Add virtual inpaint layer to canvas (used during sequential generation)"""
+        try:
+            import datetime
+            from .sketchbook_types import LayerData
+            
+            # Delete existing virtual layers first
+            self._delete_virtual_layers()
             
             # Position based on bounding box
             x_pos = bbox[0] if bbox else 0
@@ -806,36 +984,55 @@ class SketchbookWidget(QWidget):
             
             timestamp = datetime.datetime.now().strftime("%H%M%S")
             
-            from .sketchbook_types import LayerData
-            temp_data = LayerData(
-                name=f"TempResult_{timestamp}",
-                image_path=temp_path,
+            # Use Virtual_Inpaint_ prefix for virtual layers
+            layer_data = LayerData(
+                name=f"Virtual_Inpaint_{timestamp}",
+                image_path=image_path,
                 position=(float(x_pos), float(y_pos)),
                 z_order=self.canvas.get_max_z_order() + 1,
             )
             
-            # Add temporary result layer (visible and deletable)
-            self.preview_layer_id = self.canvas.add_layer(temp_data)
-            self.layer_panel.add_layer(temp_data)
+            # Add layer to canvas
+            layer_id = self.canvas.add_layer(layer_data)
+            self.layer_panel.add_layer(layer_data)
             
-            # Show accept/cancel buttons (control window stays visible with hidden prompts)
-            if self.inpaint_control_window:
-                # Window is already visible, just show result buttons
-                self.inpaint_control_window.show_result_buttons(True)
-            
-            print(f"✅ Temporary result layer added at position ({x_pos}, {y_pos})")
-            # Issue [2]: Don't show completion message
-            # QMessageBox.information(self, "인페인트 완료", 
-            #                        "임시 결과가 생성되었습니다.\n승인하면 정식 레이어로, 취소하면 삭제됩니다.") - image is already visible
+            print(f"✅ Virtual inpaint layer added to canvas at ({x_pos}, {y_pos})")
             
         except Exception as e:
-            # QMessageBox.critical(self, "오류", f"결과 생성 중 오류:\n{str(e)}")
-            print(f"❌ Error creating result: {e}")
-        
-        # Clean up worker
-        if self.inpaint_worker:
-            self.inpaint_worker.deleteLater()
-            self.inpaint_worker = None
+            print(f"❌ Error adding virtual layer to canvas: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _add_result_to_canvas(self, image_path: str, bbox: tuple):
+        """Add inpaint result to canvas from result window"""
+        try:
+            import datetime
+            from .sketchbook_types import LayerData
+            
+            # DON'T delete virtual layers when adding regular results
+            # Only position based on bounding box
+            x_pos = bbox[0] if bbox else 0
+            y_pos = bbox[1] if bbox else 0
+            
+            timestamp = datetime.datetime.now().strftime("%H%M%S")
+            
+            # Regular inpaint results use Inpaint_ prefix (not Virtual_)
+            layer_data = LayerData(
+                name=f"Inpaint_{timestamp}",
+                image_path=image_path,
+                position=(float(x_pos), float(y_pos)),
+                z_order=self.canvas.get_max_z_order() + 1,
+            )
+            
+            # Add layer to canvas
+            layer_id = self.canvas.add_layer(layer_data)
+            self.layer_panel.add_layer(layer_data)
+            
+            print(f"✅ Inpaint result added to canvas at ({x_pos}, {y_pos})")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"레이어 추가 중 오류:\n{str(e)}")
+            print(f"❌ Error adding result to canvas: {e}")
     
     def _add_image_at_position(self, image_path: str, layer_name: str, x: float, y: float) -> Optional[str]:
         """Add an image as a new layer at specific position"""
@@ -861,54 +1058,6 @@ class SketchbookWidget(QWidget):
         
         return layer_id
     
-    def _on_inpaint_result_accepted(self):
-        """User accepted the result - rename temp layer to final"""
-        if not hasattr(self, 'preview_layer_id'):
-            return
-        
-        # Rename temporary layer to final name
-        if self.preview_layer_id in self.canvas.layers:
-            layer_item = self.canvas.layers[self.preview_layer_id]
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%H%M%S")
-            layer_item.layer_data.name = f"Inpaint_{timestamp}"
-            
-            # Update in layer panel
-            self.layer_panel.update_layer_name(self.preview_layer_id, layer_item.layer_data.name)
-            
-            print(f"✅ Inpaint result accepted: {layer_item.layer_data.name}")
-            # Issue [2]: Don't show completion message
-            # QMessageBox.information(self, "완료", "인페인트 결과가 승인되었습니다.")
-        
-        # Clear pending and stored mask
-        self.pending_result = None
-        self.pending_bbox = None
-        if hasattr(self, 'stored_mask_grid'):
-            delattr(self, 'stored_mask_grid')
-        delattr(self, 'preview_layer_id')
-    
-    def _on_inpaint_result_cancelled(self):
-        """User cancelled the result - remove temp layer and restore mask"""
-        # Remove preview layer
-        if hasattr(self, 'preview_layer_id'):
-            if self.preview_layer_id in self.canvas.layers:
-                self.canvas.remove_layer(self.preview_layer_id)
-                self.layer_panel.remove_layer(self.preview_layer_id)
-            delattr(self, 'preview_layer_id')
-        
-        # Issue [1]: Restore the mask when user cancels
-        if hasattr(self, 'stored_mask_grid') and self.canvas.inpaint_layer:
-            self.canvas.inpaint_layer.mask_grid = [row[:] for row in self.stored_mask_grid]
-            self.canvas.inpaint_layer.update_display()
-            delattr(self, 'stored_mask_grid')
-        
-        # Clear pending
-        self.pending_result = None
-        self.pending_bbox = None
-        
-        print("❌ Inpaint result cancelled - temporary layer removed and mask restored")
-        # QMessageBox.information(self, "취소", "인페인트 결과가 취소되었습니다.")
-
     # --- Layer Management ---
     
     def add_image(self):
@@ -1044,6 +1193,119 @@ class SketchbookWidget(QWidget):
     def export_composite(self) -> Optional[QPixmap]:
         """Export the composite image"""
         return self.canvas.export_composite()
+    
+    def retry_inpaint_generation(self, frame):
+        """Retry generation for a specific result frame"""
+        if not frame.generation_params:
+            print("⚠️ No generation parameters for retry")
+            return
+        
+        # Check if retry is already running
+        if hasattr(self, 'retry_worker') and self.retry_worker and self.retry_worker.isRunning():
+            print("⚠️ Retry generation already in progress")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "재시도 중", "이미 재시도가 진행 중입니다.")
+            return
+        
+        # Check if normal generation is running
+        if hasattr(self, 'inpaint_worker') and self.inpaint_worker and self.inpaint_worker.isRunning():
+            print("⚠️ Normal generation in progress")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "생성 중", "인페인트 생성이 진행 중입니다.")
+            return
+        
+        # Get current mask and composite
+        if not self.canvas.inpaint_layer:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "오류", "인페인트 레이어가 없습니다.")
+            return
+        
+        # Get mask
+        mask = self.canvas.get_inpaint_mask()
+        small_mask = self.canvas.get_small_inpaint_mask()
+        
+        if not mask:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "오류", "마스크가 비어있습니다.")
+            return
+        
+        # Temporarily hide inpaint layer for composite generation
+        self.canvas.inpaint_layer.setVisible(False)
+        
+        # Get composite image
+        composite = self.canvas.export_composite()
+        if not composite:
+            self.canvas.inpaint_layer.setVisible(True)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "오류", "캔버스가 비어있습니다.")
+            return
+        
+        # Restore inpaint layer visibility
+        self.canvas.inpaint_layer.setVisible(True)
+        
+        # Convert to PIL
+        composite_img = self._qpixmap_to_pil(composite)
+        mask_img = self._qpixmap_to_pil(mask)
+        small_mask_img = self._qpixmap_to_pil(small_mask) if small_mask else None
+        
+        # Get character prompts
+        character_prompts = self.get_active_character_prompts()
+        
+        # Create worker with overridden parameters
+        from .sketchbook_inpaint_worker import InpaintGenerationWorker
+        
+        self.retry_worker = InpaintGenerationWorker(
+            self.app_context, composite_img, mask_img,
+            frame.generation_params['main_prompt'],
+            frame.generation_params['negative_prompt'],
+            frame.generation_params['strength'],
+            small_mask_img,
+            character_prompts
+        )
+        
+        # Connect to special handler for retry
+        self.retry_worker.generation_finished.connect(
+            lambda img, server_orig, bbox: self._on_retry_finished(img, server_orig, bbox, frame)
+        )
+        self.retry_worker.generation_error.connect(self._on_retry_error)
+        
+        # Start generation
+        self.retry_worker.start()
+        print(f"🔄 Retry generation started for frame #{frame.index + 1}")
+    
+    def _on_retry_finished(self, result_img: Image, server_original: Image, bbox: tuple, frame):
+        """Handle retry generation completion"""
+        # Update the frame with new result and server original
+        frame.update_result(result_img, server_original)
+        print(f"✅ Retry completed for frame #{frame.index + 1}")
+        
+        # Clean up worker
+        if hasattr(self, 'retry_worker'):
+            if self.retry_worker.isRunning():
+                self.retry_worker.quit()
+                self.retry_worker.wait(100)  # Wait up to 100ms for thread to finish
+            self.retry_worker.deleteLater()
+            self.retry_worker = None
+    
+    def _on_retry_error(self, error_msg: str):
+        """Handle retry generation error"""
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "재시도 실패", f"재시도 생성 실패:\n{error_msg}")
+        print(f"❌ Retry generation error: {error_msg}")
+        
+        # Reset retry button state for all frames (find the one that was retrying)
+        if self.results_manager:
+            for frame in self.results_manager.result_frames:
+                if hasattr(frame, 'retry_btn') and not frame.retry_btn.isEnabled():
+                    frame.set_retry_state(False)
+        
+        # Clean up worker
+        if hasattr(self, 'retry_worker'):
+            if self.retry_worker.isRunning():
+                self.retry_worker.quit()
+                self.retry_worker.wait(100)  # Wait up to 100ms for thread to finish
+            self.retry_worker.deleteLater()
+            self.retry_worker = None
     
     def get_active_character_prompts(self) -> List[Tuple[str, str]]:
         """Get all active character prompts ordered by z-order

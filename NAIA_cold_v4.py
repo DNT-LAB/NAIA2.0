@@ -721,6 +721,9 @@ class ModernMainWindow(QMainWindow):
         self.negative_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.negative_prompt_textedit.setPlaceholderText("네거티브 프롬프트를 입력하세요...")
         self.negative_prompt_textedit.setMinimumHeight(100)
+        # 기본 QMenu 컨텍스트 메뉴 설정
+        self.negative_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.negative_prompt_textedit.customContextMenuRequested.connect(self.show_negative_prompt_context_menu)
         negative_prompt_layout.addWidget(self.negative_prompt_textedit)
         
         prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
@@ -2334,6 +2337,13 @@ class ModernMainWindow(QMainWindow):
             default_height = get_scaled_size(650)
             self.resize(default_width, default_height)
 
+    def show_negative_prompt_context_menu(self, pos):
+        """negative_prompt_textedit에서 우클릭 시 기본 QMenu를 표시합니다."""
+        # 기본 스타일의 QMenu 생성 (스타일시트 적용 없음)
+        menu = self.negative_prompt_textedit.createStandardContextMenu()
+        if menu:
+            menu.exec(self.negative_prompt_textedit.mapToGlobal(pos))
+    
     def show_prompt_context_menu(self, pos):
         """main_prompt_textedit에서 우클릭 시 KR_tags 정보를 포함한 커스텀 메뉴를 표시합니다."""
         menu = QMenu(self)

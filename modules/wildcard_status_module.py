@@ -7,6 +7,7 @@ from core.context import AppContext
 from core.prompt_context import PromptContext
 from ui.theme import DARK_STYLES, get_dynamic_styles # 테마 스타일 import
 from ui.scaling_manager import get_scaled_font_size
+from ui.modern_menu import setModernStyle
 
 class WildcardStatusModule(BaseMiddleModule):
     """
@@ -52,6 +53,7 @@ class WildcardStatusModule(BaseMiddleModule):
         self.history_textbox.setReadOnly(True)
         self.history_textbox.setStyleSheet(dynamic_styles['compact_textedit'])
         self.history_textbox.setMinimumHeight(100)
+        setModernStyle(self.history_textbox)
         self.history_textbox.setPlaceholderText("랜덤 프롬프트 생성 시 사용된 와일드카드 내역이 표시됩니다.")
         layout.addWidget(self.history_textbox)
 
@@ -64,6 +66,7 @@ class WildcardStatusModule(BaseMiddleModule):
         self.state_textbox.setReadOnly(True)
         self.state_textbox.setStyleSheet(dynamic_styles['compact_textedit'])
         self.state_textbox.setFixedHeight(80)
+        setModernStyle(self.state_textbox)
         self.state_textbox.setPlaceholderText("활성화된 순차/종속 와일드카드가 없습니다.")
         layout.addWidget(self.state_textbox)
 

@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QGridLayout, QCheckBox, QTextEdit
 )
 from PyQt6.QtCore import Qt
+from ui.modern_menu import setModernStyle
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
@@ -38,12 +39,14 @@ class NAID4CharacterInput(QWidget):
         self.prompt_textbox.setPlaceholderText("캐릭터 프롬프트 (예: 1girl, ...)")
         self.prompt_textbox.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.prompt_textbox.setFixedHeight(110)
+        setModernStyle(self.prompt_textbox)
         prompt_uc_layout.addWidget(self.prompt_textbox)
 
         self.uc_textbox = QTextEdit()
         self.uc_textbox.setPlaceholderText("부정 프롬프트 (UC)")
         self.uc_textbox.setStyleSheet(DARK_STYLES['compact_textedit'] + "color: #9E9E9E;")
         self.uc_textbox.setFixedHeight(50)
+        setModernStyle(self.uc_textbox)
         prompt_uc_layout.addWidget(self.uc_textbox)
         
         layout.addLayout(prompt_uc_layout)
@@ -200,6 +203,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.processed_prompt_display.setReadOnly(True)
         self.processed_prompt_display.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.processed_prompt_display.setFixedHeight(240)
+        setModernStyle(self.processed_prompt_display)
         main_layout.addWidget(self.processed_prompt_display)
 
         # 🆕 생성된 위젯 저장 (가시성 제어용)

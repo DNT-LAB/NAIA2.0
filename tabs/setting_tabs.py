@@ -467,7 +467,7 @@ class SettingsWidget(QWidget):
                 child.setParent(None)
         
         # 숨길 수 있는 탭들만 허용
-        hideable_tabs = ['BrowserTabModule', 'PNGInfoTabModule', 'HookerTabModule', 'StorytellerTabModule']
+        hideable_tabs = ['BrowserTabModule', 'PNGInfoTabModule', 'HookerTabModule', 'StorytellerTabModule', 'AssetsTabModule']
         
         # RightView의 TabController에서 탭 정보 가져오기
         if (hasattr(self.app_context, 'main_window') and 
@@ -591,7 +591,8 @@ class SettingsWidget(QWidget):
                 'BrowserTabModule',      # 📦 Danbooru
                 'PNGInfoTabModule',      # 📝 PNG Info
                 'HookerTabModule',       # 🔍 Hooker
-                'StorytellerTabModule'   # Storyteller 탭
+                'StorytellerTabModule',  # Storyteller 탭
+                'AssetsTabModule'        # 🎨 Assets
             ]
             
             for tab_id in hideable_tabs:

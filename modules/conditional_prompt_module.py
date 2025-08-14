@@ -8,6 +8,7 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
+from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List
 import re
 
@@ -102,6 +103,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self.rules_textedit = QTextEdit()
         self.rules_textedit.setFixedHeight(200)
         self.rules_textedit.setStyleSheet(rules_textbox_style)
+        setModernStyle(self.rules_textedit)
         self.rules_textedit.setPlaceholderText(
             "규칙 예시:\n"
             "(e):prefix+=nsfw^rating:explicit,\n"
@@ -160,6 +162,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self.log_textedit.setFixedHeight(250)
         self.log_textedit.setReadOnly(True)
         self.log_textedit.setStyleSheet(textbox_style + "color: #B0B0B0;")
+        setModernStyle(self.log_textedit)
         self.log_textedit.setPlaceholderText("규칙 실행 로그가 여기에 표시됩니다...")
         layout.addWidget(self.log_textedit)
 

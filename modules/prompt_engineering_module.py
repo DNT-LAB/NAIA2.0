@@ -4,6 +4,7 @@ from core.prompt_context import PromptContext
 from interfaces.mode_aware_module import ModeAwareModule
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
+from ui.modern_menu import setModernStyle
 from typing import Dict, Any
 import os, json
 
@@ -111,6 +112,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.pre_textedit = QTextEdit()
         self.pre_textedit.setFixedHeight(160)
         self.pre_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
+        setModernStyle(self.pre_textedit)
         layout.addWidget(self.pre_textedit)
 
         # 후행 고정 프롬프트
@@ -121,6 +123,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.post_textedit = QTextEdit()
         self.post_textedit.setFixedHeight(160)
         self.post_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
+        setModernStyle(self.post_textedit)
         layout.addWidget(self.post_textedit)
 
         # 자동 숨김 프롬프트
@@ -131,6 +134,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.auto_hide_textedit = QTextEdit()
         self.auto_hide_textedit.setFixedHeight(160)
         self.auto_hide_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
+        setModernStyle(self.auto_hide_textedit)
         layout.addWidget(self.auto_hide_textedit)
 
         # 프롬프트 전처리 옵션들

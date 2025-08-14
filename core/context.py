@@ -110,7 +110,11 @@ class AppContext:
         """지정된 이벤트에 대한 콜백 함수(구독자)를 등록합니다."""
         # 이벤트 이름에 해당하는 리스트가 없으면 생성하고 콜백 추가
         self.subscribers.setdefault(event_name, []).append(callback)
-        print(f"📬 이벤트 구독: '{event_name}' -> {callback.__self__.__class__.__name__}.{callback.__name__}")
+        # 메서드인지 일반 함수인지 확인하여 적절한 로그 출력
+        if hasattr(callback, '__self__'):
+            print(f"📬 이벤트 구독: '{event_name}' -> {callback.__self__.__class__.__name__}.{callback.__name__}")
+        else:
+            print(f"📬 이벤트 구독: '{event_name}' -> {callback.__name__}")
 
     def publish(self, event_name: str, *args, **kwargs):
         """지정된 이벤트의 모든 구독자에게 데이터를 전달하며 콜백을 실행합니다."""

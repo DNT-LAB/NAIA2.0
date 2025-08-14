@@ -112,6 +112,21 @@ class RightView(QWidget):
             print("✅ AssetsTabModule 인스턴스를 찾았습니다. (시그널 연결 없음)")
         else:
             print("⚠️ AssetsTabModule 인스턴스를 찾을 수 없습니다.")
+    
+    def on_tab_changed(self, index: int):
+        """탭이 변경될 때 호출되는 메서드"""
+        # 현재 탭의 위젯 가져오기
+        widget = self.tab_widget.widget(index)
+        if not widget:
+            return
+            
+        # 해당 위젯에 연결된 모듈 찾기
+        for tab_id, module in self.tab_controller.module_instances.items():
+            if self.tab_controller.tab_index_map.get(tab_id) == index:
+                # on_tab_activated 메서드가 있으면 호출
+                if hasattr(module, 'on_tab_activated'):
+                    module.on_tab_activated()
+                break
 
 
     def init_ui(self):
@@ -123,6 +138,8 @@ class RightView(QWidget):
         self.tab_widget = EnhancedTabWidget()
         self.tab_widget.setStyleSheet(DARK_STYLES['dark_tabs'])
         self.tab_widget.tab_detach_requested.connect(self.detach_tab)
+        # 탭 변경 시그널 연결
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
         main_layout.addWidget(self.tab_widget)
 

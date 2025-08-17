@@ -257,11 +257,11 @@ class SketchbookCanvas(QGraphicsView):
                 crop_handles_visibility.append((handle, handle.isVisible()))
                 handle.setVisible(False)
         
-        # Also hide the inpaint layer temporarily if it exists
+        # Hide the inpaint layer temporarily if it exists
         inpaint_visibility = None
         if self.inpaint_layer:
             inpaint_visibility = self.inpaint_layer.isVisible()
-            # Don't hide inpaint layer, it might be intentional to include it
+            self.inpaint_layer.setVisible(False)  # Always hide inpaint layer for export
         
         w, h = int(self.canvas_bounds.width()), int(self.canvas_bounds.height())
         pixmap = QPixmap(w, h)
@@ -284,6 +284,10 @@ class SketchbookCanvas(QGraphicsView):
         # Restore crop handle visibility
         for handle, was_visible in crop_handles_visibility:
             handle.setVisible(was_visible)
+        
+        # Restore inpaint layer visibility
+        if self.inpaint_layer and inpaint_visibility is not None:
+            self.inpaint_layer.setVisible(inpaint_visibility)
         
         return pixmap
 

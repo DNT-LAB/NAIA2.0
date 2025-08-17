@@ -159,6 +159,8 @@ class InpaintControlWindow(QDialog):
     
     # Signal for seed fix checkbox changes
     seed_fix_changed = pyqtSignal(bool)
+    # Signal for sending to main window
+    send_to_main_requested = pyqtSignal(object, object)  # canvas_pixmap, mask_pixmap
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -274,6 +276,28 @@ class InpaintControlWindow(QDialog):
         control_layout.addLayout(import_export_layout)
         
         control_layout.addStretch()
+        
+        # Send to Main button
+        self.send_to_main_button = QPushButton("◀ Send to Main")
+        self.send_to_main_button.clicked.connect(self._send_to_main)
+        self.send_to_main_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #4a90e2;
+                color: white;
+                border: none;
+                padding: {get_scaled_size(8)}px;
+                border-radius: 4px;
+                font-size: {get_scaled_font_size(19)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #5ba0f2;
+            }}
+            QPushButton:pressed {{
+                background-color: #357abd;
+            }}
+        """)
+        control_layout.addWidget(self.send_to_main_button)
         
         # Action buttons
         self.clear_mask_button = QPushButton("🧹 마스크 지우기")
@@ -1069,6 +1093,31 @@ class InpaintControlWindow(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "오류", f"설정 불러오기 실패:\n{str(e)}")
             print(f"❌ Failed to import settings: {e}")
+    
+    def _send_to_main(self):
+        """Send canvas and mask data to main window"""
+        if not self.parent_widget or not hasattr(self.parent_widget, 'canvas'):
+            print("⚠️ Parent widget or canvas not available")
+            return
+        
+        # Get inpaint mask FIRST (before hiding the layer)
+        mask_pixmap = self.parent_widget.canvas.get_inpaint_mask()
+        if not mask_pixmap:
+            QMessageBox.warning(self, "오류", "마스크가 비어있습니다. 인페인트 영역을 그려주세요.")
+            return
+        
+        # Get canvas composite image (this will hide inpaint layer)
+        canvas_pixmap = self.parent_widget.canvas.export_composite()
+        if not canvas_pixmap:
+            QMessageBox.warning(self, "오류", "캔버스가 비어있습니다.")
+            return
+        
+        # Emit signal with canvas and mask
+        self.send_to_main_requested.emit(canvas_pixmap, mask_pixmap)
+        
+        # Show success message
+        self.status_bar.showMessage("이미지와 마스크가 Main Window로 전송되었습니다.", 3000)
+        print("✅ Sent canvas and mask to Main Window")
     
     def closeEvent(self, event):
         """Handle window close"""

@@ -1,7 +1,7 @@
 import io
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QPushButton, QDoubleSpinBox, QFrame, QSlider)
+                             QPushButton, QDoubleSpinBox, QFrame, QSlider, QCheckBox)
 from PyQt6.QtGui import QPixmap, QPainter, QColor
 from PyQt6.QtCore import Qt, QSize
 from PIL.ImageQt import ImageQt
@@ -25,6 +25,8 @@ class Img2ImgPanel(QFrame):
         self.background_pixmap: QPixmap = None
         self.full_mask_pil: Image.Image = None
         self.small_mask_pil: Image.Image = None
+        self._mask_preset = False  # Flag to indicate if mask was preset from sketchbook
+        self._mask_from_sketchbook = False  # Additional flag for sketchbook source
         
         self.init_ui()
         self.setVisible(False)
@@ -128,6 +130,33 @@ class Img2ImgPanel(QFrame):
         noise_hlayout.addWidget(self.noise_value_label)
         controls_layout.addWidget(noise_group)
 
+        # Auto-Outpainting checkbox (only visible in inpaint mode)
+        self.auto_outpainting_checkbox = QCheckBox("Enable Auto-Outpainting (3:2)")
+        self.auto_outpainting_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                font-size: {get_scaled_font_size(16)}px;
+                color: white;
+                background-color: transparent;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid #555;
+                border-radius: 3px;
+                background-color: #22253F;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.auto_outpainting_checkbox.setVisible(False)  # Hidden by default
+        controls_layout.addWidget(self.auto_outpainting_checkbox)
+
         main_layout.addLayout(controls_layout)
         main_layout.addStretch(1)
 
@@ -140,6 +169,13 @@ class Img2ImgPanel(QFrame):
 
     def _on_inpaint_button_clicked(self):
         if not self.original_pil_image:
+            return
+        
+        # Check if mask was preset from sketchbook (only block the first time)
+        if self._mask_from_sketchbook and self.mode == 'inpaint' and self.full_mask_pil:
+            # Reset the flag so user can edit mask later if they want
+            self._mask_from_sketchbook = False
+            print("🎨 Using preset mask from Sketchbook (click again to edit)")
             return
 
         result = InpaintWindow.get_inpaint_data(self.original_pil_image, self.full_mask_pil, self)
@@ -179,9 +215,12 @@ class Img2ImgPanel(QFrame):
         if self.mode == 'inpaint':
             self.inpaint_button.setText("Edit Mask")
             self.inpaint_button.setStyleSheet(DARK_STYLES['primary_button']) # 강조 색상으로 변경
+            self.auto_outpainting_checkbox.setVisible(True)  # Show checkbox in inpaint mode
         else: # 'img2img'
             self.inpaint_button.setText("Inpaint Image")
             self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
+            self.auto_outpainting_checkbox.setVisible(False)  # Hide checkbox in img2img mode
+            self.auto_outpainting_checkbox.setChecked(False)  # Reset checkbox state
 
     def _update_strength_label(self, value):
         """Strength 슬라이더 값 변경 시 라벨 업데이트"""
@@ -258,6 +297,8 @@ class Img2ImgPanel(QFrame):
         self.background_pixmap = None
         self.full_mask_pil = None
         self.small_mask_pil = None
+        self._mask_preset = False  # Reset preset flag
+        self._mask_from_sketchbook = False  # Reset sketchbook flag
         self._update_ui_for_mode() # UI 상태도 초기화
 
     def get_parameters(self) -> dict | None:
@@ -281,10 +322,24 @@ class Img2ImgPanel(QFrame):
             params["type"] = "inpaint"
             api_mode = self.app_context.get_api_mode()
             
+            # Add auto_outpainting parameter if checkbox is checked
+            if self.auto_outpainting_checkbox.isChecked():
+                params["auto_outpainting"] = True
+                # Always provide full mask for auto-outpainting
+                params["full_mask_pil"] = self.full_mask_pil
+            
             mask_to_use = self.small_mask_pil if api_mode == "NAI" else self.full_mask_pil
             
             # 🔥 수정: 모든 API에 대해 완벽한 이진 PNG 전송
+            # Convert to grayscale if needed
+            if mask_to_use.mode != 'L':
+                mask_to_use = mask_to_use.convert('L')
+            
             mask_array = np.array(mask_to_use)
+            
+            # Ensure 2D array (grayscale)
+            if len(mask_array.shape) > 2:
+                mask_array = mask_array[:, :, 0] if mask_array.shape[2] > 0 else mask_array[:, :]
             
             # 완벽한 이진화 강제 (혹시 모를 중간값 제거)
             mask_array = np.where(mask_array > 127, 255, 0).astype(np.uint8)
@@ -307,3 +362,41 @@ class Img2ImgPanel(QFrame):
             params["type"] = "img2img"
 
         return params
+    
+    def set_mask_from_sketchbook(self, mask_pil: Image.Image):
+        """Set mask from sketchbook and process it through InpaintWindow"""
+        if not self.original_pil_image:
+            print("⚠️ No image loaded to apply mask to")
+            return
+            
+        # Process mask through InpaintWindow with auto_accept
+        result = InpaintWindow.get_inpaint_data(
+            self.original_pil_image, 
+            mask_pil,  # Pass the mask from sketchbook
+            self, 
+            auto_accept=True  # Auto-accept to process the mask
+        )
+        
+        if result and "full_mask_image" in result:
+            print("🎨 Mask from Sketchbook processed successfully")
+            self.mode = 'inpaint'
+            self.full_mask_pil = result["full_mask_image"]
+            self.small_mask_pil = result["small_mask_image"]
+            
+            # Update preview if available
+            if "preview_image" in result:
+                preview_pil = result["preview_image"]
+                q_image = ImageQt(preview_pil.convert("RGBA"))
+                self.background_pixmap = QPixmap.fromImage(q_image).scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.update()
+            
+            self._update_ui_for_mode()
+            self._mask_from_sketchbook = True
+            return True
+        else:
+            print("⚠️ Failed to process mask from Sketchbook")
+            return False

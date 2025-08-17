@@ -716,6 +716,11 @@ class SketchbookWidget(QWidget):
         if not self.inpaint_control_window:
             self.inpaint_control_window = InpaintControlWindow(self)
             
+            # Connect send to main signal
+            self.inpaint_control_window.send_to_main_requested.connect(
+                self._handle_send_to_main
+            )
+            
             # Connect seed fix sync
             if hasattr(self.app_context, 'main_window'):
                 main_window = self.app_context.main_window
@@ -1342,6 +1347,155 @@ class SketchbookWidget(QWidget):
         print(f"✅ Inpaint prompts stored (will be used when inpaint mode is enabled):")
         print(f"   Main: {main_prompt[:50]}...")
         print(f"   Negative: {negative_prompt[:50]}...")
+    
+    def _handle_send_to_main(self, canvas_pixmap: QPixmap, mask_pixmap: QPixmap):
+        """Handle send to main window request from inpaint control"""
+        try:
+            # Get character prompts from layers
+            character_prompts = self.get_active_character_prompts()
+            
+            # Show character prompts if exist (non-blocking)
+            if character_prompts:
+                self._show_character_prompts_non_blocking(character_prompts)
+            
+            # Convert QPixmap to PIL Image for both canvas and mask
+            from PIL import Image
+            import io
+            
+            # Convert canvas pixmap to PIL Image
+            canvas_bytes = QBuffer()
+            canvas_bytes.open(QBuffer.OpenModeFlag.WriteOnly)
+            canvas_pixmap.save(canvas_bytes, "PNG")
+            canvas_pil = Image.open(io.BytesIO(canvas_bytes.data()))
+            
+            # Convert mask pixmap to PIL Image (ensure grayscale)
+            mask_bytes = QBuffer()
+            mask_bytes.open(QBuffer.OpenModeFlag.WriteOnly)
+            mask_pixmap.save(mask_bytes, "PNG")
+            mask_pil = Image.open(io.BytesIO(mask_bytes.data()))
+            
+            # Ensure mask is grayscale
+            if mask_pil.mode != 'L':
+                mask_pil = mask_pil.convert('L')
+            
+            # Get main window and activate inpaint mode
+            if hasattr(self.app_context, 'main_window'):
+                main_window = self.app_context.main_window
+                
+                # Activate inpaint mode with canvas image
+                if hasattr(main_window, 'activate_inpaint_mode'):
+                    # First set the image
+                    main_window.activate_inpaint_mode(canvas_pil, skip_window=True)
+                    
+                    # Then process the mask properly through InpaintWindow
+                    if hasattr(main_window, 'img2img_panel'):
+                        panel = main_window.img2img_panel
+                        
+                        # Use the new method to properly process the mask
+                        if panel.set_mask_from_sketchbook(mask_pil):
+                            # Set initial parameters after successful mask processing
+                            panel.strength_slider.setValue(99)  # 0.99
+                            panel.noise_slider.setValue(5)      # 0.05
+                        
+                        print("✅ Canvas and mask transferred to Main Window")
+                        print(f"   Canvas size: {canvas_pil.size}")
+                        print(f"   Mask size: {mask_pil.size}")
+                        print(f"   Strength: 0.99, Noise: 0.05")
+                    else:
+                        print("⚠️ img2img_panel not found in main window")
+                    
+                    # Close inpaint control window after successful transfer
+                    if self.inpaint_control_window:
+                        self.inpaint_control_window.close()
+                        print("✅ Inpaint control window closed")
+                else:
+                    print("⚠️ activate_inpaint_mode not found in main window")
+            else:
+                print("⚠️ Main window not accessible through app_context")
+                
+        except Exception as e:
+            print(f"❌ Error sending to main window: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _show_character_prompts_non_blocking(self, character_prompts: List[Tuple[str, str]]):
+        """Show character prompts in a text window"""
+        try:
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout
+            from ui.theme import get_dynamic_styles
+            from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+            
+            # Create dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("캐릭터 프롬프트")
+            dialog.setMinimumSize(get_scaled_size(600), get_scaled_size(400))
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Create text edit
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            
+            # Format prompts
+            prompt_text = ""
+            for i, (prompt, uc) in enumerate(character_prompts, 1):
+                prompt_text += f"캐릭터 프롬프트 {i}:\n{prompt}\n\n"
+                if uc:
+                    prompt_text += f"캐릭터 UC {i}:\n{uc}\n\n"
+            
+            text_edit.setPlainText(prompt_text.strip())
+            
+            # Apply styling
+            ds = get_dynamic_styles()
+            text_edit.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: #2b2b2b;
+                    color: #ffffff;
+                    font-size: {get_scaled_font_size(14)}px;
+                    padding: {get_scaled_size(10)}px;
+                    border: 1px solid #505050;
+                    border-radius: 4px;
+                }}
+            """)
+            
+            layout.addWidget(text_edit)
+            
+            # Add buttons
+            button_layout = QHBoxLayout()
+            
+            copy_button = QPushButton("복사")
+            copy_button.clicked.connect(lambda: self._copy_to_clipboard(prompt_text.strip()))
+            copy_button.setStyleSheet(ds.get('primary_button', ''))
+            
+            close_button = QPushButton("닫기")
+            close_button.clicked.connect(dialog.close)
+            close_button.setStyleSheet(ds.get('secondary_button', ''))
+            
+            button_layout.addStretch()
+            button_layout.addWidget(copy_button)
+            button_layout.addWidget(close_button)
+            
+            layout.addLayout(button_layout)
+            
+            # Show dialog (non-blocking)
+            dialog.show()
+            
+            print(f"✅ Displayed {len(character_prompts)} character prompts (non-blocking)")
+            
+        except Exception as e:
+            print(f"❌ Error showing character prompts: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _copy_to_clipboard(self, text: str):
+        """Copy text to clipboard"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            print("✅ Character prompts copied to clipboard")
+        except Exception as e:
+            print(f"❌ Error copying to clipboard: {e}")
 
     # --- Keyboard Shortcuts ---
     

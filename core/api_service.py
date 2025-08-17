@@ -51,18 +51,27 @@ class APIService:
         max_retries = 5
         last_exception = None
 
+        result = None
         for attempt in range(1, max_retries + 1):
             if attempt > 1:
                 print(f"🔄 재시도 {attempt}/{max_retries}...")
             try:
                 if api_mode == "NAI":
-                    return self._call_nai_api(parameters)
+                    result = self._call_nai_api(parameters)
                 elif api_mode == "WEBUI":
-                    return self._call_webui_api(parameters)
+                    result = self._call_webui_api(parameters)
                 elif api_mode == "COMFYUI":  # 🆕 새로 추가
-                    return self._call_comfyui_api(parameters)
+                    result = self._call_comfyui_api(parameters)
                 else:
-                    return {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+                    result = {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+                
+                # Check if auto_outpainting is enabled and first generation was successful
+                if result and result.get('status') == 'success' and parameters.get('auto_outpainting'):
+                    print("🎨 Auto-Outpainting enabled, processing second pass...")
+                    result = self._auto_outpainting(result, parameters)
+                
+                return result
+                
             except Exception as e:
                 print(f"⚠️ API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
                 last_exception = e
@@ -583,3 +592,235 @@ class APIService:
             print(f"❌ 마스크 데이터 처리 실패: {e}")
             # 폴백: 원본 데이터를 그대로 base64 인코딩
             return base64.b64encode(mask_bytes).decode()
+    
+    def _auto_outpainting(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Auto-Outpainting 처리를 수행합니다.
+        첫 번째 생성 결과를 받아 3:2 비율로 확장하여 두 번째 생성을 수행합니다.
+        
+        Args:
+            result: 첫 번째 생성 결과 (이미지 바이트 포함)
+            parameters: 원본 생성 파라미터
+            
+        Returns:
+            두 번째 생성 결과 또는 에러 시 원본 결과
+        """
+        try:
+            import numpy as np
+            
+            # 1. Extract the generated image from result
+            print("🎨 Step 1: Extracting generated image...")
+            
+            generated_image = None
+            raw_bytes = None
+            
+            # Check for 'image' key (PIL Image object)
+            if 'image' in result and result['image'] is not None:
+                generated_image = result['image']
+                print(f"   ✅ Found PIL Image: {generated_image.size}")
+            
+            # Also check for raw_bytes for saving later
+            if 'raw_bytes' in result:
+                raw_bytes = result['raw_bytes']
+                if generated_image is None:
+                    generated_image = Image.open(io.BytesIO(raw_bytes))
+                    print(f"   ✅ Created PIL Image from raw_bytes: {generated_image.size}")
+            
+            if generated_image is None:
+                print("   ❌ No image found in result")
+                return result
+            
+            # Get the full mask data for auto-outpainting
+            # Use full_mask_pil if available (for auto-outpainting), otherwise use mask_bytes
+            full_mask_pil = parameters.get('full_mask_pil')
+            if full_mask_pil:
+                # Use the full mask PIL object directly
+                mask_image = full_mask_pil
+                if mask_image.mode != 'L':
+                    mask_image = mask_image.convert('L')
+                print(f"   ✅ Using full mask PIL: {mask_image.size}")
+            elif parameters.get('mask_bytes'):
+                # Fallback to mask_bytes if no full_mask_pil
+                mask_bytes = parameters.get('mask_bytes')
+                # Decode mask and find the inpainted region
+                mask_image = Image.open(io.BytesIO(mask_bytes))
+                if mask_image.mode != 'L':
+                    mask_image = mask_image.convert('L')
+                print(f"   ⚠️ Using mask_bytes (may be small): {mask_image.size}")
+            else:
+                mask_image = None
+            
+            if mask_image:
+                # Find bounding box of the mask (white areas)
+                mask_array = np.array(mask_image)
+                white_pixels = np.where(mask_array > 127)
+                
+                if len(white_pixels[0]) > 0:
+                    # Get bounding box of the masked area
+                    y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
+                    x_min, x_max = white_pixels[1].min(), white_pixels[1].max()
+                    
+                    # Crop the generated image to the mask area
+                    cropped_image = generated_image.crop((x_min, y_min, x_max + 1, y_max + 1))
+                    print(f"   ✅ Cropped to mask area: {cropped_image.size}")
+                else:
+                    # No mask found, use the entire image
+                    cropped_image = generated_image
+                    print("   ⚠️ No mask area found, using entire image")
+            else:
+                # No mask provided, use the entire image
+                cropped_image = generated_image
+                print("   ℹ️ No mask provided, using entire image")
+            
+            # 2. Create expanded canvas (1216 x 832)
+            print("🎨 Step 2: Creating expanded canvas...")
+            
+            canvas_width = 1216
+            canvas_height = 832
+            
+            # Create white canvas
+            canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
+            
+            # Calculate position to center the cropped image
+            crop_w, crop_h = cropped_image.size
+            x_offset = (canvas_width - crop_w) // 2
+            y_offset = (canvas_height - crop_h) // 2
+            
+            # Ensure the cropped image is in RGBA mode
+            if cropped_image.mode != 'RGBA':
+                cropped_image = cropped_image.convert('RGBA')
+            
+            # Paste the cropped image in the center
+            canvas.paste(cropped_image, (x_offset, y_offset))
+            print(f"   ✅ Canvas created: {canvas_width}x{canvas_height}, image centered at ({x_offset}, {y_offset})")
+            
+            # 3. Generate outpainting mask
+            print("🎨 Step 3: Generating outpainting mask...")
+            
+            # Create mask - white for areas to inpaint, black for areas to keep
+            mask = Image.new('L', (canvas_width, canvas_height), 255)  # Start with all white
+            
+            # Create black rectangle for the original image area
+            mask_draw = np.array(mask)
+            mask_draw[y_offset:y_offset + crop_h, x_offset:x_offset + crop_w] = 0
+            
+            # Add 32px white border around the original image for blending
+            border_size = 64
+            # Top border
+            if y_offset - border_size >= 0:
+                mask_draw[max(0, y_offset - border_size):y_offset, 
+                         max(0, x_offset - border_size):min(canvas_width, x_offset + crop_w + border_size)] = 255
+            # Bottom border  
+            if y_offset + crop_h + border_size <= canvas_height:
+                mask_draw[y_offset + crop_h:min(canvas_height, y_offset + crop_h + border_size),
+                         max(0, x_offset - border_size):min(canvas_width, x_offset + crop_w + border_size)] = 255
+            # Left border
+            if x_offset - border_size >= 0:
+                mask_draw[max(0, y_offset - border_size):min(canvas_height, y_offset + crop_h + border_size),
+                         max(0, x_offset - border_size):x_offset] = 255
+            # Right border
+            if x_offset + crop_w + border_size <= canvas_width:
+                mask_draw[max(0, y_offset - border_size):min(canvas_height, y_offset + crop_h + border_size),
+                         x_offset + crop_w:min(canvas_width, x_offset + crop_w + border_size)] = 255
+            
+            mask = Image.fromarray(mask_draw.astype(np.uint8), mode='L')
+            
+            # Resize mask to NAI small size (152x104) and ensure perfect binary
+            nai_width = 152
+            nai_height = 104
+            
+            # Resize to NAI dimensions
+            mask_small = mask.resize((nai_width, nai_height), Image.NEAREST)
+            
+            # Ensure perfect binary (0 or 255 only)
+            mask_array_small = np.array(mask_small)
+            mask_array_small = np.where(mask_array_small > 127, 255, 0).astype(np.uint8)
+            
+            # Add 4-pixel inpaint margin inside the boundaries between black and white areas
+            # This helps with edge blending in the small mask
+            margin = 6
+            
+            # Use scipy for efficient dilation if available, otherwise use numpy
+            try:
+                from scipy import ndimage
+                # Create a circular kernel for dilation
+                kernel = np.ones((margin*2+1, margin*2+1), dtype=np.uint8)
+                # Dilate white areas (expand them by margin pixels)
+                mask_array_small = ndimage.binary_dilation(mask_array_small == 255, kernel).astype(np.uint8) * 255
+                print(f"   ✅ Added {margin}px inpaint margin using scipy dilation")
+            except ImportError:
+                # Fallback: simple numpy-based dilation
+                mask_copy = mask_array_small.copy()
+                for y in range(nai_height):
+                    for x in range(nai_width):
+                        # If current pixel is black (0)
+                        if mask_copy[y, x] == 0:
+                            # Check if any pixel within margin distance is white
+                            for dy in range(max(0, y-margin), min(nai_height, y+margin+1)):
+                                for dx in range(max(0, x-margin), min(nai_width, x+margin+1)):
+                                    if mask_copy[dy, dx] == 255:
+                                        mask_array_small[y, x] = 255
+                                        break
+                                if mask_array_small[y, x] == 255:
+                                    break
+                print(f"   ✅ Added {margin}px inpaint margin using numpy")
+            
+            mask_small_binary = Image.fromarray(mask_array_small, mode='L')
+            
+            # Save mask without compression
+            mask_byte_arr = io.BytesIO()
+            mask_small_binary.save(mask_byte_arr, format='PNG', compress_level=0, optimize=False)
+            mask_bytes_raw = mask_byte_arr.getvalue()
+            
+            print(f"   ✅ Mask generated: original {mask.size} → NAI size {mask_small_binary.size}")
+            print(f"   ✅ Binary values: {np.unique(mask_array_small)}")
+            
+            # 4. Prepare parameters for second generation
+            print("🎨 Step 4: Preparing parameters for second generation...")
+            
+            # Copy parameters
+            new_params = parameters.copy()
+            
+            # Convert expanded canvas to bytes
+            canvas_byte_arr = io.BytesIO()
+            canvas.save(canvas_byte_arr, format='PNG')
+            new_params['image_bytes'] = canvas_byte_arr.getvalue()
+            
+            # Set mask bytes (raw, without 8x scaling)
+            new_params['mask_bytes'] = mask_bytes_raw
+            
+            # Update dimensions
+            new_params['width'] = canvas_width
+            new_params['height'] = canvas_height
+            
+            # Set as inpaint type
+            new_params['type'] = 'inpaint'
+            
+            # Keep strength from original or set default
+            if 'strength' not in new_params:
+                new_params['strength'] = 0.7
+            
+            # Remove auto_outpainting flag to prevent infinite recursion
+            if 'auto_outpainting' in new_params:
+                del new_params['auto_outpainting']
+            
+            print(f"   ✅ Parameters prepared: {canvas_width}x{canvas_height}, strength={new_params.get('strength')}")
+            
+            # 5. Call API for second generation
+            print("🎨 Step 5: Calling API for second generation...")
+            
+            second_result = self.call_generation_api(new_params)
+            
+            if second_result and second_result.get('status') == 'success':
+                print("   ✅ Auto-Outpainting completed successfully!")
+                return second_result
+            else:
+                print("   ⚠️ Second generation failed, returning original result")
+                return result
+            
+        except Exception as e:
+            print(f"❌ Auto-Outpainting failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # On error, return the original result
+            return result

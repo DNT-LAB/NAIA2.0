@@ -2011,6 +2011,7 @@ except Exception as e:
             
             # 이미지 로드 및 표시
             self._load_and_display_image(item_path)
+            print("") # 알 수 없는 crash 방지를 위한 빈 줄
             
         except Exception as e:
             print(f"❌ 트리 아이템 클릭 처리 오류: {e}")

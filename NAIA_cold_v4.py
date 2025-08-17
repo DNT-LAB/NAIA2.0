@@ -2605,14 +2605,16 @@ class ModernMainWindow(QMainWindow):
             self.img2img_panel.set_image(pil_image)
             self.status_bar.showMessage("Img2Img 패널이 활성화되었습니다.", 3000)
 
-    def activate_inpaint_mode(self, pil_image: Image.Image):
+    def activate_inpaint_mode(self, pil_image: Image.Image, skip_window: bool = False):
         """Img2ImgPopup의 요청을 받아 Img2ImgPanel을 활성화하고 즉시 Inpaint 창을 엽니다."""
         if hasattr(self, 'img2img_panel'):
             print(f"🎨 Inpaint 모드 활성화 요청 (이미지 크기: {pil_image.size})")
             # 1. 먼저 패널을 이미지와 함께 활성화
             self.img2img_panel.set_image(pil_image)
-            # 2. 패널의 Inpaint 버튼 클릭 로직을 즉시 실행
-            self.img2img_panel._on_inpaint_button_clicked()
+            # 2. 패널의 Inpaint 버튼 클릭 로직을 즉시 실행 (unless skip_window is True)
+            # Note: skip_window is now handled differently via set_mask_from_sketchbook
+            if not skip_window:
+                self.img2img_panel._on_inpaint_button_clicked()
 
     def on_send_to_inpaint_requested(self, history_item):
         """

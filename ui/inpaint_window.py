@@ -359,8 +359,15 @@ class InpaintWindow(QDialog):
         event.accept()
 
     @staticmethod
-    def get_inpaint_data(pil_image: Image.Image, initial_mask: Image.Image = None, parent=None) -> dict | None:
+    def get_inpaint_data(pil_image: Image.Image, initial_mask: Image.Image = None, parent=None, auto_accept: bool = False) -> dict | None:
         dialog = InpaintWindow(pil_image, initial_mask, parent)
+        
+        # If auto_accept is True, immediately accept with the provided mask
+        if auto_accept and initial_mask is not None:
+            # Directly call accept to process the mask
+            dialog.accept()
+            return dialog.result
+        
         result_code = dialog.exec()
 
         if result_code == QDialog.DialogCode.Accepted:

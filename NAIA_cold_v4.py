@@ -1669,14 +1669,32 @@ class ModernMainWindow(QMainWindow):
 
             # 자동 생성 체크
             try:
-                if self.automation_module and self.automation_module.automation_controller.is_running:
+                # 자동 생성이 활성화되어 있고, 자동화가 실행 중일 때만 지연시간 적용
+                auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
+                if (auto_generate_checkbox and auto_generate_checkbox.isChecked() and 
+                    self.automation_module and self.automation_module.automation_controller.is_running):
                     delay = self.automation_module.get_generation_delay()
                     if delay > 0:
-                        from PyQt6.QtCore import QTimer
-                        QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
+                        print(f"⏱️ 생성 지연: {delay:.1f}초")
+                        # 카운트다운 스레드를 사용하여 지연 시각화
+                        if hasattr(self.automation_module, 'start_delay_countdown'):
+                            # 카운트다운 완료 시 자동 생성 트리거를 연결
+                            self.automation_module.countdown_thread = None  # 기존 연결 해제를 위해 초기화
+                            self.automation_module.start_delay_countdown_for_new_prompt(delay)
+                        else:
+                            # 폴백: 기존 방식 사용
+                            if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                                self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
+                            from PyQt6.QtCore import QTimer
+                            QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
                     else:
+                        if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                            self.automation_module.delay_info_label.setText("⚡ 지연 없음")
                         self._check_and_trigger_auto_generation()
                 else:
+                    # 자동화가 비활성화된 경우 지연 없이 즉시 실행
+                    if self.automation_module and hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                        self.automation_module.delay_info_label.setText("")
                     self._check_and_trigger_auto_generation()
             except Exception as e:
                 print(f"❌ 자동 생성 체크 실패: {e}")

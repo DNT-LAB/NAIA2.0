@@ -207,30 +207,9 @@ class MainController:
                     self.main_window.automation_module = module
                     break
         
+        # NAIA_cold_v4.py에서 이미 콜백을 연결하므로 여기서는 모듈 참조만 설정
         if hasattr(self.main_window, 'automation_module') and self.main_window.automation_module:
-            try:
-                # 콜백 함수 등록 (시그널 대신)
-                self.main_window.automation_module.set_automation_status_callback(
-                    self.main_window.update_automation_status
-                )
-                
-                self.main_window.automation_module.set_generation_delay_callback(
-                    self.main_window.on_generation_delay_changed
-                )
-                
-                # [신규] 자동 생성 상태 확인 콜백 등록
-                self.main_window.automation_module.set_auto_generate_status_callback(
-                    self.get_auto_generate_status
-                )
-
-                # [신규] 자동화 활성 상태 확인 콜백 등록 (누락된 부분)
-                self.main_window.automation_module.set_automation_active_status_callback(
-                    self.main_window.get_automation_active_status
-                )
-                
-                print("✅ 자동화 모듈 콜백 연결 완료")
-            except Exception as e:
-                print(f"⚠️ 자동화 모듈 콜백 연결 실패: {e}")
+            print("✅ 자동화 모듈 참조 설정 완료")
         else:
             print("⚠️ 자동화 모듈을 찾을 수 없습니다.")
         

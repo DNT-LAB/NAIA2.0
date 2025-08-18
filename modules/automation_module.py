@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QCheckBox, QRadioButton, QPushButton,
     QButtonGroup, QFrame, QMessageBox
 )
-from PyQt6.QtCore import QTimer, QThread, QObject, pyqtSignal
+from PyQt6.QtCore import QTimer, QObject, pyqtSignal, QThread
+from PyQt6.QtWidgets import QApplication
 from interfaces.base_module import BaseMiddleModule
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
@@ -13,7 +14,46 @@ import random
 import subprocess
 import platform
 
-class AutomationController(QThread):
+class DelayCountdownThread(QThread):
+    """지연 시간 카운트다운을 시각화하는 스레드"""
+    
+    progress_updated = pyqtSignal(str)
+    countdown_finished = pyqtSignal()
+    
+    def __init__(self, delay_seconds: float):
+        super().__init__()
+        self.delay_seconds = delay_seconds
+        self.remaining_time = delay_seconds
+        self.is_running = True
+    
+    def run(self):
+        """카운트다운 실행"""
+        import time
+        # 카운트다운 시작
+        
+        # 즉시 첫 업데이트 표시
+        self.progress_updated.emit(f"⏱️ 지연: {self.remaining_time:.1f}초 후 다음 생성")
+        
+        while self.remaining_time > 0 and self.is_running:
+            # 0.1초 단위로 감소
+            time.sleep(0.1)
+            self.remaining_time -= 0.1
+            
+            if self.remaining_time > 0 and self.is_running:
+                self.progress_updated.emit(f"⏱️ 지연: {self.remaining_time:.1f}초 후 다음 생성")
+            
+        if self.is_running:
+            # 카운트다운 완료
+            self.countdown_finished.emit()
+        else:
+            pass
+            # 카운트다운 중단됨
+    
+    def stop(self):
+        """스레드 중지"""
+        self.is_running = False
+
+class AutomationController(QObject):
     """자동화 타이머 및 카운터를 관리하는 컨트롤러"""
     
     automation_finished = pyqtSignal()
@@ -23,6 +63,7 @@ class AutomationController(QThread):
         super().__init__()
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_progress)
+        self.timer.moveToThread(QApplication.instance().thread())  # 메인 스레드로 이동
         
         # 자동화 설정
         self.automation_type = "unlimited"
@@ -49,18 +90,20 @@ class AutomationController(QThread):
         
         if automation_type == "timer":
             self.remaining_seconds = timer_minutes * 60
-            self.timer.start(1000)
+            self.timer.start(1000)  # 1초마다 업데이트
+            print(f"🕒 타이머 시작: {timer_minutes}분 ({self.remaining_seconds}초)")
         elif automation_type == "count":
             self.remaining_count = count_limit
+            print(f"🔢 횟수 제한 시작: {count_limit}회")
         
         self.is_running = True
-        self.update_progress()
+        self.update_progress()  # 초기 상태 표시
         
     def stop_automation(self):
         """자동화를 중단합니다."""
         self.timer.stop()
         self.is_running = False
-        self.progress_updated.emit("자동화 중단됨")
+        self.progress_updated.emit("🛑 자동화 중단됨")
         
     def update_progress(self):
         """진행 상황을 업데이트합니다."""
@@ -78,14 +121,16 @@ class AutomationController(QThread):
             else:
                 time_str = f"{minutes:02d}:{seconds:02d}"
                 
-            self.progress_updated.emit(f"자동화 ({time_str})")
+            status_text = f"⏰ 자동화 진행 중 ({time_str} 남음)"
+            self.progress_updated.emit(status_text)
             self.remaining_seconds -= 1
             
         elif self.automation_type == "count":
-            self.progress_updated.emit(f"자동화 ({self.remaining_count})")
+            status_text = f"🔢 자동화 진행 중 ({self.remaining_count}회 남음)"
+            self.progress_updated.emit(status_text)
             
         elif self.automation_type == "unlimited":
-            self.progress_updated.emit("자동화 (무제한)")
+            self.progress_updated.emit("♾️ 자동화 진행 중 (무제한)")
     
     def decrement_count(self):
         """카운트 기반 자동화에서 카운트를 감소시킵니다."""
@@ -100,11 +145,12 @@ class AutomationController(QThread):
         """자동화를 완료합니다."""
         self.timer.stop()
         self.is_running = False
-        self.progress_updated.emit("자동화 완료")
+        self.progress_updated.emit("✅ 자동화 완료")
         
-        if self.shutdown_on_finish:
-            self.shutdown_system()
-        elif self.notify_on_finish:
+        # 시스템 종료 기능 비활성화 (리스크 방지)
+        # if self.shutdown_on_finish:
+        #     self.shutdown_system()
+        if self.notify_on_finish:
             self.show_completion_notification()
             
         self.automation_finished.emit()
@@ -242,6 +288,7 @@ class AutomationModule(BaseMiddleModule):
         
         self.delay_input = QLineEdit(str(self.delay_seconds))
         self.delay_input.setStyleSheet(input_style)
+        self.delay_input.setProperty("autocomplete_ignore", True)  # 자동완성 무시
         self.delay_input.textChanged.connect(self.on_delay_text_changed)
         delay_grid.addWidget(self.delay_input, 0, 1)
         
@@ -257,6 +304,7 @@ class AutomationModule(BaseMiddleModule):
         
         self.repeat_input = QLineEdit(str(self.repeat_count))
         self.repeat_input.setStyleSheet(input_style)
+        self.repeat_input.setProperty("autocomplete_ignore", True)  # 자동완성 무시
         delay_grid.addWidget(self.repeat_input, 2, 1)
         
         repeat_info_label = QLabel("* 자동 생성 상태일때만 작동합니다")
@@ -308,6 +356,7 @@ class AutomationModule(BaseMiddleModule):
         
         self.timer_input = QLineEdit("60")
         self.timer_input.setStyleSheet(input_style)
+        self.timer_input.setProperty("autocomplete_ignore", True)  # 자동완성 무시
         condition_grid.addWidget(self.timer_input, 0, 1)
         
         # 횟수 제한 옵션
@@ -317,6 +366,7 @@ class AutomationModule(BaseMiddleModule):
         
         self.count_input = QLineEdit("100")
         self.count_input.setStyleSheet(input_style)
+        self.count_input.setProperty("autocomplete_ignore", True)  # 자동완성 무시
         condition_grid.addWidget(self.count_input, 1, 1)
         
         automation_layout.addLayout(condition_grid)
@@ -336,6 +386,8 @@ class AutomationModule(BaseMiddleModule):
         # 완료 시 동작 섹션을 프레임으로 감싸기
         self.finish_frame = QFrame()
         self.finish_frame.setLayout(finish_layout)
+        # 시스템 종료 기능 숨김 처리
+        self.finish_frame.setVisible(False)
         automation_layout.addWidget(self.finish_frame)
         
         layout.addWidget(automation_frame)
@@ -396,10 +448,36 @@ class AutomationModule(BaseMiddleModule):
         
         layout.addLayout(button_layout)
         
-        # 상태 표시 레이블
-        self.status_label = QLabel("자동화 대기 중")
-        self.status_label.setStyleSheet(f"{label_style} font-weight: bold; color: #4CAF50;")
-        layout.addWidget(self.status_label)
+        # 상태 표시 프레임 (3줄 분리)
+        status_frame = QFrame()
+        status_frame.setFrameStyle(QFrame.Shape.Box)
+        status_frame.setStyleSheet("background-color: #2a2a2a; border-radius: 5px; padding: 5px;")
+        status_layout = QVBoxLayout(status_frame)
+        status_layout.setSpacing(2)
+        
+        # 통일된 폰트 크기 설정
+        status_font_size = get_scaled_font_size(13)
+        
+        # 1. 자동화 카운트 라벨
+        self.automation_count_label = QLabel("🌐 자동화 대기 중")
+        self.automation_count_label.setStyleSheet(f"{label_style} font-weight: bold; font-size: {status_font_size}px; color: #4CAF50;")
+        status_layout.addWidget(self.automation_count_label)
+        
+        # 2. 반복 생성 정보 라벨
+        self.repeat_info_label = QLabel("")
+        self.repeat_info_label.setStyleSheet(f"{label_style} font-size: {status_font_size}px; color: #2196F3;")
+        self.repeat_info_label.setVisible(False)  # 초기에는 숨김
+        status_layout.addWidget(self.repeat_info_label)
+        
+        # 3. 지연시간 라벨
+        self.delay_info_label = QLabel("")
+        self.delay_info_label.setStyleSheet(f"{label_style} font-size: {status_font_size}px; color: #9C27B0;")
+        status_layout.addWidget(self.delay_info_label)
+        
+        layout.addWidget(status_frame)
+        
+        # 기존 status_label 호환성을 위해 별칭 설정
+        self.status_label = self.automation_count_label
         
         # 라디오 버튼 시그널 연결
         self.automation_type_group.buttonClicked.connect(self.on_automation_type_changed)
@@ -416,19 +494,22 @@ class AutomationModule(BaseMiddleModule):
             self.timer_input.setVisible(False)
             self.count_label.setVisible(False)
             self.count_input.setVisible(False)
+            # 시스템 종료 옵션 항상 숨김
             self.finish_frame.setVisible(False)
         elif self.timer_radio.isChecked():
             self.timer_label.setVisible(True)
             self.timer_input.setVisible(True)
             self.count_label.setVisible(False)
             self.count_input.setVisible(False)
-            self.finish_frame.setVisible(True)
+            # 시스템 종료 옵션 항상 숨김
+            self.finish_frame.setVisible(False)
         elif self.count_radio.isChecked():
             self.timer_label.setVisible(False)
             self.timer_input.setVisible(False)
             self.count_label.setVisible(True)
             self.count_input.setVisible(True)
-            self.finish_frame.setVisible(True)
+            # 시스템 종료 옵션 항상 숨김
+            self.finish_frame.setVisible(False)
 
     def on_delay_text_changed(self, text: str):
         """지연 시간 텍스트 변경 시 처리"""
@@ -473,28 +554,67 @@ class AutomationModule(BaseMiddleModule):
         
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.status_label.setText("자동화 설정이 적용되었습니다.")
-        self.status_label.setStyleSheet("color: #FF9800; font-weight: bold;")
+        
+        # 초기 상태를 자동화 카운트 라벨에 표시
+        if hasattr(self, 'automation_count_label'):
+            if automation_type == "timer":
+                self.automation_count_label.setText(f"⏰ 자동화 시작 ({timer_minutes}분)")
+            elif automation_type == "count":
+                self.automation_count_label.setText(f"🔢 자동화 시작 ({count_limit}회)")
+            else:
+                self.automation_count_label.setText("♾️ 자동화 시작 (무제한)")
+            self.automation_count_label.setStyleSheet(f"font-weight: bold; font-size: {get_scaled_font_size(13)}px; color: #FF9800;")
+        
+        # 반복 생성 및 지연시간 라벨 초기화
+        if hasattr(self, 'repeat_info_label'):
+            self.repeat_info_label.setText("")
+        if hasattr(self, 'delay_info_label'):
+            self.delay_info_label.setText("")
     
     def stop_automation(self):
         """자동화 중단"""
         self.automation_controller.stop_automation()
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        self.status_label.setText("자동화 설정이 중단되었습니다.")
-        self.status_label.setStyleSheet("color: #F44336; font-weight: bold;")
+        
+        if hasattr(self, 'automation_count_label'):
+            self.automation_count_label.setText("🚫 자동화 중단됨")
+            self.automation_count_label.setStyleSheet(f"font-weight: bold; font-size: {get_scaled_font_size(13)}px; color: #F44336;")
+        if hasattr(self, 'repeat_info_label'):
+            self.repeat_info_label.setText("")
+        if hasattr(self, 'delay_info_label'):
+            self.delay_info_label.setText("")
     
     def on_automation_finished(self):
         """자동화 완료 시 처리"""
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        self.status_label.setText("자동화 완료")
-        self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        
+        if hasattr(self, 'automation_count_label'):
+            self.automation_count_label.setText("✅ 자동화 완료")
+            self.automation_count_label.setStyleSheet(f"font-weight: bold; font-size: {get_scaled_font_size(13)}px; color: #4CAF50;")
+        if hasattr(self, 'repeat_info_label'):
+            self.repeat_info_label.setText("")
+        if hasattr(self, 'delay_info_label'):
+            self.delay_info_label.setText("")
+        
+        # 자동 생성 버튼 체크 해제
+        try:
+            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'generation_checkboxes'):
+                auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
+                if auto_generate_checkbox and auto_generate_checkbox.isChecked():
+                    auto_generate_checkbox.setChecked(False)
+                    print("✅ 자동화 완료: 자동 생성 체크박스 해제")
+        except Exception as e:
+            print(f"⚠️ 자동 생성 체크박스 해제 실패: {e}")
     
     def on_progress_updated(self, text: str):
         """진행 상황 업데이트"""
-        if self.automation_status_callback:
-            self.automation_status_callback(text)
+        # 자동화 카운트 라벨에 표시
+        if hasattr(self, 'automation_count_label') and self.automation_count_label:
+            self.automation_count_label.setText(text)
+            # 진행 중일 때는 주황색으로 표시
+            self.automation_count_label.setStyleSheet(f"font-weight: bold; font-size: {get_scaled_font_size(13)}px; color: #FF9800;")
     
     def set_automation_status_callback(self, callback):
         """자동화 상태 업데이트 콜백 등록"""
@@ -514,15 +634,22 @@ class AutomationModule(BaseMiddleModule):
     
     def get_generation_delay(self) -> float:
         """현재 지연 시간을 반환 (랜덤 지연 고려)"""
+        # 자동화가 비활성화된 경우 지연시간 0 반환
+        if not (self.automation_controller and self.automation_controller.is_running):
+            return 0.0
+            
         delay = self.delay_seconds
         
         try:
             if (hasattr(self, 'random_delay_checkbox') and 
                 self.random_delay_checkbox and 
                 self.random_delay_checkbox.isChecked()):
+                original_delay = delay
                 variation = delay * 0.5
                 delay += random.uniform(-variation, variation)
                 delay = max(0.0, delay)
+                if delay != original_delay:
+                    print(f"🎲 랜덤 지연 적용: {original_delay:.1f}초 → {delay:.1f}초")
         except (AttributeError, RuntimeError):
             pass
         
@@ -533,49 +660,88 @@ class AutomationModule(BaseMiddleModule):
         if self.automation_controller and self.automation_controller.automation_type == "count":
             self.automation_controller.decrement_count()
         
-        self.handle_repeat_generation()
+        return self.handle_repeat_generation()
     
     def handle_repeat_generation(self):
         """반복 생성 처리"""
-        if self.get_auto_generate_status_callback:
-            auto_generate_enabled = self.get_auto_generate_status_callback()
-            if not auto_generate_enabled:
-                return True
+        # 자동 생성 체크박스 확인
+        try:
+            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'generation_checkboxes'):
+                auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
+                if not (auto_generate_checkbox and auto_generate_checkbox.isChecked()):
+                    # 자동 생성이 비활성화되면 카운터 리셋
+                    self.current_repeat_count = 0
+                    print("ℹ️ 자동 생성이 비활성화되어 반복 생성을 중단합니다.")
+                    return True
+        except Exception as e:
+            print(f"⚠️ 자동 생성 상태 확인 실패: {e}")
+            return True
         
-        if self.get_automation_active_status_callback:
-            automation_active = self.get_automation_active_status_callback()
-            if not automation_active:
-                print("ℹ️ 자동화 설정이 비활성화되어 있어 반복 생성을 무시하고 다음 프롬프트로 진행합니다.")
-                return True
+        # 자동화 활성 상태 확인 - 자동화가 활성화되지 않았으면 반복 생성 사용 안 함
+        if not (self.automation_controller and self.automation_controller.is_running):
+            # 자동화가 아닌 경우 반복 생성 기능 비활성화
+            # 반복 정보 라벨 숨김
+            if hasattr(self, 'repeat_info_label') and self.repeat_info_label:
+                self.repeat_info_label.setText("")
+                self.repeat_info_label.setVisible(False)
+            return True
         
         try:
             repeat_count = int(self.repeat_input.text()) if hasattr(self, 'repeat_input') and self.repeat_input and self.repeat_input.text() else 1
         except (ValueError, AttributeError, RuntimeError):
             repeat_count = 1
         
-        if not hasattr(self, 'current_repeat_count'):
-            self.current_repeat_count = 0
+        # 반복 횟수가 1인 경우 반복 생성 사용 안 함
+        if repeat_count <= 1:
+            # 반복 정보 라벨 숨김
+            if hasattr(self, 'repeat_info_label') and self.repeat_info_label:
+                self.repeat_info_label.setText("")
+                self.repeat_info_label.setVisible(False)
+            return True
         
-        self.current_repeat_count += 1
+        # 초기화되지 않았거나 리셋된 경우 0으로 설정
+        if not hasattr(self, 'current_repeat_count') or self.current_repeat_count == 0:
+            self.current_repeat_count = 1  # 첫 번째 생성으로 설정
+        else:
+            self.current_repeat_count += 1
+        
+        # 반복 정보 라벨 표시
+        if hasattr(self, 'repeat_info_label') and self.repeat_info_label:
+            self.repeat_info_label.setVisible(True)
         
         print(f"🔄 반복 생성: {self.current_repeat_count}/{repeat_count}")
         
         if self.current_repeat_count >= repeat_count:
             self.current_repeat_count = 0
             print(f"✅ 반복 완료 ({repeat_count}회), 다음 프롬프트로 진행")
+            # 반복 정보 라벨 숨김
+            if hasattr(self, 'repeat_info_label') and self.repeat_info_label:
+                self.repeat_info_label.setText("")
+                self.repeat_info_label.setVisible(False)
             return True
         else:
             remaining = repeat_count - self.current_repeat_count
             print(f"🔁 동일 프롬프트로 재생성 ({remaining}회 남음)")
             
-            if self.automation_status_callback:
-                self.automation_status_callback(f"🔁 반복 생성 중... ({remaining}회 남음)")
+            # 반복 생성 정보를 중간 라인에 표시
+            if hasattr(self, 'repeat_info_label') and self.repeat_info_label:
+                self.repeat_info_label.setText(f"🔁 반복 생성: {self.current_repeat_count}/{repeat_count} ({remaining}회 남음)")
+                self.repeat_info_label.setVisible(True)
             
-            delay = self.get_generation_delay()
-            if delay > 0:
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(int(delay * 1000), self.trigger_repeat_generation)
+            # 자동화가 활성화된 경우에만 지연시간 적용
+            if self.automation_controller and self.automation_controller.is_running:
+                delay = self.get_generation_delay()
+                if delay > 0:
+                    print(f"⏱️ 반복 생성 지연: {delay:.1f}초 후 실행")
+                    if hasattr(self, 'delay_info_label') and self.delay_info_label:
+                        self.start_delay_countdown(delay)
+                else:
+                    if hasattr(self, 'delay_info_label') and self.delay_info_label:
+                        self.delay_info_label.setText("⚡ 지연 없음")
+                    self.trigger_repeat_generation()
             else:
+                # 자동화 비활성 시 지연 없이 즉시 실행
+                print("ℹ️ 자동화 비활성 - 지연 없이 반복 생성")
                 self.trigger_repeat_generation()
             
             return False
@@ -583,22 +749,25 @@ class AutomationModule(BaseMiddleModule):
     def trigger_repeat_generation(self):
         """반복 생성 트리거"""
         try:
-            if self.automation_status_callback:
-                try:
-                    repeat_count = int(self.repeat_input.text()) if self.repeat_input and self.repeat_input.text() else 1
-                except:
-                    repeat_count = 1
-                remaining = repeat_count - self.current_repeat_count
-                self.automation_status_callback(f"🔁 반복 생성 중... ({remaining}회 남음)")
+            # 카운트다운 스레드 정지
+            if hasattr(self, 'countdown_thread') and self.countdown_thread and self.countdown_thread.isRunning():
+                self.countdown_thread.stop()
+                self.countdown_thread.wait()
             
-            from PyQt6.QtWidgets import QApplication
-            app = QApplication.instance()
-            if app:
-                for widget in app.topLevelWidgets():
-                    if hasattr(widget, 'generation_controller'):
-                        if not (hasattr(widget.generation_controller, 'is_generating') and widget.generation_controller.is_generating):
-                            widget.generation_controller.execute_generation_pipeline()
-                        break
+            # 지연 라벨 초기화
+            if hasattr(self, 'delay_info_label') and self.delay_info_label:
+                self.delay_info_label.setText("")
+            
+            # 더 안정적인 generation_controller 접근
+            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'generation_controller'):
+                generation_controller = self.context.main_window.generation_controller
+                if not (hasattr(generation_controller, 'is_generating') and generation_controller.is_generating):
+                    generation_controller.execute_generation_pipeline()
+                    print(f"🔁 반복 생성 트리거 성공")
+                else:
+                    print("⚠️ 이미 생성 중이므로 반복 생성 대기")
+            else:
+                print("❌ generation_controller를 찾을 수 없음")
                         
         except Exception as e:
             print(f"❌ 반복 생성 트리거 실패: {e}")
@@ -606,7 +775,92 @@ class AutomationModule(BaseMiddleModule):
     def reset_repeat_counter(self):
         """반복 카운터 리셋"""
         self.current_repeat_count = 0
+        # 반복 정보 라벨 숨김
+        if hasattr(self, 'repeat_info_label') and self.repeat_info_label:
+            self.repeat_info_label.setText("")
+            self.repeat_info_label.setVisible(False)
         print("🔄 반복 카운터 리셋")
+    
+    def start_delay_countdown(self, delay_seconds: float):
+        """지연 시간 카운트다운 시작"""
+        try:
+            # 기존 스레드 정리
+            if hasattr(self, 'countdown_thread') and self.countdown_thread:
+                if self.countdown_thread.isRunning():
+                    self.countdown_thread.stop()
+                    self.countdown_thread.wait()
+                self.countdown_thread.deleteLater()
+            
+            # 새 카운트다운 스레드 생성
+            self.countdown_thread = DelayCountdownThread(delay_seconds)
+            self.countdown_thread.progress_updated.connect(self.update_delay_label)
+            self.countdown_thread.countdown_finished.connect(self.trigger_repeat_generation)
+            self.countdown_thread.start()
+            
+            print(f"⏱️ 카운트다운 시작: {delay_seconds:.1f}초")
+            
+        except Exception as e:
+            print(f"❌ 카운트다운 시작 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            # 실패 시 즉시 트리거
+            QTimer.singleShot(int(delay_seconds * 1000), self.trigger_repeat_generation)
+    
+    def update_delay_label(self, text: str):
+        """지연 라벨 업데이트"""
+        if hasattr(self, 'delay_info_label') and self.delay_info_label:
+            self.delay_info_label.setText(text)
+    
+    def start_delay_countdown_for_new_prompt(self, delay_seconds: float):
+        """새 프롬프트 생성을 위한 지연 카운트다운 시작 (NAIA_cold_v4.py에서 호출)"""
+        try:
+            # 기존 스레드 정리
+            if hasattr(self, 'countdown_thread') and self.countdown_thread:
+                if self.countdown_thread.isRunning():
+                    self.countdown_thread.stop()
+                    self.countdown_thread.wait()
+                self.countdown_thread.deleteLater()
+            
+            # 새 카운트다운 스레드 생성
+            self.countdown_thread = DelayCountdownThread(delay_seconds)
+            self.countdown_thread.progress_updated.connect(self.update_delay_label)
+            # 새 프롬프트 생성을 위한 콜백 연결
+            self.countdown_thread.countdown_finished.connect(self.trigger_new_prompt_generation)
+            self.countdown_thread.start()
+            
+            print(f"⏱️ 새 프롬프트 카운트다운 시작: {delay_seconds:.1f}초")
+            
+        except Exception as e:
+            print(f"❌ 새 프롬프트 카운트다운 시작 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            # 실패 시 즉시 트리거
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(int(delay_seconds * 1000), self.trigger_new_prompt_generation)
+    
+    def trigger_new_prompt_generation(self):
+        """새 프롬프트 생성 트리거 (카운트다운 완료 후)"""
+        try:
+            # 새 프롬프트 생성 트리거
+            
+            # 카운트다운 스레드 정지
+            if hasattr(self, 'countdown_thread') and self.countdown_thread and self.countdown_thread.isRunning():
+                self.countdown_thread.stop()
+                self.countdown_thread.wait()
+            
+            # 지연 라벨 초기화
+            if hasattr(self, 'delay_info_label') and self.delay_info_label:
+                self.delay_info_label.setText("")
+            
+            # 메인 윈도우의 자동 생성 트리거 호출
+            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, '_check_and_trigger_auto_generation'):
+                self.context.main_window._check_and_trigger_auto_generation()
+                print("✅ 새 프롬프트 생성 트리거 성공")
+            else:
+                print("❌ _check_and_trigger_auto_generation 메서드를 찾을 수 없음")
+                
+        except Exception as e:
+            print(f"❌ 새 프롬프트 생성 트리거 실패: {e}")
     
     def get_parameters(self) -> dict:
         """모듈 파라미터 반환"""

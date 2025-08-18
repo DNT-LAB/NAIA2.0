@@ -330,7 +330,7 @@ class GenerationController:
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
         
-        # UI 업데이트 (이제 is_generating이 False이므로 자동 생성이 가능)
+        # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         self.context.main_window.update_ui_with_result(result)
 
     def _on_generation_error(self, error_message: str):

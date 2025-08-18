@@ -145,3 +145,5 @@ CLAUDE.md
 app_settings.json
 .claude/settings.local.json
 /tabs/assets/characters
+data/artist_thumbnail.json
+data/artist_thumbnail_nai.json

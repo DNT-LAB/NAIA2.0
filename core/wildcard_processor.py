@@ -15,12 +15,35 @@ class WildcardProcessor:
         """
         expanded_list = []
         for tag in tag_list:
-            expanded_list.extend(self._expand_recursive(tag, context))
+            # $ 로 시작하는 인스턴트 와일드카드 처리
+            if tag.startswith('$'):
+                instant_key = tag[1:].strip()  # $ 제거
+                if instant_key in self.wildcard_manager.instant_wildcard_dict:
+                    # 인스턴트 와일드카드의 값으로 대체
+                    instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
+                    # 값을 콤마로 분리하여 개별 태그로 추가
+                    instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
+                    expanded_list.extend(instant_tags)
+                else:
+                    # 인스턴트 와일드카드를 찾을 수 없으면 원본 유지
+                    expanded_list.append(tag)
+            else:
+                # 일반 와일드카드 처리
+                expanded_list.extend(self._expand_recursive(tag, context))
         return expanded_list
 
     def _expand_recursive(self, tag: str, context: PromptContext, depth=0) -> List[str]:
         """하나의 태그를 재귀적으로 확장합니다."""
         if depth > 10: return [tag]
+        
+        # $ 로 시작하는 인스턴트 와일드카드 처리 (재귀 호출에서도)
+        if tag.startswith('$'):
+            instant_key = tag[1:].strip()
+            if instant_key in self.wildcard_manager.instant_wildcard_dict:
+                instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
+                instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
+                return instant_tags
+            return [tag]
 
         if tag.startswith('<') and tag.endswith('>'):
             wildcard_name = tag[1:-1]

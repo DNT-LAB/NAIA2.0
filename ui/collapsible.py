@@ -104,7 +104,7 @@ class EnhancedCollapsibleBox(QWidget):
             except RuntimeError:
                 print(f"❌ 모듈 '{self.title}'의 위젯이 이미 삭제되었습니다.")
         else:
-            print(f"⚠️ 모듈 '{self.title}': content_widget이 None이거나 이미 분리된 상태입니다.")
+            print(f"[WARNING] Module '{self.title}': content_widget is None or already detached")
 
     def on_toggled(self, checked):
         """접기/펼치기 토글"""
@@ -124,7 +124,7 @@ class EnhancedCollapsibleBox(QWidget):
             print(f"⚠️ 모듈 '{self.title}': 레이아웃이 None입니다.")
             return
             
-        print(f"🔧 '{self.title}' 콘텐츠 설정 중...")
+        print(f"[CONFIG] Setting content for '{self.title}'...")
         print(f"   - 입력 레이아웃: {layout}")
         print(f"   - 레이아웃 타입: {type(layout).__name__}")
         
@@ -145,11 +145,11 @@ class EnhancedCollapsibleBox(QWidget):
         print(f"   - 생성된 content_widget: {content_widget}")
         print(f"   - content_widget 크기: {content_widget.size()}")
         print(f"   - content_widget 레이아웃: {content_widget.layout()}")
-        print(f"✅ 모듈 '{self.title}': 콘텐츠 위젯 설정 완료")
+        print(f"[OK] Module '{self.title}': Content widget setup complete")
 
     def request_detach(self):
         """모듈 분리 요청 (디버깅 강화 버전)"""
-        print(f"🔗 모듈 분리 요청: {self.title}")
+        print(f"[DETACH] Module detach request: {self.title}")
         print(f"   - content_widget: {self.content_widget}")
         print(f"   - is_detached: {self.is_detached}")
         
@@ -165,15 +165,15 @@ class EnhancedCollapsibleBox(QWidget):
                 self.module_detach_requested.emit(self.title, self.content_widget)
                 
             except RuntimeError as e:
-                print(f"❌ 모듈 '{self.title}'의 위젯이 이미 삭제되었습니다: {e}")
+                print(f"[ERROR] Module '{self.title}' widget already deleted: {e}")
         else:
-            print(f"⚠️ 모듈 '{self.title}': content_widget이 None이거나 이미 분리된 상태입니다.")
+            print(f"[WARNING] Module '{self.title}': content_widget is None or already detached")
             print(f"   - content_widget is None: {self.content_widget is None}")
             print(f"   - is_detached: {self.is_detached}")
 
     def set_detached_state(self, is_detached: bool):
         """분리 상태 설정 (디버깅 강화 버전)"""
-        print(f"🔧 '{self.title}' 분리 상태 변경: {self.is_detached} → {is_detached}")
+        print(f"[CONFIG] Detach state change for '{self.title}': {self.is_detached} -> {is_detached}")
         
         self.is_detached = is_detached
         

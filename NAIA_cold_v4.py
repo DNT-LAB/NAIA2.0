@@ -2965,11 +2965,49 @@ class ModernMainWindow(QMainWindow):
         # 기본 스타일의 QMenu 생성 (스타일시트 적용 없음)
         menu = self.negative_prompt_textedit.createStandardContextMenu()
         if menu:
+            # 선택된 텍스트가 있으면 인스턴트 와일드카드 추가 메뉴 표시
+            cursor = self.negative_prompt_textedit.textCursor()
+            selected_text = cursor.selectedText().strip()
+            
+            if selected_text:
+                # 인스턴트 와일드카드 모듈 찾기
+                instant_wildcard_module = None
+                if hasattr(self, 'middle_section_controller'):
+                    instant_wildcard_module = self.middle_section_controller.get_module_instance("InstantWildcardModule")
+                
+                if instant_wildcard_module:
+                    # 상단에 액션 삽입
+                    actions = menu.actions()
+                    add_wildcard_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                    add_wildcard_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                    
+                    if actions:
+                        menu.insertAction(actions[0], add_wildcard_action)
+                        menu.insertSeparator(actions[0])
+                    else:
+                        menu.addAction(add_wildcard_action)
+            
             menu.exec(self.negative_prompt_textedit.mapToGlobal(pos))
     
     def show_prompt_context_menu(self, pos):
         """main_prompt_textedit에서 우클릭 시 KR_tags 정보를 포함한 커스텀 메뉴를 표시합니다."""
         menu = QMenu(self)
+
+        # --- 0. 선택된 텍스트가 있으면 인스턴트 와일드카드 추가 메뉴 표시 ---
+        cursor = self.main_prompt_textedit.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        if selected_text:
+            # 인스턴트 와일드카드 모듈 찾기
+            instant_wildcard_module = None
+            if hasattr(self, 'middle_section_controller'):
+                instant_wildcard_module = self.middle_section_controller.get_module_instance("InstantWildcardModule")
+            
+            if instant_wildcard_module:
+                add_wildcard_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                add_wildcard_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                menu.addAction(add_wildcard_action)
+                menu.addSeparator()
 
         # --- 1. 커서 위치의 태그 찾기 ---
         cursor = self.main_prompt_textedit.cursorForPosition(pos)

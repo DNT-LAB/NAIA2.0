@@ -1,6 +1,6 @@
 import re
 from PyQt6.QtCore import QObject, QEvent, Qt, QTimer
-from PyQt6.QtWidgets import QApplication, QListWidget, QWidget, QLineEdit, QTextEdit
+from PyQt6.QtWidgets import QApplication, QListWidget, QWidget, QLineEdit, QTextEdit, QHBoxLayout, QTextBrowser
 from PyQt6.QtGui import QTextCursor, QKeyEvent
 
 # ✅ 전역 인스턴스 (싱글턴 패턴 대체)
@@ -84,9 +84,16 @@ class AutoCompleteManager(QObject):
         # 자동완성 리스트 위젯 (지연 생성)
         self.suggestion_list = None
         
+        # 인스턴트 와일드카드용 값 표시 위젯
+        self.value_display = None
+        self.value_container = None
+        
         # 현재 활성 위젯
         self.current_widget = None
         self.current_suggestions = []
+        
+        # 인스턴트 와일드카드 딕셔너리 캐시
+        self.instant_wildcards = {}
         
         # 설정
         self.min_chars = 2
@@ -149,7 +156,8 @@ class AutoCompleteManager(QObject):
     def _create_popup(self) -> QListWidget:
         """자동완성 목록을 보여줄 팝업 위젯 생성"""
         list_widget = QListWidget()
-        list_widget.setWindowFlags(Qt.WindowType.ToolTip)
+        list_widget.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        list_widget.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         
         # 팝업 크기 설정
         list_widget.setMinimumWidth(350)  # 최소 너비
@@ -203,7 +211,12 @@ class AutoCompleteManager(QObject):
             self.on_key_release(watched, event)
         elif event.type() == QEvent.Type.FocusOut:
             # 약간의 지연을 주어, 팝업 클릭 시 바로 닫히지 않도록 함
-            QTimer.singleShot(100, lambda: self.popup.hide() if self.popup and not self.popup.hasFocus() else None)
+            QTimer.singleShot(100, self._hide_popups_if_not_focused)
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            # 마우스 클릭 시 커서 위치 변경 감지하여 팝업 닫기
+            if self.popup and self.popup.isVisible():
+                # 클릭 후 커서 위치 체크를 위해 지연 실행
+                QTimer.singleShot(50, lambda: self._check_cursor_position_and_close(watched))
 
         return super().eventFilter(watched, event)
 
@@ -259,14 +272,18 @@ class AutoCompleteManager(QObject):
         if not hasattr(self, 'enabled'):
             self.enabled = False
         self.enabled = False
-        if self.popup and self.popup.isVisible():
-            self.popup.hide()
+        self._hide_all_popups()
         print("Autocomplete disabled.")
 
     def on_key_release(self, widget: QWidget, event: QKeyEvent):
         """키 입력이 끝나면 타이머를 시작하여 자동완성 팝업을 띄울 준비"""
         nav_keys = [Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, Qt.Key.Key_Escape]
-        if event.key() not in nav_keys:
+        
+        # 방향키(좌우)로 커서가 이동한 경우 팝업 닫기 체크
+        if event.key() in [Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Home, Qt.Key.Key_End]:
+            if self.popup and self.popup.isVisible():
+                self._check_cursor_position_and_close(widget)
+        elif event.key() not in nav_keys:
             self.current_widget = widget
             self.timer.start(200)
 
@@ -282,11 +299,20 @@ class AutoCompleteManager(QObject):
         # 현재 활성 토큰 정보 가져오기
         token_info = self._get_active_token_info(self.current_widget)
         if not token_info or len(token_info['stripped_text']) < 1:
-            self.popup.hide()
+            self._hide_all_popups()
             return
             
         self.active_token_info = token_info
         target_text = token_info['stripped_text']
+        
+        # $ 로 시작하는 경우 인스턴트 와일드카드 처리
+        if target_text.startswith('$'):
+            self._show_instant_wildcard_completions(target_text[1:])  # $ 제거하고 전달
+            return
+        
+        # 인스턴트 와일드카드가 아닌 경우 값 표시 패널 숨기기
+        if self.value_container:
+            self.value_container.hide()
         
         # wildcard_manager가 있다면 추가 와일드카드도 전달
         additional_wildcards = None
@@ -297,7 +323,7 @@ class AutoCompleteManager(QObject):
         try:
             if not self.tag_data_manager:
                 print("⚠️ tag_data_manager가 없습니다")
-                self.popup.hide()
+                self._hide_all_popups()
                 return
                 
             matches = self.tag_data_manager.find_top_matches(
@@ -306,12 +332,12 @@ class AutoCompleteManager(QObject):
             )
         except Exception as e:
             print(f"⚠️ 자동완성 검색 중 오류: {e}")
-            self.popup.hide()
+            self._hide_all_popups()
             return
         
         # 매칭 결과가 없으면 팝업 숨기기
         if not matches:
-            self.popup.hide()
+            self._hide_all_popups()
             return
             
         # 팝업에 결과 표시 (태그명 + count 포함)
@@ -377,9 +403,15 @@ class AutoCompleteManager(QObject):
         widget = self.current_widget
         info = self.active_token_info
         
-        # 괄호 구조 복원
-        if not self.app_context.current_api_mode == "NAI":
-            completion_text = completion_text.replace('(', r'\(').replace(')', r'\)')
+        # 인스턴트 와일드카드인 경우 값이 그대로 삽입됨 ($ 없이)
+        if info['stripped_text'].startswith('$'):
+            # completion_text는 이미 값이므로 그대로 사용
+            pass
+        else:
+            # 일반 태그인 경우 괄호 구조 복원
+            if not self.app_context.current_api_mode == "NAI":
+                completion_text = completion_text.replace('(', r'\(').replace(')', r'\)')
+        
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
 
         if isinstance(widget, QTextEdit):
@@ -392,7 +424,7 @@ class AutoCompleteManager(QObject):
             new_text = current_text[:info['start']] + final_text + current_text[info['end']:]
             widget.setText(new_text)
         
-        self.popup.hide()
+        self._hide_all_popups()
         widget.setFocus() # 텍스트 완성 후 원래 위젯으로 포커스 복귀
 
     def handle_popup_navigation(self, event: QKeyEvent) -> bool:
@@ -401,17 +433,18 @@ class AutoCompleteManager(QObject):
         if key in [Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab]:
             current_item = self.popup.currentItem()
             if current_item:
-                # UserRole에서 실제 태그명 가져오기
-                actual_tag = current_item.data(Qt.ItemDataRole.UserRole)
-                if actual_tag:
-                    self.complete_text(actual_tag)
+                # UserRole에서 실제 값/태그명 가져오기
+                # 인스턴트 와일드카드의 경우 값이, 일반 태그의 경우 태그명이 저장됨
+                actual_value = current_item.data(Qt.ItemDataRole.UserRole)
+                if actual_value:
+                    self.complete_text(actual_value)
                 else:
                     # 폴백: 텍스트에서 태그명 추출
                     display_text = current_item.text()
                     tag_name = display_text.split()[0] if display_text else ""
                     self.complete_text(tag_name)
             else:
-                self.popup.hide()
+                self._hide_all_popups()
             return True
         elif key == Qt.Key.Key_Up:
             self.popup.setCurrentRow(max(0, self.popup.currentRow() - 1))
@@ -420,7 +453,7 @@ class AutoCompleteManager(QObject):
             self.popup.setCurrentRow(min(self.popup.count() - 1, self.popup.currentRow() + 1))
             return True
         elif key == Qt.Key.Key_Escape:
-            self.popup.hide()
+            self._hide_all_popups()
             return True
         return False
         
@@ -478,3 +511,186 @@ class AutoCompleteManager(QObject):
     def _restore_brackets(self, keyword, prefix, suffix):
         """분리했던 괄호를 다시 합칩니다."""
         return f"{prefix}{keyword}{suffix}"
+    
+    def _check_cursor_position_and_close(self, widget: QWidget):
+        """커서 위치가 현재 편집 중인 토큰을 벗어났는지 확인하고 팝업을 닫습니다."""
+        if not self.popup or not self.popup.isVisible():
+            return
+        
+        # 현재 커서 위치의 토큰 정보 가져오기
+        current_token_info = self._get_active_token_info(widget)
+        
+        # 이전에 저장된 토큰 정보와 비교
+        if hasattr(self, 'active_token_info') and self.active_token_info:
+            # 커서가 다른 토큰으로 이동했거나 토큰 범위를 벗어난 경우
+            if (not current_token_info or 
+                current_token_info['start'] != self.active_token_info['start'] or
+                current_token_info['end'] != self.active_token_info['end']):
+                self._hide_all_popups()
+                self.active_token_info = None
+    
+    def _hide_popups_if_not_focused(self):
+        """포커스가 없으면 모든 팝업을 숨깁니다."""
+        if self.popup and not self.popup.hasFocus():
+            self._hide_all_popups()
+    
+    def _hide_all_popups(self):
+        """모든 팝업(리스트와 값 표시)을 숨깁니다."""
+        if self.popup:
+            self.popup.hide()
+        if self.value_container:
+            self.value_container.hide()
+    
+    def _get_instant_wildcards(self):
+        """인스턴트 와일드카드 딕셔너리를 가져옵니다."""
+        try:
+            # middle_section_controller를 통해 InstantWildcardModule 접근
+            if self.main_window and hasattr(self.main_window, 'middle_section_controller'):
+                instant_module = self.main_window.middle_section_controller.get_module_instance("InstantWildcardModule")
+                if instant_module:
+                    return instant_module.get_wildcards()
+        except Exception as e:
+            print(f"⚠️ 인스턴트 와일드카드 가져오기 실패: {e}")
+        return {}
+    
+    def _show_instant_wildcard_completions(self, search_text: str):
+        """인스턴트 와일드카드 자동완성을 표시합니다."""
+        # 인스턴트 와일드카드 딕셔너리 가져오기
+        self.instant_wildcards = self._get_instant_wildcards()
+        
+        if not self.instant_wildcards:
+            self._hide_all_popups()
+            return
+        
+        # 검색어와 매칭되는 와일드카드 키 찾기
+        matching_keys = []
+        for key in self.instant_wildcards.keys():
+            if not search_text or key.lower().startswith(search_text.lower()):
+                matching_keys.append(key)
+        
+        if not matching_keys:
+            self._hide_all_popups()
+            return
+        
+        # 최대 10개까지만 표시
+        matching_keys = matching_keys[:self.max_suggestions]
+        
+        # 팝업에 키 목록 표시
+        self.popup.clear()
+        self._populate_instant_wildcard_popup(matching_keys)
+        
+        # 값 표시 패널 생성 및 업데이트
+        if not self.value_container:
+            self._create_value_display()
+        
+        # 첫 번째 항목의 값 표시
+        if matching_keys:
+            self._update_value_display(matching_keys[0])
+        
+        # 팝업과 값 패널 위치 조정
+        self.popup_at_cursor_with_value()
+    
+    def _create_value_display(self):
+        """인스턴트 와일드카드 값을 표시할 패널을 생성합니다."""
+        self.value_container = QWidget()
+        self.value_container.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.value_container.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        layout = QHBoxLayout(self.value_container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.value_display = QTextBrowser()
+        self.value_display.setReadOnly(True)
+        self.value_display.setMinimumWidth(300)
+        self.value_display.setMaximumWidth(400)
+        
+        self.value_display.setStyleSheet("""
+            QTextBrowser {
+                border: 1px solid #444;
+                background-color: #1E1E1E;
+                color: #CCCCCC;
+                font-size: 14px;
+                padding: 12px;
+                font-family: 'Consolas', 'Courier New', monospace;
+            }
+        """)
+        
+        layout.addWidget(self.value_display)
+    
+    def _populate_instant_wildcard_popup(self, keys):
+        """인스턴트 와일드카드 키를 팝업에 표시합니다."""
+        from PyQt6.QtWidgets import QListWidgetItem
+        from PyQt6.QtCore import Qt
+        
+        for key in keys:
+            # $ 없이 키만 표시
+            display_text = key
+            item = QListWidgetItem(display_text)
+            
+            # 실제 값을 UserRole에 저장 (선택 시 값이 삽입됨)
+            value = self.instant_wildcards.get(key, "")
+            item.setData(Qt.ItemDataRole.UserRole, value)
+            
+            # 키 정보는 UserRole + 1에 저장 (값 표시용)
+            item.setData(Qt.ItemDataRole.UserRole + 1, key)
+            
+            # 툴팁 설정 (값의 미리보기)
+            preview = value[:100] + "..." if len(value) > 100 else value
+            item.setToolTip(f"키: ${key}\n값: {preview}")
+            
+            self.popup.addItem(item)
+        
+        # 선택 변경 시 값 표시 업데이트
+        if not hasattr(self, '_wildcard_selection_connected'):
+            self.popup.currentRowChanged.connect(self._on_wildcard_selection_changed)
+            self._wildcard_selection_connected = True
+    
+    def _on_wildcard_selection_changed(self, row):
+        """와일드카드 선택이 변경될 때 값 표시를 업데이트합니다."""
+        if row >= 0 and row < self.popup.count():
+            item = self.popup.item(row)
+            # UserRole + 1에서 키 정보 가져오기
+            key = item.data(Qt.ItemDataRole.UserRole + 1)
+            if key:
+                self._update_value_display(key)
+    
+    def _update_value_display(self, key: str):
+        """선택된 와일드카드의 값을 표시합니다."""
+        if not self.value_display:
+            return
+        
+        value = self.instant_wildcards.get(key, "")
+        
+        # HTML 포맷팅으로 가독성 향상 (공백 제거)
+        html_content = f"""<div style="color: #CCCCCC; font-family: 'Consolas', 'Courier New', monospace; margin: 0; padding: 0;">
+<div style="color: #569CD6; font-weight: bold; margin-bottom: 8px;">${key}</div>
+<div style="border-top: 1px solid #444; padding-top: 8px; white-space: pre-wrap;">{value}</div>
+</div>"""
+        
+        self.value_display.setHtml(html_content)
+    
+    def popup_at_cursor_with_value(self):
+        """커서 위치에 팝업과 값 표시 패널을 나란히 표시합니다."""
+        if not self.current_widget:
+            return
+        
+        cursor_rect = self.current_widget.cursorRect()
+        cursor_pos_global = self.current_widget.mapToGlobal(cursor_rect.bottomLeft())
+        
+        # 팝업 표시
+        self.popup.move(cursor_pos_global)
+        self.popup.setCurrentRow(0)
+        self.popup.show()
+        
+        # 값 패널을 팝업 오른쪽에 표시
+        if self.value_container:
+            # 팝업 높이에 맞춰서 값 패널 높이 조정
+            self.value_display.setMinimumHeight(self.popup.height())
+            self.value_display.setMaximumHeight(self.popup.height())
+            
+            # 팝업 오른쪽에 위치
+            value_pos = cursor_pos_global
+            value_pos.setX(value_pos.x() + self.popup.width() + 5)
+            self.value_container.move(value_pos)
+            self.value_container.show()

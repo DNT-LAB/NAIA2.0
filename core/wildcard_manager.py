@@ -7,6 +7,7 @@ class WildcardManager:
     def __init__(self):
         self.wildcards_dir = os.path.join(os.getcwd(), 'wildcards')
         self.wildcard_dict_tree = {}
+        self.instant_wildcard_dict = {}  # 인스턴트 와일드카드 딕셔너리
         self.reload_callbacks = []
         self.activate_wildcards()
 
@@ -102,3 +103,14 @@ class WildcardManager:
         현재 로드된 와일드카드 개수를 반환합니다.
         """
         return len(self.wildcard_dict_tree)
+    
+    def update_instant_wildcards(self, instant_dict):
+        """
+        인스턴트 와일드카드 딕셔너리를 업데이트합니다.
+        InstantWildcardModule에서 호출됩니다.
+        """
+        self.instant_wildcard_dict = instant_dict.copy() if instant_dict else {}
+        try:
+            print(f"[OK] 인스턴트 와일드카드 업데이트: {len(self.instant_wildcard_dict)}개")
+        except UnicodeEncodeError:
+            print(f"[OK] Instant wildcards updated: {len(self.instant_wildcard_dict)} items")

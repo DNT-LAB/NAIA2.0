@@ -21,6 +21,10 @@ class DetachedWindow(QMainWindow):
         self.tab_index = tab_index
         self.parent_container = parent_container  # 참조만 저장 (부모 관계 아님)
         
+        # 도킹 관련 속성
+        self.docked_window = None  # 이 창에 도킹된 창
+        self.docked_to = None  # 이 창이 도킹된 대상 창
+        
         # ✅ 완전히 독립적인 윈도우 플래그 설정
         self.setWindowFlags(
             Qt.WindowType.Window |  # 독립 창
@@ -42,6 +46,10 @@ class DetachedWindow(QMainWindow):
         self.init_ui()
         self.setup_widget()
         self.setup_window_controls()
+        
+        # 프롬프트 편집기 창인 경우 도킹 메뉴 추가
+        if "프롬프트" in title:
+            self.setup_docking_menu()
         
     def get_window_icon(self):
         """창 아이콘 설정 (독립 창임을 시각적으로 표시)"""
@@ -78,6 +86,65 @@ class DetachedWindow(QMainWindow):
         self.main_layout.setContentsMargins(8, 8, 8, 8)
         self.main_layout.setSpacing(0)
         
+    def setup_docking_menu(self):
+        """도킹 메뉴 설정 (프롬프트 창 전용)"""
+        menubar = self.menuBar()
+        
+        # 도킹 메뉴 추가
+        docking_menu = menubar.addMenu("도킹 (&D)")
+        docking_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 6px 12px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        
+        # 도킹 토글 액션
+        self.dock_action = QAction("🔗 이미지 결과 창과 도킹", self)
+        self.dock_action.setCheckable(True)
+        self.dock_action.setChecked(False)
+        self.dock_action.triggered.connect(self.toggle_docking)
+        docking_menu.addAction(self.dock_action)
+        
+        docking_menu.addSeparator()
+        
+        # 도킹 정보
+        info_action = QAction("도킹 정보", self)
+        info_action.setEnabled(False)
+        info_action.setText("도킹 시 두 창이 함께 이동합니다")
+        docking_menu.addAction(info_action)
+    
+    def toggle_docking(self, checked):
+        """도킹 모드 토글"""
+        if checked:
+            # 도킹 활성화
+            if self.parent_container and hasattr(self.parent_container, 'image_window'):
+                # 이미지 생성 결과 탭을 도킹 모드로 분리
+                image_window = self.parent_container.image_window.dock_prompt_and_image_tabs(self)
+                if image_window:
+                    print("✅ 프롬프트 탭과 이미지 생성 결과 탭이 도킹되었습니다.")
+                    self.dock_action.setText("🔓 도킹 해제")
+                else:
+                    print("⚠️ 이미지 생성 결과 탭을 도킹할 수 없습니다.")
+                    self.dock_action.setChecked(False)
+        else:
+            # 도킹 해제
+            if self.docked_window:
+                self.docked_window.docked_to = None
+                self.docked_window = None
+                self.dock_action.setText("🔗 이미지 결과 창과 도킹")
+                print("✅ 도킹이 해제되었습니다.")
+    
     def setup_window_controls(self):
         """윈도우 제어 기능 설정"""
         # 메뉴 바 생성
@@ -277,10 +344,68 @@ class DetachedWindow(QMainWindow):
         # ✅ 독립 창이므로 특별한 포커스 처리 불필요
         print(f"🪟 독립 창 '{self.tab_title}' 표시됨")
             
+    def moveEvent(self, event):
+        """창 이동 시 도킹된 창도 함께 이동"""
+        super().moveEvent(event)
+        
+        if self.docked_window and not self.docked_to:
+            # 이 창이 주 창이고 도킹된 창이 있는 경우
+            new_pos = self.pos()
+            self.docked_window.move(new_pos.x() + self.width(), new_pos.y())
+    
+    def changeEvent(self, event):
+        """창 상태 변경 이벤트 (활성화/비활성화 포함)"""
+        super().changeEvent(event)
+        
+        if event.type() == event.Type.ActivationChange:
+            if self.isActiveWindow():
+                # 이 창이 활성화되면 도킹된 창도 앞으로
+                if self.docked_window and not self.docked_to:
+                    # 주 창인 경우에만 부 창을 활성화
+                    self.docked_window.raise_()
+                elif self.docked_to:
+                    # 부 창인 경우 주 창을 활성화
+                    self.docked_to.raise_()
+    
+    def focusInEvent(self, event):
+        """창이 포커스를 받을 때 도킹된 창도 함께 앞으로"""
+        super().focusInEvent(event)
+        
+        if self.docked_window:
+            # 도킹된 창도 앞으로 가져오기
+            self.docked_window.raise_()
+    
+    def raise_(self):
+        """창을 앞으로 가져올 때 도킹된 창도 함께"""
+        super().raise_()
+        
+        if self.docked_window:
+            self.docked_window.raise_()
+    
+    def resizeEvent(self, event):
+        """창 크기 변경 시 도킹된 창도 높이 동기화"""
+        super().resizeEvent(event)
+        
+        if self.docked_window:
+            # 도킹된 창의 높이를 이 창과 동일하게 조정
+            self.docked_window.resize(self.docked_window.width(), self.height())
+            # 위치도 재조정 (너비가 변경된 경우)
+            if not self.docked_to:
+                new_pos = self.pos()
+                self.docked_window.move(new_pos.x() + self.width(), new_pos.y())
+    
     def closeEvent(self, event: QCloseEvent):
         """창이 닫힐 때 위젯을 원래 위치로 되돌림"""
         try:
             print(f"🔄 독립 창 닫기: {self.tab_title}")
+            
+            # 도킹 관계 해제
+            if self.docked_window:
+                self.docked_window.docked_to = None
+                self.docked_window = None
+            if self.docked_to:
+                self.docked_to.docked_window = None
+                self.docked_to = None
             
             # 위젯을 원래 위치로 되돌리기 위한 시그널 발송
             self.window_closed.emit(self.tab_index, self.original_widget)

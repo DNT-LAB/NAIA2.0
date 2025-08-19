@@ -314,6 +314,10 @@ class GenerationController:
         self.is_generating = True
         self.context.main_window.generate_button_main.setEnabled(False)
         self.context.main_window.generate_button_main.setText("🔄 생성 중...")
+        # 분리된 버튼도 비활성화
+        if hasattr(self.context.main_window, 'detached_generate_btn'):
+            self.context.main_window.detached_generate_btn.setEnabled(False)
+            self.context.main_window.detached_generate_btn.setText("🔄 생성 중...")
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
     
     def _on_generation_progress(self, message: str):
@@ -326,6 +330,10 @@ class GenerationController:
         self.is_generating = False
         self.context.main_window.generate_button_main.setEnabled(True)
         self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
+        # 분리된 버튼도 활성화
+        if hasattr(self.context.main_window, 'detached_generate_btn'):
+            self.context.main_window.detached_generate_btn.setEnabled(True)
+            self.context.main_window.detached_generate_btn.setText("🎨 이미지 생성 요청")
         
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
@@ -339,6 +347,10 @@ class GenerationController:
         self.is_generating = False
         self.context.main_window.generate_button_main.setEnabled(True)
         self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
+        # 분리된 버튼도 활성화
+        if hasattr(self.context.main_window, 'detached_generate_btn'):
+            self.context.main_window.detached_generate_btn.setEnabled(True)
+            self.context.main_window.detached_generate_btn.setText("🎨 이미지 생성 요청")
         
         print(f"❌ 생성 오류 발생: {error_message}")
         

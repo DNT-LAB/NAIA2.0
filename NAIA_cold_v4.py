@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
     QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox, QSpinBox, QSlider, QDoubleSpinBox,
-    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog
+    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy
 )
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
@@ -22,7 +22,7 @@ from ui.scaling_settings_dialog import ScalingSettingsDialog
 from ui.collapsible import CollapsibleBox
 from ui.right_view import RightView
 from ui.resolution_manager_dialog import ResolutionManagerDialog
-from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor
+from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
@@ -441,8 +441,8 @@ class ModernMainWindow(QMainWindow):
         self.main_splitter.addWidget(left_panel)
         self.main_splitter.addWidget(self.image_window)
         # FHD 대응: 더 균형잡힌 패널 비율 (45:55)
-        self.main_splitter.setStretchFactor(0, 45)
-        self.main_splitter.setStretchFactor(1, 55)
+        self.main_splitter.setStretchFactor(0, 49)
+        self.main_splitter.setStretchFactor(1, 51)
 
         main_layout.addWidget(self.main_splitter)
 
@@ -500,23 +500,23 @@ class ModernMainWindow(QMainWindow):
         main_layout.setSpacing(6)
 
         # 🚀 핵심 수정: 단일 수직 스플리터로 통합
-        main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.setStyleSheet(CUSTOM["main_splitter"])
+        self.vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.vertical_splitter.setStyleSheet(CUSTOM["main_splitter"])
 
         # === 상단 영역: 검색 + 프롬프트 ===
         top_container = self.create_top_section()
-        main_splitter.addWidget(top_container)
+        self.vertical_splitter.addWidget(top_container)
 
         # === 중간 영역: 자동화 설정들 ===  
         middle_container = self.create_middle_section()
-        main_splitter.addWidget(middle_container)
+        self.vertical_splitter.addWidget(middle_container)
 
         # FHD 대응: 스플리터 비율 설정 (상단 45%, 중간 55%)
-        main_splitter.setStretchFactor(0, 45)
-        main_splitter.setStretchFactor(1, 55)
+        self.vertical_splitter.setStretchFactor(0, 45)
+        self.vertical_splitter.setStretchFactor(1, 55)
         
         # 메인 레이아웃에 스플리터 추가
-        main_layout.addWidget(main_splitter)
+        main_layout.addWidget(self.vertical_splitter)
         main_layout.insertWidget(1, self.img2img_panel)
 
         # === 하단 영역: 확장 가능한 생성 제어 영역 ===
@@ -681,8 +681,41 @@ class ModernMainWindow(QMainWindow):
         """)
         self.save_settings_btn.setToolTip("현재 모든 설정을 저장합니다")
         
-        self.restore_btn = QPushButton("복원")
+        self.restore_btn = QPushButton("⚙️ 복원")
         self.restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        
+        # 복원 버튼에 컨텍스트 메뉴 추가
+        self.restore_menu = QMenu(self)
+        menu_style = f"""
+            QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
+            QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
+            QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
+        """
+        self.restore_menu.setStyleSheet(menu_style)
+        
+        # 메뉴 액션들 추가
+        restore_search_action = QAction("🔄 검색결과 복원", self)
+        restore_search_action.triggered.connect(self.restore_search_results)
+        self.restore_menu.addAction(restore_search_action)
+        
+        load_parquet_action = QAction("📂 불러오기", self)
+        load_parquet_action.triggered.connect(self.load_custom_parquet)
+        self.restore_menu.addAction(load_parquet_action)
+        
+        merge_parquet_action = QAction("🔀 합치기", self)
+        merge_parquet_action.triggered.connect(self.merge_custom_parquet)
+        self.restore_menu.addAction(merge_parquet_action)
+        
+        export_parquet_action = QAction("💾 내보내기", self)
+        export_parquet_action.triggered.connect(self.export_custom_parquet)
+        self.restore_menu.addAction(export_parquet_action)
+        
+        save_execution_action = QAction("🚀 실행파일 저장", self)
+        save_execution_action.triggered.connect(self.save_to_execution_file)
+        self.restore_menu.addAction(save_execution_action)
+        
+        # 버튼에 메뉴 할당
+        self.restore_btn.setMenu(self.restore_menu)
         self.deep_search_btn = QPushButton("심층검색")
         self.deep_search_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         
@@ -692,9 +725,17 @@ class ModernMainWindow(QMainWindow):
         top_layout.addWidget(self.search_result_frame)
         
         # 메인 프롬프트 창
-        prompt_tabs = QTabWidget()
-        prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
-        prompt_tabs.setMinimumHeight(100)
+        self.prompt_tabs = QTabWidget()
+        self.prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
+        self.prompt_tabs.setMinimumHeight(100)
+        
+        # 프롬프트 탭 분리 상태 추적
+        self.prompt_tabs_detached = False
+        self.prompt_tabs_window = None
+        
+        # 탭 위젯에 우클릭 메뉴 추가
+        self.prompt_tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.prompt_tabs.customContextMenuRequested.connect(self.show_prompt_tabs_context_menu)
         
         main_prompt_widget = QWidget()
         negative_prompt_widget = QWidget()
@@ -726,9 +767,36 @@ class ModernMainWindow(QMainWindow):
         self.negative_prompt_textedit.customContextMenuRequested.connect(self.show_negative_prompt_context_menu)
         negative_prompt_layout.addWidget(self.negative_prompt_textedit)
         
-        prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
-        prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
-        top_layout.addWidget(prompt_tabs)
+        self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
+        self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
+        
+        # 탭 바에 detach 버튼 추가
+        self.prompt_tabs_detach_btn = QPushButton("🔓")
+        self.prompt_tabs_detach_btn.setFixedSize(45, 55)
+        self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
+        self.prompt_tabs_detach_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+        """)
+        self.prompt_tabs_detach_btn.clicked.connect(self.toggle_prompt_tabs_detach)
+        self.prompt_tabs.setCornerWidget(self.prompt_tabs_detach_btn, Qt.Corner.TopRightCorner)
+        
+        # 프롬프트 탭 컨테이너 생성 (분리/재부착을 위한 래퍼)
+        self.prompt_tabs_container = QWidget()
+        prompt_tabs_container_layout = QVBoxLayout(self.prompt_tabs_container)
+        prompt_tabs_container_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_tabs_container_layout.addWidget(self.prompt_tabs)
+        
+        top_layout.addWidget(self.prompt_tabs_container)
 
         top_scroll_area.setWidget(top_container)
         return top_scroll_area
@@ -1912,12 +1980,532 @@ class ModernMainWindow(QMainWindow):
     def on_previous_results_loaded(self, result_model: SearchResultModel):
         """비동기로 로드된 이전 검색 결과를 UI에 적용"""
         self.search_results.append_dataframe(result_model.get_dataframe())
-        self.search_results.deduplicate()
+        
+        # 라벨 업데이트
         count = self.search_results.get_count()
         self.result_label1.setText(f"검색: {count}")
         self.result_label2.setText(f"남음: {count}")
-        self.status_bar.showMessage(f"✅ 이전 검색 결과 {count}개를 불러왔습니다.", 5000)
-        self.load_thread.quit()         
+        self.status_bar.showMessage(f"✅ 이전 검색 결과 {count:,}개를 불러왔습니다.", 5000)
+    
+    def load_custom_parquet(self):
+        """사용자가 선택한 parquet 파일을 불러오기 (현재 결과를 비움)"""
+        # custom_tags 폴더 확인 및 생성
+        custom_tags_dir = os.path.join("save", "custom_tags")
+        if not os.path.exists(custom_tags_dir):
+            os.makedirs(custom_tags_dir, exist_ok=True)
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Parquet 파일 불러오기",
+            custom_tags_dir,
+            "Parquet Files (*.parquet);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # 현재 검색 결과 비우기
+                self.search_results.set_dataframe(pd.DataFrame())
+                
+                # 파일 불러오기
+                df = pd.read_parquet(file_path)
+                self.search_results.set_dataframe(df)
+                
+                row_count = len(df)
+                # UI 라벨 업데이트
+                self.result_label1.setText(f"검색: {row_count:,}")
+                self.result_label2.setText(f"남음: {row_count:,}")
+                self.status_bar.showMessage(f"✅ {os.path.basename(file_path)} 파일을 불러왔습니다. ({row_count:,}개 항목)", 5000)
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"파일을 불러오는 중 오류가 발생했습니다:\n{str(e)}")
+                self.status_bar.showMessage(f"❌ 파일 불러오기 실패: {str(e)}", 5000)
+    
+    def merge_custom_parquet(self):
+        """사용자가 선택한 parquet 파일을 현재 결과에 합치기"""
+        # custom_tags 폴더 확인 및 생성
+        custom_tags_dir = os.path.join("save", "custom_tags")
+        if not os.path.exists(custom_tags_dir):
+            os.makedirs(custom_tags_dir, exist_ok=True)
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Parquet 파일 합치기",
+            custom_tags_dir,
+            "Parquet Files (*.parquet);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # 새 파일 불러오기
+                new_df = pd.read_parquet(file_path)
+                
+                # 현재 데이터프레임과 합치기
+                current_df = self.search_results.get_dataframe()
+                if current_df.empty:
+                    merged_df = new_df
+                else:
+                    merged_df = pd.concat([current_df, new_df], ignore_index=True)
+                
+                self.search_results.set_dataframe(merged_df)
+                
+                new_count = len(new_df)
+                total_count = len(merged_df)
+                # UI 라벨 업데이트
+                self.result_label1.setText(f"검색: {total_count:,}")
+                self.result_label2.setText(f"남음: {total_count:,}")
+                self.status_bar.showMessage(
+                    f"✅ {os.path.basename(file_path)}을(를) 합쳤습니다. "
+                    f"(+{new_count:,}개, 총 {total_count:,}개 항목)", 
+                    5000
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"파일을 합치는 중 오류가 발생했습니다:\n{str(e)}")
+                self.status_bar.showMessage(f"❌ 파일 합치기 실패: {str(e)}", 5000)
+    
+    def export_custom_parquet(self):
+        """현재 검색 결과를 사용자가 지정한 이름으로 내보내기"""
+        # custom_tags 폴더 확인 및 생성
+        custom_tags_dir = os.path.join("save", "custom_tags")
+        if not os.path.exists(custom_tags_dir):
+            os.makedirs(custom_tags_dir, exist_ok=True)
+        
+        # 현재 데이터프레임 확인
+        current_df = self.search_results.get_dataframe()
+        if current_df.empty:
+            QMessageBox.warning(self, "경고", "내보낼 검색 결과가 없습니다.")
+            return
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Parquet 파일로 내보내기",
+            os.path.join(custom_tags_dir, "my_tags.parquet"),
+            "Parquet Files (*.parquet);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # .parquet 확장자 확인
+                if not file_path.endswith('.parquet'):
+                    file_path += '.parquet'
+                
+                # 파일 저장
+                current_df.to_parquet(file_path, index=False)
+                
+                row_count = len(current_df)
+                self.status_bar.showMessage(
+                    f"✅ {os.path.basename(file_path)}로 내보냈습니다. ({row_count:,}개 항목)", 
+                    5000
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"파일을 내보내는 중 오류가 발생했습니다:\n{str(e)}")
+                self.status_bar.showMessage(f"❌ 파일 내보내기 실패: {str(e)}", 5000)
+    
+    def save_to_execution_file(self):
+        """현재 남아있는 행으로 naia_temp_rows.parquet 업데이트"""
+        try:
+            # 현재 데이터프레임 가져오기
+            current_df = self.search_results.get_dataframe()
+            
+            if current_df.empty:
+                QMessageBox.warning(self, "경고", "저장할 검색 결과가 없습니다.")
+                return
+            
+            # naia_temp_rows.parquet에 저장
+            execution_file = 'naia_temp_rows.parquet'
+            current_df.to_parquet(execution_file, index=False)
+            
+            row_count = len(current_df)
+            self.status_bar.showMessage(
+                f"✅ 실행 파일(naia_temp_rows.parquet)을 업데이트했습니다. ({row_count:,}개 항목)", 
+                5000
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"실행 파일 저장 중 오류가 발생했습니다:\n{str(e)}")
+            self.status_bar.showMessage(f"❌ 실행 파일 저장 실패: {str(e)}", 5000)
+    
+    def show_prompt_tabs_context_menu(self, pos):
+        """프롬프트 탭 위젯의 컨텍스트 메뉴 표시"""
+        menu = QMenu(self)
+        menu.setStyleSheet(DARK_STYLES['menu_style'] if 'menu_style' in DARK_STYLES else "")
+        
+        if not self.prompt_tabs_detached:
+            detach_action = QAction("🔓 외부 창으로 분리", self)
+            detach_action.triggered.connect(self.detach_prompt_tabs)
+            menu.addAction(detach_action)
+        else:
+            reattach_action = QAction("🔒 원래 위치로 복귀", self)
+            reattach_action.triggered.connect(self.reattach_prompt_tabs)
+            menu.addAction(reattach_action)
+        
+        menu.exec(self.prompt_tabs.mapToGlobal(pos))
+    
+    def detach_prompt_tabs(self):
+        """프롬프트 탭을 외부 창으로 분리"""
+        if self.prompt_tabs_detached:
+            print("⚠️ 프롬프트 탭이 이미 분리되어 있습니다.")
+            return
+        
+        try:
+            print("🔧 프롬프트 탭 분리 시작...")
+            
+            # 1. 현재 컨테이너에서 탭 위젯 제거
+            self.prompt_tabs_container.layout().removeWidget(self.prompt_tabs)
+            self.prompt_tabs.setParent(None)
+            
+            # 2. 컨테이너를 레이아웃에서 제거 (공간 완전히 압축)
+            # top_layout을 찾기 위해 부모 위젯 탐색
+            parent_widget = self.prompt_tabs_container.parent()
+            if parent_widget and parent_widget.layout():
+                self.prompt_tabs_container_index = parent_widget.layout().indexOf(self.prompt_tabs_container)
+                parent_widget.layout().removeWidget(self.prompt_tabs_container)
+                self.prompt_tabs_container.setVisible(False)
+            
+            # 3. 스플리터 크기 조정 (프롬프트 영역 공간을 중간 섹션에 할당)
+            if hasattr(self, 'vertical_splitter'):
+                # 현재 스플리터 크기 저장
+                self.saved_splitter_sizes = self.vertical_splitter.sizes()
+                # 상단 영역 축소, 중간 영역 확장
+                total_height = sum(self.saved_splitter_sizes)
+                if total_height > 0:
+                    # 상단을 최소 크기로, 나머지를 중간에 할당
+                    new_top_size = max(100, self.saved_splitter_sizes[0] - 350)  # 최소 150px 유지
+                    new_middle_size = total_height - new_top_size
+                    self.vertical_splitter.setSizes([new_top_size, new_middle_size])
+            
+            # 3. 프롬프트 탭을 감싸는 위젯 생성 (버튼 추가를 위해)
+            detached_widget = QWidget()
+            detached_layout = QVBoxLayout(detached_widget)
+            detached_layout.setContentsMargins(8, 8, 8, 8)
+            detached_layout.setSpacing(8)
+            
+            # 탭 위젯 추가
+            detached_layout.addWidget(self.prompt_tabs)
+            
+            # 생성 파라미터 컨테이너 생성
+            params_container = QWidget()
+            params_layout = QVBoxLayout(params_container)
+            params_layout.setContentsMargins(8, 4, 8, 4)
+            params_layout.setSpacing(4)
+            
+            # Line 1: 해상도 관련 컨트롤
+            resolution_layout = QHBoxLayout()
+            resolution_layout.setSpacing(6)
+            
+            # 해상도 콤보박스 (복사본)
+            self.detached_resolution_combo = QComboBox()
+            self.detached_resolution_combo.addItems(self.resolutions)
+            self.detached_resolution_combo.setCurrentText(self.resolution_combo.currentText())
+            self.detached_resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+            self.detached_resolution_combo.currentTextChanged.connect(self.sync_resolution_to_main)
+            resolution_layout.addWidget(self.detached_resolution_combo, 2)
+            
+            # 랜덤 해상도 체크박스 (복사본)
+            self.detached_random_resolution = QCheckBox("랜덤 해상도")
+            self.detached_random_resolution.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_random_resolution.setChecked(self.random_resolution_checkbox.isChecked())
+            self.detached_random_resolution.toggled.connect(self.sync_random_resolution_to_main)
+            resolution_layout.addWidget(self.detached_random_resolution)
+            
+            # 자동 맞춤 체크박스 (복사본)
+            self.detached_auto_fit = QCheckBox("자동 맞춤")
+            self.detached_auto_fit.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_auto_fit.setChecked(self.auto_fit_resolution_checkbox.isChecked())
+            self.detached_auto_fit.toggled.connect(self.sync_auto_fit_to_main)
+            resolution_layout.addWidget(self.detached_auto_fit)
+            
+            params_layout.addLayout(resolution_layout)
+            
+            # Line 2: 생성 옵션 체크박스들 (상단 마진 추가)
+            options_layout = QHBoxLayout()
+            options_layout.setSpacing(6)
+            options_layout.setContentsMargins(0, 8, 0, 0)  # 상단 마진 8px
+            
+            # 시드 고정 체크박스 (복사본)
+            self.detached_seed_fix = QCheckBox("시드 고정")
+            self.detached_seed_fix.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_seed_fix.setChecked(self.seed_fix_checkbox.isChecked())
+            self.detached_seed_fix.toggled.connect(self.sync_seed_fix_to_main)
+            options_layout.addWidget(self.detached_seed_fix)
+            
+            # 프롬프트 고정 체크박스 (복사본)
+            self.detached_prompt_fixed = QCheckBox("프롬프트 고정")
+            self.detached_prompt_fixed.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_prompt_fixed.setChecked(self.generation_checkboxes["프롬프트 고정"].isChecked())
+            self.detached_prompt_fixed.toggled.connect(self.sync_prompt_fixed_to_main)
+            options_layout.addWidget(self.detached_prompt_fixed)
+            
+            # 자동 생성 체크박스 (복사본)
+            self.detached_auto_generate = QCheckBox("자동 생성")
+            self.detached_auto_generate.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_auto_generate.setChecked(self.generation_checkboxes["자동 생성"].isChecked())
+            self.detached_auto_generate.toggled.connect(self.sync_auto_generate_to_main)
+            options_layout.addWidget(self.detached_auto_generate)
+            
+            params_layout.addLayout(options_layout)
+            detached_layout.addWidget(params_container)
+            
+            # 구분선 추가
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            separator.setStyleSheet(f"background-color: {DARK_COLORS['border']}; max-height: 1px;")
+            detached_layout.addWidget(separator)
+            
+            # 버튼 컨테이너 생성
+            button_container = QWidget()
+            button_layout = QHBoxLayout(button_container)
+            button_layout.setContentsMargins(0, 0, 0, 0)
+            button_layout.setSpacing(6)  # 메인 윈도우와 동일한 간격
+            
+            # 랜덤 프롬프트 버튼 (복사본)
+            self.detached_random_btn = QPushButton(self.random_prompt_btn.text())
+            self.detached_random_btn.setStyleSheet(DARK_STYLES['secondary_button'])  # 원본과 동일한 스타일
+            self.detached_random_btn.setEnabled(self.random_prompt_btn.isEnabled())
+            self.detached_random_btn.clicked.connect(self.trigger_random_prompt)
+            self.detached_random_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)  # 너비 확장
+            button_layout.addWidget(self.detached_random_btn, 1)  # stretch factor 1 for equal width
+            
+            # 생성 버튼 (복사본)
+            self.detached_generate_btn = QPushButton("🎨 이미지 생성 요청")
+            self.detached_generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
+            self.detached_generate_btn.setEnabled(self.generate_button_main.isEnabled())
+            self.detached_generate_btn.clicked.connect(self.generation_controller.execute_generation_pipeline)
+            self.detached_generate_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)  # 너비 확장
+            button_layout.addWidget(self.detached_generate_btn, 1)  # stretch factor 1 for equal width
+            
+            detached_layout.addWidget(button_container)
+            
+            # 4. DetachedWindow 생성
+            from ui.detached_window import DetachedWindow
+            self.prompt_tabs_window = DetachedWindow(
+                detached_widget,
+                "프롬프트 편집기",
+                -1,
+                parent_container=self
+            )
+            self.prompt_tabs_window.window_closed.connect(self.on_prompt_tabs_window_closed)
+            
+            # 최소 크기 설정
+            self.prompt_tabs_window.setMinimumSize(350, 650)
+            self.prompt_tabs_window.resize(600, 650)
+            
+            # 5. 창 표시
+            self.prompt_tabs_window.show()
+            self.prompt_tabs_window.raise_()
+            self.prompt_tabs_window.activateWindow()
+            
+            self.prompt_tabs_detached = True
+            
+            # detach 버튼 텍스트 업데이트
+            if hasattr(self, 'prompt_tabs_detach_btn'):
+                self.prompt_tabs_detach_btn.setText("🔒")
+                self.prompt_tabs_detach_btn.setToolTip("원래 위치로 복귀")
+            
+            # 메인 윈도우 컨트롤들과 연결 설정
+            self.setup_main_to_detached_sync()
+            
+            # 현재 버튼 상태 동기화
+            self.update_random_prompt_button_state()
+            
+            print("✅ 프롬프트 탭 분리 완료")
+            
+        except Exception as e:
+            print(f"❌ 프롬프트 탭 분리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 실패 시 복원
+            try:
+                if hasattr(self, 'prompt_tabs_placeholder'):
+                    self.prompt_tabs_container.layout().removeWidget(self.prompt_tabs_placeholder)
+                    self.prompt_tabs_placeholder.deleteLater()
+                self.prompt_tabs_container.layout().addWidget(self.prompt_tabs)
+                self.prompt_tabs_detached = False
+            except Exception as restore_error:
+                print(f"복원 실패: {restore_error}")
+    
+    def reattach_prompt_tabs(self):
+        """분리된 프롬프트 탭을 원래 위치로 복귀"""
+        if not self.prompt_tabs_detached:
+            print("⚠️ 프롬프트 탭이 분리되어 있지 않습니다.")
+            return
+        
+        try:
+            print("🔄 프롬프트 탭 복귀 시작...")
+            
+            # 1. 창에서 위젯 회수
+            if self.prompt_tabs_window:
+                detached_widget = self.prompt_tabs_window.get_original_widget()
+                # detached_widget에서 prompt_tabs 추출
+                if detached_widget and detached_widget.layout():
+                    # 탭 위젯 찾기
+                    for i in range(detached_widget.layout().count()):
+                        item = detached_widget.layout().itemAt(i)
+                        if item and item.widget() == self.prompt_tabs:
+                            detached_widget.layout().removeWidget(self.prompt_tabs)
+                            break
+                
+                self.prompt_tabs_window.close()
+                self.prompt_tabs_window = None
+            
+            # 2. 동기화 연결 해제
+            self.cleanup_main_to_detached_sync()
+            
+            # 3. 분리된 컨트롤들 정리
+            detached_controls = [
+                'detached_random_btn', 'detached_generate_btn',
+                'detached_resolution_combo', 'detached_random_resolution',
+                'detached_auto_fit', 'detached_seed_fix',
+                'detached_prompt_fixed', 'detached_auto_generate'
+            ]
+            
+            for control_name in detached_controls:
+                if hasattr(self, control_name):
+                    control = getattr(self, control_name)
+                    control.deleteLater()
+                    delattr(self, control_name)
+            
+            # 3. 프롬프트 탭을 컨테이너에 다시 추가
+            self.prompt_tabs_container.layout().addWidget(self.prompt_tabs)
+            
+            # 4. 컨테이너를 원래 레이아웃 위치에 복귀
+            parent_widget = self.prompt_tabs_container.parent()
+            if parent_widget and parent_widget.layout():
+                # 저장된 인덱스가 있으면 그 위치에, 없으면 마지막에 추가
+                if hasattr(self, 'prompt_tabs_container_index'):
+                    parent_widget.layout().insertWidget(self.prompt_tabs_container_index, self.prompt_tabs_container)
+                else:
+                    parent_widget.layout().addWidget(self.prompt_tabs_container)
+            self.prompt_tabs_container.setVisible(True)
+            
+            # 5. 스플리터 크기 복원
+            if hasattr(self, 'vertical_splitter') and hasattr(self, 'saved_splitter_sizes'):
+                self.vertical_splitter.setSizes(self.saved_splitter_sizes)
+            
+            self.prompt_tabs_detached = False
+            
+            # detach 버튼 텍스트 업데이트
+            if hasattr(self, 'prompt_tabs_detach_btn'):
+                self.prompt_tabs_detach_btn.setText("🔓")
+                self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
+            
+            print("✅ 프롬프트 탭 복귀 완료")
+            
+        except Exception as e:
+            print(f"❌ 프롬프트 탭 복귀 실패: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_prompt_tabs_window_closed(self, tab_index, widget):
+        """프롬프트 탭 분리 창이 닫힐 때 호출"""
+        self.reattach_prompt_tabs()
+    
+    def toggle_prompt_tabs_detach(self):
+        """프롬프트 탭 분리/복귀 토글"""
+        if self.prompt_tabs_detached:
+            self.reattach_prompt_tabs()
+        else:
+            self.detach_prompt_tabs()
+    
+    # === 분리된 창의 컨트롤 동기화 메서드들 ===
+    
+    def sync_resolution_to_main(self, text):
+        """분리된 창의 해상도를 메인 윈도우에 동기화"""
+        if hasattr(self, 'resolution_combo'):
+            self.resolution_combo.setCurrentText(text)
+    
+    def sync_random_resolution_to_main(self, checked):
+        """분리된 창의 랜덤 해상도를 메인 윈도우에 동기화"""
+        if hasattr(self, 'random_resolution_checkbox'):
+            self.random_resolution_checkbox.setChecked(checked)
+    
+    def sync_auto_fit_to_main(self, checked):
+        """분리된 창의 자동 맞춤을 메인 윈도우에 동기화"""
+        if hasattr(self, 'auto_fit_resolution_checkbox'):
+            self.auto_fit_resolution_checkbox.setChecked(checked)
+    
+    def sync_seed_fix_to_main(self, checked):
+        """분리된 창의 시드 고정을 메인 윈도우에 동기화"""
+        if hasattr(self, 'seed_fix_checkbox'):
+            self.seed_fix_checkbox.setChecked(checked)
+    
+    def sync_prompt_fixed_to_main(self, checked):
+        """분리된 창의 프롬프트 고정을 메인 윈도우에 동기화"""
+        if "프롬프트 고정" in self.generation_checkboxes:
+            self.generation_checkboxes["프롬프트 고정"].setChecked(checked)
+            # 버튼 상태도 업데이트
+            self.update_random_prompt_button_state()
+    
+    def sync_auto_generate_to_main(self, checked):
+        """분리된 창의 자동 생성을 메인 윈도우에 동기화"""
+        if "자동 생성" in self.generation_checkboxes:
+            self.generation_checkboxes["자동 생성"].setChecked(checked)
+    
+    # === 메인 윈도우에서 분리된 창으로 동기화 ===
+    
+    def setup_main_to_detached_sync(self):
+        """메인 윈도우 컨트롤들의 시그널을 분리된 창과 연결"""
+        # 해상도 콤보박스
+        self.resolution_combo.currentTextChanged.connect(
+            lambda text: self.detached_resolution_combo.setCurrentText(text) 
+            if hasattr(self, 'detached_resolution_combo') else None
+        )
+        
+        # 체크박스들
+        self.random_resolution_checkbox.toggled.connect(
+            lambda checked: self.detached_random_resolution.setChecked(checked)
+            if hasattr(self, 'detached_random_resolution') else None
+        )
+        self.auto_fit_resolution_checkbox.toggled.connect(
+            lambda checked: self.detached_auto_fit.setChecked(checked)
+            if hasattr(self, 'detached_auto_fit') else None
+        )
+        self.seed_fix_checkbox.toggled.connect(
+            lambda checked: self.detached_seed_fix.setChecked(checked)
+            if hasattr(self, 'detached_seed_fix') else None
+        )
+        self.generation_checkboxes["프롬프트 고정"].toggled.connect(
+            lambda checked: self.detached_prompt_fixed.setChecked(checked)
+            if hasattr(self, 'detached_prompt_fixed') else None
+        )
+        self.generation_checkboxes["자동 생성"].toggled.connect(
+            lambda checked: self.detached_auto_generate.setChecked(checked)
+            if hasattr(self, 'detached_auto_generate') else None
+        )
+    
+    def cleanup_main_to_detached_sync(self):
+        """메인 윈도우 컨트롤들의 동기화 시그널 연결 해제"""
+        try:
+            # 기존 연결들을 안전하게 해제
+            self.resolution_combo.currentTextChanged.disconnect()
+        except TypeError:
+            pass  # 연결되지 않았으면 무시
+        
+        try:
+            self.random_resolution_checkbox.toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.auto_fit_resolution_checkbox.toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.seed_fix_checkbox.toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.generation_checkboxes["프롬프트 고정"].toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.generation_checkboxes["자동 생성"].toggled.disconnect()
+        except TypeError:
+            pass         
 
     def open_depth_search_tab(self):
         """심층 검색 탭을 열거나, 이미 열려있으면 해당 탭으로 전환"""
@@ -1959,6 +2547,9 @@ class ModernMainWindow(QMainWindow):
     def trigger_random_prompt(self):
         """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작"""
         self.random_prompt_btn.setEnabled(False)
+        # 분리된 버튼도 비활성화
+        if hasattr(self, 'detached_random_btn'):
+            self.detached_random_btn.setEnabled(False)
         self.status_bar.showMessage("다음 프롬프트를 생성 중...")
 
         # UI에서 생성 관련 설정값들을 수집
@@ -2071,6 +2662,9 @@ class ModernMainWindow(QMainWindow):
             # 수동 생성인 경우
             self.status_bar.showMessage("✅ 다음 프롬프트 생성 완료!", 3000)
             self.random_prompt_btn.setEnabled(True)
+            # 분리된 버튼도 활성화
+            if hasattr(self, 'detached_random_btn'):
+                self.detached_random_btn.setEnabled(True)
 
     def on_generation_error(self, error_message: str):
         """프롬프트 생성 중 오류 발생 시 호출"""
@@ -2079,6 +2673,9 @@ class ModernMainWindow(QMainWindow):
 
         self.status_bar.showMessage(f"❌ 생성 오류: {error_message}", 5000)
         self.random_prompt_btn.setEnabled(True)
+        # 분리된 버튼도 활성화
+        if hasattr(self, 'detached_random_btn'):
+            self.detached_random_btn.setEnabled(True)
 
     def load_generation_parameters(self):
         # 기존 방식 대신 모드별 로드
@@ -2316,9 +2913,17 @@ class ModernMainWindow(QMainWindow):
             if prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked():
                 self.random_prompt_btn.setEnabled(False)
                 self.random_prompt_btn.setText("프롬프트 고정됨")
+                # 분리된 버튼도 동기화
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(False)
+                    self.detached_random_btn.setText("프롬프트 고정됨")
             else:
                 self.random_prompt_btn.setEnabled(True)
                 self.random_prompt_btn.setText("랜덤/다음 프롬프트")
+                # 분리된 버튼도 동기화
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(True)
+                    self.detached_random_btn.setText("랜덤/다음 프롬프트")
                 
         except Exception as e:
             print(f"❌ 버튼 상태 업데이트 오류: {e}")

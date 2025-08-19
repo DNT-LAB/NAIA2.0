@@ -166,7 +166,7 @@ class MainController:
         
         mw.search_btn.clicked.connect(mw.trigger_search)
         mw.save_settings_btn.clicked.connect(self.save_all_current_settings)
-        mw.restore_btn.clicked.connect(mw.restore_search_results)
+        # restore_btn은 이제 메뉴를 가지고 있으므로 개별 액션들이 connect됨
         mw.deep_search_btn.clicked.connect(mw.open_depth_search_tab)
         mw.random_prompt_btn.clicked.connect(mw.trigger_random_prompt)
         mw.image_window.instant_generation_requested.connect(self.on_instant_generation_requested)

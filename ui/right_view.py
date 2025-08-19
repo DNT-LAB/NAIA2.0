@@ -143,8 +143,13 @@ class RightView(QWidget):
         
         main_layout.addWidget(self.tab_widget)
 
-    def detach_tab(self, tab_index: int):
-        """탭을 외부 창으로 분리"""
+    def detach_tab(self, tab_index: int, dock_to_window=None):
+        """탭을 외부 창으로 분리
+        
+        Args:
+            tab_index: 분리할 탭의 인덱스
+            dock_to_window: 도킹할 대상 창 (DetachedWindow 인스턴스)
+        """
         if tab_index in self.detached_windows:
             self.detached_windows[tab_index].raise_()
             self.detached_windows[tab_index].activateWindow()
@@ -165,6 +170,10 @@ class RightView(QWidget):
             detached_window = DetachedWindow(widget, tab_title, tab_index, parent_container=self)
             detached_window.window_closed.connect(self.reattach_tab)
             
+            # 도킹 모드 설정
+            if dock_to_window and isinstance(dock_to_window, DetachedWindow):
+                self.dock_windows(dock_to_window, detached_window)
+            
             self.detached_windows[tab_index] = detached_window
             detached_window.show()
             
@@ -172,6 +181,65 @@ class RightView(QWidget):
             print(f"❌ 탭 '{tab_title}' 분리 실패: {e}")
             import traceback
             traceback.print_exc()
+    
+    def dock_windows(self, primary_window, secondary_window):
+        """두 개의 분리된 창을 도킹(결합) 상태로 만듦
+        
+        Args:
+            primary_window: 주 창 (왼쪽)
+            secondary_window: 부 창 (오른쪽)
+        """
+        # 도킹 관계 설정
+        primary_window.docked_window = secondary_window
+        secondary_window.docked_to = primary_window
+        
+        # 부 창을 주 창 오른쪽에 배치
+        primary_pos = primary_window.pos()
+        primary_width = primary_window.width()
+        
+        secondary_window.move(primary_pos.x() + primary_width, primary_pos.y())
+        
+        # 높이 동기화
+        max_height = max(primary_window.height(), secondary_window.height())
+        primary_window.resize(primary_window.width(), max_height)
+        secondary_window.resize(secondary_window.width(), max_height)
+        
+        print(f"✅ '{primary_window.tab_title}'과 '{secondary_window.tab_title}' 창이 도킹되었습니다.")
+    
+    def dock_prompt_and_image_tabs(self, prompt_window=None):
+        """프롬프트 탭과 이미지 생성 결과 탭을 도킹 모드로 분리
+        
+        Args:
+            prompt_window: 이미 분리된 프롬프트 창 (없으면 자동 생성)
+        """
+        # "🖼️ 생성 결과" 탭 찾기
+        image_tab_index = -1
+        for i in range(self.tab_widget.count()):
+            if "생성 결과" in self.tab_widget.tabText(i):
+                image_tab_index = i
+                break
+        
+        if image_tab_index == -1:
+            print("⚠️ '생성 결과' 탭을 찾을 수 없습니다.")
+            return None
+        
+        # 이미지 탭이 이미 분리되어 있는지 확인
+        if image_tab_index in self.detached_windows:
+            image_window = self.detached_windows[image_tab_index]
+            
+            # 프롬프트 창과 도킹
+            if prompt_window:
+                self.dock_windows(prompt_window, image_window)
+            
+            return image_window
+        
+        # 이미지 탭 분리 (도킹 모드로)
+        self.detach_tab(image_tab_index, dock_to_window=prompt_window)
+        
+        if image_tab_index in self.detached_windows:
+            return self.detached_windows[image_tab_index]
+        
+        return None
 
     def reattach_tab(self, tab_index: int, widget: QWidget):
         """외부 창에서 탭으로 복귀"""

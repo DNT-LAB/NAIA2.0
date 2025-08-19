@@ -2,8 +2,10 @@ import requests
 import zipfile
 import io, time, re, json
 import base64
+import numpy as np
 from PIL import Image
 from typing import Dict, Any, TYPE_CHECKING, List
+from PyQt6.QtGui import QImage, QPixmap
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 
@@ -65,8 +67,13 @@ class APIService:
                 else:
                     result = {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
                 
+                # Check if cropped_image_request is enabled
+                if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
+                    print("✂️ Cropped image request enabled, extracting mask area...")
+                    result = self._extract_cropped_image(result, parameters)
+                
                 # Check if auto_outpainting is enabled and first generation was successful
-                if result and result.get('status') == 'success' and parameters.get('auto_outpainting'):
+                elif result and result.get('status') == 'success' and parameters.get('auto_outpainting'):
                     print("🎨 Auto-Outpainting enabled, processing second pass...")
                     result = self._auto_outpainting(result, parameters)
                 
@@ -593,6 +600,77 @@ class APIService:
             # 폴백: 원본 데이터를 그대로 base64 인코딩
             return base64.b64encode(mask_bytes).decode()
     
+    def _extract_cropped_image(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract only the mask area from the generated image.
+        Returns the cropped image without EXIF data.
+        
+        Args:
+            result: Generation result with image bytes
+            parameters: Original generation parameters including full_mask_pil
+            
+        Returns:
+            Modified result with cropped image
+        """
+        try:
+            print("✂️ Starting cropped image extraction...")
+            
+            # 1. Get the generated image
+            generated_image = result.get('image')
+            if not generated_image:
+                print("   ⚠️ No generated image found, returning original result")
+                return result
+            
+            # 2. Get the mask
+            mask_image = parameters.get('full_mask_pil')
+            if mask_image:
+                print(f"   ℹ️ Using provided mask: {mask_image.size}")
+                
+                # Ensure mask is in grayscale mode
+                if mask_image.mode != 'L':
+                    mask_image = mask_image.convert('L')
+                
+                # Find bounding box of the mask (white areas)
+                mask_array = np.array(mask_image)
+                white_pixels = np.where(mask_array > 127)
+                
+                if len(white_pixels[0]) > 0:
+                    # Get bounding box of the masked area
+                    y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
+                    x_min, x_max = white_pixels[1].min(), white_pixels[1].max()
+                    
+                    # Crop the generated image to the mask area
+                    cropped_image = generated_image.crop((x_min, y_min, x_max + 1, y_max + 1))
+                    print(f"   ✅ Cropped to mask area: {cropped_image.size}")
+                    
+                    # Replace the original image with cropped one
+                    result['image'] = cropped_image
+                    
+                    # Remove EXIF data by creating a new image
+                    clean_image = Image.new(cropped_image.mode, cropped_image.size)
+                    clean_image.putdata(list(cropped_image.getdata()))
+                    result['image'] = clean_image
+                    
+                    # Update image bytes for saving
+                    buffer = io.BytesIO()
+                    clean_image.save(buffer, format='PNG')
+                    result['image_bytes'] = buffer.getvalue()
+                    
+                    print("   ✅ Cropped image extraction completed (EXIF removed)")
+                else:
+                    print("   ⚠️ No mask area found, returning original image")
+            else:
+                print("   ⚠️ No mask provided, returning original image")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ Cropped image extraction failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Return original result on error
+            return result
+    
     def _auto_outpainting(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Auto-Outpainting 처리를 수행합니다.
@@ -824,3 +902,276 @@ class APIService:
             traceback.print_exc()
             # On error, return the original result
             return result
+    
+    def upscale_NAI(self, pixmap: 'QPixmap', token: str = None) -> Dict[str, Any]:
+        """
+        NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
+        
+        Args:
+            pixmap: QPixmap 형식의 이미지
+            token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
+        
+        Returns:
+            Dict with 'status', 'image' (upscaled QPixmap), and 'message'
+        """
+        import zipfile
+        from PyQt6.QtCore import QBuffer, QIODevice
+        
+        try:
+            # 토큰 가져오기
+            if not token:
+                token = self.app_context.secure_token_manager.get_token('nai_token')
+                if not token:
+                    return {
+                        'status': 'error',
+                        'message': 'NAI 토큰이 설정되지 않았습니다.'
+                    }
+            
+            # QPixmap을 bytes로 변환
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buffer, "PNG")
+            image_bytes = buffer.data().data()
+            buffer.close()
+            
+            # Base64 인코딩
+            img_base64 = base64.b64encode(image_bytes).decode()
+            
+            # 원본 이미지 크기
+            width = pixmap.width()
+            height = pixmap.height()
+            
+            # API 요청 데이터
+            data = {
+                "image": img_base64,
+                "width": width,
+                "height": height,
+                "scale": 2  # 2배 업스케일
+            }
+            
+            # API 호출
+            print(f"🔍 NAI Upscale API 호출 중... (원본: {width}x{height})")
+            response = requests.post(
+                "https://api.novelai.net/ai/upscale",
+                json=data,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                error_msg = f"API 에러 (코드: {response.status_code})"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"{error_msg}: {error_detail.get('message', 'Unknown error')}"
+                except:
+                    pass
+                return {
+                    'status': 'error',
+                    'message': error_msg
+                }
+            
+            # 응답이 ZIP 파일 형식
+            try:
+                zipped = zipfile.ZipFile(io.BytesIO(response.content))
+                if not zipped.namelist():
+                    return {
+                        'status': 'error',
+                        'message': '업스케일 결과가 비어있습니다.'
+                    }
+                
+                # 첫 번째 이미지 추출
+                file_info = zipped.infolist()[0]
+                image_bytes = zipped.read(file_info)
+                
+                # bytes를 QPixmap으로 변환
+                upscaled_pixmap = QPixmap()
+                upscaled_pixmap.loadFromData(image_bytes)
+                
+                if upscaled_pixmap.isNull():
+                    return {
+                        'status': 'error',
+                        'message': '업스케일된 이미지를 로드할 수 없습니다.'
+                    }
+                
+                print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+                
+                return {
+                    'status': 'success',
+                    'image': upscaled_pixmap,
+                    'message': f'이미지가 {upscaled_pixmap.width()}x{upscaled_pixmap.height()}로 업스케일되었습니다.'
+                }
+                
+            except zipfile.BadZipFile:
+                return {
+                    'status': 'error',
+                    'message': '업스케일 응답 형식이 올바르지 않습니다.'
+                }
+                
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': 'API 요청 시간 초과 (60초)'
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                'status': 'error',
+                'message': '네트워크 연결 오류'
+            }
+        except Exception as e:
+            print(f"❌ 업스케일 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'status': 'error',
+                'message': f'업스케일 중 오류 발생: {str(e)}'
+            }
+    
+    def get_anlas(self) -> int:
+        """NAI 구독의 Anlas 잔액을 가져옵니다."""
+        if self.app_context.current_api_mode != "NAI":
+            return None
+        
+        try:
+            # NAI 토큰 가져오기 - secure_token_manager 사용
+            nai_access_token = self.app_context.secure_token_manager.get_token('nai_token')
+            if not nai_access_token:
+                return None
+            
+            response = requests.get(
+                "https://api.novelai.net/user/subscription",
+                headers={"Authorization": f"Bearer {nai_access_token}"},
+                timeout=3
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                training_steps = data.get('trainingStepsLeft', {})
+                fixed_steps = int(training_steps.get('fixedTrainingStepsLeft', 0))
+                purchased_steps = int(training_steps.get('purchasedTrainingSteps', 0))
+                anlas = fixed_steps + purchased_steps
+                return anlas
+            
+        except Exception as e:
+            print(f"⚠️ Anlas 조회 실패: {e}")
+        
+        return None
+    
+    def upscale_NAI_from_inpaint(self, pil_image: Image.Image, target_width: int, target_height: int) -> Dict[str, Any]:
+        """
+        Inpaint 패널에서 PIL 이미지를 업스케일하고 원본 크기로 리사이징합니다.
+        
+        Args:
+            pil_image: 업스케일할 PIL 이미지
+            target_width: 최종 리사이징할 너비
+            target_height: 최종 리사이징할 높이
+        
+        Returns:
+            Dict with 'status', 'image' (PIL Image), and 'message'
+        """
+        try:
+            # 1. PIL 이미지를 base64로 변환
+            buffered = io.BytesIO()
+            pil_image.save(buffered, format="PNG")
+            image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            
+            # 2. NAI 토큰 가져오기
+            token = self.app_context.secure_token_manager.get_token('nai_token')
+            if not token:
+                return {
+                    'status': 'error',
+                    'message': 'NAI 토큰이 없습니다.'
+                }
+            
+            # 3. NAI Upscale API 호출
+            # 디버깅: 원본 이미지 크기 확인
+            print(f"🔍 DEBUG - Original image size: {pil_image.width}x{pil_image.height}")
+            print(f"🔍 DEBUG - Target upscale size: {pil_image.width * 2}x{pil_image.height * 2}")
+            print(f"🔍 DEBUG - Base64 string length: {len(image_base64)}")
+            
+            # NAI API는 width/height가 아닌 원본 크기를 받고 scale로 배수를 결정
+            data = {
+                "image": image_base64,
+                "width": pil_image.width,  # 원본 너비
+                "height": pil_image.height,  # 원본 높이
+                "scale": 2  # 2배 업스케일 (scale 4는 4배를 의미)
+            }
+            
+            # 디버깅: 요청 데이터 확인
+            print(f"🔍 DEBUG - Request data keys: {data.keys()}")
+            print(f"🔍 DEBUG - Width: {data['width']}, Height: {data['height']}, Scale: {data['scale']}")
+            print(f"🔍 DEBUG - Token exists: {bool(token)}")
+            print(f"🔍 DEBUG - Token length: {len(token) if token else 0}")
+            
+            response = requests.post(
+                "https://api.novelai.net/ai/upscale",
+                json=data,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=60
+            )
+            
+            # 디버깅: 응답 상세 정보
+            print(f"🔍 DEBUG - Response status code: {response.status_code}")
+            print(f"🔍 DEBUG - Response headers: {dict(response.headers)}")
+            
+            if response.status_code != 200:
+                # 디버깅: 에러 응답 내용 확인
+                try:
+                    error_content = response.text
+                    print(f"🔍 DEBUG - Error response content: {error_content}")
+                    
+                    # JSON 응답인 경우 파싱 시도
+                    try:
+                        error_json = response.json()
+                        print(f"🔍 DEBUG - Error JSON: {error_json}")
+                    except:
+                        pass
+                except:
+                    print(f"🔍 DEBUG - Could not read error response")
+                
+                return {
+                    'status': 'error',
+                    'message': f'API 오류: {response.status_code}\n응답: {response.text[:500] if response.text else "No response text"}'
+                }
+            
+            # 4. 응답 처리 (ZIP 파일)
+            zip_data = io.BytesIO(response.content)
+            with zipfile.ZipFile(zip_data, 'r') as zip_file:
+                image_data = zip_file.read(zip_file.namelist()[0])
+            
+            # 5. 업스케일된 이미지를 PIL로 변환
+            upscaled_image = Image.open(io.BytesIO(image_data))
+            
+            # 6. 원본 크기로 리사이징 (LANCZOS)
+            resized_image = upscaled_image.resize(
+                (target_width, target_height),
+                Image.Resampling.LANCZOS
+            )
+            
+            print(f"✅ 업스케일 완료: {pil_image.width}x{pil_image.height} → "
+                  f"{upscaled_image.width}x{upscaled_image.height} → "
+                  f"{resized_image.width}x{resized_image.height}")
+            
+            return {
+                'status': 'success',
+                'image': resized_image,
+                'message': '업스케일 성공'
+            }
+            
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': '요청 시간 초과'
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                'status': 'error',
+                'message': '네트워크 연결 오류'
+            }
+        except Exception as e:
+            print(f"❌ 업스케일 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'status': 'error',
+                'message': f'업스케일 중 오류 발생: {str(e)}'
+            }

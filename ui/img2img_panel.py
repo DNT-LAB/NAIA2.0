@@ -1,9 +1,10 @@
 import io
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QPushButton, QDoubleSpinBox, QFrame, QSlider, QCheckBox)
+                             QPushButton, QDoubleSpinBox, QFrame, QSlider, QCheckBox,
+                             QMessageBox, QProgressDialog)
 from PyQt6.QtGui import QPixmap, QPainter, QColor
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 from PIL.ImageQt import ImageQt
 import numpy as np
 from .theme import DARK_STYLES, DARK_COLORS
@@ -156,16 +157,58 @@ class Img2ImgPanel(QFrame):
         """)
         self.auto_outpainting_checkbox.setVisible(False)  # Hidden by default
         controls_layout.addWidget(self.auto_outpainting_checkbox)
+        
+        # Cropped image request checkbox (only visible in inpaint mode)
+        self.cropped_image_checkbox = QCheckBox("Get only mask area image (no exif)")
+        self.cropped_image_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                font-size: {get_scaled_font_size(16)}px;
+                color: white;
+                background-color: transparent;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid #555;
+                border-radius: 3px;
+                background-color: #22253F;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.cropped_image_checkbox.setVisible(False)  # Hidden by default
+        controls_layout.addWidget(self.cropped_image_checkbox)
+        
+        # Connect mutual exclusion between auto_outpainting and cropped_image
+        self.auto_outpainting_checkbox.toggled.connect(self._on_auto_outpainting_toggled)
+        self.cropped_image_checkbox.toggled.connect(self._on_cropped_image_toggled)
 
         main_layout.addLayout(controls_layout)
         main_layout.addStretch(1)
 
-        # 하단: Inpaint 버튼
+        # 하단: Inpaint 버튼과 Upscale 버튼
+        bottom_button_layout = QHBoxLayout()
+        bottom_button_layout.addStretch()
+        
+        self.upscale_button = QPushButton("Upscale")
+        self.upscale_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.upscale_button.clicked.connect(self._on_upscale_button_clicked)
+        self.upscale_button.setFixedWidth(120)
+        bottom_button_layout.addWidget(self.upscale_button)
+        
         self.inpaint_button = QPushButton("Inpaint Image")
         self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
         self.inpaint_button.clicked.connect(self._on_inpaint_button_clicked) # [2단계] 연결 메서드 변경
         self.inpaint_button.setFixedWidth(200)
-        main_layout.addWidget(self.inpaint_button, alignment=Qt.AlignmentFlag.AlignRight)
+        bottom_button_layout.addWidget(self.inpaint_button)
+        
+        main_layout.addLayout(bottom_button_layout)
 
     def _on_inpaint_button_clicked(self):
         if not self.original_pil_image:
@@ -216,16 +259,29 @@ class Img2ImgPanel(QFrame):
             self.inpaint_button.setText("Edit Mask")
             self.inpaint_button.setStyleSheet(DARK_STYLES['primary_button']) # 강조 색상으로 변경
             self.auto_outpainting_checkbox.setVisible(True)  # Show checkbox in inpaint mode
+            self.cropped_image_checkbox.setVisible(True)  # Show cropped image checkbox in inpaint mode
         else: # 'img2img'
             self.inpaint_button.setText("Inpaint Image")
             self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
             self.auto_outpainting_checkbox.setVisible(False)  # Hide checkbox in img2img mode
             self.auto_outpainting_checkbox.setChecked(False)  # Reset checkbox state
+            self.cropped_image_checkbox.setVisible(False)  # Hide cropped image checkbox in img2img mode
+            self.cropped_image_checkbox.setChecked(False)  # Reset checkbox state
 
     def _update_strength_label(self, value):
         """Strength 슬라이더 값 변경 시 라벨 업데이트"""
         strength_value = value / 100.0
         self.strength_value_label.setText(f"{strength_value:.2f}")
+    
+    def _on_auto_outpainting_toggled(self, checked):
+        """Auto-outpainting 체크박스 토글 시 cropped_image 체크박스 해제"""
+        if checked and self.cropped_image_checkbox.isChecked():
+            self.cropped_image_checkbox.setChecked(False)
+    
+    def _on_cropped_image_toggled(self, checked):
+        """Cropped image 체크박스 토글 시 auto_outpainting 체크박스 해제"""
+        if checked and self.auto_outpainting_checkbox.isChecked():
+            self.auto_outpainting_checkbox.setChecked(False)
 
     def _update_noise_label(self, value):
         """Noise 슬라이더 값 변경 시 라벨 업데이트"""
@@ -254,6 +310,10 @@ class Img2ImgPanel(QFrame):
 
         self.original_pil_image = pil_image
         self._set_cropped_background() # 배경은 원본 크롭 이미지로 설정
+        
+        # 새 이미지가 로드되면 Upscale 버튼 다시 표시
+        self.upscale_button.setVisible(True)
+        
         self.update() 
         self.setVisible(True)
 
@@ -299,6 +359,9 @@ class Img2ImgPanel(QFrame):
         self.small_mask_pil = None
         self._mask_preset = False  # Reset preset flag
         self._mask_from_sketchbook = False  # Reset sketchbook flag
+        
+        # 패널이 숨겨질 때 Upscale 버튼도 초기화 (다음에 다시 표시되도록)
+        self.upscale_button.setVisible(True)
         self._update_ui_for_mode() # UI 상태도 초기화
 
     def get_parameters(self) -> dict | None:
@@ -326,6 +389,12 @@ class Img2ImgPanel(QFrame):
             if self.auto_outpainting_checkbox.isChecked():
                 params["auto_outpainting"] = True
                 # Always provide full mask for auto-outpainting
+                params["full_mask_pil"] = self.full_mask_pil
+            
+            # Add cropped_image_request parameter if checkbox is checked
+            if self.cropped_image_checkbox.isChecked():
+                params["cropped_image_request"] = True
+                # Provide full mask for cropped image extraction
                 params["full_mask_pil"] = self.full_mask_pil
             
             mask_to_use = self.small_mask_pil if api_mode == "NAI" else self.full_mask_pil
@@ -400,3 +469,89 @@ class Img2ImgPanel(QFrame):
         else:
             print("⚠️ Failed to process mask from Sketchbook")
             return False
+    
+    def _on_upscale_button_clicked(self):
+        """Upscale 버튼 클릭 시 처리"""
+        if not self.original_pil_image:
+            QMessageBox.warning(self, "경고", "업스케일할 이미지가 없습니다.")
+            return
+        
+        # NAI 모드 확인
+        if self.app_context.app_context.current_api_mode != "NAI":
+            QMessageBox.warning(self, "경고", "Upscale 기능은 NAI 모드에서만 사용 가능합니다.")
+            return
+        
+        # 원본 크기 저장
+        original_width = self.original_pil_image.width
+        original_height = self.original_pil_image.height
+        
+        # Progress dialog
+        self.progress_dialog = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+        self.progress_dialog.setWindowTitle("업스케일")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.show()
+        
+        # Worker thread 생성
+        self.upscale_worker = UpscaleWorker(
+            self.app_context,
+            self.original_pil_image,
+            original_width,
+            original_height
+        )
+        self.upscale_worker.finished.connect(self._on_upscale_finished)
+        self.upscale_worker.error.connect(self._on_upscale_error)
+        self.upscale_worker.start()
+    
+    def _on_upscale_finished(self, upscaled_image):
+        """업스케일 완료 처리"""
+        self.progress_dialog.close()
+        
+        # 업스케일된 이미지로 교체
+        self.original_pil_image = upscaled_image
+        
+        # 배경 이미지 업데이트
+        self._set_cropped_background()
+        
+        # Upscale 버튼 숨기기 (이미 업스케일 완료)
+        self.upscale_button.setVisible(False)
+        
+        # Anlas 업데이트
+        if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'update_anlas_display'):
+            self.app_context.main_window.update_anlas_display()
+        
+        QMessageBox.information(self, "완료", f"이미지가 2배 업스케일 후 원본 크기({upscaled_image.width}x{upscaled_image.height})로 리사이징되었습니다.")
+    
+    def _on_upscale_error(self, error_msg):
+        """업스케일 에러 처리"""
+        self.progress_dialog.close()
+        QMessageBox.critical(self, "업스케일 실패", f"업스케일 중 오류가 발생했습니다:\n{error_msg}")
+
+
+class UpscaleWorker(QThread):
+    """업스케일 작업을 수행하는 워커 스레드"""
+    finished = pyqtSignal(Image.Image)
+    error = pyqtSignal(str)
+    
+    def __init__(self, app_context, pil_image, target_width, target_height):
+        super().__init__()
+        self.app_context = app_context
+        self.pil_image = pil_image
+        self.target_width = target_width
+        self.target_height = target_height
+    
+    def run(self):
+        try:
+            # API service에서 업스케일 수행
+            result = self.app_context.app_context.api_service.upscale_NAI_from_inpaint(
+                self.pil_image,
+                self.target_width,
+                self.target_height
+            )
+            
+            if result['status'] == 'success':
+                self.finished.emit(result['image'])
+            else:
+                self.error.emit(result.get('message', 'Unknown error'))
+        except Exception as e:
+            self.error.emit(str(e))

@@ -539,6 +539,12 @@ class ModernMainWindow(QMainWindow):
 
         # 검색 및 필터링 섹션
         search_box = CollapsibleBox("프롬프트 검색 / 필터링 / API 관리")
+        self.search_collapsible_box = search_box  # 나중에 업데이트하기 위해 참조 저장
+        
+        # NAI 모드인지 확인하고 Anlas 표시
+        if self.app_context.current_api_mode == "NAI":
+            anlas = self.app_context.api_service.get_anlas()
+            search_box.update_anlas(anlas)
 
         # 전체 검색 레이아웃
         search_main_layout = QVBoxLayout()
@@ -1335,6 +1341,9 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage("NAI 모드로 전환되었습니다.")
             self.app_context.set_api_mode(mode)
             
+            # NAI 모드로 전환 시 Anlas 업데이트
+            self.update_anlas_display()
+            
         elif mode == "WEBUI":
             # WEBUI 모드 선택 시 연결 테스트 수행 (기존 로직 유지)
             try:
@@ -1535,6 +1544,18 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage("⚙️ API 관리 탭으로 이동했습니다.", 3000)
         else:
             self.status_bar.showMessage("⚠️ API 관리 탭을 열 수 없습니다.", 5000)
+
+    def update_anlas_display(self):
+        """NAI 모드에서 Anlas 값을 업데이트하여 CollapsibleBox 제목에 표시합니다."""
+        if not hasattr(self, 'search_collapsible_box'):
+            return
+        
+        # NAI 모드일 때만 Anlas 표시
+        if self.app_context.current_api_mode == "NAI":
+            anlas = self.app_context.api_service.get_anlas()
+            self.search_collapsible_box.update_anlas(anlas)
+        else:
+            self.search_collapsible_box.update_anlas(None)
 
     def create_right_panel(self):
        # [수정] 생성자에 main_window 참조를 전달합니다.

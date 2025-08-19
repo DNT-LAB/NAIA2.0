@@ -34,12 +34,17 @@ class ImageLayerItem(QGraphicsPixmapItem):
         # Load and set pixmap
         if layer_data.pixmap:
             self.setPixmap(layer_data.pixmap)
+            # Store original pixmap for high-quality resampling
+            if not hasattr(layer_data, 'original_pixmap'):
+                layer_data.original_pixmap = layer_data.pixmap
         else:
             pixmap = QPixmap(layer_data.image_path)
             if not pixmap.isNull():
                 self.setPixmap(pixmap)
                 layer_data.pixmap = pixmap
                 layer_data.original_size = (pixmap.width(), pixmap.height())
+                # Store original pixmap for high-quality resampling
+                layer_data.original_pixmap = pixmap
         
         # Apply transforms
         self.setPos(*layer_data.position)
@@ -99,9 +104,86 @@ class ImageLayerItem(QGraphicsPixmapItem):
         shift = old_center - new_center
         self.setPos(self.pos() + shift)
         self.layer_data.scale = scale
+    
+    def apply_smooth_resample(self):
+        """Apply high-quality resampling to the pixmap based on current scale
+        This should be called after resize operation is complete for smooth scaling
+        """
+        try:
+            # Get the original pixmap (we keep the original for quality)
+            if not hasattr(self.layer_data, 'original_pixmap') or not self.layer_data.original_pixmap:
+                # Store original pixmap if not already stored
+                self.layer_data.original_pixmap = self.layer_data.pixmap.copy() if self.layer_data.pixmap else None
+            
+            original_pixmap = self.layer_data.original_pixmap
+            if not original_pixmap or original_pixmap.isNull():
+                return
+            
+            # Get the cumulative scale (including any previous resampling)
+            if not hasattr(self.layer_data, 'cumulative_scale'):
+                self.layer_data.cumulative_scale = 1.0
+            
+            # Update cumulative scale with current transform scale
+            current_transform_scale = self.scale()
+            total_scale = self.layer_data.cumulative_scale * current_transform_scale
+            
+            # Calculate new size based on total scale from original
+            new_width = int(original_pixmap.width() * total_scale)
+            new_height = int(original_pixmap.height() * total_scale)
+            
+            # Ensure minimum size
+            new_width = max(10, new_width)
+            new_height = max(10, new_height)
+            
+            # Skip if size hasn't changed significantly
+            current_pixmap = self.pixmap()
+            if (abs(current_pixmap.width() - new_width) < 2 and 
+                abs(current_pixmap.height() - new_height) < 2):
+                return
+            
+            # Convert to QImage for high-quality scaling
+            from PyQt6.QtGui import QImage
+            original_image = original_pixmap.toImage()
+            
+            # Apply smooth transformation (Bilinear or BiCubic interpolation)
+            scaled_image = original_image.scaled(
+                new_width, new_height,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            # Convert back to pixmap
+            new_pixmap = QPixmap.fromImage(scaled_image)
+            
+            # Update the pixmap
+            self.setPixmap(new_pixmap)
+            self.layer_data.pixmap = new_pixmap
+            
+            # Reset transform scale to 1.0 since we've applied the scaling to the pixmap itself
+            self.setScale(1.0)
+            
+            # Store the cumulative scale
+            self.layer_data.cumulative_scale = total_scale
+            self.layer_data.scale = total_scale  # Keep this for compatibility
+            
+            # Update layer data to reflect the new size
+            self.layer_data.original_size = (new_width, new_height)
+            
+            print(f"✅ Applied smooth resampling: {original_pixmap.width()}x{original_pixmap.height()} → {new_width}x{new_height} (scale: {total_scale:.2f})")
+            
+        except Exception as e:
+            print(f"⚠️ Error applying smooth resample: {e}")
+            import traceback
+            traceback.print_exc()
 
-    def set_scale_from_handle(self, new_scale: float, handle_pos: str):
-        """Scale from a specific handle position with opposite anchor"""
+    def set_scale_from_handle(self, new_scale: float, handle_pos: str, apply_resampling: bool = False):
+        """Scale from a specific handle position with opposite anchor
+        
+        Args:
+            new_scale: The new scale factor
+            handle_pos: The handle position being dragged
+            apply_resampling: If True, apply high-quality resampling to the pixmap
+        """
         old_rect = self.sceneBoundingRect()
         
         # Determine anchor point (opposite of handle)
@@ -126,6 +208,10 @@ class ImageLayerItem(QGraphicsPixmapItem):
         
         shift = anchor - new_anchor
         self.setPos(self.pos() + shift)
+        
+        # Apply high-quality resampling if requested (on mouse release)
+        if apply_resampling:
+            self.apply_smooth_resample()
 
     def itemChange(self, change, value):
         """Track position changes"""
@@ -225,7 +311,7 @@ class ImageLayerItem(QGraphicsPixmapItem):
         if crop_rect.isEmpty():
             return False
         
-        # Create cropped pixmap
+        # Create cropped pixmap from current displayed pixmap
         cropped_pixmap = current_pixmap.copy(crop_rect)
         
         # Update the pixmap
@@ -235,6 +321,46 @@ class ImageLayerItem(QGraphicsPixmapItem):
         self.layer_data.pixmap = cropped_pixmap
         self.layer_data.original_size = (cropped_pixmap.width(), cropped_pixmap.height())
         
+        # Important: Update the original_pixmap reference as well
+        # The cropped image becomes the new original
+        if hasattr(self.layer_data, 'original_pixmap'):
+            # If we have cumulative scale, we need to crop the original proportionally
+            cumulative_scale = getattr(self.layer_data, 'cumulative_scale', 1.0)
+            
+            if cumulative_scale != 1.0 and self.layer_data.original_pixmap:
+                # Calculate the crop rect in original pixmap coordinates
+                original_crop_rect = QRectF(
+                    crop_rect.x() / cumulative_scale,
+                    crop_rect.y() / cumulative_scale,
+                    crop_rect.width() / cumulative_scale,
+                    crop_rect.height() / cumulative_scale
+                ).toRect()
+                
+                # Ensure it's within original bounds
+                original_rect = self.layer_data.original_pixmap.rect()
+                original_crop_rect = original_crop_rect.intersected(original_rect)
+                
+                if not original_crop_rect.isEmpty():
+                    # Crop the original pixmap
+                    cropped_original = self.layer_data.original_pixmap.copy(original_crop_rect)
+                    self.layer_data.original_pixmap = cropped_original
+                    print(f"✅ Cropped original pixmap: {original_crop_rect.width()}x{original_crop_rect.height()}")
+            else:
+                # No scaling, so the cropped pixmap becomes the new original
+                self.layer_data.original_pixmap = cropped_pixmap
+        else:
+            # If no original_pixmap exists, set it now
+            self.layer_data.original_pixmap = cropped_pixmap
+        
+        # Reset cumulative scale since we've cropped to a new base size
+        # The displayed size is now the "base" size
+        if hasattr(self.layer_data, 'cumulative_scale'):
+            self.layer_data.cumulative_scale = 1.0
+        
+        # Reset transform scale to 1.0 since cropping creates a new base
+        self.setScale(1.0)
+        self.layer_data.scale = 1.0
+        
         # Reset crop rect and exit crop mode
         self._crop_rect = None
         self.set_crop_mode(False)
@@ -242,6 +368,8 @@ class ImageLayerItem(QGraphicsPixmapItem):
         # Update handles
         for handle in self.handles:
             handle.update_position()
+        
+        print(f"✂️ Crop applied: new size {cropped_pixmap.width()}x{cropped_pixmap.height()}")
         
         return True
     
@@ -431,15 +559,28 @@ class ResizeHandle(QGraphicsRectItem):
                 handle.update_position()
 
     def mouseReleaseEvent(self, event):
-        """End resize operation"""
-        # Record scale change if it occurred
-        if self._press_scale != self.layer_item.scale():
+        """End resize operation and apply smooth resampling"""
+        # Check if scale actually changed
+        scale_changed = self._press_scale != self.layer_item.scale()
+        
+        if scale_changed:
+            # Apply high-quality resampling now that dragging is complete
+            self.layer_item.apply_smooth_resample()
+            
+            # After resampling, scale is reset to 1.0, so use the stored scale value
+            final_scale = self.layer_item.layer_data.scale
+            
+            # Emit scale change signal
             if self.scene() and hasattr(self.scene().parent(), 'layer_scaled'):
                 self.scene().parent().layer_scaled.emit(
                     self.layer_item.layer_data.id,
                     self._press_scale,
-                    self.layer_item.scale()
+                    final_scale
                 )
+            
+            # Update all handles after resampling
+            for handle in self.layer_item.handles:
+                handle.update_position()
         
         self._press_pos = None
         self._press_scale = 1.0

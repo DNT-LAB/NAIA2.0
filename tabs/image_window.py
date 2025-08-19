@@ -208,7 +208,16 @@ class ImageHistoryWindow(QWidget):
 
     def add_history_item(self, history_item: HistoryItem):
         """새로운 히스토리 아이템을 받아 위젯을 생성하고 목록 최상단에 추가"""
-        item_widget = HistoryItemWidget(history_item)
+        # app_context를 찾기 위해 부모 체인을 탐색
+        app_context = None
+        parent_widget = self.parent()
+        while parent_widget:
+            if hasattr(parent_widget, 'app_context'):
+                app_context = parent_widget.app_context
+                break
+            parent_widget = parent_widget.parent()
+        
+        item_widget = HistoryItemWidget(history_item, parent=None, app_context=app_context)
         item_widget.item_selected.connect(self.on_item_selected)
         item_widget.delete_requested.connect(self.on_item_delete_requested)
 
@@ -333,9 +342,10 @@ class HistoryItemWidget(QWidget):
     select_previous_requested = pyqtSignal()
     select_next_requested = pyqtSignal()
 
-    def __init__(self, history_item: HistoryItem, parent=None):
+    def __init__(self, history_item: HistoryItem, parent=None, app_context=None):
         super().__init__(parent)
         self.history_item = history_item
+        self.app_context = app_context
         self.is_selected = False
         self.init_ui()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -429,6 +439,19 @@ class HistoryItemWidget(QWidget):
         copy_webp_action.triggered.connect(lambda: self.copy_image_to_clipboard('WEBP'))
         menu.addAction(copy_png_action)
         menu.addAction(copy_webp_action)
+        
+        # NAI Upscale 메뉴 추가
+        menu.addSeparator()
+        upscale_action = QAction("🔍 NAI 2x 업스케일", self)
+        upscale_action.triggered.connect(self.upscale_image_nai)
+        # NAI 모드가 아니면 비활성화
+        if hasattr(self, 'app_context'):
+            current_mode = self.app_context.get_api_mode() if self.app_context else None
+            if current_mode != "NAI":
+                upscale_action.setEnabled(False)
+                upscale_action.setToolTip("NAI 모드에서만 사용 가능합니다")
+        menu.addAction(upscale_action)
+        
         menu.addSeparator()
         delete_action = QAction("🗑️ 이미지 삭제", self)
         delete_action.triggered.connect(lambda: self.delete_requested.emit(self))
@@ -570,6 +593,177 @@ class HistoryItemWidget(QWidget):
         qimg.loadFromData(buf.getvalue())
         QApplication.clipboard().setPixmap(qimg)
         print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
+    
+    def _show_styled_message(self, title, message, msg_type='warning'):
+        """다크 테마 스타일이 적용된 QMessageBox를 표시합니다."""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        
+        if msg_type == 'warning':
+            msg.setIcon(QMessageBox.Icon.Warning)
+        elif msg_type == 'critical':
+            msg.setIcon(QMessageBox.Icon.Critical)
+        elif msg_type == 'information':
+            msg.setIcon(QMessageBox.Icon.Information)
+        
+        # 다크 테마 스타일 적용
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QMessageBox QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                background-color: transparent;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 6px 20px;
+                border-radius: 4px;
+                min-width: 80px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border: 1px solid {DARK_COLORS['accent_blue']};
+            }}
+            QMessageBox QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_pressed']};
+            }}
+        """)
+        
+        msg.exec()
+    
+    def upscale_image_nai(self):
+        """NAI API를 사용하여 이미지를 2배 업스케일합니다."""
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+        from PyQt6.QtGui import QPixmap
+        import io
+        
+        # AppContext 가져오기 (self.app_context가 있으면 직접 사용)
+        if hasattr(self, 'app_context') and self.app_context:
+            app_context = self.app_context
+        else:
+            # 없으면 부모 체인에서 찾기
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'app_context'):
+                parent_widget = parent_widget.parent()
+            
+            if not parent_widget or not hasattr(parent_widget, 'app_context'):
+                self._show_styled_message("오류", "AppContext를 찾을 수 없습니다.", 'warning')
+                return
+            
+            app_context = parent_widget.app_context
+        
+        # 현재 이미지를 QPixmap으로 변환
+        pil_img = self.history_item.image
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        buf.seek(0)
+        current_pixmap = QPixmap()
+        current_pixmap.loadFromData(buf.getvalue())
+        
+        # 진행 상황 다이얼로그 생성
+        progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+        progress.setWindowTitle("NAI 업스케일")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+        
+        # Worker 클래스 정의 (메서드 내부에 정의)
+        class UpscaleWorker(QObject):
+            finished = pyqtSignal(dict)
+            
+            def __init__(self, api_service, pixmap):
+                super().__init__()
+                self.api_service = api_service
+                self.pixmap = pixmap
+            
+            def run(self):
+                result = self.api_service.upscale_NAI(self.pixmap)
+                self.finished.emit(result)
+        
+        # Worker 스레드 설정
+        self.upscale_thread = QThread()
+        self.upscale_worker = UpscaleWorker(app_context.api_service, current_pixmap)
+        self.upscale_worker.moveToThread(self.upscale_thread)
+        
+        # 시그널 연결
+        self.upscale_thread.started.connect(self.upscale_worker.run)
+        self.upscale_worker.finished.connect(
+            lambda result: self._handle_upscale_result(result, progress, app_context)
+        )
+        self.upscale_worker.finished.connect(self.upscale_thread.quit)
+        self.upscale_worker.finished.connect(self.upscale_worker.deleteLater)
+        self.upscale_thread.finished.connect(self.upscale_thread.deleteLater)
+        
+        # 스레드 시작
+        self.upscale_thread.start()
+    
+    def _handle_upscale_result(self, result, progress, app_context):
+        """업스케일 결과를 처리합니다."""
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtCore import QBuffer, QIODevice
+        from PIL import Image
+        import io
+        
+        progress.close()
+        
+        if result['status'] == 'success':
+            # QPixmap을 PIL Image로 변환
+            upscaled_pixmap = result['image']
+            
+            # QBuffer를 사용하여 QPixmap을 bytes로 변환
+            qbuffer = QBuffer()
+            qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            upscaled_pixmap.save(qbuffer, "PNG")
+            image_data = qbuffer.data().data()
+            qbuffer.close()
+            
+            # bytes를 PIL Image로 변환
+            buffer = io.BytesIO(image_data)
+            upscaled_image = Image.open(buffer)
+            
+            # 기존 메타데이터 복사
+            info_text = self.history_item.info_text + f"\nUpscaled: 2x ({upscaled_pixmap.width()}x{upscaled_pixmap.height()})"
+            metadata = self.history_item.metadata.copy() if hasattr(self.history_item, 'metadata') else {}
+            metadata['upscaled'] = True
+            metadata['upscale_factor'] = 2
+            
+            # source_row 가져오기 (원본 이미지의 생성 정보)
+            source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') else None
+            
+            # 히스토리에 추가
+            if hasattr(app_context, 'add_to_history'):
+                app_context.add_to_history(
+                    upscaled_image,
+                    info_text,
+                    metadata,
+                    source_row
+                )
+                # 성공 메시지 제거 - 사용자 요청에 따라 성공시 메시지 표시 안함
+                print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+            else:
+                # 폴백: 직접 ImageWindow에 추가 시도
+                parent_widget = self.parent()
+                while parent_widget:
+                    if hasattr(parent_widget, 'add_to_history'):
+                        parent_widget.add_to_history(upscaled_image, info_text, metadata, source_row)
+                        # 성공 메시지 제거
+                        print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+                        return
+                    parent_widget = parent_widget.parent()
+                
+                # 히스토리에 추가할 방법이 없는 경우
+                self._show_styled_message("경고", 
+                    f"{result['message']}\n\n업스케일은 성공했지만 히스토리에 추가할 수 없습니다.", 'warning')
+        else:
+            self._show_styled_message("업스케일 실패", result['message'], 'critical')
 
     def restore_generation_params(self):
         """🆕 생성 파라미터를 UI에 복원"""
@@ -1087,6 +1281,17 @@ class ImageWindow(QWidget):
         copy_webp_action.triggered.connect(lambda: self.copy_image_to_clipboard('WEBP'))
         menu.addAction(copy_png_action)
         menu.addAction(copy_webp_action)
+        
+        # NAI Upscale 메뉴 추가
+        menu.addSeparator()
+        upscale_action = QAction("🔍 NAI 2x 업스케일", self)
+        upscale_action.triggered.connect(self.upscale_current_image_nai)
+        # NAI 모드가 아니면 비활성화
+        current_mode = self.app_context.get_api_mode() if self.app_context else None
+        if current_mode != "NAI":
+            upscale_action.setEnabled(False)
+            upscale_action.setToolTip("NAI 모드에서만 사용 가능합니다")
+        menu.addAction(upscale_action)
 
         menu.addSeparator()
         send_to_inpaint_action = QAction("🎨 Send to Inpaint (NAI)", self)
@@ -1226,28 +1431,28 @@ class ImageWindow(QWidget):
         """🆕 현재 이미지의 ComfyUI 워크플로우를 표시합니다."""
         if self.current_history_item and self.current_history_item.comfyui_workflow:
             # HistoryItemWidget의 show_comfyui_workflow 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.show_comfyui_workflow()
 
     def _save_current_comfyui_workflow(self):
         """🆕 현재 이미지의 ComfyUI 워크플로우를 저장합니다."""
         if self.current_history_item and self.current_history_item.comfyui_workflow:
             # HistoryItemWidget의 save_comfyui_workflow 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.save_comfyui_workflow()
 
     def _restore_current_generation_params(self):
         """🆕 현재 이미지의 생성 파라미터를 복원합니다."""
         if self.current_history_item:
             # HistoryItemWidget의 restore_generation_params 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item, self)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.restore_generation_params()
 
     def _show_current_metadata(self):
         """🆕 현재 이미지의 전체 메타데이터를 표시합니다."""
         if self.current_history_item:
             # HistoryItemWidget의 show_full_metadata 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item, self)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.show_full_metadata()
 
     # 🆕 ComfyUI 메타데이터 처리 메소드들
@@ -1670,6 +1875,11 @@ class ImageWindow(QWidget):
 
         if self.image_history_window:
             self.image_history_window.add_history_item(history_item)
+        
+        # NAI 모드에서 히스토리 아이템 추가 시 Anlas 업데이트
+        if self.app_context.current_api_mode == "NAI":
+            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'update_anlas_display'):
+                self.app_context.main_window.update_anlas_display()
 
     def display_history_item(self, item: HistoryItem):
         """[수정] 선택된 히스토리 아이템의 내용을 메인 뷰어에 표시"""
@@ -1786,6 +1996,146 @@ class ImageWindow(QWidget):
         qimg.loadFromData(buf.getvalue())
         QApplication.clipboard().setPixmap(qimg)
         print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
+    
+    def _show_styled_message_main(self, title, message, msg_type='warning'):
+        """메인 이미지용 다크 테마 스타일이 적용된 QMessageBox를 표시합니다."""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        
+        if msg_type == 'warning':
+            msg.setIcon(QMessageBox.Icon.Warning)
+        elif msg_type == 'critical':
+            msg.setIcon(QMessageBox.Icon.Critical)
+        elif msg_type == 'information':
+            msg.setIcon(QMessageBox.Icon.Information)
+        
+        # 다크 테마 스타일 적용
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QMessageBox QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                background-color: transparent;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 6px 20px;
+                border-radius: 4px;
+                min-width: 80px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border: 1px solid {DARK_COLORS['accent_blue']};
+            }}
+            QMessageBox QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_pressed']};
+            }}
+        """)
+        
+        msg.exec()
+    
+    def upscale_current_image_nai(self):
+        """메인 이미지를 NAI API를 사용하여 2배 업스케일합니다."""
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QBuffer, QIODevice
+        from PyQt6.QtGui import QPixmap
+        from PIL import Image
+        import io
+        
+        if not self.current_history_item:
+            self._show_styled_message_main("오류", "업스케일할 이미지가 없습니다.", 'warning')
+            return
+        
+        # 현재 이미지를 QPixmap으로 변환
+        pil_img = self.current_history_item.image
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        buf.seek(0)
+        current_pixmap = QPixmap()
+        current_pixmap.loadFromData(buf.getvalue())
+        
+        # 진행 상황 다이얼로그 생성
+        progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+        progress.setWindowTitle("NAI 업스케일")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+        
+        # Worker 클래스 정의 (메서드 내부에 정의)
+        class UpscaleWorker(QObject):
+            finished = pyqtSignal(dict)
+            
+            def __init__(self, api_service, pixmap):
+                super().__init__()
+                self.api_service = api_service
+                self.pixmap = pixmap
+            
+            def run(self):
+                result = self.api_service.upscale_NAI(self.pixmap)
+                self.finished.emit(result)
+        
+        # Worker 스레드 설정
+        self.upscale_thread = QThread()
+        self.upscale_worker = UpscaleWorker(self.app_context.api_service, current_pixmap)
+        self.upscale_worker.moveToThread(self.upscale_thread)
+        
+        # 시그널 연결
+        self.upscale_thread.started.connect(self.upscale_worker.run)
+        self.upscale_worker.finished.connect(
+            lambda result: self._handle_main_upscale_result(result, progress)
+        )
+        self.upscale_worker.finished.connect(self.upscale_thread.quit)
+        self.upscale_worker.finished.connect(self.upscale_worker.deleteLater)
+        self.upscale_thread.finished.connect(self.upscale_thread.deleteLater)
+        
+        # 스레드 시작
+        self.upscale_thread.start()
+    
+    def _handle_main_upscale_result(self, result, progress):
+        """메인 이미지 업스케일 결과를 처리합니다."""
+        from PyQt6.QtCore import QBuffer, QIODevice
+        from PIL import Image
+        import io
+        
+        progress.close()
+        
+        if result['status'] == 'success':
+            # QPixmap을 PIL Image로 변환
+            upscaled_pixmap = result['image']
+            
+            # QBuffer를 사용하여 QPixmap을 bytes로 변환
+            qbuffer = QBuffer()
+            qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            upscaled_pixmap.save(qbuffer, "PNG")
+            image_data = qbuffer.data().data()
+            qbuffer.close()
+            
+            # bytes를 PIL Image로 변환
+            buffer = io.BytesIO(image_data)
+            upscaled_image = Image.open(buffer)
+            
+            # 기존 메타데이터 복사
+            info_text = self.current_history_item.info_text + f"\nUpscaled: 2x ({upscaled_pixmap.width()}x{upscaled_pixmap.height()})"
+            metadata = self.current_history_item.metadata.copy() if hasattr(self.current_history_item, 'metadata') else {}
+            metadata['upscaled'] = True
+            metadata['upscale_factor'] = 2
+            
+            # source_row 가져오기 (원본 이미지의 생성 정보)
+            source_row = self.current_history_item.source_row if hasattr(self.current_history_item, 'source_row') else None
+            
+            # 히스토리에 추가
+            self.add_to_history(upscaled_image, info_text, metadata, source_row)
+            # 성공 메시지 제거 - 콘솔에만 출력
+            print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+        else:
+            self._show_styled_message_main("업스케일 실패", result['message'], 'critical')
 
     # [신규] 전체 다운로드 작업을 시작하는 메서드
     def start_download_all(self, clear_after=False):

@@ -3,7 +3,7 @@
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QScrollArea, QSizePolicy, QToolButton, QMenu, QFrame, QLabel
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QToolButton, QMenu, QFrame, QLabel
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QAction, QCursor
@@ -36,6 +36,11 @@ class EnhancedCollapsibleBox(QWidget):
         self.toggle_button.setArrowType(Qt.ArrowType.RightArrow)
         self.toggle_button.toggled.connect(self.on_toggled)
         
+        # Anlas 표시용 레이블 (NAI 모드 전용)
+        self.anlas_label = QLabel("")
+        self.anlas_label.setStyleSheet(f"color: #FFFF97; font-size: {get_scaled_font_size(19)}px; font-weight: bold; padding: 0 10px;")
+        self.anlas_label.setVisible(False)
+        
         # 테마에서 이미 동적 스케일링이 적용되므로 추가 스타일링 불필요
         # DARK_STYLES['collapsible_box']에서 QToolButton 스타일을 사용
         
@@ -57,7 +62,15 @@ class EnhancedCollapsibleBox(QWidget):
             }
         """)
         
-        self.main_layout.addWidget(self.toggle_button)
+        # 헤더 레이아웃 (제목 버튼과 Anlas 레이블을 담을 수평 레이아웃)
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(0)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.addWidget(self.toggle_button)
+        header_layout.addWidget(self.anlas_label)
+        header_layout.addStretch()
+        
+        self.main_layout.addLayout(header_layout)
         self.main_layout.addWidget(self.content_area)
 
     def show_context_menu(self, position: QPoint):
@@ -116,6 +129,14 @@ class EnhancedCollapsibleBox(QWidget):
             self.content_area.setMaximumHeight(16777215)
         else:
             self.content_area.setMaximumHeight(0)
+    
+    def update_anlas(self, anlas_value):
+        """Anlas 값을 업데이트합니다."""
+        if anlas_value is not None:
+            self.anlas_label.setText(f"[Anlas: {anlas_value}]")
+            self.anlas_label.setVisible(True)
+        else:
+            self.anlas_label.setVisible(False)
 
 
     def setContentLayout(self, layout):

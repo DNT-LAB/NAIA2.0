@@ -250,10 +250,14 @@ class SketchbookWidget(QWidget):
                 x = int(pos.x())
                 y = int(pos.y())
                 
-                # Apply layer's transform (scale)
-                if layer.layer_data.scale != 1.0:
-                    new_w = int(layer_img.width * layer.layer_data.scale)
-                    new_h = int(layer_img.height * layer.layer_data.scale)
+                # Apply layer's transform (scale) - already high quality from apply_smooth_resample
+                # The pixmap should already be at the correct size due to resampling on release
+                # But if there's a transform scale still applied, handle it
+                if layer.scale() != 1.0:
+                    # This means there's a transform that wasn't resampled yet
+                    actual_scale = layer.scale()
+                    new_w = int(layer_img.width * actual_scale)
+                    new_h = int(layer_img.height * actual_scale)
                     layer_img = layer_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 
                 # Paste layer onto composite using alpha_composite for proper blending
@@ -297,6 +301,8 @@ class SketchbookWidget(QWidget):
             # Reload the merged image
             pixmap = QPixmap(temp_path)
             target_layer.layer_data.pixmap = pixmap
+            target_layer.layer_data.original_pixmap = pixmap  # Set as new original
+            target_layer.layer_data.cumulative_scale = 1.0  # Reset scale tracking
             target_layer.setPixmap(pixmap)
             target_layer.setPos(0, 0)
             target_layer.resetTransform()  # Use Qt's built-in resetTransform method
@@ -361,10 +367,34 @@ class SketchbookWidget(QWidget):
                     result_pixmap = QPixmap(temp_output.name)
                     
                     if not result_pixmap.isNull():
-                        # Update layer with result
-                        layer_data.pixmap = result_pixmap
+                        # Update layer with result, preserving scale
+                        cumulative_scale = getattr(layer_data, 'cumulative_scale', 1.0)
+                        
+                        # Update original pixmap to the new background-removed version
+                        layer_data.original_pixmap = result_pixmap
+                        
+                        # If layer was scaled, apply the scale to the new image
+                        if cumulative_scale != 1.0:
+                            new_width = int(result_pixmap.width() * cumulative_scale)
+                            new_height = int(result_pixmap.height() * cumulative_scale)
+                            
+                            from PyQt6.QtGui import QImage
+                            result_image = result_pixmap.toImage()
+                            scaled_image = result_image.scaled(
+                                new_width, new_height,
+                                Qt.AspectRatioMode.IgnoreAspectRatio,
+                                Qt.TransformationMode.SmoothTransformation
+                            )
+                            scaled_result = QPixmap.fromImage(scaled_image)
+                            
+                            layer_data.pixmap = scaled_result
+                            layer.setPixmap(scaled_result)
+                            layer.setScale(1.0)  # Reset transform since we applied the scale
+                        else:
+                            layer_data.pixmap = result_pixmap
+                            layer.setPixmap(result_pixmap)
+                        
                         layer_data.image_path = temp_output.name
-                        layer.setPixmap(result_pixmap)
                         
                         # Update layer name to indicate background removed
                         layer_data.name = f"BG_Removed_{layer_data.name[:15]}"
@@ -405,15 +435,20 @@ class SketchbookWidget(QWidget):
             layer = self.canvas.layers[layer_id]
             layer_data = layer.layer_data
             
+            # Get the true original pixmap (unscaled) for background application
+            # This is important to maintain quality when applying backgrounds to scaled images
+            true_original_pixmap = getattr(layer_data, 'original_pixmap', None)
+            
             # Store original image path before applying background (if not already stored)
             if not hasattr(layer_data, 'original_image_path_before_bg') or not layer_data.original_image_path_before_bg:
-                # Save current image as original if this is the first background application
+                # Save the TRUE original (unscaled) image if this is the first background application
                 original_file = tempfile.NamedTemporaryFile(suffix='_original.png', delete=False)
                 original_filename = original_file.name
                 original_file.close()
                 
-                current_pixmap = layer.pixmap()
-                current_pixmap.save(original_filename, 'PNG')
+                # Use the true original pixmap if available, otherwise use current
+                pixmap_to_save = true_original_pixmap if true_original_pixmap else layer.pixmap()
+                pixmap_to_save.save(original_filename, 'PNG')
                 layer_data.original_image_path_before_bg = original_filename
                 print(f"📁 Saved original image to: {original_filename}")
             
@@ -462,8 +497,34 @@ class SketchbookWidget(QWidget):
             new_pixmap = QPixmap(result_filename)
             
             if not new_pixmap.isNull():
-                # Update the layer's pixmap
-                layer.setPixmap(new_pixmap)
+                # Check if layer has been scaled and apply the same scale to the new image
+                cumulative_scale = getattr(layer_data, 'cumulative_scale', 1.0)
+                
+                if cumulative_scale != 1.0:
+                    # Apply the cumulative scale to the new image with background
+                    new_width = int(new_pixmap.width() * cumulative_scale)
+                    new_height = int(new_pixmap.height() * cumulative_scale)
+                    
+                    from PyQt6.QtGui import QImage
+                    new_image = new_pixmap.toImage()
+                    scaled_image = new_image.scaled(
+                        new_width, new_height,
+                        Qt.AspectRatioMode.IgnoreAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    scaled_new_pixmap = QPixmap.fromImage(scaled_image)
+                    
+                    # Update the layer's pixmap with scaled version
+                    layer.setPixmap(scaled_new_pixmap)
+                    layer_data.pixmap = scaled_new_pixmap
+                    
+                    # Update the original_pixmap to be the new one with background (unscaled)
+                    layer_data.original_pixmap = new_pixmap
+                else:
+                    # No scaling, just update
+                    layer.setPixmap(new_pixmap)
+                    layer_data.pixmap = new_pixmap
+                    layer_data.original_pixmap = new_pixmap
                 
                 # Store the background color in layer data for future reference
                 layer_data.background_color = color_hex
@@ -472,6 +533,8 @@ class SketchbookWidget(QWidget):
                 layer_data.image_path = result_filename
                 
                 print(f"✅ Background color {color_hex} applied to layer: {layer_id}")
+                if cumulative_scale != 1.0:
+                    print(f"   Maintained scale: {cumulative_scale:.2f}")
             else:
                 print(f"❌ Failed to apply background color to layer: {layer_id}")
             
@@ -527,15 +590,45 @@ class SketchbookWidget(QWidget):
                 original_pixmap = QPixmap(original_path)
                 
                 if not original_pixmap.isNull():
-                    # Update the layer with original image
-                    layer.setPixmap(original_pixmap)
+                    # Get current scale information before updating
+                    current_scale = layer.scale()
+                    cumulative_scale = getattr(layer_data, 'cumulative_scale', 1.0)
                     
-                    # Save original to a new temp file for current image_path
+                    # Update the original pixmap reference first
+                    layer_data.original_pixmap = original_pixmap
+                    
+                    # If layer has been scaled, apply resampling to the restored image
+                    if cumulative_scale != 1.0:
+                        # Apply the cumulative scale to the restored image
+                        new_width = int(original_pixmap.width() * cumulative_scale)
+                        new_height = int(original_pixmap.height() * cumulative_scale)
+                        
+                        from PyQt6.QtGui import QImage
+                        original_image = original_pixmap.toImage()
+                        scaled_image = original_image.scaled(
+                            new_width, new_height,
+                            Qt.AspectRatioMode.IgnoreAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation
+                        )
+                        scaled_pixmap = QPixmap.fromImage(scaled_image)
+                        layer.setPixmap(scaled_pixmap)
+                        layer_data.pixmap = scaled_pixmap
+                        # Keep scale at 1.0 since we applied the scaling
+                        layer.setScale(1.0)
+                    else:
+                        # No scaling needed, just set the original
+                        layer.setPixmap(original_pixmap)
+                        layer_data.pixmap = original_pixmap
+                    
+                    # Save restored image to a new temp file for current image_path
                     import tempfile
                     restored_file = tempfile.NamedTemporaryFile(suffix='_restored.png', delete=False)
                     restored_filename = restored_file.name
                     restored_file.close()
-                    original_pixmap.save(restored_filename, 'PNG')
+                    
+                    # Save the current displayed pixmap (which may be scaled)
+                    current_display_pixmap = layer.pixmap()
+                    current_display_pixmap.save(restored_filename, 'PNG')
                     
                     # Update layer data
                     layer_data.image_path = restored_filename
@@ -549,6 +642,8 @@ class SketchbookWidget(QWidget):
                     
                     print(f"✅ Background color removed from layer: {layer_id}")
                     print(f"   Restored image saved to: {restored_filename}")
+                    if cumulative_scale != 1.0:
+                        print(f"   Maintained scale: {cumulative_scale:.2f}")
                 else:
                     print(f"❌ Failed to load original pixmap from: {original_path}")
                     layer_data.background_color = None

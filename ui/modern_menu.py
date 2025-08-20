@@ -5,6 +5,7 @@ Provides a simple way to apply modern menu styling to TextEdit widgets.
 
 from PyQt6.QtWidgets import QTextEdit, QPlainTextEdit
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
@@ -33,6 +34,42 @@ def setModernStyle(text_edit_widget):
         menu = text_edit_widget.createStandardContextMenu()
         if not menu:
             return
+        
+        # Check for selected text and InstantWildcardModule
+        cursor = text_edit_widget.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        if selected_text:
+            # Try to find InstantWildcardModule
+            instant_wildcard_module = None
+            try:
+                # Get app context from widget hierarchy
+                widget = text_edit_widget
+                while widget and not hasattr(widget, 'app_context'):
+                    widget = widget.parent()
+                
+                if widget and hasattr(widget, 'app_context'):
+                    app_context = widget.app_context
+                    if hasattr(app_context, 'main_window'):
+                        mw = app_context.main_window
+                        if hasattr(mw, 'middle_section_controller'):
+                            instant_wildcard_module = mw.middle_section_controller.get_module_instance("InstantWildcardModule")
+            except Exception:
+                pass  # Silently fail if module not found
+            
+            # Add instant wildcard action if module is available
+            if instant_wildcard_module:
+                # Insert at the beginning of menu
+                actions = menu.actions()
+                add_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                add_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                
+                if actions:
+                    menu.insertAction(actions[0], add_action)
+                    menu.insertSeparator(actions[0])
+                else:
+                    menu.addAction(add_action)
+                    menu.addSeparator()
         
         # Get scaled sizes for responsive UI
         border_radius = get_scaled_size(8)
@@ -127,6 +164,42 @@ def setDarkStyle(text_edit_widget):
         menu = text_edit_widget.createStandardContextMenu()
         if not menu:
             return
+        
+        # Check for selected text and InstantWildcardModule
+        cursor = text_edit_widget.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        if selected_text:
+            # Try to find InstantWildcardModule
+            instant_wildcard_module = None
+            try:
+                # Get app context from widget hierarchy
+                widget = text_edit_widget
+                while widget and not hasattr(widget, 'app_context'):
+                    widget = widget.parent()
+                
+                if widget and hasattr(widget, 'app_context'):
+                    app_context = widget.app_context
+                    if hasattr(app_context, 'main_window'):
+                        mw = app_context.main_window
+                        if hasattr(mw, 'middle_section_controller'):
+                            instant_wildcard_module = mw.middle_section_controller.get_module_instance("InstantWildcardModule")
+            except Exception:
+                pass  # Silently fail if module not found
+            
+            # Add instant wildcard action if module is available
+            if instant_wildcard_module:
+                # Insert at the beginning of menu
+                actions = menu.actions()
+                add_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                add_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                
+                if actions:
+                    menu.insertAction(actions[0], add_action)
+                    menu.insertSeparator(actions[0])
+                else:
+                    menu.addAction(add_action)
+                    menu.addSeparator()
         
         # Get scaled sizes for responsive UI
         border_radius = get_scaled_size(8)
@@ -229,6 +302,42 @@ class ModernMenu:
             if not menu:
                 return
             
+            # Check for selected text and InstantWildcardModule
+            cursor = text_edit_widget.textCursor()
+            selected_text = cursor.selectedText().strip()
+            
+            if selected_text:
+                # Try to find InstantWildcardModule
+                instant_wildcard_module = None
+                try:
+                    # Get app context from widget hierarchy
+                    widget = text_edit_widget
+                    while widget and not hasattr(widget, 'app_context'):
+                        widget = widget.parent()
+                    
+                    if widget and hasattr(widget, 'app_context'):
+                        app_context = widget.app_context
+                        if hasattr(app_context, 'main_window'):
+                            mw = app_context.main_window
+                            if hasattr(mw, 'middle_section_controller'):
+                                instant_wildcard_module = mw.middle_section_controller.get_module_instance("InstantWildcardModule")
+                except Exception:
+                    pass  # Silently fail if module not found
+                
+                # Add instant wildcard action if module is available
+                if instant_wildcard_module:
+                    # Insert at the beginning of menu
+                    actions = menu.actions()
+                    add_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                    add_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                    
+                    if actions:
+                        menu.insertAction(actions[0], add_action)
+                        menu.insertSeparator(actions[0])
+                    else:
+                        menu.addAction(add_action)
+                        menu.addSeparator()
+            
             # Get scaled sizes for responsive UI
             border_radius = get_scaled_size(8)
             padding = get_scaled_size(6)
@@ -318,6 +427,42 @@ class ModernMenu:
             menu = text_edit_widget.createStandardContextMenu()
             if not menu:
                 return
+            
+            # Check for selected text and InstantWildcardModule
+            cursor = text_edit_widget.textCursor()
+            selected_text = cursor.selectedText().strip()
+            
+            if selected_text:
+                # Try to find InstantWildcardModule
+                instant_wildcard_module = None
+                try:
+                    # Get app context from widget hierarchy
+                    widget = text_edit_widget
+                    while widget and not hasattr(widget, 'app_context'):
+                        widget = widget.parent()
+                    
+                    if widget and hasattr(widget, 'app_context'):
+                        app_context = widget.app_context
+                        if hasattr(app_context, 'main_window'):
+                            mw = app_context.main_window
+                            if hasattr(mw, 'middle_section_controller'):
+                                instant_wildcard_module = mw.middle_section_controller.get_module_instance("InstantWildcardModule")
+                except Exception:
+                    pass  # Silently fail if module not found
+                
+                # Add instant wildcard action if module is available
+                if instant_wildcard_module:
+                    # Insert at the beginning of menu
+                    actions = menu.actions()
+                    add_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                    add_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                    
+                    if actions:
+                        menu.insertAction(actions[0], add_action)
+                        menu.insertSeparator(actions[0])
+                    else:
+                        menu.addAction(add_action)
+                        menu.addSeparator()
             
             # Get scaled sizes for responsive UI
             border_radius = get_scaled_size(8)

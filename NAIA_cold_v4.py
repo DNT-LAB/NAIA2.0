@@ -807,6 +807,13 @@ class ModernMainWindow(QMainWindow):
         top_scroll_area.setWidget(top_container)
         return top_scroll_area
 
+    def disable_wheel_event(self, widget):
+        """위젯의 마우스 휠 이벤트를 비활성화"""
+        def wheelEvent(event):
+            event.ignore()
+        widget.wheelEvent = wheelEvent
+        return widget
+    
     def create_enhanced_generation_area(self):
         """확장 가능한 생성 제어 영역 생성"""
         container = QWidget()
@@ -863,6 +870,7 @@ class ModernMainWindow(QMainWindow):
         self.model_combo = QComboBox()
         self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
         self.model_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.model_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.model_combo, 0, 1)
         
         scheduler_label = QLabel("스케줄러")
@@ -872,6 +880,7 @@ class ModernMainWindow(QMainWindow):
         self.scheduler_combo = QComboBox()
         self.scheduler_combo.addItems(["karras", "native", "exponential", "polyexponential"])
         self.scheduler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.scheduler_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.scheduler_combo, 0, 3)
         
         # === 두 번째 행: 해상도 + 랜덤 해상도 ===
@@ -884,6 +893,7 @@ class ModernMainWindow(QMainWindow):
                         "1088 x 960", "1152 x 896", "1216 x 832"]
         self.resolution_combo.addItems(self.resolutions)
         self.resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.resolution_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.resolution_combo, 1, 1)
         
         # 랜덤 해상도 체크박스
@@ -908,6 +918,7 @@ class ModernMainWindow(QMainWindow):
         self.sampler_combo.addItems(["k_euler_ancestral", "k_euler", "k_dpmpp_2m", 
                                     "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "ddim_v3"])
         self.sampler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.sampler_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.sampler_combo, 2, 1)
         
         steps_label = QLabel("Steps")
@@ -918,6 +929,7 @@ class ModernMainWindow(QMainWindow):
         self.steps_spinbox.setRange(1, 150)
         self.steps_spinbox.setValue(28)
         self.steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.disable_wheel_event(self.steps_spinbox)  # 마우스 휠 비활성화
         params_grid.addWidget(self.steps_spinbox, 2, 3)
         
         # === 네 번째 행: CFG Scale + CFG Rescale ===
@@ -935,6 +947,7 @@ class ModernMainWindow(QMainWindow):
         self.cfg_scale_slider.setRange(10, 100)  # 1.0 ~ 30.0을 10 ~ 300으로 표현
         self.cfg_scale_slider.setValue(50)  # 기본값 5.0
         self.cfg_scale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        self.disable_wheel_event(self.cfg_scale_slider)  # 마우스 휠 비활성화
         cfg_container_layout.addWidget(self.cfg_scale_slider)
         
         # CFG 값 표시 라벨
@@ -966,6 +979,7 @@ class ModernMainWindow(QMainWindow):
         self.cfg_rescale_slider.setRange(-25, 100)  # 0.0 ~ 1.0을 0 ~ 100으로 표현
         self.cfg_rescale_slider.setValue(45)  # 기본값 0.2
         self.cfg_rescale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        self.disable_wheel_event(self.cfg_rescale_slider)  # 마우스 휠 비활성화
         rescale_container_layout.addWidget(self.cfg_rescale_slider)
         
         # CFG Rescale 값 표시 라벨
@@ -1081,6 +1095,7 @@ class ModernMainWindow(QMainWindow):
         self.hr_upscaler_combo.addItems(["Lanczos", "Nearest", "ESRGAN_4x", "LDSR", "SwinIR_4x"])
         self.hr_upscaler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.hr_upscaler_combo.setMinimumWidth(120)
+        self.disable_wheel_event(self.hr_upscaler_combo)  # 마우스 휠 비활성화
         self.hires_option_layout_row1.addWidget(self.hr_upscaler_combo)
         
         self.hires_option_layout_row1.addStretch()
@@ -1099,6 +1114,7 @@ class ModernMainWindow(QMainWindow):
         self.hires_steps_spinbox.setValue(0)  # 기본값 0 (use same as generation)
         self.hires_steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
         self.hires_steps_spinbox.setFixedWidth(80)
+        self.disable_wheel_event(self.hires_steps_spinbox)  # 마우스 휠 비활성화
         self.hires_option_layout_row2.addWidget(self.hires_steps_spinbox)
         
         # 구분선
@@ -1122,6 +1138,7 @@ class ModernMainWindow(QMainWindow):
         self.denoising_strength_slider.setValue(50)  # 기본값 0.5
         self.denoising_strength_slider.setStyleSheet(DARK_STYLES['compact_slider'])
         self.denoising_strength_slider.setMinimumWidth(80)
+        self.disable_wheel_event(self.denoising_strength_slider)  # 마우스 휠 비활성화
         denoising_container_layout.addWidget(self.denoising_strength_slider)
         
         # 슬라이더 값 표시 라벨
@@ -2219,6 +2236,7 @@ class ModernMainWindow(QMainWindow):
             self.detached_resolution_combo.addItems(self.resolutions)
             self.detached_resolution_combo.setCurrentText(self.resolution_combo.currentText())
             self.detached_resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+            self.disable_wheel_event(self.detached_resolution_combo)  # 마우스 휠 비활성화
             self.detached_resolution_combo.currentTextChanged.connect(self.sync_resolution_to_main)
             resolution_layout.addWidget(self.detached_resolution_combo, 2)
             

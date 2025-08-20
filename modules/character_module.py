@@ -18,10 +18,11 @@ from ui.theme import DARK_STYLES
 
 class NAID4CharacterInput(QWidget):
     """단일 캐릭터 입력을 위한 위젯 클래스"""
-    def __init__(self, char_id: int, remove_callback, parent=None):
+    def __init__(self, char_id: int, remove_callback, app_context=None, parent=None):
         super().__init__(parent)
         self.char_id = char_id
         self.remove_callback = remove_callback
+        self.app_context = app_context
         self.init_ui()
 
     def init_ui(self):
@@ -55,6 +56,7 @@ class NAID4CharacterInput(QWidget):
         remove_btn.setFixedSize(30, 30)
         remove_btn.clicked.connect(lambda: self.remove_callback(self))
         layout.addWidget(remove_btn)
+    
 
 class CharacterModule(BaseMiddleModule, ModeAwareModule):
     def __init__(self):
@@ -291,7 +293,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
 
     def add_character_widget(self, prompt_text: str = "", uc_text: str = "", is_enabled: bool = True):
         char_id = len(self.character_widgets) + 1
-        char_widget = NAID4CharacterInput(char_id, self.remove_character_widget, self.scroll_layout.parentWidget())
+        char_widget = NAID4CharacterInput(char_id, self.remove_character_widget, self.app_context, self.scroll_layout.parentWidget())
         char_widget.prompt_textbox.setText(prompt_text)
         char_widget.uc_textbox.setText(uc_text)
         char_widget.active_checkbox.setChecked(is_enabled)

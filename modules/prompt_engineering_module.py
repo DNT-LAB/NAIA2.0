@@ -1,4 +1,5 @@
 from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox
+from PyQt6.QtCore import Qt
 from interfaces.base_module import BaseMiddleModule
 from core.prompt_context import PromptContext
 from interfaces.mode_aware_module import ModeAwareModule

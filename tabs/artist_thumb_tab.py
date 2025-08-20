@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLineEdit, QLabel, QSplitter, QFileDialog, QMessageBox,
+    QLineEdit, QLabel, QFileDialog, QMessageBox,
     QPushButton, QFrame, QScrollArea, QMenu, QApplication, QWidgetAction, QComboBox,
     QProgressDialog, QTextEdit, QSizePolicy
 )
@@ -353,30 +353,20 @@ class ArtistThumbModule(BaseTabModule):
         toolbar = self._create_toolbar()
         layout.addWidget(toolbar)
         
-        # 메인 스플리터 (좌측: 리스트, 우측: 미리보기)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setStyleSheet(f"""
-            QSplitter::handle {{
-                background-color: {DARK_COLORS['border']};
-                width: {get_scaled_size(2)}px;
-            }}
-            QSplitter::handle:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-        """)
+        # 메인 수평 레이아웃 (좌측: 리스트, 우측: 미리보기)
+        main_horizontal_layout = QHBoxLayout()
+        main_horizontal_layout.setSpacing(get_scaled_size(2))
         
-        # 좌측 패널 (검색 + 리스트)
+        # 좌측 패널 (검색 + 리스트) - 250픽셀 고정
         left_panel = self._create_left_panel(dynamic_styles)
-        splitter.addWidget(left_panel)
+        left_panel.setFixedWidth(250)
+        main_horizontal_layout.addWidget(left_panel)
         
         # 우측 패널 (이미지 미리보기)
         right_panel = self._create_right_panel()
-        splitter.addWidget(right_panel)
+        main_horizontal_layout.addWidget(right_panel)
         
-        # 스플리터 비율 설정 (3:5)
-        splitter.setSizes([200, 550])
-        
-        layout.addWidget(splitter)
+        layout.addLayout(main_horizontal_layout)
         
         # 하단 정보 패널
         info_panel = self._create_info_panel()
@@ -541,33 +531,36 @@ class ArtistThumbModule(BaseTabModule):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # 2차 스플리터 (2:3 비율)
-        sub_splitter = QSplitter(Qt.Orientation.Horizontal)
-        sub_splitter.setStyleSheet(f"""
-            QSplitter::handle {{
-                background-color: {DARK_COLORS['border']};
-                width: {get_scaled_size(2)}px;
-            }}
-            QSplitter::handle:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-        """)
+        # 서브 수평 레이아웃 (썸네일/프롬프트 : 생성 이미지)
+        sub_horizontal_layout = QHBoxLayout()
+        sub_horizontal_layout.setSpacing(get_scaled_size(2))
         
         # 왼쪽: 썸네일 + 프롬프트
         prompt_panel = self._create_prompt_panel()
+        # 크기는 _create_prompt_panel에서 이미 고정됨
         
         # 오른쪽: 생성 이미지 (832x1216 고정)
         generation_panel = self._create_generation_panel()
         
-        sub_splitter.addWidget(prompt_panel)
-        sub_splitter.addWidget(generation_panel)
-        sub_splitter.setSizes([550, 450])  # 썸네일 크기를 고려한 조정
+        sub_horizontal_layout.addWidget(prompt_panel)
+        sub_horizontal_layout.addWidget(generation_panel)
+        sub_horizontal_layout.setStretchFactor(prompt_panel, 1)  # 썸네일 패널은 늘어남
+        sub_horizontal_layout.setStretchFactor(generation_panel, 0)  # 생성 패널은 고정
         
-        main_layout.addWidget(sub_splitter)
+        main_layout.addLayout(sub_horizontal_layout)
         return main_panel
     
     def _create_prompt_panel(self) -> QWidget:
         """왼쪽 서브패널: 썸네일 + 프롬프트 입력"""
+        # 썸네일 이미지 (3:3.8 비율로 고정 크기 설정)
+        # 3:3.8 비율 = 너비:높이 = 1:1.267
+        thumbnail_width = 450
+        thumbnail_height = int(thumbnail_width * 3.8 / 3.0)  # 570
+        
+        # 패널 너비를 썸네일 너비 + 패딩으로 설정
+        panel_padding = get_scaled_size(8)
+        panel_width = thumbnail_width + (panel_padding * 2)
+        
         panel = QFrame()
         panel.setFrameStyle(QFrame.Shape.Box)
         panel.setStyleSheet(f"""
@@ -577,15 +570,16 @@ class ArtistThumbModule(BaseTabModule):
                 border-radius: {get_scaled_size(4)}px;
             }}
         """)
+        # 패널 크기 고정
+        panel.setFixedWidth(panel_width)
         
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(get_scaled_size(8), get_scaled_size(8),
-                                 get_scaled_size(8), get_scaled_size(8))
+        layout.setContentsMargins(panel_padding, panel_padding,
+                                 panel_padding, panel_padding)
         layout.setSpacing(get_scaled_size(8))
         
         dynamic_styles = get_dynamic_styles()
         
-        # 썸네일 이미지 (라벨 제거, 크기 증가, 1:1 비율 유지)
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumbnail_label.setStyleSheet(f"""
@@ -596,8 +590,8 @@ class ArtistThumbModule(BaseTabModule):
                 padding: {get_scaled_size(4)}px;
             }}
         """)
-        self.thumbnail_label.setMinimumSize(512, 512)
-        self.thumbnail_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # 크기를 고정으로 설정
+        self.thumbnail_label.setFixedSize(thumbnail_width, thumbnail_height)
         self.thumbnail_label.setScaledContents(False)  # False로 설정하여 비율 유지
         self._show_default_thumbnail()
         layout.addWidget(self.thumbnail_label)
@@ -610,15 +604,42 @@ class ArtistThumbModule(BaseTabModule):
         self.positive_prompt = QTextEdit()
         self.positive_prompt.setPlaceholderText("아티스트 스타일과 함께 사용할 프롬프트...")
         self.positive_prompt.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
-        self.positive_prompt.setMinimumHeight(get_scaled_size(100))
-        self.positive_prompt.setMaximumHeight(get_scaled_size(200))
+        # 썸네일 너비에 맞춰 크기 조정
+        self.positive_prompt.setFixedWidth(thumbnail_width)
+        self.positive_prompt.setFixedHeight(get_scaled_size(120))
         layout.addWidget(self.positive_prompt)
         
         # Generate 버튼
         self.generate_btn = QPushButton("🎨 Generate (832x1216)")
         self.generate_btn.setStyleSheet(dynamic_styles.get('primary_button', ''))
+        self.generate_btn.setFixedWidth(thumbnail_width)  # 썸네일 너비에 맞춤
+        self.generate_btn.setFixedHeight(get_scaled_size(40))
         self.generate_btn.clicked.connect(self._on_generate_clicked)
         layout.addWidget(self.generate_btn)
+        
+        # 작가태그 앞에 들어갈 텍스트
+        prefix_label = QLabel("작가태그 앞에 들어갈 텍스트:")
+        prefix_label.setStyleSheet(dynamic_styles.get('label_style', ''))
+        layout.addWidget(prefix_label)
+        
+        self.prefix_textedit = QTextEdit()
+        self.prefix_textedit.setPlaceholderText("1girl, usada pekora, ...")
+        self.prefix_textedit.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
+        self.prefix_textedit.setFixedWidth(thumbnail_width)
+        self.prefix_textedit.setFixedHeight(get_scaled_size(100))
+        layout.addWidget(self.prefix_textedit)
+        
+        # 작가태그 뒤에 들어갈 텍스트
+        postfix_label = QLabel("작가태그 뒤에 들어갈 텍스트:")
+        postfix_label.setStyleSheet(dynamic_styles.get('label_style', ''))
+        layout.addWidget(postfix_label)
+        
+        self.postfix_textedit = QTextEdit()
+        self.postfix_textedit.setPlaceholderText("no text, best quality, masterpiece, year 2024, ...")
+        self.postfix_textedit.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
+        self.postfix_textedit.setFixedWidth(thumbnail_width)
+        self.postfix_textedit.setFixedHeight(get_scaled_size(100))
+        layout.addWidget(self.postfix_textedit)
         
         layout.addStretch()
         
@@ -663,11 +684,16 @@ class ArtistThumbModule(BaseTabModule):
                         "아티스트\n썸네일")
         painter.end()
         
-        # 라벨 크기에 맞게 스케일링 (1:1 비율 유지)
+        # 고정된 썸네일 크기로 스케일링
         if hasattr(self, 'thumbnail_label'):
-            label_size = self.thumbnail_label.size()
+            # 고정된 썸네일 크기 사용 (패딩 고려)
+            padding = get_scaled_size(4) * 2  # 양쪽 패딩
+            target_width = 450 - padding
+            target_height = int(450 * 3.8 / 3.0) - padding
+            
             scaled_pixmap = pixmap.scaled(
-                label_size,
+                target_width,
+                target_height,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
@@ -1008,10 +1034,27 @@ class ArtistThumbModule(BaseTabModule):
                 pixmap.loadFromData(img_bytes)
                 
                 if hasattr(self, 'thumbnail_label'):
-                    # 라벨 크기에 맞게 스케일링 (1:1 비율 유지)
-                    label_size = self.thumbnail_label.size()
-                    scaled_pixmap = pixmap.scaled(
-                        label_size,
+                    # 좌우 85픽셀씩 잘라내기 (검은색 썸네일 영역 제거)
+                    if pixmap.width() > 170:  # 최소 170픽셀 이상일 때만 크롭
+                        cropped_pixmap = pixmap.copy(
+                            85,  # x 시작점
+                            0,   # y 시작점
+                            pixmap.width() - 170,  # 너비 (양쪽 85픽셀씩 제거)
+                            pixmap.height()  # 높이 유지
+                        )
+                    else:
+                        cropped_pixmap = pixmap
+                    
+                    # 고정된 썸네일 크기 사용 (패딩 고려)
+                    # 라벨의 고정 크기에서 패딩을 뺀 실제 이미지 영역 계산
+                    padding = get_scaled_size(4) * 2  # 양쪽 패딩
+                    target_width = 450 - padding
+                    target_height = int(450 * 3.8 / 3.0) - padding
+                    
+                    # 계산된 크기로 스케일링
+                    scaled_pixmap = cropped_pixmap.scaled(
+                        target_width,
+                        target_height,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation
                     )
@@ -1161,60 +1204,100 @@ class ArtistThumbModule(BaseTabModule):
         # Positive 프롬프트 가져오기
         positive = self.positive_prompt.toPlainText().strip()
         
+        # Prefix와 Postfix 가져오기
+        prefix = self.prefix_textedit.toPlainText().strip()
+        postfix = self.postfix_textedit.toPlainText().strip()
+        
+        # 최종 프롬프트 조합: prefix + positive + postfix
+        final_prompt_parts = []
+        if prefix:
+            final_prompt_parts.append(prefix)
+        if positive:
+            final_prompt_parts.append(positive)
+        if postfix:
+            final_prompt_parts.append(postfix)
+        
+        final_positive = ", ".join(final_prompt_parts)
+        
         # Negative 프롬프트는 메인 윈도우에서 가져오기
         negative = ""
         if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'negative_prompt_text'):
             negative = self.app_context.main_window.negative_prompt_text.toPlainText().strip()
         
-        if not positive:
-            QMessageBox.warning(self.widget, "경고", "Positive 프롬프트를 입력하세요.")
+        if not final_positive:
+            QMessageBox.warning(self.widget, "경고", "프롬프트를 입력하세요.")
             return
         
         # 오버라이드 파라미터 준비
         override_params = {
-            'positive_prompt': positive,
+            'input': final_positive,
             'negative_prompt': negative,
             'width': 832,
             'height': 1216,
+            'random_resolution': False,
             'artist_thumb_request': True  # ArtistThumb 전용 식별자
         }
         
-        # 생성 완료 이벤트 구독
-        def on_generation_complete(event_data):
-            if event_data.get('artist_thumb_request'):
-                # 생성된 이미지 표시
-                output_paths = event_data.get('output_paths', [])
-                if output_paths:
-                    try:
-                        # 첫 번째 이미지 로드
-                        img_path = output_paths[0]
-                        pil_image = Image.open(img_path)
-                        
-                        # StableImageWidget에 표시
-                        if hasattr(self, 'generation_image'):
-                            self.generation_image.setPilImage(pil_image)
-                        
-                        print(f"✅ ArtistThumb: 이미지 생성 완료 - {img_path}")
-                    except Exception as e:
-                        print(f"❌ ArtistThumb: 이미지 표시 오류 - {e}")
-                
-                # 구독 해제
-                self.app_context.unsubscribe('generation_complete', on_generation_complete)
+        # 자동 생성 체크박스 해제 (필요한 경우)
+        if hasattr(self.app_context, 'main_window'):
+            auto_generate_checkbox = self.app_context.main_window.generation_checkboxes.get("자동 생성")
+            if auto_generate_checkbox and auto_generate_checkbox.isChecked():
+                auto_generate_checkbox.setChecked(False)
         
-        # 이벤트 구독
-        self.app_context.subscribe('generation_complete', on_generation_complete)
+        # ArtistThumb 전용 생성 완료 이벤트 구독
+        self.app_context.subscribe("generation_completed_for_artist_thumb", self._on_generation_completed)
         
-        # generation_controller 호출
-        if hasattr(self.app_context, 'generation_controller'):
-            try:
-                self.app_context.generation_controller.generate_image(override_params)
-                print(f"🎨 ArtistThumb: 이미지 생성 시작 (832x1216)")
-            except Exception as e:
-                QMessageBox.critical(self.widget, "오류", f"이미지 생성 실패:\n{str(e)}")
-                self.app_context.unsubscribe('generation_complete', on_generation_complete)
+        # Generate 버튼 비활성화
+        self.generate_btn.setEnabled(False)
+        self.generate_btn.setText("🔄 생성 중...")
+        
+        # generation_controller의 execute_generation_pipeline 호출
+        if hasattr(self.app_context, 'main_window'):
+            gen_controller = self.app_context.main_window.generation_controller
+            gen_controller.execute_generation_pipeline(overrides=override_params)
+            print(f"🎨 ArtistThumb: 이미지 생성 시작 (832x1216)")
         else:
-            QMessageBox.warning(self.widget, "오류", "Generation controller를 찾을 수 없습니다.")
-            self.app_context.unsubscribe('generation_complete', on_generation_complete)
+            print("⚠️ generation_controller를 찾을 수 없습니다.")
+            # 오류 발생 시 버튼 복원
+            self.generate_btn.setEnabled(True)
+            self.generate_btn.setText("🎨 Generate (832x1216)")
+    
+    def _on_generation_completed(self, result):
+        """이미지 생성 완료 콜백"""
+        try:
+            # ArtistThumb 전용 구독 해제
+            if "generation_completed_for_artist_thumb" in self.app_context.subscribers:
+                self.app_context.subscribers["generation_completed_for_artist_thumb"].remove(self._on_generation_completed)
+            
+            # result가 PIL Image인지 확인
+            image_object = result
+            if hasattr(image_object, 'mode'):  # PIL Image 확인
+                # StableImageWidget에 표시
+                if hasattr(self, 'generation_image'):
+                    self.generation_image.setPilImage(image_object)
+                    print("✅ ArtistThumb: 이미지 생성 완료")
+                
+                # Generate 버튼 복원
+                self.generate_btn.setEnabled(True)
+                self.generate_btn.setText("🎨 Generate (832x1216)")
+                
+                # 상태바 메시지
+                if hasattr(self.app_context, 'main_window'):
+                    self.app_context.main_window.status_bar.showMessage(
+                        "✅ ArtistThumb: 이미지 생성 완료", 3000
+                    )
+            else:
+                print(f"⚠️ 예상과 다른 결과 타입: {type(result)}")
+                # 오류 시에도 버튼 복원
+                self.generate_btn.setEnabled(True)
+                self.generate_btn.setText("🎨 Generate (832x1216)")
+                
+        except Exception as e:
+            print(f"❌ 생성 완료 처리 중 오류: {e}")
+            print(f"결과 타입: {type(result)}")
+            # 예외 시에도 버튼 복원
+            self.generate_btn.setEnabled(True)
+            self.generate_btn.setText("🎨 Generate (832x1216)")
     
     def cleanup(self):
         """탭 종료 시 정리"""

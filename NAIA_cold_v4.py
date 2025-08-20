@@ -1122,38 +1122,42 @@ class ModernMainWindow(QMainWindow):
         separator3.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(separator3)
         
-        # Denoising Strength 슬라이더 (이동)
+        # Denoising Strength 스핀박스로 변경
         denoising_label = QLabel("Denoise")
         denoising_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(denoising_label)
         
-        # Denoising 슬라이더 컨테이너
-        denoising_container = QWidget()
-        denoising_container_layout = QHBoxLayout(denoising_container)
-        denoising_container_layout.setContentsMargins(0, 0, 0, 0)
-        denoising_container_layout.setSpacing(5)
+        # Denoising 스핀박스
+        self.denoising_strength_spinbox = QDoubleSpinBox()
+        self.denoising_strength_spinbox.setRange(0.0, 1.0)  # 0.0 ~ 1.0
+        self.denoising_strength_spinbox.setSingleStep(0.01)  # 0.01 단위
+        self.denoising_strength_spinbox.setDecimals(2)  # 소수점 2자리
+        self.denoising_strength_spinbox.setValue(0.50)  # 기본값 0.5
+        self.denoising_strength_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.denoising_strength_spinbox.setFixedWidth(80)
+        self.disable_wheel_event(self.denoising_strength_spinbox)  # 마우스 휠 비활성화
+        self.hires_option_layout_row2.addWidget(self.denoising_strength_spinbox)
         
-        self.denoising_strength_slider = QSlider(Qt.Orientation.Horizontal)
-        self.denoising_strength_slider.setRange(0, 100)  # 0.0 ~ 1.0을 0~100으로 표현
-        self.denoising_strength_slider.setValue(50)  # 기본값 0.5
-        self.denoising_strength_slider.setStyleSheet(DARK_STYLES['compact_slider'])
-        self.denoising_strength_slider.setMinimumWidth(80)
-        self.disable_wheel_event(self.denoising_strength_slider)  # 마우스 휠 비활성화
-        denoising_container_layout.addWidget(self.denoising_strength_slider)
+        # 구분선
+        separator4 = QLabel("|")
+        separator4.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(separator4)
         
-        # 슬라이더 값 표시 라벨
-        self.denoising_value_label = QLabel("0.50")
-        self.denoising_value_label.setStyleSheet(param_label_style)
-        self.denoising_value_label.setFixedWidth(50)
-        self.denoising_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        denoising_container_layout.addWidget(self.denoising_value_label)
+        # hr_cfg 스핀박스 추가
+        hr_cfg_label = QLabel("hr CFG")
+        hr_cfg_label.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(hr_cfg_label)
         
-        # 슬라이더 값 변경 시 라벨 업데이트
-        self.denoising_strength_slider.valueChanged.connect(
-            lambda value: self.denoising_value_label.setText(f"{value/100:.2f}")
-        )
+        self.hr_cfg_spinbox = QDoubleSpinBox()
+        self.hr_cfg_spinbox.setRange(0.0, 30.0)  # 0 ~ 30
+        self.hr_cfg_spinbox.setSingleStep(0.1)  # 0.1 단위
+        self.hr_cfg_spinbox.setDecimals(1)  # 소수점 1자리
+        self.hr_cfg_spinbox.setValue(0.0)  # 기본값 0
+        self.hr_cfg_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.hr_cfg_spinbox.setFixedWidth(80)
+        self.disable_wheel_event(self.hr_cfg_spinbox)  # 마우스 휠 비활성화
+        self.hires_option_layout_row2.addWidget(self.hr_cfg_spinbox)
         
-        self.hires_option_layout_row2.addWidget(denoising_container)
         self.hires_option_layout_row2.addStretch()
         
         # 위젯에 두 행 추가
@@ -1655,9 +1659,13 @@ class ModernMainWindow(QMainWindow):
                     "enable_hr": self.enable_hr_checkbox.isChecked(),
                     "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 1.5,
                     "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Lanczos",
-                    "denoising_strength": self.denoising_strength_slider.value() / 100.0 if hasattr(self, 'denoising_strength_slider') else 0.5,
+                    "denoising_strength": self.denoising_strength_spinbox.value() if hasattr(self, 'denoising_strength_spinbox') else 0.5,
                     "hires_steps": self.hires_steps_spinbox.value() if hasattr(self, 'hires_steps_spinbox') else 0
                 })
+                
+                # WEBUI 모드에서 hr_cfg 추가
+                if self.get_current_api_mode() == "WEBUI" and hasattr(self, 'hr_cfg_spinbox'):
+                    params["hr_cfg"] = self.hr_cfg_spinbox.value()
                 
             # 🆕 추가: ComfyUI 전용 파라미터들 (현재 모드가 ComfyUI일 때만)
             current_mode = self.get_current_api_mode()

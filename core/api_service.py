@@ -327,7 +327,8 @@ class APIService:
                     "hr_upscaler": params.get('hr_upscaler', 'Lanczos'),
                     "hr_second_pass_steps": params.get('steps', 28) // 2,
                     "hr_resize_x": int(payload["width"] * params.get('hr_scale', 1.5)),
-                    "hr_resize_y": int(payload["height"] * params.get('hr_scale', 1.5))
+                    "hr_resize_y": int(payload["height"] * params.get('hr_scale', 1.5)),
+                    "hr_cfg": params.get('hr_cfg', 0)  # hr_cfg 추가, 기본값 0
                 })
             
             # 🔥 개선된 커스텀 파라미터 처리

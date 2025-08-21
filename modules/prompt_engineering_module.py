@@ -215,6 +215,25 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # ~ 로 시작하는 아이템 제거
         auto_hide = [item for item in auto_hide if not item.startswith('~')]
         
+        # 원본 tag_conversion_map (key와 value를 바꿔서 사용할 것임)
+        original_tag_conversion_map = {
+            'v': 'peace sign', 'double v': 'double peace', '|_|': 'bar eyes',
+            '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
+            'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
+        }
+        
+        # key와 value를 바꾼 reversed map
+        tag_conversion_map = {v: k for k, v in original_tag_conversion_map.items()}
+        
+        # auto_hide에 있는 항목이 reversed map의 key와 매칭되면, 해당 value도 auto_hide에 추가
+        additional_auto_hide = []
+        for item in auto_hide:
+            if item in tag_conversion_map:
+                additional_auto_hide.append(tag_conversion_map[item])
+        
+        # 추가된 항목을 auto_hide에 병합 (중복 제거)
+        auto_hide = list(set(auto_hide + additional_auto_hide))
+
         # 직접 매칭되는 키워드 제거
         for keyword in main_tags:
             if keyword in auto_hide:

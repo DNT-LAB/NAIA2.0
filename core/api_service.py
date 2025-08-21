@@ -247,12 +247,20 @@ class APIService:
             # API payload를 안전하게 저장
             self.app_context.store_api_payload(payload, "NAI")
             
-            response = requests.post(
-                self.NAI_V3_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=180
-            )
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    self.NAI_V3_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=180
+                )
+                # urllib3 연결 풀 강제 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
             response.raise_for_status()
             
             # 이미지 처리
@@ -343,7 +351,15 @@ class APIService:
             self.app_context.store_api_payload(payload, "WEBUI")
             
             headers = {"Content-Type": "application/json"}
-            response = requests.post(api_endpoint, headers=headers, json=payload, timeout=300)
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(api_endpoint, headers=headers, json=payload, timeout=300)
+                # urllib3 연결 풀 강제 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
             response.raise_for_status()
             
             result = response.json()
@@ -952,12 +968,20 @@ class APIService:
             
             # API 호출
             print(f"🔍 NAI Upscale API 호출 중... (원본: {width}x{height})")
-            response = requests.post(
-                "https://api.novelai.net/ai/upscale",
-                json=data,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=60
-            )
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    "https://api.novelai.net/ai/upscale",
+                    json=data,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=60
+                )
+                # urllib3 연결 풀 강제 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
             
             if response.status_code != 200:
                 error_msg = f"API 에러 (코드: {response.status_code})"
@@ -1038,11 +1062,19 @@ class APIService:
             if not nai_access_token:
                 return None
             
-            response = requests.get(
-                "https://api.novelai.net/user/subscription",
-                headers={"Authorization": f"Bearer {nai_access_token}"},
-                timeout=3
-            )
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.get(
+                    "https://api.novelai.net/user/subscription",
+                    headers={"Authorization": f"Bearer {nai_access_token}"},
+                    timeout=3
+                )
+                # urllib3 연결 풀 강제 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
             
             if response.status_code == 200:
                 data = response.json()
@@ -1103,12 +1135,20 @@ class APIService:
             print(f"🔍 DEBUG - Token exists: {bool(token)}")
             print(f"🔍 DEBUG - Token length: {len(token) if token else 0}")
             
-            response = requests.post(
-                "https://api.novelai.net/ai/upscale",
-                json=data,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=60
-            )
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    "https://api.novelai.net/ai/upscale",
+                    json=data,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=60
+                )
+                # urllib3 연결 풀 강제 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
             
             # 디버깅: 응답 상세 정보
             print(f"🔍 DEBUG - Response status code: {response.status_code}")

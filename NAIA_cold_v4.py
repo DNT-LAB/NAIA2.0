@@ -1,6 +1,14 @@
 import __init__
 import sys
 import os
+
+# 과학 연산 라이브러리 스레드 제한 (메모리 누수 방지용)
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+
 import json
 import pandas as pd
 import random

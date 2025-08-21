@@ -4,8 +4,53 @@ import piexif
 import piexif.helper
 import json
 import re, random
-from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool
 import pandas as pd
+import gc
+import requests
+
+def _force_cleanup_all_threads():
+    """모든 종류의 스레드 풀과 연결을 강제로 정리하는 함수"""
+    try:
+        # 1. 전역 urllib3 연결 풀 정리
+        try:
+            from urllib3.util import connection
+            from urllib3 import poolmanager
+            # 전역 연결 풀 매니저 정리
+            if hasattr(poolmanager, '_default_pool'):
+                poolmanager._default_pool = None
+        except Exception:
+            pass
+
+        # 2. requests 세션 정리
+        try:
+            # requests 모듈의 기본 세션 정리
+            if hasattr(requests, 'sessions'):
+                if hasattr(requests.sessions, 'Session'):
+                    # 기본 어댑터 정리
+                    session = requests.Session()
+                    session.close()
+        except Exception:
+            pass
+
+        # 3. Qt 스레드 풀 정리
+        try:
+            thread_pool = QThreadPool.globalInstance()
+            thread_pool.clear()
+            thread_pool.waitForDone(1000)  # 1초 대기
+        except Exception:
+            pass
+
+        # 4. 가비지 컬렉션 강제 실행
+        gc.collect()
+        
+        # 5. Qt 이벤트 루프 강제 처리 (여러 번)
+        for i in range(3):
+            QCoreApplication.processEvents()
+            QTimer.singleShot(10, lambda: QCoreApplication.processEvents())
+            
+    except Exception:
+        pass
 
 class GenerationWorker(QObject):
     """API 호출을 담당하는 워커 클래스"""
@@ -288,6 +333,7 @@ class GenerationController:
         """별도 스레드에서 생성 작업을 시작합니다."""
         # 새 스레드와 워커 생성
         self.generation_thread = QThread()
+        self.generation_thread.setObjectName(f"GenThread-{id(self.generation_thread)}")
         self.generation_worker = GenerationWorker(self.context)
         
         # 워커를 스레드로 이동
@@ -303,6 +349,11 @@ class GenerationController:
         self.generation_thread.started.connect(self.generation_worker.run_generation)
         self.generation_worker.generation_finished.connect(self.generation_thread.quit)
         self.generation_worker.generation_error.connect(self.generation_thread.quit)
+        
+        # 🔧 올바른 deleteLater 연결 - 스레드 종료 시 해당 객체의 소유 스레드에서 안전하게 삭제
+        self.generation_thread.finished.connect(self.generation_worker.deleteLater)
+        self.generation_thread.finished.connect(self.generation_thread.deleteLater)
+        
         self.generation_thread.finished.connect(self._on_thread_finished)
         
         # 파라미터 설정 및 스레드 시작
@@ -435,13 +486,22 @@ class GenerationController:
 
     def _on_thread_finished(self):
         """스레드 완료 시 정리 작업"""
-        # 스레드와 워커 정리만 수행
-        if self.generation_thread:
-            self.generation_thread.deleteLater()
-            self.generation_thread = None
-        if self.generation_worker:
-            self.generation_worker.deleteLater()
-            self.generation_worker = None
+        # 🔧 스레드 종료 처리 및 포인터 정리
+        def _cleanup():
+            try:
+                if self.generation_thread:
+                    self.generation_thread.wait(50)  # finished 후 즉시 반환
+            except Exception:
+                pass
+            finally:
+                # 포인터 정리 (deleteLater는 이미 signal로 연결됨)
+                self.generation_thread = None
+                self.generation_worker = None
+                
+                # 강력한 스레드 정리 실행
+                _force_cleanup_all_threads()
+        
+        _cleanup()
 
     def _expand_wildcards_in_input(self, input_text: str) -> str:
         """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)"""

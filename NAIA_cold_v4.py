@@ -1729,9 +1729,10 @@ class ModernMainWindow(QMainWindow):
                 print("❌ image_object가 None입니다.")
                 return
             try:
-                # Assets Workshop 요청 여부 확인
+                # 특수 요청 여부 확인
                 generation_params = result.get("generation_params", {})
                 is_assets_request = generation_params.get("assets_workshop_request", False)
+                is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
                 
                 self.image_window.update_image(image_object)
                 
@@ -1741,6 +1742,13 @@ class ModernMainWindow(QMainWindow):
                     # AppContext를 통해 이벤트 발행
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_assets", image_object)
+                
+                # Artist Thumb 요청인 경우 별도 이벤트 발행
+                if is_artist_thumb_request:
+                    print("🎨 Artist Thumb 요청 감지 - 전용 이벤트 발행")
+                    # AppContext를 통해 이벤트 발행
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_artist_thumb", image_object)
                 
                 # Main Window → Assets 자동 전파 (추후 제거 가능)
                 # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능

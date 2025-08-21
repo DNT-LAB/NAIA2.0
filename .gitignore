@@ -153,3 +153,6 @@ NAIA_generation_old.py
 /tabs/assets/backgrounds
 *.png
 /tabs/assets/Preset
+artist_tab_old.py
+artist_thumb/banned_artist.txt
+artist_thumb/generate_options.json

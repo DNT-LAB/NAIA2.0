@@ -313,10 +313,10 @@ class GenerationController:
                 print(f"🎲 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
                 
                 # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
-                processed_input = self._apply_conditional_prompts(params['input'])
-                if processed_input != params['input']:
-                    params['input'] = processed_input
-                    print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                # processed_input = self._apply_conditional_prompts(params['input'])
+                # if processed_input != params['input']:
+                #     params['input'] = processed_input
+                #     print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
                 
                 # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
                 if self.context.current_prompt_context:

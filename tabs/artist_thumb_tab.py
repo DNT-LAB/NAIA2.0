@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLineEdit, QLabel, QFileDialog, QMessageBox,
     QPushButton, QFrame, QScrollArea, QMenu, QApplication, QWidgetAction, QComboBox,
-    QProgressDialog, QTextEdit, QSizePolicy
+    QProgressDialog, QTextEdit, QSizePolicy, QDialog, QDialogButtonBox, QInputDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QPoint, QThread, QBuffer, QIODevice
 from PyQt6.QtGui import QPixmap, QPainter, QImage, QAction, QKeyEvent, QColor
@@ -95,14 +95,15 @@ class StableImageWidget(QWidget):
             return
 
         widget_size = self.size()
-        square_size = min(widget_size.width(), widget_size.height())
         
+        # 위젯 크기에 맞춰 이미지를 스케일링 (폭을 꽉 채우도록)
         scaled_pixmap = self._pixmap.scaled(
-            QSize(square_size, square_size),
+            widget_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
         
+        # 중앙 정렬
         x = (widget_size.width() - scaled_pixmap.width()) // 2
         y = (widget_size.height() - scaled_pixmap.height()) // 2
         painter.drawPixmap(x, y, scaled_pixmap)
@@ -245,6 +246,11 @@ class ArtistThumbModule(BaseTabModule):
         self.current_mode = None      # 현재 선택된 썸네일 모드
         self.tab_initialized = False  # 탭 초기화 여부
         
+        # 관심/제외 작가 리스트
+        self.favorite_artists = []
+        self.banned_artists = []
+        self.filter_mode = "전체 목록 보기"  # 필터링 모드
+        
     def get_tab_title(self) -> str:
         return "🎨 Artist Thumb"
     
@@ -375,6 +381,9 @@ class ArtistThumbModule(BaseTabModule):
         # 검색 팝업만 초기화 (데이터 로드는 탭 활성화 시)
         self._init_search_popup()
         
+        # 관심/제외 작가 목록 로드
+        self._load_artist_lists()
+        
         # artist_dict만으로 기본 리스트 초기화
         if artist_dict:
             self.artist_list = sorted(
@@ -382,7 +391,9 @@ class ArtistThumbModule(BaseTabModule):
                 key=lambda k: artist_dict.get(k, 0),
                 reverse=True
             )
-            self._update_listbox(self.artist_list)
+            # 제외된 작가를 필터링한 리스트 표시
+            filtered_list = [artist for artist in self.artist_list if artist not in self.banned_artists]
+            self._update_listbox(filtered_list)
         
         return self.widget
     
@@ -519,7 +530,59 @@ class ArtistThumbModule(BaseTabModule):
         """)
         self.artist_listbox.itemSelectionChanged.connect(self._on_artist_selected)
         layout.addWidget(self.artist_listbox)
-    
+        
+        # 필터 콤보박스 추가 (라벨 없이)
+        self.filter_combo = QComboBox()
+        
+        # 기본 필터 항목들
+        filter_items = ["전체 목록 보기", "관심 작가 보기", "제외 작가 보기"]
+        
+        # artist_thumb 폴더에서 사용자 정의 필터 파일들 로드
+        if os.path.exists('artist_thumb'):
+            custom_files = [f for f in os.listdir('artist_thumb') 
+                          if f.endswith('.txt') and f != 'banned_artist.txt']
+            for file in custom_files:
+                display_name = file.replace('.txt', '')
+                filter_items.append(display_name)
+        
+        # TODO: 분류 그룹 추가 기능 - 현재 숨김 처리
+        # filter_items.append("+ 분류 그룹 추가")
+        
+        self.filter_combo.addItems(filter_items)
+        self.filter_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(14)}px;
+                margin-top: {get_scaled_size(8)}px;
+            }}
+            QComboBox:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: {get_scaled_size(20)}px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: {get_scaled_size(5)}px solid transparent;
+                border-right: {get_scaled_size(5)}px solid transparent;
+                border-top: {get_scaled_size(5)}px solid {DARK_COLORS['text_primary']};
+                margin-right: {get_scaled_size(5)}px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {DARK_COLORS['bg_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                selection-background-color: {DARK_COLORS['bg_hover']};
+                padding: {get_scaled_size(4)}px;
+            }}
+        """)
+        self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
+        layout.addWidget(self.filter_combo)
         
         return panel
     
@@ -544,8 +607,8 @@ class ArtistThumbModule(BaseTabModule):
         
         sub_horizontal_layout.addWidget(prompt_panel)
         sub_horizontal_layout.addWidget(generation_panel)
-        sub_horizontal_layout.setStretchFactor(prompt_panel, 1)  # 썸네일 패널은 늘어남
-        sub_horizontal_layout.setStretchFactor(generation_panel, 0)  # 생성 패널은 고정
+        sub_horizontal_layout.setStretchFactor(prompt_panel, 0)  # 썸네일 패널은 고정 크기
+        sub_horizontal_layout.setStretchFactor(generation_panel, 1)  # 생성 패널이 나머지 공간 차지
         
         main_layout.addLayout(sub_horizontal_layout)
         return main_panel
@@ -596,11 +659,6 @@ class ArtistThumbModule(BaseTabModule):
         self._show_default_thumbnail()
         layout.addWidget(self.thumbnail_label)
         
-        # Positive Prompt
-        pos_label = QLabel("Positive Prompt (아티스트 스타일 추가)")
-        pos_label.setStyleSheet(dynamic_styles.get('label_style', ''))
-        layout.addWidget(pos_label)
-        
         self.positive_prompt = QTextEdit()
         self.positive_prompt.setPlaceholderText("아티스트 스타일과 함께 사용할 프롬프트...")
         self.positive_prompt.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
@@ -641,6 +699,61 @@ class ArtistThumbModule(BaseTabModule):
         self.postfix_textedit.setFixedHeight(get_scaled_size(100))
         layout.addWidget(self.postfix_textedit)
         
+        # 저장된 생성 옵션 로드
+        self._load_generate_options()
+        
+        # 관심 작가 및 제외 버튼 추가
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(get_scaled_size(5))
+        
+        self.favorite_button = QPushButton("⭐ 관심 작가 등록")
+        self.favorite_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(15)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+            }}
+        """)
+        self.favorite_button.clicked.connect(self._toggle_favorite)
+        self.favorite_button.setEnabled(False)
+        button_layout.addWidget(self.favorite_button)
+        
+        self.ban_button = QPushButton("🚫 이 작가명 제거")
+        self.ban_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #8B0000;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(13)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #A52A2A;
+            }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+            }}
+        """)
+        self.ban_button.clicked.connect(self._ban_artist)
+        self.ban_button.setEnabled(False)
+        button_layout.addWidget(self.ban_button)
+        
+        layout.addLayout(button_layout)
+        
         layout.addStretch()
         
         return panel
@@ -661,10 +774,11 @@ class ArtistThumbModule(BaseTabModule):
         layout.setContentsMargins(get_scaled_size(8), get_scaled_size(8),
                                  get_scaled_size(8), get_scaled_size(8))
         
-        # StableImageWidget 사용
+        # StableImageWidget 사용 - 레이아웃을 꽉 채우도록 설정
         self.generation_image = StableImageWidget()
+        self.generation_image.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.generation_image.setMinimumSize(416, 608)  # 832x1216의 절반 크기
-        layout.addWidget(self.generation_image)
+        layout.addWidget(self.generation_image, 1)  # stretch factor 1로 설정하여 여유 공간 모두 차지
         
         return panel
     
@@ -715,7 +829,7 @@ class ArtistThumbModule(BaseTabModule):
         
         layout = QHBoxLayout(panel)
         
-        # 현재 선택된 아티스트 정보
+        # 현재 선택된 아티스트 정보만 표시
         self.info_label = QLabel("아티스트를 선택하세요")
         self.info_label.setStyleSheet(f"""
             QLabel {{
@@ -726,30 +840,6 @@ class ArtistThumbModule(BaseTabModule):
         layout.addWidget(self.info_label)
         
         layout.addStretch()
-        
-        # 복사 버튼
-        copy_btn = QPushButton("📋 아티스트명 복사 (Ctrl+C)")
-        copy_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: white;
-                border: none;
-                border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
-                font-size: {get_scaled_font_size(14)}px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['accent_blue_hover']};
-            }}
-            QPushButton:disabled {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_secondary']};
-            }}
-        """)
-        copy_btn.clicked.connect(self._copy_artist_name)
-        self.copy_button = copy_btn
-        self.copy_button.setEnabled(False)
-        layout.addWidget(copy_btn)
         
         return panel
     
@@ -1000,9 +1090,54 @@ class ArtistThumbModule(BaseTabModule):
         # 정보 업데이트
         weight = artist_dict.get(artist_name, 0) if artist_dict else 0
         self.info_label.setText(f"선택된 아티스트: {artist_name} (가중치: {weight})")
+
+        # 관심/제외 버튼 활성화 및 상태 업데이트
+        self.favorite_button.setEnabled(True)
+        self.ban_button.setEnabled(True)
         
-        # 복사 버튼 활성화
-        self.copy_button.setEnabled(True)
+        # 관심 작가 여부에 따라 버튼 텍스트 및 스타일 변경
+        if artist_name in self.favorite_artists:
+            self.favorite_button.setText("⭐ 관심 작가 해제")
+            # 관심 작가인 경우 회색 배경
+            self.favorite_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #666666;
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(6)}px;
+                    font-size: {get_scaled_font_size(15)}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #777777;
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """)
+        else:
+            self.favorite_button.setText("⭐ 관심 작가 등록")
+            # 관심 작가가 아닌 경우 파란색 배경
+            self.favorite_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['accent_blue']};
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(6)}px;
+                    font-size: {get_scaled_font_size(15)}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {DARK_COLORS['accent_blue_hover']};
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """)
         
         # 프롬프트에 아티스트명 추가 (항상 자동 적용)
         if hasattr(self, 'positive_prompt'):
@@ -1096,20 +1231,6 @@ class ArtistThumbModule(BaseTabModule):
                 self._show_default_image()
         else:
             self._show_default_image()
-    
-    def _copy_artist_name(self):
-        """현재 선택된 아티스트 이름 복사"""
-        if self.current_artist:
-            clipboard = QApplication.clipboard()
-            clipboard.setText(self.current_artist)
-            
-            # 복사 완료 피드백
-            original_text = self.copy_button.text()
-            self.copy_button.setText("✅ 복사됨!")
-            QTimer.singleShot(1000, lambda: self.copy_button.setText(original_text))
-            
-            # 시그널 발생
-            self.copy_requested.emit(self.current_artist)
     
     def _on_popup_item_clicked(self, item):
         artist = item.data(Qt.ItemDataRole.UserRole)
@@ -1208,6 +1329,9 @@ class ArtistThumbModule(BaseTabModule):
         prefix = self.prefix_textedit.toPlainText().strip()
         postfix = self.postfix_textedit.toPlainText().strip()
         
+        # 생성 옵션 저장
+        self._save_generate_options()
+        
         # 최종 프롬프트 조합: prefix + positive + postfix
         final_prompt_parts = []
         if prefix:
@@ -1265,10 +1389,6 @@ class ArtistThumbModule(BaseTabModule):
     def _on_generation_completed(self, result):
         """이미지 생성 완료 콜백"""
         try:
-            # ArtistThumb 전용 구독 해제
-            if "generation_completed_for_artist_thumb" in self.app_context.subscribers:
-                self.app_context.subscribers["generation_completed_for_artist_thumb"].remove(self._on_generation_completed)
-            
             # result가 PIL Image인지 확인
             image_object = result
             if hasattr(image_object, 'mode'):  # PIL Image 확인
@@ -1277,10 +1397,6 @@ class ArtistThumbModule(BaseTabModule):
                     self.generation_image.setPilImage(image_object)
                     print("✅ ArtistThumb: 이미지 생성 완료")
                 
-                # Generate 버튼 복원
-                self.generate_btn.setEnabled(True)
-                self.generate_btn.setText("🎨 Generate (832x1216)")
-                
                 # 상태바 메시지
                 if hasattr(self.app_context, 'main_window'):
                     self.app_context.main_window.status_bar.showMessage(
@@ -1288,18 +1404,333 @@ class ArtistThumbModule(BaseTabModule):
                     )
             else:
                 print(f"⚠️ 예상과 다른 결과 타입: {type(result)}")
-                # 오류 시에도 버튼 복원
-                self.generate_btn.setEnabled(True)
-                self.generate_btn.setText("🎨 Generate (832x1216)")
                 
         except Exception as e:
             print(f"❌ 생성 완료 처리 중 오류: {e}")
             print(f"결과 타입: {type(result)}")
-            # 예외 시에도 버튼 복원
+        finally:
+            # 항상 구독 해제 및 버튼 복원 (finally 블록에서 안전하게 처리)
+            self._cleanup_generation()
+    
+    def _cleanup_generation(self):
+        """생성 관련 정리 작업"""
+        try:
+            # ArtistThumb 전용 구독 해제
+            if hasattr(self, 'app_context') and self.app_context and "generation_completed_for_artist_thumb" in self.app_context.subscribers:
+                if self._on_generation_completed in self.app_context.subscribers["generation_completed_for_artist_thumb"]:
+                    self.app_context.subscribers["generation_completed_for_artist_thumb"].remove(self._on_generation_completed)
+        except Exception as e:
+            print(f"⚠️ 구독 해제 중 오류: {e}")
+        
+        # Generate 버튼 복원
+        if hasattr(self, 'generate_btn'):
             self.generate_btn.setEnabled(True)
             self.generate_btn.setText("🎨 Generate (832x1216)")
     
     def cleanup(self):
         """탭 종료 시 정리"""
+        # 검색 팝업 정리
         if self.search_popup and self.search_popup.isVisible():
             self.search_popup.hide()
+        
+        # 생성 관련 정리
+        self._cleanup_generation()
+        
+        # 다운로드 워커 정리
+        if hasattr(self, 'download_worker') and self.download_worker:
+            self.download_worker.quit()
+            self.download_worker.wait(1000)
+            self.download_worker.deleteLater()
+    
+    def _load_artist_lists(self):
+        """파일에서 관심/제외 작가 목록 로드"""
+        # wildcards 폴더 생성
+        os.makedirs('wildcards', exist_ok=True)
+        # artist_thumb 폴더 생성
+        os.makedirs('artist_thumb', exist_ok=True)
+        
+        # 관심 작가 파일 로드
+        favorite_file = os.path.join('wildcards', 'favorite_artist.txt')
+        if os.path.exists(favorite_file):
+            with open(favorite_file, 'r', encoding='utf-8') as f:
+                self.favorite_artists = [line.strip() for line in f if line.strip()]
+        else:
+            # 파일이 없으면 생성
+            with open(favorite_file, 'w', encoding='utf-8') as f:
+                pass
+        
+        # 제외 작가 파일 로드
+        banned_file = os.path.join('artist_thumb', 'banned_artist.txt')
+        if os.path.exists(banned_file):
+            with open(banned_file, 'r', encoding='utf-8') as f:
+                self.banned_artists = [line.strip() for line in f if line.strip()]
+        else:
+            # 파일이 없으면 생성
+            with open(banned_file, 'w', encoding='utf-8') as f:
+                pass
+        
+        # 생성 옵션 파일 로드
+        self._load_generate_options()
+    
+    def _save_favorite_artists(self):
+        """관심 작가 목록을 파일에 저장"""
+        favorite_file = os.path.join('wildcards', 'favorite_artist.txt')
+        with open(favorite_file, 'w', encoding='utf-8') as f:
+            for artist in self.favorite_artists:
+                f.write(f"{artist}\n")
+    
+    def _save_banned_artists(self):
+        """제외 작가 목록을 파일에 저장"""
+        banned_file = os.path.join('artist_thumb', 'banned_artist.txt')
+        with open(banned_file, 'w', encoding='utf-8') as f:
+            for artist in self.banned_artists:
+                f.write(f"{artist}\n")
+    
+    def _load_generate_options(self):
+        """생성 옵션 파일 로드"""
+        options_file = os.path.join('artist_thumb', 'generate_options.json')
+        if os.path.exists(options_file):
+            try:
+                with open(options_file, 'r', encoding='utf-8') as f:
+                    options = json.load(f)
+                    if hasattr(self, 'prefix_textedit'):
+                        self.prefix_textedit.setPlainText(options.get('prefix', ''))
+                    if hasattr(self, 'postfix_textedit'):
+                        self.postfix_textedit.setPlainText(options.get('postfix', ''))
+            except Exception as e:
+                print(f"생성 옵션 로드 실패: {e}")
+    
+    def _save_generate_options(self):
+        """생성 옵션을 파일에 저장"""
+        os.makedirs('artist_thumb', exist_ok=True)
+        options_file = os.path.join('artist_thumb', 'generate_options.json')
+        
+        options = {
+            'prefix': self.prefix_textedit.toPlainText().strip() if hasattr(self, 'prefix_textedit') else '',
+            'postfix': self.postfix_textedit.toPlainText().strip() if hasattr(self, 'postfix_textedit') else ''
+        }
+        
+        try:
+            with open(options_file, 'w', encoding='utf-8') as f:
+                json.dump(options, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"생성 옵션 저장 실패: {e}")
+    
+    def _toggle_favorite(self):
+        """관심 작가 등록/해제 토글"""
+        if not self.current_artist:
+            return
+        
+        if self.current_artist in self.favorite_artists:
+            # 이미 관심 작가인 경우 해제
+            self.favorite_artists.remove(self.current_artist)
+            self.favorite_button.setText("⭐ 관심 작가 등록")
+            # 버튼 배경색을 원래대로
+            self.favorite_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['accent_blue']};
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(6)}px;
+                    font-size: {get_scaled_font_size(15)}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {DARK_COLORS['accent_blue_hover']};
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """)
+            self._save_favorite_artists()
+            # 다이얼로그 제거 - 시각적 피드백만 제공
+        else:
+            # 관심 작가에 추가
+            self.favorite_artists.append(self.current_artist)
+            self.favorite_button.setText("⭐ 관심 작가 해제")
+            # 버튼 배경색을 회색으로 변경
+            self.favorite_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #666666;
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(6)}px;
+                    font-size: {get_scaled_font_size(15)}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #777777;
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """)
+            self._save_favorite_artists()
+            # 다이얼로그 제거 - 시각적 피드백만 제공
+        
+        # 필터가 관심 작가 보기인 경우 리스트 업데이트
+        if self.filter_combo.currentText() == "관심 작가 보기":
+            self._apply_filter()
+    
+    def _ban_artist(self):
+        """현재 선택된 작가를 제외 목록에 추가"""
+        if not self.current_artist:
+            return
+        
+        # 현재 아이템의 인덱스 저장
+        current_index = -1
+        for i in range(self.artist_listbox.count()):
+            if self.artist_listbox.item(i).text() == self.current_artist:
+                current_index = i
+                break
+        
+        # 제외 목록에 추가
+        if self.current_artist not in self.banned_artists:
+            self.banned_artists.append(self.current_artist)
+            self._save_banned_artists()
+        
+        # 관심 목록에서 제거
+        if self.current_artist in self.favorite_artists:
+            self.favorite_artists.remove(self.current_artist)
+            self._save_favorite_artists()
+        
+        # 리스트에서 제거
+        if current_index >= 0:
+            self.artist_listbox.takeItem(current_index)
+            
+            # 다음 아이템 선택 (있으면)
+            if self.artist_listbox.count() > 0:
+                # 같은 인덱스를 선택하거나, 마지막이었다면 이전 아이템 선택
+                new_index = min(current_index, self.artist_listbox.count() - 1)
+                self.artist_listbox.setCurrentRow(new_index)
+                # 선택 이벤트 수동 트리거
+                self._on_artist_selected()
+            else:
+                # 리스트가 비었을 때
+                self.current_artist = None
+                self.favorite_button.setEnabled(False)
+                self.ban_button.setEnabled(False)
+                self._show_default_thumbnail()
+    
+    def _on_filter_changed(self, filter_mode: str):
+        """필터 모드 변경 시 처리"""
+        if filter_mode == "+ 분류 그룹 추가":
+            # 파일명 입력 다이얼로그
+            filename, ok = QInputDialog.getText(
+                self.widget,
+                "분류 그룹 추가",
+                "새 분류 그룹 파일명을 입력하세요:\n(artist_thumb 폴더에 .txt 파일로 저장됩니다)",
+                QLineEdit.EchoMode.Normal,
+                ""
+            )
+            
+            if ok and filename:
+                # 파일명 검증
+                filename = filename.strip()
+                if not filename:
+                    QMessageBox.warning(self.widget, "경고", "파일명을 입력해주세요.")
+                    # 이전 선택으로 복원
+                    self.filter_combo.blockSignals(True)
+                    self.filter_combo.setCurrentText(self.filter_mode)
+                    self.filter_combo.blockSignals(False)
+                    return
+                
+                # .txt 확장자 추가 (없으면)
+                if not filename.endswith('.txt'):
+                    filename += '.txt'
+                
+                # 파일 경로
+                os.makedirs('artist_thumb', exist_ok=True)
+                file_path = os.path.join('artist_thumb', filename)
+                
+                # 파일이 이미 존재하는지 확인
+                if os.path.exists(file_path):
+                    QMessageBox.warning(self.widget, "경고", f"{filename} 파일이 이미 존재합니다.")
+                    # 이전 선택으로 복원
+                    self.filter_combo.blockSignals(True)
+                    self.filter_combo.setCurrentText(self.filter_mode)
+                    self.filter_combo.blockSignals(False)
+                    return
+                
+                # 빈 파일 생성
+                try:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        pass
+                    
+                    # 콤보박스에 새 항목 추가 (+ 분류 그룹 추가 앞에)
+                    display_name = filename.replace('.txt', '')
+                    self.filter_combo.blockSignals(True)
+                    
+                    # 기존 항목들 가져오기
+                    items = []
+                    for i in range(self.filter_combo.count()):
+                        items.append(self.filter_combo.itemText(i))
+                    
+                    # "+ 분류 그룹 추가" 제거
+                    if "+ 분류 그룹 추가" in items:
+                        items.remove("+ 분류 그룹 추가")
+                    
+                    # 새 항목 추가
+                    items.append(display_name)
+                    
+                    # "+ 분류 그룹 추가" 다시 추가
+                    items.append("+ 분류 그룹 추가")
+                    
+                    # 콤보박스 재구성
+                    self.filter_combo.clear()
+                    self.filter_combo.addItems(items)
+                    
+                    # 새로 추가된 항목 선택
+                    self.filter_combo.setCurrentText(display_name)
+                    self.filter_combo.blockSignals(False)
+                    
+                    # 필터 모드 업데이트
+                    self.filter_mode = display_name
+                    self._apply_filter()
+                    
+                    QMessageBox.information(self.widget, "성공", f"{display_name} 분류 그룹이 생성되었습니다.")
+                    
+                except Exception as e:
+                    QMessageBox.critical(self.widget, "오류", f"파일 생성 중 오류가 발생했습니다:\n{str(e)}")
+                    # 이전 선택으로 복원
+                    self.filter_combo.blockSignals(True)
+                    self.filter_combo.setCurrentText(self.filter_mode)
+                    self.filter_combo.blockSignals(False)
+            else:
+                # 취소된 경우 이전 선택으로 복원
+                self.filter_combo.blockSignals(True)
+                self.filter_combo.setCurrentText(self.filter_mode)
+                self.filter_combo.blockSignals(False)
+            return
+        
+        self.filter_mode = filter_mode
+        self._apply_filter()
+    
+    def _apply_filter(self):
+        """현재 필터 모드에 따라 리스트 업데이트"""
+        self.artist_listbox.clear()
+        
+        if self.filter_mode == "전체 목록 보기":
+            # 제외된 작가를 제외한 전체 목록 표시
+            filtered_list = [artist for artist in self.artist_list if artist not in self.banned_artists]
+            self._update_listbox(filtered_list)
+        
+        elif self.filter_mode == "관심 작가 보기":
+            # 관심 작가만 표시
+            self._update_listbox(self.favorite_artists)
+        
+        elif self.filter_mode == "제외 작가 보기":
+            # 제외된 작가만 표시
+            self._update_listbox(self.banned_artists)
+        
+        else:
+            # 사용자 정의 분류 그룹
+            custom_file = os.path.join('artist_thumb', f'{self.filter_mode}.txt')
+            if os.path.exists(custom_file):
+                with open(custom_file, 'r', encoding='utf-8') as f:
+                    custom_artists = [line.strip() for line in f if line.strip()]
+                self._update_listbox(custom_artists)

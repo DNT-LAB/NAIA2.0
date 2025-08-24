@@ -557,16 +557,27 @@ class AutoCompleteManager(QObject):
             if not self.app_context.current_api_mode == "NAI":
                 completion_text = completion_text.replace('(', r'\(').replace(')', r'\)')
         
+        # 가중치 접두사가 있으면 추가 (예: "0.5::")
+        weight_prefix = info.get('weight_prefix', '')
+        if weight_prefix:
+            completion_text = weight_prefix + completion_text
+        
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
+
+        # 가중치가 있는 경우 시작 위치를 조정 (weight 부분도 교체하기 위해)
+        start_pos = info['start']
+        if weight_prefix:
+            # weight_prefix 길이만큼 시작 위치를 앞으로 이동
+            start_pos = info['start'] - len(weight_prefix)
 
         if isinstance(widget, QTextEdit):
             cursor = widget.textCursor()
-            cursor.setPosition(info['start'])
+            cursor.setPosition(start_pos)
             cursor.setPosition(info['end'], QTextCursor.MoveMode.KeepAnchor)
             cursor.insertText(final_text)
         else: # QLineEdit
             current_text = widget.text()
-            new_text = current_text[:info['start']] + final_text + current_text[info['end']:]
+            new_text = current_text[:start_pos] + final_text + current_text[info['end']:]
             widget.setText(new_text)
         
         self._hide_all_popups()
@@ -633,22 +644,23 @@ class AutoCompleteManager(QObject):
         
         # NAI :: 문법 처리 - 커서 위치에 따라 검색 범위 조정
         original_token = token  # 원본 토큰 저장
+        weight_prefix = ""  # 가중치 부분을 저장할 변수
         if '::' in token:
-            # :: 위치 찾기
-            double_colon_pos = token.find('::')
-            absolute_double_colon_pos = start_pos + double_colon_pos
+            # 마지막 :: 위치 찾기 (여러 개의 ::가 있을 수 있음)
+            last_double_colon_pos = token.rfind('::')
+            absolute_double_colon_pos = start_pos + last_double_colon_pos
             
             # 커서가 :: 의 왼쪽에 있는지 오른쪽에 있는지 확인
             if pos <= absolute_double_colon_pos:
                 # 커서가 :: 왼쪽에 있으면 가중치 부분 제거 (:: 이후는 무시)
-                token = token[:double_colon_pos]
-                end_pos = start_pos + double_colon_pos
+                token = token[:last_double_colon_pos]
+                end_pos = start_pos + last_double_colon_pos
             else:
-                # 커서가 :: 오른쪽에 있으면 :: 이후 부분만 검색
-                # 이 경우 weight 값이므로 검색하지 않고 빈 결과 반환
-                token = ""
-                start_pos = absolute_double_colon_pos + 2
-                end_pos = start_pos
+                # 커서가 :: 오른쪽에 있으면 weight 부분은 유지하고 그 이후 텍스트로 검색
+                # 예: "0.5::arti" -> weight_prefix="0.5::", token="arti"
+                weight_prefix = token[:last_double_colon_pos + 2]  # "0.5::" 부분 저장
+                token = token[last_double_colon_pos + 2:]  # "arti" 부분만 검색
+                start_pos = absolute_double_colon_pos + 2  # 검색 시작 위치 조정
         
         stripped_token, prefix, suffix = self._strip_brackets(token)
 
@@ -658,7 +670,8 @@ class AutoCompleteManager(QObject):
             'prefix': prefix, 
             'suffix': suffix, 
             'start': start_pos, 
-            'end': end_pos
+            'end': end_pos,
+            'weight_prefix': weight_prefix  # 가중치 접두사 추가
         }
 
     def _strip_brackets(self, keyword: str) -> tuple[str, str, str]:

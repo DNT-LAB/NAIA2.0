@@ -696,6 +696,16 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         preset_dir = self.get_preset_dir()
         preset_file = preset_dir / f"{preset_name}.json"
         
+        # 기존 프리셋 파일에서 description 읽기
+        existing_description = None
+        if preset_file.exists():
+            try:
+                with open(preset_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    existing_description = existing_data.get("description")
+            except Exception:
+                pass  # 파일 읽기 실패 시 무시
+        
         # 모듈 설정 수집
         module_settings = self.collect_current_settings()
         
@@ -706,6 +716,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "module_settings": module_settings,
             "main_settings": main_settings
         }
+        
+        # 기존 description이 있으면 유지
+        if existing_description is not None:
+            preset_data["description"] = existing_description
         
         with open(preset_file, 'w', encoding='utf-8') as f:
             json.dump(preset_data, f, ensure_ascii=False, indent=2)

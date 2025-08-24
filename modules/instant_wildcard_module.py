@@ -10,23 +10,154 @@ from typing import Dict, List, Optional, Any
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox,
     QTextEdit, QLabel, QMessageBox, QDialog, QDialogButtonBox,
-    QLineEdit, QGroupBox
+    QLineEdit, QGroupBox, QSizePolicy, QApplication, QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage
 
 from interfaces.base_module import BaseMiddleModule
-from ui.theme import DARK_STYLES, DARK_COLORS
+from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+
+
+class PreviewImageWidget(QWidget):
+    """와일드카드 이미지 미리보기 위젯 - 클립보드 지원"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap = None
+        self.current_file = None
+        self.current_key = None
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        
+        # 클립보드 붙여넣기 지원
+        self.setAcceptDrops(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+    
+    def set_item(self, filename: str, key: str):
+        """현재 아이템 설정"""
+        self.current_file = filename.replace('.json', '') if filename else None
+        self.current_key = key
+        self.load_preview_image()
+    
+    def load_preview_image(self):
+        """와일드카드 미리보기 이미지 로드"""
+        if not self.current_file or not self.current_key:
+            self._pixmap = None
+            self.update()
+            return
+        
+        # 이미지 파일 경로
+        image_path = Path("save") / "instant_wildcard" / "images" / self.current_file / f"{self.current_key}.png"
+        if image_path.exists():
+            self._pixmap = QPixmap(str(image_path))
+        else:
+            self._pixmap = None
+        self.update()
+    
+    def save_preview_image(self):
+        """현재 이미지를 와일드카드 미리보기로 저장 (512px 리사이즈)"""
+        if not self._pixmap or not self.current_file or not self.current_key:
+            return
+        
+        # 이미지 디렉토리 생성
+        image_dir = Path("save") / "instant_wildcard" / "images" / self.current_file
+        image_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 512px로 리사이즈 (긴 쪽이 512가 되도록)
+        original_size = self._pixmap.size()
+        width = original_size.width()
+        height = original_size.height()
+        
+        if width > height:
+            new_width = 512
+            new_height = int(512 * height / width)
+        else:
+            new_height = 512
+            new_width = int(512 * width / height)
+        
+        # 리사이즈하여 저장
+        resized_pixmap = self._pixmap.scaled(
+            new_width, new_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        
+        # 이미지 저장
+        image_path = image_dir / f"{self.current_key}.png"
+        resized_pixmap.save(str(image_path), "PNG")
+        print(f"🖼️ 와일드카드 이미지 저장: {self.current_file}/{self.current_key} ({new_width}x{new_height})")
+    
+    def clear_preview(self):
+        """프리뷰 클리어"""
+        self._pixmap = None
+        self.current_file = None
+        self.current_key = None
+        self.update()
+    
+    def keyPressEvent(self, event):
+        """Ctrl+V로 클립보드 이미지 붙여넣기"""
+        if event.key() == Qt.Key.Key_V and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.paste_from_clipboard()
+    
+    def paste_from_clipboard(self):
+        """클립보드에서 이미지 붙여넣기"""
+        clipboard = QApplication.clipboard()
+        mimeData = clipboard.mimeData()
+        
+        if mimeData.hasImage():
+            image = clipboard.image()
+            if not image.isNull():
+                self._pixmap = QPixmap.fromImage(image)
+                self.update()
+                # 자동 저장 (512px 리사이즈)
+                if self.current_file and self.current_key:
+                    self.save_preview_image()
+                    # 리사이즈된 이미지 다시 로드
+                    self.load_preview_image()
+                return True
+        return False
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(DARK_COLORS['bg_secondary']))
+        
+        if not self._pixmap:
+            painter.setPen(QColor(DARK_COLORS['text_secondary']))
+            font = QFont()
+            font.setPointSize(get_scaled_font_size(12))
+            painter.setFont(font)
+            
+            # 안내 텍스트
+            text = "와일드카드 이미지\n\n클릭 후 Ctrl+V로\n이미지를 붙여넣으세요\n\n(512px로 자동 리사이즈)"
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+            return
+        
+        # 이미지 표시
+        widget_size = self.size()
+        
+        # 위젯 크기에 맞춰 이미지를 스케일링 (비율 유지)
+        scaled_pixmap = self._pixmap.scaled(
+            widget_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        
+        # 중앙 정렬
+        x = (widget_size.width() - scaled_pixmap.width()) // 2
+        y = (widget_size.height() - scaled_pixmap.height()) // 2
+        
+        painter.drawPixmap(x, y, scaled_pixmap)
 
 
 class AddWildcardDialog(QDialog):
     """와일드카드 추가 다이얼로그"""
     
-    def __init__(self, parent=None, json_files=None, current_file=None, initial_text=""):
+    def __init__(self, parent=None, json_files=None, current_file=None, initial_text="", module_instance=None):
         super().__init__(parent)
         self.setWindowTitle("인스턴트 와일드카드 추가")
-        self.setModal(True)
-        self.setMinimumWidth(get_scaled_size(400))
+        self.setModal(False)  # 모달리스로 변경
+        self.resize(get_scaled_size(800), get_scaled_size(400))  # 크기 증가
         
         # 다크 테마 적용
         self.setStyleSheet(f"""
@@ -39,12 +170,19 @@ class AddWildcardDialog(QDialog):
         self.json_files = json_files or []
         self.current_file = current_file
         self.initial_text = initial_text
+        self.module_instance = module_instance  # 모듈 인스턴스 참조
+        self.result_callback = None  # 결과 처리 콜백
         
         self.init_ui()
         
     def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(get_scaled_size(10))
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(get_scaled_size(10))
+        
+        # 왼쪽 패널 (기존 UI)
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setSpacing(get_scaled_size(10))
         
         # 대상 파일 선택
         file_layout = QHBoxLayout()
@@ -57,8 +195,9 @@ class AddWildcardDialog(QDialog):
         self.file_combo.addItems(self.json_files)
         if self.current_file and self.current_file in self.json_files:
             self.file_combo.setCurrentText(self.current_file)
+        self.file_combo.currentTextChanged.connect(self.on_file_changed)
         file_layout.addWidget(self.file_combo)
-        layout.addLayout(file_layout)
+        left_layout.addLayout(file_layout)
         
         # 아이템명 입력
         name_layout = QHBoxLayout()
@@ -70,32 +209,81 @@ class AddWildcardDialog(QDialog):
         self.name_edit.setProperty("autocomplete_ignore", True)  # AutoComplete 제외
         self.name_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
         self.name_edit.setPlaceholderText("와일드카드 키 이름 입력")
+        self.name_edit.textChanged.connect(self.on_name_changed)
         name_layout.addWidget(self.name_edit)
-        layout.addLayout(name_layout)
+        left_layout.addLayout(name_layout)
         
-        # 값 입력 (라벨 제거, TextEdit만)
+        # 값 입력
+        value_label = QLabel("와일드카드 값:")
+        value_label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(16)}px;")
+        left_layout.addWidget(value_label)
+        
         self.value_edit = QTextEdit()
         self.value_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.value_edit.setPlaceholderText("와일드카드 값 입력 (태그, 여러 줄 가능)")
         self.value_edit.setMinimumHeight(get_scaled_size(150))
         if self.initial_text:
             self.value_edit.setPlainText(self.initial_text)
-        layout.addWidget(self.value_edit)
+        left_layout.addWidget(self.value_edit)
         
         # 버튼
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.setStyleSheet(f"""
-            QPushButton {{
-                font-size: {get_scaled_font_size(16)}px;
-                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
-            }}
-        """)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        button_layout = QHBoxLayout()
         
+        self.ok_button = QPushButton("추가")
+        self.ok_button.setStyleSheet(DARK_STYLES['primary_button'])
+        self.ok_button.clicked.connect(self.on_ok_clicked)
+        button_layout.addWidget(self.ok_button)
+        
+        self.cancel_button = QPushButton("취소")
+        self.cancel_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.cancel_button.clicked.connect(self.close)
+        button_layout.addWidget(self.cancel_button)
+        
+        left_layout.addLayout(button_layout)
+        
+        # 오른쪽 패널 (이미지 프리뷰)
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setSpacing(get_scaled_size(8))
+        
+        preview_label = QLabel("와일드카드 이미지:")
+        preview_label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(16)}px;")
+        right_layout.addWidget(preview_label)
+        
+        self.preview_widget = PreviewImageWidget()
+        self.preview_widget.setMinimumWidth(get_scaled_size(250))
+        right_layout.addWidget(self.preview_widget)
+        
+        # 메인 레이아웃에 추가
+        main_layout.addWidget(left_widget, 2)  # 왼쪽 패널 비율 2
+        main_layout.addWidget(right_widget, 1)  # 오른쪽 패널 비율 1
+        
+    def on_file_changed(self, filename):
+        """파일 선택이 변경되었을 때 이미지 프리뷰 업데이트"""
+        if self.name_edit.text():
+            self.preview_widget.set_item(filename, self.name_edit.text())
+    
+    def on_name_changed(self, name):
+        """아이템명이 변경되었을 때 이미지 프리뷰 업데이트"""
+        if self.file_combo.currentText():
+            self.preview_widget.set_item(self.file_combo.currentText(), name)
+    
+    def on_ok_clicked(self):
+        """확인 버튼 클릭 시 처리"""
+        data = self.get_data()
+        if not data[1]:  # 아이템명이 없으면
+            QMessageBox.warning(self, "경고", "아이템명을 입력해주세요.")
+            return
+        
+        if self.result_callback:
+            self.result_callback(data)
+        
+        self.accept()  # 다이얼로그 닫기
+    
+    def set_result_callback(self, callback):
+        """결과 처리 콜백 설정"""
+        self.result_callback = callback
+    
     def get_data(self) -> tuple:
         """입력된 데이터 반환"""
         return (
@@ -165,9 +353,9 @@ class InstantWildcardModule(BaseMiddleModule):
             return self.widget
             
         self.widget = QWidget(parent)
-        content_layout = QVBoxLayout(self.widget)
-        content_layout.setContentsMargins(8, 8, 8, 8)
-        content_layout.setSpacing(get_scaled_size(8))
+        main_layout = QVBoxLayout(self.widget)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(get_scaled_size(8))
         
         # 상단 컨트롤
         top_layout = QHBoxLayout()
@@ -179,7 +367,16 @@ class InstantWildcardModule(BaseMiddleModule):
         top_layout.addWidget(self.update_btn)
         
         top_layout.addStretch()
-        content_layout.addLayout(top_layout)
+        main_layout.addLayout(top_layout)
+        
+        # 메인 스플리터 (좌우 분할)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # 왼쪽 패널 (기존 컨트롤)
+        left_widget = QWidget()
+        content_layout = QVBoxLayout(left_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(get_scaled_size(8))
         
         # 파일 선택
         file_layout = QHBoxLayout()
@@ -242,6 +439,27 @@ class InstantWildcardModule(BaseMiddleModule):
         
         # 스트레치 추가로 위쪽 정렬
         content_layout.addStretch()
+        
+        # 오른쪽 패널 (이미지 프리뷰)
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(get_scaled_size(8))
+        
+        preview_label = QLabel("와일드카드 이미지:")
+        preview_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px;")
+        right_layout.addWidget(preview_label)
+        
+        self.preview_widget = PreviewImageWidget()
+        self.preview_widget.setMinimumWidth(get_scaled_size(200))
+        right_layout.addWidget(self.preview_widget)
+        
+        # 스플리터에 위젯 추가
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setSizes([400, 200])  # 초기 크기 비율
+        
+        main_layout.addWidget(splitter)
         
         # 초기화
         self.initialize_wildcards()
@@ -367,6 +585,10 @@ class InstantWildcardModule(BaseMiddleModule):
         
         # 값 표시
         self.value_edit.setPlainText(value)
+        
+        # 이미지 프리뷰 업데이트
+        if hasattr(self, 'preview_widget'):
+            self.preview_widget.set_item(self.current_file, key)
     
     def toggle_edit_mode(self):
         """편집 모드 토글"""
@@ -473,14 +695,15 @@ class InstantWildcardModule(BaseMiddleModule):
             parent=self.widget,
             json_files=list(self.json_data.keys()),
             current_file=self.current_file,
-            initial_text=initial_text
+            initial_text=initial_text,
+            module_instance=self
         )
         
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            filename, key, value = dialog.get_data()
+        # 결과 처리 콜백 설정
+        def handle_result(data):
+            filename, key, value = data
             
             if not key:
-                QMessageBox.warning(self.widget, "경고", "아이템명을 입력해주세요.")
                 return
             
             # 중복 키 확인
@@ -515,6 +738,9 @@ class InstantWildcardModule(BaseMiddleModule):
                 QMessageBox.information(self.widget, "성공", "항목이 추가되었습니다.")
             except Exception as e:
                 QMessageBox.critical(self.widget, "오류", f"추가 실패: {e}")
+        
+        dialog.set_result_callback(handle_result)
+        dialog.show()  # exec() 대신 show() 사용
     
     def add_from_selection(self, text: str):
         """선택된 텍스트로부터 와일드카드 추가 (메인 윈도우에서 호출)"""

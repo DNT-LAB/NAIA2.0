@@ -1311,9 +1311,10 @@ class ModernMainWindow(QMainWindow):
             cb.setStyleSheet(DARK_STYLES['dark_checkbox'])
             gen_checkbox_layout.addWidget(cb, 1)  # stretch factor 1로 균등 배치
             self.generation_checkboxes[cb_text] = cb
-            #터보모드 미지원 상태이므로 조건문으로 block 처리
+            # 터보 옵션 체크박스 이벤트 연결
             if cb_text == "터보 옵션":
-                cb.setEnabled(False)
+                cb.setEnabled(False)  # 비활성화 -> TODO
+                # cb.clicked.connect(self.on_turbo_option_changed)
 
         # 오른쪽 여백을 위한 stretch (제거하지 않음)
         gen_checkbox_layout.addStretch()
@@ -1322,6 +1323,33 @@ class ModernMainWindow(QMainWindow):
         container_layout.addWidget(generation_control_frame)
         
         return container
+    
+    def on_turbo_option_changed(self, checked):
+        """터보 옵션 체크박스 상태 변경 시 호출"""
+        if checked:
+            # TurboPresetWindow 열기
+            from ui.turbo_preset_window import TurboPresetWindow
+            if not hasattr(self, 'turbo_window') or not self.turbo_window:
+                self.turbo_window = TurboPresetWindow(self.app_context, self)
+                self.turbo_window.preset_applied.connect(self.on_turbo_preset_applied)
+                # 독립 창으로 표시
+                self.turbo_window.show()
+                self.turbo_window.raise_()  # 창을 맨 앞으로
+                self.turbo_window.activateWindow()  # 창 활성화
+        else:
+            # TurboPresetWindow 닫기
+            if hasattr(self, 'turbo_window') and self.turbo_window:
+                self.turbo_window.close()
+                self.turbo_window = None
+    
+    def on_turbo_preset_applied(self, preset):
+        """터보 프리셋이 적용되었을 때 호출"""
+        # 프리셋을 app_context에 저장하여 generation 시 사용
+        if hasattr(self.app_context, 'turbo_preset'):
+            self.app_context.turbo_preset = preset
+        else:
+            setattr(self.app_context, 'turbo_preset', preset)
+        self.status_bar.showMessage("✅ 터보 프리셋이 적용되었습니다.")
     
     def toggle_params_panel(self):
         """생성 파라미터 패널 토글"""
@@ -2756,6 +2784,11 @@ class ModernMainWindow(QMainWindow):
             # [추가] 분리된 모든 모듈 창 닫기 요청
             if self.middle_section_controller:
                 self.middle_section_controller.close_all_detached_modules()
+                
+                # 퀵 프리셋 저장 (PromptEngineeringModule)
+                prompt_eng_module = self.middle_section_controller.get_module_instance("PromptEngineeringModule")
+                if prompt_eng_module and hasattr(prompt_eng_module, 'save_on_exit'):
+                    prompt_eng_module.save_on_exit()
 
             self.image_window.close_all_detached_windows()
 

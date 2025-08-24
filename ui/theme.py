@@ -23,6 +23,12 @@ DARK_COLORS = {
     'success': '#4CAF50',         # 성공 색상
     'warning': '#FF9800',         # 경고 색상
     'error': '#F44336',           # 오류 색상
+    # 호환성을 위한 추가 키
+    'background': '#212121',      # 메인 배경 (bg_primary와 동일)
+    'panel': '#2B2B2B',          # 패널 배경 (bg_secondary와 동일)
+    'input': '#2B2B2B',          # 입력 필드 배경 (bg_tertiary와 동일)
+    'highlight': '#1976D2',       # 하이라이트 (accent_blue와 동일)
+    'text': '#FFFFFF',            # 텍스트 (text_primary와 동일)
 }
 
 

@@ -1,13 +1,125 @@
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox, QHBoxLayout, QComboBox, QPushButton, QDialog, QGridLayout, QLineEdit, QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox, QInputDialog, QSplitter, QSizePolicy, QApplication
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer, QMimeData, QEvent
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage, QClipboard
 from interfaces.base_module import BaseMiddleModule
 from core.prompt_context import PromptContext
 from interfaces.mode_aware_module import ModeAwareModule
-from ui.theme import get_dynamic_styles
+from ui.theme import get_dynamic_styles, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from ui.modern_menu import setModernStyle
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os, json
+from pathlib import Path
+
+class PresetPreviewWidget(QWidget):
+    """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap = None
+        self.preset_name = None
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        
+        # 클립보드 붙여넣기 지원
+        self.setAcceptDrops(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+    
+    def set_preset_name(self, preset_name: str):
+        """현재 프리셋 이름 설정"""
+        self.preset_name = preset_name
+        self.load_preview_image()
+    
+    def load_preview_image(self):
+        """프리셋 미리보기 이미지 로드"""
+        if not self.preset_name:
+            self._pixmap = None
+            self.update()
+            return
+        
+        # 이미지 파일 경로
+        image_path = Path("save") / "presets" / "previews" / f"{self.preset_name}.png"
+        if image_path.exists():
+            self._pixmap = QPixmap(str(image_path))
+        else:
+            self._pixmap = None
+        self.update()
+    
+    def save_preview_image(self):
+        """현재 이미지를 프리셋 미리보기로 저장"""
+        if not self._pixmap or not self.preset_name:
+            return
+        
+        # previews 디렉토리 생성
+        preview_dir = Path("save") / "presets" / "previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 이미지 저장
+        image_path = preview_dir / f"{self.preset_name}.png"
+        self._pixmap.save(str(image_path), "PNG")
+        print(f"🖼️ 프리셋 미리보기 이미지 저장: {self.preset_name}")
+    
+    def clear_preview(self):
+        """프리뷰 클리어"""
+        self._pixmap = None
+        self.preset_name = None
+        self.update()
+    
+    def keyPressEvent(self, event):
+        """Ctrl+V로 클립보드 이미지 붙여넣기"""
+        if event.key() == Qt.Key.Key_V and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.paste_from_clipboard()
+    
+    def paste_from_clipboard(self):
+        """클립보드에서 이미지 붙여넣기"""
+        clipboard = QApplication.clipboard()
+        mimeData = clipboard.mimeData()
+        
+        if mimeData.hasImage():
+            image = clipboard.image()
+            if not image.isNull():
+                self._pixmap = QPixmap.fromImage(image)
+                self.update()
+                # 자동 저장
+                if self.preset_name:
+                    self.save_preview_image()
+                return True
+        return False
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(DARK_COLORS['bg_secondary']))
+        
+        if not self._pixmap:
+            painter.setPen(QColor(DARK_COLORS['text_secondary']))
+            font = QFont()
+            font.setPointSize(get_scaled_font_size(12))
+            painter.setFont(font)
+            
+            # 안내 텍스트
+            text = "프리셋 미리보기 이미지\n\n클릭 후 Ctrl+V로\n이미지를 붙여넣으세요"
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+            return
+        
+        # 이미지 표시
+        widget_size = self.size()
+        
+        # 위젯 크기에 맞춰 이미지를 스케일링 (비율 유지)
+        scaled_pixmap = self._pixmap.scaled(
+            widget_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        
+        # 중앙 정렬
+        x = (widget_size.width() - scaled_pixmap.width()) // 2
+        y = (widget_size.height() - scaled_pixmap.height()) // 2
+        painter.drawPixmap(x, y, scaled_pixmap)
+        painter.end()
+    
+    def mousePressEvent(self, event):
+        """클릭 시 포커스 설정 (Ctrl+V 받기 위함)"""
+        self.setFocus()
+        super().mousePressEvent(event)
 
 class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     """
@@ -27,6 +139,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # 🆕 필수 호환성 플래그 추가
         self.NAI_compatibility = True
         self.WEBUI_compatibility = True
+        self.COMFYUI_compatibility = True
         
         # UI 위젯들을 저장할 인스턴스 변수 초기화
         self.pre_textedit = None
@@ -47,9 +160,15 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "랜덤 프롬프트의 색상포함 태그를 제거": "remove_color",
             "랜덤 프롬프트의 장소와 배경색을 제거": "remove_location_and_background_color"
         }
+        
+        # 퀵 프리셋 관련 초기화
+        self.preset_combo = None
+        self.current_preset = "default"
+        self.last_preset = "default"
+        self.preset_list = []
 
     def get_title(self) -> str:
-        return "🔧 프롬프트 엔지니어링/자동화"
+        return "🔧 프롬프트 엔지니어링/자동화/프리셋"
 
     def get_order(self) -> int:
         return 900
@@ -77,19 +196,33 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     def apply_settings(self, settings: Dict[str, Any]):
         """설정을 UI에 적용"""
         if not all([self.pre_textedit, self.post_textedit, self.auto_hide_textedit]):
+            print("    ⚠️ UI 위젯이 아직 준비되지 않음")
             return
 
+        print(f"    - 모듈 설정 적용:")
+        
         # 텍스트 설정 적용
-        self.pre_textedit.setText(settings.get("pre_prompt", ""))
-        self.post_textedit.setText(settings.get("post_prompt", ""))
-        self.auto_hide_textedit.setText(settings.get("auto_hide_prompt", ""))
+        pre_prompt = settings.get("pre_prompt", "")
+        post_prompt = settings.get("post_prompt", "")
+        auto_hide = settings.get("auto_hide_prompt", "")
+        
+        print(f"      pre_prompt 길이: {len(pre_prompt)}")
+        print(f"      post_prompt 길이: {len(post_prompt)}")
+        print(f"      auto_hide 길이: {len(auto_hide)}")
+        
+        self.pre_textedit.setText(pre_prompt)
+        self.post_textedit.setText(post_prompt)
+        self.auto_hide_textedit.setText(auto_hide)
         
         # 체크박스 설정 적용
         options = settings.get("preprocessing_options", {})
+        print(f"      preprocessing_options: {options}")
+        
         for text, cb in self.preprocessing_checkboxes.items():
             key = self.option_key_map.get(text)
             if key in options:
                 cb.setChecked(options[key])
+                print(f"      체크박스 '{text}' = {options[key]}")
     
     # 🆕 누락된 메서드 추가
     def initialize_with_context(self, context):
@@ -104,6 +237,37 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 동적 스타일 가져오기
         dynamic_styles = get_dynamic_styles()
+        
+        # 퀵 프리셋 UI 추가
+        preset_layout = QHBoxLayout()
+        preset_layout.setSpacing(4)
+        
+        preset_label = QLabel("퀵 프리셋:")
+        preset_label.setStyleSheet(dynamic_styles['label_style'])
+        preset_label.setFixedWidth(100)
+        preset_layout.addWidget(preset_label)
+        
+        self.preset_combo = QComboBox()
+        self.preset_combo.setStyleSheet(dynamic_styles['compact_combobox'])
+        self.preset_combo.addItem("(프리셋 없음)")  # 초기 플레이스홀더
+        self.preset_combo.currentTextChanged.connect(self.on_preset_changed)
+        # 마우스 휠로 값이 변경되지 않도록 설정
+        self.preset_combo.wheelEvent = lambda e: e.ignore()
+        preset_layout.addWidget(self.preset_combo, 1)
+        
+        add_btn = QPushButton("추가")
+        add_btn.setStyleSheet(dynamic_styles['compact_button'])
+        add_btn.setFixedWidth(80)
+        add_btn.clicked.connect(self.add_preset)
+        preset_layout.addWidget(add_btn)
+        
+        manage_btn = QPushButton("관리")
+        manage_btn.setStyleSheet(dynamic_styles['compact_button'])
+        manage_btn.setFixedWidth(80)
+        manage_btn.clicked.connect(self.manage_presets)
+        preset_layout.addWidget(manage_btn)
+        
+        layout.addLayout(preset_layout)
         
         # 선행 고정 프롬프트
         pre_label = QLabel("선행 고정 프롬프트:")
@@ -345,4 +509,953 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             current_mode = self.app_context.get_api_mode()
             if self.widget:
                 self.update_visibility_for_mode(current_mode)
+            
+            # API 모드 변경 시그널 연결
+            self.app_context.subscribe("api_mode_changed", self.on_api_mode_changed_preset)
+            
         self.load_mode_settings()
+        
+        # 지연 초기화 - MainWindow가 완전히 초기화된 후 실행
+        # 500ms 지연으로 충분한 초기화 시간 확보
+        QTimer.singleShot(500, self.delayed_preset_initialization)
+    
+    # ==================== 퀵 프리셋 관련 메서드 ====================
+    
+    def delayed_preset_initialization(self):
+        """MainWindow 초기화 완료 후 프리셋 초기화"""
+        # 프리셋 목록 로드
+        self.load_preset_list()
+        
+        # 마지막 사용한 프리셋 정보 로드
+        last_used = self.load_last_used_preset_info()
+        
+        preset_dir = self.get_preset_dir()
+        default_file = preset_dir / "default.json"
+        
+        # default 프리셋이 없으면 현재 UI 상태로 생성
+        if not default_file.exists():
+            # 현재 UI 상태를 default 프리셋으로 저장
+            self.save_current_preset("default")
+            print(f"📝 Default 프리셋을 현재 UI 상태로 생성했습니다.")
+        
+        # 사용할 프리셋 결정
+        preset_to_load = None
+        if last_used and last_used in self.preset_list:
+            # 마지막 사용한 프리셋이 존재하면 그것을 사용
+            preset_to_load = last_used
+            print(f"📂 마지막 사용 프리셋 복원: {last_used}")
+        elif "default" in self.preset_list:
+            # 그렇지 않으면 default 사용
+            preset_to_load = "default"
+            print(f"📂 기본 프리셋 로드: default")
+        
+        # 프리셋 로드 및 적용
+        if preset_to_load and self.preset_combo:
+            # 신호를 차단하고 프리셋 설정
+            self.preset_combo.blockSignals(True)
+            self.preset_combo.setCurrentText(preset_to_load)
+            self.preset_combo.blockSignals(False)
+            
+            # 프리셋 로드
+            self.load_preset(preset_to_load)
+            
+            # 현재 프리셋 상태 업데이트
+            self.current_preset = preset_to_load
+            self.last_preset = preset_to_load
+    
+    def get_preset_dir(self) -> Path:
+        """현재 API 모드에 따른 프리셋 디렉토리 경로 반환"""
+        if not hasattr(self, 'app_context') or not self.app_context:
+            mode = "NAI"
+        else:
+            mode = self.app_context.get_api_mode() or "NAI"
+        
+        preset_dir = Path("save") / "presets" / mode
+        preset_dir.mkdir(parents=True, exist_ok=True)
+        return preset_dir
+    
+    def load_preset_list(self):
+        """프리셋 목록을 로드하고 콤보박스에 설정"""
+        if not self.preset_combo:
+            return
+            
+        preset_dir = self.get_preset_dir()
+        
+        # JSON 파일 목록 가져오기
+        json_files = sorted(preset_dir.glob("*.json"))
+        preset_names = [f.stem for f in json_files]
+        
+        # default를 맨 앞으로
+        if "default" in preset_names:
+            preset_names.remove("default")
+            preset_names.insert(0, "default")
+        
+        self.preset_list = preset_names
+        
+        # 콤보박스 업데이트
+        current_text = self.preset_combo.currentText()
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        
+        if preset_names:
+            self.preset_combo.addItems(preset_names)
+            # 이전 선택 복원 또는 default 선택
+            if current_text in preset_names:
+                self.preset_combo.setCurrentText(current_text)
+            elif "default" in preset_names:
+                self.preset_combo.setCurrentText("default")
+        else:
+            # 프리셋이 없으면 빈 상태로 표시
+            self.preset_combo.addItem("(프리셋 없음)")
+        
+        self.preset_combo.blockSignals(False)
+    
+    def create_default_preset(self, filepath: Path):
+        """기본 프리셋 파일 생성"""
+        mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        
+        if mode == "NAI":
+            default_data = {
+                "module_settings": {
+                    "pre_prompt": "masterpiece, best quality",
+                    "post_prompt": "",
+                    "auto_hide_prompt": "",
+                    "preprocessing_options": {
+                        "remove_author": False,
+                        "remove_work_title": False,
+                        "remove_character_name": False,
+                        "remove_character_features": False,
+                        "remove_clothes": False,
+                        "remove_color": False,
+                        "remove_location_and_background_color": False
+                    }
+                },
+                "main_settings": {
+                    "prompt": "",
+                    "negative": "lowres, {bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract]",
+                    "cfg_scale": 5.0,
+                    "sampler": "k_euler",
+                    "steps": 28
+                }
+            }
+        elif mode == "WEBUI":
+            default_data = {
+                "module_settings": {
+                    "pre_prompt": "",
+                    "post_prompt": "",
+                    "auto_hide_prompt": "",
+                    "preprocessing_options": {
+                        "remove_author": False,
+                        "remove_work_title": False,
+                        "remove_character_name": False,
+                        "remove_character_features": False,
+                        "remove_clothes": False,
+                        "remove_color": False,
+                        "remove_location_and_background_color": False
+                    }
+                },
+                "main_settings": {
+                    "prompt": "",
+                    "negative": "",
+                    "cfg_scale": 7.0,
+                    "sampler": "Euler",
+                    "steps": 20
+                }
+            }
+        else:  # COMFYUI
+            default_data = {
+                "module_settings": {
+                    "pre_prompt": "",
+                    "post_prompt": "",
+                    "auto_hide_prompt": "",
+                    "preprocessing_options": {
+                        "remove_author": False,
+                        "remove_work_title": False,
+                        "remove_character_name": False,
+                        "remove_character_features": False,
+                        "remove_clothes": False,
+                        "remove_color": False,
+                        "remove_location_and_background_color": False
+                    }
+                },
+                "main_settings": {
+                    "prompt": "",
+                    "negative": "",
+                    "workflow": "default"
+                }
+            }
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(default_data, f, ensure_ascii=False, indent=2)
+    
+    def save_current_preset(self, preset_name: Optional[str] = None):
+        """현재 설정을 프리셋으로 저장"""
+        if not preset_name:
+            preset_name = self.current_preset
+        
+        preset_dir = self.get_preset_dir()
+        preset_file = preset_dir / f"{preset_name}.json"
+        
+        # 모듈 설정 수집
+        module_settings = self.collect_current_settings()
+        
+        # 메인 UI 설정 수집
+        main_settings = self.collect_main_ui_settings()
+        
+        preset_data = {
+            "module_settings": module_settings,
+            "main_settings": main_settings
+        }
+        
+        with open(preset_file, 'w', encoding='utf-8') as f:
+            json.dump(preset_data, f, ensure_ascii=False, indent=2)
+        
+        print(f"💾 프리셋 저장: {preset_name}")
+    
+    def load_preset(self, preset_name: str):
+        """프리셋 로드 및 적용"""
+        preset_dir = self.get_preset_dir()
+        preset_file = preset_dir / f"{preset_name}.json"
+        
+        if not preset_file.exists():
+            print(f"⚠️ 프리셋 파일을 찾을 수 없음: {preset_name}")
+            return
+        
+        print(f"🔄 프리셋 로드 시작: {preset_name}")
+        
+        try:
+            with open(preset_file, 'r', encoding='utf-8') as f:
+                preset_data = json.load(f)
+            
+            print(f"  - 프리셋 데이터 키: {list(preset_data.keys())}")
+            
+            # 메인 윈도우가 준비되었는지 확인
+            main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+            
+            # 모듈 설정은 항상 적용
+            if "module_settings" in preset_data:
+                print(f"  - module_settings 적용 중...")
+                self.apply_settings(preset_data["module_settings"])
+                print(f"  - module_settings 적용 완료")
+            else:
+                print(f"  - module_settings 없음")
+            
+            # 메인 UI 설정은 메인 윈도우가 준비된 경우에만 적용
+            if "main_settings" in preset_data and main_window:
+                print(f"  - main_settings 적용 중...")
+                # 기존 키 이름 호환성 처리
+                main_settings = preset_data["main_settings"]
+                if 'sm' in main_settings:
+                    main_settings['SMEA'] = main_settings.pop('sm', False)
+                if 'sm_dyn' in main_settings:
+                    main_settings['DYN'] = main_settings.pop('sm_dyn', False)
+                if 'variety' in main_settings:
+                    main_settings['VAR+'] = main_settings.pop('variety', False)
+                if 'decrisper' in main_settings:
+                    main_settings['DECRISP'] = main_settings.pop('decrisper', False)
+                
+                self.apply_main_ui_settings(main_settings)
+                print(f"  - main_settings 적용 완료")
+            elif "main_settings" in preset_data and not main_window:
+                print(f"⚠️ 메인 UI가 아직 준비되지 않아 UI 설정 적용을 건너뜁니다.")
+            else:
+                print(f"  - main_settings 없음")
+            
+            print(f"📂 프리셋 로드 완료: {preset_name}")
+            
+        except Exception as e:
+            import traceback
+            print(f"❌ 프리셋 로드 실패: {e}")
+            traceback.print_exc()
+    
+    def on_preset_changed(self, preset_name: str):
+        """프리셋 변경 시 호출"""
+        if not preset_name or preset_name == self.current_preset or preset_name == "(프리셋 없음)":
+            return
+        
+        print(f"🔄 프리셋 변경: {self.current_preset} → {preset_name}")
+        
+        # 이전 프리셋 저장 (현재 UI 상태를 이전 프리셋에 저장)
+        if self.current_preset and self.current_preset != "(프리셋 없음)":
+            self.save_current_preset(self.current_preset)
+            print(f"  - 이전 프리셋 '{self.current_preset}' 저장 완료")
+        
+        # 새 프리셋 로드
+        self.load_preset(preset_name)
+        
+        # 프리셋 상태 업데이트
+        self.last_preset = self.current_preset
+        self.current_preset = preset_name
+        
+        # 마지막 사용 프리셋 정보 저장
+        self.save_last_used_preset_info()
+    
+    def add_preset(self):
+        """새 프리셋 추가 다이얼로그"""
+        dialog = QDialog(self.widget if self.widget else None)
+        dialog.setWindowTitle("새 프리셋 추가")
+        dialog.setStyleSheet(f"background-color: {DARK_COLORS['background']};")
+        
+        layout = QGridLayout(dialog)
+        dynamic_styles = get_dynamic_styles()
+        
+        # 이름 입력
+        name_label = QLabel("프리셋 이름:")
+        name_label.setStyleSheet(dynamic_styles['label_style'])
+        layout.addWidget(name_label, 0, 0)
+        
+        name_input = QLineEdit()
+        name_input.setStyleSheet(dynamic_styles['compact_lineedit'])
+        name_input.setProperty("autocomplete_ignore", True)
+        layout.addWidget(name_input, 0, 1)
+        
+        # 안내 메시지
+        info_label = QLabel("현재 설정이 복사됩니다.")
+        info_label.setStyleSheet(dynamic_styles['label_style'])
+        layout.addWidget(info_label, 1, 0, 1, 2)  # 두 컬럼에 걸쳐 표시
+        
+        # 버튼
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.setStyleSheet(dynamic_styles['primary_button'])
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons, 2, 0, 1, 2)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            preset_name = name_input.text().strip()
+            
+            if not preset_name:
+                QMessageBox.warning(self.widget, "경고", "프리셋 이름을 입력해주세요.")
+                return
+            
+            # 파일명에 사용할 수 없는 문자 제거
+            invalid_chars = '<>:"/\\|?*'
+            for char in invalid_chars:
+                preset_name = preset_name.replace(char, '')
+            
+            preset_dir = self.get_preset_dir()
+            preset_file = preset_dir / f"{preset_name}.json"
+            
+            if preset_file.exists():
+                reply = QMessageBox.question(
+                    self.widget, 
+                    "확인", 
+                    f"'{preset_name}' 프리셋이 이미 존재합니다. 덮어쓰시겠습니까?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
+            # 현재 설정으로 새 프리셋 생성
+            self.save_current_preset(preset_name)
+            
+            # 목록 업데이트 및 선택
+            self.load_preset_list()
+            self.preset_combo.setCurrentText(preset_name)
+    
+    def manage_presets(self):
+        """프리셋 관리 다이얼로그"""
+        dialog = QDialog(self.widget if self.widget else None)
+        dialog.setWindowTitle("프리셋 관리")
+        dialog.resize(1200, 700)  # 크기 증가
+        dialog.setStyleSheet(f"background-color: {DARK_COLORS['background']};")
+        
+        main_layout = QVBoxLayout(dialog)
+        dynamic_styles = get_dynamic_styles()
+        
+        # 메인 스플리터 생성 (3열 구조)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # 왼쪽 패널 (이미지 프리뷰 + 설명)
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setSpacing(10)
+        
+        # 이미지 프리뷰 위젯
+        preview_label = QLabel("프리셋 이미지:")
+        preview_label.setStyleSheet(dynamic_styles['label_style'])
+        left_layout.addWidget(preview_label)
+        
+        preview_widget = PresetPreviewWidget()
+        preview_widget.setMinimumHeight(300)
+        preview_widget.setMaximumWidth(400)
+        left_layout.addWidget(preview_widget, 2)
+        
+        # 설명 텍스트 편집 위젯
+        desc_label = QLabel("프리셋 설명:")
+        desc_label.setStyleSheet(dynamic_styles['label_style'])
+        left_layout.addWidget(desc_label)
+        
+        desc_textedit = QTextEdit()
+        desc_textedit.setMaximumHeight(150)
+        desc_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
+        desc_textedit.setPlaceholderText("이 프리셋에 대한 설명을 작성하세요...")
+        left_layout.addWidget(desc_textedit, 1)
+        
+        # 중앙 패널 (프리셋 목록)
+        center_panel = QWidget()
+        center_layout = QVBoxLayout(center_panel)
+        
+        list_label = QLabel("프리셋 목록:")
+        list_label.setStyleSheet(dynamic_styles['label_style'])
+        center_layout.addWidget(list_label)
+        
+        # 프리셋 목록
+        list_widget = QListWidget()
+        list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 5px;
+                font-size: {get_scaled_font_size(16)}px;
+            }}
+            QListWidget::item {{
+                padding: 5px;
+                color: white;
+            }}
+            QListWidget::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: white;
+            }}
+            QListWidget::item:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+            }}
+        """)
+        
+        # 프리셋 목록 로드
+        preset_dir = self.get_preset_dir()
+        preset_data = {}
+        for preset_file in sorted(preset_dir.glob("*.json")):
+            list_widget.addItem(preset_file.stem)
+            try:
+                with open(preset_file, 'r', encoding='utf-8') as f:
+                    preset_data[preset_file.stem] = json.load(f)
+            except:
+                pass
+        
+        center_layout.addWidget(list_widget)
+        
+        # 버튼들
+        button_layout = QHBoxLayout()
+        
+        save_desc_btn = QPushButton("설명 저장")
+        save_desc_btn.setStyleSheet(dynamic_styles['secondary_button'])
+        def save_description():
+            current_item = list_widget.currentItem()
+            if current_item:
+                preset_name = current_item.text()
+                self.save_preset_description(preset_name, desc_textedit.toPlainText())
+                # preset_data 업데이트
+                if preset_name in preset_data:
+                    preset_data[preset_name]["description"] = desc_textedit.toPlainText()
+                QMessageBox.information(dialog, "성공", f"{preset_name} 프리셋의 설명이 저장되었습니다.")
+            else:
+                QMessageBox.warning(dialog, "경고", "설명을 저장할 프리셋을 선택해주세요.")
+        save_desc_btn.clicked.connect(save_description)
+        button_layout.addWidget(save_desc_btn)
+        
+        rename_btn = QPushButton("이름 변경")
+        rename_btn.setStyleSheet(dynamic_styles['secondary_button'])
+        rename_btn.clicked.connect(lambda: self.rename_preset(list_widget))
+        button_layout.addWidget(rename_btn)
+        
+        delete_btn = QPushButton("삭제")
+        delete_btn.setStyleSheet(dynamic_styles['secondary_button'])
+        delete_btn.clicked.connect(lambda: self.delete_preset(list_widget))
+        button_layout.addWidget(delete_btn)
+        
+        close_btn = QPushButton("닫기")
+        close_btn.setStyleSheet(dynamic_styles['primary_button'])
+        close_btn.clicked.connect(dialog.close)
+        button_layout.addWidget(close_btn)
+        
+        center_layout.addLayout(button_layout)
+        
+        # 오른쪽 패널 (프리셋 설정 상세 정보)
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        
+        detail_label = QLabel("프리셋 상세 정보:")
+        detail_label.setStyleSheet(dynamic_styles['label_style'])
+        right_layout.addWidget(detail_label)
+        
+        # 프리셋 설정 표시용 TextEdit
+        detail_textedit = QTextEdit()
+        detail_textedit.setReadOnly(True)
+        detail_textedit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 10px;
+                font-family: monospace;
+                font-size: {get_scaled_font_size(14)}px;
+            }}
+        """)
+        right_layout.addWidget(detail_textedit)
+        
+        # 스플리터에 패널 추가
+        splitter.addWidget(left_panel)
+        splitter.addWidget(center_panel)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([350, 300, 550])  # 초기 크기 비율
+        
+        main_layout.addWidget(splitter)
+        
+        # 리스트 선택 이벤트 연결
+        def on_preset_selected():
+            current_item = list_widget.currentItem()
+            if current_item:
+                preset_name = current_item.text()
+                
+                # 이미지 프리뷰 업데이트
+                preview_widget.set_preset_name(preset_name)
+                
+                # 프리셋 데이터 로드 및 표시
+                if preset_name in preset_data:
+                    data = preset_data[preset_name]
+                    
+                    # 설명 로드
+                    desc = data.get("description", "")
+                    desc_textedit.setText(desc)
+                    
+                    # 상세 정보 표시
+                    detail_text = self.format_preset_details(data)
+                    detail_textedit.setText(detail_text)
+                else:
+                    desc_textedit.clear()
+                    detail_textedit.clear()
+            else:
+                preview_widget.clear_preview()
+                desc_textedit.clear()
+                detail_textedit.clear()
+        
+        list_widget.itemSelectionChanged.connect(on_preset_selected)
+        
+        # 첫 번째 항목 선택
+        if list_widget.count() > 0:
+            list_widget.setCurrentRow(0)
+        
+        # 모달리스 다이얼로그로 표시 (exec 대신 show 사용)
+        dialog.show()
+    
+    def format_preset_details(self, preset_data: Dict) -> str:
+        """프리셋 데이터를 읽기 쉬운 텍스트로 포맷팅"""
+        lines = []
+        
+        # module_settings
+        if "module_settings" in preset_data:
+            lines.append("═══ 모듈 설정 ═══\n")
+            settings = preset_data["module_settings"]
+            
+            if settings.get("pre_prompt"):
+                lines.append("▶ 선행 프롬프트:")
+                lines.append(f"  {settings['pre_prompt']}\n")
+            
+            if settings.get("post_prompt"):
+                lines.append("▶ 후행 프롬프트:")
+                lines.append(f"  {settings['post_prompt']}\n")
+            
+            if settings.get("auto_hide_prompt"):
+                lines.append("▶ 자동 숨김 프롬프트:")
+                lines.append(f"  {settings['auto_hide_prompt']}\n")
+            
+            if settings.get("preprocessing_options"):
+                active_options = [k for k, v in settings["preprocessing_options"].items() if v]
+                if active_options:
+                    lines.append("▶ 전처리 옵션:")
+                    for opt in active_options:
+                        lines.append(f"  ✓ {opt}")
+                    lines.append("")
+        
+        # main_settings
+        if "main_settings" in preset_data:
+            lines.append("\n═══ 메인 설정 ═══\n")
+            settings = preset_data["main_settings"]
+            
+            if "prompt" in settings:
+                lines.append("▶ 메인 프롬프트:")
+                lines.append(f"  {settings['prompt']}\n")
+            
+            if "negative" in settings:
+                lines.append("▶ 네거티브 프롬프트:")
+                lines.append(f"  {settings['negative']}\n")
+            
+            if "cfg_scale" in settings:
+                lines.append(f"▶ CFG Scale: {settings['cfg_scale']}")
+            
+            if "sampler" in settings:
+                lines.append(f"▶ 샘플러: {settings['sampler']}")
+            
+            if "steps" in settings:
+                lines.append(f"▶ 스텝: {settings['steps']}")
+            
+            # 체크박스 옵션들
+            checkboxes = []
+            for key in ["SMEA", "DYN", "VAR+", "DECRISP", "sm", "sm_dyn", "variety", "decrisper"]:
+                if key in settings and settings[key]:
+                    checkboxes.append(key)
+            
+            if checkboxes:
+                lines.append(f"▶ 활성 옵션: {', '.join(checkboxes)}")
+        
+        return "\n".join(lines)
+    
+    def rename_preset(self, list_widget: QListWidget):
+        """프리셋 이름 변경"""
+        current_item = list_widget.currentItem()
+        if not current_item:
+            QMessageBox.warning(self.widget, "경고", "이름을 변경할 프리셋을 선택해주세요.")
+            return
+        
+        old_name = current_item.text()
+        
+        if old_name == "default":
+            QMessageBox.warning(self.widget, "경고", "기본 프리셋은 이름을 변경할 수 없습니다.")
+            return
+        
+        new_name, ok = QInputDialog.getText(self.widget, "이름 변경", "새 이름:", text=old_name)
+        
+        if ok and new_name and new_name != old_name:
+            # 파일명에 사용할 수 없는 문자 제거
+            invalid_chars = '<>:"/\\|?*'
+            for char in invalid_chars:
+                new_name = new_name.replace(char, '')
+            
+            preset_dir = self.get_preset_dir()
+            old_file = preset_dir / f"{old_name}.json"
+            new_file = preset_dir / f"{new_name}.json"
+            
+            if new_file.exists():
+                QMessageBox.warning(self.widget, "경고", f"'{new_name}' 프리셋이 이미 존재합니다.")
+                return
+            
+            old_file.rename(new_file)
+            current_item.setText(new_name)
+            
+            # 콤보박스 업데이트
+            self.load_preset_list()
+    
+    def delete_preset(self, list_widget: QListWidget):
+        """프리셋 삭제"""
+        current_item = list_widget.currentItem()
+        if not current_item:
+            QMessageBox.warning(self.widget, "경고", "삭제할 프리셋을 선택해주세요.")
+            return
+        
+        preset_name = current_item.text()
+        
+        if preset_name == "default":
+            QMessageBox.warning(self.widget, "경고", "기본 프리셋은 삭제할 수 없습니다.")
+            return
+        
+        reply = QMessageBox.question(
+            self.widget,
+            "확인",
+            f"'{preset_name}' 프리셋을 삭제하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            preset_dir = self.get_preset_dir()
+            preset_file = preset_dir / f"{preset_name}.json"
+            preset_file.unlink()
+            
+            # 목록에서 제거
+            list_widget.takeItem(list_widget.row(current_item))
+            
+            # 콤보박스 업데이트
+            self.load_preset_list()
+    
+    def on_api_mode_changed_preset(self, data: dict):
+        """API 모드 변경 시 프리셋 처리"""
+        # 이전 모드의 현재 프리셋 저장
+        if self.current_preset and self.current_preset != "(프리셋 없음)":
+            self.save_current_preset()
+            self.save_last_used_preset_info()
+        
+        # 새 모드의 프리셋 목록 로드
+        self.load_preset_list()
+        
+        # 새 모드의 마지막 사용 프리셋 로드
+        last_used = self.load_last_used_preset_info()
+        
+        preset_to_load = None
+        if last_used and last_used in self.preset_list:
+            preset_to_load = last_used
+            print(f"📂 마지막 사용 프리셋 복원: {last_used}")
+        elif "default" in self.preset_list:
+            preset_to_load = "default"
+            print(f"📂 기본 프리셋 로드: default")
+        
+        if preset_to_load:
+            self.preset_combo.blockSignals(True)
+            self.preset_combo.setCurrentText(preset_to_load)
+            self.preset_combo.blockSignals(False)
+            self.load_preset(preset_to_load)
+            self.current_preset = preset_to_load
+            self.last_preset = preset_to_load
+    
+    def collect_main_ui_settings(self) -> Dict[str, Any]:
+        """메인 UI 설정 수집 - app_context를 통해 접근"""
+        settings = {}
+        
+        if not hasattr(self, 'app_context') or not self.app_context:
+            return settings
+        
+        # MainWindow 인스턴스 가져오기
+        main_window = getattr(self.app_context, 'main_window', None)
+        if not main_window:
+            return settings
+        
+        try:
+            # 프롬프트 텍스트
+            if hasattr(main_window, 'main_prompt_textedit'):
+                settings['prompt'] = main_window.main_prompt_textedit.toPlainText()
+            
+            if hasattr(main_window, 'negative_prompt_textedit'):
+                settings['negative'] = main_window.negative_prompt_textedit.toPlainText()
+            
+            # 생성 파라미터
+            params = main_window.get_main_parameters() if hasattr(main_window, 'get_main_parameters') else {}
+            
+            mode = self.app_context.get_api_mode()
+            if mode == "NAI":
+                # 직접 위젯에서 값 가져오기 (params가 비어있을 수 있음)
+                if hasattr(main_window, 'cfg_scale_slider'):
+                    settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
+                else:
+                    settings['cfg_scale'] = params.get('cfg_scale', 5.0)
+                    
+                if hasattr(main_window, 'sampler_combo'):
+                    settings['sampler'] = main_window.sampler_combo.currentText()
+                else:
+                    settings['sampler'] = params.get('sampler', 'k_euler')
+                    
+                if hasattr(main_window, 'steps_spinbox'):
+                    settings['steps'] = main_window.steps_spinbox.value()
+                else:
+                    settings['steps'] = params.get('steps', 28)
+                # 체크박스들 - advanced_checkboxes 딕셔너리에서 가져오기
+                if hasattr(main_window, 'advanced_checkboxes'):
+                    settings['SMEA'] = main_window.advanced_checkboxes.get("SMEA", QCheckBox()).isChecked()
+                    settings['DYN'] = main_window.advanced_checkboxes.get("DYN", QCheckBox()).isChecked()
+                    settings['VAR+'] = main_window.advanced_checkboxes.get("VAR+", QCheckBox()).isChecked()
+                    settings['DECRISP'] = main_window.advanced_checkboxes.get("DECRISP", QCheckBox()).isChecked()
+                else:
+                    settings['SMEA'] = params.get('SMEA', False)
+                    settings['DYN'] = params.get('DYN', False)
+                    settings['VAR+'] = params.get('VAR+', False)
+                    settings['DECRISP'] = params.get('DECRISP', False)
+            elif mode == "WEBUI":
+                settings['cfg_scale'] = params.get('cfg_scale', 7.0)
+                settings['sampler'] = params.get('sampler_name', 'Euler')
+                settings['steps'] = params.get('steps', 20)
+                settings['enable_hr'] = params.get('enable_hr', False)
+                settings['hr_scale'] = params.get('hr_scale', 2.0)
+                settings['hr_upscaler'] = params.get('hr_upscaler', 'Latent')
+            elif mode == "COMFYUI":
+                # ComfyUI는 워크플로우 기반이므로 최소한의 정보만
+                settings['workflow'] = params.get('workflow', 'default')
+            
+        except Exception as e:
+            print(f"⚠️ 메인 UI 설정 수집 중 오류: {e}")
+        
+        return settings
+    
+    def apply_main_ui_settings(self, settings: Dict[str, Any]):
+        """메인 UI에 설정 적용"""
+        if not hasattr(self, 'app_context') or not self.app_context:
+            print("    ⚠️ app_context 없음")
+            return
+        
+        main_window = getattr(self.app_context, 'main_window', None)
+        if not main_window:
+            print("    ⚠️ main_window 없음")
+            return
+        
+        print(f"    - 메인 UI 설정 적용:")
+        print(f"      설정 키: {list(settings.keys())}")
+        
+        try:
+            # 프롬프트 텍스트 적용
+            if 'prompt' in settings:
+                if hasattr(main_window, 'main_prompt_textedit'):
+                    main_window.main_prompt_textedit.setPlainText(settings['prompt'])
+                    print(f"      메인 프롬프트 적용 (길이: {len(settings['prompt'])})")
+                else:
+                    print(f"      ⚠️ main_prompt_textedit 없음")
+            
+            if 'negative' in settings:
+                if hasattr(main_window, 'negative_prompt_textedit'):
+                    main_window.negative_prompt_textedit.setPlainText(settings['negative'])
+                    print(f"      네거티브 프롬프트 적용 (길이: {len(settings['negative'])})")
+                else:
+                    print(f"      ⚠️ negative_prompt_textedit 없음")
+            
+            mode = self.app_context.get_api_mode()
+            
+            # NAI 모드 설정
+            if mode == "NAI":
+                print(f"      NAI 모드 설정 적용 중...")
+                
+                if 'cfg_scale' in settings:
+                    if hasattr(main_window, 'cfg_scale_slider'):
+                        # cfg_scale은 슬라이더로 구현되어 있으며 10배수로 저장됨
+                        slider_value = int(float(settings['cfg_scale']) * 10)
+                        main_window.cfg_scale_slider.setValue(slider_value)
+                        # 라벨도 업데이트
+                        if hasattr(main_window, 'cfg_value_label'):
+                            main_window.cfg_value_label.setText(str(settings['cfg_scale']))
+                        print(f"        cfg_scale: {settings['cfg_scale']}")
+                    else:
+                        print(f"        ⚠️ cfg_scale_slider 없음")
+                
+                if 'sampler' in settings:
+                    if hasattr(main_window, 'sampler_combo'):
+                        index = main_window.sampler_combo.findText(settings['sampler'])
+                        if index >= 0:
+                            main_window.sampler_combo.setCurrentIndex(index)
+                            print(f"        sampler: {settings['sampler']}")
+                        else:
+                            print(f"        ⚠️ sampler '{settings['sampler']}' 찾을 수 없음")
+                    else:
+                        print(f"        ⚠️ sampler_combo 없음")
+                
+                if 'steps' in settings:
+                    if hasattr(main_window, 'steps_spinbox'):
+                        main_window.steps_spinbox.setValue(int(settings['steps']))
+                        print(f"        steps: {settings['steps']}")
+                    else:
+                        print(f"        ⚠️ steps_spinbox 없음")
+                
+                # 체크박스들 - advanced_checkboxes 딕셔너리 사용
+                if hasattr(main_window, 'advanced_checkboxes'):
+                    if 'SMEA' in settings and "SMEA" in main_window.advanced_checkboxes:
+                        main_window.advanced_checkboxes["SMEA"].setChecked(settings['SMEA'])
+                        print(f"        SMEA: {settings['SMEA']}")
+                    
+                    if 'DYN' in settings and "DYN" in main_window.advanced_checkboxes:
+                        main_window.advanced_checkboxes["DYN"].setChecked(settings['DYN'])
+                        print(f"        DYN: {settings['DYN']}")
+                    
+                    if 'VAR+' in settings and "VAR+" in main_window.advanced_checkboxes:
+                        main_window.advanced_checkboxes["VAR+"].setChecked(settings['VAR+'])
+                        print(f"        VAR+: {settings['VAR+']}")
+                    
+                    if 'DECRISP' in settings and "DECRISP" in main_window.advanced_checkboxes:
+                        main_window.advanced_checkboxes["DECRISP"].setChecked(settings['DECRISP'])
+                        print(f"        DECRISP: {settings['DECRISP']}")
+                else:
+                    print(f"        ⚠️ advanced_checkboxes 없음")
+            
+            # WEBUI 모드 설정
+            elif mode == "WEBUI":
+                if 'cfg_scale' in settings and hasattr(main_window, 'cfg_scale_input'):
+                    main_window.cfg_scale_input.setValue(float(settings['cfg_scale']))
+                
+                if 'sampler' in settings and hasattr(main_window, 'sampler_combo'):
+                    index = main_window.sampler_combo.findText(settings['sampler'])
+                    if index >= 0:
+                        main_window.sampler_combo.setCurrentIndex(index)
+                
+                if 'steps' in settings and hasattr(main_window, 'steps_input'):
+                    main_window.steps_input.setValue(int(settings['steps']))
+                
+                if 'enable_hr' in settings and hasattr(main_window, 'enable_hr_checkbox'):
+                    main_window.enable_hr_checkbox.setChecked(settings['enable_hr'])
+                
+                if 'hr_scale' in settings and hasattr(main_window, 'hr_scale_input'):
+                    main_window.hr_scale_input.setValue(float(settings['hr_scale']))
+                
+                if 'hr_upscaler' in settings and hasattr(main_window, 'hr_upscaler_combo'):
+                    index = main_window.hr_upscaler_combo.findText(settings['hr_upscaler'])
+                    if index >= 0:
+                        main_window.hr_upscaler_combo.setCurrentIndex(index)
+            
+        except Exception as e:
+            import traceback
+            print(f"⚠️ 메인 UI 설정 적용 중 오류: {e}")
+            traceback.print_exc()
+    
+    def save_on_exit(self):
+        """프로그램 종료 시 현재 프리셋 저장"""
+        if self.current_preset and self.current_preset != "(프리셋 없음)":
+            self.save_current_preset()
+            self.save_last_used_preset_info()
+    
+    def save_last_used_preset_info(self):
+        """마지막 사용한 프리셋 정보 저장"""
+        if not self.current_preset or self.current_preset == "(프리셋 없음)":
+            return
+        
+        mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        
+        last_used_file = Path("save") / "presets" / "last_used_preset.json"
+        last_used_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        data = {
+            mode: self.current_preset
+        }
+        
+        # 기존 데이터가 있으면 병합
+        if last_used_file.exists():
+            try:
+                with open(last_used_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    existing_data.update(data)
+                    data = existing_data
+            except:
+                pass
+        
+        try:
+            with open(last_used_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"💾 마지막 사용 프리셋 저장: {self.current_preset} ({mode})")
+        except Exception as e:
+            print(f"⚠️ 마지막 사용 프리셋 정보 저장 실패: {e}")
+    
+    def load_last_used_preset_info(self) -> Optional[str]:
+        """마지막 사용한 프리셋 정보 로드"""
+        mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        
+        last_used_file = Path("save") / "presets" / "last_used_preset.json"
+        
+        if not last_used_file.exists():
+            return None
+        
+        try:
+            with open(last_used_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get(mode)
+        except Exception as e:
+            print(f"⚠️ 마지막 사용 프리셋 정보 로드 실패: {e}")
+            return None
+    
+    def save_preset_description(self, preset_name: str, description: str):
+        """프리셋 설명 저장"""
+        if not preset_name:
+            return
+        
+        preset_dir = self.get_preset_dir()
+        preset_file = preset_dir / f"{preset_name}.json"
+        
+        if not preset_file.exists():
+            return
+        
+        try:
+            # 기존 프리셋 데이터 로드
+            with open(preset_file, 'r', encoding='utf-8') as f:
+                preset_data = json.load(f)
+            
+            # 설명 추가/업데이트
+            preset_data["description"] = description
+            
+            # 저장
+            with open(preset_file, 'w', encoding='utf-8') as f:
+                json.dump(preset_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"📝 프리셋 설명 저장: {preset_name}")
+        except Exception as e:
+            print(f"⚠️ 프리셋 설명 저장 실패: {e}")

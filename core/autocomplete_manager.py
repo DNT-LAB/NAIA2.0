@@ -1,7 +1,8 @@
 import re
+from pathlib import Path
 from PyQt6.QtCore import QObject, QEvent, Qt, QTimer
-from PyQt6.QtWidgets import QApplication, QListWidget, QWidget, QLineEdit, QTextEdit, QHBoxLayout, QTextBrowser
-from PyQt6.QtGui import QTextCursor, QKeyEvent
+from PyQt6.QtWidgets import QApplication, QListWidget, QWidget, QLineEdit, QTextEdit, QHBoxLayout, QTextBrowser, QLabel, QVBoxLayout
+from PyQt6.QtGui import QTextCursor, QKeyEvent, QPixmap
 
 # ✅ 전역 인스턴스 (싱글턴 패턴 대체)
 _autocomplete_manager = None
@@ -87,6 +88,8 @@ class AutoCompleteManager(QObject):
         # 인스턴트 와일드카드용 값 표시 위젯
         self.value_display = None
         self.value_container = None
+        self.image_container = None  # 이미지 표시용 별도 컨테이너
+        self.image_label = None  # 이미지 표시용 라벨
         
         # 현재 활성 위젯
         self.current_widget = None
@@ -480,6 +483,26 @@ class AutoCompleteManager(QObject):
             start_pos += 1
             
         token = text[start_pos:end_pos]
+        
+        # NAI :: 문법 처리 - 커서 위치에 따라 검색 범위 조정
+        original_token = token  # 원본 토큰 저장
+        if '::' in token:
+            # :: 위치 찾기
+            double_colon_pos = token.find('::')
+            absolute_double_colon_pos = start_pos + double_colon_pos
+            
+            # 커서가 :: 의 왼쪽에 있는지 오른쪽에 있는지 확인
+            if pos <= absolute_double_colon_pos:
+                # 커서가 :: 왼쪽에 있으면 가중치 부분 제거 (:: 이후는 무시)
+                token = token[:double_colon_pos]
+                end_pos = start_pos + double_colon_pos
+            else:
+                # 커서가 :: 오른쪽에 있으면 :: 이후 부분만 검색
+                # 이 경우 weight 값이므로 검색하지 않고 빈 결과 반환
+                token = ""
+                start_pos = absolute_double_colon_pos + 2
+                end_pos = start_pos
+        
         stripped_token, prefix, suffix = self._strip_brackets(token)
 
         return {
@@ -492,20 +515,34 @@ class AutoCompleteManager(QObject):
         }
 
     def _strip_brackets(self, keyword: str) -> tuple[str, str, str]:
-        """단어 앞뒤의 괄호를 분리합니다."""
+        """단어 앞뒤의 괄호와 NAI :: 가중치 문법을 분리합니다."""
         if not isinstance(keyword, str):
             return "", "", ""
 
         keyword_stripped = keyword.strip()
+        
+        # NAI :: 가중치 문법 처리
+        # :: 이후 부분은 suffix로 처리하여 자동완성 후에도 유지
+        double_colon_suffix = ""
+        if '::' in keyword_stripped:
+            parts = keyword_stripped.split('::', 1)
+            keyword_stripped = parts[0]
+            if len(parts) > 1:
+                double_colon_suffix = '::' + parts[1]
+        
+        # 괄호 처리
         prefix_match = re.match(r'^[\{\[\(]+', keyword_stripped)
         prefix = prefix_match.group(0) if prefix_match else ''
         suffix_match = re.search(r'[\}\]\)]+$', keyword_stripped)
         suffix = suffix_match.group(0) if suffix_match else ''
         
-        if len(prefix) + len(suffix) > len(keyword_stripped):
-             return keyword_stripped, "", ""
+        # :: 가중치를 suffix에 추가
+        suffix = suffix + double_colon_suffix
+        
+        if len(prefix) + len(suffix) > len(keyword_stripped) + len(double_colon_suffix):
+             return keyword_stripped, "", double_colon_suffix
 
-        stripped_keyword = keyword_stripped[len(prefix):len(keyword_stripped) - len(suffix)]
+        stripped_keyword = keyword_stripped[len(prefix):len(keyword_stripped) - (len(suffix) - len(double_colon_suffix)) if suffix else len(keyword_stripped)]
         return stripped_keyword, prefix, suffix
     
     def _restore_brackets(self, keyword, prefix, suffix):
@@ -540,6 +577,8 @@ class AutoCompleteManager(QObject):
             self.popup.hide()
         if self.value_container:
             self.value_container.hide()
+        if self.image_container:
+            self.image_container.hide()
     
     def _get_instant_wildcards(self):
         """인스턴트 와일드카드 딕셔너리를 가져옵니다."""
@@ -564,9 +603,53 @@ class AutoCompleteManager(QObject):
         
         # 검색어와 매칭되는 와일드카드 키 찾기
         matching_keys = []
+        search_lower = search_text.lower() if search_text else ""
+        
+        # 우선순위 기반 매칭
+        exact_matches = []      # 정확히 일치
+        starts_with = []        # 시작 부분 일치
+        word_starts = []        # 단어 시작 일치
+        contains = []           # 포함
+        
         for key in self.instant_wildcards.keys():
-            if not search_text or key.lower().startswith(search_text.lower()):
+            key_lower = key.lower()
+            
+            if not search_text:
+                # 검색어가 없으면 모든 키 추가
                 matching_keys.append(key)
+            elif key_lower == search_lower:
+                # 정확히 일치
+                exact_matches.append(key)
+            elif key_lower.startswith(search_lower):
+                # 시작 부분 일치
+                starts_with.append(key)
+            else:
+                # 단어 경계에서 시작하는지 확인 (공백, _, - 로 구분)
+                import re
+                # 단어 구분자로 분리
+                words = re.split(r'[\s_\-]+', key_lower)
+                word_found = False
+                for word in words:
+                    if word.startswith(search_lower):
+                        word_starts.append(key)
+                        word_found = True
+                        break
+                
+                # 아무 곳이나 포함
+                if not word_found and search_lower in key_lower:
+                    contains.append(key)
+        
+        # 우선순위에 따라 결과 합치기
+        matching_keys = exact_matches + starts_with + word_starts + contains
+        
+        # 중복 제거 (순서 유지)
+        seen = set()
+        unique_keys = []
+        for key in matching_keys:
+            if key not in seen:
+                seen.add(key)
+                unique_keys.append(key)
+        matching_keys = unique_keys
         
         if not matching_keys:
             self._hide_all_popups()
@@ -592,6 +675,7 @@ class AutoCompleteManager(QObject):
     
     def _create_value_display(self):
         """인스턴트 와일드카드 값을 표시할 패널을 생성합니다."""
+        # 텍스트 값 표시 컨테이너
         self.value_container = QWidget()
         self.value_container.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.value_container.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -617,6 +701,29 @@ class AutoCompleteManager(QObject):
         """)
         
         layout.addWidget(self.value_display)
+        
+        # 이미지 표시용 별도 컨테이너
+        self.image_container = QWidget()
+        self.image_container.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.image_container.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        image_layout = QVBoxLayout(self.image_container)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(0)
+        
+        self.image_label = QLabel()
+        self.image_label.setStyleSheet("""
+            QLabel {
+                border: 1px solid #444;
+                background-color: #1E1E1E;
+                padding: 4px;
+            }
+        """)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setMinimumWidth(150)
+        self.image_label.setMaximumWidth(250)
+        
+        image_layout.addWidget(self.image_label)
     
     def _populate_instant_wildcard_popup(self, keys):
         """인스턴트 와일드카드 키를 팝업에 표시합니다."""
@@ -656,7 +763,7 @@ class AutoCompleteManager(QObject):
                 self._update_value_display(key)
     
     def _update_value_display(self, key: str):
-        """선택된 와일드카드의 값을 표시합니다."""
+        """선택된 와일드카드의 값과 이미지를 표시합니다."""
         if not self.value_display:
             return
         
@@ -669,6 +776,73 @@ class AutoCompleteManager(QObject):
 </div>"""
         
         self.value_display.setHtml(html_content)
+        
+        # 이미지 업데이트
+        self._update_image_display(key)
+    
+    def _update_image_display(self, key: str):
+        """와일드카드에 연결된 이미지를 표시합니다."""
+        if not self.image_label or not self.image_container:
+            return
+        
+        # 현재 파일 찾기 (default.json 등)
+        current_file = None
+        for filename, data in self._get_instant_wildcard_files().items():
+            if key in data:
+                current_file = filename.replace('.json', '')
+                break
+        
+        if not current_file:
+            self.image_container.hide()
+            return
+        
+        # 이미지 경로 확인
+        image_path = Path("save") / "instant_wildcard" / "images" / current_file / f"{key}.png"
+        
+        if image_path.exists():
+            try:
+                pixmap = QPixmap(str(image_path))
+                if not pixmap.isNull():
+                    # 높이에 맞춰 스케일링 (비율 유지)
+                    max_height = self.popup.height() if self.popup else 200
+                    scaled_pixmap = pixmap.scaledToHeight(
+                        max_height,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self.image_label.setPixmap(scaled_pixmap)
+                    
+                    # 이미지 컨테이너 위치 설정 및 표시
+                    if self.current_widget and self.value_container and self.value_container.isVisible():
+                        # 값 패널 왼쪽에 이미지 표시
+                        value_pos = self.value_container.pos()
+                        image_pos = value_pos
+                        image_pos.setX(value_pos.x() - self.image_label.width() - 5)
+                        self.image_container.move(image_pos)
+                        self.image_container.show()
+                else:
+                    self.image_container.hide()
+            except Exception as e:
+                print(f"⚠️ 이미지 로드 실패: {e}")
+                self.image_container.hide()
+        else:
+            self.image_container.hide()
+    
+    def _get_instant_wildcard_files(self) -> dict:
+        """인스턴트 와일드카드 JSON 파일들을 로드합니다."""
+        wildcard_files = {}
+        wildcard_dir = Path("save") / "instant_wildcard"
+        
+        if wildcard_dir.exists():
+            for json_file in wildcard_dir.glob("*.json"):
+                try:
+                    import json
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        wildcard_files[json_file.name] = data
+                except Exception as e:
+                    print(f"⚠️ 와일드카드 파일 로드 실패 {json_file.name}: {e}")
+        
+        return wildcard_files
     
     def popup_at_cursor_with_value(self):
         """커서 위치에 팝업과 값 표시 패널을 나란히 표시합니다."""
@@ -694,3 +868,14 @@ class AutoCompleteManager(QObject):
             value_pos.setX(value_pos.x() + self.popup.width() + 5)
             self.value_container.move(value_pos)
             self.value_container.show()
+            
+            # 이미지 컨테이너 높이 조정 (있는 경우)
+            if self.image_label:
+                self.image_label.setMaximumHeight(self.popup.height())
+            
+            # 첫 번째 항목의 이미지 업데이트 (있는 경우)
+            if self.popup.count() > 0:
+                item = self.popup.item(0)
+                key = item.data(Qt.ItemDataRole.UserRole + 1)
+                if key:
+                    self._update_image_display(key)

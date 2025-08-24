@@ -6,11 +6,12 @@
 import os
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox,
     QTextEdit, QLabel, QMessageBox, QDialog, QDialogButtonBox,
-    QLineEdit, QGroupBox, QSizePolicy, QApplication, QSplitter
+    QLineEdit, QGroupBox, QSizePolicy, QApplication, QSplitter,
+    QInputDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage
@@ -47,7 +48,7 @@ class PreviewImageWidget(QWidget):
             self.update()
             return
         
-        # 이미지 파일 경로
+        # 이미지 파일 경로 (self.current_file은 이미 .json이 제거된 상태)
         image_path = Path("save") / "instant_wildcard" / "images" / self.current_file / f"{self.current_key}.png"
         if image_path.exists():
             self._pixmap = QPixmap(str(image_path))
@@ -307,6 +308,7 @@ class InstantWildcardModule(BaseMiddleModule):
         self.signals = WildcardSignals()
         self.widget = None
         self.instant_wildcard_dict = {}  # 전역 와일드카드 딕셔너리
+        self.instant_wildcard_tree = {}  # 파일별 그룹화된 와일드카드 트리
         self.json_data = {}  # 파일별 데이터 저장
         self.save_path = Path("save/instant_wildcard")
         self.current_file = None
@@ -366,6 +368,12 @@ class InstantWildcardModule(BaseMiddleModule):
         self.update_btn.clicked.connect(self.load_all_wildcards)
         top_layout.addWidget(self.update_btn)
         
+        # 와일드카드 그룹 추가 버튼
+        self.add_group_btn = QPushButton("📁 그룹 추가")
+        self.add_group_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.add_group_btn.clicked.connect(self.add_wildcard_group)
+        top_layout.addWidget(self.add_group_btn)
+        
         top_layout.addStretch()
         main_layout.addLayout(top_layout)
         
@@ -417,21 +425,30 @@ class InstantWildcardModule(BaseMiddleModule):
         self.value_edit.setReadOnly(True)
         content_layout.addWidget(self.value_edit)
         
-        # 액션 버튼
+        # 액션 버튼 (크기 조정 및 이름변경 버튼 추가)
         button_layout = QHBoxLayout()
         
         self.edit_btn = QPushButton("수정")
         self.edit_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.edit_btn.setFixedWidth(get_scaled_size(100))  # 버튼 크기 줄임
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
         button_layout.addWidget(self.edit_btn)
         
         self.delete_btn = QPushButton("삭제")
         self.delete_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.delete_btn.setFixedWidth(get_scaled_size(100))  # 버튼 크기 줄임
         self.delete_btn.clicked.connect(self.delete_item)
         button_layout.addWidget(self.delete_btn)
         
+        self.rename_btn = QPushButton("이름변경")
+        self.rename_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.rename_btn.setFixedWidth(get_scaled_size(100))  # 이름변경 버튼
+        self.rename_btn.clicked.connect(self.rename_item)
+        button_layout.addWidget(self.rename_btn)
+        
         self.add_btn = QPushButton("추가")
         self.add_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        self.add_btn.setFixedWidth(get_scaled_size(100))  # 버튼 크기 줄임
         self.add_btn.clicked.connect(self.add_item)
         button_layout.addWidget(self.add_btn)
         
@@ -494,6 +511,7 @@ class InstantWildcardModule(BaseMiddleModule):
         """모든 와일드카드 파일 로드"""
         self.json_data.clear()
         self.instant_wildcard_dict.clear()
+        self.instant_wildcard_tree.clear()
         
         # JSON 파일 목록 가져오기
         json_files = sorted([f.name for f in self.save_path.glob("*.json")])
@@ -511,8 +529,11 @@ class InstantWildcardModule(BaseMiddleModule):
                     data = json.load(f)
                     self.json_data[filename] = data
                     
-                    # instant_wildcard_dict에 추가
+                    # instant_wildcard_tree에 파일별로 그룹화
                     basename = filename.replace('.json', '')
+                    self.instant_wildcard_tree[basename] = data.copy()
+                    
+                    # instant_wildcard_dict에 추가
                     for key, value in data.items():
                         # 중복 키 처리
                         if key in self.instant_wildcard_dict:
@@ -529,13 +550,81 @@ class InstantWildcardModule(BaseMiddleModule):
         # 시그널 발송
         self.signals.wildcards_updated.emit(self.instant_wildcard_dict)
         
-        # WildcardManager에 인스턴트 와일드카드 업데이트
+        # WildcardManager에 인스턴트 와일드카드 업데이트 (딕셔너리와 트리 모두 전달)
         if hasattr(self, 'app_context') and self.app_context:
             wildcard_manager = getattr(self.app_context, 'wildcard_manager', None)
             if wildcard_manager:
-                wildcard_manager.update_instant_wildcards(self.instant_wildcard_dict)
+                wildcard_manager.update_instant_wildcards(self.instant_wildcard_dict, self.instant_wildcard_tree)
         
         print(f"[OK] Wildcards loaded: {len(self.instant_wildcard_dict)} items")
+    
+    def add_wildcard_group(self):
+        """새로운 와일드카드 그룹(JSON 파일) 추가"""
+        # 사용자로부터 그룹 이름 입력받기
+        group_name, ok = QInputDialog.getText(
+            self.widget,
+            "와일드카드 그룹 추가",
+            "새 그룹 이름을 입력하세요:\n(영문, 숫자, 언더스코어만 사용 가능)",
+            QLineEdit.EchoMode.Normal,
+            ""
+        )
+        
+        if not ok or not group_name:
+            return
+        
+        # 파일명 유효성 검사
+        import re
+        if not re.match(r'^[a-zA-Z0-9_가-힣]+$', group_name):
+            QMessageBox.warning(
+                self.widget,
+                "경고",
+                "그룹 이름은 영문, 숫자, 한글, 언더스코어만 사용할 수 있습니다."
+            )
+            return
+        
+        # .json 확장자 추가
+        if not group_name.endswith('.json'):
+            group_name += '.json'
+        
+        # 파일 경로 생성
+        filepath = self.save_path / group_name
+        
+        # 이미 존재하는 파일인지 확인
+        if filepath.exists():
+            QMessageBox.warning(
+                self.widget,
+                "경고",
+                f"'{group_name}' 파일이 이미 존재합니다."
+            )
+            return
+        
+        # 새 JSON 파일 생성 (빈 딕셔너리로 시작)
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump({}, f, ensure_ascii=False, indent=2)
+            
+            # 생성 성공 메시지
+            QMessageBox.information(
+                self.widget,
+                "성공",
+                f"'{group_name}' 그룹이 생성되었습니다."
+            )
+            
+            # 와일드카드 다시 로드하여 UI 업데이트
+            self.load_all_wildcards()
+            
+            # 새로 생성한 파일을 선택
+            if group_name in self.json_data:
+                index = self.file_combo.findText(group_name)
+                if index >= 0:
+                    self.file_combo.setCurrentIndex(index)
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self.widget,
+                "오류",
+                f"파일 생성 중 오류가 발생했습니다:\n{str(e)}"
+            )
     
     def update_ui(self):
         """UI 콤보박스 업데이트"""
@@ -655,7 +744,7 @@ class InstantWildcardModule(BaseMiddleModule):
         self.add_btn.setEnabled(True)
     
     def delete_item(self):
-        """현재 항목 삭제"""
+        """현재 항목 삭제 (이미지 파일도 함께 삭제)"""
         if self.is_editing:
             # 편집 모드에서는 취소 동작
             self.cancel_edit()
@@ -673,6 +762,16 @@ class InstantWildcardModule(BaseMiddleModule):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
+            # 이미지 파일 삭제 (filename에서 .json 제거)
+            basename = self.current_file.replace('.json', '')
+            image_path = Path("save") / "instant_wildcard" / "images" / basename / f"{self.current_key}.png"
+            if image_path.exists():
+                try:
+                    image_path.unlink()
+                    print(f"🗑️ 이미지 파일 삭제: {image_path}")
+                except Exception as e:
+                    print(f"⚠️ 이미지 파일 삭제 실패: {e}")
+            
             # JSON 데이터에서 제거
             del self.json_data[self.current_file][self.current_key]
             
@@ -688,6 +787,70 @@ class InstantWildcardModule(BaseMiddleModule):
                 QMessageBox.information(self.widget, "성공", "항목이 삭제되었습니다.")
             except Exception as e:
                 QMessageBox.critical(self.widget, "오류", f"삭제 실패: {e}")
+    
+    def rename_item(self):
+        """현재 항목 이름 변경 (이미지 파일도 함께 이름 변경)"""
+        if self.is_editing:
+            # 편집 모드에서는 동작하지 않음
+            return
+        
+        if not self.current_file or not self.current_key:
+            return
+        
+        # 새 이름 입력 받기
+        new_name, ok = QInputDialog.getText(
+            self.widget,
+            "이름 변경",
+            f"'{self.current_key}'의 새 이름을 입력하세요:",
+            QLineEdit.EchoMode.Normal,
+            self.current_key
+        )
+        
+        if ok and new_name and new_name != self.current_key:
+            # 중복 검사
+            if new_name in self.json_data[self.current_file]:
+                QMessageBox.warning(
+                    self.widget,
+                    "경고",
+                    f"'{new_name}' 이름이 이미 존재합니다."
+                )
+                return
+            
+            try:
+                # 이미지 파일 이름 변경 (filename에서 .json 제거)
+                basename = self.current_file.replace('.json', '')
+                old_image_path = Path("save") / "instant_wildcard" / "images" / basename / f"{self.current_key}.png"
+                new_image_path = Path("save") / "instant_wildcard" / "images" / basename / f"{new_name}.png"
+                
+                if old_image_path.exists():
+                    try:
+                        old_image_path.rename(new_image_path)
+                        print(f"📝 이미지 파일 이름 변경: {old_image_path} → {new_image_path}")
+                    except Exception as e:
+                        print(f"⚠️ 이미지 파일 이름 변경 실패: {e}")
+                
+                # JSON 데이터에서 이름 변경
+                value = self.json_data[self.current_file][self.current_key]
+                del self.json_data[self.current_file][self.current_key]
+                self.json_data[self.current_file][new_name] = value
+                
+                # 파일에 저장
+                filepath = self.save_path / self.current_file
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(self.json_data[self.current_file], f, ensure_ascii=False, indent=2)
+                
+                # 와일드카드 재로드
+                self.load_all_wildcards()
+                
+                # 새 이름으로 선택 유지
+                index = self.key_combo.findText(new_name)
+                if index >= 0:
+                    self.key_combo.setCurrentIndex(index)
+                
+                QMessageBox.information(self.widget, "성공", f"항목 이름이 '{new_name}'으로 변경되었습니다.")
+                
+            except Exception as e:
+                QMessageBox.critical(self.widget, "오류", f"이름 변경 실패: {e}")
     
     def add_item(self, initial_text=""):
         """새 항목 추가"""
@@ -746,9 +909,15 @@ class InstantWildcardModule(BaseMiddleModule):
         """선택된 텍스트로부터 와일드카드 추가 (메인 윈도우에서 호출)"""
         self.add_item(initial_text=text)
     
-    def get_wildcards(self) -> Dict[str, str]:
-        """현재 로드된 와일드카드 딕셔너리 반환"""
-        return self.instant_wildcard_dict.copy()
+    def get_wildcards(self) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+        """현재 로드된 와일드카드 딕셔너리와 트리 반환
+        
+        Returns:
+            tuple: (instant_wildcard_dict, instant_wildcard_tree)
+                - instant_wildcard_dict: 전역 와일드카드 딕셔너리 (중복 키는 suffix 포함)
+                - instant_wildcard_tree: 파일별 그룹화된 와일드카드 트리
+        """
+        return self.instant_wildcard_dict.copy(), self.instant_wildcard_tree.copy()
     
     def get_parameters(self) -> dict:
         """모듈 파라미터 반환 (생성 파이프라인용)"""

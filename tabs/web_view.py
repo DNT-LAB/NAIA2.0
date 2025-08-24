@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLin
 from interfaces.base_tab_module import BaseTabModule
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
+from ui.modern_menu import setModernStyle
 import os
 import sys
 import re
@@ -83,10 +84,12 @@ class BrowserTab(QWidget):
         # 태그 추출 결과 표시 영역 (기본 숨김)
         self.tags_display = QTextEdit()
         self.tags_display.setFixedHeight(150)
-        self.tags_display.setReadOnly(True)
+        #self.tags_display.setReadOnly(True)
         self.tags_display.setStyleSheet(f"{DARK_STYLES['compact_textedit']} font-size: {get_scaled_font_size(16)}px;")
         self.tags_display.setPlaceholderText("Danbooru 페이지에서 '📝 태그 추출' 버튼을 클릭하세요...")
         self.tags_display.setVisible(False)
+        self.tags_display.setProperty("autocomplete_ignore", True)
+        setModernStyle(self.tags_display)  # Apply modern context menu style
         bottom_panel_layout.addWidget(self.tags_display)
 
         # 하단 버튼 레이아웃 (항상 보임)

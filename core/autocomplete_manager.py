@@ -97,6 +97,11 @@ class AutoCompleteManager(QObject):
         
         # 인스턴트 와일드카드 딕셔너리 캐시
         self.instant_wildcards = {}
+        self.instant_wildcards_tree = {}
+        
+        # 아티스트 이미지 캐시 (중복 처리 방지)
+        self.last_processed_img_data = None
+        self.last_processed_pixmap = None
         
         # 설정
         self.min_chars = 2
@@ -189,6 +194,10 @@ class AutoCompleteManager(QObject):
             }
         """)
         list_widget.itemClicked.connect(self.on_item_clicked)
+        
+        # 아이템 포커스 변경 이벤트 연결 (키보드 탐색 시 아티스트 이미지 표시)
+        list_widget.currentItemChanged.connect(self._on_item_focused)
+        
         return list_widget
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
@@ -364,6 +373,10 @@ class AutoCompleteManager(QObject):
         from PyQt6.QtWidgets import QListWidgetItem
         from PyQt6.QtCore import Qt
         
+        # Artist data 가져오기 (한 번만)
+        artist_data = self._get_artist_data()
+        artist_list = self._get_artist_list()
+        
         for tag, count in matches:
             # count를 포맷팅 (천 단위 구분자 추가)
             if count >= 1000000:
@@ -381,11 +394,137 @@ class AutoCompleteManager(QObject):
             # 실제 태그명만 별도로 저장 (완성 시 사용)
             item.setData(Qt.ItemDataRole.UserRole, tag)
             
-            # 툴팁 설정
-            item.setToolTip(f"태그: {tag}\n사용 횟수: {count:,}")
+            # 아티스트 검색 - artist: 접두사 유무와 관계없이 확인
+            artist_name = tag.replace("artist:", "").strip() if tag.startswith("artist:") else tag.strip()
+            
+            # artist_list에서 아티스트 확인 (artist: 접두사 없어도 검색)
+            if artist_name in artist_list and artist_name in artist_data:
+                # UserRole + 2에 아티스트 이미지 데이터 저장
+                item.setData(Qt.ItemDataRole.UserRole + 2, artist_data[artist_name])
+                item.setToolTip(f"아티스트: {artist_name}\n사용 횟수: {count:,}\n(키보드로 선택 시 이미지 확인)")
+            else:
+                # 툴팁 설정
+                item.setToolTip(f"태그: {tag}\n사용 횟수: {count:,}")
             
             self.popup.addItem(item)
 
+    def _on_item_focused(self, current, previous):
+        """아이템 포커스 변경 시 (키보드 탐색) 아티스트 이미지 표시"""
+        from PyQt6.QtGui import QPixmap
+        from PyQt6.QtCore import Qt, QPoint
+        from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+        import base64
+        import io
+        from PIL import Image
+        
+        if not current:
+            if self.image_container:
+                self.image_container.hide()
+            return
+            
+        item = current
+        
+        # UserRole + 2에서 아티스트 데이터 확인
+        artist_data = item.data(Qt.ItemDataRole.UserRole + 2)
+        
+        # artist_data는 list 형태이고, [0]번 인덱스에 이미지 데이터가 있음
+        if artist_data and isinstance(artist_data, list) and len(artist_data) > 0:
+            # 이미지 데이터 추출 (첫 번째 요소)
+            img_data_list = artist_data[0] if artist_data[0] else None
+            
+            if img_data_list:
+                try:
+                    # 이미지 컨테이너가 없으면 생성
+                    if not self.image_container:
+                        self._create_artist_image_container()
+                    
+                    # 이전에 처리한 이미지와 동일한지 확인 (캐시 체크)
+                    if img_data_list == self.last_processed_img_data and self.last_processed_pixmap:
+                        pixmap = self.last_processed_pixmap
+                    else:
+                        # base64 디코딩 (img_data_list가 직접 base64 문자열임)
+                        img_bytes = base64.b64decode(img_data_list)
+                        
+                        # PIL 이미지로 변환
+                        img = Image.open(io.BytesIO(img_bytes))
+                        
+                        # 좌우 85픽셀씩 잘라내기 (검은색 썸네일 영역 제거)
+                        width, height = img.size
+                        if width > 170:  # 최소 170픽셀 이상일 때만 크롭
+                            img = img.crop((85, 0, width - 85, height))
+                        
+                        # 높이를 384px로 제한하면서 비율 유지
+                        width, height = img.size
+                        if height > 384:
+                            new_height = 384
+                            new_width = int(width * (384 / height))
+                            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        
+                        # QPixmap으로 변환
+                        img_bytes = io.BytesIO()
+                        img.save(img_bytes, format='PNG')
+                        img_bytes.seek(0)
+                        
+                        pixmap = QPixmap()
+                        pixmap.loadFromData(img_bytes.read())
+                        
+                        # 캐시에 저장
+                        self.last_processed_img_data = img_data_list
+                        self.last_processed_pixmap = pixmap
+                    
+                    # 이미지 레이블에 설정
+                    self.image_label.setPixmap(pixmap)
+                    
+                    # 이미지 컨테이너를 팝업 옆에 표시
+                    if self.popup.isVisible():
+                        popup_rect = self.popup.geometry()
+                        # 팝업의 오른쪽에 이미지 표시
+                        image_pos = QPoint(popup_rect.right() + 5, popup_rect.top())
+                        self.image_container.move(image_pos)
+                        self.image_container.adjustSize()
+                        self.image_container.show()
+                    
+                except Exception as e:
+                    print(f"아티스트 이미지 표시 오류: {e}")
+                    if self.image_container:
+                        self.image_container.hide()
+            else:
+                # 이미지 데이터가 없으면 컨테이너 숨김
+                if self.image_container:
+                    self.image_container.hide()
+        else:
+            # 아티스트 데이터가 없으면 컨테이너 숨김
+            if self.image_container:
+                self.image_container.hide()
+    
+    def _create_artist_image_container(self):
+        """아티스트 이미지 표시용 컨테이너 생성"""
+        from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+        from PyQt6.QtCore import Qt
+        
+        self.image_container = QWidget()
+        self.image_container.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.image_container.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        image_layout = QVBoxLayout(self.image_container)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(0)
+        
+        self.image_label = QLabel()
+        self.image_label.setStyleSheet("""
+            QLabel {
+                border: 1px solid #444;
+                background-color: #1E1E1E;
+                padding: 4px;
+            }
+        """)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setMinimumWidth(150)
+        self.image_label.setMaximumWidth(400)  # 너비 제한 증가
+        self.image_label.setMaximumHeight(512)  # 높이 제한
+        
+        image_layout.addWidget(self.image_label)
+    
     def on_item_clicked(self, item):
         """팝업 아이템 클릭 시 텍스트 완성 - 실제 태그명만 사용"""
         # UserRole에 저장된 실제 태그명 사용
@@ -405,6 +544,9 @@ class AutoCompleteManager(QObject):
 
         widget = self.current_widget
         info = self.active_token_info
+        
+        # 그룹 아이템 선택 여부 확인 ($groupname: 형태)
+        is_group_selection = completion_text.startswith('$') and completion_text.endswith(':')
         
         # 인스턴트 와일드카드인 경우 값이 그대로 삽입됨 ($ 없이)
         if info['stripped_text'].startswith('$'):
@@ -429,6 +571,11 @@ class AutoCompleteManager(QObject):
         
         self._hide_all_popups()
         widget.setFocus() # 텍스트 완성 후 원래 위젯으로 포커스 복귀
+        
+        # 그룹 아이템을 선택한 경우, 자동으로 해당 그룹의 아이템들을 표시
+        if is_group_selection:
+            # 약간의 지연을 주어 텍스트 삽입이 완료된 후 실행
+            QTimer.singleShot(50, self.show_completions)
 
     def handle_popup_navigation(self, event: QKeyEvent) -> bool:
         """팝업에서의 키보드 네비게이션 처리"""
@@ -581,66 +728,199 @@ class AutoCompleteManager(QObject):
             self.image_container.hide()
     
     def _get_instant_wildcards(self):
-        """인스턴트 와일드카드 딕셔너리를 가져옵니다."""
+        """인스턴트 와일드카드 딕셔너리와 트리를 가져옵니다.
+        
+        다른 모듈에서 instant_wildcards_tree에 접근하는 방법:
+        
+        1. middle_section_controller를 통해 직접 접근:
+           instant_module = self.app_context.middle_section_controller.get_module_instance("InstantWildcardModule")
+           if instant_module:
+               dict_data, tree_data = instant_module.get_wildcards()
+        
+        2. WildcardManager를 통해 접근 (캐시된 데이터):
+           wildcard_manager = self.app_context.wildcard_manager
+           dict_data, tree_data = wildcard_manager.get_instant_wildcards()
+           # 또는 개별적으로:
+           tree_data = wildcard_manager.get_instant_wildcard_tree()
+           dict_data = wildcard_manager.get_instant_wildcard_dict()
+        """
         try:
             # middle_section_controller를 통해 InstantWildcardModule 접근
             if self.main_window and hasattr(self.main_window, 'middle_section_controller'):
                 instant_module = self.main_window.middle_section_controller.get_module_instance("InstantWildcardModule")
                 if instant_module:
-                    return instant_module.get_wildcards()
+                    result = instant_module.get_wildcards()
+                    # 튜플로 반환되는 경우 처리
+                    if isinstance(result, tuple) and len(result) == 2:
+                        return result  # (dict, tree)
+                    else:
+                        # 이전 버전 호환성 - 딕셔너리만 반환하는 경우
+                        return result, {}
         except Exception as e:
             print(f"⚠️ 인스턴트 와일드카드 가져오기 실패: {e}")
+        return {}, {}
+    
+    def _get_artist_data(self):
+        """ArtistThumbModule의 artist_data를 가져옵니다.
+        
+        사용 방법:
+        artist_data = self._get_artist_data()
+        # artist_data는 아티스트 이름을 키로 하는 딕셔너리
+        # 각 값은 아티스트 정보 (스타일, 설명 등)를 포함
+        
+        다른 모듈에서 ArtistThumbModule에 접근하는 방법:
+        
+        1. TabController를 통한 직접 접근 (app_context 사용):
+           right_view = self.app_context.main_window.image_window
+           artist_module = right_view.tab_controller.get_tab_instance('ArtistThumbModule')
+           if artist_module:
+               artist_data = artist_module.get_artist_data()
+               artist_list = artist_module.get_artist_list()
+        
+        2. MainWindow를 통한 접근:
+           if self.main_window and hasattr(self.main_window, 'image_window'):
+               right_view = self.main_window.image_window
+               artist_module = right_view.tab_controller.get_tab_instance('ArtistThumbModule')
+               if artist_module:
+                   artist_data = artist_module.get_artist_data()
+        """
+        try:
+            # main_window의 image_window (RightView)를 통해 TabController 접근
+            if self.main_window and hasattr(self.main_window, 'image_window'):
+                right_view = self.main_window.image_window
+                if hasattr(right_view, 'tab_controller'):
+                    artist_module = right_view.tab_controller.get_tab_instance('ArtistThumbModule')
+                    if artist_module:
+                        return artist_module.get_artist_data()
+        except Exception as e:
+            print(f"⚠️ ArtistThumbModule 데이터 가져오기 실패: {e}")
         return {}
+    
+    def _get_artist_list(self):
+        """ArtistThumbModule의 artist_list를 가져옵니다.
+        
+        사용 방법:
+        artist_list = self._get_artist_list()
+        # artist_list는 아티스트 이름 리스트
+        """
+        try:
+            # main_window의 image_window (RightView)를 통해 TabController 접근
+            if self.main_window and hasattr(self.main_window, 'image_window'):
+                right_view = self.main_window.image_window
+                if hasattr(right_view, 'tab_controller'):
+                    artist_module = right_view.tab_controller.get_tab_instance('ArtistThumbModule')
+                    if artist_module:
+                        return artist_module.get_artist_list()
+        except Exception as e:
+            print(f"⚠️ ArtistThumbModule 리스트 가져오기 실패: {e}")
+        return []
     
     def _show_instant_wildcard_completions(self, search_text: str):
         """인스턴트 와일드카드 자동완성을 표시합니다."""
-        # 인스턴트 와일드카드 딕셔너리 가져오기
-        self.instant_wildcards = self._get_instant_wildcards()
+        # 인스턴트 와일드카드 딕셔너리와 트리 가져오기
+        self.instant_wildcards, self.instant_wildcards_tree = self._get_instant_wildcards()
         
-        if not self.instant_wildcards:
+        if not self.instant_wildcards and not self.instant_wildcards_tree:
             self._hide_all_popups()
             return
         
-        # 검색어와 매칭되는 와일드카드 키 찾기
         matching_keys = []
         search_lower = search_text.lower() if search_text else ""
         
-        # 우선순위 기반 매칭
-        exact_matches = []      # 정확히 일치
-        starts_with = []        # 시작 부분 일치
-        word_starts = []        # 단어 시작 일치
-        contains = []           # 포함
+        # $filename: 형태의 그룹 검색 확인
+        is_group_search = False
+        group_name = None
+        group_search_text = search_lower
         
-        for key in self.instant_wildcards.keys():
-            key_lower = key.lower()
+        if not (search_text.startswith("artist")) and ":" in search_text:
+            # $filename: 형태 - 해당 그룹 내에서만 검색
+            parts = search_text.split(":", 1)
+            group_name = parts[0]  # $ 제거
+            group_search_text = parts[1].lower() if len(parts) > 1 else ""
+            is_group_search = True
+        
+        # 그룹 검색인 경우
+        if is_group_search and group_name in self.instant_wildcards_tree:
+            # 특정 그룹 내에서만 검색
+            group_items = self.instant_wildcards_tree[group_name]
             
-            if not search_text:
-                # 검색어가 없으면 모든 키 추가
-                matching_keys.append(key)
-            elif key_lower == search_lower:
-                # 정확히 일치
-                exact_matches.append(key)
-            elif key_lower.startswith(search_lower):
-                # 시작 부분 일치
-                starts_with.append(key)
-            else:
-                # 단어 경계에서 시작하는지 확인 (공백, _, - 로 구분)
-                import re
-                # 단어 구분자로 분리
-                words = re.split(r'[\s_\-]+', key_lower)
-                word_found = False
-                for word in words:
-                    if word.startswith(search_lower):
-                        word_starts.append(key)
-                        word_found = True
-                        break
+            exact_matches = []
+            starts_with = []
+            word_starts = []
+            contains = []
+            
+            for key in group_items.keys():
+                key_lower = key.lower()
                 
-                # 아무 곳이나 포함
-                if not word_found and search_lower in key_lower:
-                    contains.append(key)
-        
-        # 우선순위에 따라 결과 합치기
-        matching_keys = exact_matches + starts_with + word_starts + contains
+                if not group_search_text:
+                    # 그룹 내 모든 키
+                    contains.append(key)  # matching_keys가 아닌 contains에 추가
+                elif key_lower == group_search_text:
+                    exact_matches.append(key)
+                elif key_lower.startswith(group_search_text):
+                    starts_with.append(key)
+                else:
+                    import re
+                    words = re.split(r'[\s_\-]+', key_lower)
+                    word_found = False
+                    for word in words:
+                        if word.startswith(group_search_text):
+                            word_starts.append(key)
+                            word_found = True
+                            break
+                    
+                    if not word_found and group_search_text in key_lower:
+                        contains.append(key)
+            
+            matching_keys = exact_matches + starts_with + word_starts + contains
+            
+        else:
+            # 일반 검색 - 그룹명을 1순위로, 그 다음 개별 키
+            group_matches = []  # 그룹명 매칭
+            exact_matches = []
+            starts_with = []
+            word_starts = []
+            contains = []
+            
+            # 1. 그룹명(파일명) 검색
+            for group_name in self.instant_wildcards_tree.keys():
+                group_lower = group_name.lower()
+                
+                if not search_text:
+                    # 검색어가 없으면 모든 그룹 추가
+                    group_matches.append(f"${group_name}")
+                elif group_lower == search_lower:
+                    group_matches.insert(0, f"${group_name}")  # 정확한 일치는 맨 앞에
+                elif group_lower.startswith(search_lower):
+                    group_matches.append(f"${group_name}")
+                elif search_lower in group_lower:
+                    group_matches.append(f"${group_name}")
+            
+            # 2. 개별 와일드카드 키 검색
+            for key in self.instant_wildcards.keys():
+                key_lower = key.lower()
+                
+                if not search_text:
+                    contains.append(key)  # matching_keys가 아닌 contains에 추가
+                elif key_lower == search_lower:
+                    exact_matches.append(key)
+                elif key_lower.startswith(search_lower):
+                    starts_with.append(key)
+                else:
+                    import re
+                    words = re.split(r'[\s_\-]+', key_lower)
+                    word_found = False
+                    for word in words:
+                        if word.startswith(search_lower):
+                            word_starts.append(key)
+                            word_found = True
+                            break
+                    
+                    if not word_found and search_lower in key_lower:
+                        contains.append(key)
+            
+            # 그룹을 최우선으로, 그 다음 개별 키
+            matching_keys = group_matches + exact_matches + starts_with + word_starts + contains
         
         # 중복 제거 (순서 유지)
         seen = set()
@@ -731,20 +1011,42 @@ class AutoCompleteManager(QObject):
         from PyQt6.QtCore import Qt
         
         for key in keys:
-            # $ 없이 키만 표시
             display_text = key
             item = QListWidgetItem(display_text)
             
-            # 실제 값을 UserRole에 저장 (선택 시 값이 삽입됨)
-            value = self.instant_wildcards.get(key, "")
-            item.setData(Qt.ItemDataRole.UserRole, value)
+            # 그룹 아이템인지 확인
+            is_group = key.startswith("$")
             
-            # 키 정보는 UserRole + 1에 저장 (값 표시용)
-            item.setData(Qt.ItemDataRole.UserRole + 1, key)
-            
-            # 툴팁 설정 (값의 미리보기)
-            preview = value[:100] + "..." if len(value) > 100 else value
-            item.setToolTip(f"키: ${key}\n값: {preview}")
+            if is_group:
+                # 그룹 아이템 처리
+                group_name = key[1:]  # $ 제거
+                
+                # UserRole에는 그룹 선택 시 삽입될 텍스트 저장
+                item.setData(Qt.ItemDataRole.UserRole, f"${group_name}:")
+                
+                # UserRole + 1에는 표시용 키 저장
+                item.setData(Qt.ItemDataRole.UserRole + 1, key)
+                
+                # 그룹의 하위 키들을 툴팁으로 표시 (최대 5개)
+                if group_name in self.instant_wildcards_tree:
+                    sub_keys = list(self.instant_wildcards_tree[group_name].keys())[:5]
+                    sub_keys_text = ", ".join(sub_keys)
+                    if len(self.instant_wildcards_tree[group_name]) > 5:
+                        sub_keys_text += f", ... (+{len(self.instant_wildcards_tree[group_name]) - 5}개)"
+                    item.setToolTip(f"📁 그룹: {group_name}\n하위 항목: {sub_keys_text}")
+                else:
+                    item.setToolTip(f"📁 그룹: {group_name}")
+            else:
+                # 일반 와일드카드 아이템 처리
+                value = self.instant_wildcards.get(key, "")
+                item.setData(Qt.ItemDataRole.UserRole, value)
+                
+                # 키 정보는 UserRole + 1에 저장 (값 표시용)
+                item.setData(Qt.ItemDataRole.UserRole + 1, key)
+                
+                # 툴팁 설정 (값의 미리보기)
+                preview = value[:100] + "..." if len(value) > 100 else value
+                item.setToolTip(f"키: ${key}\n값: {preview}")
             
             self.popup.addItem(item)
         
@@ -767,10 +1069,36 @@ class AutoCompleteManager(QObject):
         if not self.value_display:
             return
         
-        value = self.instant_wildcards.get(key, "")
-        
-        # HTML 포맷팅으로 가독성 향상 (공백 제거)
-        html_content = f"""<div style="color: #CCCCCC; font-family: 'Consolas', 'Courier New', monospace; margin: 0; padding: 0;">
+        # 그룹 아이템인지 확인
+        if key.startswith("$"):
+            # 그룹 표시
+            group_name = key[1:]  # $ 제거
+            
+            if group_name in self.instant_wildcards_tree:
+                # 그룹의 하위 항목들 표시
+                sub_items = self.instant_wildcards_tree[group_name]
+                items_html = ""
+                for sub_key, sub_value in list(sub_items.items())[:10]:  # 최대 10개 표시
+                    preview = sub_value[:50] + "..." if len(sub_value) > 50 else sub_value
+                    items_html += f"<div style='margin-bottom: 4px;'><span style='color: #9CDCFE;'>{sub_key}:</span> <span style='color: #999;'>{preview}</span></div>"
+                
+                if len(sub_items) > 10:
+                    items_html += f"<div style='color: #666; font-style: italic;'>... 그 외 {len(sub_items) - 10}개 항목</div>"
+                
+                html_content = f"""<div style="color: #CCCCCC; font-family: 'Consolas', 'Courier New', monospace; margin: 0; padding: 0;">
+<div style="color: #569CD6; font-weight: bold; margin-bottom: 8px;">📁 {group_name} 그룹</div>
+<div style="border-top: 1px solid #444; padding-top: 8px;">{items_html}</div>
+</div>"""
+            else:
+                html_content = f"""<div style="color: #CCCCCC; font-family: 'Consolas', 'Courier New', monospace; margin: 0; padding: 0;">
+<div style="color: #569CD6; font-weight: bold;">📁 {group_name} 그룹</div>
+</div>"""
+        else:
+            # 일반 와일드카드 표시
+            value = self.instant_wildcards.get(key, "")
+            
+            # HTML 포맷팅으로 가독성 향상 (공백 제거)
+            html_content = f"""<div style="color: #CCCCCC; font-family: 'Consolas', 'Courier New', monospace; margin: 0; padding: 0;">
 <div style="color: #569CD6; font-weight: bold; margin-bottom: 8px;">${key}</div>
 <div style="border-top: 1px solid #444; padding-top: 8px; white-space: pre-wrap;">{value}</div>
 </div>"""
@@ -783,6 +1111,11 @@ class AutoCompleteManager(QObject):
     def _update_image_display(self, key: str):
         """와일드카드에 연결된 이미지를 표시합니다."""
         if not self.image_label or not self.image_container:
+            return
+        
+        # 그룹 아이템인 경우 이미지 표시 안함
+        if key.startswith("$"):
+            self.image_container.hide()
             return
         
         # 현재 파일 찾기 (default.json 등)
@@ -813,10 +1146,10 @@ class AutoCompleteManager(QObject):
                     
                     # 이미지 컨테이너 위치 설정 및 표시
                     if self.current_widget and self.value_container and self.value_container.isVisible():
-                        # 값 패널 왼쪽에 이미지 표시
+                        # 값 패널 오른쪽에 이미지 표시
                         value_pos = self.value_container.pos()
                         image_pos = value_pos
-                        image_pos.setX(value_pos.x() - self.image_label.width() - 5)
+                        image_pos.setX(value_pos.x() + self.value_container.width() + 5)
                         self.image_container.move(image_pos)
                         self.image_container.show()
                 else:

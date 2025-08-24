@@ -295,7 +295,7 @@ class PromptTextEdit(QTextEdit):
 class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NAIA v2.0.0 Dev")
+        self.setWindowTitle("NAIA v2.0.0 Dev - 250824")
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()

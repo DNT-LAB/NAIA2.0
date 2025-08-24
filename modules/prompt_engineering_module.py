@@ -965,10 +965,23 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         delete_btn.clicked.connect(lambda: self.delete_preset(list_widget))
         button_layout.addWidget(delete_btn)
         
-        close_btn = QPushButton("닫기")
-        close_btn.setStyleSheet(dynamic_styles['primary_button'])
-        close_btn.clicked.connect(dialog.close)
-        button_layout.addWidget(close_btn)
+        # 선택 버튼 (현재 포커스된 프리셋을 적용하고 창을 닫음)
+        select_btn = QPushButton("선택")
+        select_btn.setStyleSheet(dynamic_styles['primary_button'])
+        def apply_selected_preset():
+            current_item = list_widget.currentItem()
+            if current_item and self.preset_combo:
+                preset_name = current_item.text()
+                # 콤보박스에 프리셋 이름 설정
+                self.preset_combo.setCurrentText(preset_name)
+                # 프리셋 로드 (이미 정의된 메서드 사용)
+                self.load_preset(preset_name)
+                # 다이얼로그 닫기
+                dialog.close()
+            elif not current_item:
+                QMessageBox.warning(dialog, "경고", "적용할 프리셋을 선택해주세요.")
+        select_btn.clicked.connect(apply_selected_preset)
+        button_layout.addWidget(select_btn)
         
         center_layout.addLayout(button_layout)
         

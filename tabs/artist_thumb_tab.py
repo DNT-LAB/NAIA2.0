@@ -260,6 +260,14 @@ class ArtistThumbModule(BaseTabModule):
     def get_tab_type(self) -> str:
         return 'core'  # 시작 시 자동 로드
     
+    def get_artist_data(self) -> dict:
+        """다른 모듈에서 아티스트 데이터에 접근할 수 있도록 제공"""
+        return self.artist_data.copy()
+    
+    def get_artist_list(self) -> list:
+        """다른 모듈에서 아티스트 리스트에 접근할 수 있도록 제공"""
+        return self.artist_list.copy()
+    
     def on_tab_activated(self):
         """탭이 활성화될 때 호출 (사용자가 탭을 클릭했을 때)"""
         if not self.tab_initialized and hasattr(self, 'mode_combo'):

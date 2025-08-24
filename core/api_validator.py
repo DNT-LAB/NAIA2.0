@@ -27,7 +27,22 @@ class APIValidator(QObject):
             if data.get('perks', {}).get('unlimitedMaxPriority', False):
                 result_message, result_type, success = "✅ Opus 등급 구독이 확인되었습니다.", "info", True
             else:
-                result_message, result_type = "⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다.", "warning"
+                # Opus가 아닌 경우 trainingStepsLeft 체크
+                training_steps_left = data.get('trainingStepsLeft', {})
+                if training_steps_left:
+                    # fixedTrainingStepsLeft와 purchasedTrainingSteps의 합 계산
+                    fixed_steps = training_steps_left.get('fixedTrainingStepsLeft', 0)
+                    purchased_steps = training_steps_left.get('purchasedTrainingSteps', 0)
+                    total_steps = fixed_steps + purchased_steps
+                    
+                    if total_steps > 20:
+                        result_message = f"⚠️ Opus 구독 상태가 아닙니다. 유료 Anlas를 소진합니다. (보유: {total_steps} Anlas)"
+                        result_type, success = "warning", True
+                    else:
+                        result_message = f"⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다. (Anlas 부족: {total_steps})"
+                        result_type = "warning"
+                else:
+                    result_message, result_type = "⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다.", "warning"
         except requests.exceptions.HTTPError as e:
             result_message = f"인증 실패 (HTTP {e.response.status_code}): 유효하지 않은 토큰일 수 있습니다." if e.response.status_code == 401 else f"HTTP 오류: {e.response.status_code}"
         except requests.exceptions.RequestException as e:

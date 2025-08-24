@@ -18,7 +18,61 @@ class WildcardProcessor:
             # $ 로 시작하는 인스턴트 와일드카드 처리
             if tag.startswith('$'):
                 instant_key = tag[1:].strip()  # $ 제거
-                if instant_key in self.wildcard_manager.instant_wildcard_dict:
+                
+                # ":" 포함 여부 확인하여 필터링 적용
+                if ":" in instant_key:
+                    parts = instant_key.split(":", 1)
+                    group_name = parts[0]
+                    filter_text = parts[1].lower() if len(parts) > 1 else ""
+                    
+                    # tree에서 그룹 찾기
+                    if group_name in self.wildcard_manager.instant_wildcard_tree:
+                        group_dict = self.wildcard_manager.instant_wildcard_tree[group_name]
+                        
+                        # filter_text를 포함하는 key들만 추출
+                        if filter_text and group_dict:
+                            filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
+                            
+                            if filtered_dict:
+                                # 필터링된 결과에서 무작위 선택
+                                random_key = random.choice(list(filtered_dict.keys()))
+                                random_value = filtered_dict[random_key]
+                            else:
+                                # 필터링 결과가 없으면 전체에서 무작위 선택
+                                random_key = random.choice(list(group_dict.keys()))
+                                random_value = group_dict[random_key]
+                        elif group_dict:
+                            # 필터 텍스트가 없으면 전체에서 무작위 선택
+                            random_key = random.choice(list(group_dict.keys()))
+                            random_value = group_dict[random_key]
+                        else:
+                            # 그룹이 비어있으면 원본 유지
+                            expanded_list.append(tag)
+                            continue
+                            
+                        # 값을 콤마로 분리하여 개별 태그로 추가
+                        instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                        expanded_list.extend(instant_tags)
+                    else:
+                        # 그룹을 찾을 수 없으면 원본 유지
+                        expanded_list.append(tag)
+                
+                # ":" 없이 단순 그룹명인 경우
+                elif instant_key in self.wildcard_manager.instant_wildcard_tree:
+                    # tree에서 해당 그룹의 딕셔너리 가져오기
+                    group_dict = self.wildcard_manager.instant_wildcard_tree[instant_key]
+                    if group_dict:
+                        # 무작위로 key-value 쌍 선택
+                        random_key = random.choice(list(group_dict.keys()))
+                        random_value = group_dict[random_key]
+                        # 값을 콤마로 분리하여 개별 태그로 추가
+                        instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                        expanded_list.extend(instant_tags)
+                    else:
+                        # 그룹이 비어있으면 원본 유지
+                        expanded_list.append(tag)
+                # tree에 없으면 기존 instant_wildcard_dict에서 검색
+                elif instant_key in self.wildcard_manager.instant_wildcard_dict:
                     # 인스턴트 와일드카드의 값으로 대체
                     instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
                     # 값을 콤마로 분리하여 개별 태그로 추가
@@ -39,7 +93,56 @@ class WildcardProcessor:
         # $ 로 시작하는 인스턴트 와일드카드 처리 (재귀 호출에서도)
         if tag.startswith('$'):
             instant_key = tag[1:].strip()
-            if instant_key in self.wildcard_manager.instant_wildcard_dict:
+            
+            # ":" 포함 여부 확인하여 필터링 적용
+            if ":" in instant_key:
+                parts = instant_key.split(":", 1)
+                group_name = parts[0]
+                filter_text = parts[1].lower() if len(parts) > 1 else ""
+                
+                # tree에서 그룹 찾기
+                if group_name in self.wildcard_manager.instant_wildcard_tree:
+                    group_dict = self.wildcard_manager.instant_wildcard_tree[group_name]
+                    
+                    # filter_text를 포함하는 key들만 추출
+                    if filter_text and group_dict:
+                        filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
+                        
+                        if filtered_dict:
+                            # 필터링된 결과에서 무작위 선택
+                            random_key = random.choice(list(filtered_dict.keys()))
+                            random_value = filtered_dict[random_key]
+                        else:
+                            # 필터링 결과가 없으면 전체에서 무작위 선택
+                            random_key = random.choice(list(group_dict.keys()))
+                            random_value = group_dict[random_key]
+                    elif group_dict:
+                        # 필터 텍스트가 없으면 전체에서 무작위 선택
+                        random_key = random.choice(list(group_dict.keys()))
+                        random_value = group_dict[random_key]
+                    else:
+                        # 그룹이 비어있으면 원본 유지
+                        return [tag]
+                        
+                    # 값을 콤마로 분리하여 개별 태그로 추가
+                    instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                    return instant_tags
+                return [tag]
+            
+            # ":" 없이 단순 그룹명인 경우
+            elif instant_key in self.wildcard_manager.instant_wildcard_tree:
+                # tree에서 해당 그룹의 딕셔너리 가져오기
+                group_dict = self.wildcard_manager.instant_wildcard_tree[instant_key]
+                if group_dict:
+                    # 무작위로 key-value 쌍 선택
+                    random_key = random.choice(list(group_dict.keys()))
+                    random_value = group_dict[random_key]
+                    # 값을 콤마로 분리하여 개별 태그로 추가
+                    instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                    return instant_tags
+                return [tag]
+            # tree에 없으면 기존 instant_wildcard_dict에서 검색
+            elif instant_key in self.wildcard_manager.instant_wildcard_dict:
                 instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
                 instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
                 return instant_tags

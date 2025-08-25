@@ -134,6 +134,22 @@ class APIService:
                 "legacy": False,
                 "legacy_v3_extend": False,
             }
+            
+            # skip_cfg_above_sigma 처리 (VAR+ 파라미터에 따라)
+            if params.get('VAR+', False):
+                # VAR+가 True일 때 모델에 따라 다른 값 설정
+                if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated']:
+                    api_parameters["skip_cfg_above_sigma"] = 58
+                elif model_name in ['nai-diffusion-4-full', 'nai-diffusion-4-curated', 'nai-diffusion-3']:
+                    api_parameters["skip_cfg_above_sigma"] = 19
+                # inpainting 모델도 동일하게 처리
+                elif model_name in ['nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:
+                    api_parameters["skip_cfg_above_sigma"] = 58
+                elif model_name in ['nai-diffusion-4-full-inpainting', 'nai-diffusion-4-curated-inpainting', 'nai-diffusion-3-inpainting']:
+                    api_parameters["skip_cfg_above_sigma"] = 19
+            else:
+                # VAR+가 False일 때는 null (Python에서는 None이지만 JSON 전송 시 제외됨)
+                api_parameters["skip_cfg_above_sigma"] = None
 
             if is_img2img:
                 api_parameters["image"] = base64.b64encode(params['image_bytes']).decode()

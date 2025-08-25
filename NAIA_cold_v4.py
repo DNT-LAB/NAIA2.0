@@ -374,9 +374,11 @@ class ModernMainWindow(QMainWindow):
         self.negative_prompt_textedit.viewport().installEventFilter(self)
 
         self.resolution_is_detected = False
-        
+
         # 초기화 완료 후 splitter stretch factor 업데이트
         QTimer.singleShot(100, self.update_splitter_stretch_factors)
+        # 초기 체크박스 색상 설정 (기본 모델에 따라)
+        QTimer.singleShot(300, self.update_naid_checkbox_colors)
 
     def apply_dynamic_styles(self):
         """동적 스타일시트 적용"""
@@ -479,6 +481,9 @@ class ModernMainWindow(QMainWindow):
 
             # [신규] 모듈 로드 완료 후 자동화 시그널 연결
             self.controller.connect_automation_signals()
+            
+            # E621 이벤트 모듈 시그널 연결
+            self.controller.connect_e621_event_signals()
 
             # 상태 메시지 업데이트
             loaded_count = len(self.middle_section_controller.module_instances)
@@ -879,6 +884,7 @@ class ModernMainWindow(QMainWindow):
         self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
         self.model_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.disable_wheel_event(self.model_combo)  # 마우스 휠 비활성화
+        self.model_combo.currentTextChanged.connect(self.update_naid_checkbox_colors)  # 모델 변경 시 체크박스 색상 업데이트
         params_grid.addWidget(self.model_combo, 0, 1)
         
         scheduler_label = QLabel("스케줄러")
@@ -1324,23 +1330,23 @@ class ModernMainWindow(QMainWindow):
         
         return container
     
-    def on_turbo_option_changed(self, checked):
-        """터보 옵션 체크박스 상태 변경 시 호출"""
-        if checked:
-            # TurboPresetWindow 열기
-            from ui.turbo_preset_window import TurboPresetWindow
-            if not hasattr(self, 'turbo_window') or not self.turbo_window:
-                self.turbo_window = TurboPresetWindow(self.app_context, self)
-                self.turbo_window.preset_applied.connect(self.on_turbo_preset_applied)
-                # 독립 창으로 표시
-                self.turbo_window.show()
-                self.turbo_window.raise_()  # 창을 맨 앞으로
-                self.turbo_window.activateWindow()  # 창 활성화
-        else:
-            # TurboPresetWindow 닫기
-            if hasattr(self, 'turbo_window') and self.turbo_window:
-                self.turbo_window.close()
-                self.turbo_window = None
+    # def on_turbo_option_changed(self, checked):
+    #     """터보 옵션 체크박스 상태 변경 시 호출"""
+    #     if checked:
+    #         # TurboPresetWindow 열기
+    #         #from ui.turbo_preset_window import TurboPresetWindow
+    #         if not hasattr(self, 'turbo_window') or not self.turbo_window:
+    #             self.turbo_window = TurboPresetWindow(self.app_context, self)
+    #             self.turbo_window.preset_applied.connect(self.on_turbo_preset_applied)
+    #             # 독립 창으로 표시
+    #             self.turbo_window.show()
+    #             self.turbo_window.raise_()  # 창을 맨 앞으로
+    #             self.turbo_window.activateWindow()  # 창 활성화
+    #     else:
+    #         # TurboPresetWindow 닫기
+    #         if hasattr(self, 'turbo_window') and self.turbo_window:
+    #             self.turbo_window.close()
+    #             self.turbo_window = None
     
     def on_turbo_preset_applied(self, preset):
         """터보 프리셋이 적용되었을 때 호출"""
@@ -1632,6 +1638,30 @@ class ModernMainWindow(QMainWindow):
         self.main_prompt_textedit.setPlainText(prompt)
         print(f"📋 프롬프트 불러오기 완료.")
         self.status_bar.showMessage("프롬프트가 성공적으로 로드되었습니다.", 3000)
+    
+    def update_naid_checkbox_colors(self, model_text: str = None):
+        """모델 선택에 따라 NAID 체크박스 색상을 업데이트합니다."""
+        if model_text is None or model_text == "":
+            model_text = self.model_combo.currentText()
+        
+        # NAID3일 때는 모든 체크박스 흰색, 그 외에는 SMEA, DYN, DECRISP를 회색으로
+        is_naid3 = (model_text == "NAID3")
+        
+        for option_name, checkbox in self.advanced_checkboxes.items():
+            if is_naid3:
+                # NAID3: 모든 체크박스 흰색
+                checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            else:
+                # 다른 모델: VAR+만 흰색, 나머지는 회색
+                if option_name == "VAR+":
+                    checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+                else:
+                    # SMEA, DYN, DECRISP는 회색으로
+                    gray_style = DARK_STYLES['dark_checkbox'].replace(
+                        f"color: {DARK_COLORS['text_primary']}", 
+                        f"color: {DARK_COLORS['text_secondary']}"
+                    )
+                    checkbox.setStyleSheet(gray_style)
 
     def get_main_parameters(self) -> dict:
         """메인 UI의 파라미터들을 수집하여 딕셔너리로 반환합니다."""

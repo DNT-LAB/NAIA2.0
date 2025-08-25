@@ -121,6 +121,7 @@ class E621EventModule(BaseMiddleModule):
             }}
         """)
         self.search_input.returnPressed.connect(self.on_search_clicked)
+        self.search_input.setProperty("autocomplete_ignore", True)
         search_layout.addWidget(self.search_input)
         
         # 검색 버튼

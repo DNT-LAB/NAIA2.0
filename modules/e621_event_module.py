@@ -747,12 +747,12 @@ class E621EventModule(BaseMiddleModule):
         # 결과 메시지
         if self.filtered_keys:
             print(f"[OK] 검색 완료: '{search_text}' - {len(self.filtered_keys)}개 항목 발견")
-        else:
-            QMessageBox.information(
-                self.widget,
-                "검색 결과",
-                f"'{search_text}'에 대한 검색 결과가 없습니다."
-            )
+        # else:
+        #     QMessageBox.information(
+        #         self.widget,
+        #         "검색 결과",
+        #         f"'{search_text}'에 대한 검색 결과가 없습니다."
+        #     )
     
     def on_reset_clicked(self):
         """초기화 버튼 클릭 처리"""

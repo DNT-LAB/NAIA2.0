@@ -40,6 +40,7 @@ class E621EventModule(BaseMiddleModule):
         # 데이터 관련
         self.parquet_path = Path("data/e621_sample.parquet")
         self.deleted_path = Path("save/e621_event/deleted.json")
+        self.settings_path = Path("save/e621_module.json")  # 설정 파일 경로
         self.event_dict = {}  # {key: (value0, value1)} - 튜플로 저장
         self.deleted_keys = set()  # 삭제된 키 목록
         self.current_keys = []  # 전체 키 목록 (원본 순서 유지)
@@ -51,6 +52,7 @@ class E621EventModule(BaseMiddleModule):
         self.table_widget = None
         self.value1_edit = None
         self.auto_hide_edit = None
+        self.disable_auto_emphasis_checkbox = None  # 자동 강조처리 해제 체크박스
         self.next_button = None
         self.generate_button = None
         self.hide_button = None
@@ -305,6 +307,9 @@ class E621EventModule(BaseMiddleModule):
         """)
         content_layout.addWidget(self.disable_auto_emphasis_checkbox)
         
+        # 설정 로드 (자동 숨김 태그, 체크박스 상태)
+        self.load_settings()
+        
         return self.widget
     
     def load_parquet_file(self):
@@ -389,6 +394,43 @@ class E621EventModule(BaseMiddleModule):
         except Exception as e:
             print(f"[ERROR] 삭제 목록 저장 실패: {e}")
     
+    def save_settings(self):
+        """모듈 설정 저장 (자동 숨김 태그, 자동 강조처리 해제 여부)"""
+        try:
+            settings = {
+                'auto_hide_tags': self.auto_hide_edit.toPlainText() if self.auto_hide_edit else '',
+                'disable_auto_emphasis': self.disable_auto_emphasis_checkbox.isChecked() if self.disable_auto_emphasis_checkbox else False
+            }
+            
+            # save 디렉토리 생성
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # JSON 파일로 저장
+            with open(self.settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            print(f"[OK] E621 모듈 설정 저장: {self.settings_path}")
+        except Exception as e:
+            print(f"[ERROR] E621 모듈 설정 저장 실패: {e}")
+    
+    def load_settings(self):
+        """모듈 설정 로드"""
+        try:
+            if self.settings_path.exists():
+                with open(self.settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                
+                # 자동 숨김 태그 설정
+                if self.auto_hide_edit and 'auto_hide_tags' in settings:
+                    self.auto_hide_edit.setPlainText(settings['auto_hide_tags'])
+                
+                # 자동 강조처리 해제 체크박스 설정
+                if self.disable_auto_emphasis_checkbox and 'disable_auto_emphasis' in settings:
+                    self.disable_auto_emphasis_checkbox.setChecked(settings['disable_auto_emphasis'])
+                
+                print(f"[OK] E621 모듈 설정 로드: {self.settings_path}")
+        except Exception as e:
+            print(f"[ERROR] E621 모듈 설정 로드 실패: {e}")
+    
     def update_table(self):
         """테이블 위젯 업데이트 - 검색 상태에 따라 표시"""
         # 표시할 키 목록 결정
@@ -404,6 +446,9 @@ class E621EventModule(BaseMiddleModule):
         
         # 모든 아이템 채우기
         for i, key in enumerate(display_keys):
+            # 키가 딕셔너리에 없으면 건너뛰기 (삭제된 경우)
+            if key not in self.event_dict:
+                continue
             value0, value1 = self.event_dict[key]  # 튜플 언패킹
             
             # Key 컬럼
@@ -596,6 +641,9 @@ class E621EventModule(BaseMiddleModule):
         
         # 시그널 발송 (main_controller에서 on_generate_with_image_requested에 연결됨)
         self.signals.generation_requested.emit(tags_data)
+        
+        # 설정 저장 (자동 숨김 태그, 자동 강조처리 해제 상태)
+        self.save_settings()
     
     def on_hide_clicked(self):
         """숨김 버튼 클릭 - 선택된 항목 삭제"""
@@ -619,31 +667,24 @@ class E621EventModule(BaseMiddleModule):
         
         key = display_keys[row]
         
-        # 확인 다이얼로그
-        reply = QMessageBox.question(
-            self.widget,
-            "숨김 확인",
-            f"'{key}' 이벤트를 숨김 처리하시겠습니까?\n(다시 표시하려면 deleted.json 파일을 수정해야 합니다)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        # 삭제 목록에 추가
+        self.deleted_keys.add(key)
+        self.save_deleted_keys()
         
-        if reply == QMessageBox.StandardButton.Yes:
-            # 삭제 목록에 추가
-            self.deleted_keys.add(key)
-            self.save_deleted_keys()
-            
-            # 딕셔너리와 키 목록에서 제거
+        # 딕셔너리에서 제거
+        if key in self.event_dict:
             del self.event_dict[key]
+        
+        # 키 목록에서 제거
+        if key in self.current_keys:
             self.current_keys.remove(key)
-            
-            # 테이블 업데이트
-            self.update_table()
-            
-            QMessageBox.information(
-                self.widget,
-                "완료",
-                f"'{key}' 이벤트가 숨김 처리되었습니다."
-            )
+        
+        # 검색 결과 목록에서도 제거
+        if key in self.filtered_keys:
+            self.filtered_keys.remove(key)
+        
+        # 테이블 업데이트
+        self.update_table()
     
     def delayed_setup(self):
         """지연된 초기화 - MiddleSectionController 찾기"""

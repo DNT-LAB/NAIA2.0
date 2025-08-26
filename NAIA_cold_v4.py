@@ -1,6 +1,7 @@
 import __init__
 import sys
 import os
+import subprocess
 
 # 과학 연산 라이브러리 스레드 제한 (메모리 누수 방지용)
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -30,8 +31,8 @@ from ui.scaling_settings_dialog import ScalingSettingsDialog
 from ui.collapsible import CollapsibleBox
 from ui.right_view import RightView
 from ui.resolution_manager_dialog import ResolutionManagerDialog
-from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction
-from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData
+from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices
+from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
 from core.autocomplete_manager import AutoCompleteManager
@@ -146,6 +147,60 @@ class ImageDownloadThread(QThread):
             self.download_failed.emit(f"네트워크 오류: {str(e)}")
         except Exception as e:
             self.download_failed.emit(f"이미지 처리 오류: {str(e)}")
+
+
+class GitHubUpdateChecker(QThread):
+    """GitHub 저장소의 최신 커밋을 확인하는 스레드"""
+    update_available = pyqtSignal(str, str, str)  # latest_commit_sha, commit_message, commit_date
+
+    def __init__(self, owner, repo, branch, current_sha):
+        super().__init__()
+        self.owner = owner
+        self.repo = repo
+        self.branch = branch
+        self.current_sha = current_sha
+        # 특정 브랜치의 최신 커밋을 가져오는 API URL
+        self.request_url = f"https://api.github.com/repos/{self.owner}/{self.repo}/commits?sha={self.branch}&per_page=1"
+        self.is_running = True
+
+    def run(self):
+        if not self.current_sha:
+            print("⚠️ 로컬 버전 정보(SHA)가 없어 업데이트를 확인할 수 없습니다.")
+            return
+
+        try:
+            headers = {'User-Agent': 'NAIA-Update-Checker'}
+            response = requests.get(self.request_url, headers=headers, timeout=15)
+            response.raise_for_status()  # 200 OK가 아니면 예외 발생
+
+            latest_commit_data = response.json()[0]
+            latest_sha = latest_commit_data['sha'][:7]  # 짧은 형태로 저장
+            commit_message = latest_commit_data['commit']['message'].split('\n')[0]  # 첫 줄만 사용
+            
+            # 커밋 날짜 파싱 (ISO 8601 형식을 YYYYMMDD로 변환)
+            commit_date_str = latest_commit_data['commit']['author']['date']
+            from datetime import datetime
+            commit_date = datetime.fromisoformat(commit_date_str.replace('Z', '+00:00'))
+            commit_date_formatted = commit_date.strftime('%Y%m%d')
+
+            print(f"🔍 업데이트 확인 ({self.branch} 브랜치): 현재={self.current_sha[:7]}, 최신={latest_sha}")
+
+            # 항상 최신 버전 정보를 emit (같든 다르든)
+            self.update_available.emit(latest_sha, commit_message, commit_date_formatted)
+            
+            if self.current_sha[:7] != latest_sha:
+                print(f"✨ 새로운 업데이트 발견! {latest_sha}: {commit_message}")
+        except requests.exceptions.Timeout:
+            print("⏱️ GitHub API 요청 시간 초과 (네트워크가 느리거나 오프라인 상태)")
+        except requests.exceptions.ConnectionError:
+            print("🔌 네트워크 연결 오류 (오프라인 상태이거나 GitHub에 접속할 수 없음)")
+        except requests.exceptions.RequestException as e:
+            print(f"❌ GitHub API 요청 실패: {str(e)[:100]}")  # 긴 오류 메시지 제한
+        except Exception as e:
+            print(f"❌ 업데이트 확인 중 예기치 않은 오류: {str(e)[:100]}")
+
+    def stop(self):
+        self.is_running = False
 
 
 class PromptTextEdit(QTextEdit):
@@ -295,10 +350,25 @@ class PromptTextEdit(QTextEdit):
 class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NAIA v2.0.0 Dev - 250825")
+        # 기본 타이틀 설정 (Git 정보 없을 때 사용)
+        self.base_title = "NAIA v2.0.0 Dev"
+        self.setWindowTitle(self.base_title + " - 250825")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
+        
+        # 업데이트 확인 스레드 변수 추가
+        self.update_checker_thread = None
+        self.github_repo_owner = "DNT-LAB"    # GitHub 사용자명
+        self.github_repo_name = "NAIA2.0"     # GitHub 저장소 이름
+        self.github_branch = "Dev0714"        # GitHub 브랜치
+        
+        # Git 정보 저장 변수
+        self.current_commit_sha = ""
+        self.current_commit_date = ""
+        self.latest_commit_sha = ""
+        self.latest_commit_date = ""
+        self.has_git = False
         
         self.set_initial_window_size()
         self.kr_tags_df = self._load_kr_tags()
@@ -379,6 +449,9 @@ class ModernMainWindow(QMainWindow):
         QTimer.singleShot(100, self.update_splitter_stretch_factors)
         # 초기 체크박스 색상 설정 (기본 모델에 따라)
         QTimer.singleShot(300, self.update_naid_checkbox_colors)
+        
+        # 프로그램 시작 시 업데이트 확인 (UI 초기화 완료 후 충분한 시간 뒤에)
+        QTimer.singleShot(2000, self.check_for_updates)  # 2초 후 시작
 
     def apply_dynamic_styles(self):
         """동적 스타일시트 적용"""
@@ -930,7 +1003,7 @@ class ModernMainWindow(QMainWindow):
         self.sampler_combo = QComboBox()
         # NAI 기본 샘플러들로 시작 (WEBUI 모드 전환 시 동적으로 변경됨)
         self.sampler_combo.addItems(["k_euler_ancestral", "k_euler", "k_dpmpp_2m", 
-                                    "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "ddim_v3"])
+                                    "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"])
         self.sampler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.disable_wheel_event(self.sampler_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.sampler_combo, 2, 1)
@@ -2808,6 +2881,159 @@ class ModernMainWindow(QMainWindow):
         current_mode = self.app_context.get_api_mode()
         self.generation_params_manager.save_mode_settings(current_mode)
     
+    def read_current_version(self) -> tuple:
+        """Git 명령어로 현재 브랜치, 커밋 SHA, 날짜를 가져옵니다.
+        반환: (branch, sha, date) 튜플 또는 ("", "", "") if Git 저장소가 아니거나 오류 발생
+        """
+        try:
+            # .git 폴더가 있는지 확인 (ZIP 다운로드 등의 경우 없을 수 있음)
+            git_dir = os.path.join(os.path.dirname(__file__), '.git')
+            if not os.path.exists(git_dir):
+                print("⚠️ .git 폴더가 없습니다. (ZIP 다운로드 또는 Git 저장소가 아님)")
+                self.has_git = False
+                return "", "", ""
+            
+            # Windows에서 콘솔 창 숨기기 위한 설정
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+            # macOS/Linux에서는 startupinfo가 None으로 유지됨 (정상 동작)
+            
+            # 현재 브랜치 이름 가져오기
+            branch_result = subprocess.run(
+                ['git', 'branch', '--show-current'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(__file__),
+                startupinfo=startupinfo
+            )
+            
+            # 현재 커밋 SHA 가져오기 (짧은 형태)
+            sha_result = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(__file__),
+                startupinfo=startupinfo
+            )
+            
+            # 현재 커밋 날짜 가져오기 (YYYYMMDD 형식)
+            date_result = subprocess.run(
+                ['git', 'show', '-s', '--format=%cd', '--date=format:%Y%m%d', 'HEAD'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(__file__),
+                startupinfo=startupinfo
+            )
+            
+            if branch_result.returncode == 0 and sha_result.returncode == 0 and date_result.returncode == 0:
+                branch = branch_result.stdout.strip()
+                sha = sha_result.stdout.strip()
+                date = date_result.stdout.strip()
+                
+                # shallow clone의 경우 브랜치 이름이 비어있을 수 있음
+                if not branch:
+                    # detached HEAD 상태일 수 있으므로 기본 브랜치 사용
+                    branch = self.github_branch
+                    print(f"⚠️ Detached HEAD 상태 또는 shallow clone. 기본 브랜치 사용: {branch}")
+                
+                self.has_git = True
+                print(f"📍 현재 Git 정보: 브랜치={branch}, SHA={sha}, 날짜={date}")
+                return branch, sha, date
+            else:
+                print("⚠️ Git 명령 실행 실패. Git이 설치되어 있지 않을 수 있습니다.")
+                self.has_git = False
+                
+        except FileNotFoundError:
+            print("⚠️ Git이 설치되어 있지 않습니다.")
+            self.has_git = False
+        except Exception as e:
+            print(f"⚠️ Git 정보 읽기 실패: {e}")
+            self.has_git = False
+        
+        return "", "", ""
+
+    def check_for_updates(self):
+        """업데이트 확인 스레드를 시작합니다."""
+        current_branch, current_sha, current_date = self.read_current_version()
+        
+        # Git 정보 저장
+        self.current_commit_sha = current_sha
+        self.current_commit_date = current_date
+        
+        # Git이 있는 경우 윈도우 타이틀 업데이트
+        if self.has_git and current_sha:
+            self.update_window_title()
+        
+        # 브랜치가 다르면 경고 메시지 출력
+        if current_branch and current_branch != self.github_branch:
+            print(f"⚠️ 브랜치 불일치: 로컬={current_branch}, 설정={self.github_branch}")
+            # 로컬 브랜치를 우선 사용
+            self.github_branch = current_branch
+        
+        if not current_sha:
+            print("⚠️ Git 정보를 가져올 수 없어 업데이트 확인을 건너뜁니다.")
+            return
+
+        # 이전 스레드가 실행 중이면 중복 실행 방지
+        if self.update_checker_thread and self.update_checker_thread.isRunning():
+            return
+
+        self.update_checker_thread = GitHubUpdateChecker(
+            owner=self.github_repo_owner,
+            repo=self.github_repo_name,
+            branch=self.github_branch,
+            current_sha=current_sha
+        )
+        self.update_checker_thread.update_available.connect(self.on_version_checked)
+        self.update_checker_thread.start()
+
+    def on_version_checked(self, latest_sha: str, commit_message: str, commit_date: str):
+        """버전 확인 결과를 처리하고 필요시 업데이트 알림을 표시합니다."""
+        # 최신 버전 정보 저장
+        self.latest_commit_sha = latest_sha
+        self.latest_commit_date = commit_date
+        
+        # 윈도우 타이틀 업데이트
+        self.update_window_title()
+        
+        # 업데이트가 있는 경우에만 상태 표시줄에 알림 표시
+        if self.current_commit_sha != latest_sha:
+            # 클릭 가능한 라벨 생성
+            update_label = QLabel(f"✨ 새 버전 업데이트 가능 ({self.github_branch}): {commit_message[:30]}...")
+            update_label.setStyleSheet("color: #87CEEB; text-decoration: underline; cursor: pointer;")
+            update_label.setToolTip(f"클릭하여 GitHub {self.github_branch} 브랜치에서 변경 사항 확인")
+
+            # 라벨 클릭 시 GitHub 페이지 열기 - QDesktopServices 사용
+            # 브랜치별 커밋 페이지로 이동
+            repo_url = f"https://github.com/{self.github_repo_owner}/{self.github_repo_name}/commit/{latest_sha}"
+            update_label.mousePressEvent = lambda event: QDesktopServices.openUrl(QUrl(repo_url))
+
+            # 상태 표시줄 오른쪽에 영구 위젯으로 추가
+            self.status_bar.addPermanentWidget(update_label)
+        else:
+            print("✅ 현재 최신 버전을 사용 중입니다.")
+    
+    def update_window_title(self):
+        """Git 정보를 기반으로 윈도우 타이틀을 업데이트합니다."""
+        if not self.has_git:
+            # Git이 없으면 기존 형식 유지
+            return
+        
+        # 기본 타이틀에 버전 정보 추가
+        title = f"{self.base_title} - {self.current_commit_sha} : {self.current_commit_date}"
+        
+        # 최신 버전 체크
+        if self.latest_commit_sha:
+            if self.current_commit_sha == self.latest_commit_sha:
+                title += " (최신 버전)"
+            else:
+                title += f" (업데이트가 있습니다 : {self.latest_commit_date})"
+        
+        self.setWindowTitle(title)
+
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장
         try:

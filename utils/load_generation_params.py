@@ -839,7 +839,7 @@ class GenerationParamsManager:
             
             if hasattr(mw, 'sampler_combo'):
                 nai_samplers = ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "k_dpmpp_2s_ancestral", 
-                            "k_dpmpp_sde", "ddim_v3"]
+                            "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"]
                 mw.sampler_combo.clear()
                 mw.sampler_combo.addItems(nai_samplers)
             
@@ -922,7 +922,7 @@ class GenerationParamsManager:
             if hasattr(mw, 'sampler_combo'):
                 current_sampler = mw.sampler_combo.currentText()
                 nai_samplers = ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "k_dpmpp_2s_ancestral", 
-                            "k_dpmpp_sde", "ddim_v3"]
+                            "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"]
                 mw.sampler_combo.clear()
                 mw.sampler_combo.addItems(nai_samplers)
                 

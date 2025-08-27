@@ -3051,21 +3051,21 @@ class ModernMainWindow(QMainWindow):
         self.update_window_title()
         
         # 업데이트가 있는 경우에만 상태 표시줄에 알림 표시
-        if self.current_commit_sha != latest_sha:
-            # 클릭 가능한 라벨 생성
-            update_label = QLabel(f"✨ 새 버전 업데이트 가능 ({self.github_branch}): {commit_message[:30]}...")
-            update_label.setStyleSheet("color: #87CEEB; text-decoration: underline; cursor: pointer;")
-            update_label.setToolTip(f"클릭하여 GitHub {self.github_branch} 브랜치에서 변경 사항 확인")
+        # if self.current_commit_sha != latest_sha:
+        #     # 클릭 가능한 라벨 생성
+        #     update_label = QLabel(f"✨ 새 버전 업데이트 가능 ({self.github_branch}): {commit_message[:30]}...")
+        #     update_label.setStyleSheet("color: #87CEEB; text-decoration: underline; cursor: pointer;")
+        #     update_label.setToolTip(f"클릭하여 GitHub {self.github_branch} 브랜치에서 변경 사항 확인")
 
-            # 라벨 클릭 시 GitHub 페이지 열기 - QDesktopServices 사용
-            # 브랜치별 커밋 페이지로 이동
-            repo_url = f"https://github.com/{self.github_repo_owner}/{self.github_repo_name}/commit/{latest_sha}"
-            update_label.mousePressEvent = lambda event: QDesktopServices.openUrl(QUrl(repo_url))
+        #     # 라벨 클릭 시 GitHub 페이지 열기 - QDesktopServices 사용
+        #     # 브랜치별 커밋 페이지로 이동
+        #     repo_url = f"https://github.com/{self.github_repo_owner}/{self.github_repo_name}/commit/{latest_sha}"
+        #     update_label.mousePressEvent = lambda event: QDesktopServices.openUrl(QUrl(repo_url))
 
-            # 상태 표시줄 오른쪽에 영구 위젯으로 추가
-            self.status_bar.addPermanentWidget(update_label)
-        else:
-            print("✅ 현재 최신 버전을 사용 중입니다.")
+        #     # 상태 표시줄 오른쪽에 영구 위젯으로 추가
+        #     self.status_bar.addPermanentWidget(update_label)
+        # else:
+        #     print("✅ 현재 최신 버전을 사용 중입니다.")
     
     def update_window_title(self):
         """Git 정보를 기반으로 윈도우 타이틀을 업데이트합니다."""

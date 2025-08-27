@@ -45,7 +45,7 @@ class AppContext:
         self.current_prompt_context: Optional[PromptContext] = None
         session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.session_save_path = Path("output") / session_timestamp
-        self.session_save_path.mkdir(parents=True, exist_ok=True)
+        # mkdir 제거 - 실제 저장 시점에 생성하도록 변경
         self.subscribers: Dict[str, List[Callable]] = {}
         self.settings_manager = None
         
@@ -80,12 +80,13 @@ class AppContext:
         try:
             # 새로운 기본 경로 설정
             base_dir = Path(base_path)
-            base_dir.mkdir(parents=True, exist_ok=True)
+            # base_dir은 미리 생성하지 않음 - 실제 저장 시점에 생성
             
-            # 세션 타임스탬프를 유지하면서 새 경로 설정
-            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.session_save_path = base_dir / session_timestamp
-            self.session_save_path.mkdir(parents=True, exist_ok=True)
+            # 기존 세션 타임스탬프를 유지하면서 새 경로 설정
+            # session_save_path의 마지막 부분(타임스탬프)를 추출
+            session_folder = self.session_save_path.name
+            self.session_save_path = base_dir / session_folder
+            # 여기서도 mkdir을 하지 않음 - 실제 저장 시점에 생성
             
             print(f"Save directory changed to: {self.session_save_path}")
             

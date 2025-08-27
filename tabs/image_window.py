@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Any
 from io import BytesIO
+from pathlib import Path
 import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
@@ -718,12 +719,16 @@ class HistoryItemWidget(QWidget):
             # QPixmap을 PIL Image로 변환
             upscaled_pixmap = result['image']
             
-            # QBuffer를 사용하여 QPixmap을 bytes로 변환
-            qbuffer = QBuffer()
-            qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            upscaled_pixmap.save(qbuffer, "PNG")
-            image_data = qbuffer.data().data()
-            qbuffer.close()
+            # raw_bytes가 있으면 그대로 사용, 없으면 QPixmap에서 변환
+            if 'raw_bytes' in result and result['raw_bytes']:
+                image_data = result['raw_bytes']
+            else:
+                # QBuffer를 사용하여 QPixmap을 bytes로 변환
+                qbuffer = QBuffer()
+                qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                upscaled_pixmap.save(qbuffer, "PNG")
+                image_data = qbuffer.data().data()
+                qbuffer.close()
             
             # bytes를 PIL Image로 변환
             buffer = io.BytesIO(image_data)
@@ -742,6 +747,7 @@ class HistoryItemWidget(QWidget):
             if hasattr(app_context, 'add_to_history'):
                 app_context.add_to_history(
                     upscaled_image,
+                    image_data,  # raw_bytes 파라미터
                     info_text,
                     metadata,
                     source_row
@@ -753,7 +759,7 @@ class HistoryItemWidget(QWidget):
                 parent_widget = self.parent()
                 while parent_widget:
                     if hasattr(parent_widget, 'add_to_history'):
-                        parent_widget.add_to_history(upscaled_image, info_text, metadata, source_row)
+                        parent_widget.add_to_history(upscaled_image, image_data, info_text, metadata, source_row)
                         # 성공 메시지 제거
                         print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
                         return
@@ -1033,6 +1039,7 @@ class ImageWindow(QWidget):
         self.comfyui_workflow_cache: Dict[int, Dict] = {}
 
         self.init_ui()
+        self.load_settings()
 
     def init_ui(self):
         # 1. ImageWindow 자체의 메인 레이아웃 (수평)
@@ -1052,6 +1059,7 @@ class ImageWindow(QWidget):
         control_layout = QHBoxLayout()
         self.auto_save_checkbox = QCheckBox("자동 저장")
         self.auto_save_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.auto_save_checkbox.toggled.connect(self.save_settings)
 
         self.toggle_history_button = QPushButton("📜 히스토리 숨기기")
         self.toggle_history_button.setCheckable(True)
@@ -1090,6 +1098,7 @@ class ImageWindow(QWidget):
         
         self.save_as_webp_checkbox = QCheckBox("WEBP로 저장")
         self.save_as_webp_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.save_as_webp_checkbox.toggled.connect(self.save_settings)
 
         # 초기화 버튼
         clear_button = QPushButton(" 🗑️ ")
@@ -1214,6 +1223,52 @@ class ImageWindow(QWidget):
         self.main_image_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_image_label.customContextMenuRequested.connect(self.show_main_image_context_menu)
 
+    def save_settings(self):
+        """체크박스 설정을 JSON 파일에 저장합니다."""
+        settings = {
+            "auto_save": self.auto_save_checkbox.isChecked(),
+            "save_as_webp": self.save_as_webp_checkbox.isChecked()
+        }
+        
+        settings_path = Path("save/image_window.json")
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Failed to save image_window settings: {e}")
+    
+    def load_settings(self):
+        """JSON 파일에서 체크박스 설정을 불러옵니다."""
+        settings_path = Path("save/image_window.json")
+        
+        if settings_path.exists():
+            try:
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                
+                # 설정 적용 (toggled 시그널 임시 차단)
+                self.auto_save_checkbox.blockSignals(True)
+                self.save_as_webp_checkbox.blockSignals(True)
+                
+                self.auto_save_checkbox.setChecked(settings.get("auto_save", False))
+                self.save_as_webp_checkbox.setChecked(settings.get("save_as_webp", False))
+                
+                self.auto_save_checkbox.blockSignals(False)
+                self.save_as_webp_checkbox.blockSignals(False)
+                
+            except Exception as e:
+                print(f"Failed to load image_window settings: {e}")
+                # 로드 실패시 기본값 사용
+                self.auto_save_checkbox.setChecked(False)
+                self.save_as_webp_checkbox.setChecked(False)
+        else:
+            # 파일이 없으면 기본값으로 설정하고 저장
+            self.auto_save_checkbox.setChecked(False)
+            self.save_as_webp_checkbox.setChecked(False)
+            self.save_settings()
+
     def show_main_image_context_menu(self, pos):
         """메인 이미지 우클릭 시 컨텍스트 메뉴를 표시합니다."""
         if not self.current_history_item:
@@ -1274,6 +1329,12 @@ class ImageWindow(QWidget):
             reveal_action = QAction("📁 파일 위치 열기", self)
             reveal_action.triggered.connect(lambda: self._open_file_in_explorer(filepath))
             menu.addAction(reveal_action)
+        else:
+            # 파일이 저장되지 않은 경우 저장 버튼 추가
+            menu.addSeparator()
+            save_action = QAction("💾 이미지 저장", self)
+            save_action.triggered.connect(self.save_image_manually)
+            menu.addAction(save_action)
         
         copy_png_action = QAction("PNG로 클립보드 복사", self)
         copy_webp_action = QAction("WEBP로 클립보드 복사", self)
@@ -1305,6 +1366,11 @@ class ImageWindow(QWidget):
         
         menu.exec(self.main_image_label.mapToGlobal(pos))
 
+    def save_image_manually(self):
+        """현재 표시된 이미지를 수동으로 저장합니다 - save_current_image와 동일한 기능."""
+        # 기존의 save_current_image 메소드를 호출
+        self.save_current_image()
+    
     def _emit_send_to_inpaint(self):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
@@ -1608,8 +1674,31 @@ class ImageWindow(QWidget):
         """
         [수정] 이미지 바이트를 EXIF 손실 없이 그대로 파일에 저장합니다.
         info_text 매개변수는 이제 사용되지 않지만 호환성을 위해 남겨둡니다.
+        폴더가 존재하지 않는 경우 자동으로 재생성합니다.
         """
+        import os
+        from pathlib import Path
+        
         try:
+            # 파일 경로에서 디렉토리 추출
+            file_path = Path(filename)
+            directory = file_path.parent
+            
+            # 디렉토리가 존재하지 않으면 생성
+            if not directory.exists():
+                print(f"⚠️ 저장 폴더가 존재하지 않습니다. 재생성 중: {directory}")
+                try:
+                    directory.mkdir(parents=True, exist_ok=True)
+                    print(f"✅ 폴더가 생성되었습니다: {directory}")
+                except Exception as mkdir_error:
+                    print(f"❌ 폴더 생성 실패: {mkdir_error}")
+                    # 폴더 생성 실패시 기본 output 폴더 사용 시도
+                    fallback_dir = Path("output")
+                    fallback_dir.mkdir(exist_ok=True)
+                    file_path = fallback_dir / file_path.name
+                    filename = str(file_path)
+                    print(f"⚠️ 대체 경로 사용: {filename}")
+            
             if as_webp:
                 # 이미지 객체로부터 WEBP로 저장
                 img = Image.open(io.BytesIO(image_bytes))
@@ -1621,8 +1710,18 @@ class ImageWindow(QWidget):
                     f.write(image_bytes)
                 print(f"✅ PNG 저장 완료: {filename}")
             return True
+        except PermissionError as e:
+            print(f"❌ 파일 저장 권한 오류: {e}")
+            print(f"💡 파일이 다른 프로그램에서 사용 중이거나 권한이 부족합니다.")
+            return False
+        except OSError as e:
+            print(f"❌ 파일 시스템 오류: {e}")
+            print(f"💡 디스크 공간이 부족하거나 파일 경로가 너무 길 수 있습니다.")
+            return False
         except Exception as e:
             print(f"❌ 이미지 저장 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def toggle_history_panel(self):
@@ -1832,12 +1931,27 @@ class ImageWindow(QWidget):
         is_webp = self.save_as_webp_checkbox.isChecked()
         if self.auto_save_checkbox.isChecked():
             save_path = self.app_context.session_save_path
+            
+            # 폴더가 존재하지 않으면 생성
+            if not save_path.exists():
+                try:
+                    save_path.mkdir(parents=True, exist_ok=True)
+                    print(f"✅ 세션 저장 폴더 재생성: {save_path}")
+                except Exception as e:
+                    print(f"❌ 세션 저장 폴더 생성 실패: {e}")
+                    # 실패시 기본 output 폴더 사용
+                    save_path = Path("output")
+                    save_path.mkdir(exist_ok=True)
+                    print(f"⚠️ 대체 폴더 사용: {save_path}")
+            
             suffix = "webp" if is_webp else "png"
             filename = f"{self.save_counter:05d}.{suffix}"
             filepath = save_path / filename
             # 저장 함수에는 이제 info_text를 새로 생성한 것으로 전달
-            self.save_image_with_metadata(str(filepath), raw_bytes, info_text, as_webp=is_webp)
-            self.save_counter += 1
+            if self.save_image_with_metadata(str(filepath), raw_bytes, info_text, as_webp=is_webp):
+                self.save_counter += 1
+            else:
+                filepath = None  # 저장 실패시 filepath를 None으로 설정
 
         # 🆕 확장된 메타데이터 수집
         enhanced_metadata = {}
@@ -1909,6 +2023,19 @@ class ImageWindow(QWidget):
         
         # 1. AppContext에서 세션 저장 경로를 가져옴
         save_path = self.app_context.session_save_path
+        
+        # 폴더가 존재하지 않으면 생성
+        if not save_path.exists():
+            try:
+                save_path.mkdir(parents=True, exist_ok=True)
+                print(f"✅ 세션 저장 폴더 재생성: {save_path}")
+            except Exception as e:
+                print(f"❌ 세션 저장 폴더 생성 실패: {e}")
+                # 실패시 기본 output 폴더 사용
+                save_path = Path("output")
+                save_path.mkdir(exist_ok=True)
+                print(f"⚠️ 대체 폴더 사용: {save_path}")
+                self.app_context.main_window.status_bar.showMessage(f"⚠️ 대체 폴더 사용: output/", 3000)
         
         # 2. 새로운 파일명 생성 (자동 저장과 카운터 공유)
         suffix = "webp" if is_webp else "png"
@@ -2110,12 +2237,16 @@ class ImageWindow(QWidget):
             # QPixmap을 PIL Image로 변환
             upscaled_pixmap = result['image']
             
-            # QBuffer를 사용하여 QPixmap을 bytes로 변환
-            qbuffer = QBuffer()
-            qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            upscaled_pixmap.save(qbuffer, "PNG")
-            image_data = qbuffer.data().data()
-            qbuffer.close()
+            # raw_bytes가 있으면 그대로 사용, 없으면 QPixmap에서 변환
+            if 'raw_bytes' in result and result['raw_bytes']:
+                image_data = result['raw_bytes']
+            else:
+                # QBuffer를 사용하여 QPixmap을 bytes로 변환
+                qbuffer = QBuffer()
+                qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                upscaled_pixmap.save(qbuffer, "PNG")
+                image_data = qbuffer.data().data()
+                qbuffer.close()
             
             # bytes를 PIL Image로 변환
             buffer = io.BytesIO(image_data)
@@ -2130,8 +2261,8 @@ class ImageWindow(QWidget):
             # source_row 가져오기 (원본 이미지의 생성 정보)
             source_row = self.current_history_item.source_row if hasattr(self.current_history_item, 'source_row') else None
             
-            # 히스토리에 추가
-            self.add_to_history(upscaled_image, info_text, metadata, source_row)
+            # 히스토리에 추가 (raw_bytes 포함)
+            self.add_to_history(upscaled_image, image_data, info_text, source_row)
             # 성공 메시지 제거 - 콘솔에만 출력
             print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
         else:

@@ -834,6 +834,11 @@ class AssetsTab(QWidget):
         self.generate_btn.setStyleSheet(dynamic_styles.get('primary_button', DARK_STYLES.get('primary_button', '')))
         self.generate_btn.clicked.connect(self._on_generate_clicked)
         
+        # 클립보드에서 불러오기 버튼 추가
+        self.paste_clipboard_btn = QPushButton("📋 클립보드에서 불러오기")
+        self.paste_clipboard_btn.setStyleSheet(dynamic_styles.get('secondary_button', DARK_STYLES.get('secondary_button', '')))
+        self.paste_clipboard_btn.clicked.connect(self._paste_from_clipboard)
+        
         # 구분선
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
@@ -874,6 +879,14 @@ class AssetsTab(QWidget):
         self.remove_bg_btn.clicked.connect(self._on_remove_background_clicked)
         self.remove_bg_btn.setEnabled(True)  # 첫 클릭으로 체크 가능
         self.remove_bg_btn.setToolTip("배경 제거 기능 - 첫 클릭 시 패키지 상태를 확인합니다")
+        
+        # NAI BG-Removal 버튼 추가
+        self.nai_bg_removal_btn = QPushButton("🎨 NAI BG-Removal (유료)")
+        # 배경 제거 버튼과 동일한 스타일 사용
+        self.nai_bg_removal_btn.setStyleSheet(dynamic_styles.get('secondary_button', DARK_STYLES.get('secondary_button', '')))
+        self.nai_bg_removal_btn.clicked.connect(self._on_nai_bg_removal_clicked)
+        self.nai_bg_removal_btn.setEnabled(False)  # 초기에는 비활성화
+        self.nai_bg_removal_btn.setToolTip("NovelAI의 AI 기반 배경 제거 서비스 (최소 65 Anlas 소비)")
         
         # 구분선
         separator2 = QFrame()
@@ -939,6 +952,7 @@ class AssetsTab(QWidget):
         layout.addWidget(resolution_label)
         layout.addWidget(self.resolution_combo)
         layout.addWidget(self.generate_btn)
+        layout.addWidget(self.paste_clipboard_btn)
         layout.addWidget(separator)
         layout.addWidget(save_label)
         layout.addWidget(path_label)
@@ -951,6 +965,9 @@ class AssetsTab(QWidget):
         save_buttons_layout.addWidget(self.save_btn)
         save_buttons_layout.addWidget(self.remove_bg_btn)
         layout.addLayout(save_buttons_layout)
+        
+        # NAI BG-Removal 버튼은 전체 너비 사용
+        layout.addWidget(self.nai_bg_removal_btn)
         
         # Alpha Matting UI 제거 - 고정값 사용
         layout.addWidget(separator2)
@@ -1201,6 +1218,12 @@ class AssetsTab(QWidget):
                 # rembg가 사용 가능하면 배경 제거 버튼도 활성화
                 if self.rembg_available:
                     self.remove_bg_btn.setEnabled(True)
+                
+                # NAI BG-Removal 버튼 활성화 (NAI 모드일 때만)
+                current_mode = self.app_context.get_api_mode() if self.app_context else None
+                if current_mode == "NAI":
+                    self.nai_bg_removal_btn.setEnabled(True)
+                
                 print("✅ Assets Workshop: 이미지 표시 완료")
             else:
                 print("❌ QPixmap 변환 실패")
@@ -1236,6 +1259,302 @@ class AssetsTab(QWidget):
             print(f"❌ 생성 완료 처리 중 오류: {e}")
             print(f"결과 타입: {type(result)}")
             self._restore_generate_button()  # 예외 시에도 버튼 복원
+    
+    def _on_nai_bg_removal_clicked(self):
+        """NAI BG-Removal 버튼 클릭 핸들러"""
+        try:
+            # 이미지 확인
+            if not self.current_image:
+                QMessageBox.warning(self, "경고", "배경을 제거할 이미지가 없습니다.")
+                return
+            
+            # NAI 모드 확인
+            current_mode = self.app_context.get_api_mode() if self.app_context else None
+            if current_mode != "NAI":
+                QMessageBox.warning(self, "경고", "NAI BG-Removal은 NAI 모드에서만 사용 가능합니다.")
+                return
+            
+            # Anlas 확인 (선택적)
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Question)
+            msg.setWindowTitle("NAI BG-Removal 확인")
+            msg.setText("NovelAI의 AI 기반 배경 제거를 실행하시겠습니까?")
+            msg.setInformativeText(
+                "이 작업은 최소 65 Anlas를 소비합니다.\n"
+                "3개의 이미지가 생성되며, 최종 배경 제거 결과가 적용됩니다.\n\n"
+                "계속하시겠습니까?"
+            )
+            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg.setDefaultButton(QMessageBox.StandardButton.No)
+            
+            if msg.exec() != QMessageBox.StandardButton.Yes:
+                return
+            
+            # Progress Dialog 생성
+            progress = QProgressDialog("NAI BG-Removal 처리 중...", None, 0, 0, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setCancelButton(None)
+            progress.setWindowTitle("처리 중")
+            progress.show()
+            QApplication.processEvents()
+            
+            # 이미지 크기 체크 및 리사이즈 (3MP 제한)
+            from PIL.ImageQt import ImageQt
+            
+            # 현재 이미지의 메가픽셀 계산
+            width, height = self.current_image.size
+            megapixels = (width * height) / 1_000_000
+            
+            print(f"📐 원본 이미지 크기: {width}x{height} = {megapixels:.2f}MP")
+            
+            # 3MP를 초과하면 리사이즈
+            if megapixels > 3.0:
+                # 비율을 유지하면서 3MP 이하로 축소
+                scale_factor = (3.0 / megapixels) ** 0.5
+                new_width = int(width * scale_factor)
+                new_height = int(height * scale_factor)
+                
+                print(f"📉 3MP 제한 초과. 리사이즈: {new_width}x{new_height}")
+                
+                # PIL Image 리사이즈
+                resized_image = self.current_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # QPixmap 생성
+                q_image = ImageQt(resized_image)
+                current_pixmap = QPixmap.fromImage(q_image)
+            else:
+                # 3MP 이하면 그대로 사용
+                q_image = ImageQt(self.current_image)
+                current_pixmap = QPixmap.fromImage(q_image)
+            
+            print(f"✅ 최종 크기: {current_pixmap.width()}x{current_pixmap.height()}")
+            
+            # Worker 스레드 생성
+            class BgRemovalWorker(QThread):
+                finished = pyqtSignal(dict)
+                
+                def __init__(self, api_service, pil_image, save_counter):
+                    super().__init__()
+                    self.api_service = api_service
+                    self.pil_image = pil_image
+                    self.save_counter = save_counter
+                
+                def run(self):
+                    result = self.api_service.nai_bg_removal_pil(self.pil_image, self.save_counter)
+                    self.finished.emit(result)
+            
+            # save_counter 가져오기
+            save_counter = getattr(self.app_context.main_window.image_window, 'save_counter', 1)
+            
+            # Worker 스레드 설정
+            self.bg_removal_thread = QThread()
+            # 리사이즈된 이미지 또는 원본 이미지를 전달
+            if megapixels > 3.0:
+                self.bg_removal_worker = BgRemovalWorker(self.app_context.api_service, resized_image, save_counter)
+            else:
+                self.bg_removal_worker = BgRemovalWorker(self.app_context.api_service, self.current_image, save_counter)
+            self.bg_removal_worker.moveToThread(self.bg_removal_thread)
+            
+            # 시그널 연결
+            self.bg_removal_thread.started.connect(self.bg_removal_worker.run)
+            self.bg_removal_worker.finished.connect(
+                lambda result: self._handle_nai_bg_removal_result(result, progress)
+            )
+            self.bg_removal_worker.finished.connect(self.bg_removal_thread.quit)
+            self.bg_removal_worker.finished.connect(self.bg_removal_worker.deleteLater)
+            self.bg_removal_thread.finished.connect(self.bg_removal_thread.deleteLater)
+            
+            # 버튼 비활성화
+            self.nai_bg_removal_btn.setEnabled(False)
+            self.nai_bg_removal_btn.setText("🔄 처리 중...")
+            
+            # 스레드 시작
+            self.bg_removal_thread.start()
+            
+        except Exception as e:
+            print(f"❌ NAI BG-Removal 실행 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "오류", f"NAI BG-Removal 실행 중 오류 발생:\n{str(e)}")
+            # 버튼 복원
+            self.nai_bg_removal_btn.setEnabled(True)
+            self.nai_bg_removal_btn.setText("🎨 NAI BG-Removal (유료)")
+    
+    def _handle_nai_bg_removal_result(self, result, progress):
+        """NAI BG-Removal 결과 처리"""
+        progress.close()
+        
+        # 버튼 복원
+        self.nai_bg_removal_btn.setEnabled(True)
+        self.nai_bg_removal_btn.setText("🎨 NAI BG-Removal (유료)")
+        
+        if result['status'] == 'success':
+            # 선택된 이미지(3번째) 적용
+            selected_pixmap = result.get('selected_image')
+            if selected_pixmap:
+                # QPixmap을 PIL Image로 변환
+                from PyQt6.QtCore import QBuffer, QIODevice
+                import io
+                
+                buffer = QBuffer()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                selected_pixmap.save(buffer, "PNG")
+                image_data = buffer.data().data()
+                buffer.close()
+                
+                # PIL Image로 변환
+                pil_image = Image.open(io.BytesIO(image_data))
+                
+                # 이미지 업데이트
+                self.update_generated_image(pil_image)
+                
+                # 성공 메시지
+                if hasattr(self.app_context, 'main_window'):
+                    self.app_context.main_window.status_bar.showMessage(
+                        f"✅ NAI BG-Removal 완료 ({result.get('message', '')})", 5000
+                    )
+                print(f"✅ NAI BG-Removal 성공: {result.get('message', '')}")
+            else:
+                QMessageBox.warning(self, "경고", "배경 제거 결과를 적용할 수 없습니다.")
+        else:
+            # 오류 메시지 표시
+            error_msg = result.get('message', '알 수 없는 오류')
+            QMessageBox.critical(self, "오류", f"NAI BG-Removal 실패:\n{error_msg}")
+            print(f"❌ NAI BG-Removal 실패: {error_msg}")
+    
+    def _paste_from_clipboard(self):
+        """클립보드에서 이미지 붙여넣기하여 StableImageWidget에 표시"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from PIL import ImageGrab
+            import tempfile
+            
+            app = QApplication.instance()
+            if not app:
+                QMessageBox.warning(self, "오류", "QApplication을 찾을 수 없습니다.")
+                return
+            
+            clipboard = app.clipboard()
+            mime_data = clipboard.mimeData()
+            
+            # 이미지가 클립보드에 있는지 확인
+            if mime_data.hasImage():
+                # PIL ImageGrab을 사용하여 메타데이터 보존
+                try:
+                    pil_image = ImageGrab.grabclipboard()
+                    if pil_image:
+                        # PIL 이미지를 StableImageWidget에 설정
+                        self.output_image_widget.setPilImage(pil_image)
+                        
+                        # current_image 업데이트
+                        self.current_image = pil_image
+                        
+                        # QPixmap도 생성하여 current_pixmap 업데이트
+                        from PIL.ImageQt import ImageQt
+                        q_image_conv = ImageQt(pil_image.convert("RGBA"))
+                        self.current_pixmap = QPixmap.fromImage(q_image_conv)
+                        
+                        # 버튼 활성화
+                        self.save_btn.setEnabled(True)
+                        if self.rembg_available:
+                            self.remove_bg_btn.setEnabled(True)
+                        
+                        # NAI BG-Removal 버튼 활성화 (NAI 모드일 때만)
+                        current_mode = self.app_context.get_api_mode() if self.app_context else None
+                        if current_mode == "NAI":
+                            self.nai_bg_removal_btn.setEnabled(True)
+                        
+                        print("✅ 클립보드에서 이미지를 불러왔습니다.")
+                        
+                        # 상태바 메시지
+                        if hasattr(self.app_context, 'main_window'):
+                            self.app_context.main_window.status_bar.showMessage(
+                                "✅ 클립보드에서 이미지를 불러왔습니다.", 3000
+                            )
+                    else:
+                        # ImageGrab 실패시 Qt 방식 시도
+                        q_image = clipboard.image()
+                        if not q_image.isNull():
+                            pixmap = QPixmap.fromImage(q_image)
+                            self.output_image_widget.setPixmap(pixmap)
+                            
+                            # current_pixmap 업데이트
+                            self.current_pixmap = pixmap
+                            
+                            # PIL Image로 변환하여 current_image 업데이트
+                            from PyQt6.QtCore import QBuffer, QIODevice
+                            import io
+                            buffer = QBuffer()
+                            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                            pixmap.save(buffer, "PNG")
+                            image_data = buffer.data().data()
+                            buffer.close()
+                            self.current_image = Image.open(io.BytesIO(image_data))
+                            
+                            self.save_btn.setEnabled(True)
+                            if self.rembg_available:
+                                self.remove_bg_btn.setEnabled(True)
+                            
+                            # NAI BG-Removal 버튼 활성화 (NAI 모드일 때만)
+                            current_mode = self.app_context.get_api_mode() if self.app_context else None
+                            if current_mode == "NAI":
+                                self.nai_bg_removal_btn.setEnabled(True)
+                            
+                            print("✅ 클립보드에서 이미지를 불러왔습니다. (Qt)")
+                            
+                            if hasattr(self.app_context, 'main_window'):
+                                self.app_context.main_window.status_bar.showMessage(
+                                    "✅ 클립보드에서 이미지를 불러왔습니다.", 3000
+                                )
+                        else:
+                            QMessageBox.warning(self, "경고", "클립보드에서 이미지를 불러올 수 없습니다.")
+                            
+                except ImportError:
+                    # ImageGrab이 없을 경우 Qt만 사용
+                    q_image = clipboard.image()
+                    if not q_image.isNull():
+                        pixmap = QPixmap.fromImage(q_image)
+                        self.output_image_widget.setPixmap(pixmap)
+                        
+                        # current_pixmap 업데이트
+                        self.current_pixmap = pixmap
+                        
+                        # PIL Image로 변환하여 current_image 업데이트
+                        from PyQt6.QtCore import QBuffer, QIODevice
+                        import io
+                        buffer = QBuffer()
+                        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                        pixmap.save(buffer, "PNG")
+                        image_data = buffer.data().data()
+                        buffer.close()
+                        self.current_image = Image.open(io.BytesIO(image_data))
+                        
+                        self.save_btn.setEnabled(True)
+                        if self.rembg_available:
+                            self.remove_bg_btn.setEnabled(True)
+                        
+                        # NAI BG-Removal 버튼 활성화 (NAI 모드일 때만)
+                        current_mode = self.app_context.get_api_mode() if self.app_context else None
+                        if current_mode == "NAI":
+                            self.nai_bg_removal_btn.setEnabled(True)
+                        
+                        print("✅ 클립보드에서 이미지를 불러왔습니다.")
+                        
+                        if hasattr(self.app_context, 'main_window'):
+                            self.app_context.main_window.status_bar.showMessage(
+                                "✅ 클립보드에서 이미지를 불러왔습니다.", 3000
+                            )
+                    else:
+                        QMessageBox.warning(self, "경고", "클립보드에서 이미지를 불러올 수 없습니다.")
+                        
+            else:
+                QMessageBox.information(self, "정보", "클립보드에 이미지가 없습니다.")
+                
+        except Exception as e:
+            print(f"❌ 클립보드 붙여넣기 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "오류", f"클립보드에서 이미지를 불러오는 중 오류가 발생했습니다.\n{str(e)}")
     
     # =================== 프리셋 관련 메서드 ===================
     

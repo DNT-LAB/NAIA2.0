@@ -5,6 +5,8 @@
 
 import os
 import json
+import platform
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from PyQt6.QtWidgets import (
@@ -374,6 +376,13 @@ class InstantWildcardModule(BaseMiddleModule):
         self.add_group_btn.clicked.connect(self.add_wildcard_group)
         top_layout.addWidget(self.add_group_btn)
         
+        # 폴더 열기 버튼 추가
+        self.open_folder_btn = QPushButton("📂 폴더 열기")
+        self.open_folder_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.open_folder_btn.clicked.connect(self.open_save_folder)
+        self.open_folder_btn.setToolTip(f"인스턴트 와일드카드 저장 폴더를 엽니다\n{self.save_path}")
+        top_layout.addWidget(self.open_folder_btn)
+        
         top_layout.addStretch()
         main_layout.addLayout(top_layout)
         
@@ -624,6 +633,32 @@ class InstantWildcardModule(BaseMiddleModule):
                 self.widget,
                 "오류",
                 f"파일 생성 중 오류가 발생했습니다:\n{str(e)}"
+            )
+    
+    def open_save_folder(self):
+        """인스턴트 와일드카드 저장 폴더를 파일 탐색기에서 엽니다."""
+        try:
+            # 폴더가 존재하지 않으면 생성
+            if not self.save_path.exists():
+                self.save_path.mkdir(parents=True, exist_ok=True)
+            
+            # 운영체제별로 폴더 열기
+            system = platform.system()
+            if system == "Windows":
+                os.startfile(str(self.save_path))
+            elif system == "Darwin":  # macOS
+                subprocess.run(["open", str(self.save_path)])
+            else:  # Linux
+                subprocess.run(["xdg-open", str(self.save_path)])
+            
+            print(f"📂 인스턴트 와일드카드 폴더 열기: {self.save_path}")
+            
+        except Exception as e:
+            print(f"❌ 폴더 열기 실패: {e}")
+            QMessageBox.warning(
+                self.widget,
+                "경고",
+                f"폴더를 열 수 없습니다:\n{str(e)}"
             )
     
     def update_ui(self):

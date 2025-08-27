@@ -1,11 +1,52 @@
 import re
 from pathlib import Path
-from PyQt6.QtCore import QObject, QEvent, Qt, QTimer
+from PyQt6.QtCore import QObject, QEvent, Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QListWidget, QWidget, QLineEdit, QTextEdit, QHBoxLayout, QTextBrowser, QLabel, QVBoxLayout
 from PyQt6.QtGui import QTextCursor, QKeyEvent, QPixmap
+from utils.translator import korean_to_english
 
 # ✅ 전역 인스턴스 (싱글턴 패턴 대체)
 _autocomplete_manager = None
+
+class TranslationWorker(QThread):
+    """번역을 백그라운드 스레드에서 수행하는 워커 (재사용 가능)"""
+    translation_completed = pyqtSignal(str, str)  # 원문, 번역문
+    translation_failed = pyqtSignal()
+    request_translation = pyqtSignal(str)  # 번역 요청 시그널
+    
+    def __init__(self):
+        super().__init__()
+        self.korean_text = ""
+        self.is_running = True
+        
+    def set_text(self, text):
+        """번역할 텍스트 설정"""
+        self.korean_text = text
+        
+    def run(self):
+        """스레드 메인 루프 - 계속 실행됨"""
+        while self.is_running:
+            if self.korean_text:
+                try:
+                    # 번역 수행
+                    translated = korean_to_english(self.korean_text)
+                    if translated:
+                        self.translation_completed.emit(self.korean_text, translated)
+                    else:
+                        self.translation_failed.emit()
+                except Exception as e:
+                    print(f"번역 오류: {e}")
+                    self.translation_failed.emit()
+                
+                # 번역 완료 후 텍스트 초기화
+                self.korean_text = ""
+            
+            # CPU 사용률을 낮추기 위해 짧은 대기
+            self.msleep(50)
+    
+    def stop(self):
+        """스레드 종료"""
+        self.is_running = False
 
 # 1. autocomplete_manager.py의 get_autocomplete_manager() 함수 수정
 
@@ -102,6 +143,19 @@ class AutoCompleteManager(QObject):
         # 아티스트 이미지 캐시 (중복 처리 방지)
         self.last_processed_img_data = None
         self.last_processed_pixmap = None
+        
+        # 번역 관련 변수
+        self.translation_timer = QTimer()
+        self.translation_timer.setSingleShot(True)
+        self.translation_timer.timeout.connect(self._perform_translation)
+        self.last_translation_text = ""
+        self.pending_translation_text = ""
+        
+        # 번역 워커 생성 (한 번만 생성하고 재사용)
+        self.translation_worker = TranslationWorker()
+        self.translation_worker.translation_completed.connect(self._on_translation_completed)
+        self.translation_worker.translation_failed.connect(self._on_translation_failed)
+        self.translation_worker.start()  # 스레드 시작 (프로그램 종료까지 계속 실행)
         
         # 설정
         self.min_chars = 2
@@ -309,13 +363,37 @@ class AutoCompleteManager(QObject):
             self.popup = self._create_popup()
 
         # 현재 활성 토큰 정보 가져오기
-        token_info = self._get_active_token_info(self.current_widget)
+        try: token_info = self._get_active_token_info(self.current_widget)
+        except: 
+            token_info = None
+            return
         if not token_info or len(token_info['stripped_text']) < 1:
             self._hide_all_popups()
             return
             
         self.active_token_info = token_info
         target_text = token_info['stripped_text']
+        
+        # % 로 시작하는 경우 번역 처리
+        if target_text.startswith('%'):
+            translation_text = target_text[1:]  # % 제거
+            
+            # 툴팁이 이미 표시 중이 아니고, 텍스트가 있고, 이전과 다른 경우에만 처리
+            is_tooltip_showing = (self.popup and self.popup.isVisible()) or (self.value_container and self.value_container.isVisible())
+            
+            if translation_text and (not is_tooltip_showing or translation_text != self.last_translation_text):
+                self.pending_translation_text = translation_text
+                self.translation_timer.stop()
+                
+                # 마지막 문자가 '.' 또는 ' '인 경우 즉시 번역
+                if translation_text.endswith('.') or translation_text.endswith(' '):
+                    self._perform_translation()  # 즉시 번역 수행
+                else:
+                    # 그 외의 경우 0.5초 후에 번역 수행
+                    self.translation_timer.start(500)
+            elif not translation_text:
+                self._hide_all_popups()
+            return
         
         # $ 로 시작하는 경우 인스턴트 와일드카드 처리
         if target_text.startswith('$'):
@@ -325,6 +403,11 @@ class AutoCompleteManager(QObject):
         # 인스턴트 와일드카드가 아닌 경우 값 표시 패널 숨기기
         if self.value_container:
             self.value_container.hide()
+        
+        # 일반 자동완성일 때 팝업 크기를 원래대로 복구
+        if self.popup:
+            self.popup.setMinimumWidth(350)
+            self.popup.setMaximumWidth(500)
         
         # wildcard_manager가 있다면 추가 와일드카드도 전달
         additional_wildcards = None
@@ -548,6 +631,16 @@ class AutoCompleteManager(QObject):
         # 그룹 아이템 선택 여부 확인 ($groupname: 형태)
         is_group_selection = completion_text.startswith('$') and completion_text.endswith(':')
         
+        # 원본 텍스트의 뒤 공백/줄바꿈 추출 (모든 모드에서 동일하게 처리)
+        original_text = info['text']
+        trailing_whitespace = ''
+        # 원본의 뒤쪽 공백/줄바꿈 찾기
+        for i in range(len(original_text) - 1, -1, -1):
+            if original_text[i] in ' \n\t\r':
+                trailing_whitespace = original_text[i] + trailing_whitespace
+            else:
+                break
+        
         # 인스턴트 와일드카드인 경우 값이 그대로 삽입됨 ($ 없이)
         if info['stripped_text'].startswith('$'):
             # completion_text는 이미 값이므로 그대로 사용
@@ -562,7 +655,9 @@ class AutoCompleteManager(QObject):
         if weight_prefix:
             completion_text = weight_prefix + completion_text
         
+        # 괄호 복원 후 뒤 공백 추가 (모든 모드에서 동일하게)
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
+        final_text = final_text + trailing_whitespace
 
         # 가중치가 있는 경우 시작 위치를 조정 (weight 부분도 교체하기 위해)
         start_pos = info['start']
@@ -575,10 +670,21 @@ class AutoCompleteManager(QObject):
             cursor.setPosition(start_pos)
             cursor.setPosition(info['end'], QTextCursor.MoveMode.KeepAnchor)
             cursor.insertText(final_text)
+            
+            # 커서를 뒤 공백/줄바꿈 이전 위치로 설정
+            if trailing_whitespace:
+                new_cursor_pos = cursor.position() - len(trailing_whitespace)
+                cursor.setPosition(new_cursor_pos)
+                widget.setTextCursor(cursor)
         else: # QLineEdit
             current_text = widget.text()
             new_text = current_text[:start_pos] + final_text + current_text[info['end']:]
             widget.setText(new_text)
+            
+            # 커서를 뒤 공백/줄바꿈 이전 위치로 설정
+            if trailing_whitespace:
+                new_cursor_pos = start_pos + len(final_text) - len(trailing_whitespace)
+                widget.setCursorPosition(new_cursor_pos)
         
         self._hide_all_popups()
         widget.setFocus() # 텍스트 완성 후 원래 위젯으로 포커스 복귀
@@ -666,7 +772,7 @@ class AutoCompleteManager(QObject):
 
         return {
             'text': token, 
-            'stripped_text': stripped_token.strip(), 
+            'stripped_text': stripped_token.strip(),  # 모든 모드에서 동일하게 strip() 사용
             'prefix': prefix, 
             'suffix': suffix, 
             'start': start_pos, 
@@ -739,6 +845,19 @@ class AutoCompleteManager(QObject):
             self.value_container.hide()
         if self.image_container:
             self.image_container.hide()
+        # 번역 타이머도 중지
+        if hasattr(self, 'translation_timer'):
+            self.translation_timer.stop()
+        # 번역 워커는 유지 (재사용을 위해)
+    
+    def cleanup(self):
+        """프로그램 종료 시 리소스 정리"""
+        # 번역 워커 종료
+        if hasattr(self, 'translation_worker') and self.translation_worker:
+            self.translation_worker.stop()  # 플래그 설정
+            self.translation_worker.quit()   # 이벤트 루프 종료
+            self.translation_worker.wait(1000)  # 최대 1초 대기
+            self.translation_worker.deleteLater()
     
     def _get_instant_wildcards(self):
         """인스턴트 와일드카드 딕셔너리와 트리를 가져옵니다.
@@ -827,6 +946,73 @@ class AutoCompleteManager(QObject):
         except Exception as e:
             print(f"⚠️ ArtistThumbModule 리스트 가져오기 실패: {e}")
         return []
+    
+    def _perform_translation(self):
+        """번역을 백그라운드 스레드에서 수행합니다."""
+        if not self.pending_translation_text:
+            return
+        
+        # 워커에 새 텍스트 설정 (스레드는 이미 실행 중)
+        if self.translation_worker:
+            self.translation_worker.set_text(self.pending_translation_text)
+            # 현재 텍스트를 마지막 번역 텍스트로 저장
+            self.last_translation_text = self.pending_translation_text
+    
+    def _on_translation_completed(self, korean_text: str, english_text: str):
+        """번역이 완료되면 호출됩니다."""
+        self._show_translation_tooltip(korean_text, english_text)
+        # 워커는 계속 유지 (재사용을 위해)
+    
+    def _on_translation_failed(self):
+        """번역이 실패하면 호출됩니다."""
+        self._hide_all_popups()
+        # 워커는 계속 유지 (재사용을 위해)
+    
+    def _show_translation_tooltip(self, korean_text: str, english_text: str):
+        """번역 결과를 툴팁으로 표시합니다."""
+        # 팝업이 없으면 생성
+        if self.popup is None:
+            self.popup = self._create_popup()
+        
+        # 번역 팝업은 더 작은 너비 설정
+        self.popup.setMinimumWidth(150)
+        self.popup.setMaximumWidth(200)
+        
+        # 팝업 초기화
+        self.popup.clear()
+        
+        # Accept 항목만 추가 (영문 텍스트 제외)
+        accept_item = "✅ Accept"
+        item = self.popup.addItem(accept_item)
+        self.popup.item(0).setData(Qt.ItemDataRole.UserRole, english_text)
+        self.popup.item(0).setToolTip(f"클릭하여 영문 번역을 삽입합니다.")
+        
+        # 값 표시 컨테이너 생성 및 업데이트
+        if not self.value_container:
+            self._create_value_display()
+        
+        # 번역용으로 더 넓은 너비 설정
+        self.value_display.setMinimumWidth(450)
+        self.value_display.setMaximumWidth(550)
+        
+        # 한글 원문을 값 표시 패널에 표시
+        self.value_display.clear()
+        html_content = f"""
+        <div style="color: #E0E0E0; font-size: 14px;">
+            <div style="color: #90CAF9; margin-bottom: 8px;">📝 원문 (한글):</div>
+            <div style="background-color: #263238; padding: 8px; border-radius: 4px; margin-bottom: 12px;">
+                {korean_text}
+            </div>
+            <div style="color: #A5D6A7; margin-bottom: 8px;">🔤 번역 (영어):</div>
+            <div style="background-color: #263238; padding: 8px; border-radius: 4px;">
+                {english_text}
+            </div>
+        </div>
+        """
+        self.value_display.setHtml(html_content)
+        
+        # 팝업과 값 패널 표시
+        self.popup_at_cursor_with_value()
     
     def _show_instant_wildcard_completions(self, search_text: str):
         """인스턴트 와일드카드 자동완성을 표시합니다."""
@@ -958,6 +1144,15 @@ class AutoCompleteManager(QObject):
         # 값 표시 패널 생성 및 업데이트
         if not self.value_container:
             self._create_value_display()
+        
+        # 인스턴트 와일드카드용 너비로 복구 (번역용보다 좁게)
+        self.value_display.setMinimumWidth(300)
+        self.value_display.setMaximumWidth(400)
+        
+        # 일반 팝업 크기로 복구
+        if self.popup:
+            self.popup.setMinimumWidth(350)
+            self.popup.setMaximumWidth(500)
         
         # 첫 번째 항목의 값 표시
         if matching_keys:

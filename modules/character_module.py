@@ -39,14 +39,15 @@ class NAID4CharacterInput(QWidget):
         self.prompt_textbox = QTextEdit()
         self.prompt_textbox.setPlaceholderText("캐릭터 프롬프트 (예: 1girl, ...)")
         self.prompt_textbox.setStyleSheet(DARK_STYLES['compact_textedit'])
-        self.prompt_textbox.setFixedHeight(110)
+        self.prompt_textbox.setMinimumHeight(110)
         setModernStyle(self.prompt_textbox)
         prompt_uc_layout.addWidget(self.prompt_textbox)
 
         self.uc_textbox = QTextEdit()
         self.uc_textbox.setPlaceholderText("부정 프롬프트 (UC)")
         self.uc_textbox.setStyleSheet(DARK_STYLES['compact_textedit'] + "color: #9E9E9E;")
-        self.uc_textbox.setFixedHeight(50)
+        self.uc_textbox.setMinimumHeight(55)
+        self.uc_textbox.setMaximumHeight(110)
         setModernStyle(self.uc_textbox)
         prompt_uc_layout.addWidget(self.uc_textbox)
         

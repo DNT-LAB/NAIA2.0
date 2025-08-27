@@ -352,7 +352,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 250825")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 250827")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2007,7 +2007,7 @@ class ModernMainWindow(QMainWindow):
                 
             if auto_generate_checkbox.isChecked() and not prompt_fixed_checkbox.isChecked():
                 # 검색 결과가 있는지 확인
-                if self.search_results.is_empty():
+                if self.search_results.is_empty() and not self.generation_checkboxes["와일드카드 단독 모드"].isChecked():
                     self.status_bar.showMessage("⚠️ 검색 결과가 없어 자동 생성을 중단합니다.")
                     # 자동화 중단 (자동화가 활성화되어 있는 경우만)
                     if self.automation_module and self.automation_module.automation_controller.is_running:
@@ -2144,11 +2144,32 @@ class ModernMainWindow(QMainWindow):
         result_file = 'naia_temp_rows.parquet'
         if os.path.exists(result_file):
             self.status_bar.showMessage("이전 검색 결과를 불러오는 중...", 3000)
+            
+            # 기존 스레드가 있으면 정리
+            if hasattr(self, 'load_thread') and self.load_thread is not None:
+                if self.load_thread.isRunning():
+                    self.load_thread.quit()
+                    self.load_thread.wait(1000)
+                try:
+                    self.load_thread.deleteLater()
+                except:
+                    pass
+                self.load_thread = None
+            
+            if hasattr(self, 'loader') and self.loader is not None:
+                try:
+                    self.loader.deleteLater()
+                except:
+                    pass
+                self.loader = None
+            
+            # 새로운 스레드와 로더 생성
             self.load_thread = QThread()
             self.loader = ParquetLoader()
             self.loader.moveToThread(self.load_thread)
             self.load_thread.started.connect(lambda: self.loader.run(result_file))
             self.loader.finished.connect(self.on_previous_results_loaded)
+            self.loader.finished.connect(self.loader.deleteLater)
             self.load_thread.finished.connect(self.load_thread.deleteLater)
             self.load_thread.start()
 
@@ -2156,15 +2177,45 @@ class ModernMainWindow(QMainWindow):
         """'naia_temp_rows.parquet' 파일이 있으면 비동기로 로드합니다."""
         result_file = 'naia_temp_rows.parquet'
         if os.path.exists(result_file):
+            self.search_results.set_dataframe(pd.DataFrame())
             self.status_bar.showMessage("이전 검색 결과를 복원하는 중...", 3000)
             
-            # 기존 앱 시작 시 사용했던 비동기 로더 재활용
+            # 기존 스레드가 실행 중이면 정리
+            if hasattr(self, 'load_thread') and self.load_thread is not None:
+                if self.load_thread.isRunning():
+                    self.load_thread.quit()
+                    self.load_thread.wait(1000)  # 최대 1초 대기
+                    if self.load_thread.isRunning():
+                        self.load_thread.terminate()
+                        self.load_thread.wait()
+                
+                # 기존 스레드 정리
+                try:
+                    self.load_thread.deleteLater()
+                except:
+                    pass
+                self.load_thread = None
+            
+            # 기존 로더 정리
+            if hasattr(self, 'loader') and self.loader is not None:
+                try:
+                    self.loader.deleteLater()
+                except:
+                    pass
+                self.loader = None
+            
+            # 새로운 스레드와 로더 생성
             self.load_thread = QThread()
             self.loader = ParquetLoader()
             self.loader.moveToThread(self.load_thread)
+            
+            # 연결 설정
             self.load_thread.started.connect(lambda: self.loader.run(result_file))
             self.loader.finished.connect(self.on_previous_results_loaded)
+            self.loader.finished.connect(self.loader.deleteLater)
             self.load_thread.finished.connect(self.load_thread.deleteLater)
+            
+            # 스레드 시작
             self.load_thread.start()
         else:
             self.status_bar.showMessage("⚠️ 복원할 검색 결과 파일(naia_temp_rows.parquet)이 없습니다.", 5000)

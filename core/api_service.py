@@ -3,9 +3,11 @@ import zipfile
 import io, time, re, json
 import base64
 import numpy as np
+import gc
 from PIL import Image
 from typing import Dict, Any, TYPE_CHECKING, List
 from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import QCoreApplication, QThreadPool
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 
@@ -25,6 +27,44 @@ class APIService:
         self.NAI_V3_API_URL = "https://image.novelai.net/ai/generate-image"
         self.comfyui_service = None
         self.workflow_manager = ComfyUIWorkflowManager()
+    
+    def _cleanup_http_threads(self):
+        """HTTP 연결 관련 스레드 정리"""
+        try:
+            # urllib3 연결 풀 정리
+            try:
+                from urllib3.util import connection
+                from urllib3 import poolmanager
+                if hasattr(poolmanager, '_default_pool'):
+                    poolmanager._default_pool = None
+            except Exception:
+                pass
+            
+            # requests 세션 정리
+            try:
+                if hasattr(requests, 'sessions'):
+                    if hasattr(requests.sessions, 'Session'):
+                        session = requests.Session()
+                        session.close()
+            except Exception:
+                pass
+            
+            # Qt 스레드 풀 정리
+            try:
+                thread_pool = QThreadPool.globalInstance()
+                thread_pool.clear()
+                thread_pool.waitForDone(100)
+            except Exception:
+                pass
+            
+            # 가비지 컬렉션
+            gc.collect()
+            
+            # Qt 이벤트 루프 처리
+            for _ in range(2):
+                QCoreApplication.processEvents()
+        except Exception:
+            pass
 
     def call_generation_api(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -271,12 +311,15 @@ class APIService:
                     json=payload,
                     timeout=180
                 )
-                # urllib3 연결 풀 강제 정리
+                # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             response.raise_for_status()
             
             # 이미지 처리
@@ -370,12 +413,15 @@ class APIService:
             # HTTP 세션을 사용하여 연결 정리
             with requests.Session() as session:
                 response = session.post(api_endpoint, headers=headers, json=payload, timeout=300)
-                # urllib3 연결 풀 강제 정리
+                # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             response.raise_for_status()
             
             result = response.json()
@@ -992,12 +1038,15 @@ class APIService:
                     headers={"Authorization": f"Bearer {token}"},
                     timeout=60
                 )
-                # urllib3 연결 풀 강제 정리
+                # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             
             if response.status_code != 200:
                 error_msg = f"API 에러 (코드: {response.status_code})"
@@ -1085,12 +1134,15 @@ class APIService:
                     headers={"Authorization": f"Bearer {nai_access_token}"},
                     timeout=3
                 )
-                # urllib3 연결 풀 강제 정리
+                # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             
             if response.status_code == 200:
                 data = response.json()
@@ -1104,6 +1156,167 @@ class APIService:
             print(f"⚠️ Anlas 조회 실패: {e}")
         
         return None
+    
+    def nai_bg_removal_pil(self, pil_image: Image.Image, save_counter: int, token: str = None) -> Dict[str, Any]:
+        """
+        NovelAI BG-Removal API를 사용하여 이미지 배경을 제거합니다 (PIL Image 버전).
+        
+        Args:
+            pil_image: PIL Image 형식의 이미지
+            save_counter: 저장 카운터
+            token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
+        
+        Returns:
+            Dict with 'status', 'selected_image' (3rd QPixmap), and 'message'
+        """
+        import zipfile
+        import io
+        import base64
+        from pathlib import Path
+        from PyQt6.QtGui import QPixmap
+        
+        try:
+            # 토큰 가져오기
+            if not token:
+                token = self.app_context.secure_token_manager.get_token('nai_token')
+                if not token:
+                    return {
+                        'status': 'error',
+                        'message': 'NAI 토큰이 설정되지 않았습니다.'
+                    }
+            
+            # PIL Image를 bytes로 변환
+            img_buffer = io.BytesIO()
+            pil_image.save(img_buffer, format="PNG")
+            image_bytes = img_buffer.getvalue()
+            
+            # Base64 인코딩
+            img_base64 = base64.b64encode(image_bytes).decode()
+            
+            # 원본 이미지 크기
+            width, height = pil_image.size
+            
+            # API 요청 데이터
+            data = {
+                "image": img_base64,
+                "width": width,
+                "height": height,
+                "req_type": "bg-removal"
+            }
+            
+            # API 호출
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    "https://image.novelai.net/ai/augment-image",
+                    json=data,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=120  # 배경 제거는 시간이 더 걸릴 수 있음
+                )
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
+            
+            if response.status_code != 200:
+                error_msg = f"API 에러 (코드: {response.status_code})"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"{error_msg}: {error_detail.get('message', 'Unknown error')}"
+                except:
+                    pass
+                return {
+                    'status': 'error',
+                    'message': error_msg
+                }
+            
+            # 응답이 ZIP 파일 형식으로 3개 이미지 포함
+            try:
+                zipped = zipfile.ZipFile(io.BytesIO(response.content))
+                file_list = zipped.namelist()
+                
+                if not file_list:
+                    return {
+                        'status': 'error',
+                        'message': '배경 제거 결과가 비어있습니다.'
+                    }
+                
+                # bg_removal 폴더 생성
+                save_path = self.app_context.session_save_path / "bg_removal"
+                save_path.mkdir(parents=True, exist_ok=True)
+                
+                # 모든 이미지 추출 및 저장
+                images = []
+                image_bytes_list = []
+                suffixes = ["_masked", "_generated", "_blend"]
+                
+                for idx, file_info in enumerate(zipped.infolist()):
+                    img_bytes = zipped.read(file_info)
+                    image_bytes_list.append(img_bytes)
+                    
+                    # bytes를 QPixmap으로 변환
+                    temp_pixmap = QPixmap()
+                    temp_pixmap.loadFromData(img_bytes)
+                    
+                    if not temp_pixmap.isNull():
+                        images.append(temp_pixmap)
+                        
+                        # 파일로 저장
+                        if idx < len(suffixes):
+                            filename = f"{save_counter:05d}{suffixes[idx]}.png"
+                            filepath = save_path / filename
+                            temp_pixmap.save(str(filepath), "PNG")
+                
+                # 3번째 이미지 선택 (인덱스 2)
+                selected_image = None
+                selected_bytes = None
+                if len(images) >= 3:
+                    selected_image = images[2]  # 3번째 이미지 (blend)
+                    selected_bytes = image_bytes_list[2]
+                elif images:
+                    # 3개 미만인 경우 마지막 이미지 선택
+                    selected_image = images[-1]
+                    selected_bytes = image_bytes_list[-1]
+                
+                if not selected_image:
+                    return {
+                        'status': 'error',
+                        'message': '배경 제거된 이미지를 로드할 수 없습니다.'
+                    }
+                
+                return {
+                    'status': 'success',
+                    'selected_image': selected_image,  # 선택된 3번째 이미지
+                    'raw_bytes': selected_bytes,  # 선택된 이미지의 원본 바이트
+                    'message': f'배경 제거 완료: {len(images)}개 이미지 생성'
+                }
+                
+            except zipfile.BadZipFile:
+                return {
+                    'status': 'error',
+                    'message': '배경 제거 응답 형식이 올바르지 않습니다.'
+                }
+                
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': 'API 요청 시간 초과 (120초)'
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                'status': 'error',
+                'message': '네트워크 연결 오류'
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'배경 제거 중 오류 발생: {str(e)}'
+            }
     
     def upscale_NAI_from_inpaint(self, pil_image: Image.Image, target_width: int, target_height: int) -> Dict[str, Any]:
         """
@@ -1159,12 +1372,15 @@ class APIService:
                     headers={"Authorization": f"Bearer {token}"},
                     timeout=60
                 )
-                # urllib3 연결 풀 강제 정리
+                # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             
             # 디버깅: 응답 상세 정보
             print(f"🔍 DEBUG - Response status code: {response.status_code}")

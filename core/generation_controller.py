@@ -79,6 +79,13 @@ class GenerationWorker(QObject):
             # API 호출 (이 부분이 시간이 오래 걸림)
             api_result = self.context.api_service.call_generation_api(self.params)
             
+            # 🔧 FIX: API 결과가 error 상태인 경우 에러로 처리
+            if api_result.get('status') == 'error':
+                error_msg = api_result.get('message', 'Unknown API error')
+                print(f"❌ API 호출 실패: {error_msg}")
+                self.generation_error.emit(error_msg)
+                return
+            
             self.generation_progress.emit("결과 처리 중...")
             
             # 후처리
@@ -223,8 +230,8 @@ class GenerationController:
         
         # 🆕 자동 생성 재시도 관련 추가
         self.auto_retry_count = 0
-        self.max_auto_retries = 3  # 자동 생성 시 최대 재시도 횟수
-        self.retry_delay_ms = 2000  # 재시도 간격 (밀리초)
+        self.max_auto_retries = 2  # 자동 생성 시 최대 재시도 횟수 (API 자체에서 5회 재시도 하므로 줄임)
+        self.retry_delay_ms = 3000  # 재시도 간격 (밀리초) - 3초로 증가
         
     def execute_generation_pipeline(self, overrides: dict = None):
         """7단계 생성 파이프라인을 실행합니다."""

@@ -657,7 +657,20 @@ class AutoCompleteManager(QObject):
         
         # 괄호 복원 후 뒤 공백 추가 (모든 모드에서 동일하게)
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
-        final_text = final_text + trailing_whitespace
+        
+        # 자동 쉼표 추가 (trailing_whitespace가 없거나 줄바꿈인 경우)
+        # 줄바꿈이 있는 경우에도 쉼표를 추가하고 그 뒤에 줄바꿈을 유지
+        if not trailing_whitespace:
+            final_text = final_text + ", "
+            added_comma_space = True
+        elif '\n' in trailing_whitespace:
+            # 줄바꿈이 있는 경우: 쉼표 추가 후 줄바꿈 유지
+            final_text = final_text + ", " + trailing_whitespace
+            added_comma_space = True
+        else:
+            # 일반 공백만 있는 경우: 기존대로 유지
+            final_text = final_text + trailing_whitespace
+            added_comma_space = False
 
         # 가중치가 있는 경우 시작 위치를 조정 (weight 부분도 교체하기 위해)
         start_pos = info['start']
@@ -671,19 +684,34 @@ class AutoCompleteManager(QObject):
             cursor.setPosition(info['end'], QTextCursor.MoveMode.KeepAnchor)
             cursor.insertText(final_text)
             
-            # 커서를 뒤 공백/줄바꿈 이전 위치로 설정
-            if trailing_whitespace:
+            # 커서 위치 설정
+            if trailing_whitespace and not added_comma_space:
+                # 일반 공백만 있는 경우: 공백 이전 위치로
                 new_cursor_pos = cursor.position() - len(trailing_whitespace)
                 cursor.setPosition(new_cursor_pos)
-                widget.setTextCursor(cursor)
+            elif '\n' in trailing_whitespace:
+                # 줄바꿈이 있는 경우: 쉼표와 공백 뒤, 줄바꿈 이전 위치로
+                new_cursor_pos = cursor.position() - len(trailing_whitespace)
+                cursor.setPosition(new_cursor_pos)
+            # 그 외의 경우(쉼표 추가된 경우)는 커서가 이미 올바른 위치에 있음
+            widget.setTextCursor(cursor)
         else: # QLineEdit
             current_text = widget.text()
             new_text = current_text[:start_pos] + final_text + current_text[info['end']:]
             widget.setText(new_text)
             
-            # 커서를 뒤 공백/줄바꿈 이전 위치로 설정
-            if trailing_whitespace:
+            # 커서 위치 설정
+            if trailing_whitespace and not added_comma_space:
+                # 일반 공백만 있는 경우: 공백 이전 위치로
                 new_cursor_pos = start_pos + len(final_text) - len(trailing_whitespace)
+                widget.setCursorPosition(new_cursor_pos)
+            elif '\n' in trailing_whitespace:
+                # 줄바꿈이 있는 경우: 쉼표와 공백 뒤, 줄바꿈 이전 위치로
+                new_cursor_pos = start_pos + len(final_text) - len(trailing_whitespace)
+                widget.setCursorPosition(new_cursor_pos)
+            else:
+                # 쉼표와 공백을 추가한 경우: 텍스트 끝(공백 뒤)으로
+                new_cursor_pos = start_pos + len(final_text)
                 widget.setCursorPosition(new_cursor_pos)
         
         self._hide_all_popups()

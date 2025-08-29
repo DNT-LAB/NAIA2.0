@@ -376,7 +376,14 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         auto_hide = options["auto_hide"]
         temp_hide_prompt = []
         
-        # ~ 로 시작하는 아이템 제거
+        # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
+        protected_keywords = []
+        for item in auto_hide:
+            if item.startswith('~'):
+                # ~ 제거하고 보호 리스트에 추가
+                protected_keywords.append(item[1:].strip())
+        
+        # ~ 로 시작하는 아이템 제거 (auto_hide에서는 제외)
         auto_hide = [item for item in auto_hide if not item.startswith('~')]
         
         # 원본 tag_conversion_map (key와 value를 바꿔서 사용할 것임)
@@ -398,10 +405,19 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # 추가된 항목을 auto_hide에 병합 (중복 제거)
         auto_hide = list(set(auto_hide + additional_auto_hide))
 
-        # 직접 매칭되는 키워드 제거
+        # 직접 매칭되는 키워드 제거 (보호된 키워드는 제외)
         for keyword in main_tags:
             if keyword in auto_hide:
-                temp_hide_prompt.append(keyword)
+                # 보호된 키워드인지 확인
+                is_protected = False
+                for protected in protected_keywords:
+                    if protected in keyword or keyword == protected:
+                        is_protected = True
+                        break
+                
+                if not is_protected:
+                    temp_hide_prompt.append(keyword)
+                    
         for keyword in temp_hide_prompt:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
@@ -423,8 +439,24 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 modified_item = " " + modified_item.rstrip("_") + " "
                 to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
                 
-        # 조건에 맞는 키워드를 main_tags에서 제거
+        # 보호된 키워드를 to_remove에서 제외
         to_remove = list(set(to_remove))
+        if protected_keywords:
+            # 보호된 키워드와 매칭되는 항목을 to_remove에서 제거
+            protected_to_keep = []
+            for protected in protected_keywords:
+                for keyword in to_remove[:]:  # 복사본으로 순회
+                    if protected in keyword or keyword == protected:
+                        protected_to_keep.append(keyword)
+                        
+            # to_remove에서 보호된 키워드 제거
+            for protected_item in protected_to_keep:
+                if protected_item in to_remove:
+                    to_remove.remove(protected_item)
+                    
+            print(f"보호된 키워드: {', '.join(protected_to_keep) if protected_to_keep else '없음'}")
+        
+        # 조건에 맞는 키워드를 main_tags에서 제거
         if to_remove:
             for keyword in to_remove:
                 if keyword in main_tags:
@@ -712,9 +744,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # 메인 UI 설정 수집
         main_settings = self.collect_main_ui_settings()
         
+        # 현재 API 모드 저장
+        current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        
         preset_data = {
             "module_settings": module_settings,
-            "main_settings": main_settings
+            "main_settings": main_settings,
+            "api_mode": current_mode  # 프리셋이 저장된 API 모드 기록
         }
         
         # 기존 description이 있으면 유지
@@ -742,6 +778,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 preset_data = json.load(f)
             
             print(f"  - 프리셋 데이터 키: {list(preset_data.keys())}")
+            
+            # 프리셋이 저장된 API 모드 확인
+            preset_mode = preset_data.get("api_mode", "NAI")
+            current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+            
+            if preset_mode != current_mode:
+                print(f"  ⚠️ 프리셋 모드({preset_mode})와 현재 모드({current_mode})가 다름 - 변환 시도")
             
             # 메인 윈도우가 준비되었는지 확인
             main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
@@ -1276,15 +1319,81 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     settings['VAR+'] = params.get('VAR+', False)
                     settings['DECRISP'] = params.get('DECRISP', False)
             elif mode == "WEBUI":
-                settings['cfg_scale'] = params.get('cfg_scale', 7.0)
-                settings['sampler'] = params.get('sampler_name', 'Euler')
-                settings['steps'] = params.get('steps', 20)
-                settings['enable_hr'] = params.get('enable_hr', False)
-                settings['hr_scale'] = params.get('hr_scale', 2.0)
-                settings['hr_upscaler'] = params.get('hr_upscaler', 'Latent')
+                # WEBUI도 NAI와 동일한 위젯 이름 사용하므로 직접 위젯에서 값 가져오기
+                if hasattr(main_window, 'cfg_scale_slider'):
+                    settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
+                else:
+                    settings['cfg_scale'] = params.get('cfg_scale', 7.0)
+                    
+                if hasattr(main_window, 'sampler_combo'):
+                    settings['sampler'] = main_window.sampler_combo.currentText()
+                else:
+                    settings['sampler'] = params.get('sampler_name', 'Euler')
+                
+                # WEBUI에서는 scheduler도 저장해야 함
+                if hasattr(main_window, 'scheduler_combo'):
+                    settings['scheduler'] = main_window.scheduler_combo.currentText()
+                else:
+                    settings['scheduler'] = params.get('scheduler', 'SGM Uniform')
+                    
+                if hasattr(main_window, 'steps_spinbox'):
+                    settings['steps'] = main_window.steps_spinbox.value()
+                else:
+                    settings['steps'] = params.get('steps', 20)
+                
+                # WEBUI 전용 설정들
+                if hasattr(main_window, 'enable_hr_checkbox'):
+                    settings['enable_hr'] = main_window.enable_hr_checkbox.isChecked()
+                else:
+                    settings['enable_hr'] = params.get('enable_hr', False)
+                    
+                if hasattr(main_window, 'hr_scale_spinbox'):
+                    settings['hr_scale'] = main_window.hr_scale_spinbox.value()
+                else:
+                    settings['hr_scale'] = params.get('hr_scale', 1.5)
+                    
+                if hasattr(main_window, 'hr_upscaler_combo'):
+                    settings['hr_upscaler'] = main_window.hr_upscaler_combo.currentText()
+                else:
+                    settings['hr_upscaler'] = params.get('hr_upscaler', 'Lanczos')
+                
+                # denoising_strength도 저장
+                if hasattr(main_window, 'denoising_strength_slider'):
+                    settings['denoising_strength'] = main_window.denoising_strength_slider.value() / 100.0
+                else:
+                    settings['denoising_strength'] = params.get('denoising_strength', 0.5)
             elif mode == "COMFYUI":
-                # ComfyUI는 워크플로우 기반이므로 최소한의 정보만
-                settings['workflow'] = params.get('workflow', 'default')
+                # ComfyUI도 NAI/WEBUI와 동일한 위젯 이름 사용
+                if hasattr(main_window, 'cfg_scale_slider'):
+                    settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
+                else:
+                    settings['cfg_scale'] = params.get('cfg_scale', 7.0)
+                    
+                if hasattr(main_window, 'sampler_combo'):
+                    settings['sampler'] = main_window.sampler_combo.currentText()
+                else:
+                    settings['sampler'] = params.get('sampler', 'euler')
+                
+                if hasattr(main_window, 'scheduler_combo'):
+                    settings['scheduler'] = main_window.scheduler_combo.currentText()
+                else:
+                    settings['scheduler'] = params.get('scheduler', 'normal')
+                    
+                if hasattr(main_window, 'steps_spinbox'):
+                    settings['steps'] = main_window.steps_spinbox.value()
+                else:
+                    settings['steps'] = params.get('steps', 20)
+                
+                # ComfyUI 전용 설정
+                if hasattr(main_window, 'v_prediction_checkbox'):
+                    settings['v_prediction'] = main_window.v_prediction_checkbox.isChecked()
+                else:
+                    settings['v_prediction'] = params.get('v_prediction', False)
+                    
+                if hasattr(main_window, 'zsnr_checkbox'):
+                    settings['zsnr'] = main_window.zsnr_checkbox.isChecked()
+                else:
+                    settings['zsnr'] = params.get('zsnr', False)
             
         except Exception as e:
             print(f"⚠️ 메인 UI 설정 수집 중 오류: {e}")
@@ -1379,27 +1488,108 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             
             # WEBUI 모드 설정
             elif mode == "WEBUI":
-                if 'cfg_scale' in settings and hasattr(main_window, 'cfg_scale_input'):
-                    main_window.cfg_scale_input.setValue(float(settings['cfg_scale']))
+                # WEBUI는 NAI와 동일한 위젯 이름을 사용
+                if 'cfg_scale' in settings and hasattr(main_window, 'cfg_scale_slider'):
+                    # cfg_scale을 슬라이더 값으로 변환 (1.0~30.0 → 10~300)
+                    main_window.cfg_scale_slider.setValue(int(float(settings['cfg_scale']) * 10))
+                    print(f"        WEBUI cfg_scale: {settings['cfg_scale']}")
                 
                 if 'sampler' in settings and hasattr(main_window, 'sampler_combo'):
-                    index = main_window.sampler_combo.findText(settings['sampler'])
+                    sampler_value = settings['sampler']
+                    
+                    # NAI sampler를 WEBUI sampler로 매핑 시도
+                    sampler_mapping = {
+                        'k_euler_ancestral': 'Euler a',
+                        'k_euler': 'Euler',
+                        'k_dpmpp_2m': 'DPM++ 2M',
+                        'k_dpmpp_2s_ancestral': 'DPM++ 2S a',
+                        'k_dpmpp_sde': 'DPM++ SDE',
+                        'k_dpmpp_2m_sde': 'DPM++ 2M SDE',
+                        'ddim_v3': 'DDIM'
+                    }
+                    
+                    # NAI sampler라면 WEBUI 형식으로 변환
+                    if sampler_value in sampler_mapping:
+                        sampler_value = sampler_mapping[sampler_value]
+                    
+                    index = main_window.sampler_combo.findText(sampler_value)
                     if index >= 0:
                         main_window.sampler_combo.setCurrentIndex(index)
+                        print(f"        WEBUI sampler: {sampler_value}")
+                    else:
+                        print(f"        ⚠️ WEBUI sampler '{sampler_value}' 찾을 수 없음")
                 
-                if 'steps' in settings and hasattr(main_window, 'steps_input'):
-                    main_window.steps_input.setValue(int(settings['steps']))
+                if 'steps' in settings and hasattr(main_window, 'steps_spinbox'):
+                    main_window.steps_spinbox.setValue(int(settings['steps']))
+                    print(f"        WEBUI steps: {settings['steps']}")
                 
+                # scheduler 설정 적용
+                if 'scheduler' in settings and hasattr(main_window, 'scheduler_combo'):
+                    index = main_window.scheduler_combo.findText(settings['scheduler'])
+                    if index >= 0:
+                        main_window.scheduler_combo.setCurrentIndex(index)
+                        print(f"        WEBUI scheduler: {settings['scheduler']}")
+                    else:
+                        print(f"        ⚠️ WEBUI scheduler '{settings['scheduler']}' 찾을 수 없음")
+                
+                # WEBUI 전용 설정들
                 if 'enable_hr' in settings and hasattr(main_window, 'enable_hr_checkbox'):
                     main_window.enable_hr_checkbox.setChecked(settings['enable_hr'])
+                    print(f"        WEBUI enable_hr: {settings['enable_hr']}")
                 
-                if 'hr_scale' in settings and hasattr(main_window, 'hr_scale_input'):
-                    main_window.hr_scale_input.setValue(float(settings['hr_scale']))
+                if 'hr_scale' in settings and hasattr(main_window, 'hr_scale_spinbox'):
+                    main_window.hr_scale_spinbox.setValue(float(settings['hr_scale']))
+                    print(f"        WEBUI hr_scale: {settings['hr_scale']}")
                 
                 if 'hr_upscaler' in settings and hasattr(main_window, 'hr_upscaler_combo'):
                     index = main_window.hr_upscaler_combo.findText(settings['hr_upscaler'])
                     if index >= 0:
                         main_window.hr_upscaler_combo.setCurrentIndex(index)
+                        print(f"        WEBUI hr_upscaler: {settings['hr_upscaler']}")
+                
+                # denoising_strength 설정 적용
+                if 'denoising_strength' in settings and hasattr(main_window, 'denoising_strength_slider'):
+                    # 0.0~1.0 값을 0~100 슬라이더 값으로 변환
+                    slider_value = int(float(settings['denoising_strength']) * 100)
+                    main_window.denoising_strength_slider.setValue(slider_value)
+                    print(f"        WEBUI denoising_strength: {settings['denoising_strength']}")
+            
+            # ComfyUI 모드 설정
+            elif mode == "COMFYUI":
+                print("      ComfyUI 모드 설정 적용 중...")
+                
+                if 'cfg_scale' in settings and hasattr(main_window, 'cfg_scale_slider'):
+                    main_window.cfg_scale_slider.setValue(int(float(settings['cfg_scale']) * 10))
+                    print(f"        ComfyUI cfg_scale: {settings['cfg_scale']}")
+                
+                if 'sampler' in settings and hasattr(main_window, 'sampler_combo'):
+                    index = main_window.sampler_combo.findText(settings['sampler'])
+                    if index >= 0:
+                        main_window.sampler_combo.setCurrentIndex(index)
+                        print(f"        ComfyUI sampler: {settings['sampler']}")
+                    else:
+                        print(f"        ⚠️ ComfyUI sampler '{settings['sampler']}' 찾을 수 없음")
+                
+                if 'scheduler' in settings and hasattr(main_window, 'scheduler_combo'):
+                    index = main_window.scheduler_combo.findText(settings['scheduler'])
+                    if index >= 0:
+                        main_window.scheduler_combo.setCurrentIndex(index)
+                        print(f"        ComfyUI scheduler: {settings['scheduler']}")
+                    else:
+                        print(f"        ⚠️ ComfyUI scheduler '{settings['scheduler']}' 찾을 수 없음")
+                
+                if 'steps' in settings and hasattr(main_window, 'steps_spinbox'):
+                    main_window.steps_spinbox.setValue(int(settings['steps']))
+                    print(f"        ComfyUI steps: {settings['steps']}")
+                
+                # ComfyUI 전용 설정
+                if 'v_prediction' in settings and hasattr(main_window, 'v_prediction_checkbox'):
+                    main_window.v_prediction_checkbox.setChecked(settings['v_prediction'])
+                    print(f"        ComfyUI v_prediction: {settings['v_prediction']}")
+                
+                if 'zsnr' in settings and hasattr(main_window, 'zsnr_checkbox'):
+                    main_window.zsnr_checkbox.setChecked(settings['zsnr'])
+                    print(f"        ComfyUI zsnr: {settings['zsnr']}")
             
         except Exception as e:
             import traceback

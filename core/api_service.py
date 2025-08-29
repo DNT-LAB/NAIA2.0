@@ -83,20 +83,20 @@ class APIService:
             cleaned_prompt = ', '.join(cleaned_tags)
             if original_prompt != cleaned_prompt:
                 parameters['input'] = cleaned_prompt
-                print(f"🧹 APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
+                print(f"[CLEAN] APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
         
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
-        print(f"🛰️ APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
-        print(f"   📋 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
+        print(f"[API] APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
+        print(f"   [파라미터] 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
             f"모델: {parameters.get('model', 'N/A')}, 샘플러: {parameters.get('sampler', 'N/A')}")
 
-        max_retries = 5
+        max_retries = 3  # 5회에서 3회로 줄임
         last_exception = None
 
         result = None
         for attempt in range(1, max_retries + 1):
             if attempt > 1:
-                print(f"🔄 재시도 {attempt}/{max_retries}...")
+                print(f"[RETRY] 재시도 {attempt}/{max_retries}...")
             try:
                 if api_mode == "NAI":
                     result = self._call_nai_api(parameters)
@@ -106,6 +106,27 @@ class APIService:
                     result = self._call_comfyui_api(parameters)
                 else:
                     result = {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+                
+                # 🔧 FIX: API 호출 결과가 error인 경우에도 재시도하도록 수정
+                if result and result.get('status') == 'error':
+                    error_msg = result.get('message', 'Unknown error')
+                    print(f"[WARNING] API 오류 응답 (시도 {attempt}/{max_retries}): {error_msg}")
+                    
+                    # HTTP 520 등 서버 오류는 재시도 가능
+                    if 'HTTP 520' in error_msg or 'HTTP 502' in error_msg or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg:
+                        if attempt < max_retries:
+                            print(f"[WAIT] 서버 오류 감지. {2 * attempt}초 후 재시도합니다...")
+                            time.sleep(2 * attempt)  # 점진적으로 대기 시간 증가
+                            continue
+                    
+                    # 재시도할 수 없는 오류는 즉시 반환
+                    last_exception = error_msg
+                    if attempt < max_retries:
+                        time.sleep(1)  # 1초 대기 후 재시도
+                        continue
+                    else:
+                        # 마지막 시도에서도 실패하면 에러 반환
+                        return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {error_msg}"}
                 
                 # Check if cropped_image_request is enabled
                 if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
@@ -120,13 +141,13 @@ class APIService:
                 return result
                 
             except Exception as e:
-                print(f"⚠️ API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
+                print(f"[WARNING] API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
                 last_exception = e
                 if attempt < max_retries:
                     time.sleep(1)  # 1초 대기 후 재시도 (필요에 따라 시간 조정 가능)
                 else:
                     # 마지막 시도에서도 실패하면 에러 반환
-                    return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 {max_retries}회 초과): {e}"}
+                    return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {e}"}
 
 
     def _call_nai_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -280,6 +301,27 @@ class APIService:
                                     'char_caption': ucs[i] if i < len(ucs) else "",
                                     'centers': [{"x": 0.5, "y": 0.5}]
                                 })
+            
+            # 🎨 Vibe Transfer Multiple 처리
+            vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
+            if vibe_module:
+                vibe_data = vibe_module.get_vibe_transfer_multiple_data()
+                if vibe_data and vibe_data.get('reference_image_multiple'):
+                    print("✅ Vibe Transfer 활성화됨. Multiple 파라미터를 적용합니다.")
+                    
+                    # Update api_parameters with vibe transfer data
+                    api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
+                    api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
+                    api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
+                    
+                    # Add NAID3-specific parameter if present
+                    if 'reference_information_extracted_multiple' in vibe_data:
+                        api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
+                        print(f"  - NAID3 IE values: {vibe_data['reference_information_extracted_multiple']}")
+                    
+                    print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
+                    print(f"  - Normalization: {vibe_data['normalize_reference_strength_multiple']}")
+                    print(f"  - Strengths: {vibe_data['reference_strength_multiple']}")
             
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):

@@ -549,18 +549,20 @@ class GenerationParamsManager:
             self.save_mode_settings(old_mode)
         
         # 2. 새 모드와 호환되는 경우에만 설정 로드
+        # load_mode_settings 내부에서 이미 load_webui_dynamic_options를 호출하므로
+        # 여기서는 추가로 호출하지 않음
         if self.is_compatible_with_mode(new_mode):
             self.load_mode_settings(new_mode)
-        
-        # 3. 모드별 UI 업데이트
-        if new_mode == "NAI":
-            self.update_ui_for_nai_mode()
-        elif new_mode == "WEBUI":
-            self.load_webui_dynamic_options()
-            self.update_ui_for_webui_mode()
-        elif new_mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
-            self.load_comfyui_dynamic_options()
-            self.update_ui_for_comfyui_mode()
+        else:
+            # 호환되지 않는 경우에만 UI 업데이트
+            if new_mode == "NAI":
+                self.update_ui_for_nai_mode()
+            elif new_mode == "WEBUI":
+                self.load_webui_dynamic_options()
+                self.update_ui_for_webui_mode()
+            elif new_mode == "COMFYUI":
+                self.load_comfyui_dynamic_options()
+                self.update_ui_for_comfyui_mode()
 
     def load_webui_dynamic_options(self):
         """WEBUI API에서 동적 옵션들을 로드하여 UI에 적용"""

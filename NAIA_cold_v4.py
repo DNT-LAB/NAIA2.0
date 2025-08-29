@@ -305,6 +305,8 @@ class PromptTextEdit(QTextEdit):
             popup.img2img_requested.connect(main_window.activate_img2img_panel)
         if hasattr(main_window, 'activate_inpaint_mode'):
             popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
+        if hasattr(main_window, 'activate_vibe_transfer'):
+            popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
 
         # 팝업 위치 조정 및 실행
         cursor_pos = QCursor.pos()
@@ -1546,7 +1548,9 @@ class ModernMainWindow(QMainWindow):
                             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                                 self.image_window.tab_controller.add_tab_by_name(
                                     'SimpleWebViewTabModule',
-                                    api_url=validated_url
+                                    api_url=validated_url,
+                                    api_mode='WEBUI',
+                                    app_context=self.app_context
                                 )
                             
                         else:
@@ -1641,7 +1645,8 @@ class ModernMainWindow(QMainWindow):
                             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                                 self.image_window.tab_controller.add_tab_by_name(
                                     'SimpleWebViewTabModule',
-                                    api_url=f"http://{comfyui_url}"
+                                    api_url=f"http://{comfyui_url}",
+                                    api_mode='COMFYUI'
                                 )
 
                         else:
@@ -3679,6 +3684,493 @@ class ModernMainWindow(QMainWindow):
             # Note: skip_window is now handled differently via set_mask_from_sketchbook
             if not skip_window:
                 self.img2img_panel._on_inpaint_button_clicked()
+    
+    def activate_vibe_transfer(self, pil_image: Image.Image):
+        """Import Vibe Transfer 요청을 처리하여 이미지를 vibe transfer 모듈에 추가합니다."""
+        try:
+            # VibeTransferModule 찾기
+            if hasattr(self, 'middle_section_controller'):
+                vibe_module = self.middle_section_controller.get_module_instance("VibeTransferModule")
+                if vibe_module:
+                    # 임시 파일로 저장
+                    import hashlib
+                    from pathlib import Path
+                    temp_path = Path("temp") / f"vibe_import_{hashlib.sha256(str(pil_image).encode()).hexdigest()[:16]}.png"
+                    temp_path.parent.mkdir(exist_ok=True)
+                    pil_image.save(str(temp_path))
+                    
+                    # vibe frame 추가 (upload와 동일한 처리)
+                    vibe_module._add_vibe_frame(str(temp_path))
+                    print(f"📦 Vibe Transfer로 이미지 추가됨: {temp_path}")
+                    self.status_bar.showMessage("Vibe Transfer로 이미지가 추가되었습니다.", 3000)
+                else:
+                    QMessageBox.warning(self, "경고", "Vibe Transfer 모듈을 찾을 수 없습니다.")
+        except Exception as e:
+            print(f"Error adding image to vibe transfer: {e}")
+            QMessageBox.critical(self, "오류", f"Vibe Transfer에 이미지 추가 실패:\n{str(e)}")
+    
+    def apply_prompt_from_metadata(self, prompt: str, negative: str):
+        """메타데이터에서 프롬프트를 적용합니다."""
+        try:
+            # 메인 프롬프트 적용
+            if hasattr(self, 'prompt_input'):
+                self.prompt_input.setPlainText(prompt)
+            
+            # 네거티브 프롬프트 적용
+            if hasattr(self, 'negative_prompt_input'):
+                self.negative_prompt_input.setPlainText(negative)
+            
+            print(f"✅ 메타데이터에서 프롬프트 적용 완료")
+            self.status_bar.showMessage("프롬프트가 적용되었습니다.", 3000)
+        except Exception as e:
+            print(f"❌ 프롬프트 적용 중 오류: {e}")
+    
+    def apply_settings_from_metadata(self, settings: dict):
+        """메타데이터에서 설정값을 일괄 적용합니다."""
+        try:
+            current_mode = self.app_context.get_api_mode()
+            
+            # 메타데이터에서 소스 모드 감지
+            source_mode = self._detect_metadata_source_mode(settings)
+            
+            # 모드 호환성 체크
+            if source_mode and source_mode != current_mode:
+                # NAI ↔ WEBUI 간 상호 호환 불가
+                if (source_mode == "NAI" and current_mode == "WEBUI") or \
+                   (source_mode == "WEBUI" and current_mode == "NAI"):
+                    error_msg = QMessageBox(self)
+                    error_msg.setWindowTitle("호환되지 않는 모드")
+                    error_msg.setText(f"{source_mode} 모드의 설정값을 {current_mode} 모드에서 적용할 수 없습니다.\n\n"
+                                     f"동일한 모드로 전환한 후 다시 시도해주세요.")
+                    error_msg.setIcon(QMessageBox.Icon.Critical)
+                    
+                    # 다크 테마 및 하얀 텍스트 적용
+                    error_msg.setStyleSheet("""
+                        QMessageBox {
+                            background-color: #2b2b2b;
+                            color: white;
+                        }
+                        QMessageBox QLabel {
+                            color: white;
+                        }
+                        QMessageBox QPushButton {
+                            background-color: #404040;
+                            border: 1px solid #555555;
+                            color: white;
+                            padding: 5px 15px;
+                            border-radius: 3px;
+                        }
+                        QMessageBox QPushButton:hover {
+                            background-color: #505050;
+                        }
+                        QMessageBox QPushButton:pressed {
+                            background-color: #353535;
+                        }
+                    """)
+                    
+                    error_msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    error_msg.exec()
+                    return
+            
+            # 경고 메시지 표시
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("설정값 일괄 적용")
+            msg_box.setText("현재 프리셋의 설정값이 소실됩니다.\n계속하시겠습니까?")
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            
+            # 다크 테마 및 하얀 텍스트 적용
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2b2b2b;
+                    color: white;
+                }
+                QMessageBox QLabel {
+                    color: white;
+                }
+                QMessageBox QPushButton {
+                    background-color: #404040;
+                    border: 1px solid #555555;
+                    color: white;
+                    padding: 5px 15px;
+                    border-radius: 3px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #505050;
+                }
+                QMessageBox QPushButton:pressed {
+                    background-color: #353535;
+                }
+            """)
+            
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+            
+            if msg_box.exec() != QMessageBox.StandardButton.Yes:
+                return
+            
+            print(f"📝 메타데이터 설정 적용 시작 (모드: {current_mode})")
+            
+            # 랜덤 해상도 및 자동 해상도 맞춤 비활성화
+            if hasattr(self, 'random_resolution_checkbox'):
+                self.random_resolution_checkbox.setChecked(False)
+                print("  ✓ 랜덤 해상도: 비활성화")
+            
+            if hasattr(self, 'auto_fit_resolution_checkbox'):
+                self.auto_fit_resolution_checkbox.setChecked(False)
+                print("  ✓ 자동 해상도 맞춤: 비활성화")
+            
+            # 시드 고정 활성화
+            if hasattr(self, 'seed_checkbox'):
+                self.seed_checkbox.setChecked(True)
+                print("  ✓ 시드 고정: 활성화")
+            
+            # 호환성 딕셔너리 생성 (prompt_engineering_module 참조)
+            compat_settings = self._create_metadata_compatibility_dict(settings, current_mode)
+            
+            # 프롬프트 적용
+            if 'prompt' in compat_settings:
+                if hasattr(self, 'main_prompt_textedit'):
+                    self.main_prompt_textedit.setPlainText(compat_settings['prompt'])
+                elif hasattr(self, 'prompt_input'):
+                    self.prompt_input.setPlainText(compat_settings['prompt'])
+                print(f"  ✓ 프롬프트 적용 (길이: {len(compat_settings['prompt'])})")
+            
+            if 'negative' in compat_settings:
+                if hasattr(self, 'negative_prompt_textedit'):
+                    self.negative_prompt_textedit.setPlainText(compat_settings['negative'])
+                elif hasattr(self, 'negative_prompt_input'):
+                    self.negative_prompt_input.setPlainText(compat_settings['negative'])
+                print(f"  ✓ 네거티브 적용 (길이: {len(compat_settings['negative'])})")
+            
+            # apply_main_ui_settings 스타일로 설정 적용
+            if current_mode == "NAI":
+                self._apply_nai_settings(compat_settings)
+            elif current_mode == "WEBUI":
+                self._apply_webui_settings(compat_settings)
+            elif current_mode == "COMFYUI":
+                self._apply_comfyui_settings(compat_settings)
+            
+            print(f"✅ 메타데이터 설정 적용 완료")
+            # 성공 메시지는 출력하지 않음 (사용자 요청)
+            
+        except Exception as e:
+            import traceback
+            print(f"❌ 설정값 적용 중 오류: {e}")
+            traceback.print_exc()
+            self.status_bar.showMessage(f"설정 적용 중 일부 오류 발생: {e}", 5000)
+    
+    def _detect_metadata_source_mode(self, settings: dict) -> str:
+        """메타데이터에서 소스 모드를 감지합니다."""
+        # Software 필드 확인 (NAI)
+        if 'Software' in settings and settings['Software'] == 'NovelAI':
+            return 'NAI'
+        
+        # type 필드 확인
+        if 'type' in settings:
+            type_info = settings['type'].lower()
+            if type_info == 'nai':
+                return 'NAI'
+            elif type_info == 'webui':
+                return 'WEBUI'
+            elif type_info == 'comfyui':
+                return 'COMFYUI'
+        
+        # NAI 전용 파라미터 확인
+        nai_specific = ['noise_schedule', 'sm', 'sm_dyn', 'dynamic_thresholding', 
+                       'controlnet_strength', 'legacy', 'skip_cfg_above_sigma', 
+                       'uncond_scale', 'cfg_rescale']
+        for param in nai_specific:
+            if param in settings:
+                return 'NAI'
+        
+        # WebUI 전용 파라미터 확인
+        webui_specific = ['enable_hr', 'hr_scale', 'hr_upscaler', 'denoising_strength',
+                         'Model hash', 'Model', 'VAE', 'VAE hash', 'Clip skip',
+                         'Face restoration', 'RNG', 'Hires upscaler']
+        for param in webui_specific:
+            if param in settings:
+                return 'WEBUI'
+        
+        # parameters 필드 내부 확인
+        if 'parameters' in settings:
+            params = settings['parameters']
+            # WebUI 스타일 parameters
+            if any(key in params for key in ['Model hash', 'Model', 'VAE']):
+                return 'WEBUI'
+        
+        # ComfyUI workflow 확인
+        if 'workflow' in settings:
+            return 'COMFYUI'
+        
+        # 기본값: None (알 수 없음)
+        return None
+    
+    def _create_metadata_compatibility_dict(self, settings: dict, mode: str) -> dict:
+        """메타데이터를 현재 모드에 맞게 변환하는 호환성 딕셔너리 생성"""
+        compat = {}
+        
+        # 프롬프트 매핑
+        if 'prompt' in settings:
+            compat['prompt'] = settings['prompt']
+        
+        # 네거티브 프롬프트 매핑 (uc, negative, negative_prompt 등)
+        if 'negative' in settings:
+            compat['negative'] = settings['negative']
+        elif 'uc' in settings:
+            compat['negative'] = settings['uc']
+        elif 'negative_prompt' in settings:
+            compat['negative'] = settings['negative_prompt']
+        
+        # Steps 매핑
+        if 'steps' in settings:
+            compat['steps'] = int(settings['steps'])
+        
+        # CFG Scale 매핑 (scale, cfg_scale)
+        if 'scale' in settings:
+            compat['cfg_scale'] = float(settings['scale'])
+        elif 'cfg_scale' in settings:
+            compat['cfg_scale'] = float(settings['cfg_scale'])
+        
+        # Seed 매핑
+        if 'seed' in settings:
+            compat['seed'] = str(settings['seed'])
+        
+        # Sampler 매핑
+        if 'sampler' in settings:
+            compat['sampler'] = settings['sampler']
+        
+        # NAI 전용 파라미터
+        if mode == "NAI":
+            # Noise Schedule
+            if 'noise_schedule' in settings:
+                compat['noise_schedule'] = settings['noise_schedule']
+            
+            # SMEA 관련
+            if 'sm' in settings:
+                compat['SMEA'] = bool(settings['sm'])
+            if 'sm_dyn' in settings:
+                compat['DYN'] = bool(settings['sm_dyn'])
+            
+            # VAR+ (skip_cfg_above_sigma)
+            if 'skip_cfg_above_sigma' in settings:
+                skip_val = settings['skip_cfg_above_sigma']
+                compat['VAR+'] = bool(skip_val and skip_val != 0)
+            elif 'VAR+' in settings:
+                compat['VAR+'] = bool(settings['VAR+'])
+            
+            # DECRISP
+            if 'decrisper' in settings:
+                compat['DECRISP'] = bool(settings['decrisper'])
+            elif 'DECRISP' in settings:
+                compat['DECRISP'] = bool(settings['DECRISP'])
+            
+            # UC Strength
+            if 'uncond_scale' in settings:
+                compat['uncond_scale'] = float(settings['uncond_scale'])
+            
+            # CFG Rescale
+            if 'cfg_rescale' in settings:
+                compat['cfg_rescale'] = float(settings['cfg_rescale'])
+        
+        # WEBUI 전용 파라미터
+        elif mode == "WEBUI":
+            # Scheduler
+            if 'scheduler' in settings:
+                compat['scheduler'] = settings['scheduler']
+            elif 'noise_schedule' in settings:
+                # NAI noise_schedule을 WEBUI scheduler로 매핑
+                schedule_mapping = {
+                    'native': 'karras',
+                    'karras': 'karras',
+                    'exponential': 'exponential',
+                    'polyexponential': 'normal'
+                }
+                compat['scheduler'] = schedule_mapping.get(settings['noise_schedule'], 'normal')
+            
+            # Sampler 변환 (NAI → WEBUI)
+            if 'sampler' in compat:
+                sampler_mapping = {
+                    'k_euler_ancestral': 'Euler a',
+                    'k_euler': 'Euler',
+                    'k_dpmpp_2m': 'DPM++ 2M',
+                    'k_dpmpp_2s_ancestral': 'DPM++ 2S a',
+                    'k_dpmpp_sde': 'DPM++ SDE',
+                    'k_dpmpp_2m_sde': 'DPM++ 2M SDE',
+                    'ddim_v3': 'DDIM'
+                }
+                if compat['sampler'] in sampler_mapping:
+                    compat['sampler'] = sampler_mapping[compat['sampler']]
+            
+            # Hires Fix
+            if 'enable_hr' in settings:
+                compat['enable_hr'] = bool(settings['enable_hr'])
+            if 'hr_scale' in settings:
+                compat['hr_scale'] = float(settings['hr_scale'])
+            if 'hr_upscaler' in settings:
+                compat['hr_upscaler'] = settings['hr_upscaler']
+            if 'denoising_strength' in settings:
+                compat['denoising_strength'] = float(settings['denoising_strength'])
+        
+        # 해상도
+        if 'width' in settings and 'height' in settings:
+            compat['width'] = int(settings['width'])
+            compat['height'] = int(settings['height'])
+        
+        # 모델 정보
+        if 'model' in settings:
+            compat['model'] = settings['model']
+        
+        return compat
+    
+    def _apply_nai_settings(self, settings: dict):
+        """NAI 모드 설정 적용"""
+        print(f"  NAI 설정 적용 중...")
+        
+        # CFG Scale
+        if 'cfg_scale' in settings and hasattr(self, 'cfg_scale_slider'):
+            slider_value = int(float(settings['cfg_scale']) * 10)
+            self.cfg_scale_slider.setValue(slider_value)
+            if hasattr(self, 'cfg_value_label'):
+                self.cfg_value_label.setText(str(settings['cfg_scale']))
+            print(f"    ✓ CFG Scale: {settings['cfg_scale']}")
+        
+        # Sampler
+        if 'sampler' in settings and hasattr(self, 'sampler_combo'):
+            sampler_text = settings['sampler']
+            if 'noise_schedule' in settings:
+                sampler_text = f"{settings['sampler']} + {settings['noise_schedule']}"
+            
+            index = self.sampler_combo.findText(sampler_text)
+            if index >= 0:
+                self.sampler_combo.setCurrentIndex(index)
+                print(f"    ✓ Sampler: {sampler_text}")
+        
+        # Steps
+        if 'steps' in settings and hasattr(self, 'steps_spinbox'):
+            self.steps_spinbox.setValue(int(settings['steps']))
+            print(f"    ✓ Steps: {settings['steps']}")
+        
+        # Advanced checkboxes
+        if hasattr(self, 'advanced_checkboxes'):
+            for key in ['SMEA', 'DYN', 'VAR+', 'DECRISP']:
+                if key in settings and key in self.advanced_checkboxes:
+                    self.advanced_checkboxes[key].setChecked(bool(settings[key]))
+                    print(f"    ✓ {key}: {settings[key]}")
+        
+        # Seed
+        if 'seed' in settings:
+            if hasattr(self, 'seed_checkbox'):
+                self.seed_checkbox.setChecked(True)
+            if hasattr(self, 'seed_input'):
+                self.seed_input.setText(str(settings['seed']))
+                print(f"    ✓ Seed: {settings['seed']}")
+        
+        # Resolution
+        if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
+            resolution_text = f"{settings['width']} x {settings['height']}"
+            index = self.resolution_combo.findText(resolution_text)
+            if index >= 0:
+                self.resolution_combo.setCurrentIndex(index)
+                print(f"    ✓ Resolution: {resolution_text}")
+    
+    def _apply_webui_settings(self, settings: dict):
+        """WEBUI 모드 설정 적용"""
+        print(f"  WEBUI 설정 적용 중...")
+        
+        # CFG Scale
+        if 'cfg_scale' in settings and hasattr(self, 'cfg_scale_slider'):
+            slider_value = int(float(settings['cfg_scale']) * 10)
+            self.cfg_scale_slider.setValue(slider_value)
+            print(f"    ✓ CFG Scale: {settings['cfg_scale']}")
+        
+        # Sampler
+        if 'sampler' in settings and hasattr(self, 'sampler_combo'):
+            index = self.sampler_combo.findText(settings['sampler'])
+            if index >= 0:
+                self.sampler_combo.setCurrentIndex(index)
+                print(f"    ✓ Sampler: {settings['sampler']}")
+        
+        # Steps
+        if 'steps' in settings and hasattr(self, 'steps_spinbox'):
+            self.steps_spinbox.setValue(int(settings['steps']))
+            print(f"    ✓ Steps: {settings['steps']}")
+        
+        # Scheduler
+        if 'scheduler' in settings and hasattr(self, 'scheduler_combo'):
+            index = self.scheduler_combo.findText(settings['scheduler'])
+            if index >= 0:
+                self.scheduler_combo.setCurrentIndex(index)
+                print(f"    ✓ Scheduler: {settings['scheduler']}")
+        
+        # Hires Fix
+        if 'enable_hr' in settings and hasattr(self, 'enable_hr_checkbox'):
+            self.enable_hr_checkbox.setChecked(bool(settings['enable_hr']))
+            print(f"    ✓ Hires Fix: {settings['enable_hr']}")
+        
+        if 'hr_scale' in settings and hasattr(self, 'hr_scale_spinbox'):
+            self.hr_scale_spinbox.setValue(float(settings['hr_scale']))
+            print(f"    ✓ HR Scale: {settings['hr_scale']}")
+        
+        if 'hr_upscaler' in settings and hasattr(self, 'hr_upscaler_combo'):
+            index = self.hr_upscaler_combo.findText(settings['hr_upscaler'])
+            if index >= 0:
+                self.hr_upscaler_combo.setCurrentIndex(index)
+                print(f"    ✓ HR Upscaler: {settings['hr_upscaler']}")
+        
+        # Denoising strength
+        if 'denoising_strength' in settings and hasattr(self, 'denoising_strength_slider'):
+            slider_value = int(float(settings['denoising_strength']) * 100)
+            self.denoising_strength_slider.setValue(slider_value)
+            print(f"    ✓ Denoising Strength: {settings['denoising_strength']}")
+        
+        # Seed
+        if 'seed' in settings:
+            if hasattr(self, 'seed_checkbox'):
+                self.seed_checkbox.setChecked(True)
+            if hasattr(self, 'seed_input'):
+                self.seed_input.setText(str(settings['seed']))
+                print(f"    ✓ Seed: {settings['seed']}")
+        
+        # Resolution
+        if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
+            resolution_text = f"{settings['width']} x {settings['height']}"
+            index = self.resolution_combo.findText(resolution_text)
+            if index >= 0:
+                self.resolution_combo.setCurrentIndex(index)
+                print(f"    ✓ Resolution: {resolution_text}")
+    
+    def _apply_comfyui_settings(self, settings: dict):
+        """COMFYUI 모드 설정 적용"""
+        print(f"  COMFYUI 설정 적용 중...")
+        
+        # COMFYUI는 워크플로우 기반이므로 기본적인 프롬프트만 적용
+        if 'workflow' in settings:
+            print(f"    ℹ️ Workflow: {settings['workflow']}")
+        
+        # 해상도는 공통으로 적용 가능
+        if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
+            resolution_text = f"{settings['width']} x {settings['height']}"
+            index = self.resolution_combo.findText(resolution_text)
+            if index >= 0:
+                self.resolution_combo.setCurrentIndex(index)
+                print(f"    ✓ Resolution: {resolution_text}")
+    
+    def send_to_img2img_with_metadata(self, pil_image: Image.Image, metadata: dict):
+        """메타데이터와 함께 img2img로 이미지를 전송합니다."""
+        try:
+            # img2img 패널 활성화
+            if hasattr(self, 'img2img_panel'):
+                self.img2img_panel.set_image(pil_image)
+                
+                # 메타데이터에서 프롬프트 정보 가져와서 설정 가능
+                if 'prompt' in metadata:
+                    # img2img 패널의 프롬프트 필드에 설정 (있다면)
+                    pass  # img2img 패널 구현에 따라 추가
+                
+                print(f"✅ 이미지와 메타데이터를 img2img로 전송 완료")
+                self.status_bar.showMessage("img2img로 이미지가 전송되었습니다.", 3000)
+        except Exception as e:
+            print(f"❌ img2img 전송 중 오류: {e}")
 
     def on_send_to_inpaint_requested(self, history_item):
         """

@@ -338,6 +338,10 @@ class WildcardManagerWindow(QMainWindow):
         self.generator_tabs.addTab(dependent_tab, "*순차:$종속")
         
         generator_layout.addWidget(self.generator_tabs)
+
+        # 현재 탭 전용 미리보기 갱신을 위해 인덱스 매핑 및 탭 변경 핸들러 연결
+        self._gen_tab_index = {'normal': 0, 'sequential': 1, 'dependent': 2}
+        self.generator_tabs.currentChanged.connect(self.refresh_current_preview)
         
         # 공통 미리보기 (모든 탭에서 공유)
         # 위젯을 세로로 배치하기 위해 QVBoxLayout 사용
@@ -885,7 +889,8 @@ class WildcardManagerWindow(QMainWindow):
         self.normal_name_input = QLineEdit()
         self.normal_name_input.setStyleSheet(dynamic_styles['compact_lineedit'])
         self.normal_name_input.setPlaceholderText("선택된 항목 없음")
-        self.normal_name_input.textChanged.connect(self.update_normal_preview)
+        # 현재 탭에 따라 프리뷰만 갱신되도록 단일 가드 핸들러로 연결
+        self.normal_name_input.textChanged.connect(self.update_preview_guarded)
         name_layout.addWidget(self.normal_name_input)
         
         layout.addLayout(name_layout)
@@ -912,7 +917,8 @@ class WildcardManagerWindow(QMainWindow):
         self.sequential_name_input = QLineEdit()
         self.sequential_name_input.setStyleSheet(dynamic_styles['compact_lineedit'])
         self.sequential_name_input.setPlaceholderText("선택된 항목 없음")
-        self.sequential_name_input.textChanged.connect(self.update_sequential_preview)
+        # 현재 탭에 따라 프리뷰만 갱신되도록 단일 가드 핸들러로 연결
+        self.sequential_name_input.textChanged.connect(self.update_preview_guarded)
         name_layout.addWidget(self.sequential_name_input)
         
         layout.addLayout(name_layout)
@@ -939,7 +945,8 @@ class WildcardManagerWindow(QMainWindow):
         self.master_name_input = QLineEdit()
         self.master_name_input.setStyleSheet(dynamic_styles['compact_lineedit'])
         self.master_name_input.setPlaceholderText("Master 와일드카드")
-        self.master_name_input.textChanged.connect(self.update_dependent_preview)
+        # 현재 탭에 따라 프리뷰만 갱신되도록 단일 가드 핸들러로 연결
+        self.master_name_input.textChanged.connect(self.update_preview_guarded)
         master_layout.addWidget(self.master_name_input)
         
         layout.addLayout(master_layout)
@@ -954,7 +961,8 @@ class WildcardManagerWindow(QMainWindow):
         self.slave_name_input = QLineEdit()
         self.slave_name_input.setStyleSheet(dynamic_styles['compact_lineedit'])
         self.slave_name_input.setPlaceholderText("Slave 와일드카드")
-        self.slave_name_input.textChanged.connect(self.update_dependent_preview)
+        # 현재 탭에 따라 프리뷰만 갱신되도록 단일 가드 핸들러로 연결
+        self.slave_name_input.textChanged.connect(self.update_preview_guarded)
         slave_layout.addWidget(self.slave_name_input)
         
         layout.addLayout(slave_layout)
@@ -1081,6 +1089,23 @@ class WildcardManagerWindow(QMainWindow):
             self.search_results_edit.setPlaceholderText(f"'{search_text}'와 일치하는 라인이 없습니다")
             self.statusBar().showMessage(f"'{search_text}' 찾을 수 없음", 3000)
     
+    def update_preview_guarded(self, *args):
+        """현재 선택된 탭의 규칙에 맞는 미리보기 함수만 실행"""
+        try:
+            idx = self.generator_tabs.currentIndex()
+        except Exception:
+            idx = 0
+        if idx == getattr(self, '_gen_tab_index', {'normal': 0}).get('normal', 0):
+            self.update_normal_preview()
+        elif idx == getattr(self, '_gen_tab_index', {'sequential': 1}).get('sequential', 1):
+            self.update_sequential_preview()
+        elif idx == getattr(self, '_gen_tab_index', {'dependent': 2}).get('dependent', 2):
+            self.update_dependent_preview()
+
+    def refresh_current_preview(self, *args):
+        """탭 변경 시 현재 탭의 입력값으로 미리보기 재생성"""
+        self.update_preview_guarded()
+
     def closeEvent(self, event):
         """창 닫기 이벤트"""
         # 편집 모드에서 창을 닫으려 할 때

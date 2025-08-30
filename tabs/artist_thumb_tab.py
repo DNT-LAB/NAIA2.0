@@ -12,7 +12,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLineEdit, QLabel, QFileDialog, QMessageBox,
     QPushButton, QFrame, QScrollArea, QMenu, QApplication, QWidgetAction, QComboBox,
-    QProgressDialog, QTextEdit, QSizePolicy, QDialog, QDialogButtonBox, QInputDialog
+    QProgressDialog, QTextEdit, QSizePolicy, QDialog, QDialogButtonBox, QInputDialog,
+    QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QPoint, QThread, QBuffer, QIODevice
 from PyQt6.QtGui import QPixmap, QPainter, QImage, QAction, QKeyEvent, QColor
@@ -226,6 +227,1275 @@ class ThumbnailDownloadWorker(QThread):
         except Exception as e:
             error_msg = f"예상치 못한 오류: {str(e)}"
             self.download_finished.emit(False, error_msg)
+
+
+def generate_artist_randomizer_string(rule_data, artist_list=None):
+    """
+    아티스트 랜더마이저 규칙에 따라 문자열 생성 (기존 호환성 유지)
+    """
+    result_list, _ = generate_artist_randomizer_string_with_selection(rule_data, artist_list, [])
+    return result_list
+
+def generate_artist_randomizer_string_with_selection(rule_data, artist_list=None, favorite_artists=None):
+    """
+    아티스트 랜더마이저 규칙에 따라 문자열 생성 및 선택된 아티스트 반환
+    
+    Args:
+        rule_data: 규칙 데이터 (dict)
+        artist_list: 전체 아티스트 목록 (list)
+        favorite_artists: 관심 작가 목록 (list)
+    
+    Returns:
+        tuple: (생성된 문자열 리스트, 선택된 아티스트 리스트)
+    """
+    import random
+    import os
+    
+    if not rule_data:
+        return [], []
+    
+    results = []
+    selected_artists = []
+    
+    for rule in rule_data.get('rules', []):
+        # 확률 체크
+        probability = rule.get('probability', 100)
+        if random.randint(1, 100) > probability:
+            continue
+        
+        # 소스에 따른 아이템 선택
+        source = rule.get('source', '전체 목록에서 랜덤')
+        selected_item = None
+        is_artist = False  # 아티스트인지 와일드카드인지 구분
+        
+        if source == '와일드카드에서 랜덤':
+            # 와일드카드 파일에서 랜덤 선택
+            wildcard_file = rule.get('wildcard_file', '')
+            if wildcard_file and os.path.exists(wildcard_file):
+                try:
+                    with open(wildcard_file, 'r', encoding='utf-8') as f:
+                        lines = [line.strip() for line in f.readlines() if line.strip()]
+                    if lines:
+                        selected_item = random.choice(lines)
+                except Exception as e:
+                    print(f"와일드카드 파일 읽기 오류: {e}")
+                    continue
+            else:
+                continue
+        else:
+            # 아티스트 목록에서 선택
+            if source == '관심 작가에서 랜덤':
+                # 관심 작가에서만 선택
+                if not favorite_artists:
+                    continue
+                available_artists = favorite_artists
+            else:  # '전체 목록에서 랜덤'
+                # 전체 목록에서 선택
+                if not artist_list:
+                    continue
+                available_artists = artist_list
+            
+            if not available_artists:
+                continue
+                
+            selected_item = random.choice(available_artists)
+            is_artist = True
+            selected_artists.append(selected_item)  # 선택된 아티스트 기록
+        
+        if not selected_item:
+            continue
+        
+        # 가중치 계산
+        weight_mode = rule.get('weight_mode', '랜덤 가중치')
+        weight = 0.0  # 초기값을 0으로 설정
+        
+        # 정규화 계산 (아티스트인 경우에만 적용)
+        if '정규화' in weight_mode and is_artist:
+            from artist_dictionary import artist_dict
+            
+            if artist_dict:
+                # 아티스트의 가중치 가져오기
+                artist_weight = artist_dict.get(selected_item, 0)
+                
+                # 정규화 범위 가져오기
+                normalize_range = rule.get('normalize_range', {})
+                min_group = normalize_range.get('min', 1)
+                max_group = normalize_range.get('max', 100)
+                
+                # 모든 아티스트의 가중치를 가져와서 정렬
+                all_weights = sorted([artist_dict.get(a, 0) for a in available_artists if a in artist_dict], reverse=True)
+                
+                if all_weights and artist_weight > 0:
+                    # 아티스트의 순위 찾기
+                    try:
+                        artist_rank = all_weights.index(artist_weight) + 1
+                    except ValueError:
+                        # 동일한 가중치가 여러 개일 수 있으므로 처리
+                        artist_rank = len([w for w in all_weights if w > artist_weight]) + 1
+                    
+                    # 백분위 그룹 계산 (1이 최상위 1%, 100이 최하위 1%)
+                    total_artists = len(all_weights)
+                    percentile = (artist_rank - 1) / total_artists * 100  # 0-100 범위
+                    group_number = min(100, max(1, int(percentile) + 1))
+                    
+                    # 지정된 범위 내에 있는지 확인
+                    if min_group <= group_number <= max_group:
+                        # 그룹 번호를 가중치로 변환 (1 → 0.01, 100 → 1.00)
+                        normalized_weight = group_number * 0.01
+                        
+                        # 계수 적용
+                        coefficient = rule.get('coefficient', 1.0)
+                        weight = normalized_weight * coefficient
+                        
+                        print(f"정규화: {selected_item} (원본 가중치: {artist_weight}, 순위: {artist_rank}/{total_artists}, 그룹: {group_number}, 정규화: {normalized_weight:.2f}, 계수: {coefficient}, 최종: {weight:.2f})")
+                    else:
+                        # 범위 밖이면 스킵
+                        continue
+                else:
+                    # 가중치가 없으면 기본값 사용
+                    weight = 1.0 * rule.get('coefficient', 1.0)
+        
+        # 랜덤 가중치 추가
+        if '랜덤' in weight_mode:
+            random_weight = rule.get('random_weight', {})
+            lower = random_weight.get('lower', 0.1)
+            upper = random_weight.get('upper', 1.0)
+            step = random_weight.get('step', 0.1)
+            
+            # 범위 내에서 랜덤 선택
+            steps = int((upper - lower) / step) + 1
+            random_val = lower + (random.randint(0, steps - 1) * step)
+            
+            # 정규화가 있으면 더하고, 없으면 랜덤값만 사용
+            if '정규화' in weight_mode:
+                weight += random_val
+            else:
+                weight = random_val
+        
+        # 고정 가중치 추가
+        if '고정' in weight_mode:
+            fixed_weight = rule.get('fixed_weight', 0.5)
+            weight += fixed_weight
+        
+        # 정규화가 없고 다른 가중치도 없으면 기본값 1.0
+        if weight == 0.0:
+            weight = 1.0
+        
+        weight = round(weight, 2)
+        
+        # 적용 모드에 따른 문자열 생성 (전체 규칙에서 가져옴)
+        app_mode = rule_data.get('application_mode', '1::NAI모드 ::')
+        
+        # 와일드카드에서 선택했고 artist: 적용 안함 체크된 경우
+        is_wildcard = source == '와일드카드에서 랜덤'
+        no_artist_prefix = rule.get('no_artist_prefix', False)
+        
+        if app_mode == '1::NAI모드 ::':
+            # NAI 모드: f"{가중치}::artist:{랜덤아이템} ::" 또는 f"{가중치}::{랜덤아이템} ::"
+            if is_wildcard and no_artist_prefix:
+                result_str = f"{weight}::{selected_item} ::"
+            else:
+                result_str = f"{weight}::artist:{selected_item} ::"
+        else:  # '(로컬모드:1)'
+            # 로컬 모드: f"({랜덤아이템}:{가중치})"
+            # 괄호 이스케이프 처리
+            escaped_item = selected_item.replace('(', '\\(').replace(')', '\\)')
+            result_str = f"({escaped_item}:{weight})"
+        
+        results.append(result_str)
+    
+    return results, selected_artists
+
+
+class ArtistRandomizerSettings(QDialog):
+    """아티스트 랜더마이저 설정 창"""
+    
+    def __init__(self, parent=None, app_context=None):
+        super().__init__(parent)
+        self.app_context = app_context
+        self.current_rule = None
+        self.rule_frames = []  # 규칙 프레임들을 저장할 리스트
+        
+        self.setWindowTitle("🎲 아티스트 랜더마이저 규칙 설정")
+        self.setModal(False)  # Non-modal dialog
+        self.resize(get_scaled_size(1250), get_scaled_size(600))
+        
+        # 다크 테마 적용
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+        """)
+        
+        self._init_ui()
+        self._load_rule_files()
+    
+    def _init_ui(self):
+        """UI 초기화"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(get_scaled_size(10), get_scaled_size(10),
+                                 get_scaled_size(10), get_scaled_size(10))
+        
+        # 메인 수평 레이아웃
+        main_layout = QHBoxLayout()
+        
+        # 왼쪽: 규칙 파일 리스트
+        left_panel = self._create_left_panel()
+        main_layout.addWidget(left_panel)
+        
+        # 오른쪽: 규칙 편집 영역
+        right_panel = self._create_right_panel()
+        main_layout.addWidget(right_panel, 1)  # stretch factor 1
+        
+        layout.addLayout(main_layout)
+        
+        # 하단 버튼 영역
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        # 이 규칙을 저장 버튼
+        self.save_btn = QPushButton("💾 이 규칙을 저장")
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
+                font-size: {get_scaled_font_size(18)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #66BB6A;
+            }}
+        """)
+        self.save_btn.clicked.connect(self._save_rule)
+        button_layout.addWidget(self.save_btn)
+        
+        # 이 규칙을 적용 버튼
+        self.apply_btn = QPushButton("✅ 이 규칙을 적용")
+        self.apply_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
+                font-size: {get_scaled_font_size(18)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #42A5F5;
+            }}
+        """)
+        self.apply_btn.clicked.connect(self._apply_rule)
+        button_layout.addWidget(self.apply_btn)
+        
+        # 닫기 버튼
+        close_btn = QPushButton("닫기")
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #757575;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
+                font-size: {get_scaled_font_size(18)}px;
+            }}
+            QPushButton:hover {{
+                background-color: #9E9E9E;
+            }}
+        """)
+        close_btn.clicked.connect(self.close)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def _create_left_panel(self) -> QWidget:
+        """왼쪽 패널: 규칙 파일 리스트"""
+        panel = QFrame()
+        panel.setFrameStyle(QFrame.Shape.Box)
+        panel.setFixedWidth(get_scaled_size(250))
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(get_scaled_size(8), get_scaled_size(8),
+                                 get_scaled_size(8), get_scaled_size(8))
+        
+        # 제목
+        title = QLabel("📂 규칙 파일 목록")
+        title.setStyleSheet(f"""
+            QLabel {{
+                color: white;
+                font-size: {get_scaled_font_size(18)}px;
+                font-weight: bold;
+                margin-bottom: {get_scaled_size(8)}px;
+            }}
+        """)
+        layout.addWidget(title)
+        
+        # 파일 리스트
+        self.file_list = QListWidget()
+        self.file_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(15)}px;
+            }}
+            QListWidget::item {{
+                padding: {get_scaled_size(6)}px;
+                border-bottom: 1px solid {DARK_COLORS['border']};
+            }}
+            QListWidget::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: white;
+            }}
+            QListWidget::item:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+        self.file_list.itemSelectionChanged.connect(self._on_file_selected)
+        layout.addWidget(self.file_list)
+        
+        # 새 규칙 파일 추가 버튼
+        add_btn = QPushButton("➕ 새 규칙 파일")
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #66BB6A;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(18)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #81C784;
+            }}
+        """)
+        add_btn.clicked.connect(self._add_new_rule_file)
+        layout.addWidget(add_btn)
+        
+        return panel
+    
+    def _create_right_panel(self) -> QWidget:
+        """오른쪽 패널: 규칙 편집 영역"""
+        panel = QFrame()
+        panel.setFrameStyle(QFrame.Shape.Box)
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(get_scaled_size(8), get_scaled_size(8),
+                                 get_scaled_size(8), get_scaled_size(8))
+        
+        # 제목 영역
+        title_layout = QHBoxLayout()
+        
+        self.rule_title = QLabel("규칙을 선택하세요")
+        self.rule_title.setStyleSheet(f"""
+            QLabel {{
+                color: white;
+                font-size: {get_scaled_font_size(20)}px;
+                font-weight: bold;
+            }}
+        """)
+        title_layout.addWidget(self.rule_title)
+        
+        # 적용 모드 레이블
+        mode_label = QLabel("적용 모드:")
+        mode_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px; margin-left: {get_scaled_size(20)}px;")
+        title_layout.addWidget(mode_label)
+        
+        # 적용 모드 콤보박스
+        self.application_mode_combo = QComboBox()
+        self.application_mode_combo.addItems(["1::NAI모드 ::", "(로컬모드:1)"])
+        self.application_mode_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(150)}px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: {get_scaled_size(20)}px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: {get_scaled_size(5)}px solid transparent;
+                border-right: {get_scaled_size(5)}px solid transparent;
+                border-top: {get_scaled_size(5)}px solid black;
+                margin-right: {get_scaled_size(5)}px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: white;
+                color: black;
+                selection-background-color: {DARK_COLORS['accent_blue']};
+                selection-color: white;
+            }}
+        """)
+        title_layout.addWidget(self.application_mode_combo)
+        
+        title_layout.addStretch()
+        
+        # 규칙 추가 버튼
+        self.add_rule_btn = QPushButton("➕ 규칙 추가")
+        self.add_rule_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #66BB6A;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
+                font-size: {get_scaled_font_size(18)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #81C784;
+            }}
+        """)
+        self.add_rule_btn.clicked.connect(self._add_rule_frame)
+        self.add_rule_btn.setEnabled(False)
+        title_layout.addWidget(self.add_rule_btn)
+        
+        layout.addLayout(title_layout)
+        
+        # 스크롤 영역 (규칙 프레임들을 담을 영역)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {DARK_COLORS['bg_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+            }}
+        """)
+        
+        # 스크롤 내용 위젯
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        scroll.setWidget(self.scroll_content)
+        layout.addWidget(scroll)
+        
+        return panel
+    
+    def _load_rule_files(self):
+        """save/artist_randomizer 폴더의 JSON 파일들 로드"""
+        import os
+        
+        # 폴더 생성
+        save_path = Path("save/artist_randomizer")
+        save_path.mkdir(parents=True, exist_ok=True)
+        
+        # JSON 파일들 검색
+        json_files = list(save_path.glob("*.json"))
+        
+        # 파일이 없으면 기본 파일 생성
+        if not json_files:
+            default_file = save_path / "default.json"
+            default_data = {
+                "name": "기본 규칙",
+                "rules": []
+            }
+            with open(default_file, 'w', encoding='utf-8') as f:
+                json.dump(default_data, f, ensure_ascii=False, indent=2)
+            json_files = [default_file]
+        
+        # 파일 리스트에 추가
+        for file_path in json_files:
+            self.file_list.addItem(file_path.stem)
+        
+        # 첫 번째 항목 선택
+        if self.file_list.count() > 0:
+            self.file_list.setCurrentRow(0)
+    
+    def _on_file_selected(self):
+        """파일 선택 시"""
+        current_item = self.file_list.currentItem()
+        if not current_item:
+            return
+        
+        file_name = current_item.text()
+        file_path = Path(f"save/artist_randomizer/{file_name}.json")
+        
+        # 파일 로드
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                self.current_rule = json.load(f)
+            
+            # UI 업데이트
+            self.rule_title.setText(f"📝 {self.current_rule.get('name', file_name)}")
+            self.add_rule_btn.setEnabled(True)
+            
+            # 적용 모드 설정
+            app_mode = self.current_rule.get('application_mode', '1::NAI모드 ::')
+            if app_mode in ["1::NAI모드 ::", "(로컬모드:1)"]:
+                self.application_mode_combo.setCurrentText(app_mode)
+            
+            # 기존 규칙 프레임들 제거
+            self._clear_rule_frames()
+            
+            # 규칙들 표시
+            rules = self.current_rule.get('rules', [])
+            for rule_data in rules:
+                self._add_rule_frame(rule_data)
+            
+        except Exception as e:
+            msg = self._create_styled_messagebox("오류", f"파일 로드 실패: {str(e)}", QMessageBox.Icon.Critical)
+            msg.exec()
+    
+    def _clear_rule_frames(self):
+        """모든 규칙 프레임 제거"""
+        for frame in self.rule_frames:
+            frame.deleteLater()
+        self.rule_frames.clear()
+    
+    def _add_rule_frame(self, rule_data=None):
+        """규칙 프레임 추가"""
+        from PyQt6.QtWidgets import QSpinBox, QDoubleSpinBox
+        
+        # 규칙 번호 계산
+        rule_number = len(self.rule_frames) + 1
+        
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: #2a2a2a;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(8)}px;
+                margin-bottom: {get_scaled_size(8)}px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        
+        # 규칙 제목 라인
+        title_layout = QHBoxLayout()
+        rule_title = QLabel(f"규칙 {rule_number}:")
+        rule_title.setStyleSheet(f"""
+            QLabel {{
+                color: white;
+                font-size: {get_scaled_font_size(18)}px;
+                font-weight: bold;
+            }}
+        """)
+        title_layout.addWidget(rule_title)
+        title_layout.addStretch()
+        
+        # 삭제 버튼
+        delete_btn = QPushButton("🗑️ 삭제")
+        delete_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #d32f2f;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
+                font-size: {get_scaled_font_size(18)}px;
+            }}
+            QPushButton:hover {{
+                background-color: #e53935;
+            }}
+        """)
+        delete_btn.clicked.connect(lambda: self._remove_rule_frame(frame))
+        title_layout.addWidget(delete_btn)
+        
+        layout.addLayout(title_layout)
+        
+        # 헤더: 확률 설정
+        header_layout = QHBoxLayout()
+        
+        # 확률 레이블
+        prob_label = QLabel("작동 확률:")
+        prob_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        header_layout.addWidget(prob_label)
+        
+        # 확률 스핀박스 (0-100%)
+        prob_spinbox = QSpinBox()
+        prob_spinbox.setRange(0, 100)
+        prob_spinbox.setValue(rule_data.get('probability', 100) if rule_data else 100)
+        prob_spinbox.setSuffix("%")
+        prob_spinbox.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(80)}px;
+            }}
+        """)
+        header_layout.addWidget(prob_spinbox)
+        
+        header_layout.addStretch()
+        
+        layout.addLayout(header_layout)
+        
+        # 첫 번째 라인: 소스 선택
+        source_layout = QHBoxLayout()
+        
+        source_label = QLabel("소스 선택:")
+        source_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        source_layout.addWidget(source_label)
+        
+        source_combo = QComboBox()
+        source_combo.addItems(["전체 목록에서 랜덤", "관심 작가에서 랜덤", "와일드카드에서 랜덤"])
+        if rule_data and 'source' in rule_data:
+            source_combo.setCurrentText(rule_data['source'])
+        source_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(200)}px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: {get_scaled_size(20)}px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: {get_scaled_size(5)}px solid transparent;
+                border-right: {get_scaled_size(5)}px solid transparent;
+                border-top: {get_scaled_size(5)}px solid black;
+                margin-right: {get_scaled_size(5)}px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: white;
+                color: black;
+                selection-background-color: {DARK_COLORS['accent_blue']};
+                selection-color: white;
+            }}
+        """)
+        source_layout.addWidget(source_combo)
+        
+        # 와일드카드 선택 버튼 (와일드카드에서 랜덤 선택시만 표시)
+        wildcard_btn = QPushButton("📁 와일드카드 선택")
+        wildcard_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
+                font-size: {get_scaled_font_size(16)}px;
+            }}
+            QPushButton:hover {{
+                background-color: #66BB6A;
+            }}
+        """)
+        wildcard_btn.clicked.connect(lambda: self._select_wildcard_file(frame))
+        wildcard_btn.setVisible(False)  # 초기에는 숨김
+        source_layout.addWidget(wildcard_btn)
+        
+        # 선택된 와일드카드 파일 표시 레이블
+        wildcard_label = QLabel("")
+        wildcard_label.setStyleSheet(f"color: #66BB6A; font-size: {get_scaled_font_size(14)}px;")
+        wildcard_label.setVisible(False)
+        source_layout.addWidget(wildcard_label)
+        
+        # 소스 콤보박스 변경 이벤트
+        source_combo.currentTextChanged.connect(lambda text: self._on_source_changed(frame, text))
+        
+        source_layout.addStretch()
+        
+        layout.addLayout(source_layout)
+        
+        # 두 번째 라인: 가중치 모드 선택
+        weight_layout = QHBoxLayout()
+        
+        weight_label = QLabel("가중치 모드:")
+        weight_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        weight_layout.addWidget(weight_label)
+        
+        weight_combo = QComboBox()
+        weight_combo.addItems(["정규화 + 랜덤 가중치", "정규화 + 고정 가중치", "랜덤 가중치", "랜덤 + 고정 가중치"])
+        if rule_data and 'weight_mode' in rule_data:
+            weight_combo.setCurrentText(rule_data['weight_mode'])
+        weight_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(200)}px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: {get_scaled_size(20)}px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: {get_scaled_size(5)}px solid transparent;
+                border-right: {get_scaled_size(5)}px solid transparent;
+                border-top: {get_scaled_size(5)}px solid black;
+                margin-right: {get_scaled_size(5)}px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: white;
+                color: black;
+                selection-background-color: {DARK_COLORS['accent_blue']};
+                selection-color: white;
+            }}
+        """)
+        weight_layout.addWidget(weight_combo)
+        
+        # "artist:" 적용안함(NAI) 체크박스 (와일드카드 선택시만 표시)
+        no_artist_prefix_check = QCheckBox("\"artist:\" 적용안함(NAI)")
+        no_artist_prefix_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: white;
+                font-size: {get_scaled_font_size(16)}px;
+                margin-left: {get_scaled_size(20)}px;
+            }}
+            QCheckBox::indicator {{
+                width: {get_scaled_size(20)}px;
+                height: {get_scaled_size(20)}px;
+                background-color: white;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        no_artist_prefix_check.setVisible(False)  # 초기에는 숨김
+        if rule_data and 'no_artist_prefix' in rule_data:
+            no_artist_prefix_check.setChecked(rule_data['no_artist_prefix'])
+        weight_layout.addWidget(no_artist_prefix_check)
+        
+        weight_layout.addStretch()
+        
+        layout.addLayout(weight_layout)
+        
+        # 가중치 설정 영역 (동적으로 변경되는 부분)
+        weight_settings_widget = QWidget()
+        weight_settings_layout = QVBoxLayout(weight_settings_widget)
+        weight_settings_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 정규화 설정 위젯
+        normalize_widget = QWidget()
+        normalize_layout = QHBoxLayout(normalize_widget)
+        normalize_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 정규화 범위 설정
+        normalize_label = QLabel("정규화 구간 (0.01-1):")
+        normalize_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        normalize_layout.addWidget(normalize_label)
+        
+        min_range = QSpinBox()
+        min_range.setRange(1, 100)
+        if rule_data and 'normalize_range' in rule_data:
+            min_range.setValue(rule_data['normalize_range'].get('min', 1))
+        else:
+            min_range.setValue(1)
+        min_range.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(60)}px;
+            }}
+        """)
+        normalize_layout.addWidget(min_range)
+        
+        dash_label = QLabel("-")
+        dash_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        normalize_layout.addWidget(dash_label)
+        
+        max_range = QSpinBox()
+        max_range.setRange(1, 100)
+        if rule_data and 'normalize_range' in rule_data:
+            max_range.setValue(rule_data['normalize_range'].get('max', 100))
+        else:
+            max_range.setValue(100)
+        max_range.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(60)}px;
+            }}
+        """)
+        normalize_layout.addWidget(max_range)
+        
+        # 계수 설정
+        coef_label = QLabel("* 계수:")
+        coef_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px; margin-left: {get_scaled_size(20)}px;")
+        normalize_layout.addWidget(coef_label)
+        
+        coef_spinbox = QDoubleSpinBox()
+        coef_spinbox.setRange(0.1, 3.0)
+        coef_spinbox.setValue(rule_data.get('coefficient', 1.0) if rule_data else 1.0)
+        coef_spinbox.setSingleStep(0.1)
+        coef_spinbox.setDecimals(2)
+        coef_spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(80)}px;
+            }}
+        """)
+        normalize_layout.addWidget(coef_spinbox)
+        normalize_layout.addStretch()
+        
+        weight_settings_layout.addWidget(normalize_widget)
+        
+        # 랜덤 가중치 설정 위젯
+        random_widget = QWidget()
+        random_layout = QHBoxLayout(random_widget)
+        random_layout.setContentsMargins(0, 0, 0, 0)
+        
+        random_label = QLabel("랜덤 가중치:")
+        random_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        random_layout.addWidget(random_label)
+        
+        # 하한치
+        lower_label = QLabel("하한:")
+        lower_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(14)}px; margin-left: {get_scaled_size(10)}px;")
+        random_layout.addWidget(lower_label)
+        
+        lower_spinbox = QDoubleSpinBox()
+        lower_spinbox.setRange(0.1, 3.0)
+        lower_spinbox.setSingleStep(0.1)
+        lower_spinbox.setDecimals(2)
+        if rule_data and 'random_weight' in rule_data:
+            lower_spinbox.setValue(rule_data['random_weight'].get('lower', 0.1))
+        else:
+            lower_spinbox.setValue(0.1)
+        lower_spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(80)}px;
+            }}
+        """)
+        random_layout.addWidget(lower_spinbox)
+        
+        # 상한치
+        upper_label = QLabel("상한:")
+        upper_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(14)}px; margin-left: {get_scaled_size(10)}px;")
+        random_layout.addWidget(upper_label)
+        
+        upper_spinbox = QDoubleSpinBox()
+        upper_spinbox.setRange(0.1, 3.0)
+        upper_spinbox.setSingleStep(0.1)
+        upper_spinbox.setDecimals(2)
+        if rule_data and 'random_weight' in rule_data:
+            upper_spinbox.setValue(rule_data['random_weight'].get('upper', 1.0))
+        else:
+            upper_spinbox.setValue(1.0)
+        upper_spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(80)}px;
+            }}
+        """)
+        random_layout.addWidget(upper_spinbox)
+        
+        # 증감치
+        step_label = QLabel("증감:")
+        step_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(14)}px; margin-left: {get_scaled_size(10)}px;")
+        random_layout.addWidget(step_label)
+        
+        step_spinbox = QDoubleSpinBox()
+        step_spinbox.setRange(0.01, 1.0)
+        step_spinbox.setSingleStep(0.01)
+        step_spinbox.setDecimals(2)
+        if rule_data and 'random_weight' in rule_data:
+            step_spinbox.setValue(rule_data['random_weight'].get('step', 0.1))
+        else:
+            step_spinbox.setValue(0.1)
+        step_spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(80)}px;
+            }}
+        """)
+        random_layout.addWidget(step_spinbox)
+        random_layout.addStretch()
+        
+        weight_settings_layout.addWidget(random_widget)
+        
+        # 고정 가중치 설정 위젯
+        fixed_widget = QWidget()
+        fixed_layout = QHBoxLayout(fixed_widget)
+        fixed_layout.setContentsMargins(0, 0, 0, 0)
+        
+        fixed_label = QLabel("고정 가중치:")
+        fixed_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
+        fixed_layout.addWidget(fixed_label)
+        
+        fixed_spinbox = QDoubleSpinBox()
+        fixed_spinbox.setRange(0.1, 3.0)
+        fixed_spinbox.setSingleStep(0.1)
+        fixed_spinbox.setDecimals(2)
+        fixed_spinbox.setValue(rule_data.get('fixed_weight', 0.5) if rule_data else 0.5)
+        fixed_spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: white;
+                color: black;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+                min-width: {get_scaled_size(100)}px;
+            }}
+        """)
+        fixed_layout.addWidget(fixed_spinbox)
+        fixed_layout.addStretch()
+        
+        weight_settings_layout.addWidget(fixed_widget)
+        
+        # 초기 상태 설정
+        fixed_widget.hide()  # 초기에는 고정 가중치 숨김
+        
+        layout.addWidget(weight_settings_widget)
+        
+        # 가중치 모드 변경 시 UI 업데이트
+        def update_weight_ui():
+            mode = weight_combo.currentText()
+            source = source_combo.currentText()
+            
+            # 정규화 옵션은 전체 목록 또는 관심 작가에서만 사용 가능
+            can_normalize = source in ["전체 목록에서 랜덤", "관심 작가에서 랜덤"]
+            
+            if mode == "정규화 + 랜덤 가중치":
+                normalize_widget.setVisible(can_normalize)
+                random_widget.show()
+                fixed_widget.hide()
+            elif mode == "정규화 + 고정 가중치":
+                normalize_widget.setVisible(can_normalize)
+                random_widget.hide()
+                fixed_widget.show()
+            elif mode == "랜덤 가중치":
+                normalize_widget.hide()
+                random_widget.show()
+                fixed_widget.hide()
+            elif mode == "랜덤 + 고정 가중치":
+                normalize_widget.hide()
+                random_widget.show()
+                fixed_widget.show()
+            
+            # 정규화 불가능한 소스인 경우 가중치 모드 제한
+            if not can_normalize and mode in ["정규화 + 랜덤 가중치", "정규화 + 고정 가중치"]:
+                weight_combo.setCurrentText("랜덤 가중치")
+        
+        weight_combo.currentTextChanged.connect(update_weight_ui)
+        source_combo.currentTextChanged.connect(update_weight_ui)
+        
+        # 초기 UI 상태 설정
+        update_weight_ui()
+        
+        # 프레임에 데이터 저장 (나중에 저장할 때 사용)
+        frame.rule_title = rule_title  # 규칙 제목 레이블 저장
+        frame.prob_spinbox = prob_spinbox
+        frame.source_combo = source_combo
+        frame.weight_combo = weight_combo
+        frame.min_range = min_range
+        frame.max_range = max_range
+        frame.coef_spinbox = coef_spinbox
+        frame.lower_spinbox = lower_spinbox
+        frame.upper_spinbox = upper_spinbox
+        frame.step_spinbox = step_spinbox
+        frame.fixed_spinbox = fixed_spinbox
+        frame.wildcard_btn = wildcard_btn
+        frame.wildcard_label = wildcard_label
+        frame.wildcard_file = rule_data.get('wildcard_file', '') if rule_data else ''
+        frame.no_artist_prefix_check = no_artist_prefix_check
+        
+        # 와일드카드 파일이 있으면 표시
+        if frame.wildcard_file:
+            import os
+            filename = os.path.basename(frame.wildcard_file)
+            if filename:
+                wildcard_label.setText(f"📄 {filename}")
+                wildcard_label.setVisible(True)
+        
+        # 초기 소스 설정에 따른 UI 업데이트
+        if rule_data:
+            self._on_source_changed(frame, source_combo.currentText())
+        
+        # 프레임을 스크롤 레이아웃에 추가
+        self.scroll_layout.addWidget(frame)
+        self.rule_frames.append(frame)
+    
+    def _remove_rule_frame(self, frame):
+        """규칙 프레임 제거"""
+        if frame in self.rule_frames:
+            self.rule_frames.remove(frame)
+            frame.deleteLater()
+            
+            # 남은 프레임들의 번호 업데이트
+            for i, remaining_frame in enumerate(self.rule_frames):
+                if hasattr(remaining_frame, 'rule_title'):
+                    remaining_frame.rule_title.setText(f"규칙 {i + 1}:")
+    
+    def _on_source_changed(self, frame, text):
+        """소스 선택이 변경되었을 때"""
+        # 와일드카드 관련 UI 표시/숨김
+        is_wildcard = text == "와일드카드에서 랜덤"
+        
+        if hasattr(frame, 'wildcard_btn'):
+            frame.wildcard_btn.setVisible(is_wildcard)
+        
+        if hasattr(frame, 'wildcard_label'):
+            # wildcard_file이 비어있지 않은지 확인
+            has_file = bool(getattr(frame, 'wildcard_file', ''))
+            frame.wildcard_label.setVisible(is_wildcard and has_file)
+        
+        if hasattr(frame, 'no_artist_prefix_check'):
+            frame.no_artist_prefix_check.setVisible(is_wildcard)
+    
+    def _select_wildcard_file(self, frame):
+        """와일드카드 파일 선택"""
+        from PyQt6.QtWidgets import QFileDialog
+        import os
+        
+        # 와일드카드 폴더 경로 설정
+        wildcard_dir = "wildcards"
+        if not os.path.exists(wildcard_dir):
+            wildcard_dir = "."
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "와일드카드 파일 선택",
+            wildcard_dir,
+            "Text Files (*.txt);;All Files (*.*)"
+        )
+        
+        if file_path:
+            # 파일 경로 저장
+            frame.wildcard_file = file_path
+            
+            # 파일명 표시
+            filename = os.path.basename(file_path)
+            if hasattr(frame, 'wildcard_label'):
+                frame.wildcard_label.setText(f"📄 {filename}")
+                frame.wildcard_label.setVisible(True)
+    
+    def _add_new_rule_file(self):
+        """새 규칙 파일 추가"""
+        file_name, ok = QInputDialog.getText(
+            self,
+            "새 규칙 파일",
+            "파일 이름을 입력하세요:",
+            QLineEdit.EchoMode.Normal,
+            "new_rule"
+        )
+        
+        if ok and file_name:
+            file_path = Path(f"save/artist_randomizer/{file_name}.json")
+            if file_path.exists():
+                msg = self._create_styled_messagebox("경고", "이미 존재하는 파일입니다.", QMessageBox.Icon.Warning)
+                msg.exec()
+                return
+            
+            # 새 파일 생성
+            new_data = {
+                "name": file_name,
+                "rules": []
+            }
+            
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(new_data, f, ensure_ascii=False, indent=2)
+                
+                # 리스트에 추가
+                self.file_list.addItem(file_name)
+                
+                # 새 항목 선택
+                for i in range(self.file_list.count()):
+                    if self.file_list.item(i).text() == file_name:
+                        self.file_list.setCurrentRow(i)
+                        break
+                
+            except Exception as e:
+                msg = self._create_styled_messagebox("오류", f"파일 생성 실패: {str(e)}", QMessageBox.Icon.Critical)
+                msg.exec()
+    
+    def _save_rule(self):
+        """현재 규칙을 저장"""
+        if not self.current_rule:
+            msg = self._create_styled_messagebox("경고", "저장할 규칙이 선택되지 않았습니다.", QMessageBox.Icon.Warning)
+            msg.exec()
+            return
+        
+        # 현재 규칙 저장
+        self._save_current_rule()
+        
+        rule_name = self.current_rule.get('name', 'Unknown')
+        msg = self._create_styled_messagebox("성공", f"'{rule_name}' 규칙이 저장되었습니다.", QMessageBox.Icon.Information)
+        msg.exec()
+        print(f"💾 Artist Randomizer Rule Saved: {rule_name}")
+    
+    def _create_styled_messagebox(self, title, text, icon):
+        """스타일이 적용된 메시지박스 생성"""
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        msg.setIcon(icon)
+        
+        # 다크 테마 스타일 적용
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: white;
+            }}
+            QMessageBox QLabel {{
+                color: white;
+                font-size: {get_scaled_font_size(16)}px;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: white;
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(20)}px;
+                font-size: {get_scaled_font_size(14)}px;
+                min-width: {get_scaled_size(80)}px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+            QMessageBox QPushButton:pressed {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        
+        return msg
+    
+    def _apply_rule(self):
+        """현재 규칙을 적용 (저장 포함)"""
+        if not self.current_rule:
+            msg = self._create_styled_messagebox("경고", "적용할 규칙이 선택되지 않았습니다.", QMessageBox.Icon.Warning)
+            msg.exec()
+            return
+        
+        # 현재 규칙 저장 (자동 저장)
+        self._save_current_rule()
+        
+        # 현재 규칙을 app_context에 저장
+        if self.app_context:
+            self.app_context.artist_randomizer_rule = self.current_rule
+            rule_name = self.current_rule.get('name', 'Unknown')
+            
+            # 저장과 적용이 모두 완료되었음을 알림
+            msg = self._create_styled_messagebox(
+                "성공", 
+                f"'{rule_name}' 규칙이 저장되고 적용되었습니다.", 
+                QMessageBox.Icon.Information
+            )
+            msg.exec()
+            print(f"💾🎲 Artist Randomizer Rule Saved & Applied: {rule_name}")
+    
+    def _save_current_rule(self):
+        """현재 편집 중인 규칙 저장"""
+        if not self.current_rule:
+            return
+        
+        current_item = self.file_list.currentItem()
+        if not current_item:
+            return
+        
+        file_name = current_item.text()
+        file_path = Path(f"save/artist_randomizer/{file_name}.json")
+        
+        # 규칙 프레임들로부터 데이터 수집
+        rules = []
+        for frame in self.rule_frames:
+            rule_data = self._extract_rule_data(frame)
+            rules.append(rule_data)
+        
+        self.current_rule['rules'] = rules
+        self.current_rule['application_mode'] = self.application_mode_combo.currentText()
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.current_rule, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            msg = self._create_styled_messagebox("오류", f"파일 저장 실패: {str(e)}", QMessageBox.Icon.Critical)
+            msg.exec()
+    
+    def _extract_rule_data(self, frame):
+        """프레임에서 규칙 데이터 추출"""
+        rule_data = {
+            'probability': frame.prob_spinbox.value(),
+            'source': frame.source_combo.currentText(),
+            'weight_mode': frame.weight_combo.currentText(),
+            'normalize_range': {
+                'min': frame.min_range.value(),
+                'max': frame.max_range.value()
+            },
+            'coefficient': frame.coef_spinbox.value(),
+            'random_weight': {
+                'lower': frame.lower_spinbox.value(),
+                'upper': frame.upper_spinbox.value(),
+                'step': frame.step_spinbox.value()
+            },
+            'fixed_weight': frame.fixed_spinbox.value()
+        }
+        
+        # 와일드카드 설정 추가
+        if hasattr(frame, 'wildcard_file'):
+            rule_data['wildcard_file'] = frame.wildcard_file
+        
+        if hasattr(frame, 'no_artist_prefix_check'):
+            rule_data['no_artist_prefix'] = frame.no_artist_prefix_check.isChecked()
+        
+        return rule_data
 
 
 class ArtistThumbModule(BaseTabModule):
@@ -848,6 +2118,85 @@ class ArtistThumbModule(BaseTabModule):
         layout.addWidget(self.info_label)
         
         layout.addStretch()
+
+
+        # 아티스트 랜더마이저 체크박스
+        from PyQt6.QtWidgets import QCheckBox
+
+        # 연속생성 체크박스
+        self.continuous_generation_checkbox = QCheckBox("연속생성")
+        self.continuous_generation_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: {get_scaled_size(4)}px;
+            }}
+            QCheckBox::indicator {{
+                width: {get_scaled_size(18)}px;
+                height: {get_scaled_size(18)}px;
+                border: 2px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px;
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: #ff6b6b;
+                border-color: #ff6b6b;
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: #ff6b6b;
+            }}
+        """)
+        self.continuous_generation_checkbox.setToolTip("연속생성: 이미지 생성이 완료되면 1초 후 자동으로 다시 생성")
+        layout.addWidget(self.continuous_generation_checkbox)
+
+        self.randomizer_checkbox = QCheckBox("아티스트 랜더마이저 활성")
+        self.randomizer_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: {get_scaled_size(4)}px;
+            }}
+            QCheckBox::indicator {{
+                width: {get_scaled_size(18)}px;
+                height: {get_scaled_size(18)}px;
+                border: 2px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px;
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.randomizer_checkbox.stateChanged.connect(self._on_randomizer_toggled)
+        layout.addWidget(self.randomizer_checkbox)
+        
+        # 규칙 설정 버튼
+        self.randomizer_settings_btn = QPushButton("⚙️ 규칙 설정")
+        self.randomizer_settings_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
+                font-size: {get_scaled_font_size(15)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+        self.randomizer_settings_btn.clicked.connect(self._open_randomizer_settings)
+        # 규칙 설정은 항상 접근 가능
+        layout.addWidget(self.randomizer_settings_btn)
         
         return panel
     
@@ -1147,18 +2496,22 @@ class ArtistThumbModule(BaseTabModule):
                 }}
             """)
         
-        # 프롬프트에 아티스트명 추가 (항상 자동 적용)
+        # 프롬프트에 아티스트명 추가 (랜더마이저가 비활성 상태일 때만)
         if hasattr(self, 'positive_prompt'):
-            current_positive = self.positive_prompt.toPlainText()
-            # 기존 아티스트 태그 제거
-            lines = current_positive.split(',')
-            lines = [line.strip() for line in lines if not line.strip().startswith('artist:')]
-            # 새 아티스트 태그 추가
-            artist_tag = f"artist:{artist_name}"
-            if lines:
-                self.positive_prompt.setPlainText(f"{artist_tag}, {', '.join(lines)}")
+            # 랜더마이저가 활성화되어 있으면 프롬프트 업데이트 하지 않음
+            if hasattr(self, 'randomizer_checkbox') and self.randomizer_checkbox.isChecked():
+                print(f"🎲 랜더마이저 활성 상태 - 아티스트 태그 자동 추가 비활성")
             else:
-                self.positive_prompt.setPlainText(artist_tag)
+                current_positive = self.positive_prompt.toPlainText()
+                # 기존 아티스트 태그 제거
+                lines = current_positive.split(',')
+                lines = [line.strip() for line in lines if not line.strip().startswith('artist:')]
+                # 새 아티스트 태그 추가
+                artist_tag = f"artist:{artist_name}"
+                if lines:
+                    self.positive_prompt.setPlainText(f"{artist_tag}, {', '.join(lines)}")
+                else:
+                    self.positive_prompt.setPlainText(artist_tag)
         
         # 시그널 발생
         self.artist_selected.emit(artist_name)
@@ -1329,8 +2682,33 @@ class ArtistThumbModule(BaseTabModule):
         if not self.app_context:
             QMessageBox.warning(self.widget, "오류", "앱 컨텍스트가 없습니다.")
             return
+        
+        # 랜더마이저 처리
+        randomizer_string = ""
+        selected_artists = []
+        if hasattr(self, 'randomizer_checkbox') and self.randomizer_checkbox.isChecked():
+            randomizer_string, selected_artists = self.get_randomized_artist_string()
             
-        # Positive 프롬프트 가져오기
+            # 선택된 아티스트가 있으면 리스트박스 업데이트
+            if selected_artists and hasattr(self, 'artist_listbox'):
+                # 리스트박스 비우기
+                self.artist_listbox.clear()
+                # 선택된 아티스트들로 업데이트
+                for artist in selected_artists:
+                    self.artist_listbox.addItem(artist)
+                print(f"🎲 랜더마이저 선택 아티스트: {', '.join(selected_artists)}")
+                
+                # 리스트 길이가 1 이상이면 첫번째 아이템 자동 선택
+                if self.artist_listbox.count() > 0:
+                    self.artist_listbox.setCurrentRow(0)
+                    # 선택 이벤트 트리거
+                    self._on_artist_selected()
+            
+            # positive_prompt에 랜더마이저 문자열 업데이트
+            if randomizer_string:
+                self.positive_prompt.setPlainText(randomizer_string)
+        
+        # Positive 프롬프트 가져오기 (랜더마이저 적용 후)
         positive = self.positive_prompt.toPlainText().strip()
         
         # Prefix와 Postfix 가져오기
@@ -1377,11 +2755,20 @@ class ArtistThumbModule(BaseTabModule):
                 auto_generate_checkbox.setChecked(False)
         
         # ArtistThumb 전용 생성 완료 이벤트 구독
-        self.app_context.subscribe("generation_completed_for_artist_thumb", self._on_generation_completed)
+        # 구독 중복 방지 후 구독
+        try:
+            subs = getattr(self.app_context, 'subscribers', {}).get("generation_completed_for_artist_thumb", [])
+            if self._on_generation_completed not in subs:
+                self.app_context.subscribe("generation_completed_for_artist_thumb", self._on_generation_completed)
+        except Exception:
+            self.app_context.subscribe("generation_completed_for_artist_thumb", self._on_generation_completed)
         
         # Generate 버튼 비활성화
         self.generate_btn.setEnabled(False)
-        self.generate_btn.setText("🔄 생성 중...")
+        if hasattr(self, 'continuous_generation_checkbox') and self.continuous_generation_checkbox.isChecked():
+            self.generate_btn.setText("🔄 연속생성 중...")
+        else:
+            self.generate_btn.setText("🔄 생성 중...")
         
         # generation_controller의 execute_generation_pipeline 호출
         if hasattr(self.app_context, 'main_window'):
@@ -1410,6 +2797,13 @@ class ArtistThumbModule(BaseTabModule):
                     self.app_context.main_window.status_bar.showMessage(
                         "✅ ArtistThumb: 이미지 생성 완료", 3000
                     )
+                
+                # 연속생성이 활성화되어 있으면 1초 후 다시 생성
+                if hasattr(self, 'continuous_generation_checkbox') and self.continuous_generation_checkbox.isChecked():
+                    print("🔄 연속생성 모드: 1초 후 다시 생성")
+                    # QTimer 사용하여 1초 후 생성 호출
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(1000, self._trigger_continuous_generation)
             else:
                 print(f"⚠️ 예상과 다른 결과 타입: {type(result)}")
                 
@@ -1417,8 +2811,32 @@ class ArtistThumbModule(BaseTabModule):
             print(f"❌ 생성 완료 처리 중 오류: {e}")
             print(f"결과 타입: {type(result)}")
         finally:
-            # 항상 구독 해제 및 버튼 복원 (finally 블록에서 안전하게 처리)
-            self._cleanup_generation()
+            # 연속생성 모드가 아닐 때만 정리
+            if not (hasattr(self, 'continuous_generation_checkbox') and self.continuous_generation_checkbox.isChecked()):
+                # 항상 구독 해제 및 버튼 복원 (finally 블록에서 안전하게 처리)
+                self._cleanup_generation()
+            else:
+                # 연속생성 모드에서는 구독만 해제하고 버튼은 비활성 상태 유지
+                self._cleanup_generation_subscription_only()
+    
+    def _trigger_continuous_generation(self):
+        """연속생성을 위한 생성 트리거"""
+        # 연속생성이 여전히 활성화되어 있는지 확인
+        if hasattr(self, 'continuous_generation_checkbox') and self.continuous_generation_checkbox.isChecked():
+            print("🔄 연속생성: 새로운 생성 시작")
+            self._on_generate_clicked()
+    
+    def _cleanup_generation_subscription_only(self):
+        """구독만 해제 (버튼 상태는 유지)"""
+        try:
+            # ArtistThumb 전용 구독 해제 (AppContext에 unsubscribe가 없으므로 수동 제거)
+            if hasattr(self, 'app_context') and self.app_context and "generation_completed_for_artist_thumb" in self.app_context.subscribers:
+                subs = self.app_context.subscribers["generation_completed_for_artist_thumb"]
+                if self._on_generation_completed in subs:
+                    subs.remove(self._on_generation_completed)
+                    print("✅ ArtistThumb 생성 완료 이벤트 구독 해제")
+        except Exception as e:
+            print(f"⚠️ 구독 해제 중 오류: {e}")
     
     def _cleanup_generation(self):
         """생성 관련 정리 작업"""
@@ -1437,6 +2855,10 @@ class ArtistThumbModule(BaseTabModule):
     
     def cleanup(self):
         """탭 종료 시 정리"""
+        # 연속생성 중지
+        if hasattr(self, 'continuous_generation_checkbox'):
+            self.continuous_generation_checkbox.setChecked(False)
+        
         # 검색 팝업 정리
         if self.search_popup and self.search_popup.isVisible():
             self.search_popup.hide()
@@ -1742,3 +3164,51 @@ class ArtistThumbModule(BaseTabModule):
                 with open(custom_file, 'r', encoding='utf-8') as f:
                     custom_artists = [line.strip() for line in f if line.strip()]
                 self._update_listbox(custom_artists)
+    
+    def _on_randomizer_toggled(self, checked: bool):
+        """아티스트 랜더마이저 체크박스 토글 시"""
+        # 규칙 설정 버튼은 항상 활성화 상태 유지
+        
+        # 랜더마이저 활성/비활성 상태를 app_context에 저장
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.artist_randomizer_enabled = checked
+            print(f"🎲 Artist Randomizer: {'Enabled' if checked else 'Disabled'}")
+    
+    def _open_randomizer_settings(self):
+        """아티스트 랜더마이저 설정 창 열기"""
+        if not hasattr(self, 'randomizer_settings_window') or not self.randomizer_settings_window:
+            self.randomizer_settings_window = ArtistRandomizerSettings(self.widget, self.app_context)
+        self.randomizer_settings_window.show()
+        self.randomizer_settings_window.raise_()
+        self.randomizer_settings_window.activateWindow()
+    
+    def get_randomized_artist_string(self):
+        """
+        랜더마이저가 활성화된 경우 아티스트 문자열 생성
+        
+        Returns:
+            tuple: (생성된 아티스트 문자열, 선택된 아티스트 리스트)
+        """
+        # 랜더마이저가 활성화되어 있는지 확인
+        if not hasattr(self, 'randomizer_checkbox') or not self.randomizer_checkbox.isChecked():
+            return "", []
+        
+        # app_context에서 현재 규칙 가져오기
+        if not hasattr(self, 'app_context') or not self.app_context:
+            return "", []
+        
+        rule_data = getattr(self.app_context, 'artist_randomizer_rule', None)
+        if not rule_data:
+            return "", []
+        
+        # 아티스트 목록 준비
+        artist_list = self.artist_list if hasattr(self, 'artist_list') else []
+        favorite_artists = self.favorite_artists if hasattr(self, 'favorite_artists') else []
+        
+        # 문자열과 선택된 아티스트 생성
+        result_list, selected_artists = generate_artist_randomizer_string_with_selection(
+            rule_data, artist_list, favorite_artists
+        )
+        
+        # ", "로 연결하여 반환
+        return ", ".join(result_list), selected_artists

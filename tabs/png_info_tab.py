@@ -10,6 +10,7 @@ from PIL import Image, ImageQt, ImageGrab
 from PIL.PngImagePlugin import PngInfo
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size
+from ui.img2img_popup import Img2ImgPopup
 from interfaces.base_tab_module import BaseTabModule
 import json
 import re
@@ -38,8 +39,9 @@ class PngInfoTabModule(BaseTabModule):
         if self.png_info_widget is None:
             self.png_info_widget = PngInfoTab(parent)
             
-            # AppContext가 주입된 후, 위젯에 필요한 시그널 연결 등을 수행할 수 있음
-            # 예: self.png_info_widget.parameters_extracted.connect(...)
+            # AppContext 전달
+            if hasattr(self, 'app_context') and self.app_context:
+                self.png_info_widget.app_context = self.app_context
             
         return self.png_info_widget
 
@@ -201,9 +203,11 @@ class PngInfoTab(QWidget):
         super().__init__(parent)
         self.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
         self.current_image_path = None
+        self.current_pil_image = None  # 현재 로드된 PIL 이미지 저장
         self.current_parameters = {}
         self.download_thread = None
         self.downloader = None
+        self.app_context = None  # AppContext 저장용
         self.init_ui()
         
     def init_ui(self):
@@ -245,6 +249,37 @@ class PngInfoTab(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
+        # [이미지 정보 추출] 버튼을 맨 위에 추가
+        self.extract_info_button = QPushButton("🔍 이미지 정보 추출")
+        self.extract_info_button.clicked.connect(self.show_img2img_popup)
+        self.extract_info_button.setEnabled(False)  # 이미지가 로드되기 전까지 비활성화
+        self.extract_info_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #2E7D32;
+                border: 1px solid #388E3C;
+                border-radius: 6px;
+                padding: 10px 16px;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-weight: 600;
+                color: #FFFFFF;
+                font-size: {get_scaled_font_size(20)}px;
+            }}
+            QPushButton:hover:enabled {{
+                background-color: #388E3C;
+                border: 1px solid #43A047;
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed:enabled {{
+                background-color: #1B5E20;
+                color: #FFFFFF;
+            }}
+            QPushButton:disabled {{
+                background-color: #1B5E20;
+                border: 1px solid #2E7D32;
+                color: rgba(255, 255, 255, 0.5);
+            }}
+        """)
+        layout.addWidget(self.extract_info_button)
         
         # 드래그 앤 드롭 영역
         self.drop_area = ImageDropArea(self)
@@ -541,6 +576,8 @@ class PngInfoTab(QWidget):
                     self.parameters_extracted.emit(parsed_params)
 
                 self.current_image_path = None  # 클립보드 이미지는 경로가 없음
+                self.current_pil_image = pil_image  # PIL 이미지 저장
+                self.extract_info_button.setEnabled(True)  # 버튼 활성화
                 print("✅ 클립보드 이미지 로드 완료")
 
             # URL이 클립보드에 있는 경우 (웹 이미지) - 파일이 아닌 웹 URL
@@ -737,32 +774,36 @@ class PngInfoTab(QWidget):
                 return
                 
             # PIL로 이미지 열기
-            with Image.open(file_path) as img:
-                self.current_image_path = file_path
+            img = Image.open(file_path)
+            self.current_image_path = file_path
+            self.current_pil_image = img.copy()  # PIL 이미지 복사본 저장
+            
+            # 개선된 메타데이터 추출
+            geninfo, metadata = self.read_info_from_image(img)
+            
+            # 드롭 영역에 이미지 표시
+            self.drop_area.set_image(file_path)
+            
+            # 원본 데이터 표시 (전체 메타데이터)
+            self.display_raw_metadata(metadata, geninfo)
+            
+            # 파라미터 파싱 및 표시 - 함수명 수정
+            if geninfo:
+                # geninfo를 직접 파싱
+                parsed_params = self.parse_generation_parameters(geninfo)
+                self.current_parameters = parsed_params
+                self.display_parsed_parameters(parsed_params)
+                self.display_copy_text(parsed_params, geninfo)
                 
-                # 개선된 메타데이터 추출
-                geninfo, metadata = self.read_info_from_image(img)
-                
-                # 드롭 영역에 이미지 표시
-                self.drop_area.set_image(file_path)
-                
-                # 원본 데이터 표시 (전체 메타데이터)
-                self.display_raw_metadata(metadata, geninfo)
-                
-                # 파라미터 파싱 및 표시 - 함수명 수정
-                if geninfo:
-                    # geninfo를 직접 파싱
-                    parsed_params = self.parse_generation_parameters(geninfo)
-                    self.current_parameters = parsed_params
-                    self.display_parsed_parameters(parsed_params)
-                    self.display_copy_text(parsed_params, geninfo)
-                    
-                    # 시그널 발송
-                    self.parameters_extracted.emit(parsed_params)
-                else:
-                    self.clear_parameter_displays()
-                
-                print(f"✅ 이미지 로드 완료: {file_path}")
+                # 시그널 발송
+                self.parameters_extracted.emit(parsed_params)
+            else:
+                self.clear_parameter_displays()
+            
+            # 버튼 활성화
+            self.extract_info_button.setEnabled(True)
+            
+            print(f"✅ 이미지 로드 완료: {file_path}")
                 
         except Exception as e:
             QMessageBox.critical(self, "오류", f"이미지 로드 중 오류 발생:\n{str(e)}")
@@ -1051,11 +1092,39 @@ class PngInfoTab(QWidget):
     def clear_all(self):
         """모든 내용 지우기"""
         self.current_image_path = None
+        self.current_pil_image = None
         self.current_parameters = {}
         self.drop_area.clear_image()
         self.raw_text_edit.clear()
         self.copy_text_edit.clear()
         self.clear_parameter_displays()
+        self.extract_info_button.setEnabled(False)  # 버튼 비활성화
+    
+    def show_img2img_popup(self):
+        """Img2ImgPopup을 표시합니다."""
+        if not self.current_pil_image:
+            QMessageBox.warning(self, "경고", "로드된 이미지가 없습니다.")
+            return
+        
+        # MainWindow 찾기
+        main_window = self.window()
+        
+        # Img2ImgPopup 표시
+        popup = Img2ImgPopup(self.current_pil_image, self.app_context, main_window)
+        
+        # 시그널 연결 (MainWindow가 처리하도록)
+        if hasattr(main_window, 'send_to_img2img'):
+            popup.img2img_requested.connect(main_window.send_to_img2img)
+        if hasattr(main_window, 'send_to_inpaint'):
+            popup.inpaint_requested.connect(main_window.send_to_inpaint)
+        if hasattr(main_window, 'activate_vibe_transfer'):
+            popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
+        
+        # 팝업 위치 설정 (버튼 근처)
+        button_pos = self.extract_info_button.mapToGlobal(self.extract_info_button.rect().center())
+        popup.move(button_pos.x() - popup.width() // 2, button_pos.y())
+        
+        popup.exec()
 
 class ImageDropArea(QLabel):
     file_dropped = pyqtSignal(str)

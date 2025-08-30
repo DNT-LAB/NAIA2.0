@@ -2102,6 +2102,11 @@ class ImageWindow(QWidget):
     def open_folder(self):
         import sys, subprocess
         folder = str(self.app_context.session_save_path)
+        
+        # 폴더가 존재하지 않으면 생성
+        if not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
+        
         if sys.platform.startswith('darwin'):
             subprocess.run(['open', folder])
         elif os.name == 'nt':

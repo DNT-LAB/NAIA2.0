@@ -490,6 +490,28 @@ class AutoCompleteManager(QObject):
                 item.setToolTip(f"태그: {tag}\n사용 횟수: {count:,}")
             
             self.popup.addItem(item)
+            
+            # NAI 모드이고 아티스트 태그인데 "artist:" 접두사가 없는 경우 "artist:" 버전도 추가
+            if (self.app_context and 
+                hasattr(self.app_context, 'current_api_mode') and 
+                self.app_context.current_api_mode == "NAI" and
+                artist_name in artist_list and
+                not tag.startswith("artist:")):
+                
+                artist_tag = f"artist:{tag}"
+                artist_display_text = f"{artist_tag:<40} {count_text:>8}"
+                
+                artist_item = QListWidgetItem(artist_display_text)
+                artist_item.setData(Qt.ItemDataRole.UserRole, artist_tag)
+                
+                # 아티스트 이미지 데이터도 동일하게 설정
+                if artist_name in artist_data:
+                    artist_item.setData(Qt.ItemDataRole.UserRole + 2, artist_data[artist_name])
+                    artist_item.setToolTip(f"아티스트: {artist_name}\n사용 횟수: {count:,}\n(키보드로 선택 시 이미지 확인)")
+                else:
+                    artist_item.setToolTip(f"태그: {artist_tag}\n사용 횟수: {count:,}")
+                
+                self.popup.addItem(artist_item)
 
     def _on_item_focused(self, current, previous):
         """아이템 포커스 변경 시 (키보드 탐색) 아티스트 이미지 표시"""
@@ -659,8 +681,13 @@ class AutoCompleteManager(QObject):
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
         
         # 자동 쉼표 추가 (trailing_whitespace가 없거나 줄바꿈인 경우)
+        # QLineEdit인 경우 쉼표를 추가하지 않음
         # 줄바꿈이 있는 경우에도 쉼표를 추가하고 그 뒤에 줄바꿈을 유지
-        if not trailing_whitespace:
+        if isinstance(widget, QLineEdit):
+            # QLineEdit인 경우 쉼표 추가 안함
+            final_text = final_text + trailing_whitespace
+            added_comma_space = False
+        elif not trailing_whitespace:
             final_text = final_text + ", "
             added_comma_space = True
         elif '\n' in trailing_whitespace:

@@ -43,6 +43,7 @@ from utils.load_generation_params import GenerationParamsManager
 from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
 from core.main_controller import MainController
+from utils.token_calculator import get_token_calculator
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
@@ -354,7 +355,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 250830")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 250910")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -426,6 +427,13 @@ class ModernMainWindow(QMainWindow):
         
         # AppContext에 모드 변경 이벤트 구독
         self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
+        
+        # 초기 토큰 카운트 업데이트
+        QTimer.singleShot(100, self.update_token_count)
+        QTimer.singleShot(100, self.update_negative_token_count)
+        
+        # CharacterModule 업데이트 시 토큰 카운트 업데이트
+        self.app_context.subscribe("character_changed", lambda: self.update_token_count())
         
         # 초기 설정 로드 (NAI 모드)
         self.generation_params_manager.load_mode_settings("NAI")
@@ -850,7 +858,13 @@ class ModernMainWindow(QMainWindow):
         self.main_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_prompt_textedit.customContextMenuRequested.connect(self.show_prompt_context_menu)
         self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
+
+        self.main_prompt_token_label = QLabel("Estimated Tokens : 0 (Main 0 + Character 0)")
+        main_prompt_layout.addWidget(self.main_prompt_token_label)
         
+        # Connect text change event to update token count
+        self.main_prompt_textedit.textChanged.connect(self.update_token_count)
+
         self.negative_prompt_textedit = PromptTextEdit()
         self.negative_prompt_textedit.app_context = self.app_context
         self.negative_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
@@ -860,6 +874,13 @@ class ModernMainWindow(QMainWindow):
         self.negative_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.negative_prompt_textedit.customContextMenuRequested.connect(self.show_negative_prompt_context_menu)
         negative_prompt_layout.addWidget(self.negative_prompt_textedit)
+        
+        # 네거티브 프롬프트 토큰 카운트 라벨 추가
+        self.negative_prompt_token_label = QLabel("Estimated Tokens : 0")
+        negative_prompt_layout.addWidget(self.negative_prompt_token_label)
+        
+        # Connect negative prompt text change event to update token count
+        self.negative_prompt_textedit.textChanged.connect(self.update_negative_token_count)
         
         self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
         self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
@@ -1482,6 +1503,9 @@ class ModernMainWindow(QMainWindow):
             # NAI 모드로 전환 시 Anlas 업데이트
             self.update_anlas_display()
             
+            # 토큰 카운트 업데이트
+            self.update_token_count()
+            
         elif mode == "WEBUI":
             # WEBUI 모드 선택 시 연결 테스트 수행 (기존 로직 유지)
             try:
@@ -1544,11 +1568,29 @@ class ModernMainWindow(QMainWindow):
                             self.app_context.secure_token_manager.save_token('webui_url', clean_url)
                             self.app_context.set_api_mode(mode)
                             
+                            # 토큰 카운트 업데이트
+                            self.update_token_count()
+                            
+                            # URL 정규화 (스마트 프로토콜 선택)
+                            normalized_url = validated_url
+                            if not normalized_url.startswith(("http://", "https://")):
+                                # 127로 시작하면 http://, 그 외 터널링 주소는 https://
+                                if normalized_url.startswith("127"):
+                                    normalized_url = f"http://{normalized_url}"
+                                else:
+                                    normalized_url = f"https://{normalized_url}"
+                            elif normalized_url.startswith("http://http://"):
+                                normalized_url = normalized_url.replace("http://http://", "http://")
+                            elif normalized_url.startswith("https://http://"):
+                                normalized_url = normalized_url.replace("https://http://", "http://")
+                            elif normalized_url.startswith("http://https://"):
+                                normalized_url = normalized_url.replace("http://https://", "https://")
+                            
                             # ✅ WEBUI 웹뷰 탭 열기
                             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                                 self.image_window.tab_controller.add_tab_by_name(
                                     'SimpleWebViewTabModule',
-                                    api_url=validated_url,
+                                    api_url=normalized_url,
                                     api_mode='WEBUI',
                                     app_context=self.app_context
                                 )
@@ -1641,11 +1683,25 @@ class ModernMainWindow(QMainWindow):
                             self.app_context.secure_token_manager.save_token('comfyui_url', comfyui_url)
                             self.app_context.set_api_mode(mode)
                             
+                            # 토큰 카운트 업데이트1
+                            self.update_token_count()
+                            
+                            # URL 정규화 (http:// 중복 방지)
+                            normalized_url = comfyui_url
+                            if not normalized_url.startswith(("http://", "https://")):
+                                normalized_url = f"http://{normalized_url}"
+                            elif normalized_url.startswith("http://http://"):
+                                normalized_url = normalized_url.replace("http://http://", "http://")
+                            elif normalized_url.startswith("https://http://"):
+                                normalized_url = normalized_url.replace("https://http://", "http://")
+                            elif normalized_url.startswith("http://https://"):
+                                normalized_url = normalized_url.replace("http://https://", "https://")
+                            
                             # ✅ ComfyUI 웹뷰 탭 열기
                             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                                 self.image_window.tab_controller.add_tab_by_name(
                                     'SimpleWebViewTabModule',
-                                    api_url=f"http://{comfyui_url}",
+                                    api_url=normalized_url,
                                     api_mode='COMFYUI'
                                 )
 
@@ -3614,6 +3670,67 @@ class ModernMainWindow(QMainWindow):
             self.save_settings_btn.setText("💾 설정 저장")
             self.save_settings_btn.setEnabled(True)
 
+    def update_token_count(self):
+        """Update the token count label based on current prompts and mode."""
+        try:
+            # Get token calculator
+            calculator = get_token_calculator()
+            if not calculator.available:
+                self.main_prompt_token_label.setText("Estimated Tokens : N/A (tiktoken not available)")
+                return
+            
+            # Get main prompt text
+            main_prompt = self.main_prompt_textedit.toPlainText()
+            
+            # Get current API mode
+            current_mode = self.get_current_api_mode()
+            
+            # Get character prompt if in NAI mode
+            character_prompt = ""
+            if current_mode == "NAI":
+                try:
+                    character_module = self.middle_section_controller.get_module_instance("CharacterModule")
+                    if character_module and hasattr(character_module, 'modifiable_clone'):
+                        characters = character_module.modifiable_clone.get('characters', [])
+                        if characters and character_module.activate_checkbox.isChecked():
+                            # Join all character strings into one
+                            character_prompt = ' '.join(str(char) for char in characters if char)
+                except Exception as e:
+                    print(f"Warning: Could not get character module data: {e}")
+            
+            # Calculate tokens
+            token_counts = calculator.count_prompt_tokens(main_prompt, character_prompt, current_mode)
+            
+            # Format and update label
+            label_text = calculator.format_token_label(token_counts, current_mode)
+            self.main_prompt_token_label.setText(label_text)
+            
+        except Exception as e:
+            print(f"Error updating token count: {e}")
+            self.main_prompt_token_label.setText("Estimated Tokens : Error")
+    
+    def update_negative_token_count(self):
+        """Update the negative prompt token count label."""
+        try:
+            # Get token calculator
+            calculator = get_token_calculator()
+            if not calculator.available:
+                self.negative_prompt_token_label.setText("Estimated Tokens : N/A (tiktoken not available)")
+                return
+            
+            # Get negative prompt text
+            negative_prompt = self.negative_prompt_textedit.toPlainText()
+            
+            # Calculate tokens (negative prompt only, no mode dependency)
+            token_count = calculator.count_tokens(negative_prompt)
+            
+            # Update label with simple format
+            self.negative_prompt_token_label.setText(f"Estimated Tokens : {token_count}")
+            
+        except Exception as e:
+            print(f"Error updating negative token count: {e}")
+            self.negative_prompt_token_label.setText("Estimated Tokens : Error")
+    
     def _load_custom_workflow_from_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "ComfyUI 워크플로우 이미지 선택", "", "Image Files (*.png)"
@@ -4034,16 +4151,33 @@ class ModernMainWindow(QMainWindow):
                 self.cfg_value_label.setText(str(settings['cfg_scale']))
             print(f"    ✓ CFG Scale: {settings['cfg_scale']}")
         
-        # Sampler
+        # CFG Rescale (NAI 전용)
+        if 'cfg_rescale' in settings and hasattr(self, 'cfg_rescale_slider'):
+            slider_value = int(float(settings['cfg_rescale']) * 100)
+            self.cfg_rescale_slider.setValue(slider_value)
+            print(f"    ✓ CFG Rescale: {settings['cfg_rescale']}")
+        
+        # Sampler (독립적으로 적용)
         if 'sampler' in settings and hasattr(self, 'sampler_combo'):
             sampler_text = settings['sampler']
-            if 'noise_schedule' in settings:
-                sampler_text = f"{settings['sampler']} + {settings['noise_schedule']}"
-            
             index = self.sampler_combo.findText(sampler_text)
             if index >= 0:
                 self.sampler_combo.setCurrentIndex(index)
                 print(f"    ✓ Sampler: {sampler_text}")
+        
+        # Scheduler (별도 콤보박스로 적용)
+        if 'noise_schedule' in settings and hasattr(self, 'scheduler_combo'):
+            scheduler_text = settings['noise_schedule']
+            index = self.scheduler_combo.findText(scheduler_text)
+            if index >= 0:
+                self.scheduler_combo.setCurrentIndex(index)
+                print(f"    ✓ Scheduler: {scheduler_text}")
+        elif 'scheduler' in settings and hasattr(self, 'scheduler_combo'):
+            scheduler_text = settings['scheduler']
+            index = self.scheduler_combo.findText(scheduler_text)
+            if index >= 0:
+                self.scheduler_combo.setCurrentIndex(index)
+                print(f"    ✓ Scheduler: {scheduler_text}")
         
         # Steps
         if 'steps' in settings and hasattr(self, 'steps_spinbox'):
@@ -4064,6 +4198,13 @@ class ModernMainWindow(QMainWindow):
             if hasattr(self, 'seed_input'):
                 self.seed_input.setText(str(settings['seed']))
                 print(f"    ✓ Seed: {settings['seed']}")
+        
+        # Model
+        if 'model' in settings and hasattr(self, 'model_combo'):
+            index = self.model_combo.findText(settings['model'])
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+                print(f"    ✓ Model: {settings['model']}")
         
         # Resolution
         if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
@@ -4122,6 +4263,13 @@ class ModernMainWindow(QMainWindow):
             slider_value = int(float(settings['denoising_strength']) * 100)
             self.denoising_strength_slider.setValue(slider_value)
             print(f"    ✓ Denoising Strength: {settings['denoising_strength']}")
+        
+        # Model
+        if 'model' in settings and hasattr(self, 'model_combo'):
+            index = self.model_combo.findText(settings['model'])
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+                print(f"    ✓ Model: {settings['model']}")
         
         # Seed
         if 'seed' in settings:

@@ -734,33 +734,61 @@ class MetadataViewerWindow(QDialog):
     
     def _on_apply_prompt(self):
         """프롬프트 적용"""
-        prompt = self._get_prompt_text()
-        negative = self._get_negative_text()
-        self.apply_prompt.emit(prompt, negative)
-        # Non-modal로 변경 - 창을 닫지 않음
-        msgbox = QMessageBox(self)
-        msgbox.setWindowTitle("적용 완료")
-        msgbox.setText("프롬프트가 적용되었습니다.")
-        msgbox.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: white;
-            }}
-            QMessageBox QLabel {{
-                color: white;
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                color: white;
-                border: 1px solid {DARK_COLORS['border']};
-                padding: 5px 15px;
-                border-radius: 3px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-        """)
-        msgbox.exec()
+        try:
+            prompt = self._get_prompt_text()
+            negative = self._get_negative_text()
+            
+            # 시그널 발송 (기존 연결된 슬롯이 있을 경우를 위해)
+            self.apply_prompt.emit(prompt, negative)
+            
+            # app_context를 통한 직접 적용 (시그널 연결이 없을 경우를 위해)
+            if self.app_context and hasattr(self.app_context, 'main_window'):
+                main_window = self.app_context.main_window
+                
+                # 메인 프롬프트 적용
+                if hasattr(main_window, 'main_prompt_textedit'):
+                    main_window.main_prompt_textedit.setPlainText(prompt)
+                elif hasattr(main_window, 'prompt_input'):
+                    main_window.prompt_input.setPlainText(prompt)
+                    
+                # 네거티브 프롬프트 적용
+                if hasattr(main_window, 'negative_prompt_textedit'):
+                    main_window.negative_prompt_textedit.setPlainText(negative)
+                elif hasattr(main_window, 'negative_prompt_input'):
+                    main_window.negative_prompt_input.setPlainText(negative)
+                    
+                print(f"✅ 메타데이터에서 프롬프트 적용 완료 (직접 방식)")
+                if hasattr(main_window, 'status_bar'):
+                    main_window.status_bar.showMessage("프롬프트가 적용되었습니다.", 3000)
+            
+            # 적용 완료 메시지
+            msgbox = QMessageBox(self)
+            msgbox.setWindowTitle("적용 완료")
+            msgbox.setText("프롬프트가 적용되었습니다.")
+            msgbox.setStyleSheet(f"""
+                QMessageBox {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: white;
+                }}
+                QMessageBox QLabel {{
+                    color: white;
+                }}
+                QPushButton {{
+                    background-color: {DARK_COLORS['bg_tertiary']};
+                    color: white;
+                    border: 1px solid {DARK_COLORS['border']};
+                    padding: 5px 15px;
+                    border-radius: 3px;
+                }}
+                QPushButton:hover {{
+                    background-color: {DARK_COLORS['bg_hover']};
+                }}
+            """)
+            msgbox.exec()
+            
+        except Exception as e:
+            print(f"❌ 프롬프트 적용 중 오류: {e}")
+            QMessageBox.critical(self, "오류", f"프롬프트 적용 실패:\n{str(e)}")
         
     def _on_apply_settings(self):
         """설정값 일괄 적용"""

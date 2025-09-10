@@ -8,15 +8,20 @@ from pathlib import Path
 import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
-    QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox
+    QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox, QApplication,
+    QSpinBox, QRadioButton, QButtonGroup, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer
-from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeData, QUrl
+from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent, QDragEnterEvent, QDropEvent, QCursor
+from PyQt6.QtWidgets import QWidgetAction
 from PIL import Image, ImageQt
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from interfaces.base_tab_module import BaseTabModule
+from ui.img2img_popup import Img2ImgPopup
 import piexif, io
+import requests
+import tempfile
 
 class ImageViewerModule(BaseTabModule):
     """'생성 결과' 탭을 위한 모듈"""
@@ -100,16 +105,85 @@ class AllImagesDownloader(QObject):
 
 # --- 1. ImageLabel 클래스: 오직 이미지 표시와 리사이징만 담당 ---
 class ImageLabel(QLabel):
+    # 드래그&드롭으로 이미지를 받았을 때 발생하는 시그널
+    image_dropped = pyqtSignal(Image.Image)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(1, 1)
         self.full_pixmap = None
+        # 드래그&드롭 활성화
+        self.setAcceptDrops(True)
 
     def setFullPixmap(self, pixmap: QPixmap | None):
         """원본 QPixmap을 저장하고, 첫 리사이징을 트리거합니다."""
         self.full_pixmap = pixmap
         # 위젯의 현재 크기에 맞춰 이미지 업데이트
         self.resizeEvent(None) 
+    
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """드래그가 들어왔을 때 이벤트 처리"""
+        mime_data = event.mimeData()
+        
+        # 이미지 파일이나 URL을 받을 수 있는지 확인
+        if mime_data.hasImage() or mime_data.hasUrls():
+            # URL이 있는 경우 이미지 파일인지 확인
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    if file_path and file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
+                        event.acceptProposedAction()
+                        return
+                    # 웹 URL인 경우도 처리
+                    if url.scheme() in ['http', 'https']:
+                        event.acceptProposedAction()
+                        return
+            # 직접 이미지 데이터가 있는 경우
+            elif mime_data.hasImage():
+                event.acceptProposedAction()
+    
+    def dropEvent(self, event: QDropEvent):
+        """드롭 이벤트 처리"""
+        mime_data = event.mimeData()
+        pil_image = None
+        
+        try:
+            # URL 처리 (파일 경로 또는 웹 URL)
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    
+                    # 로컬 파일인 경우
+                    if file_path and os.path.exists(file_path):
+                        pil_image = Image.open(file_path)
+                        break
+                    
+                    # 웹 URL인 경우
+                    elif url.scheme() in ['http', 'https']:
+                        # URL에서 이미지 다운로드
+                        response = requests.get(url.toString(), timeout=10)
+                        if response.status_code == 200:
+                            pil_image = Image.open(BytesIO(response.content))
+                        break
+            
+            # 직접 이미지 데이터가 있는 경우
+            elif mime_data.hasImage():
+                qimage = mime_data.imageData()
+                if qimage:
+                    # QImage를 PIL Image로 변환
+                    buffer = BytesIO()
+                    qimage.save(buffer, "PNG")
+                    buffer.seek(0)
+                    pil_image = Image.open(buffer)
+            
+            # 이미지를 성공적으로 로드했으면 시그널 발생
+            if pil_image:
+                self.image_dropped.emit(pil_image)
+                event.acceptProposedAction()
+            
+        except Exception as e:
+            print(f"Failed to process dropped image: {e}")
+            event.ignore()
 
     def resizeEvent(self, event):
         """위젯의 크기가 변경될 때마다 호출되는 이벤트 핸들러"""
@@ -1090,6 +1164,16 @@ class ImageWindow(QWidget):
         download_clear_action.triggered.connect(lambda: self.start_download_all(clear_after=True))
         self.advanced_menu.addAction(download_clear_action)
 
+        clear_action = QAction("🧹 히스토리 정리 (다운로드 X)", self)
+        clear_action.triggered.connect(lambda: self.clear_history_only())
+        self.advanced_menu.addAction(clear_action)
+
+        # 구분선 추가
+        self.advanced_menu.addSeparator()
+        
+        # 메모리 관리 섹션 추가
+        self.create_memory_management_section()
+
         # 버튼에 메뉴를 영구적으로 할당합니다.
         self.advanced_button.setMenu(self.advanced_menu)
 
@@ -1158,6 +1242,9 @@ class ImageWindow(QWidget):
             }}
         """)
         self.main_image_label.setText("Generated Image")
+        
+        # 드래그&드롭 시그널 연결
+        self.main_image_label.image_dropped.connect(self.show_img2img_popup)
         
         # 3-2-b. 정보 패널 (제목 + 텍스트박스)
         self.info_panel = QWidget()
@@ -1321,6 +1408,12 @@ class ImageWindow(QWidget):
         show_metadata_action = QAction("🔍 전체 메타데이터 보기", self)
         show_metadata_action.triggered.connect(self._show_current_metadata)
         menu.addAction(show_metadata_action)
+        
+        # 이미지 붙여넣기 메뉴 추가
+        menu.addSeparator()
+        paste_image_action = QAction("📋 이미지 붙여넣기", self)
+        paste_image_action.triggered.connect(self._paste_image_from_clipboard)
+        menu.addAction(paste_image_action)
 
         # [수정] 파일 경로가 있을 때만 '파일 위치 열기' 옵션을 추가합니다.
         filepath = self.current_history_item.filepath
@@ -1375,6 +1468,72 @@ class ImageWindow(QWidget):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
+    
+    def _paste_image_from_clipboard(self):
+        """클립보드에서 이미지를 가져와 img2img 팝업을 표시합니다."""
+        clipboard = QApplication.clipboard()
+        mime_data = clipboard.mimeData()
+        
+        pil_image = None
+        
+        try:
+            # URL이 있는 경우 (파일 경로)
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    if file_path and os.path.exists(file_path):
+                        pil_image = Image.open(file_path)
+                        break
+            
+            # 직접 이미지 데이터가 있는 경우
+            elif mime_data.hasImage():
+                qimage = clipboard.image()
+                if not qimage.isNull():
+                    # QImage를 PIL Image로 변환
+                    buffer = BytesIO()
+                    qimage.save(buffer, "PNG")
+                    buffer.seek(0)
+                    pil_image = Image.open(buffer)
+            
+            # 이미지를 찾았으면 팝업 표시
+            if pil_image:
+                self.show_img2img_popup(pil_image)
+            else:
+                QMessageBox.information(self, "알림", "클립보드에 이미지가 없습니다.")
+                
+        except Exception as e:
+            print(f"Failed to paste image from clipboard: {e}")
+            QMessageBox.warning(self, "오류", f"클립보드에서 이미지를 가져올 수 없습니다.\n{str(e)}")
+    
+    def show_img2img_popup(self, pil_image: Image.Image):
+        """이미지에 대한 작업 선택 팝업을 표시합니다."""
+        main_window = self.window()
+        popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
+        
+        # 팝업의 신호를 메인 윈도우의 슬롯에 연결
+        if hasattr(main_window, 'activate_img2img_panel'):
+            popup.img2img_requested.connect(main_window.activate_img2img_panel)
+        if hasattr(main_window, 'activate_inpaint_mode'):
+            popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
+        if hasattr(main_window, 'activate_vibe_transfer'):
+            popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
+        
+        # 팝업 위치 조정 및 실행
+        cursor_pos = QCursor.pos()
+        popup_rect = popup.geometry()
+        
+        # 팝업의 좌상단 위치 계산
+        new_x = cursor_pos.x() - popup_rect.width() // 2
+        new_y = cursor_pos.y() - popup_rect.height()
+        
+        # 화면 경계 처리
+        screen = main_window.screen()
+        screen_rect = screen.availableGeometry()
+        new_x = max(screen_rect.left() + 5, min(new_x, screen_rect.right() - popup_rect.width() - 5))
+        new_y = max(screen_rect.top() + 5, min(new_y, screen_rect.bottom() - popup_rect.height() - 5))
+        
+        popup.move(new_x, new_y)
+        popup.exec()
     
     def _send_to_sketchbook(self):
         """Send current image to Sketchbook with prompts for inpaint mode."""
@@ -1989,6 +2148,9 @@ class ImageWindow(QWidget):
 
         if self.image_history_window:
             self.image_history_window.add_history_item(history_item)
+            
+            # 🧠 히스토리 큐 제한 체크
+            self.check_and_apply_history_limit()
         
         # NAI 모드에서 히스토리 아이템 추가 시 Anlas 업데이트
         if self.app_context.current_api_mode == "NAI":
@@ -2321,13 +2483,319 @@ class ImageWindow(QWidget):
         self.on_download_finished(saved_count)
         self.image_history_window.clear_all_items()
 
+    def clear_history_only(self):
+        """다운로드 없이 히스토리만 정리하고 가비지 콜렉션을 수행합니다."""
+        import gc
+        
+        if not self.image_history_window.history_widgets:
+            self.app_context.main_window.status_bar.showMessage("⚠️ 정리할 히스토리가 없습니다.", 3000)
+            return
+        
+        # 히스토리 정리
+        self.image_history_window.clear_all_items()
+        
+        # 가비지 콜렉션 수행
+        gc.collect()
+        
+        # 상태 메시지 표시
+        self.app_context.main_window.status_bar.showMessage("🧹 히스토리 정리 완료", 3000)
+
+    def create_memory_management_section(self):
+        """메모리 관리 섹션을 메뉴에 추가합니다."""
+        # 메모리 관리 위젯 컨테이너
+        memory_widget = QWidget()
+        memory_layout = QVBoxLayout(memory_widget)
+        memory_layout.setContentsMargins(10, 5, 10, 5)
+        memory_layout.setSpacing(5)
+        
+        # 섹션 제목
+        title_label = QLabel("🧠 메모리 관리")
+        title_label.setStyleSheet(f"""
+            font-size: {get_scaled_font_size(16)}px;
+            font-weight: bold;
+            color: {DARK_COLORS['text_primary']};
+            padding: 3px 0px;
+        """)
+        memory_layout.addWidget(title_label)
+        
+        # 히스토리 큐 제한 활성화 체크박스
+        self.history_limit_enabled = QCheckBox("히스토리 큐 제한 활성화")
+        self.history_limit_enabled.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.history_limit_enabled.toggled.connect(self.on_history_limit_toggled)
+        memory_layout.addWidget(self.history_limit_enabled)
+        
+        # 최대 히스토리 길이 설정
+        history_length_layout = QHBoxLayout()
+        history_length_label = QLabel("최대 히스토리 길이:")
+        history_length_label.setStyleSheet(f"""
+            color: {DARK_COLORS['text_primary']};
+            font-size: {get_scaled_font_size(14)}px;
+        """)
+        
+        self.max_history_length = QSpinBox()
+        self.max_history_length.setRange(100, 10000)
+        self.max_history_length.setSingleStep(100)
+        self.max_history_length.setValue(2000)
+        self.max_history_length.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 4px;
+                font-size: {get_scaled_font_size(14)}px;
+                min-width: 80px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border: 1px solid {DARK_COLORS['border']};
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.max_history_length.valueChanged.connect(self.save_memory_settings)
+        
+        history_length_layout.addWidget(history_length_label)
+        history_length_layout.addWidget(self.max_history_length)
+        history_length_layout.addStretch()
+        memory_layout.addLayout(history_length_layout)
+        
+        # 최대 히스토리 길이 도달시 동작 설정
+        action_label = QLabel("최대 히스토리 길이 도달시:")
+        action_label.setStyleSheet(f"""
+            color: {DARK_COLORS['text_primary']};
+            font-size: {get_scaled_font_size(14)}px;
+            font-weight: bold;
+            margin-top: 5px;
+        """)
+        memory_layout.addWidget(action_label)
+        
+        # 라디오 버튼 그룹
+        self.memory_action_group = QButtonGroup()
+        
+        self.auto_save_radio = QRadioButton("[1] 1장씩 자동저장+정리")
+        self.auto_delete_radio = QRadioButton("[2] 1장씩 저장없이 삭제")
+        self.stop_generation_radio = QRadioButton("[3] 자동생성 중단")
+        
+        # 기본값 설정
+        self.auto_save_radio.setChecked(True)
+        
+        radio_style = f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(13)}px;
+                padding: 2px;
+            }}
+            QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+            }}
+            QRadioButton::indicator::unchecked {{
+                border: 2px solid {DARK_COLORS['border']};
+                border-radius: 8px;
+                background-color: {DARK_COLORS['bg_secondary']};
+            }}
+            QRadioButton::indicator::checked {{
+                border: 2px solid {DARK_COLORS['accent_blue']};
+                border-radius: 8px;
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """
+        
+        self.auto_save_radio.setStyleSheet(radio_style)
+        self.auto_delete_radio.setStyleSheet(radio_style)
+        self.stop_generation_radio.setStyleSheet(radio_style)
+        
+        self.memory_action_group.addButton(self.auto_save_radio, 1)
+        self.memory_action_group.addButton(self.auto_delete_radio, 2)
+        self.memory_action_group.addButton(self.stop_generation_radio, 3)
+        self.memory_action_group.buttonClicked.connect(self.save_memory_settings)
+        
+        memory_layout.addWidget(self.auto_save_radio)
+        memory_layout.addWidget(self.auto_delete_radio)
+        memory_layout.addWidget(self.stop_generation_radio)
+        
+        # 초기 설정 비활성화
+        self.update_memory_controls_state(False)
+        
+        # 위젯을 메뉴에 추가
+        memory_action = QWidgetAction(self)
+        memory_action.setDefaultWidget(memory_widget)
+        self.advanced_menu.addAction(memory_action)
+        
+        # 설정 로드
+        self.load_memory_settings()
+
+    def on_history_limit_toggled(self, checked):
+        """히스토리 제한 체크박스 상태 변경 처리"""
+        self.update_memory_controls_state(checked)
+        self.save_memory_settings()
+    
+    def update_memory_controls_state(self, enabled):
+        """메모리 관리 컨트롤들의 활성화 상태 업데이트"""
+        self.max_history_length.setEnabled(enabled)
+        self.auto_save_radio.setEnabled(enabled)
+        self.auto_delete_radio.setEnabled(enabled)
+        self.stop_generation_radio.setEnabled(enabled)
+    
+    def save_memory_settings(self):
+        """메모리 관리 설정 저장"""
+        settings = {
+            'history_limit_enabled': self.history_limit_enabled.isChecked(),
+            'max_history_length': self.max_history_length.value(),
+            'memory_action': self.memory_action_group.checkedId()
+        }
+        
+        # 설정 파일에 저장
+        settings_path = Path("save/memory_management.json")
+        settings_path.parent.mkdir(exist_ok=True)
+        
+        try:
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"메모리 설정 저장 실패: {e}")
+    
+    def load_memory_settings(self):
+        """메모리 관리 설정 로드"""
+        settings_path = Path("save/memory_management.json")
+        
+        if not settings_path.exists():
+            return
+        
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # 설정 적용
+            self.history_limit_enabled.setChecked(settings.get('history_limit_enabled', False))
+            self.max_history_length.setValue(settings.get('max_history_length', 2000))
+            
+            action_id = settings.get('memory_action', 1)
+            button = self.memory_action_group.button(action_id)
+            if button:
+                button.setChecked(True)
+            
+            # 컨트롤 상태 업데이트
+            self.update_memory_controls_state(self.history_limit_enabled.isChecked())
+            
+        except Exception as e:
+            print(f"메모리 설정 로드 실패: {e}")
+
+    def check_and_apply_history_limit(self):
+        """히스토리 큐 제한을 체크하고 필요시 동작을 수행합니다."""
+        # 히스토리 제한이 비활성화되어 있으면 아무것도 하지 않음
+        if not hasattr(self, 'history_limit_enabled') or not self.history_limit_enabled.isChecked():
+            return
+        
+        # 현재 히스토리 개수가 제한을 초과하는지 확인
+        current_count = len(self.image_history_window.history_widgets)
+        max_limit = self.max_history_length.value()
+        
+        if current_count <= max_limit:
+            return  # 제한 내에 있으면 아무것도 하지 않음
+        
+        # 제한을 초과했을 때의 동작 결정
+        action_id = self.memory_action_group.checkedId()
+        
+        if action_id == 1:  # [1] 1장씩 자동저장+정리
+            self.handle_auto_save_and_clear()
+        elif action_id == 2:  # [2] 1장씩 저장없이 삭제
+            self.handle_auto_delete_only()
+        elif action_id == 3:  # [3] 자동생성 중단
+            self.handle_stop_generation()
+        
+        # 상태 메시지 표시
+        self.app_context.main_window.status_bar.showMessage(
+            f"🧠 히스토리 제한 도달 ({current_count}/{max_limit}) - 동작 수행됨", 3000
+        )
+
+    def handle_auto_save_and_clear(self):
+        """[1] 1장씩 자동저장+정리 동작"""
+        # 가장 오래된 히스토리 아이템 (맨 앞)을 가져옴
+        if not self.image_history_window.history_widgets:
+            return
+        
+        oldest_widget = self.image_history_window.history_widgets[-1]
+        oldest_item = oldest_widget.history_item
+        
+        # 해당 이미지를 저장
+        if oldest_item.raw_bytes:
+            save_path = self.app_context.session_save_path
+            save_path.mkdir(parents=True, exist_ok=True)
+            
+            is_webp = self.save_as_webp_checkbox.isChecked()
+            suffix = "webp" if is_webp else "png"
+            filename = f"auto_{self.save_counter:05d}.{suffix}"
+            filepath = save_path / filename
+            
+            if self.save_image_with_metadata(str(filepath), oldest_item.raw_bytes, oldest_item.info_text, as_webp=is_webp):
+                self.save_counter += 1
+                print(f"🧠 자동저장 완료: {filename}")
+        
+        # 해당 아이템 삭제
+        self.image_history_window.on_item_delete_requested(oldest_widget)
+        
+        # 가비지 콜렉션 수행
+        import gc
+        gc.collect()
+
+    def handle_auto_delete_only(self):
+        """[2] 1장씩 저장없이 삭제 동작"""
+        # 가장 오래된 히스토리 아이템 삭제
+        if not self.image_history_window.history_widgets:
+            return
+        
+        oldest_widget = self.image_history_window.history_widgets[-1]
+        self.image_history_window.on_item_delete_requested(oldest_widget)
+        
+        # 가비지 콜렉션 수행
+        import gc
+        gc.collect()
+        print("🧠 자동삭제 완료: 가장 오래된 히스토리 아이템 제거됨")
+
+    def handle_stop_generation(self):
+        """[3] 자동생성 중단 동작"""
+        # 생성 컨트롤러에 중단 신호 전송
+        if hasattr(self.app_context, 'generation_controller'):
+            generation_controller = self.app_context.generation_controller
+            if hasattr(generation_controller, 'stop_generation'):
+                generation_controller.stop_generation()
+                print("🧠 자동생성 중단: 히스토리 제한 도달로 인한 중단")
+        
+        # 자동 생성 체크박스 비활성화
+        if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'generation_checkboxes'):
+            auto_generate_checkbox = self.app_context.main_window.generation_checkboxes.get("자동 생성")
+            if auto_generate_checkbox and auto_generate_checkbox.isChecked():
+                auto_generate_checkbox.setChecked(False)
+        
+        # 메인 윈도우에 경고 메시지 표시
+        if hasattr(self.app_context, 'main_window'):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self.app_context.main_window, 
+                "히스토리 제한 도달", 
+                f"히스토리가 최대 길이({self.max_history_length.value()})에 도달하여 자동생성을 중단합니다.\n\n"
+                "히스토리를 정리하거나 제한 설정을 조정해주세요."
+            )
+
     def update_advanced_menu_state(self):
         """[신규] 고급 메뉴가 표시되기 직전에 호출되어 메뉴 항목의 활성화 상태를 결정합니다."""
         is_history_not_empty = bool(self.image_history_window.history_widgets)
         
-        # 메뉴에 포함된 모든 액션들의 활성화 상태를 현재 히스토리 상태에 따라 설정
+        # 메뉴에 포함된 액션들의 활성화 상태를 설정
+        # 히스토리 관련 액션들만 히스토리 상태에 따라 활성화/비활성화
         for action in self.advanced_menu.actions():
-            action.setEnabled(is_history_not_empty)
+            if isinstance(action, QWidgetAction):
+                # 메모리 관리 섹션(QWidgetAction)은 항상 활성화
+                action.setEnabled(True)
+            elif action.isSeparator():
+                # 구분선은 건드리지 않음
+                continue
+            else:
+                # 일반 액션들(다운로드, 정리 등)은 히스토리 상태에 따라 활성화
+                action.setEnabled(is_history_not_empty)
 
     def _open_file_in_explorer(self, filepath: str):
         """지정된 파일 경로를 각 운영체제에 맞는 파일 탐색기에서 엽니다."""

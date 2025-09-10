@@ -53,3 +53,4 @@ zipp==3.23.0
 websocket-client
 PyQt6-QScintilla
 googletrans
+tiktoken

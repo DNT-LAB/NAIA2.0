@@ -1,4 +1,5 @@
 import io
+import random
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QDoubleSpinBox, QFrame, QSlider, QCheckBox,
@@ -48,18 +49,18 @@ class Img2ImgPanel(QFrame):
 
         # 상단: 타이틀 + 닫기 버튼
         header_layout = QHBoxLayout()
-        title_label = QLabel("Image2Image (NAI Only)")
-        title_label.setStyleSheet(f"font-size: {get_scaled_font_size(24)}px; font-weight: 600; color: white; background-color: transparent;")
+        self.title_label = QLabel("Image2Image (NAI Only)")
+        self.title_label.setStyleSheet(f"font-size: {get_scaled_font_size(24)}px; font-weight: 600; color: white; background-color: transparent;")
 
         subtitle_label = QLabel("Transform your image.")
         subtitle_label.setStyleSheet(f"font-size: {get_scaled_font_size(14)}px; color: #CCCCCC; background-color: transparent;")
 
         title_vbox = QVBoxLayout()
-        title_vbox.addWidget(title_label)
+        title_vbox.addWidget(self.title_label)
         title_vbox.addWidget(subtitle_label)
 
         close_button = QPushButton("X")
-        close_button.setFixedSize(24, 24)
+        close_button.setFixedSize(48, 24)
         close_button.setStyleSheet("QPushButton { border-radius: 12px; background-color: #555; color: white; font-weight: bold; } QPushButton:hover { background-color: #777; }")
         close_button.clicked.connect(self.hide_panel)
 
@@ -196,6 +197,13 @@ class Img2ImgPanel(QFrame):
         bottom_button_layout = QHBoxLayout()
         bottom_button_layout.addStretch()
         
+        self.resize_button = QPushButton("Set 1MP")
+        self.resize_button.setStyleSheet(DARK_STYLES['primary_button'])
+        self.resize_button.clicked.connect(self._on_resize_button_clicked)
+        self.resize_button.setFixedWidth(120)
+        self.resize_button.setVisible(False)  # Initially hidden
+        bottom_button_layout.addWidget(self.resize_button)
+        
         self.upscale_button = QPushButton("Upscale")
         self.upscale_button.setStyleSheet(DARK_STYLES['secondary_button'])
         self.upscale_button.clicked.connect(self._on_upscale_button_clicked)
@@ -308,7 +316,21 @@ class Img2ImgPanel(QFrame):
         self.small_mask_pil = None
         self._update_ui_for_mode()
 
-        self.original_pil_image = pil_image
+        # 64배수 리사이징 및 크롭 적용
+        processed_image = self._resize_and_crop_to_64_multiple(pil_image)
+        self.original_pil_image = processed_image
+        
+        # 타이틀에 최종 이미지 크기 표시
+        final_width, final_height = processed_image.size
+        self.title_label.setText(f"Image2Image (NAI Only) -> {final_width} x {final_height}")
+        
+        # 픽셀 수 체크하여 리사이징 버튼 표시 여부 결정
+        total_pixels = final_width * final_height
+        if total_pixels < 921600 or total_pixels > 1048576:
+            self.resize_button.setVisible(True)
+        else:
+            self.resize_button.setVisible(False)
+        
         self._set_cropped_background() # 배경은 원본 크롭 이미지로 설정
         
         # 새 이미지가 로드되면 Upscale 버튼 다시 표시
@@ -316,6 +338,133 @@ class Img2ImgPanel(QFrame):
         
         self.update() 
         self.setVisible(True)
+
+    def _resize_and_crop_to_64_multiple(self, pil_image: Image.Image) -> Image.Image:
+        """이미지를 64배수 크기로 리사이징하고 크롭합니다."""
+        width, height = pil_image.size
+        
+        # 1. 더 작은 값을 기준으로 가까운 64배수로 조정
+        min_dimension = min(width, height)
+        new_min_dimension = round(min_dimension / 64) * 64
+        
+        # 최소 64픽셀 보장
+        if new_min_dimension < 64:
+            new_min_dimension = 64
+        
+        # 2. 조정된 비율을 구해서 더 큰 값에 적용
+        scale_ratio = new_min_dimension / min_dimension
+        
+        if width <= height:  # width가 더 작거나 같은 경우
+            new_width = new_min_dimension
+            new_height = int(height * scale_ratio)
+        else:  # height가 더 작은 경우
+            new_height = new_min_dimension
+            new_width = int(width * scale_ratio)
+        
+        # 3. LANCZOS를 이용해 리사이징
+        resized_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # 4. 더 큰 값을 가장 가까운 64배수로 크롭
+        if new_width >= new_height:  # width가 더 크거나 같은 경우
+            target_width = round(new_width / 64) * 64
+            difference = new_width - target_width
+            
+            # 좌우에서 크롭
+            left_crop = difference // 2
+            right_crop = difference - left_crop  # 홀수인 경우 오른쪽에서 1픽셀 더
+            
+            # 실제로는 왼쪽에서 1픽셀 더 크롭하도록 조정 (요구사항에 따라)
+            if difference % 2 == 1:
+                left_crop += 1
+                right_crop -= 1
+            
+            final_image = resized_image.crop((left_crop, 0, new_width - right_crop, new_height))
+        else:  # height가 더 큰 경우
+            target_height = round(new_height / 64) * 64
+            difference = new_height - target_height
+            
+            # 상하에서 크롭
+            top_crop = difference // 2
+            bottom_crop = difference - top_crop  # 홀수인 경우 아래쪽에서 1픽셀 더
+            
+            # 실제로는 위쪽에서 1픽셀 더 크롭하도록 조정 (요구사항에 따라)
+            if difference % 2 == 1:
+                top_crop += 1
+                bottom_crop -= 1
+            
+            final_image = resized_image.crop((0, top_crop, new_width, new_height - bottom_crop))
+        
+        print(f"🖼️ 이미지 리사이징 완료: {width}x{height} → {final_image.size[0]}x{final_image.size[1]} (64배수)")
+        return final_image
+
+    def find_max_resolution(self, width, height, max_pixels=1048576, multiple_of=64):
+        """주어진 최대 픽셀 수 내에서 최적의 해상도를 찾습니다."""
+        ratio = int(width) / int(height)
+
+        max_width = int((max_pixels * ratio)**0.5)
+        max_height = int((max_pixels / ratio)**0.5)
+
+        max_width = (max_width // multiple_of) * multiple_of
+        max_height = (max_height // multiple_of) * multiple_of
+
+        while max_width * max_height > max_pixels:
+            max_width -= multiple_of
+            max_height = int(max_width / ratio)
+            max_height = (max_height // multiple_of) * multiple_of
+
+        if max_pixels == 1048576:
+            attempts = 0  
+            max_attempts = 10  
+            while (max_width % multiple_of + max_height % multiple_of) < 32 and attempts < max_attempts:
+                if random.choice([True, False]):
+                    if (max_width + multiple_of) * max_height <= max_pixels:
+                        max_width += multiple_of
+                else:
+                    if max_width * (max_height + multiple_of) <= max_pixels:
+                        max_height += multiple_of
+                attempts += 1
+
+        return (str(max_width), str(max_height))
+
+    def _on_resize_button_clicked(self):
+        """Auto Resize 버튼 클릭 시 처리"""
+        if not self.original_pil_image:
+            return
+            
+        current_width, current_height = self.original_pil_image.size
+        total_pixels = current_width * current_height
+        
+        # 픽셀 수에 따라 적절한 max_pixels 설정
+        if total_pixels < 921600:
+            max_pixels = 1048576  # 작으면 더 큰 해상도로
+        else:  # total_pixels > 1048576
+            max_pixels = 1048576 # 크면 더 작은 해상도로
+            
+        # 최적 해상도 계산
+        new_width_str, new_height_str = self.find_max_resolution(
+            current_width, current_height, max_pixels=max_pixels
+        )
+        new_width, new_height = int(new_width_str), int(new_height_str)
+        
+        # 이미지 리사이징
+        resized_image = self.original_pil_image.resize(
+            (new_width, new_height), Image.Resampling.LANCZOS
+        )
+        
+        # 이미지 업데이트
+        self.original_pil_image = resized_image
+        
+        # 타이틀 업데이트
+        self.title_label.setText(f"Image2Image (NAI Only) -> {new_width} x {new_height}")
+        
+        # 배경 이미지 업데이트
+        self._set_cropped_background()
+        
+        # 리사이징 버튼 숨기기
+        self.resize_button.setVisible(False)
+        
+        self.update()
+        print(f"🔄 이미지 자동 리사이징: {current_width}x{current_height} → {new_width}x{new_height}")
 
     def _set_cropped_background(self):
         """원본 이미지의 중앙 상단을 기준으로 크롭하여 배경 이미지 설정."""
@@ -360,8 +509,12 @@ class Img2ImgPanel(QFrame):
         self._mask_preset = False  # Reset preset flag
         self._mask_from_sketchbook = False  # Reset sketchbook flag
         
-        # 패널이 숨겨질 때 Upscale 버튼도 초기화 (다음에 다시 표시되도록)
+        # 타이틀을 원래 상태로 복원
+        self.title_label.setText("Image2Image (NAI Only)")
+        
+        # 패널이 숨겨질 때 버튼들도 초기화
         self.upscale_button.setVisible(True)
+        self.resize_button.setVisible(False)
         self._update_ui_for_mode() # UI 상태도 초기화
 
     def get_parameters(self) -> dict | None:

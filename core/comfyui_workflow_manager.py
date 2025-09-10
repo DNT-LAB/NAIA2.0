@@ -101,13 +101,15 @@ class ComfyUIWorkflowManager:
         if 'model' in params:
             workflow["1"]["inputs"]["ckpt_name"] = params['model']
         
-        # 2. 프롬프트 설정
+        # 2. 프롬프트 설정 (주석 및 개행문자 처리)
         if 'input' in params:
-            workflow["2"]["inputs"]["text"] = params['input']
+            cleaned_input = self._clean_prompt(params['input'])
+            workflow["2"]["inputs"]["text"] = cleaned_input
         
-        # 3. 네거티브 프롬프트 설정
+        # 3. 네거티브 프롬프트 설정 (주석 및 개행문자 처리)
         if 'negative_prompt' in params:
-            workflow["3"]["inputs"]["text"] = params['negative_prompt']
+            cleaned_negative = self._clean_prompt(params['negative_prompt'])
+            workflow["3"]["inputs"]["text"] = cleaned_negative
         
         # 4. KSampler 파라미터 설정
         ksampler = workflow["4"]["inputs"]
@@ -213,6 +215,23 @@ class ComfyUIWorkflowManager:
         """랜덤 시드 생성"""
         import random
         return random.randint(0, 2**32 - 1)
+    
+    def _clean_prompt(self, prompt: str) -> str:
+        """입력 프롬프트에서 주석 및 개행문자 제거 (api_service.py와 동일한 로직)"""
+        if not isinstance(prompt, str):
+            return prompt
+            
+        cleaned_tags = []
+        for tag in prompt.split(','):
+            processed_tag = tag.replace('\n', '').strip()
+            if processed_tag and not processed_tag.startswith('#'):
+                cleaned_tags.append(processed_tag)
+        
+        cleaned_prompt = ', '.join(cleaned_tags)
+        if prompt != cleaned_prompt:
+            print(f"[CLEAN] ComfyUIWorkflowManager: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
+        
+        return cleaned_prompt
 
     def validate_and_map_workflow(self, workflow: Dict[str, Any]) -> tuple[bool, Dict[str, Any]]:
         """
@@ -380,9 +399,14 @@ class ComfyUIWorkflowManager:
             # 1. 모델 설정
             workflow[node_map["checkpoint_loader"]]["inputs"]["ckpt_name"] = params['model']
             
-            # 2. 프롬프트 설정
-            workflow[node_map["positive_prompt"]]["inputs"]["text"] = params['input']
-            workflow[node_map["negative_prompt"]]["inputs"]["text"] = params['negative_prompt']
+            # 2. 프롬프트 설정 (주석 및 개행문자 처리)
+            # 입력 프롬프트 클리닝
+            cleaned_input = self._clean_prompt(params['input'])
+            workflow[node_map["positive_prompt"]]["inputs"]["text"] = cleaned_input
+            
+            # 네거티브 프롬프트 클리닝
+            cleaned_negative = self._clean_prompt(params['negative_prompt'])
+            workflow[node_map["negative_prompt"]]["inputs"]["text"] = cleaned_negative
 
             # 3. 샘플러 설정 (KSampler와 SamplerCustom 분기 처리)
             sampler_node_id = node_map["sampler"]

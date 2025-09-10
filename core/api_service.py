@@ -161,7 +161,7 @@ class APIService:
                 "NAID4.5F": 'nai-diffusion-4-5-full',
                 "NAID4.5C": 'nai-diffusion-4-5-curated',
                 "NAID4.0F": 'nai-diffusion-4-full',
-                "NAID4.0C": 'nai-diffusion-4-curated',
+                "NAID4.0C": 'nai-diffusion-4-curated-preview',
                 "NAID3": 'nai-diffusion-3'
             }
             
@@ -645,9 +645,21 @@ class APIService:
 
             # 6. 진행률 콜백 설정
             def progress_callback(current: int, total: int):
-                # 메인 윈도우에 진행률 업데이트 (필요시 구현)
-                progress_percent = int((current / total) * 100) if total > 0 else 0
-                print(f"🔄 ComfyUI 생성 진행률: {progress_percent}% ({current}/{total})")
+                if total <= 0:
+                    return
+                    
+                progress_percent = int((current / total) * 100)
+                
+                # 5% 단위로 진행 바 생성 (총 20개 박스)
+                filled_boxes = int(progress_percent / 5)
+                empty_boxes = 20 - filled_boxes
+                progress_bar = "■" * filled_boxes + "□" * empty_boxes
+                
+                message = f"ComfyUI 생성 : {progress_percent}% ({current}/{total}) [{progress_bar}]"
+                
+                # 상태바에 진행률 표시
+                if hasattr(self, 'app_context') and self.app_context and hasattr(self.app_context, 'main_window'):
+                    self.app_context.main_window.status_bar.showMessage(message)
             
             # 7. 이미지 생성 실행
             result = self.comfyui_service.generate_image(workflow, progress_callback)

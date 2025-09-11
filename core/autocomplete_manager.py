@@ -682,9 +682,16 @@ class AutoCompleteManager(QObject):
         
         # 자동 쉼표 추가 (trailing_whitespace가 없거나 줄바꿈인 경우)
         # QLineEdit인 경우 쉼표를 추가하지 않음
+        # $로 시작하는 instant wildcard인 경우에도 쉼표를 추가하지 않음
         # 줄바꿈이 있는 경우에도 쉼표를 추가하고 그 뒤에 줄바꿈을 유지
+        is_instant_wildcard = info['stripped_text'].startswith('$')
+        
         if isinstance(widget, QLineEdit):
             # QLineEdit인 경우 쉼표 추가 안함
+            final_text = final_text + trailing_whitespace
+            added_comma_space = False
+        elif is_instant_wildcard:
+            # $로 시작하는 instant wildcard인 경우 쉼표 추가 안함
             final_text = final_text + trailing_whitespace
             added_comma_space = False
         elif not trailing_whitespace:

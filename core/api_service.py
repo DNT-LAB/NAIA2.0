@@ -85,6 +85,44 @@ class APIService:
                 parameters['input'] = cleaned_prompt
                 print(f"[CLEAN] APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
         
+        # resolution:, seed: 파라미터 처리
+        if 'input' in parameters and isinstance(parameters['input'], str):
+            processed_prompt = parameters['input']
+            fix_seed_value = str(parameters.get('seed', 0))
+            fix_res_value = [parameters.get('width', 1024), parameters.get('height', 1024)]
+            
+            fix_check = processed_prompt.split(', ')
+            after_check = fix_check.copy()
+            
+            for i, v in enumerate(fix_check):
+                if "seed:" in v and v.startswith("seed:"):
+                    fix_seed_value = v[5:]  # "seed:" 부분 제거
+                    after_check.remove(fix_check[i])
+                elif "resolution:" in v and v.startswith("resolution:"):
+                    try:
+                        fix_res_value = [int(l) for l in v[11:].split('x')]  # "resolution:" 부분 제거
+                        if len(fix_res_value) == 2:
+                            parameters['width'] = fix_res_value[0]
+                            parameters['height'] = fix_res_value[1]
+                    except:
+                        fix_res_value = [1024, 1024]
+                    after_check.remove(fix_check[i])
+            
+            # seed 값 업데이트
+            try:
+                parameters['seed'] = int(fix_seed_value)
+            except:
+                parameters['seed'] = 0
+            
+            # 처리된 프롬프트 업데이트 (seed:, resolution: 태그 제거)
+            cleaned_tags_prompt = ', '.join(after_check)
+            if cleaned_tags_prompt != processed_prompt:
+                parameters['input'] = cleaned_tags_prompt
+                print(f"[PARAM] APIService: seed/resolution 태그 처리 완료")
+                print(f"   - Seed: {parameters.get('seed')}")
+                print(f"   - Resolution: {parameters.get('width')}x{parameters.get('height')}")
+                print(f"   - 정리된 프롬프트: '{cleaned_tags_prompt[:100]}...'")
+        
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
         print(f"[API] APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
         print(f"   [파라미터] 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
@@ -322,6 +360,34 @@ class APIService:
                     print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
                     print(f"  - Normalization: {vibe_data['normalize_reference_strength_multiple']}")
                     print(f"  - Strengths: {vibe_data['reference_strength_multiple']}")
+            
+            # 🎯 Character Reference (Director) 처리 - NAID4.5 전용
+            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 
+                             'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:
+                if params.get('director_reference_descriptions'):
+                    print("✅ Character Reference 활성화됨. Director 파라미터를 적용합니다.")
+                    
+                    # Director 파라미터 추가
+                    api_parameters['director_reference_descriptions'] = params['director_reference_descriptions']
+                    api_parameters['director_reference_images'] = params['director_reference_images']
+                    api_parameters['director_reference_information_extracted'] = params['director_reference_information_extracted']
+                    api_parameters['director_reference_strength_values'] = params['director_reference_strength_values']
+                    
+                    # Character Reference 활성화 시 skip_cfg_above_sigma 제거
+                    if 'skip_cfg_above_sigma' in api_parameters:
+                        del api_parameters['skip_cfg_above_sigma']
+                        print("  - skip_cfg_above_sigma 파라미터 제거됨 (Character Reference 활성화)")
+                    
+                    # Character Reference Module에서 추가된 파라미터들
+                    if 'controlnet_strength' in params:
+                        api_parameters['controlnet_strength'] = params['controlnet_strength']
+                    if 'inpaintImg2ImgStrength' in params:
+                        api_parameters['inpaintImg2ImgStrength'] = params['inpaintImg2ImgStrength']
+                    if 'normalize_reference_strength_multiple' in params:
+                        api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
+                    
+                    print(f"  - Director images: {len(params['director_reference_images'])}")
+                    print(f"  - Director strengths: {params['director_reference_strength_values']}")
             
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):

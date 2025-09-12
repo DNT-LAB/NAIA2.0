@@ -970,10 +970,40 @@ class CharacterStorageWindow(QDialog):
         layout.setSpacing(get_scaled_size(10))
         layout.setContentsMargins(get_scaled_size(10), get_scaled_size(10), get_scaled_size(10), get_scaled_size(10))
         
-        # Title
+        # Title and folder button layout
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(get_scaled_size(10))
+        
         title_label = QLabel("📦 Character Reference Storage")
         title_label.setStyleSheet(f"color: #FFD700; font-size: {get_scaled_font_size(24)}px; font-weight: bold;")
-        layout.addWidget(title_label)
+        title_layout.addWidget(title_label)
+        
+        title_layout.addStretch()
+        
+        # Folder open button
+        folder_btn = QPushButton("📁 폴더 열기")
+        folder_btn.setFixedHeight(get_scaled_size(40))
+        folder_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #2d5aa0;
+                color: white;
+                border: 1px solid #4a7bc8;
+                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
+                font-weight: bold;
+                border-radius: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(16)}px;
+            }}
+            QPushButton:hover {{
+                background-color: #3d6bb0;
+            }}
+            QPushButton:pressed {{
+                background-color: #1d4a90;
+            }}
+        """)
+        folder_btn.clicked.connect(self._open_storage_folder)
+        title_layout.addWidget(folder_btn)
+        
+        layout.addLayout(title_layout)
         
         # Scroll area
         scroll_area = QScrollArea()
@@ -1030,6 +1060,62 @@ class CharacterStorageWindow(QDialog):
                     
             except Exception as e:
                 print(f"Failed to load character reference {image_file}: {e}")
+    
+    def _open_storage_folder(self):
+        """Open the character reference storage folder in file explorer"""
+        import os
+        import subprocess
+        import platform
+        
+        try:
+            # Get the storage folder path
+            images_folder = Path("save/character_reference/images")
+            
+            # Create folder if it doesn't exist
+            images_folder.mkdir(parents=True, exist_ok=True)
+            
+            # Convert to absolute path
+            folder_path = images_folder.resolve()
+            
+            # Open folder based on operating system
+            system = platform.system()
+            if system == "Windows":
+                os.startfile(folder_path)
+            elif system == "Darwin":  # macOS
+                subprocess.run(["open", folder_path])
+            else:  # Linux
+                subprocess.run(["xdg-open", folder_path])
+            
+            print(f"✅ Opened storage folder: {folder_path}")
+            
+        except Exception as e:
+            print(f"❌ Failed to open storage folder: {e}")
+            # Show error message
+            from PyQt6.QtWidgets import QMessageBox
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("오류")
+            msg_box.setText(f"폴더를 열 수 없습니다: {str(e)}")
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #1a1a1a;
+                    color: white;
+                }
+                QMessageBox QLabel {
+                    color: white;
+                }
+                QMessageBox QPushButton {
+                    background-color: #3a3a3a;
+                    color: white;
+                    border: 1px solid #555;
+                    padding: 5px 15px;
+                    min-width: 60px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #4a4a4a;
+                }
+            """)
+            msg_box.exec()
 
 
 class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):

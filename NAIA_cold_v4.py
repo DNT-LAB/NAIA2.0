@@ -355,7 +355,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 250912")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 250912b")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1572,20 +1572,12 @@ class ModernMainWindow(QMainWindow):
                             self.update_token_count()
                             
                             # URL 정규화 (스마트 프로토콜 선택)
-                            normalized_url = validated_url
-                            if not normalized_url.startswith(("http://", "https://")):
-                                # 127로 시작하면 http://, 그 외 터널링 주소는 https://
-                                if normalized_url.startswith("127"):
-                                    normalized_url = f"http://{normalized_url}"
-                                else:
-                                    normalized_url = f"https://{normalized_url}"
-                            elif normalized_url.startswith("http://http://"):
-                                normalized_url = normalized_url.replace("http://http://", "http://")
-                            elif normalized_url.startswith("https://http://"):
-                                normalized_url = normalized_url.replace("https://http://", "http://")
-                            elif normalized_url.startswith("http://https://"):
-                                normalized_url = normalized_url.replace("http://https://", "https://")
-                            
+                            normalized_url = validated_url.replace('https://', '').replace('http://', '')
+                            if normalized_url.startswith("127"):
+                                normalized_url = f"http://{normalized_url}"
+                            else:
+                                normalized_url = f"https://{normalized_url}"
+
                             # ✅ WEBUI 웹뷰 탭 열기
                             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                                 self.image_window.tab_controller.add_tab_by_name(

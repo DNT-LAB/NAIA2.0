@@ -1587,15 +1587,15 @@ class ImageWindow(QWidget):
                         sketchbook = assets_tab.widget.sketchbook_widget
                         
                         # Check if Sketchbook has layers
-                        if hasattr(sketchbook, 'canvas') and sketchbook.canvas.layers:
-                            QMessageBox.warning(self, "전송 실패", 
-                                              "Sketchbook에 레이어가 이미 존재합니다.\n"
-                                              "인페인트 모드를 사용하려면 Sketchbook을 비워주세요.")
-                            try:
-                                os.unlink(temp_path)
-                            except:
-                                pass
-                            return
+                        # if hasattr(sketchbook, 'canvas') and sketchbook.canvas.layers:
+                        #     QMessageBox.warning(self, "전송 실패", 
+                        #                       "Sketchbook에 레이어가 이미 존재합니다.\n"
+                        #                       "인페인트 모드를 사용하려면 Sketchbook을 비워주세요.")
+                        #     try:
+                        #         os.unlink(temp_path)
+                        #     except:
+                        #         pass
+                        #     return
                         
                         # Add image to Sketchbook
                         image_name = f"Inpaint_{os.path.basename(temp_path)}"

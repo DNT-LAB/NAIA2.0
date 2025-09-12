@@ -218,7 +218,7 @@ class ImageLayerItem(QGraphicsPixmapItem):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             new_pos = value
             self.layer_data.position = (new_pos.x(), new_pos.y())
-            # Update handles when moving
+            # Update handles when moving - but only if selected
             if self._selected:
                 for handle in self.handles:
                     handle.update_position()
@@ -442,6 +442,9 @@ class ResizeHandle(QGraphicsRectItem):
         self.position = position
         self.setParentItem(layer_item)
         
+        # Add identifier for type checking
+        self._is_resize_handle = True
+        
         # Visual style
         self.setPen(QPen(Qt.PenStyle.NoPen))
         self.setBrush(QBrush(QColor(100, 150, 255)))
@@ -596,6 +599,9 @@ class CropHandle(QGraphicsRectItem):
         self.layer_item = layer_item
         self.position = position
         self.setParentItem(layer_item)
+        
+        # Add identifier for type checking
+        self._is_crop_handle = True
         
         # Visual style - yellow for crop handles
         self.setPen(QPen(Qt.PenStyle.NoPen))

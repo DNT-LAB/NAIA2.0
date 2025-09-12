@@ -320,3 +320,36 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         for i, widget in enumerate(self.character_widgets):
             widget.char_id = i + 1
             widget.active_checkbox.setText(f"C{widget.char_id}")
+    
+    def assign_c1(self, character_prompt: str, character_uc: str):
+        """
+        C1 위젯에 캐릭터 프롬프트와 UC를 할당하고 활성화합니다.
+        
+        Args:
+            character_prompt: 캐릭터 프롬프트 텍스트
+            character_uc: 캐릭터 UC 텍스트
+        """
+        # C1 위젯이 없으면 생성
+        if not self.character_widgets:
+            self.add_character_widget()
+        
+        # C1 위젯 (첫 번째 위젯)에 접근
+        c1_widget = self.character_widgets[0]
+        
+        # 프롬프트와 UC 설정
+        c1_widget.prompt_textbox.setPlainText(character_prompt)
+        c1_widget.uc_textbox.setPlainText(character_uc)
+        
+        # 모든 캐릭터 위젯의 체크박스를 False로 설정
+        for widget in self.character_widgets:
+            widget.active_checkbox.setChecked(False)
+        
+        # C1만 True로 설정
+        c1_widget.active_checkbox.setChecked(True)
+        
+        # CharacterModule 전체 활성화
+        if self.activate_checkbox:
+            self.activate_checkbox.setChecked(True)
+        
+        # 미리보기 갱신
+        self.process_and_update_view()

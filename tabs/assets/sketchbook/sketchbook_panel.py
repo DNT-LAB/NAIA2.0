@@ -24,6 +24,7 @@ class LayerPanel(QWidget):
     layer_save_variation_requested = pyqtSignal(str)  # layer_id for saving as variation
     layer_set_background_color = pyqtSignal(str, str)  # layer_id, color_hex
     layer_remove_background_color = pyqtSignal(str)  # layer_id for removing background color
+    clear_all_requested = pyqtSignal()  # Clear all layers signal
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,9 +36,24 @@ class LayerPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
+        # Header with label and clear button
+        header_layout = QHBoxLayout()
+        
         header_label = QLabel("레이어")
         header_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; font-weight: bold; color: #000000;")
-        layout.addWidget(header_label)
+        header_layout.addWidget(header_label)
+        
+        header_layout.addStretch()
+        
+        self.clear_button = QPushButton("🗑️ 전체 삭제")
+        self.clear_button.setMaximumWidth(get_scaled_size(140))
+        self.clear_button.clicked.connect(self.clear_all_requested.emit)
+        from ui.theme import get_dynamic_styles
+        ds = get_dynamic_styles()
+        self.clear_button.setStyleSheet(ds.get('secondary_button', ''))
+        header_layout.addWidget(self.clear_button)
+        
+        layout.addLayout(header_layout)
 
         self.layer_list = QListWidget()
         self.layer_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -167,6 +183,13 @@ class LayerPanel(QWidget):
     def select_layer(self, layer_id: str):
         """Select a layer in the list"""
         if self._updating:
+            return
+        
+        # If layer_id is empty, clear selection
+        if not layer_id:
+            self._updating = True
+            self.layer_list.clearSelection()
+            self._updating = False
             return
         
         for i in range(self.layer_list.count()):

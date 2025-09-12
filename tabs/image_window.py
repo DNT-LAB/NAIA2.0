@@ -1457,6 +1457,11 @@ class ImageWindow(QWidget):
         send_to_sketchbook_action.triggered.connect(self._send_to_sketchbook)
         menu.addAction(send_to_sketchbook_action)
         
+        # Add Send to Character Reference action
+        send_to_character_ref_action = QAction("📸 Send to Character Reference", self)
+        send_to_character_ref_action.triggered.connect(self._send_to_character_reference)
+        menu.addAction(send_to_character_ref_action)
+        
         menu.exec(self.main_image_label.mapToGlobal(pos))
 
     def save_image_manually(self):
@@ -1626,6 +1631,80 @@ class ImageWindow(QWidget):
                 os.unlink(path)
         except:
             pass
+
+    def _send_to_character_reference(self):
+        """Send current image to Character Reference module."""
+        if not self.current_history_item:
+            return
+        
+        # Save image to temp file
+        import tempfile
+        import time
+        from pathlib import Path
+        
+        # Create character_reference/temp folder
+        temp_folder = Path("save/character_reference/temp")
+        temp_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Generate temp file name with timestamp
+        temp_file = temp_folder / f"from_history_{int(time.time())}.png"
+        
+        # Save PIL Image to temp file
+        if self.current_history_item.image:
+            self.current_history_item.image.save(temp_file, 'PNG')
+            
+            # Get CharacterReferenceModule from app context
+            try:
+                if hasattr(self.app_context, 'middle_section_controller'):
+                    char_ref_module = self.app_context.middle_section_controller.get_module_instance("CharacterReferenceModule")
+                    if char_ref_module:
+                        # Add the image to character reference module
+                        frame = char_ref_module._add_character_frame(str(temp_file))
+                        if frame:
+                            print(f"✅ Image sent to Character Reference: {temp_file}")
+                            # Show success message
+                            from PyQt6.QtWidgets import QMessageBox
+                            msg_box = QMessageBox()
+                            msg_box.setIcon(QMessageBox.Icon.Information)
+                            msg_box.setWindowTitle("성공")
+                            msg_box.setText("이미지가 Character Reference 모듈에 추가되었습니다.")
+                            msg_box.setStyleSheet("""
+                                QMessageBox {
+                                    background-color: #1a1a1a;
+                                    color: white;
+                                }
+                                QMessageBox QLabel {
+                                    color: white;
+                                }
+                                QMessageBox QPushButton {
+                                    background-color: #3a3a3a;
+                                    color: white;
+                                    border: 1px solid #555;
+                                    padding: 5px 15px;
+                                    min-width: 60px;
+                                }
+                                QMessageBox QPushButton:hover {
+                                    background-color: #4a4a4a;
+                                }
+                            """)
+                            msg_box.exec()
+                        else:
+                            # Show error message if frame creation failed
+                            from PyQt6.QtWidgets import QMessageBox
+                            QMessageBox.warning(self, "오류", "Character Reference 모듈에 이미지를 추가하지 못했습니다.")
+                    else:
+                        # Show error if module not found
+                        from PyQt6.QtWidgets import QMessageBox
+                        QMessageBox.warning(self, "오류", "Character Reference 모듈을 찾을 수 없습니다.")
+                else:
+                    # Show error if context not available
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "오류", "앱 컨텍스트를 사용할 수 없습니다.")
+                    
+            except Exception as e:
+                print(f"❌ Error sending image to Character Reference: {e}")
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "오류", f"Character Reference로 이미지를 전송하는 중 오류가 발생했습니다: {str(e)}")
 
     def _load_current_prompt(self):
         """🆕 현재 표시 중인 이미지의 프롬프트를 불러옵니다 - main_prompt 우선 사용"""

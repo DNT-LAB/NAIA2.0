@@ -118,6 +118,11 @@ class SketchbookWidget(QWidget):
         self.crop_button.toggled.connect(self._on_crop_mode_toggled)
         layout.addWidget(self.crop_button)
         
+        # Upscale/CR button
+        self.upscale_button = QPushButton("📏 Upscale/CR")
+        self.upscale_button.clicked.connect(self._on_upscale_clicked)
+        layout.addWidget(self.upscale_button)
+        
         # Crop apply button (initially hidden)
         self.apply_crop_button = QPushButton("✅ 자르기 적용")
         self.apply_crop_button.clicked.connect(self._apply_crop)
@@ -132,11 +137,6 @@ class SketchbookWidget(QWidget):
         
         layout.addStretch()
         
-        # Clear button
-        self.clear_button = QPushButton("🗑️ 전체 삭제")
-        self.clear_button.clicked.connect(self.clear_canvas)
-        layout.addWidget(self.clear_button)
-        
         return toolbar
 
     def apply_styling(self):
@@ -144,8 +144,9 @@ class SketchbookWidget(QWidget):
         ds = get_dynamic_styles()
         
         # Style buttons
-        for button in [self.add_button, self.export_button, self.clear_button, 
-                      self.crop_button, self.apply_crop_button, self.cancel_crop_button]:
+        for button in [self.add_button, self.export_button, 
+                      self.crop_button, self.apply_crop_button, self.cancel_crop_button,
+                      self.upscale_button]:
             button.setStyleSheet(ds.get('secondary_button', ''))
         
         self.inpaint_button.setStyleSheet(ds.get('primary_button', ''))
@@ -170,6 +171,7 @@ class SketchbookWidget(QWidget):
         self.layer_panel.layer_save_variation_requested.connect(self._on_save_variation)
         self.layer_panel.layer_set_background_color.connect(self._on_set_background_color)
         self.layer_panel.layer_remove_background_color.connect(self._on_remove_background_color)
+        self.layer_panel.clear_all_requested.connect(self.clear_canvas)
 
     # --- Event Handlers ---
     
@@ -762,7 +764,6 @@ class SketchbookWidget(QWidget):
             self.export_button.setEnabled(False)
             self.inpaint_button.setEnabled(False)
             self.canvas_combo.setEnabled(False)
-            self.clear_button.setEnabled(False)
         else:
             self._cancel_crop()
     
@@ -801,7 +802,6 @@ class SketchbookWidget(QWidget):
         self.export_button.setEnabled(True)
         self.inpaint_button.setEnabled(True)
         self.canvas_combo.setEnabled(True)
-        self.clear_button.setEnabled(True)
 
     def _show_inpaint_controls(self):
         """Show inpaint control window"""
@@ -1799,3 +1799,271 @@ class SketchbookWidget(QWidget):
                 self.canvas.remove_layer(layer_data.id)
                 self.layer_panel.remove_layer(layer_data.id)
             self.undo_stack.append(action)
+    
+    def _on_upscale_clicked(self):
+        """Handle upscale button click - upscale current canvas composite"""
+        try:
+            from PyQt6.QtWidgets import QProgressDialog, QMessageBox
+            from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QPointF
+            from PyQt6.QtGui import QPixmap, QMouseEvent
+            
+            # 1. Clear handle focus by simulating empty space click
+            # Get canvas center position as QPointF (required for PyQt6)
+            canvas_center = QPointF(
+                self.canvas.viewport().width() / 2,
+                self.canvas.viewport().height() / 2
+            )
+            
+            # Create a mouse press event to clear selection (simplified PyQt6 signature)
+            dummy_event = QMouseEvent(
+                QMouseEvent.Type.MouseButtonPress,
+                canvas_center,  # localPos as QPointF
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier
+            )
+            
+            # Simulate click to clear handles
+            self.canvas.mousePressEvent(dummy_event)
+            
+            # 2. Generate PIL image from current canvas composite
+            canvas_pixmap = self.canvas.export_composite()
+            if not canvas_pixmap or canvas_pixmap.isNull():
+                QMessageBox.warning(self, "경고", "캔버스가 비어있거나 이미지를 생성할 수 없습니다.")
+                return
+            
+            
+            # 3. Show progress dialog
+            progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+            progress.setWindowTitle("NAI 업스케일")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setCancelButton(None)
+            progress.show()
+            
+            # 4. Create upscale worker (similar to image_window.py implementation)
+            class UpscaleWorker(QObject):
+                finished = pyqtSignal(dict)
+                
+                def __init__(self, api_service, pixmap):
+                    super().__init__()
+                    self.api_service = api_service
+                    self.pixmap = pixmap
+                
+                def run(self):
+                    result = self.api_service.upscale_NAI(self.pixmap)
+                    self.finished.emit(result)
+            
+            # 5. Set up worker thread
+            self.upscale_thread = QThread()
+            self.upscale_worker = UpscaleWorker(self.app_context.api_service, canvas_pixmap)
+            self.upscale_worker.moveToThread(self.upscale_thread)
+            
+            # 6. Connect signals
+            self.upscale_thread.started.connect(self.upscale_worker.run)
+            self.upscale_worker.finished.connect(
+                lambda result: self._handle_sketchbook_upscale_result(result, progress)
+            )
+            self.upscale_worker.finished.connect(self.upscale_thread.quit)
+            self.upscale_worker.finished.connect(self.upscale_worker.deleteLater)
+            self.upscale_thread.finished.connect(self.upscale_thread.deleteLater)
+            
+            # 7. Start thread
+            self.upscale_thread.start()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"업스케일 실행 중 오류:\n{str(e)}")
+    
+    def _handle_sketchbook_upscale_result(self, result, progress):
+        """Handle upscale result from sketchbook canvas"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            from PyQt6.QtCore import QBuffer, QIODevice
+            from PIL import Image
+            import io
+            
+            progress.close()
+            
+            if result['status'] == 'success':
+                # Get upscaled QPixmap
+                upscaled_pixmap = result['image']
+                
+                # Get raw bytes if available, otherwise convert from QPixmap
+                if 'raw_bytes' in result and result['raw_bytes']:
+                    image_data = result['raw_bytes']
+                else:
+                    qbuffer = QBuffer()
+                    qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                    upscaled_pixmap.save(qbuffer, "PNG")
+                    image_data = qbuffer.data().data()
+                    qbuffer.close()
+                
+                # Convert bytes to PIL Image
+                buffer = io.BytesIO(image_data)
+                upscaled_image = Image.open(buffer)
+                
+                # Apply aspect ratio normalization (from character_reference_module.py)
+                normalized_image, final_image_data = self._apply_aspect_ratio_normalization(upscaled_image)
+                
+                # Create metadata
+                canvas_size = self.canvas.current_canvas_size
+                info_text = f"Sketchbook Upscale + Aspect Ratio\nOriginal: {canvas_size[0]}×{canvas_size[1]}\nUpscaled: {upscaled_image.width}×{upscaled_image.height} (2x)\nNormalized: {normalized_image.width}×{normalized_image.height}"
+                metadata = {
+                    'source': 'Sketchbook Canvas',
+                    'upscaled': True,
+                    'upscale_factor': 2,
+                    'aspect_ratio_normalized': True,
+                    'original_size': canvas_size,
+                    'upscaled_size': (upscaled_image.width, upscaled_image.height),
+                    'normalized_size': (normalized_image.width, normalized_image.height)
+                }
+                
+                # Use normalized image and data for history
+                upscaled_image = normalized_image
+                image_data = final_image_data
+                
+                # Add to image history
+                success = False
+                
+                if hasattr(self.app_context, 'main_window'):
+                    main_window = self.app_context.main_window
+                    if hasattr(main_window, 'image_window'):
+                        image_window = main_window.image_window
+                        if hasattr(image_window, 'add_to_history'):
+                            try:
+                                from PIL import Image
+                                import pandas as pd
+                                
+                                # PIL Image 및 bytes 타입 검증
+                                if not isinstance(upscaled_image, Image.Image):
+                                    return
+                                if not isinstance(image_data, bytes):
+                                    return
+                                
+                                empty_source_row = pd.Series(dtype=object)
+                                
+                                image_window.add_to_history(
+                                    upscaled_image,      # image: PIL.Image (RGBA 모드)
+                                    image_data,          # raw_bytes: bytes (PNG 데이터)  
+                                    info_text,           # info: str
+                                    empty_source_row    # source_row: pd.Series
+                                )
+                                success = True
+                            except Exception as e:
+                                QMessageBox.warning(self, "경고", f"업스케일은 성공했지만 히스토리 추가에 실패했습니다:\n{str(e)}")
+                
+                if success:
+                    
+                    # Force focus to ImageViewerModule tab ("🖼️ 생성 결과")
+                    try:
+                        main_window = self.app_context.main_window
+                        if hasattr(main_window, 'image_window') and hasattr(main_window.image_window, 'tab_widget'):
+                            tab_widget = main_window.image_window.tab_widget
+                            for i in range(tab_widget.count()):
+                                tab_text = tab_widget.tabText(i)
+                                if "🖼️ 생성 결과" in tab_text:
+                                    tab_widget.setCurrentIndex(i)
+                                    break
+                    except Exception:
+                        pass
+                        
+                else:
+                    QMessageBox.warning(self, "경고", 
+                        "업스케일은 성공했지만 히스토리에 추가할 수 없습니다.")
+                    
+            else:
+                # Show error message
+                error_msg = result.get('message', '알 수 없는 오류')
+                QMessageBox.critical(self, "업스케일 실패", f"업스케일에 실패했습니다:\n{error_msg}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"업스케일 결과 처리 중 오류:\n{str(e)}")
+    
+    def _apply_aspect_ratio_normalization(self, image):
+        """Apply aspect ratio normalization with black background (from character_reference_module.py)"""
+        try:
+            import io
+            
+            # 이미지 비율 계산
+            width, height = image.size
+            aspect_ratio = width / height
+            
+            # 가장 가까운 표준 비율 결정
+            ratios = {
+                '2:3': (2/3, 1024, 1536),  # (비율, 너비, 높이)
+                '3:2': (3/2, 1536, 1024),
+                '1:1': (1/1, 1472, 1472)
+            }
+            
+            # 현재 비율과 가장 가까운 표준 비율 찾기
+            closest_ratio = min(ratios.keys(), key=lambda k: abs(aspect_ratio - ratios[k][0]))
+            target_ratio, canvas_width, canvas_height = ratios[closest_ratio]
+            
+            
+            # 검은색 배경 생성
+            canvas = Image.new('RGB', (canvas_width, canvas_height), (0, 0, 0))
+            
+            # 이미지를 캔버스에 맞게 리사이징 (비율 유지)
+            if width / canvas_width > height / canvas_height:
+                # 너비 기준으로 리사이징
+                new_width = canvas_width
+                new_height = int(height * (canvas_width / width))
+            else:
+                # 높이 기준으로 리사이징
+                new_height = canvas_height
+                new_width = int(width * (canvas_height / height))
+            
+            # LANCZOS 리사이징
+            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # 중앙에 배치
+            x_offset = (canvas_width - new_width) // 2
+            y_offset = (canvas_height - new_height) // 2
+            
+            # RGBA 모드인 경우 투명도 처리
+            if resized_image.mode == 'RGBA':
+                canvas = canvas.convert('RGBA')
+                canvas.paste(resized_image, (x_offset, y_offset), resized_image)
+                # 다시 RGB로 변환 (검은 배경과 합성)
+                rgb_canvas = Image.new('RGB', (canvas_width, canvas_height), (0, 0, 0))
+                rgb_canvas.paste(canvas, (0, 0), canvas)
+                canvas = rgb_canvas
+            else:
+                canvas.paste(resized_image, (x_offset, y_offset))
+            
+            # PNG로 인코딩하여 bytes 생성 (RGBA 모드 보장)
+            if canvas.mode != 'RGBA':
+                canvas = canvas.convert('RGBA')
+            
+            # 메타데이터를 추가하여 extract_info_from_image 문제 방지
+            from PIL.PngImagePlugin import PngInfo
+            metadata = PngInfo()
+            metadata.add_text("Software", "NAIA Sketchbook Upscale")
+            metadata.add_text("Description", "Aspect ratio normalized image")
+            
+            buffer = io.BytesIO()
+            canvas.save(buffer, format="PNG", optimize=False, pnginfo=metadata)
+            final_image_data = buffer.getvalue()
+            buffer.close()
+            
+            
+            return canvas, final_image_data
+            
+        except Exception:
+            # Fallback to original image
+            
+            # 폴백: 원본 이미지 그대로 사용 (RGBA 모드 보장)
+            if image.mode != 'RGBA':
+                image = image.convert('RGBA')
+            
+            # 폴백에도 메타데이터 추가
+            from PIL.PngImagePlugin import PngInfo
+            metadata = PngInfo()
+            metadata.add_text("Software", "NAIA Sketchbook Upscale")
+            metadata.add_text("Description", "Fallback original image")
+                
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", pnginfo=metadata)
+            fallback_data = buffer.getvalue()
+            buffer.close()
+            
+            return image, fallback_data

@@ -328,3 +328,42 @@ class SketchbookCanvas(QGraphicsView):
         # Implementation depends on how you want to handle the result
         # This is a placeholder
         pass
+
+    def mousePressEvent(self, event):
+        """Handle mouse press to deselect layers when clicking empty space"""
+        # Check if click is on an item
+        item = self.itemAt(event.pos())
+        
+        # Import handle classes for type checking
+        from .sketchbook_layers import ResizeHandle, CropHandle, ImageLayerItem
+        
+        # Check if clicked item is a handle by checking the identifier attributes
+        is_handle = (hasattr(item, '_is_resize_handle') or hasattr(item, '_is_crop_handle'))
+        is_layer = isinstance(item, ImageLayerItem)
+        
+        # Check if clicked item is effectively "empty space" (canvas background or unknown UI elements)
+        is_empty_space = (not item or 
+                         isinstance(item, CanvasRootItem) or 
+                         (hasattr(item, '__class__') and 'InpaintLayerItem' in item.__class__.__name__) or
+                         # Unknown QGraphicsRectItem with CanvasRootItem parent (likely selection UI)
+                         (item and hasattr(item, 'parentItem') and 
+                          isinstance(item.parentItem(), CanvasRootItem) and 
+                          not is_handle and not is_layer))
+        
+        if is_empty_space and not (is_handle or is_layer):
+            # Deselect current layer when clicking empty space
+            if self.selected_layer_id and self.selected_layer_id in self.layers:
+                layer = self.layers[self.selected_layer_id]
+                layer.set_selected(False)
+                # Force hide all handles
+                for handle in layer.handles:
+                    handle.setVisible(False)
+                    handle.hide()
+                for handle in layer.crop_handles:
+                    handle.setVisible(False) 
+                    handle.hide()
+                self.selected_layer_id = None
+                # Emit signal to update layer panel selection
+                self.layer_selected.emit("")
+        
+        super().mousePressEvent(event)

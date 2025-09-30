@@ -263,15 +263,15 @@ class TokenCalculator:
             corrected_count = round(base_count * total_correction)
             
             # 디버그 정보 (가중치 제거/처리 확인용)
-            if text != preprocessed_text or additional_tokens > 0:
-                mode_name = current_mode
-                artist_tokens = artist_count * 2
-                other_additional = additional_tokens - artist_tokens
+            # if text != preprocessed_text or additional_tokens > 0:
+            #     mode_name = current_mode
+            #     artist_tokens = artist_count * 2
+            #     other_additional = additional_tokens - artist_tokens
                 
-                print(f"{mode_name} Weight Processing:")
-                print(f"  Original: {text[:100]}{'...' if len(text) > 100 else ''}")
-                print(f"  Processed: {preprocessed_text[:100]}{'...' if len(preprocessed_text) > 100 else ''}")
-                print(f"  Base Tokens: {len(tokens)}, Artist: {artist_tokens} ({artist_count} instances), Other: {other_additional}, Total: {base_count}, Corrected: {corrected_count}")
+            #     print(f"{mode_name} Weight Processing:")
+            #     print(f"  Original: {text[:100]}{'...' if len(text) > 100 else ''}")
+            #     print(f"  Processed: {preprocessed_text[:100]}{'...' if len(preprocessed_text) > 100 else ''}")
+            #     print(f"  Base Tokens: {len(tokens)}, Artist: {artist_tokens} ({artist_count} instances), Other: {other_additional}, Total: {base_count}, Corrected: {corrected_count}")
             
             return corrected_count
             

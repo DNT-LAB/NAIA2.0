@@ -19,6 +19,8 @@ from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from interfaces.base_tab_module import BaseTabModule
 from ui.img2img_popup import Img2ImgPopup
+from ui.metadata_viewer import MetadataViewerWindow
+from utils.image_info import ImageMetadataExtractor
 import piexif, io
 import requests
 import tempfile
@@ -990,48 +992,71 @@ class HistoryItemWidget(QWidget):
             traceback.print_exc()
 
     def show_full_metadata(self):
-        """🆕 전체 메타데이터를 다이얼로그에 표시"""
+        """메타데이터 뷰어 윈도우를 엽니다 (Img2ImgPopup 방식 참고)"""
         try:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QHBoxLayout, QPushButton
-            
-            dialog = QDialog(self)
-            dialog.setWindowTitle(f"이미지 메타데이터 - {self.history_item.backend_type}")
-            dialog.resize(800, 600)
-            
-            layout = QVBoxLayout(dialog)
-            
-            text_edit = QTextEdit()
-            text_edit.setReadOnly(True)
-            text_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
-            
-            # 메타데이터 포맷팅
-            metadata_text = self._format_metadata_for_display()
-            text_edit.setPlainText(metadata_text)
-            
-            layout.addWidget(text_edit)
-            
-            # 버튼 레이아웃
-            button_layout = QHBoxLayout()
-            
-            # 복원 버튼
-            restore_btn = QPushButton("⚙️ 설정 복원")
-            restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-            restore_btn.clicked.connect(self.restore_generation_params)
-            restore_btn.clicked.connect(dialog.accept)
-            button_layout.addWidget(restore_btn)
-            
-            # 닫기 버튼
-            close_btn = QPushButton("닫기")
-            close_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-            close_btn.clicked.connect(dialog.accept)
-            button_layout.addWidget(close_btn)
-            
-            layout.addLayout(button_layout)
-            
-            dialog.exec()
-            
+            # 1. 이미지에서 메타데이터 추출
+            if not self.history_item.image:
+                QMessageBox.warning(self, "경고", "이미지 데이터가 없습니다.")
+                return
+
+            # ImageMetadataExtractor를 사용하여 메타데이터 추출
+            has_metadata = ImageMetadataExtractor.has_metadata(self.history_item.image)
+
+            if not has_metadata:
+                QMessageBox.information(
+                    self,
+                    "메타데이터 없음",
+                    "이 이미지에는 추출 가능한 메타데이터가 없습니다."
+                )
+                return
+
+            metadata = ImageMetadataExtractor.extract_metadata(self.history_item.image)
+
+            if not metadata:
+                QMessageBox.warning(self, "경고", "메타데이터를 읽을 수 없습니다.")
+                return
+
+            # 2. MetadataViewerWindow 열기 (non-modal)
+            # app_context.main_window를 parent로 설정하여 시그널 연결
+            parent_window = None
+            if self.app_context and hasattr(self.app_context, 'main_window'):
+                parent_window = self.app_context.main_window
+
+            self.metadata_viewer = MetadataViewerWindow(
+                self.history_item.image,
+                metadata,
+                self.app_context,
+                parent_window
+            )
+
+            # 3. 시그널 연결 (MainWindow에서 처리하도록)
+            if parent_window:
+                # 프롬프트 적용 시그널 연결
+                if hasattr(parent_window, 'apply_prompt_from_metadata'):
+                    self.metadata_viewer.apply_prompt.connect(
+                        parent_window.apply_prompt_from_metadata
+                    )
+
+                # 설정 적용 시그널 연결
+                if hasattr(parent_window, 'apply_settings_from_metadata'):
+                    self.metadata_viewer.apply_all_settings.connect(
+                        parent_window.apply_settings_from_metadata
+                    )
+
+            # 4. 윈도우 표시
+            self.metadata_viewer.show()
+
+            print(f"✅ MetadataViewerWindow 열림 - {self.history_item.backend_type}")
+
         except Exception as e:
-            print(f"❌ 메타데이터 다이얼로그 표시 실패: {e}")
+            print(f"❌ 메타데이터 뷰어 표시 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "오류",
+                f"메타데이터 뷰어를 열 수 없습니다:\n{str(e)}"
+            )
 
     def _format_metadata_for_display(self) -> str:
         """🆕 메타데이터를 보기 좋게 포맷팅"""

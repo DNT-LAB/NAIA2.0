@@ -315,16 +315,25 @@ class GenerationController:
 
             # --- 와일드카드 확장 처리 (API 호출 전) ---
             if 'input' in params and params['input']:
-                expanded_input = self._expand_wildcards_in_input(params['input'])
+                # negative_prompt도 함께 전달
+                negative_prompt = params.get('negative_prompt', '')
+                expanded_input, processed_negative_prompt = self._expand_wildcards_in_input(
+                    params['input'],
+                    negative_prompt
+                )
                 params['input'] = expanded_input
+                params['negative_prompt'] = processed_negative_prompt
+
                 print(f"🎲 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
-                
+                if processed_negative_prompt != negative_prompt:
+                    print(f"➖ Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
+
                 # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
                 # processed_input = self._apply_conditional_prompts(params['input'])
                 # if processed_input != params['input']:
                 #     params['input'] = processed_input
                 #     print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
-                
+
                 # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
                 if self.context.current_prompt_context:
                     self.context.publish("prompt_generated", self.context.current_prompt_context)
@@ -510,11 +519,15 @@ class GenerationController:
         
         _cleanup()
 
-    def _expand_wildcards_in_input(self, input_text: str) -> str:
-        """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)"""
+    def _expand_wildcards_in_input(self, input_text: str, negative_prompt: str = "") -> tuple[str, str]:
+        """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)
+
+        Returns:
+            tuple[str, str]: (expanded_input, processed_negative_prompt)
+        """
         if not input_text or not input_text.strip():
-            return input_text
-        
+            return input_text, negative_prompt
+
         try:
             # AppContext의 기존 컨텍스트에서 순차 카운터 가져오기 (공유를 위해)
             if self.context.current_prompt_context:
@@ -523,44 +536,62 @@ class GenerationController:
                 # 컨텍스트가 없으면 새로 생성하여 AppContext에 저장
                 from core.prompt_context import PromptContext
                 import pandas as pd
-                
+
                 self.context.current_prompt_context = PromptContext(
-                    source_row=pd.Series(), 
+                    source_row=pd.Series(),
                     settings={}
                 )
                 prompt_context = self.context.current_prompt_context
-            
+
             # WildcardProcessor를 사용하여 기존 처리 방식과 동일하게 처리
             from core.wildcard_processor import WildcardProcessor
             wildcard_processor = WildcardProcessor(self.context.wildcard_manager)
-            
-            # 1. 전체 문자열을 콤마로 분해하여 태그 리스트 생성 (주석 및 개행문자 처리)
+
+            # 1. 전체 문자열을 콤마로 분해하여 태그 리스트 생성 (주석, 개행문자, negative prompt 처리)
             cleaned_tags = []
+            processed_negative_prompt = negative_prompt  # 초기값
+
             for tag in input_text.split(','):
                 processed_tag = tag.replace('\n', '').strip()
-                if processed_tag and not processed_tag.startswith('#'):
+
+                # 주석 제거
+                if not processed_tag or processed_tag.startswith('#'):
+                    continue
+
+                # - prefix 처리 (::가 없는 경우만)
+                if processed_tag.startswith('-') and '::' not in processed_tag:
+                    # '-'를 제거하고 negative prompt에 추가
+                    negative_tag = processed_tag[1:].strip()  # '-' 제거
+                    if negative_tag:
+                        if processed_negative_prompt:
+                            processed_negative_prompt += ', ' + negative_tag
+                        else:
+                            processed_negative_prompt = negative_tag
+                else:
+                    # 일반 태그
                     cleaned_tags.append(processed_tag)
+
             input_tags = cleaned_tags
-            
+
             # 2. expand_tags 호출하여 완전한 와일드카드 확장 수행 (기존 방식과 동일)
             expanded_tags = wildcard_processor.expand_tags(input_tags, prompt_context)
-            
+
             # 3. global_append_tags가 있다면 뒤에 추가 (기존 방식과 동일)
             result_parts = expanded_tags.copy()
             if prompt_context.global_append_tags:
                 result_parts.extend(prompt_context.global_append_tags)
                 # global_append_tags 소비 후 초기화
                 prompt_context.global_append_tags.clear()
-            
+
             # 4. 확장된 태그들을 콤마로 연결하여 단일 문자열로 반환
             expanded_result = ', '.join(result_parts) if result_parts else input_text
-            
-            return expanded_result
-            
+
+            return expanded_result, processed_negative_prompt
+
         except Exception as e:
             print(f"⚠️ 와일드카드 확장 중 오류 발생: {e}")
             # 오류 발생 시 원본 텍스트 반환
-            return input_text
+            return input_text, negative_prompt
 
     def _apply_conditional_prompts(self, input_text: str) -> str:
         """generation_controller 전용 조건부 프롬프트 처리 (와일드카드 확장 후 실행)"""

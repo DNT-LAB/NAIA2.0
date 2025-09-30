@@ -31,7 +31,7 @@ from ui.scaling_settings_dialog import ScalingSettingsDialog
 from ui.collapsible import CollapsibleBox
 from ui.right_view import RightView
 from ui.resolution_manager_dialog import ResolutionManagerDialog
-from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices
+from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
@@ -196,6 +196,64 @@ class GitHubUpdateChecker(QThread):
         self.is_running = False
 
 
+class PromptHighlighter(QSyntaxHighlighter):
+    """프롬프트 텍스트 하이라이터
+
+    규칙 1: '#'로 시작해서 쉼표까지 → 연노랑색 텍스트
+    규칙 2: '-'로 시작하고 [:6] 안에 '::'가 없으면 쉼표까지 → 연회색 텍스트
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # 연노랑색 포맷 (# 주석용)
+        self.comment_format = QTextCharFormat()
+        self.comment_format.setForeground(QColor("#FFFFE0"))  # 연노랑색 텍스트
+
+        # 연회색 포맷 (- 음수 가중치용)
+        self.negative_weight_format = QTextCharFormat()
+        self.negative_weight_format.setForeground(QColor("#999999"))  # 연회색 텍스트
+
+    def highlightBlock(self, text: str):
+        """각 텍스트 블록(줄)에 대해 하이라이팅 적용"""
+        pos = 0
+
+        while pos < len(text):
+            # 현재 위치에서 다음 쉼표 찾기
+            comma_index = text.find(',', pos)
+
+            if comma_index == -1:
+                # 더 이상 쉼표가 없으면 나머지 전체 확인
+                segment = text[pos:].strip()
+                self._apply_format_to_segment(text, pos, len(text), segment)
+                break
+            else:
+                # 쉼표를 찾았으면 해당 구간 확인
+                segment = text[pos:comma_index].strip()
+                self._apply_format_to_segment(text, pos, comma_index + 1, segment)
+
+                # 다음 구간으로 이동 (쉼표 다음부터)
+                pos = comma_index + 1
+
+    def _apply_format_to_segment(self, text: str, start_pos: int, end_pos: int, segment: str):
+        """세그먼트에 포맷 적용"""
+        if not segment:
+            return
+
+        # 규칙 1: '#'으로 시작하면 연노랑색
+        if segment.startswith('#'):
+            self.setFormat(start_pos, end_pos - start_pos, self.comment_format)
+        # 규칙 2: '-'로 시작하고 [:6] 안에 '::'가 없으면 연회색
+        elif segment.startswith('-'):
+            # 원본 텍스트에서 실제 세그먼트 위치 찾기
+            actual_segment_start = text.find(segment, start_pos)
+            if actual_segment_start != -1:
+                # '-' 이후 최대 6자 확인
+                check_range = segment[:7] if len(segment) >= 7 else segment
+                if '::' not in check_range:
+                    # '::'가 없으면 쉼표까지 연회색 처리
+                    self.setFormat(start_pos, end_pos - start_pos, self.negative_weight_format)
+
 class PromptTextEdit(QTextEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -348,7 +406,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 250912b")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 2500930")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -851,6 +909,9 @@ class ModernMainWindow(QMainWindow):
         self.main_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_prompt_textedit.customContextMenuRequested.connect(self.show_prompt_context_menu)
         self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
+
+        # PromptHighlighter 적용
+        self.main_prompt_highlighter = PromptHighlighter(self.main_prompt_textedit.document())
 
         self.main_prompt_token_label = QLabel("Estimated Tokens : 0 (Main 0 + Character 0)")
         main_prompt_layout.addWidget(self.main_prompt_token_label)
@@ -2882,41 +2943,9 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage(f"❌ 자동 이미지 생성 오류: {e}")
             print(f"자동 이미지 생성 오류: {e}")
 
-    def _highlight_prompt_text(self, text: str) -> str:
-        """주어진 텍스트에서 '#'으로 시작하는 부분을 연노랑색으로 하이라이트하는 HTML을 생성합니다."""
-        # HTML 특수 문자를 이스케이프하여 '<lora...>'
-        escaped_text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-        parts = []
-        last_index = 0
-        while True:
-            start_hash = escaped_text.find('#', last_index)
-            if start_hash == -1:
-                parts.append(escaped_text[last_index:])
-                break
-
-            parts.append(escaped_text[last_index:start_hash])
-
-            end_comma = escaped_text.find(',', start_hash)
-            
-            if end_comma == -1:
-                segment = escaped_text[start_hash:]
-                last_index = len(escaped_text)
-            else:
-                segment = escaped_text[start_hash:end_comma]
-                last_index = end_comma
-            
-            # 하이라이트 태그 적용 (연노랑 배경, 검은색 텍스트)
-            parts.append(f'<span style="background-color: #FFFFE0; color: #000000;">{segment}</span>')
-
-        # 모든 부분을 합치고, 줄바꿈을 <br>로 변환하여 HTML 형식에 맞춥니다.
-        return "".join(parts).replace('\n', '<br>')
-        
-    # on_prompt_generated 메서드에 플래그 해제 추가
     def on_prompt_generated(self, prompt_text: str):
-        """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트 (하이라이트 기능 추가)"""
-        highlighted_html = self._highlight_prompt_text(prompt_text)
-        self.main_prompt_textedit.setHtml(highlighted_html)
+        """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트"""
+        self.main_prompt_textedit.setPlainText(prompt_text)
         
         # [신규] 새 프롬프트 생성 시 반복 카운터 리셋
         if self.automation_module:

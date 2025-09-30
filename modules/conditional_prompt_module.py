@@ -565,58 +565,105 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         
         return self._evaluate_logical_expression(expression, all_tags)
     
+    def _matching_paren(self, s: str, start: int) -> int:
+        """시작 괄호의 짝을 찾음"""
+        depth = 1
+        for i in range(start + 1, len(s)):
+            if s[i] == '(':
+                depth += 1
+            elif s[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    return i
+        return -1
+
+    def _split_by_operator(self, expression: str, operator: str) -> List[str]:
+        """괄호 밖의 연산자로만 분할"""
+        parts = []
+        current = ""
+        depth = 0
+
+        for char in expression:
+            if char == '(':
+                depth += 1
+                current += char
+            elif char == ')':
+                depth -= 1
+                current += char
+            elif char == operator and depth == 0:
+                parts.append(current.strip())
+                current = ""
+            else:
+                current += char
+
+        if current.strip():
+            parts.append(current.strip())
+
+        return parts if len(parts) > 1 else [expression]
+
     def _evaluate_logical_expression(self, expression: str, all_tags: List[str]) -> bool:
-        """논리 표현식 평가"""
+        """논리 표현식 평가 - 중첩 괄호 지원"""
+        expression = expression.strip()
+
         if not expression:
             return True
-        
-        # AND 연산자로 분할 (상위 레벨)
-        and_parts = re.split(r'\s*&\s*', expression)
-        and_results = []
-        
-        for and_part in and_parts:
-            # OR 연산자로 분할 (하위 레벨)
-            or_parts = re.split(r'\s*\|\s*', and_part)
-            or_results = []
-            
-            for or_part in or_parts:
-                or_part = or_part.strip()
-                result = self._evaluate_single_condition(or_part, all_tags)
-                or_results.append(result)
-            
-            # OR 조건 평가 (하나라도 True면 True)
-            and_results.append(any(or_results))
-        
-        # AND 조건 평가 (모두 True여야 True)
-        return all(and_results)
+
+        # 최외곽 괄호 제거 (매칭되는 경우만)
+        while expression.startswith('(') and expression.endswith(')'):
+            matching_index = self._matching_paren(expression, 0)
+            if matching_index == len(expression) - 1:
+                expression = expression[1:-1].strip()
+            else:
+                break
+
+        # AND 연산자 분할 (괄호 밖에서만)
+        and_parts = self._split_by_operator(expression, '&')
+        if len(and_parts) > 1:
+            return all(self._evaluate_logical_expression(part, all_tags) for part in and_parts)
+
+        # OR 연산자 분할 (괄호 밖에서만)
+        or_parts = self._split_by_operator(expression, '|')
+        if len(or_parts) > 1:
+            return any(self._evaluate_logical_expression(part, all_tags) for part in or_parts)
+
+        # 단일 조건 평가
+        return self._evaluate_single_condition(expression, all_tags)
     
     def _evaluate_single_condition(self, condition: str, all_tags: List[str]) -> bool:
         """단일 조건 평가"""
         condition = condition.strip()
-        
+
         # 등급 조건 처리
         if condition in ['e', 'q', 's', 'g']:
             return self._check_rating_condition(condition, exact_match=True)
         elif condition in ['~e', '~q', '~s', '~g']:
             rating_char = condition[1:]  # ~ 제거
             return self._check_rating_condition(rating_char, exact_match=False)
-        
+
         # 기존 태그 조건 처리
         if condition.startswith('~!'):
             # 정확 불일치 조건 (~!tag)
-            tag = condition[2:]
-            return tag not in all_tags
+            tag = condition[2:].strip()
+            result = tag not in all_tags
+            print(f"  [~!{tag}] -> {result} (all_tags count: {len(all_tags)})")
+            return result
         elif condition.startswith('~'):
             # 불포함 조건 (~tag)
-            tag = condition[1:]
-            return not any(tag in element for element in all_tags)
+            tag = condition[1:].strip()
+            result = not any(tag in element for element in all_tags)
+            print(f"  [~{tag}] -> {result}")
+            return result
         elif condition.startswith('*'):
             # 정확 일치 조건 (*tag)
-            tag = condition[1:]
-            return tag in all_tags
+            tag = condition[1:].strip()
+            result = tag in all_tags
+            print(f"  [*{tag}] -> {result} (searching '{tag}' in {len(all_tags)} tags: {all_tags[:3]}...)")
+            return result
         else:
             # 포함 조건 (tag)
-            return any(condition in element for element in all_tags)
+            result = any(condition in element for element in all_tags)
+            print(f"  [{condition}] -> {result}")
+            return result
     
     def _check_rating_condition(self, rating_char: str, exact_match: bool) -> bool:
         """등급 조건을 확인"""
@@ -792,26 +839,26 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.current_source_row = sample_row
             self.app_context.current_prompt_context = test_context
             
+            # 디버깅: 초기 상태 출력
+            logs.insert(0, "")
+            logs.insert(0, f"  postfix_tags: {test_context.postfix_tags}")
+            logs.insert(0, f"  main_tags: {test_context.main_tags[:5]}{'...' if len(test_context.main_tags) > 5 else ''}")
+            logs.insert(0, f"  prefix_tags: {test_context.prefix_tags}")
+            logs.insert(0, f"초기 상태:")
+            logs.insert(0, f"  general: {sample_row.get('general', 'None')[:100]}...")
+            logs.insert(0, f"  character: {sample_row.get('character', 'None')}")
+            logs.insert(0, f"  rating: {sample_row.get('rating', 'None')}")
+            logs.insert(0, f"샘플링된 행:")
+            logs.insert(0, "=== 규칙 테스트 시작 ===")
+
             # 5. 규칙 적용
             modified_context = self._apply_rules(test_context, rules_text, logs)
-            
-            # logs.append(f"샘플링된 행:")
-            # logs.append(f"  rating: {sample_row.get('rating', 'None')}")
-            # logs.append(f"  general: {sample_row.get('general', 'None')}")
-            # logs.append(f"  character: {sample_row.get('character', 'None')}")
-            # logs.append("")
-            
-            # logs.append(f"초기 상태:")
-            # logs.append(f"  prefix_tags: {test_context.prefix_tags}")
-            # logs.append(f"  main_tags: {test_context.main_tags}")
-            # logs.append(f"  postfix_tags: {test_context.postfix_tags}")
-            # logs.append("")
 
-            # logs.append("")
-            # logs.append("=== 최종 결과 ===")
-            # logs.append(f"  prefix_tags: {modified_context.prefix_tags}")
-            # logs.append(f"  main_tags: {modified_context.main_tags}")
-            # logs.append(f"  postfix_tags: {modified_context.postfix_tags}")
+            logs.append("")
+            logs.append("=== 최종 결과 ===")
+            logs.append(f"  prefix_tags: {modified_context.prefix_tags}")
+            logs.append(f"  main_tags: {modified_context.main_tags[:5]}{'...' if len(modified_context.main_tags) > 5 else ''}")
+            logs.append(f"  postfix_tags: {modified_context.postfix_tags}")
             
             # 6. 실제 PromptProcessor로 전체 파이프라인 시뮬레이션 (선택사항)
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'prompt_gen_controller'):

@@ -843,12 +843,12 @@ class AutoCompleteManager(QObject):
         }
 
     def _strip_brackets(self, keyword: str) -> tuple[str, str, str]:
-        """단어 앞뒤의 괄호와 NAI :: 가중치 문법을 분리합니다."""
+        """단어 앞뒤의 괄호, NAI :: 가중치 문법, 그리고 - prefix를 분리합니다."""
         if not isinstance(keyword, str):
             return "", "", ""
 
         keyword_stripped = keyword.strip()
-        
+
         # NAI :: 가중치 문법 처리
         # :: 이후 부분은 suffix로 처리하여 자동완성 후에도 유지
         double_colon_suffix = ""
@@ -857,20 +857,31 @@ class AutoCompleteManager(QObject):
             keyword_stripped = parts[0]
             if len(parts) > 1:
                 double_colon_suffix = '::' + parts[1]
-        
+
         # 괄호 처리
         prefix_match = re.match(r'^[\{\[\(]+', keyword_stripped)
         prefix = prefix_match.group(0) if prefix_match else ''
         suffix_match = re.search(r'[\}\]\)]+$', keyword_stripped)
         suffix = suffix_match.group(0) if suffix_match else ''
-        
+
+        # - prefix 처리 (항상 적용)
+        # 예: "-tw" -> prefix="-", stripped="tw"
+        # 예: "-0.5::bad anatomy" -> prefix="-", stripped="0.5", suffix="::bad anatomy"
+        minus_prefix = ""
+        if keyword_stripped.startswith('-'):
+            minus_prefix = '-'
+            keyword_stripped = keyword_stripped[1:]  # '-' 제거
+
+        # prefix에 minus_prefix 추가
+        prefix = minus_prefix + prefix
+
         # :: 가중치를 suffix에 추가
         suffix = suffix + double_colon_suffix
-        
-        if len(prefix) + len(suffix) > len(keyword_stripped) + len(double_colon_suffix):
-             return keyword_stripped, "", double_colon_suffix
 
-        stripped_keyword = keyword_stripped[len(prefix):len(keyword_stripped) - (len(suffix) - len(double_colon_suffix)) if suffix else len(keyword_stripped)]
+        if len(prefix) + len(suffix) > len(keyword_stripped) + len(double_colon_suffix) + len(minus_prefix):
+             return keyword_stripped, minus_prefix, double_colon_suffix
+
+        stripped_keyword = keyword_stripped[len(prefix) - len(minus_prefix):len(keyword_stripped) - (len(suffix) - len(double_colon_suffix)) if suffix else len(keyword_stripped)]
         return stripped_keyword, prefix, suffix
     
     def _restore_brackets(self, keyword, prefix, suffix):

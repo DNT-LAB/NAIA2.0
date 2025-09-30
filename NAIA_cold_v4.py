@@ -129,19 +129,11 @@ class ImageDownloadThread(QThread):
             # 이미지 데이터를 메모리로 읽기
             image_data = BytesIO(response.content)
             pil_image = Image.open(image_data)
-            
-            # RGB로 변환 (RGBA나 다른 모드일 수 있음)
-            if pil_image.mode in ('RGBA', 'LA'):
-                # 투명 배경을 흰색으로 변환
-                background = Image.new('RGB', pil_image.size, (255, 255, 255))
-                if pil_image.mode == 'RGBA':
-                    background.paste(pil_image, mask=pil_image.split()[-1])
-                else:
-                    background.paste(pil_image, mask=pil_image.split()[-1])
-                pil_image = background
-            elif pil_image.mode != 'RGB':
-                pil_image = pil_image.convert('RGB')
-            
+
+            # 이미지 모드를 유지 (RGBA의 경우 stealth PNG 메타데이터 보존)
+            # RGB/RGBA/기타 모드 모두 그대로 전달
+            print(f"✅ ImageDownloadThread: 이미지 다운로드 완료, 모드 = {pil_image.mode}")
+
             self.image_downloaded.emit(pil_image)
             
         except requests.exceptions.RequestException as e:
@@ -259,7 +251,7 @@ class PromptTextEdit(QTextEdit):
             return
             
         # 프로그레스 다이얼로그 생성
-        self.progress_dialog = QProgressDialog("이미지 다운로드 중...", "취소", 0, 0, self)
+        self.progress_dialog = QProgressDialog("이미지 다운로드 중... \n복사 붙여넣기를 권장합니다", "취소", 0, 0, self)
         self.progress_dialog.setWindowTitle("이미지 다운로드")
         self.progress_dialog.setModal(True)
         self.progress_dialog.show()
@@ -298,6 +290,7 @@ class PromptTextEdit(QTextEdit):
         self.on_download_finished()
 
     def show_img2img_popup(self, pil_image: Image.Image):
+        print(f"🔍 show_img2img_popup 호출: 이미지 모드 = {pil_image.mode}, 크기 = {pil_image.size}")
         main_window = self.window()
         popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
 

@@ -28,25 +28,37 @@ class ImageMetadataExtractor:
                 img = Image.open(image_path)
             else:
                 img = image_path
-            
+
             # 여러 메타데이터 소스 확인
             if 'Comment' in img.info:
+                print("✅ has_metadata: Comment 필드 발견")
                 return True
             if 'parameters' in img.info:
+                print("✅ has_metadata: parameters 필드 발견")
                 return True
             if hasattr(img, 'getexif') and img.getexif():
+                print("✅ has_metadata: EXIF 데이터 발견")
                 return True
-            
+
             # Stealth PNG 확인 (RGBA만)
             if img.mode == 'RGBA':
+                print(f"🔍 has_metadata: RGBA 이미지 감지, stealth PNG 확인 시작...")
                 stealth_data = ImageMetadataExtractor._read_stealth_pnginfo(img)
                 if stealth_data:
+                    print(f"✅ has_metadata: Stealth PNG 데이터 발견 (길이: {len(stealth_data)})")
                     return True
-            
+                else:
+                    print("❌ has_metadata: Stealth PNG 데이터 없음")
+            else:
+                print(f"ℹ️ has_metadata: 이미지 모드 {img.mode}, stealth PNG 확인 스킵")
+
+            print("❌ has_metadata: 메타데이터 없음")
             return False
-            
+
         except Exception as e:
-            print(f"메타데이터 확인 중 오류: {e}")
+            print(f"❌ 메타데이터 확인 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     @staticmethod
@@ -321,73 +333,109 @@ class ImageMetadataExtractor:
     def _read_stealth_pnginfo(image: Image.Image) -> Optional[str]:
         """Stealth PNG 정보 읽기"""
         if image.mode != 'RGBA':
+            print(f"⚠️ _read_stealth_pnginfo: 이미지 모드 {image.mode}, RGBA 아님")
             return None
-        
+
         width, height = image.size
+        print(f"🔍 _read_stealth_pnginfo: 이미지 크기 {width}x{height}")
         pixels = image.load()
-        
+
         binary_data = ''
         buffer_a = ''
         index_a = 0
         confirming_signature = True
         reading_param_len = False
         reading_param = False
-        
+        read_end = False
+
         for x in range(width):
             for y in range(height):
                 r, g, b, a = pixels[x, y]
                 buffer_a += str(a & 1)
                 index_a += 1
-                
-                if confirming_signature and x == 0 and y == 119:
-                    decoded_sig = bytearray(
-                        int(buffer_a[i:i + 8], 2) 
-                        for i in range(0, len(buffer_a), 8)
-                    ).decode('utf-8', errors='ignore')
-                    
-                    if decoded_sig == 'stealth_pngcomp':
-                        confirming_signature = False
-                        reading_param_len = True
+
+                if confirming_signature and x == 0:
+                    if y == 119:  # index_a == len('stealth_pngcomp') * 8 == 120
+                        decoded_sig = bytearray(
+                            int(buffer_a[i:i + 8], 2)
+                            for i in range(0, len(buffer_a), 8)
+                        ).decode('utf-8', errors='ignore')
+
+                        print(f"🔍 _read_stealth_pnginfo: 시그니처 확인 - '{decoded_sig}'")
+                        if decoded_sig == 'stealth_pngcomp':
+                            print("✅ _read_stealth_pnginfo: Stealth PNG 시그니처 확인됨")
+                            confirming_signature = False
+                            reading_param_len = True
+                            buffer_a = ''
+                            index_a = 0
+                        else:
+                            print(f"❌ _read_stealth_pnginfo: 시그니처 불일치 (기대: 'stealth_pngcomp')")
+                            return None
+
+                elif reading_param_len:
+                    if index_a == 32:  # 32 bits for length
+                        param_len = int(buffer_a, 2)
+                        print(f"✅ _read_stealth_pnginfo: 데이터 길이 읽음 - {param_len} bits")
+                        reading_param_len = False
+                        reading_param = True
                         buffer_a = ''
                         index_a = 0
-                
-                elif reading_param_len and y == 151:
-                    param_len = int(buffer_a, 2)
-                    reading_param_len = False
-                    reading_param = True
-                    buffer_a = ''
-                    index_a = 0
-                
-                elif reading_param and index_a == param_len:
-                    binary_data = buffer_a
+
+                elif reading_param:
+                    if index_a == param_len:
+                        binary_data = buffer_a
+                        print(f"✅ _read_stealth_pnginfo: 바이너리 데이터 읽기 완료 ({param_len} bits)")
+                        read_end = True
+                        break
+                else:
+                    read_end = True
                     break
-            
-            if binary_data:
+
+            if read_end:
                 break
-        
+
         if binary_data:
             try:
                 byte_data = bytearray(
                     int(binary_data[i:i + 8], 2)
                     for i in range(0, len(binary_data), 8)
                 )
+                print(f"🔍 _read_stealth_pnginfo: gzip 압축 해제 시도 ({len(byte_data)} bytes)")
                 decoded_data = gzip.decompress(bytes(byte_data)).decode('utf-8')
+                print(f"✅ _read_stealth_pnginfo: 데이터 추출 성공 (길이: {len(decoded_data)})")
                 return decoded_data
-            except Exception:
+            except Exception as e:
+                print(f"❌ _read_stealth_pnginfo: gzip 압축 해제 실패 - {e}")
                 pass
-        
+
+        print("❌ _read_stealth_pnginfo: 바이너리 데이터 없음")
         return None
     
     @staticmethod
     def _parse_stealth_data(data: str) -> Optional[Dict[str, Any]]:
         """Stealth PNG 데이터 파싱"""
         try:
-            # JSON 시도
+            # JSON 직접 파싱 시도
             if data.strip().startswith('{'):
-                return json.loads(data.replace("\\", ""))
-        except:
-            pass
-        
+                try:
+                    # 먼저 그대로 파싱 시도
+                    parsed = json.loads(data)
+                    # Comment 필드가 있으면 이것도 JSON 파싱 시도
+                    if 'Comment' in parsed and isinstance(parsed['Comment'], str):
+                        try:
+                            parsed['Comment'] = json.loads(parsed['Comment'])
+                        except:
+                            pass  # Comment가 JSON이 아니면 그대로 유지
+                    return parsed
+                except json.JSONDecodeError:
+                    # 실패하면 백슬래시 제거 후 재시도 (구형 호환성)
+                    try:
+                        return json.loads(data.replace("\\", ""))
+                    except:
+                        pass
+        except Exception as e:
+            print(f"Stealth data parsing error: {e}")
+
         # NAI 형식으로 파싱 시도
         return ImageMetadataExtractor._parse_nai_format(data)
     

@@ -1512,6 +1512,7 @@ class ImageWindow(QWidget):
     
     def show_img2img_popup(self, pil_image: Image.Image):
         """이미지에 대한 작업 선택 팝업을 표시합니다."""
+        print(f"🔍 ImageWindow.show_img2img_popup: 이미지 모드 = {pil_image.mode}, 크기 = {pil_image.size}")
         main_window = self.window()
         popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
         
@@ -2795,24 +2796,25 @@ class ImageWindow(QWidget):
         # 가장 오래된 히스토리 아이템 (맨 앞)을 가져옴
         if not self.image_history_window.history_widgets:
             return
-        
+
         oldest_widget = self.image_history_window.history_widgets[-1]
         oldest_item = oldest_widget.history_item
-        
+
         # 해당 이미지를 저장
         if oldest_item.raw_bytes:
             save_path = self.app_context.session_save_path
             save_path.mkdir(parents=True, exist_ok=True)
-            
+
             is_webp = self.save_as_webp_checkbox.isChecked()
             suffix = "webp" if is_webp else "png"
-            filename = f"auto_{self.save_counter:05d}.{suffix}"
+            filename = f"{self.save_counter:05d}.{suffix}"
             filepath = save_path / filename
-            
+
             if self.save_image_with_metadata(str(filepath), oldest_item.raw_bytes, oldest_item.info_text, as_webp=is_webp):
+                oldest_item.filepath = str(filepath)  # 저장 성공 시 HistoryItem에 파일 경로 업데이트
                 self.save_counter += 1
                 print(f"🧠 자동저장 완료: {filename}")
-        
+
         # 해당 아이템 삭제
         self.image_history_window.on_item_delete_requested(oldest_widget)
         

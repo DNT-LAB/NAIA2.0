@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QCheckBox, QPushButton, QFrame, QScrollArea
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRegularExpression
+from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
@@ -11,6 +12,45 @@ from ui.scaling_manager import get_scaled_font_size
 from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List
 import re
+
+class CommentHighlighter(QSyntaxHighlighter):
+    """# 으로 시작해서 첫 번째 쉼표까지 회색 처리하는 구문 하이라이터"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # 회색 포맷 설정
+        self.comment_format = QTextCharFormat()
+        self.comment_format.setForeground(QColor("#808080"))
+
+    def highlightBlock(self, text: str):
+        """각 텍스트 블록(줄)에 대해 하이라이팅 적용 - 쉼표 단위로 규칙 분리"""
+        # 한 줄 내에서 쉼표로 구분된 여러 규칙을 처리
+        # 예: "(e):prefix+=nsfw, #(~e):prefix+=, (q):main+=test,"
+
+        pos = 0
+        while pos < len(text):
+            # 현재 위치에서 다음 쉼표 찾기
+            comma_index = text.find(',', pos)
+
+            if comma_index == -1:
+                # 더 이상 쉼표가 없으면 나머지 전체 확인
+                segment = text[pos:].strip()
+                if segment.startswith('#'):
+                    # 나머지 전체를 회색 처리
+                    self.setFormat(pos, len(text) - pos, self.comment_format)
+                break
+            else:
+                # 쉼표를 찾았으면 해당 구간 확인
+                segment = text[pos:comma_index].strip()
+
+                if segment.startswith('#'):
+                    # # 으로 시작하면 쉼표까지 (쉼표 포함) 회색 처리
+                    # pos부터 comma_index+1까지의 실제 문자열 길이 계산
+                    self.setFormat(pos, comma_index - pos + 1, self.comment_format)
+
+                # 다음 구간으로 이동 (쉼표 다음부터)
+                pos = comma_index + 1
 
 class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
     """
@@ -121,9 +161,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             "• 따옴표: 선택사항 (쉼표 포함 시 필수)\n"
             "• 주석: # 으로 시작하는 줄은 무시"
         )
-        
-        # 텍스트 변경 시 주석 하이라이팅
-        self.rules_textedit.textChanged.connect(self._highlight_comments)
+
+        # QSyntaxHighlighter 적용
+        self.comment_highlighter = CommentHighlighter(self.rules_textedit.document())
+
         layout.addWidget(self.rules_textedit)
 
         # 도움말 프레임
@@ -199,40 +240,6 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 self.update_visibility_for_mode(current_mode)
 
         return widget
-    
-    def _highlight_comments(self):
-        """주석(#으로 시작하는 줄) 하이라이팅"""
-        if not self.rules_textedit:
-            return
-            
-        # 현재 커서 위치 저장
-        cursor = self.rules_textedit.textCursor()
-        cursor_position = cursor.position()
-        
-        # HTML 형식으로 텍스트 변환
-        text = self.rules_textedit.toPlainText()
-        lines = text.split('\n')
-        
-        html_lines = []
-        for line in lines:
-            stripped_line = line.strip()
-            if stripped_line.startswith('#'):
-                # 주석 줄은 연한 녹색으로 표시
-                html_lines.append(f'<span style="color: #F8FFDF;">{line}</span>')
-            else:
-                html_lines.append(line)
-        
-        html_content = '<br>'.join(html_lines)
-        
-        # HTML 설정 (텍스트 변경 신호 차단)
-        self.rules_textedit.blockSignals(True)
-        self.rules_textedit.setHtml(f'<div style="font-family: monospace; color: #FFFFFF;">{html_content}</div>')
-        
-        # 커서 위치 복원
-        cursor = self.rules_textedit.textCursor()
-        cursor.setPosition(min(cursor_position, len(self.rules_textedit.toPlainText())))
-        self.rules_textedit.setTextCursor(cursor)
-        self.rules_textedit.blockSignals(False)
 
     def collect_current_settings(self) -> Dict[str, Any]:
         """현재 UI 상태를 딕셔너리로 수집"""

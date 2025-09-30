@@ -1,7 +1,7 @@
 # ui/metadata_viewer.py
 """이미지 메타데이터 뷰어 윈도우"""
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                             QTextEdit, QFrame, QGroupBox, QLineEdit, QCheckBox,
                             QGridLayout, QScrollArea, QWidget, QSplitter, QTabWidget,
                             QSizePolicy, QMessageBox)
@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional
 import json
 from ui.theme import get_dynamic_styles, DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from utils.image_info import ImageMetadataExtractor
 
 
 class MetadataViewerWindow(QDialog):
@@ -23,25 +24,27 @@ class MetadataViewerWindow(QDialog):
     apply_prompt = pyqtSignal(str, str)  # prompt, negative
     apply_all_settings = pyqtSignal(dict)
     
-    def __init__(self, pil_image: Image.Image, metadata: Dict[str, Any], 
+    def __init__(self, pil_image: Image.Image, metadata: Dict[str, Any],
                  app_context=None, parent=None):
         super().__init__(parent)
         self.pil_image = pil_image
-        self.metadata = metadata
         self.app_context = app_context
         self.dynamic_styles = get_dynamic_styles()
-        
+
+        # 메타데이터 검증 및 보강
+        self.metadata = self._validate_and_enhance_metadata(metadata)
+
         self.setWindowTitle("이미지 메타데이터")
         # Non-modal로 변경
         self.setModal(False)
         self.resize(1400, 800)
-        
+
         # 창이 항상 위에 표시되도록 설정 (선택적)
         # self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        
+
         # 창 닫기 버튼 동작 설정 - DeleteOnClose 제거하여 메모리 관리
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        
+
         # 전체 다이얼로그 다크 테마
         self.setStyleSheet(f"""
             QDialog {{
@@ -49,8 +52,54 @@ class MetadataViewerWindow(QDialog):
                 color: {DARK_COLORS['text_primary']};
             }}
         """)
-        
+
         self.init_ui()
+
+    def _validate_and_enhance_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """메타데이터 검증 및 보강 - 필요시 ImageMetadataExtractor로 재추출"""
+        # 메타데이터가 비어있거나 주요 필드가 없으면 재추출 시도
+        has_prompt = False
+        has_params = False
+
+        # Comment 필드가 딕셔너리인지 확인
+        if 'Comment' in metadata:
+            if isinstance(metadata['Comment'], dict):
+                has_prompt = 'prompt' in metadata['Comment']
+                has_params = 'steps' in metadata['Comment'] or 'scale' in metadata['Comment']
+            elif isinstance(metadata['Comment'], str):
+                # Comment가 문자열이면 JSON 파싱 시도
+                try:
+                    comment_data = json.loads(metadata['Comment'])
+                    metadata['Comment'] = comment_data
+                    has_prompt = 'prompt' in comment_data
+                    has_params = 'steps' in comment_data or 'scale' in comment_data
+                except:
+                    pass
+
+        # 직접 prompt 필드 확인
+        if not has_prompt:
+            has_prompt = 'prompt' in metadata
+
+        # parameters 필드 확인
+        if not has_params:
+            has_params = 'parameters' in metadata
+
+        # 메타데이터가 불완전하면 ImageMetadataExtractor로 재추출
+        if not has_prompt or not has_params:
+            try:
+                extracted = ImageMetadataExtractor.extract_metadata(self.pil_image)
+                if extracted:
+                    # 기존 메타데이터와 병합 (추출된 데이터 우선)
+                    merged = metadata.copy()
+                    merged.update(extracted)
+                    print("✅ MetadataViewerWindow: ImageMetadataExtractor로 메타데이터 보강 완료")
+                    return merged
+            except Exception as e:
+                print(f"⚠️ MetadataViewerWindow: 메타데이터 재추출 실패: {e}")
+        
+        # NAI Stealth Info 처리
+        if metadata.get('Software') == 'NovelAI': metadata = metadata.get('Comment')
+        return metadata
         
     def init_ui(self):
         """UI 초기화"""
@@ -618,38 +667,52 @@ class MetadataViewerWindow(QDialog):
     
     def _get_prompt_text(self) -> str:
         """프롬프트 텍스트 추출"""
-        # Comment 필드가 JSON인 경우 파싱
+        # 1. Comment 필드가 딕셔너리인 경우 (이미 파싱됨)
         if 'Comment' in self.metadata:
-            try:
-                comment_data = json.loads(self.metadata['Comment'])
-                if 'prompt' in comment_data:
-                    return comment_data['prompt']
-            except:
-                pass
-        
-        # 직접 prompt 필드
+            comment = self.metadata['Comment']
+            if isinstance(comment, dict) and 'prompt' in comment:
+                return comment['prompt']
+            # Comment가 문자열이면 JSON 파싱 시도
+            elif isinstance(comment, str):
+                try:
+                    comment_data = json.loads(comment)
+                    if 'prompt' in comment_data:
+                        return comment_data['prompt']
+                except:
+                    pass
+
+        # 2. 직접 prompt 필드
         if 'prompt' in self.metadata:
             return self.metadata['prompt']
-        
+
+        # 3. Description 필드 (NAI의 경우)
+        if 'Description' in self.metadata:
+            return self.metadata['Description']
+
         return ""
     
     def _get_negative_text(self) -> str:
         """네거티브 프롬프트 텍스트 추출"""
-        # Comment 필드가 JSON인 경우 파싱
+        # 1. Comment 필드가 딕셔너리인 경우 (이미 파싱됨)
         if 'Comment' in self.metadata:
-            try:
-                comment_data = json.loads(self.metadata['Comment'])
-                if 'uc' in comment_data:
-                    return comment_data['uc']
-            except:
-                pass
-        
-        # 직접 uc 또는 negative 필드
+            comment = self.metadata['Comment']
+            if isinstance(comment, dict) and 'uc' in comment:
+                return comment['uc']
+            # Comment가 문자열이면 JSON 파싱 시도
+            elif isinstance(comment, str):
+                try:
+                    comment_data = json.loads(comment)
+                    if 'uc' in comment_data:
+                        return comment_data['uc']
+                except:
+                    pass
+
+        # 2. 직접 uc 또는 negative 필드
         if 'uc' in self.metadata:
             return self.metadata['uc']
         if 'negative' in self.metadata:
             return self.metadata['negative']
-        
+
         return ""
     
     def _get_model_info(self) -> str:

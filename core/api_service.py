@@ -371,6 +371,7 @@ class APIService:
                     api_parameters['director_reference_descriptions'] = params['director_reference_descriptions']
                     api_parameters['director_reference_images'] = params['director_reference_images']
                     api_parameters['director_reference_information_extracted'] = params['director_reference_information_extracted']
+                    api_parameters['director_reference_secondary_strength_values'] = params['director_reference_secondary_strength_values']
                     api_parameters['director_reference_strength_values'] = params['director_reference_strength_values']
                     
                     # Character Reference 활성화 시 skip_cfg_above_sigma 제거

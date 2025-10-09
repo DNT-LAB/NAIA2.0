@@ -406,7 +406,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 2500930")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 2501009")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -939,7 +939,33 @@ class ModernMainWindow(QMainWindow):
         self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
         self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
         
-        # 탭 바에 detach 버튼 추가
+        # 탭 바 우측 상단 버튼 컨테이너
+        corner_widget_container = QWidget()
+        corner_layout = QHBoxLayout(corner_widget_container)
+        corner_layout.setContentsMargins(0, 0, 0, 0)
+        corner_layout.setSpacing(2)
+
+        # 대기열 버튼 추가
+        self.queue_btn = QPushButton("대기열")
+        self.queue_btn.setFixedSize(80, 55)
+        self.queue_btn.setToolTip("생성 대기열 관리")
+        self.queue_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+        """)
+        self.queue_btn.clicked.connect(self.toggle_queue_window)
+        #corner_layout.addWidget(self.queue_btn)
+
+        # detach 버튼 추가
         self.prompt_tabs_detach_btn = QPushButton("🔓")
         self.prompt_tabs_detach_btn.setFixedSize(45, 55)
         self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
@@ -957,7 +983,9 @@ class ModernMainWindow(QMainWindow):
             }}
         """)
         self.prompt_tabs_detach_btn.clicked.connect(self.toggle_prompt_tabs_detach)
-        self.prompt_tabs.setCornerWidget(self.prompt_tabs_detach_btn, Qt.Corner.TopRightCorner)
+        corner_layout.addWidget(self.prompt_tabs_detach_btn)
+
+        self.prompt_tabs.setCornerWidget(corner_widget_container, Qt.Corner.TopRightCorner)
         
         # 프롬프트 탭 컨테이너 생성 (분리/재부착을 위한 래퍼)
         self.prompt_tabs_container = QWidget()
@@ -2137,6 +2165,23 @@ class ModernMainWindow(QMainWindow):
                 
                 # 프롬프트 생성 컨트롤러에 자동 생성 플래그 설정
                 self.prompt_gen_controller.auto_generation_requested = True
+
+                #1009 변경사항 -> hooker와 호환되지 않는 NAI 캐릭터 프롬프트 처리 위치 변경
+                char_module = self.middle_section_controller.get_module_instance("CharacterModule")
+                if (char_module and 
+                    hasattr(char_module, 'is_auto_mode_active') and 
+                    char_module.is_auto_mode_active()):
+                    
+                    # 자동 생성 모드에서 이미지 생성 트리거
+                    self._trigger_auto_image_generation()
+
+                if (char_module and 
+                    char_module.activate_checkbox.isChecked() and 
+                    not char_module.reroll_on_generate_checkbox.isChecked()):
+                    
+                    print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
+                    char_module.process_and_update_view()
+
                 self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
             elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():
                 self.auto_generation_in_progress = True
@@ -2759,6 +2804,11 @@ class ModernMainWindow(QMainWindow):
             self.reattach_prompt_tabs()
         else:
             self.detach_prompt_tabs()
+
+    def toggle_queue_window(self):
+        """대기열 창 열기/닫기 토글"""
+        # TODO: 대기열 창 구현
+        QMessageBox.information(self, "대기열", "대기열 기능은 아직 구현 중입니다.")
     
     # === 분리된 창의 컨트롤 동기화 메서드들 ===
     
@@ -2959,19 +3009,19 @@ class ModernMainWindow(QMainWindow):
             # 자동 생성 플래그 해제
             self.prompt_gen_controller.auto_generation_requested = False
 
-            char_module = self.middle_section_controller.get_module_instance("CharacterModule")
-            if (char_module and 
-                hasattr(char_module, 'is_auto_mode_active') and 
-                char_module.is_auto_mode_active()):
+            # char_module = self.middle_section_controller.get_module_instance("CharacterModule")
+            # if (char_module and 
+            #     hasattr(char_module, 'is_auto_mode_active') and 
+            #     char_module.is_auto_mode_active()):
                 
-                # 자동 생성 모드에서 이미지 생성 트리거
-                self._trigger_auto_image_generation()
-            if (char_module and 
-                char_module.activate_checkbox.isChecked() and 
-                not char_module.reroll_on_generate_checkbox.isChecked()):
+            #     # 자동 생성 모드에서 이미지 생성 트리거
+            #     self._trigger_auto_image_generation()
+            # if (char_module and 
+            #     char_module.activate_checkbox.isChecked() and 
+            #     not char_module.reroll_on_generate_checkbox.isChecked()):
                 
-                print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
-                char_module.process_and_update_view()
+            #     print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
+            #     char_module.process_and_update_view()
             
             self.status_bar.showMessage("🔄 자동 생성: 프롬프트 생성 완료, 이미지 생성 시작...")
             

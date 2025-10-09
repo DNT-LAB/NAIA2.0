@@ -1,16 +1,20 @@
-gray
+grey
+beige
+aqua
 white
 brown
-Red
+blonde
+red
 pink
 orange
 yellow
 golden
-light_green
+gold
+light green
 green
-sky_blue
+sky blue
 blue
-Purple
+purple
 black
 rainbow
 two-tone
@@ -18,12 +22,12 @@ streaked
 gradient
 split-color
 multicolored
-colored_inner
+colored inner
 plaid
 strawberry
 rainbow
-polka_dot
-american_flag
+polka dot
+american flag
 argyle
 camouflage
 print
@@ -31,3 +35,6 @@ striped
 diagonal-striped
 vertical-striped
 checkered
+dark
+pale
+silver

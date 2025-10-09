@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import json
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QPushButton, QScrollArea, QCheckBox, QFileDialog,
     QMessageBox, QApplication, QDialog, QTabWidget, QGridLayout,
-    QMenu, QInputDialog, QSizePolicy, QTextEdit, QLineEdit
+    QMenu, QInputDialog, QSizePolicy, QTextEdit, QLineEdit, QSlider
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QPixmap, QImage, QAction
@@ -23,6 +23,12 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 # VibeEncodingWorker 클래스 제거됨 - Character Reference에서는 인코딩 불필요
+
+
+class NoScrollSlider(QSlider):
+    """QSlider that ignores mouse wheel events"""
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 class CharacterReferenceFrame(QFrame):
@@ -43,6 +49,7 @@ class CharacterReferenceFrame(QFrame):
         
         # Character reference data (simplified from vibe transfer)
         self.style_aware = True    # Style Aware 체크박스 상태 (기본값: True)
+        self.fidelity = 1       # Fidelity 슬라이더 값 (기본값: 0.75)
         self.is_enabled = False    # 단일 선택을 위한 활성화 상태
         
         # Setup UI
@@ -225,18 +232,51 @@ class CharacterReferenceFrame(QFrame):
         controls_layout = QVBoxLayout(controls_container)
         controls_layout.setSpacing(get_scaled_size(8))
         controls_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Style Aware checkbox (replaces IE/IRS sliders)
-        style_aware_label = QLabel("Style Aware")
-        style_aware_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px; font-weight: bold;")
-        controls_layout.addWidget(style_aware_label)
-        
-        self.style_aware_check = QCheckBox("Include style information")
+
+        self.style_aware_check = QCheckBox("Style Aware")
         self.style_aware_check.setChecked(self.style_aware)
         self.style_aware_check.setStyleSheet(dynamic_styles['dark_checkbox'])
         self.style_aware_check.toggled.connect(self._on_style_aware_changed)
         controls_layout.addWidget(self.style_aware_check)
-        
+
+        # Fidelity value label and slider container
+        fidelity_value_layout = QHBoxLayout()
+        fidelity_value_layout.setSpacing(get_scaled_size(8))
+
+        self.fidelity_value_label = QLabel(f"Fidelity: {self.fidelity:.2f}")
+        self.fidelity_value_label.setStyleSheet(f"color: #4a9eff; font-size: {get_scaled_font_size(16)}px; font-weight: bold;")
+        fidelity_value_layout.addWidget(self.fidelity_value_label)
+        fidelity_value_layout.addStretch()
+
+        controls_layout.addLayout(fidelity_value_layout)
+
+        # Fidelity slider (0.0 to 1.0, step 0.05)
+        self.fidelity_slider = NoScrollSlider(Qt.Orientation.Horizontal)
+        self.fidelity_slider.setMinimum(0)
+        self.fidelity_slider.setMaximum(20)  # 0 to 1.0 in 0.05 steps = 20 steps
+        self.fidelity_slider.setValue(int(self.fidelity * 20))  # 0.75 * 20 = 15
+        self.fidelity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.fidelity_slider.setTickInterval(1)
+        self.fidelity_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: #2a2a2a;
+                height: {get_scaled_size(8)}px;
+                border-radius: {get_scaled_size(4)}px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #4a9eff;
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(20)}px;
+                margin: -{get_scaled_size(6)}px 0;
+                border-radius: {get_scaled_size(3)}px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: #6ab9ff;
+            }}
+        """)
+        self.fidelity_slider.valueChanged.connect(self._on_fidelity_changed)
+        controls_layout.addWidget(self.fidelity_slider)
+
         # Add spacing to push controls to top
         controls_layout.addStretch()
         
@@ -277,6 +317,11 @@ class CharacterReferenceFrame(QFrame):
         """Handle style aware checkbox change"""
         self.style_aware = checked
         # No need to save settings - user controls this each time
+
+    def _on_fidelity_changed(self, value: int):
+        """Handle fidelity slider change"""
+        self.fidelity = value / 20.0  # Convert 0-20 to 0.0-1.0
+        self.fidelity_value_label.setText(f"Fidelity: {self.fidelity:.2f}")
     
     def _get_parent_module(self):
         """Get the parent CharacterReferenceModule instance"""
@@ -349,10 +394,17 @@ class CharacterReferenceFrame(QFrame):
         """Get character reference data if enabled"""
         if not self.is_enabled or not self._is_naid45_model():
             return None
-        
+
+        # Calculate fidelity with rounding and 0.05 step alignment
+        inverted_fidelity = 1.0 - self.fidelity
+        # Round to 0.05 steps and clamp to [0.0, 1.0]
+        fidelity_value = round(inverted_fidelity * 20) / 20.0
+        fidelity_value = max(0.0, min(1.0, fidelity_value))
+
         return {
             "image_data": self.image_data,
             "style_aware": self.style_aware,
+            "fidelity": fidelity_value,
             "file_path": self.file_path,
             "file_hash": self.file_hash
         }
@@ -1152,9 +1204,10 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
                 "file_path": frame.file_path,
                 "file_hash": frame.file_hash,
                 "style_aware": frame.style_aware,
+                "fidelity": frame.fidelity,
                 "is_enabled": frame.is_enabled
             })
-        
+
         return {
             "frames": frames_data
         }
@@ -1525,6 +1578,7 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
             "director_reference_descriptions": descriptions,
             "director_reference_images": [char_data["image_data"]],
             "director_reference_information_extracted": [1],
+            "director_reference_secondary_strength_values": [char_data["fidelity"]],
             "director_reference_strength_values": [1],
             "controlnet_strength": 1,
             "inpaintImg2ImgStrength": 1,

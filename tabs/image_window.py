@@ -2825,24 +2825,28 @@ class ImageWindow(QWidget):
         oldest_widget = self.image_history_window.history_widgets[-1]
         oldest_item = oldest_widget.history_item
 
-        # 해당 이미지를 저장
+        # 해당 이미지를 저장 (중복 체크 추가)
         if oldest_item.raw_bytes:
-            save_path = self.app_context.session_save_path
-            save_path.mkdir(parents=True, exist_ok=True)
+            # 파일 경로가 있고, 실제 파일도 존재하면 저장 건너뛰기
+            if oldest_item.filepath and os.path.exists(oldest_item.filepath):
+                print(f"🧠 자동저장 건너뛰기: 이미 저장된 파일입니다 - {os.path.basename(oldest_item.filepath)}")
+            else:
+                save_path = self.app_context.session_save_path
+                save_path.mkdir(parents=True, exist_ok=True)
 
-            is_webp = self.save_as_webp_checkbox.isChecked()
-            suffix = "webp" if is_webp else "png"
-            filename = f"{self.save_counter:05d}.{suffix}"
-            filepath = save_path / filename
+                is_webp = self.save_as_webp_checkbox.isChecked()
+                suffix = "webp" if is_webp else "png"
+                filename = f"{self.save_counter:05d}.{suffix}"
+                filepath = save_path / filename
 
-            if self.save_image_with_metadata(str(filepath), oldest_item.raw_bytes, oldest_item.info_text, as_webp=is_webp):
-                oldest_item.filepath = str(filepath)  # 저장 성공 시 HistoryItem에 파일 경로 업데이트
-                self.save_counter += 1
-                print(f"🧠 자동저장 완료: {filename}")
+                if self.save_image_with_metadata(str(filepath), oldest_item.raw_bytes, oldest_item.info_text, as_webp=is_webp):
+                    oldest_item.filepath = str(filepath)  # 저장 성공 시 HistoryItem에 파일 경로 업데이트
+                    self.save_counter += 1
+                    print(f"🧠 자동저장 완료: {filename}")
 
         # 해당 아이템 삭제
         self.image_history_window.on_item_delete_requested(oldest_widget)
-        
+
         # 가비지 콜렉션 수행
         import gc
         gc.collect()

@@ -55,15 +55,25 @@ class ImageViewerModule(BaseTabModule):
         return self.image_window_widget
 
 class AllImagesDownloader(QObject):
+    """[리팩토링] ImageCrudController를 사용하는 일괄 저장 워커"""
     # 진행률 시그널: (현재 순번, 전체 개수, 파일명/메시지)
     progress_updated = pyqtSignal(int, int, str)
     # 완료 시그널: (실제로 저장된 파일 개수)
     finished = pyqtSignal(int)
 
-    def run(self, history_items, save_path, save_as_webp, save_counter_start):
-        """백그라운드 스레드에서 실행될 이미지 저장 로직"""
+    def __init__(self, image_crud_controller):
+        super().__init__()
+        self.image_crud = image_crud_controller
+
+    def run(self, history_items, save_as_webp):
+        """
+        백그라운드 스레드에서 실행될 이미지 저장 로직
+
+        Parameters:
+            history_items (list): 저장할 HistoryItem 리스트
+            save_as_webp (bool): WEBP 형식으로 저장 여부
+        """
         saved_count = 0
-        current_counter = save_counter_start
         total_items = len(history_items)
 
         for i, item in enumerate(history_items):
@@ -78,27 +88,29 @@ class AllImagesDownloader(QObject):
                     self.progress_updated.emit(i + 1, total_items, "[건너뜀] 원본 데이터 없음")
                     continue
 
-                # 3. 파일명 생성 및 저장
-                suffix = "webp" if save_as_webp else "png"
-                filename = f"{current_counter:05d}.{suffix}"
-                file_path = save_path / filename
+                # 3. 🆕 분류 정보 생성
+                classification_info = {
+                    "method": self.image_crud.get_classification_method(),
+                    "prompt": item.info_text,
+                    "image_size": item.image.size if item.image else (0, 0),
+                    "tags": item.prompt_context.get("main_tags", []) if isinstance(item.prompt_context, dict) else [],
+                    "backend_type": item.backend_type,
+                }
 
-                # PIL 이미지 객체로 변환
-                img = Image.open(io.BytesIO(item.raw_bytes))
-                
-                # 메타데이터와 함께 저장
-                if save_as_webp:
-                    exif = img.info.get('exif', b'')
-                    img.save(str(file_path), format='WEBP', quality=95, method=6, exif=exif)
+                # 4. ✅ ImageCrudController를 통한 저장 (분류 정보 포함)
+                success, filepath, error = self.image_crud.save_image(
+                    image_bytes=item.raw_bytes,
+                    as_webp=save_as_webp,
+                    classification_info=classification_info
+                )
+
+                if success:
+                    # HistoryItem 객체에 저장 경로 업데이트 (중복 저장 방지용)
+                    item.filepath = filepath
+                    saved_count += 1
+                    self.progress_updated.emit(i + 1, total_items, f"[저장됨] {os.path.basename(filepath)}")
                 else:
-                    with open(str(file_path), 'wb') as f:
-                        f.write(item.raw_bytes)
-
-                # HistoryItem 객체에 저장 경로 업데이트 (중복 저장 방지용)
-                item.filepath = str(file_path)
-                saved_count += 1
-                current_counter += 1
-                self.progress_updated.emit(i + 1, total_items, f"[저장됨] {filename}")
+                    self.progress_updated.emit(i + 1, total_items, f"[오류] {error}")
 
             except Exception as e:
                 self.progress_updated.emit(i + 1, total_items, f"[오류] {e}")
@@ -1130,10 +1142,11 @@ class ImageWindow(QWidget):
         self.image_history_window: ImageHistoryWindow = None
         self.info_visible = True
         self.app_context = app_context
-        self.history_visible = True 
+        self.history_visible = True
         self.toggle_history_button: QPushButton = None
-        self.save_counter = 1  
-        self.current_history_item = None 
+        # ✅ ImageCrudController 사용 (save_counter 제거)
+        self.image_crud = app_context.image_crud_controller
+        self.current_history_item = None
         # 🆕 ComfyUI 워크플로우 캐시
         self.comfyui_workflow_cache: Dict[int, Dict] = {}
 
@@ -1154,7 +1167,7 @@ class ImageWindow(QWidget):
         left_layout.setContentsMargins(4, 0, 4, 0)
         left_layout.setSpacing(4)
 
-        # 3-1. 컨트롤 버튼 영역 (상단)
+        # 3-1. 컨트롤 버튼 영역 (상단) 
         control_layout = QHBoxLayout()
         self.auto_save_checkbox = QCheckBox("자동 저장")
         self.auto_save_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
@@ -1936,56 +1949,25 @@ class ImageWindow(QWidget):
 
     def save_image_with_metadata(self, filename: str, image_bytes: bytes, info_text: str, as_webp=False):
         """
-        [수정] 이미지 바이트를 EXIF 손실 없이 그대로 파일에 저장합니다.
-        info_text 매개변수는 이제 사용되지 않지만 호환성을 위해 남겨둡니다.
-        폴더가 존재하지 않는 경우 자동으로 재생성합니다.
+        [DEPRECATED] 하위 호환성을 위한 래퍼 메서드
+
+        ⚠️ 이 메서드는 더 이상 사용되지 않습니다.
+        새 코드는 app_context.image_crud_controller.save_image()를 직접 사용하세요.
+
+        info_text 매개변수는 무시됩니다 (ImageCrudController가 메타데이터를 자동 처리).
         """
-        import os
-        from pathlib import Path
-        
-        try:
-            # 파일 경로에서 디렉토리 추출
-            file_path = Path(filename)
-            directory = file_path.parent
-            
-            # 디렉토리가 존재하지 않으면 생성
-            if not directory.exists():
-                print(f"⚠️ 저장 폴더가 존재하지 않습니다. 재생성 중: {directory}")
-                try:
-                    directory.mkdir(parents=True, exist_ok=True)
-                    print(f"✅ 폴더가 생성되었습니다: {directory}")
-                except Exception as mkdir_error:
-                    print(f"❌ 폴더 생성 실패: {mkdir_error}")
-                    # 폴더 생성 실패시 기본 output 폴더 사용 시도
-                    fallback_dir = Path("output")
-                    fallback_dir.mkdir(exist_ok=True)
-                    file_path = fallback_dir / file_path.name
-                    filename = str(file_path)
-                    print(f"⚠️ 대체 경로 사용: {filename}")
-            
-            if as_webp:
-                # 이미지 객체로부터 WEBP로 저장
-                img = Image.open(io.BytesIO(image_bytes))
-                exif = img.info.get('exif', b'')
-                img.save(filename, format='WEBP', quality=95, method=6, exif=exif)
-                print(f"✅ WEBP(95%, exif) 저장 완료: {filename}")
-            else:
-                with open(filename, 'wb') as f:
-                    f.write(image_bytes)
-                print(f"✅ PNG 저장 완료: {filename}")
+        print(f"⚠️ [DEPRECATED] save_image_with_metadata 호출됨. ImageCrudController 사용 권장.")
+
+        # ✅ ImageCrudController로 위임 (파일명 무시, 컨트롤러가 자동 생성)
+        success, filepath, error = self.image_crud.save_image(
+            image_bytes=image_bytes,
+            as_webp=as_webp
+        )
+
+        if success:
             return True
-        except PermissionError as e:
-            print(f"❌ 파일 저장 권한 오류: {e}")
-            print(f"💡 파일이 다른 프로그램에서 사용 중이거나 권한이 부족합니다.")
-            return False
-        except OSError as e:
-            print(f"❌ 파일 시스템 오류: {e}")
-            print(f"💡 디스크 공간이 부족하거나 파일 경로가 너무 길 수 있습니다.")
-            return False
-        except Exception as e:
-            print(f"❌ 이미지 저장 실패: {e}")
-            import traceback
-            traceback.print_exc()
+        else:
+            print(f"❌ 저장 실패: {error}")
             return False
 
     def toggle_history_panel(self):
@@ -2194,28 +2176,68 @@ class ImageWindow(QWidget):
         filepath = None
         is_webp = self.save_as_webp_checkbox.isChecked()
         if self.auto_save_checkbox.isChecked():
-            save_path = self.app_context.session_save_path
-            
-            # 폴더가 존재하지 않으면 생성
-            if not save_path.exists():
-                try:
-                    save_path.mkdir(parents=True, exist_ok=True)
-                    print(f"✅ 세션 저장 폴더 재생성: {save_path}")
-                except Exception as e:
-                    print(f"❌ 세션 저장 폴더 생성 실패: {e}")
-                    # 실패시 기본 output 폴더 사용
-                    save_path = Path("output")
-                    save_path.mkdir(exist_ok=True)
-                    print(f"⚠️ 대체 폴더 사용: {save_path}")
-            
-            suffix = "webp" if is_webp else "png"
-            filename = f"{self.save_counter:05d}.{suffix}"
-            filepath = save_path / filename
-            # 저장 함수에는 이제 info_text를 새로 생성한 것으로 전달
-            if self.save_image_with_metadata(str(filepath), raw_bytes, info_text, as_webp=is_webp):
-                self.save_counter += 1
+            # 🆕 분류 정보 생성 (자동 저장용)
+            prompt_context = generation_result.get('prompt_context', {}) if generation_result else {}
+            main_tags = prompt_context.get('main_tags', [])
+
+            # 🔍 디버깅 (필요시 주석 해제)
+            # print(f"[DEBUG] generation_result keys: {list(generation_result.keys()) if generation_result else 'None'}")
+            # print(f"[DEBUG] prompt_context keys: {list(prompt_context.keys()) if prompt_context else 'None'}")
+            # print(f"[DEBUG] main_tags from prompt_context: {main_tags[:10] if main_tags else '(empty)'}")
+
+            # 🆕 Fallback: main_tags가 비어있으면 프롬프트에서 직접 추출
+            if not main_tags and info_text:
+                # generation_result에서 최종 프롬프트 추출
+                final_prompt = generation_result.get('generation_params', {}).get('input', '') if generation_result else ''
+                if final_prompt:
+                    import re
+
+                    # 1. 먼저 쉼표로 분리
+                    raw_tags = final_prompt.split(',')
+
+                    # 2. 각 태그에서 NAI 가중치 제거
+                    cleaned_tags = []
+                    for tag in raw_tags:
+                        tag = tag.strip()
+                        if not tag:
+                            continue
+
+                        # NAI 가중치 패턴 제거: "1.25::tag::" → "tag" 또는 "-1.15::tag::" → "tag"
+                        # 패턴: 숫자(선택적 음수, 소수점) + :: + 내용 + :: (끝 ::는 선택적)
+                        tag = re.sub(r'^-?\d+\.?\d*::', '', tag)  # 앞쪽 가중치 제거
+                        tag = re.sub(r'::$', '', tag)  # 뒤쪽 :: 제거
+                        tag = tag.strip()
+
+                        if tag:
+                            cleaned_tags.append(tag)
+
+                    main_tags = cleaned_tags
+                    # print(f"[DEBUG] 🔧 Fallback: 프롬프트에서 추출한 tags ({len(main_tags)}개)")
+                    # print(f"[DEBUG]   처음 10개: {main_tags[:10]}")
+                    # print(f"[DEBUG]   'solo' in tags: {'solo' in main_tags}")
+                    # print(f"[DEBUG]   'holding' in tags: {'holding' in main_tags}")
+                    # print(f"[DEBUG]   'standing' in tags: {'standing' in main_tags}")
+
+            classification_info = {
+                "method": self.app_context.image_crud_controller.get_classification_method(),
+                "prompt": info_text,
+                "image_size": image.size if image else (0, 0),
+                "tags": main_tags,
+                "backend_type": generation_result.get('backend_type', 'NAI') if generation_result else 'NAI',
+            }
+
+            # ✅ ImageCrudController를 통한 저장 (분류 정보 포함)
+            success, saved_filepath, error = self.image_crud.save_image(
+                image_bytes=raw_bytes,
+                as_webp=is_webp,
+                classification_info=classification_info
+            )
+
+            if success:
+                filepath = saved_filepath
             else:
-                filepath = None  # 저장 실패시 filepath를 None으로 설정
+                print(f"❌ 자동 저장 실패: {error}")
+                filepath = None
 
         # 🆕 확장된 메타데이터 수집
         enhanced_metadata = {}
@@ -2268,9 +2290,36 @@ class ImageWindow(QWidget):
         self.update_image(item.image)
         self.update_info(item.info_text) # 저장된 생성 정보로 업데이트
 
+    def _create_classification_info(self, item: HistoryItem) -> dict:
+        """
+        [신규] HistoryItem에서 classification_info를 생성합니다.
+
+        Parameters:
+            item (HistoryItem): 히스토리 아이템
+
+        Returns:
+            dict: classification_info
+        """
+        tags = item.prompt_context.get("main_tags", []) if isinstance(item.prompt_context, dict) else []
+
+        # 🔍 디버깅 (필요시 주석 해제)
+        # print(f"[DEBUG] _create_classification_info - tags: {tags[:10] if tags else '(empty)'}")
+        # print(f"[DEBUG] prompt_context type: {type(item.prompt_context)}")
+        # if isinstance(item.prompt_context, dict):
+        #     print(f"[DEBUG] prompt_context keys: {list(item.prompt_context.keys())}")
+
+        return {
+            "method": self.app_context.image_crud_controller.get_classification_method(),
+            "prompt": item.info_text,
+            "image_size": item.image.size if item.image else (0, 0),
+            "tags": tags,
+            "backend_type": item.backend_type,
+        }
+
     def save_current_image(self):
+        """[리팩토링] '이미지 저장' 버튼 클릭 시, 대화상자 없이 바로 저장"""
         is_webp = self.save_as_webp_checkbox.isChecked()
-        """[수정] '이미지 저장' 버튼 클릭 시, 대화상자 없이 바로 저장"""
+
         if not hasattr(self, 'current_history_item') or not self.current_history_item:
             # status_bar 접근 방법 수정
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'status_bar'):
@@ -2287,36 +2336,26 @@ class ImageWindow(QWidget):
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'status_bar'):
                 self.app_context.main_window.status_bar.showMessage("⚠️ 저장할 이미지의 원본 데이터가 없습니다.", 3000)
             return
-        
-        # 1. AppContext에서 세션 저장 경로를 가져옴
-        save_path = self.app_context.session_save_path
-        
-        # 폴더가 존재하지 않으면 생성
-        if not save_path.exists():
-            try:
-                save_path.mkdir(parents=True, exist_ok=True)
-                print(f"✅ 세션 저장 폴더 재생성: {save_path}")
-            except Exception as e:
-                print(f"❌ 세션 저장 폴더 생성 실패: {e}")
-                # 실패시 기본 output 폴더 사용
-                save_path = Path("output")
-                save_path.mkdir(exist_ok=True)
-                print(f"⚠️ 대체 폴더 사용: {save_path}")
-                self.app_context.main_window.status_bar.showMessage(f"⚠️ 대체 폴더 사용: output/", 3000)
-        
-        # 2. 새로운 파일명 생성 (자동 저장과 카운터 공유)
-        suffix = "webp" if is_webp else "png"
-        filename = f"{self.save_counter:05d}.{suffix}"
-        file_path = save_path / filename
-        
-        # 3. 메타데이터와 함께 저장
-        success = self.save_image_with_metadata(str(file_path), item.raw_bytes, item.info_text, as_webp=is_webp)
-        
-        # 4. 카운터 증가
+
+        # 🆕 분류 정보 생성
+        classification_info = self._create_classification_info(item)
+
+        # ✅ ImageCrudController를 통한 저장 (에러 메시지 및 분류 정보 포함)
+        success, filepath, error = self.image_crud.save_image(
+            image_bytes=item.raw_bytes,
+            as_webp=is_webp,
+            classification_info=classification_info
+        )
+
         if success:
-            item.filepath = str(file_path)  # [핵심] 저장 성공 시 HistoryItem에 파일 경로 주입
-            self.save_counter += 1
-            self.app_context.main_window.status_bar.showMessage(f"✅ 이미지 저장 완료: {filename}", 3000)
+            item.filepath = filepath  # [핵심] 저장 성공 시 HistoryItem에 파일 경로 주입
+            self.app_context.main_window.status_bar.showMessage(
+                f"✅ 이미지 저장 완료: {os.path.basename(filepath)}", 3000
+            )
+        else:
+            self.app_context.main_window.status_bar.showMessage(
+                f"❌ 저장 실패: {error}", 5000
+            )
 
     
     def extract_info_from_image(self, image: Image.Image, _info):
@@ -2550,24 +2589,24 @@ class ImageWindow(QWidget):
         items_to_save.reverse() # 오래된 이미지부터 순서대로 저장
 
         self.worker_thread = QThread()
-        self.downloader = AllImagesDownloader()
+        # ✅ ImageCrudController 전달
+        self.downloader = AllImagesDownloader(self.image_crud)
         self.downloader.moveToThread(self.worker_thread)
 
         self.downloader.progress_updated.connect(self.on_download_progress)
-        
+
         # 완료 후 동작 결정
         if clear_after:
             self.downloader.finished.connect(self.on_download_finished_and_clear)
         else:
             self.downloader.finished.connect(self.on_download_finished)
 
+        # ✅ 간소화된 run() 시그니처 (save_path, save_counter 제거)
         self.worker_thread.started.connect(lambda: self.downloader.run(
             items_to_save,
-            self.app_context.session_save_path,
-            self.save_as_webp_checkbox.isChecked(),
-            self.save_counter
+            self.save_as_webp_checkbox.isChecked()
         ))
-        
+
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.advanced_button.setEnabled(False)
         self.save_button.setEnabled(False)
@@ -2579,7 +2618,7 @@ class ImageWindow(QWidget):
 
     def on_download_finished(self, saved_count):
         self.app_context.main_window.status_bar.showMessage(f"✅ 전체 다운로드 완료. {saved_count}개 파일 저장됨.", 5000)
-        self.save_counter += saved_count
+        # ✅ 카운터 증가 제거 (ImageCrudController가 자동 처리)
         self.advanced_button.setEnabled(True)
         self.save_button.setEnabled(True)
         if self.worker_thread: self.worker_thread.quit()
@@ -2831,18 +2870,23 @@ class ImageWindow(QWidget):
             if oldest_item.filepath and os.path.exists(oldest_item.filepath):
                 print(f"🧠 자동저장 건너뛰기: 이미 저장된 파일입니다 - {os.path.basename(oldest_item.filepath)}")
             else:
-                save_path = self.app_context.session_save_path
-                save_path.mkdir(parents=True, exist_ok=True)
-
                 is_webp = self.save_as_webp_checkbox.isChecked()
-                suffix = "webp" if is_webp else "png"
-                filename = f"{self.save_counter:05d}.{suffix}"
-                filepath = save_path / filename
 
-                if self.save_image_with_metadata(str(filepath), oldest_item.raw_bytes, oldest_item.info_text, as_webp=is_webp):
-                    oldest_item.filepath = str(filepath)  # 저장 성공 시 HistoryItem에 파일 경로 업데이트
-                    self.save_counter += 1
-                    print(f"🧠 자동저장 완료: {filename}")
+                # 🆕 분류 정보 생성
+                classification_info = self._create_classification_info(oldest_item)
+
+                # ✅ ImageCrudController를 통한 저장 (분류 정보 포함)
+                success, filepath, error = self.image_crud.save_image(
+                    image_bytes=oldest_item.raw_bytes,
+                    as_webp=is_webp,
+                    classification_info=classification_info
+                )
+
+                if success:
+                    oldest_item.filepath = filepath  # 저장 성공 시 HistoryItem에 파일 경로 업데이트
+                    print(f"🧠 자동저장 완료: {os.path.basename(filepath)}")
+                else:
+                    print(f"🧠 자동저장 실패: {error}")
 
         # 해당 아이템 삭제
         self.image_history_window.on_item_delete_requested(oldest_widget)

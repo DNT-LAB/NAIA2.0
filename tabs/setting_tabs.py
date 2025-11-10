@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QCheckBox, QLineEdit, QFileDialog, QGroupBox,
-    QScrollArea, QMessageBox
+    QScrollArea, QMessageBox, QComboBox
 )
 from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtWidgets import QTextEdit
 from interfaces.base_tab_module import BaseTabModule
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaling_manager
@@ -125,6 +126,15 @@ class SettingsWidget(QWidget):
         self.app_context = app_context
         self.settings_module = settings_module
         self.init_ui()
+
+        # ✅ ImageCrudController 이벤트 구독
+        if app_context:
+            app_context.subscribe("image_counter_changed", self._on_counter_changed)
+
+            # 초기 카운터 값 표시
+            if hasattr(app_context, 'image_crud_controller'):
+                initial_counter = app_context.image_crud_controller.get_counter()
+                self.counter_value_label.setText(str(initial_counter))
         
     def init_ui(self):
         """UI 초기화"""
@@ -248,13 +258,215 @@ class SettingsWidget(QWidget):
         path_layout.addWidget(self.save_path_edit, 1)
         path_layout.addWidget(browse_btn)
         layout.addLayout(path_layout)
-        
+
+        # 🆕 타임스탬프 폴더 사용 여부
+        self.use_timestamp_folder_checkbox = QCheckBox("날짜_시간 폴더 사용 (예: 20250109_143520/)")
+        self.use_timestamp_folder_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.use_timestamp_folder_checkbox.setChecked(True)  # 기본값: 사용
+        self.use_timestamp_folder_checkbox.toggled.connect(self._on_use_timestamp_folder_changed)
+        layout.addWidget(self.use_timestamp_folder_checkbox)
+
+        # ✅ 이미지 저장 카운터 표시
+        counter_layout = QHBoxLayout()
+        counter_label = QLabel("현재 저장 카운터:")
+        counter_label.setStyleSheet(DARK_STYLES['label_style'])
+        self.counter_value_label = QLabel("1")
+        self.counter_value_label.setStyleSheet(f"""
+            QLabel {{
+                color: {DARK_COLORS['success']};
+                font-weight: bold;
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 4px 8px;
+                background-color: {DARK_COLORS['bg_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+            }}
+        """)
+
+        reset_counter_btn = QPushButton("카운터 초기화")
+        reset_counter_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        reset_counter_btn.clicked.connect(self._reset_image_counter)
+
+        counter_layout.addWidget(counter_label)
+        counter_layout.addWidget(self.counter_value_label)
+        counter_layout.addWidget(reset_counter_btn)
+        counter_layout.addStretch()
+        layout.addLayout(counter_layout)
+
+        # 🆕 파일명 형식 선택
+        filename_format_layout = QHBoxLayout()
+        filename_format_label = QLabel("파일명 형식:")
+        filename_format_label.setStyleSheet(DARK_STYLES['label_style'])
+
+        self.filename_format_combo = QComboBox()
+        self.filename_format_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.filename_format_combo.addItem("번호만 (00001.png)", "number_only")
+        self.filename_format_combo.addItem("시간_번호 (143052_00001.png)", "time_number")
+        self.filename_format_combo.addItem("날짜_시간 (20250108_143052.png)", "datetime")
+        self.filename_format_combo.currentIndexChanged.connect(self._on_filename_format_changed)
+
+        # 설명 레이블
+        filename_format_desc = QLabel("※ 중복 방지: 번호만/시간_번호는 카운터 증가, 날짜_시간은 (1), (2) 추가")
+        filename_format_desc.setStyleSheet(f"""
+            QLabel {{
+                color: {DARK_COLORS['text_secondary']};
+                font-size: {get_scaled_font_size(11)}px;
+                font-style: italic;
+            }}
+        """)
+
+        filename_format_layout.addWidget(filename_format_label)
+        filename_format_layout.addWidget(self.filename_format_combo)
+        filename_format_layout.addStretch()
+        layout.addLayout(filename_format_layout)
+        layout.addWidget(filename_format_desc)
+        filename_format_desc.setVisible(False)
+
+        # 🆕 분류 방법 선택
+        classification_layout = QHBoxLayout()
+        classification_label = QLabel("분류 방법:")
+        classification_label.setStyleSheet(DARK_STYLES['label_style'])
+
+        self.classification_method_combo = QComboBox()
+        self.classification_method_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.classification_method_combo.addItem("분류 없음", "none")
+        self.classification_method_combo.addItem("프롬프트 인식", "prompt_recognition")
+        self.classification_method_combo.currentIndexChanged.connect(self._on_classification_method_changed)
+
+        # 설명 레이블
+        classification_desc = QLabel("※ 분류 시 하위 폴더에 자동 정리됩니다 (예: output/20250108_143052/character/)")
+        classification_desc.setStyleSheet(f"""
+            QLabel {{
+                color: {DARK_COLORS['text_secondary']};
+                font-size: {get_scaled_font_size(11)}px;
+                font-style: italic;
+            }}
+        """)
+
+        classification_layout.addWidget(classification_label)
+        classification_layout.addWidget(self.classification_method_combo)
+        classification_layout.addStretch()
+        layout.addLayout(classification_layout)
+        layout.addWidget(classification_desc)
+        classification_desc.setVisible(False)
+
+        # 🆕 프롬프트 인식 분류 규칙 입력 필드
+        self.classification_rules_label = QLabel("분류 규칙:")
+        self.classification_rules_label.setStyleSheet(DARK_STYLES['label_style'])
+
+        self.classification_rules_textedit = QTextEdit()
+        self.classification_rules_textedit.setFixedHeight(120)
+        self.classification_rules_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
+        self.classification_rules_textedit.setPlaceholderText(
+            "예시:\n"
+            "*1girl,\n"
+            "(*solo&*1girl),\n"
+            "(landscape|scenery),\n"
+            "nsfw\n\n"
+            "규칙:\n"
+            "• *tag: 정확 일치 (퍼펙트 매칭)\n"
+            "• &: AND 연산자\n"
+            "• |: OR 연산자\n"
+            "• 쉼표로 구분, 작성 순서대로 우선순위"
+        )
+        self.classification_rules_textedit.textChanged.connect(self._on_classification_rules_changed)
+
+        # 설명 레이블
+        rules_desc = QLabel("※ 위에서 아래 순서로 조건을 확인하며, 첫 번째 일치하는 조건의 폴더로 분류됩니다.")
+        rules_desc.setStyleSheet(f"""
+            QLabel {{
+                color: {DARK_COLORS['text_secondary']};
+                font-size: {get_scaled_font_size(11)}px;
+                font-style: italic;
+            }}
+        """)
+
+        layout.addWidget(self.classification_rules_label)
+        layout.addWidget(self.classification_rules_textedit)
+        layout.addWidget(rules_desc)
+
+        # 초기에는 숨김 (분류 없음이 기본값)
+        self.classification_rules_label.setVisible(False)
+        self.classification_rules_textedit.setVisible(False)
+        rules_desc.setVisible(False)
+
+        # 🆕 2차 분류 활성화 체크박스
+        self.secondary_classification_checkbox = QCheckBox("2차 분류 활성화")
+        self.secondary_classification_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.secondary_classification_checkbox.toggled.connect(self._on_secondary_classification_toggled)
+        layout.addWidget(self.secondary_classification_checkbox)
+        self.secondary_classification_checkbox.setVisible(False)
+
+        # 🆕 2차 분류 방법 선택
+        secondary_classification_layout = QHBoxLayout()
+        secondary_classification_label = QLabel("2차 분류 방법:")
+        secondary_classification_label.setStyleSheet(DARK_STYLES['label_style'])
+
+        self.secondary_classification_method_combo = QComboBox()
+        self.secondary_classification_method_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.secondary_classification_method_combo.addItem("분류 없음", "none")
+        self.secondary_classification_method_combo.addItem("프롬프트 인식", "prompt_recognition")
+        self.secondary_classification_method_combo.currentIndexChanged.connect(self._on_secondary_classification_method_changed)
+
+        secondary_classification_layout.addWidget(secondary_classification_label)
+        secondary_classification_layout.addWidget(self.secondary_classification_method_combo)
+        secondary_classification_layout.addStretch()
+        layout.addLayout(secondary_classification_layout)
+
+        self.secondary_classification_label = secondary_classification_label
+        self.secondary_classification_label.setVisible(False)
+        self.secondary_classification_method_combo.setVisible(False)
+
+        # 🆕 규칙 선택 콤보박스
+        rule_selection_layout = QHBoxLayout()
+        rule_selection_label = QLabel("규칙 선택:")
+        rule_selection_label.setStyleSheet(DARK_STYLES['label_style'])
+
+        self.rule_selection_combo = QComboBox()
+        self.rule_selection_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.rule_selection_combo.currentIndexChanged.connect(self._on_rule_selection_changed)
+
+        rule_selection_layout.addWidget(rule_selection_label)
+        rule_selection_layout.addWidget(self.rule_selection_combo)
+        rule_selection_layout.addStretch()
+        layout.addLayout(rule_selection_layout)
+
+        self.rule_selection_label = rule_selection_label
+        self.rule_selection_label.setVisible(False)
+        self.rule_selection_combo.setVisible(False)
+
+        # 🆕 2차 분류 규칙 입력 필드 (동적으로 표시됨)
+        self.secondary_rules_label = QLabel("")
+        self.secondary_rules_label.setStyleSheet(DARK_STYLES['label_style'])
+
+        self.secondary_rules_textedit = QTextEdit()
+        self.secondary_rules_textedit.setFixedHeight(120)
+        self.secondary_rules_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
+        self.secondary_rules_textedit.setPlaceholderText(
+            "예시:\n"
+            "*standing,\n"
+            "(*sitting&*chair),\n"
+            "lying\n\n"
+            "2차 분류 규칙을 입력하세요."
+        )
+        self.secondary_rules_textedit.textChanged.connect(self._on_secondary_rules_changed)
+
+        layout.addWidget(self.secondary_rules_label)
+        layout.addWidget(self.secondary_rules_textedit)
+
+        self.secondary_rules_label.setVisible(False)
+        self.secondary_rules_textedit.setVisible(False)
+
+        # 🆕 2차 분류 규칙 저장소 (규칙별로 저장)
+        self.secondary_classification_rules = {}  # {rule_name: rules_text}
+        self.classification_rules_desc = rules_desc  # 나중에 접근하기 위해 저장
+
         # TODO: 자동 분류 기능 구현 예정
         # self.classification_checkbox = QCheckBox("자동 분류 활성화 (모드/날짜별 하위폴더)")
         # self.classification_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         # self.classification_checkbox.toggled.connect(self._on_classification_toggled)
         # layout.addWidget(self.classification_checkbox)
-        
+
         # TODO: 하위폴더 형식 기능 구현 예정
         # subfolder_layout = QHBoxLayout()
         # subfolder_label = QLabel("하위폴더 형식:")
@@ -262,11 +474,11 @@ class SettingsWidget(QWidget):
         # self.subfolder_edit = QLineEdit()
         # self.subfolder_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
         # self.subfolder_edit.setPlaceholderText("{mode}/{date} 또는 {mode}/{timestamp}")
-        # self.subfolder_edit.textChanged.connect(self._on_subfolder_format_changed)        
+        # self.subfolder_edit.textChanged.connect(self._on_subfolder_format_changed)
         # subfolder_layout.addWidget(subfolder_label)
         # subfolder_layout.addWidget(self.subfolder_edit)
         # layout.addLayout(subfolder_layout)
-        
+
         return section
     
     def _create_module_management_section(self) -> QWidget:
@@ -410,7 +622,163 @@ class SettingsWidget(QWidget):
         )
         if new_path:
             self.save_path_edit.setText(new_path)
-    
+
+    def _on_use_timestamp_folder_changed(self, checked: bool):
+        """타임스탬프 폴더 사용 여부 변경"""
+        if not hasattr(self.app_context, 'image_crud_controller'):
+            return
+
+        self.app_context.image_crud_controller.set_use_timestamp_folder(checked)
+        print(f"✅ 타임스탬프 폴더 사용: {checked}")
+
+    def _on_secondary_classification_toggled(self, checked: bool):
+        """2차 분류 활성화 토글"""
+        # 2차 분류 관련 UI 표시/숨김
+        self.secondary_classification_label.setVisible(checked)
+        self.secondary_classification_method_combo.setVisible(checked)
+
+        if checked and self.secondary_classification_method_combo.currentData() == "prompt_recognition":
+            self._update_rule_selection_combo()
+            self.rule_selection_label.setVisible(True)
+            self.rule_selection_combo.setVisible(True)
+            self.secondary_rules_label.setVisible(True)
+            self.secondary_rules_textedit.setVisible(True)
+        else:
+            self.rule_selection_label.setVisible(False)
+            self.rule_selection_combo.setVisible(False)
+            self.secondary_rules_label.setVisible(False)
+            self.secondary_rules_textedit.setVisible(False)
+
+        # ImageCrudController에 반영
+        self._sync_secondary_settings_to_controller()
+
+    def _on_secondary_classification_method_changed(self, index: int):
+        """2차 분류 방법 변경"""
+        method = self.secondary_classification_method_combo.currentData()
+
+        if method == "prompt_recognition":
+            # 규칙 선택 콤보박스 업데이트
+            self._update_rule_selection_combo()
+            self.rule_selection_label.setVisible(True)
+            self.rule_selection_combo.setVisible(True)
+            self.secondary_rules_label.setVisible(True)
+            self.secondary_rules_textedit.setVisible(True)
+        else:
+            self.rule_selection_label.setVisible(False)
+            self.rule_selection_combo.setVisible(False)
+            self.secondary_rules_label.setVisible(False)
+            self.secondary_rules_textedit.setVisible(False)
+
+        # ImageCrudController에 반영
+        self._sync_secondary_settings_to_controller()
+
+    def _update_rule_selection_combo(self):
+        """1차 분류 규칙에서 콤보박스 항목 업데이트"""
+        # 기존 항목 제거
+        self.rule_selection_combo.blockSignals(True)
+        self.rule_selection_combo.clear()
+
+        # 1차 분류 규칙 텍스트 가져오기
+        rules_text = self.classification_rules_textedit.toPlainText().strip()
+
+        if rules_text:
+            # 쉼표로 분리하여 각 규칙 추출 (ImageCrudController와 동일한 방식)
+            rules = [rule.strip() for rule in rules_text.split(',') if rule.strip()]
+
+            for rule in rules:
+                # 각 규칙을 폴더명으로 변환 (ImageCrudController._condition_to_folder_name과 동일한 로직)
+                folder_name = self._rule_to_folder_name(rule)
+                # 콤보박스에 추가 (표시: 원본 규칙, 데이터: 폴더명)
+                self.rule_selection_combo.addItem(f"{folder_name} ({rule})", folder_name)
+
+        self.rule_selection_combo.blockSignals(False)
+
+        # 첫 번째 규칙 선택 시 해당 규칙 로드
+        if self.rule_selection_combo.count() > 0:
+            self.rule_selection_combo.setCurrentIndex(0)
+            self._on_rule_selection_changed(0)
+
+    def _rule_to_folder_name(self, rule: str) -> str:
+        """규칙을 폴더명으로 변환 (ImageCrudController._condition_to_folder_name과 동일)"""
+        import re
+
+        folder_name = rule.strip()
+
+        # 괄호 제거
+        folder_name = folder_name.replace('(', '').replace(')', '')
+
+        # 논리 연산자 치환
+        folder_name = folder_name.replace('&', '_and_')
+        folder_name = folder_name.replace('|', '_or_')
+
+        # * 제거 (퍼펙트 매칭 표시)
+        folder_name = folder_name.replace('*', '')
+
+        # 공백 → 언더스코어
+        folder_name = folder_name.replace(' ', '_')
+
+        # 파일시스템 안전 문자만 허용 (영문, 숫자, _, -, .)
+        folder_name = re.sub(r'[^\w\-.]', '_', folder_name)
+
+        # 연속된 언더스코어 제거
+        folder_name = re.sub(r'_+', '_', folder_name)
+
+        # 앞뒤 언더스코어 제거
+        folder_name = folder_name.strip('_')
+
+        return folder_name if folder_name else "unknown"
+
+    def _on_rule_selection_changed(self, index: int):
+        """규칙 선택 변경 - 해당 규칙의 2차 분류 규칙 로드"""
+        if index < 0:
+            return
+
+        rule_name = self.rule_selection_combo.currentData()
+        if not rule_name:
+            return
+
+        # 레이블 업데이트
+        self.secondary_rules_label.setText(f"{rule_name}에 대한 2차 분류 규칙:")
+
+        # 저장된 2차 분류 규칙 로드
+        saved_rules = self.secondary_classification_rules.get(rule_name, "")
+
+        self.secondary_rules_textedit.blockSignals(True)
+        self.secondary_rules_textedit.setPlainText(saved_rules)
+        self.secondary_rules_textedit.blockSignals(False)
+
+    def _on_secondary_rules_changed(self):
+        """2차 분류 규칙 텍스트 변경 - 저장"""
+        rule_name = self.rule_selection_combo.currentData()
+        if not rule_name:
+            return
+
+        # 현재 입력된 규칙 저장
+        rules_text = self.secondary_rules_textedit.toPlainText()
+        self.secondary_classification_rules[rule_name] = rules_text
+
+        print(f"✅ 2차 분류 규칙 저장: {rule_name} → {len(rules_text)} chars")
+
+        # ImageCrudController에 반영
+        if hasattr(self.app_context, 'image_crud_controller'):
+            self.app_context.image_crud_controller.set_secondary_classification_rules(self.secondary_classification_rules)
+
+    def _sync_secondary_settings_to_controller(self):
+        """2차 분류 설정을 ImageCrudController에 동기화"""
+        if not hasattr(self.app_context, 'image_crud_controller'):
+            return
+
+        # 2차 분류 활성화 여부
+        enabled = self.secondary_classification_checkbox.isChecked()
+        self.app_context.image_crud_controller.set_secondary_classification_enabled(enabled)
+
+        # 2차 분류 방법
+        method = self.secondary_classification_method_combo.currentData()
+        self.app_context.image_crud_controller.set_secondary_classification_method(method)
+
+        # 2차 분류 규칙
+        self.app_context.image_crud_controller.set_secondary_classification_rules(self.secondary_classification_rules)
+
     # TODO: 자동 분류 기능 구현 예정
     # def _on_classification_toggled(self, checked: bool):
     #     """자동 분류 토글"""
@@ -534,20 +902,163 @@ class SettingsWidget(QWidget):
         self.autocomplete_checkbox.setChecked(
             self.settings_module.get_setting('autocomplete.enabled', True)
         )
-        
+
         # 저장 디렉토리 설정
         self.save_path_edit.setText(
             self.settings_module.get_setting('save_directory.base_path', './output')
         )
-        
+
+        # 🆕 타임스탬프 폴더 사용 여부 설정
+        if hasattr(self, 'use_timestamp_folder_checkbox') and hasattr(self.app_context, 'image_crud_controller'):
+            current_use_timestamp = self.app_context.image_crud_controller.get_use_timestamp_folder()
+            self.use_timestamp_folder_checkbox.setChecked(current_use_timestamp)
+
+        # 🆕 파일명 형식 설정
+        if hasattr(self, 'filename_format_combo') and hasattr(self.app_context, 'image_crud_controller'):
+            current_format = self.app_context.image_crud_controller.get_filename_format()
+            # 콤보박스에서 해당 형식 찾기
+            for i in range(self.filename_format_combo.count()):
+                if self.filename_format_combo.itemData(i) == current_format:
+                    self.filename_format_combo.setCurrentIndex(i)
+                    break
+
+        # 🆕 분류 방법 설정
+        if hasattr(self, 'classification_method_combo') and hasattr(self.app_context, 'image_crud_controller'):
+            current_method = self.app_context.image_crud_controller.get_classification_method()
+            # 콤보박스에서 해당 방법 찾기
+            for i in range(self.classification_method_combo.count()):
+                if self.classification_method_combo.itemData(i) == current_method:
+                    self.classification_method_combo.setCurrentIndex(i)
+                    break
+
+            # 🆕 분류 규칙 설정
+            if hasattr(self, 'classification_rules_textedit'):
+                current_rules = self.app_context.image_crud_controller.get_classification_rules()
+                self.classification_rules_textedit.setPlainText(current_rules)
+
+                # 프롬프트 인식 모드일 때만 규칙 필드 표시
+                is_prompt_recognition = (current_method == "prompt_recognition")
+                self.classification_rules_label.setVisible(is_prompt_recognition)
+                self.classification_rules_textedit.setVisible(is_prompt_recognition)
+                self.classification_rules_desc.setVisible(is_prompt_recognition)
+
         # UI 설정
         self.auto_save_checkbox.setChecked(
             self.settings_module.get_setting('ui.auto_save', True)
         )
-        
+
         # 모듈 및 탭 목록 새로고침
         QTimer.singleShot(100, self._refresh_module_list)
         QTimer.singleShot(100, self._refresh_tab_list)
+
+    def _on_counter_changed(self, data: dict):
+        """
+        [신규] ImageCrudController 카운터 변경 이벤트 핸들러
+
+        Parameters:
+            data (dict): {"new_counter": int}
+        """
+        new_counter = data.get("new_counter", 1)
+        self.counter_value_label.setText(str(new_counter))
+        print(f"✅ Settings 탭: 카운터 업데이트 → {new_counter}")
+
+    def _on_filename_format_changed(self, index: int):
+        """
+        [신규] 파일명 형식 변경 핸들러
+
+        Parameters:
+            index (int): 콤보박스 인덱스
+        """
+        if not hasattr(self.app_context, 'image_crud_controller'):
+            return
+
+        # 선택된 형식 가져오기
+        selected_format = self.filename_format_combo.currentData()
+
+        # ImageCrudController에 반영
+        try:
+            self.app_context.image_crud_controller.set_filename_format(selected_format)
+            print(f"✅ 파일명 형식 변경: {selected_format}")
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"파일명 형식 변경 실패: {e}")
+
+    def _on_classification_method_changed(self, index: int):
+        """
+        [신규] 분류 방법 변경 핸들러
+
+        Parameters:
+            index (int): 콤보박스 인덱스
+        """
+        if not hasattr(self.app_context, 'image_crud_controller'):
+            return
+
+        # 선택된 방법 가져오기
+        selected_method = self.classification_method_combo.currentData()
+
+        # 🆕 프롬프트 인식 선택 시 규칙 입력 필드 표시
+        is_prompt_recognition = (selected_method == "prompt_recognition")
+        if hasattr(self, 'classification_rules_label'):
+            self.classification_rules_label.setVisible(is_prompt_recognition)
+            self.classification_rules_textedit.setVisible(is_prompt_recognition)
+            self.classification_rules_desc.setVisible(is_prompt_recognition)
+
+        # 🆕 2차 분류 체크박스 표시/숨김
+        if hasattr(self, 'secondary_classification_checkbox'):
+            self.secondary_classification_checkbox.setVisible(is_prompt_recognition)
+
+            # 프롬프트 인식이 아닐 때는 2차 분류도 숨김
+            if not is_prompt_recognition:
+                self.secondary_classification_method_label.setVisible(False)
+                self.secondary_classification_method_combo.setVisible(False)
+                self.rule_selection_label.setVisible(False)
+                self.rule_selection_combo.setVisible(False)
+                self.secondary_rules_label.setVisible(False)
+                self.secondary_rules_textedit.setVisible(False)
+
+        # ImageCrudController에 반영
+        try:
+            self.app_context.image_crud_controller.set_classification_method(selected_method)
+            print(f"✅ 분류 방법 변경: {selected_method}")
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"분류 방법 변경 실패: {e}")
+
+    def _on_classification_rules_changed(self):
+        """
+        [신규] 분류 규칙 변경 핸들러
+        """
+        if not hasattr(self.app_context, 'image_crud_controller'):
+            return
+
+        rules_text = self.classification_rules_textedit.toPlainText().strip()
+        self.app_context.image_crud_controller.set_classification_rules(rules_text)
+        print(f"✅ 분류 규칙 업데이트: {len(rules_text)} 문자")
+
+        # 🆕 2차 분류가 활성화되어 있고, 프롬프트 인식이 선택되어 있으면 규칙 콤보박스 업데이트
+        if (hasattr(self, 'secondary_classification_checkbox') and
+            self.secondary_classification_checkbox.isChecked() and
+            self.secondary_classification_method_combo.currentData() == "prompt_recognition"):
+            self._update_rule_selection_combo()
+
+    def _reset_image_counter(self):
+        """
+        [신규] 이미지 저장 카운터 초기화 버튼 핸들러
+        """
+        if not hasattr(self.app_context, 'image_crud_controller'):
+            QMessageBox.warning(self, "오류", "ImageCrudController를 찾을 수 없습니다.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "카운터 초기화 확인",
+            "이미지 저장 카운터를 1로 초기화하시겠습니까?\n\n"
+            "⚠️ 기존 파일과 번호가 겹칠 수 있습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.app_context.image_crud_controller.reset_counter()
+            QMessageBox.information(self, "완료", "카운터가 1로 초기화되었습니다.")
         
         # 저장된 모듈 가시성 설정 적용
         QTimer.singleShot(200, self._apply_saved_module_visibility)

@@ -8,8 +8,9 @@ from core.tag_data_manager import TagDataManager
 from core.prompt_context import PromptContext
 from core.mode_ware_manager import ModeAwareModuleManager
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
+from core.generation_queue_manager import GenerationQueueManager
 import pandas as pd
-from datetime import datetime 
+from datetime import datetime
 from pathlib import Path       
 
 if TYPE_CHECKING:
@@ -50,6 +51,9 @@ class AppContext:
         # 🆕 ImageCrudController 초기화
         from core.image_crud_controller import ImageCrudController
         self.image_crud_controller = ImageCrudController(self)
+
+        # 🆕 GenerationQueueManager 초기화 (이미지 생성 큐 관리)
+        self.generation_queue_manager = GenerationQueueManager(self)
 
         # ⚠️ DEPRECATED: 하위 호환성만 유지, 향후 제거 예정
         # 새 코드는 image_crud_controller.get_save_directory() 사용 권장

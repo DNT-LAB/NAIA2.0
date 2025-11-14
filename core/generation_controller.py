@@ -1,4 +1,5 @@
-from core.context import AppContext
+﻿from core.context import AppContext
+from core.generation_request import GenerationRequest
 from PIL import Image
 import piexif
 import piexif.helper
@@ -84,6 +85,17 @@ class GenerationWorker(QObject):
                 error_msg = api_result.get('message', 'Unknown API error')
                 print(f"❌ API 호출 실패: {error_msg}")
                 self.generation_error.emit(error_msg)
+                return
+
+            # 큐가 남아있는 경우 자동 재시도를 보류하고 큐를 먼저 처리
+            queue_manager = self.context.generation_queue_manager
+            if False and (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
+                self.auto_retry_pending = True
+                self.queue_hold_auto_gen = True
+                print(f"[QUEUE] 큐 우선. 자동 재시도 보류... (남은 큐: {queue_manager.get_queue_size()})")
+                # 대기 중이면 즉시 큐 처리 진입
+                if not self.is_generating:
+                    QTimer.singleShot(0, self._process_next_queue_request)
                 return
             
             self.generation_progress.emit("결과 처리 중...")
@@ -227,21 +239,43 @@ class GenerationController:
         self.generation_thread = None
         self.generation_worker = None
         self.is_generating = False
+        # arbitration flags between queue and auto-generation
+        self.queue_hold_auto_gen = False
+        self.auto_retry_pending = False
         
         # 🆕 자동 생성 재시도 관련 추가
         self.auto_retry_count = 0
         self.max_auto_retries = 2  # 자동 생성 시 최대 재시도 횟수 (API 자체에서 5회 재시도 하므로 줄임)
         self.retry_delay_ms = 3000  # 재시도 간격 (밀리초) - 3초로 증가
         
-    def execute_generation_pipeline(self, overrides: dict = None):
-        """7단계 생성 파이프라인을 실행합니다."""
-        # 이미 생성 중인 경우 중복 실행 방지
-        if self.is_generating:
-            self.context.main_window.status_bar.showMessage("⚠️ 이미 생성 중입니다...")
+    def execute_generation_pipeline(self, overrides: dict = None, priority: int = 0, from_queue: bool = False):
+        """
+        7단계 생성 파이프라인을 실행합니다.
+
+        Args:
+            overrides: 파라미터 덮어쓰기 딕셔너리
+            priority: 우선순위 (0=일반, 100=긴급)
+            from_queue: 큐에서 호출되었는지 여부
+        """
+        # 이미 생성 중인 경우 → 큐에 추가
+        if self.is_generating and not from_queue:
+            print(f"[QUEUE] 생성 중이므로 요청을 큐에 추가합니다 (우선순위: {priority})")
+            self._enqueue_current_request(overrides, priority)
             return
             
         try:
             # --- 1 ~ 4 단계: 파라미터 수집 및 유효성 검사 ---
+            # 큐 우선: 대기 상태이고 큐가 있다면 큐를 먼저 처리하고 반환합니다.
+            try:
+                queue_manager = self.context.generation_queue_manager
+                if (not from_queue) and (not self.is_generating) and (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
+                    self.queue_hold_auto_gen = True
+                    self._update_button_with_queue_size()
+                    QTimer.singleShot(0, self._process_next_queue_request)
+                    return
+            except Exception:
+                pass
+
             api_mode = self.context.main_window.get_current_api_mode()
             if api_mode == "NAI": 
                 token = 'nai_token'
@@ -344,7 +378,166 @@ class GenerationController:
         except Exception as e:
             self.context.main_window.status_bar.showMessage(f"❌ 생성 준비 오류: {e}")
             print(f"오류 발생: {e}")
-    
+
+    def _enqueue_current_request(self, overrides: dict = None, priority: int = 0):
+        """
+        현재 생성 요청을 큐에 추가합니다.
+
+        Args:
+            overrides: 파라미터 덮어쓰기 딕셔너리
+            priority: 우선순위 (0=일반, 100=긴급)
+        """
+        try:
+            # 파라미터 수집 (실제 생성 파이프라인과 동일한 로직)
+            api_mode = self.context.main_window.get_current_api_mode()
+            if api_mode == "NAI":
+                token = 'nai_token'
+            elif api_mode == "COMFYUI":
+                token = 'comfyui_url'
+            else:
+                token = 'webui_url'
+
+            credential = self.context.secure_token_manager.get_token(token)
+            if not credential:
+                self.context.main_window.status_bar.showMessage(f"❌ {api_mode} 인증 정보가 없습니다.")
+                return
+
+            params = self.context.main_window.get_main_parameters()
+            params['api_mode'] = api_mode
+            params['credential'] = credential
+
+            source_row = self.context.current_source_row
+            if source_row is None:
+                empty_data = {'general': None, 'character': None, 'copyright': None, 'artist': None, 'meta': None}
+                source_row = pd.Series(empty_data, name="wildcard_standalone")
+
+            # 모듈 파라미터 수집
+            for module in self.module_instances:
+                module_params = module.get_parameters()
+                if module_params:
+                    params.update(module_params)
+
+            # 랜덤 해상도 처리
+            if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
+                random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
+                self.context.main_window.resolution_combo.setCurrentIndex(random_index)
+                selected_value = self.context.main_window.resolution_combo.currentText()
+                width, height = map(int, selected_value.split('x'))
+                params['width'] = width
+                params['height'] = height
+
+            img2img_params = self.context.main_window.img2img_panel.get_parameters()
+            if img2img_params:
+                params.update(img2img_params)
+
+            if overrides:
+                params.update(overrides)
+
+            # GenerationRequest 생성
+            request = GenerationRequest(
+                params=params,
+                source_row=source_row,
+                priority=priority,
+                max_retries=0  # 재시도는 나중에 구현
+            )
+
+            # 큐에 추가 (우선순위에 따라)
+            queue_manager = self.context.generation_queue_manager
+            if priority > 0:
+                request_id = queue_manager.enqueue_with_priority(request)
+            else:
+                request_id = queue_manager.enqueue_request(request)
+
+            # UI 업데이트 (버튼 텍스트에 큐 크기 표시)
+            self._update_button_with_queue_size()
+
+            print(f"✅ [QUEUE] 요청 추가 완료: {request_id[:8]}... (우선순위: {priority})")
+
+        except Exception as e:
+            print(f"❌ [QUEUE] 요청 추가 실패: {e}")
+            self.context.main_window.status_bar.showMessage(f"❌ 큐 추가 실패: {e}")
+
+    def _process_next_queue_request(self):
+        """
+        큐에서 다음 요청을 가져와 처리합니다.
+        """
+        queue_manager = self.context.generation_queue_manager
+        # 큐가 존재하는 동안 자동생성은 보류
+        self.queue_hold_auto_gen = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
+
+        # 추가 안전: 스레드 실행 중이면 대기
+        if self.generation_thread and self.generation_thread.isRunning():
+            print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
+            return
+
+        # 🔒 이미 생성 중이면 나중에 재시도 (자동생성이 끼어들었을 수 있음)
+        if self.is_generating:
+            print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
+            return
+
+        # 큐가 비어있는지 확인
+        if queue_manager.is_empty():
+            print("[QUEUE] 큐가 비어있습니다. 대기 종료.")
+            return
+
+        # 다음 요청 가져오기
+        next_request = queue_manager.dequeue_request()
+        if not next_request:
+            print("[QUEUE] 큐에서 요청을 가져오지 못했습니다 (일시정지 상태일 수 있음)")
+            return
+
+        print(f"[QUEUE] 요청 가져옴: {next_request.request_id[:8]}... "
+              f"(남은 큐: {queue_manager.get_queue_size()})")
+
+        # 요청 상태 업데이트
+        next_request.mark_processing()
+
+        # context 업데이트
+        self.context.current_source_row = next_request.source_row
+
+        # 생성 파이프라인 실행 (from_queue=True로 재귀 방지)
+        try:
+            # 자동생성 모드일 때, 큐 아이템도 동일 파이프라인으로 처리되도록 플래그 전달
+            try:
+                auto_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
+                if auto_checkbox and auto_checkbox.isChecked():
+                    if isinstance(next_request.params, dict):
+                        next_request.params["auto_generate"] = True
+            except Exception:
+                pass
+            self.execute_generation_pipeline(
+                overrides=next_request.params,
+                priority=next_request.priority,
+                from_queue=True
+            )
+        except Exception as e:
+            print(f"❌ [QUEUE] 큐 요청 처리 실패: {e}")
+            next_request.mark_failed(str(e))
+            # 다음 요청 처리
+            self._process_next_queue_request()
+
+    def _update_button_with_queue_size(self):
+        """생성 버튼 텍스트를 큐 크기로 업데이트합니다."""
+        queue_manager = self.context.generation_queue_manager
+        queue_size = queue_manager.get_queue_size()
+
+        if self.is_generating:
+            # 생성 중일 때
+            if queue_size > 0:
+                btn_text = f"🔄 생성 중... ({queue_size})"
+            else:
+                btn_text = "🔄 생성 중..."
+
+            self.context.main_window.generate_button_main.setText(btn_text)
+            if hasattr(self.context.main_window, 'detached_generate_btn'):
+                self.context.main_window.detached_generate_btn.setText(btn_text)
+        else:
+            # 생성 중이 아닐 때
+            btn_text = "🎨 이미지 생성 요청"
+            self.context.main_window.generate_button_main.setText(btn_text)
+            if hasattr(self.context.main_window, 'detached_generate_btn'):
+                self.context.main_window.detached_generate_btn.setText(btn_text)
+
     def _start_threaded_generation(self, params: dict, source_row):
         """별도 스레드에서 생성 작업을 시작합니다."""
         # 새 스레드와 워커 생성
@@ -379,12 +572,12 @@ class GenerationController:
     def _on_generation_started(self):
         """생성 시작 시 호출되는 슬롯"""
         self.is_generating = True
-        self.context.main_window.generate_button_main.setEnabled(False)
-        self.context.main_window.generate_button_main.setText("🔄 생성 중...")
-        # 분리된 버튼도 비활성화
-        if hasattr(self.context.main_window, 'detached_generate_btn'):
-            self.context.main_window.detached_generate_btn.setEnabled(False)
-            self.context.main_window.detached_generate_btn.setText("🔄 생성 중...")
+        # 🆕 버튼 비활성화 제거 - 큐에 추가할 수 있도록 활성 상태 유지
+        # self.context.main_window.generate_button_main.setEnabled(False)
+
+        # 🆕 큐 크기를 반영한 버튼 텍스트 업데이트
+        self._update_button_with_queue_size()
+
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
     
     def _on_generation_progress(self, message: str):
@@ -393,72 +586,102 @@ class GenerationController:
     
     def _on_generation_finished(self, result: dict):
         """생성 완료 시 호출되는 슬롯"""
-        # 생성 완료 시 즉시 is_generating을 False로 설정
-        self.is_generating = False
-        self.context.main_window.generate_button_main.setEnabled(True)
-        self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
-        # 분리된 버튼도 활성화
-        if hasattr(self.context.main_window, 'detached_generate_btn'):
-            self.context.main_window.detached_generate_btn.setEnabled(True)
-            self.context.main_window.detached_generate_btn.setText("🎨 이미지 생성 요청")
-        
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
-        
+
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         self.context.main_window.update_ui_with_result(result)
 
+        # 🆕 큐에 대기 중인 요청이 있으면 다음 요청 처리
+        queue_manager = self.context.generation_queue_manager
+        if not queue_manager.is_empty() and not queue_manager.is_paused():
+            # 🔒 큐가 있으면 is_generating을 유지하여 자동생성 차단
+            print(f"[QUEUE] 생성 완료. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
+            # ⚡ 즉시 큐 처리 (자동생성이 끼어들 틈 없음)
+            # 다음 요청 디스패치는 스레드 종료에서 트리거합니다.
+        else:
+            # 큐가 비어있거나 일시정지 상태면 is_generating = False로 설정
+            # → 자동생성이 지연 없이 즉시 트리거 가능!
+            # is_generating 해제는 스레드 종료 핸들러에서 처리
+            self._update_button_with_queue_size()
+            if queue_manager.is_empty():
+                print("[QUEUE] 큐 비어있음. 자동생성 즉시 가능.")
+            else:
+                print("[QUEUE] 큐가 일시정지 상태입니다.")
+
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
-        # UI 상태 일시적으로 복원
-        self.is_generating = False
-        self.context.main_window.generate_button_main.setEnabled(True)
-        self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
-        # 분리된 버튼도 활성화
-        if hasattr(self.context.main_window, 'detached_generate_btn'):
-            self.context.main_window.detached_generate_btn.setEnabled(True)
-            self.context.main_window.detached_generate_btn.setText("🎨 이미지 생성 요청")
-        
         print(f"❌ 생성 오류 발생: {error_message}")
-        
+
         # 🆕 자동 생성 모드에서의 재시도 로직
         auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
         is_auto_generation = auto_generate_checkbox and auto_generate_checkbox.isChecked()
-        
+
+        # 큐 확인 (재시도 및 큐 처리 여부 결정)
+        queue_manager = self.context.generation_queue_manager
+        has_queue = not queue_manager.is_empty() and not queue_manager.is_paused()
+
         if is_auto_generation and self.auto_retry_count < self.max_auto_retries:
-            # 자동 생성 모드에서 재시도 가능한 경우
+            # 🔒 자동 재시도 중에는 is_generating 유지 (차단)
             self.auto_retry_count += 1
             retry_message = f"🔄 자동 생성 재시도 {self.auto_retry_count}/{self.max_auto_retries} (오류: {error_message[:50]}...)"
             self.context.main_window.status_bar.showMessage(retry_message)
             print(f"🔄 자동 생성 재시도 시작: {self.auto_retry_count}/{self.max_auto_retries}")
-            
+
             # 지연 후 재시도
-            QTimer.singleShot(self.retry_delay_ms, self._retry_auto_generation)
-            
+            if has_queue:
+                # 큐를 먼저 소진하고 자동 재시도를 이어갑니다.
+                self.auto_retry_pending = True
+                print("[QUEUE] 큐 우선. 자동 재시도 보류.")
+            else:
+                QTimer.singleShot(self.retry_delay_ms, self._retry_auto_generation)
+
+        elif has_queue:
+            # 🔒 큐가 있으면 is_generating 유지하고 즉시 큐 처리
+            print(f"[QUEUE] 오류 발생. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
+            # 스레드 종료 시점에 큐 디스패치 수행
+
         else:
-            # 재시도 횟수 초과 또는 수동 생성 모드
+            # 재시도도 안 하고 큐도 없으면 is_generating = False
+            # is_generating 해제는 스레드 종료 핸들러에서 처리
+            self.context.main_window.generate_button_main.setEnabled(True)
+            self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
+            # 분리된 버튼도 활성화
+            if hasattr(self.context.main_window, 'detached_generate_btn'):
+                self.context.main_window.detached_generate_btn.setEnabled(True)
+                self.context.main_window.detached_generate_btn.setText("🎨 이미지 생성 요청")
+
+            # 재시도 횟수 초과 체크
             if is_auto_generation and self.auto_retry_count >= self.max_auto_retries:
-                # 최대 재시도 횟수 초과 시 자동 생성 중단
                 final_message = f"❌ 자동 생성 최대 재시도 횟수({self.max_auto_retries})를 초과했습니다. 자동 생성을 중단합니다."
                 self.context.main_window.status_bar.showMessage(final_message)
                 print(final_message)
-                
+
                 # 자동화 모듈이 있다면 중단
-                if (hasattr(self.context.main_window, 'automation_module') and 
-                    self.context.main_window.automation_module and 
+                if (hasattr(self.context.main_window, 'automation_module') and
+                    self.context.main_window.automation_module and
                     self.context.main_window.automation_module.automation_controller.is_running):
                     self.context.main_window.automation_module.stop_automation()
-                    
+
                 # 재시도 카운터 리셋
                 self.auto_retry_count = 0
-                
             else:
                 # 수동 생성 모드의 일반적인 오류 처리
                 self.context.main_window.status_bar.showMessage(f"❌ 생성 오류: {error_message}")
-    
+
+            print("[QUEUE] 큐 비어있음. 자동생성 가능.")
+
     def _retry_auto_generation(self):
         """🆕 자동 생성 재시도를 실행하는 메서드"""
         try:
+            # 한국어: 큐가 존재하면 자동생성 재시도를 보류하고 먼저 큐를 처리합니다.
+            queue_manager = self.context.generation_queue_manager
+            if (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
+                self.auto_retry_pending = True
+                self.queue_hold_auto_gen = True
+                print("[QUEUE] 큐 우선. 자동 재시도 보류.")
+                QTimer.singleShot(0, self._process_next_queue_request)
+                return
             print(f"🔄 자동 생성 재시도 실행 중... ({self.auto_retry_count}/{self.max_auto_retries})")
             
             # 자동 생성이 여전히 활성화되어 있는지 확인
@@ -518,6 +741,36 @@ class GenerationController:
                 _force_cleanup_all_threads()
         
         _cleanup()
+
+        # 스레드 종료 시점에서만 is_generating을 False로 전환하고 다음 작업을 결정
+        try:
+            self.is_generating = False
+
+            queue_manager = self.context.generation_queue_manager
+            has_queue = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
+
+            if has_queue:
+                # 큐 우선 처리: 자동생성을 보류한 상태에서 다음 요청을 즉시 디스패치
+                self.queue_hold_auto_gen = True
+                print(f"[QUEUE] 스레드 종료. 큐 디스패치 시작... (남은 큐: {queue_manager.get_queue_size()})")
+                QTimer.singleShot(0, self._process_next_queue_request)
+            else:
+                # 큐가 비면 자동생성 보류 해제
+                if self.queue_hold_auto_gen:
+                    print("[QUEUE] 큐 비었음. 자동생성 보류 해제.")
+                self.queue_hold_auto_gen = False
+
+                # 보류 중인 자동 재시도 수행
+                if self.auto_retry_pending:
+                    self.auto_retry_pending = False
+                    print("[AUTO] 보류된 자동 재시도 실행.")
+                    QTimer.singleShot(0, self._retry_auto_generation)
+
+            # UI 상태 업데이트
+            self._update_button_with_queue_size()
+
+        except Exception as _e:
+            print(f"[GEN] thread-finish 후 디스패치 오류: {_e}")
 
     def _expand_wildcards_in_input(self, input_text: str, negative_prompt: str = "") -> tuple[str, str]:
         """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)

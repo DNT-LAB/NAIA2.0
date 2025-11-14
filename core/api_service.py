@@ -346,21 +346,21 @@ class APIService:
                 vibe_data = vibe_module.get_vibe_transfer_multiple_data()
                 if vibe_data and vibe_data.get('reference_image_multiple'):
                     print("✅ Vibe Transfer 활성화됨. Multiple 파라미터를 적용합니다.")
-                    
+
                     # Update api_parameters with vibe transfer data
                     api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
                     api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
                     api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
-                    
+
                     # Add NAID3-specific parameter if present
                     if 'reference_information_extracted_multiple' in vibe_data:
                         api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
                         print(f"  - NAID3 IE values: {vibe_data['reference_information_extracted_multiple']}")
-                    
+
                     print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
                     print(f"  - Normalization: {vibe_data['normalize_reference_strength_multiple']}")
                     print(f"  - Strengths: {vibe_data['reference_strength_multiple']}")
-            
+
             # 🎯 Character Reference (Director) 처리 - NAID4.5 전용
             if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 
                              'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:

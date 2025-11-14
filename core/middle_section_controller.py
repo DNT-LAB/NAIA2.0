@@ -25,10 +25,20 @@ class MiddleSectionController:
         self.parent_widget = parent
         self.module_classes = []
         self.module_instances = []
-        
+
         # 분리된 모듈들을 추적하기 위한 딕셔너리
         self.detached_modules = {}  # {module_title: DetachedWindow}
         self.module_boxes = {}      # {module_title: EnhancedCollapsibleBox}
+
+        # 🆕 모듈 상태 추적
+        self.module_states = {
+            'expanded': set(),      # 현재 펼쳐진 모듈들 (title)
+            'detached': set(),      # 현재 분리된 모듈들 (title)
+            'scroll_positions': {}  # {title: scroll_position}
+        }
+
+        # 🆕 아코디언 모드 (하나만 펼치기)
+        self.accordion_mode = True
 
         self.app_context.subscribe("api_mode_changed", self.on_api_mode_changed)
         
@@ -194,7 +204,10 @@ class MiddleSectionController:
                 
                 # 5. 모듈 분리 요청 시그널 연결
                 box.module_detach_requested.connect(self.detach_module)
-                
+
+                # 🆕 5.5. 모듈 토글 시그널 연결 (아코디언 동작)
+                box.toggled.connect(self.on_module_toggled)
+
                 # 6. 위젯 생성 및 박스에 추가
                 widget = module_instance.create_widget(parent=self.parent_widget)
                 
@@ -224,6 +237,9 @@ class MiddleSectionController:
                 traceback.print_exc()
         
         # 모든 모듈 생성 완료 후 추가 초기화는 제거 (이미 위에서 처리함)
+
+        # 🆕 저장된 상태 로드
+        self.load_module_states()
 
     def detach_module(self, module_title: str, content_widget: QWidget):
         """모듈을 외부 창으로 분리 (완전 독립 창)"""
@@ -293,7 +309,12 @@ class MiddleSectionController:
             
             # 창 추적 딕셔너리에 추가
             self.detached_modules[module_title] = detached_window
-            
+
+            # 🆕 분리 상태 추적
+            self.module_states['detached'].add(module_title)
+            self.module_states['expanded'].discard(module_title)  # 분리된 모듈은 펼침 목록에서 제거
+            self.save_module_states()
+
             # 4. 독립 창 표시
             detached_window.show()
             detached_window.raise_()
@@ -357,7 +378,13 @@ class MiddleSectionController:
             
             # 추적 딕셔너리에서 제거
             del self.detached_modules[module_title]
-            
+
+            # 🆕 복귀 상태 추적
+            self.module_states['detached'].discard(module_title)
+            # 복귀 시 펼쳐진 상태로 설정 (옵션: 원하면 접힌 상태로 가능)
+            # self.module_states['expanded'].add(module_title)
+            self.save_module_states()
+
             print(f"✅ 모듈 '{module_title}' 복귀 완료")
             
         except Exception as e:
@@ -397,3 +424,152 @@ class MiddleSectionController:
             except Exception as e:
                 print(f"  - ❌ {title} 창 닫기 실패: {e}")
         self.detached_modules.clear()
+
+    # 🆕 ============================================================
+    # 🆕 모듈 상태 추적 및 아코디언 동작
+    # 🆕 ============================================================
+
+    def on_module_toggled(self, module_title: str, is_expanded: bool):
+        """모듈 펼침/접힘 상태 변경 이벤트"""
+        print(f"📊 [STATE] 모듈 토글: '{module_title}' → {'펼침' if is_expanded else '접음'}")
+
+        if is_expanded:
+            # 펼쳐진 모듈로 등록
+            self.module_states['expanded'].add(module_title)
+
+            # 🎯 아코디언 모드: 다른 모듈들 접기
+            if self.accordion_mode:
+                self._collapse_other_modules(module_title)
+
+            # 📜 자동 스크롤: 해당 모듈로 이동
+            self._scroll_to_module(module_title)
+
+        else:
+            # 접힌 모듈로 등록
+            self.module_states['expanded'].discard(module_title)
+
+        # 상태 저장
+        self.save_module_states()
+
+    def _collapse_other_modules(self, expanded_module_title: str):
+        """아코디언 동작: 다른 모듈들을 접기 (분리된 모듈 제외)"""
+        print(f"🎯 [ACCORDION] 다른 모듈들 접기 ('{expanded_module_title}' 제외)")
+
+        for title, box in self.module_boxes.items():
+            # 현재 펼친 모듈과 분리된 모듈은 건드리지 않음
+            if title == expanded_module_title or title in self.module_states['detached']:
+                continue
+
+            # 펼쳐져 있으면 접기 (시그널 발행 안 함 - 재귀 방지)
+            if box.is_expanded():
+                print(f"  - '{title}' 접기")
+                box.collapse(emit_signal=False)
+                self.module_states['expanded'].discard(title)
+
+    def _scroll_to_module(self, module_title: str):
+        """모듈로 자동 스크롤"""
+        if module_title not in self.module_boxes:
+            return
+
+        box = self.module_boxes[module_title]
+
+        # 부모 스크롤 영역 찾기
+        scroll_area = self._find_parent_scroll_area(box)
+        if not scroll_area:
+            print(f"⚠️ [SCROLL] '{module_title}': 부모 스크롤 영역을 찾을 수 없습니다.")
+            return
+
+        # 박스의 Y 위치 계산
+        box_y = box.y()
+        print(f"📜 [SCROLL] '{module_title}'로 스크롤 이동: Y={box_y}")
+
+        # 스크롤 이동 (QTimer로 지연 - UI 업데이트 대기)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: scroll_area.verticalScrollBar().setValue(box_y))
+
+    def _find_parent_scroll_area(self, widget: QWidget):
+        """위젯의 부모 QScrollArea 찾기"""
+        from PyQt6.QtWidgets import QScrollArea
+
+        parent = widget.parent()
+        while parent:
+            if isinstance(parent, QScrollArea):
+                return parent
+            parent = parent.parent()
+        return None
+
+    def set_accordion_mode(self, enabled: bool):
+        """아코디언 모드 설정"""
+        self.accordion_mode = enabled
+        print(f"🎯 [ACCORDION] 아코디언 모드: {'활성화' if enabled else '비활성화'}")
+
+    def get_module_states(self) -> dict:
+        """현재 모듈 상태 반환"""
+        return {
+            'expanded': list(self.module_states['expanded']),
+            'detached': list(self.module_states['detached']),
+            'scroll_positions': self.module_states['scroll_positions'].copy(),
+            'accordion_mode': self.accordion_mode
+        }
+
+    def save_module_states(self):
+        """모듈 상태를 파일에 저장"""
+        import json
+        from pathlib import Path
+
+        # 스크롤 위치 업데이트
+        for title, box in self.module_boxes.items():
+            if box.is_expanded():
+                self.module_states['scroll_positions'][title] = box.get_scroll_position()
+
+        state_file = Path("save/module_states.json")
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+
+        state_data = self.get_module_states()
+
+        try:
+            with open(state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, indent=2, ensure_ascii=False)
+            print(f"💾 [STATE] 모듈 상태 저장 완료: {state_file}")
+        except Exception as e:
+            print(f"❌ [STATE] 모듈 상태 저장 실패: {e}")
+
+    def load_module_states(self):
+        """파일에서 모듈 상태 로드"""
+        import json
+        from pathlib import Path
+
+        state_file = Path("save/module_states.json")
+        if not state_file.exists():
+            print(f"ℹ️ [STATE] 저장된 모듈 상태 파일 없음: {state_file}")
+            return
+
+        try:
+            with open(state_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+
+            # 상태 복원
+            self.module_states['expanded'] = set(state_data.get('expanded', []))
+            self.module_states['detached'] = set(state_data.get('detached', []))
+            self.module_states['scroll_positions'] = state_data.get('scroll_positions', {})
+            self.accordion_mode = state_data.get('accordion_mode', True)
+
+            # UI에 상태 적용
+            for title, box in self.module_boxes.items():
+                # 펼침/접힘 상태 복원
+                if title in self.module_states['expanded']:
+                    box.expand(emit_signal=False)
+                else:
+                    box.collapse(emit_signal=False)
+
+                # 스크롤 위치 복원
+                if title in self.module_states['scroll_positions']:
+                    scroll_pos = self.module_states['scroll_positions'][title]
+                    box.set_scroll_position(scroll_pos)
+
+            print(f"✅ [STATE] 모듈 상태 로드 완료: {len(self.module_states['expanded'])}개 펼침")
+
+        except Exception as e:
+            print(f"❌ [STATE] 모듈 상태 로드 실패: {e}")
+            import traceback
+            traceback.print_exc()

@@ -7,9 +7,9 @@ import os
 import json
 import pandas as pd
 import requests
-from PyQt6.QtWidgets import QMessageBox, QProgressDialog
-from PyQt6.QtCore import QThread, QTimer
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QMenu
+from PyQt6.QtCore import QThread, QTimer, Qt
+from PyQt6.QtGui import QTextCursor, QAction, QShortcut, QKeySequence
 from PIL import Image
 from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
@@ -170,9 +170,15 @@ class MainController:
         mw.deep_search_btn.clicked.connect(mw.open_depth_search_tab)
         mw.random_prompt_btn.clicked.connect(mw.trigger_random_prompt)
         mw.image_window.instant_generation_requested.connect(self.on_instant_generation_requested)
-        mw.generate_button_main.clicked.connect(
-            mw.generation_controller.execute_generation_pipeline
-        )
+        # 🆕 큐 지원을 위해 wrapper 함수로 연결
+        mw.generate_button_main.clicked.connect(lambda: self.trigger_generation(priority=0))
+
+        # 🆕 생성 버튼에 우클릭 컨텍스트 메뉴 설정
+        self._setup_generation_button_context_menu()
+
+        # 🆕 키보드 단축키 설정
+        self._setup_keyboard_shortcuts()
+
         mw.prompt_gen_controller.prompt_generated.connect(self.on_prompt_generated)
         mw.prompt_gen_controller.generation_error.connect(self.on_generation_error)
         mw.prompt_gen_controller.prompt_popped.connect(self.on_prompt_popped)
@@ -197,7 +203,19 @@ class MainController:
             print("⚠️ generate_with_image_requested 시그널을 찾을 수 없습니다.")
         if hasattr(mw.image_window, 'send_to_inpaint_requested'):
             mw.image_window.send_to_inpaint_requested.connect(self.on_send_to_inpaint_requested)
-        
+
+        # 🆕 큐 이벤트 구독
+        self.connect_queue_signals()
+
+    def connect_queue_signals(self):
+        """큐 이벤트 구독"""
+        if hasattr(self.main_window, 'app_context') and self.main_window.app_context:
+            # 큐 재개 이벤트 구독
+            self.main_window.app_context.subscribe("queue_queue_resumed", self.on_queue_resumed)
+            # 큐 일시정지 이벤트 구독
+            self.main_window.app_context.subscribe("queue_queue_paused", self.on_queue_paused)
+            print("✅ [QUEUE] 큐 이벤트 구독 완료")
+
     def connect_automation_signals(self):
         """자동화 모듈과의 시그널 연결"""
         # 자동화 모듈 찾기
@@ -237,7 +255,156 @@ class MainController:
             
         except Exception as e:
             print(f"❌ 체크박스 시그널 연결 오류: {e}")
-    
+
+    # === 🆕 Generation Queue Methods ===
+
+    def trigger_generation(self, priority: int = 0):
+        """
+        생성 요청을 트리거합니다 (큐 지원 포함)
+
+        Args:
+            priority: 우선순위 (0=일반, 100=긁급)
+        """
+        # auto_generation_requested 플래그 리셋 (수동 생성)
+        self.main_window.prompt_gen_controller.auto_generation_requested = False
+
+        # GenerationController의 execute_generation_pipeline 호출
+        self.main_window.generation_controller.execute_generation_pipeline(priority=priority)
+
+    def on_queue_resumed(self, data: dict):
+        """
+        큐 재개 이벤트 핸들러
+
+        재개 시 생성 중이 아니고 큐가 비어있지 않으면 자동으로 다음 요청 처리
+        """
+        queue_size = data.get('queue_size', 0)
+        print(f"[QUEUE] 큐 재개됨: {queue_size}개 대기 중")
+
+        # 버튼 텍스트 업데이트
+        self.main_window.generation_controller._update_button_with_queue_size()
+
+        # ⚡ 간단한 플래그 체크 후 즉시 처리
+        if queue_size > 0 and not self.main_window.generation_controller.is_generating:
+            print(f"[QUEUE] 자동 재시작: 다음 요청 처리 중...")
+            # 최소한의 지연 (50ms면 충분)
+            QTimer.singleShot(50, self.main_window.generation_controller._process_next_queue_request)
+        elif queue_size > 0:
+            print(f"[QUEUE] 생성 중이므로 대기... (완료 후 자동 처리됨)")
+
+    def on_queue_paused(self, data: dict):
+        """
+        큐 일시정지 이벤트 핸들러
+
+        일시정지 시 버튼 텍스트 업데이트
+        """
+        queue_size = data.get('queue_size', 0)
+        print(f"[QUEUE] 큐 일시정지됨: {queue_size}개 대기 중")
+
+        # 버튼 텍스트 업데이트
+        self.main_window.generation_controller._update_button_with_queue_size()
+
+    def _setup_generation_button_context_menu(self):
+        """생성 버튼에 우클릭 컨텍스트 메뉴를 설정합니다."""
+        mw = self.main_window
+
+        # 생성 버튼에 컨텍스트 메뉴 정책 설정
+        mw.generate_button_main.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        mw.generate_button_main.customContextMenuRequested.connect(self._show_queue_context_menu)
+
+        print("[QUEUE] 생성 버튼 컨텍스트 메뉴 설정 완료")
+
+    def _show_queue_context_menu(self, position):
+        """생성 버튼 우클릭 시 큐 제어 메뉴 표시"""
+        mw = self.main_window
+        queue_manager = mw.app_context.generation_queue_manager
+
+        menu = QMenu(mw)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 5px;
+                font-size: {get_scaled_font_size(14)}px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+            QMenu::item:disabled {{
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+
+        # 큐 상태 표시 (비활성화, 정보 표시용)
+        queue_size = queue_manager.get_queue_size()
+        status_action = QAction(f"📊 대기 중: {queue_size}개", mw)
+        status_action.setEnabled(False)
+        menu.addAction(status_action)
+
+        menu.addSeparator()
+
+        # 일시정지/재개 액션
+        if queue_manager.is_paused():
+            pause_action = QAction("▶️ 큐 재개", mw)
+            pause_action.triggered.connect(queue_manager.resume_queue)
+        else:
+            pause_action = QAction("⏸️ 큐 일시정지", mw)
+            pause_action.triggered.connect(queue_manager.pause_queue)
+        menu.addAction(pause_action)
+
+        # 큐 비우기 액션
+        clear_action = QAction("🗑️ 큐 비우기", mw)
+        clear_action.triggered.connect(self._clear_queue_with_confirmation)
+        clear_action.setEnabled(queue_size > 0)  # 큐가 비어있으면 비활성화
+        menu.addAction(clear_action)
+
+        # 메뉴 표시
+        global_pos = mw.generate_button_main.mapToGlobal(position)
+        menu.exec(global_pos)
+
+    def _clear_queue_with_confirmation(self):
+        """큐 비우기 (확인 대화상자 포함)"""
+        queue_manager = self.main_window.app_context.generation_queue_manager
+        queue_size = queue_manager.get_queue_size()
+
+        if queue_size == 0:
+            return
+
+        # 확인 대화상자
+        reply = QMessageBox.question(
+            self.main_window,
+            '큐 비우기 확인',
+            f'대기 중인 {queue_size}개의 요청을 모두 제거하시겠습니까?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            queue_manager.clear_queue()
+            self.main_window.status_bar.showMessage(f"🗑️ {queue_size}개의 대기 요청이 제거되었습니다.")
+            print(f"[QUEUE] 사용자가 {queue_size}개의 요청을 제거했습니다.")
+
+    def _setup_keyboard_shortcuts(self):
+        """키보드 단축키를 설정합니다."""
+        mw = self.main_window
+
+        # Ctrl+Enter: 일반 생성 (우선순위 0)
+        ctrl_enter = QShortcut(QKeySequence(Qt.Modifier.CTRL.value | Qt.Key.Key_Return.value), mw)
+        ctrl_enter.activated.connect(lambda: self.trigger_generation(priority=0))
+
+        # Shift+Enter: 긴급 생성 (우선순위 100)
+        shift_enter = QShortcut(QKeySequence(Qt.Modifier.SHIFT.value | Qt.Key.Key_Return.value), mw)
+        shift_enter.activated.connect(lambda: self.trigger_generation(priority=100))
+
+        print("[QUEUE] 키보드 단축키 설정 완료:")
+        print("  - Ctrl+Enter: 일반 생성")
+        print("  - Shift+Enter: 긴급 생성")
+
     # === Helper Methods ===
     
     def get_auto_generate_status(self) -> bool:

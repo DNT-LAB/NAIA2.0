@@ -485,7 +485,15 @@ class ModernMainWindow(QMainWindow):
         
         # CharacterModule 업데이트 시 토큰 카운트 업데이트
         self.app_context.subscribe("character_changed", lambda: self.update_token_count())
-        
+
+        # 큐 이벤트 구독 - 버튼 상태 자동 업데이트
+        for queue_event in [
+            "queue_request_enqueued", "queue_request_dequeued",
+            "queue_queue_paused", "queue_queue_resumed",
+            "queue_queue_cleared", "queue_request_removed"
+        ]:
+            self.app_context.subscribe(queue_event, lambda _=None: self.update_random_prompt_button_state())
+
         # 초기 설정 로드 (NAI 모드)
         self.generation_params_manager.load_mode_settings("NAI")
 
@@ -2111,7 +2119,15 @@ class ModernMainWindow(QMainWindow):
             return  # 자동 생성 체크박스가 없으면 종료
 
         try:
-            if (hasattr(self, 'generation_controller') and 
+            # [큐 우선] 큐가 비어있지 않으면 큐 처리가 끝날 때까지 자동생성 대기
+            if hasattr(self, 'app_context') and self.app_context:
+                queue_manager = self.app_context.generation_queue_manager
+                if queue_manager and not queue_manager.is_empty() and not queue_manager.is_paused():
+                    self.status_bar.showMessage("큐 처리 중... 자동생성 대기")
+                    QTimer.singleShot(500, self._check_and_trigger_auto_generation)
+                    return
+
+            if (hasattr(self, 'generation_controller') and
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
                 # 약간의 지연 후 다시 시도
@@ -3435,24 +3451,39 @@ class ModernMainWindow(QMainWindow):
     def update_random_prompt_button_state(self):
         """generation_checkboxes 상태에 따라 random_prompt_btn을 활성화/비활성화"""
         try:
-            # "프롬프트 고정" 체크박스가 체크되어 있으면 버튼 비활성화
+            # 큐 상태 확인 (최우선)
+            queue_busy = False
+            if hasattr(self, 'app_context') and self.app_context:
+                queue_manager = self.app_context.generation_queue_manager
+                if queue_manager:
+                    queue_busy = not queue_manager.is_empty() and not queue_manager.is_paused()
+
+            # "프롬프트 고정" 체크박스 확인
             prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
-            
-            if prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked():
+            prompt_fixed = prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked()
+
+            if queue_busy:
+                # 큐 처리 중 (최우선)
+                self.random_prompt_btn.setEnabled(False)
+                self.random_prompt_btn.setText("큐 처리 중")
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(False)
+                    self.detached_random_btn.setText("큐 처리 중")
+            elif prompt_fixed:
+                # 프롬프트 고정 모드
                 self.random_prompt_btn.setEnabled(False)
                 self.random_prompt_btn.setText("프롬프트 고정됨")
-                # 분리된 버튼도 동기화
                 if hasattr(self, 'detached_random_btn'):
                     self.detached_random_btn.setEnabled(False)
                     self.detached_random_btn.setText("프롬프트 고정됨")
             else:
+                # 일반 모드 (활성화)
                 self.random_prompt_btn.setEnabled(True)
                 self.random_prompt_btn.setText("랜덤/다음 프롬프트")
-                # 분리된 버튼도 동기화
                 if hasattr(self, 'detached_random_btn'):
                     self.detached_random_btn.setEnabled(True)
                     self.detached_random_btn.setText("랜덤/다음 프롬프트")
-                
+
         except Exception as e:
             print(f"❌ 버튼 상태 업데이트 오류: {e}")
 

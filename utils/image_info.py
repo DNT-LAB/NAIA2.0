@@ -69,10 +69,10 @@ class ImageMetadataExtractor:
                 img = Image.open(image_path)
             else:
                 img = image_path
-            
+
             # NovelAI 메타데이터도 포함
             result = {}
-            
+
             # img.info의 모든 필드를 먼저 수집
             if hasattr(img, 'info') and img.info:
                 result.update(img.info)
@@ -112,7 +112,7 @@ class ImageMetadataExtractor:
                     parsed = ImageMetadataExtractor._parse_stealth_data(stealth_data)
                     if parsed:
                         result.update(parsed)
-            
+
             return result if result else None
             
         except Exception as e:
@@ -126,10 +126,10 @@ class ImageMetadataExtractor:
             # JSON 형식 시도
             if comment.strip().startswith('{'):
                 return json.loads(comment)
-            
+
             # NAI 형식 파싱
             return ImageMetadataExtractor._parse_nai_format(comment)
-            
+
         except Exception:
             # 일반 텍스트로 반환
             return {'type': 'text', 'content': comment}

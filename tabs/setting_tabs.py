@@ -289,7 +289,7 @@ class SettingsWidget(QWidget):
 
         counter_layout.addWidget(counter_label)
         counter_layout.addWidget(self.counter_value_label)
-        counter_layout.addWidget(reset_counter_btn)
+        #counter_layout.addWidget(reset_counter_btn)
         counter_layout.addStretch()
         layout.addLayout(counter_layout)
 

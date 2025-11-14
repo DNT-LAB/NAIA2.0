@@ -97,8 +97,31 @@ class MetadataViewerWindow(QDialog):
             except Exception as e:
                 print(f"⚠️ MetadataViewerWindow: 메타데이터 재추출 실패: {e}")
         
-        # NAI Stealth Info 처리
-        if metadata.get('Software') == 'NovelAI': metadata = metadata.get('Comment')
+        # NAI Stealth Info 처리 (구형 호환성)
+        # ⚠️ 주의: Software == 'NovelAI'일 때 Comment로 덮어씌우면 Source 필드가 사라짐!
+        # 최신 NAI 이미지는 Stealth PNG에 Software, Source가 상위 레벨에 있고
+        # Comment 안에 프롬프트와 파라미터가 있는 구조
+        if metadata.get('Software') == 'NovelAI':
+            # Comment가 딕셔너리이고 상위 레벨에 중요 필드가 있으면 병합
+            if isinstance(metadata.get('Comment'), dict):
+                comment_data = metadata['Comment']
+                # Source, Software, Title, Description 등 상위 필드 보존
+                # ✅ Vibe Transfer 필드들도 보존
+                important_fields = [
+                    'Software', 'Source', 'Title', 'Description', 'Generation time',
+                    'reference_image_multiple', 'reference_strength_multiple',
+                    'reference_information_extracted_multiple', 'normalize_reference_strength_multiple'
+                ]
+                preserved = {k: v for k, v in metadata.items() if k in important_fields}
+
+                # Comment 데이터를 기본으로 하고 중요 필드 병합
+                result = comment_data.copy()
+                result.update(preserved)
+                return result
+            else:
+                # 구형 포맷: Comment로 덮어씌우기 (하위 호환성)
+                metadata = metadata.get('Comment')
+
         return metadata
         
     def init_ui(self):
@@ -344,11 +367,11 @@ class MetadataViewerWindow(QDialog):
             """)
             layout.addWidget(char_edit, 1)  # stretch factor 1 for resize
             
-            # Vibe Transfer 복원 버튼 추가 (vibe 데이터가 있을 때만)
-            if self._has_vibe_transfer_data():
-                vibe_button = self._create_vibe_restore_button()
-                if vibe_button:  # 모델 호환성 체크 후 버튼이 생성된 경우만 추가
-                    layout.addWidget(vibe_button)
+        # Vibe Transfer 복원 버튼 추가 (vibe 데이터가 있을 때만)
+        if self._has_vibe_transfer_data():
+            vibe_button = self._create_vibe_restore_button()
+            if vibe_button:  # 모델 호환성 체크 후 버튼이 생성된 경우만 추가
+                layout.addWidget(vibe_button)
         
         return panel
     
@@ -923,19 +946,20 @@ class MetadataViewerWindow(QDialog):
     
     def _has_vibe_transfer_data(self) -> bool:
         """메타데이터에 vibe transfer 데이터가 있는지 확인"""
-        vibe_fields = ['reference_image_multiple', 
+        vibe_fields = ['reference_image_multiple',
                        'reference_strength_multiple']
-        
+
         for field in vibe_fields:
             if field in self.metadata and self.metadata[field]:
                 return True
+
         return False
     
     def _get_model_compatibility(self) -> Optional[str]:
         """메타데이터의 모델과 현재 모델의 호환성 확인"""
         # 메타데이터에서 모델 정보 확인
         model_hash = self.metadata.get('Source', '')
-        
+
         # 모델 매핑
         model_map = {
             'NovelAI Diffusion V4.5 4BDE2A90': 'NAID4.5F',  # NovelAI Diffusion V4.5 Full
@@ -944,18 +968,18 @@ class MetadataViewerWindow(QDialog):
             'NovelAI Diffusion V4 37442FCA': 'NAID4.0F',  # NovelAI Diffusion V4 Full
             'Stable Diffusion XL 7BCCAA2C': None         # NAID3 - 지원하지 않음
         }
-        
+
         # 해시 매칭
         for hash_key, model_name in model_map.items():
             if hash_key in model_hash:
                 return model_name
-        
+
         return None
     
     def _create_vibe_restore_button(self) -> Optional[QPushButton]:
         """Vibe Transfer 복원 버튼 생성"""
         required_model = self._get_model_compatibility()
-        
+
         # NAID3 모델은 지원하지 않음
         if required_model is None:
             return None
@@ -1010,7 +1034,7 @@ class MetadataViewerWindow(QDialog):
             vibe_button.setEnabled(True)
             vibe_button.setToolTip(f"✅ Vibe Transfer 데이터를 복원합니다.")
             vibe_button.clicked.connect(self._on_restore_vibe_transfer)
-        
+
         return vibe_button
     
     def _on_restore_vibe_transfer(self):
@@ -1036,6 +1060,7 @@ class MetadataViewerWindow(QDialog):
                 'normalize_reference_strength_multiple': self.metadata.get('normalize_reference_strength_multiple'),
                 'reference_image_multiple': self.metadata.get('reference_image_multiple'),
                 'reference_strength_multiple': self.metadata.get('reference_strength_multiple'),
+                'reference_information_extracted_multiple': self.metadata.get('reference_information_extracted_multiple'),
                 'source_model': self._get_model_compatibility()  # Add the model info
             }
             

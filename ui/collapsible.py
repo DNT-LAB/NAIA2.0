@@ -10,17 +10,23 @@ from PyQt6.QtGui import QAction, QCursor
 
 class EnhancedCollapsibleBox(QWidget):
     """우클릭 컨텍스트 메뉴가 있는 향상된 접고 펼 수 있는 위젯"""
-    
+
     # 모듈을 외부 창으로 분리 요청 시그널 (title, content_widget)
     module_detach_requested = pyqtSignal(str, object)
-    
+
+    # 🆕 펼침/접힘 상태 변경 시그널 (title, is_expanded)
+    toggled = pyqtSignal(str, bool)
+
     def __init__(self, title="", parent=None, detachable=True):
         super().__init__(parent)
         self.title = title
         self.detachable = detachable
         self.content_widget = None
         self.is_detached = False
-        
+
+        # 🆕 스크롤 위치 저장
+        self._saved_scroll_position = 0
+
         self.setStyleSheet(DARK_STYLES['collapsible_box'])
         self.init_ui()
 
@@ -123,12 +129,19 @@ class EnhancedCollapsibleBox(QWidget):
         """접기/펼치기 토글"""
         if self.is_detached:
             return  # 분리된 상태에서는 토글 비활성화
-            
+
         self.toggle_button.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
         if checked:
             self.content_area.setMaximumHeight(16777215)
+            # 🆕 스크롤 위치 복원
+            self._restore_scroll_position()
         else:
+            # 🆕 스크롤 위치 저장
+            self._save_scroll_position()
             self.content_area.setMaximumHeight(0)
+
+        # 🆕 펼침/접힘 상태 변경 시그널 발행
+        self.toggled.emit(self.title, checked)
     
     def update_anlas(self, anlas_value):
         """Anlas 값을 업데이트합니다."""
@@ -272,6 +285,66 @@ class EnhancedCollapsibleBox(QWidget):
     def get_content_widget(self):
         """콘텐츠 위젯 반환"""
         return self.content_widget
+
+    # 🆕 상태 추적 및 제어 메서드
+
+    def is_expanded(self) -> bool:
+        """현재 펼쳐진 상태인지 확인"""
+        return self.toggle_button.isChecked() and not self.is_detached
+
+    def set_expanded(self, expanded: bool, emit_signal: bool = True):
+        """프로그래밍 방식으로 펼치기/접기 (시그널 발행 여부 선택 가능)"""
+        if self.is_detached:
+            return
+
+        # 시그널 발행 방지를 위해 임시로 차단
+        if not emit_signal:
+            self.toggle_button.blockSignals(True)
+
+        self.toggle_button.setChecked(expanded)
+
+        if not emit_signal:
+            self.toggle_button.blockSignals(False)
+            # 수동으로 UI만 업데이트 (시그널 없이)
+            self.toggle_button.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+            if expanded:
+                self.content_area.setMaximumHeight(16777215)
+                self._restore_scroll_position()
+            else:
+                self._save_scroll_position()
+                self.content_area.setMaximumHeight(0)
+
+    def collapse(self, emit_signal: bool = True):
+        """접기 (편의 메서드)"""
+        self.set_expanded(False, emit_signal)
+
+    def expand(self, emit_signal: bool = True):
+        """펼치기 (편의 메서드)"""
+        self.set_expanded(True, emit_signal)
+
+    def _save_scroll_position(self):
+        """스크롤 위치 저장"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            self._saved_scroll_position = self.content_area.verticalScrollBar().value()
+            print(f"[SCROLL] '{self.title}' 스크롤 위치 저장: {self._saved_scroll_position}")
+
+    def _restore_scroll_position(self):
+        """스크롤 위치 복원"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            self.content_area.verticalScrollBar().setValue(self._saved_scroll_position)
+            print(f"[SCROLL] '{self.title}' 스크롤 위치 복원: {self._saved_scroll_position}")
+
+    def get_scroll_position(self) -> int:
+        """현재 스크롤 위치 반환"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            return self.content_area.verticalScrollBar().value()
+        return 0
+
+    def set_scroll_position(self, position: int):
+        """스크롤 위치 설정"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            self.content_area.verticalScrollBar().setValue(position)
+            self._saved_scroll_position = position
 
 # 기존 CollapsibleBox는 호환성을 위해 유지
 class CollapsibleBox(EnhancedCollapsibleBox):

@@ -1623,57 +1623,71 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         if len(self.vibe_frames) >= 8:
             QMessageBox.warning(self.widget, "Limit Reached", "Maximum 8 vibe frames allowed")
             return None
-        
+
         try:
+            # Handle None values
+            ref_img_multiple = vibe_data.get('reference_image_multiple') or []
+            ref_ie_multiple = vibe_data.get('reference_information_extracted_multiple') or []
+
+            # Early return if no valid vibe data
+            if not ref_img_multiple:
+                print(f"⚠️ No reference_image_multiple data in import - aborting")
+                return None
+
             # Create a special frame for no_image mode
             # Since we don't have an actual file, we'll create a minimal VibeTransferFrame
             # that only holds the vibe data
-            
+
             # Create a temporary black image for display purposes
             from PIL import Image
             import io
             import base64
-            
+
             temp_image = Image.new('RGB', (512, 512), color='black')
-            
+
             # Save to temp path
             temp_path = Path("temp") / f"{no_image_path}.png"
             temp_path.parent.mkdir(exist_ok=True)
             temp_image.save(str(temp_path))
-            
+
             # Create frame using the temp path with is_no_image flag
             # Get current model to set as target model
             current_model = self._get_current_model()
             frame = VibeTransferFrame(str(temp_path), self.app_context, is_no_image=True, target_model=current_model)
-            
+
             # Override the frame's data with imported vibe data
             # Store the vibe data directly in the frame's encodings
-            if vibe_data.get('reference_image_multiple'):
-                # Use the reference strength as the key
-                strength_values = vibe_data.get('reference_strength_multiple', [1.0])
-                if strength_values:
-                    # Add encoding for each strength value
-                    for i, strength in enumerate(strength_values):
-                        if i < len(vibe_data['reference_image_multiple']):
-                            frame.vibe_encodings[float(strength)] = vibe_data['reference_image_multiple'][i]
-            
+            # ✅ Use information_extracted as the key (not reference_strength)
+            # For non-NAID3 models, this key doesn't matter (default 1.0)
+            # For NAID3 models, this would be provided in reference_information_extracted_multiple
+            if ref_ie_multiple and len(ref_ie_multiple) > 0:
+                # Use provided IE values as keys
+                for i, ie_value in enumerate(ref_ie_multiple):
+                    if i < len(ref_img_multiple):
+                        frame.vibe_encodings[float(ie_value)] = ref_img_multiple[i]
+            else:
+                # Default: use 1.0 as key for all encodings (non-NAID3 compatible)
+                for i, encoding in enumerate(ref_img_multiple):
+                    frame.vibe_encodings[1.0] = encoding
+                    break  # Only use the first encoding with key 1.0
+
             # Mark this as a no_image frame by setting special properties
             frame.file_name = no_image_path
             frame.file_path = no_image_path
-            
+
             # Save the vibe data to storage
             frame._save_encodings()
-            
+
             # Connect signals
             frame.removed.connect(self._remove_frame)
             frame.encoding_requested.connect(self._on_encoding_requested)
-            
+
             # Add to UI
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
-            
+
             return frame
-            
+
         except Exception as e:
             QMessageBox.critical(self.widget, "Error", f"Failed to add vibe from import: {str(e)}")
             return None
@@ -1683,59 +1697,75 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         if len(self.vibe_frames) >= 8:
             QMessageBox.warning(self.widget, "Limit Reached", "Maximum 8 vibe frames allowed")
             return None
-        
+
         try:
+            # Handle None values - convert to empty list for safety
+            ref_img_multiple = vibe_data.get('reference_image_multiple') or []
+            ref_str_multiple = vibe_data.get('reference_strength_multiple') or []
+            ref_ie_multiple = vibe_data.get('reference_information_extracted_multiple') or []
+
+            # Early return if no valid vibe data
+            if not ref_img_multiple:
+                QMessageBox.warning(self.widget, "경고", "Metadata에 유효한 Vibe Transfer 데이터가 없습니다.")
+                return None
+
             # Create a special frame for no_image mode
             # Since we don't have an actual file, we'll create a minimal VibeTransferFrame
             # that only holds the vibe data
-            
+
             # Create a temporary black image for display purposes
             from PIL import Image
             import io
             import base64
-            
+
             temp_image = Image.new('RGB', (512, 512), color='black')
-            
+
             # Save to temp path - ensure metadata is in the path for proper identification
             temp_path = Path("temp") / f"{no_image_path}.png"
             temp_path.parent.mkdir(exist_ok=True)
             temp_image.save(str(temp_path))
-            
+
             # Create frame using the temp path with is_no_image flag
             # Use source model from metadata if available, otherwise current model
             target_model = vibe_data.get('source_model', self._get_current_model())
             frame = VibeTransferFrame(str(temp_path), self.app_context, is_no_image=True, target_model=target_model)
-            
+
             # Override the frame's data with metadata vibe data
             # Store the vibe data directly in the frame's encodings
-            if vibe_data.get('reference_image_multiple'):
-                # Use the reference strength as the key
-                strength_values = vibe_data.get('reference_strength_multiple', [1.0])
-                if strength_values:
-                    # Add encoding for each strength value
-                    for i, strength in enumerate(strength_values):
-                        if i < len(vibe_data['reference_image_multiple']):
-                            frame.vibe_encodings[float(strength)] = vibe_data['reference_image_multiple'][i]
-            
+            # Use information_extracted as the key (not reference_strength)
+            # Metadata may contain reference_information_extracted_multiple for NAID3
+            if ref_ie_multiple and len(ref_ie_multiple) > 0:
+                # Use provided IE values as keys (NAID3 compatibility)
+                for i, ie_value in enumerate(ref_ie_multiple):
+                    if i < len(ref_img_multiple):
+                        encoding = ref_img_multiple[i]
+                        frame.vibe_encodings[float(ie_value)] = encoding
+            else:
+                # Default: use 1.0 as key for all encodings (non-NAID3 models)
+                # The actual encoding values in reference_image_multiple are what matter
+                for i, encoding in enumerate(ref_img_multiple):
+                    frame.vibe_encodings[1.0] = encoding
+                    break  # Only use the first encoding with key 1.0
+
             # Mark this as a no_image frame by setting special properties
             frame.file_name = no_image_path
             frame.file_path = no_image_path
-            
+
             # Update UI to show it's from metadata - the label is already set in _setup_ui
-            
+
             # Save the vibe data to storage
             frame._save_encodings()
-            
+
             # Connect signals
             frame.removed.connect(self._remove_frame)
             frame.encoding_requested.connect(self._on_encoding_requested)
-            
+
             # Add to UI
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
-            
+
             return frame
-            
+
         except Exception as e:
             QMessageBox.critical(self.widget, "Error", f"Failed to add vibe from metadata: {str(e)}")
             return None
@@ -1999,59 +2029,61 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         Returns:
             dict with keys:
                 - normalize_reference_strength_multiple: bool
-                - reference_image_multiple: List of encoded values  
+                - reference_image_multiple: List of encoded values
                 - reference_strength_multiple: List of reference strength values
                 - reference_information_extracted_multiple: List of IE values (NAID3 only)
         """
         reference_image_multiple = []
         reference_strength_multiple = []
         reference_information_extracted_multiple = []
-        
+
         # Check if current model is NAID3
         current_model = self._get_current_model()
         is_naid3 = "NAID3" in current_model
-        
+
         # Collect data from enabled frames only
         for frame in self.vibe_frames:
             if not frame.is_enabled or not frame.vibe_encodings:
                 continue
-                
+
             # Get the encoding for the current information_extracted value
             # Find closest encoding to current info_extracted value
-            closest_key = min(frame.vibe_encodings.keys(), 
+            closest_key = min(frame.vibe_encodings.keys(),
                             key=lambda x: abs(x - frame.information_extracted))
-            
+
             encoded_value = frame.vibe_encodings[closest_key]
             reference_image_multiple.append(encoded_value)
             reference_strength_multiple.append(frame.reference_strength)
-            
+
             # For NAID3, also collect information_extracted values
+            # Use the actual encoding key (closest_key) instead of frame.information_extracted
+            # This ensures no_image frames use the correct IE value from vibe_encodings
             if is_naid3:
-                reference_information_extracted_multiple.append(frame.information_extracted)
+                reference_information_extracted_multiple.append(closest_key)
         
         # Get normalization setting
         normalize = self.normalize_checkbox and self.normalize_checkbox.isChecked()
-        
+
         # Apply normalization if enabled and sum > 1
         if normalize and reference_strength_multiple:
             total_strength = sum(reference_strength_multiple)
             if total_strength > 1.0:
                 # Normalize to sum to 1.0 with 15 decimal places max
                 reference_strength_multiple = [
-                    round(strength / total_strength, 15) 
+                    round(strength / total_strength, 15)
                     for strength in reference_strength_multiple
                 ]
-        
+
         result = {
             "normalize_reference_strength_multiple": normalize,
             "reference_image_multiple": reference_image_multiple,
             "reference_strength_multiple": reference_strength_multiple
         }
-        
+
         # Add NAID3-specific field if applicable
         if is_naid3 and reference_information_extracted_multiple:
             result["reference_information_extracted_multiple"] = reference_information_extracted_multiple
-        
+
         return result
     
     def get_parameters(self) -> dict:

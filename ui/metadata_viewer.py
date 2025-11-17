@@ -883,36 +883,22 @@ class MetadataViewerWindow(QDialog):
             'prompt': self._get_prompt_text(),
             'negative': self._get_negative_text()
         }
-        
+
         # 소스 모드 식별을 위한 메타데이터 포함
         if 'Software' in self.metadata:
             settings['Software'] = self.metadata['Software']
         if 'type' in self.metadata:
             settings['type'] = self.metadata['type']
-        
-        # Comment 필드가 JSON인 경우 파라미터 추출
-        if 'Comment' in self.metadata:
-            try:
-                comment_data = json.loads(self.metadata['Comment'])
-                if 'parameters' in comment_data:
-                    settings.update(comment_data['parameters'])
-                # 직접 필드들도 추가
-                for key in ['steps', 'scale', 'seed', 'sampler', 'cfg_rescale', 'skip_cfg_above_sigma',
-                            'noise_schedule', 'sm', 'sm_dyn', 'dynamic_thresholding', 
-                            'controlnet_strength', 'legacy', 'uncond_scale']:
-                    if key in comment_data:
-                        settings[key] = comment_data[key]
-            except:
-                pass
-        
-        # 파라미터 추가
-        if 'parameters' in self.metadata:
-            settings.update(self.metadata['parameters'])
-        
-        # 이미지 크기 추가
+
+        # ✅ _extract_all_parameters() 활용하여 모든 파라미터 추출
+        # (Comment, parameters, 직접 필드 등 모든 소스에서 추출)
+        extracted_params = self._extract_all_parameters()
+        settings.update(extracted_params)
+
+        # 이미지 크기 추가 (덮어쓰기)
         settings['width'] = self.pil_image.width
         settings['height'] = self.pil_image.height
-        
+
         self.apply_all_settings.emit(settings)
         # 적용 완료 메시지는 표시하지 않음
         

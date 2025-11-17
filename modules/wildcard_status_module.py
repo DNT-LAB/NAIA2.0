@@ -71,6 +71,7 @@ class WildcardStatusModule(BaseMiddleModule):
         layout.addLayout(history_header_layout)
 
         self.history_textbox = QTextEdit()
+        self.history_textbox.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.history_textbox.setReadOnly(True)
         self.history_textbox.setStyleSheet(dynamic_styles['compact_textedit'])
         self.history_textbox.setMinimumHeight(100)
@@ -84,6 +85,7 @@ class WildcardStatusModule(BaseMiddleModule):
         layout.addWidget(state_label)
 
         self.state_textbox = QTextEdit()
+        self.state_textbox.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.state_textbox.setReadOnly(True)
         self.state_textbox.setStyleSheet(dynamic_styles['compact_textedit'])
         self.state_textbox.setFixedHeight(80)

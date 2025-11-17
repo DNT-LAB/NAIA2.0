@@ -141,6 +141,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(rules_label)
 
         self.rules_textedit = QTextEdit()
+        self.rules_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.rules_textedit.setFixedHeight(200)
         self.rules_textedit.setStyleSheet(rules_textbox_style)
         setModernStyle(self.rules_textedit)
@@ -200,6 +201,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(log_label)
 
         self.log_textedit = QTextEdit()
+        self.log_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.log_textedit.setFixedHeight(250)
         self.log_textedit.setReadOnly(True)
         self.log_textedit.setStyleSheet(textbox_style + "color: #B0B0B0;")

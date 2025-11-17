@@ -24,8 +24,9 @@ class ResolutionManagerDialog(QDialog):
 
         # [신규] 유효성 검사 UI 요소
         self.validation_warning_label = QLabel()
+        self.nearest_value_label = QLabel()
         self.auto_fit_button = QPushButton("자동 맞춤")
-        
+
         # UI 구성
         self.init_ui()
         
@@ -86,8 +87,16 @@ class ResolutionManagerDialog(QDialog):
         self.anlas_warning_label.setVisible(False)
         add_layout.addWidget(self.anlas_warning_label, 3, 0, 1, 3)
 
+        # 유효성 검사 레이아웃 (수평: 경고 메시지(왼쪽) + 버튼(오른쪽))
         validation_layout = QHBoxLayout()
-        validation_layout.addWidget(self.validation_warning_label, 1) # 라벨이 남은 공간 차지
+
+        # 경고 메시지 영역 (수직: 경고 텍스트 + 인접값)
+        warning_text_layout = QVBoxLayout()
+        warning_text_layout.setSpacing(2)
+        warning_text_layout.addWidget(self.validation_warning_label)
+        warning_text_layout.addWidget(self.nearest_value_label)
+
+        validation_layout.addLayout(warning_text_layout, 1)  # 경고 메시지가 남은 공간 차지
         validation_layout.addWidget(self.auto_fit_button)
         add_layout.addLayout(validation_layout, 4, 0, 1, 3)
 
@@ -98,10 +107,10 @@ class ResolutionManagerDialog(QDialog):
         button_layout = QHBoxLayout()
         save_button = QPushButton("저장 후 닫기")
         save_button.setStyleSheet(DARK_STYLES['primary_button'])
-        save_button.clicked.connect(self.accept)
+        save_button.clicked.connect(self._on_save_clicked)
         cancel_button = QPushButton("취소")
         cancel_button.setStyleSheet(DARK_STYLES['secondary_button'])
-        cancel_button.clicked.connect(self.reject)
+        cancel_button.clicked.connect(self._on_cancel_clicked)
         
         button_layout.addStretch(1)
         button_layout.addWidget(save_button)
@@ -151,7 +160,11 @@ class ResolutionManagerDialog(QDialog):
             self.res_list_widget.takeItem(self.res_list_widget.row(item))
             
     def get_updated_resolutions(self):
-        return [self.res_list_widget.item(i).text() for i in range(self.res_list_widget.count())]
+        result = [self.res_list_widget.item(i).text() for i in range(self.res_list_widget.count())]
+        # print(f"[DEBUG] ResolutionManagerDialog.get_updated_resolutions() 호출")
+        # print(f"[DEBUG] 리스트 위젯 항목 수: {self.res_list_widget.count()}")
+        # print(f"[DEBUG] 반환할 해상도 목록: {result}")
+        return result
     
     def on_input_changed(self):
         """입력값 변경 시 호출되는 통합 메서드"""
@@ -183,20 +196,55 @@ class ResolutionManagerDialog(QDialog):
         try:
             width = int(self.width_input.text()) if self.width_input.text() else 0
             height = int(self.height_input.text()) if self.height_input.text() else 0
-            
+
             api_mode = self.main_window.get_current_api_mode()
             multiple = 64 if api_mode == "NAI" else 8
 
             is_width_valid = (width == 0) or (width % multiple == 0)
             is_height_valid = (height == 0) or (height % multiple == 0)
-            
+
             if is_width_valid and is_height_valid:
                 self.validation_warning_label.setVisible(False)
+                self.nearest_value_label.setVisible(False)
                 self.auto_fit_button.setVisible(False)
             else:
+                # 경고 메시지 표시
                 self.validation_warning_label.setText(f"너비와 높이는 {multiple}의 배수여야 합니다.")
                 self.validation_warning_label.setVisible(True)
                 self.auto_fit_button.setVisible(True)
+
+                # 인접값 계산
+                nearest_suggestions = []
+
+                if not is_width_valid and width > 0:
+                    width_lower = (width // multiple) * multiple
+                    width_upper = width_lower + multiple
+                    nearest_suggestions.append(f"너비: {width_lower} / {width_upper}")
+
+                if not is_height_valid and height > 0:
+                    height_lower = (height // multiple) * multiple
+                    height_upper = height_lower + multiple
+                    nearest_suggestions.append(f"높이: {height_lower} / {height_upper}")
+
+                # 인접값 표시
+                if nearest_suggestions:
+                    self.nearest_value_label.setText("인접값 - " + ", ".join(nearest_suggestions))
+                    self.nearest_value_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: 11px;")
+                    self.nearest_value_label.setVisible(True)
+                else:
+                    self.nearest_value_label.setVisible(False)
+
         except ValueError:
             self.validation_warning_label.setVisible(False)
+            self.nearest_value_label.setVisible(False)
             self.auto_fit_button.setVisible(False)
+
+    def _on_save_clicked(self):
+        """저장 후 닫기 버튼 클릭"""
+        # print(f"[DEBUG] 저장 후 닫기 버튼 클릭됨")
+        self.accept()
+
+    def _on_cancel_clicked(self):
+        """취소 버튼 클릭"""
+        # print(f"[DEBUG] 취소 버튼 클릭됨")
+        self.reject()

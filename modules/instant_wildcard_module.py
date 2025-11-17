@@ -220,8 +220,9 @@ class AddWildcardDialog(QDialog):
         value_label = QLabel("와일드카드 값:")
         value_label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(16)}px;")
         left_layout.addWidget(value_label)
-        
+
         self.value_edit = QTextEdit()
+        self.value_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.value_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.value_edit.setPlaceholderText("와일드카드 값 입력 (태그, 여러 줄 가능)")
         self.value_edit.setMinimumHeight(get_scaled_size(150))
@@ -429,6 +430,7 @@ class InstantWildcardModule(BaseMiddleModule):
         
         # 값 편집
         self.value_edit = QTextEdit()
+        self.value_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.value_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.value_edit.setMinimumHeight(get_scaled_size(100))
         self.value_edit.setReadOnly(True)

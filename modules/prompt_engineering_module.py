@@ -275,6 +275,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(pre_label)
 
         self.pre_textedit = QTextEdit()
+        self.pre_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.pre_textedit.setFixedHeight(160)
         self.pre_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
         setModernStyle(self.pre_textedit)
@@ -286,6 +287,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(post_label)
 
         self.post_textedit = QTextEdit()
+        self.post_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.post_textedit.setFixedHeight(160)
         self.post_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
         setModernStyle(self.post_textedit)
@@ -297,6 +299,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(auto_hide_label)
 
         self.auto_hide_textedit = QTextEdit()
+        self.auto_hide_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.auto_hide_textedit.setFixedHeight(160)
         self.auto_hide_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
         setModernStyle(self.auto_hide_textedit)
@@ -944,6 +947,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         left_layout.addWidget(desc_label)
         
         desc_textedit = QTextEdit()
+        desc_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         desc_textedit.setMaximumHeight(150)
         desc_textedit.setStyleSheet(dynamic_styles['compact_textedit'])
         desc_textedit.setPlaceholderText("이 프리셋에 대한 설명을 작성하세요...")
@@ -1052,6 +1056,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         
         # 프리셋 설정 표시용 TextEdit
         detail_textedit = QTextEdit()
+        detail_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         detail_textedit.setReadOnly(True)
         detail_textedit.setStyleSheet(f"""
             QTextEdit {{

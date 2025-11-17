@@ -778,6 +778,7 @@ class CharacterStorageItem(QFrame):
         layout.addWidget(prompt_label)
         
         prompt_edit = QTextEdit()
+        prompt_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         prompt_edit.setPlainText(metadata.get("character_prompt", ""))
         prompt_edit.setStyleSheet("""
             QTextEdit {
@@ -802,6 +803,7 @@ class CharacterStorageItem(QFrame):
         layout.addWidget(uc_label)
         
         uc_edit = QTextEdit()
+        uc_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         uc_edit.setPlainText(metadata.get("character_uc", ""))
         uc_edit.setStyleSheet("""
             QTextEdit {

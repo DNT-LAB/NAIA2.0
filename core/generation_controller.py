@@ -1,5 +1,6 @@
 ﻿from core.context import AppContext
 from core.generation_request import GenerationRequest
+from core.sequence_parser import SequenceParser
 from PIL import Image
 import piexif
 import piexif.helper
@@ -262,8 +263,17 @@ class GenerationController:
             print(f"[QUEUE] 생성 중이므로 요청을 큐에 추가합니다 (우선순위: {priority})")
             self._enqueue_current_request(overrides, priority)
             return
-            
+
         try:
+            # 🆕 시퀀스 프롬프트 감지 (큐에서 호출된 경우 제외)
+            if not from_queue:
+                main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+
+                if SequenceParser.is_sequence_prompt(main_prompt_text):
+                    print("[SEQUENCE] 시퀀스 프롬프트 감지됨. 시퀀스 모드로 전환합니다.")
+                    self._handle_sequence_generation(main_prompt_text, overrides, priority)
+                    return
+
             # --- 1 ~ 4 단계: 파라미터 수집 및 유효성 검사 ---
             # 큐 우선: 대기 상태이고 큐가 있다면 큐를 먼저 처리하고 반환합니다.
             try:
@@ -533,7 +543,11 @@ class GenerationController:
                 self.context.main_window.detached_generate_btn.setText(btn_text)
         else:
             # 생성 중이 아닐 때
-            btn_text = "🎨 이미지 생성 요청"
+            if queue_size > 0:
+                btn_text = f"🎨 이미지 생성 요청 ({queue_size})"
+            else:
+                btn_text = "🎨 이미지 생성 요청"
+
             self.context.main_window.generate_button_main.setText(btn_text)
             if hasattr(self.context.main_window, 'detached_generate_btn'):
                 self.context.main_window.detached_generate_btn.setText(btn_text)
@@ -921,3 +935,249 @@ class GenerationController:
         """🆕 외부에서 재시도 카운터를 리셋할 수 있는 메서드"""
         self.auto_retry_count = 0
         print("🔄 자동 생성 재시도 카운터가 리셋되었습니다.")
+
+    # ==================== 🆕 시퀀스 생성 메서드 ====================
+
+    def _handle_sequence_generation(self, prompt_text: str, overrides: dict = None, priority: int = 0):
+        """
+        🆕 시퀀스 생성 처리
+
+        Args:
+            prompt_text: 원본 프롬프트 텍스트
+            overrides: 파라미터 덮어쓰기
+            priority: 우선순위
+        """
+        try:
+            # 1. 파싱
+            print("[SEQUENCE] 프롬프트 파싱 중...")
+            parsed = SequenceParser.parse_prompt(prompt_text)
+
+            # 2. 검증
+            is_valid, error_msg = SequenceParser.validate_structure(parsed)
+            if not is_valid:
+                self.context.main_window.status_bar.showMessage(f"❌ 시퀀스 검증 실패: {error_msg}")
+                print(f"[SEQUENCE] 검증 실패: {error_msg}")
+                return
+
+            # 3. 프롬프트 세트 생성
+            print("[SEQUENCE] 프롬프트 세트 생성 중...")
+            prompt_sets = SequenceParser.generate_prompt_sets(parsed)
+            print(f"[SEQUENCE] {len(prompt_sets)}개 프롬프트 세트 생성됨")
+
+            # 🔧 FIX MEDIUM-1: 빈 prompt_sets 체크
+            if not prompt_sets:
+                self.context.main_window.status_bar.showMessage("❌ 프롬프트 세트 생성 실패: 빈 결과")
+                print("[SEQUENCE] 오류: 프롬프트 세트가 비어있습니다.")
+                return
+
+            # 디버깅: 생성된 프롬프트 출력
+            for i, prompt in enumerate(prompt_sets, 1):
+                print(f"[SEQUENCE] #{i}: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
+
+            # 4. 해상도 결정
+            fixed_resolution = self._determine_fixed_resolution(prompt_sets[0])
+            print(f"[SEQUENCE] 고정 해상도: {fixed_resolution[0]}x{fixed_resolution[1]}")
+
+            # 5. 큐에 일괄 추가
+            print("[SEQUENCE] 큐에 요청 추가 중...")
+            self._enqueue_sequence_requests(prompt_sets, fixed_resolution, overrides, priority)
+
+            # 6. 상태바 업데이트
+            self.context.main_window.status_bar.showMessage(
+                f"✅ 시퀀스 생성: {len(prompt_sets)}개 요청이 큐에 추가되었습니다."
+            )
+
+            # 7. 큐 처리 시작
+            print("[SEQUENCE] 큐 처리 시작...")
+            QTimer.singleShot(0, self._process_next_queue_request)
+
+        except ValueError as e:
+            # 파싱 오류
+            self.context.main_window.status_bar.showMessage(f"❌ 시퀀스 파싱 오류: {e}")
+            print(f"[SEQUENCE] 파싱 오류: {e}")
+        except Exception as e:
+            self.context.main_window.status_bar.showMessage(f"❌ 시퀀스 생성 오류: {e}")
+            print(f"[SEQUENCE] 생성 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _determine_fixed_resolution(self, first_prompt: str) -> tuple[int, int]:
+        """
+        🆕 첫 번째 프롬프트에서 해상도 결정
+
+        Args:
+            first_prompt: 첫 번째 프롬프트 텍스트
+
+        Returns:
+            tuple: (width, height)
+        """
+        # 1. resolution: 태그 확인
+        resolution_match = re.search(r'resolution:(\d+)x(\d+)', first_prompt)
+        if resolution_match:
+            width = int(resolution_match.group(1))
+            height = int(resolution_match.group(2))
+            print(f"[SEQUENCE] resolution: 태그에서 해상도 추출: {width}x{height}")
+            return (width, height)
+
+        # 2. UI 해상도 콤보박스 값 사용
+        try:
+            selected_value = self.context.main_window.resolution_combo.currentText()
+            width, height = map(int, selected_value.split('x'))
+            print(f"[SEQUENCE] UI 콤보박스에서 해상도 추출: {width}x{height}")
+            return (width, height)
+        except Exception as e:
+            print(f"[SEQUENCE] 해상도 추출 실패, 기본값 사용: {e}")
+            return (832, 1216)  # 기본값
+
+    def _enqueue_sequence_requests(
+        self,
+        prompt_sets: list,
+        fixed_resolution: tuple[int, int],
+        overrides: dict = None,
+        priority: int = 0
+    ):
+        """
+        🆕 시퀀스 요청을 큐에 일괄 추가
+
+        Args:
+            prompt_sets: 프롬프트 리스트
+            fixed_resolution: (width, height)
+            overrides: 파라미터 덮어쓰기
+            priority: 우선순위
+        """
+        queue_manager = self.context.generation_queue_manager
+
+        # 🔧 FIX HIGH-1: 파라미터를 루프 밖에서 한 번만 수집
+        # (캐릭터 리롤이 각 시퀀스마다 반복되지 않도록)
+        base_params = self._collect_generation_params()
+
+        # 🆕 API 모드 확인 (시드 처리 분기용)
+        api_mode = base_params.get('api_mode', 'NAI')
+        seed_is_fixed = self.context.main_window.seed_fix_checkbox.isChecked()
+
+        for i, prompt in enumerate(prompt_sets):
+            try:
+                # 각 요청마다 base_params를 복사하여 사용
+                params = base_params.copy()
+
+                # seed: 태그 처리 (각 프롬프트마다 독립적)
+                # 🔧 FIX MEDIUM-2: seed: 태그를 추출 후 프롬프트에서 제거
+                seed_match = re.search(r'seed:(\d+)', prompt)
+                if seed_match:
+                    params['seed'] = int(seed_match.group(1))
+                    print(f"[SEQUENCE] 프롬프트 #{i+1}: seed:{params['seed']} 적용")
+                    # 프롬프트에서 seed: 태그 제거
+                    prompt = re.sub(r'seed:\d+,?\s*', '', prompt).strip()
+                else:
+                    # 🆕 seed: 태그가 없는 경우, NAI 모드에서는 랜덤 시드 생성
+                    if api_mode == "NAI" and not seed_is_fixed:
+                        params['seed'] = random.randint(0, 9999999999)
+                        print(f"[SEQUENCE] 프롬프트 #{i+1}: NAI 랜덤 시드 생성 - {params['seed']}")
+                    # WEBUI/COMFYUI는 고정 시드 사용 (base_params의 seed 유지)
+
+                # 프롬프트 설정 (메인 프롬프트를 각 시퀀스 프롬프트로 대체)
+                params['input'] = prompt
+
+                # 해상도 설정 (고정)
+                params['width'] = fixed_resolution[0]
+                params['height'] = fixed_resolution[1]
+
+                # 덮어쓰기 적용
+                if overrides:
+                    params.update(overrides)
+
+                # source_row 설정
+                source_row = self.context.current_source_row
+                if source_row is None:
+                    empty_data = {
+                        'general': None,
+                        'character': None,
+                        'copyright': None,
+                        'artist': None,
+                        'meta': None
+                    }
+                    source_row = pd.Series(empty_data, name=f"sequence_{i+1}")
+
+                # GenerationRequest 생성
+                request = GenerationRequest(
+                    params=params,
+                    source_row=source_row,
+                    priority=priority,
+                    max_retries=0
+                )
+
+                # 큐에 추가
+                if priority > 0:
+                    request_id = queue_manager.enqueue_with_priority(request)
+                else:
+                    request_id = queue_manager.enqueue_request(request)
+
+                print(f"[SEQUENCE] 요청 {i+1}/{len(prompt_sets)} 추가됨: {request_id[:8]}...")
+
+            except Exception as e:
+                print(f"[SEQUENCE] 요청 {i+1} 추가 실패: {e}")
+                continue
+
+        # 버튼 텍스트 업데이트
+        self._update_button_with_queue_size()
+
+    def _collect_generation_params(self) -> dict:
+        """
+        🆕 생성 파라미터 수집 (기존 로직 재사용)
+
+        Returns:
+            dict: 생성 파라미터
+        """
+        # API 모드 및 인증 정보
+        api_mode = self.context.main_window.get_current_api_mode()
+
+        if api_mode == "NAI":
+            token = 'nai_token'
+            # NAI 모드에서 캐릭터 리롤 처리
+            char_module = self.context.middle_section_controller.get_module_instance("CharacterModule")
+            if (char_module and
+                char_module.activate_checkbox.isChecked() and
+                char_module.reroll_on_generate_checkbox.isChecked()):
+                print("🔄️ 생성 시 Reroll: 캐릭터 와일드카드를 갱신합니다.")
+                char_module.process_and_update_view()
+        elif api_mode == "COMFYUI":
+            token = 'comfyui_url'
+        else:
+            token = 'webui_url'
+
+        credential = self.context.secure_token_manager.get_token(token)
+
+        # 메인 파라미터
+        params = self.context.main_window.get_main_parameters()
+        params['api_mode'] = api_mode
+        params['credential'] = credential
+
+        # 모듈 파라미터 수집
+        for module in self.module_instances:
+            module_params = module.get_parameters()
+            if module_params:
+                params.update(module_params)
+
+        # 랜덤 해상도 처리
+        if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
+            random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
+            self.context.main_window.resolution_combo.setCurrentIndex(random_index)
+            selected_value = self.context.main_window.resolution_combo.currentText()
+            width, height = map(int, selected_value.split('x'))
+            params['width'] = width
+            params['height'] = height
+            print(f"랜덤 해상도 설정: {width}x{height}")
+
+        # Img2Img 파라미터
+        img2img_params = self.context.main_window.img2img_panel.get_parameters()
+        if img2img_params:
+            print("🖼️ Img2Img 패널 활성화됨. 파라미터를 추가합니다.")
+            params.update(img2img_params)
+
+        # ComfyUI 워크플로우 처리
+        if api_mode == "COMFYUI":
+            final_workflow = self.workflow_manager.apply_params_to_workflow(params)
+            if final_workflow:
+                params['workflow'] = final_workflow
+
+        return params

@@ -268,6 +268,7 @@ class E621EventModule(BaseMiddleModule):
         content_layout.addWidget(value1_label)
         
         self.value1_edit = QTextEdit()
+        self.value1_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.value1_edit.setMinimumHeight(get_scaled_size(100))
         self.value1_edit.setMaximumHeight(get_scaled_size(150))
         self.value1_edit.setStyleSheet(dynamic_styles['compact_textedit'])
@@ -285,6 +286,7 @@ class E621EventModule(BaseMiddleModule):
         
         # Line6: 자동 숨김처리 태그 텍스트박스
         self.auto_hide_edit = QTextEdit()
+        self.auto_hide_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.auto_hide_edit.setMinimumHeight(get_scaled_size(60))
         self.auto_hide_edit.setMaximumHeight(get_scaled_size(100))
         self.auto_hide_edit.setStyleSheet(dynamic_styles['compact_textedit'])

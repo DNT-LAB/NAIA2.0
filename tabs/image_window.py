@@ -507,6 +507,23 @@ class HistoryItemWidget(QWidget):
         reroll_action.triggered.connect(self.emit_reroll_prompt)
         menu.addAction(reroll_action)
 
+        # 🆕 큐 추가 메뉴
+        menu.addSeparator()
+
+        enqueue_front_action = QAction("⬆️ 큐 앞에 추가", self)
+        enqueue_front_action.triggered.connect(self.enqueue_to_front)
+        # generation_params가 있는 경우에만 활성화
+        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
+            enqueue_front_action.setEnabled(False)
+        menu.addAction(enqueue_front_action)
+
+        enqueue_back_action = QAction("⬇️ 큐 뒤에 추가", self)
+        enqueue_back_action.triggered.connect(self.enqueue_to_back)
+        # generation_params가 있는 경우에만 활성화
+        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
+            enqueue_back_action.setEnabled(False)
+        menu.addAction(enqueue_back_action)
+
         # 🆕 메타데이터 복원 메뉴 추가
         menu.addSeparator()
         restore_params_action = QAction("⚙️ 생성 설정 복원", self)
@@ -570,6 +587,85 @@ class HistoryItemWidget(QWidget):
     def emit_reroll_prompt(self):
         """'프롬프트 다시개봉' 시그널을 발생시킵니다."""
         self.reroll_requested.emit(self.history_item.source_row)
+
+    def enqueue_to_front(self):
+        """🆕 히스토리 아이템을 큐 앞에 추가 (우선순위 100)"""
+        self._enqueue_history_item(priority=100)
+
+    def enqueue_to_back(self):
+        """🆕 히스토리 아이템을 큐 뒤에 추가 (우선순위 0)"""
+        self._enqueue_history_item(priority=0)
+
+    def _enqueue_history_item(self, priority: int = 0):
+        """🆕 히스토리 아이템을 생성 큐에 추가"""
+        try:
+            if not self.app_context:
+                # print("❌ AppContext가 없습니다.")
+                return
+
+            # GenerationRequest 클래스 import
+            from core.generation_request import GenerationRequest
+
+            # 생성 파라미터 복사
+            params = self.history_item.generation_params.copy()
+
+            # [2] 랜덤 해상도 체크 - 직접 해상도 덮어쓰기
+            main_window = self.app_context.main_window
+            if hasattr(main_window, 'random_resolution_checkbox') and main_window.random_resolution_checkbox:
+                if main_window.random_resolution_checkbox.isChecked():
+                    # 무작위 해상도 선택
+                    import random
+                    random_index = random.randint(0, main_window.resolution_combo.count() - 1)
+                    selected_value = main_window.resolution_combo.itemText(random_index)
+                    width, height = map(int, selected_value.split(' x '))
+                    params['width'] = width
+                    params['height'] = height
+                    # print(f"✅ 랜덤 해상도 적용: {width}x{height}")
+
+            # [3] 시드 고정 체크 (체크되어 있지 않으면 무작위 시드 생성)
+            if hasattr(main_window, 'seed_fix_checkbox') and main_window.seed_fix_checkbox:
+                if not main_window.seed_fix_checkbox.isChecked():
+                    # 무작위 시드 생성 (0 ~ 9999999999 범위)
+                    import random
+                    random_seed = random.randint(0, 9999999999)
+                    params['seed'] = random_seed
+                    params['extra_noise_seed'] = random_seed
+                    # print(f"✅ 무작위 시드 적용: {random_seed}")
+
+            # source_row 가져오기 (없으면 빈 Series)
+            import pandas as pd
+            source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') and self.history_item.source_row is not None else pd.Series()
+
+            # GenerationRequest 생성
+            request = GenerationRequest(
+                params=params,
+                source_row=source_row,
+                priority=priority,
+                max_retries=0
+            )
+
+            # 큐 매니저 가져오기
+            queue_manager = self.app_context.generation_queue_manager
+
+            # 우선순위에 따라 큐에 추가
+            if priority > 0:
+                request_id = queue_manager.enqueue_with_priority(request)
+                queue_size = queue_manager.get_queue_size()
+                # print(f"✅ 큐 앞에 추가됨: {request_id[:8]}... (우선순위: {priority}, 큐 크기: {queue_size})")
+                if hasattr(main_window, 'status_bar'):
+                    main_window.status_bar.showMessage(f"✅ 큐 앞에 추가됨 (대기 중: {queue_size})", 3000)
+            else:
+                request_id = queue_manager.enqueue_request(request)
+                queue_size = queue_manager.get_queue_size()
+                # print(f"✅ 큐 뒤에 추가됨: {request_id[:8]}... (큐 크기: {queue_size})")
+                if hasattr(main_window, 'status_bar'):
+                    main_window.status_bar.showMessage(f"✅ 큐 뒤에 추가됨 (대기 중: {queue_size})", 3000)
+
+        except Exception as e:
+            # print(f"❌ 큐 추가 실패: {e}")
+            # import traceback
+            # traceback.print_exc()
+            pass
 
     def show_comfyui_workflow(self):
         """🆕 ComfyUI 워크플로우 정보를 보여주는 다이얼로그"""

@@ -239,7 +239,7 @@ class MiddleSectionController:
         # 모든 모듈 생성 완료 후 추가 초기화는 제거 (이미 위에서 처리함)
 
         # 🆕 저장된 상태 로드
-        self.load_module_states()
+        # self.load_module_states()
 
     def detach_module(self, module_title: str, content_widget: QWidget):
         """모듈을 외부 창으로 분리 (완전 독립 창)"""

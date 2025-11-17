@@ -554,7 +554,10 @@ class AutomationModule(BaseMiddleModule):
         
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        
+
+        # ✅ 설정 저장
+        self.save_settings()
+
         # 초기 상태를 자동화 카운트 라벨에 표시
         if hasattr(self, 'automation_count_label'):
             if automation_type == "timer":
@@ -576,7 +579,7 @@ class AutomationModule(BaseMiddleModule):
         self.automation_controller.stop_automation()
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        
+
         if hasattr(self, 'automation_count_label'):
             self.automation_count_label.setText("🚫 자동화 중단됨")
             self.automation_count_label.setStyleSheet(f"font-weight: bold; font-size: {get_scaled_font_size(13)}px; color: #F44336;")
@@ -584,6 +587,9 @@ class AutomationModule(BaseMiddleModule):
             self.repeat_info_label.setText("")
         if hasattr(self, 'delay_info_label'):
             self.delay_info_label.setText("")
+
+        # ✅ 설정 저장
+        self.save_settings()
     
     def on_automation_finished(self):
         """자동화 완료 시 처리"""
@@ -891,34 +897,30 @@ class AutomationModule(BaseMiddleModule):
         self.load_settings()
     
     def save_settings(self):
-        """설정을 JSON 파일에 저장"""
-        if not all([self.delay_input, self.random_delay_checkbox, self.repeat_input]):
+        """설정을 JSON 파일에 저장 (동일 이미지 반복 생성 횟수는 제외)"""
+        if not all([self.delay_input, self.random_delay_checkbox]):
             return
-        
+
         try:
             delay_seconds = float(self.delay_input.text()) if self.delay_input.text() else 2.0
         except ValueError:
             delay_seconds = 2.0
-            
-        try:
-            repeat_count = int(self.repeat_input.text()) if self.repeat_input.text() else 1
-        except ValueError:
-            repeat_count = 1
-            
+
         try:
             timer_minutes = int(self.timer_input.text()) if self.timer_input.text() else 60
         except ValueError:
             timer_minutes = 60
-            
+
         try:
             count_limit = int(self.count_input.text()) if self.count_input.text() else 100
         except ValueError:
             count_limit = 100
-        
+
+        # ✅ 저장할 설정 (repeat_count는 제외)
         settings = {
             "delay_seconds": delay_seconds,
             "random_delay": self.random_delay_checkbox.isChecked(),
-            "repeat_count": repeat_count,
+            # "repeat_count": repeat_count,  # ❌ 제외: 매번 새로 설정해야 함
             "timer_minutes": timer_minutes,
             "count_limit": count_limit,
             "shutdown_on_finish": self.shutdown_checkbox.isChecked(),
@@ -929,11 +931,12 @@ class AutomationModule(BaseMiddleModule):
                 "unlimited"
             )
         }
-        
+
         try:
             os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=4, ensure_ascii=False)
+            print(f"✅ '{self.get_title()}' 설정 저장 완료")
         except Exception as e:
             print(f"❌ '{self.get_title()}' 설정 저장 실패: {e}")
     
@@ -949,7 +952,8 @@ class AutomationModule(BaseMiddleModule):
             if self.delay_input:
                 self.delay_input.setText(str(settings.get("delay_seconds", 2.0)))
                 self.random_delay_checkbox.setChecked(settings.get("random_delay", False))
-                self.repeat_input.setText(str(settings.get("repeat_count", 1)))
+                # self.repeat_input.setText(str(settings.get("repeat_count", 1)))  # ❌ 제외: 항상 기본값 1로 유지
+                self.repeat_input.setText("1")  # ✅ 항상 기본값으로 리셋
                 self.timer_input.setText(str(settings.get("timer_minutes", 60)))
                 self.count_input.setText(str(settings.get("count_limit", 100)))
                 self.shutdown_checkbox.setChecked(settings.get("shutdown_on_finish", False))
@@ -968,3 +972,22 @@ class AutomationModule(BaseMiddleModule):
             print(f"✅ '{self.get_title()}' 설정 로드 완료.")
         except Exception as e:
             print(f"❌ '{self.get_title()}' 설정 로드 실패: {e}")
+
+    def cleanup(self):
+        """모듈 종료 시 리소스 정리 및 설정 저장"""
+        # ✅ 설정 저장
+        self.save_settings()
+
+        # 타이머 정지
+        if hasattr(self, 'automation_controller') and self.automation_controller:
+            if hasattr(self.automation_controller, 'timer'):
+                self.automation_controller.timer.stop()
+
+        # 카운트다운 스레드 정리
+        if hasattr(self, 'countdown_thread') and self.countdown_thread:
+            if self.countdown_thread.isRunning():
+                self.countdown_thread.stop()
+                self.countdown_thread.wait()
+            self.countdown_thread.deleteLater()
+
+        print(f"✅ '{self.get_title()}' 정리 완료")

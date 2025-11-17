@@ -181,6 +181,7 @@ class CharacterSearchDialog(QDialog):
         right_layout.addWidget(prompt_label)
 
         self.character_prompt = QTextEdit()
+        self.character_prompt.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.character_prompt.setReadOnly(True)
         self.character_prompt.setPlaceholderText("캐릭터를 선택하면 태그가 표시됩니다")
         self.character_prompt.setStyleSheet(DARK_STYLES['compact_textedit'])
@@ -194,6 +195,7 @@ class CharacterSearchDialog(QDialog):
         right_layout.addWidget(negative_label)
 
         self.character_negative = QTextEdit()
+        self.character_negative.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.character_negative.setReadOnly(True)
         self.character_negative.setPlaceholderText("negative 프롬프트를 추가하려면 [수정] 버튼을 눌러 추가 후 [저장] 하세요")
         self.character_negative.setStyleSheet(DARK_STYLES['compact_textedit'] + f"color: {DARK_COLORS['text_secondary']};")
@@ -564,6 +566,7 @@ class AddCustomCharacterDialog(QDialog):
         layout.addWidget(prompt_label)
 
         self.prompt_edit = QTextEdit()
+        self.prompt_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.prompt_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
         #self.prompt_edit.setProperty("autocomplete_ignore", True)
         self.prompt_edit.setMinimumHeight(get_scaled_size(120))
@@ -578,6 +581,7 @@ class AddCustomCharacterDialog(QDialog):
         layout.addWidget(negative_label)
 
         self.negative_edit = QTextEdit()
+        self.negative_edit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.negative_edit.setStyleSheet(DARK_STYLES['compact_textedit'] + f"color: {DARK_COLORS['text_secondary']};")
         #self.negative_edit.setProperty("autocomplete_ignore", True)
         self.negative_edit.setMinimumHeight(get_scaled_size(80))
@@ -658,6 +662,7 @@ class NAID4CharacterInput(QWidget):
 
         prompt_uc_layout = QVBoxLayout()
         self.prompt_textbox = QTextEdit()
+        self.prompt_textbox.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.prompt_textbox.setPlaceholderText("캐릭터 프롬프트 (예: 1girl, ...)")
         self.prompt_textbox.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.prompt_textbox.setMinimumHeight(110)
@@ -665,6 +670,7 @@ class NAID4CharacterInput(QWidget):
         prompt_uc_layout.addWidget(self.prompt_textbox)
 
         self.uc_textbox = QTextEdit()
+        self.uc_textbox.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.uc_textbox.setPlaceholderText("부정 프롬프트 (UC)")
         self.uc_textbox.setStyleSheet(DARK_STYLES['compact_textedit'] + "color: #9E9E9E;")
         self.uc_textbox.setMinimumHeight(55)
@@ -851,6 +857,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         main_layout.addWidget(processed_label)
 
         self.processed_prompt_display = QTextEdit()
+        self.processed_prompt_display.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.processed_prompt_display.setReadOnly(True)
         self.processed_prompt_display.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.processed_prompt_display.setFixedHeight(240)

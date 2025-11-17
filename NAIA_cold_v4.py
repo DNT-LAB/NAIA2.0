@@ -777,6 +777,9 @@ class ModernMainWindow(QMainWindow):
         # 프로그램 시작 시 업데이트 확인 (UI 초기화 완료 후 충분한 시간 뒤에)
         QTimer.singleShot(2000, self.check_for_updates)  # 2초 후 시작
 
+        # 🆕 멀티 NAI 계정 알림 (업데이트 확인 후)
+        QTimer.singleShot(3000, self._show_multi_account_notification)  # 3초 후 시작
+
     def apply_dynamic_styles(self):
         """동적 스타일시트 적용"""
         try:
@@ -3900,6 +3903,63 @@ class ModernMainWindow(QMainWindow):
                 title += f" (업데이트가 있습니다 : {self.latest_commit_date})"
         
         self.setWindowTitle(title)
+
+    def _show_multi_account_notification(self):
+        """🆕 멀티 NAI 계정 활성화 시 시작 알림 표시"""
+        try:
+            import json
+            from pathlib import Path
+
+            # NAI 모드가 아니면 체크하지 않음
+            if self.app_context.current_api_mode != "NAI":
+                return
+
+            # save/nai_accounts.json 로드
+            accounts_file = Path("save/nai_accounts.json")
+
+            if not accounts_file.exists():
+                # 계정 파일이 없으면 알림 없음
+                return
+
+            with open(accounts_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # 🆕 안전장치: 자동 복구된 경우 알림 스킵
+            if data.get('auto_recovered', False):
+                print("ℹ️ 계정 자동 복구가 수행되었습니다. 시작 알림을 스킵합니다.")
+                return
+
+            accounts = data.get('accounts', [])
+            round_robin_enabled = data.get('round_robin_enabled', False)
+            main_account_enabled = data.get('main_account_enabled', True)
+
+            # 활성화된 추가 계정 카운트
+            enabled_additional_accounts = sum(1 for acc in accounts if acc.get('enabled', False))
+
+            # 🆕 총 활성 계정 = 메인(활성화 시 1) + 활성화된 추가 계정
+            total_active_accounts = (1 if main_account_enabled else 0) + enabled_additional_accounts
+
+            # 멀티 계정이 활성화된 경우에만 알림 표시
+            if total_active_accounts > 1:
+                mode_text = "라운드 로빈 모드" if round_robin_enabled else "단일 계정 모드"
+
+                # 상태바에 메시지 표시 (5초)
+                message = f"🔄 멀티 NAI 계정 활성화됨: {total_active_accounts}개 계정 ({mode_text})"
+                self.status_bar.showMessage(message, 5000)
+
+                # 콘솔에도 출력
+                print(f"\n{'='*60}")
+                print(f"🔄 멀티 NAI 계정 시스템 활성화")
+                print(f"   - 총 활성 계정: {total_active_accounts}개 (메인 {'1개' if main_account_enabled else '0개'} + 추가 {enabled_additional_accounts}개)")
+                print(f"   - 운영 모드: {mode_text}")
+                if round_robin_enabled:
+                    print(f"   - 이미지 생성 시 카운터 기반으로 계정을 순환합니다.")
+                else:
+                    print(f"   - 활성화된 단일 계정만 사용됩니다.")
+                print(f"{'='*60}\n")
+
+        except Exception as e:
+            print(f"⚠️ 멀티 계정 알림 표시 오류: {e}")
 
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장

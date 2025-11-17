@@ -188,10 +188,80 @@ class APIService:
                     return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {e}"}
 
 
+    def _get_active_nai_token(self) -> str:
+        """
+        🆕 멀티 계정 지원: 라운드 로빈 모드에 따라 활성 NAI 토큰을 반환합니다.
+
+        Returns:
+            str: 활성 NAI 토큰 (메인 또는 추가 계정)
+        """
+        try:
+            import json
+            from pathlib import Path
+
+            # save/nai_accounts.json 로드
+            accounts_file = Path("save/nai_accounts.json")
+
+            if not accounts_file.exists():
+                # 계정 파일이 없으면 메인 토큰 반환
+                main_token = self.app_context.secure_token_manager.get_token('nai_token')
+                return main_token
+
+            with open(accounts_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            accounts = data.get('accounts', [])
+            round_robin_enabled = data.get('round_robin_enabled', False)
+            main_account_enabled = data.get('main_account_enabled', True)  # 🆕 메인 계정 활성화 여부
+
+            # 활성화된 계정 목록 생성 (메인 + 추가 계정)
+            active_tokens = []
+
+            # 1. 메인 토큰 추가 (활성화된 경우만)
+            main_token = self.app_context.secure_token_manager.get_token('nai_token')
+            if main_token and main_account_enabled:
+                active_tokens.append(('nai_token', main_token))
+
+            # 2. 활성화된 추가 계정 추가
+            for account in accounts:
+                if account.get('enabled', False):
+                    account_id = account.get('id')
+                    token = self.app_context.secure_token_manager.get_token(account_id)
+                    if token:
+                        active_tokens.append((account_id, token))
+
+            # 활성화된 토큰이 없으면 메인 토큰 반환
+            if not active_tokens:
+                return main_token if main_token else ""
+
+            # 라운드 로빈 모드 확인
+            if round_robin_enabled and len(active_tokens) > 1:
+                # 카운터 기반 라운드 로빈
+                counter = self.app_context.image_crud_controller.get_counter()
+                index = counter % len(active_tokens)
+
+                selected_id, selected_token = active_tokens[index]
+                print(f"🔄 [Round-Robin] 카운터: {counter}, 계정 인덱스: {index}/{len(active_tokens)}, 선택된 계정: {selected_id}")
+
+                return selected_token
+            else:
+                # 라운드 로빈 비활성화: 첫 번째 활성 토큰 사용
+                first_id, first_token = active_tokens[0]
+                print(f"✅ [Single Account] 선택된 계정: {first_id}")
+
+                return first_token
+
+        except Exception as e:
+            print(f"⚠️ 멀티 계정 토큰 선택 오류: {e}. 메인 토큰으로 폴백합니다.")
+            # 에러 발생 시 메인 토큰으로 폴백
+            main_token = self.app_context.secure_token_manager.get_token('nai_token')
+            return main_token if main_token else ""
+
     def _call_nai_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다."""
         try:
-            token = params.get('credential')
+            # 🆕 멀티 계정 지원: 라운드 로빈 토큰 선택
+            token = self._get_active_nai_token()
             if not token:
                 raise ValueError("NAI 토큰이 제공되지 않았습니다.")
 
@@ -307,17 +377,20 @@ class APIService:
                     # Use sketchbook character prompts instead of character module
                     print("📝 Using Sketchbook character prompts instead of Character Module")
                     sketchbook_prompts = params['sketchbook_character_prompts']
-                    
-                    for prompt, uc in sketchbook_prompts:
+
+                    for i, (prompt, uc) in enumerate(sketchbook_prompts):
+                        # Sketchbook uses default center position (no custom positioning yet)
+                        centers = [{"x": 0.5, "y": 0.5}]
+
                         api_parameters['v4_prompt']['caption']['char_captions'].append({
                             'char_caption': prompt,
-                            'centers': [{"x": 0.5, "y": 0.5}]
+                            'centers': centers
                         })
                         api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
                             'char_caption': uc or "",
-                            'centers': [{"x": 0.5, "y": 0.5}]
+                            'centers': centers
                         })
-                    
+
                     print(f"✅ Added {len(sketchbook_prompts)} Sketchbook character prompts")
                 else:
                     # Fall back to regular character module
@@ -354,22 +427,31 @@ class APIService:
                                 if char_params and char_params.get("characters"):
                                     characters = char_params["characters"]
                                     ucs = char_params["uc"]
+                                    # 🆕 캐릭터 위치 좌표 가져오기 (없으면 빈 리스트)
+                                    character_positions = char_params.get("character_positions", [])
 
                                     # 🐛 디버깅: 캐릭터 데이터 확인
                                     print(f"[DEBUG] characters count: {len(characters) if isinstance(characters, list) else 'NOT_LIST'}")
                                     print(f"[DEBUG] ucs count: {len(ucs) if isinstance(ucs, list) else 'NOT_LIST'}")
+                                    print(f"[DEBUG] character_positions: {character_positions}")
                                     if isinstance(characters, list) and len(characters) > 0:
                                         print(f"[DEBUG] First character preview: {characters[0][:50]}..." if len(characters[0]) > 50 else f"[DEBUG] First character: {characters[0]}")
 
                                     # 캐릭터 프롬프트를 v4_prompt에 추가
                                     for i, prompt in enumerate(characters):
+                                        # 🆕 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
+                                        if i < len(character_positions):
+                                            centers = [character_positions[i]]
+                                        else:
+                                            centers = [{"x": 0.5, "y": 0.5}]
+
                                         api_parameters['v4_prompt']['caption']['char_captions'].append({
                                             'char_caption': prompt,
-                                            'centers': [{"x": 0.5, "y": 0.5}]
+                                            'centers': centers
                                         })
                                         api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
                                             'char_caption': ucs[i] if i < len(ucs) else "",
-                                            'centers': [{"x": 0.5, "y": 0.5}]
+                                            'centers': centers
                                         })
                                 else:
                                     print(f"[DEBUG] ⚠️ char_params is None or has no 'characters' key")

@@ -641,6 +641,336 @@ class AddCustomCharacterDialog(QDialog):
         self.accept()
 
 
+class CharacterPositionGridDialog(QDialog):
+    """5x5 그리드 위치 선택 다이얼로그"""
+
+    position_selected = pyqtSignal(int, str)  # (char_index, position)
+
+    def __init__(self, char_index: int, current_position: str, used_positions: List[str] = None, parent=None):
+        super().__init__(parent)
+        self.char_index = char_index
+        self.current_position = current_position
+        self.used_positions = used_positions or []  # 이미 사용 중인 위치들
+
+        self.setWindowTitle(f"캐릭터 {char_index+1} 위치 선택")
+        self.setFixedSize(get_scaled_size(350), get_scaled_size(400))
+        self.setModal(True)
+
+        # 다크 테마
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+
+        self.init_ui()
+
+    def init_ui(self):
+        """UI 초기화"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(get_scaled_size(10))
+        main_layout.setContentsMargins(
+            get_scaled_size(15), get_scaled_size(15),
+            get_scaled_size(15), get_scaled_size(15)
+        )
+
+        # 헤더
+        header_label = QLabel("화면 위치를 선택하세요")
+        header_label.setStyleSheet(f"font-size: {get_scaled_font_size(14)}px; color: {DARK_COLORS['text_primary']};")
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(header_label)
+
+        # 5x5 그리드
+        grid_frame = QFrame()
+        grid_layout = QGridLayout(grid_frame)
+        grid_layout.setSpacing(get_scaled_size(5))
+        grid_layout.setContentsMargins(get_scaled_size(10), get_scaled_size(10),
+                                      get_scaled_size(10), get_scaled_size(10))
+
+        self.grid_buttons = {}
+
+        for col_idx, col_label in enumerate(['A', 'B', 'C', 'D', 'E']):
+            for row_idx in range(5):
+                row_num = row_idx + 1
+                pos = f"{col_label}{row_num}"
+
+                button = QPushButton(pos)
+                button.setFixedSize(get_scaled_size(50), get_scaled_size(50))
+
+                # 이미 다른 캐릭터가 사용 중인 위치인지 확인
+                is_used = pos in self.used_positions and pos != self.current_position
+
+                if is_used:
+                    # 사용 중인 위치: 빨간색 + 비활성화
+                    button.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {DARK_COLORS['error']};
+                            color: {DARK_COLORS['text_disabled']};
+                            font-size: {get_scaled_font_size(12)}px;
+                            border: 2px solid {DARK_COLORS['border']};
+                            border-radius: 5px;
+                        }}
+                    """)
+                    button.setEnabled(False)
+                    button.setToolTip("다른 캐릭터가 사용 중입니다")
+                elif pos == self.current_position:
+                    # 현재 위치: 파란색 하이라이트
+                    button.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {DARK_COLORS['accent_blue']};
+                            color: white;
+                            font-weight: bold;
+                            font-size: {get_scaled_font_size(12)}px;
+                            border: 2px solid {DARK_COLORS['accent_blue_hover']};
+                            border-radius: 5px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: {DARK_COLORS['accent_blue_hover']};
+                        }}
+                    """)
+                else:
+                    # 사용 가능한 위치
+                    button.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {DARK_COLORS['bg_secondary']};
+                            color: {DARK_COLORS['text_primary']};
+                            font-size: {get_scaled_font_size(12)}px;
+                            border: 1px solid {DARK_COLORS['border']};
+                            border-radius: 5px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: {DARK_COLORS['bg_hover']};
+                            border: 1px solid {DARK_COLORS['accent_blue']};
+                        }}
+                    """)
+
+                button.clicked.connect(lambda checked, p=pos: self._select_position(p))
+
+                grid_layout.addWidget(button, row_idx, col_idx)
+                self.grid_buttons[pos] = button
+
+        main_layout.addWidget(grid_frame)
+
+        # 취소 버튼
+        cancel_button = QPushButton("✗ 취소")
+        cancel_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        cancel_button.setFixedWidth(get_scaled_size(100))
+        cancel_button.clicked.connect(self.reject)
+        main_layout.addWidget(cancel_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _select_position(self, position: str):
+        """위치 선택"""
+        self.position_selected.emit(self.char_index, position)
+        self.accept()
+
+
+class CharacterPositionManagerDialog(QDialog):
+    """캐릭터 위치 관리 다이얼로그"""
+
+    positions_updated = pyqtSignal(list)  # List[str]
+
+    def __init__(self, character_widgets: List, character_positions: List[str], parent_module, parent=None):
+        super().__init__(parent)
+        self.character_widgets = character_widgets
+        self.character_positions = character_positions  # 🆕 복사본이 아닌 원본 참조 (실시간 업데이트)
+        self.parent_module = parent_module  # 🆕 부모 모듈 참조
+
+        self.setWindowTitle("캐릭터 위치 관리")
+        self.setFixedSize(get_scaled_size(600), get_scaled_size(500))
+        self.setModal(False)  # 🆕 Non-modal로 변경 (백그라운드에서 메인 UI 확인 가능)
+
+        # 다크 테마 적용
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+
+        self.init_ui()
+
+    def init_ui(self):
+        """UI 초기화"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(get_scaled_size(10))
+        main_layout.setContentsMargins(
+            get_scaled_size(15), get_scaled_size(15),
+            get_scaled_size(15), get_scaled_size(15)
+        )
+
+        # --- 헤더 ---
+        header_label = QLabel("각 캐릭터의 화면 위치를 설정하세요")
+        header_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: {DARK_COLORS['text_primary']}; font-weight: bold;")
+        main_layout.addWidget(header_label)
+
+        # --- 캐릭터별 위치 버튼 ---
+        char_scroll = QScrollArea()
+        char_scroll.setWidgetResizable(True)
+        char_scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: 1px solid {DARK_COLORS['border']};
+                background-color: {DARK_COLORS['bg_secondary']};
+            }}
+        """)
+
+        char_container = QWidget()
+        char_layout = QVBoxLayout(char_container)
+        char_layout.setSpacing(get_scaled_size(5))
+        char_layout.setContentsMargins(get_scaled_size(5), get_scaled_size(5),
+                                       get_scaled_size(5), get_scaled_size(5))
+
+        self.position_buttons = []
+
+        for idx, widget in enumerate(self.character_widgets):
+            if not widget.active_checkbox.isChecked():
+                continue
+
+            # 캐릭터 행 프레임
+            char_frame = QFrame()
+            char_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {DARK_COLORS['bg_primary']};
+                    border: 1px solid {DARK_COLORS['border']};
+                    border-radius: 5px;
+                    padding: 5px;
+                }}
+            """)
+            char_row_layout = QHBoxLayout(char_frame)
+            char_row_layout.setContentsMargins(get_scaled_size(10), get_scaled_size(5),
+                                              get_scaled_size(10), get_scaled_size(5))
+
+            # 캐릭터 번호 + 이름 (프롬프트 첫 태그)
+            prompt_text = widget.prompt_textbox.toPlainText()
+            char_name = prompt_text.split(',')[0].strip() if prompt_text else f"캐릭터 {idx+1}"
+
+            label = QLabel(f"[{idx+1}] {char_name[:30]}")
+            label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(14)}px;")
+            label.setFixedWidth(get_scaled_size(250))
+            char_row_layout.addWidget(label)
+
+            # 위치 버튼
+            current_pos = self.character_positions[idx] if idx < len(self.character_positions) else "C3"
+            pos_button = QPushButton(f"위치: {current_pos}")
+            pos_button.setStyleSheet(DARK_STYLES['secondary_button'])
+            pos_button.setFixedWidth(get_scaled_size(100))
+            pos_button.clicked.connect(lambda checked, i=idx: self._open_grid_selector(i))
+            char_row_layout.addWidget(pos_button)
+
+            char_row_layout.addStretch()
+
+            self.position_buttons.append((idx, pos_button))
+            char_layout.addWidget(char_frame)
+
+        char_layout.addStretch()
+        char_scroll.setWidget(char_container)
+        main_layout.addWidget(char_scroll)
+
+        # --- 무작위 배치 옵션 ---
+        random_frame = QFrame()
+        random_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 5px;
+                padding: 5px;
+            }}
+        """)
+        random_layout = QHBoxLayout(random_frame)
+        random_layout.setContentsMargins(get_scaled_size(10), get_scaled_size(5),
+                                        get_scaled_size(10), get_scaled_size(5))
+
+        random_button = QPushButton("🎲 무작위 배치")
+        random_button.setStyleSheet(DARK_STYLES['primary_button'])
+        random_button.setFixedWidth(get_scaled_size(170))
+        random_button.clicked.connect(self._randomize_positions)
+        random_layout.addWidget(random_button)
+
+        self.exclude_center_checkbox = QCheckBox("가운데(C3) 제외")
+        self.exclude_center_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        random_layout.addWidget(self.exclude_center_checkbox)
+
+        random_layout.addStretch()
+        main_layout.addWidget(random_frame)
+
+        # 🆕 실시간 피드백: 확인/취소 버튼 제거
+        # 위치 변경 시 즉시 부모 모듈에 반영됨
+
+    def _open_grid_selector(self, char_index: int):
+        """그리드 선택 다이얼로그 열기"""
+        current_pos = self.character_positions[char_index] if char_index < len(self.character_positions) else "C3"
+
+        # 다른 활성 캐릭터들이 사용 중인 위치 수집
+        used_positions = []
+        for idx, widget in enumerate(self.character_widgets):
+            if idx != char_index and widget.active_checkbox.isChecked():
+                if idx < len(self.character_positions):
+                    pos = self.character_positions[idx]
+                    if pos and len(pos) >= 2:
+                        used_positions.append(pos)
+
+        dialog = CharacterPositionGridDialog(char_index, current_pos, used_positions, parent=self)
+        dialog.position_selected.connect(self._on_position_selected)
+        dialog.exec()
+
+    def _on_position_selected(self, char_index: int, position: str):
+        """그리드에서 위치 선택 시 (실시간 피드백)"""
+        # 리스트 크기 확장 (필요 시)
+        while len(self.character_positions) <= char_index:
+            self.character_positions.append("C3")
+
+        self.character_positions[char_index] = position
+
+        # 버튼 텍스트 업데이트
+        for idx, button in self.position_buttons:
+            if idx == char_index:
+                button.setText(f"위치: {position}")
+                break
+
+        # 🆕 실시간 피드백: 부모 모듈의 시각화 즉시 업데이트
+        if hasattr(self.parent_module, '_update_position_viewer'):
+            self.parent_module._update_position_viewer()
+        print(f"📍 C{char_index+1} 위치 변경: {position}")
+
+    def _randomize_positions(self):
+        """무작위 위치 배치 (겹침 방지)"""
+        import random
+
+        # 가능한 위치 리스트
+        all_positions = [f"{col}{row}" for col in "ABCDE" for row in "12345"]
+
+        # 가운데 제외 옵션
+        if self.exclude_center_checkbox.isChecked():
+            all_positions = [p for p in all_positions if p != "C3"]
+
+        # 활성화된 캐릭터 수만큼 샘플링 (중복 없이)
+        active_indices = [idx for idx, widget in enumerate(self.character_widgets)
+                          if widget.active_checkbox.isChecked()]
+
+        if len(active_indices) > len(all_positions):
+            QMessageBox.warning(self, "경고",
+                              f"활성화된 캐릭터 수({len(active_indices)})가 가능한 위치({len(all_positions)})보다 많습니다.")
+            return
+
+        # 중복 없이 위치 샘플링
+        random_positions = random.sample(all_positions, len(active_indices))
+
+        # 위치 업데이트
+        for i, idx in enumerate(active_indices):
+            while len(self.character_positions) <= idx:
+                self.character_positions.append("C3")
+            self.character_positions[idx] = random_positions[i]
+
+            # 버튼 텍스트 업데이트
+            for btn_idx, button in self.position_buttons:
+                if btn_idx == idx:
+                    button.setText(f"위치: {random_positions[i]}")
+                    break
+
+        # 🆕 실시간 피드백: 부모 모듈의 시각화 즉시 업데이트
+        if hasattr(self.parent_module, '_update_position_viewer'):
+            self.parent_module._update_position_viewer()
+        print(f"🎲 무작위 위치 배치 완료: {random_positions}")
+
+
 class NAID4CharacterInput(QWidget):
     """단일 캐릭터 입력을 위한 위젯 클래스"""
     def __init__(self, char_id: int, remove_callback, app_context=None, parent=None):
@@ -738,6 +1068,15 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.processed_prompt_display: QTextEdit = None
         self.last_processed_data: dict = {'characters': [], 'uc': []}
         self.modifiable_clone: dict = {'characters': [], 'uc': []}
+
+        # 🆕 캐릭터 위치 관련 속성
+        self.enable_position_checkbox: QCheckBox = None
+        self.position_button: QPushButton = None
+        self.position_viewer: QLabel = None
+        self.random_position_button: QPushButton = None  # 🆕 위치 랜덤 버튼
+        self.auto_reroll_checkbox: QCheckBox = None  # 🆕 생성 시 자동 리롤
+        self.character_positions: List[str] = ["C3"] * 6  # 기본 중앙 (최대 6명)
+        self.exclude_center_on_random: bool = True  # 🆕 가운데 비우기 기본 활성화
 
     def get_title(self) -> str:
         return "👤 NAID4 캐릭터"
@@ -837,6 +1176,68 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         options_layout.addWidget(self.reroll_on_generate_checkbox, 1, 0)
         options_layout.addWidget(self.reroll_button, 1, 1)
 
+        # 🆕 캐릭터 위치 관리 UI
+        self.enable_position_checkbox = QCheckBox("(2인이상체크) 캐릭터 포지션을 활성화 합니다")
+        self.enable_position_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.enable_position_checkbox.setChecked(False)
+        self.enable_position_checkbox.stateChanged.connect(self._on_position_toggle)
+
+        self.position_button = QPushButton("📍")
+        self.position_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.position_button.setFixedWidth(get_scaled_size(55))  # 🆕 120 → 160 (40 증가)
+        self.position_button.clicked.connect(self._open_position_dialog)
+        self.position_button.setEnabled(False)  # 초기 비활성화
+
+        # 위치 시각화 라벨 (25x25px 이미지를 50x50px로 표시)
+        from PIL import Image
+        from PyQt6.QtGui import QPixmap, QImage
+        temp_image = Image.new('RGB', (25, 25), DARK_COLORS['bg_secondary'])
+        # PIL Image → QImage → QPixmap 변환
+        temp_image_bytes = temp_image.tobytes("raw", "RGB")
+        q_image = QImage(temp_image_bytes, 25, 25, 25 * 3, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_image).scaled(
+            get_scaled_size(50), get_scaled_size(50),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.position_viewer = QLabel()
+        self.position_viewer.setPixmap(pixmap)
+        self.position_viewer.setFixedSize(get_scaled_size(60), get_scaled_size(60))
+        self.position_viewer.setStyleSheet(f"""
+            QLabel {{
+                border: 1px solid {DARK_COLORS['border']};
+                background-color: {DARK_COLORS['bg_secondary']};
+            }}
+        """)
+
+        # 🆕 위치 랜덤 버튼
+        self.random_position_button = QPushButton("🔄")
+        self.random_position_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.random_position_button.setFixedWidth(get_scaled_size(55))
+        self.random_position_button.setToolTip("위치 무작위 배치 (가운데 제외)")
+        self.random_position_button.clicked.connect(self._on_random_position_clicked)
+        self.random_position_button.setEnabled(False)  # 초기 비활성화
+
+        # 🆕 생성 시 자동 리롤 체크박스
+        self.auto_reroll_checkbox = QCheckBox("A")
+        self.auto_reroll_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.auto_reroll_checkbox.setToolTip("생성 시 위치 자동 리롤")
+        self.auto_reroll_checkbox.setChecked(False)
+
+        # 버튼과 시각화 이미지를 같은 셀에 배치 (UI 밀림 방지)
+        position_control_widget = QWidget()
+        position_control_layout = QHBoxLayout(position_control_widget)
+        position_control_layout.setContentsMargins(0, 0, 0, 0)
+        position_control_layout.setSpacing(get_scaled_size(5))
+        position_control_layout.addWidget(self.position_button)
+        position_control_layout.addWidget(self.position_viewer)
+        position_control_layout.addWidget(self.random_position_button)
+        position_control_layout.addWidget(self.auto_reroll_checkbox)
+        position_control_layout.addStretch()
+
+        options_layout.addWidget(self.enable_position_checkbox, 2, 0)
+        options_layout.addWidget(position_control_widget, 2, 1)
+
         main_layout.addWidget(options_frame)
 
         # 캐릭터 위젯 컨테이너
@@ -930,7 +1331,38 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         if not self.activate_checkbox or not self.activate_checkbox.isChecked():
             return {"characters": None}
 
-        return self.modifiable_clone
+        # 기본 파라미터
+        params = self.modifiable_clone.copy()
+
+        # 🆕 캐릭터 위치 좌표 매핑
+        if self.enable_position_checkbox and self.enable_position_checkbox.isChecked():
+            # A: 생성 시 자동 리롤 체크되어 있으면 먼저 위치 리롤
+            if self.auto_reroll_checkbox and self.auto_reroll_checkbox.isChecked():
+                self._on_random_position_clicked()
+
+            # 좌표 매핑 테이블
+            x_mapping = {'A': 0.1, 'B': 0.3, 'C': 0.5, 'D': 0.7, 'E': 0.9}
+            y_mapping = {'1': 0.1, '2': 0.3, '3': 0.5, '4': 0.7, '5': 0.9}
+
+            # 활성화된 캐릭터들의 위치만 변환
+            character_coords = []
+            for idx, widget in enumerate(self.character_widgets):
+                if widget.active_checkbox.isChecked():
+                    if idx < len(self.character_positions):
+                        pos = self.character_positions[idx]
+                        if pos and len(pos) >= 2:
+                            x = x_mapping.get(pos[0], 0.5)
+                            y = y_mapping.get(pos[1], 0.5)
+                            character_coords.append({'x': x, 'y': y})
+                        else:
+                            character_coords.append({'x': 0.5, 'y': 0.5})  # 기본값
+                    else:
+                        character_coords.append({'x': 0.5, 'y': 0.5})  # 기본값
+
+            params['character_positions'] = character_coords
+            print(f"📍 캐릭터 위치 좌표: {character_coords}")
+
+        return params
     
     def hooker_update_prompt(self):
         # ⬇️ Hooker에 의해 수정된 최종 결과를 UI에 업데이트하는 로직 추가
@@ -953,10 +1385,16 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         char_widget.prompt_textbox.setText(prompt_text)
         char_widget.uc_textbox.setText(uc_text)
         char_widget.active_checkbox.setChecked(is_enabled)
-        
+
+        # 🆕 active_checkbox 변경 시 안전장치 체크 연결
+        char_widget.active_checkbox.stateChanged.connect(lambda: self._check_and_update_position_safety())
+
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, char_widget)
         self.character_widgets.append(char_widget)
         self.update_widget_ids()
+
+        # 🆕 위치 안전장치 체크
+        self._check_and_update_position_safety()
 
     def _remove_character_widget_internal(self, widget_to_remove):
         """내부용 위젯 제거 메서드 (최소 개수 제한 없음)"""
@@ -965,17 +1403,186 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
             widget_to_remove.deleteLater()
             self.update_widget_ids()
 
+            # 🆕 위치 안전장치 체크
+            self._check_and_update_position_safety()
+
     def remove_character_widget(self, widget_to_remove):
         if len(self.character_widgets) > 1:
             self.character_widgets.remove(widget_to_remove)
             widget_to_remove.deleteLater()
             self.update_widget_ids()
 
+            # 🆕 위치 안전장치 체크
+            self._check_and_update_position_safety()
+
     def update_widget_ids(self):
         for i, widget in enumerate(self.character_widgets):
             widget.char_id = i + 1
             widget.active_checkbox.setText(f"C{widget.char_id}")
-    
+
+    # 🆕 캐릭터 위치 관리 메서드들
+    def _on_position_toggle(self, state):
+        """위치 활성화 체크박스 변경 시"""
+        print(f"[DEBUG] _on_position_toggle called with state={state}")
+        enabled_count = sum(1 for w in self.character_widgets if w.active_checkbox.isChecked())
+        print(f"[DEBUG] Enabled character count: {enabled_count}")
+
+        # PyQt6에서 stateChanged는 int를 전달: 0=Unchecked, 2=Checked
+        if state == 2:  # Qt.CheckState.Checked
+            if enabled_count < 2:
+                # 2인 미만이면 경고 후 자동 해제
+                QMessageBox.warning(
+                    self.widget,
+                    "경고",
+                    "2인 이상 캐릭터가 활성화되어야 포지션 기능을 사용할 수 있습니다."
+                )
+                self.enable_position_checkbox.setChecked(False)
+                return
+
+            self.position_button.setEnabled(True)
+            self.random_position_button.setEnabled(True)  # 🆕 랜덤 버튼도 활성화
+            print(f"✅ 캐릭터 포지션 활성화 (활성 캐릭터: {enabled_count}명)")
+        else:
+            self.position_button.setEnabled(False)
+            self.random_position_button.setEnabled(False)  # 🆕 랜덤 버튼도 비활성화
+            # 위치 데이터 초기화
+            self.character_positions = ["C3"] * 6
+            self._update_position_viewer()
+            print("❌ 캐릭터 포지션 비활성화")
+
+    def _on_random_position_clicked(self):
+        """🔄 랜덤 버튼 클릭 시 위치 무작위 배치"""
+        import random
+
+        # 활성화된 캐릭터 수 확인
+        active_indices = [i for i, w in enumerate(self.character_widgets) if w.active_checkbox.isChecked()]
+
+        if len(active_indices) < 2:
+            print("⚠️ 활성 캐릭터가 2명 미만입니다. 랜덤 배치 불가.")
+            return
+
+        # 5x5 그리드 전체 위치
+        all_positions = [f"{col}{row}" for col in ['A', 'B', 'C', 'D', 'E'] for row in ['1', '2', '3', '4', '5']]
+
+        # 가운데 제외 옵션 (기본 True)
+        if self.exclude_center_on_random:
+            all_positions = [pos for pos in all_positions if pos != 'C3']
+
+        # 활성 캐릭터 수만큼 랜덤 선택 (중복 없이)
+        selected_positions = random.sample(all_positions, len(active_indices))
+
+        # 위치 할당
+        for active_idx, position in zip(active_indices, selected_positions):
+            while len(self.character_positions) <= active_idx:
+                self.character_positions.append("C3")
+            self.character_positions[active_idx] = position
+
+        # 시각화 업데이트
+        self._update_position_viewer()
+
+        print(f"🎲 무작위 위치 배치 완료: {selected_positions}")
+
+    def _check_and_update_position_safety(self):
+        """안전장치: 활성 캐릭터가 2명 미만이면 포지션 기능 자동 해제"""
+        enabled_count = sum(1 for w in self.character_widgets if w.active_checkbox.isChecked())
+
+        if enabled_count < 2 and self.enable_position_checkbox.isChecked():
+            # 자동 해제
+            self.enable_position_checkbox.setChecked(False)
+            self.enable_position_checkbox.setEnabled(False)
+            print(f"⚠️ 활성 캐릭터 {enabled_count}명 → 포지션 기능 자동 해제 및 비활성화")
+        elif enabled_count >= 2 and not self.enable_position_checkbox.isEnabled():
+            # 다시 활성화 가능하도록 변경
+            self.enable_position_checkbox.setEnabled(True)
+            print(f"✅ 활성 캐릭터 {enabled_count}명 → 포지션 기능 활성화 가능")
+
+    def _open_position_dialog(self):
+        """위치 관리 다이얼로그 열기 (실시간 피드백)"""
+        dialog = CharacterPositionManagerDialog(
+            character_widgets=self.character_widgets,
+            character_positions=self.character_positions,
+            parent_module=self,  # 🆕 부모 모듈 참조 전달
+            parent=self.widget
+        )
+        # 🆕 Non-modal로 표시 (백그라운드에서 메인 UI 확인 가능)
+        dialog.show()
+
+    def _update_position_viewer(self):
+        """위치 시각화 이미지 업데이트 (25x25px, 각 셀 5x5px)"""
+        from PIL import Image, ImageDraw
+        from PyQt6.QtGui import QPixmap, QImage
+        from ui.theme import DARK_COLORS
+
+        print("\n[DEBUG] === _update_position_viewer 호출 ===")
+
+        # 25x25px 이미지 생성 (원본 크기 복원)
+        img = Image.new('RGB', (25, 25), DARK_COLORS['bg_secondary'])
+        draw = ImageDraw.Draw(img)
+
+        # 색상 팔레트 (temp/characterpos.py와 동일)
+        colors = [
+            (255, 182, 193),  # Light Pink
+            (173, 216, 230),  # Light Blue
+            (144, 238, 144),  # Light Green
+            (255, 255, 153),  # Light Yellow
+            (216, 191, 216),  # Light Purple
+            (250, 218, 185)   # Light Orange
+        ]
+
+        drawn_count = 0
+
+        # 활성화된 캐릭터만 표시
+        for idx, widget in enumerate(self.character_widgets):
+            if not widget.active_checkbox.isChecked():
+                print(f"[DEBUG] C{idx+1}: 비활성 (스킵)")
+                continue
+
+            if idx >= len(self.character_positions):
+                print(f"[DEBUG] C{idx+1}: 위치 리스트 범위 초과 (스킵)")
+                continue
+
+            pos = self.character_positions[idx]
+            if pos is None or len(pos) < 2:
+                print(f"[DEBUG] C{idx+1}: 위치 없음 (pos={pos}, 스킵)")
+                continue
+
+            col = ord(pos[0]) - ord('A')  # A=0, B=1, ..., E=4
+            row = int(pos[1]) - 1         # 1=0, 2=1, ..., 5=4
+
+            # 5x5 셀 좌표 계산
+            x = col * 5
+            y = row * 5
+
+            print(f"[DEBUG] C{idx+1}: pos={pos}, col={col}, row={row}, x={x}, y={y}")
+
+            # 25x25 이미지 내에서 5x5 셀 그리기
+            color = colors[idx % len(colors)]
+            draw.rectangle([x, y, x+4, y+4], fill=color, outline=None)
+            drawn_count += 1
+            print(f"[DEBUG] C{idx+1}: 사각형 그리기 성공 - [{x},{y},{x+4},{y+4}] color={color}")
+
+        print(f"[DEBUG] 총 {drawn_count}개 캐릭터 그려짐")
+
+        # 🆕 디버깅용: 이미지 파일로 저장
+        try:
+            debug_path = "temp/debug_position_viewer.png"
+            img.save(debug_path)
+            print(f"[DEBUG] 이미지 저장됨: {debug_path}")
+        except Exception as e:
+            print(f"[DEBUG] 이미지 저장 실패: {e}")
+
+        # PIL Image → QImage → QPixmap 변환
+        img_bytes = img.tobytes("raw", "RGB")
+        q_image = QImage(img_bytes, 25, 25, 25 * 3, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_image).scaled(
+            get_scaled_size(50), get_scaled_size(50),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation  # FastTransformation → SmoothTransformation
+        )
+
+        if self.position_viewer:
+            self.position_viewer.setPixmap(pixmap)
+
     def assign_c1(self, character_prompt: str, character_uc: str):
         """
         C1 위젯에 캐릭터 프롬프트와 UC를 할당하고 활성화합니다.

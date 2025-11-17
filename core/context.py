@@ -66,6 +66,11 @@ class AppContext:
         self._last_api_payload = None
         self._payload_lock = False
 
+        # 🆕 임시 생성 창 모드 플래그 (FR-2-1, FR-3-1)
+        self.temp_window_mode = False  # 임시 창 생성 중인지 여부
+        self.temp_window_character_tab = None  # VirtualCharacterTab 인스턴스
+        self.pipeline_hook_overrides = {}  # {hook_point: [(priority, module_instance), ...]}
+
     @property
     def session_save_path(self) -> Path:
         """

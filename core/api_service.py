@@ -321,24 +321,64 @@ class APIService:
                     print(f"✅ Added {len(sketchbook_prompts)} Sketchbook character prompts")
                 else:
                     # Fall back to regular character module
-                    char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
-                    if char_module and char_module.activate_checkbox.isChecked():
-                        print("✅ 캐릭터 모듈 활성화됨. 파라미터를 가져옵니다.")
-                        char_params = char_module.get_parameters()
-                        
-                        if char_params and char_params.get("characters"):
-                            characters = char_params["characters"]
-                            ucs = char_params["uc"]
-                            
-                            for i, prompt in enumerate(characters):
-                                api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                    'char_caption': prompt,
-                                    'centers': [{"x": 0.5, "y": 0.5}]
-                                })
-                                api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                    'char_caption': ucs[i] if i < len(ucs) else "",
-                                    'centers': [{"x": 0.5, "y": 0.5}]
-                                })
+                    # 🆕 FR-2-1: Swap character module when in temporary window mode
+
+                    # 🐛 디버깅: 임시 창 모드 확인
+                    print(f"[DEBUG] temp_window_mode: {getattr(self.app_context, 'temp_window_mode', 'NOT_SET')}")
+                    print(f"[DEBUG] temp_window_character_tab exists: {hasattr(self.app_context, 'temp_window_character_tab') and self.app_context.temp_window_character_tab is not None}")
+
+                    if self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
+                        char_module = self.app_context.temp_window_character_tab
+                        print(f"[DEBUG] ✅ Using VirtualCharacterTab from temp window")
+                    else:
+                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                        print(f"[DEBUG] ✅ Using regular CharacterModule from main UI")
+
+                    # 🐛 디버깅: char_module 상태 확인
+                    if char_module:
+                        print(f"[DEBUG] char_module type: {type(char_module).__name__}")
+                        print(f"[DEBUG] char_module has activate_checkbox: {hasattr(char_module, 'activate_checkbox')}")
+
+                        if hasattr(char_module, 'activate_checkbox'):
+                            is_checked = char_module.activate_checkbox.isChecked()
+                            print(f"[DEBUG] activate_checkbox.isChecked(): {is_checked}")
+
+                            if is_checked:
+                                print("✅ 캐릭터 모듈 활성화됨. 파라미터를 가져옵니다.")
+                                char_params = char_module.get_parameters()
+
+                                # 🐛 디버깅: 파라미터 확인
+                                print(f"[DEBUG] char_params type: {type(char_params)}")
+                                print(f"[DEBUG] char_params keys: {char_params.keys() if isinstance(char_params, dict) else 'NOT_DICT'}")
+
+                                if char_params and char_params.get("characters"):
+                                    characters = char_params["characters"]
+                                    ucs = char_params["uc"]
+
+                                    # 🐛 디버깅: 캐릭터 데이터 확인
+                                    print(f"[DEBUG] characters count: {len(characters) if isinstance(characters, list) else 'NOT_LIST'}")
+                                    print(f"[DEBUG] ucs count: {len(ucs) if isinstance(ucs, list) else 'NOT_LIST'}")
+                                    if isinstance(characters, list) and len(characters) > 0:
+                                        print(f"[DEBUG] First character preview: {characters[0][:50]}..." if len(characters[0]) > 50 else f"[DEBUG] First character: {characters[0]}")
+
+                                    # 캐릭터 프롬프트를 v4_prompt에 추가
+                                    for i, prompt in enumerate(characters):
+                                        api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                            'char_caption': prompt,
+                                            'centers': [{"x": 0.5, "y": 0.5}]
+                                        })
+                                        api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                            'char_caption': ucs[i] if i < len(ucs) else "",
+                                            'centers': [{"x": 0.5, "y": 0.5}]
+                                        })
+                                else:
+                                    print(f"[DEBUG] ⚠️ char_params is None or has no 'characters' key")
+                            else:
+                                print(f"[DEBUG] ⚠️ activate_checkbox is not checked")
+                        else:
+                            print(f"[DEBUG] ⚠️ char_module has no activate_checkbox attribute")
+                    else:
+                        print(f"[DEBUG] ⚠️ char_module is None")
             
             # 🎨 Vibe Transfer Multiple 처리
             vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")

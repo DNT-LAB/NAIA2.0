@@ -473,6 +473,9 @@ class TempWindowManager:
         temp_window.params_update_requested.connect(
             self.main_window.apply_temp_params
         )
+        temp_window.random_prompt_requested.connect(
+            self.handle_random_prompt_request
+        )
         temp_window.window_closing.connect(
             self.main_window.on_temp_window_closing
         )
@@ -488,6 +491,125 @@ class TempWindowManager:
         print(f"✅ [TempWindowManager] 임시 창 #{window_id} 생성 완료 (총 {len(self.temp_windows)}개)")
 
         return temp_window
+
+    def handle_random_prompt_request(self, window_id: int):
+        """
+        🆕 Issue 1 Fix: 임시 창에서 Random/Next Prompt 요청 처리
+
+        메인 UI를 오염시키지 않고 독립적으로 프롬프트를 생성하여 임시 창에 반영합니다.
+
+        Args:
+            window_id: 요청한 창의 ID
+        """
+        print(f"[TempWindowManager] 임시 창 #{window_id}에서 Random/Next Prompt 요청 수신")
+
+        # 임시 창 확인
+        temp_window = self.temp_windows.get(window_id)
+        if not temp_window:
+            print(f"⚠️ [TempWindowManager] 임시 창 #{window_id}를 찾을 수 없습니다")
+            return
+
+        # 프롬프트 고정 체크박스 상태 확인
+        is_fixed = temp_window.prompt_fixed_checkbox.isChecked()
+
+        # 독립적인 프롬프트 생성 (메인 UI 메서드 사용하되 결과만 가져옴)
+        # 메인 UI의 프롬프트를 임시 저장
+        original_main_prompt = self.main_window.main_prompt_textedit.toPlainText()
+        original_negative_prompt = self.main_window.negative_prompt_textedit.toPlainText()
+
+        try:
+            # 🆕 FR-3: 메인 PromptEngineeringModule 훅 비활성화 (임시 창 자체 훅 사용)
+            self.main_window.app_context.skip_prompt_engineering_hook = True
+            print("[DEBUG] ✅ skip_prompt_engineering_hook = True 설정")
+
+            # 와일드카드 단독 모드 체크
+            is_wildcard_standalone = hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked()
+
+            if is_wildcard_standalone:
+                # 와일드카드 단독 모드: trigger_random_prompt()를 호출하지 않고 빈 프롬프트 사용
+                print("[DEBUG] 와일드카드 단독 모드: 랜덤 프롬프트 생성 건너뛰기")
+                new_main_prompt = ""  # 빈 프롬프트
+                new_negative_prompt = self.main_window.negative_prompt_textedit.toPlainText()
+            else:
+                # 일반 모드: 메인 UI의 프롬프트 생성 메서드 호출
+                if hasattr(self.main_window, 'trigger_random_prompt'):
+                    self.main_window.trigger_random_prompt()
+                else:
+                    print(f"⚠️ [TempWindowManager] MainWindow에 trigger_random_prompt 메서드가 없습니다")
+                    return
+
+                # 생성된 프롬프트 가져오기
+                new_main_prompt = self.main_window.main_prompt_textedit.toPlainText()
+                new_negative_prompt = self.main_window.negative_prompt_textedit.toPlainText()
+
+                print(f"[DEBUG] 메인 UI에서 생성된 프롬프트: {new_main_prompt[:50]}...")
+
+            # 🆕 FR-3: 임시 창의 프롬프트 엔지니어링 훅 수동 실행
+            if hasattr(temp_window, 'prompt_engineering_tab'):
+                print(f"[DEBUG] 임시 창 프롬프트 엔지니어링 훅 실행 중...")
+
+                # PromptContext 생성
+                from core.prompt_context import PromptContext
+                # pd는 이미 파일 상단에서 전역 import됨 (line 14)
+
+                # source_row 준비 (와일드카드 단독 모드 지원)
+                if hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked():
+                    # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
+                    empty_data = {
+                        'general': None,
+                        'character': None,
+                        'copyright': None,
+                        'artist': None,
+                        'meta': None
+                    }
+                    source_row = pd.Series(empty_data, name="wildcard_standalone")
+                    print(f"[DEBUG] 와일드카드 단독 모드: 빈 source_row 생성")
+                else:
+                    source_row = self.main_window.app_context.current_source_row
+                    if source_row is None:
+                        source_row = pd.Series({'general': None}, name="temp_window_random")
+
+                # tags 파싱 (쉼표로 분리)
+                input_tags = [tag.strip() for tag in new_main_prompt.split(',') if tag.strip()]
+
+                # PromptContext 초기화
+                temp_context = PromptContext(
+                    source_row=source_row,
+                    settings={},
+                    prefix_tags=[],
+                    main_tags=input_tags,
+                    postfix_tags=[]
+                )
+
+                # 수동 훅 실행
+                try:
+                    modified_context = temp_window.prompt_engineering_tab.execute_manual_hook(temp_context)
+
+                    # 수정된 태그를 다시 문자열로 결합
+                    all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+                    new_main_prompt = ', '.join(all_tags)
+
+                    print(f"[DEBUG] ✅ 임시 창 프롬프트 엔지니어링 적용 완료: {new_main_prompt[:50]}...")
+                except Exception as e:
+                    print(f"[DEBUG] ⚠️ 임시 창 프롬프트 엔지니어링 훅 실행 오류: {e}")
+            else:
+                print(f"[DEBUG] ⚠️ 임시 창에 prompt_engineering_tab이 없습니다")
+
+            # 임시 창에 프롬프트 업데이트
+            temp_window.update_prompts(new_main_prompt, new_negative_prompt)
+
+            print(f"[TempWindowManager] 임시 창 #{window_id} 프롬프트 업데이트 완료 (고정 모드: {is_fixed})")
+
+        finally:
+            # 🆕 FR-3: 메인 PromptEngineeringModule 훅 재활성화
+            self.main_window.app_context.skip_prompt_engineering_hook = False
+            print("[DEBUG] ✅ skip_prompt_engineering_hook = False 해제")
+
+            # 메인 UI 프롬프트 복원 (오염 방지)
+            self.main_window.main_prompt_textedit.setPlainText(original_main_prompt)
+            self.main_window.negative_prompt_textedit.setPlainText(original_negative_prompt)
+
+            print(f"[TempWindowManager] 메인 UI 프롬프트 복원 완료 (오염 방지)")
 
     def close_temp_window(self, window_id: int):
         """
@@ -527,7 +649,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 2501009")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 2501117")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -3032,7 +3154,10 @@ class ModernMainWindow(QMainWindow):
             # 🆕 기존 메인 UI의 생성 파라미터 복제
             temp_window.set_initial_params(self)
 
-            print(f"✅ [ModernMainWindow] 임시 창 #{temp_window.window_id} 생성 완료 (프롬프트 + 파라미터 복제됨)")
+            # 🆕 Issue 2 Fix: 메인 UI 모듈 상태 복제 (캐릭터 등)
+            temp_window.initialize_from_main_modules(self)
+
+            print(f"✅ [ModernMainWindow] 임시 창 #{temp_window.window_id} 생성 완료 (프롬프트 + 파라미터 + 모듈 상태 복제됨)")
         else:
             print("❌ [ModernMainWindow] TempWindowManager가 초기화되지 않았습니다")
 
@@ -3042,13 +3167,43 @@ class ModernMainWindow(QMainWindow):
 
         Args:
             window_id: 요청한 임시 창의 ID
-            params: 생성 파라미터 (input, negative_prompt)
+            params: 생성 파라미터 (input, negative_prompt, characters 등)
 
         임시 창의 프롬프트를 사용하여 GenerationController를 통해 생성 파이프라인을 실행합니다.
         """
-        print(f"📥 [ModernMainWindow] 임시 창 #{window_id}에서 생성 요청 수신")
+        print(f"\n{'='*80}")
+        print(f"📥 [ModernMainWindow] on_temp_window_generate_requested() 호출됨!")
+        print(f"📥 임시 창 ID: {window_id}")
+        print(f"📥 params keys: {list(params.keys()) if params else 'None'}")
+        print(f"{'='*80}\n")
 
         try:
+            # 🆕 FR-2-1: 임시 창 모드 플래그 설정
+            print(f"[DEBUG] temp_window_manager 타입: {type(self.temp_window_manager).__name__}")
+            print(f"[DEBUG] temp_windows 딕셔너리 keys: {list(self.temp_window_manager.temp_windows.keys())}")
+            print(f"[DEBUG] 찾으려는 window_id: {window_id} (type: {type(window_id).__name__})")
+
+            temp_window = self.temp_window_manager.temp_windows.get(window_id)
+            print(f"[DEBUG] temp_window.get({window_id}) 결과: {temp_window}")
+
+            if temp_window:
+                print(f"[DEBUG] ✅ 임시 창 #{window_id} 찾음. AppContext 플래그 설정 중...")
+                print(f"[DEBUG] temp_window.character_tab 타입: {type(temp_window.character_tab).__name__}")
+
+                # 플래그 설정
+                self.app_context.temp_window_mode = True
+                self.app_context.temp_window_character_tab = temp_window.character_tab
+
+                print(f"[DEBUG] ✅ temp_window_mode = True")
+                print(f"[DEBUG] ✅ temp_window_character_tab = {type(temp_window.character_tab).__name__}")
+            else:
+                print(f"[DEBUG] ⚠️⚠️⚠️ 임시 창 #{window_id}를 찾을 수 없습니다!")
+                print(f"[DEBUG] ⚠️ 가능한 원인:")
+                print(f"[DEBUG] ⚠️   1. window_id 불일치 (찾는 ID: {window_id}, 실제 keys: {list(self.temp_window_manager.temp_windows.keys())})")
+                print(f"[DEBUG] ⚠️   2. 임시 창이 아직 등록되지 않음")
+                print(f"[DEBUG] ⚠️   3. 임시 창이 이미 닫힘")
+                print(f"[DEBUG] ⚠️ 플래그 설정 건너뜀 → temp_window_mode는 False로 유지됨")
+
             # 생성 파라미터 수집
             main_prompt = params.get('input', '')
             negative_prompt = params.get('negative_prompt', '')
@@ -3057,11 +3212,8 @@ class ModernMainWindow(QMainWindow):
             print(f"  - Negative Prompt: {negative_prompt[:50]}{'...' if len(negative_prompt) > 50 else ''}")
 
             # GenerationController를 통해 생성 파이프라인 실행
-            # 임시 창의 프롬프트를 오버라이드로 전달
-            overrides = {
-                'input': main_prompt,
-                'negative_prompt': negative_prompt
-            }
+            # 모든 params를 그대로 전달 (characters 포함)
+            overrides = params.copy()
 
             # execute_generation_pipeline 호출
             # (GenerationController가 자동으로 큐에 추가하거나 즉시 실행)
@@ -3070,11 +3222,18 @@ class ModernMainWindow(QMainWindow):
                 print(f"✅ [ModernMainWindow] 임시 창 #{window_id} 생성 요청 처리 완료")
             else:
                 print("❌ [ModernMainWindow] GenerationController가 없습니다")
+                # 플래그 해제
+                self.app_context.temp_window_mode = False
+                self.app_context.temp_window_character_tab = None
 
         except Exception as e:
             print(f"❌ [ModernMainWindow] 임시 창 생성 요청 처리 중 오류: {e}")
             import traceback
             traceback.print_exc()
+
+            # 에러 발생 시 플래그 해제
+            self.app_context.temp_window_mode = False
+            self.app_context.temp_window_character_tab = None
 
     def apply_temp_params(self, params: dict):
         """
@@ -3083,92 +3242,153 @@ class ModernMainWindow(QMainWindow):
         Args:
             params: TempGenerationParamsWidget.collect_parameters()에서 반환된 딕셔너리
                     + input, negative_prompt
+                    + apply_sections (optional): 어떤 섹션을 적용할지 선택
         """
         print("[ModernMainWindow] 임시 창 파라미터를 메인 UI에 적용 중...")
 
+        # 선택적 적용 섹션 확인
+        apply_sections = params.get('apply_sections', {
+            'main_prompt': True,
+            'negative_prompt': True,
+            'generation_params': True,
+            'character': False,
+            'prompt_engineering': False
+        })
+
         try:
             # 1. 프롬프트 적용
-            if 'input' in params:
-                self.main_prompt_edit.setPlainText(params['input'])
+            if apply_sections.get('main_prompt', True) and 'input' in params:
+                self.main_prompt_textedit.setPlainText(params['input'])
                 print(f"  ✅ Main Prompt: {params['input'][:50]}{'...' if len(params['input']) > 50 else ''}")
 
-            if 'negative_prompt' in params:
-                self.negative_prompt_edit.setPlainText(params['negative_prompt'])
+            if apply_sections.get('negative_prompt', True) and 'negative_prompt' in params:
+                self.negative_prompt_textedit.setPlainText(params['negative_prompt'])
                 print(f"  ✅ Negative Prompt: {params['negative_prompt'][:50]}{'...' if len(params['negative_prompt']) > 50 else ''}")
 
-            # 2. 해상도 적용
-            if 'width' in params and 'height' in params:
-                resolution_text = f"{params['width']} x {params['height']}"
-                index = self.resolution_combo.findText(resolution_text, Qt.MatchFlag.MatchContains)
-                if index >= 0:
-                    self.resolution_combo.setCurrentIndex(index)
-                    print(f"  ✅ Resolution: {resolution_text}")
-
-            # 3. 기본 파라미터 적용
-            if 'steps' in params:
-                self.steps_spinbox.setValue(params['steps'])
-                print(f"  ✅ Steps: {params['steps']}")
-
-            if 'scale' in params:
-                self.cfg_scale_slider.setValue(int(params['scale'] * 10))
-                print(f"  ✅ CFG Scale: {params['scale']}")
-
-            if 'seed' in params:
-                self.seed_input.setText(str(params['seed']))
-                print(f"  ✅ Seed: {params['seed']}")
-
-            if 'sampler' in params:
-                index = self.sampler_combo.findText(params['sampler'])
-                if index >= 0:
-                    self.sampler_combo.setCurrentIndex(index)
-                    print(f"  ✅ Sampler: {params['sampler']}")
-
-            if 'noise_schedule' in params:
-                index = self.scheduler_combo.findText(params['noise_schedule'])
-                if index >= 0:
-                    self.scheduler_combo.setCurrentIndex(index)
-                    print(f"  ✅ Scheduler: {params['noise_schedule']}")
-
-            # 4. NAI 전용 파라미터
-            if self.app_context.get_api_mode() == "NAI":
-                if 'model' in params:
-                    index = self.model_combo.findText(params['model'])
+            # 2. 생성 파라미터 적용 (선택된 경우만)
+            if apply_sections.get('generation_params', True):
+                # 해상도 적용
+                if 'width' in params and 'height' in params:
+                    resolution_text = f"{params['width']} x {params['height']}"
+                    index = self.resolution_combo.findText(resolution_text, Qt.MatchFlag.MatchContains)
                     if index >= 0:
-                        self.model_combo.setCurrentIndex(index)
-                        print(f"  ✅ NAI Model: {params['model']}")
+                        self.resolution_combo.setCurrentIndex(index)
+                        print(f"  ✅ Resolution: {resolution_text}")
 
-                if 'cfg_rescale' in params:
-                    self.cfg_rescale_slider.setValue(int(params['cfg_rescale'] * 100))
-                    print(f"  ✅ CFG Rescale: {params['cfg_rescale']}")
+                # 기본 파라미터 적용
+                if 'steps' in params:
+                    self.steps_spinbox.setValue(params['steps'])
+                    print(f"  ✅ Steps: {params['steps']}")
 
-                # NAI 옵션 체크박스
-                if 'sm' in params:
-                    self.advanced_checkboxes['SMEA'].setChecked(params['sm'])
-                if 'sm_dyn' in params:
-                    self.advanced_checkboxes['DYN'].setChecked(params['sm_dyn'])
-                if 'variety_plus' in params:
-                    self.advanced_checkboxes['VAR+'].setChecked(params['variety_plus'])
-                if 'decrisper' in params:
-                    self.advanced_checkboxes['DECRISP'].setChecked(params['decrisper'])
+                if 'scale' in params:
+                    self.cfg_scale_slider.setValue(int(params['scale'] * 10))
+                    print(f"  ✅ CFG Scale: {params['scale']}")
 
-            # 5. WEBUI 전용 파라미터
-            elif self.app_context.get_api_mode() == "WEBUI":
-                if 'enable_hr' in params and hasattr(self, 'enable_hr_checkbox'):
-                    self.enable_hr_checkbox.setChecked(params['enable_hr'])
-                if 'hr_scale' in params and hasattr(self, 'hr_scale_spinbox'):
-                    self.hr_scale_spinbox.setValue(params['hr_scale'])
-                if 'hr_upscaler' in params and hasattr(self, 'hr_upscaler_combo'):
-                    index = self.hr_upscaler_combo.findText(params['hr_upscaler'])
+                if 'seed' in params:
+                    self.seed_input.setText(str(params['seed']))
+                    print(f"  ✅ Seed: {params['seed']}")
+
+                if 'sampler' in params:
+                    index = self.sampler_combo.findText(params['sampler'])
                     if index >= 0:
-                        self.hr_upscaler_combo.setCurrentIndex(index)
+                        self.sampler_combo.setCurrentIndex(index)
+                        print(f"  ✅ Sampler: {params['sampler']}")
 
-            # 6. 체크박스들
-            if 'random_resolution' in params:
-                self.random_resolution_checkbox.setChecked(params['random_resolution'])
-            if 'seed_fix' in params:
-                self.seed_fix_checkbox.setChecked(params['seed_fix'])
-            if 'auto_fit_resolution' in params:
-                self.auto_fit_resolution_checkbox.setChecked(params['auto_fit_resolution'])
+                if 'noise_schedule' in params:
+                    index = self.scheduler_combo.findText(params['noise_schedule'])
+                    if index >= 0:
+                        self.scheduler_combo.setCurrentIndex(index)
+                        print(f"  ✅ Scheduler: {params['noise_schedule']}")
+
+                # NAI 전용 파라미터
+                if self.app_context.get_api_mode() == "NAI":
+                    if 'model' in params:
+                        index = self.model_combo.findText(params['model'])
+                        if index >= 0:
+                            self.model_combo.setCurrentIndex(index)
+                            print(f"  ✅ NAI Model: {params['model']}")
+
+                    if 'cfg_rescale' in params:
+                        self.cfg_rescale_slider.setValue(int(params['cfg_rescale'] * 100))
+                        print(f"  ✅ CFG Rescale: {params['cfg_rescale']}")
+
+                    # NAI 옵션 체크박스
+                    if 'sm' in params:
+                        self.advanced_checkboxes['SMEA'].setChecked(params['sm'])
+                    if 'sm_dyn' in params:
+                        self.advanced_checkboxes['DYN'].setChecked(params['sm_dyn'])
+                    if 'variety_plus' in params:
+                        self.advanced_checkboxes['VAR+'].setChecked(params['variety_plus'])
+                    if 'decrisper' in params:
+                        self.advanced_checkboxes['DECRISP'].setChecked(params['decrisper'])
+
+                # WEBUI 전용 파라미터
+                elif self.app_context.get_api_mode() == "WEBUI":
+                    if 'enable_hr' in params and hasattr(self, 'enable_hr_checkbox'):
+                        self.enable_hr_checkbox.setChecked(params['enable_hr'])
+                    if 'hr_scale' in params and hasattr(self, 'hr_scale_spinbox'):
+                        self.hr_scale_spinbox.setValue(params['hr_scale'])
+                    if 'hr_upscaler' in params and hasattr(self, 'hr_upscaler_combo'):
+                        index = self.hr_upscaler_combo.findText(params['hr_upscaler'])
+                        if index >= 0:
+                            self.hr_upscaler_combo.setCurrentIndex(index)
+
+                # 체크박스들
+                if 'random_resolution' in params:
+                    self.random_resolution_checkbox.setChecked(params['random_resolution'])
+                if 'seed_fix' in params:
+                    self.seed_fix_checkbox.setChecked(params['seed_fix'])
+                if 'auto_fit_resolution' in params:
+                    self.auto_fit_resolution_checkbox.setChecked(params['auto_fit_resolution'])
+
+            # 3. 캐릭터 적용 (선택된 경우만)
+            if apply_sections.get('character', False):
+                if 'temp_window_character_tab' in params:
+                    # VirtualCharacterTab에서 텍스트만 추출하여 메인 CharacterModule에 덤핑
+                    temp_char_tab = params['temp_window_character_tab']
+                    character_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+
+                    if character_module and temp_char_tab and hasattr(temp_char_tab, 'get_display_text'):
+                        # VirtualCharacterTab에서 표시 중인 텍스트 가져오기
+                        display_text = temp_char_tab.get_display_text()
+
+                        if display_text:
+                            # CharacterModule의 첫 번째 캐릭터 위젯에 텍스트 덤핑
+                            if hasattr(character_module, 'character_widgets') and len(character_module.character_widgets) > 0:
+                                first_widget = character_module.character_widgets[0]
+                                if hasattr(first_widget, 'prompt_textbox'):
+                                    first_widget.prompt_textbox.setPlainText(display_text)
+                                    # 체크박스 활성화
+                                    if hasattr(first_widget, 'active_checkbox'):
+                                        first_widget.active_checkbox.setChecked(True)
+                                    print(f"  ✅ Character: 첫 번째 위젯에 텍스트 덤핑 완료 ({len(display_text)} 문자)")
+                            else:
+                                print(f"  ⚠️ Character: character_widgets를 찾을 수 없거나 비어있음")
+                        else:
+                            print(f"  ⚠️ Character: 덤핑할 텍스트가 비어있음")
+
+            # 4. 프롬프트 엔지니어링 적용 (선택된 경우만)
+            if apply_sections.get('prompt_engineering', False):
+                if 'temp_window_prompt_engineering_tab' in params:
+                    # 프롬프트 엔지니어링 모듈을 통해 설정 적용
+                    pe_module = self.app_context.middle_section_controller.get_module_instance("PromptEngineeringModule")
+                    temp_pe_tab = params['temp_window_prompt_engineering_tab']
+                    if pe_module and temp_pe_tab:
+                        # 텍스트 필드 복사
+                        if hasattr(temp_pe_tab, 'pre_textedit') and hasattr(pe_module, 'pre_textedit'):
+                            pe_module.pre_textedit.setPlainText(temp_pe_tab.pre_textedit.toPlainText())
+                        if hasattr(temp_pe_tab, 'post_textedit') and hasattr(pe_module, 'post_textedit'):
+                            pe_module.post_textedit.setPlainText(temp_pe_tab.post_textedit.toPlainText())
+                        if hasattr(temp_pe_tab, 'auto_hide_textedit') and hasattr(pe_module, 'auto_hide_textedit'):
+                            pe_module.auto_hide_textedit.setPlainText(temp_pe_tab.auto_hide_textedit.toPlainText())
+
+                        # 체크박스 복사
+                        if hasattr(temp_pe_tab, 'preprocessing_checkboxes') and hasattr(pe_module, 'preprocessing_checkboxes'):
+                            for key, checkbox in temp_pe_tab.preprocessing_checkboxes.items():
+                                if key in pe_module.preprocessing_checkboxes:
+                                    pe_module.preprocessing_checkboxes[key].setChecked(checkbox.isChecked())
+
+                        print(f"  ✅ Prompt Engineering: 설정 적용됨")
 
             print(f"✅ [ModernMainWindow] 임시 창 파라미터 적용 완료: {len(params)} 항목")
 

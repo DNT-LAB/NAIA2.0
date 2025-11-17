@@ -986,6 +986,178 @@ class MyModule(BaseMiddleModule):
         return widget
 ```
 
+### Skip Flag 패턴 (임시 창 이중 실행 방지)
+
+**목적**: 임시 생성 창(Temporary Generation Window)과 메인 UI에서 동일한 파이프라인 훅이 중복 실행되는 것을 방지합니다.
+
+**사용 사례**: 임시 창에서 Random/Next Prompt 버튼을 누를 때, 메인 UI의 훅과 임시 창의 Virtual Module 훅이 동시에 실행되어 서로 다른 규칙이 적용되는 문제를 해결합니다.
+
+#### 문제 상황
+
+임시 창에서 Random Prompt를 생성할 때, 다음과 같은 문제가 발생합니다:
+
+```
+Random/Next Prompt 버튼 클릭
+    ↓
+메인 UI trigger_random_prompt() 호출 (메인 UI 프롬프트 생성 로직 재사용)
+    ↓
+🔧 메인 PromptEngineeringModule.execute_pipeline_hook() 실행
+   → Auto Hide: 태그 A, B, C 제거
+    ↓
+🔧 임시 창 VirtualPromptEngineeringTab.execute_manual_hook() 실행
+   → Auto Hide: 태그 D, E, F 제거
+    ↓
+❌ 결과: 서로 다른 Auto Hide 규칙이 중복 적용되어 의도하지 않은 태그 제거
+```
+
+#### 해결책: AppContext Skip Flag
+
+**핵심 아이디어**: AppContext에 동적 플래그를 추가하여, 특정 조건에서 메인 모듈의 훅 실행을 건너뜁니다.
+
+**구현 단계**:
+
+1. **AppContext에 플래그 추가** (동적 속성, 명시적 선언 불필요):
+```python
+# core/context.py (자동으로 추가됨)
+# 사용 시 setattr/getattr로 동적 설정
+self.app_context.skip_prompt_engineering_hook = False
+```
+
+2. **메인 모듈에서 플래그 확인** (`modules/prompt_engineering_module.py:343-346`):
+```python
+def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
+    """기존 파이프라인 훅 로직 유지"""
+
+    # 🆕 임시 창 프롬프트 생성 중에는 메인 UI 훅 건너뛰기
+    if hasattr(self, 'app_context') and getattr(self.app_context, 'skip_prompt_engineering_hook', False):
+        print("[DEBUG] 🚫 메인 PromptEngineeringModule 훅 건너뛰기 (임시 창 프롬프트 생성 중)")
+        return context
+
+    print("🔧 프롬프트 엔지니어링 훅 실행...")
+
+    # ... 기존 로직 계속 실행 ...
+    # 프리픽스 태그 추가
+    # 포스트픽스 태그 추가
+    # Auto Hide 처리
+    # 전처리 옵션 적용
+
+    return context
+```
+
+3. **임시 창 관리자에서 플래그 제어** (`NAIA_cold_v4.py:521-586`):
+```python
+class TempWindowManager:
+    def handle_random_prompt_request(self, temp_window):
+        """임시 창에서 Random/Next Prompt 요청 처리"""
+        try:
+            # 🆕 메인 PromptEngineeringModule 훅 비활성화
+            self.main_window.app_context.skip_prompt_engineering_hook = True
+            print("[DEBUG] ✅ skip_prompt_engineering_hook = True 설정")
+
+            # 메인 UI의 Random Prompt 생성 로직 호출
+            new_main_prompt = self.main_window.trigger_random_prompt()
+
+            # 🆕 임시 창의 프롬프트 엔지니어링 훅 수동 실행
+            if hasattr(temp_window, 'prompt_engineering_tab'):
+                print(f"[DEBUG] 임시 창 프롬프트 엔지니어링 훅 실행 중...")
+
+                # PromptContext 생성
+                from core.prompt_context import PromptContext
+                import pandas as pd
+
+                source_row = self.main_window.app_context.current_source_row
+                if source_row is None:
+                    source_row = pd.Series({'general': None}, name="temp_window_random")
+
+                # tags 파싱
+                input_tags = [tag.strip() for tag in new_main_prompt.split(',') if tag.strip()]
+
+                # PromptContext 초기화
+                temp_context = PromptContext(
+                    source_row=source_row,
+                    settings={},
+                    prefix_tags=[],
+                    main_tags=input_tags,
+                    postfix_tags=[]
+                )
+
+                # 수동 훅 실행
+                try:
+                    modified_context = temp_window.prompt_engineering_tab.execute_manual_hook(temp_context)
+                    all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+                    new_main_prompt = ', '.join(all_tags)
+                    print(f"[DEBUG] ✅ 임시 창 프롬프트 엔지니어링 적용 완료")
+                except Exception as e:
+                    print(f"[DEBUG] ⚠️ 임시 창 프롬프트 엔지니어링 훅 실행 오류: {e}")
+
+            # 임시 창에 최종 프롬프트 적용
+            temp_window.main_prompt_input.setPlainText(new_main_prompt)
+
+        finally:
+            # 🆕 메인 PromptEngineeringModule 훅 재활성화 (필수!)
+            self.main_window.app_context.skip_prompt_engineering_hook = False
+            print("[DEBUG] ✅ skip_prompt_engineering_hook = False 해제")
+```
+
+#### 실행 흐름 (수정 후)
+
+```
+Random/Next Prompt 버튼 클릭 (임시 창)
+    ↓
+skip_prompt_engineering_hook = True 설정
+    ↓
+메인 UI trigger_random_prompt() 호출
+    ↓
+🚫 메인 PromptEngineeringModule 훅 건너뛰기 (플래그 체크)
+    ↓
+프롬프트 생성 완료 (메인 UI 로직만 적용)
+    ↓
+🔧 임시 창 VirtualPromptEngineeringTab.execute_manual_hook() 실행
+   → Auto Hide: 태그 D, E, F 제거 (임시 창 규칙 적용)
+    ↓
+skip_prompt_engineering_hook = False 해제 (finally 블록)
+    ↓
+✅ 결과: 임시 창 Auto Hide 규칙만 정확히 적용됨
+```
+
+#### 중요 포인트
+
+1. **finally 블록 필수**: 예외 발생 시에도 플래그를 반드시 해제해야 합니다.
+   ```python
+   try:
+       self.app_context.skip_xxx_hook = True
+       # ... 작업 ...
+   finally:
+       self.app_context.skip_xxx_hook = False  # 필수!
+   ```
+
+2. **getattr 안전 접근**: 플래그가 없을 경우 기본값 False 반환
+   ```python
+   if getattr(self.app_context, 'skip_xxx_hook', False):
+       return context
+   ```
+
+3. **디버깅 로그**: 플래그 설정/해제 시점 확인
+   ```python
+   print(f"[DEBUG] ✅ skip_xxx_hook = {value}")
+   ```
+
+4. **확장 가능**: 다른 모듈에도 동일한 패턴 적용 가능
+   - `skip_character_hook`
+   - `skip_wildcard_hook`
+   - `skip_conditional_prompt_hook`
+
+#### 관련 파일
+
+- `modules/prompt_engineering_module.py:343-346` - Skip flag 체크
+- `NAIA_cold_v4.py:521-586` - Flag 관리 (TempWindowManager)
+- `ui/virtual_prompt_engineering_tab.py` - Virtual Module 구현
+- `core/generation_controller.py:375-411` - Manual hook execution
+
+#### 참고 사항
+
+- **Virtual Module 패턴과의 조합**: Skip Flag는 Virtual Module 패턴과 함께 사용되어 임시 창 시스템의 독립성을 보장합니다. 자세한 내용은 `ui/CLAUDE.md`의 "임시 생성 창 시스템" 섹션을 참고하세요.
+
 ---
 
 ## 문제 해결

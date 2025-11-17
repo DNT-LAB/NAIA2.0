@@ -339,6 +339,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
         """기존 파이프라인 훅 로직 유지"""
+
+        # 🆕 FR-3: 임시 창 프롬프트 생성 중에는 메인 UI 훅 건너뛰기
+        if hasattr(self, 'app_context') and getattr(self.app_context, 'skip_prompt_engineering_hook', False):
+            print("[DEBUG] 🚫 메인 PromptEngineeringModule 훅 건너뛰기 (임시 창 프롬프트 생성 중)")
+            return context
+
         print("🔧 프롬프트 엔지니어링 훅 실행...")
 
         options = self.get_parameters()

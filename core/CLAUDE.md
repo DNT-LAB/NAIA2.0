@@ -709,6 +709,169 @@ def _force_cleanup_all_threads():
 
 **중요**: 모든 API 호출 후 반드시 `_force_cleanup_all_threads()` 호출!
 
+#### 임시 창 Virtual Module 훅 수동 실행
+
+**파일**: `core/generation_controller.py:375-411`
+
+임시 생성 창(Temporary Generation Window) 시스템에서는 AppContext 파이프라인을 우회하고 Virtual Module의 훅을 **수동으로 실행**합니다.
+
+**배경**: 임시 창은 메인 UI와 독립적으로 동작하며, 메인 UI 모듈의 훅을 실행하지 않고 자체 Virtual Module의 훅을 실행해야 합니다.
+
+**구현**:
+
+```python
+# 🆕 임시 창 프롬프트 엔지니어링 훅 수동 실행
+if 'temp_window_prompt_engineering_tab' in params:
+    prompt_eng_tab = params['temp_window_prompt_engineering_tab']
+    print(f"[TempWindow] 프롬프트 엔지니어링 훅 수동 실행 중...")
+
+    # PromptContext 생성
+    from core.prompt_context import PromptContext
+    import pandas as pd
+
+    source_row = self.context.current_source_row
+    if source_row is None:
+        source_row = pd.Series({'general': None}, name="temp_window")
+
+    # tags 파싱 (쉼표로 분리)
+    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
+
+    # PromptContext 초기화
+    temp_context = PromptContext(
+        source_row=source_row,
+        settings=params,
+        prefix_tags=[],
+        main_tags=input_tags,
+        postfix_tags=[]
+    )
+
+    # 수동 훅 실행
+    try:
+        modified_context = prompt_eng_tab.execute_manual_hook(temp_context)
+
+        # 수정된 태그를 다시 문자열로 결합
+        all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+        params['input'] = ', '.join(all_tags)
+
+        print(f"✅ [TempWindow] 프롬프트 엔지니어링 적용 완료: '{params['input'][:50]}...'")
+    except Exception as e:
+        print(f"⚠️ [TempWindow] 프롬프트 엔지니어링 훅 실행 오류: {e}")
+```
+
+**실행 위치**: 와일드카드 확장 이후, API 호출 이전 (일반 파이프라인의 `post_processing` 훅 포인트와 동일한 위치)
+
+**파라미터 전달 방법**:
+
+임시 창에서 생성 요청 시, Virtual Module 참조를 파라미터에 포함:
+
+```python
+# ui/temp_generation_window.py:277-283
+def generate_single_image(self):
+    params = self._collect_generation_params()
+
+    # Virtual Module 참조 전달
+    if hasattr(self, 'prompt_engineering_tab'):
+        params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+
+    # 생성 요청
+    self.app_context.generation_controller.generate_image(params)
+```
+
+**Virtual Module 구조**:
+
+- **파일**: `ui/virtual_prompt_engineering_tab.py`
+- **클래스**: `VirtualPromptEngineeringTab(QWidget)`
+- **메서드**: `execute_manual_hook(context: PromptContext) -> PromptContext`
+- **특징**: AppContext 파이프라인에 등록되지 않음, 메인 모듈 로직 복제
+
+**관련 패턴**:
+
+- **Virtual Module 패턴**: `ui/CLAUDE.md` → "임시 생성 창 시스템" 섹션
+- **Skip Flag 패턴**: `modules/CLAUDE.md` → "고급 패턴" → "Skip Flag 패턴"
+
+#### 와일드카드 단독 모드 (Wildcard Standalone Mode)
+
+**위치**: `core/generation_controller.py:384-399`
+
+**목적**: 임시 창에서 데이터베이스 태그 없이 와일드카드만으로 프롬프트를 생성할 수 있도록 지원합니다.
+
+**동작 원리**:
+
+임시 창에서 `wildcard_standalone` 파라미터가 `True`로 전달되면, `source_row`를 빈 데이터(`pd.Series` with all `None` values)로 생성하여 데이터베이스 태그가 프롬프트에 추가되지 않도록 합니다.
+
+**구현**:
+
+```python
+# core/generation_controller.py:384-399
+# source_row 준비 (와일드카드 단독 모드 지원)
+if params.get('wildcard_standalone', False):
+    # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
+    empty_data = {
+        'general': None,
+        'character': None,
+        'copyright': None,
+        'artist': None,
+        'meta': None
+    }
+    source_row = pd.Series(empty_data, name="wildcard_standalone")
+    print(f"[TempWindow] 와일드카드 단독 모드: 빈 source_row 생성")
+else:
+    source_row = self.context.current_source_row
+    if source_row is None:
+        source_row = pd.Series({'general': None}, name="temp_window")
+```
+
+**파라미터 전달 방법**:
+
+임시 창에서 와일드카드 단독 모드 체크박스 상태를 파라미터에 포함:
+
+```python
+# ui/temp_generation_window.py:286-287
+def _collect_generation_params(self) -> dict:
+    params = {
+        'input': self.main_prompt_input.toPlainText(),
+        'negative_prompt': self.negative_prompt_input.toPlainText(),
+        # ...
+    }
+
+    # 와일드카드 단독 모드 플래그
+    if hasattr(self, 'wildcard_standalone_checkbox'):
+        params['wildcard_standalone'] = self.wildcard_standalone_checkbox.isChecked()
+
+    return params
+```
+
+**Random Prompt 처리**:
+
+임시 창의 Random/Next Prompt 버튼에서도 와일드카드 단독 모드를 지원합니다:
+
+```python
+# NAIA_cold_v4.py:547-562 (TempWindowManager.handle_random_prompt_request)
+# source_row 준비 (와일드카드 단독 모드 지원)
+if hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked():
+    empty_data = {
+        'general': None,
+        'character': None,
+        'copyright': None,
+        'artist': None,
+        'meta': None
+    }
+    source_row = pd.Series(empty_data, name="wildcard_standalone")
+    print(f"[DEBUG] 와일드카드 단독 모드: 빈 source_row 생성")
+else:
+    source_row = self.app_context.current_source_row
+```
+
+**사용 시나리오**:
+
+1. **와일드카드만 사용**: 데이터베이스의 랜덤 태그 없이 와일드카드만으로 프롬프트 구성
+2. **프롬프트 엔지니어링 테스트**: Virtual Module의 프리픽스/포스트픽스/Auto Hide 기능만 테스트
+3. **커스텀 프롬프트 생성**: 사용자가 직접 입력한 태그만 사용
+
+**관련 문서**:
+
+- **UI 구현**: `ui/CLAUDE.md` → "임시 생성 창 시스템" → "TempGenerationWindow 추가 기능" → "2. 와일드카드 단독 모드"
+
 ### ImageCrudController: 이미지 파일 관리 컨트롤러
 
 **파일**: `core/image_crud_controller.py:1-700+`

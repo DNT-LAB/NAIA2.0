@@ -372,6 +372,56 @@ class GenerationController:
                 if processed_negative_prompt != negative_prompt:
                     print(f"➖ Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
 
+                # --- 🆕 FR-3: 임시 창 프롬프트 엔지니어링 훅 수동 실행 ---
+                if 'temp_window_prompt_engineering_tab' in params:
+                    prompt_eng_tab = params['temp_window_prompt_engineering_tab']
+                    print(f"[TempWindow] 프롬프트 엔지니어링 훅 수동 실행 중...")
+
+                    # PromptContext 생성
+                    from core.prompt_context import PromptContext
+                    # pd는 이미 파일 상단에서 전역 import됨 (line 10)
+
+                    # source_row 준비 (와일드카드 단독 모드 지원)
+                    if params.get('wildcard_standalone', False):
+                        # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
+                        empty_data = {
+                            'general': None,
+                            'character': None,
+                            'copyright': None,
+                            'artist': None,
+                            'meta': None
+                        }
+                        source_row = pd.Series(empty_data, name="wildcard_standalone")
+                        print(f"[TempWindow] 와일드카드 단독 모드: 빈 source_row 생성")
+                    else:
+                        source_row = self.context.current_source_row
+                        if source_row is None:
+                            source_row = pd.Series({'general': None}, name="temp_window")
+
+                    # tags 파싱 (쉼표로 분리)
+                    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
+
+                    # PromptContext 초기화
+                    temp_context = PromptContext(
+                        source_row=source_row,
+                        settings=params,
+                        prefix_tags=[],
+                        main_tags=input_tags,
+                        postfix_tags=[]
+                    )
+
+                    # 수동 훅 실행
+                    try:
+                        modified_context = prompt_eng_tab.execute_manual_hook(temp_context)
+
+                        # 수정된 태그를 다시 문자열로 결합
+                        all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+                        params['input'] = ', '.join(all_tags)
+
+                        print(f"✅ [TempWindow] 프롬프트 엔지니어링 적용 완료: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                    except Exception as e:
+                        print(f"⚠️ [TempWindow] 프롬프트 엔지니어링 훅 실행 오류: {e}")
+
                 # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
                 # processed_input = self._apply_conditional_prompts(params['input'])
                 # if processed_input != params['input']:
@@ -783,8 +833,20 @@ class GenerationController:
             # UI 상태 업데이트
             self._update_button_with_queue_size()
 
+            # 🆕 FR-2-1: 임시 창 모드 플래그 해제
+            if self.context.temp_window_mode:
+                print(f"[DEBUG] 생성 완료. 임시 창 모드 플래그 해제")
+                self.context.temp_window_mode = False
+                self.context.temp_window_character_tab = None
+
         except Exception as _e:
             print(f"[GEN] thread-finish 후 디스패치 오류: {_e}")
+
+            # 에러 발생 시에도 플래그 해제
+            if self.context.temp_window_mode:
+                print(f"[DEBUG] 에러 발생. 임시 창 모드 플래그 강제 해제")
+                self.context.temp_window_mode = False
+                self.context.temp_window_character_tab = None
 
     def _expand_wildcards_in_input(self, input_text: str, negative_prompt: str = "") -> tuple[str, str]:
         """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)
@@ -802,7 +864,7 @@ class GenerationController:
             else:
                 # 컨텍스트가 없으면 새로 생성하여 AppContext에 저장
                 from core.prompt_context import PromptContext
-                import pandas as pd
+                # pd는 이미 파일 상단에서 전역 import됨 (line 10)
 
                 self.context.current_prompt_context = PromptContext(
                     source_row=pd.Series(),

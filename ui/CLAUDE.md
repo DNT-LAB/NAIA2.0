@@ -15,11 +15,12 @@
 7. [해상도 관리 다이얼로그](#해상도-관리-다이얼로그)
 8. [RightView 탭 컨테이너](#rightview-탭-컨테이너)
 9. [분리 창 시스템](#분리-창-시스템)
-10. [실전 예제](#실전-예제)
-11. [문제 해결](#문제-해결)
-12. [체크리스트](#체크리스트)
-13. [참고 자료](#참고-자료)
-14. [요약](#요약)
+10. [임시 생성 창 시스템](#임시-생성-창-시스템)
+11. [실전 예제](#실전-예제)
+12. [문제 해결](#문제-해결)
+13. [체크리스트](#체크리스트)
+14. [참고 자료](#참고-자료)
+15. [요약](#요약)
 
 ---
 
@@ -1351,6 +1352,714 @@ detached.show()
 detached.raise_()
 detached.activateWindow()
 ```
+
+---
+
+## 임시 생성 창 시스템
+
+### 개요
+
+**파일**: `ui/temp_generation_window.py`, `ui/temp_generation_params.py`
+
+임시 생성 창 (Temporary Generation Window) 시스템은 메인 UI와 독립적으로 이미지를 생성할 수 있는 별도의 창을 제공합니다. 이 시스템의 핵심은 **Virtual Module 패턴**으로, 메인 UI 모듈의 경량 복제본을 생성하여 AppContext 파이프라인을 우회합니다.
+
+#### 주요 특징
+
+- 🔄 **독립 생성**: 메인 UI와 별도로 이미지 생성 가능
+- 🧩 **Virtual Module 패턴**: 메인 모듈의 상태 복사 및 독립 실행
+- 🎯 **Manual Hook Execution**: AppContext 파이프라인 대신 직접 훅 실행
+- 🔒 **Skip Flag 패턴**: 메인 UI 훅과 충돌 방지
+- 📋 **Full-Tab 스크롤**: 전체 탭 스크롤 가능 UI 패턴
+
+### Virtual Module 패턴
+
+Virtual Module은 메인 UI 모듈의 **UI와 로직을 복제**하지만, AppContext 파이프라인에 등록되지 않는 경량 버전입니다.
+
+#### 설계 원칙
+
+1. **독립성**: AppContext 파이프라인에 등록하지 않음
+2. **상태 복사**: `initialize_from_main()` 메서드로 메인 모듈 상태 복제
+3. **수동 훅 실행**: `execute_manual_hook()` 메서드로 직접 파이프라인 로직 실행
+4. **충돌 방지**: Skip flag로 메인 모듈 훅과 동시 실행 방지
+
+#### 구현 예시: VirtualPromptEngineeringTab
+
+**파일**: `ui/virtual_prompt_engineering_tab.py:1-470`
+
+```python
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QTextEdit, QCheckBox
+from core.context import AppContext
+from core.prompt_context import PromptContext
+from ui.theme import DARK_COLORS, DARK_STYLES
+
+class VirtualPromptEngineeringTab(QWidget):
+    """
+    Virtual Module for Prompt Engineering in Temporary Generation Window.
+
+    이 모듈은 메인 PromptEngineeringModule의 UI와 로직을 복제하지만,
+    AppContext 파이프라인에 등록되지 않고 수동으로 훅을 실행합니다.
+    """
+
+    def __init__(self, app_context: AppContext, parent=None):
+        super().__init__(parent)
+        self.app_context = app_context
+        self.main_module = None  # 메인 모듈 참조
+
+        # UI 위젯 참조
+        self.pre_textedit = None
+        self.post_textedit = None
+        self.auto_hide_textedit = None
+        self.preprocessing_checkboxes = {}
+
+        # 옵션 키 매핑
+        self.option_key_map = {
+            "랜덤 프롬프트의 작가명을 제거": "remove_author",
+            "랜덤 프롬프트의 캐릭터명을 제거": "remove_character",
+            # ... 7개 옵션
+        }
+
+        self.init_ui()
+
+    def init_ui(self):
+        """Full-tab 스크롤 패턴으로 UI 구성"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 스크롤 영역 생성
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
+
+        # 실제 콘텐츠 위젯
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+
+        # 프리픽스 섹션
+        self.pre_textedit = QTextEdit()
+        self.pre_textedit.setAcceptRichText(False)  # 필수!
+        self.pre_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
+        content_layout.addWidget(self.pre_textedit)
+
+        # ... 나머지 UI 구성 ...
+
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
+
+    def initialize_from_main(self, main_module):
+        """
+        메인 PromptEngineeringModule에서 상태를 복사합니다.
+
+        Parameters:
+            main_module: PromptEngineeringModule 인스턴스
+        """
+        self.main_module = main_module
+
+        # 텍스트 필드 복사
+        if hasattr(main_module, 'pre_textedit') and main_module.pre_textedit:
+            self.pre_textedit.setPlainText(main_module.pre_textedit.toPlainText())
+
+        if hasattr(main_module, 'post_textedit') and main_module.post_textedit:
+            self.post_textedit.setPlainText(main_module.post_textedit.toPlainText())
+
+        # ... 체크박스 상태 복사 ...
+
+    def execute_manual_hook(self, context: PromptContext) -> PromptContext:
+        """
+        수동 파이프라인 훅 실행 (메인 모듈 로직 복제).
+
+        이 메서드는 GenerationController에서 직접 호출되며,
+        메인 PromptEngineeringModule.execute_pipeline_hook()과 동일한 로직을 실행합니다.
+
+        Parameters:
+            context (PromptContext): 프롬프트 컨텍스트
+
+        Returns:
+            PromptContext: 수정된 컨텍스트
+        """
+        print("🔧 [VirtualPromptEngineeringTab] 프롬프트 엔지니어링 훅 수동 실행...")
+
+        # 프리픽스 태그 추가
+        prefix_text = self.pre_textedit.toPlainText().strip()
+        if prefix_text:
+            prefix_tags = [tag.strip() for tag in prefix_text.split(',') if tag.strip()]
+            context.prefix_tags = prefix_tags + context.prefix_tags
+
+        # 포스트픽스 태그 추가
+        postfix_text = self.post_textedit.toPlainText().strip()
+        if postfix_text:
+            postfix_tags = [tag.strip() for tag in postfix_text.split(',') if tag.strip()]
+            context.postfix_tags = context.postfix_tags + postfix_tags
+
+        # Auto Hide 처리 (복잡한 로직)
+        auto_hide_text = self.auto_hide_textedit.toPlainText().strip()
+        if auto_hide_text:
+            # ~ 보호 키워드 처리
+            # 패턴 매칭 및 태그 제거
+            # ... 470줄의 로직 ...
+
+        # 전처리 옵션 적용 (7개 체크박스)
+        # - 작가명 제거
+        # - 캐릭터명 제거
+        # - 특수 태그 제거 등
+
+        return context
+```
+
+### Manual Hook Execution 패턴
+
+Virtual Module의 훅은 AppContext 파이프라인에 등록되지 않고, GenerationController에서 직접 호출됩니다.
+
+#### GenerationController 통합
+
+**파일**: `core/generation_controller.py:375-411`
+
+```python
+# 임시 창 프롬프트 엔지니어링 훅 수동 실행
+if 'temp_window_prompt_engineering_tab' in params:
+    prompt_eng_tab = params['temp_window_prompt_engineering_tab']
+    print(f"[TempWindow] 프롬프트 엔지니어링 훅 수동 실행 중...")
+
+    # PromptContext 생성
+    from core.prompt_context import PromptContext
+    import pandas as pd
+
+    source_row = self.context.current_source_row
+    if source_row is None:
+        source_row = pd.Series({'general': None}, name="temp_window")
+
+    # tags 파싱 (쉼표로 분리)
+    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
+
+    # PromptContext 초기화
+    temp_context = PromptContext(
+        source_row=source_row,
+        settings=params,
+        prefix_tags=[],
+        main_tags=input_tags,
+        postfix_tags=[]
+    )
+
+    # 수동 훅 실행
+    try:
+        modified_context = prompt_eng_tab.execute_manual_hook(temp_context)
+
+        # 수정된 태그를 다시 문자열로 결합
+        all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+        params['input'] = ', '.join(all_tags)
+
+        print(f"✅ [TempWindow] 프롬프트 엔지니어링 적용 완료")
+    except Exception as e:
+        print(f"⚠️ [TempWindow] 프롬프트 엔지니어링 훅 실행 오류: {e}")
+```
+
+#### TempGenerationWindow 통합
+
+**파일**: `ui/temp_generation_window.py:234-283`
+
+```python
+# Virtual Module 생성
+self.prompt_engineering_tab = VirtualPromptEngineeringTab(self.app_context)
+self.tab_widget.addTab(self.prompt_engineering_tab, "🔧 프롬프트 엔지니어링")
+
+# 초기화 (메인 모듈에서 상태 복사)
+def initialize_from_main_window(self, main_window):
+    main_pe_module = main_window.app_context.middle_section_controller.get_module_instance("PromptEngineeringModule")
+    if main_pe_module:
+        self.prompt_engineering_tab.initialize_from_main(main_pe_module)
+
+# 생성 파라미터에 Virtual Module 참조 전달
+def generate_single_image(self):
+    params = self._collect_generation_params()
+
+    # Virtual Module 참조 전달
+    if hasattr(self, 'prompt_engineering_tab'):
+        params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+
+    # 생성 요청
+    self.app_context.generation_controller.generate_image(params)
+```
+
+### Skip Flag 패턴 (Double Execution 방지)
+
+임시 창에서 Random/Next Prompt 버튼을 누를 때, 메인 UI의 PromptEngineeringModule 훅과 임시 창의 VirtualPromptEngineeringTab 훅이 **동시에 실행되는 것을 방지**합니다.
+
+#### 문제 상황
+
+```
+Random/Next Prompt 버튼 클릭
+    ↓
+메인 UI trigger_random_prompt() 호출
+    ↓
+🔧 메인 PromptEngineeringModule 훅 실행 (Auto Hide: 태그 A, B, C 제거)
+    ↓
+🔧 임시 창 VirtualPromptEngineeringTab 훅 실행 (Auto Hide: 태그 D, E, F 제거)
+    ↓
+❌ 결과: 서로 다른 Auto Hide 규칙이 중복 적용됨
+```
+
+#### 해결책: Skip Flag
+
+**AppContext 플래그 추가**:
+```python
+# core/context.py (자동 추가됨, 명시적 선언 불필요)
+self.skip_prompt_engineering_hook = False  # 동적 속성
+```
+
+**메인 모듈에서 플래그 확인** (`modules/prompt_engineering_module.py:343-346`):
+```python
+def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
+    """기존 파이프라인 훅 로직 유지"""
+
+    # 임시 창 프롬프트 생성 중에는 메인 UI 훅 건너뛰기
+    if hasattr(self, 'app_context') and getattr(self.app_context, 'skip_prompt_engineering_hook', False):
+        print("[DEBUG] 🚫 메인 PromptEngineeringModule 훅 건너뛰기 (임시 창 프롬프트 생성 중)")
+        return context
+
+    print("🔧 프롬프트 엔지니어링 훅 실행...")
+    # ... 기존 로직 계속 ...
+```
+
+**TempWindowManager에서 플래그 관리** (`NAIA_cold_v4.py:521-586`):
+```python
+def handle_random_prompt_request(self, temp_window):
+    try:
+        # 메인 PromptEngineeringModule 훅 비활성화
+        self.main_window.app_context.skip_prompt_engineering_hook = True
+        print("[DEBUG] ✅ skip_prompt_engineering_hook = True 설정")
+
+        # Random Prompt 생성 (메인 UI 훅 건너뜀)
+        new_main_prompt = self.main_window.trigger_random_prompt()
+
+        # 임시 창의 프롬프트 엔지니어링 훅 수동 실행
+        if hasattr(temp_window, 'prompt_engineering_tab'):
+            # PromptContext 생성
+            temp_context = PromptContext(
+                source_row=...,
+                settings={},
+                prefix_tags=[],
+                main_tags=input_tags,
+                postfix_tags=[]
+            )
+
+            # 수동 훅 실행
+            modified_context = temp_window.prompt_engineering_tab.execute_manual_hook(temp_context)
+            all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+            new_main_prompt = ', '.join(all_tags)
+
+        # 임시 창에 프롬프트 적용
+        temp_window.main_prompt_input.setPlainText(new_main_prompt)
+
+    finally:
+        # 메인 PromptEngineeringModule 훅 재활성화
+        self.main_window.app_context.skip_prompt_engineering_hook = False
+        print("[DEBUG] ✅ skip_prompt_engineering_hook = False 해제")
+```
+
+#### 실행 흐름 (수정 후)
+
+```
+Random/Next Prompt 버튼 클릭
+    ↓
+skip_prompt_engineering_hook = True 설정
+    ↓
+메인 UI trigger_random_prompt() 호출
+    ↓
+🚫 메인 PromptEngineeringModule 훅 건너뛰기 (플래그 체크)
+    ↓
+🔧 임시 창 VirtualPromptEngineeringTab 훅 실행 (Auto Hide: 태그 D, E, F 제거)
+    ↓
+skip_prompt_engineering_hook = False 해제
+    ↓
+✅ 결과: 임시 창 Auto Hide 규칙만 적용됨
+```
+
+### Full-Tab Scrolling 패턴
+
+Virtual Module은 전체 탭이 스크롤 가능한 UI 패턴을 사용합니다.
+
+```python
+def init_ui(self):
+    main_layout = QVBoxLayout(self)
+    main_layout.setContentsMargins(0, 0, 0, 0)
+
+    # 전체 탭을 감싸는 QScrollArea
+    scroll_area = QScrollArea()
+    scroll_area.setWidgetResizable(True)
+    scroll_area.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
+
+    # 실제 콘텐츠
+    content_widget = QWidget()
+    content_layout = QVBoxLayout(content_widget)
+
+    # UI 요소들 추가
+    content_layout.addWidget(...)
+
+    scroll_area.setWidget(content_widget)
+    main_layout.addWidget(scroll_area)
+```
+
+### 체크리스트: Virtual Module 작성
+
+```
+[ ] QWidget 상속 (BaseMiddleModule 아님!)
+[ ] app_context 참조 저장
+[ ] main_module 참조 저장 (initialize_from_main에서 설정)
+[ ] Full-tab 스크롤 패턴 사용
+[ ] 모든 QTextEdit에 setAcceptRichText(False) 적용
+[ ] DARK_COLORS['bg_primary'] 배경색 적용
+[ ] initialize_from_main() 메서드 구현
+[ ] execute_manual_hook() 메서드 구현 (메인 모듈 로직 복제)
+[ ] TempGenerationWindow에 탭 추가
+[ ] GenerationController에 수동 훅 실행 로직 추가
+[ ] 필요 시 Skip Flag 패턴 구현 (double execution 방지)
+```
+
+### 디버깅 팁
+
+**Virtual Module이 작동하지 않는 경우**:
+
+1. **상태 복사 실패**: `initialize_from_main()` 호출 확인
+2. **훅 미실행**: `params['temp_window_xxx_tab']` 키 전달 확인
+3. **Double Execution**: Skip flag 설정/해제 로그 확인
+4. **UI 업데이트 안 됨**: QThread 시그널/슬롯 연결 확인
+
+**디버깅 로그 추가**:
+```python
+def execute_manual_hook(self, context):
+    print(f"[DEBUG] Virtual Module 훅 실행: {self.__class__.__name__}")
+    print(f"[DEBUG] 입력 태그: {context.main_tags}")
+
+    # ... 로직 ...
+
+    print(f"[DEBUG] 출력 태그: {all_tags}")
+    return context
+```
+
+### TempGenerationWindow 추가 기능
+
+**파일**: `ui/temp_generation_window.py`
+
+임시 생성 창은 세 가지 편의 기능을 제공합니다:
+
+#### 1. 프롬프트 고정 (Prompt Fixed)
+
+**위치**: `ui/temp_generation_window.py:190-193, 311-322`
+
+**목적**: Random/Next Prompt 버튼을 비활성화하여 현재 프롬프트를 유지합니다.
+
+**구현**:
+```python
+# UI 생성
+self.prompt_fixed_checkbox = QCheckBox("프롬프트 고정")
+self.prompt_fixed_checkbox.setToolTip("체크 시: Random/Next Prompt 버튼 비활성화")
+self.prompt_fixed_checkbox.stateChanged.connect(self._on_prompt_fixed_changed)
+
+# 체크박스 상태 변경 핸들러
+def _on_prompt_fixed_changed(self, state):
+    """프롬프트 고정 체크박스 상태 변경 시 Random 버튼 활성화/비활성화"""
+    is_fixed = (state == Qt.CheckState.Checked.value)
+    self.random_prompt_btn.setEnabled(not is_fixed)
+
+    if is_fixed:
+        self.random_prompt_btn.setToolTip("프롬프트가 고정되어 있습니다")
+    else:
+        self.random_prompt_btn.setToolTip("다음 프롬프트 불러오기")
+```
+
+**동작**:
+- 체크 시: Random/Next Prompt 버튼 비활성화
+- 해제 시: Random/Next Prompt 버튼 활성화
+
+#### 2. 와일드카드 단독 모드 (Wildcard Standalone Mode)
+
+**위치**:
+- UI: `ui/temp_generation_window.py:195-197, 286-287`
+- 생성 로직: `core/generation_controller.py:384-399`, `NAIA_cold_v4.py:547-562`
+
+**목적**: 데이터베이스 태그 없이 와일드카드만으로 프롬프트를 생성합니다.
+
+**구현**:
+
+**UI (TempGenerationWindow)**:
+```python
+# UI 생성
+self.wildcard_standalone_checkbox = QCheckBox("와일드카드 단독 모드")
+self.wildcard_standalone_checkbox.setToolTip("데이터베이스 태그 없이 와일드카드만 사용")
+
+# 파라미터 수집 시 플래그 전달
+def _collect_generation_params(self) -> dict:
+    params = {
+        'input': self.main_prompt_input.toPlainText(),
+        'negative_prompt': self.negative_prompt_input.toPlainText(),
+        # ...
+    }
+
+    # 와일드카드 단독 모드 플래그
+    if hasattr(self, 'wildcard_standalone_checkbox'):
+        params['wildcard_standalone'] = self.wildcard_standalone_checkbox.isChecked()
+
+    return params
+```
+
+**생성 로직 (GenerationController)**:
+```python
+# core/generation_controller.py:384-399
+# source_row 준비 (와일드카드 단독 모드 지원)
+if params.get('wildcard_standalone', False):
+    # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
+    empty_data = {
+        'general': None,
+        'character': None,
+        'copyright': None,
+        'artist': None,
+        'meta': None
+    }
+    source_row = pd.Series(empty_data, name="wildcard_standalone")
+    print(f"[TempWindow] 와일드카드 단독 모드: 빈 source_row 생성")
+else:
+    source_row = self.context.current_source_row
+    if source_row is None:
+        source_row = pd.Series({'general': None}, name="temp_window")
+```
+
+**Random Prompt 처리 (NAIA_cold_v4.py)**:
+```python
+# NAIA_cold_v4.py:547-562
+# source_row 준비 (와일드카드 단독 모드 지원)
+if hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked():
+    empty_data = {
+        'general': None,
+        'character': None,
+        'copyright': None,
+        'artist': None,
+        'meta': None
+    }
+    source_row = pd.Series(empty_data, name="wildcard_standalone")
+    print(f"[DEBUG] 와일드카드 단독 모드: 빈 source_row 생성")
+else:
+    source_row = self.app_context.current_source_row
+```
+
+**동작**:
+- 체크 시: `pd.Series`의 모든 컬럼을 `None`으로 설정 (데이터베이스 태그 제외)
+- 해제 시: 일반적인 `current_source_row` 사용
+
+**사용 시나리오**:
+- 와일드카드만으로 프롬프트 구성
+- 데이터베이스 태그 없이 커스텀 프롬프트 생성
+- 프롬프트 엔지니어링 모듈 테스트
+
+#### 3. 메인 UI 적용 (Apply to Main UI) 체크박스 다이얼로그
+
+**위치**:
+- UI 다이얼로그: `ui/temp_generation_window.py:324-453`
+- 적용 로직: `NAIA_cold_v4.py:3218-3377`
+
+**목적**: 임시 창에서 생성한 파라미터를 메인 UI에 선택적으로 적용합니다.
+
+**구현**:
+
+**선택 다이얼로그 (TempGenerationWindow)**:
+```python
+# ui/temp_generation_window.py:324-453
+def on_update_main_ui_clicked(self):
+    """메인 UI에 적용 버튼 클릭 시: 선택 다이얼로그 표시"""
+    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QCheckBox, QDialogButtonBox
+    from ui.theme import DARK_COLORS
+
+    # 다이얼로그 생성
+    dialog = QDialog(self)
+    dialog.setWindowTitle("메인 UI 적용 항목 선택")
+    dialog.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']}; color: {DARK_COLORS['text_primary']};")
+
+    layout = QVBoxLayout(dialog)
+
+    # 5개 체크박스 생성
+    apply_main_prompt = QCheckBox("메인 프롬프트")
+    apply_main_prompt.setChecked(True)
+    layout.addWidget(apply_main_prompt)
+
+    apply_negative_prompt = QCheckBox("네거티브 프롬프트")
+    apply_negative_prompt.setChecked(True)
+    layout.addWidget(apply_negative_prompt)
+
+    apply_generation_params = QCheckBox("생성 파라미터")
+    apply_generation_params.setChecked(True)
+    layout.addWidget(apply_generation_params)
+
+    apply_character = QCheckBox("캐릭터")
+    apply_character.setChecked(False)
+    layout.addWidget(apply_character)
+
+    apply_prompt_engineering = QCheckBox("프롬프트 엔지니어링")
+    apply_prompt_engineering.setChecked(False)
+    layout.addWidget(apply_prompt_engineering)
+
+    # OK/Cancel 버튼
+    button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    button_box.accepted.connect(dialog.accept)
+    button_box.rejected.connect(dialog.reject)
+    layout.addWidget(button_box)
+
+    # 다이얼로그 실행
+    if dialog.exec() == QDialog.DialogCode.Accepted:
+        # 선택 항목 수집
+        apply_sections = {
+            'main_prompt': apply_main_prompt.isChecked(),
+            'negative_prompt': apply_negative_prompt.isChecked(),
+            'generation_params': apply_generation_params.isChecked(),
+            'character': apply_character.isChecked(),
+            'prompt_engineering': apply_prompt_engineering.isChecked()
+        }
+
+        # 메인 UI 업데이트 요청
+        params = self._collect_generation_params()
+        params['apply_sections'] = apply_sections
+
+        # 캐릭터/프롬프트 엔지니어링 탭 참조 전달
+        if apply_sections.get('character'):
+            params['temp_window_character_tab'] = self.character_tab
+
+        if apply_sections.get('prompt_engineering'):
+            params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+
+        self.params_to_main_ui.emit(params)
+```
+
+**적용 로직 (TempWindowManager)**:
+```python
+# NAIA_cold_v4.py:3218-3377
+def apply_params_to_main_ui(self, params: dict):
+    """임시 창 파라미터를 메인 UI에 선택적으로 적용"""
+
+    # 선택적 적용 섹션 확인
+    apply_sections = params.get('apply_sections', {
+        'main_prompt': True,
+        'negative_prompt': True,
+        'generation_params': True,
+        'character': False,
+        'prompt_engineering': False
+    })
+
+    print(f"[DEBUG] 메인 UI 적용 시작 - 선택 섹션: {apply_sections}")
+
+    # 1. 메인 프롬프트 적용
+    if apply_sections.get('main_prompt', True) and 'input' in params:
+        self.main_window.main_prompt_textedit.setPlainText(params['input'])
+        print(f"  ✅ Main Prompt: '{params['input'][:50]}...'")
+
+    # 2. 네거티브 프롬프트 적용
+    if apply_sections.get('negative_prompt', True) and 'negative_prompt' in params:
+        self.main_window.negative_prompt_textedit.setPlainText(params['negative_prompt'])
+        print(f"  ✅ Negative Prompt: '{params['negative_prompt'][:50]}...'")
+
+    # 3. 생성 파라미터 적용
+    if apply_sections.get('generation_params', True):
+        # Scale, Steps, Sampler, Seed 등
+        if 'scale' in params:
+            self.main_window.scale_input.setValue(params['scale'])
+        # ... (기타 파라미터)
+
+    # 4. 캐릭터 적용 (텍스트 덤핑)
+    if apply_sections.get('character', False):
+        temp_char_tab = params.get('temp_window_character_tab')
+        if temp_char_tab and hasattr(temp_char_tab, 'get_display_text'):
+            display_text = temp_char_tab.get_display_text()
+
+            if display_text:
+                # CharacterModule의 첫 번째 위젯에 텍스트 덤핑
+                character_module = self.main_window.app_context.middle_section_controller.get_module_instance("CharacterModule")
+
+                if hasattr(character_module, 'character_widgets') and len(character_module.character_widgets) > 0:
+                    first_widget = character_module.character_widgets[0]
+
+                    if hasattr(first_widget, 'prompt_textbox'):
+                        first_widget.prompt_textbox.setPlainText(display_text)
+
+                        # 체크박스 활성화
+                        if hasattr(first_widget, 'active_checkbox'):
+                            first_widget.active_checkbox.setChecked(True)
+
+                        print(f"  ✅ Character: 첫 번째 위젯에 텍스트 덤핑 완료 ({len(display_text)} 문자)")
+
+    # 5. 프롬프트 엔지니어링 적용
+    if apply_sections.get('prompt_engineering', False):
+        temp_pe_tab = params.get('temp_window_prompt_engineering_tab')
+        pe_module = self.main_window.app_context.middle_section_controller.get_module_instance("PromptEngineeringModule")
+
+        if temp_pe_tab and pe_module:
+            # 프리픽스/포스트픽스/Auto Hide 텍스트 복사
+            if hasattr(temp_pe_tab, 'pre_textedit') and hasattr(pe_module, 'pre_textedit'):
+                pe_module.pre_textedit.setPlainText(temp_pe_tab.pre_textedit.toPlainText())
+
+            # ... (기타 설정 복사)
+```
+
+**VirtualCharacterTab 텍스트 추출**:
+```python
+# ui/virtual_character_tab.py:353-373
+def get_display_text(self) -> str:
+    """
+    현재 표시 중인 캐릭터 텍스트를 하나의 문자열로 반환 (메인 UI 적용용)
+
+    Returns:
+        모든 활성화된 캐릭터의 프롬프트를 결합한 문자열
+    """
+    if not self.activate_checkbox or not self.activate_checkbox.isChecked():
+        return ""
+
+    combined_text = []
+
+    for widget in self.character_widgets:
+        if widget.active_checkbox.isChecked():
+            prompt_text = widget.prompt_textbox.toPlainText().strip()
+            if prompt_text:
+                combined_text.append(prompt_text)
+
+    result = ', '.join(combined_text)
+    print(f"[VirtualCharacterTab] get_display_text(): {len(result)} 문자 반환")
+    return result
+```
+
+**동작 흐름**:
+```
+1. 사용자가 "메인 UI에 적용" 버튼 클릭
+    ↓
+2. 체크박스 다이얼로그 표시 (5개 섹션)
+    ↓
+3. 사용자가 적용할 섹션 선택 후 OK
+    ↓
+4. apply_sections 딕셔너리 생성
+    ↓
+5. params_to_main_ui 시그널 발행
+    ↓
+6. TempWindowManager.apply_params_to_main_ui() 호출
+    ↓
+7. 선택된 섹션만 메인 UI에 적용
+```
+
+**적용 섹션**:
+
+| 섹션 | 기본값 | 적용 내용 | 참고 |
+|------|--------|----------|------|
+| 메인 프롬프트 | ✅ | `main_prompt_textedit` 텍스트 | 단순 텍스트 복사 |
+| 네거티브 프롬프트 | ✅ | `negative_prompt_textedit` 텍스트 | 단순 텍스트 복사 |
+| 생성 파라미터 | ✅ | Scale, Steps, Sampler, Seed 등 | 파라미터 값 복사 |
+| 캐릭터 | ❌ | CharacterModule 첫 번째 위젯 | 텍스트 덤핑 + 체크박스 활성화 |
+| 프롬프트 엔지니어링 | ❌ | 프리픽스/포스트픽스/Auto Hide 등 | 모든 설정 복사 |
+
+**설계 원칙**:
+
+1. **선택적 적용**: 사용자가 필요한 섹션만 선택 가능
+2. **기본값 안전성**: 프롬프트는 기본 적용, 모듈 설정은 기본 미적용
+3. **텍스트 덤핑 패턴**: 캐릭터는 복잡한 파라미터 대신 텍스트만 복사
+4. **비파괴적 적용**: 선택되지 않은 섹션은 메인 UI에서 변경되지 않음
+
+**주의사항**:
+
+- **캐릭터 적용**: `CharacterModule.character_widgets[0]`에만 텍스트 덤핑 (첫 번째 슬롯)
+- **프롬프트 엔지니어링**: 체크박스 상태까지 모두 복사
+- **Apply Sections 딕셔너리**: 반드시 `params['apply_sections']`로 전달
 
 ---
 

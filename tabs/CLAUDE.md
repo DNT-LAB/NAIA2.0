@@ -96,7 +96,7 @@ tabs/
 |------|------|------|------|----------|
 | **image_window.py** | 42K | 생성 이미지 표시 및 관리 | core | 이미지 뷰어, 히스토리, 일괄 저장, ImageCrudController 통합, 🆕 큐 추가 기능 (랜덤 옵션 지원) |
 | **png_info_tab.py** | 47K | 이미지 메타데이터 추출 | core | PNG/JPEG/WebP 정보 파싱, Stealth PNG 지원 |
-| **setting_tabs.py** | 27K | 애플리케이션 설정 | core | 자동완성, 저장 경로, 타임스탬프 폴더 토글, 이미지 카운터, 파일명 형식, 분류 규칙, 🆕 2차 분류 시스템, 모듈/탭 가시성, UI 스케일 |
+| **setting_tabs.py** | 28K | 애플리케이션 설정 | core | 자동완성, 저장 경로, 타임스탬프 폴더 토글, 이미지 카운터, 파일명 형식, 분류 규칙, 🆕 2차 분류 시스템, 모듈/탭 가시성 (시작 시 자동 적용), UI 스케일 |
 | **assets_tab.py** | 35K | 배경 제거 등 도구 | closable | rembg 통합, 패키지 설치, 이미지 처리 |
 | **web_view.py** | 19K | Danbooru 브라우저 | closable | 태그 추출, WebEngine, 세션 저장 |
 | **img2img_tab.py** | 2.8K | Img2Img/Inpaint | closable | 스켈레톤 구현 (TODO) |
@@ -472,1003 +472,65 @@ class MyTab(BaseTabModule):
 
 ## 실전 예제
 
-### 예제 1: 간단한 메모 탭 (15분)
+**개요**: 간단한 탭부터 복잡한 기능까지 단계별 예제를 제공합니다.
 
-**목표**: 텍스트 입력/저장 기능을 가진 메모 탭 생성
+### 예제 목록
 
-**파일**: `tabs/memo_tab.py`
+1. **간단한 메모 탭 (15분)** - 텍스트 입력/저장 기능
+2. **이미지 정보 표시 탭 (30분)** - 드래그&드롭 + 메타데이터 표시
+3. **WebEngine 브라우저 탭 (45분)** - 웹 탐색 기능
 
-```python
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout
-from PyQt6.QtCore import pyqtSignal
-from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
-import json
-from pathlib import Path
+### 주요 학습 포인트
 
-class MemoTabModule(BaseTabModule):
-    """간단한 메모 탭"""
+- **예제 1**: 기본 UI 구성, 파일 저장/로드
+- **예제 2**: Drag & Drop, QSplitter, PIL 통합
+- **예제 3**: WebEngine 설정, 네비게이션 UI
 
-    def __init__(self):
-        super().__init__()
-        self.memo_file = Path("save/memo.txt")
-
-    def get_tab_title(self) -> str:
-        return "📝 Memo"
-
-    def get_tab_order(self) -> int:
-        return 100  # Settings 앞
-
-    def get_tab_type(self) -> str:
-        return 'core'  # 항상 로드
-
-    def create_widget(self, parent: QWidget) -> QWidget:
-        widget = QWidget(parent)
-        widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
-
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-
-        # 텍스트 에디터
-        self.text_edit = QTextEdit()
-        self.text_edit.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: {get_scaled_font_size(16)}px;
-            }}
-        """)
-        layout.addWidget(self.text_edit)
-
-        # 버튼 레이아웃
-        button_layout = QHBoxLayout()
-
-        self.save_btn = QPushButton("💾 Save")
-        self.save_btn.setStyleSheet(DARK_STYLES['primary_button'])
-        self.save_btn.clicked.connect(self._save_memo)
-
-        self.clear_btn = QPushButton("🗑️ Clear")
-        self.clear_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-        self.clear_btn.clicked.connect(self._clear_memo)
-
-        button_layout.addStretch()
-        button_layout.addWidget(self.save_btn)
-        button_layout.addWidget(self.clear_btn)
-
-        layout.addLayout(button_layout)
-
-        self.widget = widget
-        return widget
-
-    def on_initialize(self):
-        """탭 초기화 시 메모 로드"""
-        self._load_memo()
-
-    def _save_memo(self):
-        """메모 저장"""
-        text = self.text_edit.toPlainText()
-        self.memo_file.parent.mkdir(exist_ok=True)
-        self.memo_file.write_text(text, encoding='utf-8')
-        print(f"✅ 메모 저장 완료: {self.memo_file}")
-
-    def _load_memo(self):
-        """메모 로드"""
-        if self.memo_file.exists():
-            text = self.memo_file.read_text(encoding='utf-8')
-            self.text_edit.setPlainText(text)
-            print(f"✅ 메모 로드 완료: {self.memo_file}")
-
-    def _clear_memo(self):
-        """메모 지우기"""
-        self.text_edit.clear()
-```
-
-**테스트**:
-1. `tabs/memo_tab.py` 저장
-2. NAIA 재시작
-3. 📝 Memo 탭 확인
-4. 텍스트 입력 후 💾 Save 클릭
-5. 재시작 후 메모 유지 확인
-
-### 예제 2: 이미지 정보 표시 탭 (30분)
-
-**목표**: 드래그&드롭으로 이미지 정보를 표시하는 탭
-
-**파일**: `tabs/image_info_tab.py`
-
-```python
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
-from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
-from PIL import Image
-from PIL.ImageQt import ImageQt
-import os
-
-class ImageInfoTabModule(BaseTabModule):
-    """이미지 정보 표시 탭"""
-
-    def __init__(self):
-        super().__init__()
-
-    def get_tab_title(self) -> str:
-        return "ℹ️ Image Info"
-
-    def get_tab_type(self) -> str:
-        return 'closable'  # 선택적 탭
-
-    def create_widget(self, parent: QWidget) -> QWidget:
-        widget = ImageInfoWidget(parent)
-        self.widget = widget
-        return widget
-
-
-class ImageInfoWidget(QWidget):
-    """이미지 드롭 및 정보 표시 위젯"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
-        self.init_ui()
-        self.setAcceptDrops(True)
-
-    def init_ui(self):
-        """UI 초기화"""
-        layout = QHBoxLayout(self)
-
-        # 좌측: 이미지 표시
-        self.image_label = QLabel("📷\n\n이미지를 드래그하세요")
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setMinimumSize(300, 300)
-        self.image_label.setStyleSheet(f"""
-            QLabel {{
-                border: 2px dashed {DARK_COLORS['border_light']};
-                border-radius: 8px;
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_secondary']};
-                font-size: {get_scaled_font_size(18)}px;
-            }}
-        """)
-
-        # 우측: 정보 표시
-        self.info_text = QTextEdit()
-        self.info_text.setReadOnly(True)
-        self.info_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: {get_scaled_font_size(14)}px;
-            }}
-        """)
-
-        # 스플리터
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.image_label)
-        splitter.addWidget(self.info_text)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-
-        layout.addWidget(splitter)
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        """드래그 진입"""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event: QDropEvent):
-        """드롭 이벤트"""
-        urls = event.mimeData().urls()
-        if not urls:
-            return
-
-        file_path = urls[0].toLocalFile()
-        if not os.path.exists(file_path):
-            return
-
-        self.load_image(file_path)
-
-    def load_image(self, file_path: str):
-        """이미지 로드 및 정보 표시"""
-        try:
-            # PIL로 이미지 열기
-            pil_image = Image.open(file_path)
-
-            # 이미지 표시
-            qimage = ImageQt(pil_image)
-            pixmap = QPixmap.fromImage(qimage)
-            scaled_pixmap = pixmap.scaled(
-                self.image_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            self.image_label.setPixmap(scaled_pixmap)
-
-            # 정보 추출
-            info_text = f"📂 파일: {os.path.basename(file_path)}\n"
-            info_text += f"📐 크기: {pil_image.width} x {pil_image.height}\n"
-            info_text += f"🎨 모드: {pil_image.mode}\n"
-            info_text += f"📦 포맷: {pil_image.format}\n"
-            info_text += f"💾 파일 크기: {os.path.getsize(file_path):,} bytes\n"
-            info_text += "\n🔍 메타데이터:\n"
-
-            if pil_image.info:
-                for key, value in pil_image.info.items():
-                    value_str = str(value)
-                    if len(value_str) > 100:
-                        value_str = value_str[:100] + "..."
-                    info_text += f"  {key}: {value_str}\n"
-            else:
-                info_text += "  (없음)\n"
-
-            self.info_text.setPlainText(info_text)
-
-        except Exception as e:
-            self.info_text.setPlainText(f"❌ 오류: {str(e)}")
-```
-
-**테스트**:
-1. `tabs/image_info_tab.py` 저장
-2. NAIA 재시작
-3. MainWindow에서 탭 추가 기능으로 "ℹ️ Image Info" 추가 (또는 core로 변경하여 자동 로드)
-4. 이미지 파일 드래그&드롭
-5. 정보 확인
-
-### 예제 3: WebEngine 브라우저 탭 (45분)
-
-**목표**: 간단한 웹 브라우저 탭 (웹페이지 로드 및 탐색)
-
-**파일**: `tabs/simple_browser_tab.py`
-
-```python
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
-from PyQt6.QtCore import QUrl, pyqtSignal
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLineEdit
-)
-from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
-
-class SimpleBrowserTabModule(BaseTabModule):
-    """간단한 웹 브라우저 탭"""
-
-    def __init__(self):
-        super().__init__()
-
-    def get_tab_title(self) -> str:
-        return "🌐 Browser"
-
-    def get_tab_type(self) -> str:
-        return 'closable'
-
-    def create_widget(self, parent: QWidget) -> QWidget:
-        widget = SimpleBrowserWidget(parent)
-        self.widget = widget
-        return widget
-
-
-class SimpleBrowserWidget(QWidget):
-    """웹 브라우저 위젯"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.init_ui()
-
-    def init_ui(self):
-        """UI 초기화"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        # 주소 표시줄
-        address_layout = QHBoxLayout()
-
-        self.back_btn = QPushButton("←")
-        self.back_btn.setFixedWidth(40)
-        self.back_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-
-        self.forward_btn = QPushButton("→")
-        self.forward_btn.setFixedWidth(40)
-        self.forward_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-
-        self.refresh_btn = QPushButton("⟳")
-        self.refresh_btn.setFixedWidth(40)
-        self.refresh_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-
-        self.address_bar = QLineEdit()
-        self.address_bar.setPlaceholderText("URL 입력...")
-        self.address_bar.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: {get_scaled_font_size(14)}px;
-            }}
-        """)
-
-        self.go_btn = QPushButton("이동")
-        self.go_btn.setStyleSheet(DARK_STYLES['primary_button'])
-
-        address_layout.addWidget(self.back_btn)
-        address_layout.addWidget(self.forward_btn)
-        address_layout.addWidget(self.refresh_btn)
-        address_layout.addWidget(self.address_bar)
-        address_layout.addWidget(self.go_btn)
-
-        layout.addLayout(address_layout)
-
-        # 웹뷰
-        self.browser = QWebEngineView()
-        layout.addWidget(self.browser)
-
-        # 시그널 연결
-        self.back_btn.clicked.connect(self.browser.back)
-        self.forward_btn.clicked.connect(self.browser.forward)
-        self.refresh_btn.clicked.connect(self.browser.reload)
-        self.go_btn.clicked.connect(self.navigate)
-        self.address_bar.returnPressed.connect(self.navigate)
-        self.browser.urlChanged.connect(self.update_address_bar)
-
-        # 홈페이지 로드
-        self.browser.setUrl(QUrl("https://www.google.com"))
-
-    def navigate(self):
-        """주소창 URL로 이동"""
-        url = self.address_bar.text().strip()
-        if not url:
-            return
-
-        # URL 형식 보정
-        if not url.startswith(('http://', 'https://')):
-            if '.' in url and ' ' not in url:
-                url = 'https://' + url
-            else:
-                url = f'https://www.google.com/search?q={url}'
-
-        self.browser.setUrl(QUrl(url))
-
-    def update_address_bar(self, qurl: QUrl):
-        """주소창 업데이트"""
-        self.address_bar.setText(qurl.toString())
-```
-
-**테스트**:
-1. `tabs/simple_browser_tab.py` 저장
-2. NAIA 재시작
-3. 🌐 Browser 탭 열기
-4. URL 입력 및 탐색
+📖 **상세 코드 및 설명**: [.claude/examples_CLAUDE.md](.claude/examples_CLAUDE.md)
 
 ---
 
 ## 단계별 튜토리얼
 
-### 튜토리얼 1: 최소 뷰어 탭 (30분)
+**개요**: 난이도별로 구성된 실습 튜토리얼입니다.
 
-**목표**: 생성된 이미지를 표시하는 최소 탭
+### 튜토리얼 목록
 
-**1단계: 기본 구조 작성** (5분)
+1. **최소 뷰어 탭 (30분)** - 기본 구조 → 이미지 로드 → 이벤트 구독
+2. **대화형 도구 탭 (2시간)** - UI 레이아웃 → 분석 로직 → AppContext 통합
+3. **복잡한 WebEngine 탭 (1일)** - WebEngine 설정 → JavaScript 통신 → HTML 파싱
+4. **완전한 애플리케이션 탭 (1주)** - Settings 탭 수준의 복합 기능
 
-```python
-# tabs/mini_viewer_tab.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt6.QtCore import Qt
-from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_COLORS
+### 주요 학습 목표
 
-class MiniViewerTabModule(BaseTabModule):
-    def __init__(self):
-        super().__init__()
+- **튜토리얼 1**: 기본 탭 생명주기, 이벤트 시스템
+- **튜토리얼 2**: UI 통합, 데이터 처리, 시그널
+- **튜토리얼 3**: WebEngine, JavaScript 브릿지
+- **튜토리얼 4**: 설정 영속성, 가시성 관리, 복잡한 UI
 
-    def get_tab_title(self) -> str:
-        return "🖼️ Mini Viewer"
-
-    def get_tab_type(self) -> str:
-        return 'core'
-
-    def create_widget(self, parent: QWidget) -> QWidget:
-        widget = QWidget(parent)
-        widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
-
-        layout = QVBoxLayout(widget)
-        self.image_label = QLabel("No Image")
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.image_label)
-
-        self.widget = widget
-        return widget
-```
-
-**2단계: 이미지 로드 기능 추가** (10분)
-
-```python
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt
-
-# create_widget 내부에 추가
-def load_image(self, file_path: str):
-    """이미지 로드 및 표시"""
-    pixmap = QPixmap(file_path)
-    if not pixmap.isNull():
-        scaled_pixmap = pixmap.scaled(
-            self.image_label.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.image_label.setPixmap(scaled_pixmap)
-```
-
-**3단계: 이벤트 구독으로 자동 업데이트** (15분)
-
-```python
-def initialize_with_context(self, app_context):
-    self.app_context = app_context
-
-    # 이미지 생성 완료 이벤트 구독
-    app_context.subscribe("image_generated", self._on_image_generated)
-
-def _on_image_generated(self, data: dict):
-    """이미지 생성 완료 시 자동 표시"""
-    if 'file_path' in data:
-        self.load_image(data['file_path'])
-```
-
-### 튜토리얼 2: 대화형 도구 탭 (2시간)
-
-**목표**: 프롬프트 분석 및 제안 탭
-
-**1단계: UI 레이아웃** (30분)
-
-```python
-# tabs/prompt_analyzer_tab.py
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QTextEdit,
-    QPushButton, QLabel, QSplitter
-)
-from PyQt6.QtCore import Qt
-from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
-
-class PromptAnalyzerTabModule(BaseTabModule):
-    def get_tab_title(self) -> str:
-        return "🔍 Prompt Analyzer"
-
-    def create_widget(self, parent: QWidget) -> QWidget:
-        widget = QWidget(parent)
-        widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
-
-        layout = QVBoxLayout(widget)
-
-        # 입력 영역
-        self.input_label = QLabel("프롬프트 입력:")
-        self.input_label.setStyleSheet(DARK_STYLES['label_style'])
-
-        self.input_text = QTextEdit()
-        self.input_text.setMaximumHeight(150)
-        self.input_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 8px;
-                font-size: {get_scaled_font_size(14)}px;
-            }}
-        """)
-
-        # 분석 버튼
-        self.analyze_btn = QPushButton("🔍 Analyze")
-        self.analyze_btn.setStyleSheet(DARK_STYLES['primary_button'])
-        self.analyze_btn.clicked.connect(self._analyze_prompt)
-
-        # 결과 영역
-        self.result_label = QLabel("분석 결과:")
-        self.result_label.setStyleSheet(DARK_STYLES['label_style'])
-
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: {get_scaled_font_size(14)}px;
-            }}
-        """)
-
-        layout.addWidget(self.input_label)
-        layout.addWidget(self.input_text)
-        layout.addWidget(self.analyze_btn)
-        layout.addWidget(self.result_label)
-        layout.addWidget(self.result_text)
-
-        self.widget = widget
-        return widget
-```
-
-**2단계: 분석 로직 구현** (45분)
-
-```python
-import re
-from collections import Counter
-
-def _analyze_prompt(self):
-    """프롬프트 분석"""
-    prompt = self.input_text.toPlainText().strip()
-    if not prompt:
-        self.result_text.setPlainText("프롬프트를 입력하세요.")
-        return
-
-    # 태그 분리
-    tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
-
-    # 분석
-    total_tags = len(tags)
-    unique_tags = len(set(tags))
-    duplicates = total_tags - unique_tags
-
-    # 카테고리 추측 (간단한 휴리스틱)
-    character_tags = [t for t in tags if any(keyword in t.lower()
-                                              for keyword in ['girl', 'boy', '1girl', '2girls'])]
-    quality_tags = [t for t in tags if any(keyword in t.lower()
-                                            for keyword in ['masterpiece', 'best', 'quality'])]
-
-    # 결과 포맷팅
-    result = f"""📊 프롬프트 분석 결과
-{'=' * 50}
-
-📝 총 태그 수: {total_tags}
-🔸 고유 태그 수: {unique_tags}
-🔁 중복 태그 수: {duplicates}
-
-👤 캐릭터 태그: {len(character_tags)}
-  {', '.join(character_tags[:5])}{'...' if len(character_tags) > 5 else ''}
-
-⭐ 품질 태그: {len(quality_tags)}
-  {', '.join(quality_tags)}
-
-📋 전체 태그 목록:
-"""
-
-    for i, tag in enumerate(tags, 1):
-        result += f"  {i}. {tag}\n"
-
-    self.result_text.setPlainText(result)
-```
-
-**3단계: AppContext 통합** (30min)
-
-```python
-def initialize_with_context(self, app_context):
-    self.app_context = app_context
-
-    # 프롬프트 생성 이벤트 구독
-    app_context.subscribe("prompt_generated", self._on_prompt_generated)
-
-    # 태그 데이터 매니저 사용
-    self.tag_data_manager = app_context.tag_data_manager
-
-def _on_prompt_generated(self, context):
-    """프롬프트 생성 시 자동 분석"""
-    final_prompt = context.final_prompt
-    self.input_text.setPlainText(final_prompt)
-    self._analyze_prompt()
-```
-
-**4단계: 고급 기능 추가** (15분)
-
-```python
-# 태그 제안 기능
-def _suggest_tags(self, current_tags: list) -> list:
-    """태그 제안"""
-    suggestions = []
-
-    # 캐릭터 태그가 없으면 제안
-    if not any('girl' in t or 'boy' in t for t in current_tags):
-        suggestions.append("캐릭터 태그 추가 권장 (예: 1girl)")
-
-    # 품질 태그가 없으면 제안
-    quality_keywords = ['masterpiece', 'best quality', 'highly detailed']
-    if not any(keyword in ' '.join(current_tags) for keyword in quality_keywords):
-        suggestions.append("품질 태그 추가 권장")
-
-    return suggestions
-```
-
-### 튜토리얼 3: 복잡한 WebEngine 탭 (1일)
-
-**시간 분배**:
-- 1-2시간: 기본 WebEngine 설정
-- 2-3시간: JavaScript 통신 구현
-- 2-3시간: 데이터 추출 및 파싱
-- 2-3시간: UI 통합 및 테스트
-
-**참고 파일**: `tabs/web_view.py`
-
-**주요 구현 포인트**:
-
-1. **WebEngine 프로필 설정** (`web_view.py:132-165`)
-2. **JavaScript 실행 및 결과 수신** (`web_view.py:219-241`)
-3. **HTML 파싱** (`web_view.py:276-318`)
-4. **시그널 발행** (`web_view.py:368-382`)
-
-### 튜토리얼 4: 완전한 애플리케이션 탭 (1주)
-
-**목표**: 설정 관리, 파일 저장/로드, 이벤트 통합을 모두 갖춘 탭
-
-**참고 파일**: `tabs/setting_tabs.py`
-
-**주요 기능**:
-1. **JSON 설정 저장/로드** (`setting_tabs.py:54-117`)
-2. **저장 디렉토리 관리** (`setting_tabs.py:241-267`)
-   - 기본 저장 경로 설정
-   - 🆕 타임스탬프 폴더 사용 여부 체크박스 (`line 263-267`)
-3. **파일명 형식 선택** (`setting_tabs.py:289-310`)
-   - number_only, time_number, datetime
-4. **분류 시스템 설정** (`setting_tabs.py:312-462`)
-   - 분류 방법 선택 (none, prompt_recognition)
-   - 🆕 프롬프트 인식 분류 규칙 입력 (`line 343-382`)
-   - 🆕 2차 분류 시스템 (`line 393-462`)
-     - 2차 분류 활성화 체크박스
-     - 2차 분류 방법 선택 (none, prompt_recognition)
-     - 규칙 선택 콤보박스 (1차 규칙에서 자동 생성)
-     - 선택된 규칙별 2차 분류 규칙 입력
-5. **이미지 저장 카운터 표시 및 초기화** (`setting_tabs.py:269-287`)
-   - 실시간 카운터 표시 (이벤트 구독)
-   - 카운터 수동 초기화 버튼
-6. **모듈/탭 가시성 관리** (`setting_tabs.py:414-530`)
-7. **AppContext 이벤트 발행/구독** (`setting_tabs.py:129-136, 588-618`)
-8. **QTimer 지연 초기화** (`setting_tabs.py:549-560`)
+📖 **상세 단계별 코드**: [.claude/tutorials_CLAUDE.md](.claude/tutorials_CLAUDE.md)
 
 ---
 
 ## 고급 패턴
 
-### 패턴 1: QThread 비동기 작업
+**개요**: 실전 프로젝트에서 자주 사용되는 고급 패턴입니다.
 
-**시나리오**: 이미지 다운로드를 UI 스레드를 차단하지 않고 수행
+### 패턴 목록
 
-**PNG Info 탭 예시** (`png_info_tab.py:49-106`)
+1. **QThread 비동기 작업** - UI 블로킹 없이 네트워크/파일 작업
+2. **Drag & Drop 통합** - 파일/URL 드래그 앤 드롭 처리
+3. **WebEngine JavaScript 통신** - 웹페이지와 데이터 교환
+4. **설정 영속성** - JSON 기반 설정 저장/로드 시스템
 
-```python
-class ImageDownloader(QObject):
-    """비동기 이미지 다운로드 워커"""
+### 주요 활용 사례
 
-    download_finished = pyqtSignal(str)  # temp_path
-    download_error = pyqtSignal(str)
-    download_progress = pyqtSignal(int)  # 0-100
+- **패턴 1**: 이미지 다운로드, API 호출 (PNG Info 탭 참조)
+- **패턴 2**: 이미지/파일 드롭 영역 (PNG Info, Image Viewer 참조)
+- **패턴 3**: Danbooru 태그 추출 (Web View 탭 참조)
+- **패턴 4**: 앱 설정 관리 (Settings 탭 참조)
 
-    def run(self, url: str):
-        """백그라운드 스레드에서 실행"""
-        try:
-            # 1. 다운로드
-            response = urllib.request.urlopen(url)
-            content_type = response.headers.get('Content-Type', '')
-
-            # 2. 진행률 업데이트
-            self.download_progress.emit(50)
-
-            # 3. 임시 파일 저장
-            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-            temp_file.write(response.read())
-            temp_file.close()
-
-            self.download_progress.emit(100)
-            self.download_finished.emit(temp_file.name)
-
-        except Exception as e:
-            self.download_error.emit(f"다운로드 오류: {str(e)}")
-```
-
-**메인 탭에서 사용**:
-```python
-def download_and_load_image(self, url: str):
-    """비동기 다운로드 시작"""
-
-    # 1. UI 상태 변경
-    self.progress_bar.setVisible(True)
-    self.set_buttons_enabled(False)
-
-    # 2. 워커 및 스레드 생성
-    self.download_thread = QThread()
-    self.downloader = ImageDownloader()
-    self.downloader.moveToThread(self.download_thread)
-
-    # 3. 시그널 연결
-    self.downloader.download_finished.connect(self.on_download_finished)
-    self.downloader.download_error.connect(self.on_download_error)
-    self.downloader.download_progress.connect(self.on_download_progress)
-
-    # 4. 스레드 시작
-    self.download_thread.started.connect(lambda: self.downloader.run(url))
-    self.download_thread.finished.connect(self.download_thread.deleteLater)
-    self.download_thread.start()
-
-def on_download_finished(self, temp_path: str):
-    """다운로드 완료"""
-    self.progress_bar.setVisible(False)
-    self.load_image_from_path(temp_path)
-    self.set_buttons_enabled(True)
-
-    # 스레드 정리
-    if self.download_thread:
-        self.download_thread.quit()
-        self.download_thread.wait()
-
-def on_download_error(self, error_msg: str):
-    """다운로드 실패"""
-    self.progress_bar.setVisible(False)
-    QMessageBox.critical(self, "오류", error_msg)
-    self.set_buttons_enabled(True)
-
-    if self.download_thread:
-        self.download_thread.quit()
-```
-
-### 패턴 2: Drag & Drop 통합
-
-**ImageDropArea 패턴** (`png_info_tab.py:1159-1284`)
-
-```python
-class ImageDropArea(QLabel):
-    """이미지 드래그&드롭 영역"""
-
-    file_dropped = pyqtSignal(str)  # 로컬 파일 경로
-    web_url_dropped = pyqtSignal(str)  # 웹 URL
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setText("📷\n\n이미지를 드래그하세요")
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        """드래그 진입 시 비주얼 피드백"""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            self.setStyleSheet(f"""
-                QLabel {{
-                    border: 2px dashed {DARK_COLORS['success']};
-                    color: {DARK_COLORS['success']};
-                }}
-            """)
-
-    def dragLeaveEvent(self, event):
-        """드래그 이탈 시 원래 스타일 복원"""
-        self.setStyleSheet(f"""
-            QLabel {{
-                border: 2px dashed {DARK_COLORS['border_light']};
-                color: {DARK_COLORS['text_secondary']};
-            }}
-        """)
-
-    def dropEvent(self, event: QDropEvent):
-        """드롭 이벤트 처리"""
-        try:
-            if event.mimeData().hasUrls():
-                url = event.mimeData().urls()[0]
-
-                # 로컬 파일
-                if url.isLocalFile():
-                    file_path = url.toLocalFile()
-                    self.file_dropped.emit(file_path)
-
-                # 웹 URL
-                else:
-                    url_str = url.toString()
-                    self.web_url_dropped.emit(url_str)
-
-        finally:
-            self.dragLeaveEvent(event)
-
-    def set_image(self, pixmap: QPixmap):
-        """이미지 표시"""
-        scaled = pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.setPixmap(scaled)
-```
-
-**사용 예시**:
-```python
-def create_image_panel(self):
-    """드롭 영역이 있는 패널"""
-    panel = QFrame()
-    layout = QVBoxLayout(panel)
-
-    # 드롭 영역
-    self.drop_area = ImageDropArea(self)
-    self.drop_area.file_dropped.connect(self.load_image_from_path)
-    self.drop_area.web_url_dropped.connect(self.download_and_load_image)
-
-    layout.addWidget(self.drop_area)
-    return panel
-```
-
-### 패턴 3: WebEngine JavaScript 통신
-
-**JavaScript 실행 및 결과 수신** (`web_view.py:219-241`)
-
-```python
-def extract_danbooru_tags(self):
-    """현재 페이지에서 JavaScript로 데이터 추출"""
-
-    js_code = """
-    (function() {
-        const result = {
-            url: window.location.href,
-            html: document.documentElement.outerHTML
-        };
-        return result;
-    })();
-    """
-
-    # JavaScript 실행 및 결과를 콜백으로 수신
-    self.page.runJavaScript(js_code, self.process_page_data)
-
-def process_page_data(self, page_data):
-    """JavaScript 결과 처리"""
-    if not page_data:
-        return
-
-    url = page_data['url']
-    html = page_data['html']
-
-    # HTML 파싱
-    tags_data = self.parse_danbooru_tags(html, post_id)
-
-    # 결과 표시
-    self.display_extracted_tags(tags_data)
-```
-
-**HTML 파싱** (`web_view.py:276-318`)
-
-```python
-import re
-
-def parse_danbooru_tags(self, html: str, post_id: int) -> dict:
-    """정규식으로 HTML 파싱"""
-
-    tags_data = {
-        'id': post_id,
-        'artist': [],
-        'copyright': [],
-        'character': [],
-        'general': [],
-        'meta': []
-    }
-
-    categories = {
-        'artist': r'<ul class="artist-tag-list">(.*?)</ul>',
-        'copyright': r'<ul class="copyright-tag-list">(.*?)</ul>',
-        'character': r'<ul class="character-tag-list">(.*?)</ul>',
-        'general': r'<ul class="general-tag-list">(.*?)</ul>',
-        'meta': r'<ul class="meta-tag-list">(.*?)</ul>'
-    }
-
-    for category, pattern in categories.items():
-        ul_match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
-        if ul_match:
-            ul_content = ul_match.group(1)
-
-            # data-tag-name 속성 추출
-            tag_pattern = r'data-tag-name="([^"]*)"'
-            tag_matches = re.findall(tag_pattern, ul_content)
-
-            for tag in tag_matches:
-                # HTML 엔티티 디코딩
-                tag = tag.replace('&amp;', '&')
-                tag = tag.replace('&lt;', '<')
-                tag = tag.replace('&gt;', '>')
-
-                if tag and tag not in tags_data[category]:
-                    tags_data[category].append(tag)
-
-    return tags_data
-```
-
-### 패턴 4: 설정 영속성 (JSON 저장/로드)
-
-**Settings 탭 패턴** (`setting_tabs.py:54-117`)
-
-```python
-class SettingsTabModule(BaseTabModule):
-    def __init__(self):
-        super().__init__()
-        self.settings_data = {}
-        self.settings_file = "app_settings.json"
-
-    def load_settings(self):
-        """설정 파일 로드"""
-        try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    self.settings_data = json.load(f)
-            else:
-                self.settings_data = self._get_default_settings()
-        except Exception as e:
-            print(f"Settings load failed: {e}")
-            self.settings_data = self._get_default_settings()
-
-    def save_settings(self):
-        """설정 파일 저장"""
-        try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(self.settings_data, f, indent=2, ensure_ascii=False)
-            print("Settings saved successfully.")
-        except Exception as e:
-            print(f"Settings save failed: {e}")
-
-    def _get_default_settings(self) -> dict:
-        """기본 설정값"""
-        return {
-            "autocomplete": {"enabled": True},
-            "save_directory": {"base_path": "./output"},
-            "module_visibility": {},
-            "tab_visibility": {},
-            "ui": {"theme": "dark", "auto_save": True}
-        }
-
-    def get_setting(self, key_path: str, default=None):
-        """점 표기법으로 설정 가져오기 (예: 'autocomplete.enabled')"""
-        keys = key_path.split('.')
-        value = self.settings_data
-        try:
-            for key in keys:
-                if isinstance(value, dict):
-                    value = value.get(key)
-                    if value is None:
-                        return default
-                else:
-                    return default
-            return value
-        except (KeyError, TypeError, AttributeError):
-            return default
-
-    def set_setting(self, key_path: str, value):
-        """점 표기법으로 설정 저장"""
-        keys = key_path.split('.')
-        data = self.settings_data
-        for key in keys[:-1]:
-            if key not in data:
-                data[key] = {}
-            data = data[key]
-        data[keys[-1]] = value
-        self.save_settings()
-```
-
-**사용 예시**:
-```python
-# 설정 읽기
-autocomplete_enabled = settings_module.get_setting('autocomplete.enabled', True)
-
-# 설정 쓰기
-settings_module.set_setting('autocomplete.enabled', False)
-
-# 중첩 설정
-settings_module.set_setting('module_visibility.MyModule', False)
-```
+📖 **상세 구현 코드**: [.claude/advanced_patterns_CLAUDE.md](.claude/advanced_patterns_CLAUDE.md)
 
 ---
 
@@ -1647,7 +709,87 @@ def setup_webengine(self):
     QTimer.singleShot(100, lambda: self.browser.setUrl(QUrl("https://example.com")))
 ```
 
-### Q5: 탭 분리 후 메모리 누수가 있어요
+### Q5: 모듈/탭 가시성이 프로그램 시작 시 적용되지 않아요
+
+**증상**:
+```
+Settings 탭에서 모듈을 False로 설정했는데, 재시작 후 계속 보임
+```
+
+**원인**:
+1. `_apply_saved_module_visibility`가 호출되지 않음
+2. 타이밍 문제 (컨트롤러가 아직 준비되지 않음)
+3. `update_ui_from_settings`에서 가시성 적용 누락
+
+**해결**:
+
+**1. update_ui_from_settings에 가시성 적용 추가**:
+```python
+def update_ui_from_settings(self):
+    """저장된 설정으로 UI 업데이트"""
+    # ... 기존 설정 ...
+
+    # ✅ 저장된 가시성 설정 적용 (프로그램 시작 시)
+    QTimer.singleShot(200, self._apply_saved_module_visibility)
+    QTimer.singleShot(250, self._apply_saved_tab_visibility)
+```
+
+**2. 재시도 메커니즘 구현**:
+```python
+def _apply_saved_module_visibility(self, retry_count=0):
+    """저장된 모듈 가시성 설정을 실제 UI에 적용"""
+    max_retries = 3
+    print(f"🔍 [SETTINGS] _apply_saved_module_visibility 호출됨 (시도 {retry_count + 1}/{max_retries + 1})")
+
+    # ✅ 컨트롤러 존재 확인
+    if not hasattr(self.app_context, 'middle_section_controller'):
+        print("⚠️ [SETTINGS] middle_section_controller가 없습니다.")
+        if retry_count < max_retries:
+            print(f"  → 500ms 후 재시도...")
+            QTimer.singleShot(500, lambda: self._apply_saved_module_visibility(retry_count + 1))
+        return
+
+    controller = self.app_context.middle_section_controller
+
+    # ✅ module_boxes 준비 확인
+    if not controller.module_boxes:
+        print("⚠️ [SETTINGS] module_boxes가 비어있습니다. 모듈이 아직 생성되지 않았을 수 있습니다.")
+        if retry_count < max_retries:
+            print(f"  → 500ms 후 재시도...")
+            QTimer.singleShot(500, lambda: self._apply_saved_module_visibility(retry_count + 1))
+        return
+
+    # ✅ 가시성 적용
+    applied_count = 0
+    for module in controller.module_instances:
+        module_id = module.__class__.__name__
+        is_visible = self.settings_module.get_setting(f'module_visibility.{module_id}', True)
+
+        module_title = module.get_title()
+        print(f"  - 모듈 '{module_title}' ({module_id}): 설정 가시성={is_visible}")
+
+        if not is_visible:
+            if module_title in controller.module_boxes:
+                box = controller.module_boxes[module_title]
+                box.setVisible(False)
+                print(f"    ✅ Module '{module_title}' hidden on startup")
+                applied_count += 1
+
+    print(f"✅ [SETTINGS] 모듈 가시성 적용 완료 ({applied_count}개 숨김)")
+```
+
+**3. 디버깅**:
+```bash
+# 콘솔에서 다음 메시지 확인
+🔍 [SETTINGS] _apply_saved_module_visibility 호출됨 (시도 1/4)
+📊 [SETTINGS] 모듈 인스턴스 수: 8
+📊 [SETTINGS] 모듈 박스 수: 8
+  - 모듈 '🎭 Character' (CharacterModule): 설정 가시성=False
+    ✅ Module '🎭 Character' hidden on startup
+✅ [SETTINGS] 모듈 가시성 적용 완료 (1개 숨김)
+```
+
+### Q6: 탭 분리 후 메모리 누수가 있어요
 
 **증상**:
 - 탭을 분리하고 닫아도 메모리가 해제되지 않음
@@ -1973,12 +1115,13 @@ console.log("Debug message");
 - 시그널 문제 → [Q2](#q2-시그널이-연결되지-않아요)
 - AppContext 문제 → [Q3](#q3-appcontext가-none이에요)
 - WebEngine 문제 → [Q4](#q4-webengine-페이지가-로드되지-않아요)
-- 메모리 누수 → [Q5](#q5-탭-분리-후-메모리-누수가-있어요)
+- 모듈/탭 가시성 문제 → [Q5](#q5-모듈탭-가시성이-프로그램-시작-시-적용되지-않아요)
+- 메모리 누수 → [Q6](#q6-탭-분리-후-메모리-누수가-있어요)
 
 ---
 
-*문서 버전: 1.3*
-*최종 업데이트: 2025-01-10*
+*문서 버전: 1.4*
+*최종 업데이트: 2025-01-18*
 *담당 영역: tabs/ 디렉터리*
 *변경사항:*
 - *ImageCrudController 통합 (image_window.py, setting_tabs.py 업데이트)*
@@ -1990,3 +1133,9 @@ console.log("Debug message");
   - *선택된 규칙별 2차 분류 규칙 입력 필드*
   - *ImageCrudController 동기화 로직*
 - *카운터 재시작 시 1로 초기화 정책 적용*
+- *🆕 모듈/탭 가시성 프로그램 시작 시 자동 적용 (setting_tabs.py:950-956, 1067-1160)*
+  - *`update_ui_from_settings`에서 가시성 적용 함수 호출 추가*
+  - *재시도 메커니즘 구현 (컨트롤러 준비 대기, 최대 3회 재시도)*
+  - *디버깅 로그 추가 (상태 추적 및 문제 진단)*
+  - *타이밍 문제 해결 (QTimer 지연 실행)*
+- *문제 해결 섹션에 Q5 추가: 모듈/탭 가시성 프로그램 시작 시 미적용 문제*

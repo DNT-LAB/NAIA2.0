@@ -1182,6 +1182,7 @@ else:
 **파일**:
 - `core/generation_request.py:1-135`
 - `core/generation_queue_manager.py:1-288`
+- `core/generation_controller.py:233-773`
 
 ### 개요
 
@@ -1192,662 +1193,15 @@ else:
 - 📊 **우선순위 지원**: 긴급 요청 (priority 100) vs 일반 요청 (priority 0)
 - 🔒 **스레드 안전**: `threading.Lock`을 사용한 동기화
 - ⏸️ **일시정지/재개**: 큐 처리를 일시적으로 중단 가능
-- 🗑️ **큐 관리**: 비우기, 특정 요청 제거
-- 📢 **이벤트 발행**: 큐 상태 변경 시 AppContext를 통해 알림
 
-### GenerationRequest: 생성 요청 데이터 클래스
-
-`core/generation_request.py:11-135`
-
-**구조**:
-```python
-@dataclass
-class GenerationRequest:
-    # 필수 속성
-    params: Dict[str, Any]              # 생성 파라미터
-    source_row: pd.Series               # 소스 데이터
-
-    # 자동 생성 속성
-    request_id: str                     # 고유 ID (UUID)
-    created_at: datetime                # 생성 시간
-
-    # 우선순위 및 상태
-    priority: int = 0                   # 우선순위 (0=일반, 100=긴급)
-    status: str = "pending"             # 상태: pending/processing/completed/failed
-
-    # 재시도
-    max_retries: int = 0                # 최대 재시도 횟수
-    retry_count: int = 0                # 현재 재시도 횟수
-
-    # 타임스탬프
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-    # 에러
-    error_message: Optional[str] = None
-```
-
-**상태 전환 메서드**:
-```python
-# 처리 시작
-request.mark_processing()
-# → status: "pending" → "processing"
-# → started_at: 현재 시간
-
-# 완료
-request.mark_completed()
-# → status: "processing" → "completed"
-# → completed_at: 현재 시간
-
-# 실패
-request.mark_failed("에러 메시지")
-# → status: "processing" → "failed"
-# → error_message: 에러 메시지
-# → completed_at: 현재 시간
-
-# 재시도 가능 여부 확인
-if request.can_retry():
-    request.retry_count += 1
-```
-
-**유틸리티 메서드**:
-```python
-# 경과 시간 (초)
-elapsed = request.get_elapsed_time()
-# → created_at부터 현재까지 경과 시간 (started_at 있으면 그 시점부터)
-
-# 완료 여부
-is_done = request.is_done()
-# → status가 "completed" 또는 "failed"인지 확인
-```
-
-### GenerationQueueManager: 큐 관리자
-
-`core/generation_queue_manager.py:16-288`
-
-#### 초기화
-
-```python
-class GenerationQueueManager:
-    def __init__(self, app_context):
-        self.app_context = app_context
-        self._queue: Deque[GenerationRequest] = deque()
-        self._queue_lock = Lock()  # 스레드 안전
-        self._is_paused = False
-```
-
-#### 큐에 요청 추가
-
-**일반 추가** (큐 끝에):
-```python
-request = GenerationRequest(
-    params={"input": "1girl, solo", ...},
-    source_row=current_row,
-    priority=0
-)
-
-request_id = queue_manager.enqueue_request(request)
-# → 큐 끝에 추가
-# → 이벤트 발행: "queue_request_enqueued"
-```
-
-**우선순위 추가** (우선순위에 따라 위치 결정):
-```python
-urgent_request = GenerationRequest(
-    params={"input": "1girl, masterpiece", ...},
-    source_row=current_row,
-    priority=100  # 긴급
-)
-
-request_id = queue_manager.enqueue_with_priority(urgent_request)
-# → 우선순위가 높은 요청은 큐 앞쪽에 삽입
-# → 같은 우선순위는 순서대로 삽입
-```
-
-**우선순위 삽입 로직**:
-```
-큐: [P:50] [P:50] [P:10] [P:0] [P:0]
-새 요청: P:30
-
-1. P:50 확인 → 30 < 50, 계속
-2. P:50 확인 → 30 < 50, 계속
-3. P:10 확인 → 30 > 10, 여기에 삽입!
-
-결과: [P:50] [P:50] [P:30] [P:10] [P:0] [P:0]
-```
-
-#### 큐에서 요청 가져오기
-
-```python
-next_request = queue_manager.dequeue_request()
-
-if next_request:
-    # 요청 처리
-    next_request.mark_processing()
-    # ... API 호출 ...
-else:
-    # 큐가 비어있거나 일시정지 상태
-    pass
-```
-
-**주의**:
-- 일시정지 상태 (`_is_paused=True`)이면 `None` 반환
-- 큐가 비어있으면 `None` 반환
-
-#### 큐 제어
-
-```python
-# 일시정지
-queue_manager.pause_queue()
-# → 이후 dequeue_request()는 None 반환
-# → 이벤트 발행: "queue_queue_paused"
-
-# 재개
-queue_manager.resume_queue()
-# → dequeue_request() 정상 동작
-# → 이벤트 발행: "queue_queue_resumed"
-
-# 큐 비우기
-queue_manager.clear_queue()
-# → 모든 대기 요청 제거
-# → 이벤트 발행: "queue_queue_cleared"
-
-# 특정 요청 제거
-success = queue_manager.remove_request(request_id)
-# → True: 제거 성공, False: 찾을 수 없음
-# → 이벤트 발행: "queue_request_removed"
-```
-
-#### 큐 상태 조회
-
-```python
-# 큐 크기
-size = queue_manager.get_queue_size()
-
-# 일시정지 여부
-is_paused = queue_manager.is_paused()
-
-# 큐가 비어있는지
-is_empty = queue_manager.is_empty()
-
-# 다음 요청 미리보기 (제거하지 않음)
-next_req = queue_manager.peek_next_request()
-
-# 모든 요청 목록 (복사본)
-all_requests = queue_manager.get_all_requests()
-
-# 통계 정보
-stats = queue_manager.get_queue_stats()
-# → {
-#     "total": 5,
-#     "is_paused": False,
-#     "priority_counts": {0: 3, 100: 2},
-#     "has_urgent": True
-# }
-```
-
-### GenerationController 통합
-
-`core/generation_controller.py:233-773`
-
-#### 초기화: 큐-자동생성 조정 플래그
-
-`core/generation_controller.py:233-250`
-
-```python
-class GenerationController:
-    def __init__(self, context: 'AppContext', module_instances: list):
-        self.context = context
-        self.module_instances = module_instances
-
-        # 스레드 관련 초기화
-        self.generation_thread = None
-        self.generation_worker = None
-        self.is_generating = False
-
-        # 🆕 큐-자동생성 간 조정 플래그
-        self.queue_hold_auto_gen = False  # 큐가 있는 동안 자동생성 보류
-        self.auto_retry_pending = False   # 큐 때문에 보류된 자동재시도
-
-        # 자동 생성 재시도 관련
-        self.auto_retry_count = 0
-        self.max_auto_retries = 2
-        self.retry_delay_ms = 3000
-```
-
-**핵심 원리**:
-- `queue_hold_auto_gen`: 큐가 비지 않으면 `True`, 자동생성/수동생성이 큐를 방해하지 않도록 함
-- `auto_retry_pending`: 에러 발생 시 자동재시도를 큐 완료 후로 연기
-
-#### 생성 요청 시 큐 우선 처리
-
-`core/generation_controller.py:251-277`
-
-```python
-def execute_generation_pipeline(self, overrides=None, priority=0, from_queue=False):
-    """
-    7단계 생성 파이프라인 실행
-
-    Args:
-        overrides: 생성 파라미터 오버라이드
-        priority: 우선순위 (0=일반, 100=긴급)
-        from_queue: 큐에서 가져온 요청인지 여부
-    """
-
-    # 1. 이미 생성 중인 경우 → 큐에 추가
-    if self.is_generating and not from_queue:
-        print(f"[QUEUE] 생성 중이므로 큐에 추가 (우선순위: {priority})")
-        self._enqueue_current_request(overrides, priority)
-        return
-
-    # 2. 🆕 큐 우선: 대기 상태이고 큐가 있다면 큐를 먼저 처리
-    try:
-        queue_manager = self.context.generation_queue_manager
-        if (not from_queue) and (not self.is_generating) \
-            and (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
-            self.queue_hold_auto_gen = True
-            self._update_button_with_queue_size()
-            QTimer.singleShot(0, self._process_next_queue_request)
-            return
-    except Exception:
-        pass
-
-    # 3. 생성 시작
-    # ...
-```
-
-**동작 순서**:
-1. 생성 중 → 큐에 추가 (충돌 방지)
-2. **대기 중 + 큐 존재 → 큐 우선 처리** (자동생성/수동생성 양보)
-3. 큐 비어있음 → 정상 생성 시작
-
-#### 큐에 요청 추가
-
-```python
-def _enqueue_current_request(self, overrides, priority):
-    """현재 설정으로 요청을 큐에 추가"""
-
-    # 파라미터 수집
-    params = self._collect_current_params(overrides)
-
-    # 요청 생성
-    request = GenerationRequest(
-        params=params,
-        source_row=self.context.current_source_row.copy(),
-        priority=priority,
-        max_retries=0
-    )
-
-    # 큐에 추가 (우선순위에 따라)
-    queue_manager = self.context.generation_queue_manager
-    queue_manager.enqueue_with_priority(request)
-
-    # 버튼 텍스트 업데이트
-    self._update_button_with_queue_size()
-```
-
-#### 버튼 텍스트 자동 업데이트
-
-`core/generation_controller.py:529-553`
-
-버튼 텍스트는 생성 상태와 큐 크기에 따라 자동으로 업데이트됩니다:
-
-```python
-def _update_button_with_queue_size(self):
-    """생성 버튼 텍스트를 큐 크기로 업데이트합니다."""
-    queue_manager = self.context.generation_queue_manager
-    queue_size = queue_manager.get_queue_size()
-
-    if self.is_generating:
-        # 생성 중일 때
-        if queue_size > 0:
-            btn_text = f"🔄 생성 중... ({queue_size})"
-        else:
-            btn_text = "🔄 생성 중..."
-    else:
-        # 생성 중이 아닐 때
-        if queue_size > 0:
-            btn_text = f"🎨 이미지 생성 요청 ({queue_size})"
-        else:
-            btn_text = "🎨 이미지 생성 요청"
-
-    self.context.main_window.generate_button_main.setText(btn_text)
-    if hasattr(self.context.main_window, 'detached_generate_btn'):
-        self.context.main_window.detached_generate_btn.setText(btn_text)
-```
-
-**버튼 텍스트 상태표**:
-
-| 생성 상태 | 큐 크기 | 버튼 텍스트 |
-|----------|---------|------------|
-| 생성 중 | 0 | 🔄 생성 중... |
-| 생성 중 | 2 | 🔄 생성 중... (2) |
-| 대기 중 | 0 | 🎨 이미지 생성 요청 |
-| 대기 중 | 1 | 🎨 이미지 생성 요청 (1) |
-| 대기 중 | 5 | 🎨 이미지 생성 요청 (5) |
-
-**호출 시점**:
-- 큐에 요청 추가 시 (`_enqueue_current_request`)
-- 생성 시작 시 (`_on_generation_started`)
-- 생성 완료 시 (`_on_generation_finished`)
-- 스레드 종료 시 (`_on_thread_finished`)
-- 큐 이벤트 발생 시 (`NAIA_cold_v4.py:610-620`)
-
-#### 생성 완료 후 핸드오프
-
-`core/generation_controller.py:587-611`
-
-```python
-def _on_generation_finished(self, result: dict):
-    """생성 완료 시 큐 확인 및 다음 요청 처리"""
-
-    # 성공 시 재시도 카운터 리셋
-    self.auto_retry_count = 0
-
-    # UI 업데이트
-    self.context.main_window.update_ui_with_result(result)
-
-    # 🆕 큐가 있으면 스레드 종료 시점까지 is_generating 유지
-    # (자동생성이 끼어들지 못하도록 차단)
-    queue_manager = self.context.generation_queue_manager
-    if not queue_manager.is_empty() and not queue_manager.is_paused():
-        print(f"[QUEUE] 생성 완료. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
-        # 다음 요청 디스패치는 _on_thread_finished에서 수행
-    else:
-        # 큐가 비어있으면 정상 종료
-        self._update_button_with_queue_size()
-        print("[QUEUE] 큐 비어있음. 자동생성 즉시 가능.")
-```
-
-**핵심 변경**:
-- 이전: 큐 처리를 `_on_generation_finished`에서 즉시 스케줄
-- 현재: `is_generating` 해제를 `_on_thread_finished`로 연기하여 자동생성 차단
-
-#### 에러 발생 시 큐 우선 처리
-
-`core/generation_controller.py:612-673`
-
-```python
-def _on_generation_error(self, error_message: str):
-    """생성 오류 시 호출 - 큐 우선 처리"""
-
-    print(f"❌ 생성 오류 발생: {error_message}")
-
-    auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
-    is_auto_generation = auto_generate_checkbox and auto_generate_checkbox.isChecked()
-
-    queue_manager = self.context.generation_queue_manager
-    has_queue = not queue_manager.is_empty() and not queue_manager.is_paused()
-
-    if is_auto_generation and self.auto_retry_count < self.max_auto_retries:
-        # 자동재시도 가능
-        self.auto_retry_count += 1
-
-        if has_queue:
-            # 🆕 큐가 있으면 재시도 보류
-            self.auto_retry_pending = True
-            print("[QUEUE] 큐 우선. 자동 재시도 보류.")
-        else:
-            # 큐 없으면 즉시 재시도
-            QTimer.singleShot(self.retry_delay_ms, self._retry_auto_generation)
-
-    elif has_queue:
-        # 🆕 재시도 불가 + 큐 존재 → 큐 우선 처리
-        print(f"[QUEUE] 오류 발생. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
-        # 스레드 종료 시점에 큐 디스패치 수행
-
-    else:
-        # 재시도도 안 하고 큐도 없으면 종료
-        # UI 업데이트 및 버튼 활성화
-        # ...
-```
-
-**동작 순서**:
-1. 자동재시도 가능 + 큐 존재 → 재시도 보류 (`auto_retry_pending = True`)
-2. 자동재시도 불가 + 큐 존재 → 큐 우선 처리
-3. 큐 없음 → 정상 에러 처리
-
-#### 자동재시도 시 큐 체크
-
-`core/generation_controller.py:674-711`
-
-```python
-def _retry_auto_generation(self):
-    """자동 생성 재시도 실행"""
-
-    try:
-        # 🆕 큐가 존재하면 재시도를 보류하고 큐를 먼저 처리
-        queue_manager = self.context.generation_queue_manager
-        if (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
-            self.auto_retry_pending = True
-            self.queue_hold_auto_gen = True
-            print("[QUEUE] 큐 우선. 자동 재시도 보류.")
-            QTimer.singleShot(0, self._process_next_queue_request)
-            return
-
-        # 자동 생성이 여전히 활성화되어 있는지 확인
-        auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
-        if not (auto_generate_checkbox and auto_generate_checkbox.isChecked()):
-            print("⚠️ 자동 생성이 비활성화되어 재시도를 중단합니다.")
-            self.auto_retry_count = 0
-            return
-
-        # 재시도 실행
-        # ...
-    except Exception as e:
-        print(f"❌ 자동 재시도 중 오류: {e}")
-```
-
-#### 스레드 종료 시 핸드오프 결정
-
-`core/generation_controller.py:726-773`
-
-```python
-def _on_thread_finished(self):
-    """스레드 완료 시 정리 및 다음 작업 결정"""
-
-    # 스레드 정리
-    def _cleanup():
-        try:
-            if self.generation_thread:
-                self.generation_thread.wait(50)
-        except Exception:
-            pass
-        finally:
-            self.generation_thread = None
-            self.generation_worker = None
-            _force_cleanup_all_threads()
-
-    _cleanup()
-
-    # 🆕 is_generating 해제 및 핸드오프 결정
-    try:
-        self.is_generating = False
-
-        queue_manager = self.context.generation_queue_manager
-        has_queue = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
-
-        if has_queue:
-            # 큐 우선 처리: 자동생성을 보류하고 다음 요청 즉시 디스패치
-            self.queue_hold_auto_gen = True
-            print(f"[QUEUE] 스레드 종료. 큐 디스패치 시작... (남은 큐: {queue_manager.get_queue_size()})")
-            QTimer.singleShot(0, self._process_next_queue_request)
-        else:
-            # 큐가 비면 자동생성 보류 해제
-            if self.queue_hold_auto_gen:
-                print("[QUEUE] 큐 비었음. 자동생성 보류 해제.")
-            self.queue_hold_auto_gen = False
-
-            # 보류 중인 자동 재시도 수행
-            if self.auto_retry_pending:
-                self.auto_retry_pending = False
-                print("[AUTO] 보류된 자동 재시도 실행.")
-                QTimer.singleShot(0, self._retry_auto_generation)
-
-        # UI 상태 업데이트
-        self._update_button_with_queue_size()
-
-    except Exception as _e:
-        print(f"[GEN] thread-finish 후 디스패치 오류: {_e}")
-```
-
-**핵심 로직**:
-1. **has_queue = True**: `queue_hold_auto_gen = True` → 큐 디스패치 → 자동생성 차단
-2. **has_queue = False**: `queue_hold_auto_gen = False` → 보류된 재시도 실행 → 자동생성 허용
-
-#### 다음 요청 처리
-
-`core/generation_controller.py:460-503`
-
-```python
-def _process_next_queue_request(self):
-    """큐에서 다음 요청을 가져와 실행"""
-
-    queue_manager = self.context.generation_queue_manager
-
-    # 큐가 존재하는 동안 자동생성은 보류
-    self.queue_hold_auto_gen = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
-
-    # 안전: 스레드 실행 중이면 대기
-    if self.generation_thread and self.generation_thread.isRunning():
-        print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
-        return
-
-    # 안전: 이미 생성 중이면 대기
-    if self.is_generating:
-        print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
-        return
-
-    if queue_manager.is_empty():
-        print("[QUEUE] 큐가 비어있습니다. 대기 종료.")
-        return
-
-    # 다음 요청 가져오기
-    next_request = queue_manager.dequeue_request()
-
-    if not next_request:
-        print("[QUEUE] 요청을 가져오지 못했습니다 (일시정지 상태일 수 있음)")
-        return
-
-    # 요청 처리 시작
-    print(f"[QUEUE] 요청 가져옴: {next_request.request_id[:8]}...")
-    next_request.mark_processing()
-
-    # 소스 데이터 복원
-    self.context.current_source_row = next_request.source_row
-
-    # 생성 실행 (from_queue=True로 재귀 방지)
-    self.execute_generation_pipeline(
-        overrides=next_request.params,
-        priority=next_request.priority,
-        from_queue=True
-    )
-```
-
-**안전 장치**:
-1. `generation_thread.isRunning()` 체크
-2. `is_generating` 체크
-3. 큐 비어있음 체크
-4. `dequeue_request()` null 체크
-
-### MainController 통합 (UI)
-
-`core/main_controller.py:249-362`
-
-#### 키보드 단축키
-
-```python
-def _setup_keyboard_shortcuts(self):
-    """키보드 단축키 설정"""
-    mw = self.main_window
-
-    # Ctrl+Enter: 일반 생성 (우선순위 0)
-    ctrl_enter = QShortcut(
-        QKeySequence(Qt.Modifier.CTRL.value | Qt.Key.Key_Return.value),
-        mw
-    )
-    ctrl_enter.activated.connect(lambda: self.trigger_generation(priority=0))
-
-    # Shift+Enter: 긴급 생성 (우선순위 100)
-    shift_enter = QShortcut(
-        QKeySequence(Qt.Modifier.SHIFT.value | Qt.Key.Key_Return.value),
-        mw
-    )
-    shift_enter.activated.connect(lambda: self.trigger_generation(priority=100))
-```
-
-**사용법**:
-- **Ctrl+Enter**: 일반 생성 (큐 끝에 추가)
-- **Shift+Enter**: 긴급 생성 (우선순위에 따라 앞쪽에 삽입)
-
-#### 우클릭 컨텍스트 메뉴
-
-```python
-def _setup_generation_button_context_menu(self):
-    """생성 버튼에 우클릭 메뉴 설정"""
-    mw = self.main_window
-
-    mw.generate_button_main.setContextMenuPolicy(
-        Qt.ContextMenuPolicy.CustomContextMenu
-    )
-    mw.generate_button_main.customContextMenuRequested.connect(
-        self._show_queue_context_menu
-    )
-
-def _show_queue_context_menu(self, position):
-    """큐 관리 컨텍스트 메뉴 표시"""
-
-    menu = QMenu(self.main_window)
-    queue_manager = self.main_window.app_context.generation_queue_manager
-
-    queue_size = queue_manager.get_queue_size()
-
-    # 큐 상태 표시
-    status_action = QAction(f"📊 대기 중: {queue_size}개", self.main_window)
-    status_action.setEnabled(False)
-    menu.addAction(status_action)
-
-    menu.addSeparator()
-
-    # 일시정지/재개
-    if queue_manager.is_paused():
-        pause_action = QAction("▶️ 큐 재개", self.main_window)
-        pause_action.triggered.connect(queue_manager.resume_queue)
-    else:
-        pause_action = QAction("⏸️ 큐 일시정지", self.main_window)
-        pause_action.triggered.connect(queue_manager.pause_queue)
-
-    menu.addAction(pause_action)
-
-    # 큐 비우기
-    clear_action = QAction("🗑️ 큐 비우기", self.main_window)
-    clear_action.triggered.connect(self._clear_queue_with_confirmation)
-    clear_action.setEnabled(queue_size > 0)
-    menu.addAction(clear_action)
-
-    # 메뉴 표시
-    menu.exec(self.main_window.generate_button_main.mapToGlobal(position))
-```
-
-**사용법**:
-1. 생성 버튼 우클릭
-2. 메뉴에서 선택:
-   - **대기 중: N개**: 현재 큐 크기 표시 (비활성)
-   - **⏸️ 큐 일시정지** / **▶️ 큐 재개**: 큐 처리 제어
-   - **🗑️ 큐 비우기**: 모든 대기 요청 제거 (확인 대화상자)
-
-### 큐 이벤트
-
-GenerationQueueManager는 큐 상태 변경 시 다음 이벤트를 발행합니다:
-
-| 이벤트 이름 | 데이터 구조 | 발행 시점 |
-|------------|------------|----------|
-| `queue_request_enqueued` | `{"request_id": str, "priority": int, "queue_size": int, "position": int}` | 요청 추가 시 |
-| `queue_request_dequeued` | `{"request_id": str, "priority": int, "queue_size": int}` | 요청 가져올 시 |
-| `queue_request_removed` | `{"request_id": str, "queue_size": int}` | 요청 제거 시 |
-| `queue_queue_paused` | `{"queue_size": int}` | 일시정지 시 |
-| `queue_queue_resumed` | `{"queue_size": int}` | 재개 시 |
-| `queue_queue_cleared` | `{"cleared_count": int}` | 큐 비우기 시 |
+**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)
+- GenerationRequest 데이터 클래스
+- GenerationQueueManager API
+- GenerationController 통합
+- MainController UI 통합 (키보드 단축키, 컨텍스트 메뉴)
+- 큐 이벤트 시스템
+- 사용 시나리오
+- 문제 해결
 
 ---
 
@@ -1864,415 +1218,16 @@ GenerationQueueManager는 큐 상태 변경 시 다음 이벤트를 발행합니
 2. **큐가 비면** → 자동생성 재개, 보류된 재시도 실행
 3. **UI 피드백** → 버튼 상태로 현재 상태 표시
 
-### NAIA_cold_v4.py: 자동생성 트리거
-
-`NAIA_cold_v4.py:2104-2120`
-
-#### 자동생성 조건 체크
-
-```python
-def _check_and_trigger_auto_generation(self):
-    """자동 생성 조건을 확인하고 조건이 만족되면 다음 사이클을 시작"""
-
-    auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
-    prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
-
-    if not auto_generate_checkbox.isChecked():
-        return  # 자동 생성 체크박스가 없으면 종료
-
-    try:
-        # 🆕 [큐 우선] 큐가 비어있지 않으면 큐 처리가 끝날 때까지 자동생성 대기
-        if hasattr(self, 'app_context') and self.app_context:
-            queue_manager = self.app_context.generation_queue_manager
-            if queue_manager and not queue_manager.is_empty() and not queue_manager.is_paused():
-                self.status_bar.showMessage("큐 처리 중... 자동생성 대기")
-                QTimer.singleShot(500, self._check_and_trigger_auto_generation)
-                return
-
-        # 이후 기존 체크 (is_generating, thread.isRunning, 반복 생성 중 등)
-        # ...
-    except Exception as e:
-        print(f"❌ 자동 생성 트리거 오류: {e}")
-```
-
-**동작 순서**:
-1. 큐 상태 확인 (최우선)
-2. 큐가 있으면 → 500ms 후 재시도, 상태바 메시지 표시
-3. 큐 없으면 → 기존 조건 체크 (`is_generating`, 스레드 상태 등)
-
-#### 랜덤 프롬프트 버튼 상태 관리
-
-`NAIA_cold_v4.py:3642-3677`
-
-```python
-def update_random_prompt_button_state(self):
-    """generation_checkboxes 상태에 따라 random_prompt_btn을 활성화/비활성화"""
-
-    try:
-        # "프롬프트 고정" 체크박스 확인
-        prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
-        prompt_fixed = prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked()
-
-        if prompt_fixed:
-            # 프롬프트 고정 모드
-            self.random_prompt_btn.setEnabled(False)
-            self.random_prompt_btn.setText("프롬프트 고정됨")
-            # detached_random_btn도 동기화
-        else:
-            # 일반 모드 (활성화)
-            self.random_prompt_btn.setEnabled(True)
-            self.random_prompt_btn.setText("랜덤/다음 프롬프트")
-
-    except Exception as e:
-        print(f"❌ 버튼 상태 업데이트 오류: {e}")
-```
-
-**우선순위**:
-1. **프롬프트 고정** → "프롬프트 고정됨" + 비활성화
-2. **일반 모드** → "랜덤/다음 프롬프트" + 활성화
-
-**참고**: 큐 처리 중에도 프롬프트 생성 가능 (스레드 안전성 검증 완료)
-
-#### 큐 이벤트 구독
-
-`NAIA_cold_v4.py:575-581`
-
-```python
-# AppContext 초기화 시점 (self.app_context 생성 후)
-
-# 큐 이벤트 구독 - 상태 동기화
-for queue_event in [
-    "queue_request_enqueued", "queue_request_dequeued",
-    "queue_queue_paused", "queue_queue_resumed",
-    "queue_queue_cleared", "queue_request_removed"
-]:
-    self.app_context.subscribe(queue_event, lambda _=None: self.update_random_prompt_button_state())
-```
-
-**효과**:
-- 큐 상태가 변경될 때마다 UI 동기화
-- 현재는 프롬프트 고정 상태만 체크 (큐 상태는 버튼 제한 없음)
-
-### 전체 흐름도
-
-```
-사용자 액션
-    ↓
-[자동생성 ON]           [수동 생성 버튼 클릭]
-    ↓                        ↓
-_check_and_trigger    execute_generation_pipeline
-    ↓                        ↓
-    └─────[큐 체크]──────────┘
-              ↓
-    큐 비어있음?  ──No──→ 큐 우선 처리
-              Yes               ↓
-              ↓            큐 요청 실행
-         정상 생성              ↓
-              ↓            생성 완료
-              ↓                 ↓
-         생성 완료         큐 남았음?
-              ↓                Yes ──→ 다음 큐 처리
-         큐 있음?               No
-              Yes                ↓
-              ↓            자동생성 재개
-         큐 처리               (queue_hold_auto_gen = False)
-              No
-              ↓
-         자동생성 계속
-```
-
-### 검증 시나리오
-
-#### 시나리오 1: 자동생성 ON + 사용자 클릭 2회
-
-```
-1. 자동생성 활성화 상태
-2. 사용자가 "생성" 버튼 2회 연속 클릭
-3. 첫 요청 → 즉시 실행
-4. 둘째 요청 → 큐에 추가 (is_generating = True)
-5. 첫 요청 완료 → 스레드 종료
-6. _on_thread_finished → 큐 발견 → queue_hold_auto_gen = True
-7. 다음 큐 요청 처리 (자동생성 차단)
-8. 둘째 요청 완료 → 큐 비어있음
-9. queue_hold_auto_gen = False → 자동생성 재개
-```
-
-**예상 결과**:
-- ✅ 두 요청 모두 처리됨
-- ✅ 큐가 비기 전까지 자동생성 대기
-- ✅ 큐 완료 후 자동생성 즉시 재개
-
-#### 시나리오 2: 에러 발생 + 자동재시도 ON + 큐 존재
-
-```
-1. 자동생성 중 에러 발생
-2. auto_retry_count < max_auto_retries (재시도 가능)
-3. 큐 체크 → has_queue = True
-4. auto_retry_pending = True (재시도 보류)
-5. 큐 처리 시작
-6. 큐 완료 → _on_thread_finished
-7. has_queue = False → auto_retry_pending = True 감지
-8. _retry_auto_generation 실행 (보류된 재시도)
-```
-
-**예상 결과**:
-- ✅ 큐 우선 처리
-- ✅ 큐 완료 후 자동재시도 실행
-- ✅ 재시도 카운트 유지
-
-#### 시나리오 3: 랜덤 프롬프트 버튼
-
-```
-1. 큐에 3개 요청 대기
-2. 랜덤 프롬프트 버튼 → "큐 처리 중" + 비활성화
-3. 큐 이벤트 발행 (queue_request_dequeued)
-4. update_random_prompt_button_state() 자동 호출
-5. 큐 남아있음 → 여전히 "큐 처리 중"
-6. 마지막 큐 완료 → queue_cleared 이벤트
-7. 버튼 → "랜덤/다음 프롬프트" + 활성화
-```
-
-**예상 결과**:
-- ✅ 큐 처리 중 버튼 비활성화
-- ✅ 큐 완료 시 자동 활성화
-- ✅ 사용자가 큐 상태를 즉시 인지 가능
-
-### 문제 해결
-
-#### Q1: 큐가 있는데 자동생성이 계속 실행됨
-
-**원인**: `_check_and_trigger_auto_generation`에서 큐 체크 누락
-
-**확인**:
-```python
-# NAIA_cold_v4.py:2114-2120
-if hasattr(self, 'app_context') and self.app_context:
-    queue_manager = self.app_context.generation_queue_manager
-    if queue_manager and not queue_manager.is_empty() and not queue_manager.is_paused():
-        # 큐가 있으면 대기해야 함
-        return
-```
-
-#### Q2: 큐 완료 후 자동재시도가 실행되지 않음
-
-**원인**: `auto_retry_pending` 플래그가 해제되지 않음
-
-**확인**:
-```python
-# generation_controller.py:1464-1473 (_on_thread_finished)
-if has_queue == False:
-    if self.auto_retry_pending:
-        self.auto_retry_pending = False  # ← 반드시 False로 설정
-        QTimer.singleShot(0, self._retry_auto_generation)
-```
-
-#### Q3: 랜덤 프롬프트 버튼이 큐 상태를 반영하지 않음
-
-**원인**: 큐 이벤트 구독 누락
-
-**확인**:
-```python
-# NAIA_cold_v4.py:489-495
-for queue_event in [...]:
-    self.app_context.subscribe(queue_event, lambda _=None: self.update_random_prompt_button_state())
-```
-
-**추가 확인**: `update_random_prompt_button_state()`에서 `queue_busy` 계산 로직 확인
-
-**구독 예시**:
-```python
-def initialize_with_context(self, app_context):
-    self.app_context = app_context
-
-    # 큐 이벤트 구독
-    app_context.subscribe("queue_request_enqueued", self._on_queue_updated)
-    app_context.subscribe("queue_request_dequeued", self._on_queue_updated)
-
-def _on_queue_updated(self, data: dict):
-    queue_size = data.get("queue_size", 0)
-    print(f"큐 업데이트: {queue_size}개 대기 중")
-```
-
-### 사용 시나리오
-
-#### 시나리오 1: 일반 사용 (연속 생성)
-
-```
-사용자 액션:
-1. 생성 버튼 클릭 (또는 Ctrl+Enter)
-   → 생성 시작, 버튼 텍스트: "생성 중..."
-
-2. 생성 중에 다시 버튼 클릭
-   → 큐에 추가 (우선순위 0), 버튼 텍스트: "생성 중... (1)"
-
-3. 또 클릭
-   → 큐에 추가, 버튼 텍스트: "생성 중... (2)"
-
-결과:
-- 첫 번째 생성 완료
-- 500ms 후 큐의 첫 번째 요청 자동 처리
-- 두 번째 생성 완료
-- 500ms 후 큐의 두 번째 요청 자동 처리
-- 모두 완료
-```
-
-#### 시나리오 2: 긴급 요청 추가
-
-```
-사용자 액션:
-1. 일반 생성 3회 추가 (Ctrl+Enter x3)
-   → 큐: [P:0] [P:0] [P:0]
-
-2. 긴급 요청 추가 (Shift+Enter)
-   → 큐: [P:100] [P:0] [P:0] [P:0]
-
-결과:
-- 긴급 요청이 큐 앞쪽에 삽입됨
-- 현재 생성 완료 후 긴급 요청 먼저 처리
-```
-
-#### 시나리오 3: 큐 일시정지
-
-```
-사용자 액션:
-1. 생성 중에 요청 5개 큐에 추가
-   → 큐: [P:0] [P:0] [P:0] [P:0] [P:0]
-
-2. 생성 버튼 우클릭 → "⏸️ 큐 일시정지"
-   → 큐 일시정지
-
-3. 현재 생성 완료
-   → 다음 큐 처리 안 함 (일시정지 상태)
-
-4. 생성 버튼 우클릭 → "▶️ 큐 재개"
-   → 다음 요청 자동 처리 시작
-```
-
-#### 시나리오 4: 자동 생성과 큐
-
-```
-상황:
-- "자동 생성" 체크박스 활성화
-- 생성 중에 수동으로 버튼 클릭
-
-동작:
-1. 자동 생성으로 이미지 생성 중
-2. 사용자가 버튼 클릭 → 큐에 추가
-3. 자동 생성 완료
-4. 큐에 요청이 있으므로 큐 먼저 처리
-5. 큐 비워진 후 자동 생성 재개
-
-→ 큐가 자동 생성보다 우선순위가 높음
-```
-
-#### 시나리오 5: 히스토리에서 큐에 추가 (🆕)
-
-```
-사용자 액션:
-1. 생성된 이미지 히스토리 목록에서 우클릭
-2. "⬆️ 큐 앞에 추가" 또는 "⬇️ 큐 뒤에 추가" 선택
-
-동작:
-- 해당 이미지의 generation_params를 사용하여 GenerationRequest 생성
-- 🆕 현재 UI 설정 반영:
-  - "랜덤 해상도" 체크 시 → 무작위 해상도로 덮어쓰기
-  - "시드 고정" 체크 OFF 시 → 무작위 시드 생성 (0~9999999999)
-- 우선순위에 따라 큐에 추가
-  - "큐 앞에 추가": priority=100 (긴급)
-  - "큐 뒤에 추가": priority=0 (일반)
-- 상태바 피드백: "✅ 큐 뒤에 추가됨 (대기 중: 1)"
-- 버튼 텍스트 자동 업데이트: "🎨 이미지 생성 요청 (1)"
-
-결과:
-- 동일한 설정으로 이미지를 다시 생성할 수 있음
-- 랜덤 옵션 적용으로 변형 생성 가능
-- generation_params가 없는 이미지는 버튼 비활성화됨
-```
-
-**주의사항**:
-- NovelAI API는 음수 시드를 받지 않음 (`seed: -1` → HTTP 400 오류)
-- 무작위 시드는 0~9999999999 범위의 양수 정수 생성
-- `extra_noise_seed`도 동일한 값으로 설정해야 함
-
-### 콘솔 출력 예시
-
-```
-[QUEUE] 생성 중이므로 요청을 큐에 추가합니다 (우선순위: 0)
-[QUEUE] 일반 요청 추가: a3b4c5d6... (위치: 2, 큐 크기: 3)
-🚀 이벤트 발행: 'queue_request_enqueued' (구독자: 0개)
-
-[QUEUE] 요청 가져옴: a3b4c5d6... (남은 큐: 2)
-🚀 이벤트 발행: 'queue_request_dequeued' (구독자: 0개)
-
-[QUEUE] 생성 완료. 다음 요청 처리 중... (남은 큐: 2)
-
-[QUEUE] 요청 가져옴: b4c5d6e7... (남은 큐: 1)
-[QUEUE] 생성 완료. 다음 요청 처리 중... (남은 큐: 1)
-
-[QUEUE] 요청 가져옴: c5d6e7f8... (남은 큐: 0)
-[QUEUE] 모든 생성 완료. 큐가 비어있습니다.
-
-[QUEUE] ⏸️ 큐 일시정지 (대기 중: 5)
-[QUEUE] ▶️ 큐 재개 (대기 중: 5)
-[QUEUE] 🗑️ 큐 비우기 완료: 5개 요청 제거됨
-```
-
-### 문제 해결
-
-#### Q1: 큐에 추가되지 않아요
-
-**증상**: 생성 중에 버튼 클릭 시 큐에 추가되지 않음
-
-**원인**:
-- `is_generating` 플래그가 False
-- `from_queue` 파라미터가 True
-
-**해결**:
-```python
-# GenerationController에서
-def execute_generation_pipeline(self, overrides=None, priority=0, from_queue=False):
-    # ✅ from_queue=False일 때만 큐에 추가
-    if self.is_generating and not from_queue:
-        self._enqueue_current_request(overrides, priority)
-        return
-```
-
-#### Q2: 큐가 자동으로 처리되지 않아요
-
-**증상**: 생성 완료 후 큐에 요청이 있지만 처리되지 않음
-
-**원인**:
-- `_on_generation_finished()`에서 큐 처리 로직 누락
-- 큐가 일시정지 상태
-
-**해결**:
-```python
-def _on_generation_finished(self, result: dict):
-    # ...
-
-    # ✅ 큐 확인 및 처리
-    queue_manager = self.context.generation_queue_manager
-
-    if not queue_manager.is_empty():
-        QTimer.singleShot(500, self._process_next_queue_request)
-```
-
-#### Q3: 우선순위가 작동하지 않아요
-
-**증상**: 긴급 요청이 일반 요청보다 나중에 처리됨
-
-**원인**:
-- `enqueue_request()` 사용 (우선순위 무시)
-- 우선순위 값이 잘못됨
-
-**해결**:
-```python
-# ❌ 잘못된 방법
-queue_manager.enqueue_request(request)  # 항상 큐 끝에 추가
-
-# ✅ 올바른 방법
-queue_manager.enqueue_with_priority(request)  # 우선순위에 따라 삽입
-```
+**조정 플래그**:
+- `queue_hold_auto_gen`: 큐가 있는 동안 자동생성 보류
+- `auto_retry_pending`: 큐 때문에 보류된 자동재시도
+
+**상세 레퍼런스**: [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
+- NAIA_cold_v4.py: 자동생성 트리거
+- GenerationController: 큐-자동생성 조정
+- 전체 흐름도
+- 검증 시나리오
+- 문제 해결
 
 ---
 
@@ -2414,6 +1369,109 @@ def _cleanup_http_threads(self):
 ```
 
 **중요**: 모든 API 메서드 마지막에 반드시 호출!
+
+### 캐릭터 위치 동적 좌표 처리 🆕
+
+**파일**: `core/api_service.py:424-452`
+
+**목적**: character_module에서 전달된 동적 위치 좌표를 NovelAI API의 `centers` 파라미터로 전달합니다.
+
+#### 배경
+
+NAID4 모델은 `v4_prompt.caption.char_captions`에서 각 캐릭터의 화면 위치를 지정할 수 있습니다:
+- `centers`: 배열 형태, 각 요소는 `{"x": float, "y": float}` (0.0~1.0 범위)
+- 기본값: `[{"x": 0.5, "y": 0.5}]` (화면 중앙)
+
+#### 구현
+
+```python
+# core/api_service.py:424-452
+if char_params and char_params.get("characters"):
+    characters = char_params["characters"]
+    ucs = char_params["uc"]
+    # 🆕 캐릭터 위치 좌표 가져오기 (없으면 빈 리스트)
+    character_positions = char_params.get("character_positions", [])
+
+    print(f"[DEBUG] character_positions: {character_positions}")
+
+    # 캐릭터 프롬프트를 v4_prompt에 추가
+    for i, prompt in enumerate(characters):
+        # 🆕 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
+        if i < len(character_positions):
+            centers = [character_positions[i]]
+        else:
+            centers = [{"x": 0.5, "y": 0.5}]
+
+        api_parameters['v4_prompt']['caption']['char_captions'].append({
+            'char_caption': prompt,
+            'centers': centers  # 동적 좌표 적용
+        })
+        api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+            'char_caption': ucs[i] if i < len(ucs) else "",
+            'centers': centers  # negative도 동일 좌표 사용
+        })
+```
+
+#### 좌표 매핑
+
+`character_module.py`에서 생성되는 `character_positions` 파라미터 구조:
+
+```python
+# 예시: 2명의 캐릭터
+character_positions = [
+    {'x': 0.1, 'y': 0.1},  # 캐릭터 1: A1 위치 (좌상단)
+    {'x': 0.9, 'y': 0.9}   # 캐릭터 2: E5 위치 (우하단)
+]
+```
+
+**좌표 변환 규칙** (character_module.py에서):
+- **A-E (열)** → x: 0.1, 0.3, 0.5, 0.7, 0.9
+- **1-5 (행)** → y: 0.1, 0.3, 0.5, 0.7, 0.9
+
+| 위치 | x | y | 설명 |
+|------|---|---|------|
+| A1 | 0.1 | 0.1 | 좌상단 |
+| C3 | 0.5 | 0.5 | 중앙 (기본값) |
+| E5 | 0.9 | 0.9 | 우하단 |
+| B2 | 0.3 | 0.3 | 좌상단 근처 |
+| D4 | 0.7 | 0.7 | 우하단 근처 |
+
+#### Fallback 동작
+
+1. **위치 기능 비활성화 시**: `character_positions` 파라미터 자체가 전달되지 않음
+   → 모든 캐릭터에 `{"x": 0.5, "y": 0.5}` 기본값 사용
+
+2. **위치 개수 부족 시**: `character_positions` 배열 길이 < 캐릭터 개수
+   → 부족한 캐릭터는 `{"x": 0.5, "y": 0.5}` 기본값 사용
+
+3. **Sketchbook 모드**: 현재 Sketchbook은 위치 기능 미지원
+   → 항상 `{"x": 0.5, "y": 0.5}` 사용
+
+#### 디버깅
+
+**콘솔 출력 확인**:
+```
+[DEBUG] character_positions: [{'x': 0.1, 'y': 0.1}, {'x': 0.9, 'y': 0.9}]
+📍 캐릭터 위치 좌표: [{'x': 0.1, 'y': 0.1}, {'x': 0.9, 'y': 0.9}]
+```
+
+**문제 해결**:
+
+**Q: 좌표가 항상 0.5로 나와요**
+- **원인 1**: `character_module.py`의 `enable_position_checkbox`가 체크되지 않음
+- **원인 2**: `get_parameters()`에서 `character_positions` 생성 로직 누락
+- **해결**: 위치 체크박스 활성화 후 `get_parameters()` 반환값 확인
+
+**Q: API에서 좌표를 인식하지 못해요**
+- **원인**: `character_positions` 파라미터 형식 오류
+- **해결**: `{'x': float, 'y': float}` 딕셔너리 형태 확인, 리스트로 감싸기 (`[coord_dict]`)
+
+#### 관련 코드
+
+- **좌표 생성**: `modules/character_module.py:1329-1365` (`get_parameters()`)
+- **시각화**: `modules/character_module.py:1460-1510` (`_update_position_viewer()`)
+- **API 전달**: `core/api_service.py:424-452`
+- **좌표 검증 문서**: `docs/character_position_coordinate_verification.md`
 
 ---
 
@@ -3069,43 +2127,7 @@ print(f"스레드 목록: {[t.name for t in threading.enumerate()]}")
 ---
 
 *문서 버전: 1.7*
-*최종 업데이트: 2025-01-15*
+*최종 업데이트: 2025-01-18*
 *담당 영역: core/ 디렉터리*
-*변경사항:*
-- *🆕 **히스토리 큐 추가 기능 개선** (2025-01-15)*
-  - *랜덤 해상도 옵션 적용 (체크 시 무작위 해상도로 덮어쓰기)*
-  - *시드 고정 옵션 적용 (OFF 시 양수 무작위 시드 생성 0~9999999999)*
-  - *NovelAI API 음수 시드 오류 해결 (seed=-1 → HTTP 400)*
-  - *버튼 텍스트 자동 업데이트 ("🎨 이미지 생성 요청 (N)")*
-  - *큐 이벤트 구독 시 `_update_button_with_queue_size()` 호출*
-  - *상태바 피드백 개선 (큐 크기 표시)*
-- *🆕 자동생성-큐 핸드오프 시스템 문서화*
-- *🆕 GenerationController: 큐-자동생성 조정 플래그 (`queue_hold_auto_gen`, `auto_retry_pending`)*
-- *🆕 큐 우선 처리 로직 상세 설명 (execute_generation_pipeline, _on_thread_finished)*
-- *🆕 NAIA_cold_v4.py 자동생성 트리거 및 UI 통합*
-- *ImageCrudController 추가 (이미지 저장 로직 중앙화)*
-- *파일명 형식 지원 추가 (number_only, time_number, datetime)*
-- *🆕 프롬프트 기반 분류 시스템 구현 (prompt_recognition, 논리 연산자 지원)*
-- *🆕 타임스탬프 폴더 토글 기능 (선택적 날짜_시간 폴더 사용)*
-- *🆕 2차 분류 시스템 구현 (계층적 폴더 구조 지원, primary/secondary 경로)*
-- *카운터 재시작 시 1로 초기화 정책 적용*
-- *설정 영속성: app_settings.json에 모든 설정 저장/로드*
-- *🆕 **MiddleSectionController**: 모듈 상태 추적 및 아코디언 동작*
-  - *모듈 펼침/접힘/분리 상태 추적*
-  - *스크롤 위치 자동 저장/복원*
-  - *아코디언 모드 (하나만 펼치기)*
-  - *자동 스크롤 (모듈로 이동)*
-  - *상태 영속성 (save/module_states.json)*
-- *🆕 **Generation Queue System** 구현 (2025-01-11)*
-  - *GenerationRequest 데이터 클래스 (요청 추적, 상태 관리)*
-  - *GenerationQueueManager (스레드 안전 큐, 우선순위 지원)*
-  - *GenerationController 통합 (자동 큐 처리)*
-  - *MainController UI 통합 (키보드 단축키, 컨텍스트 메뉴)*
-  - *큐 이벤트 시스템 (request_enqueued, request_dequeued 등)*
-- *🆕 **Sequence Generation Feature** 구현 (2025-01-14)*
-  - *SequenceParser 모듈: `:begin`, `:seq`, `:end` 구문 파싱 및 검증*
-  - *GenerationController: 시퀀스 감지 분기 및 일괄 큐 추가*
-  - *NAI 모드 랜덤 시드 처리 (각 시퀀스마다 다른 시드)*
-  - *WEBUI/COMFYUI: 고정 시드 사용 (일관된 변화)*
-  - *seed: 및 resolution: 태그 지원*
-  - *68개 유닛 테스트 + 62개 통합 테스트 (100% 통과)*
+
+**변경사항**: [상세 변경 로그](.claude/CHANGELOG_CLAUDE.md) 참조

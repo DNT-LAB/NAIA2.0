@@ -5,17 +5,28 @@
 **문서 구조**:
 - **본 파일**: 프로젝트 개요, 빠른 시작, 핵심 개념, 개발 워크플로우
 - **디렉터리별 CLAUDE.md**: 각 영역의 상세 가이드 (`core/`, `modules/`, `tabs/`, `ui/`, `interfaces/`, `utils/`, `data/`)
+- **디렉터리별 `.claude/` 폴더**: 상세 레퍼런스 문서 (2,000줄 이상 문서는 세부 항목을 분리)
+  - 예: `core/.claude/GENERATION_QUEUE_CLAUDE.md`, `core/.claude/CHANGELOG_CLAUDE.md`
 - **AGENTS.md**: AI 협업을 위한 기술적 레퍼런스 (상세 API/계약/프로토콜)
 
-**📚 문서화 현황** (2025-01-14 업데이트):
+**📝 문서 관리 방침** (2025-01-18):
+- **CLAUDE.md 파일 크기 제한**: 각 CLAUDE.md는 2,000줄 이하로 유지
+- **레퍼런스 분리**: 2,000줄 초과 시 상세 내용을 `<directory>/.claude/*_CLAUDE.md`로 분리
+- **명명 규칙**: 레퍼런스 파일명은 반드시 `*_CLAUDE.md` 패턴 사용
+- **Git 추적**: `.gitignore`에서 `!**/.claude/*.md` 예외 설정으로 레퍼런스 포함
+- **링크 방식**: 메인 문서에서 핵심만 설명, 상세는 레퍼런스 링크로 안내
+  - 예: `**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)`
+
+**📚 문서화 현황** (2025-01-18 업데이트):
 - ✅ **core/CLAUDE.md** (v1.5): AppContext, 컨트롤러, 파이프라인, API 서비스
   - 🆕 ImageCrudController 파일명 형식, 분류 시스템, 타임스탬프 폴더 토글
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
   - 🆕 **SequenceParser**: 시퀀스 프롬프트 파싱 (`:begin`, `:seq`, `:end`)
   - 🆕 **GenerationController**: 시퀀스 생성 지원, NAI 랜덤 시드 처리
 - ✅ **modules/CLAUDE.md** (완료): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
-- ✅ **tabs/CLAUDE.md** (v1.2): 탭 개발 가이드, 시그널 브리징, 생명주기
-  - 🆕 Settings 탭: 타임스탬프 폴더 토글, 분류 규칙 UI
+- ✅ **tabs/CLAUDE.md** (v1.4): 탭 개발 가이드, 시그널 브리징, 생명주기
+  - 🆕 Settings 탭: 타임스탬프 폴더 토글, 분류 규칙 UI, 2차 분류 시스템
+  - 🆕 **모듈/탭 가시성**: 프로그램 시작 시 자동 적용, 재시도 메커니즘, 디버깅 로그
 - ✅ **ui/CLAUDE.md** (v1.3): 테마 시스템, 스케일링, 공용 위젯, 분리 창
   - 🆕 **CollapsibleBox**: 상태 추적, 스크롤 위치 저장/복원, 프로그래밍 제어
   - 🆕 **PromptHighlighter**: 시퀀스 토큰 하이라이팅 (`:begin`, `:seq`, `:end`)
@@ -997,7 +1008,7 @@ app_context.publish = debug_publish
 
 | 파일 | 학습 포인트 |
 |------|------------|
-| `modules/character_module.py` | 모드 인식, 이벤트 발행 |
+| `modules/character_module.py` | 모드 인식, 이벤트 발행, **🆕 캐릭터 위치 시스템 (5x5 그리드, 동적 좌표, 시각화)** |
 | `modules/instant_wildcard_module.py` | 파일 저장/로드, UI 통합 |
 | `modules/automation_module.py` | QThread 사용, 자동화 로직 |
 | `tabs/png_info_tab.py` | 탭 구조, 메타데이터 처리 |

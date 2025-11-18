@@ -773,6 +773,351 @@ class PresetManagerModule(BaseMiddleModule):
         print(f"설정 적용: {settings}")
 ```
 
+### 예제 4: 캐릭터 위치 시스템 (2시간) 🆕
+
+**목표**: 다중 캐릭터의 화면 위치를 5x5 그리드로 제어하는 시스템 구축
+
+**파일**: `modules/character_module.py:1000-1500`
+
+**주요 기능**:
+- 5x5 그리드 위치 설정 (A-E, 1-5)
+- 실시간 위치 시각화 (25x25px 이미지)
+- 랜덤 위치 배치 (가운데 C3 제외 옵션)
+- 자동 리롤 (생성 시 위치 자동 재배치)
+- 안전장치 (2명 미만 시 자동 비활성화)
+- 좌표 매핑 (A-E → x: 0.1-0.9, 1-5 → y: 0.1-0.9)
+
+#### 1. UI 구성 요소
+
+```python
+from PyQt6.QtWidgets import QCheckBox, QPushButton, QLabel, QHBoxLayout
+from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtCore import Qt
+from PIL import Image, ImageDraw
+from ui.theme import DARK_COLORS, DARK_STYLES
+from ui.scaling_manager import get_scaled_size
+import random
+
+class CharacterModule(BaseMiddleModule):
+    def __init__(self):
+        super().__init__()
+
+        # 🆕 캐릭터 위치 관련 속성
+        self.enable_position_checkbox: QCheckBox = None
+        self.position_button: QPushButton = None
+        self.position_viewer: QLabel = None
+        self.random_position_button: QPushButton = None
+        self.auto_reroll_checkbox: QCheckBox = None
+        self.character_positions: List[str] = ["C3"] * 6  # 기본 중앙
+        self.exclude_center_on_random: bool = True  # 가운데 비우기 기본값
+
+    def create_widget(self, parent):
+        # ... 기존 UI 구성 ...
+
+        # ✅ 위치 활성화 체크박스
+        self.enable_position_checkbox = QCheckBox("캐릭터 위치 사용")
+        self.enable_position_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.enable_position_checkbox.stateChanged.connect(self._on_position_toggle)
+
+        # ✅ 위치 설정 버튼
+        self.position_button = QPushButton("위치 설정")
+        self.position_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.position_button.setFixedWidth(get_scaled_size(100))
+        self.position_button.clicked.connect(self._open_position_manager)
+        self.position_button.setEnabled(False)
+
+        # ✅ 위치 미리보기 (60x60, 25x25 이미지를 50x50으로 스케일)
+        self.position_viewer = QLabel()
+        self.position_viewer.setFixedSize(get_scaled_size(60), get_scaled_size(60))
+        self.position_viewer.setStyleSheet(f"""
+            QLabel {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+            }}
+        """)
+
+        # ✅ 랜덤 위치 버튼
+        self.random_position_button = QPushButton("🔄")
+        self.random_position_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.random_position_button.setFixedWidth(get_scaled_size(45))
+        self.random_position_button.setToolTip("위치 무작위 배치 (가운데 제외)")
+        self.random_position_button.clicked.connect(self._on_random_position_clicked)
+        self.random_position_button.setEnabled(False)
+
+        # ✅ 자동 리롤 체크박스
+        self.auto_reroll_checkbox = QCheckBox("A")
+        self.auto_reroll_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.auto_reroll_checkbox.setToolTip("생성 시 위치 자동 리롤")
+        self.auto_reroll_checkbox.setChecked(False)
+
+        # 컨트롤 레이아웃 (한 줄에 배치)
+        position_control_layout = QHBoxLayout()
+        position_control_layout.addWidget(self.position_button)
+        position_control_layout.addWidget(self.position_viewer)
+        position_control_layout.addWidget(self.random_position_button)
+        position_control_layout.addWidget(self.auto_reroll_checkbox)
+        position_control_layout.addStretch()
+
+        # ... 레이아웃에 추가 ...
+```
+
+#### 2. 위치 시각화 시스템
+
+**개요**: 25x25px 이미지에 5x5 셀을 그려서 각 캐릭터의 위치를 표시합니다.
+
+```python
+def _update_position_viewer(self):
+    """위치 시각화 이미지 업데이트"""
+    # 25x25 이미지 생성 (5x5 그리드, 각 셀 5x5px)
+    img = Image.new('RGB', (25, 25), DARK_COLORS['bg_secondary'])
+    draw = ImageDraw.Draw(img)
+
+    # 활성 캐릭터들의 위치에 사각형 그리기
+    for idx, widget in enumerate(self.character_widgets):
+        if not widget.active_checkbox.isChecked():
+            continue
+
+        if idx >= len(self.character_positions):
+            continue
+
+        pos = self.character_positions[idx]
+        if not pos or len(pos) < 2:
+            continue
+
+        # 위치 파싱 (예: "D4" → col=3, row=3)
+        col = ord(pos[0]) - ord('A')  # A=0, B=1, ..., E=4
+        row = int(pos[1]) - 1          # 1=0, 2=1, ..., 5=4
+
+        # 좌표 계산 (각 셀 5x5px)
+        x = col * 5
+        y = row * 5
+
+        # 캐릭터별 색상 (파스텔 톤)
+        colors = [
+            (255, 182, 193),  # 핑크
+            (173, 216, 230),  # 하늘색
+            (144, 238, 144),  # 연두색
+            (255, 218, 185),  # 복숭아색
+            (221, 160, 221),  # 자주색
+            (255, 255, 224)   # 크림색
+        ]
+        color = colors[idx % len(colors)]
+
+        # 사각형 그리기 [x, y, x+4, y+4] (5x5 셀)
+        draw.rectangle([x, y, x + 4, y + 4], fill=color, outline=None)
+
+    # PIL → QPixmap 변환
+    img_bytes = img.tobytes("raw", "RGB")
+    q_image = QImage(img_bytes, 25, 25, 25 * 3, QImage.Format.Format_RGB888)
+    pixmap = QPixmap.fromImage(q_image).scaled(
+        get_scaled_size(50), get_scaled_size(50),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation  # 부드러운 스케일링
+    )
+
+    self.position_viewer.setPixmap(pixmap)
+```
+
+**좌표 매핑 표**:
+
+| 위치 | col | row | x | y | 범위 | 실제 좌표 (API) |
+|------|-----|-----|---|---|------|----------------|
+| A1 | 0 | 0 | 0 | 0 | [0,0,4,4] | x:0.1, y:0.1 |
+| C3 | 2 | 2 | 10 | 10 | [10,10,14,14] | x:0.5, y:0.5 |
+| E5 | 4 | 4 | 20 | 20 | [20,20,24,24] | x:0.9, y:0.9 |
+
+#### 3. 랜덤 위치 배치
+
+```python
+def _on_random_position_clicked(self):
+    """🔄 랜덤 버튼 클릭 시 위치 무작위 배치"""
+    # 활성 캐릭터 수 확인
+    active_indices = [i for i, w in enumerate(self.character_widgets)
+                      if w.active_checkbox.isChecked()]
+
+    if len(active_indices) < 2:
+        print("⚠️ 활성 캐릭터가 2명 미만입니다. 랜덤 배치 불가.")
+        return
+
+    # 5x5 그리드 전체 위치
+    all_positions = [f"{col}{row}" for col in ['A', 'B', 'C', 'D', 'E']
+                     for row in ['1', '2', '3', '4', '5']]
+
+    # 가운데 C3 제외 옵션
+    if self.exclude_center_on_random:
+        all_positions = [pos for pos in all_positions if pos != 'C3']
+
+    # 활성 캐릭터 수만큼 랜덤 선택 (중복 없이)
+    selected_positions = random.sample(all_positions, len(active_indices))
+
+    # 위치 할당
+    for active_idx, position in zip(active_indices, selected_positions):
+        while len(self.character_positions) <= active_idx:
+            self.character_positions.append("C3")
+        self.character_positions[active_idx] = position
+
+    # 시각화 업데이트
+    self._update_position_viewer()
+
+    print(f"🎲 무작위 위치 배치 완료: {selected_positions}")
+```
+
+#### 4. 안전장치 (2명 미만 시 자동 비활성화)
+
+```python
+def _check_and_update_position_safety(self):
+    """안전장치: 활성 캐릭터가 2명 미만이면 포지션 기능 자동 해제"""
+    enabled_count = sum(1 for w in self.character_widgets
+                        if w.active_checkbox.isChecked())
+
+    if enabled_count < 2 and self.enable_position_checkbox.isChecked():
+        # 자동 해제
+        self.enable_position_checkbox.setChecked(False)
+        self.enable_position_checkbox.setEnabled(False)
+        print(f"⚠️ 활성 캐릭터 {enabled_count}명 → 포지션 기능 자동 해제 및 비활성화")
+    elif enabled_count >= 2 and not self.enable_position_checkbox.isEnabled():
+        # 다시 활성화 가능하도록 변경
+        self.enable_position_checkbox.setEnabled(True)
+        print(f"✅ 활성 캐릭터 {enabled_count}명 → 포지션 기능 활성화 가능")
+
+# 캐릭터 추가/제거/체크박스 변경 시 호출
+def add_character_widget(self, ...):
+    # ... 위젯 추가 ...
+    char_widget.active_checkbox.stateChanged.connect(
+        lambda: self._check_and_update_position_safety()
+    )
+    self._check_and_update_position_safety()
+
+def _remove_character_widget_internal(self, ...):
+    # ... 위젯 제거 ...
+    self._check_and_update_position_safety()
+```
+
+#### 5. 좌표 매핑 시스템 (API 전달)
+
+```python
+def get_parameters(self) -> dict:
+    """모듈 파라미터 반환 (API 호출 시 사용)"""
+    if not self.activate_checkbox or not self.activate_checkbox.isChecked():
+        return {"characters": None}
+
+    params = self.modifiable_clone.copy()
+
+    # 🆕 캐릭터 위치 좌표 매핑
+    if self.enable_position_checkbox and self.enable_position_checkbox.isChecked():
+        # A: 자동 리롤 체크되어 있으면 먼저 위치 리롤
+        if self.auto_reroll_checkbox and self.auto_reroll_checkbox.isChecked():
+            self._on_random_position_clicked()
+
+        # 좌표 매핑 테이블
+        x_mapping = {'A': 0.1, 'B': 0.3, 'C': 0.5, 'D': 0.7, 'E': 0.9}
+        y_mapping = {'1': 0.1, '2': 0.3, '3': 0.5, '4': 0.7, '5': 0.9}
+
+        # 활성화된 캐릭터들의 위치만 변환
+        character_coords = []
+        for idx, widget in enumerate(self.character_widgets):
+            if widget.active_checkbox.isChecked():
+                if idx < len(self.character_positions):
+                    pos = self.character_positions[idx]
+                    if pos and len(pos) >= 2:
+                        x = x_mapping.get(pos[0], 0.5)
+                        y = y_mapping.get(pos[1], 0.5)
+                        character_coords.append({'x': x, 'y': y})
+                    else:
+                        character_coords.append({'x': 0.5, 'y': 0.5})
+                else:
+                    character_coords.append({'x': 0.5, 'y': 0.5})
+
+        params['character_positions'] = character_coords
+        print(f"📍 캐릭터 위치 좌표: {character_coords}")
+
+    return params
+```
+
+#### 6. API 서비스 통합
+
+**파일**: `core/api_service.py:424-452`
+
+```python
+# API 파라미터 수집 시
+if char_params and char_params.get("characters"):
+    characters = char_params["characters"]
+    ucs = char_params["uc"]
+    # 🆕 캐릭터 위치 좌표 가져오기
+    character_positions = char_params.get("character_positions", [])
+
+    # 캐릭터 프롬프트를 v4_prompt에 추가
+    for i, prompt in enumerate(characters):
+        # 🆕 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
+        if i < len(character_positions):
+            centers = [character_positions[i]]
+        else:
+            centers = [{"x": 0.5, "y": 0.5}]
+
+        api_parameters['v4_prompt']['caption']['char_captions'].append({
+            'char_caption': prompt,
+            'centers': centers  # 동적 좌표 전달
+        })
+```
+
+#### 7. 주요 특징 정리
+
+| 기능 | 설명 | 코드 위치 |
+|------|------|----------|
+| **5x5 그리드** | A-E (열), 1-5 (행) | `character_module.py:1200` |
+| **실시간 시각화** | 25x25px 이미지, 50x50px 표시 | `_update_position_viewer()` |
+| **랜덤 배치** | 🔄 버튼, C3 제외 옵션 | `_on_random_position_clicked()` |
+| **자동 리롤** | A 체크박스, 생성 시 리롤 | `get_parameters()` |
+| **안전장치** | 2명 미만 시 자동 비활성화 | `_check_and_update_position_safety()` |
+| **좌표 매핑** | A-E: 0.1-0.9, 1-5: 0.1-0.9 | `get_parameters()` |
+| **API 통합** | 동적 좌표 전달 | `api_service.py:440-451` |
+
+#### 8. 테스트 시나리오
+
+```
+1. 캐릭터 2명 추가
+   → 위치 체크박스 활성화 가능
+
+2. "위치 설정" 클릭
+   → 5x5 그리드 다이얼로그 표시
+
+3. C1: A1, C2: E5 설정
+   → 미리보기에 두 점 표시 (좌상단, 우하단)
+
+4. 🔄 버튼 클릭
+   → 랜덤 위치 배치 (C3 제외)
+   → 미리보기 업데이트
+
+5. A 체크박스 활성화
+   → 생성 버튼 클릭 시 자동 리롤
+
+6. 이미지 생성
+   → 콘솔 출력: "📍 캐릭터 위치 좌표: [{'x': 0.1, 'y': 0.1}, {'x': 0.9, 'y': 0.9}]"
+   → API 호출 시 centers에 동적 좌표 전달
+
+7. 캐릭터 1명 제거
+   → 위치 기능 자동 비활성화
+```
+
+#### 9. 문제 해결
+
+**Q: E5 위치가 표시되지 않아요**
+- **원인**: 20x20 이미지에서 [16,16,19,19] 범위가 스케일링 시 손실됨
+- **해결**: 25x25 이미지로 변경, SmoothTransformation 사용
+
+**Q: 좌표가 항상 0.5로 나와요**
+- **원인**: `character_positions` 파라미터가 API 서비스로 전달되지 않음
+- **해결**: `get_parameters()`에서 `character_coords` 생성 및 반환 확인
+
+**Q: 자동 리롤이 작동하지 않아요**
+- **원인**: `auto_reroll_checkbox`가 체크되어 있지만 `_on_random_position_clicked()` 호출 안 됨
+- **해결**: `get_parameters()`에서 체크박스 상태 확인 후 호출
+
+**참고 문서**:
+- `docs/character_position_coordinate_verification.md`: 좌표 계산 검증 문서
+- `core/CLAUDE.md`: API 서비스 동적 좌표 처리
+
 ---
 
 ## 단계별 튜토리얼

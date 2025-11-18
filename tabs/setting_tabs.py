@@ -951,6 +951,10 @@ class SettingsWidget(QWidget):
         QTimer.singleShot(100, self._refresh_module_list)
         QTimer.singleShot(100, self._refresh_tab_list)
 
+        # 🆕 저장된 가시성 설정 적용 (프로그램 시작 시)
+        QTimer.singleShot(200, self._apply_saved_module_visibility)
+        QTimer.singleShot(250, self._apply_saved_tab_visibility)
+
     def _on_counter_changed(self, data: dict):
         """
         [신규] ImageCrudController 카운터 변경 이벤트 핸들러
@@ -1059,64 +1063,101 @@ class SettingsWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.app_context.image_crud_controller.reset_counter()
             QMessageBox.information(self, "완료", "카운터가 1로 초기화되었습니다.")
-        
-        # 저장된 모듈 가시성 설정 적용
-        QTimer.singleShot(200, self._apply_saved_module_visibility)
-        
-        # 저장된 탭 가시성 설정 적용
-        QTimer.singleShot(300, self._apply_saved_tab_visibility)
-        
-        # 저장된 자동완성 및 UI 설정 적용
-        QTimer.singleShot(400, self._apply_saved_autocomplete_settings)
-        QTimer.singleShot(500, self._apply_saved_ui_settings)
     
-    def _apply_saved_module_visibility(self):
+    def _apply_saved_module_visibility(self, retry_count=0):
         """저장된 모듈 가시성 설정을 실제 UI에 적용"""
-        if (hasattr(self.app_context, 'middle_section_controller') and 
-            self.app_context.middle_section_controller):
-            
-            controller = self.app_context.middle_section_controller
-            for module in controller.module_instances:
-                module_id = module.__class__.__name__
-                # 저장된 가시성 설정 가져오기 (기본값은 True)
-                is_visible = self.settings_module.get_setting(f'module_visibility.{module_id}', True)
-                
-                # 가시성이 False인 경우에만 숨기기
-                if not is_visible:
-                    module_title = module.get_title()
-                    if module_title in controller.module_boxes:
-                        box = controller.module_boxes[module_title]
-                        box.setVisible(False)
-                        print(f"Module '{module_title}' hidden on startup")
+        max_retries = 3
+        print(f"🔍 [SETTINGS] _apply_saved_module_visibility 호출됨 (시도 {retry_count + 1}/{max_retries + 1})")
+
+        if not hasattr(self.app_context, 'middle_section_controller'):
+            print("⚠️ [SETTINGS] middle_section_controller가 없습니다.")
+            if retry_count < max_retries:
+                print(f"  → 500ms 후 재시도...")
+                QTimer.singleShot(500, lambda: self._apply_saved_module_visibility(retry_count + 1))
+            return
+
+        if not self.app_context.middle_section_controller:
+            print("⚠️ [SETTINGS] middle_section_controller가 None입니다.")
+            if retry_count < max_retries:
+                print(f"  → 500ms 후 재시도...")
+                QTimer.singleShot(500, lambda: self._apply_saved_module_visibility(retry_count + 1))
+            return
+
+        controller = self.app_context.middle_section_controller
+        print(f"📊 [SETTINGS] 모듈 인스턴스 수: {len(controller.module_instances)}")
+        print(f"📊 [SETTINGS] 모듈 박스 수: {len(controller.module_boxes)}")
+
+        if not controller.module_boxes:
+            print("⚠️ [SETTINGS] module_boxes가 비어있습니다. 모듈이 아직 생성되지 않았을 수 있습니다.")
+            if retry_count < max_retries:
+                print(f"  → 500ms 후 재시도...")
+                QTimer.singleShot(500, lambda: self._apply_saved_module_visibility(retry_count + 1))
+            return
+
+        # 가시성 적용 성공
+        applied_count = 0
+        for module in controller.module_instances:
+            module_id = module.__class__.__name__
+            # 저장된 가시성 설정 가져오기 (기본값은 True)
+            is_visible = self.settings_module.get_setting(f'module_visibility.{module_id}', True)
+
+            module_title = module.get_title()
+            print(f"  - 모듈 '{module_title}' ({module_id}): 설정 가시성={is_visible}")
+
+            # 가시성이 False인 경우에만 숨기기
+            if not is_visible:
+                if module_title in controller.module_boxes:
+                    box = controller.module_boxes[module_title]
+                    box.setVisible(False)
+                    print(f"    ✅ Module '{module_title}' hidden on startup")
+                    applied_count += 1
+                else:
+                    print(f"    ⚠️ Module '{module_title}' not found in module_boxes")
+
+        print(f"✅ [SETTINGS] 모듈 가시성 적용 완료 ({applied_count}개 숨김)")
     
-    def _apply_saved_tab_visibility(self):
+    def _apply_saved_tab_visibility(self, retry_count=0):
         """저장된 탭 가시성 설정을 실제 UI에 적용"""
-        if (hasattr(self.app_context, 'main_window') and 
-            hasattr(self.app_context.main_window, 'image_window') and 
-            hasattr(self.app_context.main_window.image_window, 'tab_controller')):
-            
-            tab_controller = self.app_context.main_window.image_window.tab_controller
-            
-            # 숨길 수 있는 탭들
-            hideable_tabs = [
-                'BrowserTabModule',      # 📦 Danbooru
-                'PNGInfoTabModule',      # 📝 PNG Info
-                'HookerTabModule',       # 🔍 Hooker
-                'StorytellerTabModule',  # Storyteller 탭
-                'AssetsTabModule'        # 🎨 Assets
-            ]
-            
-            for tab_id in hideable_tabs:
-                if tab_id in tab_controller.tab_index_map:
-                    # 저장된 가시성 설정 가져오기 (기본값은 True)
-                    is_visible = self.settings_module.get_setting(f'tab_visibility.{tab_id}', True)
-                    
-                    # 탭 가시성 적용
-                    tab_index = tab_controller.tab_index_map[tab_id]
-                    tab_controller.tab_widget.setTabVisible(tab_index, is_visible)
-                    
-                    if not is_visible:
-                        print(f"📑 Tab '{tab_id}' hidden on startup based on saved settings")
+        max_retries = 3
+        print(f"🔍 [SETTINGS] _apply_saved_tab_visibility 호출됨 (시도 {retry_count + 1}/{max_retries + 1})")
+
+        if not (hasattr(self.app_context, 'main_window') and
+                hasattr(self.app_context.main_window, 'image_window') and
+                hasattr(self.app_context.main_window.image_window, 'tab_controller')):
+            print("⚠️ [SETTINGS] tab_controller를 찾을 수 없습니다.")
+            if retry_count < max_retries:
+                print(f"  → 500ms 후 재시도...")
+                QTimer.singleShot(500, lambda: self._apply_saved_tab_visibility(retry_count + 1))
+            return
+
+        tab_controller = self.app_context.main_window.image_window.tab_controller
+
+        # 숨길 수 있는 탭들
+        hideable_tabs = [
+            'BrowserTabModule',      # 📦 Danbooru
+            'PNGInfoTabModule',      # 📝 PNG Info
+            'HookerTabModule',       # 🔍 Hooker
+            'StorytellerTabModule',  # Storyteller 탭
+            'AssetsTabModule'        # 🎨 Assets
+        ]
+
+        applied_count = 0
+        for tab_id in hideable_tabs:
+            if tab_id in tab_controller.tab_index_map:
+                # 저장된 가시성 설정 가져오기 (기본값은 True)
+                is_visible = self.settings_module.get_setting(f'tab_visibility.{tab_id}', True)
+
+                print(f"  - 탭 '{tab_id}': 설정 가시성={is_visible}")
+
+                # 탭 가시성 적용
+                tab_index = tab_controller.tab_index_map[tab_id]
+                tab_controller.tab_widget.setTabVisible(tab_index, is_visible)
+
+                if not is_visible:
+                    print(f"    ✅ Tab '{tab_id}' hidden on startup")
+                    applied_count += 1
+
+        print(f"✅ [SETTINGS] 탭 가시성 적용 완료 ({applied_count}개 숨김)")
     
     def _apply_saved_autocomplete_settings(self):
         """저장된 자동완성 설정을 실제로 적용"""

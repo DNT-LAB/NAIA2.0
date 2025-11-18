@@ -150,6 +150,7 @@ data/artist_thumbnail_nai.json
 GEMINI.md
 *.md
 !CLAUDE.md
+!**/.claude/*.md
 NAIA_generation_old.py
 /tabs/assets/backgrounds
 *.png

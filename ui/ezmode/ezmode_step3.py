@@ -155,7 +155,7 @@ class EZModeStep3(QWidget):
         self.tag_buttons.clear()
 
     def _load_special_tags(self):
-        """Special Tags 옵션 로드 (3x3 그리드, 최대 9개)"""
+        """Special Tags 옵션 로드 (3x4 그리드, 최대 12개)"""
         # person_count_key 생성 (예: '1girl', '2girls')
         person_count_keys = list(self.current_person_count.keys())
         if not person_count_keys:
@@ -183,12 +183,12 @@ class EZModeStep3(QWidget):
             self.info_label.setText("사용 가능한 Special Tags가 없습니다.")
             return
 
-        # 3x3 그리드 레이아웃으로 버튼 생성 (최대 9개)
+        # 3x4 그리드 레이아웃으로 버튼 생성 (최대 12개)
         row = 0
         col = 0
         max_cols = 3  # 3열
-        max_rows = 3  # 3행
-        max_buttons = max_cols * max_rows  # 9개
+        max_rows = 4  # 4행 (3→4로 증가)
+        max_buttons = max_cols * max_rows  # 12개
 
         for i, option in enumerate(valid_options[:max_buttons]):
             # option 구조: {'category_id': ..., 'special_tags': [...], 'special_key': ..., 'label': ...}

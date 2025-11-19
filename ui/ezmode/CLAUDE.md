@@ -373,6 +373,11 @@ def _on_rating_clicked(self):
 - `1boy`, `2boys`, `3boys`, `4boys`, `5boys`, `6+boys`
 - `1other`, `2others`, `3others`, ...
 
+**⚠️ 중요**: `3+` 이상의 태그는 매트릭스 파일명에서 `many_`로 치환됩니다
+- `3boys`, `4boys`, `5boys`, `6+boys` → `many_boys`
+- `3girls`, `4girls`, `5girls`, `6+girls` → `many_girls`
+- `3others`, `4others`, `5others`, `6+others` → `many_others`
+
 **동작**:
 1. Rating 선택 시 활성화
 2. 카테고리 탭 표시

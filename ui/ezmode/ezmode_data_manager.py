@@ -205,8 +205,16 @@ class EZModeDataManager(QObject):
           → "g_solo_1girl"
         - rating='g', person_type='solo', person_count={'1girl': 1}, special_tags=['small_breasts']
           → "g_solo_1girl_small_breasts"
+        - rating='e', person_type='multiple', person_count={'1girl': 1, '3boys': 3}, special_tags=[]
+          → "e_multiple_1girl_many_boys" (3boys → many_boys 변환)
         """
-        person_count_str = '_'.join(sorted(person_count.keys()))
+        # person_count 키 변환 (3+ → many_)
+        normalized_keys = []
+        for key in sorted(person_count.keys()):
+            normalized_key = self._normalize_person_count(key)
+            normalized_keys.append(normalized_key)
+
+        person_count_str = '_'.join(normalized_keys)
         special_tags_str = '_'.join(sorted(special_tags)) if special_tags else ''
 
         category_id = f"{rating}_{person_type}_{person_count_str}"
@@ -214,6 +222,36 @@ class EZModeDataManager(QObject):
             category_id += f"_{special_tags_str}"
 
         return category_id
+
+    def _normalize_person_count(self, person_tag: str) -> str:
+        """Person count 태그 정규화 (3+ → many_)
+
+        Args:
+            person_tag: 원본 태그 (예: '3boys', '4girls', '6+others')
+
+        Returns:
+            str: 정규화된 태그 (예: 'many_boys', 'many_girls', 'many_others')
+        """
+        # 3 이상의 숫자나 6+는 many_로 치환
+        replacements = {
+            # boys
+            '3boys': 'many_boys',
+            '4boys': 'many_boys',
+            '5boys': 'many_boys',
+            '6+boys': 'many_boys',
+            # girls
+            '3girls': 'many_girls',
+            '4girls': 'many_girls',
+            '5girls': 'many_girls',
+            '6+girls': 'many_girls',
+            # others
+            '3others': 'many_others',
+            '4others': 'many_others',
+            '5others': 'many_others',
+            '6+others': 'many_others',
+        }
+
+        return replacements.get(person_tag, person_tag)
 
     def validate_category_exists(self, category_id: str) -> bool:
         """카테고리가 존재하는지 확인"""

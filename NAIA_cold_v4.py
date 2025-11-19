@@ -648,8 +648,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev"
-        self.setWindowTitle(self.base_title + " - 2501117")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 122"
+        self.setWindowTitle(self.base_title + " - 2501119")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -700,6 +700,9 @@ class ModernMainWindow(QMainWindow):
 
         # TempWindowManager 초기화
         self.temp_window_manager = TempWindowManager(self)
+
+        # EZ Mode 창 변수 초기화
+        self.ez_mode_window = None
 
         # 🆕 임시 창 자동 종료를 위한 모드/모델 추적 변수
         self._previous_api_mode = "NAI"
@@ -1252,6 +1255,28 @@ class ModernMainWindow(QMainWindow):
         """)
         self.prompt_tabs_temp_btn.clicked.connect(self.create_temp_generation_window)
         corner_layout.addWidget(self.prompt_tabs_temp_btn)
+
+        # [EZ] 버튼 추가 (EZ Mode)
+        self.prompt_tabs_ez_btn = QPushButton("EZ")
+        self.prompt_tabs_ez_btn.setFixedSize(45, 55)
+        self.prompt_tabs_ez_btn.setToolTip("EZ Mode - Easy Prompt Generation")
+        self.prompt_tabs_ez_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['accent_blue']};
+                font-size: {get_scaled_font_size(16)}px;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+                color: {DARK_COLORS['accent_blue_light']};
+            }}
+        """)
+        self.prompt_tabs_ez_btn.clicked.connect(self.open_ez_mode_window)
+        corner_layout.addWidget(self.prompt_tabs_ez_btn)
 
         # detach 버튼 추가
         self.prompt_tabs_detach_btn = QPushButton("🔓")
@@ -3465,6 +3490,87 @@ class ModernMainWindow(QMainWindow):
             print(f"🚫 [ModernMainWindow] 사용자 취소: {change_type} 변경 취소됨")
             return False
 
+    # === EZ Mode 관련 메서드 ===
+
+    def open_ez_mode_window(self):
+        """
+        EZ Mode 창 열기
+
+        [EZ] 버튼 클릭 시 호출되어 EZModeWindow를 생성하거나 기존 창을 활성화합니다.
+        """
+        print("[OK] [ModernMainWindow] EZ Mode 창 열기 요청")
+
+        # 이미 열려있으면 활성화
+        if hasattr(self, 'ez_mode_window') and self.ez_mode_window is not None:
+            if self.ez_mode_window.isVisible():
+                self.ez_mode_window.raise_()
+                self.ez_mode_window.activateWindow()
+                print("[OK] [ModernMainWindow] 기존 EZ Mode 창 활성화")
+                return
+
+        try:
+            from ui.ezmode.ezmode_window import EZModeWindow
+
+            # EZ Mode 창 생성
+            self.ez_mode_window = EZModeWindow(self.app_context, parent=self)
+
+            # 프롬프트 생성 이벤트 구독
+            self.app_context.subscribe('ez_mode_prompt_generated', self._on_ez_mode_prompt_generated)
+
+            # 즉시 생성 시그널 연결 (EZModeWindow → MainWindow)
+            self.ez_mode_window.instant_generation_requested.connect(self.on_generate_with_image_requested)
+            print("✅ EZ Mode instant_generation_requested 시그널이 연결되었습니다.")
+
+            # 창 닫기 이벤트 연결
+            self.ez_mode_window.destroyed.connect(self.on_ez_mode_window_closing)
+
+            # 창 표시
+            self.ez_mode_window.show()
+            self.ez_mode_window.raise_()
+            self.ez_mode_window.activateWindow()
+
+            print("[OK] [ModernMainWindow] EZ Mode 창 생성 완료")
+
+        except Exception as e:
+            print(f"[ERROR] [ModernMainWindow] EZ Mode 창 생성 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "EZ Mode 오류",
+                f"EZ Mode 창을 열 수 없습니다.\n\n{str(e)}"
+            )
+
+    def _on_ez_mode_prompt_generated(self, data: dict):
+        """
+        EZ Mode에서 프롬프트 생성 시 호출
+
+        Args:
+            data: {'prompt': str} - 생성된 프롬프트
+        """
+        prompt = data.get('prompt', '')
+
+        if prompt:
+            # 메인 프롬프트에 적용
+            self.main_prompt_textedit.setPlainText(prompt)
+            print(f"[OK] [ModernMainWindow] EZ Mode 프롬프트 적용: {len(prompt)} characters")
+
+    def on_ez_mode_window_closing(self):
+        """
+        EZ Mode 창이 닫힐 때 호출
+        """
+        print("[OK] [ModernMainWindow] EZ Mode 창 닫기")
+
+        # 이벤트 구독 해제
+        if hasattr(self, 'app_context'):
+            # Note: AppContext에 unsubscribe 메서드가 있다면 사용
+            pass
+
+        # 참조 제거
+        self.ez_mode_window = None
+
     def _on_model_changing(self, new_model: str):
         """
         NAI 모델 변경 시 호출 (임시 창 자동 종료 체크)
@@ -3690,11 +3796,20 @@ class ModernMainWindow(QMainWindow):
     def on_prompt_generated(self, prompt_text: str):
         """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트"""
         self.main_prompt_textedit.setPlainText(prompt_text)
-        
+
+        # 🆕 EZ Mode Skip Flags 해제 (항상 프롬프트 생성 후 정리)
+        if hasattr(self.app_context, 'skip_prompt_engineering_hook') and self.app_context.skip_prompt_engineering_hook:
+            self.app_context.skip_prompt_engineering_hook = False
+            print(f"[MainWindow] ✅ skip_prompt_engineering_hook = False 해제 (전체 훅 재활성화)")
+
+        if hasattr(self.app_context, 'skip_prompt_engineering_auto_hide') and self.app_context.skip_prompt_engineering_auto_hide:
+            self.app_context.skip_prompt_engineering_auto_hide = False
+            print(f"[MainWindow] ✅ skip_prompt_engineering_auto_hide = False 해제 (Auto Hide 재활성화)")
+
         # [신규] 새 프롬프트 생성 시 반복 카운터 리셋
         if self.automation_module:
             self.automation_module.reset_repeat_counter()
-        
+
         # [신규] 자동 생성 플래그 해제
         self.auto_generation_in_progress = False
         

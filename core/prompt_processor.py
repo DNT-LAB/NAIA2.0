@@ -137,8 +137,11 @@ class PromptProcessor:
             elif tag == "\n\n":
                 formatted_prompt.append("\n\n")
             else:
-                formatted_prompt.append(tag)
-        
+                # ✅ 언더바를 공백으로 변환 (NovelAI 표준 형식)
+                # EZ Mode 등에서 전달된 'large_breasts' → 'large breasts'
+                formatted_tag = tag.replace('_', ' ')
+                formatted_prompt.append(formatted_tag)
+
         final_string = ', '.join(formatted_prompt)
-        
+
         return final_string

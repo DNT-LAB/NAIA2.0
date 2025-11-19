@@ -349,51 +349,63 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         options = self.get_parameters()
 
+        # 🆕 EZ Mode: 전처리 옵션 및 Auto Hide 건너뛰기 플래그 (선행/후행 프롬프트는 유지)
+        skip_preprocessing = hasattr(self, 'app_context') and getattr(self.app_context, 'skip_prompt_engineering_auto_hide', False)
+
         # 메인UI의 전역 데이터 파이프라인에 접근
         filter_manager = self.context.filter_data_manager
 
         # 1. 선행/후행 프롬프트 추가
         _prefix_tags = options["pre_prompt"]
         _postfix_tags = options["post_prompt"]
-        
+
         # context의 태그 리스트 앞/뒤에 추가
         prefix_tags = _prefix_tags + context.prefix_tags
         postfix_tags = context.postfix_tags + _postfix_tags
         main_tags = context.main_tags
         removed_tags = context.removed_tags
         source_row = context.source_row
-        
-        # 2. 자동 태그 제거 옵션 처리
-        checkbox_options = options["preprocessing_options"]
 
-        # "remove_work_title"
-        if not checkbox_options.get("remove_work_title"):
-            copyright = source_row.get("copyright")
-            if copyright: prefix_tags.insert(0, copyright)
+        # 2. 자동 태그 제거 옵션 처리 (EZ Mode에서는 건너뛰기)
+        if not skip_preprocessing:
+            checkbox_options = options["preprocessing_options"]
 
-        # "remove_author"
-        if not checkbox_options.get("remove_author"):
-            artist = source_row.get("artist")
-            if artist: prefix_tags.insert(0, artist)
+            # "remove_work_title"
+            if not checkbox_options.get("remove_work_title"):
+                copyright = source_row.get("copyright")
+                if copyright: prefix_tags.insert(0, copyright)
 
-        # "remove_character_name"
-        if not checkbox_options.get("remove_character_name"):
-            character = source_row.get("character")
-            if character: prefix_tags.insert(0, character)
+            # "remove_author"
+            if not checkbox_options.get("remove_author"):
+                artist = source_row.get("artist")
+                if artist: prefix_tags.insert(0, artist)
 
-        # 자동숨김프롬프트 처리
+            # "remove_character_name"
+            if not checkbox_options.get("remove_character_name"):
+                character = source_row.get("character")
+                if character: prefix_tags.insert(0, character)
+        else:
+            # EZ Mode: checkbox_options 초기화 (이후 코드에서 사용하지 않도록)
+            checkbox_options = {}
+
+        # 자동숨김프롬프트 처리 (EZ Mode에서는 건너뛰기)
         auto_hide = options["auto_hide"]
         temp_hide_prompt = []
-        
-        # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
-        protected_keywords = []
-        for item in auto_hide:
-            if item.startswith('~'):
-                # ~ 제거하고 보호 리스트에 추가
-                protected_keywords.append(item[1:].strip())
-        
-        # ~ 로 시작하는 아이템 제거 (auto_hide에서는 제외)
-        auto_hide = [item for item in auto_hide if not item.startswith('~')]
+
+        if not skip_preprocessing:
+            # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
+            protected_keywords = []
+            for item in auto_hide:
+                if item.startswith('~'):
+                    # ~ 제거하고 보호 리스트에 추가
+                    protected_keywords.append(item[1:].strip())
+
+            # ~ 로 시작하는 아이템 제거 (auto_hide에서는 제외)
+            auto_hide = [item for item in auto_hide if not item.startswith('~')]
+        else:
+            print("[DEBUG] 🚫 전처리 옵션 및 Auto Hide 건너뛰기 (EZ Mode 즉시 생성)")
+            protected_keywords = []
+            auto_hide = []
         
         # 원본 tag_conversion_map (key와 value를 바꿔서 사용할 것임)
         original_tag_conversion_map = {
@@ -474,49 +486,51 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     
         print(f"Auto Hide로 제거된 태그: {', '.join(removed_tags) if removed_tags else '없음'}")
 
-        # "remove_character_features"
-        if checkbox_options.get("remove_character_features"):
-            characteristics = filter_manager.characteristic_list
-            temp = []
-            for keyword in main_tags:
-                if keyword in characteristics:
-                    temp.append(keyword)
-            for keyword in temp:
-                main_tags.remove(keyword)
-                removed_tags.append(keyword)
-    
-        # "remove_clothes"
-        if checkbox_options.get("remove_clothes"):
-            clothes = filter_manager.clothes_list
-            temp = []
-            for keyword in main_tags:
-                if keyword in clothes:
-                    temp.append(keyword)
-            for keyword in temp:
-                main_tags.remove(keyword)
-                removed_tags.append(keyword)
+        # 3. 추가 전처리 옵션 (EZ Mode에서는 건너뛰기)
+        if not skip_preprocessing:
+            # "remove_character_features"
+            if checkbox_options.get("remove_character_features"):
+                characteristics = filter_manager.characteristic_list
+                temp = []
+                for keyword in main_tags:
+                    if keyword in characteristics:
+                        temp.append(keyword)
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
 
-        # "remove_color"
-        if checkbox_options.get("remove_color"):
-            colors = filter_manager.color_list
-            temp = []
-            for keyword in main_tags:
-                if any(color in keyword for color in colors):
-                    temp.append(keyword)
-            for keyword in temp:
-                main_tags.remove(keyword)
-                removed_tags.append(keyword)
+            # "remove_clothes"
+            if checkbox_options.get("remove_clothes"):
+                clothes = filter_manager.clothes_list
+                temp = []
+                for keyword in main_tags:
+                    if keyword in clothes:
+                        temp.append(keyword)
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
 
-        # "remove_location_and_background_color"
-        if checkbox_options.get("remove_location_and_background_color"):
-            locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
-            temp = []
-            for keyword in main_tags:
-                if keyword in locations:
-                    temp.append(keyword)
-            for keyword in temp:
-                main_tags.remove(keyword)
-                removed_tags.append(keyword)
+            # "remove_color"
+            if checkbox_options.get("remove_color"):
+                colors = filter_manager.color_list
+                temp = []
+                for keyword in main_tags:
+                    if any(color in keyword for color in colors):
+                        temp.append(keyword)
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_location_and_background_color"
+            if checkbox_options.get("remove_location_and_background_color"):
+                locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
+                temp = []
+                for keyword in main_tags:
+                    if keyword in locations:
+                        temp.append(keyword)
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
         
         # 수정된 context를 다음 훅 또는 파이프라인으로 전달
         context.prefix_tags = prefix_tags

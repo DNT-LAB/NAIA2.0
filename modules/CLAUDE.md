@@ -1505,6 +1505,170 @@ skip_prompt_engineering_hook = False 해제 (finally 블록)
 
 ---
 
+### EZ Mode: Selective Preprocessing Skip (2025-01-19)
+
+**배경**: EZ Mode에서 "즉시 생성" 기능 사용 시, Prompt Engineering Module의 일부 전처리 기능만 선택적으로 비활성화해야 합니다.
+
+**요구사항**:
+- ✅ **유지**: 선행 고정 프롬프트 (Leading Fixed Prompt)
+- ✅ **유지**: 후행 고정 프롬프트 (Trailing Fixed Prompt)
+- ❌ **건너뛰기**: 작품명/작가명/캐릭터명 자동 추가 (preprocessing_options)
+- ❌ **건너뛰기**: Auto Hide 태그 제거
+- ❌ **건너뛰기**: 캐릭터 특징 제거 (remove_character_features)
+- ❌ **건너뛰기**: 의류 정보 제거 (remove_clothes)
+- ❌ **건너뛰기**: 색상 포함 태그 제거 (remove_color)
+- ❌ **건너뛰기**: 위치/배경색 제거 (remove_location_and_background_color)
+
+#### 구현: `skip_prompt_engineering_auto_hide` Flag
+
+**파일**: `modules/prompt_engineering_module.py`
+
+**1. 플래그 체크 및 초기화** (Line 352-389):
+```python
+def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
+    """프롬프트 엔지니어링 훅"""
+
+    # 🆕 EZ Mode 즉시 생성 시 전처리 옵션 및 Auto Hide만 건너뛰기
+    skip_preprocessing = hasattr(self, 'app_context') and \
+                        getattr(self.app_context, 'skip_prompt_engineering_auto_hide', False)
+
+    if skip_preprocessing:
+        print("[DEBUG] 🚫 Auto Hide 건너뛰기 (EZ Mode 즉시 생성)")
+
+    # ... 선행/후행 고정 프롬프트 처리 (항상 실행) ...
+
+    # 전처리 옵션 (조건부)
+    if not skip_preprocessing:
+        # 작품명, 작가명, 캐릭터명 자동 추가
+        if checkbox_options.get("add_work_name"):
+            # ...
+    else:
+        # EZ Mode: checkbox_options 초기화 (이후 코드에서 사용되지 않도록)
+        checkbox_options = {}
+
+    # Auto Hide (조건부)
+    if not skip_preprocessing:
+        # Auto Hide 로직 실행
+        hidden_tags = self._auto_hide_tags(...)
+        print(f"Auto Hide로 제거된 태그: {', '.join(hidden_tags) if hidden_tags else '없음'}")
+    else:
+        print("Auto Hide로 제거된 태그: 없음")
+
+    # ... 나머지 로직 ...
+```
+
+**2. 추가 전처리 옵션 스킵** (Line 489-533):
+```python
+# 캐릭터 특징, 의류, 색상, 위치/배경색 제거 (조건부)
+if not skip_preprocessing:
+    # "remove_character_features"
+    if checkbox_options.get("remove_character_features"):
+        # ... 제거 로직 ...
+
+    # "remove_clothes"
+    if checkbox_options.get("remove_clothes"):
+        # ... 제거 로직 ...
+
+    # "remove_color"
+    if checkbox_options.get("remove_color"):
+        # ... 제거 로직 ...
+
+    # "remove_location_and_background_color"
+    if checkbox_options.get("remove_location_and_background_color"):
+        # ... 제거 로직 ...
+```
+
+**3. EZ Mode 윈도우에서 플래그 설정** (`NAIA_cold_v4.py:3805-3807`):
+```python
+# EZ Mode 창 닫기 시 플래그 정리
+if hasattr(self.app_context, 'skip_prompt_engineering_auto_hide') and \
+   self.app_context.skip_prompt_engineering_auto_hide:
+    self.app_context.skip_prompt_engineering_auto_hide = False
+    print(f"[MainWindow] ✅ skip_prompt_engineering_auto_hide = False 해제 (Auto Hide 재활성화)")
+```
+
+**4. EZ Mode Controller에서 플래그 제어** (`ui/ezmode/ezmode_controller.py`):
+```python
+def _on_instant_generate(self):
+    """즉시 생성 버튼 클릭"""
+    # Virtual Row 생성 전 플래그 설정
+    if hasattr(self, 'app_context'):
+        self.app_context.skip_prompt_engineering_auto_hide = True
+        print("[Controller] ✅ skip_prompt_engineering_auto_hide = True 설정")
+
+    # Virtual Row 생성 및 신호 발행
+    virtual_row = self._create_virtual_row()
+    self.instant_generation_requested.emit(virtual_row)
+
+    # Note: 플래그는 MainWindow에서 이미지 생성 완료 후 해제됨
+```
+
+#### 실행 흐름
+
+```
+EZ Mode "즉시 생성" 버튼 클릭
+    ↓
+skip_prompt_engineering_auto_hide = True 설정 (Controller)
+    ↓
+Virtual Row 생성 및 신호 발행
+    ↓
+MainWindow.on_generate_with_image_requested() 호출
+    ↓
+프롬프트 파이프라인 실행
+    ↓
+PromptEngineeringModule.execute_pipeline_hook() 실행
+    ↓
+플래그 체크: skip_preprocessing = True
+    ↓
+✅ 선행/후행 고정 프롬프트 적용
+🚫 전처리 옵션 (작품명/작가명/캐릭터명) 건너뛰기
+🚫 Auto Hide 건너뛰기
+🚫 추가 전처리 (캐릭터 특징/의류/색상/위치) 건너뛰기
+    ↓
+이미지 생성 시작
+    ↓
+skip_prompt_engineering_auto_hide = False 해제 (MainWindow)
+    ↓
+✅ 결과: EZ Mode 태그 + 고정 프롬프트만 적용된 이미지 생성
+```
+
+#### 중요 포인트
+
+1. **checkbox_options 초기화**: `skip_preprocessing = True`일 때 `checkbox_options = {}`로 초기화하여 이후 코드에서 KeyError 방지
+
+2. **조건부 블록 포괄**: 모든 전처리 관련 코드(`if checkbox_options.get(...)`)를 `if not skip_preprocessing:` 블록 내부에 배치
+
+3. **플래그 정리**: EZ Mode 창 닫기 시 또는 생성 완료 후 플래그를 반드시 `False`로 재설정
+
+4. **디버깅 로그**: 각 단계마다 명확한 로그 출력으로 동작 확인
+   ```
+   [DEBUG] 🚫 Auto Hide 건너뛰기 (EZ Mode 즉시 생성)
+   Auto Hide로 제거된 태그: 없음
+   ```
+
+#### 관련 파일
+
+- `modules/prompt_engineering_module.py:352-389` - 플래그 체크 및 초기화
+- `modules/prompt_engineering_module.py:489-533` - 추가 전처리 옵션 스킵
+- `ui/ezmode/ezmode_controller.py` - 플래그 설정 (즉시 생성 시)
+- `NAIA_cold_v4.py:3805-3807` - 플래그 정리 (EZ Mode 창 닫기 시)
+
+#### 문제 해결
+
+**Q**: 선행/후행 고정 프롬프트가 적용되지 않아요
+
+**A**: `skip_preprocessing` 체크가 너무 이른 위치에 있는지 확인. 고정 프롬프트 처리는 플래그와 무관하게 항상 실행되어야 함.
+
+**Q**: `checkbox_options` KeyError 발생
+
+**A**: `else:` 블록에서 `checkbox_options = {}` 초기화가 누락되었는지 확인 (Line 387-389).
+
+**Q**: Auto Hide가 계속 실행됨
+
+**A**: `skip_preprocessing` 변수가 올바르게 설정되었는지 확인. `getattr(self.app_context, 'skip_prompt_engineering_auto_hide', False)` 값 확인.
+
+---
+
 ## 문제 해결
 
 ### Q1: 모듈이 로드되지 않아요

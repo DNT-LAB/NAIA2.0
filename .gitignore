@@ -162,3 +162,8 @@ temp_image.png
 *.naiv4vibebundle
 *.naiv4vibe
 desktop.ini
+
+# EZ Mode 데이터 분리 구조
+# - data/ezmode/: GitHub 포함 (JSON 파일들)
+# - data/.ezmode/: Hugging Face 전용 (matrices만)
+data/.ezmode/

@@ -61,7 +61,8 @@ class PromptGenerationController(QObject):
             for key, value in instant_row.items():
                 if isinstance(value, list):
                     # 리스트의 모든 요소를 문자열로 변환하여 join
-                    processed_dict[key] = ', '.join(map(str, value)).replace('_', ' ')
+                    # ✅ 언더바는 제거하지 않음 (EZ Mode 등에서 정확한 태그 전달을 위해)
+                    processed_dict[key] = ', '.join(map(str, value))
                 else:
                     processed_dict[key] = value
             instant_row = processed_dict
@@ -74,7 +75,7 @@ class PromptGenerationController(QObject):
 
         self.app_context.current_source_row = source_row_series
         self.app_context.current_prompt_context = self._create_initial_context(source_row_series, settings)
-        
+
         try:
             # ✅ 이제 processor는 AppContext를 통해 공유된 context를 사용하게 됩니다.
             final_context = self.processor.process()

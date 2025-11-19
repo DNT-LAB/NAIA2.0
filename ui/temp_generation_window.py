@@ -276,12 +276,11 @@ class TempGenerationWindow(QMainWindow):
             params.update(character_params)
 
         # 🆕 FR-3: 프롬프트 엔지니어링 훅 수동 실행
-        # 임시 창은 AppContext 파이프라인을 우회하므로, execute_manual_hook()을 직접 호출합니다.
-        # 이 시점에서는 아직 PromptContext가 없으므로, 실제 훅 실행은 GenerationController에서 수행됩니다.
-        # 여기서는 플래그만 설정하여 GenerationController가 수동 훅 실행을 알 수 있도록 합니다.
-        if hasattr(self, 'prompt_engineering_tab'):
-            params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
-            print(f"[TempGenerationWindow #{self.window_id}] 프롬프트 엔지니어링 탭 참조 전달")
+        # ❌ 비활성화: 이미지 생성 버튼에서는 메인 프롬프트만 사용해야 함
+        # 선행/후행 고정 프롬프트는 Random/Next Prompt 버튼을 눌렀을 때만 적용됨
+        # if hasattr(self, 'prompt_engineering_tab'):
+        #     params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+        #     print(f"[TempGenerationWindow #{self.window_id}] 프롬프트 엔지니어링 탭 참조 전달")
 
         # 🆕 FR-5: 와일드카드 단독 모드 추가
         if hasattr(self, 'wildcard_standalone_checkbox'):

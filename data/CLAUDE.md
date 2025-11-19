@@ -10,12 +10,13 @@
 2. [주요 파일 및 역할](#주요-파일-및-역할)
 3. [텍스트 사전 파일](#텍스트-사전-파일)
 4. [Parquet 태그 데이터베이스](#parquet-태그-데이터베이스)
-5. [데이터 로딩 패턴](#데이터-로딩-패턴)
-6. [실전 예제](#실전-예제)
-7. [문제 해결](#문제-해결)
-8. [체크리스트](#체크리스트)
-9. [참고 자료](#참고-자료)
-10. [요약](#요약)
+5. [EZ Mode 데이터](#ez-mode-데이터)
+6. [데이터 로딩 패턴](#데이터-로딩-패턴)
+7. [실전 예제](#실전-예제)
+8. [문제 해결](#문제-해결)
+9. [체크리스트](#체크리스트)
+10. [참고 자료](#참고-자료)
+11. [요약](#요약)
 
 ---
 
@@ -28,6 +29,7 @@ data/는 NAIA 2.0의 **정적 데이터 저장소**로, 다음을 담당합니�
 - 📊 **태그 데이터베이스**: Parquet 형식의 대용량 태그 정보 (data/tags/)
 - 📝 **필터 사전**: 특징/의류 태그 목록 (characteristic_list.txt, clothes_list.txt)
 - 🔍 **검색 인덱스**: 멀티프로세싱 기반 고속 태그 검색
+- 🤖 **EZ Mode 데이터**: 카테고리 인덱스 및 Co-occurrence 매트릭스 (data/ezmode/, data/.ezmode/)
 - 🎨 **UI 지원**: 자동완성, 태그 정보 툴팁, 필터링
 
 ### 아키텍처
@@ -39,7 +41,18 @@ data/
   │   ├── tags_01.parquet
   │   └── ...tags_129.parquet  # 130개 파일
   ├── characteristic_list.txt  # 특징 태그 사전 (1006개)
-  └── clothes_list.txt         # 의류 태그 사전 (3700개)
+  ├── clothes_list.txt         # 의류 태그 사전 (3700개)
+  ├── ezmode/                  # EZ Mode JSON 파일 (GitHub, 668KB)
+  │   ├── category_index.json  # 카테고리 인덱스 (411개 카테고리)
+  │   ├── output.json          # 태그 인덱스
+  │   └── category_tags_merged.json  # 카테고리별 태그 목록
+  └── .ezmode/                 # EZ Mode 매트릭스 (Hugging Face, 2.7GB)
+      └── matrices/            # Co-occurrence 매트릭스 (1645개 파일)
+          ├── build_summary.json
+          ├── {category}_cooccur.npz
+          ├── {category}_pmi.npz
+          ├── {category}_condprob.npz
+          └── {category}_metadata.json
 ```
 
 **데이터 흐름**:
@@ -55,6 +68,18 @@ data/characteristic_list.txt, clothes_list.txt
 core/filter_data_manager.py
     ↓ (필터링)
 modules/ (모듈별 태그 제안)
+
+data/ezmode/*.json
+    ↓ (초기 로드)
+ui/ezmode/ezmode_data_manager.py
+    ↓ (카테고리 정보)
+ui/ezmode/ezmode_step*.py (STEP 1~3 UI)
+
+data/.ezmode/matrices/*.npz
+    ↓ (LRU 캐싱, 최대 3개)
+ui/ezmode/ezmode_data_manager.py
+    ↓ (Co-occurrence 추천)
+ui/ezmode/ezmode_step4.py (태그 추천)
 ```
 
 ### 다른 디렉터리와의 관계
@@ -533,6 +558,375 @@ large_images = df[(df['image_width'] >= 1024) & (df['image_height'] >= 1024)]
        chunk_df = full_df.iloc[start_idx:end_idx]
        chunk_df.to_parquet(f'data/tags/tags_{i:02d}.parquet')
    ```
+
+---
+
+## EZ Mode 데이터
+
+### 데이터 분리 전략
+
+**2025-01-19 업데이트**: EZ Mode 데이터는 **크기에 따라 GitHub와 Hugging Face로 분리**하여 관리합니다.
+
+| 위치 | 저장소 | 크기 | 파일 | 용도 |
+|------|--------|------|------|------|
+| `data/ezmode/` | **GitHub** | 668KB | JSON 파일 (3개) | 카테고리 인덱스, 태그 인덱스 |
+| `data/.ezmode/matrices/` | **Hugging Face** | 2.7GB | Sparse 매트릭스 (1645개) | Co-occurrence 추천 데이터 |
+
+**분리 이유**:
+1. **GitHub 파일 크기 제한**: 100MB 이상 파일은 Git LFS 필요
+2. **버전 관리 효율**: JSON 메타데이터는 자주 변경, 매트릭스는 정적
+3. **다운로드 선택성**: 사용자가 필요할 때만 매트릭스 다운로드
+
+### JSON 파일 (GitHub)
+
+**위치**: `data/ezmode/`
+
+#### 1. category_index.json
+
+411개 카테고리의 메타데이터 및 UI 트리 구조.
+
+**구조**:
+```json
+{
+  "metadata": {
+    "total_categories": 411,
+    "version": "2025-01-19"
+  },
+  "categories": {
+    "g_solo_1girl": {
+      "rating": "g",
+      "person_type": "solo",
+      "person_count": {"1girl": 1},
+      "special_tags": [],
+      "tag_count": 12345
+    },
+    "e_multiple_1girl_many_boys": {
+      "rating": "e",
+      "person_type": "multiple",
+      "person_count": {"1girl": 1, "many_boys": 3},
+      "special_tags": [],
+      "tag_count": 5678
+    }
+  },
+  "ui_tree": {
+    "g": {
+      "solo": {
+        "1girl": [
+          {"category_id": "g_solo_1girl", "label": "일반", "special_tags": []},
+          {"category_id": "g_solo_1girl_small_breasts", "label": "작은 가슴", "special_tags": ["small_breasts"]}
+        ]
+      }
+    }
+  },
+  "available_options": {
+    "ratings": ["g", "s", "q", "e"],
+    "person_types": ["solo", "multiple"]
+  }
+}
+```
+
+**사용**:
+- `ui/ezmode/ezmode_step1.py`: Rating 선택
+- `ui/ezmode/ezmode_step2.py`: Person Count 선택
+- `ui/ezmode/ezmode_step3.py`: Special Tags 선택
+
+#### 2. output.json
+
+전체 태그 목록 및 인덱스 (태그명 → 인덱스 매핑).
+
+**구조**:
+```json
+{
+  "1girl": 123456,
+  "smile": 98765,
+  "long_hair": 87654,
+  ...
+}
+```
+
+**사용**:
+- `ui/ezmode/ezmode_data_manager.py`: 태그 인덱스 생성 (`tag_index`, `index_tag`)
+
+#### 3. category_tags_merged.json
+
+카테고리별로 사용 가능한 태그 목록 (필터링용).
+
+**구조**:
+```json
+{
+  "g_solo_1girl": ["1girl", "solo", "smile", "long_hair", ...],
+  "e_multiple_1girl_many_boys": ["1girl", "hetero", "sex", ...]
+}
+```
+
+**사용**:
+- `ui/ezmode/ezmode_step4.py`: 카테고리 필터 (STEP 3 태그에 의한 필터링)
+
+### 매트릭스 파일 (Hugging Face)
+
+**위치**: `data/.ezmode/matrices/`
+
+**다운로드 URL**:
+```
+https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/tags_70_tags_129_matrices.zip
+```
+
+**파일 구조** (카테고리당 4개 파일):
+```
+{category_id}_cooccur.npz     # Co-occurrence 매트릭스 (공출현 횟수)
+{category_id}_pmi.npz          # Pointwise Mutual Information (연관성)
+{category_id}_condprob.npz     # Conditional Probability (조건부 확률)
+{category_id}_metadata.json    # 매트릭스 메타데이터
+```
+
+**예시**:
+```
+g_solo_1girl_cooccur.npz
+g_solo_1girl_pmi.npz
+g_solo_1girl_condprob.npz
+g_solo_1girl_metadata.json
+```
+
+#### build_summary.json
+
+전체 매트릭스 빌드 정보 (무결성 검증용).
+
+**구조**:
+```json
+{
+  "build_date": "2025-01-19",
+  "total_categories": 411,
+  "total_files": 1645,
+  "version": "1.0"
+}
+```
+
+**사용**:
+- `ui/ezmode/ezmode_downloader.py`: 다운로드 후 무결성 검증
+  - `build_summary.json` 존재 여부 확인
+  - 전체 파일 수 1645개 검증 (80% 이상 = 1316개 이상)
+
+### Person Count 정규화
+
+**문제**: 매트릭스 파일명은 `many_boys`를 사용하지만, UI에서는 `3boys`, `4boys` 등을 표시.
+
+**해결** (`ui/ezmode/ezmode_data_manager.py:226-254`):
+
+```python
+def _normalize_person_count(self, person_tag: str) -> str:
+    """Person count 태그 정규화 (3+ → many_)
+
+    Args:
+        person_tag: 원본 태그 (예: '3boys', '4girls', '6+others')
+
+    Returns:
+        str: 정규화된 태그 (예: 'many_boys', 'many_girls', 'many_others')
+    """
+    replacements = {
+        # boys
+        '3boys': 'many_boys',
+        '4boys': 'many_boys',
+        '5boys': 'many_boys',
+        '6+boys': 'many_boys',
+        # girls
+        '3girls': 'many_girls',
+        '4girls': 'many_girls',
+        '5girls': 'many_girls',
+        '6+girls': 'many_girls',
+        # others
+        '3others': 'many_others',
+        '4others': 'many_others',
+        '5others': 'many_others',
+        '6+others': 'many_others',
+    }
+    return replacements.get(person_tag, person_tag)
+```
+
+**적용 위치**:
+- `build_category_id()`: 매트릭스 파일 경로 생성 시 정규화 적용
+- Virtual Row: 프롬프트에는 원본 태그 유지 (예: `3boys`)
+
+### 데이터 로딩 패턴
+
+#### 초기 로드 (동기)
+
+**파일**: `ui/ezmode/ezmode_data_manager.py:37-71`
+
+```python
+def load_initial_data(self) -> bool:
+    """초기 데이터 로드 (category_index, tag_index)"""
+    try:
+        # 1. category_index.json
+        category_path = self.data_dir / 'category_index.json'
+        with open(category_path, 'r', encoding='utf-8') as f:
+            self.category_index = json.load(f)
+
+        # 2. output.json
+        output_path = self.data_dir / 'output.json'
+        with open(output_path, 'r', encoding='utf-8') as f:
+            tag_totals = json.load(f)
+
+        tags = sorted(tag_totals.keys())
+        self.tag_index = {tag: idx for idx, tag in enumerate(tags)}
+        self.index_tag = {idx: tag for tag, idx in self.tag_index.items()}
+
+        self.data_loaded.emit()
+        return True
+    except Exception as e:
+        self.load_error.emit(f"Data load failed: {e}")
+        return False
+```
+
+**특징**:
+- **동기 로딩**: UI 초기화 전 완료 필요
+- **빠른 로딩**: JSON 파일 총 668KB로 1초 이내 완료
+- **시그널 발행**: `data_loaded` 또는 `load_error`
+
+#### 매트릭스 로드 (LRU 캐싱)
+
+**파일**: `ui/ezmode/ezmode_data_manager.py:105-148`
+
+```python
+def load_matrices(self, category_id: str) -> Optional[Dict]:
+    """매트릭스 로드 (캐싱)"""
+    # 1. 캐시 확인
+    if category_id in self.matrix_cache:
+        print(f"[CACHE] Matrix loaded from cache: {category_id}")
+        return self.matrix_cache[category_id]
+
+    # 2. 디스크에서 로드
+    try:
+        base_path = self.matrices_dir / category_id
+
+        matrices = {
+            'cooccur': load_npz(f"{base_path}_cooccur.npz"),
+            'pmi': load_npz(f"{base_path}_pmi.npz"),
+            'condprob': load_npz(f"{base_path}_condprob.npz")
+        }
+
+        with open(f"{base_path}_metadata.json", 'r', encoding='utf-8') as f:
+            matrices['metadata'] = json.load(f)
+
+        # 3. LRU 캐시에 추가 (최대 3개)
+        self._add_to_cache(category_id, matrices)
+
+        return matrices
+    except Exception as e:
+        print(f"[ERROR] Matrix load failed ({category_id}): {e}")
+        return None
+```
+
+**특징**:
+- **LRU 캐싱**: 최대 3개 카테고리 캐싱
+- **Scipy CSR**: Sparse 매트릭스 형식으로 메모리 효율
+- **On-demand**: STEP 4에서 태그 선택 시에만 로드
+
+#### 다운로드 (QThread)
+
+**파일**: `ui/ezmode/ezmode_downloader.py:16-171`
+
+**동작 흐름**:
+```
+1. 사용자가 EZ Mode 열기
+2. check_ezmode_data_exists() 검증
+   - build_summary.json 확인
+   - 파일 수 1645개 (또는 80% 이상) 확인
+3. 불완전 시 다운로드 다이얼로그 표시
+4. EZModeDownloadWorker (QThread) 시작
+   - Hugging Face ZIP 다운로드 (진행률 표시)
+   - data/.ezmode/matrices/로 압축 해제
+   - build_summary.json 검증
+5. 완료 시 EZ Mode UI 표시
+```
+
+**주요 메서드**:
+- `check_ezmode_data_exists()`: 데이터 존재 및 무결성 확인
+- `get_data_directory_info()`: 상세 상태 정보 조회
+- `_download_zip()`: 다운로드 (진행률 콜백)
+- `_extract_zip()`: 압축 해제 (파일명만 추출, 경로 제거)
+
+### 사용 예시
+
+#### EZ Mode 데이터 확인
+
+```python
+from ui.ezmode.ezmode_downloader import check_ezmode_data_exists, get_data_directory_info
+
+# 데이터 존재 확인
+if check_ezmode_data_exists():
+    print("[OK] EZ Mode 데이터 준비 완료")
+else:
+    # 상세 정보 조회
+    info = get_data_directory_info()
+    print(f"[!] 데이터 불완전: {info['matrices_count']}/{info['expected_count']}")
+    print(f"    build_summary 존재: {info['build_summary_exists']}")
+```
+
+#### 카테고리 정보 조회
+
+```python
+from ui.ezmode.ezmode_data_manager import EZModeDataManager
+
+manager = EZModeDataManager()
+manager.load_initial_data()
+
+# Rating 목록
+ratings = manager.get_available_ratings()  # ['g', 's', 'q', 'e']
+
+# Person Count 목록
+person_counts = manager.get_available_person_counts('g', 'solo')
+# ['1girl', '1boy', '1other']
+
+# Special Tags 옵션
+options = manager.get_available_options('g', 'solo', '1girl')
+# [{'category_id': 'g_solo_1girl', 'label': '일반', 'special_tags': []}, ...]
+```
+
+#### 매트릭스 로드 및 추천
+
+```python
+# 카테고리 ID 생성
+category_id = manager.build_category_id(
+    rating='g',
+    person_type='solo',
+    person_count={'1girl': 1},
+    special_tags=[]
+)  # 'g_solo_1girl'
+
+# 매트릭스 로드 (캐싱)
+matrices = manager.load_matrices(category_id)
+
+if matrices:
+    cooccur_matrix = matrices['cooccur']  # CSR matrix
+    pmi_matrix = matrices['pmi']
+    condprob_matrix = matrices['condprob']
+    metadata = matrices['metadata']
+
+    print(f"매트릭스 크기: {cooccur_matrix.shape}")
+    print(f"태그 수: {metadata['tag_count']}")
+```
+
+### 체크리스트
+
+**EZ Mode 데이터 추가 시**:
+```
+[ ] JSON 파일은 data/ezmode/에 저장
+[ ] 매트릭스 파일은 data/.ezmode/matrices/에 저장
+[ ] .gitignore에 data/.ezmode/ 제외 확인
+[ ] category_index.json 스키마 준수
+[ ] build_summary.json 업데이트 (파일 수, 날짜)
+[ ] Person Count 정규화 규칙 따르기 (3+ → many_)
+[ ] 카테고리당 4개 파일 세트 완성 (cooccur, pmi, condprob, metadata)
+```
+
+**데이터 무결성 검증 시**:
+```
+[ ] build_summary.json 존재 확인
+[ ] 전체 파일 수 1645개 (또는 80% 이상) 확인
+[ ] 각 카테고리에 4개 파일 모두 존재
+[ ] Sparse 매트릭스 로드 가능 (scipy.sparse.load_npz)
+[ ] metadata.json 파싱 가능
+```
 
 ---
 

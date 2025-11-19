@@ -455,7 +455,7 @@ class EZModeStep4(QWidget):
                 item.widget().deleteLater()
 
         # 추천 태그 계산 (48개)
-        recommended_tags = self._get_recommended_tags(top_n=48)
+        recommended_tags = self._get_recommended_tags(top_n=60)
 
         if not recommended_tags:
             no_recommend_label = QLabel("추천 태그가 없습니다.")

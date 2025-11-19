@@ -15,6 +15,11 @@
 - ✅ **STEP 4 초기화 버튼** (STEP 4 태그만 리셋, STEP 1~3 유지)
 - ✅ **Rating 변경 확인 다이얼로그** (STEP 2~4 초기화 경고)
 - ✅ **데이터 구조 최적화** (GitHub: JSON 파일 668KB, Hugging Face: matrices 2.7GB)
+- 🆕 **STEP 4 UI 개선** (0점 태그 점수 숨김, 0-9점 회색 표시)
+- 🆕 **Person Count 정규화** (3+boys/girls/others → many_boys/girls/others)
+- 🆕 **데이터 무결성 검증** (build_summary.json 확인, 1645개 파일 검증)
+- 🆕 **실제 다운로드 기능** (Hugging Face ZIP 다운로드 및 자동 압축 해제)
+- 🆕 **STEP 3 그리드 확장** (3x3 → 3x4, 최대 12개 Special Tags 표시)
 
 ---
 

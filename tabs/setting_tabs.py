@@ -1012,7 +1012,7 @@ class SettingsWidget(QWidget):
 
             # 프롬프트 인식이 아닐 때는 2차 분류도 숨김
             if not is_prompt_recognition:
-                self.secondary_classification_method_label.setVisible(False)
+                self.secondary_classification_label.setVisible(False)
                 self.secondary_classification_method_combo.setVisible(False)
                 self.rule_selection_label.setVisible(False)
                 self.rule_selection_combo.setVisible(False)

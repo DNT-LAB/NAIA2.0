@@ -393,114 +393,173 @@ class APIService:
 
                     print(f"✅ Added {len(sketchbook_prompts)} Sketchbook character prompts")
                 else:
-                    # Fall back to regular character module
-                    # 🆕 FR-2-1: Swap character module when in temporary window mode
+                    # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character 데이터 가져오기
+                    generation_request = params.get('_generation_request')
+                    if generation_request and generation_request.nai_characters:
+                        print("✅ [EarlyBinding] Character Data from GenerationRequest")
+                        nai_char_data = generation_request.nai_characters
 
-                    # 🐛 디버깅: 임시 창 모드 확인
-                    print(f"[DEBUG] temp_window_mode: {getattr(self.app_context, 'temp_window_mode', 'NOT_SET')}")
-                    print(f"[DEBUG] temp_window_character_tab exists: {hasattr(self.app_context, 'temp_window_character_tab') and self.app_context.temp_window_character_tab is not None}")
-
-                    if self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
-                        char_module = self.app_context.temp_window_character_tab
-                        print(f"[DEBUG] ✅ Using VirtualCharacterTab from temp window")
-                    else:
-                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
-                        print(f"[DEBUG] ✅ Using regular CharacterModule from main UI")
-
-                    # 🐛 디버깅: char_module 상태 확인
-                    if char_module:
-                        print(f"[DEBUG] char_module type: {type(char_module).__name__}")
-                        print(f"[DEBUG] char_module has activate_checkbox: {hasattr(char_module, 'activate_checkbox')}")
-
-                        if hasattr(char_module, 'activate_checkbox'):
-                            is_checked = char_module.activate_checkbox.isChecked()
-                            print(f"[DEBUG] activate_checkbox.isChecked(): {is_checked}")
-
-                            if is_checked:
-                                print("✅ 캐릭터 모듈 활성화됨. 파라미터를 가져옵니다.")
-                                char_params = char_module.get_parameters()
-
-                                # 🐛 디버깅: 파라미터 확인
-                                print(f"[DEBUG] char_params type: {type(char_params)}")
-                                print(f"[DEBUG] char_params keys: {char_params.keys() if isinstance(char_params, dict) else 'NOT_DICT'}")
-
-                                if char_params and char_params.get("characters"):
-                                    characters = char_params["characters"]
-                                    ucs = char_params["uc"]
-                                    # 🆕 캐릭터 위치 좌표 가져오기 (없으면 빈 리스트)
-                                    character_positions = char_params.get("character_positions", [])
-
-                                    # 🐛 디버깅: 캐릭터 데이터 확인
-                                    print(f"[DEBUG] characters count: {len(characters) if isinstance(characters, list) else 'NOT_LIST'}")
-                                    print(f"[DEBUG] ucs count: {len(ucs) if isinstance(ucs, list) else 'NOT_LIST'}")
-                                    print(f"[DEBUG] character_positions: {character_positions}")
-                                    if isinstance(characters, list) and len(characters) > 0:
-                                        print(f"[DEBUG] First character preview: {characters[0][:50]}..." if len(characters[0]) > 50 else f"[DEBUG] First character: {characters[0]}")
-
-                                    # 캐릭터 프롬프트를 v4_prompt에 추가
-                                    for i, prompt in enumerate(characters):
-                                        # 🆕 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
-                                        if i < len(character_positions):
-                                            centers = [character_positions[i]]
-                                        else:
-                                            centers = [{"x": 0.5, "y": 0.5}]
-
-                                        api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                            'char_caption': prompt,
-                                            'centers': centers
-                                        })
-                                        api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                            'char_caption': ucs[i] if i < len(ucs) else "",
-                                            'centers': centers
-                                        })
-                                else:
-                                    print(f"[DEBUG] ⚠️ char_params is None or has no 'characters' key")
+                        # 캐릭터 프롬프트를 v4_prompt에 추가
+                        for i, prompt in enumerate(nai_char_data.characters):
+                            # 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
+                            if i < len(nai_char_data.character_positions):
+                                centers = [nai_char_data.character_positions[i].to_dict()]
                             else:
-                                print(f"[DEBUG] ⚠️ activate_checkbox is not checked")
-                        else:
-                            print(f"[DEBUG] ⚠️ char_module has no activate_checkbox attribute")
+                                centers = [{"x": 0.5, "y": 0.5}]
+
+                            api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                'char_caption': prompt,
+                                'centers': centers
+                            })
+                            api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                'char_caption': nai_char_data.uc[i] if i < len(nai_char_data.uc) else "",
+                                'centers': centers
+                            })
+
+                        print(f"  - {len(nai_char_data.characters)} character(s) added")
+                        if nai_char_data.character_positions:
+                            print(f"  - Position data: {[pos.to_dict() for pos in nai_char_data.character_positions]}")
+                    elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
+                        # 🆕 FR-2-1: Temporary Window Mode (Late Binding fallback for temp windows)
+                        print("🪟 [TempWindow] Using VirtualCharacterTab (Late Binding fallback)")
+                        char_module = self.app_context.temp_window_character_tab
+
+                        if hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                            char_params = char_module.get_parameters()
+
+                            if char_params and char_params.get("characters"):
+                                characters = char_params["characters"]
+                                ucs = char_params["uc"]
+                                character_positions = char_params.get("character_positions", [])
+
+                                for i, prompt in enumerate(characters):
+                                    if i < len(character_positions):
+                                        centers = [character_positions[i]]
+                                    else:
+                                        centers = [{"x": 0.5, "y": 0.5}]
+
+                                    api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                        'char_caption': prompt,
+                                        'centers': centers
+                                    })
+                                    api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                        'char_caption': ucs[i] if i < len(ucs) else "",
+                                        'centers': centers
+                                    })
+
+                                print(f"  - {len(characters)} character(s) from temp window")
                     else:
-                        print(f"[DEBUG] ⚠️ char_module is None")
+                        # 🔄 Late Binding fallback for direct generation (non-queue)
+                        print("  - No GenerationRequest. Using Late Binding fallback (direct generation)")
+                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+
+                        if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                            char_params = char_module.get_parameters()
+
+                            if char_params and char_params.get("characters"):
+                                characters = char_params["characters"]
+                                ucs = char_params["uc"]
+                                character_positions = char_params.get("character_positions", [])
+
+                                for i, prompt in enumerate(characters):
+                                    if i < len(character_positions):
+                                        centers = [character_positions[i]]
+                                    else:
+                                        centers = [{"x": 0.5, "y": 0.5}]
+
+                                    api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                        'char_caption': prompt,
+                                        'centers': centers
+                                    })
+                                    api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                        'char_caption': ucs[i] if i < len(ucs) else "",
+                                        'centers': centers
+                                    })
+
+                                print(f"  - {len(characters)} character(s) from Late Binding fallback")
             
-            # 🎨 Vibe Transfer Multiple 처리
-            vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
-            if vibe_module:
-                vibe_data = vibe_module.get_vibe_transfer_multiple_data()
-                if vibe_data and vibe_data.get('reference_image_multiple'):
-                    print("✅ Vibe Transfer 활성화됨. Multiple 파라미터를 적용합니다.")
+            # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
+            generation_request = params.get('_generation_request')
+            if generation_request and generation_request.nai_vibe_transfer:
+                print("✅ [EarlyBinding] Vibe Transfer Data from GenerationRequest")
+                nai_vibe_data = generation_request.nai_vibe_transfer
 
-                    # Update api_parameters with vibe transfer data
-                    api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
-                    api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
-                    api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
+                # Update api_parameters with vibe transfer data
+                api_parameters['normalize_reference_strength_multiple'] = nai_vibe_data.normalize
+                api_parameters['reference_image_multiple'] = nai_vibe_data.reference_image_multiple
+                api_parameters['reference_strength_multiple'] = nai_vibe_data.reference_strength_multiple
 
-                    # Add NAID3-specific parameter if present
-                    if 'reference_information_extracted_multiple' in vibe_data:
-                        api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
-                        print(f"  - NAID3 IE values: {vibe_data['reference_information_extracted_multiple']}")
+                # Add NAID3-specific parameter if present
+                if nai_vibe_data.reference_information_extracted_multiple:
+                    api_parameters['reference_information_extracted_multiple'] = nai_vibe_data.reference_information_extracted_multiple
+                    print(f"  - NAID3 IE values: {nai_vibe_data.reference_information_extracted_multiple}")
 
-                    print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
-                    print(f"  - Normalization: {vibe_data['normalize_reference_strength_multiple']}")
-                    print(f"  - Strengths: {vibe_data['reference_strength_multiple']}")
+                print(f"  - {len(nai_vibe_data.reference_image_multiple)} vibe(s) added")
+                print(f"  - Normalization: {nai_vibe_data.normalize}")
+                print(f"  - Strengths: {nai_vibe_data.reference_strength_multiple}")
+            else:
+                # 🔄 Late Binding fallback for direct generation (non-queue)
+                vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
+                if vibe_module:
+                    vibe_data = vibe_module.get_vibe_transfer_multiple_data()
+                    if vibe_data and vibe_data.get('reference_image_multiple'):
+                        print("🔄 [LateBinding] Vibe Transfer from module (direct generation)")
 
-            # 🎯 Character Reference (Director) 처리 - NAID4.5 전용
-            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 
+                        # Update api_parameters with vibe transfer data
+                        api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
+                        api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
+                        api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
+
+                        # Add NAID3-specific parameter if present
+                        if 'reference_information_extracted_multiple' in vibe_data:
+                            api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
+
+                        print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
+
+            # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
+            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated',
                              'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:
-                if params.get('director_reference_descriptions'):
-                    print("✅ Character Reference 활성화됨. Director 파라미터를 적용합니다.")
-                    
+                generation_request = params.get('_generation_request')
+                if generation_request and generation_request.nai_character_reference:
+                    print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
+                    nai_ref_data = generation_request.nai_character_reference
+
+                    # Director 파라미터 추가
+                    api_parameters['director_reference_descriptions'] = nai_ref_data.director_reference_descriptions
+                    api_parameters['director_reference_images'] = nai_ref_data.director_reference_images
+                    api_parameters['director_reference_information_extracted'] = nai_ref_data.director_reference_information_extracted
+                    api_parameters['director_reference_secondary_strength_values'] = nai_ref_data.director_reference_secondary_strength_values
+                    api_parameters['director_reference_strength_values'] = nai_ref_data.director_reference_strength_values
+
+                    # Character Reference 활성화 시 skip_cfg_above_sigma 제거
+                    if 'skip_cfg_above_sigma' in api_parameters:
+                        del api_parameters['skip_cfg_above_sigma']
+                        print("  - skip_cfg_above_sigma 파라미터 제거됨 (Character Reference 활성화)")
+
+                    # Character Reference Module에서 추가된 파라미터들
+                    api_parameters['controlnet_strength'] = nai_ref_data.controlnet_strength
+                    api_parameters['inpaintImg2ImgStrength'] = nai_ref_data.inpaint_img2img_strength
+                    api_parameters['normalize_reference_strength_multiple'] = nai_ref_data.normalize_reference_strength_multiple
+
+                    print(f"  - Director images: {len(nai_ref_data.director_reference_images)}")
+                    print(f"  - Director strengths: {nai_ref_data.director_reference_strength_values}")
+                    print(f"  - Fidelity values: {nai_ref_data.director_reference_secondary_strength_values}")
+                elif params.get('director_reference_descriptions'):
+                    # 🔄 Late Binding fallback for direct generation (non-queue)
+                    print("🔄 [LateBinding] Character Reference from params (direct generation)")
+
                     # Director 파라미터 추가
                     api_parameters['director_reference_descriptions'] = params['director_reference_descriptions']
                     api_parameters['director_reference_images'] = params['director_reference_images']
                     api_parameters['director_reference_information_extracted'] = params['director_reference_information_extracted']
                     api_parameters['director_reference_secondary_strength_values'] = params['director_reference_secondary_strength_values']
                     api_parameters['director_reference_strength_values'] = params['director_reference_strength_values']
-                    
+
                     # Character Reference 활성화 시 skip_cfg_above_sigma 제거
                     if 'skip_cfg_above_sigma' in api_parameters:
                         del api_parameters['skip_cfg_above_sigma']
                         print("  - skip_cfg_above_sigma 파라미터 제거됨 (Character Reference 활성화)")
-                    
+
                     # Character Reference Module에서 추가된 파라미터들
                     if 'controlnet_strength' in params:
                         api_parameters['controlnet_strength'] = params['controlnet_strength']
@@ -508,9 +567,8 @@ class APIService:
                         api_parameters['inpaintImg2ImgStrength'] = params['inpaintImg2ImgStrength']
                     if 'normalize_reference_strength_multiple' in params:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
-                    
+
                     print(f"  - Director images: {len(params['director_reference_images'])}")
-                    print(f"  - Director strengths: {params['director_reference_strength_values']}")
             
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):

@@ -443,62 +443,44 @@ class GenerationController:
         """
         현재 생성 요청을 큐에 추가합니다.
 
+        Phase 2: Early Binding - NAI 데이터를 큐에 추가할 때 캡처
+
         Args:
             overrides: 파라미터 덮어쓰기 딕셔너리
             priority: 우선순위 (0=일반, 100=긴급)
         """
         try:
-            # 파라미터 수집 (실제 생성 파이프라인과 동일한 로직)
-            api_mode = self.context.main_window.get_current_api_mode()
-            if api_mode == "NAI":
-                token = 'nai_token'
-            elif api_mode == "COMFYUI":
-                token = 'comfyui_url'
-            else:
-                token = 'webui_url'
+            # ✅ Phase 2: 통합된 파라미터 수집 메서드 사용
+            params = self._collect_generation_params()
 
-            credential = self.context.secure_token_manager.get_token(token)
-            if not credential:
+            # 인증 정보 확인
+            api_mode = params.get('api_mode', 'NAI')
+            if not params.get('credential'):
                 self.context.main_window.status_bar.showMessage(f"❌ {api_mode} 인증 정보가 없습니다.")
                 return
 
-            params = self.context.main_window.get_main_parameters()
-            params['api_mode'] = api_mode
-            params['credential'] = credential
-
+            # source_row 설정
             source_row = self.context.current_source_row
             if source_row is None:
                 empty_data = {'general': None, 'character': None, 'copyright': None, 'artist': None, 'meta': None}
                 source_row = pd.Series(empty_data, name="wildcard_standalone")
 
-            # 모듈 파라미터 수집
-            for module in self.module_instances:
-                module_params = module.get_parameters()
-                if module_params:
-                    params.update(module_params)
-
-            # 랜덤 해상도 처리
-            if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
-                random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
-                self.context.main_window.resolution_combo.setCurrentIndex(random_index)
-                selected_value = self.context.main_window.resolution_combo.currentText()
-                width, height = map(int, selected_value.split('x'))
-                params['width'] = width
-                params['height'] = height
-
-            img2img_params = self.context.main_window.img2img_panel.get_parameters()
-            if img2img_params:
-                params.update(img2img_params)
-
+            # 덮어쓰기 적용
             if overrides:
                 params.update(overrides)
 
-            # GenerationRequest 생성
+            # ✅ Phase 2: NAI 데이터 추출 (Early Binding)
+            nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params)
+
+            # GenerationRequest 생성 (NAI 데이터 포함)
             request = GenerationRequest(
                 params=params,
                 source_row=source_row,
                 priority=priority,
-                max_retries=0  # 재시도는 나중에 구현
+                max_retries=0,  # 재시도는 나중에 구현
+                nai_characters=nai_characters,
+                nai_vibe_transfer=nai_vibe_transfer,
+                nai_character_reference=nai_character_reference
             )
 
             # 큐에 추가 (우선순위에 따라)
@@ -516,6 +498,8 @@ class GenerationController:
         except Exception as e:
             print(f"❌ [QUEUE] 요청 추가 실패: {e}")
             self.context.main_window.status_bar.showMessage(f"❌ 큐 추가 실패: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _process_next_queue_request(self):
         """
@@ -565,6 +549,11 @@ class GenerationController:
                         next_request.params["auto_generate"] = True
             except Exception:
                 pass
+
+            # ✅ Phase 3: GenerationRequest를 params에 추가 (API Service가 NAI 데이터 접근 가능하도록)
+            if isinstance(next_request.params, dict):
+                next_request.params["_generation_request"] = next_request
+
             self.execute_generation_pipeline(
                 overrides=next_request.params,
                 priority=next_request.priority,
@@ -1101,6 +1090,8 @@ class GenerationController:
         """
         🆕 시퀀스 요청을 큐에 일괄 추가
 
+        Phase 2: Early Binding - NAI 데이터를 시퀀스 전체에 대해 한 번만 캡처
+
         Args:
             prompt_sets: 프롬프트 리스트
             fixed_resolution: (width, height)
@@ -1112,6 +1103,9 @@ class GenerationController:
         # 🔧 FIX HIGH-1: 파라미터를 루프 밖에서 한 번만 수집
         # (캐릭터 리롤이 각 시퀀스마다 반복되지 않도록)
         base_params = self._collect_generation_params()
+
+        # ✅ Phase 2: NAI 데이터를 시퀀스 전체에 대해 한 번만 추출 (Early Binding)
+        nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(base_params)
 
         # 🆕 API 모드 확인 (시드 처리 분기용)
         api_mode = base_params.get('api_mode', 'NAI')
@@ -1160,12 +1154,15 @@ class GenerationController:
                     }
                     source_row = pd.Series(empty_data, name=f"sequence_{i+1}")
 
-                # GenerationRequest 생성
+                # GenerationRequest 생성 (NAI 데이터 포함)
                 request = GenerationRequest(
                     params=params,
                     source_row=source_row,
                     priority=priority,
-                    max_retries=0
+                    max_retries=0,
+                    nai_characters=nai_characters,
+                    nai_vibe_transfer=nai_vibe_transfer,
+                    nai_character_reference=nai_character_reference
                 )
 
                 # 큐에 추가
@@ -1243,3 +1240,63 @@ class GenerationController:
                 params['workflow'] = final_workflow
 
         return params
+
+    def _extract_nai_data(self, params: dict) -> tuple:
+        """
+        🆕 NAI 전용 데이터를 추출하여 타입 안전한 dataclass로 변환
+
+        Phase 2: Early Binding - 큐에 추가될 때 데이터 캡처
+
+        Args:
+            params: 생성 파라미터 (모듈에서 수집된 데이터 포함)
+
+        Returns:
+            Tuple of (NAICharacterData | None, NAIVibeTransferData | None, NAICharacterReferenceData | None)
+        """
+        from core.generation_request import (
+            NAICharacterData,
+            NAIVibeTransferData,
+            NAICharacterReferenceData
+        )
+        from typing import Optional, Tuple
+
+        nai_characters: Optional[NAICharacterData] = None
+        nai_vibe_transfer: Optional[NAIVibeTransferData] = None
+        nai_character_reference: Optional[NAICharacterReferenceData] = None
+
+        # API 모드 확인 (NAI가 아니면 모두 None 반환)
+        api_mode = params.get('api_mode', 'NAI')
+        if api_mode != "NAI":
+            return nai_characters, nai_vibe_transfer, nai_character_reference
+
+        try:
+            # 1. Character Module (NAID4)
+            if 'characters' in params and params['characters']:
+                nai_characters = NAICharacterData.from_params(params)
+                if nai_characters:
+                    print(f"✅ [EarlyBinding] Character Data 캡처: {len(nai_characters.characters)}명")
+
+            # 2. Vibe Transfer Module
+            vibe_keys = ['reference_image_multiple', 'reference_strength_multiple']
+            if all(key in params for key in vibe_keys):
+                nai_vibe_transfer = NAIVibeTransferData.from_params(params)
+                if nai_vibe_transfer:
+                    print(f"✅ [EarlyBinding] Vibe Transfer Data 캡처: {len(nai_vibe_transfer.reference_image_multiple)}개")
+
+            # 3. Character Reference Module (NAID4.5 Director Tool)
+            ref_keys = ['director_reference_descriptions', 'director_reference_images']
+            if all(key in params for key in ref_keys):
+                nai_character_reference = NAICharacterReferenceData.from_params(params)
+                if nai_character_reference:
+                    print(f"✅ [EarlyBinding] Character Reference Data 캡처")
+
+        except ValueError as e:
+            # 데이터 검증 실패
+            print(f"⚠️ [EarlyBinding] NAI 데이터 검증 실패: {e}")
+        except Exception as e:
+            # 예상치 못한 오류
+            print(f"❌ [EarlyBinding] NAI 데이터 추출 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return nai_characters, nai_vibe_transfer, nai_character_reference

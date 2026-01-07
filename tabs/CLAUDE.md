@@ -834,6 +834,64 @@ class MyTabModule(BaseTabModule):
             self.widget.deleteLater()
             self.widget = None
 
+### Q7: 분류 방법 변경 시 프로그램이 강제 종료돼요 (Settings 탭)
+
+**증상**:
+```
+저장 디렉토리 설정에서 분류 방법을 "프롬프트 인식"으로 변경했다가
+"분류 없음"으로 되돌리면 프로그램이 강제 종료됨
+```
+
+**원인**:
+- `_on_classification_method_changed()` 메서드에서 잘못된 속성명 참조 (`AttributeError`)
+- Line 1015: `self.secondary_classification_method_label.setVisible(False)`
+- 실제 속성명: `self.secondary_classification_label` (Line 416에서 정의됨)
+
+**해결** (2025-01-21 수정 완료):
+
+```python
+# ❌ 수정 전 (tabs/setting_tabs.py:1015)
+if not is_prompt_recognition:
+    self.secondary_classification_method_label.setVisible(False)  # AttributeError!
+    self.secondary_classification_method_combo.setVisible(False)
+    # ...
+
+# ✅ 수정 후
+if not is_prompt_recognition:
+    self.secondary_classification_label.setVisible(False)  # 올바른 속성명
+    self.secondary_classification_method_combo.setVisible(False)
+    # ...
+```
+
+**근본 원인**:
+- 변수명 불일치 (타이포):
+  - Line 416: `self.secondary_classification_label = secondary_classification_label` (정의)
+  - Line 1015: `self.secondary_classification_method_label` (잘못된 참조)
+
+**재현 방법**:
+1. Settings 탭 → 저장 디렉토리 설정
+2. 분류 방법을 "프롬프트 인식"으로 변경
+3. 분류 방법을 "분류 없음"으로 되돌림
+4. ❌ **프로그램 강제 종료** (수정 전)
+5. ✅ **정상 동작** (수정 후)
+
+**디버깅 팁**:
+```python
+# 속성명 확인
+print(dir(self))  # 모든 속성 출력
+print(hasattr(self, 'secondary_classification_label'))  # True
+print(hasattr(self, 'secondary_classification_method_label'))  # False
+
+# 예외 처리 추가 (임시 방편)
+if hasattr(self, 'secondary_classification_label'):
+    self.secondary_classification_label.setVisible(False)
+```
+
+**관련 파일**:
+- [setting_tabs.py:1015](../tabs/setting_tabs.py#L1015) - 수정 완료
+- [setting_tabs.py:416](../tabs/setting_tabs.py#L416) - 속성 정의 위치
+- [setting_tabs.py:637](../tabs/setting_tabs.py#L637) - 올바른 사용 예시
+
         print(f"✅ {self.get_tab_title()} 정리 완료")
 ```
 
@@ -1117,11 +1175,12 @@ console.log("Debug message");
 - WebEngine 문제 → [Q4](#q4-webengine-페이지가-로드되지-않아요)
 - 모듈/탭 가시성 문제 → [Q5](#q5-모듈탭-가시성이-프로그램-시작-시-적용되지-않아요)
 - 메모리 누수 → [Q6](#q6-탭-분리-후-메모리-누수가-있어요)
+- 분류 방법 변경 시 크래시 → [Q7](#q7-분류-방법-변경-시-프로그램이-강제-종료돼요-settings-탭)
 
 ---
 
-*문서 버전: 1.4*
-*최종 업데이트: 2025-01-18*
+*문서 버전: 1.5*
+*최종 업데이트: 2025-01-21*
 *담당 영역: tabs/ 디렉터리*
 *변경사항:*
 - *ImageCrudController 통합 (image_window.py, setting_tabs.py 업데이트)*
@@ -1139,3 +1198,7 @@ console.log("Debug message");
   - *디버깅 로그 추가 (상태 추적 및 문제 진단)*
   - *타이밍 문제 해결 (QTimer 지연 실행)*
 - *문제 해결 섹션에 Q5 추가: 모듈/탭 가시성 프로그램 시작 시 미적용 문제*
+- *🐛 **버그 수정** (2025-01-21): 분류 방법 변경 시 크래시 문제 해결 (setting_tabs.py:1015)*
+  - *잘못된 속성명 참조로 인한 AttributeError 수정*
+  - *`secondary_classification_method_label` → `secondary_classification_label`*
+  - *문제 해결 섹션에 Q7 추가: 재현 방법, 근본 원인, 디버깅 팁 포함*

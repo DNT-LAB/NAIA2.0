@@ -760,21 +760,26 @@ if 'temp_window_prompt_engineering_tab' in params:
 
 **실행 위치**: 와일드카드 확장 이후, API 호출 이전 (일반 파이프라인의 `post_processing` 훅 포인트와 동일한 위치)
 
-**파라미터 전달 방법**:
+**⚠️ 중요: 이미지 생성 버튼에서는 적용 안 됨**
 
-임시 창에서 생성 요청 시, Virtual Module 참조를 파라미터에 포함:
+**2025-01-20 변경**: 임시 창의 이미지 생성 버튼(`on_generate_clicked`)에서는 Virtual Module 훅을 실행하지 않습니다.
+
+- **이미지 생성 버튼**: 메인 프롬프트 내용만 사용 (선행/후행 고정 프롬프트 적용 안 됨)
+- **Random/Next Prompt 버튼**: 메인 UI의 `trigger_random_prompt()` 호출 (선행/후행 고정 프롬프트 적용됨)
+
+**파라미터 전달 방법** (현재 비활성화됨):
 
 ```python
-# ui/temp_generation_window.py:277-283
-def generate_single_image(self):
+# ui/temp_generation_window.py:278-283
+def on_generate_clicked(self):
     params = self._collect_generation_params()
 
-    # Virtual Module 참조 전달
-    if hasattr(self, 'prompt_engineering_tab'):
-        params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+    # ❌ 비활성화: 이미지 생성 버튼에서는 메인 프롬프트만 사용
+    # 선행/후행 고정 프롬프트는 Random/Next Prompt 버튼을 눌렀을 때만 적용됨
+    # if hasattr(self, 'prompt_engineering_tab'):
+    #     params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
 
-    # 생성 요청
-    self.app_context.generation_controller.generate_image(params)
+    self.generate_requested.emit(self.window_id, params)
 ```
 
 **Virtual Module 구조**:

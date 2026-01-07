@@ -208,18 +208,106 @@ def initialize_from_main_window(self, main_window):
     main_pe_module = main_window.app_context.middle_section_controller.get_module_instance("PromptEngineeringModule")
     if main_pe_module:
         self.prompt_engineering_tab.initialize_from_main(main_pe_module)
+```
 
-# 생성 파라미터에 Virtual Module 참조 전달
-def generate_single_image(self):
+**⚠️ 중요: 이미지 생성 버튼 vs 랜덤 프롬프트 버튼**
+
+임시 창에는 두 가지 생성 버튼이 있으며, **각각 다른 동작**을 합니다:
+
+#### 1. 🎨 이미지 생성 버튼 (`on_generate_clicked`)
+
+**목적**: 메인 프롬프트 텍스트를 **그대로** 사용하여 이미지 생성
+
+**동작**:
+- 메인 프롬프트 내용만 사용
+- 선행/후행 고정 프롬프트 적용 **안 됨**
+- Virtual Module 훅 실행 **안 됨**
+
+**구현** (`ui/temp_generation_window.py:278-283`):
+```python
+def on_generate_clicked(self):
     params = self._collect_generation_params()
 
-    # Virtual Module 참조 전달
-    if hasattr(self, 'prompt_engineering_tab'):
-        params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+    # ❌ 비활성화: 이미지 생성 버튼에서는 메인 프롬프트만 사용
+    # 선행/후행 고정 프롬프트는 Random/Next Prompt 버튼을 눌렀을 때만 적용됨
+    # if hasattr(self, 'prompt_engineering_tab'):
+    #     params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
 
-    # 생성 요청
-    self.app_context.generation_controller.generate_image(params)
+    self.generate_requested.emit(self.window_id, params)
 ```
+
+**사용 시나리오**:
+```
+사용자가 메인 프롬프트에 "1girl, smile, sitting"을 직접 입력
+    ↓
+이미지 생성 버튼 클릭
+    ↓
+프롬프트: "1girl, smile, sitting" (입력한 그대로)
+```
+
+#### 2. 🔀 Random/Next Prompt 버튼 (`on_random_prompt_clicked`)
+
+**목적**: 선행/후행 고정 프롬프트가 **적용된** 랜덤 프롬프트 생성
+
+**동작**:
+- 메인 UI의 `trigger_random_prompt()` 호출
+- 선행/후행 고정 프롬프트 자동 적용
+- 생성된 프롬프트를 임시 창 메인 프롬프트에 복사
+
+**구현** (`core/temp_window_manager.py:139-186`):
+```python
+def handle_random_prompt_request(self, window_id: int):
+    # 메인 UI의 프롬프트 임시 저장
+    original_main = self.main_window.main_prompt_edit.toPlainText()
+    original_negative = self.main_window.negative_prompt_edit.toPlainText()
+
+    try:
+        # 메인 UI의 프롬프트 생성 (선행/후행 고정 프롬프트 적용됨)
+        self.main_window.trigger_random_prompt()
+
+        # 생성된 프롬프트 가져오기
+        new_main = self.main_window.main_prompt_edit.toPlainText()
+        new_negative = self.main_window.negative_prompt_edit.toPlainText()
+
+        # 임시 창에 복사
+        temp_window.update_prompts(new_main, new_negative)
+    finally:
+        # 메인 UI 복원 (오염 방지)
+        self.main_window.main_prompt_edit.setPlainText(original_main)
+        self.main_window.negative_prompt_edit.setPlainText(original_negative)
+```
+
+**사용 시나리오**:
+```
+선행 고정 프롬프트: "masterpiece, best quality"
+후행 고정 프롬프트: "highly detailed"
+    ↓
+Random/Next Prompt 버튼 클릭
+    ↓
+랜덤 태그 생성: "1girl, sitting, park"
+    ↓
+최종 프롬프트: "masterpiece, best quality, 1girl, sitting, park, highly detailed"
+    ↓
+임시 창 메인 프롬프트에 복사됨
+```
+
+#### 동작 비교표
+
+| 항목 | 이미지 생성 버튼 | Random/Next Prompt 버튼 |
+|------|-----------------|------------------------|
+| **메인 프롬프트 사용** | ✅ 입력한 그대로 | ✅ 랜덤 생성 후 복사 |
+| **선행/후행 고정 프롬프트** | ❌ 적용 안 됨 | ✅ 자동 적용 |
+| **Virtual Module 훅** | ❌ 실행 안 됨 | ❌ 실행 안 됨 (메인 UI 훅만) |
+| **메인 UI 오염** | ❌ 없음 | ❌ 없음 (복원됨) |
+| **용도** | 직접 입력한 프롬프트로 테스트 | 랜덤 프롬프트 + 고정 프롬프트 조합 |
+
+#### 수정 이력
+
+**2025-01-20**: 이미지 생성 버튼에서 Virtual Module 훅 전달 비활성화
+- **문제**: 이미지 생성 버튼에서도 선행/후행 고정 프롬프트가 적용됨
+- **원인**: `on_generate_clicked()`에서 `temp_window_prompt_engineering_tab` 파라미터를 항상 전달
+- **해결**: 해당 코드 주석 처리 → 메인 프롬프트만 사용
+- **영향**: Random/Next Prompt 버튼은 영향 없음 (메인 UI의 `trigger_random_prompt()` 사용)
 
 ---
 

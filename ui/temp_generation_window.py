@@ -240,8 +240,16 @@ class TempGenerationWindow(QMainWindow):
 
     def on_generate_clicked(self):
         """
-        Generate 버튼 클릭 시 처리
+        🎨 이미지 생성 버튼 클릭 시 처리
 
+        **중요**: 이 메서드는 메인 프롬프트 내용만 사용하여 이미지를 생성합니다.
+        - 선행/후행 고정 프롬프트: 적용 안 됨
+        - Virtual Module 훅: 실행 안 됨
+        - 메인 프롬프트: 입력한 그대로 사용
+
+        선행/후행 고정 프롬프트를 적용하려면 🔀 Random/Next Prompt 버튼을 사용하세요.
+
+        처리 순서:
         1. 버튼 피드백 시작 ("요청 전달됨" + LightGrey)
         2. 프롬프트 및 파라미터 수집
         3. generate_requested 시그널 발행
@@ -453,7 +461,17 @@ class TempGenerationWindow(QMainWindow):
 
     def on_random_prompt_clicked(self):
         """
-        🆕 FR-4: Random/Next Prompt 버튼 클릭 시 처리 (개선됨)
+        🔀 Random/Next Prompt 버튼 클릭 시 처리
+
+        **중요**: 이 메서드는 메인 UI의 프롬프트 생성 로직을 사용합니다.
+        - 선행/후행 고정 프롬프트: 자동 적용됨 ✅
+        - 메인 UI 훅: 모두 실행됨
+        - 랜덤 태그: 데이터베이스에서 생성
+        - 결과: 임시 창 메인 프롬프트에 복사됨
+
+        🎨 이미지 생성 버튼과의 차이:
+        - 이미지 생성 버튼: 메인 프롬프트만 사용 (고정 프롬프트 적용 안 됨)
+        - Random/Next Prompt 버튼: 선행/후행 고정 프롬프트 자동 적용
 
         시그널을 발행하여 외부(TempWindowManager)에서 처리하도록 위임합니다.
         이를 통해 메인 UI를 오염시키지 않고 독립적으로 프롬프트를 생성할 수 있습니다.

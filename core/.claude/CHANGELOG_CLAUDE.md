@@ -5,6 +5,19 @@
 
 ---
 
+## 버전 1.8 (2025-01-21)
+
+### 버그 수정
+
+- 🐛 **Settings 탭 크래시 수정** ([tabs/setting_tabs.py:1015](../../tabs/setting_tabs.py#L1015))
+  - **문제**: 분류 방법을 "프롬프트 인식"에서 "분류 없음"으로 변경 시 `AttributeError`로 프로그램 강제 종료
+  - **원인**: 잘못된 속성명 참조 (`self.secondary_classification_method_label` → 존재하지 않음)
+  - **해결**: 올바른 속성명 사용 (`self.secondary_classification_label`)
+  - **영향**: 분류 방법 전환이 정상 작동, 사용자가 설정을 자유롭게 변경 가능
+  - **관련 문서**: [tabs/CLAUDE.md Q7](../../tabs/CLAUDE.md#q7-분류-방법-변경-시-프로그램이-강제-종료돼요-settings-탭)
+
+---
+
 ## 버전 1.7 (2025-01-18)
 
 ### 문서 구조 개선

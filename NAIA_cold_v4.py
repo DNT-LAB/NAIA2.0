@@ -648,7 +648,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 125 temp"
+        self.base_title = "NAIA v2.0.0 Dev 126"
         self.setWindowTitle(self.base_title + " - 260107_temp")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -2605,7 +2605,7 @@ class ModernMainWindow(QMainWindow):
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
                 # 약간의 지연 후 다시 시도
-                # QTimer.singleShot(500, self._check_and_trigger_auto_generation)
+                QTimer.singleShot(800, self._check_and_trigger_auto_generation)
                 return
                 
             # [추가] 스레드 상태 확인
@@ -2665,12 +2665,15 @@ class ModernMainWindow(QMainWindow):
                     # 자동 생성 모드에서 이미지 생성 트리거
                     self._trigger_auto_image_generation()
 
-                if (char_module and 
-                    char_module.activate_checkbox.isChecked() and 
+                if (char_module and
+                    char_module.activate_checkbox.isChecked() and
                     not char_module.reroll_on_generate_checkbox.isChecked()):
-                    
+
                     print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
                     char_module.process_and_update_view()
+
+                # 프리셋 랜더마이저 신호 발행 (자동 생성 시 랜덤 프리셋 적용)
+                self.app_context.publish("random_prompt_triggered_preset_randomizer")
 
                 self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
             elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():

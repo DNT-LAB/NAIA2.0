@@ -75,7 +75,7 @@ BaseMiddleModule 상속 클래스 찾기
 | **character_module.py** | 44K | 캐릭터 검색 및 프롬프트 적용 | ModeAware, 파이프라인 훅, 다이얼로그 |
 | **character_reference_module.py** | 65K | Character Reference (CR) 관리 | NAI 전용, 이미지 선택, CR strength |
 | **vibe_transfer_module.py** | 99K | Vibe Transfer 이미지 관리 | NAI 전용, 다중 이미지, information_extracted |
-| **prompt_engineering_module.py** | 78K | 프롬프트 엔지니어링 도구 | 태그 조작, 가중치, 재배치 |
+| **prompt_engineering_module.py** | 85K | 프롬프트 엔지니어링 도구 | 태그 조작, 가중치, 재배치, 🆕 프리셋 랜덤화 |
 | **automation_module.py** | 43K | 자동 생성 (타이머/횟수/무제한) | QThread, 지연 기능 |
 | **instant_wildcard_module.py** | 40K | 인스턴트 와일드카드 관리 | JSON 저장/로드, 이미지 미리보기 |
 | **conditional_prompt_module.py** | 38K | 조건부 프롬프트 | 파이프라인 훅, 조건 평가 |
@@ -1860,7 +1860,304 @@ def _start_worker(self):
 
 ---
 
+### 예제 5: 프리셋 랜덤화 시스템 (Preset Randomizer) 🆕 (2025-01-08)
+
+**목표**: 여러 프리셋 중에서 무작위로 선택하여 적용하는 기능 구현
+
+**파일**: `modules/prompt_engineering_module.py`
+
+**주요 기능**:
+- 퀵 프리셋 콤보박스에 `*randomized` 특수 항목 추가
+- 랜덤 프리셋 풀(ListBox)에서 프리셋 추가/제거
+- 자동 생성 시 랜덤하게 프리셋 선택 및 적용
+- ListBox 아이템 클릭으로 수동 프리셋 로드
+
+#### 1. UI 구성 요소
+
+```python
+# 인스턴스 변수 (__init__)
+self.is_randomized_mode = False
+self.randomized_preset_list = []  # ListBox에 표시될 프리셋 목록
+
+# UI 위젯 참조
+self.randomized_layout_widget = None  # *randomized 전용 UI 컨테이너
+self.randomized_listbox = None  # QListWidget - 랜덤 프리셋 목록
+self.randomized_combo = None  # 프리셋 선택 복제 콤보박스
+self.randomized_add_btn = None  # [+추가] 버튼
+self.randomized_remove_btn = None  # [-제거] 버튼
+```
+
+#### 2. UI 레이아웃 (create_widget)
+
+```python
+# === *randomized 전용 UI 레이아웃 ===
+self.randomized_layout_widget = QWidget()
+randomized_layout = QVBoxLayout(self.randomized_layout_widget)
+
+# 1) 랜덤 프리셋 목록 Label
+randomized_label = QLabel("랜덤 프리셋 목록:")
+
+# 2) 랜덤 프리셋 목록 ListBox
+self.randomized_listbox = QListWidget()
+self.randomized_listbox.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+self.randomized_listbox.setFixedHeight(100)
+self.randomized_listbox.itemClicked.connect(self._on_randomized_listbox_item_clicked)
+
+# 3) 프리셋 선택 + 버튼 행
+selection_layout = QHBoxLayout()
+selection_label = QLabel("선택:")
+
+self.randomized_combo = QComboBox()  # *randomized, default 제외한 프리셋 목록
+self.randomized_add_btn = QPushButton("+추가")
+self.randomized_remove_btn = QPushButton("-제거")
+
+self.randomized_layout_widget.setVisible(False)  # 초기 숨김
+```
+
+#### 3. 콤보박스에 *randomized 항목 추가 (load_preset_list)
+
+```python
+def load_preset_list(self):
+    # [*randomized]를 첫 번째로 추가
+    self.preset_combo.addItem("*randomized")
+
+    # default 및 기타 프리셋 추가
+    self.preset_combo.addItems(preset_names)
+```
+
+#### 4. 프리셋 전환 처리 (on_preset_changed)
+
+```python
+def on_preset_changed(self, preset_name):
+    if preset_name == "*randomized":
+        # *randomized 모드 활성화
+        self.is_randomized_mode = True
+        self._show_randomized_ui()
+        self.randomized_add_btn.setEnabled(False)  # 선택 전 비활성화
+    else:
+        # 일반 모드
+        self.is_randomized_mode = False
+        self._hide_randomized_ui()
+        self.randomized_add_btn.setEnabled(True)
+```
+
+#### 5. 추가/제거 버튼 핸들러
+
+```python
+def _add_to_randomized_list(self):
+    """복제 콤보박스에서 선택한 프리셋을 ListBox에 추가"""
+    preset_name = self.randomized_combo.currentText()
+
+    if not preset_name or preset_name in self.randomized_preset_list:
+        return
+
+    # ListBox에 추가
+    self.randomized_listbox.addItem(preset_name)
+    self.randomized_preset_list.append(preset_name)
+
+    # 복제 콤보박스에서 해당 항목 숨김 (hide, not disable)
+    self._update_randomized_combo()
+
+def _remove_from_randomized_list(self):
+    """ListBox에서 선택한 프리셋 제거"""
+    current_item = self.randomized_listbox.currentItem()
+    if not current_item:
+        return
+
+    preset_name = current_item.text()
+
+    # ListBox에서 제거
+    row = self.randomized_listbox.row(current_item)
+    self.randomized_listbox.takeItem(row)
+    self.randomized_preset_list.remove(preset_name)
+
+    # 복제 콤보박스에서 해당 항목 복원
+    self._update_randomized_combo()
+```
+
+#### 6. 복제 콤보박스 업데이트
+
+```python
+def _update_randomized_combo(self):
+    """복제 콤보박스 업데이트 - *randomized, default 제외, 이미 추가된 항목 숨김"""
+    self.randomized_combo.clear()
+
+    for preset_name in self.preset_list:
+        # *randomized, default 제외
+        if preset_name in ["*randomized", "default"]:
+            continue
+
+        # 이미 ListBox에 있는 항목 숨김
+        if preset_name in self.randomized_preset_list:
+            continue
+
+        self.randomized_combo.addItem(preset_name)
+
+    # +추가 버튼 상태 갱신 (콤보에 항목이 있을 때만 활성화)
+    has_items = self.randomized_combo.count() > 0
+    self.randomized_add_btn.setEnabled(has_items and self.current_preset != "*randomized")
+```
+
+#### 7. 신호 통합 (random_prompt_triggered)
+
+```python
+def initialize_with_context(self, app_context):
+    # 랜덤 프롬프트 신호 구독
+    app_context.subscribe("random_prompt_triggered", self._on_random_prompt_triggered)
+    app_context.subscribe("random_prompt_triggered_preset_randomizer", self._on_random_prompt_triggered)
+
+def _on_random_prompt_triggered(self, _data=None):
+    """random_prompt_triggered 신호 수신 시 호출 - 랜덤 프리셋 선택"""
+    if self.current_preset != "*randomized":
+        return
+
+    if not self.randomized_preset_list:
+        print("⚠️ 랜덤 프리셋 목록이 비어있습니다")
+        return
+
+    # 랜덤하게 프리셋 선택
+    import random
+    selected_preset = random.choice(self.randomized_preset_list)
+
+    print(f"🎲 랜덤 프리셋 선택: {selected_preset}")
+    self.load_preset_random(selected_preset)
+```
+
+#### 8. ListBox 아이템 클릭 핸들러
+
+```python
+def _on_randomized_listbox_item_clicked(self, item):
+    """랜덤 프리셋 목록에서 아이템 클릭 시 해당 프리셋 로드"""
+    if item is None:
+        return
+
+    selected_preset = item.text()
+    if selected_preset:
+        print(f"🎯 사용자가 랜덤 프리셋 목록에서 선택: {selected_preset}")
+        self.load_preset_random(selected_preset)
+```
+
+#### 9. 랜덤 프리셋 로드 (부분 적용)
+
+```python
+def load_preset_random(self, preset_name: str):
+    """랜덤 프리셋 로드 - pre_prompt, post_prompt만 적용, main_settings는 prompt 제외하고 적용"""
+    preset_file = self.get_preset_dir() / f"{preset_name}.json"
+
+    if not preset_file.exists():
+        print(f"⚠️ 프리셋 파일을 찾을 수 없음: {preset_name}")
+        return
+
+    with open(preset_file, 'r', encoding='utf-8') as f:
+        preset_data = json.load(f)
+
+    # module_settings에서 pre_prompt, post_prompt만 적용
+    module_settings = preset_data.get("module_settings", {})
+
+    if "pre_prompt" in module_settings:
+        self.pre_prompt_input.setPlainText(module_settings["pre_prompt"])
+
+    if "post_prompt" in module_settings:
+        self.post_prompt_input.setPlainText(module_settings["post_prompt"])
+
+    # main_settings 적용 (prompt 제외)
+    main_settings = preset_data.get("main_settings", {})
+    if main_settings:
+        main_settings.pop("prompt", None)  # prompt는 적용하지 않음
+
+        if self.app_context:
+            self.app_context.publish("apply_preset_main_settings", main_settings)
+```
+
+#### 10. API 모드 변경 시 처리
+
+```python
+def on_api_mode_changed_preset(self, data: dict):
+    """API 모드 변경 시 프리셋 저장/로드"""
+    # *randomized 모드에서는 저장하지 않고 상태만 초기화
+    if self.current_preset == "*randomized":
+        print("🎲 *randomized 모드 해제: 랜덤 프리셋 목록 초기화")
+        self._reset_randomized_state()
+    elif self.current_preset and self.current_preset != "(프리셋 없음)":
+        self.save_current_preset()
+
+def _reset_randomized_state(self):
+    """*randomized 모드 상태 초기화"""
+    self.is_randomized_mode = False
+    self.randomized_preset_list.clear()
+
+    if self.randomized_listbox:
+        self.randomized_listbox.clear()
+
+    if self.randomized_layout_widget:
+        self.randomized_layout_widget.setVisible(False)
+
+    # 복제 콤보박스 초기화
+    self._update_randomized_combo()
+```
+
+#### 주요 특징 정리
+
+| 기능 | 설명 | 코드 위치 |
+|------|------|----------|
+| **\*randomized 항목** | 퀵 프리셋 콤보박스 최상위 | `load_preset_list()` |
+| **랜덤 프리셋 풀** | QListWidget으로 프리셋 목록 관리 | `create_widget()` |
+| **추가/제거** | +추가로 풀에 추가, -제거로 풀에서 제거 | `_add_to_randomized_list()` |
+| **항목 숨김** | 추가된 항목은 콤보에서 숨김 (비활성화 대신) | `_update_randomized_combo()` |
+| **랜덤 선택** | 자동 생성 시 풀에서 무작위 선택 | `_on_random_prompt_triggered()` |
+| **수동 로드** | ListBox 아이템 클릭 시 해당 프리셋 로드 | `_on_randomized_listbox_item_clicked()` |
+| **부분 적용** | pre_prompt, post_prompt, main_settings(prompt 제외) | `load_preset_random()` |
+| **모드 전환** | API 모드 변경 시 상태 초기화 | `_reset_randomized_state()` |
+
+#### 테스트 시나리오
+
+```
+1. *randomized 선택
+   → 랜덤 프리셋 UI 표시
+   → +추가 버튼 비활성화
+
+2. 콤보박스에서 프리셋 선택 후 +추가 클릭
+   → ListBox에 추가됨
+   → 콤보박스에서 해당 항목 숨김
+
+3. ListBox에서 프리셋 클릭
+   → 해당 프리셋의 pre_prompt, post_prompt, main_settings(prompt 제외) 적용
+
+4. 자동 생성 실행
+   → 랜덤으로 프리셋 선택
+   → 콘솔: "🎲 랜덤 프리셋 선택: preset_name"
+
+5. API 모드 변경 (NAI → WEBUI)
+   → *randomized 상태 초기화
+   → 콘솔: "🎲 *randomized 모드 해제: 랜덤 프리셋 목록 초기화"
+```
+
+#### 관련 신호
+
+- `random_prompt_triggered`: 랜덤 프롬프트 생성 시 발행 (automation_module 등)
+- `random_prompt_triggered_preset_randomizer`: 자동 생성 시 발행 (NAIA_cold_v4.py)
+- `apply_preset_main_settings`: main_settings 적용 요청
+
+---
+
 ## 변경 이력
+
+### 2025-01-08: 프리셋 랜덤화 시스템 추가 🆕
+
+**파일**: `modules/prompt_engineering_module.py`
+
+**추가된 기능**:
+- `*randomized` 특수 프리셋 항목
+- 랜덤 프리셋 풀 UI (QListWidget, QComboBox, 추가/제거 버튼)
+- 자동 생성 시 랜덤 프리셋 선택 (`_on_random_prompt_triggered`)
+- ListBox 아이템 클릭 시 프리셋 로드 (`_on_randomized_listbox_item_clicked`)
+- 부분 프리셋 로드 (`load_preset_random`) - pre_prompt, post_prompt, main_settings(prompt 제외)
+- API 모드 변경 시 상태 초기화 (`_reset_randomized_state`)
+
+**관련 파일**:
+- `NAIA_cold_v4.py`: `random_prompt_triggered_preset_randomizer` 신호 발행 추가
+
+---
 
 ### 2025-01-10: Vibe Transfer 메타데이터 복원 버그 수정
 
@@ -1939,6 +2236,6 @@ if is_naid3:
 
 ---
 
-*문서 버전: 1.2*
-*최종 업데이트: 2025-01-17*
+*문서 버전: 1.3*
+*최종 업데이트: 2025-01-08*
 *담당 영역: modules/ 디렉터리*

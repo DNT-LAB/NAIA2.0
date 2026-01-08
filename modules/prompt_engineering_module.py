@@ -163,9 +163,21 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         
         # 퀵 프리셋 관련 초기화
         self.preset_combo = None
+        self.preset_add_btn = None  # 퀵 프리셋 "추가" 버튼
         self.current_preset = "default"
         self.last_preset = "default"
         self.preset_list = []
+
+        # *randomized 모드 관련
+        self.is_randomized_mode = False
+        self.randomized_preset_list = []  # ListBox에 표시될 프리셋 목록
+
+        # *randomized UI 위젯 참조
+        self.randomized_layout_widget = None  # randomized 전용 UI 컨테이너
+        self.randomized_listbox = None  # QListWidget
+        self.randomized_combo = None  # 프리셋 선택 복제 콤보박스
+        self.randomized_add_btn = None  # [추가] 버튼
+        self.randomized_remove_btn = None  # [제거] 버튼
 
     def get_title(self) -> str:
         return "🔧 프롬프트 엔지니어링/자동화/프리셋"
@@ -229,6 +241,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         """AppContext와 연결"""
         self.context = context  # 기존 코드에서 사용하는 self.context 유지
         self.app_context = context  # 새로운 모드 시스템용
+
+        # 랜덤 프리셋 선택용 신호 구독
+        if self.app_context:
+            self.app_context.subscribe("random_prompt_triggered", self._on_random_prompt_triggered)
+            self.app_context.subscribe("random_prompt_triggered_preset_randomizer", self._on_random_prompt_triggered)
     
     def create_widget(self, parent: QWidget) -> QWidget:
         widget = QWidget(parent)
@@ -255,11 +272,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.preset_combo.wheelEvent = lambda e: e.ignore()
         preset_layout.addWidget(self.preset_combo, 1)
         
-        add_btn = QPushButton("추가")
-        add_btn.setStyleSheet(dynamic_styles['compact_button'])
-        add_btn.setFixedWidth(80)
-        add_btn.clicked.connect(self.add_preset)
-        preset_layout.addWidget(add_btn)
+        self.preset_add_btn = QPushButton("추가")
+        self.preset_add_btn.setStyleSheet(dynamic_styles['compact_button'])
+        self.preset_add_btn.setFixedWidth(80)
+        self.preset_add_btn.clicked.connect(self.add_preset)
+        preset_layout.addWidget(self.preset_add_btn)
         
         manage_btn = QPushButton("관리")
         manage_btn.setStyleSheet(dynamic_styles['compact_button'])
@@ -268,7 +285,77 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         preset_layout.addWidget(manage_btn)
         
         layout.addLayout(preset_layout)
-        
+
+        # === *randomized 전용 UI 레이아웃 ===
+        self.randomized_layout_widget = QWidget()
+        randomized_layout = QVBoxLayout(self.randomized_layout_widget)
+        randomized_layout.setContentsMargins(0, 5, 0, 5)
+        randomized_layout.setSpacing(4)
+
+        # 1) 랜덤 프리셋 목록 Label
+        randomized_label = QLabel("랜덤 프리셋 목록:")
+        randomized_label.setStyleSheet(dynamic_styles['label_style'])
+        randomized_layout.addWidget(randomized_label)
+
+        # 2) 랜덤 프리셋 목록 ListBox
+        self.randomized_listbox = QListWidget()
+        self.randomized_listbox.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.randomized_listbox.setFixedHeight(100)
+        self.randomized_listbox.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 4px;
+                font-size: {get_scaled_font_size(14)}px;
+            }}
+            QListWidget::item {{
+                padding: 3px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: white;
+            }}
+        """)
+        randomized_layout.addWidget(self.randomized_listbox)
+
+        # ListBox 아이템 클릭 시 해당 프리셋 로드
+        self.randomized_listbox.itemClicked.connect(self._on_randomized_listbox_item_clicked)
+
+        # 3) 프리셋 선택 + 버튼 행
+        selection_layout = QHBoxLayout()
+        selection_layout.setSpacing(4)
+
+        # "선택:" Label 추가
+        selection_label = QLabel("선택:")
+        selection_label.setStyleSheet(dynamic_styles['label_style'])
+        selection_label.setFixedWidth(60)
+        selection_layout.addWidget(selection_label)
+
+        self.randomized_combo = QComboBox()
+        self.randomized_combo.setStyleSheet(dynamic_styles['compact_combobox'])
+        self.randomized_combo.wheelEvent = lambda e: e.ignore()
+        self.randomized_combo.setMinimumWidth(150)
+        self.randomized_combo.currentTextChanged.connect(self._on_randomized_combo_changed)
+        selection_layout.addWidget(self.randomized_combo, 1)
+
+        self.randomized_add_btn = QPushButton("+추가")
+        self.randomized_add_btn.setStyleSheet(dynamic_styles['compact_button'])
+        self.randomized_add_btn.setFixedWidth(70)
+        self.randomized_add_btn.clicked.connect(self._add_to_randomized_list)
+        selection_layout.addWidget(self.randomized_add_btn)
+
+        self.randomized_remove_btn = QPushButton("-제거")
+        self.randomized_remove_btn.setStyleSheet(dynamic_styles['compact_button'])
+        self.randomized_remove_btn.setFixedWidth(70)
+        self.randomized_remove_btn.clicked.connect(self._remove_from_randomized_list)
+        selection_layout.addWidget(self.randomized_remove_btn)
+
+        randomized_layout.addLayout(selection_layout)
+
+        self.randomized_layout_widget.setVisible(False)  # 초기 숨김
+        layout.addWidget(self.randomized_layout_widget)
+
         # 선행 고정 프롬프트
         pre_label = QLabel("선행 고정 프롬프트:")
         pre_label.setStyleSheet(dynamic_styles['label_style'])
@@ -633,36 +720,42 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         """프리셋 목록을 로드하고 콤보박스에 설정"""
         if not self.preset_combo:
             return
-            
+
         preset_dir = self.get_preset_dir()
-        
+
         # JSON 파일 목록 가져오기
         json_files = sorted(preset_dir.glob("*.json"))
         preset_names = [f.stem for f in json_files]
-        
+
         # default를 맨 앞으로
         if "default" in preset_names:
             preset_names.remove("default")
             preset_names.insert(0, "default")
-        
+
+        # preset_list는 실제 파일 기반 프리셋만 포함 (*randomized 제외)
         self.preset_list = preset_names
-        
+
         # 콤보박스 업데이트
         current_text = self.preset_combo.currentText()
         self.preset_combo.blockSignals(True)
         self.preset_combo.clear()
-        
+
+        # *randomized를 첫 번째로 추가 (파일 기반이 아님)
+        self.preset_combo.addItem("*randomized")
+
         if preset_names:
             self.preset_combo.addItems(preset_names)
             # 이전 선택 복원 또는 default 선택
-            if current_text in preset_names:
+            if current_text == "*randomized":
+                self.preset_combo.setCurrentText("*randomized")
+            elif current_text in preset_names:
                 self.preset_combo.setCurrentText(current_text)
             elif "default" in preset_names:
                 self.preset_combo.setCurrentText("default")
         else:
-            # 프리셋이 없으면 빈 상태로 표시
-            self.preset_combo.addItem("(프리셋 없음)")
-        
+            # 프리셋이 없으면 *randomized만 표시
+            pass  # *randomized는 이미 추가됨
+
         self.preset_combo.blockSignals(False)
     
     def create_default_preset(self, filepath: Path):
@@ -852,21 +945,46 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         """프리셋 변경 시 호출"""
         if not preset_name or preset_name == self.current_preset or preset_name == "(프리셋 없음)":
             return
-        
+
         print(f"🔄 프리셋 변경: {self.current_preset} → {preset_name}")
-        
-        # 이전 프리셋 저장 (현재 UI 상태를 이전 프리셋에 저장)
-        if self.current_preset and self.current_preset != "(프리셋 없음)":
+
+        # === *randomized 특수 처리 ===
+        if preset_name == "*randomized":
+            # 이전 프리셋 저장 (randomized로 진입 전, 파일 기반 프리셋만)
+            if self.current_preset and self.current_preset not in ["(프리셋 없음)", "*randomized"]:
+                self.save_current_preset(self.current_preset)
+                print(f"  - 이전 프리셋 '{self.current_preset}' 저장 완료")
+
+            # Randomized 모드 활성화
+            self.is_randomized_mode = True
+            self._show_randomized_ui()
+
+            # 상태 업데이트
+            self.last_preset = self.current_preset
+            self.current_preset = "*randomized"
+
+            # *randomized는 마지막 사용 프리셋으로 저장하지 않음
+            print(f"🎲 Randomized Mode 활성화")
+            return
+
+        # === *randomized에서 다른 프리셋으로 전환 ===
+        if self.current_preset == "*randomized":
+            self.is_randomized_mode = False
+            self._hide_randomized_ui()
+            # *randomized는 파일 저장 없음, 바로 새 프리셋 로드로 진행
+
+        # 이전 프리셋 저장 (파일 기반 프리셋만)
+        if self.current_preset and self.current_preset not in ["(프리셋 없음)", "*randomized"]:
             self.save_current_preset(self.current_preset)
             print(f"  - 이전 프리셋 '{self.current_preset}' 저장 완료")
-        
+
         # 새 프리셋 로드
         self.load_preset(preset_name)
-        
+
         # 프리셋 상태 업데이트
         self.last_preset = self.current_preset
         self.current_preset = preset_name
-        
+
         # 마지막 사용 프리셋 정보 저장
         self.save_last_used_preset_info()
     
@@ -1265,11 +1383,15 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     
     def on_api_mode_changed_preset(self, data: dict):
         """API 모드 변경 시 프리셋 처리"""
-        # 이전 모드의 현재 프리셋 저장
-        if self.current_preset and self.current_preset != "(프리셋 없음)":
+        # *randomized 모드인 경우 저장 건너뛰고 초기화
+        if self.current_preset == "*randomized":
+            print("🎲 *randomized 모드 해제: 랜덤 프리셋 목록 초기화")
+            self._reset_randomized_state()
+        elif self.current_preset and self.current_preset != "(프리셋 없음)":
+            # 이전 모드의 현재 프리셋 저장 (일반 프리셋만)
             self.save_current_preset()
             self.save_last_used_preset_info()
-        
+
         # 새 모드의 프리셋 목록 로드
         self.load_preset_list()
         
@@ -1701,3 +1823,224 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             print(f"📝 프리셋 설명 저장: {preset_name}")
         except Exception as e:
             print(f"⚠️ 프리셋 설명 저장 실패: {e}")
+
+    # ==================== *randomized 전용 메서드 ====================
+
+    def _show_randomized_ui(self):
+        """*randomized 선택 시 전용 UI 표시"""
+        if self.randomized_layout_widget:
+            self.randomized_layout_widget.setVisible(True)
+
+        # 퀵 프리셋 "추가" 버튼 비활성화 (*randomized 선택 시 새 프리셋 추가 불가)
+        if self.preset_add_btn:
+            self.preset_add_btn.setEnabled(False)
+
+        # 복제 콤보박스 업데이트 (randomized_add_btn 상태도 여기서 설정됨)
+        self._update_randomized_combo()
+
+    def _hide_randomized_ui(self):
+        """*randomized 해제 시 전용 UI 숨김"""
+        if self.randomized_layout_widget:
+            self.randomized_layout_widget.setVisible(False)
+
+        # 퀵 프리셋 "추가" 버튼 활성화
+        if self.preset_add_btn:
+            self.preset_add_btn.setEnabled(True)
+
+    def _reset_randomized_state(self):
+        """*randomized 관련 상태 초기화 (원본 프리셋은 건드리지 않음)"""
+        # randomized 모드 플래그 해제
+        self.is_randomized_mode = False
+
+        # 랜덤 프리셋 목록 초기화
+        self.randomized_preset_list = []
+
+        # ListBox 비우기
+        if self.randomized_listbox:
+            self.randomized_listbox.clear()
+
+        # UI 숨김 (preset_add_btn 활성화 포함)
+        self._hide_randomized_ui()
+
+        # 현재 프리셋을 default로 리셋
+        self.current_preset = "default"
+        self.last_preset = "default"
+
+    def _update_randomized_combo(self):
+        """복제 콤보박스 업데이트 - *randomized, default, 이미 추가된 항목 제외"""
+        if self.randomized_combo is None:
+            print("⚠️ randomized_combo가 None입니다")
+            return
+
+        self.randomized_combo.blockSignals(True)
+        self.randomized_combo.clear()
+
+        for preset_name in self.preset_list:
+            # *randomized와 default는 복제 콤보박스에서 제외
+            if preset_name in ["*randomized", "default"]:
+                continue
+
+            # 이미 ListBox에 있는 항목도 제외 (숨김 처리)
+            if preset_name in self.randomized_preset_list:
+                continue
+
+            self.randomized_combo.addItem(preset_name)
+
+        # 첫 번째 항목 선택
+        if self.randomized_combo.count() > 0:
+            self.randomized_combo.setCurrentIndex(0)
+
+        self.randomized_combo.blockSignals(False)
+
+        # randomized_add_btn 상태 업데이트: 콤보박스에 항목이 있으면 활성화
+        self._update_randomized_add_btn_state()
+
+    def _update_randomized_add_btn_state(self):
+        """randomized_add_btn 활성화 상태 업데이트"""
+        if self.randomized_add_btn is None or self.randomized_combo is None:
+            return
+
+        # 콤보박스에 선택 가능한 항목이 있으면 활성화, 없으면 비활성화
+        if self.randomized_combo.count() > 0 and self.randomized_combo.currentText():
+            self.randomized_add_btn.setEnabled(True)
+        else:
+            self.randomized_add_btn.setEnabled(False)
+
+    def _on_randomized_combo_changed(self, _text: str):
+        """복제 콤보박스 선택 변경 시 호출"""
+        self._update_randomized_add_btn_state()
+
+    def _add_to_randomized_list(self):
+        """복제 콤보박스에서 선택한 프리셋을 ListBox에 추가"""
+        if self.randomized_combo is None or self.randomized_listbox is None:
+            print(f"⚠️ _add_to_randomized_list: combo={self.randomized_combo}, listbox={self.randomized_listbox}")
+            return
+
+        preset_name = self.randomized_combo.currentText()
+
+        if not preset_name or preset_name in self.randomized_preset_list:
+            print(f"⚠️ _add_to_randomized_list: preset_name={preset_name}, already_in_list={preset_name in self.randomized_preset_list}")
+            return
+
+        # ListBox에 추가
+        self.randomized_listbox.addItem(preset_name)
+        self.randomized_preset_list.append(preset_name)
+
+        # 복제 콤보박스 업데이트 (해당 항목 숨김 및 +추가 버튼 상태 갱신)
+        self._update_randomized_combo()
+
+        print(f"🎲 랜덤 프리셋 목록에 추가: {preset_name} (총 {len(self.randomized_preset_list)}개)")
+
+    def _remove_from_randomized_list(self):
+        """ListBox에서 선택한 프리셋 제거"""
+        if self.randomized_listbox is None:
+            return
+
+        current_item = self.randomized_listbox.currentItem()
+
+        if not current_item:
+            return
+
+        preset_name = current_item.text()
+
+        # ListBox에서 제거
+        row = self.randomized_listbox.row(current_item)
+        self.randomized_listbox.takeItem(row)
+
+        if preset_name in self.randomized_preset_list:
+            self.randomized_preset_list.remove(preset_name)
+
+        # 복제 콤보박스 업데이트 (해당 항목 활성화 복원 및 +추가 버튼 상태 갱신)
+        self._update_randomized_combo()
+
+        print(f"🎲 랜덤 프리셋 목록에서 제거: {preset_name}")
+
+    def _on_randomized_listbox_item_clicked(self, item):
+        """랜덤 프리셋 목록에서 아이템 클릭 시 해당 프리셋 로드"""
+        if item is None:
+            return
+
+        selected_preset = item.text()
+        if selected_preset:
+            print(f"🎯 사용자가 랜덤 프리셋 목록에서 선택: {selected_preset}")
+            self.load_preset_random(selected_preset)
+
+    def _on_random_prompt_triggered(self, _data=None):
+        """random_prompt_triggered 신호 수신 시 호출 - 랜덤 프리셋 선택"""
+        # *randomized 모드가 아니면 무시
+        if self.current_preset != "*randomized":
+            return
+
+        # 랜덤 프리셋 목록이 비어있으면 무시
+        if not self.randomized_preset_list:
+            print("⚠️ 랜덤 프리셋 목록이 비어있습니다")
+            return
+
+        # 랜덤하게 프리셋 선택
+        import random
+        selected_preset = random.choice(self.randomized_preset_list)
+
+        print(f"🎲 랜덤 프리셋 선택: {selected_preset}")
+
+        # 선택된 프리셋 로드 (pre_prompt, post_prompt만 적용)
+        self.load_preset_random(selected_preset)
+
+    def load_preset_random(self, preset_name: str):
+        """랜덤 프리셋 로드 - pre_prompt, post_prompt만 적용 (auto_hide, options 무시), main_settings는 prompt 제외하고 적용"""
+        preset_dir = self.get_preset_dir()
+        preset_file = preset_dir / f"{preset_name}.json"
+
+        if not preset_file.exists():
+            print(f"⚠️ 프리셋 파일을 찾을 수 없음: {preset_name}")
+            return
+
+        try:
+            with open(preset_file, 'r', encoding='utf-8') as f:
+                preset_data = json.load(f)
+
+            # module_settings에서 pre_prompt, post_prompt만 추출하여 적용
+            if "module_settings" in preset_data:
+                module_settings = preset_data["module_settings"]
+
+                # UI 위젯 확인
+                if not all([self.pre_textedit, self.post_textedit]):
+                    print("⚠️ UI 위젯이 준비되지 않음")
+                    return
+
+                # pre_prompt, post_prompt만 적용 (auto_hide, preprocessing_options 무시)
+                pre_prompt = module_settings.get("pre_prompt", "")
+                post_prompt = module_settings.get("post_prompt", "")
+
+                self.pre_textedit.setText(pre_prompt)
+                self.post_textedit.setText(post_prompt)
+
+                print(f"🎲 랜덤 프리셋 모듈 설정 적용: {preset_name} (pre: {len(pre_prompt)}자, post: {len(post_prompt)}자)")
+
+            # main_settings 적용 (prompt 제외)
+            main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+
+            if "main_settings" in preset_data and main_window:
+                main_settings = preset_data["main_settings"].copy()  # 원본 보존을 위해 복사
+
+                # prompt는 제외 (랜덤 프리셋에서는 prompt를 변경하지 않음)
+                main_settings.pop('prompt', None)
+
+                # 기존 키 이름 호환성 처리
+                if 'sm' in main_settings:
+                    main_settings['SMEA'] = main_settings.pop('sm', False)
+                if 'sm_dyn' in main_settings:
+                    main_settings['DYN'] = main_settings.pop('sm_dyn', False)
+                if 'variety' in main_settings:
+                    main_settings['VAR+'] = main_settings.pop('variety', False)
+                if 'decrisper' in main_settings:
+                    main_settings['DECRISP'] = main_settings.pop('decrisper', False)
+
+                self.apply_main_ui_settings(main_settings)
+                print(f"🎲 랜덤 프리셋 메인 UI 설정 적용 완료: {preset_name}")
+
+            print(f"🎲 랜덤 프리셋 적용 완료: {preset_name}")
+
+        except Exception as e:
+            import traceback
+            print(f"❌ 랜덤 프리셋 로드 실패: {e}")
+            traceback.print_exc()

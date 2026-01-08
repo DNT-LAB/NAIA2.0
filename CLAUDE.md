@@ -23,7 +23,8 @@
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
   - 🆕 **SequenceParser**: 시퀀스 프롬프트 파싱 (`:begin`, `:seq`, `:end`)
   - 🆕 **GenerationController**: 시퀀스 생성 지원, NAI 랜덤 시드 처리
-- ✅ **modules/CLAUDE.md** (완료): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
+- ✅ **modules/CLAUDE.md** (v1.3): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
+  - 🆕 **프리셋 랜덤화 시스템**: `*randomized` 특수 프리셋, 랜덤 프리셋 풀 관리, 자동/수동 프리셋 선택
 - ✅ **tabs/CLAUDE.md** (v1.5): 탭 개발 가이드, 시그널 브리징, 생명주기
   - 🆕 Settings 탭: 타임스탬프 폴더 토글, 분류 규칙 UI, 2차 분류 시스템
   - 🆕 **모듈/탭 가시성**: 프로그램 시작 시 자동 적용, 재시도 메커니즘, 디버깅 로그

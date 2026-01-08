@@ -694,6 +694,109 @@ highlighter = PromptHighlighter(self.prompt_edit.document())
 
 ---
 
+## 분리 창 시스템
+
+### DetachedWindow 개요
+
+`ui/detached_window.py`의 `DetachedWindow` 클래스는 위젯을 메인 윈도우에서 독립된 창으로 분리하는 기능을 제공합니다.
+
+**특징**:
+- 완전히 독립적인 창 (태스크바에 별도 아이콘)
+- 항상 위에 표시 토글 지원
+- 도킹 시스템 (프롬프트 창 ↔ 이미지 결과 창)
+- 창 닫힘 시 자동 복귀
+
+### 사용 사례
+
+| 분리 대상 | 위치 | 상태 플래그 |
+|-----------|------|-------------|
+| 프롬프트 탭 | `NAIA_cold_v4.py` | `prompt_tabs_detached` |
+| Custom API 파라미터 | `NAIA_cold_v4.py` | `custom_api_detached` |
+| 이미지 생성 결과 탭 | `tabs/image_window.py` | 탭 분리 시스템 |
+
+### 기본 사용 패턴
+
+```python
+from ui.detached_window import DetachedWindow
+
+# 1. 상태 플래그 초기화 (__init__에서)
+self.my_widget_detached = False
+self.my_widget_window = None
+
+# 2. 분리 함수
+def detach_my_widget(self):
+    if self.my_widget_detached:
+        return
+
+    # 위젯을 레이아웃에서 분리
+    self.parent_layout.removeWidget(self.my_widget)
+    self.my_widget.setParent(None)
+
+    # 래핑 위젯 생성
+    detached_widget = QWidget()
+    detached_layout = QVBoxLayout(detached_widget)
+    detached_layout.addWidget(self.my_widget)
+
+    # DetachedWindow 생성
+    self.my_widget_window = DetachedWindow(
+        detached_widget,
+        "창 제목",
+        -1,  # tab_index (-1 = 탭이 아님)
+        parent_container=self
+    )
+    self.my_widget_window.window_closed.connect(self.on_my_widget_window_closed)
+    self.my_widget_window.setMinimumSize(400, 300)
+    self.my_widget_window.show()
+
+    self.my_widget_detached = True
+
+# 3. 복귀 함수
+def reattach_my_widget(self):
+    if not self.my_widget_detached:
+        return
+
+    # 창에서 위젯 회수
+    if self.my_widget_window:
+        detached_widget = self.my_widget_window.get_original_widget()
+        if detached_widget and detached_widget.layout():
+            detached_widget.layout().removeWidget(self.my_widget)
+        self.my_widget_window.close()
+
+    # 원래 레이아웃에 추가
+    self.my_widget.setParent(None)
+    self.parent_layout.addWidget(self.my_widget)
+
+    self.my_widget_detached = False
+    self.my_widget_window = None
+
+# 4. 창 닫힘 이벤트
+def on_my_widget_window_closed(self, tab_index, widget):
+    self.reattach_my_widget()
+```
+
+### Custom API 파라미터 분리 창 (2025-01-08)
+
+**구현 위치**: `NAIA_cold_v4.py`
+
+**UI 구조**:
+- `custom_api_checkbox` 옆에 🔓/🔒 Detach 버튼
+- 버튼은 항상 표시되며, 체크박스가 켜질 때만 활성화
+- 분리 시 텍스트박스 높이가 80px → 300px+ 로 확장
+
+**상태 플래그**:
+- `custom_api_detached`: 분리 상태 추적
+- `custom_api_window`: DetachedWindow 인스턴스 참조
+
+**메서드**:
+- `toggle_custom_api_detach()`: 분리/복귀 토글
+- `detach_custom_api()`: 외부 창으로 분리
+- `reattach_custom_api()`: 원래 위치로 복귀
+- `on_custom_api_window_closed()`: 창 닫힘 이벤트 처리
+
+**파라미터 전달**: 분리된 상태에서도 `custom_script_textbox.toPlainText()` 호출로 정상 동작 (위젯 인스턴스 동일)
+
+---
+
 ## 체크리스트
 
 ### 새 UI 컴포넌트 추가 시

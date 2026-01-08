@@ -1154,7 +1154,11 @@ class ModernMainWindow(QMainWindow):
         # 프롬프트 탭 분리 상태 추적
         self.prompt_tabs_detached = False
         self.prompt_tabs_window = None
-        
+
+        # Custom API 창 분리 상태 추적
+        self.custom_api_detached = False
+        self.custom_api_window = None
+
         # 탭 위젯에 우클릭 메뉴 추가
         self.prompt_tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.prompt_tabs.customContextMenuRequested.connect(self.show_prompt_tabs_context_menu)
@@ -1759,10 +1763,39 @@ class ModernMainWindow(QMainWindow):
         params_layout.addWidget(self.comfyui_option_widget)  # 🆕 ComfyUI 위젯 추가
         
         # === Custom API 파라미터 섹션 ===
+        custom_api_header = QHBoxLayout()
+        custom_api_header.setSpacing(6)
+
         self.custom_api_checkbox = QCheckBox("Add custom/override api parameters")
         self.custom_api_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.custom_api_checkbox.toggled.connect(self.toggle_custom_api_params)
-        params_layout.addWidget(self.custom_api_checkbox)
+        custom_api_header.addWidget(self.custom_api_checkbox)
+
+        # Detach 버튼 추가
+        self.custom_api_detach_btn = QPushButton("🔓")
+        self.custom_api_detach_btn.setToolTip("외부 창으로 분리")
+        self.custom_api_detach_btn.setFixedSize(36, 24)
+        self.custom_api_detach_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                font-size: {get_scaled_font_size(14)}px;
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+            QPushButton:disabled {{
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+        self.custom_api_detach_btn.clicked.connect(self.toggle_custom_api_detach)
+        self.custom_api_detach_btn.setEnabled(False)  # 기본 비활성화 상태
+        custom_api_header.addWidget(self.custom_api_detach_btn)
+
+        custom_api_header.addStretch()
+        params_layout.addLayout(custom_api_header)
         
         # Custom Script 텍스트박스 (기본적으로 숨김)
         self.custom_script_textbox = QTextEdit()
@@ -1866,12 +1899,115 @@ class ModernMainWindow(QMainWindow):
     
     def toggle_custom_api_params(self, checked):
         """Custom API 파라미터 텍스트박스 토글"""
-        self.custom_script_textbox.setVisible(checked)
+        # 분리된 상태가 아닐 때만 텍스트박스 가시성 토글
+        self.custom_script_textbox.setVisible(checked and not self.custom_api_detached)
+        # Detach 버튼은 항상 보이되, 체크박스가 켜질 때만 활성화
+        self.custom_api_detach_btn.setEnabled(checked)
         if checked:
             self.status_bar.showMessage("Custom API 파라미터 입력이 활성화되었습니다.")
         else:
             self.status_bar.showMessage("Custom API 파라미터 입력이 비활성화되었습니다.")
-    
+
+    def toggle_custom_api_detach(self):
+        """Custom API 텍스트박스 분리/복귀 토글"""
+        if self.custom_api_detached:
+            self.reattach_custom_api()
+        else:
+            self.detach_custom_api()
+
+    def detach_custom_api(self):
+        """Custom API 텍스트박스를 외부 창으로 분리"""
+        if self.custom_api_detached:
+            print("⚠️ Custom API 창이 이미 분리되어 있습니다.")
+            return
+
+        try:
+            print("🔧 Custom API 창 분리 시작...")
+
+            # 1. 텍스트박스를 레이아웃에서 분리
+            self.params_area.layout().removeWidget(self.custom_script_textbox)
+            self.custom_script_textbox.setParent(None)
+
+            # 2. 래핑 위젯 생성 (확장된 UI)
+            detached_widget = QWidget()
+            detached_layout = QVBoxLayout(detached_widget)
+            detached_layout.setContentsMargins(8, 8, 8, 8)
+
+            # 분리된 창에서는 텍스트박스 크기 확장
+            self.custom_script_textbox.setMinimumHeight(300)
+            self.custom_script_textbox.setMaximumHeight(16777215)  # 최대 높이 제한 해제
+            detached_layout.addWidget(self.custom_script_textbox)
+            self.custom_script_textbox.setVisible(True)
+
+            # 3. DetachedWindow 생성
+            from ui.detached_window import DetachedWindow
+            self.custom_api_window = DetachedWindow(
+                detached_widget,
+                "Custom API Parameters",
+                -1,
+                parent_container=self
+            )
+            self.custom_api_window.window_closed.connect(self.on_custom_api_window_closed)
+            self.custom_api_window.setMinimumSize(400, 400)
+            self.custom_api_window.resize(500, 450)
+            self.custom_api_window.show()
+            self.custom_api_window.raise_()
+            self.custom_api_window.activateWindow()
+
+            # 4. 상태 업데이트
+            self.custom_api_detached = True
+            self.custom_api_detach_btn.setText("🔒")
+            self.custom_api_detach_btn.setToolTip("원래 위치로 복귀")
+
+            print("✅ Custom API 창 분리 완료")
+
+        except Exception as e:
+            print(f"❌ Custom API 분리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def reattach_custom_api(self):
+        """분리된 Custom API 창을 원래 위치로 복귀"""
+        if not self.custom_api_detached:
+            print("⚠️ Custom API 창이 분리되어 있지 않습니다.")
+            return
+
+        try:
+            print("🔄 Custom API 창 복귀 시작...")
+
+            # 1. 창에서 위젯 회수
+            if self.custom_api_window:
+                detached_widget = self.custom_api_window.get_original_widget()
+                if detached_widget and detached_widget.layout():
+                    # 텍스트박스 추출
+                    detached_widget.layout().removeWidget(self.custom_script_textbox)
+                self.custom_api_window.close()
+
+            # 2. 원래 크기로 복원
+            self.custom_script_textbox.setParent(None)
+            self.custom_script_textbox.setFixedHeight(80)
+
+            # 3. 원래 레이아웃에 추가
+            self.params_area.layout().addWidget(self.custom_script_textbox)
+            self.custom_script_textbox.setVisible(self.custom_api_checkbox.isChecked())
+
+            # 4. 상태 업데이트
+            self.custom_api_detached = False
+            self.custom_api_window = None
+            self.custom_api_detach_btn.setText("🔓")
+            self.custom_api_detach_btn.setToolTip("외부 창으로 분리")
+
+            print("✅ Custom API 창 복귀 완료")
+
+        except Exception as e:
+            print(f"❌ Custom API 복귀 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_custom_api_window_closed(self, tab_index, widget):
+        """Custom API 창이 닫힐 때 호출"""
+        self.reattach_custom_api()
+
     def toggle_search_mode(self, mode):
         """NAI/WEBUI/COMFYUI 검색 모드 토글 (ComfyUI 지원 추가)"""
         if mode == "NAI":

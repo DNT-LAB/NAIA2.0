@@ -372,12 +372,9 @@ class CharacterSearchDialog(QDialog):
             # 기본 character_dict 사용
             if keyword in character_dict:
                 tags = character_dict[keyword]
-                # 첫 번째 태그(캐릭터 이름) 제거
                 tag_list = tags.split(', ')
-                if len(tag_list) >= 2:
-                    filtered_tags = ", ".join(tag_list[1:])
-                else:
-                    filtered_tags = ", ".join(tag_list)
+                tag_list.insert(0, keyword)
+                filtered_tags = ", ".join(tag_list)
 
                 self.character_prompt.setPlainText(filtered_tags)
                 self.character_negative.setPlainText("")  # 기본적으로 비어있음

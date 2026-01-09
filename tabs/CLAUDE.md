@@ -97,6 +97,7 @@ tabs/
 | **image_window.py** | 42K | 생성 이미지 표시 및 관리 | core | 이미지 뷰어, 히스토리, 일괄 저장, ImageCrudController 통합, 🆕 큐 추가 기능 (랜덤 옵션 지원) |
 | **png_info_tab.py** | 47K | 이미지 메타데이터 추출 | core | PNG/JPEG/WebP 정보 파싱, Stealth PNG 지원 |
 | **setting_tabs.py** | 28K | 애플리케이션 설정 | core | 자동완성, 저장 경로, 타임스탬프 폴더 토글, 이미지 카운터, 파일명 형식, 분류 규칙, 🆕 2차 분류 시스템, 모듈/탭 가시성 (시작 시 자동 적용), UI 스케일 |
+| **studio_tab.py** | 대형 | 🆕 다중 프레임 생성 | core | 다중 프레임 그리드, 순차 생성, 프리셋 저장/로드 (부분 로드 지원), 그리드 내보내기 (클립보드 복사), 시드 고정 (레이블에 값 표시), 스택 네비게이션, 일괄 편집, 🆕 시퀀스 텍스트 생성 |
 | **assets_tab.py** | 35K | 배경 제거 등 도구 | closable | rembg 통합, 패키지 설치, 이미지 처리 |
 | **web_view.py** | 19K | Danbooru 브라우저 | closable | 태그 추출, WebEngine, 세션 저장 |
 | **img2img_tab.py** | 2.8K | Img2Img/Inpaint | closable | 스켈레톤 구현 (TODO) |
@@ -980,6 +981,7 @@ if hasattr(self, 'secondary_classification_label'):
 - **[ui/CLAUDE.md](../ui/CLAUDE.md)**: RightView, EnhancedTabWidget, 테마, 스케일링
 - **[interfaces/CLAUDE.md](../interfaces/CLAUDE.md)**: BaseTabModule 계약
 - **[modules/CLAUDE.md](../modules/CLAUDE.md)**: 모듈 개발 (유사 패턴)
+- **[studio/CLAUDE.md](studio/CLAUDE.md)**: 🆕 Studio Tab 전용 가이드 (다중 프레임, 프리셋, 내보내기)
 
 ### 주요 의존성
 
@@ -1179,10 +1181,27 @@ console.log("Debug message");
 
 ---
 
-*문서 버전: 1.5*
-*최종 업데이트: 2025-01-21*
+*문서 버전: 1.8*
+*최종 업데이트: 2025-01-09*
 *담당 영역: tabs/ 디렉터리*
 *변경사항:*
+- *🆕 Studio Tab v2.2 업데이트 (studio_tab.py, studio/ 하위 디렉터리)*
+  - *다중 프레임 그리드 (3x4 기본 레이아웃)*
+  - *순차 생성 및 반복 생성 지원*
+  - *프리셋 저장/로드 시스템 (v2.0 JSON 형식, 썸네일 포함)*
+  - *🆕 프리셋 부분 로드: Events Only, Global Only, All*
+  - *그리드 이미지 내보내기 (🆕 클립보드 복사 지원)*
+  - *🆕 시드 고정: Fix Seed 체크박스, 마지막 시드 기억, 레이블에 현재 시드 값 표시*
+  - *🐛 Fix Seed 버그 수정: last_seed가 -1일 때 랜덤 시드 자동 생성*
+  - *🆕 스택 네비게이션: PreviewDialog에서 이미지 탐색 및 선택*
+  - *🆕 일괄 편집: EventsDialog로 모든 프레임 프롬프트 한 번에 편집*
+  - *PromptSettingDialog: Seed UI 숨김 (항상 랜덤 시드 사용)*
+  - *🆕 시퀀스 텍스트 생성 (v2.2)*
+    - *`sequence_generator.py` - 프레임 이벤트를 :sequence 텍스트로 변환*
+    - *`SequenceTextDialog` - 시퀀스 텍스트 표시/복사 다이얼로그*
+    - *EventsDialog, OpenPresetDialog에 "Get :Sequence" 버튼 추가*
+    - *"Copy without :resolution" 버튼으로 해상도 태그 제외 복사*
+  - *studio/CLAUDE.md v2.2 상세 문서 업데이트*
 - *ImageCrudController 통합 (image_window.py, setting_tabs.py 업데이트)*
 - *🆕 타임스탬프 폴더 토글 기능 추가 (setting_tabs.py:263-267, 556-562, 693-696)*
 - *🆕 프롬프트 기반 분류 규칙 UI 추가 (setting_tabs.py:343-382)*

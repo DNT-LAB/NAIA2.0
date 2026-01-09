@@ -17,7 +17,7 @@
 - **링크 방식**: 메인 문서에서 핵심만 설명, 상세는 레퍼런스 링크로 안내
   - 예: `**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)`
 
-**📚 문서화 현황** (2025-01-18 업데이트):
+**📚 문서화 현황** (2025-01-09 업데이트):
 - ✅ **core/CLAUDE.md** (v1.5): AppContext, 컨트롤러, 파이프라인, API 서비스
   - 🆕 ImageCrudController 파일명 형식, 분류 시스템, 타임스탬프 폴더 토글
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
@@ -25,10 +25,12 @@
   - 🆕 **GenerationController**: 시퀀스 생성 지원, NAI 랜덤 시드 처리
 - ✅ **modules/CLAUDE.md** (v1.3): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
   - 🆕 **프리셋 랜덤화 시스템**: `*randomized` 특수 프리셋, 랜덤 프리셋 풀 관리, 자동/수동 프리셋 선택
-- ✅ **tabs/CLAUDE.md** (v1.5): 탭 개발 가이드, 시그널 브리징, 생명주기
+- ✅ **tabs/CLAUDE.md** (v1.6): 탭 개발 가이드, 시그널 브리징, 생명주기
   - 🆕 Settings 탭: 타임스탬프 폴더 토글, 분류 규칙 UI, 2차 분류 시스템
   - 🆕 **모듈/탭 가시성**: 프로그램 시작 시 자동 적용, 재시도 메커니즘, 디버깅 로그
   - 🐛 **버그 수정** (2025-01-21): 분류 방법 변경 시 크래시 해결 (AttributeError)
+  - 🆕 **Studio Tab** (v2.0): 다중 프레임 그리드, 순차 생성, 프리셋 시스템, 그리드 내보내기
+    - **tabs/studio/CLAUDE.md**: 전용 상세 가이드 추가
 - ✅ **ui/CLAUDE.md** (v1.3): 테마 시스템, 스케일링, 공용 위젯, 분리 창
   - 🆕 **CollapsibleBox**: 상태 추적, 스크롤 위치 저장/복원, 프로그래밍 제어
   - 🆕 **PromptHighlighter**: 시퀀스 토큰 하이라이팅 (`:begin`, `:seq`, `:end`)
@@ -581,6 +583,7 @@ def cleanup(self):
 - `image_window.py` - 이미지 뷰어 (core)
 - `png_info_tab.py` - 메타데이터 뷰어
 - `assets_tab.py` - 에셋 관리
+- 🆕 `studio_tab.py` - 다중 프레임 생성 (상세: [tabs/studio/CLAUDE.md](tabs/studio/CLAUDE.md))
 
 **언제 추가하는가?**:
 - 새로운 뷰/패널 필요
@@ -1015,6 +1018,7 @@ app_context.publish = debug_publish
 | `modules/automation_module.py` | QThread 사용, 자동화 로직 |
 | `tabs/png_info_tab.py` | 탭 구조, 메타데이터 처리 |
 | `tabs/assets_tab.py` | 복잡한 탭, 서브 모듈 |
+| 🆕 `tabs/studio_tab.py` | 다중 프레임 그리드, 순차 생성, 프리셋 시스템 |
 
 ### 코딩 스타일 가이드
 
@@ -1111,5 +1115,5 @@ app_context.publish = debug_publish
 
 ---
 
-*문서 버전: 2025-01-08*
-*최종 검토: Claude Code 협업 문서 리팩토링*
+*문서 버전: 2025-01-09*
+*최종 검토: Studio Tab 문서화 추가*

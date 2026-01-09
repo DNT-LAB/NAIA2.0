@@ -648,8 +648,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 126"
-        self.setWindowTitle(self.base_title + " - 260107_temp")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 127"
+        self.setWindowTitle(self.base_title + " - 260109")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2481,6 +2481,8 @@ class ModernMainWindow(QMainWindow):
                 generation_params = result.get("generation_params", {})
                 is_assets_request = generation_params.get("assets_workshop_request", False)
                 is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
+                is_studio_request = generation_params.get("studio_request", False)
+                studio_frame_index = generation_params.get("studio_frame_index", 0)
                 
                 self.image_window.update_image(image_object)
                 
@@ -2497,7 +2499,16 @@ class ModernMainWindow(QMainWindow):
                     # AppContext를 통해 이벤트 발행
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_artist_thumb", image_object)
-                
+
+                # Studio 요청인 경우 별도 이벤트 발행
+                if is_studio_request:
+                    print(f"🎬 Studio 요청 감지 - 전용 이벤트 발행 (frame: {studio_frame_index})")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_studio", {
+                            "image": image_object,
+                            "frame_index": studio_frame_index
+                        })
+
                 # Main Window → Assets 자동 전파 (추후 제거 가능)
                 # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능
                 if not is_assets_request:

@@ -1723,9 +1723,18 @@ class ArtistThumbModule(BaseTabModule):
             }}
             QComboBox QAbstractItemView {{
                 background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
                 border: 1px solid {DARK_COLORS['border']};
                 selection-background-color: {DARK_COLORS['bg_hover']};
                 padding: {get_scaled_size(4)}px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                color: {DARK_COLORS['text_primary']};
+                padding: {get_scaled_size(4)}px;
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: {DARK_COLORS['bg_hover']};
+                color: {DARK_COLORS['text_primary']};
             }}
         """)
         

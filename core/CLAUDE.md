@@ -1532,6 +1532,88 @@ wildcards/
 - 태그 딕셔너리 로딩 (general, artist, copyright, character)
 - 태그 검색 및 매칭
 
+### AutoCompleteManager: 태그 자동완성
+
+**파일**: `core/autocomplete_manager.py:92-1000+`
+
+#### 역할
+
+- 전역 이벤트 필터를 통한 QLineEdit/QTextEdit 자동완성
+- 태그 데이터베이스 기반 추천
+- 인스턴트 와일드카드 (`$key`) 자동완성
+- 한글 번역 기능 (`%한글텍스트`)
+- 아티스트 이미지 미리보기
+
+#### 핵심 메서드
+
+**`_get_active_token_info(widget)`** - 현재 커서 위치의 토큰 정보 추출:
+```python
+# 반환값 예시
+{
+    'text': '0.7::pixel art',      # 원본 토큰
+    'stripped_text': 'pixel art',   # 검색에 사용될 텍스트
+    'prefix': '',                   # 괄호 접두사 (예: "(", "((")
+    'suffix': '',                   # 괄호 접미사 (예: ")", "))")
+    'start': 0,                     # 토큰 시작 위치
+    'end': 14,                      # 토큰 끝 위치
+    'weight_prefix': '0.7::',       # NAI 가중치 접두사
+    'weight_suffix': '',            # NAI 가중치 접미사
+    'is_weight_value': False        # 가중치 값 편집 중 여부
+}
+```
+
+**`_strip_brackets(keyword)`** - 괄호 분리 (쌍을 이루는 경우만):
+```python
+# 예시
+"(tag)"           → ("tag", "(", ")")      # 괄호 쌍 분리
+"blade (galaxist)" → ("blade (galaxist)", "", "")  # 내부 괄호 유지
+"((tag))"         → ("tag", "((", "))")    # 중첩 괄호 분리
+"-tag"            → ("tag", "-", "")       # 마이너스 접두사 분리
+```
+
+#### NAI 가중치 문법 처리 (🆕 2025-01-10)
+
+NAI의 `::` 가중치 문법에 대한 특별 처리:
+
+1. **가중치 값 편집 시 자동완성 무시**: `0.7::pixel art`에서 `0.7`을 편집할 때 자동완성이 트리거되지 않음
+2. **가중치 보존**: `0.7::art` 입력 후 `artist:xxx` 선택 시 → `0.7::artist:xxx` 유지
+
+```python
+# _get_active_token_info에서 가중치 값 감지
+if weight_suffix and weight_suffix.startswith('::'):
+    try:
+        float(stripped_token.strip())
+        is_weight_value = True  # 숫자면 가중치 값으로 판단
+    except ValueError:
+        pass
+```
+
+#### 괄호 쌍 매칭 로직 (🆕 2025-01-10)
+
+입력 텍스트의 앞뒤 괄호가 **쌍을 이루는 경우에만** prefix/suffix로 분리:
+
+```python
+# 괄호 쌍 정의
+bracket_pairs = {'(': ')', '[': ']', '{': '}'}
+
+# 앞쪽 여는 괄호와 뒤쪽 닫는 괄호가 매칭되는지 확인
+# 예: "blade (galaxist)" - 앞에 여는 괄호 없음 → 뒤 괄호도 분리 안 함
+# 예: "(blade (galaxist))" - 앞 "("와 뒤 ")" 매칭 → 분리
+```
+
+#### 자동완성 제외 설정
+
+```python
+# 위젯 속성으로 제외
+widget.setProperty("autocomplete_ignore", True)
+
+# 위젯 이름으로 제외 (기본 제외 목록)
+ignored_widget_names = {
+    "search_input", "exclude_input", "negative_prompt",
+    "delay_input", "repeat_input", "timer_input", "count_input"
+}
+```
+
 ### ModeAwareModuleManager: 모드 인식 모듈 관리
 
 **파일**: `core/mode_ware_manager.py:7-82`

@@ -76,10 +76,14 @@ class ResultImageFrameManager(QObject):
         """Event filter to detect viewport resize for uniform frame sizing"""
         from PyQt6.QtCore import QEvent
 
-        if self.scroll_area and obj == self.scroll_area.viewport():
-            if event.type() == QEvent.Type.Resize:
-                # Debounce resize events
-                self._resize_timer.start(50)  # 50ms debounce
+        try:
+            if self.scroll_area and obj == self.scroll_area.viewport():
+                if event.type() == QEvent.Type.Resize:
+                    # Debounce resize events
+                    self._resize_timer.start(50)  # 50ms debounce
+        except RuntimeError:
+            # scroll_area의 C++ 객체가 이미 삭제된 경우 (프로그램 종료 시)
+            pass
         return super().eventFilter(obj, event)
 
     def _recalculate_frame_sizes(self):

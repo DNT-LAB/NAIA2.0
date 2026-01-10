@@ -1854,9 +1854,19 @@ class ArtistThumbModule(BaseTabModule):
             }}
             QComboBox QAbstractItemView {{
                 background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
                 border: 1px solid {DARK_COLORS['border']};
                 selection-background-color: {DARK_COLORS['bg_hover']};
+                selection-color: white;
                 padding: {get_scaled_size(4)}px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                color: {DARK_COLORS['text_primary']};
+                padding: {get_scaled_size(4)}px;
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: {DARK_COLORS['bg_hover']};
+                color: white;
             }}
         """)
         self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
@@ -1871,37 +1881,36 @@ class ArtistThumbModule(BaseTabModule):
         main_layout = QVBoxLayout(main_panel)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
+
         # 서브 수평 레이아웃 (썸네일/프롬프트 : 생성 이미지)
-        sub_horizontal_layout = QHBoxLayout()
-        sub_horizontal_layout.setSpacing(get_scaled_size(2))
-        
-        # 왼쪽: 썸네일 + 프롬프트
-        prompt_panel = self._create_prompt_panel()
-        # 크기는 _create_prompt_panel에서 이미 고정됨
-        
+        self.sub_horizontal_layout = QHBoxLayout()
+        self.sub_horizontal_layout.setSpacing(get_scaled_size(2))
+
+        # 왼쪽: 썸네일 + 프롬프트 (인스턴스 변수로 저장)
+        self.prompt_panel = self._create_prompt_panel()
+
         # 오른쪽: 생성 이미지 (832x1216 고정)
         generation_panel = self._create_generation_panel()
-        
-        sub_horizontal_layout.addWidget(prompt_panel)
-        sub_horizontal_layout.addWidget(generation_panel)
-        sub_horizontal_layout.setStretchFactor(prompt_panel, 0)  # 썸네일 패널은 고정 크기
-        sub_horizontal_layout.setStretchFactor(generation_panel, 1)  # 생성 패널이 나머지 공간 차지
-        
-        main_layout.addLayout(sub_horizontal_layout)
+
+        self.sub_horizontal_layout.addWidget(self.prompt_panel)
+        self.sub_horizontal_layout.addWidget(generation_panel)
+        self.sub_horizontal_layout.setStretchFactor(self.prompt_panel, 0)  # 썸네일 패널은 고정 크기
+        self.sub_horizontal_layout.setStretchFactor(generation_panel, 1)  # 생성 패널이 나머지 공간 차지
+
+        main_layout.addLayout(self.sub_horizontal_layout)
         return main_panel
     
     def _create_prompt_panel(self) -> QWidget:
         """왼쪽 서브패널: 썸네일 + 프롬프트 입력"""
-        # 썸네일 이미지 (3:3.8 비율로 고정 크기 설정)
+        # 썸네일 이미지 (3:3.8 비율로 동적 스케일링 적용)
         # 3:3.8 비율 = 너비:높이 = 1:1.267
-        thumbnail_width = 450
-        thumbnail_height = int(thumbnail_width * 3.8 / 3.0)  # 570
-        
+        thumbnail_width = get_scaled_size(350)  # 동적 스케일링 적용
+        thumbnail_height = int(thumbnail_width * 3.8 / 3.0)
+
         # 패널 너비를 썸네일 너비 + 패딩으로 설정
         panel_padding = get_scaled_size(8)
         panel_width = thumbnail_width + (panel_padding * 2)
-        
+
         panel = QFrame()
         panel.setFrameStyle(QFrame.Shape.Box)
         panel.setStyleSheet(f"""
@@ -1913,14 +1922,20 @@ class ArtistThumbModule(BaseTabModule):
         """)
         # 패널 크기 고정
         panel.setFixedWidth(panel_width)
-        
+
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(panel_padding, panel_padding,
                                  panel_padding, panel_padding)
-        layout.setSpacing(get_scaled_size(8))
-        
+        layout.setSpacing(get_scaled_size(6))
+
         dynamic_styles = get_dynamic_styles()
-        
+
+        # 썸네일 컨테이너 (썸네일 + 미리보기 버튼)
+        thumbnail_container = QWidget()
+        thumbnail_container_layout = QVBoxLayout(thumbnail_container)
+        thumbnail_container_layout.setContentsMargins(0, 0, 0, 0)
+        thumbnail_container_layout.setSpacing(get_scaled_size(4))
+
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumbnail_label.setStyleSheet(f"""
@@ -1931,68 +1946,94 @@ class ArtistThumbModule(BaseTabModule):
                 padding: {get_scaled_size(4)}px;
             }}
         """)
-        # 크기를 고정으로 설정
+        # 동적 스케일링된 크기로 설정
         self.thumbnail_label.setFixedSize(thumbnail_width, thumbnail_height)
-        self.thumbnail_label.setScaledContents(False)  # False로 설정하여 비율 유지
+        self.thumbnail_label.setScaledContents(False)
         self._show_default_thumbnail()
-        layout.addWidget(self.thumbnail_label)
-        
+        thumbnail_container_layout.addWidget(self.thumbnail_label)
+
+        # 크게 보기 토글 버튼
+        self.large_preview_btn = QPushButton("🔍 크게 보기")
+        self.large_preview_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QPushButton:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.large_preview_btn.setCheckable(True)
+        self.large_preview_btn.clicked.connect(self._toggle_large_preview)
+        thumbnail_container_layout.addWidget(self.large_preview_btn)
+
+        layout.addWidget(thumbnail_container)
+
         self.positive_prompt = QTextEdit()
         self.positive_prompt.setPlaceholderText("아티스트 스타일과 함께 사용할 프롬프트...")
         self.positive_prompt.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
-        # 썸네일 너비에 맞춰 크기 조정
-        self.positive_prompt.setFixedWidth(thumbnail_width)
-        self.positive_prompt.setFixedHeight(get_scaled_size(120))
+        self.positive_prompt.setFixedHeight(get_scaled_size(100))
         layout.addWidget(self.positive_prompt)
-        
+
         # Generate 버튼
         self.generate_btn = QPushButton("🎨 Generate (832x1216)")
         self.generate_btn.setStyleSheet(dynamic_styles.get('primary_button', ''))
-        self.generate_btn.setFixedWidth(thumbnail_width)  # 썸네일 너비에 맞춤
-        self.generate_btn.setFixedHeight(get_scaled_size(40))
+        self.generate_btn.setFixedHeight(get_scaled_size(36))
         self.generate_btn.clicked.connect(self._on_generate_clicked)
         layout.addWidget(self.generate_btn)
-        
+
         # 작가태그 앞에 들어갈 텍스트
         prefix_label = QLabel("작가태그 앞에 들어갈 텍스트:")
-        prefix_label.setStyleSheet(dynamic_styles.get('label_style', ''))
+        prefix_label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(15)}px;")
         layout.addWidget(prefix_label)
-        
+
         self.prefix_textedit = QTextEdit()
         self.prefix_textedit.setPlaceholderText("1girl, usada pekora, ...")
         self.prefix_textedit.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
-        self.prefix_textedit.setFixedWidth(thumbnail_width)
-        self.prefix_textedit.setFixedHeight(get_scaled_size(100))
+        self.prefix_textedit.setFixedHeight(get_scaled_size(80))
         layout.addWidget(self.prefix_textedit)
-        
+
         # 작가태그 뒤에 들어갈 텍스트
         postfix_label = QLabel("작가태그 뒤에 들어갈 텍스트:")
-        postfix_label.setStyleSheet(dynamic_styles.get('label_style', ''))
+        postfix_label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(15)}px;")
         layout.addWidget(postfix_label)
-        
+
         self.postfix_textedit = QTextEdit()
         self.postfix_textedit.setPlaceholderText("no text, best quality, masterpiece, year 2024, ...")
         self.postfix_textedit.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
-        self.postfix_textedit.setFixedWidth(thumbnail_width)
-        self.postfix_textedit.setFixedHeight(get_scaled_size(100))
+        self.postfix_textedit.setFixedHeight(get_scaled_size(80))
         layout.addWidget(self.postfix_textedit)
-        
+
         # 저장된 생성 옵션 로드
         self._load_generate_options()
-        
+
         # 관심 작가 및 제외 버튼 추가
         button_layout = QHBoxLayout()
         button_layout.setSpacing(get_scaled_size(5))
-        
+
+        # 공통 버튼 스타일 (높이 통일)
+        button_height = get_scaled_size(32)
+        button_font_size = get_scaled_font_size(13)
+
         self.favorite_button = QPushButton("⭐ 관심 작가 등록")
+        self.favorite_button.setFixedHeight(button_height)
         self.favorite_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK_COLORS['accent_blue']};
                 color: white;
                 border: none;
                 border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px;
-                font-size: {get_scaled_font_size(15)}px;
+                padding: {get_scaled_size(4)}px {get_scaled_size(8)}px;
+                font-size: {button_font_size}px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -2006,16 +2047,17 @@ class ArtistThumbModule(BaseTabModule):
         self.favorite_button.clicked.connect(self._toggle_favorite)
         self.favorite_button.setEnabled(False)
         button_layout.addWidget(self.favorite_button)
-        
-        self.ban_button = QPushButton("🚫 이 작가명 제거")
+
+        self.ban_button = QPushButton("🚫 작가명 제거")
+        self.ban_button.setFixedHeight(button_height)
         self.ban_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: #8B0000;
                 color: white;
                 border: none;
                 border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px;
-                font-size: {get_scaled_font_size(13)}px;
+                padding: {get_scaled_size(4)}px {get_scaled_size(8)}px;
+                font-size: {button_font_size}px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -2029,11 +2071,36 @@ class ArtistThumbModule(BaseTabModule):
         self.ban_button.clicked.connect(self._ban_artist)
         self.ban_button.setEnabled(False)
         button_layout.addWidget(self.ban_button)
-        
+
         layout.addLayout(button_layout)
-        
+
+        # 갤러리 버튼과 위 버튼들 사이 마진
+        layout.addSpacing(get_scaled_size(10))
+
+        # 갤러리 버튼 (별도 줄, 강조 스타일)
+        gallery_btn_font_size = button_font_size + 3
+        self.gallery_button = QPushButton("🖼️ 갤러리 보기")
+        self.gallery_button.setFixedHeight(get_scaled_size(38))
+        self.gallery_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid white;
+                border-radius: {get_scaled_size(6)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
+                font-size: {gallery_btn_font_size}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.gallery_button.clicked.connect(self._open_gallery_window)
+        layout.addWidget(self.gallery_button)
+
         layout.addStretch()
-        
+
         return panel
     
     def _create_generation_panel(self) -> QWidget:
@@ -2065,24 +2132,25 @@ class ArtistThumbModule(BaseTabModule):
         # 빈 이미지 생성 (512x512)
         pixmap = QPixmap(512, 512)
         pixmap.fill(Qt.GlobalColor.darkGray)
-        
+
         # 텍스트 추가
         painter = QPainter(pixmap)
         painter.setPen(Qt.GlobalColor.white)
         font = painter.font()
         font.setPointSize(24)
         painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, 
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter,
                         "아티스트\n썸네일")
         painter.end()
-        
-        # 고정된 썸네일 크기로 스케일링
+
+        # 동적 스케일링된 썸네일 크기로 스케일링
         if hasattr(self, 'thumbnail_label'):
-            # 고정된 썸네일 크기 사용 (패딩 고려)
+            # 동적 스케일링 적용
             padding = get_scaled_size(4) * 2  # 양쪽 패딩
-            target_width = 450 - padding
-            target_height = int(450 * 3.8 / 3.0) - padding
-            
+            thumbnail_width = get_scaled_size(350)
+            target_width = thumbnail_width - padding
+            target_height = int(thumbnail_width * 3.8 / 3.0) - padding
+
             scaled_pixmap = pixmap.scaled(
                 target_width,
                 target_height,
@@ -2090,6 +2158,89 @@ class ArtistThumbModule(BaseTabModule):
                 Qt.TransformationMode.SmoothTransformation
             )
             self.thumbnail_label.setPixmap(scaled_pixmap)
+
+    def _toggle_large_preview(self):
+        """크게 보기 토글 - thumbnail_label 숨기고 generation_image에 썸네일 표시"""
+        if not hasattr(self, '_large_preview_mode'):
+            self._large_preview_mode = False
+
+        self._large_preview_mode = not self._large_preview_mode
+
+        if self._large_preview_mode:
+            # 크게 보기 모드 활성화
+            self.large_preview_btn.setText("🔍 작게 보기")
+            self.thumbnail_label.hide()
+
+            # 현재 썸네일을 generation_image에 표시
+            self._show_thumbnail_in_generation_panel()
+
+            # TextEdit 크기 2배로 확장
+            self._expand_textedit_sizes()
+        else:
+            # 크게 보기 모드 비활성화
+            self.large_preview_btn.setText("🔍 크게 보기")
+            self.thumbnail_label.show()
+
+            # generation_image 초기화 (기존 생성 이미지가 있으면 복원)
+            if hasattr(self, '_last_generated_image') and self._last_generated_image:
+                self.generation_image.setPilImage(self._last_generated_image)
+            else:
+                self.generation_image.setPixmap(None)
+
+            # TextEdit 크기 원래대로 복원
+            self._restore_textedit_sizes()
+
+    def _show_thumbnail_in_generation_panel(self):
+        """현재 썸네일을 generation_image에 크게 표시"""
+        if not self._large_preview_mode:
+            return
+
+        if self.current_artist and self.artist_data:
+            img_data_list = self.artist_data.get(self.current_artist, [])
+            if img_data_list and img_data_list[0]:
+                try:
+                    # base64 디코딩
+                    img_bytes = base64.b64decode(img_data_list[0])
+
+                    # PIL 이미지로 변환
+                    pil_image = Image.open(io.BytesIO(img_bytes))
+
+                    # 좌우 85픽셀씩 잘라내기 (검은색 썸네일 영역 제거)
+                    if pil_image.width > 170:
+                        pil_image = pil_image.crop((
+                            85,
+                            0,
+                            pil_image.width - 85,
+                            pil_image.height
+                        ))
+
+                    # StableImageWidget에 표시
+                    self.generation_image.setPilImage(pil_image)
+                except Exception as e:
+                    print(f"크게 보기 이미지 로드 오류: {e}")
+                    self.generation_image.setPixmap(None)
+
+    def _expand_textedit_sizes(self):
+        """크게 보기 모드에서 TextEdit 크기 2배로 확장"""
+        # 원래 크기 저장 (최초 1회만)
+        if not hasattr(self, '_original_textedit_heights'):
+            self._original_textedit_heights = {
+                'positive_prompt': self.positive_prompt.height(),
+                'prefix_textedit': self.prefix_textedit.height(),
+                'postfix_textedit': self.postfix_textedit.height()
+            }
+
+        # 크기 확장 (positive: 1배, prefix: 2.5배, postfix: 4배)
+        self.positive_prompt.setFixedHeight(int(self._original_textedit_heights['positive_prompt'] * 1))
+        self.prefix_textedit.setFixedHeight(int(self._original_textedit_heights['prefix_textedit'] * 2.5))
+        self.postfix_textedit.setFixedHeight(int(self._original_textedit_heights['postfix_textedit'] * 4))
+
+    def _restore_textedit_sizes(self):
+        """TextEdit 크기 원래대로 복원"""
+        if hasattr(self, '_original_textedit_heights'):
+            self.positive_prompt.setFixedHeight(self._original_textedit_heights['positive_prompt'])
+            self.prefix_textedit.setFixedHeight(self._original_textedit_heights['prefix_textedit'])
+            self.postfix_textedit.setFixedHeight(self._original_textedit_heights['postfix_textedit'])
     
     def _create_info_panel(self) -> QWidget:
         """하단 정보 패널 생성"""
@@ -2100,40 +2251,43 @@ class ArtistThumbModule(BaseTabModule):
                 background-color: {DARK_COLORS['bg_secondary']};
                 border: 1px solid {DARK_COLORS['border']};
                 border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(8)}px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(10)}px;
             }}
         """)
-        panel.setFixedHeight(get_scaled_size(60))
-        
+        panel.setFixedHeight(get_scaled_size(50))
+
         layout = QHBoxLayout(panel)
-        
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(get_scaled_size(12))
+
         # 현재 선택된 아티스트 정보만 표시
         self.info_label = QLabel("아티스트를 선택하세요")
         self.info_label.setStyleSheet(f"""
             QLabel {{
                 color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(16)}px;
+                font-size: {get_scaled_font_size(14)}px;
             }}
         """)
+        self.info_label.setMinimumWidth(get_scaled_size(200))
         layout.addWidget(self.info_label)
-        
+
         layout.addStretch()
 
-
-        # 아티스트 랜더마이저 체크박스
-        from PyQt6.QtWidgets import QCheckBox
+        # 체크박스 공통 폰트 사이즈
+        checkbox_font_size = get_scaled_font_size(13)
+        checkbox_indicator_size = get_scaled_size(16)
 
         # 연속생성 체크박스
         self.continuous_generation_checkbox = QCheckBox("연속생성")
         self.continuous_generation_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(16)}px;
-                padding: {get_scaled_size(4)}px;
+                font-size: {checkbox_font_size}px;
+                padding: {get_scaled_size(2)}px;
             }}
             QCheckBox::indicator {{
-                width: {get_scaled_size(18)}px;
-                height: {get_scaled_size(18)}px;
+                width: {checkbox_indicator_size}px;
+                height: {checkbox_indicator_size}px;
                 border: 2px solid {DARK_COLORS['border']};
                 border-radius: {get_scaled_size(3)}px;
                 background-color: {DARK_COLORS['bg_primary']};
@@ -2149,16 +2303,16 @@ class ArtistThumbModule(BaseTabModule):
         self.continuous_generation_checkbox.setToolTip("연속생성: 이미지 생성이 완료되면 1초 후 자동으로 다시 생성")
         layout.addWidget(self.continuous_generation_checkbox)
 
-        self.randomizer_checkbox = QCheckBox("아티스트 랜더마이저 활성")
+        self.randomizer_checkbox = QCheckBox("랜더마이저")
         self.randomizer_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(16)}px;
-                padding: {get_scaled_size(4)}px;
+                font-size: {checkbox_font_size}px;
+                padding: {get_scaled_size(2)}px;
             }}
             QCheckBox::indicator {{
-                width: {get_scaled_size(18)}px;
-                height: {get_scaled_size(18)}px;
+                width: {checkbox_indicator_size}px;
+                height: {checkbox_indicator_size}px;
                 border: 2px solid {DARK_COLORS['border']};
                 border-radius: {get_scaled_size(3)}px;
                 background-color: {DARK_COLORS['bg_primary']};
@@ -2171,20 +2325,21 @@ class ArtistThumbModule(BaseTabModule):
                 border-color: {DARK_COLORS['accent_blue']};
             }}
         """)
+        self.randomizer_checkbox.setToolTip("아티스트 랜더마이저 활성화")
         self.randomizer_checkbox.stateChanged.connect(self._on_randomizer_toggled)
         layout.addWidget(self.randomizer_checkbox)
-        
+
         # 규칙 설정 버튼
-        self.randomizer_settings_btn = QPushButton("⚙️ 규칙 설정")
+        self.randomizer_settings_btn = QPushButton("⚙️ 규칙")
+        self.randomizer_settings_btn.setFixedHeight(get_scaled_size(28))
         self.randomizer_settings_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK_COLORS['bg_tertiary']};
                 color: {DARK_COLORS['text_primary']};
                 border: 1px solid {DARK_COLORS['border']};
                 border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
-                font-size: {get_scaled_font_size(15)}px;
-                font-weight: bold;
+                padding: {get_scaled_size(4)}px {get_scaled_size(10)}px;
+                font-size: {get_scaled_font_size(13)}px;
             }}
             QPushButton:hover {{
                 background-color: {DARK_COLORS['bg_hover']};
@@ -2194,10 +2349,10 @@ class ArtistThumbModule(BaseTabModule):
                 background-color: {DARK_COLORS['bg_primary']};
             }}
         """)
+        self.randomizer_settings_btn.setToolTip("아티스트 랜더마이저 규칙 설정")
         self.randomizer_settings_btn.clicked.connect(self._open_randomizer_settings)
-        # 규칙 설정은 항상 접근 가능
         layout.addWidget(self.randomizer_settings_btn)
-        
+
         return panel
     
     
@@ -2440,10 +2595,14 @@ class ArtistThumbModule(BaseTabModule):
         # 이제 리스트에는 아티스트명만 있으므로 직접 사용
         artist_name = current_item.text()
         self.current_artist = artist_name
-        
+
         # 썸네일 표시
         self._display_artist_thumbnail(artist_name)
-        
+
+        # 크게 보기 모드가 활성화되어 있으면 generation_image도 업데이트
+        if hasattr(self, '_large_preview_mode') and self._large_preview_mode:
+            self._show_thumbnail_in_generation_panel()
+
         # 정보 업데이트
         weight = artist_dict.get(artist_name, 0) if artist_dict else 0
         self.info_label.setText(f"선택된 아티스트: {artist_name} (가중치: {weight})")
@@ -2519,16 +2678,16 @@ class ArtistThumbModule(BaseTabModule):
     def _display_artist_thumbnail(self, artist_name: str):
         """아티스트 썸네일 표시"""
         img_data_list = self.artist_data.get(artist_name, [])
-        
+
         if img_data_list and img_data_list[0]:
             try:
                 # base64 디코딩
                 img_bytes = base64.b64decode(img_data_list[0])
-                
+
                 # QPixmap으로 직접 변환
                 pixmap = QPixmap()
                 pixmap.loadFromData(img_bytes)
-                
+
                 if hasattr(self, 'thumbnail_label'):
                     # 좌우 85픽셀씩 잘라내기 (검은색 썸네일 영역 제거)
                     if pixmap.width() > 170:  # 최소 170픽셀 이상일 때만 크롭
@@ -2540,13 +2699,13 @@ class ArtistThumbModule(BaseTabModule):
                         )
                     else:
                         cropped_pixmap = pixmap
-                    
-                    # 고정된 썸네일 크기 사용 (패딩 고려)
-                    # 라벨의 고정 크기에서 패딩을 뺀 실제 이미지 영역 계산
+
+                    # 동적 스케일링된 썸네일 크기 사용
                     padding = get_scaled_size(4) * 2  # 양쪽 패딩
-                    target_width = 450 - padding
-                    target_height = int(450 * 3.8 / 3.0) - padding
-                    
+                    thumbnail_width = get_scaled_size(350)
+                    target_width = thumbnail_width - padding
+                    target_height = int(thumbnail_width * 3.8 / 3.0) - padding
+
                     # 계산된 크기로 스케일링
                     scaled_pixmap = cropped_pixmap.scaled(
                         target_width,
@@ -2555,7 +2714,7 @@ class ArtistThumbModule(BaseTabModule):
                         Qt.TransformationMode.SmoothTransformation
                     )
                     self.thumbnail_label.setPixmap(scaled_pixmap)
-                
+
             except Exception as e:
                 print(f"썸네일 표시 오류: {e}")
                 if hasattr(self, 'thumbnail_label'):
@@ -2787,17 +2946,20 @@ class ArtistThumbModule(BaseTabModule):
             # result가 PIL Image인지 확인
             image_object = result
             if hasattr(image_object, 'mode'):  # PIL Image 확인
-                # StableImageWidget에 표시
+                # 생성된 이미지 저장 (크게 보기 토글 해제 시 복원용)
+                self._last_generated_image = image_object
+
+                # StableImageWidget에 생성 결과 표시 (크게 보기 모드 여부와 무관하게 항상 표시)
                 if hasattr(self, 'generation_image'):
                     self.generation_image.setPilImage(image_object)
                     print("✅ ArtistThumb: 이미지 생성 완료")
-                
+
                 # 상태바 메시지
                 if hasattr(self.app_context, 'main_window'):
                     self.app_context.main_window.status_bar.showMessage(
                         "✅ ArtistThumb: 이미지 생성 완료", 3000
                     )
-                
+
                 # 연속생성이 활성화되어 있으면 1초 후 다시 생성
                 if hasattr(self, 'continuous_generation_checkbox') and self.continuous_generation_checkbox.isChecked():
                     print("🔄 연속생성 모드: 1초 후 다시 생성")
@@ -2946,11 +3108,189 @@ class ArtistThumbModule(BaseTabModule):
         except Exception as e:
             print(f"생성 옵션 저장 실패: {e}")
     
+    def _open_gallery_window(self):
+        """갤러리 윈도우 열기 - filter_combo 옵션에 따라 다른 아티스트 리스트 표시"""
+        from tabs.artist_thumb.gallery_window import ArtistGalleryWindow
+        from artist_dictionary import artist_dict
+
+        # 현재 필터 옵션 확인
+        current_filter = self.filter_combo.currentText()
+
+        # 필터에 따른 아티스트 리스트 생성
+        if current_filter == "관심 작가 보기":
+            # 관심 작가만 표시
+            base_list = [a for a in self.favorite_artists if a in self.artist_data and a in artist_dict]
+            window_title_suffix = " (관심 작가)"
+        elif current_filter == "제외 작가 보기":
+            # 제외 작가만 표시
+            base_list = [a for a in self.banned_artists if a in self.artist_data and a in artist_dict]
+            window_title_suffix = " (제외 작가)"
+        elif current_filter not in ["전체 목록 보기", "+ 분류 그룹 추가"]:
+            # 커스텀 필터 파일에서 아티스트 로드
+            filter_file = os.path.join('artist_thumb', f"{current_filter}.txt")
+            custom_artists = []
+            if os.path.exists(filter_file):
+                try:
+                    with open(filter_file, 'r', encoding='utf-8') as f:
+                        custom_artists = [line.strip() for line in f if line.strip()]
+                except Exception as e:
+                    print(f"필터 파일 로드 실패: {e}")
+            base_list = [a for a in custom_artists if a in self.artist_data and a in artist_dict]
+            window_title_suffix = f" ({current_filter})"
+        else:
+            # 전체 목록 보기
+            base_list = [key for key in self.artist_data if key in artist_dict]
+            window_title_suffix = ""
+
+        # 가중치 기준 내림차순 정렬
+        artist_list = sorted(
+            base_list,
+            key=lambda k: artist_dict.get(k, 0),
+            reverse=True
+        )
+
+        if not artist_list:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self.widget, "경고", f"표시할 아티스트가 없습니다.\n(필터: {current_filter})")
+            return
+
+        self.gallery_window = ArtistGalleryWindow(
+            artist_data=self.artist_data,
+            artist_list=artist_list,
+            favorite_artists=self.favorite_artists,
+            current_mode=self.current_mode,
+            parent=self.widget,
+            title_suffix=window_title_suffix,
+            app_context=self.app_context
+        )
+
+        # 시그널 연결
+        self.gallery_window.favorite_toggled.connect(self._on_gallery_favorite_toggled)
+        self.gallery_window.artist_clicked.connect(self._on_gallery_artist_clicked)
+        self.gallery_window.generate_requested.connect(self._on_gallery_generate_requested)
+        self.gallery_window.custom_generate_requested.connect(self._on_gallery_custom_generate_requested)
+
+        self.gallery_window.show()
+
+    def _on_gallery_favorite_toggled(self, artist_name: str, is_favorite: bool):
+        """갤러리에서 관심 작가 토글"""
+        if is_favorite and artist_name not in self.favorite_artists:
+            self.favorite_artists.append(artist_name)
+        elif not is_favorite and artist_name in self.favorite_artists:
+            self.favorite_artists.remove(artist_name)
+
+        self._save_favorite_artists()
+
+        # 현재 선택된 아티스트면 버튼 상태 업데이트
+        if self.current_artist == artist_name:
+            self._update_favorite_button_state()
+
+        # 필터가 관심 작가 보기인 경우 리스트 업데이트
+        if self.filter_combo.currentText() == "관심 작가 보기":
+            self._update_listbox(self.favorite_artists)
+
+    def _on_gallery_artist_clicked(self, artist_name: str):
+        """갤러리에서 아티스트 클릭 - 메인 리스트에서 선택"""
+        # 현재 필터 모드 확인
+        current_filter = self.filter_combo.currentText()
+
+        # 전체 목록 보기로 전환 (해당 아티스트가 현재 필터에 없을 수 있음)
+        if current_filter != "전체 목록 보기":
+            self.filter_combo.setCurrentText("전체 목록 보기")
+
+        # 리스트박스에서 해당 아티스트 찾아 선택
+        for i in range(self.artist_listbox.count()):
+            if self.artist_listbox.item(i).text() == artist_name:
+                self.artist_listbox.setCurrentRow(i)
+                self.artist_listbox.scrollToItem(self.artist_listbox.item(i))
+                break
+
+    def _on_gallery_generate_requested(self, artist_name: str):
+        """갤러리에서 생성 요청 - 해당 아티스트 선택 후 생성"""
+        # 현재 필터 모드 확인 및 전체 목록으로 전환
+        current_filter = self.filter_combo.currentText()
+        if current_filter != "전체 목록 보기":
+            self.filter_combo.setCurrentText("전체 목록 보기")
+
+        # 리스트박스에서 해당 아티스트 찾아 선택
+        for i in range(self.artist_listbox.count()):
+            if self.artist_listbox.item(i).text() == artist_name:
+                self.artist_listbox.setCurrentRow(i)
+                break
+
+        # 선택 이벤트 처리 후 생성 버튼 클릭
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self._on_generate_clicked)
+
+    def _on_gallery_custom_generate_requested(self, custom_tags: str):
+        """갤러리에서 커스텀 작가 태그 조합으로 생성 요청"""
+        # 기존 내용 백업
+        original_text = self.positive_prompt.toPlainText()
+
+        # positive_prompt에 커스텀 태그 덮어쓰기
+        self.positive_prompt.setPlainText(custom_tags)
+
+        # 생성 버튼 클릭 후 원래 내용 복원
+        from PyQt6.QtCore import QTimer
+
+        def restore_and_generate():
+            self._on_generate_clicked()
+            # 생성 요청 후 원래 내용 복원
+            QTimer.singleShot(200, lambda: self.positive_prompt.setPlainText(original_text))
+
+        QTimer.singleShot(100, restore_and_generate)
+
+    def _update_favorite_button_state(self):
+        """현재 선택된 아티스트에 맞춰 관심 작가 버튼 상태 업데이트"""
+        if not self.current_artist:
+            return
+
+        if self.current_artist in self.favorite_artists:
+            self.favorite_button.setText("⭐ 관심 작가 해제")
+            self.favorite_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #666666;
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(6)}px;
+                    font-size: {get_scaled_font_size(15)}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #777777;
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """)
+        else:
+            self.favorite_button.setText("⭐ 관심 작가 등록")
+            self.favorite_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['accent_blue']};
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(6)}px;
+                    font-size: {get_scaled_font_size(15)}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {DARK_COLORS['accent_blue_hover']};
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """)
+
     def _toggle_favorite(self):
         """관심 작가 등록/해제 토글"""
         if not self.current_artist:
             return
-        
+
         if self.current_artist in self.favorite_artists:
             # 이미 관심 작가인 경우 해제
             self.favorite_artists.remove(self.current_artist)

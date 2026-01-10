@@ -106,7 +106,7 @@ tabs/
 | **hooker_view.py** | 중형 | 훅 뷰어 | closable | 파이프라인 훅 디버깅 |
 | **storyteller_tab.py** | 중형 | 스토리텔러 | closable | (기능 명세 미상) |
 | **character_prompt_editor.py** | 중형 | 캐릭터 에디터 | closable | 캐릭터별 프롬프트 관리 |
-| **artist_thumb_tab.py** | 중형 | 아티스트 썸네일 | closable | 아티스트 갤러리 |
+| **artist_thumb_tab.py** | 중형 | 아티스트 썸네일 | closable | 아티스트 갤러리, 🆕 갤러리 윈도우 (4x2 그리드), 관심 작가 토글, 커스텀 태그 생성 |
 | **depth_search_window.py** | 중형 | 심화 검색 | closable | 고급 태그 검색 |
 
 ### 관련 시스템 파일
@@ -1013,6 +1013,8 @@ if hasattr(self, 'secondary_classification_label'):
 | **이벤트 구독 (카운터)** | `tabs/setting_tabs.py` | 129-136, 588-618 |
 | **ImageCrudController 사용** | `tabs/image_window.py` | 2272-2307 |
 | **🆕 큐 추가 기능** | `tabs/image_window.py` | 591-663 |
+| **🆕 아티스트 갤러리 윈도우** | `tabs/artist_thumb/gallery_window.py` | 전체 |
+| **🆕 아티스트 썸네일 프레임** | `tabs/artist_thumb/artist_frame.py` | 전체 |
 
 ### 유용한 PyQt6 클래스
 
@@ -1181,10 +1183,18 @@ console.log("Debug message");
 
 ---
 
-*문서 버전: 1.8*
-*최종 업데이트: 2025-01-09*
+*문서 버전: 1.9*
+*최종 업데이트: 2026-01-10*
 *담당 영역: tabs/ 디렉터리*
 *변경사항:*
+- *🆕 Artist Thumb Gallery Window 기능 추가 (tabs/artist_thumb/ 하위 디렉터리)*
+  - *`gallery_window.py` - 4x2 그리드 갤러리 윈도우*
+  - *`artist_frame.py` - 개별 아티스트 썸네일 프레임*
+  - *관심 작가 토글 (헤더 클릭, 녹색 배경 + 금색 별)*
+  - *작가별 복사/생성 버튼 (📋, 🎨)*
+  - *페이지네이션 (키보드: ←/→/A/D/Home/End, 마우스 휠)*
+  - *커스텀 작가 태그 조합 입력 및 생성*
+  - *ESC 키 블록 처리*
 - *🆕 Studio Tab v2.2 업데이트 (studio_tab.py, studio/ 하위 디렉터리)*
   - *다중 프레임 그리드 (3x4 기본 레이아웃)*
   - *순차 생성 및 반복 생성 지원*

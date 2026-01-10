@@ -955,6 +955,9 @@ class SettingsWidget(QWidget):
         QTimer.singleShot(200, self._apply_saved_module_visibility)
         QTimer.singleShot(250, self._apply_saved_tab_visibility)
 
+        # 🆕 저장된 자동완성 설정 적용 (AutoCompleteManager 초기화 후)
+        QTimer.singleShot(1500, self._apply_saved_autocomplete_settings)
+
     def _on_counter_changed(self, data: dict):
         """
         [신규] ImageCrudController 카운터 변경 이벤트 핸들러
@@ -1163,17 +1166,19 @@ class SettingsWidget(QWidget):
         """저장된 자동완성 설정을 실제로 적용"""
         # 저장된 자동완성 설정 가져오기
         autocomplete_enabled = self.settings_module.get_setting('autocomplete.enabled', True)
-        
+
         # 실제 자동완성 시스템에 반영
         if hasattr(self.app_context, 'main_window'):
             main_window = self.app_context.main_window
-            if hasattr(main_window, 'autocomplete_manager'):
+            if hasattr(main_window, 'autocomplete_manager') and main_window.autocomplete_manager is not None:
                 # AutoCompleteManager의 enable/disable 메서드 사용
                 if autocomplete_enabled:
                     main_window.autocomplete_manager.enable()
                 else:
                     main_window.autocomplete_manager.disable()
                 print(f"🔍 Autocomplete {'enabled' if autocomplete_enabled else 'disabled'} on startup")
+            else:
+                print("⚠️ AutoCompleteManager가 아직 초기화되지 않았습니다.")
     
     def _apply_saved_ui_settings(self):
         """저장된 UI 설정을 실제로 적용"""

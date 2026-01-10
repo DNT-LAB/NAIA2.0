@@ -381,10 +381,16 @@ class AutoCompleteManager(QObject):
         if not token_info or len(token_info['stripped_text']) < 1:
             self._hide_all_popups()
             return
-            
+
+        # NAI :: 가중치 값을 편집 중인 경우 자동완성 무시
+        # 예: "0.7::pixel art" 에서 0.7을 편집할 때는 자동완성 안 함
+        if token_info.get('is_weight_value', False):
+            self._hide_all_popups()
+            return
+
         self.active_token_info = token_info
         target_text = token_info['stripped_text']
-        
+
         # % 로 시작하는 경우 번역 처리
         if target_text.startswith('%'):
             translation_text = target_text[1:]  # % 제거
@@ -872,6 +878,20 @@ class AutoCompleteManager(QObject):
 
         stripped_token, prefix, suffix = self._strip_brackets(token)
 
+        # NAI :: 가중치 값을 편집 중인 경우 자동완성 무시
+        # 예: "0.7::pixel art" 에서 0.7을 편집할 때
+        # weight_suffix가 있고 (:: 로 시작) stripped_token이 숫자 형태인 경우
+        is_weight_value = False
+        if weight_suffix and weight_suffix.startswith('::'):
+            # 숫자 형태인지 확인 (정수, 소수, 음수 모두 포함)
+            stripped_check = stripped_token.strip()
+            if stripped_check:
+                try:
+                    float(stripped_check)
+                    is_weight_value = True
+                except ValueError:
+                    pass
+
         return {
             'text': token,
             'stripped_text': stripped_token.strip(),  # 모든 모드에서 동일하게 strip() 사용
@@ -880,11 +900,18 @@ class AutoCompleteManager(QObject):
             'start': start_pos,
             'end': end_pos,
             'weight_prefix': weight_prefix,  # 가중치 접두사 (예: "1.0::")
-            'weight_suffix': weight_suffix   # 가중치 접미사 (예: "::" 또는 "::1.0")
+            'weight_suffix': weight_suffix,  # 가중치 접미사 (예: "::" 또는 "::1.0")
+            'is_weight_value': is_weight_value  # 가중치 값 편집 중 여부
         }
 
     def _strip_brackets(self, keyword: str) -> tuple[str, str, str]:
-        """단어 앞뒤의 괄호, NAI :: 가중치 문법, 그리고 - prefix를 분리합니다."""
+        """단어 앞뒤의 괄호, NAI :: 가중치 문법, 그리고 - prefix를 분리합니다.
+
+        중요: 괄호는 쌍을 이루는 경우에만 prefix/suffix로 처리합니다.
+        예: "(tag)" -> prefix="(", suffix=")", stripped="tag"
+        예: "blade (galaxist)" -> prefix="", suffix="", stripped="blade (galaxist)"
+             (내부 괄호는 태그의 일부이므로 분리하지 않음)
+        """
         if not isinstance(keyword, str):
             return "", "", ""
 
@@ -899,19 +926,51 @@ class AutoCompleteManager(QObject):
             if len(parts) > 1:
                 double_colon_suffix = '::' + parts[1]
 
-        # 괄호 처리
-        prefix_match = re.match(r'^[\{\[\(]+', keyword_stripped)
-        prefix = prefix_match.group(0) if prefix_match else ''
-        suffix_match = re.search(r'[\}\]\)]+$', keyword_stripped)
-        suffix = suffix_match.group(0) if suffix_match else ''
-
         # - prefix 처리 (항상 적용)
         # 예: "-tw" -> prefix="-", stripped="tw"
-        # 예: "-0.5::bad anatomy" -> prefix="-", stripped="0.5", suffix="::bad anatomy"
         minus_prefix = ""
         if keyword_stripped.startswith('-'):
             minus_prefix = '-'
             keyword_stripped = keyword_stripped[1:]  # '-' 제거
+
+        # 괄호 처리 - 쌍을 이루는 괄호만 prefix/suffix로 처리
+        # 괄호 쌍 정의
+        bracket_pairs = {'(': ')', '[': ']', '{': '}'}
+
+        prefix = ''
+        suffix = ''
+
+        # 앞쪽 여는 괄호 찾기
+        prefix_match = re.match(r'^[\{\[\(]+', keyword_stripped)
+        if prefix_match:
+            potential_prefix = prefix_match.group(0)
+            # 뒤쪽에서 매칭되는 닫는 괄호 찾기
+            suffix_match = re.search(r'[\}\]\)]+$', keyword_stripped)
+            if suffix_match:
+                potential_suffix = suffix_match.group(0)
+
+                # 괄호 쌍이 올바르게 매칭되는지 확인
+                # 예: "((tag))" -> prefix="((", suffix="))"
+                # 예: "(tag" -> prefix="", suffix="" (쌍이 안 맞음)
+                matched_prefix = ''
+                matched_suffix = ''
+
+                # 앞에서부터 여는 괄호, 뒤에서부터 닫는 괄호를 매칭
+                suffix_reversed = potential_suffix[::-1]  # 뒤집어서 앞에서부터 비교
+                for i, open_bracket in enumerate(potential_prefix):
+                    if i < len(suffix_reversed):
+                        close_bracket = suffix_reversed[i]
+                        # 괄호 쌍이 맞는지 확인
+                        if bracket_pairs.get(open_bracket) == close_bracket:
+                            matched_prefix += open_bracket
+                            matched_suffix = close_bracket + matched_suffix
+                        else:
+                            break
+                    else:
+                        break
+
+                prefix = matched_prefix
+                suffix = matched_suffix
 
         # prefix에 minus_prefix 추가
         prefix = minus_prefix + prefix
@@ -919,10 +978,15 @@ class AutoCompleteManager(QObject):
         # :: 가중치를 suffix에 추가
         suffix = suffix + double_colon_suffix
 
-        if len(prefix) + len(suffix) > len(keyword_stripped) + len(double_colon_suffix) + len(minus_prefix):
-             return keyword_stripped, minus_prefix, double_colon_suffix
+        # stripped_keyword 계산
+        start_idx = len(prefix) - len(minus_prefix)  # minus_prefix는 이미 제거됨
+        end_idx = len(keyword_stripped) - (len(suffix) - len(double_colon_suffix))
 
-        stripped_keyword = keyword_stripped[len(prefix) - len(minus_prefix):len(keyword_stripped) - (len(suffix) - len(double_colon_suffix)) if suffix else len(keyword_stripped)]
+        if start_idx >= end_idx:
+            # 괄호만 있는 경우 등 예외 처리
+            return keyword_stripped, minus_prefix, double_colon_suffix
+
+        stripped_keyword = keyword_stripped[start_idx:end_idx]
         return stripped_keyword, prefix, suffix
     
     def _restore_brackets(self, keyword, prefix, suffix):

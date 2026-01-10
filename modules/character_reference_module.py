@@ -1176,11 +1176,15 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
     """Character Reference module for NAID4.5F/NAID4.5C models"""
     
     def __init__(self):
-        super().__init__()
+        BaseMiddleModule.__init__(self)
+        ModeAwareModule.__init__(self)
+
+        self.settings_base_filename = "CharacterReferenceModule"
+
         self.character_frames = []  # List of CharacterReferenceFrame instances
         self.app_context = None
         self.storage_window = None  # Storage window instance
-        
+
         # Compatibility flags
         self.NAI_compatibility = True
         self.WEBUI_compatibility = False

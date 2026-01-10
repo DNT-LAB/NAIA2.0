@@ -164,10 +164,10 @@ class AutoCompleteManager(QObject):
         self.popup = None
         
         # 무시할 위젯 이름들
-        self.ignored_widget_names = [
-            "search_input", "exclude_input", "negative_prompt", 
+        self.ignored_widget_names = {
+            "search_input", "exclude_input", "negative_prompt",
             "delay_input", "repeat_input", "timer_input", "count_input"
-        ]
+        }
         
         # 자동완성 활성화 상태
         self.enabled = True
@@ -261,12 +261,15 @@ class AutoCompleteManager(QObject):
 
         # 감시 대상이 QLineEdit 또는 QTextEdit인지 확인
         if not isinstance(watched, (QLineEdit, QTextEdit)):
+            # 다른 위젯으로 포커스 이동 시 팝업 닫기
+            if event.type() == QEvent.Type.FocusIn:
+                self._hide_all_popups()
             return super().eventFilter(watched, event)
-        
+
         # 자동완성 제외 위젯 확인
         if self._should_ignore_widget(watched):
             return super().eventFilter(watched, event)
-        
+
         # 팝업이 보이는 경우, 키보드 네비게이션을 최우선으로 처리
         if self.popup is not None and self.popup.isVisible() and event.type() == QEvent.Type.KeyPress:
             if self.handle_popup_navigation(event):
@@ -275,6 +278,11 @@ class AutoCompleteManager(QObject):
         # 이벤트 타입에 따라 처리
         if event.type() == QEvent.Type.KeyRelease:
             self.on_key_release(watched, event)
+        elif event.type() == QEvent.Type.FocusIn:
+            # 다른 텍스트 위젯으로 포커스 이동 시 팝업 닫기 및 위젯 변경
+            if self.current_widget and self.current_widget != watched:
+                self._hide_all_popups()
+            self.current_widget = watched
         elif event.type() == QEvent.Type.FocusOut:
             # 약간의 지연을 주어, 팝업 클릭 시 바로 닫히지 않도록 함
             QTimer.singleShot(100, self._hide_popups_if_not_focused)
@@ -344,11 +352,14 @@ class AutoCompleteManager(QObject):
     def on_key_release(self, widget: QWidget, event: QKeyEvent):
         """키 입력이 끝나면 타이머를 시작하여 자동완성 팝업을 띄울 준비"""
         nav_keys = [Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, Qt.Key.Key_Escape]
-        
+
         # 방향키(좌우)로 커서가 이동한 경우 팝업 닫기 체크
         if event.key() in [Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Home, Qt.Key.Key_End]:
             if self.popup and self.popup.isVisible():
                 self._check_cursor_position_and_close(widget)
+        # 콤마 입력 시 즉시 팝업 닫기 (새 토큰 시작)
+        elif event.key() == Qt.Key.Key_Comma:
+            self._hide_all_popups()
         elif event.key() not in nav_keys:
             self.current_widget = widget
             self.timer.start(200)
@@ -672,11 +683,15 @@ class AutoCompleteManager(QObject):
             if not self.app_context.current_api_mode == "NAI":
                 completion_text = completion_text.replace('(', r'\(').replace(')', r'\)')
         
-        # 가중치 접두사가 있으면 추가 (예: "0.5::")
+        # 가중치 접두사/접미사가 있으면 추가 (예: "1.0::text ::")
         weight_prefix = info.get('weight_prefix', '')
+        weight_suffix = info.get('weight_suffix', '')
         if weight_prefix:
             completion_text = weight_prefix + completion_text
-        
+        if weight_suffix:
+            # NAI 권장: 태그와 :: 사이에 공백 추가 (예: "white background ::")
+            completion_text = completion_text + ' ' + weight_suffix.lstrip()
+
         # 괄호 복원 후 뒤 공백 추가 (모든 모드에서 동일하게)
         final_text = self._restore_brackets(completion_text, info['prefix'], info['suffix'])
         
@@ -706,16 +721,20 @@ class AutoCompleteManager(QObject):
             final_text = final_text + trailing_whitespace
             added_comma_space = False
 
-        # 가중치가 있는 경우 시작 위치를 조정 (weight 부분도 교체하기 위해)
+        # 가중치가 있는 경우 시작/끝 위치를 조정 (weight 부분도 교체하기 위해)
         start_pos = info['start']
+        end_pos = info['end']
         if weight_prefix:
             # weight_prefix 길이만큼 시작 위치를 앞으로 이동
             start_pos = info['start'] - len(weight_prefix)
+        if weight_suffix:
+            # weight_suffix 길이만큼 끝 위치를 뒤로 이동
+            end_pos = info['end'] + len(weight_suffix)
 
         if isinstance(widget, QTextEdit):
             cursor = widget.textCursor()
             cursor.setPosition(start_pos)
-            cursor.setPosition(info['end'], QTextCursor.MoveMode.KeepAnchor)
+            cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
             cursor.insertText(final_text)
             
             # 커서 위치 설정
@@ -731,7 +750,7 @@ class AutoCompleteManager(QObject):
             widget.setTextCursor(cursor)
         else: # QLineEdit
             current_text = widget.text()
-            new_text = current_text[:start_pos] + final_text + current_text[info['end']:]
+            new_text = current_text[:start_pos] + final_text + current_text[end_pos:]
             widget.setText(new_text)
             
             # 커서 위치 설정
@@ -809,37 +828,59 @@ class AutoCompleteManager(QObject):
             start_pos += 1
             
         token = text[start_pos:end_pos]
-        
+
         # NAI :: 문법 처리 - 커서 위치에 따라 검색 범위 조정
-        original_token = token  # 원본 토큰 저장
         weight_prefix = ""  # 가중치 부분을 저장할 변수
         if '::' in token:
-            # 마지막 :: 위치 찾기 (여러 개의 ::가 있을 수 있음)
-            last_double_colon_pos = token.rfind('::')
-            absolute_double_colon_pos = start_pos + last_double_colon_pos
-            
-            # 커서가 :: 의 왼쪽에 있는지 오른쪽에 있는지 확인
-            if pos <= absolute_double_colon_pos:
-                # 커서가 :: 왼쪽에 있으면 가중치 부분 제거 (:: 이후는 무시)
-                token = token[:last_double_colon_pos]
-                end_pos = start_pos + last_double_colon_pos
-            else:
-                # 커서가 :: 오른쪽에 있으면 weight 부분은 유지하고 그 이후 텍스트로 검색
-                # 예: "0.5::arti" -> weight_prefix="0.5::", token="arti"
-                weight_prefix = token[:last_double_colon_pos + 2]  # "0.5::" 부분 저장
-                token = token[last_double_colon_pos + 2:]  # "arti" 부분만 검색
-                start_pos = absolute_double_colon_pos + 2  # 검색 시작 위치 조정
-        
+            # 커서 위치 기준으로 가장 가까운 :: 찾기
+            # 예: "1.0:: text ::" 에서 커서가 text 위치에 있으면
+            # 왼쪽 ::와 오른쪽 :: 모두 찾아서 커서 위치 기준으로 처리
+
+            cursor_offset = pos - start_pos  # 토큰 내에서의 커서 위치
+
+            # 커서 왼쪽에서 가장 가까운 :: 찾기
+            left_double_colon = token.rfind('::', 0, cursor_offset)
+            # 커서 오른쪽에서 가장 가까운 :: 찾기
+            right_double_colon = token.find('::', cursor_offset)
+
+            # 뒤쪽 :: 이후 부분을 suffix로 저장할 변수
+            weight_suffix = ""
+
+            if left_double_colon != -1 and right_double_colon != -1:
+                # 양쪽 모두 ::가 있는 경우 (예: "1.0:: text ::")
+                # 커서가 두 :: 사이에 있으므로, 왼쪽 :: 이후부터 오른쪽 :: 이전까지가 검색 범위
+                weight_prefix = token[:left_double_colon + 2]  # "1.0::" 부분 저장
+                weight_suffix = token[right_double_colon:]  # "::" 또는 "::1.0" 부분 저장
+                token = token[left_double_colon + 2:right_double_colon]  # 중간 텍스트만 검색
+                start_pos = start_pos + left_double_colon + 2
+                end_pos = start_pos + len(token)
+            elif left_double_colon != -1:
+                # 커서 왼쪽에만 ::가 있는 경우 (예: "0.5::arti")
+                # weight 부분은 유지하고 그 이후 텍스트로 검색
+                weight_prefix = token[:left_double_colon + 2]  # "0.5::" 부분 저장
+                token = token[left_double_colon + 2:]  # "arti" 부분만 검색
+                start_pos = start_pos + left_double_colon + 2
+            elif right_double_colon != -1:
+                # 커서 오른쪽에만 ::가 있는 경우 (예: "tag::")
+                # NAI에서는 "1.0::tag::" 형태가 일반적이므로 이 케이스는 드묾
+                # :: 이후를 suffix로 보존하여 자동완성 후에도 유지
+                weight_suffix = token[right_double_colon:]  # "::" 부분 저장
+                token = token[:right_double_colon]
+                end_pos = start_pos + right_double_colon
+        else:
+            weight_suffix = ""
+
         stripped_token, prefix, suffix = self._strip_brackets(token)
 
         return {
-            'text': token, 
+            'text': token,
             'stripped_text': stripped_token.strip(),  # 모든 모드에서 동일하게 strip() 사용
-            'prefix': prefix, 
-            'suffix': suffix, 
-            'start': start_pos, 
+            'prefix': prefix,
+            'suffix': suffix,
+            'start': start_pos,
             'end': end_pos,
-            'weight_prefix': weight_prefix  # 가중치 접두사 추가
+            'weight_prefix': weight_prefix,  # 가중치 접두사 (예: "1.0::")
+            'weight_suffix': weight_suffix   # 가중치 접미사 (예: "::" 또는 "::1.0")
         }
 
     def _strip_brackets(self, keyword: str) -> tuple[str, str, str]:

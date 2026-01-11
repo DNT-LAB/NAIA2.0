@@ -204,6 +204,11 @@ class MainController:
         if hasattr(mw.image_window, 'send_to_inpaint_requested'):
             mw.image_window.send_to_inpaint_requested.connect(self.on_send_to_inpaint_requested)
 
+        # 🆕 리모트 이벤트 저장 시그널 연결
+        if hasattr(mw.image_window, 'save_to_remote_event_requested'):
+            mw.image_window.save_to_remote_event_requested.connect(self.on_save_to_remote_event_requested)
+            print("✅ save_to_remote_event_requested 시그널이 연결되었습니다.")
+
         # 🆕 큐 이벤트 구독
         self.connect_queue_signals()
 
@@ -680,7 +685,13 @@ class MainController:
         # 메인 윈도우에 위임
         if hasattr(self.main_window, 'on_send_to_inpaint_requested'):
             self.main_window.on_send_to_inpaint_requested(history_item)
-            
+
+    def on_save_to_remote_event_requested(self, history_item):
+        """🆕 리모트 이벤트 저장 요청 처리"""
+        # 메인 윈도우에 위임
+        if hasattr(self.main_window, 'on_save_to_remote_event_requested'):
+            self.main_window.on_save_to_remote_event_requested(history_item)
+
     def _load_custom_workflow_from_image(self):
         """이미지에서 커스텀 워크플로우 로드"""
         # 메인 윈도우에 위임

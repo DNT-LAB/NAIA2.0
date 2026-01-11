@@ -22,8 +22,9 @@
 8. [RightView 탭 컨테이너](#rightview-탭-컨테이너)
 9. [분리 창 시스템](#분리-창-시스템)
 10. [임시 생성 창 시스템](#임시-생성-창-시스템)
-11. [체크리스트](#체크리스트)
-12. [참고 자료](#참고-자료)
+11. [리모트 컨트롤 창](#리모트-컨트롤-창)
+12. [체크리스트](#체크리스트)
+13. [참고 자료](#참고-자료)
 
 ---
 
@@ -797,6 +798,712 @@ def on_my_widget_window_closed(self, tab_index, widget):
 
 ---
 
+## 리모트 컨트롤 창
+
+### 개요
+
+**파일**: `ui/remote_window.py`
+
+`RemoteWindow`는 메인 윈도우와 독립적으로 동작하는 **컴팩트한 제어 패널**입니다. 멀티 모니터 환경에서 메인 윈도우의 핵심 기능을 분리하여 편리하게 접근할 수 있습니다.
+
+**특징**:
+- 🎛️ **탭 기반 UI**: P.엔지니어링, 캐릭터, 이벤트 탭
+- 🔗 **모듈 연동**: 메인 윈도우의 모듈과 양방향 동기화
+- ⭐ **프리셋 즐겨찾기**: 프리셋 설정을 즐겨찾기로 저장/로드
+- 🖼️ **캐릭터 레퍼런스 즐겨찾기**: 이미지 + 메타데이터 저장/로드
+- 📋 **클립보드/업로드 지원**: 직접 이미지 업로드 기능
+
+### 탭 구조
+
+```
+RemoteWindow
+├── P.엔지니어링 탭 (구현 완료)
+│   ├── 프리셋 섹션
+│   │   ├── 썸네일 + 콤보박스 + 관리 버튼
+│   │   └── 즐겨찾기 그리드
+│   └── 캐릭터 레퍼런스 섹션
+│       ├── Storage 콤보박스 + 현재 썸네일
+│       ├── Style Aware + Fidelity 슬라이더
+│       ├── C1 자동 할당 체크박스
+│       ├── 업로드/클립보드/메타데이터 편집 버튼
+│       └── 즐겨찾기 그리드
+├── 캐릭터 탭 (구현 완료)
+│   ├── 캐릭터 프롬프트 서브탭
+│   │   ├── 상단: 인원 수 라디오 (1~6명), 슬롯 선택 라디오 (C1~C6)
+│   │   ├── 중단: 폴더 콤보박스 + 폴더 추가/캐릭터 삭제 버튼
+│   │   └── 즐겨찾기 그리드 (선택 강조, 좌측 상단 정렬)
+│   ├── 즐겨찾기 관리 서브탭
+│   │   ├── 좌측: 대형 썸네일 (150x208)
+│   │   ├── 우측 상단: 폴더/아이템 콤보박스
+│   │   ├── 중단: 프롬프트/UC 편집 영역
+│   │   └── 하단: 캐릭터 검색/썸네일 생성/등록/수정/삭제 버튼
+│   └── 캐릭터 레퍼런스 서브탭
+└── 이벤트 탭 (구현 완료)
+    ├── 상단 필터
+    │   ├── Rating 체크박스 (g, s, q, e)
+    │   ├── 태그 검색 (입력 + 검색 버튼)
+    │   ├── 심층 검색 (입력 + 검색 버튼)
+    │   └── 정보 표시 (전체/현재 row 수, 초기화 버튼들)
+    ├── 이벤트 목록 (스크롤 영역)
+    │   └── EventItemWidget (각 이벤트 아이템)
+    └── 하단 대기열 관리
+        ├── 현재 검색 결과 모두 대기열로 보내기 버튼
+        ├── 남은 대기열 표시 + 비우기 버튼
+        ├── 자동 생성 체크박스
+        └── 생성 시작 버튼
+```
+
+### 주요 클래스
+
+#### RemoteWindow (QMainWindow)
+
+**위치**: `ui/remote_window.py`
+
+**생성자 파라미터**:
+```python
+def __init__(self, main_window, parent=None):
+    """
+    main_window: MainWindow 인스턴스 (모듈 참조용)
+    parent: 부모 위젯
+    """
+```
+
+**주요 속성**:
+```python
+# 모듈 참조
+self.main_window           # MainWindow 인스턴스
+self.preset_manager        # PresetManager 인스턴스
+self.character_ref_module  # CharacterReferenceModule 인스턴스
+
+# 프리셋 관련
+self.preset_thumbnail_label   # 현재 프리셋 썸네일
+self.preset_combo             # 프리셋 콤보박스
+self.preset_favorites_folder  # 즐겨찾기 저장 경로
+
+# 캐릭터 레퍼런스 관련
+self.char_ref_storage_combo       # Storage 콤보박스
+self.char_ref_thumbnail_label     # 현재 썸네일
+self.char_ref_style_aware_check   # Style Aware 체크박스
+self.char_ref_fidelity_slider     # Fidelity 슬라이더
+self.char_ref_auto_assign_check   # C1 자동 할당 체크박스
+self.char_ref_favorites_folder    # 즐겨찾기 저장 경로
+```
+
+#### CharRefFavoriteItemWidget (QFrame)
+
+**위치**: `ui/remote_window.py`
+
+캐릭터 레퍼런스 즐겨찾기 그리드의 개별 아이템 위젯입니다.
+
+**생성자 파라미터**:
+```python
+def __init__(self, favorite_data: dict, thumbnail_path: Path = None,
+             thumb_width: int = None, thumb_height: int = None,
+             is_selected: bool = False, parent=None):
+    """
+    favorite_data: 즐겨찾기 데이터 (file_hash, style_aware, fidelity, has_metadata)
+    thumbnail_path: 썸네일 이미지 경로
+    thumb_width/thumb_height: 썸네일 크기
+    is_selected: 선택 상태 (녹색 테두리 표시)
+    """
+```
+
+**시각적 표시**:
+- 썸네일 이미지
+- Style Aware 체크 표시 (✓)
+- Fidelity 값 (예: 0.85)
+- 메타데이터 없음 표시 ("No metadata")
+- 선택 시 녹색 테두리 (`DARK_COLORS['success']`)
+
+#### CharacterPromptFavoriteItemWidget (QFrame)
+
+**위치**: `ui/remote_window.py`
+
+캐릭터 프롬프트 즐겨찾기 그리드의 개별 아이템 위젯입니다.
+
+**생성자 파라미터**:
+```python
+def __init__(self, favorite_data: dict, thumbnail_path: Path = None,
+             thumb_width: int = None, thumb_height: int = None,
+             is_selected: bool = False, parent=None):
+    """
+    favorite_data: 즐겨찾기 데이터 (name, folder, prompt, uc, thumbnail)
+    thumbnail_path: 썸네일 이미지 경로
+    thumb_width/thumb_height: 썸네일 크기 (기본: 90x125)
+    is_selected: 선택 상태 (녹색 테두리 표시)
+    """
+```
+
+**시각적 표시**:
+- 썸네일 이미지 (없으면 👤 아이콘)
+- 캐릭터 이름 (하단 텍스트)
+- 선택 시 녹색 테두리 (`DARK_COLORS['success']`)
+- 호버 시 파란색 테두리 (`DARK_COLORS['accent_blue']`)
+
+**주요 메서드**:
+```python
+def set_selected(self, selected: bool):
+    """선택 상태 변경 및 스타일 업데이트"""
+
+def _update_style(self):
+    """선택 상태에 따른 테두리 색상 변경"""
+```
+
+#### EventItemWidget (QFrame)
+
+**위치**: `ui/remote_window.py`
+
+이벤트 탭의 개별 이벤트 아이템 위젯입니다. 1줄 전체를 사용하며 썸네일과 편집 가능한 태그 영역을 포함합니다.
+
+**생성자 파라미터**:
+```python
+def __init__(self, event_id: str, event_data: dict, parent=None):
+    """
+    event_id: 이벤트 고유 ID
+    event_data: 이벤트 데이터 (source_row, thumbnail, heart, general 등)
+    """
+```
+
+**주요 시그널**:
+```python
+instant_generate_requested = pyqtSignal(str)    # 즉시 생성 요청 (event_id)
+add_to_queue_requested = pyqtSignal(str)        # 대기열 추가 요청 (event_id)
+delete_requested = pyqtSignal(str)              # 삭제 요청 (event_id)
+edit_requested = pyqtSignal(str, str)           # 편집 저장 요청 (event_id, new_general)
+heart_changed = pyqtSignal(str, int)            # 하트 값 변경 (event_id, new_heart)
+rating_changed = pyqtSignal(str, str)           # Rating 변경 (event_id, new_rating)
+```
+
+**UI 레이아웃**:
+```
+┌─────────────────────────────────────────────────────────────┐
+│ [썸네일]  │  [General 태그 TextEdit (4:1 상단)]             │
+│ 120x167   │─────────────────────────────────────────────────│
+│ 중앙크롭  │  [R:등급][✏️수정][🗑️삭제][⚡즉시][📋대기열][♥-][♥값][♥+] │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**주요 메서드**:
+```python
+def _load_thumbnail(self):
+    """썸네일 로드 - 중앙 크롭하여 영역을 꽉 채움"""
+    # KeepAspectRatioByExpanding으로 확대 후 중앙 크롭
+
+def _on_rating_clicked(self):
+    """Rating 순환 변경 (g → s → q → e → g)"""
+
+def _on_edit_clicked(self):
+    """General 태그 수정 저장"""
+
+def _change_heart(self, delta: int):
+    """하트 값 증감"""
+```
+
+**썸네일 중앙 크롭**:
+```python
+# KeepAspectRatioByExpanding으로 확대하여 빈 공간 없이 채움
+scaled = pixmap.scaled(
+    EVENT_THUMB_WIDTH, EVENT_THUMB_HEIGHT,
+    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+    Qt.TransformationMode.SmoothTransformation
+)
+# 중앙 크롭: 확대된 이미지에서 중앙 부분만 추출
+if scaled.width() > EVENT_THUMB_WIDTH or scaled.height() > EVENT_THUMB_HEIGHT:
+    x = (scaled.width() - EVENT_THUMB_WIDTH) // 2
+    y = (scaled.height() - EVENT_THUMB_HEIGHT) // 2
+    cropped = scaled.copy(x, y, EVENT_THUMB_WIDTH, EVENT_THUMB_HEIGHT)
+```
+
+### 프리셋 즐겨찾기 시스템
+
+**저장 위치**: `save/remote_preset_favorites/`
+
+**데이터 구조** (`favorites.json`):
+```json
+{
+  "favorites": [
+    {
+      "preset_name": "my_preset",
+      "timestamp": "2025-01-10T12:34:56"
+    }
+  ]
+}
+```
+
+**관련 메서드**:
+```python
+# 즐겨찾기 등록/해제 토글
+def _on_preset_toggle_favorite(self)
+
+# 즐겨찾기 그리드 업데이트
+def _update_preset_favorites_grid(self)
+
+# 즐겨찾기 아이템 클릭 → 프리셋 적용
+def _on_preset_favorite_clicked(self, preset_name)
+
+# 즐겨찾기 아이템 삭제
+def _on_preset_favorite_delete(self, preset_name)
+```
+
+### 캐릭터 프롬프트 즐겨찾기 시스템
+
+**저장 위치**: `save/character_prompt_favorites/`
+
+캐릭터 프롬프트와 UC를 폴더별로 관리하는 시스템입니다.
+
+**디렉터리 구조**:
+```
+save/character_prompt_favorites/
+├── favorites.json       # 즐겨찾기 목록
+├── folders.json         # 폴더 목록
+└── thumb_*.png          # 썸네일 이미지
+```
+
+**데이터 구조** (`favorites.json`):
+```json
+{
+  "favorites": [
+    {
+      "name": "sakuya",
+      "folder": "기본",
+      "prompt": "izayoi sakuya, maid, silver hair",
+      "uc": "bad anatomy",
+      "thumbnail": "thumb_sakuya_0.png"
+    }
+  ]
+}
+```
+
+**데이터 구조** (`folders.json`):
+```json
+{
+  "folders": ["기본", "동방", "블루아카"]
+}
+```
+
+**관련 메서드**:
+```python
+# 즐겨찾기 그리드 업데이트 (선택 강조, 좌측 상단 정렬)
+def _update_char_prompt_favorites_grid(self)
+
+# 즐겨찾기 클릭 → 선택 슬롯에 적용
+def _on_char_prompt_favorite_clicked(self, fav_data: dict)
+
+# 캐릭터 삭제
+def _on_char_prompt_delete_character(self)
+
+# 폴더 추가
+def _on_char_prompt_add_folder(self)
+
+# 신규 캐릭터 등록
+def _on_manage_register_clicked(self)
+
+# 썸네일 생성 (이미지 생성 후 자동 반환)
+def _on_manage_gen_thumb_clicked(self)
+```
+
+**썸네일 생성 흐름**:
+1. 인원 수를 1로 임시 설정
+2. C1 프롬프트/UC를 입력값으로 임시 교체
+3. `generation_completed_for_redirect` 이벤트 구독
+4. 가상 row로 이미지 생성 요청 (`general: "upper body"`)
+5. 생성 완료 시 썸네일 영역에 이미지 표시
+6. 원래 C1 프롬프트/UC 및 인원 수 복원
+
+**선택 상태 추적**:
+```python
+# 현재 선택된 캐릭터
+self._char_prompt_selected_fav = fav_data
+
+# 그리드 업데이트 시 선택 상태 확인
+is_selected = (self._char_prompt_selected_fav.get("name") == fav_data.get("name") and
+               self._char_prompt_selected_fav.get("folder") == fav_data.get("folder"))
+```
+
+### 캐릭터 레퍼런스 즐겨찾기 시스템
+
+**저장 위치**: `save/remote_char_ref_favorites/`
+
+**데이터 구조** (`favorites.json`):
+```json
+{
+  "favorites": [
+    {
+      "file_hash": "432c6abdf8c9...",
+      "style_aware": true,
+      "fidelity": 0.85,
+      "has_metadata": true,
+      "timestamp": "2025-01-10T12:34:56"
+    }
+  ]
+}
+```
+
+**썸네일/메타데이터 저장**:
+- `thumbnails/<file_hash>.png` - 썸네일 이미지
+- `metadata/<file_hash>.json` - 캐릭터 메타데이터
+
+**관련 메서드**:
+```python
+# Storage 콤보박스 변경 → UI만 업데이트 (프레임 추가 안함)
+def _on_char_ref_storage_changed(self, text: str)
+
+# Storage에서 프레임 적용 (생성 시에만 호출)
+def _apply_char_ref_from_storage(self, file_hash: str,
+                                  clear_existing: bool = True,
+                                  auto_assign_c1: bool = False)
+
+# 현재 UI 상태 업데이트 (콤보박스 기준)
+def _update_char_ref_current_ui(self)
+
+# 즐겨찾기 등록/해제 토글
+def _on_char_ref_toggle_favorite(self)
+
+# 즐겨찾기 아이템 클릭 → Storage 검증 후 적용
+def _on_char_ref_favorite_clicked(self, file_hash: str)
+
+# 메타데이터 편집 다이얼로그
+def _open_metadata_edit_dialog(self)
+
+# 클립보드 이미지 붙여넣기
+def _on_char_ref_clipboard_image(self)
+
+# 파일 업로드
+def _on_char_ref_upload_image(self)
+```
+
+### 해시 기반 파일 관리
+
+캐릭터 레퍼런스 이미지는 SHA-256 해시로 관리됩니다.
+
+**해시 계산**:
+```python
+import hashlib
+
+def get_file_hash(file_path: Path) -> str:
+    """파일의 SHA-256 해시 (앞 12자리)"""
+    with open(file_path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()[:12]
+```
+
+**Storage 연동**:
+```python
+# 콤보박스에서 해시로 아이템 선택
+def _select_char_ref_in_combo_by_hash(self, file_hash: str) -> bool:
+    """해시값으로 콤보박스 아이템 선택"""
+    for i in range(self.char_ref_storage_combo.count()):
+        if self.char_ref_storage_combo.itemData(i) == file_hash:
+            self.char_ref_storage_combo.setCurrentIndex(i)
+            return True
+    return False
+```
+
+### 즐겨찾기 검증 로직
+
+즐겨찾기 아이템 클릭 시 Storage에서 원본 이미지 존재 여부를 검증합니다.
+
+```python
+def _on_char_ref_favorite_clicked(self, file_hash: str):
+    """즐겨찾기 아이템 클릭 → Storage 검증 후 적용"""
+
+    # Storage 콤보박스에서 해시 검색
+    found = False
+    for i in range(self.char_ref_storage_combo.count()):
+        if self.char_ref_storage_combo.itemData(i) == file_hash:
+            found = True
+            break
+
+    if not found:
+        # 원본 이미지가 삭제된 경우 경고
+        QMessageBox.warning(
+            self, "경고",
+            "원본 이미지가 Storage에서 삭제되었습니다.\n"
+            "즐겨찾기를 제거하시겠습니까?"
+        )
+        return
+
+    # 정상 적용
+    self._apply_char_ref_from_storage(file_hash)
+```
+
+### C1 자동 할당 기능
+
+**체크박스**: "C1 캐릭터 프롬프트에 메타데이터 자동 할당"
+
+**동작**:
+1. 캐릭터 레퍼런스 적용 시 메타데이터가 있으면
+2. CharacterModule의 `assign_c1()` 메서드 호출
+3. C1 외 모든 캐릭터 위젯 비활성화
+4. C1에 메타데이터 자동 입력
+
+**관련 코드** (`modules/character_module.py:1583-1614`):
+```python
+def assign_c1(self, metadata: dict):
+    """C1에 메타데이터 할당, 나머지 비활성화"""
+
+    # 모든 프레임 비활성화
+    for frame in self.character_frames:
+        frame.setEnabled(False)
+
+    # C1만 활성화
+    if self.character_frames:
+        c1 = self.character_frames[0]
+        c1.setEnabled(True)
+
+        # 메타데이터 적용
+        if 'chara_name' in metadata:
+            c1.name_input.setText(metadata['chara_name'])
+        if 'chara_prompt' in metadata:
+            c1.prompt_edit.setPlainText(metadata['chara_prompt'])
+        if 'undesired_content' in metadata:
+            c1.uc_edit.setPlainText(metadata['undesired_content'])
+```
+
+### 메타데이터 편집 다이얼로그
+
+**다이얼로그 필드**:
+- Character Name (QLineEdit)
+- Character Prompt (QTextEdit, 16px 폰트)
+- Undesired Content (QTextEdit, 16px 폰트)
+
+**저장 위치**: `save/remote_char_ref_favorites/metadata/<file_hash>.json`
+
+**데이터 구조**:
+```json
+{
+  "chara_name": "캐릭터 이름",
+  "chara_prompt": "캐릭터 프롬프트",
+  "undesired_content": "제외할 태그"
+}
+```
+
+### 클립보드/업로드 처리
+
+**임시 이미지 처리 흐름**:
+
+1. 클립보드 붙여넣기 또는 파일 업로드
+2. 임시 파일로 저장 (`save/char_ref_temp/`)
+3. SHA-256 해시 계산
+4. CharacterReferenceModule의 Storage에 등록
+5. Storage 콤보박스에서 해당 해시 선택
+6. UI 업데이트
+
+```python
+def _on_char_ref_clipboard_image(self):
+    """클립보드 이미지 붙여넣기"""
+    clipboard = QApplication.clipboard()
+
+    # QImage로 가져오기
+    image = clipboard.image()
+    if image.isNull():
+        QMessageBox.warning(self, "경고", "클립보드에 이미지가 없습니다.")
+        return
+
+    # 임시 파일로 저장
+    temp_dir = Path("save/char_ref_temp")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = temp_dir / f"clipboard_{int(time.time())}.png"
+    image.save(str(temp_path))
+
+    # Storage에 등록 후 해시 반환
+    file_hash = self._register_to_storage(temp_path)
+
+    # 콤보박스에서 선택
+    self._select_char_ref_in_combo_by_hash(file_hash)
+```
+
+### 이벤트 탭 시스템
+
+**저장 위치**: `save/remote_events/`
+
+이벤트 탭은 이미지 생성 히스토리에서 데이터 프레임을 저장하고, 나중에 해당 설정으로 재생성할 수 있는 시스템입니다.
+
+**디렉터리 구조**:
+```
+save/remote_events/
+├── events.json          # 이벤트 목록 및 메타데이터
+└── thumbnails/          # 썸네일 이미지
+    └── <event_id>.png
+```
+
+**데이터 구조** (`events.json`):
+```json
+{
+  "events": [
+    {
+      "id": "evt_1704123456_abc123",
+      "source_row": { ... },      // 원본 데이터 프레임 (pandas Series → dict)
+      "thumbnail": "evt_xxx.png",  // 썸네일 파일명
+      "heart": 0,                  // 우선순위 (정렬용)
+      "general": "1girl, smile",   // General 태그 (편집 가능)
+      "timestamp": "2025-01-10T12:34:56"
+    }
+  ]
+}
+```
+
+**필터링 시스템**:
+
+1. **Rating 필터**: 체크박스 (g, s, q, e) - 복수 선택 가능
+2. **태그 검색**: General 태그에서 키워드 검색
+3. **심층 검색**: 기존 필터에 추가로 AND 조건 적용
+
+**필터 적용 로직**:
+```python
+def _on_event_filter_changed(self):
+    """필터 변경 시 이벤트 목록 업데이트"""
+    filtered_events = []
+
+    for event in self.all_events:
+        # Rating 필터
+        rating = event.get("source_row", {}).get("rating", "g")
+        if not self._is_rating_checked(rating):
+            continue
+
+        # 태그 검색 필터
+        general = event.get("general", "")
+        if self.event_search_input.text():
+            if self.event_search_input.text().lower() not in general.lower():
+                continue
+
+        # 심층 검색 필터 (스택)
+        for depth_keyword in self.event_depth_stack:
+            if depth_keyword.lower() not in general.lower():
+                continue
+
+        filtered_events.append(event)
+
+    self._update_events_list(filtered_events)
+```
+
+**대기열 시스템**:
+
+```python
+# 대기열에 추가
+def _on_event_add_to_queue(self, event_id: str):
+    if event_id not in self.event_queue:
+        self.event_queue.append(event_id)
+    self._update_event_queue_label()
+
+# 대기열 비우기
+def _on_event_queue_clear(self):
+    self.event_queue.clear()
+    self._update_event_queue_label()
+
+# 대기열 상태 표시 업데이트
+def _update_event_queue_label(self):
+    count = len(self.event_queue) if hasattr(self, 'event_queue') else 0
+    self.event_queue_count_label.setText(f"남은 대기열: {count}")
+
+# 생성 시작
+def _on_event_generate_start(self):
+    if not self.event_queue:
+        self._show_warning("알림", "대기열이 비어 있습니다.")
+        return
+
+    event_id = self.event_queue.pop(0)
+    self._update_event_queue_label()
+    self._on_event_instant_generate(event_id)
+```
+
+**중복 검사**:
+
+이벤트 저장 시 general 태그 값으로 중복 검사:
+```python
+def _save_event_to_remote(self, event_data: dict):
+    general_tags = event_data.get("general", "")
+
+    # 기존 이벤트에서 동일한 general 태그 검색
+    for existing in self.all_events:
+        if existing.get("general", "") == general_tags:
+            # 중복 발견 - 경고 또는 스킵
+            return False
+
+    # 저장 진행
+    self.all_events.append(event_data)
+    self._save_events_to_file()
+    return True
+```
+
+**하트 기반 정렬**:
+
+```python
+def _sort_events_by_heart(self):
+    """하트 값으로 내림차순 정렬"""
+    self.all_events.sort(key=lambda e: e.get("heart", 0), reverse=True)
+```
+
+### 시각적 피드백
+
+**선택된 즐겨찾기 표시**:
+
+```python
+class CharRefFavoriteItemWidget(QFrame):
+    def _update_style(self):
+        """선택 상태에 따른 스타일 업데이트"""
+        if self._is_selected:
+            # 선택됨: 녹색 테두리
+            self.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    border: 2px solid {DARK_COLORS['success']};
+                    border-radius: 4px;
+                }}
+            """)
+        else:
+            # 미선택: 기본 테두리
+            self.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    border: 1px solid {DARK_COLORS['border']};
+                    border-radius: 4px;
+                }}
+            """)
+
+    def set_selected(self, selected: bool):
+        """선택 상태 변경"""
+        self._is_selected = selected
+        self._update_style()
+```
+
+**메타데이터 없음 표시**:
+
+```python
+# 썸네일 위에 "No metadata" 텍스트 오버레이
+if not favorite_data.get('has_metadata', False):
+    no_meta_label = QLabel("No metadata")
+    no_meta_label.setStyleSheet(f"""
+        color: {DARK_COLORS['warning']};
+        font-size: {get_scaled_font_size(10)}px;
+        background: rgba(0,0,0,0.5);
+        padding: 2px;
+    """)
+    thumb_layout.addWidget(no_meta_label, alignment=Qt.AlignmentFlag.AlignBottom)
+```
+
+### 체크리스트
+
+**RemoteWindow 사용 시**:
+```
+[ ] main_window 참조 전달
+[ ] 모듈 초기화 대기 (QTimer.singleShot 사용)
+[ ] Storage 콤보박스 초기화
+[ ] 즐겨찾기 폴더 생성 확인
+[ ] 해시 기반 파일 관리 이해
+[ ] C1 자동 할당 로직 확인
+```
+
+**즐겨찾기 구현 시**:
+```
+[ ] favorites.json 구조 준수
+[ ] 썸네일/메타데이터 별도 저장
+[ ] 삭제 시 관련 파일 정리
+[ ] Storage 검증 로직 구현
+[ ] 시각적 피드백 (선택 테두리)
+```
+
+---
+
 ## 체크리스트
 
 ### 새 UI 컴포넌트 추가 시
@@ -985,10 +1692,30 @@ debug_layout(my_layout)
 
 ---
 
-*문서 버전: 2.0 (Compressed)*
-*최종 업데이트: 2025-01-17*
+*문서 버전: 2.3*
+*최종 업데이트: 2025-01-11*
 *담당 영역: ui/ 디렉터리*
 *변경사항:*
+- *🆕 **캐릭터 탭 (Character Tab) 구현 완료** (v2.3)*
+  - *캐릭터 프롬프트 서브탭: 인원 수/슬롯 선택, 폴더별 즐겨찾기 그리드*
+  - *즐겨찾기 관리 서브탭: 대형 썸네일, 프롬프트/UC 편집, 신규 등록*
+  - *CharacterPromptFavoriteItemWidget 클래스 (선택 강조, 좌측 상단 정렬)*
+  - *썸네일 생성: generation_completed_for_redirect 이벤트 활용*
+  - *캐릭터 삭제 기능 (폴더 삭제 → 캐릭터 삭제로 변경)*
+  - *저장 경로: save/character_prompt_favorites/ (favorites.json, folders.json)*
+- *🆕 **이벤트 탭 (Event Tab) 구현 완료** (v2.2)*
+  - *EventItemWidget 클래스: 썸네일 중앙 크롭, General 태그 편집, 버튼 액션*
+  - *필터링 시스템: Rating 필터, 태그 검색, 심층 검색 (스택 방식)*
+  - *대기열 시스템: 추가/비우기/생성 시작, 자동 생성 옵션*
+  - *하트 기반 우선순위 정렬*
+  - *중복 검사 (general 태그 기준)*
+  - *저장 경로: save/remote_events/ (events.json, thumbnails/)*
+- *🆕 **리모트 컨트롤 창 (RemoteWindow)** 문서화 (v2.1)*
+  - *P.엔지니어링 탭: 프리셋 즐겨찾기, 캐릭터 레퍼런스 즐겨찾기*
+  - *CharRefFavoriteItemWidget 클래스 (선택 상태 시각화)*
+  - *해시 기반 파일 관리, Storage 검증 로직*
+  - *C1 자동 할당 기능, 메타데이터 편집 다이얼로그*
+  - *클립보드/업로드 처리 흐름*
 - *🆕 **ResolutionManagerDialog 인접값 자동 제안** (v1.5)*
   - *너비/높이가 64배수가 아닐 때 가장 가까운 lower/upper 값 표시*
   - *표시 형식: "인접값 - 너비: 960 / 1024, 높이: 1088 / 1152"*

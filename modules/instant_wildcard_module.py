@@ -964,3 +964,92 @@ class InstantWildcardModule(BaseMiddleModule):
     def wildcards_updated(self):
         """시그널 접근을 위한 프로퍼티"""
         return self.signals.wildcards_updated
+
+    def delete_wildcard(self, file_key: str, item_key: str) -> bool:
+        """와일드카드 삭제 API (RemoteWindow에서 호출)
+
+        Args:
+            file_key: 파일 키 (예: "character")
+            item_key: 아이템 키 (예: "my_character")
+
+        Returns:
+            bool: 성공 여부
+        """
+        # file_key에 .json 붙이기
+        filename = f"{file_key}.json"
+
+        if filename not in self.json_data:
+            print(f"⚠️ 파일을 찾을 수 없음: {filename}")
+            return False
+
+        if item_key not in self.json_data[filename]:
+            print(f"⚠️ 키를 찾을 수 없음: {item_key}")
+            return False
+
+        try:
+            # JSON 데이터에서 제거
+            del self.json_data[filename][item_key]
+
+            # 파일에 저장
+            filepath = self.save_path / filename
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.json_data[filename], f, ensure_ascii=False, indent=2)
+
+            # 와일드카드 재로드
+            self.load_all_wildcards()
+
+            # UI 업데이트 (현재 선택된 항목이었다면)
+            if self.current_file == filename and self.current_key == item_key:
+                self.refresh_key_combo()
+
+            print(f"✅ 와일드카드 삭제됨: {file_key}::{item_key}")
+            return True
+
+        except Exception as e:
+            print(f"⚠️ 와일드카드 삭제 실패: {e}")
+            return False
+
+    def update_wildcard_value(self, file_key: str, item_key: str, new_value: str) -> bool:
+        """와일드카드 값 업데이트 API (RemoteWindow에서 호출)
+
+        Args:
+            file_key: 파일 키 (예: "character")
+            item_key: 아이템 키 (예: "my_character")
+            new_value: 새 값
+
+        Returns:
+            bool: 성공 여부
+        """
+        # file_key에 .json 붙이기
+        filename = f"{file_key}.json"
+
+        if filename not in self.json_data:
+            print(f"⚠️ 파일을 찾을 수 없음: {filename}")
+            return False
+
+        if item_key not in self.json_data[filename]:
+            print(f"⚠️ 키를 찾을 수 없음: {item_key}")
+            return False
+
+        try:
+            # JSON 데이터 업데이트
+            self.json_data[filename][item_key] = new_value
+
+            # 파일에 저장
+            filepath = self.save_path / filename
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.json_data[filename], f, ensure_ascii=False, indent=2)
+
+            # 와일드카드 재로드
+            self.load_all_wildcards()
+
+            # UI 업데이트 (현재 선택된 항목이었다면)
+            if self.current_file == filename and self.current_key == item_key:
+                self.value_edit.setPlainText(new_value)
+
+            print(f"✅ 와일드카드 값 업데이트됨: {file_key}::{item_key}")
+            return True
+
+        except Exception as e:
+            print(f"⚠️ 와일드카드 값 업데이트 실패: {e}")
+            return False

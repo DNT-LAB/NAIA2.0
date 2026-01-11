@@ -32,6 +32,7 @@ from ui.collapsible import CollapsibleBox
 from ui.right_view import RightView
 from ui.temp_generation_window import TempGenerationWindow
 from ui.resolution_manager_dialog import ResolutionManagerDialog
+from ui.remote_window import RemoteWindow
 from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
@@ -648,8 +649,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 128"
-        self.setWindowTitle(self.base_title + " - 260110")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 129"
+        self.setWindowTitle(self.base_title + " - 260111")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -731,6 +732,7 @@ class ModernMainWindow(QMainWindow):
         
         # AppContext에 모드 변경 이벤트 구독
         self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
+        self.app_context.subscribe_mode_swap(self._on_mode_changed_for_remote_tab)
         
         # 초기 토큰 카운트 업데이트
         QTimer.singleShot(100, self.update_token_count)
@@ -1213,7 +1215,19 @@ class ModernMainWindow(QMainWindow):
         
         self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
         self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
-        
+
+        # 리모트 탭 추가 (클릭 시 새 창을 띄움)
+        remote_placeholder_widget = QWidget()
+        remote_placeholder_widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        self.prompt_tabs.addTab(remote_placeholder_widget, "리모트")
+        self.remote_tab_index = 2  # 리모트 탭의 인덱스
+        self.previous_tab_index = 0  # 이전 탭 인덱스 저장용
+        self.remote_window = None  # 리모트 창 참조
+        self.remote_window_open = False  # 리모트 창 열림 상태
+
+        # 탭 전환 이벤트 연결
+        self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
+
         # 탭 바 우측 상단 버튼 컨테이너
         corner_widget_container = QWidget()
         corner_layout = QHBoxLayout(corner_widget_container)
@@ -3308,6 +3322,71 @@ class ModernMainWindow(QMainWindow):
             self.reattach_prompt_tabs()
         else:
             self.detach_prompt_tabs()
+
+    # === 리모트 탭 관련 메서드 ===
+
+    def _on_prompt_tab_changed(self, index: int):
+        """프롬프트 탭 전환 이벤트 핸들러"""
+        # 리모트 탭이 아닌 경우, 이전 탭 인덱스 업데이트
+        if index != self.remote_tab_index:
+            self.previous_tab_index = index
+            return
+
+        # 리모트 탭 클릭 시
+        if self.remote_window_open and self.remote_window:
+            # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
+            self.remote_window.raise_()
+            self.remote_window.activateWindow()
+            QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
+        else:
+            # 새 창 열기
+            QTimer.singleShot(10, self._open_remote_window)
+
+    def _open_remote_window(self):
+        """리모트 창 열기"""
+        if self.remote_window_open:
+            return
+
+        # 이전 탭으로 복귀
+        self.prompt_tabs.setCurrentIndex(self.previous_tab_index)
+
+        # 리모트 창 생성
+        self.remote_window = RemoteWindow(parent_app=self)
+        self.remote_window.window_closed.connect(self._on_remote_window_closed)
+        self.remote_window.show()
+
+        # 상태 업데이트
+        self.remote_window_open = True
+        self._update_remote_tab_style(disabled=True)
+
+    def _on_remote_window_closed(self):
+        """리모트 창 닫힘 이벤트"""
+        self.remote_window = None
+        self.remote_window_open = False
+        self._update_remote_tab_style(disabled=False)
+
+    def _update_remote_tab_style(self, disabled: bool):
+        """리모트 탭 스타일 업데이트 (활성/비활성)"""
+        tab_bar = self.prompt_tabs.tabBar()
+        if disabled:
+            # 비활성 스타일 - 회색으로 표시
+            tab_bar.setTabTextColor(self.remote_tab_index, QColor(DARK_COLORS['text_disabled']))
+            self.prompt_tabs.setTabText(self.remote_tab_index, "리모트(열림)")
+        else:
+            # 활성 스타일 - 원래 색상
+            tab_bar.setTabTextColor(self.remote_tab_index, QColor(DARK_COLORS['text_primary']))
+            self.prompt_tabs.setTabText(self.remote_tab_index, "리모트")
+
+    def _on_mode_changed_for_remote_tab(self, _old_mode: str, new_mode: str):
+        """모드 변경 시 리모트 탭 가시성 제어"""
+        is_nai_mode = (new_mode == "NAI")
+
+        # NAI 모드가 아니면 리모트 창 닫기
+        if not is_nai_mode and self.remote_window_open and self.remote_window:
+            self.remote_window.close()
+
+        # 탭 가시성 설정
+        self.prompt_tabs.setTabVisible(self.remote_tab_index, is_nai_mode)
 
     # === 임시 생성 창 관련 메서드 ===
 
@@ -5504,7 +5583,24 @@ class ModernMainWindow(QMainWindow):
         # 2. Inpaint 모드 활성화
         pil_image = history_item.image
         self.activate_inpaint_mode(pil_image)
-    
+
+    def on_save_to_remote_event_requested(self, history_item):
+        """🆕 리모트 이벤트 저장 요청 처리"""
+        if not history_item:
+            print("⚠️ history_item이 없습니다.")
+            return
+
+        # RemoteWindow가 열려있다면 직접 추가
+        if self.remote_window_open and self.remote_window:
+            self.remote_window.add_remote_event(history_item)
+            self.status_bar.showMessage("📌 리모트 이벤트가 저장되었습니다.", 3000)
+        else:
+            # RemoteWindow가 없으면 열고 추가
+            self._open_remote_window()
+            if self.remote_window:
+                self.remote_window.add_remote_event(history_item)
+                self.status_bar.showMessage("📌 리모트 이벤트가 저장되었습니다.", 3000)
+
     def update_splitter_stretch_factors(self):
         """좌측 패널의 실제 필요 공간에 따라 splitter의 stretch factor를 동적으로 조정"""
         if not (hasattr(self, 'search_result_frame') and hasattr(self, 'main_splitter')):

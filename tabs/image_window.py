@@ -237,6 +237,7 @@ class ImageHistoryWindow(QWidget):
     load_prompt_requested = pyqtSignal(str)
     reroll_requested = pyqtSignal(pd.Series)
     history_cleared = pyqtSignal()
+    save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -315,7 +316,8 @@ class ImageHistoryWindow(QWidget):
         # [추가] HistoryItemWidget의 시그널을 ImageHistoryWindow의 시그널에 연결
         item_widget.load_prompt_requested.connect(self.load_prompt_requested)
         item_widget.reroll_requested.connect(self.reroll_requested)
-        
+        item_widget.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)  # 🆕
+
         # 새 아이템을 레이아웃의 맨 위에 추가
         self.history_layout.insertWidget(0, item_widget)
         self.history_widgets.insert(0, item_widget)
@@ -430,6 +432,7 @@ class HistoryItemWidget(QWidget):
     delete_requested = pyqtSignal(object)
     select_previous_requested = pyqtSignal()
     select_next_requested = pyqtSignal()
+    save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, history_item: HistoryItem, parent=None, app_context=None):
         super().__init__(parent)
@@ -558,6 +561,15 @@ class HistoryItemWidget(QWidget):
                 upscale_action.setToolTip("NAI 모드에서만 사용 가능합니다")
         menu.addAction(upscale_action)
         
+        # 🆕 리모트에 이벤트 저장 메뉴
+        menu.addSeparator()
+        save_to_remote_action = QAction("📌 리모트에 이벤트 저장", self)
+        # source_row가 없는 경우 비활성화
+        if self.history_item.source_row is None or self.history_item.source_row.empty:
+            save_to_remote_action.setEnabled(False)
+        save_to_remote_action.triggered.connect(self._emit_save_to_remote_event)
+        menu.addAction(save_to_remote_action)
+
         menu.addSeparator()
         delete_action = QAction("🗑️ 이미지 삭제", self)
         delete_action.triggered.connect(lambda: self.delete_requested.emit(self))
@@ -587,6 +599,10 @@ class HistoryItemWidget(QWidget):
     def emit_reroll_prompt(self):
         """'프롬프트 다시개봉' 시그널을 발생시킵니다."""
         self.reroll_requested.emit(self.history_item.source_row)
+
+    def _emit_save_to_remote_event(self):
+        """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
+        self.save_to_remote_event_requested.emit(self.history_item)
 
     def enqueue_to_front(self):
         """🆕 히스토리 아이템을 큐 앞에 추가 (우선순위 100)"""
@@ -1227,6 +1243,7 @@ class ImageWindow(QWidget):
     instant_generation_requested = pyqtSignal(object)
     load_prompt_to_main_ui = pyqtSignal(str)
     send_to_inpaint_requested = pyqtSignal(object)
+    save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, app_context, parent=None):
         super().__init__(parent)
@@ -1439,7 +1456,8 @@ class ImageWindow(QWidget):
         # [추가] 히스토리 창에서 오는 시그널들을 메인 윈도우로 전달할 슬롯에 연결
         self.image_history_window.load_prompt_requested.connect(self.load_prompt_to_main_ui)
         self.image_history_window.reroll_requested.connect(self.instant_generation_requested)
-        
+        self.image_history_window.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)  # 🆕
+
         # [추가] 메인 이미지 레이블에 컨텍스트 메뉴 설정
         self.main_image_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_image_label.customContextMenuRequested.connect(self.show_main_image_context_menu)
@@ -1595,7 +1613,16 @@ class ImageWindow(QWidget):
         send_to_character_ref_action = QAction("📸 Send to Character Reference", self)
         send_to_character_ref_action.triggered.connect(self._send_to_character_reference)
         menu.addAction(send_to_character_ref_action)
-        
+
+        # 🆕 리모트에 이벤트 저장 메뉴
+        menu.addSeparator()
+        save_to_remote_action = QAction("📌 리모트에 이벤트 저장", self)
+        # source_row가 없는 경우 비활성화
+        if self.current_history_item.source_row is None or self.current_history_item.source_row.empty:
+            save_to_remote_action.setEnabled(False)
+        save_to_remote_action.triggered.connect(self._emit_save_to_remote_event)
+        menu.addAction(save_to_remote_action)
+
         menu.exec(self.main_image_label.mapToGlobal(pos))
 
     def save_image_manually(self):
@@ -1607,7 +1634,12 @@ class ImageWindow(QWidget):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
-    
+
+    def _emit_save_to_remote_event(self):
+        """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.save_to_remote_event_requested.emit(self.current_history_item)
+
     def _paste_image_from_clipboard(self):
         """클립보드에서 이미지를 가져와 img2img 팝업을 표시합니다."""
         clipboard = QApplication.clipboard()

@@ -4875,6 +4875,7 @@ class RemoteWindow(QMainWindow):
         self.wc_depth_input = QLineEdit()
         self.wc_depth_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
         self.wc_depth_input.setPlaceholderText("와일드카드 값에서 태그 검색...")
+        self.wc_depth_input.setProperty("autocomplete_ignore", True)
         self.wc_depth_input.returnPressed.connect(self._on_wc_depth_search)
         depth_row.addWidget(self.wc_depth_input)
 

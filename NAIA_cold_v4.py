@@ -1477,7 +1477,7 @@ class ModernMainWindow(QMainWindow):
         # CFG 값 표시 라벨
         self.cfg_value_label = QLabel("5.0")
         self.cfg_value_label.setStyleSheet(param_label_style)
-        self.cfg_value_label.setFixedWidth(50)  # 30 → 40으로 증가
+        self.cfg_value_label.setFixedWidth(60)  # 30 → 40으로 증가
         self.cfg_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cfg_container_layout.addWidget(self.cfg_value_label)
         
@@ -1509,7 +1509,7 @@ class ModernMainWindow(QMainWindow):
         # CFG Rescale 값 표시 라벨
         self.cfg_rescale_value_label = QLabel("0.40")
         self.cfg_rescale_value_label.setStyleSheet(param_label_style)
-        self.cfg_rescale_value_label.setFixedWidth(50)  # 30 → 40으로 증가
+        self.cfg_rescale_value_label.setFixedWidth(68)  # 30 → 40으로 증가
         self.cfg_rescale_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rescale_container_layout.addWidget(self.cfg_rescale_value_label)
         

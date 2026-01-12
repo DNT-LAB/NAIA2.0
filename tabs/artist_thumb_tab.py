@@ -3,9 +3,18 @@ import json
 import base64
 import io
 import re
+import ssl
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+# SSL 인증서 검증을 위한 certifi 사용
+try:
+    import certifi
+    SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    # certifi가 없으면 기본 컨텍스트 사용
+    SSL_CONTEXT = ssl.create_default_context()
 from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtWidgets import (
@@ -159,18 +168,23 @@ class ThumbnailDownloadWorker(QThread):
     """썸네일 데이터 다운로드 워커 스레드"""
     progress_updated = pyqtSignal(int, str)  # percent, message
     download_finished = pyqtSignal(bool, str)  # success, message
-    
+
     def __init__(self, mode: str, target_path: Path, parent=None):
         super().__init__(parent)
         self.mode = mode
         self.target_path = target_path
-        
+        self._cancelled = False  # 취소 플래그
+
         # HuggingFace URLs
         self.urls = {
             "NAID4.5F-31000": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID4.5_artist_thumbnail_31000/artist_thumbnail_nai",
             "NoobNAI-XL-33000": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail"
         }
-        
+
+    def cancel(self):
+        """다운로드 취소"""
+        self._cancelled = True
+
     def run(self):
         """다운로드 실행"""
         try:
@@ -187,21 +201,41 @@ class ThumbnailDownloadWorker(QThread):
             }
             
             request = urllib.request.Request(url, headers=headers)
-            
-            # 진행률 표시를 위한 다운로드
-            def progress_hook(block_num, block_size, total_size):
-                if total_size > 0:
-                    percent = min(100, (block_num * block_size * 100) // total_size)
-                    downloaded_mb = (block_num * block_size) / (1024 * 1024)
-                    total_mb = total_size / (1024 * 1024)
-                    self.progress_updated.emit(percent, f"다운로드 중... {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
-                else:
-                    downloaded_mb = (block_num * block_size) / (1024 * 1024)
-                    self.progress_updated.emit(50, f"다운로드 중... {downloaded_mb:.1f} MB")
-            
-            # 임시 파일로 다운로드
+
+            # 임시 파일로 다운로드 (SSL 컨텍스트 사용)
             temp_path = self.target_path.with_suffix('.tmp')
-            urllib.request.urlretrieve(url, temp_path, reporthook=progress_hook)
+
+            # urlopen with SSL context for certificate verification
+            with urllib.request.urlopen(request, context=SSL_CONTEXT) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                block_size = 8192
+                downloaded = 0
+
+                with open(temp_path, 'wb') as out_file:
+                    while True:
+                        # 취소 확인
+                        if self._cancelled:
+                            out_file.close()
+                            if temp_path.exists():
+                                temp_path.unlink()
+                            self.download_finished.emit(False, "다운로드가 취소되었습니다.")
+                            return
+
+                        block = response.read(block_size)
+                        if not block:
+                            break
+                        downloaded += len(block)
+                        out_file.write(block)
+
+                        # 진행률 업데이트
+                        if total_size > 0:
+                            percent = min(100, (downloaded * 100) // total_size)
+                            downloaded_mb = downloaded / (1024 * 1024)
+                            total_mb = total_size / (1024 * 1024)
+                            self.progress_updated.emit(percent, f"다운로드 중... {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
+                        else:
+                            downloaded_mb = downloaded / (1024 * 1024)
+                            self.progress_updated.emit(50, f"다운로드 중... {downloaded_mb:.1f} MB")
             
             # 파일 크기 검증
             file_size = temp_path.stat().st_size
@@ -2426,16 +2460,29 @@ class ArtistThumbModule(BaseTabModule):
         self.progress_dialog.setLabelText("썸네일 데이터를 다운로드하는 중...")
         self.progress_dialog.setRange(0, 100)
         self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self.progress_dialog.setCancelButton(None)  # 취소 버튼 제거
+        self.progress_dialog.setCancelButtonText("취소")  # 취소 버튼 활성화
         self.progress_dialog.setMinimumDuration(0)
-        
+
         # 다운로드 워커 생성
         self.download_worker = ThumbnailDownloadWorker(mode, file_path)
         self.download_worker.progress_updated.connect(self._on_download_progress)
         self.download_worker.download_finished.connect(self._on_download_finished)
+
+        # 취소 버튼 연결
+        self.progress_dialog.canceled.connect(self._on_download_canceled)
+
         self.download_worker.start()
-        
         self.progress_dialog.show()
+
+    def _on_download_canceled(self):
+        """다운로드 취소 처리"""
+        if hasattr(self, 'download_worker') and self.download_worker:
+            self.download_worker.cancel()
+            # 콤보박스를 이전 상태로 복원
+            if hasattr(self, '_previous_mode'):
+                self.mode_combo.blockSignals(True)
+                self.mode_combo.setCurrentText(self._previous_mode)
+                self.mode_combo.blockSignals(False)
     
     def _on_download_progress(self, percent: int, message: str):
         """다운로드 진행률 업데이트"""

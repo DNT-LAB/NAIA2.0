@@ -17,13 +17,15 @@
 - **링크 방식**: 메인 문서에서 핵심만 설명, 상세는 레퍼런스 링크로 안내
   - 예: `**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)`
 
-**📚 문서화 현황** (2025-01-10 업데이트):
-- ✅ **core/CLAUDE.md** (v1.6): AppContext, 컨트롤러, 파이프라인, API 서비스
+**📚 문서화 현황** (2025-01-12 업데이트):
+- ✅ **core/CLAUDE.md** (v1.7): AppContext, 컨트롤러, 파이프라인, API 서비스
   - 🆕 ImageCrudController 파일명 형식, 분류 시스템, 타임스탬프 폴더 토글
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
   - 🆕 **SequenceParser**: 시퀀스 프롬프트 파싱 (`:begin`, `:seq`, `:end`)
   - 🆕 **GenerationController**: 시퀀스 생성 지원, NAI 랜덤 시드 처리
   - 🆕 **AutoCompleteManager**: NAI `::` 가중치 편집 시 자동완성 무시, 괄호 쌍 매칭 로직
+  - 🐛 **버그 수정** (2025-01-12): 자동완성 토큰 범위 오류 수정 (엔터 시 토큰 정보 갱신)
+  - 🆕 **AutoCompleteManager**: 팝업 외부 클릭 시 자동 닫기 기능
 - ✅ **modules/CLAUDE.md** (v1.3): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
   - 🆕 **프리셋 랜덤화 시스템**: `*randomized` 특수 프리셋, 랜덤 프리셋 풀 관리, 자동/수동 프리셋 선택
 - ✅ **tabs/CLAUDE.md** (v1.6): 탭 개발 가이드, 시그널 브리징, 생명주기

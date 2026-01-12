@@ -259,6 +259,12 @@ class AutoCompleteManager(QObject):
         if not self._initialized:
             return False
 
+        # 팝업 외부 클릭 감지 (모든 위젯에서 마우스 클릭 감시)
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if self.popup and self.popup.isVisible():
+                if self._is_click_outside_popups(event):
+                    self._hide_all_popups()
+
         # 감시 대상이 QLineEdit 또는 QTextEdit인지 확인
         if not isinstance(watched, (QLineEdit, QTextEdit)):
             # 다른 위젯으로 포커스 이동 시 팝업 닫기
@@ -366,16 +372,17 @@ class AutoCompleteManager(QObject):
 
     def show_completions(self):
         """자동완성 목록을 표시하는 메서드"""
-        if not self.current_widget or not self.enabled: 
+        if not self.current_widget or not self.enabled:
             return
 
-        # 💡 [수정] 팝업이 없을 경우에만 생성 (지연 초기화)
+        # 팝업이 없을 경우에만 생성 (지연 초기화)
         if self.popup is None:
             self.popup = self._create_popup()
 
         # 현재 활성 토큰 정보 가져오기
-        try: token_info = self._get_active_token_info(self.current_widget)
-        except: 
+        try:
+            token_info = self._get_active_token_info(self.current_widget)
+        except:
             token_info = None
             return
         if not token_info or len(token_info['stripped_text']) < 1:
@@ -461,7 +468,7 @@ class AutoCompleteManager(QObject):
         """커서 위치에 팝업을 표시"""
         if not self.current_widget:
             return
-            
+
         cursor_rect = self.current_widget.cursorRect()
         cursor_pos_global = self.current_widget.mapToGlobal(cursor_rect.bottomLeft())
         self.popup.move(cursor_pos_global)
@@ -661,7 +668,7 @@ class AutoCompleteManager(QObject):
         
     def complete_text(self, completion_text: str):
         """활성 토큰을 선택된 텍스트로 교체"""
-        if not self.current_widget or not self.active_token_info: 
+        if not self.current_widget or not self.active_token_info:
             return
 
         widget = self.current_widget
@@ -742,7 +749,7 @@ class AutoCompleteManager(QObject):
             cursor.setPosition(start_pos)
             cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
             cursor.insertText(final_text)
-            
+
             # 커서 위치 설정
             if trailing_whitespace and not added_comma_space:
                 # 일반 공백만 있는 경우: 공백 이전 위치로
@@ -786,6 +793,14 @@ class AutoCompleteManager(QObject):
         key = event.key()
         if key in [Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab]:
             current_item = self.popup.currentItem()
+
+            # 엔터를 누르는 시점에 토큰 정보를 다시 가져옴
+            # (타이핑 중에 저장된 active_token_info가 현재 텍스트와 다를 수 있음)
+            if self.current_widget:
+                fresh_token_info = self._get_active_token_info(self.current_widget)
+                if fresh_token_info:
+                    self.active_token_info = fresh_token_info
+
             if current_item:
                 # UserRole에서 실제 값/태그명 가져오기
                 # 인스턴트 와일드카드의 경우 값이, 일반 태그의 경우 태그명이 저장됨
@@ -819,20 +834,20 @@ class AutoCompleteManager(QObject):
         # 왼쪽 경계(콤마 또는 시작) 찾기
         start_pos = text.rfind(',', 0, pos)
         start_pos = 0 if start_pos == -1 else start_pos + 1
-        
+
         # 오른쪽 경계(콤마 또는 끝) 찾기
         end_pos = text.find(',', pos)
         if end_pos == -1:
             end_pos = len(text)
-            
+
         # 커서가 콤마 바로 뒤에 있을 때, 빈 토큰으로 인식하도록 보정
         if pos > start_pos and text[pos-1] in ', ':
-             start_pos = pos
+            start_pos = pos
 
         # 앞뒤 공백 제거
         while start_pos < end_pos and text[start_pos].isspace():
             start_pos += 1
-            
+
         token = text[start_pos:end_pos]
 
         # NAI :: 문법 처리 - 커서 위치에 따라 검색 범위 조정
@@ -1014,7 +1029,40 @@ class AutoCompleteManager(QObject):
         """포커스가 없으면 모든 팝업을 숨깁니다."""
         if self.popup and not self.popup.hasFocus():
             self._hide_all_popups()
-    
+
+    def _is_click_outside_popups(self, event) -> bool:
+        """클릭 위치가 팝업 관련 위젯들 외부인지 확인합니다."""
+        try:
+            # PyQt6에서 마우스 이벤트의 전역 위치 가져오기
+            if hasattr(event, 'globalPosition'):
+                click_pos = event.globalPosition().toPoint()
+            elif hasattr(event, 'globalPos'):
+                click_pos = event.globalPos()
+            else:
+                return False
+
+            # 각 팝업 위젯의 geometry를 체크
+            is_inside_popup = (
+                self.popup and
+                self.popup.isVisible() and
+                self.popup.geometry().contains(click_pos)
+            )
+            is_inside_value = (
+                self.value_container and
+                self.value_container.isVisible() and
+                self.value_container.geometry().contains(click_pos)
+            )
+            is_inside_image = (
+                self.image_container and
+                self.image_container.isVisible() and
+                self.image_container.geometry().contains(click_pos)
+            )
+
+            # 모든 팝업 위젯 외부 클릭이면 True
+            return not (is_inside_popup or is_inside_value or is_inside_image)
+        except Exception:
+            return False
+
     def _hide_all_popups(self):
         """모든 팝업(리스트와 값 표시)을 숨깁니다."""
         if self.popup:

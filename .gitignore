@@ -167,3 +167,7 @@ desktop.ini
 # - data/ezmode/: GitHub 포함 (JSON 파일들)
 # - data/.ezmode/: Hugging Face 전용 (matrices만)
 data/.ezmode/
+
+# Experimental folder
+.experimental/
+/data/quick_search

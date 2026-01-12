@@ -1614,6 +1614,35 @@ ignored_widget_names = {
 }
 ```
 
+#### 토큰 정보 갱신 시점 (🆕 2025-01-12)
+
+**중요**: `active_token_info`는 타이머(200ms) 후 `show_completions()`에서 저장되므로,
+엔터를 누를 때 실제 텍스트와 불일치할 수 있음.
+
+```python
+# handle_popup_navigation에서 엔터/탭 입력 시 토큰 정보 갱신
+if key in [Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab]:
+    # 엔터를 누르는 시점에 토큰 정보를 다시 가져옴
+    if self.current_widget:
+        fresh_token_info = self._get_active_token_info(self.current_widget)
+        if fresh_token_info:
+            self.active_token_info = fresh_token_info
+```
+
+#### 팝업 외부 클릭 시 자동 닫기 (🆕 2025-01-12)
+
+전역 이벤트 필터에서 모든 마우스 클릭을 감시하여, 팝업 외부 클릭 시 자동으로 닫힘:
+
+```python
+# eventFilter에서 팝업 외부 클릭 감지
+if event.type() == QEvent.Type.MouseButtonPress:
+    if self.popup and self.popup.isVisible():
+        if self._is_click_outside_popups(event):
+            self._hide_all_popups()
+
+# _is_click_outside_popups: popup, value_container, image_container 모두 체크
+```
+
 ### ModeAwareModuleManager: 모드 인식 모듈 관리
 
 **파일**: `core/mode_ware_manager.py:7-82`

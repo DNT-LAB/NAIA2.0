@@ -891,7 +891,7 @@ self.char_ref_favorites_folder    # 즐겨찾기 저장 경로
 
 #### CharRefFavoriteItemWidget (QFrame)
 
-**위치**: `ui/remote_window.py`
+**위치**: `ui/remote/char_ref_tab.py` *(리팩토링됨)*
 
 캐릭터 레퍼런스 즐겨찾기 그리드의 개별 아이템 위젯입니다.
 
@@ -917,7 +917,7 @@ def __init__(self, favorite_data: dict, thumbnail_path: Path = None,
 
 #### CharacterPromptFavoriteItemWidget (QFrame)
 
-**위치**: `ui/remote_window.py`
+**위치**: `ui/remote/char_prompt_tab.py` *(리팩토링됨)*
 
 캐릭터 프롬프트 즐겨찾기 그리드의 개별 아이템 위젯입니다.
 
@@ -951,7 +951,7 @@ def _update_style(self):
 
 #### EventItemWidget (QFrame)
 
-**위치**: `ui/remote_window.py`
+**위치**: `ui/remote/event_tab.py` *(리팩토링됨)*
 
 이벤트 탭의 개별 이벤트 아이템 위젯입니다. 1줄 전체를 사용하며 썸네일과 편집 가능한 태그 영역을 포함합니다.
 
@@ -1692,10 +1692,19 @@ debug_layout(my_layout)
 
 ---
 
-*문서 버전: 2.3*
-*최종 업데이트: 2025-01-11*
+*문서 버전: 2.5*
+*최종 업데이트: 2025-01-12*
 *담당 영역: ui/ 디렉터리*
 *변경사항:*
+- *🆕 **ui/remote/ 서브모듈 전체 리팩토링 완료** (v2.5)*
+  - *RemoteWindow 코드를 Mixin 패턴으로 완전 분리 (70% 코드 감소)*
+  - *`ui/remote/event_tab.py`: EventTabMixin, EventItemWidget (~1100줄)*
+  - *`ui/remote/instant_wc_tab.py`: InstantWcTabMixin, WildcardItemWidget (~900줄)*
+  - *🆕 `ui/remote/char_prompt_tab.py`: CharPromptTabMixin, CharacterPromptFavoriteItemWidget (~1556줄)*
+  - *🆕 `ui/remote/char_ref_tab.py`: CharRefTabMixin, CharRefFavoriteItemWidget (~1363줄)*
+  - *remote_window.py: 5000줄+ → **1577줄** (약 70% 감소)*
+  - *🔧 JSON 포맷 하위 호환성 처리 (char_ref_tab.py)*
+  - *상세 가이드: [ui/remote/CLAUDE.md](remote/CLAUDE.md)*
 - *🆕 **캐릭터 탭 (Character Tab) 구현 완료** (v2.3)*
   - *캐릭터 프롬프트 서브탭: 인원 수/슬롯 선택, 폴더별 즐겨찾기 그리드*
   - *즐겨찾기 관리 서브탭: 대형 썸네일, 프롬프트/UC 편집, 신규 등록*

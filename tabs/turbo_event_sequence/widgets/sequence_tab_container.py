@@ -103,6 +103,14 @@ class SequenceTabContainer(QWidget):
         # 시그널 브리징
         self.sequence_confirmed.emit(processed_prompts)
 
+    def confirm_current_sequence(self) -> bool:
+        """미리보기 탭의 현재 프롬프트를 확정 처리"""
+        prompts = self.preview_widget.get_prompts()
+        if not prompts:
+            return False
+        self._on_sequence_confirmed(prompts)
+        return True
+
     def _preprocess_prompts(self, prompts: list) -> list:
         """프롬프트 전처리 - Child에만 자동 삽입 태그 적용
 

@@ -84,6 +84,7 @@ class TurboEventSequenceTab(QWidget):
         self.current_generation_index = 0  # 현재 생성 중인 인덱스
         self._index_mapping = None  # 스킵 기능용 인덱스 매핑 (Worker 인덱스 → 원본 인덱스)
         self.current_parent_id = None  # 현재 선택된 Parent ID (그리드 저장용)
+        self._waiting_continuous_after_grid_save = False  # continuous: wait for grid auto-save
 
         self._init_ui()
         self._setup_ui_controls()
@@ -247,6 +248,9 @@ class TurboEventSequenceTab(QWidget):
         self.skip_generated_checkbox.setEnabled(checked)
 
         if checked:
+            # ?? ??? ??? ?? ??? ??? ??
+            if not self.history_panel.auto_save_enabled:
+                self.history_panel.auto_save_checkbox.setChecked(True)
             print(f"🔄 연속 생성: 활성화 (그리드 자동 저장이 강제 활성화됩니다)")
         else:
             print(f"🔄 연속 생성: 비활성화")
@@ -712,7 +716,8 @@ class TurboEventSequenceTab(QWidget):
         """나머지 전체 생성 버튼 클릭"""
         if not self.confirmed_prompts or not self.selected_direction:
             return
-        start_index = len(self.generated_images)
+        # 이미 생성된 이미지 수(빈 슬롯 제외)를 기준으로 이어서 생성
+        start_index = sum(1 for img in self.generated_images if img is not None)
         if start_index >= len(self.confirmed_prompts):
             return
         print(f"▶ Continuing from page {start_index + 1}...")
@@ -735,15 +740,25 @@ class TurboEventSequenceTab(QWidget):
         self.search_widget.refresh_favorites()
 
     def _on_grid_auto_saved(self, save_path: str):
-        """그리드 자동 저장 완료 (history_panel의 별도 저장)
+        """??? ?? ?? ?? (history_panel? ?? ??)
 
-        Note: 연속 생성 카운트다운은 탭의 _save_grid_image에서 처리합니다.
+        Note: ?? ??? ??? ?? ?? ?? ? ?????.
         """
-        print(f"💾 Grid auto saved (history_panel): {save_path}")
+        print(f"?? Grid auto saved (history_panel): {save_path}")
+
+        if self._waiting_continuous_after_grid_save:
+            self._waiting_continuous_after_grid_save = False
+            if self.search_widget.is_continuous_generation_enabled():
+                print("[continuous] countdown start after grid auto-save")
+                self.search_widget.start_countdown_to_next()
 
     def _on_continuous_generation_requested(self, parent_id: int):
         """연속 생성 요청 - 자동으로 전체 시퀀스 생성 시작"""
         print(f"🔄 Continuous generation requested for parent {parent_id}")
+        # ???? ??? ?? ??
+        if not self.sequence_tab_container.confirm_current_sequence():
+            print("?? ??? ?? ??: ????? ????")
+            return
         # 연속 생성 시 그리드 자동 저장 강제 활성화
         if not self.history_panel.auto_save_enabled:
             self.history_panel.auto_save_checkbox.setChecked(True)
@@ -855,7 +870,7 @@ class TurboEventSequenceTab(QWidget):
         self.progress_label.setText(f"🚀 시퀀스 생성 시작... (0/{remaining})")
 
         # 🆕 히스토리 패널에 플레이스홀더 생성 (스킵되지 않은 것만)
-        if start_index == 0:
+        if start_index == 0 and not any(img is not None for img in self.generated_images):
             # 새로운 생성: 스킵되지 않은 프롬프트 수만큼 플레이스홀더 생성
             non_skipped_count = len([i for i in range(len(self.confirmed_prompts)) if i not in disabled_indices])
             self.history_panel.prepare_placeholders(non_skipped_count)
@@ -947,7 +962,8 @@ class TurboEventSequenceTab(QWidget):
         self.generated_images[actual_index] = image
 
         self.image_viewer.set_image(image)
-        self.history_panel.add_image(worker_index, image)  # 히스토리는 순차적 인덱스 사용
+        # 실제 인덱스에 맞춰 히스토리 갱신 (이어 생성 시 기존 슬롯 유지)
+        self.history_panel.add_image(actual_index, image)
 
         # 🆕 현재 생성 인덱스 업데이트 (다음 Worker 인덱스로)
         next_worker_index = worker_index + 1
@@ -997,6 +1013,8 @@ class TurboEventSequenceTab(QWidget):
         self.sequence_tab_container.clear_highlight()
 
         # 🆕 최종 그리드 이미지 생성 및 표시 (시퀀스 완료 - 자동 저장)
+        # continuous: start next event after grid auto-save completes
+        self._waiting_continuous_after_grid_save = True
         grid_image = self._update_grid_image(is_sequence_complete=True)
         if grid_image:
             # 그리드 이미지를 이미지 뷰어에 표시
@@ -1177,9 +1195,6 @@ class TurboEventSequenceTab(QWidget):
             self.search_widget.on_grid_saved(self.current_parent_id, str(save_path))
 
             # 🆕 연속 생성 모드면 카운트다운 시작
-            if self.search_widget.is_continuous_generation_enabled():
-                print(f"🔄 연속 생성 모드 - 카운트다운 시작")
-                self.search_widget.start_countdown_to_next()
 
         except Exception as e:
             print(f"❌ Grid save error: {e}")

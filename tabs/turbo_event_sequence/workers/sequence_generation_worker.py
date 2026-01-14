@@ -107,6 +107,8 @@ class SequenceGenerationWorker(QObject):
         self.negative_prompt = self._prepare_negative_prompt(negative_prompt)
         self.prev_images = prev_images or []
         self.start_index = start_index
+        # Base reference image (parent) when continuing a sequence.
+        self.base_reference_image = self.prev_images[0] if self.prev_images else None
 
         # 취소 플래그
         self._cancelled = False
@@ -120,6 +122,7 @@ class SequenceGenerationWorker(QObject):
         # 생성 완료 대기 플래그
         self._waiting_for_result = False
         self._last_result = None
+        self._pending_request_is_inpaint = False
 
         # 방향에 따른 크기 설정
         if direction == 'horizontal':
@@ -138,6 +141,7 @@ class SequenceGenerationWorker(QObject):
             return
 
         self._generated_images = []
+        self._pending_request_is_inpaint = False
         self._current_index = 0
 
         # 생성 완료 이벤트 구독
@@ -186,30 +190,30 @@ class SequenceGenerationWorker(QObject):
 
         prompt_data = self.prompts[self._current_index]
         actual_index = self.start_index + self._current_index
-        is_first = (actual_index == 0)
+        is_parent_prompt = bool(prompt_data.get('is_parent', False))
 
         # 🆕 프롬프트 처리 (고정 프롬프트 + rating 태그 적용)
         prompt = self._process_prompt(prompt_data)
         print(f"[SequenceWorker] 처리된 프롬프트 ({actual_index}): {prompt[:100]}...")
 
         # 진행률 업데이트
-        page_type = "Parent" if is_first else f"Child {actual_index}"
+        page_type = "Parent" if is_parent_prompt else f"Child {actual_index}"
         status = f"{page_type} 생성 중..."
         self.progress_updated.emit(self._current_index, len(self.prompts), status)
 
         try:
-            if is_first:
+            if is_parent_prompt:
                 # 첫 번째 이미지: txt2img
                 self._request_txt2img_generation(prompt)
             else:
                 # 후속 이미지: 항상 첫 번째 이미지를 참조하여 Inpaint
                 # (Sliding Window 대신 고정 참조 방식)
-                if len(self._generated_images) > 0:
+                if self.base_reference_image is not None:
+                    # Always inpaint from the base(parent) image when available.
+                    prev_image = self.base_reference_image
+                elif len(self._generated_images) > 0:
                     # 현재 세션에서 생성된 첫 번째 이미지
                     prev_image = self._generated_images[0]
-                elif len(self.prev_images) > 0:
-                    # 이전 세션에서 전달받은 첫 번째 이미지
-                    prev_image = self.prev_images[0]
                 else:
                     self.generation_error.emit(actual_index, "참조할 이미지가 없습니다")
                     return
@@ -233,6 +237,7 @@ class SequenceGenerationWorker(QObject):
         }
 
         self._waiting_for_result = True
+        self._pending_request_is_inpaint = False
         self._execute_generation_pipeline(override_params)
 
     def _request_inpaint_generation(self, prev_image: Image.Image, prompt: str):
@@ -273,6 +278,7 @@ class SequenceGenerationWorker(QObject):
         }
 
         self._waiting_for_result = True
+        self._pending_request_is_inpaint = True
         self._execute_generation_pipeline(override_params)
 
     def _show_debug_preview(self, canvas: Image.Image, mask: Image.Image):
@@ -341,7 +347,7 @@ class SequenceGenerationWorker(QObject):
 
             # Inpaint 결과인 경우 크롭
             actual_index = self.start_index + self._current_index
-            if actual_index > 0:
+            if self._pending_request_is_inpaint:
                 # Inpaint 결과에서 새 영역 추출
                 image = self._crop_result(image)
 
@@ -621,7 +627,7 @@ class SequenceGenerationWorker(QObject):
             처리된 네거티브 프롬프트
         """
         # split screen 방지 태그 (NAI 가중치 형식)
-        split_screen_tag = "1.5::split screen::"
+        split_screen_tag = "1.5::split screen, black border ::"
 
         if not negative_prompt or not negative_prompt.strip():
             return split_screen_tag

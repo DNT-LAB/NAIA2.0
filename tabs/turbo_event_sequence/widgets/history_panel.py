@@ -764,11 +764,12 @@ class HistoryPanel(QWidget):
             else:
                 self.thumb_layout.addWidget(thumb_widget)
 
-    def update_grid_image(self, grid_image):
+    def update_grid_image(self, grid_image, trigger_auto_save: bool = False):
         """그리드 이미지 업데이트 (0번 인덱스, 고정 위치 방식)
 
         Args:
             grid_image: 결합된 PIL Image
+            trigger_auto_save: 자동 저장 트리거 여부 (시퀀스 완료 시에만 True)
         """
         self.grid_image = grid_image
 
@@ -811,8 +812,8 @@ class HistoryPanel(QWidget):
         # 버튼 상태 업데이트
         self._update_grid_buttons_state()
 
-        # 자동 저장 활성화 시 저장
-        if self.auto_save_enabled and grid_image:
+        # 자동 저장 활성화 시 저장 (시퀀스 완료 시에만)
+        if trigger_auto_save and self.auto_save_enabled and grid_image:
             self._auto_save_grid(grid_image)
 
     def get_grid_image(self):

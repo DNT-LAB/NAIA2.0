@@ -1268,10 +1268,10 @@ class TurboEventSequenceTab(QWidget):
         layout_type = f"{cols} per line ({rows} rows)"
         print(f"🖼️ Grid image created: {grid_w}x{grid_h} ({count} images, {layout_type})")
 
-        # 히스토리 패널에 그리드 이미지 업데이트
-        self.history_panel.update_grid_image(grid_image)
+        # 히스토리 패널에 그리드 이미지 업데이트 (시퀀스 완료 시에만 자동 저장 트리거)
+        self.history_panel.update_grid_image(grid_image, trigger_auto_save=is_sequence_complete)
 
-        # 🆕 그리드 이미지 자동 저장 (시퀀스 완료 시에만)
+        # 🆕 시퀀스 완료 시 검색 위젯 미리보기용 저장 (save/turbo_events)
         if is_sequence_complete:
             self._save_grid_image(grid_image)
 

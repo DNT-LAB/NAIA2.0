@@ -104,7 +104,7 @@ class SequenceGenerationWorker(QObject):
         self.direction = direction
         self.strength = strength
         # 🆕 네거티브 프롬프트 앞에 split screen 방지 태그 추가
-        self.negative_prompt = self._prepare_negative_prompt(negative_prompt)
+        self.negative_prompt = negative_prompt #self._prepare_negative_prompt(negative_prompt)
         self.prev_images = prev_images or []
         self.start_index = start_index
         # Base reference image (parent) when continuing a sequence.
@@ -415,6 +415,14 @@ class SequenceGenerationWorker(QObject):
             # 캔버스 상단(0, 0)에 배치
             canvas.paste(resized, (0, 0))
 
+            # 🆕 경계선 추가 (Split screen 유도): 601~608px 영역을 검은색으로 칠함
+            # 상단 이미지의 하단 8px을 덮어씀
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(canvas)
+            # (x0, y0, x1, y1) - y1은 포함되지 않음 (PIL 버전에 따라 다를 수 있으니 주의, rectangle은 x1,y1 포함)
+            # 여기서는 확실하게 601부터 608까지 칠함
+            draw.rectangle([(0, 600), (self.canvas_width, 608)], fill=(0, 0, 0))
+
         else:  # vertical
             # 세로 방향: 좌측 절반에 배치
             paste_width, paste_height = self.PASTE_SIZE_V  # (608, 832)
@@ -424,6 +432,12 @@ class SequenceGenerationWorker(QObject):
 
             # 캔버스 좌측(0, 0)에 배치
             canvas.paste(resized, (0, 0))
+
+            # 🆕 경계선 추가 (Split screen 유도): 601~608px 영역을 검은색으로 칠함
+            # 좌측 이미지의 우측 7px을 덮어씀
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(canvas)
+            draw.rectangle([(601, 0), (608, self.canvas_height)], fill=(0, 0, 0))
 
         return canvas
 

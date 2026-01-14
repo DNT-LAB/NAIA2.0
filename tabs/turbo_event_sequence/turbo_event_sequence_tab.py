@@ -85,6 +85,7 @@ class TurboEventSequenceTab(QWidget):
         self._index_mapping = None  # 스킵 기능용 인덱스 매핑 (Worker 인덱스 → 원본 인덱스)
         self.current_parent_id = None  # 현재 선택된 Parent ID (그리드 저장용)
         self._waiting_continuous_after_grid_save = False  # continuous: wait for grid auto-save
+        self.current_viewing_index = -1  # 현재 보고 있는 이미지 인덱스 (재생성용)
 
         self._init_ui()
         self._setup_ui_controls()
@@ -248,7 +249,7 @@ class TurboEventSequenceTab(QWidget):
         self.skip_generated_checkbox.setEnabled(checked)
 
         if checked:
-            # ?? ??? ??? ?? ??? ??? ??
+            # 연속 생성 활성화 시 그리드 자동 저장 강제
             if not self.history_panel.auto_save_enabled:
                 self.history_panel.auto_save_checkbox.setChecked(True)
             print(f"🔄 연속 생성: 활성화 (그리드 자동 저장이 강제 활성화됩니다)")
@@ -592,6 +593,7 @@ class TurboEventSequenceTab(QWidget):
         self.confirmed_prompts = prompts
         self.generated_images = []
         self.current_generation_index = 0
+        self.current_viewing_index = -1  # 🆕 초기화
         # 히스토리 클리어
         self.history_panel.clear()
         self.image_viewer.clear()
@@ -691,13 +693,24 @@ class TurboEventSequenceTab(QWidget):
         self._start_full_generation(start_index=0)
 
     def _on_regenerate_clicked(self):
-        """재생성 버튼 클릭 - 현재 인덱스 재생성"""
+        """재생성 버튼 클릭 - 현재 보고 있는 인덱스 재생성"""
         if not self.confirmed_prompts or not self.selected_direction:
             return
-        # 현재 표시 중인 이미지의 인덱스 찾기
-        current_index = len(self.generated_images) - 1
+
+        # 🆕 현재 보고 있는 인덱스 사용
+        current_index = self.current_viewing_index
+
+        # 유효성 검사
         if current_index < 0:
-            current_index = 0
+            print("⚠️ 재생성 불가: 그리드가 선택되었거나 유효하지 않은 인덱스입니다.")
+            # 툴팁 등으로 사용자에게 알림을 주면 더 좋음
+            return
+
+        # 인덱스 범위 확인
+        if current_index >= len(self.confirmed_prompts):
+            print(f"⚠️ 재생성 불가: 인덱스 범위 초과 ({current_index})")
+            return
+
         print(f"🔄 Regenerating page {current_index}...")
         # 해당 인덱스의 이미지 교체
         self._start_single_generation(current_index, is_regenerate=True)
@@ -733,6 +746,17 @@ class TurboEventSequenceTab(QWidget):
         """히스토리에서 이미지 선택"""
         self.image_viewer.set_image(image)
 
+        # 🆕 현재 보고 있는 인덱스 업데이트 (히스토리 인덱스 -> 원본 인덱스)
+        # 히스토리 0번은 그리드 -> -1 (재생성 불가)
+        # 히스토리 1번은 첫번째 이미지(인덱스 0) -> 0
+        self.current_viewing_index = index - 1
+
+        # 재생성 버튼 툴팁 업데이트
+        if self.current_viewing_index >= 0:
+            self.regenerate_btn.setToolTip(f"현재 선택된 이미지 (#{self.current_viewing_index}) 재생성")
+        else:
+            self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
+
     def _on_favorite_saved(self, parent_id: int):
         """Favorite 저장 완료"""
         print(f"💖 Favorite saved for parent {parent_id}")
@@ -740,11 +764,11 @@ class TurboEventSequenceTab(QWidget):
         self.search_widget.refresh_favorites()
 
     def _on_grid_auto_saved(self, save_path: str):
-        """??? ?? ?? ?? (history_panel? ?? ??)
+        """그리드 자동 저장 완료 (HistoryPanel에서 호출)
 
-        Note: ?? ??? ??? ?? ?? ?? ? ?????.
+        Note: 연속 생성 모드일 경우 다음 생성 카운트다운을 시작합니다.
         """
-        print(f"?? Grid auto saved (history_panel): {save_path}")
+        print(f"💾 Grid auto saved (history_panel): {save_path}")
 
         if self._waiting_continuous_after_grid_save:
             self._waiting_continuous_after_grid_save = False
@@ -755,9 +779,9 @@ class TurboEventSequenceTab(QWidget):
     def _on_continuous_generation_requested(self, parent_id: int):
         """연속 생성 요청 - 자동으로 전체 시퀀스 생성 시작"""
         print(f"🔄 Continuous generation requested for parent {parent_id}")
-        # ???? ??? ?? ??
+        # 현재 시퀀스 데이터 확정
         if not self.sequence_tab_container.confirm_current_sequence():
-            print("?? ??? ?? ??: ????? ????")
+            print("❌ 시퀀스 확정 실패: 데이터가 유효하지 않음")
             return
         # 연속 생성 시 그리드 자동 저장 강제 활성화
         if not self.history_panel.auto_save_enabled:
@@ -925,6 +949,9 @@ class TurboEventSequenceTab(QWidget):
         self.image_viewer.set_image(image)
         self.history_panel.add_image(index, image)
 
+        # 🆕 현재 보고 있는 인덱스 업데이트 (방금 생성된 이미지 보기)
+        self.current_viewing_index = index
+
         # 🆕 그리드 이미지 업데이트
         self._update_grid_image()
 
@@ -964,6 +991,9 @@ class TurboEventSequenceTab(QWidget):
         self.image_viewer.set_image(image)
         # 실제 인덱스에 맞춰 히스토리 갱신 (이어 생성 시 기존 슬롯 유지)
         self.history_panel.add_image(actual_index, image)
+
+        # 🆕 현재 보고 있는 인덱스 업데이트 (방금 생성된 이미지 보기)
+        self.current_viewing_index = actual_index
 
         # 🆕 현재 생성 인덱스 업데이트 (다음 Worker 인덱스로)
         next_worker_index = worker_index + 1

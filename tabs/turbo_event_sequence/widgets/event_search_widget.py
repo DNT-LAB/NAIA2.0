@@ -22,12 +22,7 @@ import ssl
 
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-
-# .experimental 경로 추가
-_experimental_path = os.path.join(
-    os.path.dirname(__file__), '..', '..', '..', '.experimental'
-)
-sys.path.insert(0, _experimental_path)
+from ..event_search_utils import EventSearcher
 
 # SSL 컨텍스트 설정
 SSL_CONTEXT = ssl.create_default_context()
@@ -140,7 +135,6 @@ class DatasetLoaderThread(QThread):
 
     def run(self):
         try:
-            from event_search_utils import EventSearcher
             if self.parquet_path and os.path.exists(self.parquet_path):
                 searcher = EventSearcher(self.parquet_path)
                 self.loaded.emit(searcher)

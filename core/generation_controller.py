@@ -240,6 +240,7 @@ class GenerationController:
         self.generation_thread = None
         self.generation_worker = None
         self.is_generating = False
+        self.current_generation_params = None  # 🆕 현재 생성 중인 파라미터 (에러 처리용)
         # arbitration flags between queue and auto-generation
         self.queue_hold_auto_gen = False
         self.auto_retry_pending = False
@@ -619,6 +620,7 @@ class GenerationController:
         self.generation_thread.finished.connect(self._on_thread_finished)
         
         # 파라미터 설정 및 스레드 시작
+        self.current_generation_params = params  # 🆕 현재 생성 파라미터 저장
         self.generation_worker.set_generation_params(params, source_row)
         self.generation_thread.start()
     
@@ -641,6 +643,8 @@ class GenerationController:
         """생성 완료 시 호출되는 슬롯"""
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
+        # 🆕 현재 생성 파라미터 정리
+        self.current_generation_params = None
 
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         self.context.main_window.update_ui_with_result(result)
@@ -665,6 +669,21 @@ class GenerationController:
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
+
+        # 🆕 Turbo Sequence 요청인 경우 전용 에러 이벤트 발행
+        if self.current_generation_params:
+            is_turbo_sequence = self.current_generation_params.get("turbo_sequence_request", False)
+            if is_turbo_sequence:
+                turbo_index = self.current_generation_params.get("turbo_sequence_index", 0)
+                print(f"🚀 Turbo Sequence 에러 감지 - 전용 에러 이벤트 발행 (index: {turbo_index})")
+                self.context.publish("generation_error", {
+                    "message": error_message,
+                    "turbo_sequence_request": True,
+                    "turbo_sequence_index": turbo_index
+                })
+                # Turbo Sequence 요청은 자동 재시도 없이 종료
+                self.current_generation_params = None
+                return
 
         # 🆕 자동 생성 모드에서의 재시도 로직
         auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")

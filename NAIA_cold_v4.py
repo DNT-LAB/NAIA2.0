@@ -649,8 +649,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 131"
-        self.setWindowTitle(self.base_title + " - 260113")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 133"
+        self.setWindowTitle(self.base_title + " - 260114")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1858,8 +1858,8 @@ class ModernMainWindow(QMainWindow):
             self.generation_checkboxes[cb_text] = cb
             # 터보 옵션 체크박스 이벤트 연결
             if cb_text == "터보 옵션":
-                cb.setEnabled(False)  # 비활성화 -> TODO
-                # cb.clicked.connect(self.on_turbo_option_changed)
+                cb.setEnabled(True)  # 활성화됨
+                cb.clicked.connect(self.on_turbo_option_changed)
 
         # 오른쪽 여백을 위한 stretch (제거하지 않음)
         gen_checkbox_layout.addStretch()
@@ -1869,23 +1869,81 @@ class ModernMainWindow(QMainWindow):
         
         return container
     
-    # def on_turbo_option_changed(self, checked):
-    #     """터보 옵션 체크박스 상태 변경 시 호출"""
-    #     if checked:
-    #         # TurboPresetWindow 열기
-    #         #from ui.turbo_preset_window import TurboPresetWindow
-    #         if not hasattr(self, 'turbo_window') or not self.turbo_window:
-    #             self.turbo_window = TurboPresetWindow(self.app_context, self)
-    #             self.turbo_window.preset_applied.connect(self.on_turbo_preset_applied)
-    #             # 독립 창으로 표시
-    #             self.turbo_window.show()
-    #             self.turbo_window.raise_()  # 창을 맨 앞으로
-    #             self.turbo_window.activateWindow()  # 창 활성화
-    #     else:
-    #         # TurboPresetWindow 닫기
-    #         if hasattr(self, 'turbo_window') and self.turbo_window:
-    #             self.turbo_window.close()
-    #             self.turbo_window = None
+    def on_turbo_option_changed(self, checked):
+        """터보 옵션 체크박스 상태 변경 시 호출"""
+        if checked:
+            # 체크박스 자동 해제
+            self.generation_checkboxes["터보 옵션"].setChecked(False)
+
+            # 터보 모드 선택 다이얼로그 표시
+            self._show_turbo_mode_dialog()
+
+    def _show_turbo_mode_dialog(self):
+        """터보 모드 선택 다이얼로그 표시"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("🚀 터보 모드 선택")
+        dialog.setFixedSize(350, 200)
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 타이틀
+        title = QLabel("터보 모드를 선택하세요")
+        title.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: bold;
+            color: {DARK_COLORS['text_primary']};
+        """)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # 설명
+        desc = QLabel("연속 이미지를 빠르게 생성할 수 있는 모드입니다.")
+        desc.setStyleSheet(f"""
+            font-size: 12px;
+            color: {DARK_COLORS['text_secondary']};
+        """)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        layout.addStretch()
+
+        # 연속 이미지 생성 버튼
+        inpaint_btn = QPushButton("🎬 연속 이미지 생성 (Inpaint)")
+        inpaint_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        inpaint_btn.setFixedHeight(40)
+        inpaint_btn.clicked.connect(lambda: self._on_turbo_mode_selected(dialog, 'inpaint'))
+        layout.addWidget(inpaint_btn)
+
+        # 취소 버튼
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        cancel_btn.clicked.connect(dialog.reject)
+        layout.addWidget(cancel_btn)
+
+        dialog.exec()
+
+    def _on_turbo_mode_selected(self, dialog, mode: str):
+        """터보 모드 선택됨"""
+        dialog.accept()
+
+        if mode == 'inpaint':
+            # TurboEventSequenceTabModule 동적 탭 생성
+            if self.image_window and hasattr(self.image_window, 'tab_controller'):
+                self.image_window.tab_controller.add_tab_by_name(
+                    'TurboEventSequenceTabModule',
+                    main_window=self
+                )
+                self.status_bar.showMessage("🚀 Turbo Sequence 탭이 생성되었습니다.")
     
     def on_turbo_preset_applied(self, preset):
         """터보 프리셋이 적용되었을 때 호출"""
@@ -2521,6 +2579,18 @@ class ModernMainWindow(QMainWindow):
                         self.app_context.publish("generation_completed_for_studio", {
                             "image": image_object,
                             "frame_index": studio_frame_index
+                        })
+
+                # Turbo Sequence 요청인 경우 별도 이벤트 발행
+                is_turbo_sequence_request = generation_params.get("turbo_sequence_request", False)
+                turbo_sequence_index = generation_params.get("turbo_sequence_index", 0)
+                if is_turbo_sequence_request:
+                    print(f"🚀 Turbo Sequence 요청 감지 - 전용 이벤트 발행 (index: {turbo_sequence_index})")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed", {
+                            "image": image_object,
+                            "turbo_sequence_request": True,
+                            "turbo_sequence_index": turbo_sequence_index
                         })
 
                 # Main Window → Assets 자동 전파 (추후 제거 가능)

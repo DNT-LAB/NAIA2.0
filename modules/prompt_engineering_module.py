@@ -626,6 +626,303 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         return context
 
+    def preprocess_prompt_turbo(self, prompt: str) -> str:
+        # 메인UI의 전역 데이터 파이프라인에 접근
+        filter_manager = None
+        if hasattr(self, 'context') and self.context:
+            filter_manager = getattr(self.context, 'filter_data_manager', None)
+
+        # 메인 태그 파싱
+        main_tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
+        removed_tags = []
+
+        options = self.get_parameters()
+        checkbox_options = options["preprocessing_options"]
+
+        # 3. Auto Hide 처리
+        auto_hide = options["auto_hide"]
+
+        # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
+        protected_keywords = []
+        for item in auto_hide:
+            if item.startswith('~'):
+                protected_keywords.append(item[1:].strip())
+
+        # ~ 로 시작하는 아이템 제거
+        auto_hide = [item for item in auto_hide if not item.startswith('~')]
+
+        # 태그 변환 맵
+        original_tag_conversion_map = {
+            'v': 'peace sign', 'double v': 'double peace', '|_|': 'bar eyes',
+            '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
+            'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
+        }
+        tag_conversion_map = {v: k for k, v in original_tag_conversion_map.items()}
+
+        # auto_hide에 있는 항목이 reversed map의 key와 매칭되면, 해당 value도 추가
+        additional_auto_hide = []
+        for item in auto_hide:
+            if item in tag_conversion_map:
+                additional_auto_hide.append(tag_conversion_map[item])
+        auto_hide = list(set(auto_hide + additional_auto_hide))
+
+        # 직접 매칭되는 키워드 제거
+        temp_hide_prompt = []
+        for keyword in main_tags:
+            if keyword in auto_hide:
+                is_protected = any(protected in keyword or keyword == protected
+                                   for protected in protected_keywords)
+                if not is_protected:
+                    temp_hide_prompt.append(keyword)
+
+        for keyword in temp_hide_prompt:
+            main_tags.remove(keyword)
+            removed_tags.append(keyword)
+
+        # 패턴 매칭 처리
+        to_remove = []
+        for item in auto_hide:
+            modified_item = item
+            if item.startswith("__") and item.endswith("__"):
+                modified_item = modified_item.replace("_", "")
+                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
+            elif item.startswith("_") and item.endswith("_"):
+                modified_item = modified_item.replace("_", " ")
+                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
+            elif item.startswith("_"):
+                modified_item = modified_item.replace("_", " ", 1)
+                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
+            elif item.endswith("_"):
+                modified_item = " " + modified_item.rstrip("_") + " "
+                to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
+
+        # 보호된 키워드를 to_remove에서 제외
+        to_remove = list(set(to_remove))
+        if protected_keywords:
+            protected_to_keep = []
+            for protected in protected_keywords:
+                for keyword in to_remove[:]:
+                    if protected in keyword or keyword == protected:
+                        protected_to_keep.append(keyword)
+            for protected_item in protected_to_keep:
+                if protected_item in to_remove:
+                    to_remove.remove(protected_item)
+
+        # 조건에 맞는 키워드를 main_tags에서 제거
+        for keyword in to_remove:
+            if keyword in main_tags:
+                main_tags.remove(keyword)
+                removed_tags.append(keyword)
+
+        # 4. 추가 전처리 옵션 (filter_manager가 있을 때만)
+        if filter_manager:
+            # "remove_character_features"
+            if checkbox_options.get("remove_character_features"):
+                characteristics = filter_manager.characteristic_list
+                temp = [keyword for keyword in main_tags if keyword in characteristics]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_clothes"
+            if checkbox_options.get("remove_clothes"):
+                clothes = filter_manager.clothes_list
+                temp = [keyword for keyword in main_tags if keyword in clothes]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_color"
+            if checkbox_options.get("remove_color"):
+                colors = filter_manager.color_list
+                temp = [keyword for keyword in main_tags
+                        if any(color in keyword for color in colors)]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_location_and_background_color"
+            if checkbox_options.get("remove_location_and_background_color"):
+                locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
+                temp = [keyword for keyword in main_tags if keyword in locations]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+        # 최종 프롬프트 조합
+        return ", ".join(main_tags)
+
+
+    def preprocess_prompt(self, prompt: str, source_row: Optional[Dict[str, Any]] = None) -> str:
+        """
+        문자열을 받아서 현재 UI 설정에 따른 전처리만 수행하고 결과 문자열을 반환합니다.
+
+        Args:
+            prompt: 전처리할 프롬프트 문자열 (콤마로 구분된 태그들)
+            source_row: 원본 데이터 (artist, copyright, character 등).
+                       None이면 해당 태그 추가 로직은 건너뜀
+
+        Returns:
+            전처리된 프롬프트 문자열
+
+        Example:
+            >>> module = PromptEngineeringModule()
+            >>> result = module.preprocess_prompt("1girl, blue hair, school uniform")
+            >>> print(result)  # 현재 설정에 따라 필터링된 결과
+        """
+        if source_row is None:
+            source_row = {}
+
+        options = self.get_parameters()
+
+        # 메인UI의 전역 데이터 파이프라인에 접근
+        filter_manager = None
+        if hasattr(self, 'context') and self.context:
+            filter_manager = getattr(self.context, 'filter_data_manager', None)
+
+        # 1. 선행/후행 프롬프트
+        prefix_tags = options["pre_prompt"]
+        postfix_tags = options["post_prompt"]
+
+        # 메인 태그 파싱
+        main_tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
+        removed_tags = []
+
+        # 2. 자동 태그 제거 옵션 처리
+        checkbox_options = options["preprocessing_options"]
+
+        # "remove_work_title" - 제거 옵션이 꺼져있으면 copyright 추가
+        if not checkbox_options.get("remove_work_title"):
+            copyright_val = source_row.get("copyright")
+            if copyright_val:
+                prefix_tags = [copyright_val] + prefix_tags
+
+        # "remove_author" - 제거 옵션이 꺼져있으면 artist 추가
+        if not checkbox_options.get("remove_author"):
+            artist = source_row.get("artist")
+            if artist:
+                prefix_tags = [artist] + prefix_tags
+
+        # "remove_character_name" - 제거 옵션이 꺼져있으면 character 추가
+        if not checkbox_options.get("remove_character_name"):
+            character = source_row.get("character")
+            if character:
+                prefix_tags = [character] + prefix_tags
+
+        # 3. Auto Hide 처리
+        auto_hide = options["auto_hide"]
+
+        # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
+        protected_keywords = []
+        for item in auto_hide:
+            if item.startswith('~'):
+                protected_keywords.append(item[1:].strip())
+
+        # ~ 로 시작하는 아이템 제거
+        auto_hide = [item for item in auto_hide if not item.startswith('~')]
+
+        # 태그 변환 맵
+        original_tag_conversion_map = {
+            'v': 'peace sign', 'double v': 'double peace', '|_|': 'bar eyes',
+            '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
+            'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
+        }
+        tag_conversion_map = {v: k for k, v in original_tag_conversion_map.items()}
+
+        # auto_hide에 있는 항목이 reversed map의 key와 매칭되면, 해당 value도 추가
+        additional_auto_hide = []
+        for item in auto_hide:
+            if item in tag_conversion_map:
+                additional_auto_hide.append(tag_conversion_map[item])
+        auto_hide = list(set(auto_hide + additional_auto_hide))
+
+        # 직접 매칭되는 키워드 제거
+        temp_hide_prompt = []
+        for keyword in main_tags:
+            if keyword in auto_hide:
+                is_protected = any(protected in keyword or keyword == protected
+                                   for protected in protected_keywords)
+                if not is_protected:
+                    temp_hide_prompt.append(keyword)
+
+        for keyword in temp_hide_prompt:
+            main_tags.remove(keyword)
+            removed_tags.append(keyword)
+
+        # 패턴 매칭 처리
+        to_remove = []
+        for item in auto_hide:
+            modified_item = item
+            if item.startswith("__") and item.endswith("__"):
+                modified_item = modified_item.replace("_", "")
+                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
+            elif item.startswith("_") and item.endswith("_"):
+                modified_item = modified_item.replace("_", " ")
+                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
+            elif item.startswith("_"):
+                modified_item = modified_item.replace("_", " ", 1)
+                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
+            elif item.endswith("_"):
+                modified_item = " " + modified_item.rstrip("_") + " "
+                to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
+
+        # 보호된 키워드를 to_remove에서 제외
+        to_remove = list(set(to_remove))
+        if protected_keywords:
+            protected_to_keep = []
+            for protected in protected_keywords:
+                for keyword in to_remove[:]:
+                    if protected in keyword or keyword == protected:
+                        protected_to_keep.append(keyword)
+            for protected_item in protected_to_keep:
+                if protected_item in to_remove:
+                    to_remove.remove(protected_item)
+
+        # 조건에 맞는 키워드를 main_tags에서 제거
+        for keyword in to_remove:
+            if keyword in main_tags:
+                main_tags.remove(keyword)
+                removed_tags.append(keyword)
+
+        # 4. 추가 전처리 옵션 (filter_manager가 있을 때만)
+        if filter_manager:
+            # "remove_character_features"
+            if checkbox_options.get("remove_character_features"):
+                characteristics = filter_manager.characteristic_list
+                temp = [keyword for keyword in main_tags if keyword in characteristics]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_clothes"
+            if checkbox_options.get("remove_clothes"):
+                clothes = filter_manager.clothes_list
+                temp = [keyword for keyword in main_tags if keyword in clothes]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_color"
+            if checkbox_options.get("remove_color"):
+                colors = filter_manager.color_list
+                temp = [keyword for keyword in main_tags
+                        if any(color in keyword for color in colors)]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+            # "remove_location_and_background_color"
+            if checkbox_options.get("remove_location_and_background_color"):
+                locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
+                temp = [keyword for keyword in main_tags if keyword in locations]
+                for keyword in temp:
+                    main_tags.remove(keyword)
+                    removed_tags.append(keyword)
+
+        # 최종 프롬프트 조합
+        final_tags = prefix_tags + main_tags + postfix_tags
+        return ", ".join(final_tags)
+
     def get_parameters(self) -> Dict[str, Any]:
         """프롬프트 엔지니어링 모듈의 현재 파라미터를 수집하여 반환합니다."""
         # 각 체크박스의 상태를 수집

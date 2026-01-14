@@ -11,6 +11,37 @@ import sys
 import re
 import json
 
+
+class SilentWebEnginePage(QWebEnginePage):
+    """JavaScript 콘솔 메시지를 필터링하는 커스텀 페이지 클래스"""
+
+    # 무시할 메시지 패턴들
+    IGNORE_PATTERNS = [
+        'Permissions-Policy header',
+        'Failed to create WebGPU',
+        'font-size:0;color:transparent',
+        'cloudflare',
+        'Content Security Policy',
+        'script-src',
+        'unsafe-eval',
+        'unsafe-inline',
+        'Refused to load',
+        'Refused to execute',
+        'Refused to evaluate',
+        '[Report Only]',
+        'preloaded using link preload but not used',
+    ]
+
+    def javaScriptConsoleMessage(self, level, message, line, source):
+        """JavaScript 콘솔 메시지 필터링"""
+        # 무시할 패턴에 해당하면 출력하지 않음
+        if any(pattern in message for pattern in self.IGNORE_PATTERNS):
+            return
+
+        # 나머지 메시지는 기본 동작 (출력)
+        super().javaScriptConsoleMessage(level, message, line, source)
+
+
 class BrowserTabModule(BaseTabModule):
     """'Danbooru' 브라우저 탭을 위한 모듈"""
     generate_with_image_requested = pyqtSignal(dict)
@@ -146,8 +177,8 @@ class BrowserTab(QWidget):
                 QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
             )
             
-            # ✅ 페이지를 미리 생성해서 인스턴스 변수로 저장
-            self.page = QWebEnginePage(self.profile)
+            # ✅ 페이지를 미리 생성해서 인스턴스 변수로 저장 (JS 콘솔 메시지 필터링 적용)
+            self.page = SilentWebEnginePage(self.profile)
             
             # 기본 웹 설정
             settings = self.page.settings()
@@ -457,5 +488,11 @@ class ErrorFilter:
 
 def enable_error_filtering():
     """에러 필터링 활성화"""
+    # 이미 필터링이 적용되어 있으면 스킵
+    if isinstance(sys.stderr, ErrorFilter):
+        return
     sys.stderr = ErrorFilter()
-    print("브라우저 에러 필터링 활성화 (CSP 포함)")
+
+
+# 모듈 로드 시 자동으로 에러 필터링 활성화
+enable_error_filtering()

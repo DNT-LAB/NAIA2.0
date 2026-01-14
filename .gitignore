@@ -171,3 +171,7 @@ data/.ezmode/
 # Experimental folder
 .experimental/
 /data/quick_search
+data/NAIA_event_dataset_1girl.parquet
+data/NAIA_event_dataset_personal.json
+data/NAIA_event_dataset_personal.parquet
+tabs/turbo_event_sequence/NAIA_event_dataset_v4.parquet

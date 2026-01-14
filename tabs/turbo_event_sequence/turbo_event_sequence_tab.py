@@ -277,6 +277,12 @@ class TurboEventSequenceTab(QWidget):
         self.history_panel.skip_toggled.connect(self._on_history_skip_toggled)
         # 🆕 시퀀스 완료 시 그리드 저장 시그널
         self.history_panel.grid_auto_saved.connect(self._on_grid_auto_saved)
+        # 🆕 순서 변경 시 재생성 버튼 비활성화
+        self.history_panel.order_changed.connect(self._on_history_order_changed)
+        # 🆕 클리어 후 시퀀스 재확정 요청 연결
+        self.history_panel.clear_and_reconfirm.connect(self._on_clear_and_reconfirm)
+        # 🆕 순서 변경 후 그리드 업데이트 요청 연결
+        self.history_panel.request_grid_update.connect(self._on_request_grid_update)
         layout.addWidget(self.history_panel, stretch=1)
 
         return panel
@@ -597,6 +603,9 @@ class TurboEventSequenceTab(QWidget):
         # 히스토리 클리어
         self.history_panel.clear()
         self.image_viewer.clear()
+        # 🆕 재생성 버튼 재활성화 (새 시퀀스이므로 순서 변경 상태 초기화)
+        self.regenerate_btn.setEnabled(True)
+        self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
         # 🆕 자동으로 가로 해상도 선택
         self._on_direction_selected('horizontal')
 
@@ -788,6 +797,45 @@ class TurboEventSequenceTab(QWidget):
             self.history_panel.auto_save_checkbox.setChecked(True)
         # 자동으로 전체 시퀀스 생성 시작
         self._on_full_sequence_clicked()
+
+    def _on_history_order_changed(self):
+        """히스토리 패널에서 위젯 순서 변경 시 - 재생성 버튼 비활성화
+
+        순서가 변경되면 원본 프롬프트 인덱스와 히스토리 인덱스가 불일치하므로
+        재생성 기능을 비활성화합니다.
+        """
+        print("⚠️ 히스토리 순서 변경됨 - 재생성 버튼 비활성화")
+        self.regenerate_btn.setEnabled(False)
+        self.regenerate_btn.setToolTip("순서가 변경되어 재생성을 사용할 수 없습니다")
+
+    def _on_clear_and_reconfirm(self):
+        """클리어 후 시퀀스 재확정 - 현재 이벤트의 시퀀스를 다시 확정"""
+        print("🔄 클리어 후 시퀀스 재확정 요청")
+
+        # 현재 시퀀스가 있는 경우에만 재확정
+        if self.current_sequence is not None:
+            # 상태 초기화
+            self.generated_images = []
+            self.current_generation_index = 0
+            self.current_viewing_index = -1
+            self.image_viewer.clear()
+
+            # 시퀀스 재확정 (sequence_tab_container의 confirm 호출)
+            if self.sequence_tab_container.confirm_current_sequence():
+                print("✅ 시퀀스 재확정 완료")
+            else:
+                print("⚠️ 시퀀스 재확정 실패 (데이터 없음)")
+        else:
+            print("⚠️ 재확정할 시퀀스가 없습니다")
+
+    def _on_request_grid_update(self):
+        """순서 변경 후 그리드 업데이트 요청"""
+        print("🖼️ 순서 변경 후 그리드 업데이트 요청")
+        if len(self.generated_images) > 0:
+            grid_image = self._update_grid_image()
+            if grid_image:
+                # 그리드 이미지를 이미지 뷰어에도 표시
+                self.image_viewer.set_image(grid_image)
 
     def _on_history_skip_toggled(self, history_index: int, is_skipped: bool):
         """히스토리 패널에서 Skip 토글 - sequence_edit_widget과 동기화

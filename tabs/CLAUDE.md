@@ -98,6 +98,7 @@ tabs/
 | **png_info_tab.py** | 47K | 이미지 메타데이터 추출 | core | PNG/JPEG/WebP 정보 파싱, Stealth PNG 지원 |
 | **setting_tabs.py** | 28K | 애플리케이션 설정 | core | 자동완성, 저장 경로, 타임스탬프 폴더 토글, 이미지 카운터, 파일명 형식, 분류 규칙, 🆕 2차 분류 시스템, 모듈/탭 가시성 (시작 시 자동 적용), UI 스케일 |
 | **studio_tab.py** | 대형 | 🆕 다중 프레임 생성 | core | 다중 프레임 그리드, 순차 생성, 프리셋 저장/로드 (부분 로드 지원), 그리드 내보내기 (클립보드 복사), 시드 고정 (레이블에 값 표시), 스택 네비게이션, 일괄 편집, 🆕 시퀀스 텍스트 생성 |
+| **turbo_event_sequence/** | 대형 | 🆕 터보 이벤트 시퀀스 생성 | core | Parent/Child 이벤트 검색, Sliding Window Inpaint, 연속/재생성 지원, 프롬프트 엔지니어링, Skip 기능, Split Screen 개선 |
 | **assets_tab.py** | 35K | 배경 제거 등 도구 | closable | rembg 통합, 패키지 설치, 이미지 처리 |
 | **web_view.py** | 19K | Danbooru 브라우저 | closable | 태그 추출, WebEngine, 세션 저장 |
 | **img2img_tab.py** | 2.8K | Img2Img/Inpaint | closable | 스켈레톤 구현 (TODO) |
@@ -982,6 +983,7 @@ if hasattr(self, 'secondary_classification_label'):
 - **[interfaces/CLAUDE.md](../interfaces/CLAUDE.md)**: BaseTabModule 계약
 - **[modules/CLAUDE.md](../modules/CLAUDE.md)**: 모듈 개발 (유사 패턴)
 - **[studio/CLAUDE.md](studio/CLAUDE.md)**: 🆕 Studio Tab 전용 가이드 (다중 프레임, 프리셋, 내보내기)
+- **[turbo_event_sequence/CLAUDE.md](turbo_event_sequence/CLAUDE.md)**: 🆕 Turbo Event Sequence 탭 가이드 (이벤트 시퀀스, Sliding Window Inpaint)
 
 ### 주요 의존성
 
@@ -1015,6 +1017,10 @@ if hasattr(self, 'secondary_classification_label'):
 | **🆕 큐 추가 기능** | `tabs/image_window.py` | 591-663 |
 | **🆕 아티스트 갤러리 윈도우** | `tabs/artist_thumb/gallery_window.py` | 전체 |
 | **🆕 아티스트 썸네일 프레임** | `tabs/artist_thumb/artist_frame.py` | 전체 |
+| **🆕 이벤트 시퀀스 탭** | `tabs/turbo_event_sequence/turbo_event_sequence_tab.py` | 전체 |
+| **🆕 Sliding Window Inpaint** | `tabs/turbo_event_sequence/workers/sequence_generation_worker.py` | 전체 |
+| **🆕 이벤트 검색 유틸** | `tabs/turbo_event_sequence/event_search_utils.py` | 전체 |
+| **🆕 프롬프트 엔지니어링** | `tabs/turbo_event_sequence/widgets/sequence_edit_widget.py` | 전체 |
 
 ### 유용한 PyQt6 클래스
 
@@ -1183,10 +1189,18 @@ console.log("Debug message");
 
 ---
 
-*문서 버전: 1.9*
-*최종 업데이트: 2026-01-10*
+*문서 버전: 2.0*
+*최종 업데이트: 2026-01-14*
 *담당 영역: tabs/ 디렉터리*
 *변경사항:*
+- *🆕 Turbo Event Sequence 탭 문서화 추가 (tabs/turbo_event_sequence/)*
+  - *Parent/Child 이벤트 검색 시스템 (EventSearcher 클래스)*
+  - *Sliding Window Inpaint 기반 시퀀스 이미지 생성*
+  - *프롬프트 엔지니어링 (quality tags 자동 삽입)*
+  - *Skip 기능 (Worker 인덱스 → Original 인덱스 매핑)*
+  - *연속 생성 및 재생성 지원*
+  - *Split Screen 개선 (경계선 삽입)*
+  - *turbo_event_sequence/CLAUDE.md 전용 가이드 추가*
 - *🆕 Artist Thumb Gallery Window 기능 추가 (tabs/artist_thumb/ 하위 디렉터리)*
   - *`gallery_window.py` - 4x2 그리드 갤러리 윈도우*
   - *`artist_frame.py` - 개별 아티스트 썸네일 프레임*

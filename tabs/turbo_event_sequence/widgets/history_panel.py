@@ -7,10 +7,10 @@ History Panel Widget
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame,
     QLabel, QPushButton, QScrollArea, QFileDialog,
-    QMessageBox, QCheckBox
+    QMessageBox, QCheckBox, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt6.QtGui import QPixmap, QImage, QDrag
 
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -28,6 +28,8 @@ class ThumbnailWidget(QFrame):
 
     clicked = pyqtSignal(int, object)  # index, image
     skip_toggled = pyqtSignal(int, bool)  # index, is_skipped
+    drag_started = pyqtSignal(int)  # index - 드래그 시작 시그널
+    dropped = pyqtSignal(int, int)  # from_index, to_index - 드롭 시그널
 
     def __init__(self, index: int, image, parent=None, is_placeholder: bool = False):
         super().__init__(parent)
@@ -36,6 +38,11 @@ class ThumbnailWidget(QFrame):
         self._selected = False
         self._is_placeholder = is_placeholder  # 플레이스홀더 여부
         self._is_skipped = False  # Skip 상태
+        self._drag_start_pos = None  # 드래그 시작 위치
+        self._is_dragging = False  # 드래그 중 여부
+
+        # 드래그 앤 드롭 활성화
+        self.setAcceptDrops(True)
 
         self._init_ui()
 
@@ -200,10 +207,86 @@ class ThumbnailWidget(QFrame):
         self._update_style()
 
     def mousePressEvent(self, event):
-        """클릭 이벤트"""
+        """클릭 이벤트 (드래그 시작 감지)"""
         if event.button() == Qt.MouseButton.LeftButton:
+            # 드래그 시작 위치 저장 (플레이스홀더가 아니고 index > 0인 경우만)
+            if not self._is_placeholder and self.index > 0 and self.image is not None:
+                self._drag_start_pos = event.pos()
             self.clicked.emit(self.index, self.image)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """마우스 이동 이벤트 (드래그 감지)"""
+        if self._drag_start_pos is None:
+            return
+
+        # 드래그 시작 조건 확인 (최소 이동 거리)
+        if (event.pos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
+            return
+
+        # 드래그 시작
+        self._is_dragging = True
+        self.drag_started.emit(self.index)
+
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        mime_data.setText(str(self.index))  # 인덱스를 텍스트로 저장
+        drag.setMimeData(mime_data)
+
+        # 드래그 중인 썸네일 미리보기 생성
+        if self.thumb_label.pixmap():
+            drag.setPixmap(self.thumb_label.pixmap().scaled(
+                get_scaled_size(80), get_scaled_size(80),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            ))
+            drag.setHotSpot(QPoint(get_scaled_size(40), get_scaled_size(40)))
+
+        # 드래그 실행
+        drag.exec(Qt.DropAction.MoveAction)
+
+        # 드래그 종료
+        self._drag_start_pos = None
+        self._is_dragging = False
+
+    def mouseReleaseEvent(self, event):
+        """마우스 릴리즈 이벤트"""
+        self._drag_start_pos = None
+        self._is_dragging = False
+        super().mouseReleaseEvent(event)
+
+    def dragEnterEvent(self, event):
+        """드래그 진입 이벤트"""
+        if event.mimeData().hasText():
+            try:
+                from_index = int(event.mimeData().text())
+                # 자기 자신이 아니고, 인덱스 0(그리드)이 아닌 경우만 허용
+                if from_index != self.index and self.index > 0:
+                    event.acceptProposedAction()
+                    return
+            except ValueError:
+                pass
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        """드래그 이동 이벤트"""
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        """드롭 이벤트"""
+        if event.mimeData().hasText():
+            try:
+                from_index = int(event.mimeData().text())
+                if from_index != self.index and self.index > 0:
+                    self.dropped.emit(from_index, self.index)
+                    event.acceptProposedAction()
+                    return
+            except ValueError:
+                pass
+        event.ignore()
 
 
 class GridThumbnailWidget(QFrame):
@@ -307,6 +390,21 @@ class GridThumbnailWidget(QFrame):
         super().mousePressEvent(event)
 
 
+class DropIndicator(QFrame):
+    """드롭 위치 인디케이터 (흰색 막대)"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(get_scaled_size(4))
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: #FFFFFF;
+                border-radius: {get_scaled_size(2)}px;
+            }}
+        """)
+        self.hide()
+
+
 class HistoryPanel(QWidget):
     """히스토리 패널
 
@@ -319,6 +417,9 @@ class HistoryPanel(QWidget):
     image_selected = pyqtSignal(int, object)  # index, image
     grid_auto_saved = pyqtSignal(str)  # 자동 저장 완료 시 경로 전달
     skip_toggled = pyqtSignal(int, bool)  # 썸네일 Skip 토글 시 (history_index, is_skipped)
+    order_changed = pyqtSignal()  # 위젯 순서 변경 시
+    clear_and_reconfirm = pyqtSignal()  # 클리어 후 시퀀스 재확정 요청
+    request_grid_update = pyqtSignal()  # 🆕 그리드 업데이트 요청 (순서 변경 시)
 
     def __init__(self, app_context=None, parent=None):
         super().__init__(parent)
@@ -328,6 +429,12 @@ class HistoryPanel(QWidget):
         self.selected_index = -1
         self.grid_image = None  # 그리드 이미지 별도 저장
         self.auto_save_enabled = False  # 자동 저장 상태
+
+        # 위치 매핑: visual_index -> original_index
+        # 예: {1: 3, 2: 1, 3: 2} 는 화면상 1번 위치에 원래 3번 이미지가 있음을 의미
+        self._position_mapping = {}  # 위치 매핑 (순서 변경 추적)
+        self._order_changed = False  # 순서 변경 여부 플래그
+        self._dragging_index = None  # 드래그 중인 위젯 인덱스
 
         self._init_ui()
 
@@ -397,6 +504,45 @@ class HistoryPanel(QWidget):
         self.auto_save_checkbox.toggled.connect(self._on_auto_save_toggled)
         header_layout.addWidget(self.auto_save_checkbox)
 
+        # 컴팩트 버튼 스타일
+        compact_button_style = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px {get_scaled_size(8)}px;
+                font-size: {get_scaled_font_size(12) + 6}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QPushButton:disabled {{
+                color: {DARK_COLORS['text_secondary']};
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """
+
+        # 저장 버튼
+        self.save_grid_btn = QPushButton("💾")
+        self.save_grid_btn.setStyleSheet(compact_button_style)
+        self.save_grid_btn.setToolTip("그리드 저장")
+        self.save_grid_btn.clicked.connect(self._on_save_grid_clicked)
+        self.save_grid_btn.setEnabled(False)
+        header_layout.addWidget(self.save_grid_btn)
+
+        # 클립보드 버튼
+        self.clipboard_btn = QPushButton("📋")
+        self.clipboard_btn.setStyleSheet(compact_button_style)
+        self.clipboard_btn.setToolTip("클립보드에 복사")
+        self.clipboard_btn.clicked.connect(self._on_clipboard_clicked)
+        self.clipboard_btn.setEnabled(False)
+        header_layout.addWidget(self.clipboard_btn)
+
         # 버튼 스타일 (3px 더 큰 폰트)
         button_style = f"""
             QPushButton {{
@@ -463,10 +609,15 @@ class HistoryPanel(QWidget):
 
         self.thumb_container = QWidget()
         self.thumb_container.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
+        self.thumb_container.setAcceptDrops(True)  # 드롭 활성화
         self.thumb_layout = QHBoxLayout(self.thumb_container)
         self.thumb_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.thumb_layout.setContentsMargins(4, 4, 4, 4)
         self.thumb_layout.setSpacing(4)
+
+        # 드롭 인디케이터 (흰색 막대)
+        self.drop_indicator = DropIndicator(self.thumb_container)
+        self.drop_indicator.setFixedHeight(get_scaled_size(120))
 
         # 플레이스홀더
         self.placeholder = QLabel("시퀀스 생성 후 이미지가 여기에 표시됩니다")
@@ -479,7 +630,24 @@ class HistoryPanel(QWidget):
         self.thumb_layout.addWidget(self.placeholder)
 
         scroll.setWidget(self.thumb_container)
+        self.scroll_area = scroll  # 참조 저장
         frame_layout.addWidget(scroll)
+
+        # 🆕 순서 변경 경고 라벨 (하단, 숨김 상태로 시작)
+        self.order_warning_label = QLabel("* 위치 변경 후에는 클리어/새 이벤트 전까지 재생성을 할 수 없습니다.")
+        self.order_warning_label.setStyleSheet(f"""
+            color: #FF9800;
+            font-size: {get_scaled_font_size(11) + 3}px;
+            padding: {get_scaled_size(2)}px {get_scaled_size(4)}px;
+        """)
+        self.order_warning_label.hide()
+        frame_layout.addWidget(self.order_warning_label)
+
+        # 컨테이너 드래그 앤 드롭 이벤트 오버라이드
+        self.thumb_container.dragEnterEvent = self._container_drag_enter
+        self.thumb_container.dragMoveEvent = self._container_drag_move
+        self.thumb_container.dragLeaveEvent = self._container_drag_leave
+        self.thumb_container.dropEvent = self._container_drop
 
         layout.addWidget(frame)
 
@@ -518,10 +686,12 @@ class HistoryPanel(QWidget):
         # 1~count: 개별 이미지 플레이스홀더
         for i in range(1, total_slots):
             placeholder_widget = ThumbnailWidget(i, None, is_placeholder=True)
-            placeholder_widget.clicked.connect(self._on_thumbnail_clicked)
-            placeholder_widget.skip_toggled.connect(self._on_skip_toggled)
+            self._connect_thumbnail_signals(placeholder_widget)
             self.thumbnails[i] = placeholder_widget
             self.thumb_layout.addWidget(placeholder_widget)
+
+        # 순서 변경 플래그 초기화
+        self._order_changed = False
 
         print(f"[HistoryPanel] 플레이스홀더 {total_slots}개 생성 (그리드 + {count}개)")
 
@@ -564,8 +734,7 @@ class HistoryPanel(QWidget):
         else:
             # 새 위젯 생성 및 추가 (플레이스홀더 없이 직접 추가된 경우)
             thumb_widget = ThumbnailWidget(history_index, image)
-            thumb_widget.clicked.connect(self._on_thumbnail_clicked)
-            thumb_widget.skip_toggled.connect(self._on_skip_toggled)
+            self._connect_thumbnail_signals(thumb_widget)
             self.thumbnails[history_index] = thumb_widget
             self.thumb_layout.addWidget(thumb_widget)
             print(f"[HistoryPanel] #{history_index} 새 위젯 생성")
@@ -573,7 +742,7 @@ class HistoryPanel(QWidget):
         # 카운트 업데이트 (그리드 제외, 실제 이미지만)
         valid_count = sum(1 for i, img in enumerate(self.images) if img is not None and i > 0)
         self.count_label.setText(f"{valid_count}개")
-        self.open_grid_btn.setEnabled(valid_count > 0)
+        self._update_grid_buttons_state()
 
     def _replace_thumbnail(self, index: int, image):
         """썸네일 위젯 교체"""
@@ -586,8 +755,7 @@ class HistoryPanel(QWidget):
 
             # 새 위젯 생성
             thumb_widget = ThumbnailWidget(index, image)
-            thumb_widget.clicked.connect(self._on_thumbnail_clicked)
-            thumb_widget.skip_toggled.connect(self._on_skip_toggled)
+            self._connect_thumbnail_signals(thumb_widget)
             self.thumbnails[index] = thumb_widget
 
             # 같은 위치에 삽입
@@ -640,6 +808,9 @@ class HistoryPanel(QWidget):
             self.thumbnails[0] = grid_thumb
             self.thumb_layout.insertWidget(0, grid_thumb)
 
+        # 버튼 상태 업데이트
+        self._update_grid_buttons_state()
+
         # 자동 저장 활성화 시 저장
         if self.auto_save_enabled and grid_image:
             self._auto_save_grid(grid_image)
@@ -654,6 +825,8 @@ class HistoryPanel(QWidget):
         self.thumbnails = []
         self.selected_index = -1
         self.grid_image = None  # 그리드 이미지도 초기화
+        self._order_changed = False  # 순서 변경 플래그 초기화
+        self._dragging_index = None  # 드래그 상태 초기화
 
         # 썸네일 위젯 제거
         while self.thumb_layout.count():
@@ -665,9 +838,19 @@ class HistoryPanel(QWidget):
         self.placeholder.show()
         self.thumb_layout.addWidget(self.placeholder)
 
+        # 🆕 경고 라벨 숨기기
+        self.order_warning_label.hide()
+
         # UI 업데이트
         self.count_label.setText("0개")
-        self.open_grid_btn.setEnabled(False)
+        self._update_grid_buttons_state()
+
+    def _update_grid_buttons_state(self):
+        """그리드 관련 버튼 활성화 상태 업데이트"""
+        has_grid = self.grid_image is not None
+        self.save_grid_btn.setEnabled(has_grid)
+        self.clipboard_btn.setEnabled(has_grid)
+        self.open_grid_btn.setEnabled(has_grid)
 
     def _on_thumbnail_clicked(self, index: int, image):
         """썸네일 클릭"""
@@ -689,27 +872,76 @@ class HistoryPanel(QWidget):
         self.auto_save_enabled = checked
         print(f"🖼️ 그리드 자동 저장: {'활성화' if checked else '비활성화'}")
 
-    def _on_open_grid_clicked(self):
-        """그리드 열기 - PIL image.show() 사용"""
+    def _on_save_grid_clicked(self):
+        """그리드 저장 버튼 클릭 - 기본 경로에 저장"""
         if self.grid_image:
             try:
-                self.grid_image.show()
+                file_path = self._save_grid_to_default_path(self.grid_image)
+                if file_path:
+                    print(f"💾 그리드 저장 완료: {file_path}")
+            except Exception as e:
+                print(f"❌ 그리드 저장 오류: {e}")
+
+    def _on_clipboard_clicked(self):
+        """클립보드 복사 버튼 클릭"""
+        if self.grid_image:
+            try:
+                from PyQt6.QtWidgets import QApplication
+                from PyQt6.QtGui import QImage
+
+                # PIL Image → bytes → QImage (더 안전한 방식)
+                img = self.grid_image
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                # 이미지 데이터를 바이트로 변환
+                data = img.tobytes('raw', 'RGB')
+                qimage = QImage(data, img.width, img.height, img.width * 3, QImage.Format.Format_RGB888)
+
+                # QImage 복사본 생성 (원본 데이터 참조 문제 방지)
+                qimage_copy = qimage.copy()
+
+                QApplication.clipboard().setImage(qimage_copy)
+                print("📋 그리드가 클립보드에 복사되었습니다")
+            except Exception as e:
+                print(f"❌ 클립보드 복사 오류: {e}")
+                import traceback
+                traceback.print_exc()
+
+    def _on_open_grid_clicked(self):
+        """그리드 열기 - 저장 후 파일 열기"""
+        if self.grid_image:
+            try:
+                # 먼저 저장
+                file_path = self._save_grid_to_default_path(self.grid_image)
+                if file_path:
+                    # 저장된 파일 열기
+                    import subprocess
+                    import sys
+                    if sys.platform == 'win32':
+                        os.startfile(str(file_path))
+                    elif sys.platform == 'darwin':  # macOS
+                        subprocess.call(['open', str(file_path)])
+                    else:  # Linux
+                        subprocess.call(['xdg-open', str(file_path)])
+                    print(f"🖼️ 그리드 열기: {file_path}")
             except Exception as e:
                 print(f"❌ 그리드 열기 오류: {e}")
 
-    def _auto_save_grid(self, grid_image):
-        """그리드 이미지 자동 저장 (WEBP 형식, /grid 폴더)
+    def _save_grid_to_default_path(self, grid_image) -> Path:
+        """그리드 이미지를 기본 경로에 저장
 
         Args:
             grid_image: PIL Image
+
+        Returns:
+            저장된 파일 경로 (Path) 또는 None
         """
         try:
             # 저장 경로 결정
             if self.app_context and hasattr(self.app_context, 'image_crud_controller'):
-                # ImageCrudController의 기본 저장 경로 사용
                 base_dir = self.app_context.image_crud_controller.get_save_directory()
             else:
-                # 폴백: output 폴더
                 base_dir = Path("output")
 
             # /grid 하위 폴더 생성
@@ -723,13 +955,23 @@ class HistoryPanel(QWidget):
 
             # WEBP로 저장
             grid_image.save(str(file_path), format='WEBP', quality=95, method=6)
-            print(f"✅ 그리드 자동 저장: {file_path}")
-
-            # 시그널 발생
-            self.grid_auto_saved.emit(str(file_path))
+            return file_path
 
         except Exception as e:
-            print(f"❌ 그리드 자동 저장 오류: {e}")
+            print(f"❌ 그리드 저장 오류: {e}")
+            return None
+
+    def _auto_save_grid(self, grid_image):
+        """그리드 이미지 자동 저장 (WEBP 형식, /grid 폴더)
+
+        Args:
+            grid_image: PIL Image
+        """
+        file_path = self._save_grid_to_default_path(grid_image)
+        if file_path:
+            print(f"✅ 그리드 자동 저장: {file_path}")
+            # 시그널 발생
+            self.grid_auto_saved.emit(str(file_path))
 
     def _create_grid_image(self, images: list) -> Image.Image:
         """그리드 이미지 생성"""
@@ -764,18 +1006,20 @@ class HistoryPanel(QWidget):
         return grid
 
     def _on_clear_clicked(self):
-        """클리어 버튼 클릭"""
+        """클리어 버튼 클릭 - 클리어 후 시퀀스 재확정 요청"""
         if self.images:
             reply = QMessageBox.question(
                 self,
                 "히스토리 클리어",
-                "모든 생성된 이미지를 삭제하시겠습니까?",
+                "모든 생성된 이미지를 삭제하고 시퀀스를 재확정하시겠습니까?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
 
             if reply == QMessageBox.StandardButton.Yes:
                 self.clear()
+                # 🆕 시퀀스 재확정 요청 시그널 발생
+                self.clear_and_reconfirm.emit()
 
     def get_images(self) -> list:
         """모든 이미지 반환"""
@@ -799,3 +1043,203 @@ class HistoryPanel(QWidget):
                         continue  # Skip된 이미지 제외
                 ordered.append(self.images[i])
         return ordered
+
+    # ===== 드래그 앤 드롭 관련 메서드 =====
+
+    def _container_drag_enter(self, event):
+        """컨테이너 드래그 진입"""
+        if event.mimeData().hasText():
+            try:
+                from_index = int(event.mimeData().text())
+                if from_index > 0:  # 그리드(0번)가 아닌 경우
+                    self._dragging_index = from_index
+                    event.acceptProposedAction()
+                    return
+            except ValueError:
+                pass
+        event.ignore()
+
+    def _container_drag_move(self, event):
+        """컨테이너 드래그 이동 - 드롭 인디케이터 표시"""
+        if event.mimeData().hasText():
+            try:
+                from_index = int(event.mimeData().text())
+                if from_index > 0:
+                    # 드롭 위치 계산
+                    drop_pos = event.position().toPoint()
+                    target_index = self._get_drop_target_index(drop_pos)
+
+                    if target_index is not None and target_index > 0:
+                        self._show_drop_indicator(target_index)
+                    else:
+                        self.drop_indicator.hide()
+
+                    event.acceptProposedAction()
+                    return
+            except ValueError:
+                pass
+        self.drop_indicator.hide()
+        event.ignore()
+
+    def _container_drag_leave(self, event):
+        """컨테이너 드래그 나감"""
+        self.drop_indicator.hide()
+        self._dragging_index = None
+
+    def _container_drop(self, event):
+        """컨테이너 드롭 처리"""
+        self.drop_indicator.hide()
+
+        if event.mimeData().hasText():
+            try:
+                from_index = int(event.mimeData().text())
+                if from_index > 0:
+                    drop_pos = event.position().toPoint()
+                    target_index = self._get_drop_target_index(drop_pos)
+
+                    if target_index is not None and target_index > 0 and from_index != target_index:
+                        self._reorder_widgets(from_index, target_index)
+                        event.acceptProposedAction()
+                        return
+            except ValueError:
+                pass
+        event.ignore()
+
+    def _get_drop_target_index(self, pos: QPoint) -> int:
+        """드롭 위치에 해당하는 타겟 인덱스 계산"""
+        # 썸네일 위젯들의 위치를 기반으로 타겟 인덱스 결정
+        for i, thumb in enumerate(self.thumbnails):
+            if thumb is None or i == 0:  # 그리드(0번) 제외
+                continue
+
+            widget_pos = thumb.pos()
+            widget_width = thumb.width()
+            widget_center = widget_pos.x() + widget_width // 2
+
+            # 마우스 위치가 위젯의 왼쪽 절반에 있으면 해당 위치 앞에 삽입
+            if pos.x() < widget_center:
+                return i
+
+        # 모든 위젯보다 오른쪽에 있으면 마지막 위치
+        return len(self.thumbnails) - 1 if self.thumbnails else 1
+
+    def _show_drop_indicator(self, target_index: int):
+        """드롭 인디케이터 표시"""
+        if target_index <= 0 or target_index >= len(self.thumbnails):
+            self.drop_indicator.hide()
+            return
+
+        target_widget = self.thumbnails[target_index]
+        if target_widget is None:
+            self.drop_indicator.hide()
+            return
+
+        # 타겟 위젯의 왼쪽에 인디케이터 표시
+        indicator_x = target_widget.pos().x() - get_scaled_size(4)
+        indicator_y = target_widget.pos().y()
+
+        self.drop_indicator.move(indicator_x, indicator_y)
+        self.drop_indicator.raise_()
+        self.drop_indicator.show()
+
+    def _reorder_widgets(self, from_index: int, to_index: int):
+        """위젯 순서 변경
+
+        Args:
+            from_index: 이동할 위젯의 현재 인덱스
+            to_index: 이동할 목표 인덱스
+        """
+        if from_index == to_index or from_index <= 0 or to_index <= 0:
+            return
+
+        print(f"🔄 위젯 순서 변경: #{from_index} → #{to_index}")
+
+        # 이동할 위젯
+        widget = self.thumbnails[from_index]
+        if widget is None:
+            return
+
+        # 레이아웃에서 위젯 제거
+        self.thumb_layout.removeWidget(widget)
+
+        # 삽입 위치 계산:
+        # - to_index는 드롭 시점의 "이 위치 앞에 삽입" 의미
+        # - from < to: pop하면 to 이후 인덱스가 1씩 감소하므로 to-1에 삽입
+        # - from > to: pop해도 to에 영향 없으므로 to에 삽입
+        insert_pos = to_index - 1 if from_index < to_index else to_index
+
+        # 레이아웃 삽입
+        self.thumb_layout.insertWidget(insert_pos, widget)
+
+        # 썸네일 리스트 재정렬
+        thumb = self.thumbnails.pop(from_index)
+        self.thumbnails.insert(insert_pos, thumb)
+
+        # 이미지 리스트 재정렬
+        if from_index < len(self.images) and self.images[from_index] is not None:
+            img = self.images.pop(from_index)
+            self.images.insert(insert_pos, img)
+
+        # 인덱스 라벨 업데이트
+        self._update_index_labels()
+
+        # 위치 매핑 업데이트
+        self._update_position_mapping()
+
+        # 순서 변경 플래그 설정
+        self._order_changed = True
+
+        # 🆕 경고 라벨 표시
+        self.order_warning_label.show()
+
+        # 시그널 발생
+        self.order_changed.emit()
+
+        # 🆕 그리드 업데이트 요청
+        self.request_grid_update.emit()
+
+        print(f"✅ 순서 변경 완료. 순서 변경됨: {self._order_changed}")
+
+    def _update_index_labels(self):
+        """모든 썸네일의 인덱스 라벨 업데이트"""
+        for i, thumb in enumerate(self.thumbnails):
+            if thumb is None or i == 0:  # 그리드(0번) 제외
+                continue
+
+            if isinstance(thumb, ThumbnailWidget):
+                thumb.index = i
+                if hasattr(thumb, 'index_label'):
+                    thumb.index_label.setText(f"#{i}")
+
+    def _update_position_mapping(self):
+        """위치 매핑 업데이트 (원래 인덱스 추적)
+
+        이 매핑은 재생성 시 원본 데이터와의 매칭에 사용됩니다.
+        """
+        # 현재는 순서 변경 여부만 추적
+        # 필요시 원본 인덱스 매핑 추가 가능
+        pass
+
+    def is_order_changed(self) -> bool:
+        """순서 변경 여부 반환"""
+        return self._order_changed
+
+    def reset_order_changed(self):
+        """순서 변경 플래그 초기화"""
+        self._order_changed = False
+
+    def _connect_thumbnail_signals(self, thumb_widget: ThumbnailWidget):
+        """썸네일 위젯 시그널 연결"""
+        thumb_widget.clicked.connect(self._on_thumbnail_clicked)
+        thumb_widget.skip_toggled.connect(self._on_skip_toggled)
+        thumb_widget.drag_started.connect(self._on_drag_started)
+        thumb_widget.dropped.connect(self._on_widget_dropped)
+
+    def _on_drag_started(self, index: int):
+        """드래그 시작 이벤트"""
+        self._dragging_index = index
+        print(f"🎯 드래그 시작: #{index}")
+
+    def _on_widget_dropped(self, from_index: int, to_index: int):
+        """위젯 드롭 이벤트"""
+        self._reorder_widgets(from_index, to_index)

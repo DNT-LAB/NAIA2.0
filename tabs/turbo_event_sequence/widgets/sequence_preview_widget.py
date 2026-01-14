@@ -161,8 +161,10 @@ class SequencePreviewWidget(QWidget):
         )
         self.tree_layout.addWidget(parent_widget)
 
-        # 프롬프트 추가 (Parent는 prompt_processor 적용하지 않음)
+        # 프롬프트 추가 (Parent에도 prompt_processor 적용)
         parent_general = str(parent.get('general', ''))
+        if self.prompt_processor:
+            parent_general = self.prompt_processor(parent_general)
         self.prompts.append({
             'index': 0,
             'id': int(parent['id']),

@@ -6,6 +6,7 @@ Event Search Widget
 
 import sys
 import os
+import random
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QLineEdit, QPushButton, QButtonGroup,
@@ -169,8 +170,15 @@ class EventSearchWidget(QWidget):
         self._current_sequence_df = None  # 현재 선택된 시퀀스 데이터
         self._saved_favorites = set()  # 저장된 favorite ID 목록
         self._continuous_generation = False  # 연속 생성 모드
+        self._random_continuous_generation = False  # 🆕 랜덤 연속 생성 모드
         self._countdown_timer = None  # 연속 생성 카운트다운 타이머
         self._countdown_seconds = 0  # 카운트다운 남은 초
+
+        # 🆕 페이지네이션 상태
+        self._current_page = 0  # 현재 페이지 (0-indexed)
+        self._items_per_page = 250  # 페이지당 항목 수
+        self._total_items = 0  # 전체 항목 수
+        self._filtered_df = None  # 필터링된 전체 데이터프레임
 
         # data 폴더 경로
         self.data_dir = Path(os.path.dirname(__file__)).parent.parent.parent / 'data'
@@ -358,6 +366,35 @@ class EventSearchWidget(QWidget):
         self.preview_checkbox.setToolTip("저장된 그리드 이미지가 있으면 이미지 뷰어에 표시")
         page_filter_layout.addWidget(self.preview_checkbox)
 
+        # 🆕 페이지네이션 컨트롤
+        page_filter_layout.addWidget(QLabel(" │ "))  # 구분선
+
+        # 이전 페이지 버튼
+        self.prev_page_btn = QPushButton("◀")
+        self.prev_page_btn.setFixedSize(get_scaled_size(28), get_scaled_size(24))
+        self.prev_page_btn.setStyleSheet(self._get_pagination_button_style())
+        self.prev_page_btn.clicked.connect(self._on_prev_page_clicked)
+        self.prev_page_btn.setEnabled(False)
+        page_filter_layout.addWidget(self.prev_page_btn)
+
+        # 페이지 표시 라벨
+        self.page_label = QLabel("0/0")
+        self.page_label.setFixedWidth(get_scaled_size(60))
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_label.setStyleSheet(f"""
+            font-size: {get_scaled_font_size(12) + 3}px;
+            color: {DARK_COLORS['text_secondary']};
+        """)
+        page_filter_layout.addWidget(self.page_label)
+
+        # 다음 페이지 버튼
+        self.next_page_btn = QPushButton("▶")
+        self.next_page_btn.setFixedSize(get_scaled_size(28), get_scaled_size(24))
+        self.next_page_btn.setStyleSheet(self._get_pagination_button_style())
+        self.next_page_btn.clicked.connect(self._on_next_page_clicked)
+        self.next_page_btn.setEnabled(False)
+        page_filter_layout.addWidget(self.next_page_btn)
+
         page_filter_layout.addStretch()
         layout.addLayout(page_filter_layout)
 
@@ -381,6 +418,30 @@ class EventSearchWidget(QWidget):
                 background-color: {DARK_COLORS['accent_blue']};
                 color: {DARK_COLORS['text_primary']};
                 border-color: {DARK_COLORS['accent_blue']};
+            }}
+        """
+
+    def _get_pagination_button_style(self) -> str:
+        """페이지네이션 버튼 스타일"""
+        return f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px;
+                font-size: {get_scaled_font_size(11) + 3}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QPushButton:disabled {{
+                color: {DARK_COLORS['text_secondary']};
+                background-color: {DARK_COLORS['bg_primary']};
             }}
         """
 
@@ -824,11 +885,19 @@ class EventSearchWidget(QWidget):
         except:
             return []
 
-    def _update_table(self, df):
-        """테이블 업데이트 - ID, Ratings, Pages, Tag Preview"""
+    def _update_table(self, df, reset_page: bool = True):
+        """테이블 업데이트 - ID, Ratings, Pages, Tag Preview
+
+        Args:
+            df: 원본 데이터프레임
+            reset_page: True면 페이지를 0으로 초기화 (새 검색 시)
+        """
         self.result_table.setRowCount(0)
 
         if df is None or len(df) == 0:
+            self._filtered_df = None
+            self._total_items = 0
+            self._update_pagination_ui()
             return
 
         # Children count 계산 (없으면 추가)
@@ -843,8 +912,21 @@ class EventSearchWidget(QWidget):
             # pages = children_count + 1
             df = df[df['children_count'].apply(lambda x: (x + 1) in self.active_page_filters)]
 
-        # 최대 500개만 표시
-        display_df = df.head(500)
+        # 🆕 필터링된 전체 데이터프레임 저장
+        self._filtered_df = df
+        self._total_items = len(df)
+
+        # 🆕 페이지 초기화 (새 검색 시)
+        if reset_page:
+            self._current_page = 0
+
+        # 🆕 페이지네이션 적용
+        start_idx = self._current_page * self._items_per_page
+        end_idx = start_idx + self._items_per_page
+        display_df = df.iloc[start_idx:end_idx]
+
+        # 🆕 페이지네이션 UI 업데이트
+        self._update_pagination_ui()
 
         for idx, row in display_df.iterrows():
             row_pos = self.result_table.rowCount()
@@ -938,6 +1020,32 @@ class EventSearchWidget(QWidget):
             else:
                 save_btn.setText("💖 Favorite에 저장")
                 save_btn.setEnabled(True)
+
+    # ===== 페이지네이션 관련 메서드 =====
+
+    def _update_pagination_ui(self):
+        """페이지네이션 UI 업데이트"""
+        total_pages = max(1, (self._total_items + self._items_per_page - 1) // self._items_per_page)
+        current_page_display = self._current_page + 1 if self._total_items > 0 else 0
+
+        self.page_label.setText(f"{current_page_display}/{total_pages}")
+
+        # 버튼 활성화 상태
+        self.prev_page_btn.setEnabled(self._current_page > 0)
+        self.next_page_btn.setEnabled(self._current_page < total_pages - 1)
+
+    def _on_prev_page_clicked(self):
+        """이전 페이지 버튼 클릭"""
+        if self._current_page > 0:
+            self._current_page -= 1
+            self._update_table(self._filtered_df, reset_page=False)
+
+    def _on_next_page_clicked(self):
+        """다음 페이지 버튼 클릭"""
+        total_pages = (self._total_items + self._items_per_page - 1) // self._items_per_page
+        if self._current_page < total_pages - 1:
+            self._current_page += 1
+            self._update_table(self._filtered_df, reset_page=False)
 
     # ===== 미리보기 관련 메서드 =====
 
@@ -1135,8 +1243,8 @@ class EventSearchWidget(QWidget):
         self._skip_checkbox_getter = skip_checkbox_getter
 
     def is_continuous_generation_enabled(self) -> bool:
-        """연속 생성 모드 활성화 여부"""
-        return self._continuous_generation
+        """연속 생성 모드 활성화 여부 (일반 또는 랜덤)"""
+        return self._continuous_generation or self._random_continuous_generation
 
     def is_skip_generated_enabled(self) -> bool:
         """이미 생성한 이벤트 건너뛰기 활성화 여부"""
@@ -1146,13 +1254,18 @@ class EventSearchWidget(QWidget):
 
     def start_countdown_to_next(self):
         """다음 이벤트로의 카운트다운 시작 (5초)"""
-        if not self._continuous_generation:
+        # 🆕 일반 연속 생성 또는 랜덤 연속 생성 중 하나가 활성화되어야 함
+        if not self._continuous_generation and not self._random_continuous_generation:
             return
 
         countdown_label = getattr(self, '_external_countdown_label', None)
 
-        # 다음 이벤트 ID 찾기
-        next_parent_id = self._find_next_parent_id()
+        # 🆕 랜덤 모드인 경우 랜덤 이벤트 ID 찾기, 아니면 순차적 다음 이벤트
+        if self._random_continuous_generation:
+            next_parent_id = self._find_random_parent_id()
+        else:
+            next_parent_id = self._find_next_parent_id()
+
         if next_parent_id is None:
             print("🏁 더 이상 생성할 이벤트가 없습니다")
             if countdown_label:
@@ -1165,7 +1278,8 @@ class EventSearchWidget(QWidget):
         self._countdown_seconds = 5
         self._next_parent_id = next_parent_id
         if countdown_label:
-            countdown_label.setText(f"⏳ {self._countdown_seconds}초 후 다음 이벤트...")
+            mode_icon = "🎲" if self._random_continuous_generation else "⏳"
+            countdown_label.setText(f"{mode_icon} {self._countdown_seconds}초 후 다음 이벤트...")
             countdown_label.show()
 
         # 타이머 시작
@@ -1188,7 +1302,8 @@ class EventSearchWidget(QWidget):
             self._select_next_event(self._next_parent_id)
         else:
             if countdown_label:
-                countdown_label.setText(f"⏳ {self._countdown_seconds}초 후 다음 이벤트...")
+                mode_icon = "🎲" if self._random_continuous_generation else "⏳"
+                countdown_label.setText(f"{mode_icon} {self._countdown_seconds}초 후 다음 이벤트...")
 
     def cancel_countdown(self):
         """카운트다운 취소"""
@@ -1200,21 +1315,22 @@ class EventSearchWidget(QWidget):
         print("⏹ 카운트다운 취소됨")
 
     def _find_next_parent_id(self) -> int:
-        """다음 생성할 Parent ID 찾기
+        """다음 생성할 Parent ID 찾기 (전체 필터링된 결과에서)
 
         Returns:
             int: 다음 Parent ID 또는 None
         """
-        if self.current_results is None or len(self.current_results) == 0:
+        # 🆕 전체 필터링된 데이터프레임 사용 (페이지 전환 지원)
+        if self._filtered_df is None or len(self._filtered_df) == 0:
             return None
 
         current_id = self._current_selected_id
         if current_id is None:
             return None
 
-        # 현재 결과에서 현재 ID의 위치 찾기
+        # 전체 필터링된 결과에서 현재 ID의 위치 찾기
         try:
-            ids_list = self.current_results['id'].tolist()
+            ids_list = self._filtered_df['id'].tolist()
             if current_id not in ids_list:
                 return None
 
@@ -1231,12 +1347,74 @@ class EventSearchWidget(QWidget):
                         print(f"⏭️ Skip (already generated): {next_id}")
                         continue
 
+                # 🆕 다음 ID가 현재 페이지에 없으면 해당 페이지로 이동
+                self._ensure_id_on_current_page(i)
+
                 return next_id
 
             return None
 
         except Exception as e:
             print(f"❌ Error finding next parent: {e}")
+            return None
+
+    def _ensure_id_on_current_page(self, global_index: int):
+        """ID가 현재 페이지에 표시되도록 페이지 전환
+
+        Args:
+            global_index: 전체 필터링 결과에서의 인덱스
+        """
+        # 해당 인덱스가 어느 페이지에 있는지 계산
+        target_page = global_index // self._items_per_page
+
+        if target_page != self._current_page:
+            print(f"📄 페이지 전환: {self._current_page + 1} → {target_page + 1}")
+            self._current_page = target_page
+            self._update_table(self._filtered_df, reset_page=False)
+
+    def _find_random_parent_id(self) -> int:
+        """🆕 랜덤 이벤트 Parent ID 찾기 (전체 필터링된 결과에서)
+
+        Returns:
+            int: 랜덤 Parent ID 또는 None
+        """
+        if self._filtered_df is None or len(self._filtered_df) == 0:
+            return None
+
+        try:
+            ids_list = self._filtered_df['id'].tolist()
+
+            # 이미 생성한 이벤트 건너뛰기가 활성화된 경우 필터링
+            if self.is_skip_generated_enabled():
+                available_ids = []
+                available_indices = []
+                for i, event_id in enumerate(ids_list):
+                    preview_path = self._get_preview_path(event_id)
+                    if not preview_path.exists():
+                        available_ids.append(event_id)
+                        available_indices.append(i)
+
+                if not available_ids:
+                    print("🎲 스킵 필터 적용 후 생성 가능한 이벤트 없음")
+                    return None
+
+                # 랜덤 선택
+                random_idx = random.randint(0, len(available_ids) - 1)
+                selected_id = available_ids[random_idx]
+                global_index = available_indices[random_idx]
+            else:
+                # 전체에서 랜덤 선택
+                global_index = random.randint(0, len(ids_list) - 1)
+                selected_id = ids_list[global_index]
+
+            # 해당 페이지로 이동
+            self._ensure_id_on_current_page(global_index)
+
+            print(f"🎲 랜덤 이벤트 선택: {selected_id} (인덱스 {global_index})")
+            return selected_id
+
+        except Exception as e:
+            print(f"❌ Error finding random parent: {e}")
             return None
 
     def _select_next_event(self, parent_id: int):

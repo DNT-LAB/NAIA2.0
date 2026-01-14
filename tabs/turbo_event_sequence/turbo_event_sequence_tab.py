@@ -144,7 +144,7 @@ class TurboEventSequenceTab(QWidget):
         return panel
 
     def _create_favorite_control_panel(self) -> QFrame:
-        """Favorite 및 연속 생성 컨트롤 패널 생성"""
+        """Favorite 및 연속 생성 컨트롤 패널 생성 (2줄 레이아웃)"""
         panel = QFrame()
         panel.setStyleSheet(f"""
             QFrame {{
@@ -153,9 +153,13 @@ class TurboEventSequenceTab(QWidget):
             }}
         """)
 
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
+        main_layout = QVBoxLayout(panel)
+        main_layout.setContentsMargins(8, 4, 8, 4)
+        main_layout.setSpacing(2)
+
+        # === 첫 번째 줄: Favorite 버튼 + 다음 이벤트 연속 생성 + 스킵 + 카운트다운 ===
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(8)
 
         # Favorite 저장 버튼
         self.save_favorite_btn = QPushButton("💖 Favorite에 저장")
@@ -165,8 +169,8 @@ class TurboEventSequenceTab(QWidget):
                 color: #ff6b9d;
                 border: 1px solid #ff6b9d;
                 border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
-                font-size: {get_scaled_font_size(12) + 5}px;
+                padding: {get_scaled_size(4)}px {get_scaled_size(10)}px;
+                font-size: {get_scaled_font_size(12) + 4}px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -185,21 +189,35 @@ class TurboEventSequenceTab(QWidget):
         self.save_favorite_btn.clicked.connect(self._on_save_favorite_btn_clicked)
         self.save_favorite_btn.setEnabled(False)
         self.save_favorite_btn.setToolTip("현재 시퀀스를 Favorites에 저장합니다")
-        layout.addWidget(self.save_favorite_btn)
+        row1_layout.addWidget(self.save_favorite_btn)
 
         # 연속 생성 체크박스
         self.continuous_checkbox = QCheckBox("🔄 다음 이벤트 연속 생성")
         self.continuous_checkbox.setStyleSheet(self._get_favorite_checkbox_style())
         self.continuous_checkbox.toggled.connect(self._on_continuous_toggled)
         self.continuous_checkbox.setToolTip("그리드 저장 완료 후 5초 뒤 다음 이벤트 자동 생성")
-        layout.addWidget(self.continuous_checkbox)
+        row1_layout.addWidget(self.continuous_checkbox)
 
         # 이미 생성한 이벤트 건너뛰기 체크박스
         self.skip_generated_checkbox = QCheckBox("⏭️ 이미 생성한 이벤트 스킵")
         self.skip_generated_checkbox.setStyleSheet(self._get_favorite_checkbox_style())
         self.skip_generated_checkbox.setToolTip("저장된 그리드 이미지가 있는 이벤트 건너뛰기")
         self.skip_generated_checkbox.setEnabled(False)  # 연속 생성 활성화 시만 사용 가능
-        layout.addWidget(self.skip_generated_checkbox)
+        row1_layout.addWidget(self.skip_generated_checkbox)
+
+        row1_layout.addStretch()
+        main_layout.addLayout(row1_layout)
+
+        # === 두 번째 줄: 랜덤 연속 생성 + 카운트다운 ===
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(8)
+
+        # 🆕 랜덤 연속 생성 체크박스
+        self.random_continuous_checkbox = QCheckBox("🎲 랜덤 이벤트 연속 생성")
+        self.random_continuous_checkbox.setStyleSheet(self._get_favorite_checkbox_style())
+        self.random_continuous_checkbox.toggled.connect(self._on_random_continuous_toggled)
+        self.random_continuous_checkbox.setToolTip("그리드 저장 완료 후 5초 뒤 랜덤 이벤트 자동 생성 (전체 검색 결과에서)")
+        row2_layout.addWidget(self.random_continuous_checkbox)
 
         # 카운트다운 라벨 (숨김)
         self.countdown_label = QLabel("")
@@ -209,9 +227,10 @@ class TurboEventSequenceTab(QWidget):
             font-weight: bold;
         """)
         self.countdown_label.hide()
-        layout.addWidget(self.countdown_label)
+        row2_layout.addWidget(self.countdown_label)
 
-        layout.addStretch()
+        row2_layout.addStretch()
+        main_layout.addLayout(row2_layout)
 
         return panel
 
@@ -246,15 +265,36 @@ class TurboEventSequenceTab(QWidget):
     def _on_continuous_toggled(self, checked: bool):
         """연속 생성 체크박스 토글"""
         self.search_widget._continuous_generation = checked
-        self.skip_generated_checkbox.setEnabled(checked)
+        # 두 체크박스 중 하나라도 활성화되면 스킵 체크박스 활성화
+        self.skip_generated_checkbox.setEnabled(checked or self.random_continuous_checkbox.isChecked())
 
         if checked:
+            # 🆕 랜덤 연속 생성과 상호 배타적
+            if self.random_continuous_checkbox.isChecked():
+                self.random_continuous_checkbox.setChecked(False)
             # 연속 생성 활성화 시 그리드 자동 저장 강제
             if not self.history_panel.auto_save_enabled:
                 self.history_panel.auto_save_checkbox.setChecked(True)
             print(f"🔄 연속 생성: 활성화 (그리드 자동 저장이 강제 활성화됩니다)")
         else:
             print(f"🔄 연속 생성: 비활성화")
+
+    def _on_random_continuous_toggled(self, checked: bool):
+        """🆕 랜덤 연속 생성 체크박스 토글"""
+        self.search_widget._random_continuous_generation = checked
+        # 두 체크박스 중 하나라도 활성화되면 스킵 체크박스 활성화
+        self.skip_generated_checkbox.setEnabled(checked or self.continuous_checkbox.isChecked())
+
+        if checked:
+            # 일반 연속 생성과 상호 배타적
+            if self.continuous_checkbox.isChecked():
+                self.continuous_checkbox.setChecked(False)
+            # 연속 생성 활성화 시 그리드 자동 저장 강제
+            if not self.history_panel.auto_save_enabled:
+                self.history_panel.auto_save_checkbox.setChecked(True)
+            print(f"🎲 랜덤 연속 생성: 활성화 (그리드 자동 저장이 강제 활성화됩니다)")
+        else:
+            print(f"🎲 랜덤 연속 생성: 비활성화")
 
     def _create_right_panel(self) -> QWidget:
         """우측 패널 생성 (이미지 뷰어 + 히스토리)"""

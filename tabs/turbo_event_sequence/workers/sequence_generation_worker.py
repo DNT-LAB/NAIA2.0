@@ -259,7 +259,7 @@ class SequenceGenerationWorker(QObject):
         mask = self._create_inpaint_mask(prev_image)  # 배경 유지 모드에서 인물 감지용
 
         # 🔧 디버그: 요청 전 캔버스와 마스크 미리보기
-        self._show_debug_preview(canvas, mask)
+        # self._show_debug_preview(canvas, mask)  # 디버그 비활성화
 
         # 이미지를 bytes로 변환
         canvas_bytes = io.BytesIO()

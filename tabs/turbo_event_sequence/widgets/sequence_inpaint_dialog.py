@@ -1133,7 +1133,7 @@ class SequenceInpaintDialog(QDialog):
             import uuid
 
             # 🔧 디버그: 캔버스와 마스크 미리보기
-            self._show_debug_preview(canvas, mask)
+            # self._show_debug_preview(canvas, mask)  # 디버그 비활성화
 
             # 요청 ID 생성 (응답 매칭용)
             self._request_id = str(uuid.uuid4())[:8]

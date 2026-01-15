@@ -1279,6 +1279,17 @@ ID가 8자리를 초과하면 `1234..78` 형태로 축약됩니다.
    - 증상: WindowFlags 제거해도 창이 항상 메인 윈도우 위에 고정됨
    - 수정: 부모 없이 생성 (`EventViewerWidget(data_dir, events_dir, None)`)
 
+4. **히스토리 패널 드래그 앤 드롭 버그** 🆕
+   - **Grid 바로 뒤 드롭 불가**: `target_index > 0` 조건이 index 1도 차단 → `>= 1`로 변경
+   - **마지막 위치 뒤 드롭 불가**: `_get_drop_target_index`가 `len-1` 반환 → `len` 반환
+   - **Grid 앞으로 이미지 이동**: 레이아웃/리스트 인덱스 불일치 → 리스트 먼저 수정 후 레이아웃 재구성
+   - 위치: `widgets/history_panel.py:_reorder_widgets()`
+
+5. **인페인트 관련 버그** 🆕
+   - **썸네일 재클릭 시 이전 이미지 표시**: `ThumbnailWidget.image` 대신 `self.images[index]` 사용
+   - **다이얼로그 이미지 잔상**: 기존 다이얼로그 닫고 새로 생성
+   - **Child 인페인트 시 prev_image 오류**: `selected_index - 1` 대신 항상 `images[1]` (Parent) 사용
+
 ---
 
 ## PyQt6 모달리스 다이얼로그 가이드

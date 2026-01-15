@@ -1086,7 +1086,8 @@ class HistoryPanel(QWidget):
                     drop_pos = event.position().toPoint()
                     target_index = self._get_drop_target_index(drop_pos)
 
-                    if target_index is not None and target_index > 0:
+                    # 🐛 수정: target_index >= 1이면 허용 (마지막 위치 포함)
+                    if target_index is not None and target_index >= 1:
                         self._show_drop_indicator(target_index)
                     else:
                         self.drop_indicator.hide()
@@ -1114,7 +1115,8 @@ class HistoryPanel(QWidget):
                     drop_pos = event.position().toPoint()
                     target_index = self._get_drop_target_index(drop_pos)
 
-                    if target_index is not None and target_index > 0 and from_index != target_index:
+                    # 🐛 수정: target_index >= 1이면 허용 (마지막 위치 포함)
+                    if target_index is not None and target_index >= 1 and from_index != target_index:
                         self._reorder_widgets(from_index, target_index)
                         event.acceptProposedAction()
                         return
@@ -1123,7 +1125,12 @@ class HistoryPanel(QWidget):
         event.ignore()
 
     def _get_drop_target_index(self, pos: QPoint) -> int:
-        """드롭 위치에 해당하는 타겟 인덱스 계산"""
+        """드롭 위치에 해당하는 타겟 인덱스 계산
+
+        Returns:
+            드롭할 위치의 인덱스 (해당 위치 앞에 삽입됨)
+            len(self.thumbnails)를 반환하면 마지막 뒤에 삽입
+        """
         # 썸네일 위젯들의 위치를 기반으로 타겟 인덱스 결정
         for i, thumb in enumerate(self.thumbnails):
             if thumb is None or i == 0:  # 그리드(0번) 제외
@@ -1137,13 +1144,27 @@ class HistoryPanel(QWidget):
             if pos.x() < widget_center:
                 return i
 
-        # 모든 위젯보다 오른쪽에 있으면 마지막 위치
-        return len(self.thumbnails) - 1 if self.thumbnails else 1
+        # 🐛 수정: 모든 위젯보다 오른쪽에 있으면 마지막 위치 뒤에 삽입
+        # len(self.thumbnails)를 반환하여 맨 뒤 삽입을 명확히 함
+        return len(self.thumbnails) if self.thumbnails else 1
 
     def _show_drop_indicator(self, target_index: int):
         """드롭 인디케이터 표시"""
-        if target_index <= 0 or target_index >= len(self.thumbnails):
+        # 🐛 수정: target_index <= 0 대신 < 1 사용 (index 1은 허용)
+        # target_index > len(self.thumbnails) - 1 대신 >= len(self.thumbnails)로 마지막 위치도 허용
+        if target_index < 1:
             self.drop_indicator.hide()
+            return
+
+        # 마지막 위치 뒤에 삽입하려는 경우: 마지막 위젯 오른쪽에 인디케이터 표시
+        if target_index >= len(self.thumbnails):
+            last_widget = self.thumbnails[-1] if self.thumbnails else None
+            if last_widget and last_widget is not None:
+                indicator_x = last_widget.pos().x() + last_widget.width() + get_scaled_size(2)
+                indicator_y = last_widget.pos().y()
+                self.drop_indicator.move(indicator_x, indicator_y)
+                self.drop_indicator.raise_()
+                self.drop_indicator.show()
             return
 
         target_widget = self.thumbnails[target_index]
@@ -1164,9 +1185,16 @@ class HistoryPanel(QWidget):
 
         Args:
             from_index: 이동할 위젯의 현재 인덱스
-            to_index: 이동할 목표 인덱스
+            to_index: 이동할 목표 인덱스 (이 위치 앞에 삽입, len(thumbnails)면 맨 뒤)
         """
-        if from_index == to_index or from_index <= 0 or to_index <= 0:
+        # to_index < 1이면 Grid 앞에 삽입 시도이므로 무시
+        # from_index < 1이면 Grid를 이동하려는 것이므로 무시
+        if from_index == to_index or from_index < 1 or to_index < 1:
+            return
+
+        # 🐛 추가 검증: to_index == 1이고 from_index == 1이면 자기 자신 앞에 삽입 (무의미)
+        # from_index < to_index일 때 to_index가 from_index + 1이면 실제로 이동 없음
+        if from_index < to_index and to_index == from_index + 1:
             return
 
         print(f"🔄 위젯 순서 변경: #{from_index} → #{to_index}")
@@ -1176,26 +1204,41 @@ class HistoryPanel(QWidget):
         if widget is None:
             return
 
-        # 레이아웃에서 위젯 제거
-        self.thumb_layout.removeWidget(widget)
-
-        # 삽입 위치 계산:
-        # - to_index는 드롭 시점의 "이 위치 앞에 삽입" 의미
-        # - from < to: pop하면 to 이후 인덱스가 1씩 감소하므로 to-1에 삽입
-        # - from > to: pop해도 to에 영향 없으므로 to에 삽입
-        insert_pos = to_index - 1 if from_index < to_index else to_index
-
-        # 레이아웃 삽입
-        self.thumb_layout.insertWidget(insert_pos, widget)
-
-        # 썸네일 리스트 재정렬
+        # 1. 먼저 리스트에서 제거 (인덱스 계산의 기준)
         thumb = self.thumbnails.pop(from_index)
-        self.thumbnails.insert(insert_pos, thumb)
-
-        # 이미지 리스트 재정렬
+        img = None
         if from_index < len(self.images) and self.images[from_index] is not None:
             img = self.images.pop(from_index)
-            self.images.insert(insert_pos, img)
+
+        # 2. 삽입 위치 계산 (pop 이후의 리스트 기준)
+        # - to_index는 원래 리스트에서 "이 위치 앞에 삽입"
+        # - pop 후에는 from_index 이후의 인덱스가 1씩 감소
+        if from_index < to_index:
+            # 원래 from 뒤에 있던 위치 → pop 후 인덱스 1 감소
+            list_insert_pos = to_index - 1
+        else:
+            # 원래 from 앞에 있던 위치 → pop 해도 인덱스 변화 없음
+            list_insert_pos = to_index
+
+        # 맨 뒤 삽입 처리
+        if list_insert_pos >= len(self.thumbnails):
+            list_insert_pos = len(self.thumbnails)  # append와 동일
+
+        # 3. 리스트에 삽입
+        self.thumbnails.insert(list_insert_pos, thumb)
+        if img is not None:
+            if list_insert_pos >= len(self.images):
+                self.images.append(img)
+            else:
+                self.images.insert(list_insert_pos, img)
+
+        # 4. 레이아웃 재구성 (리스트 순서에 맞게)
+        # 레이아웃에서 모든 위젯 제거 후 다시 추가
+        for i in range(self.thumb_layout.count()):
+            item = self.thumb_layout.takeAt(0)
+        for i, t in enumerate(self.thumbnails):
+            if t is not None:
+                self.thumb_layout.addWidget(t)
 
         # 인덱스 라벨 업데이트
         self._update_index_labels()

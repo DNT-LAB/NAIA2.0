@@ -21,6 +21,7 @@ Parquet 데이터셋에서 Parent-Child 관계의 이벤트 시퀀스를 검색�
 8. **드래그 앤 드롭 재정렬**: 히스토리 패널에서 이미지 순서 변경
 9. 🆕 **빠른 생성 버튼**: ⏩ (결정+첫페이지), ⏭ (결정+전체생성)
 10. 🆕 **랜덤 연속 생성**: 검색 결과에서 랜덤 이벤트 선택
+11. 🆕 **Event Viewer**: 생성한 이벤트 탐색 및 빠른 재생성
 
 ---
 
@@ -28,25 +29,31 @@ Parquet 데이터셋에서 Parent-Child 관계의 이벤트 시퀀스를 검색�
 
 ```
 tabs/turbo_event_sequence/
-├── turbo_event_sequence_tab.py       # 📌 메인 탭 (1354줄) - 상태 머신, 레이아웃
+├── turbo_event_sequence_tab.py       # 📌 메인 탭 (1410줄) - 상태 머신, 레이아웃
 ├── event_search_utils.py              # 📌 Parquet 검색 유틸 (440줄)
 ├── event_explorer_ui.py               # 이벤트 시각화 UI (694줄)
 ├── CLAUDE.md                          # 본 문서
 ├── widgets/
-│   ├── event_search_widget.py         # ⭐ 검색 UI (1462줄) - 재사용 가능
+│   ├── event_search_widget.py         # ⭐ 검색 UI (1470줄) - 재사용 가능
 │   ├── history_panel.py               # 히스토리 패널 (1246줄) - 드래그앤드롭
 │   ├── sequence_edit_widget.py        # 프롬프트 편집 (638줄)
 │   ├── sequence_preview_widget.py     # 시퀀스 미리보기 (387줄)
 │   ├── sequence_tab_container.py      # 탭 컨테이너 (216줄)
-│   └── image_viewer_widget.py         # 이미지 뷰어 (142줄)
+│   ├── image_viewer_widget.py         # 이미지 뷰어 (142줄)
+│   ├── event_viewer_widget.py         # 🆕 Event Viewer 다이얼로그 (350줄)
+│   ├── event_index_manager.py         # 🆕 이벤트 인덱스 JSON 관리 (300줄)
+│   ├── thumbnail_grid.py              # 🆕 썸네일 그리드 위젯 (380줄)
+│   └── event_preview_panel.py         # 🆕 이벤트 미리보기 패널 (250줄)
 ├── workers/
 │   └── sequence_generation_worker.py  # NAI 생성 워커 (662줄)
+├── .claude/
+│   └── PRD_EVENT_VIEWER.md            # 🆕 Event Viewer PRD 문서
 └── docs/                              # 참고 문서
     ├── PRD_SRS.md
     ├── WORKER_TASK.md
     └── MAIN_TASK.md
 
-총 코드량: ~7,200줄
+총 코드량: ~8,500줄
 ```
 
 ---
@@ -699,23 +706,307 @@ self.history_panel.update_grid_image(grid_image, trigger_auto_save=is_sequence_c
 
 ---
 
-## 최근 변경사항 (2025-01-15)
+## Event Viewer 시스템 (2026-01-15 추가)
+
+### 개요
+
+Event Viewer는 `save/turbo_events` 폴더에 저장된 생성된 이벤트 그리드 이미지를 탐색하고,
+선택한 이벤트의 시퀀스를 즉시 재생성할 수 있는 다이얼로그입니다.
+
+### 구성 요소
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 📂 Event Viewer                              [검색] [닫기]      │
+├─────────────────────────────────────────────────────────────────┤
+│ Parent: [Include]  [Exclude]   [🔍 검색] [🗑️ 클리어]            │
+│ [2p] [3p] [4p] [5p] [6p]              [🔄 새로고침]             │
+├────────────────────────┬────────────────────────────────────────┤
+│  ThumbnailGrid (2x5)   │  EventPreviewPanel                     │
+│  ┌───┐ ┌───┐           │  ┌────────────────────┐                │
+│  │ T │ │ T │           │  │  선택한 이벤트      │                │
+│  │ H │ │ H │           │  │  미리보기 이미지    │                │
+│  │ U │ │ U │           │  │  (LargeImageViewer) │                │
+│  └───┘ └───┘           │  └────────────────────┘                │
+│  ID   ID               │  ID: 12345 | Pages: 4 | Rating: s-q-e  │
+│  ...                   │  Tags: 1girl, solo, ...                 │
+│  [◀ 이전] [다음 ▶]    │  [▶ 시퀀스 선택] [⏭ 바로 생성]         │
+└────────────────────────┴────────────────────────────────────────┘
+```
+
+### 파일 구조
+
+| 파일 | 역할 | 줄 수 |
+|------|------|-------|
+| `event_viewer_widget.py` | 메인 다이얼로그 (검색 UI + 키보드 바인딩) | ~510줄 |
+| `event_index_manager.py` | JSON 인덱스 관리 (폴더-인덱스 동기화) | ~420줄 |
+| `thumbnail_grid.py` | 2x5 썸네일 그리드 (비동기 로딩) | ~510줄 |
+| `event_preview_panel.py` | 미리보기 패널 (이미지 + 정보 + 액션) | ~320줄 |
+
+### UI 사양
+
+| 항목 | 값 |
+|------|-----|
+| **최소 크기** | 1100 x 960 px |
+| **기본 크기** | 1200 x 1000 px |
+| **썸네일 크기** | 140 x 140 px (+ ID 라벨 18px) |
+| **그리드 너비** | 320px 고정 |
+| **폰트 최소 크기** | 15px (일부 ID 라벨 제외) |
+
+### 키보드 바인딩
+
+| 키 | 동작 |
+|----|------|
+| `←` / `→` | 썸네일 좌우 이동 |
+| `↑` / `↓` | 썸네일 상하 이동 (2열 기준) |
+| `Page Up` / `Page Down` | 페이지 넘김 |
+| `Enter` | 시퀀스 선택 (다이얼로그 닫힘) |
+| `Shift+Enter` | 바로 생성 (다이얼로그 유지) |
+| `Escape` | 다이얼로그 닫기 |
+
+### 마우스 스크롤
+
+| 영역 | 동작 |
+|------|------|
+| **썸네일 그리드** | 페이지 스크롤 (위: 이전, 아래: 다음) |
+| **미리보기 패널** | Z형 아이템 스크롤 (위: 이전, 아래: 다음 - 좌→우→다음줄 순서) |
+
+### 인덱스 JSON 구조
+
+**위치**: `save/turbo_events/generated_event_index.json`
+
+```json
+{
+  "version": "1.1",
+  "last_updated": "2026-01-15T12:34:56",
+  "total_count": 150,
+  "events": [
+    {
+      "id": 12345678,
+      "general": "1girl, solo, blue_eyes, long_hair",
+      "child_general": "kiss, 2girls, yuri hand_holding, ...",
+      "ratings": ["s", "s", "q", "e"],
+      "pages": 4,
+      "created_at": "2026-01-10T10:00:00"
+    }
+  ]
+}
+```
+
+**버전 1.1 변경사항**: `child_general` 필드 추가 (모든 child의 general 태그 합산)
+
+### 시그널
+
+```python
+class EventViewerWidget(QDialog):
+    event_selected = pyqtSignal(int, object)         # parent_id, sequence_df
+    quick_generation_requested = pyqtSignal(int)     # parent_id
+```
+
+### 검색 기능
+
+- **Parent Include/Exclude**: Parent의 general 태그 필터링
+- **Child Include/Exclude**: Child의 general 태그 필터링 (모든 child 태그 합산)
+- **Pages 필터**: 2p, 3p, 4p, 5p, 6p 토글 버튼
+- **페이지네이션**: 한 페이지 10개씩 (2x5 그리드)
+
+### 통합 포인트
+
+**TurboEventSequenceTab에서 연결**:
+```python
+# 버튼 클릭
+self.search_widget.event_viewer_btn.clicked.connect(self._on_open_event_viewer)
+
+# Event Viewer 시그널
+self._event_viewer.event_selected.connect(self._on_event_viewer_selected)
+self._event_viewer.quick_generation_requested.connect(self._on_event_viewer_quick_generate)
+```
+
+### 바로 생성 동작
+
+"바로 생성" (⏭) 버튼 또는 `Shift+Enter` 키는 **다이얼로그를 닫지 않고** 생성을 시작합니다.
+연속 작업이 가능하도록 설계되었습니다.
+
+```python
+def _on_quick_generate(self, parent_id: int):
+    """바로 생성 (다이얼로그 유지)"""
+    sequence_df = self.index_manager.get_sequence_df(parent_id)
+    if sequence_df is not None:
+        self.quick_generation_requested.emit(parent_id)
+        self.status_label.setText(f"✅ 생성 시작: {parent_id}")
+        # 다이얼로그는 닫지 않음 - 연속 작업 가능
+```
+
+### 성능 최적화
+
+1. **썸네일 비동기 로딩**: QThread 사용
+2. **캐시**: 최대 50개 썸네일 캐시
+3. **Lazy Indexing**: Event Viewer 열 때만 동기화
+4. **인덱스 증분 갱신**: 새 이벤트 생성 시만 추가
+
+### 포커스 관리 시스템
+
+Event Viewer 다이얼로그에서 키보드 네비게이션이 원활하게 동작하도록 포커스 관리 시스템이 구현되어 있습니다.
+
+#### 문제 상황
+
+1. **검색 입력 필드 포커스**: QLineEdit에 포커스가 있으면 방향키가 텍스트 커서 이동에 사용됨
+2. **이미지 영역 클릭**: 썸네일이나 미리보기 패널 클릭 후 포커스가 해당 위젯에 머물러 키보드 이벤트 처리 불가
+
+#### 해결 방법
+
+**1. keyPressEvent에서 포커스 위젯 감지**
+
+```python
+def keyPressEvent(self, event: QKeyEvent):
+    key = event.key()
+
+    # 검색 입력 필드에 포커스가 있는지 확인
+    focused_widget = self.focusWidget()
+    is_input_focused = isinstance(focused_widget, QLineEdit)
+
+    # Escape, Page Up/Down은 항상 처리
+    if key == Qt.Key.Key_Escape:
+        self.close()
+        return
+
+    if key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+        # 페이지 넘김 처리
+        return
+
+    # 입력 필드에 포커스가 있으면 방향키는 기본 동작 (텍스트 커서 이동)
+    if is_input_focused:
+        super().keyPressEvent(event)
+        return
+
+    # 썸네일 선택 이동
+    if key == Qt.Key.Key_Left:
+        self._move_selection(-1)
+        return
+    # ... 다른 키 처리
+```
+
+**2. 이미지 영역 클릭 시 다이얼로그로 포커스 반환**
+
+모든 클릭 가능한 위젯에 `mousePressEvent`를 오버라이드하여 부모 QDialog로 포커스를 반환:
+
+```python
+def mousePressEvent(self, event: QMouseEvent):
+    """마우스 클릭 시 부모 다이얼로그로 포커스 이동"""
+    super().mousePressEvent(event)
+
+    # 부모 위젯 체인을 따라 QDialog 찾기
+    parent = self.parent()
+    while parent is not None:
+        if parent.inherits("QDialog"):
+            parent.setFocus()
+            break
+        parent = parent.parent()
+```
+
+#### 적용된 위젯
+
+| 파일 | 위젯 | 역할 |
+|------|------|------|
+| `thumbnail_grid.py` | `ThumbnailItem` | 개별 썸네일 클릭 |
+| `event_preview_panel.py` | `LargeImageViewer` | 큰 이미지 뷰어 클릭 |
+| `event_preview_panel.py` | `EventPreviewPanel` | 미리보기 패널 전체 클릭 |
+| `event_viewer_widget.py` | `_on_thumbnail_clicked()` | 썸네일 선택 시 `self.setFocus()` |
+
+#### 핵심 포인트
+
+1. **QDialog.inherits("QDialog")**: 부모 체인에서 QDialog 타입 확인
+2. **포커스 반환 시점**: `mousePressEvent`에서 `super()` 호출 후 처리
+3. **검색 필드 예외**: QLineEdit에 포커스가 있을 때는 방향키 기본 동작 유지
+4. **항상 처리되는 키**: Escape, Page Up/Down은 포커스 위치와 무관하게 동작
+
+### ThumbnailItem 구조
+
+썸네일 아이템은 이미지와 ID 라벨이 분리된 구조입니다:
+
+```
+┌─────────────────┐
+│                 │
+│    이미지       │  ← 140 x 140 px
+│                 │
+├─────────────────┤
+│    12345678     │  ← 18px 높이, 10pt 폰트
+└─────────────────┘
+```
+
+ID가 8자리를 초과하면 `1234..78` 형태로 축약됩니다.
+
+---
+
+## 최근 변경사항 (2026-01-15)
 
 ### 기능 추가
 
-1. **빠른 생성 버튼** (⏩, ⏭)
+1. **Event Viewer 시스템** 🆕
+   - 생성한 이벤트 탐색 다이얼로그
+   - 2x5 썸네일 그리드 + 미리보기 패널
+   - JSON 인덱스 기반 빠른 검색
+   - 시퀀스 선택 / 바로 생성 기능
+   - 위치: `widgets/event_viewer_widget.py`
+
+2. **빠른 생성 버튼** (⏩, ⏭)
    - ⏩: 결정 + 첫 페이지 생성 (주황색)
    - ⏭: 결정 + 전체 시퀀스 생성 (녹색)
    - 위치: `sequence_preview_widget.py`
 
-2. **랜덤 연속 생성**
+3. **랜덤 연속 생성**
    - 검색 결과에서 랜덤 이벤트 선택
    - `_find_random_parent_id()` 메서드
    - 랜덤 모드 아이콘: 🎲
 
-3. **페이지네이션 개선**
+4. **페이지네이션 개선**
    - 페이지당 250개 항목
    - 연속 생성 시 자동 페이지 전환
+
+### UI 개선 (2026-01-15 후반)
+
+1. **Event Viewer UI 크기 조정**
+   - 최소 높이: 960px → 다이얼로그 기본 1200x1000px
+   - 썸네일 크기: 100px → 140px
+   - 그리드 너비: 320px 고정
+   - 폰트 크기: 15px 이상으로 통일 (가독성 개선)
+
+2. **썸네일 ID 라벨 분리**
+   - ID 텍스트를 이미지 오버레이에서 이미지 하단으로 이동
+   - ID 라벨 전용 영역: 18px 높이
+   - ID 폰트 크기: 10pt (축소 - 공간 효율)
+   - 8자리 초과 시 `1234..78` 형태로 축약
+
+3. **키보드 바인딩 추가**
+   - `←`/`→`: 썸네일 좌우 이동
+   - `↑`/`↓`: 썸네일 상하 이동
+   - `Page Up`/`Page Down`: 페이지 넘김
+   - `Enter`: 시퀀스 선택
+   - `Shift+Enter`: 바로 생성 (다이얼로그 유지)
+   - `Escape`: 닫기
+
+4. **마우스 스크롤 지원 추가**
+   - 썸네일 그리드 영역: 페이지 스크롤
+   - 미리보기 패널 영역: 아이템 스크롤
+
+5. **포커스 관리 시스템**
+   - 문제: 검색 입력 필드나 이미지 영역 클릭 후 키보드 네비게이션 불가
+   - 해결: 이미지/썸네일 영역 클릭 시 자동으로 다이얼로그에 포커스 반환
+   - 적용 위젯: `ThumbnailItem`, `LargeImageViewer`, `EventPreviewPanel`
+
+6. **Child 검색 기능** 🆕
+   - Child Include/Exclude 입력 필드 추가
+   - 인덱스 버전 1.0 → 1.1 업그레이드 (`child_general` 필드 추가)
+   - 기존 인덱스는 자동으로 재빌드됨
+
+7. **바로 생성 동작 변경**
+   - 변경 전: 다이얼로그 자동 닫힘
+   - 변경 후: 다이얼로그 유지 (연속 작업 가능)
+
+8. **모달리스 창 구현** 🆕
+   - Event Viewer를 비차단(modeless) 창으로 변경
+   - 메인 윈도우와 동시 사용 가능
+   - 일반 윈도우처럼 z-order 전환 가능
 
 ### 버그 수정
 
@@ -726,7 +1017,113 @@ self.history_panel.update_grid_image(grid_image, trigger_auto_save=is_sequence_c
 2. **DARK_COLORS['accent'] KeyError**
    - 수정: `accent_blue`, `accent_blue_hover` 사용
 
+3. **Event Viewer 항상 위에 표시 문제** 🆕
+   - 원인: QDialog를 부모와 함께 생성하면 OS가 "owned window"로 취급
+   - 증상: WindowFlags 제거해도 창이 항상 메인 윈도우 위에 고정됨
+   - 수정: 부모 없이 생성 (`EventViewerWidget(data_dir, events_dir, None)`)
+
 ---
 
-*문서 버전: 2025-01-15*
-*최종 검토: 빠른 생성, 랜덤 연속 생성, 재사용 가이드, TODO 추가*
+## PyQt6 모달리스 다이얼로그 가이드
+
+### 문제 상황
+
+QDialog를 부모와 함께 생성하면 OS가 "owned window"로 취급하여:
+- 부모 윈도우 앞에 항상 표시됨
+- `setWindowFlags()`로도 z-order 변경 불가
+- 사용자가 메인 윈도우 작업 시 불편함
+
+### 해결 방법
+
+**1. 부모 없이 생성 (권장)**
+
+```python
+# ❌ 잘못된 방법 - owned window가 됨
+self._dialog = MyDialog(data_dir, events_dir, self)  # parent=self
+
+# ✅ 올바른 방법 - 독립 창으로 동작
+self._dialog = MyDialog(data_dir, events_dir, None)  # parent=None
+```
+
+**2. show() 사용 (exec() 대신)**
+
+```python
+# ❌ 잘못된 방법 - 블로킹 모달
+self._dialog.exec()
+
+# ✅ 올바른 방법 - 비차단 모달리스
+self._dialog.show()
+```
+
+**3. 창 중복 생성 방지**
+
+```python
+def _on_open_dialog(self):
+    """다이얼로그 열기 (모달리스)"""
+    # 이미 열려있으면 포커스만 이동
+    if hasattr(self, '_dialog') and self._dialog and self._dialog.isVisible():
+        self._dialog.raise_()
+        self._dialog.activateWindow()
+        return
+
+    # 새 다이얼로그 생성 (부모 없이)
+    self._dialog = MyDialog(data, None)
+    self._dialog.show()
+```
+
+### 메모리 관리
+
+**Q: 부모 없이 생성하면 메모리 누수가 발생하나요?**
+
+**A: 아니요.** Python GC가 자동으로 처리합니다.
+
+| 상황 | 메모리 처리 |
+|------|------------|
+| 창 닫기 (X 버튼) | 위젯 숨김 → 다음 열기 시 새 인스턴스로 교체 → 이전 인스턴스 GC 수거 |
+| 새 인스턴스 할당 | `self._dialog = MyDialog()` → 이전 참조 사라짐 → GC 수거 |
+| 탭 닫기 | 탭 파괴 시 `self._dialog` 참조도 사라짐 → GC 수거 |
+
+**명시적 정리가 필요한 경우:**
+
+| 상황 | 필요 여부 | 이유 |
+|------|----------|------|
+| 일반적인 창 닫기 | ❌ 불필요 | GC가 처리 |
+| 탭 닫힐 때 열린 창 닫기 | ⚠️ 권장 (UX) | 관련 창도 같이 닫히는 게 자연스러움 |
+| QThread가 돌고 있는 경우 | ✅ 필요 | 스레드 명시적 종료 필요 |
+| 순환 참조 | ✅ 필요 | GC가 즉시 수거 못함 |
+
+**선택적 UX 개선 (탭 닫힐 때 창도 닫기):**
+
+```python
+def cleanup(self):
+    """탭 닫힐 때 관련 창도 닫기 (UX 개선)"""
+    if hasattr(self, '_dialog') and self._dialog:
+        self._dialog.close()
+```
+
+### Event Viewer 구현 예시
+
+```python
+# turbo_event_sequence_tab.py
+
+def _on_open_event_viewer(self):
+    """Event Viewer 열기 (모달리스)"""
+    from .widgets.event_viewer_widget import EventViewerWidget
+
+    # 이미 열려있으면 포커스만 이동
+    if hasattr(self, '_event_viewer') and self._event_viewer and self._event_viewer.isVisible():
+        self._event_viewer.raise_()
+        self._event_viewer.activateWindow()
+        return
+
+    # Event Viewer 생성 (부모 없이 - 독립 창)
+    self._event_viewer = EventViewerWidget(data_dir, events_dir, None)
+    self._event_viewer.event_selected.connect(self._on_event_viewer_selected)
+    self._event_viewer.quick_generation_requested.connect(self._on_event_viewer_quick_generate)
+    self._event_viewer.show()
+```
+
+---
+
+*문서 버전: 2026-01-15*
+*최종 검토: 모달리스 다이얼로그 메모리 관리 가이드 수정 (GC 자동 처리 명시)*

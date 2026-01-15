@@ -333,6 +333,12 @@ class EventSearchWidget(QWidget):
         self.clear_btn.clicked.connect(self._on_clear_clicked)
         button_layout.addWidget(self.clear_btn)
 
+        # 🆕 Event Viewer 버튼
+        self.event_viewer_btn = QPushButton("📂 Viewer")
+        self.event_viewer_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.event_viewer_btn.setToolTip("생성한 이벤트 탐색")
+        button_layout.addWidget(self.event_viewer_btn)
+
         button_layout.addStretch()
         layout.addLayout(button_layout)
 

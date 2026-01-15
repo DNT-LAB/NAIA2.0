@@ -126,6 +126,8 @@ class TurboEventSequenceTab(QWidget):
         self.search_widget.preview_image_ready.connect(self._on_preview_image_ready)
         self.search_widget.favorite_saved.connect(self._on_favorite_saved)
         self.search_widget.continuous_generation_requested.connect(self._on_continuous_generation_requested)
+        # 🆕 Event Viewer 버튼 연결
+        self.search_widget.event_viewer_btn.clicked.connect(self._on_open_event_viewer)
         layout.addWidget(self.search_widget, stretch=3)
 
         # 시퀀스 탭 컨테이너 (미리보기 + 수정 탭)
@@ -1348,7 +1350,67 @@ class TurboEventSequenceTab(QWidget):
             # 🆕 검색 위젯에 저장 완료 알림 (미리보기 업데이트용)
             self.search_widget.on_grid_saved(self.current_parent_id, str(save_path))
 
-            # 🆕 연속 생성 모드면 카운트다운 시작
+            # 🆕 Event Viewer 인덱스에 추가
+            if hasattr(self, '_event_viewer') and self._event_viewer:
+                self._event_viewer.add_event(self.current_parent_id)
 
         except Exception as e:
             print(f"❌ Grid save error: {e}")
+
+    # ===== Event Viewer 관련 메서드 =====
+
+    def _on_open_event_viewer(self):
+        """Event Viewer 열기 (모달리스)"""
+        from pathlib import Path
+        from .widgets.event_viewer_widget import EventViewerWidget
+
+        # 이미 열려있으면 포커스만 이동
+        if hasattr(self, '_event_viewer') and self._event_viewer and self._event_viewer.isVisible():
+            self._event_viewer.raise_()
+            self._event_viewer.activateWindow()
+            return
+
+        # data 폴더 경로
+        data_dir = Path(__file__).parent.parent.parent / 'data'
+        # 이벤트 이미지 폴더 경로
+        events_dir = Path("save/turbo_events")
+
+        # Event Viewer 다이얼로그 생성 (모달리스)
+        self._event_viewer = EventViewerWidget(data_dir, events_dir, None)
+        self._event_viewer.event_selected.connect(self._on_event_viewer_selected)
+        self._event_viewer.quick_generation_requested.connect(self._on_event_viewer_quick_generate)
+        self._event_viewer.show()  # exec() 대신 show() 사용
+
+    def _on_event_viewer_selected(self, parent_id: int, sequence_df):
+        """Event Viewer에서 이벤트 선택"""
+        print(f"📂 Event Viewer: 시퀀스 선택 - {parent_id}")
+        # 기존 parent_selected 핸들러 재사용
+        self._on_parent_selected(parent_id, sequence_df)
+
+    def _on_event_viewer_quick_generate(self, parent_id: int):
+        """Event Viewer에서 바로 생성 요청"""
+        print(f"📂 Event Viewer: 바로 생성 - {parent_id}")
+
+        # 시퀀스 조회
+        if hasattr(self, '_event_viewer') and self._event_viewer:
+            sequence_df = self._event_viewer.index_manager.get_sequence_df(parent_id)
+        else:
+            # 대체 방법: search_widget의 searcher 사용
+            if self.search_widget.searcher:
+                sequence_df = self.search_widget.searcher.get_sequence(parent_id)
+            else:
+                print(f"❌ 시퀀스를 조회할 수 없습니다: {parent_id}")
+                return
+
+        if sequence_df is None:
+            print(f"❌ 시퀀스를 찾을 수 없습니다: {parent_id}")
+            return
+
+        # Parent 선택 처리
+        self._on_parent_selected(parent_id, sequence_df)
+
+        # 시퀀스 확정
+        self.sequence_tab_container.confirm_current_sequence()
+
+        # 전체 시퀀스 생성 시작
+        self._on_full_sequence_clicked()

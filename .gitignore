@@ -175,3 +175,5 @@ data/NAIA_event_dataset_1girl.parquet
 data/NAIA_event_dataset_personal.json
 data/NAIA_event_dataset_personal.parquet
 tabs/turbo_event_sequence/NAIA_event_dataset_v4.parquet
+tabs/turbo_event_sequence/.claude/PRD_EVENT_VIEWER.md
+tabs/studio/.claude/STUDIO_PRESET_SRS.md

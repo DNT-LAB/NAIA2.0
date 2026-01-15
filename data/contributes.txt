@@ -1,0 +1,1 @@
+person_yolov8n-seg.pt at https://huggingface.co/Bingsu/adetailer/blob/main/person_yolov8n-seg.pt

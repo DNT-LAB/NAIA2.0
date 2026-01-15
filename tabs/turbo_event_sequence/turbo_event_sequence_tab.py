@@ -327,6 +327,8 @@ class TurboEventSequenceTab(QWidget):
         self.history_panel.clear_and_reconfirm.connect(self._on_clear_and_reconfirm)
         # 🆕 순서 변경 후 그리드 업데이트 요청 연결
         self.history_panel.request_grid_update.connect(self._on_request_grid_update)
+        # 🆕 인페인트 요청 연결
+        self.history_panel.inpaint_requested.connect(self._on_inpaint_requested)
         layout.addWidget(self.history_panel, stretch=1)
 
         return panel
@@ -452,25 +454,70 @@ class TurboEventSequenceTab(QWidget):
         button_layout.addWidget(self.initial_buttons_frame)
 
         # === 3단계: 첫 페이지 완료 후 버튼 (첫 페이지 생성 후 표시) ===
+        # 2중 레이아웃: 상단에 버튼들, 하단에 배경 유지 체크박스
         self.after_first_frame = QFrame()
-        after_first_layout = QHBoxLayout(self.after_first_frame)
-        after_first_layout.setContentsMargins(0, 0, 0, 0)
-        after_first_layout.setSpacing(4)
+        after_first_main_layout = QVBoxLayout(self.after_first_frame)
+        after_first_main_layout.setContentsMargins(0, 0, 0, 0)
+        after_first_main_layout.setSpacing(get_scaled_size(4))
+
+        # 상단: 버튼 행
+        after_first_buttons_layout = QHBoxLayout()
+        after_first_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        after_first_buttons_layout.setSpacing(4)
 
         self.regenerate_btn = QPushButton("🔄 재생성")
         self.regenerate_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         self.regenerate_btn.clicked.connect(self._on_regenerate_clicked)
-        after_first_layout.addWidget(self.regenerate_btn)
+        after_first_buttons_layout.addWidget(self.regenerate_btn)
 
         self.next_page_btn = QPushButton("➡️ 다음 페이지")
         self.next_page_btn.setStyleSheet(DARK_STYLES['primary_button'])
         self.next_page_btn.clicked.connect(self._on_next_page_clicked)
-        after_first_layout.addWidget(self.next_page_btn)
+        after_first_buttons_layout.addWidget(self.next_page_btn)
 
         self.continue_all_btn = QPushButton("▶ 나머지 전체 생성")
         self.continue_all_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         self.continue_all_btn.clicked.connect(self._on_continue_all_clicked)
-        after_first_layout.addWidget(self.continue_all_btn)
+        after_first_buttons_layout.addWidget(self.continue_all_btn)
+
+        after_first_main_layout.addLayout(after_first_buttons_layout)
+
+        # 하단: 배경 유지 체크박스 행
+        after_first_options_layout = QHBoxLayout()
+        after_first_options_layout.setContentsMargins(0, 0, 0, 0)
+        after_first_options_layout.setSpacing(get_scaled_size(8))
+
+        self.keep_background_checkbox = QCheckBox("🎭 배경 정보 유지")
+        self.keep_background_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(12)}px;
+            }}
+            QCheckBox::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+            QCheckBox::indicator:unchecked {{
+                border: 1px solid {DARK_COLORS['border']};
+                background-color: {DARK_COLORS['bg_secondary']};
+                border-radius: {get_scaled_size(3)}px;
+            }}
+            QCheckBox::indicator:checked {{
+                border: 1px solid {DARK_COLORS['accent_blue']};
+                background-color: {DARK_COLORS['accent_blue']};
+                border-radius: {get_scaled_size(3)}px;
+            }}
+        """)
+        self.keep_background_checkbox.setToolTip(
+            "활성화 시 인물 영역만 Inpaint하여 배경을 유지합니다.\n"
+            "YOLO 모델로 인물을 감지합니다."
+        )
+        self.keep_background_checkbox.clicked.connect(self._on_keep_background_clicked)
+        self._ultralytics_checked = False  # ultralytics 설치 확인 플래그
+        after_first_options_layout.addWidget(self.keep_background_checkbox)
+        after_first_options_layout.addStretch()
+
+        after_first_main_layout.addLayout(after_first_options_layout)
 
         self.after_first_frame.hide()
         button_layout.addWidget(self.after_first_frame)
@@ -572,7 +619,7 @@ class TurboEventSequenceTab(QWidget):
 
         elif self.current_state == self.STATE_FIRST_DONE:
             self.direction_frame.show()
-            self.after_first_frame.show()
+            self.after_first_frame.show()  # 배경 유지 체크박스도 함께 표시됨
             remaining = len(self.confirmed_prompts) - len(self.generated_images)
             self.progress_label.setText(f"✅ 첫 페이지 완료 - 남은 페이지: {remaining}개")
             # 마지막 페이지면 다음/나머지 버튼 비활성화
@@ -972,7 +1019,8 @@ class TurboEventSequenceTab(QWidget):
             strength=0.7,
             negative_prompt=self._get_negative_prompt(),
             prev_images=prev_images,
-            start_index=index
+            start_index=index,
+            keep_background=self.keep_background_checkbox.isChecked()
         )
 
         # 시그널 연결
@@ -1042,7 +1090,8 @@ class TurboEventSequenceTab(QWidget):
             strength=0.7,
             negative_prompt=self._get_negative_prompt(),
             prev_images=prev_images,
-            start_index=0  # Worker 내부 인덱스는 0부터 시작
+            start_index=0,  # Worker 내부 인덱스는 0부터 시작
+            keep_background=self.keep_background_checkbox.isChecked()
         )
 
         # 시그널 연결
@@ -1414,3 +1463,181 @@ class TurboEventSequenceTab(QWidget):
 
         # 전체 시퀀스 생성 시작
         self._on_full_sequence_clicked()
+
+    # ===== 배경 정보 유지 (ultralytics) 관련 메서드 =====
+
+    def _on_keep_background_clicked(self, checked: bool):
+        """배경 정보 유지 체크박스 클릭 핸들러"""
+        if not checked:
+            return
+
+        # 이미 확인했으면 스킵
+        if self._ultralytics_checked:
+            return
+
+        # ultralytics 설치 확인
+        if not self._check_ultralytics_installed():
+            # 설치되지 않음 - 체크 해제하고 설치 안내
+            self.keep_background_checkbox.setChecked(False)
+            self._show_ultralytics_install_dialog()
+        else:
+            # 설치됨 - 플래그 설정
+            self._ultralytics_checked = True
+            print("[TurboSequence] ultralytics 확인 완료")
+
+    def _check_ultralytics_installed(self) -> bool:
+        """ultralytics 패키지 설치 여부 확인"""
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec('ultralytics')
+            return spec is not None
+        except Exception:
+            return False
+
+    def _show_ultralytics_install_dialog(self):
+        """ultralytics 설치 안내 다이얼로그"""
+        from PyQt6.QtWidgets import QMessageBox
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("패키지 설치 필요")
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setText("'배경 정보 유지' 기능을 사용하려면 ultralytics 패키지가 필요합니다.")
+        msg.setInformativeText("지금 설치하시겠습니까?\n\n설치에 1-2분 정도 소요될 수 있습니다.")
+
+        install_btn = msg.addButton("설치", QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+
+        msg.exec()
+
+        if msg.clickedButton() == install_btn:
+            self._install_ultralytics()
+
+    def _install_ultralytics(self):
+        """ultralytics 패키지 설치"""
+        import sys
+        import subprocess
+        from PyQt6.QtWidgets import QProgressDialog, QApplication
+        from PyQt6.QtCore import Qt
+
+        # 가상환경 확인
+        venv_active = hasattr(sys, 'real_prefix') or (
+            hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix
+        )
+        if not venv_active:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "설치 불가",
+                "가상환경에서만 패키지를 설치할 수 있습니다."
+            )
+            return
+
+        # 진행 다이얼로그
+        progress = QProgressDialog("ultralytics 설치 중...", "취소", 0, 0, self)
+        progress.setWindowTitle("패키지 설치")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()
+
+        try:
+            # pip install 실행
+            pip_cmd = [sys.executable, '-m', 'pip', 'install', 'ultralytics']
+            print(f"🔧 실행: {' '.join(pip_cmd)}")
+
+            result = subprocess.run(
+                pip_cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+
+            progress.close()
+
+            if result.returncode == 0:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, "설치 완료",
+                    "ultralytics가 성공적으로 설치되었습니다.\n"
+                    "'배경 정보 유지' 기능을 사용할 수 있습니다."
+                )
+                self._ultralytics_checked = True
+                self.keep_background_checkbox.setChecked(True)
+                print("✅ ultralytics 설치 완료")
+            else:
+                from PyQt6.QtWidgets import QMessageBox
+                error_msg = result.stderr[:500] if result.stderr else "알 수 없는 오류"
+                QMessageBox.critical(
+                    self, "설치 실패",
+                    f"ultralytics 설치에 실패했습니다.\n\n{error_msg}"
+                )
+                print(f"❌ ultralytics 설치 실패: {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            progress.close()
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "설치 실패", "설치 시간이 초과되었습니다.")
+        except Exception as e:
+            progress.close()
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "설치 실패", f"설치 중 오류 발생:\n{str(e)}")
+
+    # ===== 인페인트 다이얼로그 =====
+
+    def _on_inpaint_requested(self, history_index: int, image, direction: str, is_parent: bool, prev_image=None):
+        """🆕 인페인트 요청 핸들러 - 다이얼로그 열기"""
+        from .widgets.sequence_inpaint_dialog import SequenceInpaintDialog
+
+        # 🐛 수정: 이미 열려있으면 닫고 새로 생성 (다른 이미지 인페인트 시 이전 이미지가 남는 문제 해결)
+        if hasattr(self, '_inpaint_dialog') and self._inpaint_dialog and self._inpaint_dialog.isVisible():
+            self._inpaint_dialog.close()
+            self._inpaint_dialog = None
+
+        # 프롬프트 정보 가져오기
+        prompt = ""
+        negative_prompt = ""
+
+        if self.confirmed_prompts and history_index > 0:
+            # history_index 1 = confirmed_prompts[0] (index 0)
+            prompt_index = history_index - 1
+            if prompt_index < len(self.confirmed_prompts):
+                prompt_data = self.confirmed_prompts[prompt_index]
+                prompt = prompt_data.get('general', '')
+
+        # 네거티브 프롬프트 가져오기 (공용 모듈에서)
+        if self.app_context and hasattr(self.app_context, 'main_window'):
+            main_window = self.app_context.main_window
+            # PromptInputModule에서 네거티브 프롬프트 가져오기
+            if hasattr(main_window, 'middle_section') and main_window.middle_section:
+                for module in main_window.middle_section.modules:
+                    if hasattr(module, 'get_parameters'):
+                        params = module.get_parameters()
+                        if 'negative_prompt' in params:
+                            negative_prompt = params.get('negative_prompt', '')
+                            break
+
+        print(f"🎨 인페인트 다이얼로그 열기: #{history_index}")
+        print(f"   - prompt: {prompt[:50]}..." if len(prompt) > 50 else f"   - prompt: {prompt}")
+        print(f"   - negative: {negative_prompt[:30]}..." if len(negative_prompt) > 30 else f"   - negative: {negative_prompt}")
+        print(f"   - prev_image: {'있음' if prev_image else '없음'}")
+
+        # 다이얼로그 생성
+        self._inpaint_dialog = SequenceInpaintDialog(
+            image=image,
+            history_index=history_index,
+            direction=direction,
+            is_parent=is_parent,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            app_context=self.app_context,
+            prev_image=prev_image,  # 🆕 이전 이미지 전달
+            parent=None  # 모달리스
+        )
+        self._inpaint_dialog.image_confirmed.connect(self._on_inpaint_confirmed)
+        self._inpaint_dialog.show()
+
+    def _on_inpaint_confirmed(self, index: int, new_image):
+        """🆕 인페인트 결과 적용"""
+        # HistoryPanel의 핸들러 호출
+        self.history_panel._on_inpaint_confirmed(index, new_image)

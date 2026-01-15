@@ -420,6 +420,7 @@ class HistoryPanel(QWidget):
     order_changed = pyqtSignal()  # 위젯 순서 변경 시
     clear_and_reconfirm = pyqtSignal()  # 클리어 후 시퀀스 재확정 요청
     request_grid_update = pyqtSignal()  # 🆕 그리드 업데이트 요청 (순서 변경 시)
+    inpaint_requested = pyqtSignal(int, object, str, bool, object)  # 🆕 인페인트 요청 (history_index, image, direction, is_parent, prev_image)
 
     def __init__(self, app_context=None, parent=None):
         super().__init__(parent)
@@ -542,6 +543,14 @@ class HistoryPanel(QWidget):
         self.clipboard_btn.clicked.connect(self._on_clipboard_clicked)
         self.clipboard_btn.setEnabled(False)
         header_layout.addWidget(self.clipboard_btn)
+
+        # 🆕 인페인트 버튼
+        self.inpaint_btn = QPushButton("🎨")
+        self.inpaint_btn.setStyleSheet(compact_button_style)
+        self.inpaint_btn.setToolTip("인페인트 (선택 이미지 수정)")
+        self.inpaint_btn.clicked.connect(self._on_inpaint_clicked)
+        self.inpaint_btn.setEnabled(False)
+        header_layout.addWidget(self.inpaint_btn)
 
         # 버튼 스타일 (3px 더 큰 폰트)
         button_style = f"""
@@ -861,7 +870,14 @@ class HistoryPanel(QWidget):
                 thumb.set_selected(i == index)
 
         self.selected_index = index
-        self.image_selected.emit(index, image)
+
+        # 🐛 수정: 썸네일 위젯의 image 대신 히스토리 패널의 images 리스트에서 가져옴
+        # (인페인트 등으로 이미지가 교체된 경우 최신 이미지 반영)
+        actual_image = self.images[index] if index < len(self.images) else image
+        self.image_selected.emit(index, actual_image)
+
+        # 🆕 인페인트 버튼 활성화 (index 0은 Grid이므로 제외, index 1 이상만)
+        self.inpaint_btn.setEnabled(index >= 1 and actual_image is not None)
 
     def _on_skip_toggled(self, index: int, is_skipped: bool):
         """썸네일 Skip 토글 (시그널 전달)"""
@@ -1244,3 +1260,55 @@ class HistoryPanel(QWidget):
     def _on_widget_dropped(self, from_index: int, to_index: int):
         """위젯 드롭 이벤트"""
         self._reorder_widgets(from_index, to_index)
+
+    def _on_inpaint_clicked(self):
+        """🆕 인페인트 버튼 클릭 - 시그널 발행"""
+        if self.selected_index < 1 or self.selected_index >= len(self.images):
+            return
+
+        image = self.images[self.selected_index]
+        if image is None:
+            return
+
+        # Parent 여부 결정 (index 1 = Parent)
+        is_parent = (self.selected_index == 1)
+
+        # 방향 결정 (이미지 크기로 추론)
+        w, h = image.size
+        if is_parent:
+            # Parent: 1152x832 (horizontal) 또는 832x1152 (vertical)
+            direction = 'horizontal' if w > h else 'vertical'
+        else:
+            # Child: 832x608 (horizontal) 또는 608x832 (vertical)
+            direction = 'horizontal' if w > h else 'vertical'
+
+        # 🐛 수정: 이전 이미지 가져오기 - 항상 Parent(index 1) 이미지 사용
+        # (Child 인페인트 시 캔버스 상단/좌측에 배치할 참조 이미지)
+        prev_image = None
+        if not is_parent and len(self.images) > 1 and self.images[1]:
+            prev_image = self.images[1]  # 항상 Parent(index 1) 사용
+
+        # 🆕 시그널 발행 (TurboEventSequenceTab에서 다이얼로그 열기)
+        self.inpaint_requested.emit(self.selected_index, image, direction, is_parent, prev_image)
+        print(f"🎨 인페인트 요청: #{self.selected_index}, is_parent={is_parent}, direction={direction}, prev_image={'있음' if prev_image else '없음'}")
+
+    def _on_inpaint_confirmed(self, index: int, new_image: Image.Image):
+        """🆕 인페인트 결과 적용"""
+        if 0 <= index < len(self.images):
+            # 이미지 교체
+            self.images[index] = new_image
+
+            # 썸네일 업데이트
+            if index < len(self.thumbnails) and self.thumbnails[index]:
+                self.thumbnails[index].image = new_image
+                self.thumbnails[index]._set_thumbnail()
+
+            # 🐛 수정: 인페인트는 순서 변경이 아니라 이미지 내용 수정이므로
+            # _order_changed 플래그를 설정하지 않음 (재생성 기능 유지)
+            # self._order_changed = True  # ← 제거됨
+            # self.order_warning_label.show()  # ← 제거됨
+
+            # 그리드 업데이트 요청 (이미지 내용이 변경되었으므로)
+            self.request_grid_update.emit()
+
+            print(f"✅ 인페인트 결과 적용: #{index}")

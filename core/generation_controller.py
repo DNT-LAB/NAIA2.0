@@ -676,11 +676,17 @@ class GenerationController:
             if is_turbo_sequence:
                 turbo_index = self.current_generation_params.get("turbo_sequence_index", 0)
                 print(f"🚀 Turbo Sequence 에러 감지 - 전용 에러 이벤트 발행 (index: {turbo_index})")
-                self.context.publish("generation_error", {
+                # 🆕 에러 이벤트 데이터 구성
+                error_data = {
                     "message": error_message,
                     "turbo_sequence_request": True,
                     "turbo_sequence_index": turbo_index
-                })
+                }
+                # 인페인트 다이얼로그에서 온 요청인 경우 식별자 추가
+                if self.current_generation_params.get("sequence_inpaint_dialog"):
+                    error_data["sequence_inpaint_dialog"] = True
+                    error_data["sequence_inpaint_request_id"] = self.current_generation_params.get("sequence_inpaint_request_id")
+                self.context.publish("generation_error", error_data)
                 # Turbo Sequence 요청은 자동 재시도 없이 종료
                 self.current_generation_params = None
                 return

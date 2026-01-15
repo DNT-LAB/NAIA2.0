@@ -13,6 +13,9 @@ from typing import List, Dict, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from core.context import AppContext
 
+# PersonMaskGenerator (배경 정보 유지 기능용)
+from .person_mask_generator import PersonMaskGenerator
+
 # 인원 태그 키워드
 PERSON_KEYWORDS = ["boy", "girl", "other"]
 
@@ -78,7 +81,8 @@ class SequenceGenerationWorker(QObject):
         strength: float = 0.7,
         negative_prompt: str = '',
         prev_images: List[Image.Image] = None,
-        start_index: int = 0
+        start_index: int = 0,
+        keep_background: bool = False
     ):
         """
         SequenceGenerationWorker 초기화.
@@ -96,6 +100,7 @@ class SequenceGenerationWorker(QObject):
             negative_prompt: 공통 네거티브 프롬프트
             prev_images: 이전에 생성된 이미지 리스트 (중간부터 시작 시 사용)
             start_index: 시작 인덱스 (시그널에 전달할 실제 인덱스)
+            keep_background: 배경 정보 유지 (YOLO 인물 마스크 사용)
         """
         super().__init__()
 
@@ -109,6 +114,9 @@ class SequenceGenerationWorker(QObject):
         self.start_index = start_index
         # Base reference image (parent) when continuing a sequence.
         self.base_reference_image = self.prev_images[0] if self.prev_images else None
+        # 🆕 배경 정보 유지 옵션
+        self.keep_background = keep_background
+        self._person_mask_generator: Optional[PersonMaskGenerator] = None
 
         # 취소 플래그
         self._cancelled = False
@@ -248,7 +256,7 @@ class SequenceGenerationWorker(QObject):
 
         # Inpaint 캔버스 및 마스크 생성
         canvas = self._create_inpaint_canvas(prev_image)
-        mask = self._create_inpaint_mask()
+        mask = self._create_inpaint_mask(prev_image)  # 배경 유지 모드에서 인물 감지용
 
         # 🔧 디버그: 요청 전 캔버스와 마스크 미리보기
         self._show_debug_preview(canvas, mask)
@@ -283,32 +291,30 @@ class SequenceGenerationWorker(QObject):
 
     def _show_debug_preview(self, canvas: Image.Image, mask: Image.Image):
         """디버그용 캔버스 및 마스크 미리보기 (배포 시 비활성화)"""
-        # 🔧 디버그 모드 비활성화 (배포용)
-        return
+        # 🔧 디버그 모드 활성화 (배경 유지 기능 디버깅용)
+        try:
+            # 캔버스와 마스크를 나란히 표시할 디버그 이미지 생성
+            # 마스크를 캔버스 크기로 확대
+            mask_enlarged = mask.resize((self.canvas_width, self.canvas_height), Image.Resampling.NEAREST)
+            mask_rgb = mask_enlarged.convert('RGB')
 
-        # try:
-        #     # 캔버스와 마스크를 나란히 표시할 디버그 이미지 생성
-        #     # 마스크를 캔버스 크기로 확대
-        #     mask_enlarged = mask.resize((self.canvas_width, self.canvas_height), Image.Resampling.NEAREST)
-        #     mask_rgb = mask_enlarged.convert('RGB')
+            # 캔버스와 마스크를 나란히 붙임
+            debug_width = self.canvas_width * 2 + 20
+            debug_height = self.canvas_height
+            debug_image = Image.new('RGB', (debug_width, debug_height), (50, 50, 50))
 
-        #     # 캔버스와 마스크를 나란히 붙임
-        #     debug_width = self.canvas_width * 2 + 20
-        #     debug_height = self.canvas_height
-        #     debug_image = Image.new('RGB', (debug_width, debug_height), (50, 50, 50))
+            # 캔버스 붙이기
+            debug_image.paste(canvas, (0, 0))
 
-        #     # 캔버스 붙이기
-        #     debug_image.paste(canvas, (0, 0))
+            # 마스크 붙이기
+            debug_image.paste(mask_rgb, (self.canvas_width + 20, 0))
 
-        #     # 마스크 붙이기
-        #     debug_image.paste(mask_rgb, (self.canvas_width + 20, 0))
-
-        #     # 디버그 이미지 표시
-        #     actual_index = self.start_index + self._current_index
-        #     print(f"🔧 [Debug] Index {actual_index}: Canvas ({self.canvas_width}x{self.canvas_height}) + Mask")
-        #     debug_image.show()
-        # except Exception as e:
-        #     print(f"🔧 [Debug] Preview error: {e}")
+            # 디버그 이미지 표시
+            actual_index = self.start_index + self._current_index
+            print(f"🔧 [Debug] Index {actual_index}: Canvas ({self.canvas_width}x{self.canvas_height}) + Mask, keep_background={self.keep_background}")
+            debug_image.show()
+        except Exception as e:
+            print(f"🔧 [Debug] Preview error: {e}")
 
     def _execute_generation_pipeline(self, override_params: dict):
         """GenerationController를 통해 생성 실행"""
@@ -397,6 +403,10 @@ class SequenceGenerationWorker(QObject):
         - 캔버스: 1216 x 832
         - 이전 이미지를 좌측 절반(608 x 832)에 리사이즈하여 배치
         - 우측 절반(608 x 832)은 Inpaint 영역
+
+        keep_background 모드:
+        - 상단/좌측뿐만 아니라 하단/우측에도 동일한 이미지 배치
+        - 검정 띠를 중간(616px)까지 확장하여 경계 명확화
         """
         # 이미지 데이터 완전 로드
         if hasattr(prev_image, 'load'):
@@ -415,13 +425,19 @@ class SequenceGenerationWorker(QObject):
             # 캔버스 상단(0, 0)에 배치
             canvas.paste(resized, (0, 0))
 
-            # 🆕 경계선 추가 (Split screen 유도): 601~608px 영역을 검은색으로 칠함
-            # 상단 이미지의 하단 8px을 덮어씀
             from PIL import ImageDraw
             draw = ImageDraw.Draw(canvas)
-            # (x0, y0, x1, y1) - y1은 포함되지 않음 (PIL 버전에 따라 다를 수 있으니 주의, rectangle은 x1,y1 포함)
-            # 여기서는 확실하게 601부터 608까지 칠함
-            draw.rectangle([(0, 600), (self.canvas_width, 608)], fill=(0, 0, 0))
+
+            if self.keep_background:
+                # 🆕 배경 유지 모드: 하단에도 동일한 이미지 배치
+                # 하단 시작 위치: 1216 - 608 = 608
+                canvas.paste(resized, (0, 608))
+
+                # 검정 띠: 600 ~ 616 (중간 지점까지 확장)
+                draw.rectangle([(0, 600), (self.canvas_width, 616)], fill=(0, 0, 0))
+            else:
+                # 기본 모드: 경계선 추가 (Split screen 유도): 601~608px 영역을 검은색으로 칠함
+                draw.rectangle([(0, 600), (self.canvas_width, 608)], fill=(0, 0, 0))
 
         else:  # vertical
             # 세로 방향: 좌측 절반에 배치
@@ -433,11 +449,19 @@ class SequenceGenerationWorker(QObject):
             # 캔버스 좌측(0, 0)에 배치
             canvas.paste(resized, (0, 0))
 
-            # 🆕 경계선 추가 (Split screen 유도): 601~608px 영역을 검은색으로 칠함
-            # 좌측 이미지의 우측 7px을 덮어씀
             from PIL import ImageDraw
             draw = ImageDraw.Draw(canvas)
-            draw.rectangle([(601, 0), (608, self.canvas_height)], fill=(0, 0, 0))
+
+            if self.keep_background:
+                # 🆕 배경 유지 모드: 우측에도 동일한 이미지 배치
+                # 우측 시작 위치: 1216 - 608 = 608
+                canvas.paste(resized, (608, 0))
+
+                # 검정 띠: 600 ~ 616 (중간 지점까지 확장)
+                draw.rectangle([(600, 0), (616, self.canvas_height)], fill=(0, 0, 0))
+            else:
+                # 기본 모드: 경계선 추가 (Split screen 유도): 601~608px 영역을 검은색으로 칠함
+                draw.rectangle([(601, 0), (608, self.canvas_height)], fill=(0, 0, 0))
 
         return canvas
 
@@ -462,13 +486,15 @@ class SequenceGenerationWorker(QObject):
 
         return cropped
 
-    def _create_inpaint_mask(self) -> Image.Image:
+    def _create_inpaint_mask(self, prev_image: Image.Image = None) -> Image.Image:
         """
-        1/8 크기 마스크 생성 (정확히 절반 분할).
+        1/8 크기 마스크 생성.
 
         NAI API는 캔버스 크기의 1/8 크기 마스크를 요구합니다.
         - 검정 (0): 보존 영역
         - 흰색 (255): Inpaint 영역
+
+        keep_background가 활성화되면 인물 영역만 마스킹합니다.
 
         가로 방향:
         - 캔버스: 832 x 1216 -> 마스크: 104 x 152
@@ -479,7 +505,19 @@ class SequenceGenerationWorker(QObject):
         - 캔버스: 1216 x 832 -> 마스크: 152 x 104
         - 좌측 절반(608px = 76px in mask): 보존
         - 우측 절반(608px = 76px in mask): Inpaint
+
+        Args:
+            prev_image: 이전 이미지 (배경 유지 모드에서 인물 감지용)
         """
+        # 🆕 배경 정보 유지 모드: 인물 마스크 사용
+        if self.keep_background and prev_image is not None:
+            person_mask = self._create_person_based_mask(prev_image)
+            if person_mask is not None:
+                return person_mask
+            # 인물 마스크 생성 실패 시 기본 마스크로 폴백
+            print("[SequenceWorker] Person mask failed, falling back to default mask")
+
+        # 기본 마스크 (정확히 절반 분할)
         mask_width = self.canvas_width // 8
         mask_height = self.canvas_height // 8
 
@@ -498,6 +536,56 @@ class SequenceGenerationWorker(QObject):
             mask.paste(255, (half_width, 0, mask_width, mask_height))
 
         return mask
+
+    def _get_person_mask_generator(self) -> PersonMaskGenerator:
+        """PersonMaskGenerator 인스턴스 (Lazy load)"""
+        if self._person_mask_generator is None:
+            self._person_mask_generator = PersonMaskGenerator()
+        return self._person_mask_generator
+
+    def _create_person_based_mask(self, prev_image: Image.Image) -> Optional[Image.Image]:
+        """
+        인물 감지 기반 마스크 생성.
+
+        이전 이미지에서 인물을 감지하고 해당 영역만 Inpaint 대상으로 설정합니다.
+
+        Args:
+            prev_image: 참조 이미지 (인물 감지 대상)
+
+        Returns:
+            인물 기반 마스크 (1/8 크기) 또는 None
+        """
+        try:
+            generator = self._get_person_mask_generator()
+
+            if not generator.is_available():
+                print("[SequenceWorker] PersonMaskGenerator not available")
+                return None
+
+            # 방향에 따른 크기 설정
+            if self.direction == 'horizontal':
+                paste_size = self.PASTE_SIZE_H
+            else:
+                paste_size = self.PASTE_SIZE_V
+
+            # 인물 마스크 생성
+            mask = generator.create_inpaint_mask_with_person(
+                prev_image=prev_image,
+                canvas_size=(self.canvas_width, self.canvas_height),
+                paste_size=paste_size,
+                direction=self.direction,
+                mask_scale=8
+            )
+
+            if mask is not None:
+                print(f"[SequenceWorker] Person-based mask created: {mask.size}")
+            return mask
+
+        except Exception as e:
+            print(f"[SequenceWorker] Error creating person mask: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def _crop_result(self, inpaint_result: Image.Image) -> Image.Image:
         """

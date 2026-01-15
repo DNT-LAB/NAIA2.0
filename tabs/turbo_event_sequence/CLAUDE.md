@@ -22,6 +22,8 @@ Parquet 데이터셋에서 Parent-Child 관계의 이벤트 시퀀스를 검색�
 9. 🆕 **빠른 생성 버튼**: ⏩ (결정+첫페이지), ⏭ (결정+전체생성)
 10. 🆕 **랜덤 연속 생성**: 검색 결과에서 랜덤 이벤트 선택
 11. 🆕 **Event Viewer**: 생성한 이벤트 탐색 및 빠른 재생성
+12. 🆕 **배경 정보 유지**: YOLO 인물 감지로 배경 보존하며 인물만 Inpaint
+13. 🆕 **인페인트 편집기**: 히스토리 패널에서 개별 이미지 수동 인페인트 편집
 
 ---
 
@@ -43,9 +45,11 @@ tabs/turbo_event_sequence/
 │   ├── event_viewer_widget.py         # 🆕 Event Viewer 다이얼로그 (350줄)
 │   ├── event_index_manager.py         # 🆕 이벤트 인덱스 JSON 관리 (300줄)
 │   ├── thumbnail_grid.py              # 🆕 썸네일 그리드 위젯 (380줄)
-│   └── event_preview_panel.py         # 🆕 이벤트 미리보기 패널 (250줄)
+│   ├── event_preview_panel.py         # 🆕 이벤트 미리보기 패널 (250줄)
+│   └── sequence_inpaint_dialog.py     # 🆕 인페인트 편집 다이얼로그 (950줄)
 ├── workers/
-│   └── sequence_generation_worker.py  # NAI 생성 워커 (662줄)
+│   ├── sequence_generation_worker.py  # NAI 생성 워커 (662줄)
+│   └── person_mask_generator.py       # 🆕 YOLO 인물 마스크 생성기 (450줄)
 ├── .claude/
 │   └── PRD_EVENT_VIEWER.md            # 🆕 Event Viewer PRD 문서
 └── docs/                              # 참고 문서
@@ -323,6 +327,88 @@ else:  # vertical
     draw.rectangle([(601, 0), (608, self.canvas_height)], fill=(0, 0, 0))
 ```
 
+#### 🆕 배경 정보 유지 모드 (Keep Background)
+
+`keep_background=True` 옵션을 사용하면 YOLO 인물 감지를 통해 배경을 유지하면서 인물 영역만 Inpaint합니다.
+
+**캔버스 구성 (keep_background 모드)**:
+```python
+# 가로 방향: 상단 + 하단 모두 동일 이미지 배치
+canvas.paste(resized, (0, 0))      # 상단
+canvas.paste(resized, (0, 608))    # 하단 (동일 이미지)
+draw.rectangle([(0, 600), (832, 616)], fill=(0, 0, 0))  # 중앙 경계선 확장
+
+# 세로 방향: 좌측 + 우측 모두 동일 이미지 배치
+canvas.paste(resized, (0, 0))      # 좌측
+canvas.paste(resized, (608, 0))    # 우측 (동일 이미지)
+draw.rectangle([(600, 0), (616, 832)], fill=(0, 0, 0))  # 중앙 경계선 확장
+```
+
+**마스크 생성**: `PersonMaskGenerator`가 YOLO로 인물 영역을 감지하여 해당 부분만 흰색(Inpaint 대상)으로 설정합니다.
+
+---
+
+### 4.1 PersonMaskGenerator (인물 마스크 생성기)
+
+**파일**: `workers/person_mask_generator.py` (450줄)
+
+**역할**: YOLO v8 기반 인물 세그멘테이션 및 Inpaint 마스크 생성
+
+**의존성**: `ultralytics` (선택적 - 설치되지 않으면 기본 마스크로 폴백)
+
+**모델**: `person_yolov8n-seg.pt` (자동 다운로드)
+
+#### 주요 상수
+
+```python
+EXPANSION_RATIO = 1.07       # 마스크 확장 비율 (7% 확장 → ~50px padding)
+CONFIDENCE_THRESHOLD = 0.25  # YOLO 신뢰도 임계값
+```
+
+#### 마스크 확장 (Morphological Dilation)
+
+고립된 배경 영역(손/옷이 프레임 밖으로 나간 부분)을 포함시키기 위해 세그멘트 마스크를 형태학적 팽창(dilation)으로 확장합니다.
+
+```python
+from scipy import ndimage
+
+# expansion_ratio를 픽셀 패딩으로 변환
+padding_pixels = int(avg_dim * (expansion_ratio - 1.0))  # ~50px
+
+# Morphological Dilation (4-connected)
+struct = ndimage.generate_binary_structure(2, 1)
+dilated = ndimage.binary_dilation(binary_mask, structure=struct, iterations=padding_pixels)
+```
+
+#### 주요 메서드
+
+```python
+def generate_mask(image: Image.Image, expansion_ratio: float = None) -> Image.Image:
+    """이미지에서 인물 마스크 생성 (흰색=인물, 검정=배경)"""
+
+def create_inpaint_mask_with_person(
+    prev_image: Image.Image,
+    canvas_size: Tuple[int, int],
+    paste_size: Tuple[int, int],
+    direction: str,
+    mask_scale: int = 8
+) -> Image.Image:
+    """Inpaint용 1/8 크기 마스크 생성 (인물 영역만 Inpaint)"""
+
+def is_available() -> bool:
+    """YOLO 모델 사용 가능 여부"""
+```
+
+#### UI 연동
+
+`TurboEventSequenceTab`의 `after_first_frame`에 `keep_background_checkbox`가 포함되어 있습니다:
+
+```python
+# after_first_frame 레이아웃 (2중 구조)
+# 상단: regenerate_btn, next_page_btn, continue_all_btn
+# 하단: keep_background_checkbox (🎭 배경 정보 유지)
+```
+
 ---
 
 ### 5. HistoryPanel (히스토리 패널)
@@ -376,6 +462,161 @@ prompts_updated = pyqtSignal(list)             # 프롬프트 수정
 prompt_engineering_toggled = pyqtSignal(bool)  # PE 토글
 quick_first_page_requested = pyqtSignal(list)  # 🆕 ⏩ 빠른 첫 페이지
 quick_all_pages_requested = pyqtSignal(list)   # 🆕 ⏭ 빠른 전체 생성
+```
+
+---
+
+### 7. SequenceInpaintDialog (인페인트 편집기)
+
+**파일**: `widgets/sequence_inpaint_dialog.py` (950줄)
+
+**역할**: 히스토리 패널에서 개별 이미지를 수동으로 인페인트 편집하는 다이얼로그
+
+#### 구성 클래스
+
+| 클래스 | 역할 |
+|--------|------|
+| `MaskEditWidget` | 8x8 격자 기반 마스크 편집 캔버스 |
+| `ResultWidget` | 원본/결과 비교, 재생성/확정 버튼 |
+| `SequenceInpaintDialog` | 전체 다이얼로그 컨테이너 |
+
+#### 시그널
+
+```python
+# MaskEditWidget
+generate_requested = pyqtSignal(dict)  # mask_data (full_mask, small_mask, strength)
+
+# ResultWidget
+regenerate_requested = pyqtSignal()    # 재생성 요청
+edit_mask_requested = pyqtSignal()     # 마스크 편집 탭 전환
+cancel_requested = pyqtSignal()        # 취소
+confirm_requested = pyqtSignal()       # 확정
+
+# SequenceInpaintDialog
+image_confirmed = pyqtSignal(int, object)  # (history_index, PIL.Image)
+```
+
+#### 캔버스 크기 상수
+
+```python
+CANVAS_SIZE_H = (832, 1216)   # 가로 방향 캔버스
+CANVAS_SIZE_V = (1216, 832)   # 세로 방향 캔버스
+PASTE_SIZE_H = (832, 608)     # 가로 방향 Child 크기
+PASTE_SIZE_V = (608, 832)     # 세로 방향 Child 크기
+PARENT_SIZE_H = (1152, 832)   # 가로 방향 Parent 크기
+PARENT_SIZE_V = (832, 1152)   # 세로 방향 Parent 크기
+```
+
+#### 마스크 편집 UI
+
+**툴바 구성**:
+- 브러시 크기 슬라이더 (8~160px, 8의 배수)
+- 브러시 모양 토글 (사각형/원형)
+- **Strength 슬라이더** (0.01~1.00, 기본값 0.7)
+
+**마우스 조작**:
+| 동작 | 기능 |
+|------|------|
+| 좌클릭 드래그 | 마스크 그리기 (파란색 오버레이) |
+| 우클릭 드래그 | 마스크 지우기 |
+| 마우스 휠 | 브러시 크기 조절 |
+
+**스크롤바 비활성화**: 마우스 휠이 브러시 크기 조절에 사용되므로 QGraphicsView 스크롤바 비활성화
+
+```python
+self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+```
+
+#### Child 이미지 캔버스 확장
+
+Child 이미지(608x832 또는 832x608)는 NAI 인페인트를 위해 캔버스 크기로 확장:
+
+```python
+# 가로 방향: 상단 + 하단에 동일 이미지 배치
+canvas.paste(child_image, (0, 0))      # 상단
+canvas.paste(child_image, (0, 608))    # 하단
+draw.rectangle([(0, 600), (832, 616)], fill=(0, 0, 0))  # 경계선
+
+# 마스크도 동일하게 복제
+new_mask.paste(small_mask, (0, 0))     # 상단 절반
+new_mask.paste(small_mask, (0, 76))    # 하단 절반 (76 = 608/8)
+```
+
+#### 인페인트 요청 흐름
+
+```
+1. HistoryPanel: inpaint_requested 시그널 발행
+      ↓
+2. TurboEventSequenceTab: _on_inpaint_requested() 핸들러
+   - confirmed_prompts에서 해당 인덱스의 프롬프트 추출
+   - negative_prompt를 메인 UI에서 가져옴
+      ↓
+3. SequenceInpaintDialog 생성 (prompt, negative_prompt 전달)
+      ↓
+4. 사용자: 마스크 편집 후 "생성하기" 클릭
+      ↓
+5. _execute_inpaint(): GenerationController 호출
+   - override_params에 식별자 포함:
+     - turbo_sequence_request: True
+     - sequence_inpaint_dialog: True
+     - sequence_inpaint_request_id: UUID
+      ↓
+6. NAIA_cold_v4.py: generation_completed 이벤트 발행 (식별자 포함)
+      ↓
+7. _on_generation_completed(): 식별자로 필터링 후 결과 표시
+      ↓
+8. 사용자: "이미지 결정" 클릭
+      ↓
+9. image_confirmed 시그널 → HistoryPanel 이미지 업데이트
+```
+
+#### Override 파라미터 형식
+
+```python
+override_params = {
+    'type': 'inpaint',
+    'input': self.prompt,              # 프롬프트 직접 전달
+    'negative_prompt': self.negative_prompt,
+    'image_bytes': canvas_bytes.getvalue(),
+    'mask_bytes': mask_bytes.getvalue(),
+    'width': canvas.width,
+    'height': canvas.height,
+    'strength': strength,              # 동적 strength 값 (0.01~1.00)
+    'noise': 0.0,
+    'random_resolution': False,
+    'turbo_sequence_request': True,    # 시퀀스 요청 식별자
+    'sequence_inpaint_dialog': True,   # 인페인트 다이얼로그 식별자
+    'sequence_inpaint_request_id': self._request_id,  # 요청 ID
+}
+```
+
+#### HistoryPanel 연동
+
+**시그널 추가** (`history_panel.py`):
+```python
+inpaint_requested = pyqtSignal(int, object, str, bool)  # history_index, image, direction, is_parent
+```
+
+**핸들러** (`turbo_event_sequence_tab.py`):
+```python
+def _on_inpaint_requested(self, history_index: int, image, direction: str, is_parent: bool):
+    # 프롬프트 추출 (confirmed_prompts에서)
+    prompt = self.confirmed_prompts[history_index - 1].get('general', '')
+
+    # 다이얼로그 생성
+    self._inpaint_dialog = SequenceInpaintDialog(
+        image=image,
+        history_index=history_index,
+        direction=direction,
+        is_parent=is_parent,
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        app_context=self.app_context,
+        parent=None  # 모달리스
+    )
+    self._inpaint_dialog.image_confirmed.connect(self._on_inpaint_confirmed)
+    self._inpaint_dialog.show()
 ```
 
 ---
@@ -1008,6 +1249,22 @@ ID가 8자리를 초과하면 `1234..78` 형태로 축약됩니다.
    - 메인 윈도우와 동시 사용 가능
    - 일반 윈도우처럼 z-order 전환 가능
 
+9. **배경 정보 유지 (Keep Background)** 🆕
+   - YOLO v8 인물 세그멘테이션 기반 배경 보존 Inpaint
+   - `PersonMaskGenerator` 클래스 추가 (`workers/person_mask_generator.py`)
+   - Morphological Dilation으로 마스크 확장 (EXPANSION_RATIO=1.07)
+   - `after_first_frame` UI 2중 레이아웃으로 재구성
+   - `ultralytics` 미설치 시 기본 마스크로 폴백
+
+10. **인페인트 편집기 (SequenceInpaintDialog)** 🆕
+   - 히스토리 패널에서 개별 이미지 수동 인페인트 편집
+   - 8x8 격자 기반 마스크 편집 캔버스
+   - Strength 슬라이더 추가 (0.01~1.00, 기본값 0.7)
+   - QGraphicsView 스크롤바 비활성화 (휠=브러시 크기)
+   - Child 이미지 캔버스 자동 확장 (상하/좌우 복제)
+   - 요청 ID 기반 응답 필터링
+   - 위치: `widgets/sequence_inpaint_dialog.py`
+
 ### 버그 수정
 
 1. **그리드 자동 저장 중복**
@@ -1126,4 +1383,4 @@ def _on_open_event_viewer(self):
 ---
 
 *문서 버전: 2026-01-15*
-*최종 검토: 모달리스 다이얼로그 메모리 관리 가이드 수정 (GC 자동 처리 명시)*
+*최종 검토: 인페인트 편집기 (SequenceInpaintDialog) 문서화*

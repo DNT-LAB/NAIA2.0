@@ -12,6 +12,7 @@ from .event_index_manager import EventIndexManager
 from .thumbnail_grid import ThumbnailGrid
 from .event_preview_panel import EventPreviewPanel
 from .event_viewer_widget import EventViewerWidget
+from .sequence_inpaint_dialog import SequenceInpaintDialog
 
 __all__ = [
     'EventSearchWidget',
@@ -23,5 +24,6 @@ __all__ = [
     'EventIndexManager',
     'ThumbnailGrid',
     'EventPreviewPanel',
-    'EventViewerWidget'
+    'EventViewerWidget',
+    'SequenceInpaintDialog'
 ]

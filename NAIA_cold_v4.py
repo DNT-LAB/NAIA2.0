@@ -2587,11 +2587,17 @@ class ModernMainWindow(QMainWindow):
                 if is_turbo_sequence_request:
                     print(f"🚀 Turbo Sequence 요청 감지 - 전용 이벤트 발행 (index: {turbo_sequence_index})")
                     if hasattr(self, 'app_context') and self.app_context:
-                        self.app_context.publish("generation_completed", {
+                        # 🆕 인페인트 다이얼로그 식별자도 포함
+                        event_data = {
                             "image": image_object,
                             "turbo_sequence_request": True,
                             "turbo_sequence_index": turbo_sequence_index
-                        })
+                        }
+                        # 인페인트 다이얼로그에서 온 요청인 경우 식별자 추가
+                        if generation_params.get("sequence_inpaint_dialog"):
+                            event_data["sequence_inpaint_dialog"] = True
+                            event_data["sequence_inpaint_request_id"] = generation_params.get("sequence_inpaint_request_id")
+                        self.app_context.publish("generation_completed", event_data)
 
                 # Main Window → Assets 자동 전파 (추후 제거 가능)
                 # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능

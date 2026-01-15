@@ -1542,7 +1542,7 @@ class TurboEventSequenceTab(QWidget):
 
         try:
             # pip install 실행
-            pip_cmd = [sys.executable, '-m', 'pip', 'install', 'ultralytics']
+            pip_cmd = [sys.executable, '-m', 'pip', 'install', 'ultralytics==8.3.252']
             print(f"🔧 실행: {' '.join(pip_cmd)}")
 
             result = subprocess.run(

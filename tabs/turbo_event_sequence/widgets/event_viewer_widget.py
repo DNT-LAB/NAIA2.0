@@ -322,18 +322,19 @@ class EventViewerWidget(QDialog):
     def _load_data(self):
         """데이터 로드"""
         # 인덱스 로드
-        if not self.index_manager.load_index():
-            # 인덱스 없으면 폴더 스캔
-            self._sync_index()
-        else:
-            # 인덱스 있으면 그대로 표시
-            self._update_display()
+        self.index_manager.load_index()
+
+        # 🔄 항상 폴더와 동기화 (새로 생성된 이벤트 감지)
+        self._sync_index()
 
     def _sync_index(self):
         """인덱스 동기화"""
         self.status_label.setText("인덱스 동기화 중...")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
+
+        # 🆕 썸네일 캐시 클리어 (이미지 새로고침)
+        self.thumbnail_grid.clear_cache()
 
         # 진행률 콜백
         def on_progress(current, total, message):

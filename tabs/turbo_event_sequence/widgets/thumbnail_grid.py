@@ -521,6 +521,10 @@ class ThumbnailGrid(QWidget):
                     item.set_selected(False)
                     break
 
+    def clear_cache(self):
+        """썸네일 캐시 클리어 (이미지 새로고침용)"""
+        self.thumbnail_cache.clear()
+
     def cleanup(self):
         """리소스 정리"""
         self._stop_loading()

@@ -86,6 +86,7 @@ class TurboEventSequenceTab(QWidget):
         self.current_parent_id = None  # 현재 선택된 Parent ID (그리드 저장용)
         self._waiting_continuous_after_grid_save = False  # continuous: wait for grid auto-save
         self.current_viewing_index = -1  # 현재 보고 있는 이미지 인덱스 (재생성용)
+        self._grid_saved_for_current_sequence = False  # 현재 시퀀스에 대해 그리드가 저장되었는지
 
         self._init_ui()
         self._setup_ui_controls()
@@ -329,6 +330,8 @@ class TurboEventSequenceTab(QWidget):
         self.history_panel.request_grid_update.connect(self._on_request_grid_update)
         # 🆕 인페인트 요청 연결
         self.history_panel.inpaint_requested.connect(self._on_inpaint_requested)
+        # 🆕 수동 그리드 저장/복사 시 turbo_events 업데이트
+        self.history_panel.grid_manually_saved.connect(self._on_grid_manually_saved)
         layout.addWidget(self.history_panel, stretch=1)
 
         return panel
@@ -640,6 +643,7 @@ class TurboEventSequenceTab(QWidget):
         print(f"🎯 Parent selected: {parent_id}")
         self.current_sequence = sequence_df
         self.current_parent_id = parent_id  # 🆕 Parent ID 저장 (그리드 저장용)
+        self._grid_saved_for_current_sequence = False  # 🆕 그리드 저장 플래그 리셋
         # set_sequence 호출하여 프롬프트 엔지니어링 적용
         self.sequence_tab_container.set_sequence(sequence_df)
         # 미리보기의 프롬프트를 수정 탭에 직접 반영 (프롬프트 엔지니어링 적용된 상태)
@@ -1358,9 +1362,22 @@ class TurboEventSequenceTab(QWidget):
         # 히스토리 패널에 그리드 이미지 업데이트 (시퀀스 완료 시에만 자동 저장 트리거)
         self.history_panel.update_grid_image(grid_image, trigger_auto_save=is_sequence_complete)
 
+        # 🆕 시퀀스 완료 여부 자동 감지 (모든 슬롯이 채워졌는지 확인)
+        # is_sequence_complete가 명시적으로 True이거나, 모든 슬롯이 채워진 경우 저장
+        all_slots_filled = False
+        if self.confirmed_prompts:
+            total_slots = len(self.confirmed_prompts)
+            # 히스토리 패널의 모든 슬롯에 이미지가 있는지 확인
+            all_slots_filled = self.history_panel.are_all_slots_filled(total_slots)
+            if all_slots_filled and not is_sequence_complete and not self._grid_saved_for_current_sequence:
+                print(f"✨ 모든 슬롯 채워짐: {total_slots}개 - 미리보기용 저장 트리거")
+
         # 🆕 시퀀스 완료 시 검색 위젯 미리보기용 저장 (save/turbo_events)
-        if is_sequence_complete:
+        # (자동 저장 on/off와 관계없이 항상 저장, 중복 저장 방지)
+        should_save = (is_sequence_complete or all_slots_filled) and not self._grid_saved_for_current_sequence
+        if should_save:
             self._save_grid_image(grid_image)
+            self._grid_saved_for_current_sequence = True
 
         return grid_image
 
@@ -1405,6 +1422,18 @@ class TurboEventSequenceTab(QWidget):
 
         except Exception as e:
             print(f"❌ Grid save error: {e}")
+
+    def _on_grid_manually_saved(self, grid_image):
+        """수동 그리드 저장/복사 시 turbo_events 업데이트
+
+        Args:
+            grid_image: PIL Image - 히스토리 패널에서 전달받은 그리드 이미지
+        """
+        if grid_image is None or self.current_parent_id is None:
+            return
+
+        print(f"🔄 수동 그리드 저장 감지 - turbo_events 업데이트: {self.current_parent_id}")
+        self._save_grid_image(grid_image)
 
     # ===== Event Viewer 관련 메서드 =====
 

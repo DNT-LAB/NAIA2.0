@@ -416,6 +416,7 @@ class HistoryPanel(QWidget):
     # 시그널
     image_selected = pyqtSignal(int, object)  # index, image
     grid_auto_saved = pyqtSignal(str)  # 자동 저장 완료 시 경로 전달
+    grid_manually_saved = pyqtSignal(object)  # 🆕 수동 저장/복사 시 그리드 이미지 전달 (turbo_events 업데이트용)
     skip_toggled = pyqtSignal(int, bool)  # 썸네일 Skip 토글 시 (history_index, is_skipped)
     order_changed = pyqtSignal()  # 위젯 순서 변경 시
     clear_and_reconfirm = pyqtSignal()  # 클리어 후 시퀀스 재확정 요청
@@ -896,6 +897,8 @@ class HistoryPanel(QWidget):
                 file_path = self._save_grid_to_default_path(self.grid_image)
                 if file_path:
                     print(f"💾 그리드 저장 완료: {file_path}")
+                    # 🆕 turbo_events 미리보기 업데이트 요청
+                    self.grid_manually_saved.emit(self.grid_image)
             except Exception as e:
                 print(f"❌ 그리드 저장 오류: {e}")
 
@@ -920,6 +923,9 @@ class HistoryPanel(QWidget):
 
                 QApplication.clipboard().setImage(qimage_copy)
                 print("📋 그리드가 클립보드에 복사되었습니다")
+
+                # 🆕 turbo_events 미리보기 업데이트 요청
+                self.grid_manually_saved.emit(self.grid_image)
             except Exception as e:
                 print(f"❌ 클립보드 복사 오류: {e}")
                 import traceback
@@ -1045,6 +1051,21 @@ class HistoryPanel(QWidget):
     def get_count(self) -> int:
         """유효한 이미지 수 반환"""
         return sum(1 for img in self.images if img is not None)
+
+    def are_all_slots_filled(self, total_slots: int) -> bool:
+        """모든 슬롯에 이미지가 있는지 확인 (Skip 상태와 무관)
+
+        Args:
+            total_slots: 총 슬롯 수 (confirmed_prompts 길이)
+
+        Returns:
+            True: 모든 슬롯에 이미지가 있음 (1번~total_slots번 인덱스)
+        """
+        # 히스토리 인덱스는 1번부터 시작 (0번은 그리드)
+        for i in range(1, total_slots + 1):
+            if i >= len(self.images) or self.images[i] is None:
+                return False
+        return True
 
     # ===== 순서 관련 메서드 =====
 

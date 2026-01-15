@@ -20,6 +20,8 @@ class SequencePreviewWidget(QWidget):
 
     # 시그널
     sequence_confirmed = pyqtSignal(list)  # List of prompt dicts
+    quick_first_page_requested = pyqtSignal(list)  # 🆕 결정 + 첫 페이지 생성
+    quick_all_pages_requested = pyqtSignal(list)  # 🆕 결정 + 전체 생성
 
     def __init__(self, app_context=None, prompt_processor=None, parent=None):
         super().__init__(parent)
@@ -68,8 +70,50 @@ class SequencePreviewWidget(QWidget):
 
         title_layout.addStretch()
 
-        # 확정 버튼 (타이틀 행에 배치)
-        self.confirm_btn = QPushButton("✅ 시퀀스 확정")
+        # 🆕 빠른 생성 버튼 공통 스타일 (primary_button과 동일한 높이/패딩)
+        def make_quick_btn_style(bg_color: str, hover_color: str) -> str:
+            return f"""
+                QPushButton {{
+                    background-color: {bg_color};
+                    color: white;
+                    border: none;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
+                    font-size: {get_scaled_font_size(16)}px;
+                    font-weight: bold;
+                    min-height: {get_scaled_size(28)}px;
+                }}
+                QPushButton:hover {{
+                    background-color: {hover_color};
+                }}
+                QPushButton:disabled {{
+                    background-color: {DARK_COLORS['bg_tertiary']};
+                    color: {DARK_COLORS['text_secondary']};
+                }}
+            """
+
+        # ⏩ 버튼: 결정 + 첫 페이지 생성 (주황색)
+        self.quick_first_btn = QPushButton("⏩")
+        self.quick_first_btn.setToolTip("결정 + 첫 페이지 생성")
+        self.quick_first_btn.setStyleSheet(make_quick_btn_style(
+            DARK_COLORS['warning'], '#E68900'  # 주황색, 호버 시 더 진한 주황
+        ))
+        self.quick_first_btn.clicked.connect(self._on_quick_first_clicked)
+        self.quick_first_btn.setEnabled(False)
+        title_layout.addWidget(self.quick_first_btn)
+
+        # ⏭ 버튼: 결정 + 전체 생성 (녹색)
+        self.quick_all_btn = QPushButton("⏭")
+        self.quick_all_btn.setToolTip("결정 + 전체 시퀀스 생성")
+        self.quick_all_btn.setStyleSheet(make_quick_btn_style(
+            DARK_COLORS['success'], '#388E3C'  # 녹색, 호버 시 더 진한 녹색
+        ))
+        self.quick_all_btn.clicked.connect(self._on_quick_all_clicked)
+        self.quick_all_btn.setEnabled(False)
+        title_layout.addWidget(self.quick_all_btn)
+
+        # 결정 버튼 (파란색 - 기존 확정 버튼)
+        self.confirm_btn = QPushButton("✅ 결정")
         self.confirm_btn.setStyleSheet(DARK_STYLES['primary_button'])
         self.confirm_btn.clicked.connect(self._on_confirm_clicked)
         self.confirm_btn.setEnabled(False)
@@ -138,6 +182,8 @@ class SequencePreviewWidget(QWidget):
             self.placeholder.show()
             self.info_label.setText("시퀀스를 선택하세요")
             self.confirm_btn.setEnabled(False)
+            self.quick_first_btn.setEnabled(False)
+            self.quick_all_btn.setEnabled(False)
             return
 
         self.placeholder.hide()
@@ -214,6 +260,8 @@ class SequencePreviewWidget(QWidget):
         # 정보 업데이트
         self.info_label.setText(f"Parent + {len(children)} Children")
         self.confirm_btn.setEnabled(True)
+        self.quick_first_btn.setEnabled(True)
+        self.quick_all_btn.setEnabled(True)
 
     def _clear_tree(self):
         """트리 클리어"""
@@ -320,9 +368,19 @@ class SequencePreviewWidget(QWidget):
         return frame
 
     def _on_confirm_clicked(self):
-        """확정 버튼 클릭"""
+        """결정 버튼 클릭"""
         if self.prompts:
             self.sequence_confirmed.emit(self.prompts)
+
+    def _on_quick_first_clicked(self):
+        """🆕 ⏩ 버튼 클릭 - 결정 + 첫 페이지 생성"""
+        if self.prompts:
+            self.quick_first_page_requested.emit(self.prompts)
+
+    def _on_quick_all_clicked(self):
+        """🆕 ⏭ 버튼 클릭 - 결정 + 전체 시퀀스 생성"""
+        if self.prompts:
+            self.quick_all_pages_requested.emit(self.prompts)
 
     def get_prompts(self) -> list:
         """현재 프롬프트 목록 반환"""

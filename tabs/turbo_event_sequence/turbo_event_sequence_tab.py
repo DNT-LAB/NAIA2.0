@@ -133,6 +133,8 @@ class TurboEventSequenceTab(QWidget):
         self.sequence_tab_container.sequence_confirmed.connect(self._on_sequence_confirmed)
         self.sequence_tab_container.prompts_updated.connect(self._on_prompts_updated)
         self.sequence_tab_container.prompt_engineering_toggled.connect(self._on_prompt_engineering_toggled)
+        self.sequence_tab_container.quick_first_page_requested.connect(self._on_quick_first_page)
+        self.sequence_tab_container.quick_all_pages_requested.connect(self._on_quick_all_pages)
         # 🆕 Skip 상태 변경 시 그리드 업데이트
         self.sequence_tab_container.edit_widget.disable_state_changed.connect(self._on_disable_state_changed)
         layout.addWidget(self.sequence_tab_container, stretch=2)
@@ -648,6 +650,40 @@ class TurboEventSequenceTab(QWidget):
         self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
         # 🆕 자동으로 가로 해상도 선택
         self._on_direction_selected('horizontal')
+
+    def _on_quick_first_page(self, prompts: list):
+        """🆕 ⏩ 빠른 결정 + 첫 페이지 생성"""
+        print(f"⏩ Quick first page: {len(prompts)} prompts")
+        # 시퀀스 확정 로직 실행
+        self.confirmed_prompts = prompts
+        self.generated_images = []
+        self.current_generation_index = 0
+        self.current_viewing_index = -1
+        self.history_panel.clear()
+        self.image_viewer.clear()
+        self.regenerate_btn.setEnabled(True)
+        self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
+        # 자동으로 가로 해상도 선택 후 첫 페이지 생성
+        self._on_direction_selected('horizontal')
+        # 바로 첫 페이지 생성 시작
+        self._start_single_generation(0)
+
+    def _on_quick_all_pages(self, prompts: list):
+        """🆕 ⏭ 빠른 결정 + 전체 시퀀스 생성"""
+        print(f"⏭ Quick all pages: {len(prompts)} prompts")
+        # 시퀀스 확정 로직 실행
+        self.confirmed_prompts = prompts
+        self.generated_images = []
+        self.current_generation_index = 0
+        self.current_viewing_index = -1
+        self.history_panel.clear()
+        self.image_viewer.clear()
+        self.regenerate_btn.setEnabled(True)
+        self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
+        # 자동으로 가로 해상도 선택 후 전체 생성
+        self._on_direction_selected('horizontal')
+        # 바로 전체 시퀀스 생성 시작
+        self._start_full_generation(start_index=0)
 
     def _on_direction_selected(self, direction: str):
         """해상도 선택"""

@@ -14,7 +14,7 @@ from .sequence_preview_widget import SequencePreviewWidget
 from .sequence_edit_widget import SequenceEditWidget
 
 # 자동 삽입 태그 (Child에만 적용)
-AUTO_INSERT_TAGS = ["2koma", "variant set"]
+AUTO_INSERT_TAGS = ["2koma", "comic", "split screen"]
 # 인원 태그 키워드
 PERSON_KEYWORDS = ["boy", "girl", "other"]
 
@@ -26,6 +26,8 @@ class SequenceTabContainer(QWidget):
     sequence_confirmed = pyqtSignal(list)  # 시퀀스 확정 시그널
     prompts_updated = pyqtSignal(list)  # 프롬프트 수정 시그널
     prompt_engineering_toggled = pyqtSignal(bool)  # 프롬프트 엔지니어링 토글 시그널
+    quick_first_page_requested = pyqtSignal(list)  # 🆕 결정 + 첫 페이지 생성
+    quick_all_pages_requested = pyqtSignal(list)  # 🆕 결정 + 전체 생성
 
     # 탭 인덱스 상수
     TAB_PREVIEW = 0
@@ -81,6 +83,8 @@ class SequenceTabContainer(QWidget):
             prompt_processor=self.edit_widget.apply_prompt_engineering
         )
         self.preview_widget.sequence_confirmed.connect(self._on_sequence_confirmed)
+        self.preview_widget.quick_first_page_requested.connect(self._on_quick_first_page)
+        self.preview_widget.quick_all_pages_requested.connect(self._on_quick_all_pages)
         self.tab_widget.addTab(self.preview_widget, "📋 미리보기")
         self.tab_widget.addTab(self.edit_widget, "✏️ 수정")
 
@@ -102,6 +106,22 @@ class SequenceTabContainer(QWidget):
         self.tab_widget.setCurrentIndex(self.TAB_EDIT)
         # 시그널 브리징
         self.sequence_confirmed.emit(processed_prompts)
+
+    def _on_quick_first_page(self, prompts: list):
+        """🆕 ⏩ 버튼 - 결정 + 첫 페이지 생성"""
+        processed_prompts = self._preprocess_prompts(prompts)
+        self.edit_widget.set_prompts(processed_prompts)
+        self.tab_widget.setCurrentIndex(self.TAB_EDIT)
+        # 빠른 생성 시그널 발생
+        self.quick_first_page_requested.emit(processed_prompts)
+
+    def _on_quick_all_pages(self, prompts: list):
+        """🆕 ⏭ 버튼 - 결정 + 전체 생성"""
+        processed_prompts = self._preprocess_prompts(prompts)
+        self.edit_widget.set_prompts(processed_prompts)
+        self.tab_widget.setCurrentIndex(self.TAB_EDIT)
+        # 빠른 생성 시그널 발생
+        self.quick_all_pages_requested.emit(processed_prompts)
 
     def confirm_current_sequence(self) -> bool:
         """미리보기 탭의 현재 프롬프트를 확정 처리"""

@@ -79,7 +79,7 @@ BaseMiddleModule 상속 클래스 찾기
 | **automation_module.py** | 43K | 자동 생성 (타이머/횟수/무제한) | QThread, 지연 기능 |
 | **instant_wildcard_module.py** | 40K | 인스턴트 와일드카드 관리 | JSON 저장/로드, 이미지 미리보기 |
 | **conditional_prompt_module.py** | 38K | 조건부 프롬프트 | 파이프라인 훅, 조건 평가 |
-| **e621_event_module.py** | 35K | E621 이벤트 태그 자동 추가 | 날짜 기반, 파이프라인 훅 |
+| **e621_event_module.py** | 40K | E621 이벤트 태그 관리 | Parquet 데이터, 즐겨찾기, 숨김/복원, 검색 |
 | **wildcard_status_module.py** | 16K | 와일드카드 상태 표시 | PromptContext 구독 |
 
 ---
@@ -1117,6 +1117,185 @@ if char_params and char_params.get("characters"):
 **참고 문서**:
 - `docs/character_position_coordinate_verification.md`: 좌표 계산 검증 문서
 - `core/CLAUDE.md`: API 서비스 동적 좌표 처리
+
+### 예제 5: E621 이벤트 모듈 (데이터 관리 패턴) 🆕
+
+**목표**: Parquet 데이터 기반의 이벤트 태그 관리 모듈 이해
+
+**e621_event_module.py 핵심 구조**:
+
+```python
+from interfaces.base_module import BaseMiddleModule
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QTableWidget, QRadioButton, QButtonGroup, QDialog
+)
+from pathlib import Path
+import json
+
+class E621EventModule(BaseMiddleModule):
+    def __init__(self):
+        super().__init__()
+        # 데이터 파일 경로
+        self.parquet_path = Path("data/e621_sample.parquet")
+        self.deleted_path = Path("save/e621_event/deleted.json")
+        self.starred_path = Path("save/e621_event/starred.json")
+
+        # 상태 관리
+        self.event_dict = {}  # {key: (value0, value1)}
+        self.deleted_keys = set()  # 숨긴 키
+        self.starred_keys = set()  # 즐겨찾기 키
+        self.current_keys = []  # 전체 키 (원본 순서)
+        self.filtered_keys = []  # 검색 결과
+        self.is_searching = False
+```
+
+**주요 기능**:
+
+| 기능 | 설명 | 구현 방법 |
+|------|------|-----------|
+| **데이터 로드** | Parquet 파일에서 이벤트 데이터 로드 | `load_parquet_file()`, pandas 사용 |
+| **검색** | key → value0 → value1 순서로 검색 | `on_search()`, 정규식 지원 |
+| **즐겨찾기** | 별표 토글, 노란색 표시 | `on_star_clicked()`, JSON 저장 |
+| **숨김/복원** | 항목 숨기기 및 복원 다이얼로그 | `on_hide_clicked()`, `HiddenItemsDialog` |
+| **보기 모드** | 기본 보기 / 즐겨찾기 보기 전환 | 라디오버튼, `get_display_keys()` |
+
+**UI 레이아웃**:
+
+```
+┌─────────────────────────────────────────────────┐
+│ 이벤트 리스트: (○ 기본 보기) (○ 즐겨찾기 보기)  │
+├─────────────────────────────────────────────────┤
+│ [검색 입력] [검색] [초기화]                      │
+├───────────────────────────────┬─────────────────┤
+│                               │ [다음] (100px)  │
+│  테이블 (Key | Value)         │ [생성] (100px)  │
+│  - 즐겨찾기 항목: 노란색       │ [★/☆] (40px)   │
+│                               │   (stretch)     │
+│                               │ [관리] (40px)   │
+│                               │ [숨김] (40px)   │
+└───────────────────────────────┴─────────────────┘
+│ 태그 값: [편집 가능 텍스트박스]                  │
+│ 자동 숨김 태그: [입력]  □ 자동 강조처리 해제    │
+└─────────────────────────────────────────────────┘
+```
+
+**핵심 헬퍼 메서드 - `get_display_keys()`**:
+
+```python
+def get_display_keys(self) -> list:
+    """현재 보기 모드에 따른 표시 키 목록 반환"""
+    # 1. 검색 상태 확인
+    if self.is_searching:
+        display_keys = self.filtered_keys
+    else:
+        display_keys = self.current_keys
+
+    # 2. 즐겨찾기 보기 모드 필터링
+    if self.radio_starred and self.radio_starred.isChecked():
+        display_keys = [key for key in display_keys if key in self.starred_keys]
+
+    return display_keys
+```
+
+**즐겨찾기 색상 표시**:
+
+```python
+def update_table(self):
+    display_keys = self.get_display_keys()
+
+    # 노란색 브러시 (즐겨찾기용)
+    from PyQt6.QtGui import QColor, QBrush
+    starred_color = QBrush(QColor("#FFD700"))  # Gold
+
+    for i, key in enumerate(display_keys):
+        is_starred = key in self.starred_keys
+
+        key_item = QTableWidgetItem(key)
+        if is_starred:
+            key_item.setForeground(starred_color)
+        self.table_widget.setItem(i, 0, key_item)
+```
+
+**숨긴 항목 복원 (원본 순서 유지)**:
+
+```python
+def restore_hidden_items(self, keys_to_restore: List[str]):
+    import pandas as pd
+    df = pd.read_parquet(self.parquet_path)
+
+    # 복원할 항목 딕셔너리에 추가
+    for _, row in df.iterrows():
+        key = str(row.iloc[0])
+        if key in keys_to_restore:
+            self.event_dict[key] = (str(row.iloc[1]), str(row.iloc[2]))
+            self.deleted_keys.discard(key)
+
+    # ⚠️ 핵심: parquet 원본 순서대로 current_keys 재구성
+    self.current_keys = []
+    for _, row in df.iterrows():
+        key = str(row.iloc[0])
+        if key in self.event_dict:
+            self.current_keys.append(key)
+```
+
+**라디오버튼 보기 모드**:
+
+```python
+# UI 설정
+self.view_mode_group = QButtonGroup(self.widget)
+
+self.radio_default = QRadioButton("기본 보기")
+self.radio_default.setChecked(True)
+self.radio_default.toggled.connect(self.on_view_mode_changed)
+self.view_mode_group.addButton(self.radio_default, 0)
+
+self.radio_starred = QRadioButton("즐겨찾기 보기")
+self.radio_starred.toggled.connect(self.on_view_mode_changed)
+self.view_mode_group.addButton(self.radio_starred, 1)
+
+# 모드 변경 핸들러
+def on_view_mode_changed(self, checked: bool):
+    if checked:  # toggled는 체크/해제 모두 발생하므로 체크만 처리
+        self.update_table()
+```
+
+**HiddenItemsDialog (숨긴 항목 관리)**:
+
+```python
+class HiddenItemsDialog(QDialog):
+    """단일 선택 리스트로 숨긴 항목 복원"""
+
+    def __init__(self, deleted_keys: set, parquet_path: Path, parent=None):
+        super().__init__(parent)
+        self.list_widget = QListWidget()
+        # ⚠️ PyQt6 다중 선택 버그 방지: 단일 선택만 허용
+        self.list_widget.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.list_widget.setDragDropMode(
+            QAbstractItemView.DragDropMode.NoDragDrop
+        )
+```
+
+**데이터 파일 구조**:
+
+```
+data/
+└── e621_sample.parquet    # 원본 데이터 (3컬럼: key, value0, value1)
+
+save/e621_event/
+├── deleted.json           # {"deleted_keys": ["key1", "key2", ...]}
+└── starred.json           # {"starred_keys": ["key3", "key4", ...]}
+```
+
+**학습 포인트**:
+- ✅ Parquet + pandas로 대용량 데이터 효율적 처리
+- ✅ JSON으로 사용자 상태 영속화 (숨김, 즐겨찾기)
+- ✅ `get_display_keys()` 헬퍼로 일관된 필터링 로직
+- ✅ 라디오버튼 그룹으로 보기 모드 전환
+- ✅ 원본 순서 유지하며 항목 복원
+- ✅ QDialog로 독립적인 관리 UI 제공
 
 ---
 

@@ -144,6 +144,22 @@ DARK_COLORS = {
 }
 ```
 
+**⚠️ 중요: 스타일 작성 전 반드시 theme.py 확인**
+
+```
+❌ 존재하지 않는 키 (KeyError 발생):
+   - 'accent'        → 'accent_blue' 사용
+   - 'accent_hover'  → 'accent_blue_hover' 사용
+   - 'primary'       → 'bg_primary' 사용
+   - 'secondary'     → 'bg_secondary' 사용
+   - 'text'          → 'text_primary' 사용 (호환용 'text'도 있음)
+
+✅ 올바른 사용:
+   - DARK_COLORS['accent_blue']       # 강조색
+   - DARK_COLORS['accent_blue_hover'] # 강조색 호버
+   - DARK_COLORS['bg_primary']        # 메인 배경
+```
+
 **사용 예시**:
 ```python
 from ui.theme import DARK_COLORS
@@ -151,7 +167,7 @@ from ui.theme import DARK_COLORS
 # QWidget 배경색 설정
 widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
 
-# 강조 버튼
+# 강조 버튼 (accent_blue 사용, accent 아님!)
 button.setStyleSheet(f"background-color: {DARK_COLORS['accent_blue']};")
 ```
 

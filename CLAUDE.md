@@ -723,9 +723,22 @@ self.thread.start()
 
 **개요**: FHD/QHD/4K 등 다양한 해상도 지원
 
+**⚠️ DARK_COLORS 사용 시 반드시 theme.py 확인**:
+```python
+# ❌ 존재하지 않는 키 (KeyError 발생!)
+DARK_COLORS['accent']        # → 'accent_blue' 사용
+DARK_COLORS['accent_hover']  # → 'accent_blue_hover' 사용
+
+# ✅ 올바른 키
+DARK_COLORS['accent_blue']        # 강조색
+DARK_COLORS['accent_blue_hover']  # 강조색 호버
+DARK_COLORS['bg_primary']         # 메인 배경
+DARK_COLORS['text_primary']       # 주요 텍스트
+```
+
 **필수 규칙**:
 ```python
-from ui.theme import get_dynamic_styles
+from ui.theme import get_dynamic_styles, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 # ❌ 절대 하지 마세요
@@ -740,6 +753,7 @@ widget.setStyleSheet(f"""
     QWidget {{
         font-size: {get_scaled_font_size(16)}px;
         padding: {get_scaled_size(8)}px;
+        background-color: {DARK_COLORS['accent_blue']};
     }}
 """)
 ```

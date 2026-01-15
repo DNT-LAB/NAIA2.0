@@ -586,7 +586,7 @@ class APIService:
                 "Content-Type": "application/json"
             }
             
-            print("📤 NAI API 요청 페이로드:", payload)
+            # print("📤 NAI API 요청 페이로드:", payload)
             
             # API payload를 안전하게 저장
             self.app_context.store_api_payload(payload, "NAI")

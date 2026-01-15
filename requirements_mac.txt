@@ -55,3 +55,4 @@ websocket-client
 PyQt6-QScintilla
 googletrans
 tiktoken
+ultralytics

@@ -66,8 +66,9 @@ class PersonMaskGenerator:
                 from ultralytics import YOLO
                 self._model = YOLO(self.model_path)
                 print(f"[PersonMaskGenerator] Model loaded: {self.model_path}")
-        except ImportError:
-            print("[PersonMaskGenerator] ultralytics not installed. Run: pip install ultralytics")
+        except ImportError as e:
+            print(f"[PersonMaskGenerator] ultralytics import failed: {e}")
+            print("[PersonMaskGenerator] ultralytics not installed or broken. Run: pip install ultralytics")
             self._model = None
         except Exception as e:
             print(f"[PersonMaskGenerator] Failed to load model: {e}")
@@ -261,7 +262,7 @@ class PersonMaskGenerator:
         paste_size: Tuple[int, int],
         direction: str,
         mask_scale: int = 8,
-        debug: bool = True
+        debug: bool = False
     ) -> Optional[Image.Image]:
         """
         인물 감지 기반 Inpaint 마스크 생성.

@@ -71,7 +71,7 @@ class E621TagListWidget(QListWidget):
                 text = text.rsplit(" (", 1)[0]
 
             # 언더바를 공백으로 변환한 상태이므로 다시 언더바로 변환
-            text = text.replace(" ", "_")
+            # text = text.replace(" ", "_")
 
             tags.append(text)
 
@@ -1374,7 +1374,9 @@ class E621EventModuleV2(BaseMiddleModule):
                 is_starred = tag_name in self.starred_keys
                 is_deleted = tag_name in self.deleted_keys
 
-                display_text = f"{tag_name} ({self._format_count(count)})"
+                # 언더바를 공백으로 변환하여 표시
+                display_tag_name = tag_name.replace("_", " ")
+                display_text = f"{display_tag_name} ({self._format_count(count)})"
                 if is_starred:
                     display_text = "⭐ " + display_text
 

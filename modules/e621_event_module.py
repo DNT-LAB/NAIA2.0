@@ -263,7 +263,8 @@ class E621EventModuleV2(BaseMiddleModule):
             return self.widget
 
         self.widget = QWidget(parent)
-        self.widget.setMinimumHeight(get_scaled_size(800))
+        # auto_detach 모듈이므로 최소 높이 설정하지 않음 (메인 UI 레이아웃 보호)
+        # self.widget.setMinimumHeight(get_scaled_size(800))
         main_layout = QVBoxLayout(self.widget)
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(get_scaled_size(8))

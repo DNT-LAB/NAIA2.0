@@ -300,13 +300,22 @@ class MiddleSectionController:
             # 3. ✅ 완전히 독립적인 창 생성 (parent 관계 제거)
             print(f"   - 독립 DetachedWindow 생성 중...")
             detached_window = DetachedWindow(
-                content_widget, 
-                module_title, 
-                -1, 
+                content_widget,
+                module_title,
+                -1,
                 parent_container=self.parent_widget  # 부모가 아닌 참조만 전달
             )
             detached_window.window_closed.connect(self.reattach_module)
-            
+
+            # 🆕 E621 모듈인 경우 최소 너비 설정
+            if "E621" in module_title or "e621" in module_title.lower():
+                from ui.scaling_manager import get_scaled_size
+                min_width = get_scaled_size(1160)
+                detached_window.setMinimumWidth(min_width)
+                # 초기 크기도 설정
+                detached_window.resize(min_width, get_scaled_size(800))
+                print(f"   - E621 모듈 최소 너비 설정: {min_width}px")
+
             # 창 추적 딕셔너리에 추가
             self.detached_modules[module_title] = detached_window
 
@@ -385,6 +394,13 @@ class MiddleSectionController:
             # self.module_states['expanded'].add(module_title)
             self.save_module_states()
 
+            # 🆕 auto_detach 모듈의 경우 is_first_toggle 리셋
+            # 창을 닫으면 다음에 열 때 자동으로 외부창이 열리도록 설정
+            module_instance = next((inst for inst in self.module_instances if inst.get_title() == module_title), None)
+            if module_instance and hasattr(module_instance, 'auto_detach') and module_instance.auto_detach:
+                module_instance.is_first_toggle = True
+                print(f"🔄 [AUTO-DETACH] '{module_title}' is_first_toggle 리셋 완료 (다음 토글 시 자동 분리됨)")
+
             print(f"✅ 모듈 '{module_title}' 복귀 완료")
             
         except Exception as e:
@@ -436,6 +452,24 @@ class MiddleSectionController:
         if is_expanded:
             # 펼쳐진 모듈로 등록
             self.module_states['expanded'].add(module_title)
+
+            # 🆕 auto_detach 체크: 자동 분리 모드 확인
+            module_instance = next((inst for inst in self.module_instances if inst.get_title() == module_title), None)
+            if module_instance and hasattr(module_instance, 'auto_detach') and module_instance.auto_detach:
+                # 첫 토글인지 확인
+                if hasattr(module_instance, 'is_first_toggle') and module_instance.is_first_toggle:
+                    print(f"🚀 [AUTO-DETACH] '{module_title}' 자동 분리 모드 활성화")
+                    module_instance.is_first_toggle = False
+
+                    # content_widget 가져오기
+                    box = self.module_boxes.get(module_title)
+                    if box and hasattr(box, 'content_widget'):
+                        content_widget = box.content_widget
+                        # 분리 실행
+                        self.detach_module(module_title, content_widget)
+                        return  # 분리 후에는 아래 로직 실행 안 함
+                    else:
+                        print(f"⚠️ [AUTO-DETACH] '{module_title}' content_widget을 찾을 수 없습니다")
 
             # 🎯 아코디언 모드: 다른 모듈들 접기
             if self.accordion_mode:

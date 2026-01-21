@@ -129,6 +129,8 @@ class TurboEventSequenceTab(QWidget):
         self.search_widget.continuous_generation_requested.connect(self._on_continuous_generation_requested)
         # 🆕 Event Viewer 버튼 연결
         self.search_widget.event_viewer_btn.clicked.connect(self._on_open_event_viewer)
+        # 🆕 Custom Event 버튼 연결
+        self.search_widget.custom_event_btn.clicked.connect(self._on_open_custom_event_dialog)
         layout.addWidget(self.search_widget, stretch=3)
 
         # 시퀀스 탭 컨테이너 (미리보기 + 수정 탭)
@@ -1434,6 +1436,33 @@ class TurboEventSequenceTab(QWidget):
 
         print(f"🔄 수동 그리드 저장 감지 - turbo_events 업데이트: {self.current_parent_id}")
         self._save_grid_image(grid_image)
+
+    # ===== Custom Event 관련 메서드 =====
+
+    def _on_open_custom_event_dialog(self):
+        """Custom Event 생성 다이얼로그 열기"""
+        from pathlib import Path
+        from .widgets.custom_event_dialog import CustomEventDialog
+
+        # data 폴더 경로
+        data_dir = Path(__file__).parent.parent.parent / 'data'
+
+        # 다이얼로그 생성 (모달리스 - 테스트 생성 시 백그라운드에서 이미지 확인 가능)
+        # 🆕 app_context 전달하여 SequenceGenerationWorker 사용 가능
+        self._custom_event_dialog = CustomEventDialog(data_dir, app_context=self.app_context, parent=self)
+        self._custom_event_dialog.event_created.connect(self._on_custom_event_created)
+        self._custom_event_dialog.show()
+
+    def _on_custom_event_created(self, parent_id: int):
+        """커스텀 이벤트 생성 완료"""
+        print(f"✅ Custom event created: {parent_id}")
+
+        # Favorites 모드로 전환하고 새로고침
+        if self.search_widget.current_mode != 'Favorites':
+            self.search_widget.mode_combo.setCurrentText('Favorites')
+
+        # 검색 새로고침
+        self.search_widget._check_and_load_dataset()
 
     # ===== Event Viewer 관련 메서드 =====
 

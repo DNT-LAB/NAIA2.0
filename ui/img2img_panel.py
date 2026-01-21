@@ -49,7 +49,7 @@ class Img2ImgPanel(QFrame):
 
         # 상단: 타이틀 + 닫기 버튼
         header_layout = QHBoxLayout()
-        self.title_label = QLabel("Image2Image (NAI Only)")
+        self.title_label = QLabel("Image2Image & Inpaint")
         self.title_label.setStyleSheet(f"font-size: {get_scaled_font_size(24)}px; font-weight: 600; color: white; background-color: transparent;")
 
         subtitle_label = QLabel("Transform your image.")
@@ -322,7 +322,7 @@ class Img2ImgPanel(QFrame):
         
         # 타이틀에 최종 이미지 크기 표시
         final_width, final_height = processed_image.size
-        self.title_label.setText(f"Image2Image (NAI Only) -> {final_width} x {final_height}")
+        self.title_label.setText(f"Image2Image & Inpaint -> {final_width} x {final_height}")
         
         # 픽셀 수 체크하여 리사이징 버튼 표시 여부 결정
         total_pixels = final_width * final_height
@@ -455,7 +455,7 @@ class Img2ImgPanel(QFrame):
         self.original_pil_image = resized_image
         
         # 타이틀 업데이트
-        self.title_label.setText(f"Image2Image (NAI Only) -> {new_width} x {new_height}")
+        self.title_label.setText(f"Image2Image & Inpaint -> {new_width} x {new_height}")
         
         # 배경 이미지 업데이트
         self._set_cropped_background()
@@ -510,7 +510,7 @@ class Img2ImgPanel(QFrame):
         self._mask_from_sketchbook = False  # Reset sketchbook flag
         
         # 타이틀을 원래 상태로 복원
-        self.title_label.setText("Image2Image (NAI Only)")
+        self.title_label.setText("Image2Image & Inpaint")
         
         # 패널이 숨겨질 때 버튼들도 초기화
         self.upscale_button.setVisible(True)

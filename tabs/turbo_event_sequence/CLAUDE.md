@@ -24,6 +24,7 @@ Parquet 데이터셋에서 Parent-Child 관계의 이벤트 시퀀스를 검색�
 11. 🆕 **Event Viewer**: 생성한 이벤트 탐색 및 빠른 재생성
 12. 🆕 **배경 정보 유지**: YOLO 인물 감지로 배경 보존하며 인물만 Inpaint
 13. 🆕 **인페인트 편집기**: 히스토리 패널에서 개별 이미지 수동 인페인트 편집
+14. 🆕 **개별 이미지 자동 저장**: 그리드 자동 저장 활성화 시 각 이미지를 즉시 개별 저장 (parent-child 페어 파일명)
 
 ---
 
@@ -37,7 +38,7 @@ tabs/turbo_event_sequence/
 ├── CLAUDE.md                          # 본 문서
 ├── widgets/
 │   ├── event_search_widget.py         # ⭐ 검색 UI (1470줄) - 재사용 가능
-│   ├── history_panel.py               # 히스토리 패널 (1246줄) - 드래그앤드롭
+│   ├── history_panel.py               # 히스토리 패널 (1280줄) - 드래그앤드롭, 개별 저장
 │   ├── sequence_edit_widget.py        # 프롬프트 편집 (638줄)
 │   ├── sequence_preview_widget.py     # 시퀀스 미리보기 (387줄)
 │   ├── sequence_tab_container.py      # 탭 컨테이너 (216줄)
@@ -439,11 +440,65 @@ request_grid_update = pyqtSignal()
 
 ```python
 def prepare_placeholders(count: int)           # 플레이스홀더 미리 생성
-def add_image(original_index, image)           # 이미지 추가 (고정 위치)
+def add_image(original_index, image)           # 이미지 추가 (고정 위치) + 🆕 개별 자동 저장
 def update_grid_image(grid_image, trigger_auto_save=False)  # 그리드 업데이트
 def get_ordered_images() -> list               # Skip 제외 이미지 반환
 def is_order_changed() -> bool                 # 순서 변경 여부
 def reset_order_changed()                      # 순서 변경 플래그 초기화
+```
+
+#### 🆕 개별 이미지 자동 저장 (2026-01-16)
+
+**동작 방식:**
+
+`add_image()` 메서드가 호출될 때 `auto_save_enabled=True`이면 각 이미지를 즉시 개별 저장합니다.
+
+```python
+# history_panel.py:757-759
+def add_image(self, original_index: int, image):
+    # ... (UI 업데이트 로직)
+
+    # 🆕 자동 저장 활성화 시 개별 이미지 저장
+    if self.auto_save_enabled and image:
+        self._auto_save_individual_image(original_index, image)
+```
+
+**저장 로직:**
+```python
+def _auto_save_individual_image(self, original_index: int, image):
+    """개별 이미지 자동 저장 (WEBP 형식, 동적 경로/grid 폴더)"""
+    # 기존 그리드 저장과 동일한 경로 사용
+    base_dir = self.app_context.image_crud_controller.get_save_directory()
+    grid_dir = base_dir / "grid"
+
+    # parent-child 파일명 형식 (타임스탬프 포함)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if original_index == 0:
+        filename = f"parent_{timestamp}.webp"
+    else:
+        filename = f"parent-child{original_index}_{timestamp}.webp"
+
+    # WEBP로 저장 (quality=95, method=6)
+    image.save(str(grid_dir / filename), format='WEBP', quality=95, method=6)
+```
+
+**저장 타이밍:**
+- **각 이미지 생성 직후** (API 응답 수신 → `image_generated` 시그널 → `add_image()` 호출)
+- **최소 2초 간격** (API 생성 시간) → 타임스탬프 충돌 없음
+
+**재생성 시 동작:**
+- 동일 인덱스의 새 타임스탬프 파일 생성
+- 이전 버전 파일은 유지됨 (버전 히스토리 보존)
+
+**예시:**
+```
+첫 생성:
+  parent_20260116_143025.webp
+  parent-child1_20260116_143030.webp
+  parent-child2_20260116_143035.webp
+
+Child2 재생성:
+  parent-child2_20260116_143045.webp  (새 파일 추가)
 ```
 
 ---
@@ -715,6 +770,7 @@ image_generated.emit(worker_index, image)
 Tab._on_image_generated()
     ├─→ actual_index = _index_mapping[worker_index]
     ├─→ HistoryPanel.add_image(actual_index, image)
+    │     └─→ 🆕 _auto_save_individual_image() → parent-child{N}_{timestamp}.webp 저장
     └─→ _update_grid_image()
 ```
 
@@ -756,10 +812,17 @@ Tab._on_continuous_generation_requested()
 
 | 파일 유형 | 경로 | 포맷 |
 |-----------|------|------|
-| 그리드 이미지 | `save/turbo_events/{parent_id}` | JPEG (확장자 없음) |
-| 자동 저장 그리드 | `{output_dir}/grid/sequence_grid_{timestamp}.webp` | WEBP |
+| 그리드 이미지 (미리보기용) | `save/turbo_events/{parent_id}` | JPEG (확장자 없음, 절반 해상도) |
+| 자동 저장 그리드 (fullsize) | `{output_dir}/grid/sequence_grid_{timestamp}.webp` | WEBP (원본 해상도) |
+| 🆕 개별 이미지 (Parent) | `{output_dir}/grid/parent_{timestamp}.webp` | WEBP (원본 해상도) |
+| 🆕 개별 이미지 (Child) | `{output_dir}/grid/parent-child{N}_{timestamp}.webp` | WEBP (원본 해상도) |
 | Favorites Parquet | `data/NAIA_event_dataset_personal.parquet` | Parquet |
 | Favorites JSON | `data/NAIA_event_dataset_personal.json` | JSON |
+
+**참고:**
+- `{output_dir}`: `ImageCrudController.get_save_directory()` 반환값 (사용자 설정 저장 경로)
+- 개별 이미지는 `auto_save_enabled=True`일 때만 저장됨
+- 재생성 시 동일 인덱스의 새 타임스탬프 파일이 생성됨 (이전 버전 보존)
 
 ---
 
@@ -1393,5 +1456,30 @@ def _on_open_event_viewer(self):
 
 ---
 
-*문서 버전: 2026-01-15*
-*최종 검토: 인페인트 편집기 (SequenceInpaintDialog) 문서화*
+## 변경 이력
+
+### 2026-01-16: 개별 이미지 자동 저장 기능 추가
+
+**추가된 기능:**
+- 그리드 자동 저장 활성화 시 각 이미지를 즉시 개별 파일로 저장
+- parent-child 페어 파일명 형식 (타임스탬프 포함)
+- 기존 그리드 저장과 동일한 경로 사용 (`{output_dir}/grid/`)
+
+**수정된 파일:**
+- `widgets/history_panel.py` (+37줄)
+  - `add_image()`: 자동 저장 로직 추가
+  - `_auto_save_individual_image()`: 새 메서드 추가
+
+**저장 경로:**
+- Parent: `{output_dir}/grid/parent_{timestamp}.webp`
+- Child: `{output_dir}/grid/parent-child{N}_{timestamp}.webp`
+
+**동작:**
+- 각 이미지 생성 직후 즉시 저장 (최소 2초 간격)
+- 재생성 시 새 타임스탬프 파일 생성 (이전 버전 보존)
+- `save/turbo_events` 미리보기 저장 기능과 독립적
+
+---
+
+*문서 버전: 2026-01-16*
+*최종 검토: 개별 이미지 자동 저장 기능 추가*

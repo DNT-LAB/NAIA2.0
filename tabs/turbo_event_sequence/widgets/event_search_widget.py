@@ -339,6 +339,12 @@ class EventSearchWidget(QWidget):
         self.event_viewer_btn.setToolTip("생성한 이벤트 탐색")
         button_layout.addWidget(self.event_viewer_btn)
 
+        # 🆕 Custom Event 생성 버튼
+        self.custom_event_btn = QPushButton("➕ Custom")
+        self.custom_event_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.custom_event_btn.setToolTip("커스텀 이벤트 시퀀스 생성")
+        button_layout.addWidget(self.custom_event_btn)
+
         button_layout.addStretch()
         layout.addLayout(button_layout)
 

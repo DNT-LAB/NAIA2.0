@@ -11,6 +11,86 @@ from typing import Dict, Any, Optional
 import os, json
 from pathlib import Path
 
+# ===================== 색상 필터링 예외 패턴 =====================
+# Critical Issue: 색상 태그 필터링 문제 해결 (2025-01-20)
+# 참조: .experimental/Critical_Issue_Colors.md
+
+# 접두사 예외 (이 단어로 시작하면 색상 필터링 예외)
+COLOR_EXCEPTION_PREFIXES = [
+    'covered',      # covered nipples, covered eyes 등
+    'shared',       # shared clothes, shared umbrella 등
+    'armored',      # armored boots, armored dress 등
+    'layered',      # layered sleeves, layered dress 등
+    'feathered',    # feathered wings
+    'colored',      # colored shadow, colored skin 등
+    'multicolored', # multicolored hair 등
+    'checkered',    # checkered (패턴)
+    'mirrored',     # mirrored text
+    'captured',     # captured (상황)
+    'scared',       # scared (표정)
+    'striped',      # striped (패턴, 단독 사용)
+]
+
+# 포함 예외 (이 문자열이 포함되면 색상 필터링 예외)
+COLOR_EXCEPTION_CONTAINS = [
+    'palette',      # turn pale이 아닌 palette
+    'impaled',      # 관통됨
+    'blueberry',    # 블루베리
+    'blueprint',    # 청사진
+    'goldfish',     # 금붕어
+    'marigold',     # 금잔화
+    'strawberry',   # 딸기
+    'pinky out',    # 새끼손가락 포즈
+    'footprints',   # 발자국
+    'darkness',     # 어둠
+    'dark aura',    # 어두운 기운
+    'rainbow',      # 무지개
+    ' fire',        # blue fire 등
+    ' theme',       # blue theme 등
+    ' border',      # black border 등
+    ' outline',     # white outline 등
+    ' gradient',    # rainbow gradient 등
+    'scooping',     # goldfish scooping
+]
+
+# 정확히 일치하는 예외
+COLOR_EXCEPTION_EXACT = [
+    'turn pale',    # 창백해지다
+    'checkered',    # 체크무늬 (단독)
+    'striped',      # 줄무늬 (단독)
+    'rainbow',      # 무지개
+    'darkness',     # 어둠
+]
+
+def _is_color_exception(tag: str) -> bool:
+    """
+    색상 필터링 예외 여부를 판단합니다.
+
+    Args:
+        tag: 검사할 태그
+
+    Returns:
+        True: 예외 (필터링하지 않음)
+        False: 필터링 대상
+    """
+    tag_lower = tag.lower()
+
+    # 1. 정확히 일치하는 예외
+    if tag_lower in COLOR_EXCEPTION_EXACT:
+        return True
+
+    # 2. 접두사 예외
+    for prefix in COLOR_EXCEPTION_PREFIXES:
+        if tag_lower.startswith(prefix):
+            return True
+
+    # 3. 포함 예외
+    for pattern in COLOR_EXCEPTION_CONTAINS:
+        if pattern in tag_lower:
+            return True
+
+    return False
+
 class PresetPreviewWidget(QWidget):
     """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
     def __init__(self, parent=None):
@@ -602,6 +682,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 colors = filter_manager.color_list
                 temp = []
                 for keyword in main_tags:
+                    # 🔥 예외 패턴 체크: 색상과 무관한 태그는 필터링하지 않음
+                    if _is_color_exception(keyword):
+                        continue
+                    # 색상 키워드 매칭
                     if any(color in keyword for color in colors):
                         temp.append(keyword)
                 for keyword in temp:
@@ -736,7 +820,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if checkbox_options.get("remove_color"):
                 colors = filter_manager.color_list
                 temp = [keyword for keyword in main_tags
-                        if any(color in keyword for color in colors)]
+                        if not _is_color_exception(keyword) and any(color in keyword for color in colors)]
                 for keyword in temp:
                     main_tags.remove(keyword)
                     removed_tags.append(keyword)
@@ -906,7 +990,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if checkbox_options.get("remove_color"):
                 colors = filter_manager.color_list
                 temp = [keyword for keyword in main_tags
-                        if any(color in keyword for color in colors)]
+                        if not _is_color_exception(keyword) and any(color in keyword for color in colors)]
                 for keyword in temp:
                     main_tags.remove(keyword)
                     removed_tags.append(keyword)

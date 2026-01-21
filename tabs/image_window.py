@@ -1600,7 +1600,7 @@ class ImageWindow(QWidget):
         menu.addAction(upscale_action)
 
         menu.addSeparator()
-        send_to_inpaint_action = QAction("🎨 Send to Inpaint (NAI)", self)
+        send_to_inpaint_action = QAction("🎨 Send to Inpaint", self)
         send_to_inpaint_action.triggered.connect(self._emit_send_to_inpaint)
         menu.addAction(send_to_inpaint_action)
         

@@ -650,8 +650,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 134"
-        self.setWindowTitle(self.base_title + " - 260115b")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 135"
+        self.setWindowTitle(self.base_title + " - 260120")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -4385,10 +4385,17 @@ class ModernMainWindow(QMainWindow):
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장
         try:
+            # 🆕 생성 스레드 안전 종료 (가장 먼저 실행)
+            if hasattr(self, 'generation_controller') and self.generation_controller:
+                try:
+                    self.generation_controller.safe_shutdown(timeout_ms=3000)
+                except Exception as e:
+                    print(f"⚠️ 생성 스레드 종료 중 오류: {e}")
+
             # [추가] 분리된 모든 모듈 창 닫기 요청
             if self.middle_section_controller:
                 self.middle_section_controller.close_all_detached_modules()
-                
+
                 # 퀵 프리셋 저장 (PromptEngineeringModule)
                 prompt_eng_module = self.middle_section_controller.get_module_instance("PromptEngineeringModule")
                 if prompt_eng_module and hasattr(prompt_eng_module, 'save_on_exit'):
@@ -4402,15 +4409,15 @@ class ModernMainWindow(QMainWindow):
 
             current_mode = self.app_context.get_api_mode()
             self.generation_params_manager.save_mode_settings(current_mode)
-            
+
             # 모든 모드 대응 모듈들 설정 저장
             self.app_context.mode_manager.save_all_current_mode()
-            
+
             print(f"💾 프로그램 종료 시 {current_mode} 모드 설정 저장 완료")
-            
+
         except Exception as e:
             print(f"❌ 설정 저장 중 오류: {e}")
-        
+
         event.accept()
 
     def get_api_mode(self) -> str:
@@ -5644,20 +5651,18 @@ class ModernMainWindow(QMainWindow):
 
     def on_send_to_inpaint_requested(self, history_item):
         """
-        Inpaint 요청을 받아 API 모드를 NAI로 전환하고
-        InpaintWindow를 즉시 실행합니다.
+        Inpaint 요청을 받아 InpaintWindow를 즉시 실행합니다.
+        현재 선택된 API 모드(NAI/WEBUI/COMFYUI)를 그대로 사용합니다.
         """
         if not history_item or not hasattr(history_item, 'image'):
             return
 
-        # 1. 현재 API 모드 확인 및 NAI로 전환 (필요시)
+        # 현재 API 모드 확인 (강제 전환하지 않음)
         current_mode = self.get_current_api_mode()
-        if current_mode != "NAI":
-            self.status_bar.showMessage("🎨 NAI 모드로 자동 전환하고 Inpaint를 시작합니다.", 3000)
-            print(f"🔄 API 모드 자동 전환: {current_mode} -> NAI")
-            self.toggle_search_mode("NAI")
-        
-        # 2. Inpaint 모드 활성화
+        print(f"🎨 Inpaint 시작: 현재 모드 '{current_mode}'에서 실행됩니다.")
+        self.status_bar.showMessage(f"🎨 {current_mode} 모드에서 Inpaint를 시작합니다.", 3000)
+
+        # Inpaint 모드 활성화 (현재 모드 유지)
         pil_image = history_item.image
         self.activate_inpaint_mode(pil_image)
 

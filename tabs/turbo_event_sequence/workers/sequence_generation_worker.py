@@ -261,14 +261,35 @@ class SequenceGenerationWorker(QObject):
         # 🔧 디버그: 요청 전 캔버스와 마스크 미리보기
         # self._show_debug_preview(canvas, mask)  # 디버그 비활성화
 
+        # 🆕 API 모드 확인
+        is_webui_mode = (
+            self.app_context and
+            hasattr(self.app_context, 'current_api_mode') and
+            self.app_context.current_api_mode == "WEBUI"
+        )
+
+        # 🆕 WEBUI 모드: strength 강제 설정
+        inpaint_strength = 0.94 if is_webui_mode else self.strength
+
         # 이미지를 bytes로 변환
         canvas_bytes = io.BytesIO()
         canvas.save(canvas_bytes, format='PNG')
         canvas_bytes.seek(0)
 
-        mask_bytes = io.BytesIO()
-        mask.save(mask_bytes, format='PNG')
-        mask_bytes.seek(0)
+        # 🆕 마스크 처리: WEBUI는 큰 마스크 사용, NAI는 작은 마스크 사용
+        if is_webui_mode:
+            # WEBUI: 1/8 마스크를 원본 크기로 확대
+            mask_full_size = mask.resize((self.canvas_width, self.canvas_height), Image.NEAREST)
+            mask_bytes = io.BytesIO()
+            mask_full_size.save(mask_bytes, format='PNG')
+            mask_bytes.seek(0)
+            print(f"🔍 [WEBUI Sequence] 마스크 확대: {mask.size} → {mask_full_size.size}, strength={inpaint_strength}")
+        else:
+            # NAI: 1/8 마스크 그대로 사용
+            mask_bytes = io.BytesIO()
+            mask.save(mask_bytes, format='PNG')
+            mask_bytes.seek(0)
+            print(f"✅ [NAI Sequence] 작은 마스크 사용: {mask.size}, strength={inpaint_strength}")
 
         override_params = {
             'type': 'inpaint',
@@ -278,7 +299,7 @@ class SequenceGenerationWorker(QObject):
             'mask_bytes': mask_bytes.getvalue(),
             'width': self.canvas_width,
             'height': self.canvas_height,
-            'strength': self.strength,
+            'strength': inpaint_strength,
             'noise': 0.0,
             'random_resolution': False,
             'turbo_sequence_request': True,

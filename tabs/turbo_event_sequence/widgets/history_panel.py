@@ -754,6 +754,10 @@ class HistoryPanel(QWidget):
         self.count_label.setText(f"{valid_count}개")
         self._update_grid_buttons_state()
 
+        # 🆕 자동 저장 활성화 시 개별 이미지 저장 (/grid 폴더)
+        if self.auto_save_enabled and image:
+            self._auto_save_individual_image(original_index, image)
+
     def _replace_thumbnail(self, index: int, image):
         """썸네일 위젯 교체"""
         if self.thumbnails[index]:
@@ -995,6 +999,45 @@ class HistoryPanel(QWidget):
             print(f"✅ 그리드 자동 저장: {file_path}")
             # 시그널 발생
             self.grid_auto_saved.emit(str(file_path))
+
+    def _auto_save_individual_image(self, original_index: int, image):
+        """개별 이미지 자동 저장 (WEBP 형식, 동적 경로/grid 폴더, parent-child 페어 파일명)
+
+        Args:
+            original_index: 원본 생성 인덱스 (0=parent, 1=child1, 2=child2, ...)
+            image: PIL Image
+        """
+        try:
+            from pathlib import Path
+            from datetime import datetime
+
+            # 🆕 기존 그리드 저장 로직과 동일한 경로 사용
+            if self.app_context and hasattr(self.app_context, 'image_crud_controller'):
+                base_dir = self.app_context.image_crud_controller.get_save_directory()
+            else:
+                base_dir = Path("output")
+
+            # /grid 하위 폴더 생성
+            grid_dir = base_dir / "grid"
+            grid_dir.mkdir(parents=True, exist_ok=True)
+
+            # 🆕 parent-child 파일명 형식 (타임스탬프 포함으로 중복 방지)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if original_index == 0:
+                filename = f"parent_{timestamp}.webp"
+            else:
+                filename = f"parent-child{original_index}_{timestamp}.webp"
+
+            file_path = grid_dir / filename
+
+            # WEBP로 저장
+            if hasattr(image, 'load'):
+                image.load()
+            image.save(str(file_path), format='WEBP', quality=95, method=6)
+            print(f"✅ 개별 이미지 자동 저장: {file_path}")
+
+        except Exception as e:
+            print(f"❌ 개별 이미지 저장 오류 (index {original_index}): {e}")
 
     def _create_grid_image(self, images: list) -> Image.Image:
         """그리드 이미지 생성"""

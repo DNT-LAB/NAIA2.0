@@ -238,14 +238,14 @@ class MainController:
     
     def connect_e621_event_signals(self):
         """E621 이벤트 모듈과의 시그널 연결"""
-        # E621EventModule 찾기
+        # E621EventModuleV2 찾기
         if self.main_window.middle_section_controller:
             for module in self.main_window.middle_section_controller.module_instances:
-                if module.__class__.__name__ == 'E621EventModule':
+                if module.__class__.__name__ == 'E621EventModuleV2':
                     # generation_requested 시그널 연결
                     if hasattr(module, 'signals') and hasattr(module.signals, 'generation_requested'):
                         module.signals.generation_requested.connect(self.on_generate_with_image_requested)
-                        print("✅ E621EventModule generation_requested 시그널 연결 완료")
+                        print("✅ E621EventModuleV2 generation_requested 시그널 연결 완료")
                     break
         
     def connect_checkbox_signals(self):

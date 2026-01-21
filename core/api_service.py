@@ -626,7 +626,13 @@ class APIService:
             return {'status': 'error', 'message': str(e)}
 
     def _call_webui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Stable Diffusion WebUI API를 호출합니다."""
+        """
+        Stable Diffusion WebUI API를 호출합니다.
+
+        ⚠️ Inpaint 모드:
+        - NAI 사양의 작은 마스크(152x104 등)를 전달하면 자동으로 원본 이미지 크기로 변환됩니다.
+        - mask_bytes에 NAI 사양 마스크를 그대로 전달해도 WebUI에서 정상 작동합니다.
+        """
         try:
             webui_url = params.get('credential')
             if not webui_url:
@@ -636,11 +642,11 @@ class APIService:
                     webui_url = f"https://{webui_url}"
                 else:
                     webui_url = f"http://{webui_url}"
-            
+
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None
             is_inpaint = is_img2img and params.get('type') == 'inpaint'
             api_endpoint = f"{webui_url}/sdapi/v1/img2img" if is_img2img else f"{webui_url}/sdapi/v1/txt2img"
-            
+
             # WEBUI API 페이로드 구성
             payload = {
                 "prompt": params.get('input', ''),
@@ -667,14 +673,36 @@ class APIService:
             if is_img2img:
                 payload["init_images"] = [base64.b64encode(params['image_bytes']).decode()]
                 payload["denoising_strength"] = params.get('strength', 0.5)
+                # 🔥 중요: img2img API에 필수 파라미터 추가
+                payload["include_init_images"] = True
 
                 if is_inpaint:
-                    mask_bytes = params['mask_bytes']
-                    processed_mask = self._process_mask_data(mask_bytes, is_nai=False)
+                    # 마스크 데이터 처리
+                    mask_bytes = params.get('mask_bytes')
+                    if not mask_bytes:
+                        raise ValueError("Inpaint 모드에서는 mask_bytes가 필수입니다.")
+
+                    # 마스크를 원본 이미지 크기로 변환 (NAI 작은 마스크 → WebUI 큰 마스크)
+                    target_width = params.get('width', 1024)
+                    target_height = params.get('height', 1216)
+                    processed_mask = self._process_mask_for_webui(mask_bytes, target_width, target_height)
                     payload["mask"] = processed_mask
-                    payload["inpainting_fill"] = 1
-                    payload["inpaint_full_res"] = True
-                    payload["inpaint_full_res_padding"] = 32
+
+                    # 🔥 Inpaint 전용 파라미터 추가
+                    payload["mask_blur"] = params.get('mask_blur', 4)
+                    payload["inpainting_fill"] = params.get('inpainting_fill', 1)  # 0: fill, 1: original, 2: latent noise, 3: latent nothing
+                    payload["inpaint_full_res"] = params.get('inpaint_full_res', True)
+                    payload["inpaint_full_res_padding"] = params.get('inpaint_full_res_padding', 32)
+                    payload["inpainting_mask_invert"] = params.get('inpainting_mask_invert', 0)  # 0: inpaint masked, 1: inpaint not masked
+                    payload["initial_noise_multiplier"] = params.get('initial_noise_multiplier', 1.0)
+
+                    print(f"🎨 [WEBUI Inpaint] 파라미터 설정 완료")
+                    print(f"   - 마스크: {target_width}x{target_height} (NAI 작은 마스크 자동 변환 지원)")
+                    print(f"   - mask_blur: {payload['mask_blur']}")
+                    print(f"   - inpainting_fill: {payload['inpainting_fill']}")
+                    print(f"   - inpaint_full_res: {payload['inpaint_full_res']}")
+                    print(f"   - inpaint_full_res_padding: {payload['inpaint_full_res_padding']}")
+                    print(f"   - inpainting_mask_invert: {payload['inpainting_mask_invert']}")
             
             if payload["enable_hr"]:
                 payload.update({
@@ -925,57 +953,117 @@ class APIService:
             if self.comfyui_service:
                 self.comfyui_service.disconnect_websocket()
 
+    def _process_mask_for_webui(self, mask_bytes: bytes, target_width: int, target_height: int) -> str:
+        """
+        WebUI용 마스크를 처리합니다. NAI 작은 마스크를 원본 이미지 크기로 자동 변환합니다.
+
+        Args:
+            mask_bytes (bytes): 마스크 바이너리 데이터 (NAI 작은 마스크 또는 큰 마스크)
+            target_width (int): 목표 이미지 너비
+            target_height (int): 목표 이미지 높이
+
+        Returns:
+            str: Base64로 인코딩된 처리된 마스크 문자열 (원본 이미지 크기)
+        """
+        try:
+            # 이미지 데이터 로드
+            img = Image.open(io.BytesIO(mask_bytes))
+
+            # 1. 그레이스케일로 변환
+            img_gray = img.convert('L')
+
+            # 2. 이진화 적용 (임계값 기준으로 흑백으로 변환)
+            threshold = 128
+            img_binary = img_gray.point(lambda x: 255 if x > threshold else 0, '1')
+
+            # 3. 마스크 크기 확인
+            mask_width, mask_height = img_binary.size
+
+            # 4. 마스크가 목표 크기보다 작으면 확대 (NAI 작은 마스크 대응)
+            if mask_width < target_width or mask_height < target_height:
+                print(f"🔍 [WebUI] 작은 마스크 감지: {mask_width}x{mask_height} → {target_width}x{target_height}")
+                # NEAREST 보간으로 확대 (픽셀화된 경계 유지)
+                img_resized = img_binary.resize((target_width, target_height), Image.NEAREST)
+            else:
+                # 이미 큰 마스크면 그대로 사용
+                img_resized = img_binary
+                print(f"✅ [WebUI] 마스크 크기 확인: {mask_width}x{mask_height} (변환 불필요)")
+
+            # 5. RGB 모드로 변환
+            img_final = img_resized.convert('RGB')
+
+            # 6. Base64 인코딩
+            buffer = io.BytesIO()
+            img_final.save(buffer, format='PNG')
+            base64_string = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            print(f"✅ [WebUI] 마스크 처리 완료: 최종 크기 {img_final.size}")
+            return base64_string
+
+        except Exception as e:
+            print(f"❌ WebUI 마스크 처리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            # 폴백: 원본 데이터를 그대로 base64 인코딩
+            return base64.b64encode(mask_bytes).decode()
+
     def _process_mask_data(self, mask_bytes: bytes, is_nai: bool = True) -> str:
         """
-        Base64 인코딩된 이미지 또는 파일에서 이진 마스크를 생성하고 확대합니다.
-        
+        마스크 데이터를 처리하여 Base64 문자열로 반환합니다.
+
         Args:
             mask_bytes (bytes): 마스크 바이너리 데이터
-            is_nai (bool): NAI API 여부 (기본값: True)
-        
+            is_nai (bool): NAI API 여부 (True: NAI는 8배 확대, False: WebUI는 원본 크기)
+
         Returns:
             str: Base64로 인코딩된 처리된 마스크 문자열
         """
         import numpy as np
-        
+
         try:
-            # 이미지 데이터 가져오기
-            base64_string = base64.b64encode(mask_bytes).decode('utf-8')
-            
-            # Base64 디코딩
-            image_data = base64.b64decode(base64_string)
-            img = Image.open(io.BytesIO(image_data))
-            
+            # 이미지 데이터 로드
+            img = Image.open(io.BytesIO(mask_bytes))
+
             # 1. 그레이스케일로 변환
             img_gray = img.convert('L')
-            
+
             # 2. 이진화 적용 (임계값 기준으로 흑백으로 변환)
             threshold = 128
             img_binary = img_gray.point(lambda x: 255 if x > threshold else 0, '1')
-            
+
             # 3. 원본 크기 저장
             original_width, original_height = img_binary.size
-            
-            # 4. 새 크기 계산 (정수로 변환)
-            scale_factor = 8
-            new_width = int(original_width * scale_factor)
-            new_height = int(original_height * scale_factor)
-            
-            # 5. 이진 이미지 확대 - nearest neighbor 사용하여 픽셀화된 경계 유지
-            img_resized = img_binary.resize((new_width, new_height), Image.NEAREST)
-            
-            # 6. 다시 RGB 모드로 변환 (필요한 경우)
-            img_final = img_resized.convert('RGB')
 
+            if is_nai:
+                # NAI: 8배 확대 (작은 마스크를 큰 이미지로 확대)
+                scale_factor = 8
+                new_width = int(original_width * scale_factor)
+                new_height = int(original_height * scale_factor)
+
+                # 이진 이미지 확대 - nearest neighbor 사용하여 픽셀화된 경계 유지
+                img_resized = img_binary.resize((new_width, new_height), Image.NEAREST)
+
+                # RGB 모드로 변환
+                img_final = img_resized.convert('RGB')
+
+                print(f"✅ [NAI] 마스크 처리 완료: {original_width}x{original_height} → {new_width}x{new_height}")
+            else:
+                # WebUI: 원본 크기 유지, RGB 변환만 수행
+                img_final = img_binary.convert('RGB')
+
+                print(f"✅ [WebUI] 마스크 처리 완료: {original_width}x{original_height} (원본 크기 유지)")
+
+            # Base64 인코딩
             buffer = io.BytesIO()
             img_final.save(buffer, format='PNG')
             new_base64_string = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            print(f"✅ 마스크 처리 완료: {original_width}x{original_height} → {new_width}x{new_height}")
+
             return new_base64_string
-            
+
         except Exception as e:
             print(f"❌ 마스크 데이터 처리 실패: {e}")
+            import traceback
+            traceback.print_exc()
             # 폴백: 원본 데이터를 그대로 base64 인코딩
             return base64.b64encode(mask_bytes).decode()
     

@@ -2415,6 +2415,173 @@ if is_naid3:
 
 ---
 
-*문서 버전: 1.3*
-*최종 업데이트: 2025-01-08*
+## 🆕 색상 필터링 예외 시스템 (2025-01-20)
+
+### 배경
+
+`data/color.txt`의 색상 키워드를 사용한 태그 필터링 시, **단순 substring 매칭**으로 인해 색상과 무관한 유의미한 태그들이 잘못 필터링되는 문제가 발견되었습니다.
+
+**문제 예시**:
+```
+color.txt의 "pale" 키워드
+    ↓
+"turn pale" (창백해지다 - 표정) 필터링됨 ❌
+"impaled" (관통됨 - 액션) 필터링됨 ❌
+"palette" (팔레트 - 오브젝트) 필터링됨 ❌
+
+color.txt의 "red" 키워드
+    ↓
+"scared" (무서워하는 - 표정) 필터링됨 ❌
+"covered nipples" (유두 가림 - 포즈) 필터링됨 ❌
+"shared umbrella" (우산 공유 - 액션) 필터링됨 ❌
+```
+
+### 해결 방안
+
+예외 패턴 시스템을 도입하여 색상과 무관한 태그는 필터링에서 제외합니다.
+
+#### 1. 예외 패턴 상수 정의
+
+[prompt_engineering_module.py:14-63]
+
+```python
+# 접두사 예외 (이 단어로 시작하면 색상 필터링 예외)
+COLOR_EXCEPTION_PREFIXES = [
+    'covered',      # covered nipples, covered eyes 등
+    'shared',       # shared clothes, shared umbrella 등
+    'armored',      # armored boots, armored dress 등
+    'scared',       # scared (표정)
+    'striped',      # striped (패턴, 단독 사용)
+    # ... 더 많은 예외
+]
+
+# 포함 예외 (이 문자열이 포함되면 색상 필터링 예외)
+COLOR_EXCEPTION_CONTAINS = [
+    'palette',      # turn pale이 아닌 palette
+    'impaled',      # 관통됨
+    'blueberry',    # 블루베리
+    'goldfish',     # 금붕어
+    ' fire',        # blue fire 등
+    ' outline',     # white outline 등
+    # ... 더 많은 예외
+]
+
+# 정확히 일치하는 예외
+COLOR_EXCEPTION_EXACT = [
+    'turn pale',    # 창백해지다
+    'rainbow',      # 무지개
+    'darkness',     # 어둠
+]
+```
+
+#### 2. 예외 판단 함수
+
+[prompt_engineering_module.py:65-92]
+
+```python
+def _is_color_exception(tag: str) -> bool:
+    """
+    색상 필터링 예외 여부를 판단합니다.
+
+    Args:
+        tag: 검사할 태그
+
+    Returns:
+        True: 예외 (필터링하지 않음)
+        False: 필터링 대상
+    """
+    tag_lower = tag.lower()
+
+    # 1. 정확히 일치하는 예외
+    if tag_lower in COLOR_EXCEPTION_EXACT:
+        return True
+
+    # 2. 접두사 예외
+    for prefix in COLOR_EXCEPTION_PREFIXES:
+        if tag_lower.startswith(prefix):
+            return True
+
+    # 3. 포함 예외
+    for pattern in COLOR_EXCEPTION_CONTAINS:
+        if pattern in tag_lower:
+            return True
+
+    return False
+```
+
+#### 3. 필터링 로직 개선
+
+**기존 코드** (문제):
+```python
+# "remove_color"
+if checkbox_options.get("remove_color"):
+    colors = filter_manager.color_list
+    temp = []
+    for keyword in main_tags:
+        if any(color in keyword for color in colors):
+            temp.append(keyword)
+    # ...
+```
+
+**개선된 코드**:
+```python
+# "remove_color"
+if checkbox_options.get("remove_color"):
+    colors = filter_manager.color_list
+    temp = []
+    for keyword in main_tags:
+        # 🔥 예외 패턴 체크: 색상과 무관한 태그는 필터링하지 않음
+        if _is_color_exception(keyword):
+            continue
+        if any(color in keyword for color in colors):
+            temp.append(keyword)
+    # ...
+```
+
+#### 4. 영향받는 파일
+
+| 파일 | 수정 내용 |
+|------|----------|
+| `modules/prompt_engineering_module.py` | 예외 패턴 정의 + 필터링 로직 개선 (3곳) |
+| `ui/virtual_prompt_engineering_tab.py` | 예외 함수 import + 필터링 로직 개선 |
+
+### 테스트 시나리오
+
+**시나리오 1: "turn pale" 태그 보존**
+- 입력: `1girl, turn pale, scared, pale blue dress`
+- 색상 필터 활성화
+- 결과: ✅ `turn pale`, `scared` 보존, `pale blue dress` 제거
+
+**시나리오 2: "covered" 태그 보존**
+- 입력: `1girl, covered nipples, covered eyes, red dress`
+- 색상 필터 활성화
+- 결과: ✅ `covered nipples`, `covered eyes` 보존, `red dress` 제거
+
+**시나리오 3: "rainbow" 단독 태그**
+- 입력: `1girl, rainbow, rainbow hair, rainbow gradient`
+- 색상 필터 활성화
+- 결과: ✅ `rainbow` 보존 (EXACT 예외), `rainbow hair`, `rainbow gradient` 제거
+
+### 복구된 주요 태그 (110개)
+
+| 카테고리 | 대표 태그 | 빈도 |
+|----------|----------|------|
+| 표정/감정 | turn pale, scared | 11,456 |
+| 포즈 | covered nipples, covered eyes, pinky out | 238,402 |
+| 액션 | impaled, shared umbrella, captured | 3,926 |
+| 효과 | darkness, footprints, white outline | 18,621 |
+| 오브젝트 | palette, blueberry, goldfish | 5,258 |
+| 신체 | multicolored hair, colored skin | 503,734 |
+
+**총 복구된 빈도**: ~1,200,000
+
+### 참고 자료
+
+- **상세 이슈 리포트**: [.experimental/Critical_Issue_Colors.md](../.experimental/Critical_Issue_Colors.md)
+- **원본 발견 프로젝트**: tag_dict_project/create_tag_dict.py
+
+---
+
+*문서 버전: 1.4*
+*최종 업데이트: 2025-01-20*
 *담당 영역: modules/ 디렉터리*

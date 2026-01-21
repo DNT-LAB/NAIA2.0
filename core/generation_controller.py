@@ -60,12 +60,13 @@ class GenerationWorker(QObject):
     generation_progress = pyqtSignal(str)  # 진행 상황 메시지
     generation_finished = pyqtSignal(dict)  # 최종 결과
     generation_error = pyqtSignal(str)  # 오류 메시지
-    
+
     def __init__(self, context: 'AppContext'):
         super().__init__()
         self.context = context
         self.params = None
         self.source_row = None
+        self._is_running = False  # 🆕 실행 상태 추적
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -74,6 +75,7 @@ class GenerationWorker(QObject):
         
     def run_generation(self):
         """별도 스레드에서 실행될 생성 작업"""
+        self._is_running = True  # 🆕 실행 시작 표시
         try:
             self.generation_started.emit()
             self.generation_progress.emit("API 호출 중...")
@@ -119,9 +121,11 @@ class GenerationWorker(QObject):
                 self._collect_enhanced_metadata(processed_result)
             
             self.generation_finished.emit(processed_result)
-            
+
         except Exception as e:
             self.generation_error.emit(str(e))
+        finally:
+            self._is_running = False  # 🆕 실행 완료 표시
     
     def _post_process(self, result: dict) -> dict:
         """결과 후처리 로직"""
@@ -244,11 +248,15 @@ class GenerationController:
         # arbitration flags between queue and auto-generation
         self.queue_hold_auto_gen = False
         self.auto_retry_pending = False
-        
+
         # 🆕 자동 생성 재시도 관련 추가
         self.auto_retry_count = 0
         self.max_auto_retries = 2  # 자동 생성 시 최대 재시도 횟수 (API 자체에서 5회 재시도 하므로 줄임)
         self.retry_delay_ms = 3000  # 재시도 간격 (밀리초) - 3초로 증가
+
+        # 🆕 스레드 안전 관리를 위한 추가 변수
+        self._thread_cleanup_in_progress = False  # 스레드 정리 중 여부
+        self._pending_thread_refs = []  # 정리 대기 중인 스레드 참조
         
     def execute_generation_pipeline(self, overrides: dict = None, priority: int = 0, from_queue: bool = False):
         """
@@ -511,9 +519,14 @@ class GenerationController:
         self.queue_hold_auto_gen = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
 
         # 추가 안전: 스레드 실행 중이면 대기
-        if self.generation_thread and self.generation_thread.isRunning():
-            print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
-            return
+        if self.generation_thread is not None:
+            try:
+                if self.generation_thread.isRunning():
+                    print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
+                    return
+            except RuntimeError:
+                # 스레드 객체가 이미 삭제된 경우 - 참조 정리 후 계속
+                self.generation_thread = None
 
         # 🔒 이미 생성 중이면 나중에 재시도 (자동생성이 끼어들었을 수 있음)
         if self.is_generating:
@@ -594,31 +607,51 @@ class GenerationController:
 
     def _start_threaded_generation(self, params: dict, source_row):
         """별도 스레드에서 생성 작업을 시작합니다."""
+        # 🆕 안전장치 0: 앱 종료 중이면 새 생성 차단
+        if self._thread_cleanup_in_progress:
+            print("⚠️ [THREAD] 앱 종료 중입니다. 새 생성이 차단됩니다.")
+            return
+
+        # 🆕 안전장치 1: 이전 스레드가 아직 실행 중인지 확인
+        if self.generation_thread is not None:
+            if self.generation_thread.isRunning():
+                print("⚠️ [THREAD] 이전 스레드가 아직 실행 중입니다. 안전하게 종료를 기다립니다...")
+                # 최대 5초 대기 (긴급 상황에서 무한 대기 방지)
+                if not self.generation_thread.wait(5000):
+                    print("❌ [THREAD] 이전 스레드 종료 대기 시간 초과. 강제 종료 시도...")
+                    self.generation_thread.terminate()
+                    self.generation_thread.wait(1000)
+
+            # 🆕 안전장치 2: 이전 참조를 정리 대기 목록에 추가 (GC가 나중에 정리)
+            if self.generation_thread is not None:
+                self._pending_thread_refs.append(self.generation_thread)
+            if self.generation_worker is not None:
+                self._pending_thread_refs.append(self.generation_worker)
+
         # 새 스레드와 워커 생성
         self.generation_thread = QThread()
         self.generation_thread.setObjectName(f"GenThread-{id(self.generation_thread)}")
         self.generation_worker = GenerationWorker(self.context)
-        
+
         # 워커를 스레드로 이동
         self.generation_worker.moveToThread(self.generation_thread)
-        
+
         # 시그널 연결
         self.generation_worker.generation_started.connect(self._on_generation_started)
         self.generation_worker.generation_progress.connect(self._on_generation_progress)
         self.generation_worker.generation_finished.connect(self._on_generation_finished)
         self.generation_worker.generation_error.connect(self._on_generation_error)
-        
+
         # 스레드 시작/종료 연결
         self.generation_thread.started.connect(self.generation_worker.run_generation)
         self.generation_worker.generation_finished.connect(self.generation_thread.quit)
         self.generation_worker.generation_error.connect(self.generation_thread.quit)
-        
+
         # 🔧 올바른 deleteLater 연결 - 스레드 종료 시 해당 객체의 소유 스레드에서 안전하게 삭제
-        self.generation_thread.finished.connect(self.generation_worker.deleteLater)
-        self.generation_thread.finished.connect(self.generation_thread.deleteLater)
-        
+        # 🆕 안전장치 3: finished 시그널에서 먼저 _on_thread_finished를 호출하고, 그 후에 deleteLater 처리
         self.generation_thread.finished.connect(self._on_thread_finished)
-        
+        # deleteLater는 _on_thread_finished 내부에서 지연 호출로 처리 (아래 참조 해제 후)
+
         # 파라미터 설정 및 스레드 시작
         self.current_generation_params = params  # 🆕 현재 생성 파라미터 저장
         self.generation_worker.set_generation_params(params, source_row)
@@ -802,23 +835,62 @@ class GenerationController:
             self.auto_retry_count = 0
 
     def _on_thread_finished(self):
-        """스레드 완료 시 정리 작업"""
-        # 🔧 스레드 종료 처리 및 포인터 정리
-        def _cleanup():
+        """스레드 완료 시 정리 작업 - 🆕 안전한 스레드 정리 로직"""
+        # 🆕 안전한 스레드 정리: 참조를 먼저 로컬 변수에 저장
+        thread_to_cleanup = self.generation_thread
+        worker_to_cleanup = self.generation_worker
+
+        # 🆕 참조 해제를 먼저 수행 (새 스레드 생성에 영향 없도록)
+        self.generation_thread = None
+        self.generation_worker = None
+
+        # 🔧 스레드 정리 함수 (지연 실행) - 별도 플래그 없이 안전하게 처리
+        def _safe_cleanup():
             try:
-                if self.generation_thread:
-                    self.generation_thread.wait(50)  # finished 후 즉시 반환
-            except Exception:
-                pass
-            finally:
-                # 포인터 정리 (deleteLater는 이미 signal로 연결됨)
-                self.generation_thread = None
-                self.generation_worker = None
-                
+                # 워커 정리
+                if worker_to_cleanup is not None:
+                    try:
+                        # 워커가 아직 실행 중인지 확인
+                        if hasattr(worker_to_cleanup, '_is_running') and worker_to_cleanup._is_running:
+                            print("⚠️ [THREAD] 워커가 아직 실행 중입니다. 대기...")
+                            QCoreApplication.processEvents()
+                        worker_to_cleanup.deleteLater()
+                    except RuntimeError as e:
+                        # "wrapped C/C++ object has been deleted" 오류 무시
+                        print(f"[THREAD] 워커 이미 삭제됨: {e}")
+                    except Exception as e:
+                        print(f"[THREAD] 워커 정리 오류: {e}")
+
+                # 스레드 정리
+                if thread_to_cleanup is not None:
+                    try:
+                        # 스레드가 아직 실행 중인지 확인
+                        if thread_to_cleanup.isRunning():
+                            print("⚠️ [THREAD] 스레드가 아직 실행 중입니다. 대기...")
+                            thread_to_cleanup.wait(500)  # 최대 500ms 대기
+                        thread_to_cleanup.deleteLater()
+                    except RuntimeError as e:
+                        print(f"[THREAD] 스레드 이미 삭제됨: {e}")
+                    except Exception as e:
+                        print(f"[THREAD] 스레드 정리 오류: {e}")
+
+                # 정리 대기 목록에서 오래된 참조 제거 (최대 10개 유지)
+                while len(self._pending_thread_refs) > 10:
+                    old_ref = self._pending_thread_refs.pop(0)
+                    try:
+                        if hasattr(old_ref, 'deleteLater'):
+                            old_ref.deleteLater()
+                    except Exception:
+                        pass
+
                 # 강력한 스레드 정리 실행
                 _force_cleanup_all_threads()
-        
-        _cleanup()
+
+            except Exception as e:
+                print(f"[THREAD] 정리 중 예외 발생: {e}")
+
+        # 🆕 안전장치: 지연 실행으로 이벤트 루프에서 안전하게 처리
+        QTimer.singleShot(100, _safe_cleanup)
 
         # 스레드 종료 시점에서만 is_generating을 False로 전환하고 다음 작업을 결정
         try:
@@ -1325,3 +1397,54 @@ class GenerationController:
             traceback.print_exc()
 
         return nai_characters, nai_vibe_transfer, nai_character_reference
+
+    def safe_shutdown(self, timeout_ms: int = 5000):
+        """
+        🆕 앱 종료 시 안전하게 스레드를 정리합니다.
+
+        Args:
+            timeout_ms: 스레드 종료 대기 시간 (밀리초)
+        """
+        print("[THREAD] 안전 종료 시작...")
+
+        # 1. 생성 플래그 해제
+        self.is_generating = False
+        self._thread_cleanup_in_progress = True  # 새 작업 방지
+
+        # 2. 현재 스레드 종료 대기
+        if self.generation_thread is not None:
+            try:
+                if self.generation_thread.isRunning():
+                    print(f"[THREAD] 실행 중인 스레드 종료 대기 중... (최대 {timeout_ms}ms)")
+                    self.generation_thread.quit()
+                    if not self.generation_thread.wait(timeout_ms):
+                        print("⚠️ [THREAD] 스레드 정상 종료 실패. 강제 종료 시도...")
+                        self.generation_thread.terminate()
+                        self.generation_thread.wait(1000)
+                print("[THREAD] 스레드 종료 완료")
+            except RuntimeError as e:
+                print(f"[THREAD] 스레드 이미 삭제됨: {e}")
+            except Exception as e:
+                print(f"[THREAD] 스레드 종료 중 오류: {e}")
+
+        # 3. 참조 정리
+        self.generation_thread = None
+        self.generation_worker = None
+
+        # 4. 대기 중인 참조 정리
+        for ref in self._pending_thread_refs:
+            try:
+                if hasattr(ref, 'isRunning') and ref.isRunning():
+                    ref.quit()
+                    ref.wait(500)
+                if hasattr(ref, 'deleteLater'):
+                    ref.deleteLater()
+            except Exception:
+                pass
+        self._pending_thread_refs.clear()
+
+        # 5. 강력한 정리
+        _force_cleanup_all_threads()
+
+        self._thread_cleanup_in_progress = False
+        print("[THREAD] 안전 종료 완료")

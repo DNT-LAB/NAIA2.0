@@ -17,6 +17,9 @@ from core.prompt_context import PromptContext
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
+# 색상 필터링 예외 함수 import
+from modules.prompt_engineering_module import _is_color_exception
+
 
 class VirtualPromptEngineeringTab(QWidget):
     """
@@ -363,6 +366,9 @@ class VirtualPromptEngineeringTab(QWidget):
                 colors = filter_manager.color_list
                 temp = []
                 for keyword in main_tags:
+                    # 🔥 예외 패턴 체크: 색상과 무관한 태그는 필터링하지 않음
+                    if _is_color_exception(keyword):
+                        continue
                     if any(color in keyword for color in colors):
                         temp.append(keyword)
                 for keyword in temp:

@@ -842,6 +842,9 @@ class QuickSearchBlock(BlockWidget):
         filename = f"{r_key}_{target_category}.tgp"
         filepath = QUICK_SEARCH_DIR / filename
         
+        # 재로드를 위해 경로 저장
+        self.current_partition_path = filepath
+        
         if not filepath.exists():
             print(f"QuickSearch: Partition file not found: {filepath}")
             self.qs_store = SinglePartitionStore()
@@ -1282,9 +1285,14 @@ class QuickSearchBlock(BlockWidget):
         """
         if not self.qs_store or not self.qs_store._loaded:
             print("[QuickSearch] 파티션 데이터가 로드되지 않음 -> 재로드 시도")
-            # 저장된 이전 설정으로 재로드 시도
-            if hasattr(self, 'last_rating') and hasattr(self, 'last_person_info'):
-                self.load_partition(self.last_rating, self.last_person_info)
+            
+            # 저장된 경로로 직접 재로드 시도
+            if hasattr(self, 'current_partition_path') and self.current_partition_path:
+                try:
+                    self.qs_store = SinglePartitionStore.load(self.current_partition_path)
+                    print(f"[QuickSearch] 파티션 데이터 재로드 성공: {self.current_partition_path.name}")
+                except Exception as e:
+                    print(f"[QuickSearch] 파티션 데이터 재로드 실패: {e}")
             
             # 재확인
             if not self.qs_store or not self.qs_store._loaded:

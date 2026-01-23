@@ -774,6 +774,10 @@ class QuickSearchBlock(BlockWidget):
         """
         특정 rating 및 person_info에 기반하여 최적의 파티션 로드 및 자동 태그 설정
         """
+        # 재로드를 위한 정보 저장
+        self.last_rating = rating
+        self.last_person_info = person_info
+
         if not isinstance(person_info, dict):
             print(f"QuickSearch: Invalid person_info received: {person_info}")
             return
@@ -1277,8 +1281,15 @@ class QuickSearchBlock(BlockWidget):
             str: 랜덤으로 생성된 프롬프트 (쉼표로 구분된 태그 문자열)
         """
         if not self.qs_store or not self.qs_store._loaded:
-            print("[QuickSearch] 파티션 데이터가 로드되지 않았습니다.")
-            return ""
+            print("[QuickSearch] 파티션 데이터가 로드되지 않음 -> 재로드 시도")
+            # 저장된 이전 설정으로 재로드 시도
+            if hasattr(self, 'last_rating') and hasattr(self, 'last_person_info'):
+                self.load_partition(self.last_rating, self.last_person_info)
+            
+            # 재확인
+            if not self.qs_store or not self.qs_store._loaded:
+                print("[QuickSearch] 파티션 데이터 로드 실패 (재시도 포함).")
+                return ""
 
         # 1. 현재 필터링된 이벤트 인덱스 가져오기
         event_indices = self.qs_store.filter_events(

@@ -769,6 +769,16 @@ class QuickSearchBlock(BlockWidget):
             # 메타데이터 재로드
             if self._validate_and_load_metadata():
                 self.update_tag_grid()
+                
+                # 저장된 경로가 있으면 해당 파티션 로드 시도
+                if hasattr(self, 'current_partition_path') and self.current_partition_path:
+                    print(f"QuickSearch: Attempting to reload partition from {self.current_partition_path}")
+                    self.qs_store = SinglePartitionStore.load(self.current_partition_path)
+                    
+                # 만약 로드된 파티션이 없다면 초기 파티션 로드 시도 (fallback)
+                if not self.qs_store or not self.qs_store._loaded:
+                    initial_info = {'girls': 1, 'boys': 0, 'others': 0, 'is_solo': True}
+                    self.load_partition('sensitive', initial_info)
 
     def load_partition(self, rating: str, person_info: dict):
         """

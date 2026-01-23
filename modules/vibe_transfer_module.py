@@ -1118,11 +1118,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         
         # Model tracking for NAID3 switching
         self._previous_model = None
-        
+        self._model_combo_connected = False  # Track connection state
+
         # Volatile file tracking
         self.volatile_files = {}  # {model: [file_hashes]}
         self._load_volatile_tracking()
-        
+
         # Clean up volatile files on initialization
         self._cleanup_volatile_files()
         
@@ -1144,19 +1145,17 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         if hasattr(self, 'app_context') and self.app_context:
             # Initialize previous model
             self._previous_model = self._get_current_model()
-            
-            # Connect to model combo changes if available
+
+            # Connect to model combo changes if available (only if not already connected)
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'model_combo'):
-                try:
-                    # Disconnect any existing connections to avoid duplicates
-                    self.app_context.main_window.model_combo.currentIndexChanged.disconnect(self._on_model_changed)
-                except:
-                    pass  # No existing connection
-                
-                # Connect to model combo changes
-                self.app_context.main_window.model_combo.currentIndexChanged.connect(self._on_model_changed)
-                print(f"✅ VibeTransferModule: Connected to model_combo changes")
-                
+                if not self._model_combo_connected:
+                    # Connect to model combo changes
+                    self.app_context.main_window.model_combo.currentIndexChanged.connect(self._on_model_changed)
+                    self._model_combo_connected = True
+                    print(f"✅ VibeTransferModule: Connected to model_combo changes")
+                else:
+                    print(f"ℹ️ VibeTransferModule: Already connected to model_combo changes")
+
             # Refresh encoding states on initialization (for mode changes)
             if self.vibe_frames:
                 print(f"🔄 VibeTransferModule: Refreshing encoding states on initialization")

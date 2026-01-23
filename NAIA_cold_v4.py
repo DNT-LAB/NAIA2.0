@@ -34,6 +34,7 @@ from ui.right_view import RightView
 from ui.temp_generation_window import TempGenerationWindow
 from ui.resolution_manager_dialog import ResolutionManagerDialog
 from ui.remote_window import RemoteWindow
+from ui.interactive_window import InteractiveWindow
 from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
@@ -650,8 +651,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 135"
-        self.setWindowTitle(self.base_title + " - 260120")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 136"
+        self.setWindowTitle(self.base_title + " - 260123")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1225,6 +1226,14 @@ class ModernMainWindow(QMainWindow):
         self.previous_tab_index = 0  # 이전 탭 인덱스 저장용
         self.remote_window = None  # 리모트 창 참조
         self.remote_window_open = False  # 리모트 창 열림 상태
+
+        # Interactive 탭 추가 (클릭 시 새 창을 띄움)
+        interactive_placeholder_widget = QWidget()
+        interactive_placeholder_widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        self.prompt_tabs.addTab(interactive_placeholder_widget, "🎨 Interactive")
+        self.interactive_tab_index = 3  # Interactive 탭의 인덱스
+        self.interactive_window = None  # Interactive 창 참조
+        self.interactive_window_open = False  # Interactive 창 열림 상태
 
         # 탭 전환 이벤트 연결
         self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
@@ -2559,13 +2568,21 @@ class ModernMainWindow(QMainWindow):
                 
                 self.image_window.update_image(image_object)
                 
+                # Interactive Mode 요청인 경우 별도 이벤트 발행
+                is_interactive_request = generation_params.get("interactive_mode_request", False)
+                if is_interactive_request:
+                    print("🎮 Interactive Mode 요청 감지 - 전용 이벤트 발행")
+                    # AppContext를 통해 이벤트 발행
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_interactive", image_object)
+
                 # Assets Workshop 요청인 경우 별도 이벤트 발행
                 if is_assets_request:
                     print("📦 Assets Workshop 요청 감지 - 전용 이벤트 발행")
                     # AppContext를 통해 이벤트 발행
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_assets", image_object)
-                
+
                 # Artist Thumb 요청인 경우 별도 이벤트 발행
                 if is_artist_thumb_request:
                     print("🎨 Artist Thumb 요청 감지 - 전용 이벤트 발행")
@@ -3404,20 +3421,32 @@ class ModernMainWindow(QMainWindow):
 
     def _on_prompt_tab_changed(self, index: int):
         """프롬프트 탭 전환 이벤트 핸들러"""
-        # 리모트 탭이 아닌 경우, 이전 탭 인덱스 업데이트
-        if index != self.remote_tab_index:
-            self.previous_tab_index = index
+        # 리모트 탭 클릭 시
+        if index == self.remote_tab_index:
+            if self.remote_window_open and self.remote_window:
+                # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
+                self.remote_window.raise_()
+                self.remote_window.activateWindow()
+                QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
+            else:
+                # 새 창 열기
+                QTimer.singleShot(10, self._open_remote_window)
             return
 
-        # 리모트 탭 클릭 시
-        if self.remote_window_open and self.remote_window:
-            # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
-            self.remote_window.raise_()
-            self.remote_window.activateWindow()
-            QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
-        else:
-            # 새 창 열기
-            QTimer.singleShot(10, self._open_remote_window)
+        # Interactive 탭 클릭 시
+        if index == self.interactive_tab_index:
+            if self.interactive_window_open and self.interactive_window:
+                # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
+                self.interactive_window.raise_()
+                self.interactive_window.activateWindow()
+                QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
+            else:
+                # 새 창 열기
+                QTimer.singleShot(10, self._open_interactive_window)
+            return
+
+        # 일반 탭 클릭 시 이전 탭 인덱스 업데이트
+        self.previous_tab_index = index
 
     def _open_remote_window(self):
         """리모트 창 열기"""
@@ -3441,6 +3470,41 @@ class ModernMainWindow(QMainWindow):
         self.remote_window = None
         self.remote_window_open = False
         self._update_remote_tab_style(disabled=False)
+
+    # === Interactive 탭 관련 메서드 ===
+
+    def _open_interactive_window(self):
+        """Interactive 창 열기"""
+        if self.interactive_window_open:
+            return
+
+        # 이전 탭으로 복귀
+        self.prompt_tabs.setCurrentIndex(self.previous_tab_index)
+
+        # Interactive 창 생성
+        self.interactive_window = InteractiveWindow(parent_app=self, app_context=self.app_context)
+        self.interactive_window.window_closed.connect(self._on_interactive_window_closed)
+        self.interactive_window.show()
+
+        # 상태 업데이트
+        self.interactive_window_open = True
+        self._update_interactive_tab_style(disabled=True)
+
+    def _on_interactive_window_closed(self):
+        """Interactive 창 닫힘 이벤트"""
+        self.interactive_window = None
+        self.interactive_window_open = False
+        self._update_interactive_tab_style(disabled=False)
+
+    def _update_interactive_tab_style(self, disabled: bool):
+        """Interactive 탭 스타일 업데이트 (활성/비활성)"""
+        tab_bar = self.prompt_tabs.tabBar()
+        if disabled:
+            # 비활성 스타일 - 회색으로 표시
+            tab_bar.setTabTextColor(self.interactive_tab_index, QColor(DARK_COLORS['text_disabled']))
+        else:
+            # 활성 스타일 - 원래 색으로 복원
+            tab_bar.setTabTextColor(self.interactive_tab_index, QColor(DARK_COLORS['text_primary']))
 
     def _update_remote_tab_style(self, disabled: bool):
         """리모트 탭 스타일 업데이트 (활성/비활성)"""

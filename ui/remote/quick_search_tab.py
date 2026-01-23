@@ -32,9 +32,9 @@ except ImportError:
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFrame, QScrollArea, QLineEdit,
-    QButtonGroup, QTextEdit, QProgressDialog,
+    QButtonGroup, QTextEdit,
     QTabWidget, QCheckBox, QMessageBox, QApplication,
-    QLayout, QSizePolicy
+    QLayout, QSizePolicy, QDialog, QProgressBar, QStyleFactory
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QRect, QSize, QPoint
 from PyQt6.QtGui import QPixmap
@@ -133,6 +133,93 @@ class FlowLayout(QLayout):
                 QSizePolicy.ControlType.PushButton,
                 Qt.Orientation.Horizontal
             )
+
+
+class DownloadProgressDialog(QDialog):
+    """다운로드 진행 상태 표시 다이얼로그 (커스텀)"""
+    canceled = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Quick Search 데이터 다운로드")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        # 크기 설정
+        w = get_scaled_size(400)
+        h = get_scaled_size(150)
+        self.setFixedSize(w, h)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # 메시지 라벨
+        self.label = QLabel("다운로드 준비 중...")
+        self.label.setWordWrap(True)
+        self.label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(14)}px; border: none;")
+        layout.addWidget(self.label)
+
+        # 프로그레스 바
+        self.progress_bar = QProgressBar()
+        # Windows 네이티브 테마 오류 방지를 위해 Fusion 스타일 강제 적용
+        self.progress_bar.setStyle(QStyleFactory.create("Fusion"))
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        # 스타일링
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        layout.addWidget(self.progress_bar)
+
+        # 취소 버튼
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.cancel_btn = QPushButton("취소")
+        self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+        self.cancel_btn.clicked.connect(self.on_cancel)
+        btn_layout.addWidget(self.cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+        # 다이얼로그 배경 스타일 (ID로 한정하여 자식 위젯 영향 방지)
+        self.setObjectName("download_dialog")
+        self.setStyleSheet(f"""
+            QDialog#download_dialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+
+    def on_cancel(self):
+        self.canceled.emit()
+        self.reject()
+
+    def update_progress(self, percent, message):
+        self.progress_bar.setValue(percent)
+        self.label.setText(message)
+
+    def closeEvent(self, event):
+        # 명시적 취소 버튼 클릭이 아닌 닫기(X버튼 등)도 취소로 간주
+        super().closeEvent(event)
+
 
 # SSL 인증서 검증
 try:
@@ -508,10 +595,71 @@ class PartitionDataDownloadWorker(QThread):
         """다운로드 취소"""
         self._cancelled = True
 
+    def _validate_metadata(self) -> tuple[bool, int]:
+        """메타데이터 검증 (파일 존재 및 태그 수 확인)
+
+        Returns:
+            (is_valid, tag_count): 유효성 여부와 태그 수
+        """
+        TGPS_MAGIC = b'TGPS'
+        metadata_file = self.target_dir / "metadata.tgpm"
+
+        if not metadata_file.exists():
+            return (False, 0)
+
+        try:
+            with open(metadata_file, 'rb') as f:
+                magic = f.read(4)
+                if magic != TGPS_MAGIC:
+                    return (False, 0)
+
+                _ = struct.unpack('<H', f.read(2))[0]  # version
+                compressed_len = struct.unpack('<I', f.read(4))[0]
+                compressed = f.read(compressed_len)
+
+            serialized = lzma.decompress(compressed)
+            data = pickle.loads(serialized)
+            tag_count = len(data.get('tag_to_id', {}))
+
+            # 태그 수가 13053개이거나 파일이 유효하지 않으면 False
+            is_valid = tag_count > 13053
+            return (is_valid, tag_count)
+
+        except Exception as e:
+            print(f"[QuickSearch] 메타데이터 검증 실패: {e}")
+            return (False, 0)
+
+    def _clean_target_directory(self):
+        """대상 디렉터리 내용 삭제"""
+        import shutil
+
+        if self.target_dir.exists():
+            self.progress_updated.emit(5, "기존 데이터 삭제 중...")
+            shutil.rmtree(self.target_dir)
+            print(f"[QuickSearch] 기존 데이터 삭제 완료: {self.target_dir}")
+
     def run(self):
         """다운로드 및 압축 해제 실행"""
         try:
-            self.progress_updated.emit(0, "다운로드 준비 중...")
+            self.progress_updated.emit(0, "메타데이터 검증 중...")
+
+            # 메타데이터 검증
+            is_valid, tag_count = self._validate_metadata()
+
+            if not is_valid:
+                if tag_count > 0:
+                    print(f"[QuickSearch] 메타데이터 태그 수 부족: {tag_count} (기대: > 13053)")
+                else:
+                    print(f"[QuickSearch] 메타데이터 파일이 없거나 유효하지 않음")
+
+                # 기존 데이터 삭제
+                self._clean_target_directory()
+            else:
+                print(f"[QuickSearch] 메타데이터 검증 성공: {tag_count} 태그")
+                self.download_finished.emit(True, f"데이터가 이미 최신 상태입니다 ({tag_count} 태그)")
+                return
+
+            self.progress_updated.emit(10, "다운로드 준비 중...")
 
             # 헤더 설정
             headers = {
@@ -546,7 +694,8 @@ class PartitionDataDownloadWorker(QThread):
                         out_file.write(block)
 
                         if total_size > 0:
-                            percent = min(90, (downloaded * 90) // total_size)
+                            # 10-90% 범위로 진행률 표시
+                            percent = min(90, 10 + (downloaded * 80) // total_size)
                             downloaded_mb = downloaded / (1024 * 1024)
                             total_mb = total_size / (1024 * 1024)
                             self.progress_updated.emit(percent, f"다운로드 중... {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
@@ -562,8 +711,16 @@ class PartitionDataDownloadWorker(QThread):
             if temp_zip.exists():
                 temp_zip.unlink()
 
+            # 다운로드 후 재검증
+            self.progress_updated.emit(95, "설치 검증 중...")
+            is_valid_after, final_tag_count = self._validate_metadata()
+
+            if not is_valid_after:
+                self.download_finished.emit(False, f"설치 후 검증 실패 (태그 수: {final_tag_count})")
+                return
+
             self.progress_updated.emit(100, "완료!")
-            self.download_finished.emit(True, f"데이터 다운로드 및 설치 완료")
+            self.download_finished.emit(True, f"데이터 다운로드 및 설치 완료 ({final_tag_count} 태그)")
 
         except urllib.error.HTTPError as e:
             self.download_finished.emit(False, f"HTTP 오류 {e.code}: {e.reason}")
@@ -572,6 +729,8 @@ class PartitionDataDownloadWorker(QThread):
         except zipfile.BadZipFile:
             self.download_finished.emit(False, "압축 파일이 손상되었습니다.")
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.download_finished.emit(False, f"오류: {str(e)}")
 
 
@@ -623,16 +782,48 @@ class QuickSearchTabMixin:
         self.main_tabs.setCurrentIndex(0)
 
     def _check_partition_data_exists(self) -> bool:
-        """파티션 데이터 존재 여부 확인"""
+        """파티션 데이터 존재 여부 및 유효성 확인"""
         if not QUICK_SEARCH_DIR.exists():
             return False
 
         if not PARTITION_METADATA_FILE.exists():
             return False
 
+        # 메타데이터 검증 (태그 수 확인)
+        TGPS_MAGIC = b'TGPS'
+        try:
+            with open(PARTITION_METADATA_FILE, 'rb') as f:
+                magic = f.read(4)
+                if magic != TGPS_MAGIC:
+                    print("[QuickSearch] 메타데이터 파일 포맷 오류")
+                    return False
+
+                _ = struct.unpack('<H', f.read(2))[0]  # version
+                compressed_len = struct.unpack('<I', f.read(4))[0]
+                compressed = f.read(compressed_len)
+
+            serialized = lzma.decompress(compressed)
+            data = pickle.loads(serialized)
+            tag_count = len(data.get('tag_to_id', {}))
+
+            # 태그 수가 13053개 이하면 구버전으로 간주
+            if tag_count <= 13053:
+                print(f"[QuickSearch] 메타데이터 태그 수 부족: {tag_count} (기대: > 13053)")
+                return False
+
+            print(f"[QuickSearch] 메타데이터 검증 성공: {tag_count} 태그")
+
+        except Exception as e:
+            print(f"[QuickSearch] 메타데이터 검증 실패: {e}")
+            return False
+
         # 최소 파티션 파일 확인 (예: s_1girl_solo.tgp)
         tgp_files = list(QUICK_SEARCH_DIR.glob("*.tgp"))
-        return len(tgp_files) >= 10  # 최소 10개 파티션
+        if len(tgp_files) < 10:
+            print(f"[QuickSearch] 파티션 파일 부족: {len(tgp_files)} (기대: >= 10)")
+            return False
+
+        return True
 
     def _create_download_ui(self, parent_layout: QVBoxLayout):
         """데이터 다운로드 UI 생성"""
@@ -705,37 +896,127 @@ class QuickSearchTabMixin:
         parent_layout.addStretch()
 
     def _on_qs_download_clicked(self):
-        """다운로드 버튼 클릭"""
-        self.qs_download_btn.setEnabled(False)
-        self.qs_download_btn.setText("다운로드 중...")
-        self.qs_progress_label.setText("준비 중...")
+        """다운로드 버튼 클릭 (커스텀 다이얼로그 사용)"""
+        # 커스텀 프로그레스 다이얼로그 생성
+        self._qs_progress_dialog = DownloadProgressDialog(self)
 
-        # 워커 생성 및 시작
+        # 워커 생성
         self._qs_download_worker = PartitionDataDownloadWorker(
             HUGGINGFACE_DATA_URL,
             QUICK_SEARCH_DIR,
             self
         )
+
+        # 시그널 연결
         self._qs_download_worker.progress_updated.connect(self._on_qs_download_progress)
         self._qs_download_worker.download_finished.connect(self._on_qs_download_finished)
+
+        # 다이얼로그 취소 시그널 -> 다운로드 취소 처리
+        self._qs_progress_dialog.canceled.connect(self._on_qs_download_canceled)
+
+        # 워커 시작
         self._qs_download_worker.start()
 
+        # 다이얼로그 표시 (Non-blocking)
+        self._qs_progress_dialog.show()
+
     def _on_qs_download_progress(self, percent: int, message: str):
-        """다운로드 진행 상태 업데이트"""
-        self.qs_progress_label.setText(message)
-        self.qs_download_btn.setText(f"다운로드 중... {percent}%")
+        """다운로드 진행 상황 업데이트"""
+        if hasattr(self, '_qs_progress_dialog') and self._qs_progress_dialog:
+            try:
+                # 커스텀 다이얼로그 업데이트 메서드 호출
+                self._qs_progress_dialog.update_progress(percent, message)
+            except RuntimeError:
+                pass
 
     def _on_qs_download_finished(self, success: bool, message: str):
         """다운로드 완료 처리"""
+        # 1. 시그널 연결 해제 및 Worker 정리
+        if hasattr(self, '_qs_download_worker') and self._qs_download_worker:
+            try:
+                self._qs_download_worker.progress_updated.disconnect()
+                self._qs_download_worker.download_finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+            if self._qs_download_worker.isRunning():
+                self._qs_download_worker.quit()
+                self._qs_download_worker.wait(1000)
+
+            self._qs_download_worker.deleteLater()
+            self._qs_download_worker = None
+
+        # 2. Dialog 정리
+        if hasattr(self, '_qs_progress_dialog') and self._qs_progress_dialog:
+            try:
+                self._qs_progress_dialog.canceled.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+            self._qs_progress_dialog.close()
+            self._qs_progress_dialog.deleteLater()
+            self._qs_progress_dialog = None
+
+        # 3. 결과 메시지 표시
+        self._show_qs_download_result(success, message)
+
+    def _on_qs_download_canceled(self):
+        """다운로드 취소 처리"""
+        # Worker 취소 요청
+        if hasattr(self, '_qs_download_worker') and self._qs_download_worker:
+            self._qs_download_worker.cancel()
+
+            if self._qs_download_worker.isRunning():
+                self._qs_download_worker.quit()
+                self._qs_download_worker.wait(1000)
+
+            self._qs_download_worker.deleteLater()
+            self._qs_download_worker = None
+
+        # Dialog 정리
+        if hasattr(self, '_qs_progress_dialog') and self._qs_progress_dialog:
+            self._qs_progress_dialog.close()
+            self._qs_progress_dialog.deleteLater()
+            self._qs_progress_dialog = None
+
+    def _show_qs_download_result(self, success: bool, message: str):
+        """다운로드 결과 메시지 표시"""
+        # 실패이고 취소된 경우 메시지 표시 안함
+        if not success and "취소" in message:
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("다운로드 완료" if success else "다운로드 실패")
+        msg_box.setText(message)
+        msg_box.setIcon(QMessageBox.Icon.Information if success else QMessageBox.Icon.Warning)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+
+        # 스타일 적용 (다크 테마)
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+
+        msg_box.exec()
+
         if success:
-            self.qs_progress_label.setText("완료! 페이지를 새로고침합니다...")
             # 탭 재생성
-            QTimer.singleShot(1000, self._reload_quick_search_tab)
-        else:
-            self.qs_download_btn.setEnabled(True)
-            self.qs_download_btn.setText("📥 데이터 다운로드")
-            self.qs_progress_label.setText(f"오류: {message}")
-            self._show_warning("다운로드 실패", message)
+            QTimer.singleShot(500, self._reload_quick_search_tab)
 
     def _reload_quick_search_tab(self):
         """Quick Search 탭 재생성"""
@@ -1113,7 +1394,7 @@ class QuickSearchTabMixin:
         self.qs_tag_list_layout.setContentsMargins(4, 4, 4, 4)
         self.qs_tag_list_layout.setSpacing(4)
 
-        # 3열 균등 분배를 위한 column stretch 설정
+        # 3열 분배를 위한 column stretch 설정
         self.qs_tag_list_layout.setColumnStretch(0, 1)
         self.qs_tag_list_layout.setColumnStretch(1, 1)
         self.qs_tag_list_layout.setColumnStretch(2, 1)

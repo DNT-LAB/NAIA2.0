@@ -92,13 +92,20 @@ class PandasModel(QAbstractTableModel):
 
     def sort(self, column, order):
         try:
+            # Check if dataframe is empty or has no columns
+            df = self.dataframe()
+            if df is None or df.empty or len(df.columns) == 0 or column >= len(df.columns):
+                return
+
             self.layoutAboutToBeChanged.emit()
-            col_name = self.dataframe().columns[column]
-            self._df = self.dataframe().sort_values(
+            col_name = df.columns[column]
+            self._df = df.sort_values(
                 col_name, ascending=(order == Qt.SortOrder.AscendingOrder), kind='mergesort'
             )
             self.layoutChanged.emit()
-        except: pass
+        except Exception as e:
+            print(f"Warning: Sort failed - {e}")
+            pass
 
     def dataframe(self):
         return self._df
@@ -164,9 +171,8 @@ class DepthSearchWindow(QWidget):
         # [신규] 우클릭 컨텍스트 메뉴 정책 설정
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self.show_table_context_menu)
-        
-        self.table_view.setSortingEnabled(True)
-        # [수정] Qt 기본 정렬 대신 커스텀 정렬 사용
+
+        # [수정] Qt 기본 정렬 대신 커스텀 정렬 사용 (기본값은 False)
         self.table_view.setSortingEnabled(False)
         self.table_view.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
         self.current_sort_order = {} # {columnIndex: order}

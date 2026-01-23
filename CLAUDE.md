@@ -17,7 +17,7 @@
 - **링크 방식**: 메인 문서에서 핵심만 설명, 상세는 레퍼런스 링크로 안내
   - 예: `**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)`
 
-**📚 문서화 현황** (2025-01-12 업데이트):
+**📚 문서화 현황** (2025-01-21 업데이트):
 - ✅ **core/CLAUDE.md** (v1.7): AppContext, 컨트롤러, 파이프라인, API 서비스
   - 🆕 ImageCrudController 파일명 형식, 분류 시스템, 타임스탬프 폴더 토글
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
@@ -37,6 +37,9 @@
 - ✅ **ui/CLAUDE.md** (v1.3): 테마 시스템, 스케일링, 공용 위젯, 분리 창
   - 🆕 **CollapsibleBox**: 상태 추적, 스크롤 위치 저장/복원, 프로그래밍 제어
   - 🆕 **PromptHighlighter**: 시퀀스 토큰 하이라이팅 (`:begin`, `:seq`, `:end`)
+  - 🆕 **ui/interactive/CLAUDE.md** (v1.0): Interactive Mode 전용 가이드
+    - ComfyUI 스타일 블록 시스템, 플로팅 패널, 테마 커스터마이징
+    - Quick Search 데이터 검증 및 자동 다운로드
 - ✅ **interfaces/CLAUDE.md** (완료): 계약 정의, 다중 상속 패턴, Breaking Change 방지
 - ✅ **utils/CLAUDE.md** (완료): 이미지 메타데이터, 토큰 계산, 번역, 파라미터 관리
 - ✅ **data/CLAUDE.md** (완료): Parquet 데이터베이스, 텍스트 사전, 검색 시스템
@@ -602,11 +605,37 @@ def cleanup(self):
 - `scaling_manager.py` - 동적 스케일링
 - `right_view.py` - 탭 컨테이너
 - `modern_menu.py` - 컨텍스트 메뉴
+- `interactive_window.py` - Interactive Mode 메인 윈도우
 
 **언제 수정하는가?**:
 - 새 UI 컴포넌트 추가
 - 테마 색상/스타일 변경
 - 스케일링 로직 수정
+
+#### 📁 ui/interactive/ - Interactive Mode (초보자 UI)
+
+**파일**: [ui/interactive/CLAUDE.md](ui/interactive/CLAUDE.md)
+
+**ComfyUI 스타일의 블록 기반 인터페이스**
+
+**주요 컴포넌트**:
+- `block_widget.py` - 블록 베이스 클래스
+- `interactive_theme.py` - 테마 시스템
+- `draggable_panel.py` - 플로팅 패널
+- `person_settings_block.py` - 인원 수/Rating 설정
+- `quick_search_block.py` - 태그 추천 (자동 데이터 다운로드)
+- `main_prompt_block.py` - 메인 프롬프트 (플로팅)
+
+**특징**:
+- 좌우 분할 레이아웃 (설정 패널 + 이미지 뷰어)
+- 접을 수 있는 색상별 블록
+- 드래그 가능한 플로팅 패널
+- Quick Search 데이터 자동 검증 및 다운로드
+
+**언제 사용하는가?**:
+- 초보자 친화적 UI 개발
+- 블록 기반 단계별 가이드 추가
+- ComfyUI 스타일 인터페이스 확장
 
 ### 📁 interfaces/ - 계약 정의
 

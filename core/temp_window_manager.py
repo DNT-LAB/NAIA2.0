@@ -202,7 +202,7 @@ class TempWindowManager(QObject):
                 temp_window.params_update_requested.disconnect()
                 temp_window.random_prompt_requested.disconnect()
                 temp_window.window_closing.disconnect()
-            except:
+            except (TypeError, RuntimeError):
                 pass  # 이미 연결 해제된 경우 무시
 
             # 추적 딕셔너리에서 제거

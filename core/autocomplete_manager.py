@@ -444,16 +444,21 @@ class AutoCompleteManager(QObject):
                 print("⚠️ tag_data_manager가 없습니다")
                 self._hide_all_popups()
                 return
-                
+
             matches = self.tag_data_manager.find_top_matches(
-                target_text, 
+                target_text,
                 additional_wildcards=additional_wildcards
             )
         except Exception as e:
             print(f"⚠️ 자동완성 검색 중 오류: {e}")
             self._hide_all_popups()
             return
-        
+
+        # 🆕 위젯의 필터 속성 확인 및 적용
+        filter_category = self.current_widget.property("autocomplete_filter")
+        if filter_category:
+            matches = self._apply_filter(matches, filter_category)
+
         # 매칭 결과가 없으면 팝업 숨기기
         if not matches:
             self._hide_all_popups()
@@ -1172,7 +1177,49 @@ class AutoCompleteManager(QObject):
         except Exception as e:
             print(f"⚠️ ArtistThumbModule 리스트 가져오기 실패: {e}")
         return []
-    
+
+    def _apply_filter(self, matches: list, filter_category: str) -> list:
+        """필터 카테고리에 따라 태그 목록을 필터링합니다.
+
+        위젯에서 사용 방법:
+        ```python
+        # 작가태그만 표시
+        artist_input = QTextEdit()
+        artist_input.setProperty("autocomplete_filter", "artist")
+
+        # 일반 태그만 표시 (작가태그 제외)
+        general_input = QTextEdit()
+        general_input.setProperty("autocomplete_filter", "general")
+        ```
+
+        Args:
+            matches: [(tag, count), ...] 형태의 매칭 결과
+            filter_category: "artist" 또는 "general"
+
+        Returns:
+            필터링된 매칭 결과
+        """
+        if not filter_category or filter_category == "all":
+            return matches
+
+        # 아티스트 리스트 가져오기
+        artist_list = self._get_artist_list()
+
+        filtered = []
+
+        for tag, count in matches:
+            if filter_category == "artist":
+                # artist: 접두사가 있거나 artist_list에 있는 태그만
+                if tag.startswith("artist:") or tag in artist_list:
+                    filtered.append((tag, count))
+
+            elif filter_category == "general":
+                # 일반 태그 (artist: 제외, artist_list에 없는 태그만)
+                if not tag.startswith("artist:") and tag not in artist_list:
+                    filtered.append((tag, count))
+
+        return filtered
+
     def _perform_translation(self):
         """번역을 백그라운드 스레드에서 수행합니다."""
         if not self.pending_translation_text:

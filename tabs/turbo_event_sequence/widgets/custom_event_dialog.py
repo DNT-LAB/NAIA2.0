@@ -1011,15 +1011,22 @@ class CustomEventDialog(QDialog):
         self._is_generating = False
         self.create_btn.setEnabled(True)
 
+        # 워커 정리 (메모리 누수 방지)
+        if self._generation_worker:
+            self._generation_worker.cancel()
+            self._generation_worker.deleteLater()
+            self._generation_worker = None
+
     def _on_generation_finished(self, images: list):
         """생성 완료"""
         self._is_generating = False
         self.create_btn.setEnabled(True)
         self.status_label.setText("✅ 생성 완료")
 
-        # 워커 정리
+        # 워커 정리 (메모리 누수 방지)
         if self._generation_worker:
             self._generation_worker.cancel()
+            self._generation_worker.deleteLater()
             self._generation_worker = None
 
     def _update_grid_button_state(self):
@@ -1143,11 +1150,15 @@ class CustomEventDialog(QDialog):
         # 기존 데이터 로드
         if personal_path.exists():
             existing_df = pd.read_parquet(personal_path)
-            # 기존 최대 ID 찾기
-            max_id = existing_df['id'].max()
+            # 커스텀 ID 범위(10000000 이상)에서 최대값 찾기
+            custom_ids = existing_df[existing_df['id'] >= 10000000]['id']
+            if len(custom_ids) > 0:
+                max_id = custom_ids.max()
+            else:
+                max_id = 10000000  # 커스텀 ID 시작점
         else:
             existing_df = pd.DataFrame()
-            max_id = 9000000  # 커스텀 ID 시작점
+            max_id = 10000000  # 커스텀 ID 시작점 (10000000으로 변경)
 
         # 새 ID 생성 (충돌 방지)
         parent_id = int(max_id) + 1
@@ -1231,8 +1242,9 @@ class CustomEventDialog(QDialog):
         return parent_id
 
     def closeEvent(self, event):
-        """다이얼로그 닫힐 때 워커 정리"""
+        """다이얼로그 닫힐 때 워커 정리 (메모리 누수 방지)"""
         if self._generation_worker:
             self._generation_worker.cancel()
+            self._generation_worker.deleteLater()
             self._generation_worker = None
         super().closeEvent(event)

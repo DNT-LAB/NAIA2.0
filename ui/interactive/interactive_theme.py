@@ -348,16 +348,19 @@ def get_checkbox_style() -> str:
     """
 
 
-def get_button_style(block_type: str = 'default') -> str:
+def get_button_style(block_type: str = 'default', bg_color: str = None, text_color: str = None) -> str:
     """
     버튼 스타일
     """
     colors = get_block_style(block_type)
+    
+    background = bg_color if bg_color else colors['header']
+    text = text_color if text_color else COMMON_STYLES['text_primary']
 
     return f"""
         QPushButton {{
-            background-color: {colors['header']};
-            color: {COMMON_STYLES['text_primary']};
+            background-color: {background};
+            color: {text};
             border: none;
             border-radius: {get_scaled_size(4)}px;
             padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
@@ -366,10 +369,10 @@ def get_button_style(block_type: str = 'default') -> str:
             font-weight: bold;
         }}
         QPushButton:hover {{
-            background-color: {_lighten_color(colors['header'], 0.15)};
+            background-color: {_lighten_color(background, 0.15)};
         }}
         QPushButton:pressed {{
-            background-color: {_lighten_color(colors['header'], -0.1)};
+            background-color: {_lighten_color(background, -0.1)};
         }}
         QPushButton:disabled {{
             background-color: {get_block_style('default')['content']};

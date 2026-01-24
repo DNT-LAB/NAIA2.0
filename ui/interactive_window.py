@@ -321,6 +321,29 @@ class InteractiveWindow(QMainWindow):
 
         self.floating_char_ref_panel.show()
 
+        # [플로팅] 이미지 태거 블록 (WD14)
+        from ui.interactive.image_tagger_block import ImageTaggerBlock
+
+        self.image_tagger_block = ImageTaggerBlock()
+        self.image_tagger_block.set_collapsed(True) # 기본 접힘
+
+        # 태그 추출 시그널 -> 메인 프롬프트에 추가 (또는 덮어쓰기?)
+        # 여기서는 메인 프롬프트 끝에 추가하는 방식으로 구현
+        self.image_tagger_block.tags_extracted.connect(self._on_tags_extracted_from_image)
+
+        # ✅ ImageTaggerBlock에 QuickSearchBlock, MainPromptBlock, AppContext 참조 설정
+        self.image_tagger_block.set_quick_search_block(self.quick_search_block)
+        self.image_tagger_block.set_main_prompt_block(self.main_prompt_block)
+        self.image_tagger_block.app_context = self.app_context  # AppContext 전달
+
+        self.floating_tagger_panel = DraggablePanel(
+            parent=self.right_panel,
+            child_widget=self.image_tagger_block
+        )
+        self.floating_tagger_panel.setFixedWidth(get_scaled_size(220))
+        self._setup_responsive_panel(self.floating_tagger_panel, self.image_tagger_block)
+        self.floating_tagger_panel.show()
+
         # [플로팅] 태그 뷰어 (투명 헤더 + 드래그 가능)
         from ui.interactive.tag_viewer_widget import TagViewerWidget
         from ui.interactive.draggable_panel import DraggablePanel
@@ -471,6 +494,12 @@ class InteractiveWindow(QMainWindow):
             # 5. Character Reference
             if self.floating_char_ref_panel.isVisible():
                 self.floating_char_ref_panel.move(next_x, common_y)
+                next_x += self.floating_char_ref_panel.width() + spacing
+
+            # 6. Image Tagger
+            if hasattr(self, 'floating_tagger_panel') and self.floating_tagger_panel.isVisible():
+                self.floating_tagger_panel.move(next_x, common_y)
+                next_x += self.floating_tagger_panel.width() + spacing
 
             # 최초 실행이었다면 플래그 설정 및 is_floating_pinned을 False로 변경
             if first_run:
@@ -711,6 +740,19 @@ class InteractiveWindow(QMainWindow):
         self.window_closed.emit()
         event.accept()
 
+    def _on_tags_extracted_from_image(self, tags: str):
+        """이미지 태거에서 추출된 태그를 메인 프롬프트에 덮어쓰기"""
+        if not tags: return
+
+        if hasattr(self, 'main_prompt_block'):
+            # 덮어쓰기 방식: 기존 텍스트 무시하고 추출된 태그만 설정
+            # 포맷팅 적용하여 설정
+            formatted_html = self.main_prompt_block._format_prompt_with_categories(tags)
+            self.main_prompt_block.set_prompt_html(formatted_html)
+
+            # 알림
+            print(f"[InteractiveWindow] 추출된 태그 {len(tags.split(','))}개로 덮어씀")
+
     def _on_add_character_click(self):
         """캐릭터 추가 버튼 클릭 시 숨겨진 플로팅 패널 노출"""
         from PyQt6.QtCore import QPoint # 로컬 임포트
@@ -892,6 +934,22 @@ class InteractiveWindow(QMainWindow):
             self.main_prompt_block.generate_random_prompt()
             # 2. 생성 요청 (동기 실행 - 시그널 발생)
             self.main_prompt_block.trigger_generation()
+
+    def _get_batch_resolution_override(self):
+        """
+        배치 처리 윈도우에서 해상도 오버라이드 값 가져오기
+
+        Returns:
+            tuple or None: (width, height) 또는 None
+        """
+        # Image Tagger Block의 batch_window 참조 확인
+        if hasattr(self, 'image_tagger_block'):
+            tagger_block = self.image_tagger_block
+            if hasattr(tagger_block, 'batch_window'):
+                batch_window = tagger_block.batch_window
+                if batch_window and hasattr(batch_window, 'get_resolution_override'):
+                    return batch_window.get_resolution_override()
+        return None
 
     def collect_generation_params(self) -> dict:
         """
@@ -1082,7 +1140,13 @@ class InteractiveWindow(QMainWindow):
         source_row = pd.Series(dtype=object)
 
         # 11. params 딕셔너리 구성 (APIService가 요구하는 기본 파라미터)
-        width, height = self.control_bar.get_resolution()
+        # 배치 처리 윈도우에서 해상도 오버라이드 체크
+        resolution_override = self._get_batch_resolution_override()
+        if resolution_override:
+            width, height = resolution_override
+            print(f"[InteractiveWindow] 배치 윈도우 해상도 오버라이드 적용: {width}x{height}")
+        else:
+            width, height = self.control_bar.get_resolution()
 
         # 시드 값 가져오기
         seed = 0

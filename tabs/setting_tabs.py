@@ -303,10 +303,11 @@ class SettingsWidget(QWidget):
         self.filename_format_combo.addItem("번호만 (00001.png)", "number_only")
         self.filename_format_combo.addItem("시간_번호 (143052_00001.png)", "time_number")
         self.filename_format_combo.addItem("날짜_시간 (20250108_143052.png)", "datetime")
+        self.filename_format_combo.addItem("프롬프트 (prompt.png)", "prompt")
         self.filename_format_combo.currentIndexChanged.connect(self._on_filename_format_changed)
 
         # 설명 레이블
-        filename_format_desc = QLabel("※ 중복 방지: 번호만/시간_번호는 카운터 증가, 날짜_시간은 (1), (2) 추가")
+        filename_format_desc = QLabel("※ 중복 방지: 번호만/시간_번호는 카운터 증가, 날짜_시간/프롬프트는 (1), (2) 추가")
         filename_format_desc.setStyleSheet(f"""
             QLabel {{
                 color: {DARK_COLORS['text_secondary']};

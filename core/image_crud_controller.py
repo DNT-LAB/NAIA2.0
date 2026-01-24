@@ -151,7 +151,7 @@ class ImageCrudController:
     # B. 파일명 생성
     # ========================================================================
 
-    def generate_filename(self, extension: str = "png", use_counter: bool = True, classification_subfolder: Optional[str] = None) -> str:
+    def generate_filename(self, extension: str = "png", use_counter: bool = True, classification_subfolder: Optional[str] = None, prompt: Optional[str] = None) -> str:
         """
         저장할 파일명을 생성합니다 (파일명 형식 및 중복 방지 포함).
 
@@ -159,17 +159,20 @@ class ImageCrudController:
         - "number_only": 00001.png (기본)
         - "time_number": 143052_00001.png (HHMMSS_카운터)
         - "datetime": 20250108_143052.png (YYYYMMDD_HHMMSS)
+        - "prompt": prompt.png (프롬프트 기반, 최대 250자)
 
         중복 방지:
         - number_only/time_number: 카운터 자동 증가
-        - datetime: (1), (2) 등 추가 번호 부여
+        - datetime/prompt: (1), (2) 등 추가 번호 부여
 
         Parameters:
             extension (str): 파일 확장자 ("png" 또는 "webp")
             use_counter (bool): 카운터 사용 여부
+            classification_subfolder (str, optional): 분류 하위 폴더명
+            prompt (str, optional): 프롬프트 텍스트 (prompt 형식 시 필요)
 
         Returns:
-            str: 생성된 파일명 (예: "00001.png", "143052_00001.png", "20250108_143052.png")
+            str: 생성된 파일명 (예: "00001.png", "143052_00001.png", "20250108_143052.png", "1girl_standing.png")
         """
         save_dir = self.get_save_directory(classification_subfolder=classification_subfolder)
 
@@ -213,6 +216,23 @@ class ImageCrudController:
             final_filename = self._resolve_duplicate_filename(save_dir, base_filename, extension)
             return final_filename
 
+        elif filename_format == "prompt":
+            # prompt.png (프롬프트 기반, 최대 230자)
+            if not prompt:
+                # 프롬프트가 없으면 타임스탬프로 대체
+                print("⚠️ 프롬프트가 없습니다. 타임스탬프로 대체합니다.")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                base_filename = f"{timestamp}.{extension}"
+            else:
+                # 프롬프트를 안전한 파일명으로 변환
+                # Windows MAX_PATH 고려: 230자 (전체 경로 260자 제한 회피)
+                safe_prompt = self._sanitize_filename(prompt, max_length=200)
+                base_filename = f"{safe_prompt}.{extension}"
+
+            # 중복 체크 및 (1), (2) 추가
+            final_filename = self._resolve_duplicate_filename(save_dir, base_filename, extension)
+            return final_filename
+
         else:
             # 기본값: number_only
             with self._counter_lock:
@@ -223,6 +243,82 @@ class ImageCrudController:
                     print(f"⚠️ 파일 중복 방지: {filename} 건너뜀 (카운터 증가)")
                     self._save_counter += 1
             return filename
+
+    def _sanitize_filename(self, text: str, max_length: int = 230) -> str:
+        """
+        텍스트를 안전한 파일명으로 변환합니다.
+
+        처리 규칙:
+        - Windows 금지 문자 제거: < > : " / \\ | ? *
+        - 쉘 특수문자 제거: [ ] { } ( )
+        - 쉼표, 세미콜론, 점 → 언더스코어
+        - 공백 → 언더스코어
+        - "artist" 단어 제거
+        - 불필요한 프리픽스 제거 (Novel_AI_prompt_, WEBUI_prompt_ 등)
+        - 연속된 언더스코어 정리
+        - 최대 길이 제한 (기본 230자, Windows MAX_PATH 260자 제한 고려)
+        - 앞뒤 공백/언더스코어 제거
+
+        Parameters:
+            text (str): 원본 텍스트 (프롬프트)
+            max_length (int): 최대 길이 (기본 230자)
+
+        Returns:
+            str: 안전한 파일명 (확장자 제외)
+
+        Example:
+            >>> _sanitize_filename("1girl, long hair, standing:1.2, masterpiece")
+            "1girl_long_hair_standing_1_2_masterpiece"
+            >>> _sanitize_filename("[Novel_AI]_{prompt_(test)}")
+            "Novel_AI_prompt_test"
+        """
+        import re
+
+        # 1. Windows 금지 문자 제거
+        forbidden_chars = '<>:"/\\|?*'
+        for char in forbidden_chars:
+            text = text.replace(char, '')
+
+        # 2. 쉘 특수문자 제거 (파일 탐색기 호환성)
+        shell_special_chars = '[]{}()'
+        for char in shell_special_chars:
+            text = text.replace(char, '_')
+
+        # 3. 쉼표, 세미콜론 → 언더스코어
+        text = text.replace(',', '_')
+        text = text.replace(';', '_')
+
+        # 4. 공백 → 언더스코어
+        text = text.replace(' ', '_')
+
+        # 5. 점(.) → 언더스코어 (파일 탐색기 호환성, Explorer 명령 오류 방지)
+        text = text.replace('.', '_')
+
+        # 6. "artist" 단어 제거 (대소문자 구분 없이)
+        text = re.sub(r'artist', '', text, flags=re.IGNORECASE)
+
+        # 7. 불필요한 프리픽스 제거
+        # "Novel_AI_prompt_", "WEBUI_prompt_", "ComfyUI_prompt_" 등 제거
+        text = re.sub(r'^(Novel_AI|WEBUI|ComfyUI)_prompt_', '', text, flags=re.IGNORECASE)
+
+        # 8. 연속된 언더스코어 정리 (___  → _)
+        text = re.sub(r'_+', '_', text)
+
+        # 9. 앞뒤 언더스코어 제거
+        text = text.strip('_')
+
+        # 10. 최대 길이 제한
+        if len(text) > max_length:
+            text = text[:max_length].rstrip('_')
+
+        # 11. 빈 문자열 방지
+        if not text:
+            text = "untitled"
+
+        if text:
+            text = text.replace("Novel_AI_prompt_", "").replace("WEBUI_prompt_", "").replace("ComfyUI_prompt_", "")
+
+        return text
 
     def _resolve_duplicate_filename(self, save_dir: Path, base_filename: str, extension: str) -> str:
         """
@@ -296,12 +392,12 @@ class ImageCrudController:
         파일명 형식을 설정합니다.
 
         Parameters:
-            format (str): "number_only", "time_number", "datetime" 중 하나
+            format (str): "number_only", "time_number", "datetime", "prompt" 중 하나
 
         Raises:
             ValueError: 유효하지 않은 형식인 경우
         """
-        valid_formats = ["number_only", "time_number", "datetime"]
+        valid_formats = ["number_only", "time_number", "datetime", "prompt"]
         if format not in valid_formats:
             raise ValueError(f"유효하지 않은 파일명 형식: {format}. 사용 가능: {valid_formats}")
 
@@ -872,7 +968,13 @@ class ImageCrudController:
 
             # 3. 파일명 생성 (중복 방지 포함)
             extension = "webp" if as_webp else "png"
-            filename = self.generate_filename(extension, classification_subfolder=classification_subfolder)
+
+            # 프롬프트 추출 (prompt 형식 사용 시)
+            prompt_text = None
+            if classification_info:
+                prompt_text = classification_info.get("prompt")
+
+            filename = self.generate_filename(extension, classification_subfolder=classification_subfolder, prompt=prompt_text)
             file_path = save_dir / filename
 
             # 3. 실제 파일 저장

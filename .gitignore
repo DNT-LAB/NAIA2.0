@@ -178,3 +178,5 @@ tabs/turbo_event_sequence/.claude/PRD_EVENT_VIEWER.md
 tabs/studio/.claude/STUDIO_PRESET_SRS.md
 data/tagger/model.onnx
 data/tagger/selected_tags.csv
+
+!/workflows/workflow.png

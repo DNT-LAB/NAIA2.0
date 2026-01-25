@@ -1930,7 +1930,8 @@ class SequenceExportDialog(QDialog):
         """
         super().__init__(parent)
         self.original_images = images
-        self.prompts = prompts
+        # 프롬프트 전처리: 시퀀스 관련 단어 제거
+        self.prompts = self._clean_prompts(prompts)
         self.app_context = app_context
 
         self.image_prompt_widgets: List[ImagePromptWidget] = []
@@ -2703,6 +2704,52 @@ class SequenceExportDialog(QDialog):
         self.current_comfy_worker = None
 
     # === 유틸리티 메서드 ===
+
+    def _clean_prompts(self, prompts: List[Dict]) -> List[Dict]:
+        """
+        프롬프트에서 시퀀스 관련 단어 제거
+
+        제거 대상: 2koma, comic, split screen (대소문자 무시)
+
+        Args:
+            prompts: 원본 프롬프트 딕셔너리 리스트
+
+        Returns:
+            정리된 프롬프트 딕셔너리 리스트
+        """
+        import re
+
+        # 제거할 단어 패턴 (단어 경계 포함, 대소문자 무시)
+        remove_patterns = [
+            r'\b2koma\b',
+            r'\bcomic\b',
+            r'\bsplit\s+screen\b'
+        ]
+
+        cleaned_prompts = []
+        for prompt_data in prompts:
+            # 딕셔너리 복사
+            cleaned_data = prompt_data.copy()
+
+            # 'general' 필드 처리
+            if 'general' in cleaned_data and cleaned_data['general']:
+                text = cleaned_data['general']
+
+                # 각 패턴 제거
+                for pattern in remove_patterns:
+                    text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+
+                # 중복 쉼표/공백 정리
+                text = re.sub(r',\s*,', ',', text)  # 연속된 쉼표 제거
+                text = re.sub(r'\s+', ' ', text)     # 중복 공백 제거
+                text = text.strip(', ')              # 앞뒤 쉼표/공백 제거
+
+                cleaned_data['general'] = text
+
+            cleaned_prompts.append(cleaned_data)
+
+        print(f"[SequenceExportDialog] 프롬프트 정리 완료: {len(cleaned_prompts)}개")
+        return cleaned_prompts
 
     def _preprocess_images(self) -> List[Image.Image]:
         """

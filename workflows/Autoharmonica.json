@@ -527,7 +527,7 @@
       "long_video_mode": "AUTO_CONTINUE",
       "continue_frames_count": 1,
       "high_noise_start_strength": 0.63,
-      "high_noise_mid_strength": 0.5,
+      "high_noise_mid_strength": 0.45,
       "low_noise_start_strength": 1,
       "low_noise_mid_strength": 0,
       "low_noise_end_strength": true,

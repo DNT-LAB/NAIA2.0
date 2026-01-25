@@ -303,11 +303,24 @@ class ComfyGenerationWorker(QThread):
         self._cancelled = False
 
     def cancel(self):
-        """작업 취소"""
+        """작업 취소 및 ComfyUI 서버 중단 요청"""
         self._cancelled = True
+        try:
+            # ComfyUI 작업 중단 요청
+            requests.post(f"{self.comfyui_url}/interrupt", timeout=5)
+            print("[ComfyWorker] ComfyUI 서버에 중단 요청 전송 (/interrupt)")
+            
+            # 대기열 비우기 (선택 사항)
+            requests.post(f"{self.comfyui_url}/queue", json={"clear": True}, timeout=5)
+            print("[ComfyWorker] ComfyUI 대기열 비우기 요청 전송 (/queue clear)")
+        except Exception as e:
+            print(f"[ComfyWorker] 중단 요청 실패: {e}")
 
     def run(self):
         """백그라운드에서 실행되는 메인 로직"""
+        # 업로드된 이미지 경로 추적 (나중에 삭제하기 위함)
+        uploaded_files_to_cleanup = []
+        
         try:
             import copy
             import json
@@ -317,30 +330,63 @@ class ComfyGenerationWorker(QThread):
             # 이미지 업로드
             self.progress.emit("이미지 업로드 중...")
 
-            def _upload_image(path: Path) -> tuple[str, str]:
+            # 고유한 세션 ID 생성 (파일명 충돌 방지)
+            session_id = f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+            def _upload_image(path: Path, idx: int) -> tuple[str, str]:
+                # 고유 파일명 생성: session_id_index_filename
+                target_name = f"NAIA_{session_id}_{idx:02d}_{path.name}"
+
+                if self._cancelled: raise InterruptedError("작업 취소됨")
+
                 with open(path, "rb") as f:
-                    files = {"image": (path.name, f, "image/png")}
+                    files = {"image": (target_name, f, "image/png")}
                     data = {"type": "input", "subfolder": "", "overwrite": "true"}
                     resp = requests.post(f"{self.comfyui_url}/upload/image", files=files, data=data, timeout=30)
                 resp.raise_for_status()
                 info = resp.json()
-                return info.get("name", path.name), info.get("subfolder", "")
+
+                filename = info.get("name")
+                subfolder = info.get("subfolder", "")
+
+                # 삭제 대상에 추가 (작업 완료 후 정리용)
+                uploaded_files_to_cleanup.append({
+                    "name": filename,
+                    "subfolder": subfolder,
+                    "type": "input"
+                })
+
+                return filename, subfolder
 
             uploaded_cache = {}
 
-            def _upload_cached(path: Path) -> tuple[str, str]:
+            def _upload_cached(path: Path, idx: int) -> tuple[str, str]:
                 key = str(path)
                 if key not in uploaded_cache:
                     if self._cancelled:
                         raise RuntimeError("작업이 취소되었습니다.")
-                    uploaded_cache[key] = _upload_image(path)
+                    uploaded_cache[key] = _upload_image(path, idx)
                 return uploaded_cache[key]
 
             # Start, Middle, End 이미지 업로드
-            start_path = self.saved_paths[0]
             num_imgs = len(self.saved_paths)
+            if num_imgs == 0:
+                raise ValueError("저장된 이미지 경로가 없습니다.")
 
-            start_name, start_sub = _upload_cached(start_path)
+            start_path = self.saved_paths[0]
+            end_path = self.saved_paths[-1]
+
+            # 첫 번째 이미지 업로드
+            start_name, start_sub = _upload_cached(start_path, 0)
+
+            # 마지막 이미지 업로드 (1장이면 첫 이미지와 동일)
+            end_name, end_sub = "", ""
+            if num_imgs >= 2:
+                _upload_cached(end_path, num_imgs - 1)
+                end_name, end_sub = uploaded_cache[str(end_path)]
+            else:
+                # 1장일 때: Start = End (같은 이미지)
+                end_name, end_sub = start_name, start_sub
 
             if self._cancelled:
                 return
@@ -392,7 +438,7 @@ class ComfyGenerationWorker(QThread):
                         if self._cancelled:
                             return
                         m_path = self.saved_paths[i]
-                        m_name, m_sub = _upload_cached(m_path)
+                        m_name, m_sub = _upload_cached(m_path, i)  # idx 인자 추가
                         middle_data.append({
                             "name": m_name,
                             "type": "input",
@@ -400,20 +446,33 @@ class ComfyGenerationWorker(QThread):
                         })
                 workflow["445"]["inputs"]["images_data"] = json.dumps(middle_data)
 
-            # End image
+            # End Image (ID 447)
             if "447" in workflow:
                 end_data = []
-                if num_imgs >= 2:
-                    if self._cancelled:
-                        return
-                    end_path = self.saved_paths[-1]
-                    end_name, end_sub = _upload_cached(end_path)
+                # 1장이든 2장 이상이든 항상 End Image 추가
+                if end_name:  # end_name이 있으면 추가
                     end_data.append({
                         "name": end_name,
                         "type": "input",
                         "subfolder": end_sub or ""
                     })
                 workflow["447"]["inputs"]["images_data"] = json.dumps(end_data)
+
+            # 이미지 개수에 따른 추가 노드 설정 (ID 448)
+            if "448" in workflow and "inputs" in workflow["448"]:
+                if num_imgs == 1:
+                    # 1장일 때: 중간 프레임 비활성화 (Start = End)
+                    workflow["448"]["inputs"]["enable_middle_frame"] = False
+                    workflow["448"]["inputs"]["low_noise_end_strength"] = 0.45
+                    print("[ComfyWorker] 이미지 1장 감지 -> 중간 프레임 OFF, 강도 0.45 설정")
+                elif num_imgs == 2:
+                    # 2장일 때: 중간 프레임 비활성화 및 강도 조절
+                    workflow["448"]["inputs"]["enable_middle_frame"] = False
+                    workflow["448"]["inputs"]["low_noise_end_strength"] = 0.45
+                    print("[ComfyWorker] 이미지 2장 감지 -> 중간 프레임 OFF, 강도 0.45 설정")
+                else:
+                    # 3장 이상일 때 (기본값 유지)
+                    workflow["448"]["inputs"]["enable_middle_frame"] = True
 
             if self._cancelled:
                 return
@@ -508,6 +567,53 @@ class ComfyGenerationWorker(QThread):
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             self.error.emit(error_msg)
+
+        finally:
+            # 업로드된 파일 정리 (ComfyUI 서버에서 삭제)
+            if uploaded_files_to_cleanup:
+                self.progress.emit(f"업로드된 이미지 정리 중... ({len(uploaded_files_to_cleanup)}개)")
+                print(f"[ComfyWorker] 업로드된 파일 삭제 시작: {len(uploaded_files_to_cleanup)}개")
+
+                for file_info in uploaded_files_to_cleanup:
+                    try:
+                        filename = file_info.get("name")
+                        subfolder = file_info.get("subfolder", "")
+
+                        # ComfyUI 파일 삭제 API (두 가지 방식 시도)
+                        import urllib.parse
+
+                        # 방법 1: DELETE 요청 (표준 방식)
+                        params = {
+                            "filename": filename,
+                            "subfolder": subfolder,
+                            "type": "input"
+                        }
+                        query_string = urllib.parse.urlencode(params)
+                        delete_url = f"{self.comfyui_url}/upload/image?{query_string}"
+
+                        resp = requests.delete(delete_url, timeout=10)
+
+                        # DELETE 실패 시 POST 방식 시도
+                        if resp.status_code not in [200, 204]:
+                            # 방법 2: POST 요청 (일부 ComfyUI 버전)
+                            post_data = {
+                                "delete": True,
+                                "filename": filename,
+                                "subfolder": subfolder,
+                                "type": "input"
+                            }
+                            resp = requests.post(f"{self.comfyui_url}/upload/image", json=post_data, timeout=10)
+
+                        if resp.status_code in [200, 204]:
+                            print(f"[ComfyWorker] 삭제 완료: {filename}")
+                        else:
+                            print(f"[ComfyWorker] 삭제 실패 (HTTP {resp.status_code}): {filename}")
+
+                    except Exception as cleanup_err:
+                        print(f"[ComfyWorker] 파일 삭제 오류: {cleanup_err}")
+                        # 삭제 실패해도 계속 진행
+
+                print(f"[ComfyWorker] 파일 정리 완료")
 
 
 class TranslationWorker(QThread):
@@ -761,7 +867,7 @@ class APIControlPanel(QWidget):
 
         # 동영상 생성 파라미터
         self.selected_segment_length = 20  # 기본값: 20 (실제 사용 시 +1하여 21)
-        self.fps = 16  # 고정값
+        self.fps = 12  # 기본값: 12 FPS
 
         # 워크플로우
         self.workflow_data = None
@@ -1674,10 +1780,10 @@ class APIControlPanel(QWidget):
             print(f"[FrameSettings] 선택됨: 20 프레임 (실제: 21), FPS: 12")
         elif selected_id == 1:
             self.selected_segment_length = 40
-            # 40프레임 선택 시 FPS를 16으로 복원
-            self.fps = 16
+            # 40프레임 선택 시 FPS를 12로 설정 (모든 프레임에서 동일)
+            self.fps = 12
             self.fps_label.setText(f"FPS: {self.fps}")
-            print(f"[FrameSettings] 선택됨: 40 프레임 (실제: 41), FPS: 16")
+            print(f"[FrameSettings] 선택됨: 40 프레임 (실제: 41), FPS: 12")
 
     # === 워크플로우 관리 메서드 ===
 
@@ -2610,6 +2716,7 @@ class SequenceExportDialog(QDialog):
         self.console_window.append_log(message, "COMFY")
 
     def _on_comfy_finished(self, output_path: str):
+        """ComfyWorker 완료 처리"""
         self.status_label.setText(f"✅ 생성 완료: {Path(output_path).name}")
         self.api_panel.generate_video_btn.setEnabled(True)
         self.api_panel.generate_prompts_btn.setEnabled(True)
@@ -2625,11 +2732,11 @@ class SequenceExportDialog(QDialog):
         msg.setWindowTitle("생성 완료")
         msg.setText(f"동영상이 생성되었습니다.\n저장 경로: {output_path}\n\n지금 재생하시겠습니까?")
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
+
         # 스타일 적용 (폰트 크기 +4px)
         font_size = get_scaled_font_size(16)  # 기본 12 + 4
         btn_font_size = get_scaled_font_size(15) # 기본 11 + 4
-        
+
         msg.setStyleSheet(f"""
             QMessageBox {{
                 background-color: {DARK_COLORS['bg_primary']};
@@ -2655,9 +2762,9 @@ class SequenceExportDialog(QDialog):
                 background-color: {DARK_COLORS['accent_blue']};
             }}
         """)
-        
+
         reply = msg.exec()
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             # 내장 플레이어로 재생
             player = SimpleVideoPlayer(output_path, self)
@@ -2674,7 +2781,8 @@ class SequenceExportDialog(QDialog):
                 else:
                     subprocess.run(['xdg-open', folder_path])
             except Exception as e:
-                print(f"폴더 열기 실패: {e}")
+                print(f"폴더 열기 실패: {e}")    
+                    
     def _on_comfy_error(self, error_msg: str):
         """ComfyWorker 오류 처리"""
         print(f"[ComfyWorker] 오류: {error_msg}")

@@ -344,7 +344,7 @@ class BrowserTab(QWidget):
                     tag = tag.replace('&#39;', "'")
                     
                     if tag and tag not in tags_data[category]:
-                        tags_data[category].append(tag)
+                        tags_data[category].append(tag.replace("_", " "))
         
         return tags_data
     

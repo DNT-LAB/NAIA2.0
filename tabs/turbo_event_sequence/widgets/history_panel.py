@@ -422,6 +422,7 @@ class HistoryPanel(QWidget):
     clear_and_reconfirm = pyqtSignal()  # 클리어 후 시퀀스 재확정 요청
     request_grid_update = pyqtSignal()  # 🆕 그리드 업데이트 요청 (순서 변경 시)
     inpaint_requested = pyqtSignal(int, object, str, bool, object)  # 🆕 인페인트 요청 (history_index, image, direction, is_parent, prev_image)
+    export_requested = pyqtSignal()  # 🆕 시퀀스 외부 API 전송 요청 (ComfyUI/Ollama)
 
     def __init__(self, app_context=None, parent=None):
         super().__init__(parent)
@@ -582,6 +583,14 @@ class HistoryPanel(QWidget):
         self.open_grid_btn.clicked.connect(self._on_open_grid_clicked)
         self.open_grid_btn.setEnabled(False)
         header_layout.addWidget(self.open_grid_btn)
+
+        # 🆕 시퀀스 외부 API 전송 버튼
+        self.export_btn = QPushButton("🎬")
+        self.export_btn.setStyleSheet(button_style)
+        self.export_btn.setToolTip("시퀀스를 외부 API (ComfyUI/Ollama)로 전송")
+        self.export_btn.clicked.connect(self._on_export_clicked)
+        self.export_btn.setEnabled(False)
+        header_layout.addWidget(self.export_btn)
 
         self.clear_btn = QPushButton("🗑️ 클리어")
         self.clear_btn.setStyleSheet(button_style)
@@ -866,6 +875,7 @@ class HistoryPanel(QWidget):
         self.save_grid_btn.setEnabled(has_grid)
         self.clipboard_btn.setEnabled(has_grid)
         self.open_grid_btn.setEnabled(has_grid)
+        self.export_btn.setEnabled(has_grid)  # 🆕 외부 API 전송 버튼
 
     def _on_thumbnail_clicked(self, index: int, image):
         """썸네일 클릭"""
@@ -1070,6 +1080,11 @@ class HistoryPanel(QWidget):
             grid.paste(img, (x, y))
 
         return grid
+
+    def _on_export_clicked(self):
+        """🆕 외부 API 전송 버튼 클릭 - 시그널 발생"""
+        print("[HistoryPanel] 외부 API 전송 버튼 클릭")
+        self.export_requested.emit()
 
     def _on_clear_clicked(self):
         """클리어 버튼 클릭 - 클리어 후 시퀀스 재확정 요청"""

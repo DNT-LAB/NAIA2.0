@@ -9,6 +9,7 @@
 - CharPromptTabMixin: 캐릭터 프롬프트 탭 관련 (ui/remote/char_prompt_tab.py)
 - CharRefTabMixin: 캐릭터 레퍼런스 탭 관련 (ui/remote/char_ref_tab.py)
 - PresetTabMixin: 프리셋 탭 관련 (ui/remote/preset_tab.py)
+- BatchImageTabMixin: 배치 이미지 태거 탭 관련 (ui/remote/batch_image_tab.py)
 """
 
 from pathlib import Path
@@ -62,15 +63,21 @@ from ui.remote.preset_tab import (
     PRESET_FAVORITES_DIR
 )
 
+# 🆕 배치 이미지 태거 탭 Mixin import
+from ui.remote.batch_image_tab import (
+    BatchImageTabMixin, BatchImageItem
+)
+
 
 # EventItemWidget은 ui/remote/event_tab.py로 이동됨
 # WildcardItemWidget은 ui/remote/instant_wc_tab.py로 이동됨
 # CharacterPromptFavoriteItemWidget은 ui/remote/char_prompt_tab.py로 이동됨
 # CharRefFavoriteItemWidget은 ui/remote/char_ref_tab.py로 이동됨
 # PresetFavoriteItemWidget은 ui/remote/preset_tab.py로 이동됨
+# BatchImageItem은 ui/remote/batch_image_tab.py로 이동됨
 
 
-class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTabMixin, CharPromptTabMixin, CharRefTabMixin, PresetTabMixin):
+class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTabMixin, CharPromptTabMixin, CharRefTabMixin, PresetTabMixin, BatchImageTabMixin):
     """리모트 탭에서 열리는 독립 창 - 모듈 통합 제어"""
 
     window_closed = pyqtSignal()
@@ -90,6 +97,7 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
         self._init_char_ref_data()
         self._init_char_prompt_data()
         self._init_preset_data()  # PresetTabMixin
+        self._init_batch_image_data()  # BatchImageTabMixin
 
         # 🆕 이벤트 탭 데이터
         self.remote_events = []  # [{"id": "...", "name": "...", "source_row": {...}, "thumbnail": "...", "created_at": "..."}, ...]
@@ -369,6 +377,8 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
         # 메인 탭 위젯
         self.main_tabs = QTabWidget()
         self.main_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
+        # 탭 변경 시 창 크기 조정
+        self.main_tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.main_tabs)
 
         # 탭1: 프리셋 (이중 탭) - PresetTabMixin
@@ -382,6 +392,9 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
 
         # 탭3: 이벤트 (이중 탭)
         self._create_event_tab()
+
+        # 🆕 탭4: WD14 배치 태거 (최상위 탭)
+        self._create_wd14_tab()
 
     # _create_preset_tab, _create_preset_favorites_subtab, _create_preset_engineering_subtab 및
     # 양방향 동기화 메서드들은 PresetTabMixin (ui/remote/preset_tab.py)으로 이동됨
@@ -427,6 +440,26 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
         self._create_instant_wc_subtab(event_sub_tabs)
 
         self.main_tabs.addTab(event_widget, "🎉 이벤트")
+
+    def _create_wd14_tab(self):
+        """탭4: WD14 배치 태거 (최상위 탭)"""
+        wd14_widget = QWidget()
+        wd14_layout = QVBoxLayout(wd14_widget)
+        wd14_layout.setContentsMargins(4, 4, 4, 4)
+
+        # 배치 이미지 태거 직접 추가 (서브탭 없이)
+        self._create_batch_image_subtab_direct(wd14_layout)
+
+        self.main_tabs.addTab(wd14_widget, "🔖 WD14")
+
+    def _create_batch_image_subtab_direct(self, parent_layout):
+        """배치 이미지 태거를 직접 레이아웃에 추가 (최상위 탭용)"""
+        # BatchImageTabMixin의 컨텐츠 위젯 생성 메서드 사용
+        batch_widget = self._create_batch_image_content_widget()
+        self._batch_image_widget = batch_widget  # 참조 저장 (탭 변경 감지용)
+
+        # parent_layout에 직접 추가
+        parent_layout.addWidget(batch_widget)
 
     def _create_instant_wc_subtab(self, parent_tabs: QTabWidget):
         """인스턴트 와일드카드 서브탭 - 이벤트 탭과 유사한 구조"""
@@ -700,6 +733,26 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
 
     # _sync_preset_combo, _on_remote_preset_changed, _update_preset_display는
     # PresetTabMixin (ui/remote/preset_tab.py)으로 이동됨
+
+    def _on_tab_changed(self, index):
+        """탭 변경 시 처리 - WD14 탭 선택 시 창 크기 자동 조정"""
+        # 현재 탭 제목 확인
+        current_tab_text = self.main_tabs.tabText(index)
+
+        if current_tab_text == "🔖 WD14":
+            # WD14 탭 선택 시: 3개 위젯 + 여유공간을 수용할 수 있도록 넓게 조정
+            # 위젯 1개: 320px, 3개: 960px + 여백(16*4=64) = 1024px
+            # 높이는 기본 유지
+            min_width = get_scaled_size(1080)  # 여유 있게 1080px
+            current_size = self.size()
+
+            if current_size.width() < min_width:
+                # 애니메이션 효과를 위해 QTimer 사용
+                target_width = min_width
+                target_height = max(current_size.height(), get_scaled_size(800))
+
+                QTimer.singleShot(50, lambda: self.resize(target_width, target_height))
+                print(f"[RemoteWindow] WD14 탭 선택 - 창 크기 조정: {target_width}x{target_height}")
 
     def resizeEvent(self, event):
         """창 크기 변경 시 그리드 업데이트"""

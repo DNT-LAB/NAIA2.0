@@ -334,6 +334,8 @@ class TurboEventSequenceTab(QWidget):
         self.history_panel.inpaint_requested.connect(self._on_inpaint_requested)
         # 🆕 수동 그리드 저장/복사 시 turbo_events 업데이트
         self.history_panel.grid_manually_saved.connect(self._on_grid_manually_saved)
+        # 🆕 외부 API 전송 요청 연결
+        self.history_panel.export_requested.connect(self._on_export_requested)
         layout.addWidget(self.history_panel, stretch=1)
 
         return panel
@@ -1699,3 +1701,50 @@ class TurboEventSequenceTab(QWidget):
         """🆕 인페인트 결과 적용"""
         # HistoryPanel의 핸들러 호출
         self.history_panel._on_inpaint_confirmed(index, new_image)
+
+    # ===== 외부 API 전송 다이얼로그 =====
+
+    def _on_export_requested(self):
+        """🆕 외부 API 전송 요청 핸들러 - SequenceExportDialog 열기"""
+        from .widgets.sequence_export_dialog import SequenceExportDialog
+
+        # 이미지 및 프롬프트 데이터 수집
+        images = self.history_panel.get_ordered_images()  # Skip 제외한 순서대로 이미지
+        prompts = self.confirmed_prompts if self.confirmed_prompts else []
+
+        if not images or not prompts:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "데이터 없음",
+                "내보낼 이미지 또는 프롬프트가 없습니다.\n시퀀스를 먼저 생성해주세요."
+            )
+            return
+
+        print(f"[TurboEventSequenceTab] 외부 API 전송: {len(images)}개 이미지, {len(prompts)}개 프롬프트")
+
+        # SequenceExportDialog 열기 (여러 윈도우 지원)
+        dialog = SequenceExportDialog(
+            images=images,
+            prompts=prompts,
+            app_context=self.app_context,
+            parent=self
+        )
+
+        # 시그널 연결 (TODO: 필요 시)
+        # dialog.video_generated.connect(self._on_video_generated)
+
+        # 다이얼로그 추적 리스트에 추가 (가비지 컬렉션 방지)
+        if not hasattr(self, '_export_dialogs'):
+            self._export_dialogs = []
+        self._export_dialogs.append(dialog)
+
+        # 닫힐 때 리스트에서 제거
+        def on_dialog_finished():
+            if dialog in self._export_dialogs:
+                self._export_dialogs.remove(dialog)
+
+        dialog.finished.connect(on_dialog_finished)
+
+        # show() 사용 (여러 윈도우 동시 열기 가능)
+        dialog.show()

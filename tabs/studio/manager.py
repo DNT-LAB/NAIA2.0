@@ -16,6 +16,8 @@ from PyQt6.QtGui import QPixmap
 from PIL import Image
 
 from tabs.studio.frame import ResultImageFrame
+from tabs.studio.wildcard_mode_state import WildcardModeState, WildcardAxisInfo
+from tabs.studio.wildcard_combination_generator import WildcardCombinationGenerator
 from ui.theme import DARK_COLORS, get_dynamic_styles, show_info, show_warning, show_error
 from ui.scaling_manager import get_scaled_size
 
@@ -67,6 +69,9 @@ class ResultImageFrameManager(QObject):
         # Seed fixing state
         self.fix_seed_mode = False
         self.last_generated_seed: Optional[int] = None
+
+        # Wildcard mode state
+        self.wildcard_mode_state = WildcardModeState()
 
     def set_app_context(self, app_context: 'AppContext'):
         """Set AppContext for event communication"""
@@ -446,7 +451,10 @@ class ResultImageFrameManager(QObject):
 
     # === View save/load ===
     def save_current_view(self, directory: str = None) -> bool:
-        """Save current active images from all frames to timestamped folder"""
+        """Save current active images from visible frames to timestamped folder
+
+        In wildcard mode, only saves images from currently visible frames.
+        """
         if not directory:
             directory = QFileDialog.getExistingDirectory(
                 None, "Select Directory for Saving Images"
@@ -457,13 +465,23 @@ class ResultImageFrameManager(QObject):
 
         # Create timestamped subfolder
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        save_folder = os.path.join(directory, f"studio_export_{timestamp}")
+
+        # Add mode info to folder name if in wildcard mode
+        if self.wildcard_mode_state.is_wildcard_mode:
+            page_num = self.wildcard_mode_state.current_page + 1
+            save_folder = os.path.join(directory, f"studio_export_{timestamp}_page{page_num}")
+        else:
+            save_folder = os.path.join(directory, f"studio_export_{timestamp}")
 
         try:
             os.makedirs(save_folder, exist_ok=True)
 
             saved_count = 0
             for frame in self.frames:
+                # Skip hidden frames (in wildcard mode, only visible frames are saved)
+                if frame.isHidden():
+                    continue
+
                 if frame.get_stack_count() > 0:
                     # Save current active image (not all stacked images)
                     filepath = os.path.join(save_folder, f"frame_{frame.index + 1}.png")
@@ -588,3 +606,173 @@ class ResultImageFrameManager(QObject):
         """Store the last generated seed"""
         self.last_generated_seed = seed
         print(f"Studio Manager: Last seed updated to {seed}")
+
+    # === Wildcard mode ===
+    def enter_wildcard_mode(
+        self,
+        prompt_pattern: str,
+        wc1_name: str,
+        wc2_name: str,
+        wc1_items: list = None,
+        wc2_items: list = None
+    ) -> bool:
+        """Enter wildcard navigation mode with swappable axes
+
+        Args:
+            prompt_pattern: Original prompt pattern with wildcards
+            wc1_name: First wildcard name (initially Page axis)
+            wc2_name: Second wildcard name (initially Frame axis)
+            wc1_items: First wildcard items (optional, fetched if not provided)
+            wc2_items: Second wildcard items (optional, fetched if not provided)
+
+        Returns:
+            True if successfully entered mode
+        """
+        # Get wildcard manager (always needed for generator)
+        wildcard_manager = None
+        if self.app_context and hasattr(self.app_context, 'wildcard_manager'):
+            wildcard_manager = self.app_context.wildcard_manager
+
+        if not wildcard_manager:
+            # Create fallback wildcard manager
+            from core.wildcard_manager import WildcardManager
+            wildcard_manager = WildcardManager()
+            print("Warning: Using fallback WildcardManager")
+
+        try:
+            # Create generator (always needed for combination generation)
+            generator = WildcardCombinationGenerator(wildcard_manager)
+
+            # Get items if not provided
+            if not wc1_items:
+                wc1_items = generator.get_wildcard_items(wc1_name)
+            if not wc2_items:
+                wc2_items = generator.get_wildcard_items(wc2_name)
+
+            if not wc1_items or not wc2_items:
+                print(f"Error: Cannot get items for wildcards {wc1_name}, {wc2_name}")
+                return False
+
+            # Create wildcard info
+            wc1 = WildcardAxisInfo(
+                name=wc1_name,
+                items=wc1_items,
+                item_count=len(wc1_items)
+            )
+            wc2 = WildcardAxisInfo(
+                name=wc2_name,
+                items=wc2_items,
+                item_count=len(wc2_items)
+            )
+
+            # Generate all combinations
+            combination_grid = generator.generate_all_combinations(
+                prompt_pattern,
+                wc1_name,
+                wc2_name
+            )
+
+            # Update state
+            self.wildcard_mode_state.is_wildcard_mode = True
+            self.wildcard_mode_state.original_prompt_pattern = prompt_pattern
+            self.wildcard_mode_state.wc1 = wc1
+            self.wildcard_mode_state.wc2 = wc2
+            self.wildcard_mode_state.axes_swapped = False  # WC1 is Page, WC2 is Frame
+            self.wildcard_mode_state.current_page = 0
+            self.wildcard_mode_state.combination_grid = combination_grid
+
+            # Apply first page to frames
+            self.refresh_current_wildcard_page()
+
+            print(f"Entered wildcard mode: {wc1_name} (Page) x {wc2_name} (Frame)")
+            print(f"  Total combinations: {len(combination_grid)}")
+            print(f"  Pages: {wc1.item_count}")
+
+            return True
+
+        except Exception as e:
+            print(f"Error entering wildcard mode: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def exit_wildcard_mode(self):
+        """Exit wildcard mode and reset to normal"""
+        self.wildcard_mode_state.reset()
+
+        # Show all frames and restore delete buttons
+        for frame in self.frames:
+            frame.show()
+            if hasattr(frame, 'delete_btn'):
+                frame.delete_btn.show()
+
+        print("Exited wildcard mode (all frames restored)")
+
+    def navigate_wildcard_page(self, delta: int):
+        """Navigate to different page in wildcard mode
+
+        Args:
+            delta: Page offset (-1=previous, +1=next)
+        """
+        if not self.wildcard_mode_state.is_wildcard_mode:
+            return
+
+        old_page = self.wildcard_mode_state.current_page
+        self.wildcard_mode_state.navigate_page(delta)
+        self.refresh_current_wildcard_page()
+
+        new_page = self.wildcard_mode_state.current_page
+        current_item = self.wildcard_mode_state.get_current_page_item()
+        print(f"Navigated to page {new_page + 1}/{self.wildcard_mode_state.get_total_pages()} (item: {current_item})")
+
+    def swap_wildcard_axes(self):
+        """Swap page and frame axes"""
+        if not self.wildcard_mode_state.is_wildcard_mode:
+            return
+
+        self.wildcard_mode_state.swap_axes()
+        self.refresh_current_wildcard_page()
+
+        page_axis = self.wildcard_mode_state.get_page_axis_name()
+        frame_axis = self.wildcard_mode_state.get_frame_axis_name()
+        print(f"Axes swapped: Page={page_axis}, Frame={frame_axis}")
+
+    def refresh_current_wildcard_page(self):
+        """Apply current page's combinations to frames"""
+        if not self.wildcard_mode_state.is_wildcard_mode:
+            return
+
+        # Get visible combinations
+        combinations = self.wildcard_mode_state.get_visible_combinations()
+
+        # Apply to frames
+        for i, (x_idx, y_idx, prompt) in enumerate(combinations):
+            if i < len(self.frames):
+                frame = self.frames[i]
+                current_data = frame.get_prompt_data()
+                current_data['prompt'] = prompt
+                frame.set_prompt_data(current_data)
+
+                # Show frame and hide delete button
+                frame.show()
+                if hasattr(frame, 'delete_btn'):
+                    frame.delete_btn.hide()
+            else:
+                # Need more frames
+                break
+
+        # Hide remaining frames (no prompt assigned)
+        for i in range(len(combinations), len(self.frames)):
+            frame = self.frames[i]
+            current_data = frame.get_prompt_data()
+            current_data['prompt'] = ""
+            frame.set_prompt_data(current_data)
+
+            # Hide frame with no prompt
+            frame.hide()
+
+        print(f"Refreshed {len(combinations)} frame prompts for current page (showing {len(combinations)} frames)")
+
+    def is_in_wildcard_mode(self) -> bool:
+        """Check if currently in wildcard mode"""
+        return self.wildcard_mode_state.is_wildcard_mode

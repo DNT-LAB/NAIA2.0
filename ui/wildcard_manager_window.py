@@ -359,17 +359,25 @@ class WildcardManagerWindow(QMainWindow):
         self.preview_edit.setFixedHeight(get_scaled_size(80)) # 3-4줄 높이
         preview_v_layout.addWidget(self.preview_edit)
 
-        # 3. 복사 버튼 (오른쪽 정렬)
+        # 3. 복사 버튼 및 시뮬레이터 버튼 (오른쪽 정렬)
         copy_btn_layout = QHBoxLayout()
         copy_btn_layout.addStretch() # 왼쪽에 빈 공간을 추가하여 버튼을 오른쪽으로 밀어냄
-        
-        self.copy_btn = QPushButton("📋 클립보드에 복사 ")
+
+        # 시뮬레이터 버튼
+        self.simulator_btn = QPushButton("🎲 시뮬레이터")
+        self.simulator_btn.setStyleSheet(dynamic_styles['compact_button'])
+        self.simulator_btn.setFixedSize(get_scaled_font_size(130), get_scaled_font_size(32))
+        self.simulator_btn.clicked.connect(self.open_simulator)
+        self.simulator_btn.setToolTip("순차/종속 와일드카드 시뮬레이터 열기")
+        copy_btn_layout.addWidget(self.simulator_btn)
+
+        self.copy_btn = QPushButton("📋 클립보드에 복사")
         self.copy_btn.setStyleSheet(dynamic_styles['compact_button'])
         self.copy_btn.setFixedSize(get_scaled_font_size(160), get_scaled_font_size(32))
         self.copy_btn.clicked.connect(self.copy_preview)
         self.copy_btn.setToolTip("클립보드에 복사")
         copy_btn_layout.addWidget(self.copy_btn)
-        
+
         preview_v_layout.addLayout(copy_btn_layout)
         
         generator_layout.addLayout(preview_v_layout)
@@ -1105,6 +1113,32 @@ class WildcardManagerWindow(QMainWindow):
     def refresh_current_preview(self, *args):
         """탭 변경 시 현재 탭의 입력값으로 미리보기 재생성"""
         self.update_preview_guarded()
+
+    def open_simulator(self):
+        """
+        와일드카드 시뮬레이터 창을 엽니다.
+        """
+        try:
+            from ui.wildcard_simulator_dialog import WildcardSimulatorDialog
+
+            # 이미 열려있는 창이 있으면 닫고 새로 열기
+            if hasattr(self, 'simulator_window') and self.simulator_window:
+                self.simulator_window.close()
+
+            # 새 창 생성
+            self.simulator_window = WildcardSimulatorDialog(self.app_context, self)
+
+            # 현재 미리보기에 프롬프트가 있으면 자동으로 설정
+            preview_text = self.preview_edit.toPlainText().strip()
+            if preview_text:
+                self.simulator_window.prompt_edit.setText(preview_text)
+
+            self.simulator_window.show()
+
+        except Exception as e:
+            print(f"❌ 시뮬레이터 창 열기 중 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
 
     def closeEvent(self, event):
         """창 닫기 이벤트"""

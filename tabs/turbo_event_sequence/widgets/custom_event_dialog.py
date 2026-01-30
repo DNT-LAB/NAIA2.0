@@ -575,8 +575,8 @@ class CustomEventDialog(QDialog):
 
     def _init_ui(self):
         self.setWindowTitle("➕ Custom Event 생성")
-        self.setMinimumSize(900, 700)
-        self.resize(1000, 800)
+        self.setMinimumSize(1000, 700)
+        self.resize(1200, 800)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -700,7 +700,7 @@ class CustomEventDialog(QDialog):
         splitter.addWidget(right_widget)
 
         # 스플리터 비율 설정 (좌측 2 : 우측 1)
-        splitter.setSizes([600, 300])
+        splitter.setSizes([700, 300])
 
         layout.addWidget(splitter, stretch=1)
 

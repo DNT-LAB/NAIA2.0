@@ -1161,12 +1161,29 @@ class EventSearchWidget(QWidget):
                 save_btn.setEnabled(False)
 
     def _on_save_favorite_clicked(self):
-        """Favorite 저장 버튼 클릭"""
-        if self._current_sequence_df is None or len(self._current_sequence_df) == 0:
+        """Favorite 저장 버튼 클릭 (내부 호출용)"""
+        self._save_to_favorites()
+
+    def _save_to_favorites(self, parent_id: int = None, sequence_df = None):
+        """Favorites에 저장 (외부 호출 지원)
+
+        Args:
+            parent_id: 저장할 Parent ID (None이면 현재 선택된 ID 사용)
+            sequence_df: 저장할 시퀀스 데이터 (None이면 현재 시퀀스 사용)
+        """
+        # 파라미터가 없으면 현재 선택 사용
+        if parent_id is None:
+            parent_id = self._current_selected_id
+        if sequence_df is None:
+            sequence_df = self._current_sequence_df
+
+        # 유효성 검사
+        if sequence_df is None or len(sequence_df) == 0:
+            print("[Favorites] 저장 불가: 시퀀스 데이터 없음")
             return
 
-        parent_id = self._current_selected_id
         if parent_id is None:
+            print("[Favorites] 저장 불가: Parent ID 없음")
             return
 
         # 이미 저장된 경우 무시
@@ -1188,9 +1205,9 @@ class EventSearchWidget(QWidget):
 
             # 데이터 병합
             if len(existing_df) > 0:
-                combined_df = pd.concat([existing_df, self._current_sequence_df], ignore_index=True)
+                combined_df = pd.concat([existing_df, sequence_df], ignore_index=True)
             else:
-                combined_df = self._current_sequence_df.copy()
+                combined_df = sequence_df.copy()
 
             # Parquet 저장
             combined_df.to_parquet(personal_parquet_path, index=False)

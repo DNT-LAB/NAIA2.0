@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QCheckBox, QRadioButton, QPushButton,
     QButtonGroup, QFrame, QMessageBox
 )
-from PyQt6.QtCore import QTimer, QObject, pyqtSignal, QThread
+from PyQt6.QtCore import QTimer, QObject, pyqtSignal, QThread, Qt
 from PyQt6.QtWidgets import QApplication
 from interfaces.base_module import BaseMiddleModule
 from ui.theme import get_dynamic_styles
@@ -146,15 +146,14 @@ class AutomationController(QObject):
         self.timer.stop()
         self.is_running = False
         self.progress_updated.emit("✅ 자동화 완료")
-        
+
+        # 시그널 발행 (AutomationModule에서 체크박스 해제 및 알림 처리)
+        self.automation_finished.emit()
+
         # 시스템 종료 기능 비활성화 (리스크 방지)
         # if self.shutdown_on_finish:
         #     self.shutdown_system()
-        if self.notify_on_finish:
-            self.show_completion_notification()
-            
-        self.automation_finished.emit()
-    
+
     def shutdown_system(self):
         """시스템 종료를 실행합니다."""
         try:
@@ -165,19 +164,6 @@ class AutomationController(QObject):
                 subprocess.run(["sudo", "shutdown", "-h", "+2"])
         except Exception as e:
             print(f"시스템 종료 오류: {e}")
-    
-    def show_completion_notification(self):
-        """자동화 완료 알림을 표시합니다."""
-        try:
-            from PyQt6.QtWidgets import QApplication
-            if QApplication.instance():
-                msg = QMessageBox()
-                msg.setWindowTitle("자동화 완료")
-                msg.setText("자동 생성이 완료되었습니다!")
-                msg.setIcon(QMessageBox.Icon.Information)
-                msg.exec()
-        except Exception as e:
-            print(f"완료 알림 표시 오류: {e}")
 
 
 class AutomationModule(BaseMiddleModule):
@@ -573,7 +559,46 @@ class AutomationModule(BaseMiddleModule):
             self.repeat_info_label.setText("")
         if hasattr(self, 'delay_info_label'):
             self.delay_info_label.setText("")
-    
+
+    def _disable_auto_generate_immediately(self):
+        """자동 생성 체크박스를 즉시 해제 (타이밍 이슈 방지)"""
+        try:
+            if hasattr(self, 'context') and hasattr(self.context, 'main_window'):
+                main_window = self.context.main_window
+                if hasattr(main_window, 'generation_checkboxes'):
+                    auto_generate_checkbox = main_window.generation_checkboxes.get("자동 생성")
+                    if auto_generate_checkbox and auto_generate_checkbox.isChecked():
+                        auto_generate_checkbox.setChecked(False)
+                        print("🔒 자동화 완료: 자동 생성 즉시 차단 (API 요청 방지)")
+        except Exception as e:
+            print(f"⚠️ 자동 생성 즉시 차단 실패: {e}")
+
+    def show_completion_notification(self):
+        """자동화 완료 알림을 표시합니다 (비차단 방식)."""
+        try:
+            # 부모 윈도우 찾기
+            parent = None
+            if hasattr(self, 'context') and hasattr(self.context, 'main_window'):
+                parent = self.context.main_window
+
+            msg = QMessageBox(parent)
+            msg.setWindowTitle("자동화 완료")
+            msg.setText("자동 생성이 완료되었습니다!")
+            msg.setIcon(QMessageBox.Icon.Information)
+
+            # ✅ exec() 대신 show() 사용 - 비차단 방식
+            # exec()는 이벤트 루프를 차단하여 automation_finished 시그널 처리 지연
+            # → 자동 생성 체크박스 해제가 지연되어 무한 API 요청 발생 위험
+            msg.setWindowModality(Qt.WindowModality.NonModal)  # 비모달 설정
+            msg.show()
+
+            # 메시지 박스가 가비지 컬렉션되지 않도록 참조 유지
+            self._completion_msg = msg
+
+            print("✅ 자동화 완료 알림 표시 (비차단)")
+        except Exception as e:
+            print(f"⚠️ 완료 알림 표시 오류: {e}")
+
     def stop_automation(self):
         """자동화 중단"""
         self.automation_controller.stop_automation()
@@ -588,14 +613,21 @@ class AutomationModule(BaseMiddleModule):
         if hasattr(self, 'delay_info_label'):
             self.delay_info_label.setText("")
 
+        # 🔒 자동 생성 즉시 중단 (수동 중단 시에도 API 요청 방지)
+        self._disable_auto_generate_immediately()
+
         # ✅ 설정 저장
         self.save_settings()
     
     def on_automation_finished(self):
-        """자동화 완료 시 처리"""
+        """자동화 완료 시 처리 (UI 업데이트)"""
+        # 🔒 최우선: 자동 생성 즉시 차단 (API 요청 방지)
+        self._disable_auto_generate_immediately()
+
+        # UI 업데이트
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        
+
         if hasattr(self, 'automation_count_label'):
             self.automation_count_label.setText("✅ 자동화 완료")
             self.automation_count_label.setStyleSheet(f"font-weight: bold; font-size: {get_scaled_font_size(13)}px; color: #4CAF50;")
@@ -603,16 +635,10 @@ class AutomationModule(BaseMiddleModule):
             self.repeat_info_label.setText("")
         if hasattr(self, 'delay_info_label'):
             self.delay_info_label.setText("")
-        
-        # 자동 생성 버튼 체크 해제
-        try:
-            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'generation_checkboxes'):
-                auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
-                if auto_generate_checkbox and auto_generate_checkbox.isChecked():
-                    auto_generate_checkbox.setChecked(False)
-                    print("✅ 자동화 완료: 자동 생성 체크박스 해제")
-        except Exception as e:
-            print(f"⚠️ 자동 생성 체크박스 해제 실패: {e}")
+
+        # ✅ 비차단 알림 표시
+        if self.automation_controller and self.automation_controller.notify_on_finish:
+            self.show_completion_notification()
     
     def on_progress_updated(self, text: str):
         """진행 상황 업데이트"""

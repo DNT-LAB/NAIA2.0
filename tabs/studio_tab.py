@@ -20,6 +20,8 @@ from tabs.studio.dialogs.export_dialog import ExportViewsDialog
 from tabs.studio.dialogs.save_preset_dialog import SavePresetDialog
 from tabs.studio.dialogs.open_preset_dialog import OpenPresetDialog
 from tabs.studio.dialogs.events_dialog import EventsDialog
+from tabs.studio.dialogs.wildcard_selector_dialog import WildcardSelectorDialog
+from tabs.studio.widgets.wildcard_nav_panel import WildcardNavPanel
 from ui.theme import DARK_COLORS, DARK_STYLES, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
@@ -46,6 +48,14 @@ class StudioTab(BaseTabModule):
         self.prefix_lock_btn: QPushButton = None
         self.postfix_lock_btn: QPushButton = None
         self.negative_lock_btn: QPushButton = None
+
+        # Wildcard analyzer section
+        self.wildcard_input: QLineEdit = None
+        self.analyze_btn: QPushButton = None
+        self.wildcard_analyzer_frame: QFrame = None  # Reference for border styling
+
+        # Wildcard navigation panel
+        self.wildcard_nav_panel: WildcardNavPanel = None
 
         # Bottom panel controls
         self.add_frame_btn: QPushButton = None
@@ -81,12 +91,24 @@ class StudioTab(BaseTabModule):
         top_control = self._create_top_control_area()
         layout.addWidget(top_control)
 
-        # 2. ResultImageFrame grid area (2x3 for taller images)
+        # 2. Wildcard analyzer section (NEW!)
+        wildcard_analyzer = self._create_wildcard_analyzer_section()
+        layout.addWidget(wildcard_analyzer)
+
+        # 2.5. Wildcard navigation panel (hidden by default)
+        self.wildcard_nav_panel = WildcardNavPanel()
+        self.wildcard_nav_panel.hide()  # Hidden until wildcard mode activated
+        self.wildcard_nav_panel.page_changed.connect(self._on_wildcard_page_changed)
+        self.wildcard_nav_panel.axis_swapped.connect(self._on_wildcard_axis_swapped)
+        self.wildcard_nav_panel.exit_mode_requested.connect(self._on_exit_wildcard_mode)
+        layout.addWidget(self.wildcard_nav_panel)
+
+        # 3. ResultImageFrame grid area (3x3 for wildcard mode)
         self.frame_manager = ResultImageFrameManager(self)
-        grid_widget = self.frame_manager.create_grid(rows=2, cols=3)
+        grid_widget = self.frame_manager.create_grid(rows=3, cols=3)
         layout.addWidget(grid_widget, 1)  # Stretch factor 1
 
-        # 3. Bottom control panel
+        # 4. Bottom control panel
         bottom_panel = self._create_bottom_panel()
         layout.addWidget(bottom_panel)
 
@@ -364,6 +386,158 @@ class StudioTab(BaseTabModule):
         layout.addWidget(self.fix_seed_checkbox)
 
         layout.addStretch()
+
+        return frame
+
+    def _create_wildcard_analyzer_section(self) -> QFrame:
+        """Create wildcard analyzer section - Single row"""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 5px;
+            }}
+        """)
+
+        # Store reference for dynamic styling
+        self.wildcard_analyzer_frame = frame
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(
+            get_scaled_size(8), get_scaled_size(4),
+            get_scaled_size(8), get_scaled_size(4)
+        )
+        layout.setSpacing(get_scaled_size(6))
+
+        # WC1 Button
+        self.wc1_btn = QPushButton("WC1")
+        self.wc1_btn.setFixedSize(get_scaled_size(50), get_scaled_size(28))
+        self.wc1_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: {get_scaled_font_size(12)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.wc1_btn.setToolTip("Select WC1 wildcard")
+        self.wc1_btn.clicked.connect(self._on_wc1_clicked)
+        layout.addWidget(self.wc1_btn)
+
+        # WC1 LineEdit
+        self.wc1_input = QLineEdit()
+        self.wc1_input.setPlaceholderText("Not selected")
+        self.wc1_input.setReadOnly(True)
+        self.wc1_input.setFixedHeight(get_scaled_size(28))
+        self.wc1_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: {get_scaled_font_size(12)}px;
+            }}
+        """)
+        layout.addWidget(self.wc1_input, 1)
+
+        # WC2 Button
+        self.wc2_btn = QPushButton("WC2")
+        self.wc2_btn.setFixedSize(get_scaled_size(50), get_scaled_size(28))
+        self.wc2_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: {get_scaled_font_size(12)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.wc2_btn.setToolTip("Select WC2 wildcard")
+        self.wc2_btn.clicked.connect(self._on_wc2_clicked)
+        layout.addWidget(self.wc2_btn)
+
+        # WC2 LineEdit
+        self.wc2_input = QLineEdit()
+        self.wc2_input.setPlaceholderText("Not selected")
+        self.wc2_input.setReadOnly(True)
+        self.wc2_input.setFixedHeight(get_scaled_size(28))
+        self.wc2_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: {get_scaled_font_size(12)}px;
+            }}
+        """)
+        layout.addWidget(self.wc2_input, 1)
+
+        # Spacer
+        layout.addSpacing(get_scaled_size(10))
+
+        # ASSIGN Button
+        self.assign_btn = QPushButton("ASSIGN")
+        self.assign_btn.setFixedSize(get_scaled_size(80), get_scaled_size(28))
+        self.assign_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #44AA44;
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: {get_scaled_font_size(12)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #55BB55;
+            }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_secondary']};
+            }}
+        """)
+        self.assign_btn.setToolTip("Assign wildcards to frames")
+        self.assign_btn.clicked.connect(self._on_assign_clicked)
+        self.assign_btn.setEnabled(False)
+        layout.addWidget(self.assign_btn)
+
+        # CLEAR Button
+        self.clear_btn = QPushButton("CLEAR")
+        self.clear_btn.setFixedSize(get_scaled_size(70), get_scaled_size(28))
+        self.clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: {get_scaled_font_size(12)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+        self.clear_btn.setToolTip("Clear wildcards and frames")
+        self.clear_btn.clicked.connect(self._on_clear_clicked)
+        layout.addWidget(self.clear_btn)
+
+        # Store selected wildcards
+        self.selected_wc1 = None  # (name, items_list)
+        self.selected_wc2 = None  # (name, items_list)
 
         return frame
 
@@ -1089,13 +1263,20 @@ class StudioTab(BaseTabModule):
         dialog.exec()
 
     def _on_export_views_clicked(self):
-        """Export all generated images as a grid image"""
+        """Export generated images as a grid image
+
+        In wildcard mode, only exports images from currently visible frames.
+        """
         if not self.frame_manager:
             return
 
-        # Collect images from frames (only current/top image from each frame with images)
+        # Collect images from visible frames only
         images = []
         for frame in self.frame_manager.frames:
+            # Skip hidden frames (in wildcard mode, only visible frames are exported)
+            if frame.isHidden():
+                continue
+
             if frame.get_stack_count() > 0:
                 pil_image = frame.get_current_pil_image()
                 if pil_image:
@@ -1173,6 +1354,552 @@ class StudioTab(BaseTabModule):
             self.reset_frames_btn.setEnabled(True)
 
         print("Studio: Frame buttons unlocked")
+
+    # === Helper methods ===
+    def _show_styled_message(self, title: str, text: str, icon=QMessageBox.Icon.Information):
+        """Show QMessageBox with dark theme styling"""
+        msg_box = QMessageBox(self.widget)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(text)
+        msg_box.setIcon(icon)
+
+        # Apply dark theme
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-size: {get_scaled_font_size(13)}px;
+                min-width: 60px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        msg_box.exec()
+
+    def _show_styled_question(self, title: str, text: str) -> bool:
+        """Show QMessageBox question with dark theme styling. Returns True if Yes."""
+        msg_box = QMessageBox(self.widget)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(text)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        # Apply dark theme
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-size: {get_scaled_font_size(13)}px;
+                min-width: 60px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        return msg_box.exec() == QMessageBox.StandardButton.Yes
+
+    # === Wildcard analyzer methods ===
+    # === New Wildcard Selector Methods ===
+    def _on_wc1_clicked(self):
+        """Open wildcard selector for WC1"""
+        try:
+            from tabs.studio.dialogs.wildcard_selector_dialog_simple import WildcardSelectorDialogSimple
+            from core.wildcard_manager import WildcardManager
+        except ImportError as e:
+            self._show_styled_message("Error", f"Import error: {e}", QMessageBox.Icon.Critical)
+            return
+
+        # Get wildcard manager
+        wildcard_manager = None
+        if self.app_context and hasattr(self.app_context, 'wildcard_manager'):
+            wildcard_manager = self.app_context.wildcard_manager
+        if not wildcard_manager:
+            wildcard_manager = WildcardManager()
+
+        # Create selector dialog
+        dialog = WildcardSelectorDialogSimple(wildcard_manager, 0, self.widget)
+
+        # Connect signal
+        def on_selected(wc_name, wc_items):
+            self.selected_wc1 = (wc_name, wc_items)
+            self.wc1_input.setText(f"{wc_name} ({len(wc_items)} items)")
+            print(f"WC1 selected: {wc_name} ({len(wc_items)} items)")
+            self._update_assign_button()
+
+        dialog.wildcard_selected.connect(on_selected)
+        dialog.exec()
+
+    def _on_wc2_clicked(self):
+        """Open wildcard selector for WC2"""
+        try:
+            from tabs.studio.dialogs.wildcard_selector_dialog_simple import WildcardSelectorDialogSimple
+            from core.wildcard_manager import WildcardManager
+        except ImportError as e:
+            self._show_styled_message("Error", f"Import error: {e}", QMessageBox.Icon.Critical)
+            return
+
+        # Get wildcard manager
+        wildcard_manager = None
+        if self.app_context and hasattr(self.app_context, 'wildcard_manager'):
+            wildcard_manager = self.app_context.wildcard_manager
+        if not wildcard_manager:
+            wildcard_manager = WildcardManager()
+
+        # Create selector dialog
+        dialog = WildcardSelectorDialogSimple(wildcard_manager, 0, self.widget)
+
+        # Connect signal
+        def on_selected(wc_name, wc_items):
+            self.selected_wc2 = (wc_name, wc_items)
+            self.wc2_input.setText(f"{wc_name} ({len(wc_items)} items)")
+            print(f"WC2 selected: {wc_name} ({len(wc_items)} items)")
+            self._update_assign_button()
+
+        dialog.wildcard_selected.connect(on_selected)
+        dialog.exec()
+
+    def _update_assign_button(self):
+        """Enable ASSIGN button if at least one wildcard is selected"""
+        if self.selected_wc1 or self.selected_wc2:
+            self.assign_btn.setEnabled(True)
+        else:
+            self.assign_btn.setEnabled(False)
+
+    def _on_assign_clicked(self):
+        """Assign wildcards to frames"""
+        if not self.selected_wc1 and not self.selected_wc2:
+            self._show_styled_message("Warning", "Please select at least one wildcard first!", QMessageBox.Icon.Warning)
+            return
+
+        if not self.frame_manager:
+            self._show_styled_message("Warning", "Frame manager not available!", QMessageBox.Icon.Warning)
+            return
+
+        # Single wildcard: use simple mode (no wildcard navigation)
+        if (self.selected_wc1 and not self.selected_wc2) or (self.selected_wc2 and not self.selected_wc1):
+            self._assign_single_wildcard()
+        # Both wildcards selected: use 2D wildcard mode
+        else:
+            self._assign_dual_wildcards()
+
+    def _assign_single_wildcard(self):
+        """Assign single wildcard to frames (simple mode, no navigation)"""
+        # Determine which wildcard is selected
+        if self.selected_wc1:
+            wc_name, wc_items = self.selected_wc1
+        else:
+            wc_name, wc_items = self.selected_wc2
+
+        # Validate item count (max 9)
+        if len(wc_items) > 9:
+            self._show_styled_message(
+                "Warning",
+                f"Wildcard has {len(wc_items)} items. Maximum is 9.\nPlease select a smaller wildcard or manually reduce items.",
+                QMessageBox.Icon.Warning
+            )
+            return
+
+        # Assign each item to a frame
+        for i, item in enumerate(wc_items):
+            if i >= len(self.frame_manager.frames):
+                break
+
+            frame = self.frame_manager.frames[i]
+            current_data = frame.get_prompt_data()
+            current_data['prompt'] = item
+            frame.set_prompt_data(current_data)
+
+        self._show_styled_message(
+            "Wildcard Assigned",
+            f"Assigned {len(wc_items)} items from '{wc_name}' to frames.\n\n"
+            f"Ready for generation!",
+            QMessageBox.Icon.Information
+        )
+
+        self._update_start_button()
+        print(f"Studio: Assigned single wildcard '{wc_name}' ({len(wc_items)} items) to frames")
+
+    def _assign_dual_wildcards(self):
+        """Assign dual wildcards to frames (2D wildcard mode with navigation)"""
+        wc1_name, wc1_items = self.selected_wc1
+        wc2_name, wc2_items = self.selected_wc2
+
+        # Validate item counts (max 9 each)
+        if len(wc1_items) > 9:
+            self._show_styled_message(
+                "Warning",
+                f"WC1 has {len(wc1_items)} items. Maximum is 9.\nPlease select a smaller wildcard.",
+                QMessageBox.Icon.Warning
+            )
+            return
+
+        if len(wc2_items) > 9:
+            self._show_styled_message(
+                "Warning",
+                f"WC2 has {len(wc2_items)} items. Maximum is 9.\nPlease select a smaller wildcard.",
+                QMessageBox.Icon.Warning
+            )
+            return
+
+        # Build prompt pattern
+        prompt_pattern = f"__{wc1_name}__, __{wc2_name}__"
+
+        # Enter wildcard mode
+        success = self.frame_manager.enter_wildcard_mode(
+            prompt_pattern,
+            wc1_name,
+            wc2_name,
+            wc1_items,
+            wc2_items
+        )
+
+        if success:
+            # Show navigation panel
+            if self.wildcard_nav_panel:
+                self.wildcard_nav_panel.show()
+                self._update_wildcard_nav_panel()
+
+            # Apply red border to wildcard analyzer section
+            if self.wildcard_analyzer_frame:
+                self.wildcard_analyzer_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: {DARK_COLORS['bg_secondary']};
+                        border: 2px solid #CC4444;
+                        border-radius: 5px;
+                    }}
+                """)
+
+            self._show_styled_message(
+                "2D Wildcard Mode",
+                f"Entered 2D wildcard mode:\n"
+                f"WC1: {wc1_name} ({len(wc1_items)} items)\n"
+                f"WC2: {wc2_name} ({len(wc2_items)} items)\n\n"
+                f"Use navigation controls to browse pages.",
+                QMessageBox.Icon.Information
+            )
+        else:
+            self._show_styled_message(
+                "Error",
+                "Failed to enter wildcard mode.",
+                QMessageBox.Icon.Critical
+            )
+
+    def _on_clear_clicked(self):
+        """Clear wildcards and reset frames"""
+        # Clear selections
+        self.selected_wc1 = None
+        self.selected_wc2 = None
+        self.wc1_input.clear()
+        self.wc2_input.clear()
+        self.wc1_input.setPlaceholderText("Not selected")
+        self.wc2_input.setPlaceholderText("Not selected")
+
+        # Disable ASSIGN button
+        self.assign_btn.setEnabled(False)
+
+        # Exit wildcard mode if active
+        if self.frame_manager and self.frame_manager.is_in_wildcard_mode():
+            self.frame_manager.exit_wildcard_mode()
+
+            # Hide navigation panel
+            if self.wildcard_nav_panel:
+                self.wildcard_nav_panel.hide()
+
+        # Restore normal border to wildcard analyzer section
+        if self.wildcard_analyzer_frame:
+            self.wildcard_analyzer_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    border: 1px solid {DARK_COLORS['border']};
+                    border-radius: 5px;
+                }}
+            """)
+
+        # Clear all frames
+        if self.frame_manager:
+            for frame in self.frame_manager.frames:
+                frame.reset()
+
+        print("Wildcards and frames cleared")
+        self._show_styled_message(
+            "Cleared",
+            "Wildcards and frames have been cleared.",
+            QMessageBox.Icon.Information
+        )
+
+    def _on_auto_assign_clicked(self):
+        """Auto-assign wildcard combinations to frames"""
+        if not hasattr(self, '_last_analysis') or not self._last_analysis:
+            self._show_styled_message("Warning", "Please analyze wildcards first!", QMessageBox.Icon.Warning)
+            return
+
+        if not self.frame_manager or not self.frame_manager.frames:
+            self._show_styled_message("Warning", "No frames available!", QMessageBox.Icon.Warning)
+            return
+
+        # Get analysis data
+        prompt_pattern = self._last_analysis['prompt']
+        total_combinations = self._last_analysis['total_combinations']
+
+        frame_count = len(self.frame_manager.frames)
+
+        # Confirm with user
+        confirm_text = (
+            f"This will assign wildcard combinations to {frame_count} frame(s).\n\n"
+            f"Total combinations available: {total_combinations:,}\n"
+            f"Frames: {frame_count}\n\n"
+            f"Each frame will get a sequential wildcard combination.\n"
+            f"Continue?"
+        )
+        if not self._show_styled_question("Auto-Assign Wildcards", confirm_text):
+            return
+
+        # Import necessary modules
+        try:
+            from core.wildcard_processor import WildcardProcessor
+            from core.wildcard_manager import WildcardManager
+            from core.prompt_context import PromptContext
+            import pandas as pd
+        except ImportError as e:
+            self._show_styled_message("Error", f"Import error: {e}", QMessageBox.Icon.Critical)
+            return
+
+        # Get wildcard manager
+        wildcard_manager = None
+        if self.app_context and hasattr(self.app_context, 'wildcard_manager'):
+            wildcard_manager = self.app_context.wildcard_manager
+
+        if not wildcard_manager:
+            wildcard_manager = WildcardManager()
+
+        processor = WildcardProcessor(wildcard_manager)
+
+        # Prepare tags for expansion
+        # Split by comma and strip whitespace
+        tags = [tag.strip() for tag in prompt_pattern.split(',') if tag.strip()]
+
+        if not tags:
+            self._show_styled_message("Warning", "No wildcard tags found in pattern!", QMessageBox.Icon.Warning)
+            return
+
+        # Assign to each frame
+        assigned_count = 0
+        for i, frame in enumerate(self.frame_manager.frames):
+            if i >= total_combinations:
+                # No more combinations available
+                break
+
+            # Create a fresh context for this iteration
+            context = PromptContext(
+                source_row=pd.Series(),
+                settings={}
+            )
+
+            # Expand tags
+            expanded_tags = processor.expand_tags(tags.copy(), context)
+
+            # Join into prompt
+            frame_prompt = ', '.join(expanded_tags)
+
+            # Get current prompt data
+            current_data = frame.get_prompt_data()
+
+            # Update prompt field
+            current_data['prompt'] = frame_prompt
+
+            # Set back to frame
+            frame.set_prompt_data(current_data)
+
+            assigned_count += 1
+
+        # Show success message
+        self._show_styled_message(
+            "Success",
+            f"Successfully assigned {assigned_count} wildcard combinations to frames!",
+            QMessageBox.Icon.Information
+        )
+
+        # Update UI
+        self._update_start_button()
+
+        print(f"Studio: Auto-assigned {assigned_count} wildcard combinations to frames")
+
+    def _show_wildcard_selector_dialog(self, wildcards: list, prompt_pattern: str):
+        """Show wildcard selector dialog for 2D mode
+
+        Args:
+            wildcards: List of WildcardInfo objects
+            prompt_pattern: Original prompt pattern
+        """
+        # Convert wildcards to dict format for dialog
+        wildcard_info_list = []
+        for wc in wildcards:
+            wildcard_info_list.append({
+                'name': wc.name,
+                'item_count': wc.item_count
+            })
+
+        total_combinations = self._last_analysis.get('total_combinations', 0)
+
+        # Create and show dialog
+        dialog = WildcardSelectorDialog(wildcard_info_list, total_combinations, self.widget)
+
+        # Connect signals
+        dialog.mode_1d_requested.connect(lambda: self._on_1d_mode_selected(dialog))
+        dialog.mode_2d_requested.connect(lambda x, y, x_items, y_items: self._on_2d_mode_selected(x, y, x_items, y_items, prompt_pattern, dialog))
+
+        dialog.exec()
+
+    def _on_1d_mode_selected(self, dialog):
+        """Handle 1D mode selection - use existing auto-assign logic"""
+        dialog.accept()
+        # Use existing 1D auto-assign
+        self._on_auto_assign_clicked()
+
+    def _on_2d_mode_selected(self, x_wildcard: str, y_wildcard: str, x_items: list, y_items: list, prompt_pattern: str, dialog):
+        """Handle 2D mode selection - enter wildcard mode
+
+        Args:
+            x_wildcard: X-axis wildcard name
+            y_wildcard: Y-axis wildcard name
+            x_items: X-axis items list (up to 9 items)
+            y_items: Y-axis items list (up to 9 items)
+            prompt_pattern: Original prompt pattern
+            dialog: Dialog to close
+        """
+        dialog.accept()
+
+        if not self.frame_manager:
+            return
+
+        # Enter wildcard mode
+        success = self.frame_manager.enter_wildcard_mode(
+            prompt_pattern,
+            x_wildcard,
+            y_wildcard,
+            x_items,
+            y_items
+        )
+
+        if success:
+            # Show navigation panel
+            if self.wildcard_nav_panel:
+                self.wildcard_nav_panel.show()
+                self._update_wildcard_nav_panel()
+
+            self._show_styled_message(
+                "2D Mode Enabled",
+                f"Entered 2D wildcard mode with:\n"
+                f"X-Axis: {x_wildcard}\n"
+                f"Y-Axis: {y_wildcard}\n\n"
+                f"Use navigation controls to browse pages.",
+                QMessageBox.Icon.Information
+            )
+
+            # Update UI
+            self._update_start_button()
+        else:
+            self._show_styled_message(
+                "Error",
+                "Failed to enter 2D wildcard mode. Check console for details.",
+                QMessageBox.Icon.Critical
+            )
+
+    def _on_wildcard_page_changed(self, delta: int):
+        """Handle wildcard page navigation
+
+        Args:
+            delta: Page offset (-1=previous, +1=next)
+        """
+        if not self.frame_manager:
+            return
+
+        self.frame_manager.navigate_wildcard_page(delta)
+        self._update_wildcard_nav_panel()
+
+    def _on_wildcard_axis_swapped(self):
+        """Handle wildcard axis swap request"""
+        if not self.frame_manager:
+            return
+
+        self.frame_manager.swap_wildcard_axes()
+        self._update_wildcard_nav_panel()
+
+    def _on_exit_wildcard_mode(self):
+        """Handle exit from wildcard mode"""
+        if not self.frame_manager:
+            return
+
+        self.frame_manager.exit_wildcard_mode()
+
+        # Hide navigation panel
+        if self.wildcard_nav_panel:
+            self.wildcard_nav_panel.hide()
+
+        # Restore normal border to wildcard analyzer section
+        if self.wildcard_analyzer_frame:
+            self.wildcard_analyzer_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    border: 1px solid {DARK_COLORS['border']};
+                    border-radius: 5px;
+                }}
+            """)
+
+        self._show_styled_message(
+            "Exited 2D Mode",
+            "Returned to normal mode.",
+            QMessageBox.Icon.Information
+        )
+
+    def _update_wildcard_nav_panel(self):
+        """Update wildcard navigation panel with current state"""
+        if not self.wildcard_nav_panel or not self.frame_manager:
+            return
+
+        state = self.frame_manager.wildcard_mode_state
+
+        if not state.is_wildcard_mode:
+            return
+
+        # Get page and frame axis info
+        page_axis_name = state.get_page_axis_name()
+        frame_axis_name = state.get_frame_axis_name()
+        current_page = state.current_page + 1  # Convert to 1-indexed
+        total_pages = state.get_total_pages()
+        current_item = state.get_current_page_item()
+        frame_items = state.get_frame_items()
+
+        # Update panel info
+        self.wildcard_nav_panel.update_info(
+            page_axis_name,
+            frame_axis_name,
+            current_page,
+            total_pages,
+            current_item,
+            frame_items
+        )
 
     # === Tab lifecycle ===
     def on_tab_activated(self):

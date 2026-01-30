@@ -48,17 +48,28 @@ ui/
     ├── tag_viewer_widget.py       # 3단 구조 태그 뷰어 (MainPrompt용)
     ├── interactive                # 태그 통합 데이터셋 (25MB, 확장자 없음)
     │
-    ├── person_settings_block.py   # 인원 수 / Rating 설정
-    ├── quick_search_block.py      # 퀵 서치 (태그 추천)
-    ├── artist_tag_block.py         # 아티스트 태그 선택
-    ├── composition_block.py        # X/Y/Z 축 구도 설정
-    ├── quality_tag_block.py        # 품질 태그 설정
-    ├── negative_prompt_block.py    # 네거티브 프롬프트
+    ├── image_plane.py             # 🆕 이미지 표시 위젯 (중앙 배치)
+    ├── floating_control_bar.py    # 🆕 하단 컨트롤 바 (생성/랜덤/설정)
+    ├── parameter_panel.py         # 🆕 생성 파라미터 패널 (모델/steps/cfg 등)
     │
-    ├── main_prompt_block.py        # 메인 프롬프트 (플로팅)
+    ├── person_settings_block.py   # 인원 수 / Rating 설정 (좌측)
+    ├── quick_search_block.py      # 퀵 서치 (태그 추천, 좌측)
+    ├── artist_tag_block.py        # 아티스트 태그 선택 (좌측)
+    ├── quality_tag_block.py       # 품질 태그 설정 (좌측)
+    ├── negative_prompt_block.py   # 네거티브 프롬프트 (좌측)
+    │
+    ├── main_prompt_block.py       # 메인 프롬프트 (플로팅)
+    ├── character_prompt_block.py  # 🆕 캐릭터 프롬프트 x6 (플로팅)
     ├── additional_negative_prompt_block.py  # 추가 네거티브 (플로팅)
+    ├── composition_block.py       # X/Y/Z 축 구도 설정 (플로팅)
+    ├── character_reference_block.py # 🆕 NAI Character Reference (플로팅, NAID4.5)
+    ├── image_tagger_block.py      # 🆕 WD14 이미지 태거 (플로팅)
     │
-    └── quick_search_data.py        # Quick Search 데이터 로더
+    ├── tag_viewer_block.py        # 태그 뷰어 블록 (보조)
+    ├── batch_image_processing_window.py # 🆕 배치 이미지 처리 윈도우
+    ├── random_filter_dialog.py    # 랜덤 필터 다이얼로그
+    ├── category_structure.py      # 카테고리 구조 정의
+    └── quick_search_data.py       # Quick Search 데이터 로더
 ```
 
 ---
@@ -68,50 +79,119 @@ ui/
 ### 레이아웃 구조
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  NAIA - Interactive Mode                    [메뉴바]    │
-├──────────────┬──────────────────────────────────────────┤
-│              │                                          │
-│  좌측 패널    │          우측 패널 (이미지 뷰어)          │
-│  (460px)     │                                          │
-│              │  ┌────────────────┐  ┌──────────────┐   │
-│ ┌──────────┐ │  │ 메인 프롬프트   │  │ 추가 네거티브 │   │
-│ │인원수/목적│ │  │ (플로팅 1)     │  │ (플로팅 2)   │   │
-│ └──────────┘ │  └────────────────┘  └──────────────┘   │
-│ ┌──────────┐ │                                          │
-│ │QuickSearch│ │        [생성된 이미지 표시]              │
-│ └──────────┘ │                                          │
-│ ┌──────────┐ │                                          │
-│ │아티스트   │ │                                          │
-│ └──────────┘ │                                          │
-│ ┌──────────┐ │                                          │
-│ │  구도     │ │                                          │
-│ └──────────┘ │                                          │
-│ ┌──────────┐ │                                          │
-│ │  품질     │ │                                          │
-│ └──────────┘ │                                          │
-│ ┌──────────┐ │                                          │
-│ │네거티브   │ │                                          │
-│ └──────────┘ │                                          │
-│              │                                          │
-└──────────────┴──────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│  NAIA - Interactive Mode                              [메뉴바]        │
+├──────────────┬────────────────────────────────────────────────────────┤
+│              │                                                        │
+│  좌측 패널    │          우측 패널 (이미지 뷰어 + 플로팅 패널)           │
+│  (460px)     │                                                        │
+│              │  ┌──────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ │
+│ ┌──────────┐ │  │ Main │ │ C1 │ │ C2 │ │... │ │ C6 │ │Add │ │Comp│ │
+│ │인원수/목적│ │  │Prompt│ └────┘ └────┘ └────┘ └────┘ │Neg │ └────┘ │
+│ └──────────┘ │  └──────┘                               └────┘ ┌────┐ │
+│              │  ┌────┐                                          │Ref │ │
+│ ┌──────────┐ │  │Tag │                                          └────┘ │
+│ │QuickSearch│ │  │Tgr │          ┌─────────────────┐           ┌────┐ │
+│ │(접힘)     │ │  └────┘          │                 │           │Tag │ │
+│ └──────────┘ │                   │  ImagePlane     │           │View│ │
+│              │                   │  (중앙 배치)     │           │(접)│ │
+│ ┌──────────┐ │                   │                 │           └────┘ │
+│ │아티스트   │ │                   └─────────────────┘                  │
+│ │(펼침)     │ │                                                        │
+│ └──────────┘ │                                                        │
+│              │                                                        │
+│ ┌──────────┐ │                                                        │
+│ │  품질     │ │                                                        │
+│ └──────────┘ │                                                        │
+│              │                                                        │
+│ ┌──────────┐ │                                                        │
+│ │네거티브   │ │                                                        │
+│ └──────────┘ │  ┌──────────────────────────────────────────────────┐ │
+│              │  │ FloatingControlBar (하단 고정)                    │ │
+│              │  │ [랜덤] [생성] [랜덤+생성] [사이드바] [핀] [태그] │ │
+│              │  │ [해상도] [파라미터 패널]                          │ │
+└──────────────┴──┴──────────────────────────────────────────────────┴─┘
 ```
+
+**우측 패널 플로팅 요소** (9개):
+1. **MainPrompt** - 메인 프롬프트 (좌측 상단)
+2. **C1~C6** - 캐릭터 프롬프트 6개 (1번만 표시, 추가 가능)
+3. **AddNeg** - 추가 네거티브 프롬프트
+4. **Comp** - 구도 설정 (X/Y/Z 축)
+5. **Ref** - NAI Character Reference (NAID4.5)
+6. **TagTgr** - WD14 Image Tagger
+7. **TagView** - 태그 뷰어 (embedded, 접힘 상태)
+8. **ImagePlane** - 중앙 이미지 표시
+9. **FloatingControlBar** - 하단 컨트롤 바 (고정 배치)
 
 ### 데이터 흐름
 
 ```
 PersonSettingsBlock (인원/Rating 변경)
     │
-    └─[settingsChanged 시그널]─→ QuickSearchBlock.load_partition()
-                                      │
-                                      └─→ 파티션 로드 및 태그 추천
+    └─[settingsChanged]─→ QuickSearchBlock.load_partition()
+                              │
+                              └─→ 파티션 로드 및 태그 추천
+
+MainPromptBlock
+    │
+    ├─[generate_requested]─→ InteractiveWindow._on_generate_requested()
+    │                            │
+    │                            ├─→ collect_generation_params()
+    │                            ├─→ GenerationRequest 생성
+    │                            └─→ GenerationController.execute_generation_pipeline()
+    │
+    └─[set_quick_search_block]─→ QuickSearchBlock 참조 (랜덤 생성 지원)
+
+CharacterPromptBlock (6개)
+    │
+    ├─[add_character_clicked]─→ InteractiveWindow._on_add_character_click()
+    │                                │
+    │                                └─→ 숨겨진 패널 표시
+    │
+    ├─[remove_character_clicked]─→ InteractiveWindow._on_remove_character_click()
+    │                                  │
+    │                                  └─→ 패널 숨김
+    │
+    └─[random_field_requested]─→ InteractiveWindow._handle_char_random_request()
+                                     │
+                                     └─→ QuickSearchBlock에서 10개 후보 추출
+                                         → 그룹/서브그룹 필터링
+                                         → 성별 기반 Creatures 필터링
+
+ImageTaggerBlock
+    │
+    └─[tags_extracted]─→ MainPromptBlock.set_prompt_html() (덮어쓰기)
+
+ImagePlane
+    │
+    └─[clicked]─→ TagViewerPanel.set_collapsed(True) (접기)
+
+FloatingControlBar
+    │
+    ├─[random_clicked]─→ MainPromptBlock.generate_random_prompt()
+    ├─[generate_clicked]─→ MainPromptBlock.trigger_generation()
+    ├─[random_generate_clicked]─→ InteractiveWindow._on_control_bar_random_generate()
+    ├─[sidebar_toggled]─→ left_panel.setHidden(checked)
+    ├─[float_pin_toggled]─→ InteractiveWindow._on_float_pin_toggled()
+    └─[tags_clicked]─→ InteractiveWindow._toggle_standalone_tag_viewer()
+
+InteractiveAutocompleteManager
+    │
+    └─[data_loaded]─→ InteractiveWindow._on_autocomplete_data_loaded()
+                          │
+                          ├─→ TagViewerWidget.set_tags_data()
+                          ├─→ _init_standalone_tag_viewer()
+                          └─→ MainPromptBlock.refresh_formatting()
 ```
 
-**시그널 체인**:
-1. 사용자가 인원 수/Rating 변경
-2. `PersonSettingsBlock.settingsChanged` 시그널 발행
-3. `QuickSearchBlock`가 해당 파티션 로드
-4. 매칭되는 태그 추천 표시
+**주요 시그널 체인**:
+1. **인원/Rating → QuickSearch**: 파티션 로드 및 태그 추천
+2. **MainPrompt → 이미지 생성**: 파라미터 수집 → GenerationRequest → 생성 파이프라인
+3. **CharacterPrompt → 랜덤**: QuickSearch 연동, 성별 기반 필터링
+4. **ImageTagger → MainPrompt**: 태그 추출 후 덮어쓰기
+5. **ControlBar → 모든 기능**: 랜덤/생성/사이드바 토글
+6. **포커스 변경 → TagViewer**: 타겟 위젯 업데이트
 
 ---
 
@@ -128,26 +208,48 @@ PersonSettingsBlock (인원/Rating 변경)
 class InteractiveWindow(QMainWindow):
     window_closed = pyqtSignal()  # 창 닫힘 시그널
 
-    def __init__(self, parent_app=None):
+    def __init__(self, parent_app=None, app_context=None):
         # 1. 좌측 패널 (고정 너비 460px)
-        # 2. 우측 패널 (이미지 뷰어)
-        # 3. 플로팅 패널 2개
+        # 2. 우측 패널 (이미지 뷰어 + 플로팅 패널 9개)
+        # 3. ImagePlane (중앙 이미지 표시)
+        # 4. FloatingControlBar (하단 컨트롤 바)
 ```
-
-**메뉴바 기능**:
-- **📌 항상 위에 표시**: WindowStaysOnTopHint 토글
 
 **좌측 패널 블록 순서**:
 1. PersonSettingsBlock (항상 펼침)
 2. QuickSearchBlock (기본 접힘)
-3. ArtistTagBlock (기본 접힘)
-4. CompositionBlock (기본 접힘)
-5. QualityTagBlock (기본 접힘)
-6. NegativePromptBlock (기본 접힘)
+3. ArtistTagBlock (기본 펼침) ← 문서 v1.2 수정
+4. QualityTagBlock (기본 접힘)
+5. NegativePromptBlock (기본 접힘)
 
-**우측 패널 플로팅**:
-1. MainPromptBlock - 좌측 상단 (20, 20)
-2. AdditionalNegativePromptBlock - 우측 상단 (350, 20)
+**우측 패널 플로팅 요소** (9개):
+1. **MainPromptBlock** - 메인 프롬프트 (좌측 상단, 360px)
+2. **CharacterPromptBlock x6** - 캐릭터 프롬프트 (C1~C6, 1번만 표시)
+3. **AdditionalNegativePromptBlock** - 추가 네거티브
+4. **CompositionBlock** - X/Y/Z 축 구도 설정
+5. **CharacterReferenceBlock** - NAI Director Tool (NAID4.5)
+6. **ImageTaggerBlock** - WD14 이미지 태거
+7. **TagViewerWidget** - 태그 뷰어 (embedded, 접힘)
+8. **ImagePlane** - 중앙 이미지 표시
+9. **FloatingControlBar** - 하단 컨트롤 바 (고정 배치)
+
+**주요 메서드**:
+```python
+def collect_generation_params(self) -> dict:
+    """모든 블록에서 파라미터 수집 → GenerationRequest 생성"""
+
+def save_interactive_data(self):
+    """현재 상태를 save/interactive_data.json에 저장"""
+
+def load_interactive_data(self):
+    """저장된 상태 복원"""
+
+def _reposition_floating_panels(self):
+    """플로팅 패널 자동 정렬 (최초 1회 또는 Pinned 시)"""
+
+def _handle_char_random_request(self, editor, groups, subgroups, field_type):
+    """캐릭터 필드 랜덤 생성 (QuickSearch 연동, 성별 기반 필터링)"""
+```
 
 ### 2. BlockWidget (블록 베이스 클래스)
 
@@ -764,6 +866,438 @@ label.setStyleSheet(f"""
 
 # 또는 헬퍼 함수 사용
 self.setStyleSheet(get_label_style() + get_combobox_style())
+```
+
+### 6. ImagePlane (이미지 표시 위젯)
+
+**위치**: [ui/interactive/image_plane.py](image_plane.py)
+
+**역할**: PIL Image를 중앙에 표시하는 클릭 가능한 위젯
+
+**특징**:
+- ✅ **PIL Image 표시**: set_image(pil_image)로 간단하게 표시
+- ✅ **중앙 정렬**: 비율 유지하며 자동 리사이징 및 중앙 배치
+- ✅ **클릭 시그널**: clicked 시그널 발행 (TagViewer 접기 트리거)
+- ✅ **드래그 가능**: 마우스로 이미지 위치 조정 가능
+- ✅ **Z-Order 최하단**: 플로팅 패널보다 항상 아래
+
+**주요 메서드**:
+```python
+class ImagePlane(QLabel):
+    clicked = pyqtSignal()
+
+    def set_image(self, pil_image):
+        """PIL Image를 표시 (비율 유지)"""
+
+    def mousePressEvent(self, event):
+        """클릭 시 시그널 발행 및 드래그 시작"""
+```
+
+**InteractiveWindow 연동**:
+```python
+# interactive_window.py:196-204
+self.image_plane = ImagePlane(parent=self.right_panel)
+blank_img = Image.new('RGB', (1024, 1024), color='white')
+self.image_plane.set_image(blank_img)
+self.image_plane.clicked.connect(self._on_image_plane_clicked)
+```
+
+### 7. FloatingControlBar (하단 컨트롤 바)
+
+**위치**: [ui/interactive/floating_control_bar.py](floating_control_bar.py)
+
+**역할**: 이미지 생성 및 설정을 제어하는 하단 고정 바
+
+**버튼 구성**:
+```
+[🎲 랜덤] [🎨 이미지 생성] [🎲🎨 랜덤+생성] [📂 사이드바] [📌 핀] [🏷️ 태그]
+[해상도 콤보박스] [⚙️ 파라미터 패널]
+```
+
+**주요 시그널**:
+```python
+class FloatingControlBar(QWidget):
+    random_clicked = pyqtSignal()            # 랜덤 프롬프트 생성
+    generate_clicked = pyqtSignal()          # 이미지 생성
+    random_generate_clicked = pyqtSignal()   # 랜덤 + 생성
+    sidebar_toggled = pyqtSignal(bool)       # 좌측 패널 숨기기/보이기
+    float_pin_toggled = pyqtSignal(bool)     # 플로팅 패널 자동 정렬 허용/금지
+    tags_clicked = pyqtSignal()              # 독립 태그 뷰어 토글
+```
+
+**해상도 프리셋**:
+```python
+resolutions = [
+    "832 x 1216 (Portrait)",
+    "1024 x 1024 (Square)",
+    "1216 x 832 (Landscape)",
+    # ... 더 많은 프리셋
+]
+```
+
+**ParameterPanel 통합**:
+```python
+self.param_panel = ParameterPanel()
+# 모델, steps, cfg_scale, sampler, scheduler, cfg_rescale, VAR+ 설정
+```
+
+### 8. CharacterPromptBlock (캐릭터 프롬프트)
+
+**위치**: [ui/interactive/character_prompt_block.py](character_prompt_block.py)
+
+**역할**: 6개의 캐릭터별 프롬프트 입력 (C1~C6)
+
+**특징**:
+- ✅ **6개 슬롯**: C1~C6, 1번만 표시하고 나머지는 추가 가능
+- ✅ **1번 블록**: "캐릭터 추가 +" 버튼
+- ✅ **2~6번 블록**: "캐릭터 제거 -" 버튼
+- ✅ **랜덤 생성**: QuickSearch 연동, 성별 기반 필터링
+- ✅ **자동완성 지원**: InteractiveAutocompleteManager 등록
+
+**블록 구조**:
+```
+┌─ CharacterPromptBlock (C1) ─┐
+│ 성별: [👧 Girl] [👦 Boy] [🧑 Other] │
+│ 이름: [___________]                │
+│ 생김새: [🎲] [태그 입력...]         │
+│ 의상: [🎲] [태그 입력...]           │
+│ 표정/행위: [🎲] [태그 입력...]      │
+│ 좌표: X [___] Y [___]              │
+│ UC: [태그 입력...]                 │
+│ [캐릭터 추가 +]                    │
+└───────────────────────────────────┘
+```
+
+**랜덤 필드 요청**:
+```python
+# 생김새 필드 랜덤 버튼 클릭 시
+self.random_field_requested.emit(
+    self.appearance_edit,
+    allowed_groups=["Person_Body"],
+    allowed_subgroups={"Person_Body": ["hair", "eyes", ...]},
+    field_type="appearance"
+)
+```
+
+**InteractiveWindow 연동**:
+```python
+# interactive_window.py:384-438
+for i in range(1, 7):
+    block = CharacterPromptBlock(index=i)
+    panel = DraggablePanel(parent=self.right_panel, child_widget=block)
+
+    if i == 1:
+        block.add_character_clicked.connect(self._on_add_character_click)
+        panel.show()
+    else:
+        block.remove_character_clicked.connect(self._on_remove_character_click)
+        panel.hide()
+```
+
+### 9. CharacterReferenceBlock (NAI Director Tool)
+
+**위치**: [ui/interactive/character_reference_block.py](character_reference_block.py)
+
+**역할**: NovelAI Director Tool (NAID4.5) - 캐릭터 레퍼런스 이미지 업로드
+
+**특징**:
+- ✅ **이미지 업로드**: 드래그&드롭 또는 파일 선택
+- ✅ **Style Aware**: 캐릭터+스타일 or 캐릭터만
+- ✅ **Fidelity 슬라이더**: 0.0~1.0 (충실도)
+- ✅ **Base64 인코딩**: API 전송용 자동 변환
+
+**UI 구조**:
+```
+┌─ Character Reference (NAID4.5) ─┐
+│ [이미지 썸네일]                   │
+│ [📁 이미지 선택]                  │
+│ ☑ Style Aware (캐릭터+스타일)    │
+│ Fidelity: [========○---] 0.85    │
+└──────────────────────────────────┘
+```
+
+**데이터 출력**:
+```python
+def get_data(self) -> CharacterReferenceData:
+    return CharacterReferenceData(
+        image_base64=self.image_base64,
+        style_aware=self.style_aware_check.isChecked(),
+        fidelity=self.fidelity_slider.value() / 100.0
+    )
+```
+
+**GenerationRequest 변환**:
+```python
+# interactive_window.py:1109-1136
+nai_char_reference = NAICharacterReferenceData(
+    director_reference_descriptions=[{
+        "caption": {
+            "base_caption": "character&style" if style_aware else "character",
+            "char_captions": []
+        },
+        "legacy_uc": False
+    }],
+    director_reference_images=[image_base64],
+    director_reference_information_extracted=[ie_value],
+    director_reference_secondary_strength_values=[fidelity],
+    director_reference_strength_values=[1],
+    controlnet_strength=1,
+    inpaint_img2img_strength=1,
+    normalize_reference_strength_multiple=True
+)
+```
+
+### 10. ImageTaggerBlock (WD14 이미지 태거)
+
+**위치**: [ui/interactive/image_tagger_block.py](image_tagger_block.py)
+
+**역할**: WD14 모델로 이미지에서 태그 자동 추출
+
+**특징**:
+- ✅ **이미지 업로드**: 드래그&드롭 또는 파일 선택
+- ✅ **WD14 태깅**: 자동 태그 추출
+- ✅ **QuickSearch 연동**: 추출된 태그 필터링 및 추천
+- ✅ **MainPrompt 덮어쓰기**: 추출된 태그를 메인 프롬프트에 반영
+- ✅ **BatchImageProcessingWindow**: 배치 이미지 처리 윈도우 연동
+
+**UI 구조**:
+```
+┌─ Image Tagger (WD14) ─┐
+│ [이미지 썸네일]         │
+│ [📁 이미지 선택]        │
+│ [🏷️ 태그 추출]         │
+│ [📋 배치 처리]         │
+│                        │
+│ 추출된 태그:           │
+│ [태그 목록 표시...]    │
+└────────────────────────┘
+```
+
+**시그널**:
+```python
+class ImageTaggerBlock(BlockWidget):
+    tags_extracted = pyqtSignal(str)  # 추출된 태그 문자열
+```
+
+**InteractiveWindow 연동**:
+```python
+# interactive_window.py:324-345
+self.image_tagger_block = ImageTaggerBlock()
+self.image_tagger_block.set_quick_search_block(self.quick_search_block)
+self.image_tagger_block.set_main_prompt_block(self.main_prompt_block)
+self.image_tagger_block.tags_extracted.connect(self._on_tags_extracted_from_image)
+
+def _on_tags_extracted_from_image(self, tags: str):
+    """추출된 태그를 메인 프롬프트에 덮어쓰기"""
+    formatted_html = self.main_prompt_block._format_prompt_with_categories(tags)
+    self.main_prompt_block.set_prompt_html(formatted_html)
+```
+
+### 11. ParameterPanel (생성 파라미터 패널)
+
+**위치**: [ui/interactive/parameter_panel.py](parameter_panel.py)
+
+**역할**: 이미지 생성 파라미터 설정 (FloatingControlBar에 포함됨)
+
+**설정 항목**:
+```python
+{
+    'model': 'NAID4.5F',              # 모델 선택
+    'steps': 28,                       # 샘플링 스텝
+    'cfg_scale': 5.0,                  # CFG Scale
+    'sampler': 'k_euler_ancestral',    # 샘플러
+    'scheduler': 'karras',             # 노이즈 스케줄
+    'cfg_rescale': 0.25,               # CFG Rescale
+    'VAR+': True                       # Quality Toggle (V4+)
+}
+```
+
+**UI 구조**:
+```
+┌─ 생성 파라미터 ─┐
+│ 모델: [NAID4.5F ▼]     │
+│ Steps: [28]            │
+│ CFG Scale: [5.0]       │
+│ Sampler: [k_euler... ▼]│
+│ Scheduler: [karras ▼]  │
+│ CFG Rescale: [0.25]    │
+│ ☑ VAR+ (Quality)       │
+└────────────────────────┘
+```
+
+**메서드**:
+```python
+def get_params(self) -> dict:
+    """현재 파라미터 딕셔너리 반환"""
+
+def set_params(self, params: dict):
+    """파라미터 적용"""
+```
+
+---
+
+## 이미지 생성 플로우
+
+### collect_generation_params()
+
+**위치**: [interactive_window.py:954-1200](../interactive_window.py#L954-L1200)
+
+**역할**: 모든 블록에서 파라미터를 수집하여 GenerationRequest 생성
+
+**NAI 프롬프트 조합 규칙**:
+```python
+# STEP 1: 인원수 태그 (Main > Person, solo 제외)
+if main_count_tags:
+    final_tags_list.extend(main_count_tags)
+elif person_count_tags:
+    final_tags_list.extend(person_count_tags)
+
+# STEP 2: Artist Tags
+final_tags_list.extend(artist_tags_list)
+
+# STEP 3: Composition Tags
+final_tags_list.extend(composition_tags_list)
+
+# STEP 4: Main Prompt (중복 제거 + composition 필터링)
+for tag in main_other_tags:
+    if tag_lower not in existing_tags_lower:
+        if not (composition_tags_list and tag_lower in composition_tags_set):
+            final_tags_list.append(tag)
+
+# STEP 5: Rating (기존 rating 없으면)
+if not has_rating and person_rating_tags:
+    final_tags_list.extend(person_rating_tags)
+
+# STEP 6: Quality Tags (마지막)
+final_tags_list.extend(quality_tags_list)
+```
+
+**NAI 캐릭터 데이터**:
+```python
+# CharacterPromptBlock → NAICharacterData
+nai_characters = NAICharacterData(
+    characters=character_prompts,  # ["chara1", "chara2", ...]
+    uc=character_negatives           # ["uc1", "uc2", ...]
+)
+
+# CharacterReferenceBlock → NAICharacterReferenceData
+nai_char_reference = NAICharacterReferenceData(
+    director_reference_images=[image_base64],
+    director_reference_secondary_strength_values=[fidelity],
+    # ... (상세는 CharacterReferenceBlock 섹션 참조)
+)
+```
+
+**GenerationRequest 생성**:
+```python
+generation_request = GenerationRequest(
+    params=params,                           # 생성 파라미터
+    source_row=pd.Series(dtype=object),      # 빈 Series
+    nai_characters=nai_characters,           # 캐릭터 데이터
+    nai_character_reference=nai_char_reference  # 레퍼런스 데이터
+)
+```
+
+---
+
+## 저장/로드 시스템
+
+### save_interactive_data()
+
+**위치**: [interactive_window.py:1310-1354](../interactive_window.py#L1310-L1354)
+
+**저장 대상**:
+- ArtistTagBlock: 아티스트 태그
+- QualityTagBlock: 품질 태그
+- NegativePromptBlock: 네거티브 프롬프트
+- MainPromptBlock: 메인 프롬프트 (raw text)
+- ParameterPanel: 생성 파라미터
+
+**저장 경로**: `save/interactive_data.json`
+
+**데이터 구조**:
+```json
+{
+  "artist_tags": "crab_d, omao, ...",
+  "quality_tags": "masterpiece, best quality, ...",
+  "negative_prompt": "bad anatomy, ...",
+  "main_prompt": "1girl, blonde hair, ...",
+  "parameters": {
+    "model": "NAID4.5F",
+    "steps": 28,
+    "cfg_scale": 5.0,
+    "sampler": "k_euler_ancestral",
+    "scheduler": "karras",
+    "cfg_rescale": 0.25,
+    "VAR+": true
+  }
+}
+```
+
+### load_interactive_data()
+
+**위치**: [interactive_window.py:1355-1391](../interactive_window.py#L1355-L1391)
+
+**호출 시점**: `_on_show_init()` - 창 표시 후 초기화
+
+**복원 대상**: save_interactive_data()와 동일
+
+---
+
+## 플로팅 패널 자동 정렬 시스템
+
+### _reposition_floating_panels()
+
+**위치**: [interactive_window.py:459-540](../interactive_window.py#L459-L540)
+
+**동작 방식**:
+1. **최초 1회 자동 정렬** (프로그램 시작 시)
+2. **is_floating_pinned = True** 상태에서만 자동 정렬
+3. **블록 접기/펼치기 시** 너비 변경 → 자동 정렬 트리거
+
+**정렬 순서** (상단 수평 배치, 5px 간격):
+```python
+spacing = get_scaled_size(5)
+
+# 1. Main Prompt (항상 기준)
+self.floating_panel.move(spacing, spacing)
+next_x = floating_panel.x() + floating_panel.width() + spacing
+
+# 2. Character Prompts (보이는 것만)
+for panel in self.char_panels:
+    if panel.isVisible():
+        panel.move(next_x, common_y)
+        next_x += panel.width() + spacing
+
+# 3. Additional Negative Prompt
+self.floating_neg_panel.move(next_x, common_y)
+next_x += floating_neg_panel.width() + spacing
+
+# 4. Composition Block
+self.floating_comp_panel.move(next_x, common_y)
+# ... 이하 동일
+```
+
+**TagViewer 위치 동기화**:
+```python
+# Composition Block 중앙 기준으로 TagViewer 배치 (1회만)
+if not self._tag_viewer_repositioned:
+    comp_geo = self.floating_comp_panel.geometry()
+    target_x = comp_geo.center().x() - (tag_viewer_width // 2) + offset
+    target_y = comp_geo.bottom() + spacing
+    self.tag_viewer_panel.move(target_x, target_y)
+    self._tag_viewer_repositioned = True
+```
+
+**FloatingControlBar 연동**:
+```python
+# 핀 버튼 토글 → is_floating_pinned 변경
+self.control_bar.float_pin_toggled.connect(self._on_float_pin_toggled)
+
+def _on_float_pin_toggled(self, checked):
+    self.is_floating_pinned = checked
+    if checked:
+        self._reposition_floating_panels()
 ```
 
 ---
@@ -1410,6 +1944,57 @@ print(f"설명: {tag_data.get('description', '없음')}")
 ---
 
 ## 버전 히스토리
+
+### v1.3 (2025-01-29)
+- 🆕 **8개 새 파일 추가**: 대규모 기능 확장
+  - `image_plane.py` - PIL 이미지 뷰어 (클릭 시그널 지원)
+  - `floating_control_bar.py` - 하단 플로팅 컨트롤 바 (생성/파라미터/로드/저장/설정/종료)
+  - `character_prompt_block.py` - 6-슬롯 캐릭터 프롬프트 시스템
+  - `character_reference_block.py` - NAI Director Tool 통합 (NAID4.5)
+  - `image_tagger_block.py` - WD14 이미지 태거 통합
+  - `parameter_panel.py` - 생성 파라미터 패널 (플로팅)
+  - `batch_image_processing_window.py` - 배치 이미지 처리 윈도우
+  - `output_preview_dialog.py` - 출력 미리보기 다이얼로그
+- 🎨 **레이아웃 대폭 확장**: 2개 → 9개 플로팅 요소
+  - ImagePlane (중앙 이미지 뷰어)
+  - FloatingControlBar (하단 고정)
+  - MainPromptBlock (메인 프롬프트, 플로팅)
+  - CharacterPromptBlock x6 (C1~C6, 플로팅)
+  - CharacterReferenceBlock (NAI Director, 플로팅)
+  - ParameterPanel (생성 파라미터, 플로팅)
+- 🔄 **이미지 생성 플로우 문서화**: `collect_generation_params()` 메서드
+  - STEP 1-6: NAI 프롬프트 조합 규칙 (Character → Reference → Main)
+  - CharacterPromptBlock → NAICharacterData 변환 (6슬롯 순회)
+  - CharacterReferenceBlock → NAICharacterReferenceData 변환
+  - MainPromptBlock prefix/suffix/global_append 통합
+- 💾 **저장/로드 시스템 문서화**: `save/interactive_data.json`
+  - 모든 블록 상태 + 플로팅 패널 위치/크기/고정 상태
+  - ArtistTagBlock 기본 상태: 접힘 → **펼침** (v1.3 변경)
+- 📐 **플로팅 패널 자동 정렬 시스템**: `_reposition_floating_panels()`
+  - 미고정(Unpinned) 패널만 자동 재배치
+  - TagViewer 위치 동기화
+  - FloatingControlBar 통합 (Pinned 여부 관리)
+- 👥 **CharacterPromptBlock 고급 기능**:
+  - 6-슬롯 시스템 (C1~C6) - 각 슬롯마다 독립적인 프롬프트
+  - 성별 기반 필터링 (Male/Female/Both/None) → QuickSearch 연동
+  - 랜덤 생성 지원 (`_handle_char_random_request` 시그널 체인)
+  - Focus 상태 저장/복원 (프롬프트 편집 중 유지)
+- 🎬 **NAI Director Tool 통합**: CharacterReferenceBlock
+  - 6슬롯 Character Reference 지원 (NAID4.5)
+  - 이미지 업로드 + 프롬프트 + 강도 설정
+  - GenerationRequest에 `character_reference_data` 추가
+- 🏷️ **WD14 이미지 태거 통합**: ImageTaggerBlock
+  - 이미지 드래그 앤 드롭 → WD14 모델 자동 태깅
+  - MainPromptBlock 덮어쓰기 시그널 (`overwrite_main_prompt.emit`)
+  - 태그 복사 기능 (클립보드)
+- 📊 **데이터 흐름 대폭 확장**: 5개 주요 시그널 체인 추가
+  - MainPromptBlock → `generate_requested` → collect_generation_params()
+  - CharacterPromptBlock → `char_random_requested` → _handle_char_random_request()
+  - ImageTaggerBlock → `overwrite_main_prompt` → MainPromptBlock
+  - FloatingControlBar → 6개 버튼 시그널 (생성/파라미터/로드/저장/설정/종료)
+  - InteractiveAutocompleteManager → 데이터 로딩 완료 시그널
+- 📁 **주요 컴포넌트 문서 추가**: 6개 섹션 (ImagePlane, FloatingControlBar, CharacterPromptBlock, CharacterReferenceBlock, ImageTaggerBlock, ParameterPanel)
+- 📖 **3개 메이저 섹션 추가**: 이미지 생성 플로우, 저장/로드 시스템, 플로팅 패널 자동 정렬
 
 ### v1.2 (2025-01-22)
 - 🆕 **TagViewer 시스템 추가**: 3단 구조 태그 브라우저 (대분류/소분류/태그)

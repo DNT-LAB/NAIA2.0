@@ -28,6 +28,7 @@ class SequenceTabContainer(QWidget):
     prompt_engineering_toggled = pyqtSignal(bool)  # 프롬프트 엔지니어링 토글 시그널
     quick_first_page_requested = pyqtSignal(list)  # 🆕 결정 + 첫 페이지 생성
     quick_all_pages_requested = pyqtSignal(list)  # 🆕 결정 + 전체 생성
+    close_editing_requested = pyqtSignal()  # 🆕 편집 모드 종료 요청
 
     # 탭 인덱스 상수
     TAB_PREVIEW = 0
@@ -76,6 +77,7 @@ class SequenceTabContainer(QWidget):
         self.edit_widget = SequenceEditWidget(app_context=self.app_context)
         self.edit_widget.prompts_updated.connect(self._on_prompts_updated)
         self.edit_widget.prompt_engineering_toggled.connect(self._on_prompt_engineering_toggled)
+        self.edit_widget.close_editing_requested.connect(self._on_close_editing_requested)
 
         # 미리보기 탭 (edit_widget.apply_prompt_engineering을 prompt_processor로 전달)
         self.preview_widget = SequencePreviewWidget(
@@ -191,6 +193,11 @@ class SequenceTabContainer(QWidget):
         """프롬프트 엔지니어링 토글 시"""
         self.prompt_engineering_toggled.emit(checked)
 
+    def _on_close_editing_requested(self):
+        """편집 모드 종료 요청 시"""
+        print("[SequenceTabContainer] 편집 모드 종료 요청 - 상위로 시그널 전달")
+        self.close_editing_requested.emit()
+
     def switch_to_preview(self):
         """미리보기 탭으로 전환"""
         self.tab_widget.setCurrentIndex(self.TAB_PREVIEW)
@@ -214,3 +221,13 @@ class SequenceTabContainer(QWidget):
     def get_preview_prompts(self) -> list:
         """미리보기 위젯의 프롬프트 목록 반환"""
         return self.preview_widget.get_prompts()
+
+    def expand_prompt_editors(self):
+        """프롬프트 편집기를 확대 모드로 전환 (편집 모드)"""
+        print("[SequenceTabContainer] 프롬프트 편집기 확대 모드 활성화")
+        self.edit_widget.set_expanded_mode(True)
+
+    def restore_prompt_editors(self):
+        """프롬프트 편집기를 원래 크기로 복원 (검색 모드)"""
+        print("[SequenceTabContainer] 프롬프트 편집기 일반 모드 복원")
+        self.edit_widget.set_expanded_mode(False)

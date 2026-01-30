@@ -4,9 +4,12 @@ Turbo Event Sequence Tab
 Sliding Window Inpaint 기반 연속 이미지 시퀀스 생성 탭
 """
 
+import copy
+import random
+
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QFrame, QPushButton, QProgressBar, QCheckBox
+    QLabel, QFrame, QPushButton, QProgressBar, QCheckBox, QMenu
 )
 from PyQt6.QtCore import pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
@@ -19,6 +22,7 @@ from .widgets.event_search_widget import EventSearchWidget
 from .widgets.sequence_tab_container import SequenceTabContainer
 from .widgets.image_viewer_widget import ImageViewerWidget
 from .widgets.history_panel import HistoryPanel
+from .widgets.custom_event_dialog import CustomEventDialog
 
 
 class TurboEventSequenceTabModule(BaseTabModule):
@@ -79,6 +83,7 @@ class TurboEventSequenceTab(QWidget):
         self.is_generating = False
         self.worker = None
         self.confirmed_prompts = []
+        self.original_prompts = []  # 🆕 원본 프롬프트 (수정 감지용)
         self.current_state = self.STATE_IDLE
         self.selected_direction = None  # 'horizontal' or 'vertical'
         self.current_generation_index = 0  # 현재 생성 중인 인덱스
@@ -142,6 +147,8 @@ class TurboEventSequenceTab(QWidget):
         self.sequence_tab_container.quick_all_pages_requested.connect(self._on_quick_all_pages)
         # 🆕 Skip 상태 변경 시 그리드 업데이트
         self.sequence_tab_container.edit_widget.disable_state_changed.connect(self._on_disable_state_changed)
+        # 🆕 편집 모드 종료 요청 시 UI 복원
+        self.sequence_tab_container.close_editing_requested.connect(self._restore_ui_layout)
         layout.addWidget(self.sequence_tab_container, stretch=2)
 
         # 🆕 Favorite 및 연속 생성 컨트롤 패널 (시퀀스 미리보기 아래)
@@ -195,8 +202,35 @@ class TurboEventSequenceTab(QWidget):
         """)
         self.save_favorite_btn.clicked.connect(self._on_save_favorite_btn_clicked)
         self.save_favorite_btn.setEnabled(False)
-        self.save_favorite_btn.setToolTip("현재 시퀀스를 Favorites에 저장합니다")
+        self.save_favorite_btn.setToolTip("클릭하여 저장 옵션 선택 (원본 Favorite / Custom)")
         row1_layout.addWidget(self.save_favorite_btn)
+
+        # 🆕 Favorite 저장 메뉴 생성
+        self.save_menu = QMenu(self)
+        menu_style = f"""
+            QMenu {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 5px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """
+        self.save_menu.setStyleSheet(menu_style)
+
+        # 메뉴 액션 추가
+        self.action_save_original = self.save_menu.addAction("💖 원본 Favorite 저장")
+        self.action_save_original.triggered.connect(self._on_save_original_favorite)
+
+        self.action_save_custom = self.save_menu.addAction("📝 Custom으로 저장")
+        self.action_save_custom.triggered.connect(self._on_save_custom_clicked)
 
         # 연속 생성 체크박스
         self.continuous_checkbox = QCheckBox("🔄 다음 이벤트 연속 생성")
@@ -640,6 +674,274 @@ class TurboEventSequenceTab(QWidget):
         elif self.current_state == self.STATE_GENERATING:
             self.cancel_btn.show()
 
+    def _rearrange_ui_for_editing(self):
+        """시퀀스 확정 후 UI 재배치 (편집 모드)
+
+        - 검색 위젯 숨김
+        - 시퀀스 컨테이너 확대 (전체 좌측 패널 공간 사용)
+        - 프롬프트 입력 폰트/높이 증가
+        """
+        print("[UI] 편집 모드로 전환 - 검색 위젯 숨김, 프롬프트 영역 확대")
+
+        # 업데이트 일시 정지 (깜빡임 방지)
+        self.left_panel.setUpdatesEnabled(False)
+
+        try:
+            # 1. 검색 위젯 숨김
+            self.search_widget.setVisible(False)
+
+            # 2. 레이아웃에서 위젯 제거 후 재추가 (stretch 변경)
+            left_layout = self.left_panel.layout()
+
+            # favorite_panel을 동적으로 찾기 (3번째 위젯)
+            favorite_panel = None
+            if left_layout.count() >= 3:
+                favorite_panel = left_layout.itemAt(2).widget()
+
+            left_layout.removeWidget(self.search_widget)
+            left_layout.removeWidget(self.sequence_tab_container)
+            if favorite_panel:
+                left_layout.removeWidget(favorite_panel)
+
+            # 재추가 (search_widget는 숨김 상태이므로 공간 차지 안 함)
+            left_layout.addWidget(self.search_widget, stretch=0)  # 숨김
+            left_layout.addWidget(self.sequence_tab_container, stretch=1)  # 전체 공간
+            if favorite_panel:
+                left_layout.addWidget(favorite_panel)  # 고정 높이
+
+            # 3. 시퀀스 컨테이너의 프롬프트 입력 확대
+            self.sequence_tab_container.expand_prompt_editors()
+
+        finally:
+            # 업데이트 재개
+            self.left_panel.setUpdatesEnabled(True)
+
+    def _restore_ui_layout(self):
+        """UI 레이아웃 복원 (검색 모드)
+
+        - 검색 위젯 표시
+        - 원래 stretch 비율 복원 (3:2)
+        - 프롬프트 입력 원래 크기로
+        """
+        print("[UI] 검색 모드로 복원 - 검색 위젯 표시, 원래 비율 복원")
+
+        # 업데이트 일시 정지
+        self.left_panel.setUpdatesEnabled(False)
+
+        try:
+            # 1. 검색 위젯 표시
+            self.search_widget.setVisible(True)
+
+            # 2. stretch 복원
+            left_layout = self.left_panel.layout()
+
+            # favorite_panel을 동적으로 찾기 (3번째 위젯)
+            favorite_panel = None
+            if left_layout.count() >= 3:
+                favorite_panel = left_layout.itemAt(2).widget()
+
+            left_layout.removeWidget(self.search_widget)
+            left_layout.removeWidget(self.sequence_tab_container)
+            if favorite_panel:
+                left_layout.removeWidget(favorite_panel)
+
+            left_layout.addWidget(self.search_widget, stretch=3)
+            left_layout.addWidget(self.sequence_tab_container, stretch=2)
+            if favorite_panel:
+                left_layout.addWidget(favorite_panel)
+
+            # 3. 프롬프트 입력 축소
+            self.sequence_tab_container.restore_prompt_editors()
+
+        finally:
+            # 업데이트 재개
+            self.left_panel.setUpdatesEnabled(True)
+
+    def _is_prompts_modified(self) -> bool:
+        """프롬프트가 수정되었는지 확인
+
+        Returns:
+            True: 프롬프트가 수정됨
+            False: 수정 없음 또는 비교 불가
+        """
+        if not self.original_prompts or not self.confirmed_prompts:
+            return False
+
+        if len(self.original_prompts) != len(self.confirmed_prompts):
+            return True
+
+        for original, current in zip(self.original_prompts, self.confirmed_prompts):
+            # general 태그 비교
+            if original.get('general', '') != current.get('general', ''):
+                return True
+            # rating 비교
+            if str(original.get('rating', '')) != str(current.get('rating', '')):
+                return True
+
+        return False
+
+    def _update_save_menu(self):
+        """저장 메뉴 액션 활성화 조건 확인"""
+        # Custom 저장: 프롬프트가 확정되었으면 항상 가능 (다이얼로그에서 추가 편집 가능)
+        has_prompts = len(self.confirmed_prompts) > 0
+        is_modified = self._is_prompts_modified()
+
+        # Custom 액션은 프롬프트가 있으면 항상 활성화
+        self.action_save_custom.setEnabled(has_prompts)
+
+        # 버튼 색상: 수정 여부에 따라 변경 (주황 = 수정됨, 핑크 = 수정 안 됨)
+        if has_prompts and is_modified:
+            print("[Menu] 버튼 색상 변경 - 프롬프트 수정 감지 (주황)")
+            # 버튼 색상을 주황색으로 변경 (수정됨 표시)
+            self.save_favorite_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['bg_tertiary']};
+                    color: #ffa726;
+                    border: 1px solid #ffa726;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(4)}px {get_scaled_size(10)}px;
+                    font-size: {get_scaled_font_size(12) + 4}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #ffa726;
+                    color: {DARK_COLORS['text_primary']};
+                }}
+                QPushButton:pressed {{
+                    background-color: #ff9800;
+                }}
+                QPushButton:disabled {{
+                    color: {DARK_COLORS['text_secondary']};
+                    background-color: {DARK_COLORS['bg_primary']};
+                    border-color: {DARK_COLORS['border']};
+                }}
+            """)
+        else:
+            print("[Menu] 버튼 색상 변경 - 수정 없음 (핑크)")
+            # 버튼 색상을 원래대로 (핑크)
+            self.save_favorite_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['bg_tertiary']};
+                    color: #ff6b9d;
+                    border: 1px solid #ff6b9d;
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(4)}px {get_scaled_size(10)}px;
+                    font-size: {get_scaled_font_size(12) + 4}px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #ff6b9d;
+                    color: {DARK_COLORS['text_primary']};
+                }}
+                QPushButton:pressed {{
+                    background-color: #ff4081;
+                }}
+                QPushButton:disabled {{
+                    color: {DARK_COLORS['text_secondary']};
+                    background-color: {DARK_COLORS['bg_primary']};
+                    border-color: {DARK_COLORS['border']};
+                }}
+            """)
+
+    def _generate_custom_event_id(self) -> int:
+        """Custom 이벤트 ID 생성 (음수 ID 사용하여 NAI 데이터와 구분)"""
+        return -random.randint(100000000, 999999999)
+
+    def _on_save_favorite_btn_clicked(self):
+        """Favorite 저장 버튼 클릭 - 메뉴 표시"""
+        # 버튼 위치에서 메뉴 표시
+        self.save_menu.exec(self.save_favorite_btn.mapToGlobal(self.save_favorite_btn.rect().bottomLeft()))
+
+    def _on_save_original_favorite(self):
+        """원본 Favorite 저장 (기존 동작)"""
+        # EventSearchWidget의 내부 저장 메서드 호출
+        self.search_widget._on_save_favorite_clicked()
+
+    def _on_save_custom_clicked(self):
+        """Custom 이벤트 저장 - CustomEventDialog 열기"""
+        if not self.confirmed_prompts:
+            print("[Custom] 저장 불가: 확정된 프롬프트 없음")
+            return
+
+        try:
+            from pathlib import Path
+
+            # CustomEventDialog 생성
+            data_dir = Path("data")
+            dialog = CustomEventDialog(
+                data_dir=data_dir,
+                app_context=self.app_context,
+                parent=self
+            )
+
+            # 현재 프롬프트를 다이얼로그에 설정
+            # Parent 프롬프트 설정
+            parent_prompt = self.confirmed_prompts[0]
+            dialog.parent_widget.set_prompt(parent_prompt.get('general', ''))
+            dialog.parent_widget.set_rating(parent_prompt.get('rating', 's'))
+
+            # Child 프롬프트 설정
+            # 필요한 Child 수 계산
+            num_children_needed = len(self.confirmed_prompts) - 1  # Parent 제외
+
+            # 부족하면 추가
+            while len(dialog.child_widgets) < num_children_needed:
+                dialog._add_child_widget()
+
+            # 많으면 삭제 (역순으로 삭제)
+            while len(dialog.child_widgets) > num_children_needed:
+                widget = dialog.child_widgets.pop()
+                dialog.prompts_layout.removeWidget(widget)
+                widget.setParent(None)
+                widget.deleteLater()
+
+            # 기존 Child 위젯에 프롬프트 설정 (인덱스 재정렬 포함)
+            for i, prompt in enumerate(self.confirmed_prompts[1:], start=0):
+                if i < len(dialog.child_widgets):
+                    child = dialog.child_widgets[i]
+                    child.set_prompt(prompt.get('general', ''))
+                    child.set_rating(prompt.get('rating', 's'))
+                    # 인덱스 재정렬 (i+1이 Child 번호)
+                    child.update_index(i + 1)
+
+            # 생성된 이미지가 있으면 썸네일로 설정
+            if self.generated_images:
+                print(f"[Custom] 생성된 이미지 {len(self.generated_images)}개를 썸네일로 설정")
+
+                # Parent 이미지 설정 (인덱스 0)
+                if len(self.generated_images) > 0 and self.generated_images[0] is not None:
+                    parent_img = self.generated_images[0]
+                    dialog.parent_widget.set_image(parent_img)
+                    print("[Custom] Parent 썸네일 설정 완료")
+
+                # Child 이미지 설정 (인덱스 1부터)
+                for i in range(1, len(self.generated_images)):
+                    img = self.generated_images[i]
+                    child_index = i - 1  # Child 위젯 인덱스는 0부터 시작
+
+                    if img is not None and child_index < len(dialog.child_widgets):
+                        dialog.child_widgets[child_index].set_image(img)
+                        print(f"[Custom] Child #{i} 썸네일 설정 완료")
+
+                # 그리드 버튼 상태 업데이트
+                dialog._update_grid_button_state()
+
+            # diff 재계산
+            dialog._recalculate_all_diffs()
+
+            # 다이얼로그 표시
+            if dialog.exec():
+                # 저장 성공 시 원본 프롬프트 갱신
+                self.original_prompts = copy.deepcopy(self.confirmed_prompts)
+                # 메뉴 업데이트 (Custom 저장 비활성화)
+                self._update_save_menu()
+                print("✅ [Custom] CustomEventDialog를 통한 저장 완료")
+
+        except Exception as e:
+            print(f"❌ [Custom] CustomEventDialog 열기 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
     # ===== 이벤트 핸들러 =====
 
     def _on_parent_selected(self, parent_id: int, sequence_df):
@@ -668,6 +970,8 @@ class TurboEventSequenceTab(QWidget):
         """프롬프트 수정 시 (수정 탭에서)"""
         print(f"📝 Prompts updated: {len(prompts)} items")
         self.confirmed_prompts = prompts
+        # 🆕 Custom 저장 버튼 활성화 조건 확인
+        self._update_save_menu()
 
     def _on_prompt_engineering_toggled(self, checked: bool):
         """프롬프트 엔지니어링 토글 시 - 시퀀스 재생성 (수정 탭 유지)"""
@@ -696,6 +1000,7 @@ class TurboEventSequenceTab(QWidget):
         """시퀀스 확정 시"""
         print(f"✅ Sequence confirmed: {len(prompts)} prompts")
         self.confirmed_prompts = prompts
+        self.original_prompts = copy.deepcopy(prompts)  # 🆕 원본 프롬프트 저장 (수정 감지용)
         self.generated_images = []
         self.current_generation_index = 0
         self.current_viewing_index = -1  # 🆕 초기화
@@ -705,6 +1010,10 @@ class TurboEventSequenceTab(QWidget):
         # 🆕 재생성 버튼 재활성화 (새 시퀀스이므로 순서 변경 상태 초기화)
         self.regenerate_btn.setEnabled(True)
         self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
+        # 🆕 UI 재배치 (편집 모드)
+        self._rearrange_ui_for_editing()
+        # 🆕 Custom 저장 버튼 초기화 (수정 없음 상태)
+        self._update_save_menu()
         # 🆕 자동으로 가로 해상도 선택
         self._on_direction_selected('horizontal')
 
@@ -713,6 +1022,7 @@ class TurboEventSequenceTab(QWidget):
         print(f"⏩ Quick first page: {len(prompts)} prompts")
         # 시퀀스 확정 로직 실행
         self.confirmed_prompts = prompts
+        self.original_prompts = copy.deepcopy(prompts)  # 🆕 원본 프롬프트 저장 (수정 감지용)
         self.generated_images = []
         self.current_generation_index = 0
         self.current_viewing_index = -1
@@ -720,6 +1030,10 @@ class TurboEventSequenceTab(QWidget):
         self.image_viewer.clear()
         self.regenerate_btn.setEnabled(True)
         self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
+        # 🆕 UI 재배치 (편집 모드)
+        self._rearrange_ui_for_editing()
+        # 🆕 Custom 저장 버튼 초기화 (수정 없음 상태)
+        self._update_save_menu()
         # 자동으로 가로 해상도 선택 후 첫 페이지 생성
         self._on_direction_selected('horizontal')
         # 바로 첫 페이지 생성 시작
@@ -730,6 +1044,7 @@ class TurboEventSequenceTab(QWidget):
         print(f"⏭ Quick all pages: {len(prompts)} prompts")
         # 시퀀스 확정 로직 실행
         self.confirmed_prompts = prompts
+        self.original_prompts = copy.deepcopy(prompts)  # 🆕 원본 프롬프트 저장 (수정 감지용)
         self.generated_images = []
         self.current_generation_index = 0
         self.current_viewing_index = -1
@@ -737,6 +1052,10 @@ class TurboEventSequenceTab(QWidget):
         self.image_viewer.clear()
         self.regenerate_btn.setEnabled(True)
         self.regenerate_btn.setToolTip("재생성할 이미지를 선택해주세요")
+        # 🆕 UI 재배치 (편집 모드)
+        self._rearrange_ui_for_editing()
+        # 🆕 Custom 저장 버튼 초기화 (수정 없음 상태)
+        self._update_save_menu()
         # 자동으로 가로 해상도 선택 후 전체 생성
         self._on_direction_selected('horizontal')
         # 바로 전체 시퀀스 생성 시작

@@ -7,7 +7,7 @@ Sequence Edit Widget
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QScrollArea, QTextEdit, QCheckBox
+    QLabel, QScrollArea, QTextEdit, QCheckBox, QPushButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont, QTextCursor
@@ -31,6 +31,7 @@ class SequenceEditWidget(QWidget):
     prompts_updated = pyqtSignal(list)  # 수정된 프롬프트 리스트
     prompt_engineering_toggled = pyqtSignal(bool)  # 프롬프트 엔지니어링 토글 시그널
     disable_state_changed = pyqtSignal(int, bool)  # 인덱스, 비활성화 여부
+    close_editing_requested = pyqtSignal()  # 편집 모드 종료 요청
 
     def __init__(self, app_context=None, parent=None):
         super().__init__(parent)
@@ -40,6 +41,7 @@ class SequenceEditWidget(QWidget):
         self.current_highlight_index = -1  # 현재 하이라이트 인덱스
         self.prompt_engineering_enabled = False  # 프롬프트 엔지니어링 토글 상태
         self.disabled_indices = set()  # 비활성화된 인덱스 집합
+        self.is_expanded = False  # 확대 모드 상태
 
         self._init_ui()
 
@@ -104,6 +106,29 @@ class SequenceEditWidget(QWidget):
         """)
         self.prompt_engineering_checkbox.toggled.connect(self._on_prompt_engineering_toggled)
         title_layout.addWidget(self.prompt_engineering_checkbox)
+
+        # 종료 버튼 (적색 배경)
+        self.close_btn = QPushButton("[ 종료 ]")
+        self.close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ACCENT_RED};
+                color: white;
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(4)}px {get_scaled_size(12)}px;
+                font-size: {get_scaled_font_size(12) + 3}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {ACCENT_RED_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: #B71C1C;
+            }}
+        """)
+        self.close_btn.clicked.connect(self._on_close_clicked)
+        self.close_btn.setVisible(False)  # 처음에는 숨김 (확대 모드에서만 표시)
+        title_layout.addWidget(self.close_btn)
 
         title_layout.addStretch()
 
@@ -636,3 +661,54 @@ class SequenceEditWidget(QWidget):
     def set_app_context(self, app_context):
         """AppContext 설정 (외부에서 주입)"""
         self.app_context = app_context
+
+    def _on_close_clicked(self):
+        """종료 버튼 클릭 - 편집 모드 종료 시그널 발생"""
+        print("[SequenceEditWidget] 종료 버튼 클릭 - 검색 모드로 복원 요청")
+        self.close_editing_requested.emit()
+
+    def set_expanded_mode(self, expanded: bool):
+        """확대 모드 설정 (편집 모드 전환 시)
+
+        Args:
+            expanded: True=확대 모드 (폰트+4px, 높이+30px), False=일반 모드
+        """
+        if self.is_expanded == expanded:
+            return  # 상태 변화 없음
+
+        self.is_expanded = expanded
+        print(f"[SequenceEditWidget] {'확대' if expanded else '일반'} 모드로 전환")
+
+        # 종료 버튼 가시성 토글
+        self.close_btn.setVisible(expanded)
+
+        # 폰트 크기 및 높이 계산
+        if expanded:
+            font_size = get_scaled_font_size(16) + 3  # 12 → 16 (+4px)
+            min_height = get_scaled_size(90)  # 60 → 90 (+30px)
+            max_height = 16777215  # QWIDGETSIZE_MAX - 높이 제약 제거 (자유롭게 확장)
+        else:
+            font_size = get_scaled_font_size(12) + 3  # 기본값
+            min_height = get_scaled_size(60)  # 기본값
+            max_height = get_scaled_size(120)  # 기본값
+
+        # 모든 TextEdit 위젯 업데이트
+        for frame, label, textedit, added_tags, auto_inserted_tags, disable_checkbox in self.prompt_frames:
+            # 높이 업데이트
+            textedit.setMinimumHeight(min_height)
+            textedit.setMaximumHeight(max_height)
+
+            # 스타일 업데이트 (폰트 크기 포함)
+            textedit.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: {DARK_COLORS['bg_tertiary']};
+                    color: {DARK_COLORS['text_primary']};
+                    border: 1px solid {DARK_COLORS['border']};
+                    border-radius: {get_scaled_size(4)}px;
+                    padding: {get_scaled_size(4)}px;
+                    font-size: {font_size}px;
+                }}
+                QTextEdit:focus {{
+                    border-color: {DARK_COLORS['accent_blue']};
+                }}
+            """)

@@ -188,16 +188,19 @@ class GenerationParamsManager:
                 settings["gen_cb_터보 옵션"] = False
                 settings["gen_cb_와일드카드 단독 모드"] = False
 
-            # 🆕 ComfyUI 모드일 때 ComfyUI 전용 파라미터 수집
-            if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
-                settings["v_prediction"] = mw.v_prediction_checkbox.isChecked()
+            # 🆕 ComfyUI 모드일 때 ComfyUI 전용 파라미터 수집 (라디오 버튼 기반)
+            if hasattr(mw, 'eps_radio') and hasattr(mw, 'v_pred_radio') and hasattr(mw, 'anima_radio'):
+                # 선택된 라디오 버튼 확인
+                if mw.eps_radio.isChecked():
+                    settings["sampling_mode"] = "eps"
+                elif mw.v_pred_radio.isChecked():
+                    settings["sampling_mode"] = "v_prediction"
+                elif mw.anima_radio.isChecked():
+                    settings["sampling_mode"] = "anima"
+                else:
+                    settings["sampling_mode"] = "eps"  # 기본값
             else:
-                settings["v_prediction"] = False
-            
-            if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
-                settings["zsnr"] = mw.zsnr_checkbox.isChecked()
-            else:
-                settings["zsnr"] = False
+                settings["sampling_mode"] = "eps"  # 기본값
 
             # WEBUI 전용 파라미터 수집
             if hasattr(mw, 'enable_hr_checkbox'):
@@ -284,9 +287,8 @@ class GenerationParamsManager:
             "gen_cb_터보 옵션": False,
             "gen_cb_와일드카드 단독 모드": False,
 
-            #comfyui
-            "v_prediction": False,
-            "zsnr": False,
+            # ComfyUI 샘플링 모드 (eps, v_prediction, anima)
+            "sampling_mode": "eps",
             
             # 기타 체크박스들
             "random_resolution_checked": False,
@@ -430,11 +432,21 @@ class GenerationParamsManager:
             if hasattr(mw, 'hires_steps_spinbox'):
                 mw.hires_steps_spinbox.setValue(settings.get("hires_steps", 0))
 
-            if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
-                mw.v_prediction_checkbox.setChecked(settings.get("v_prediction", False))
-            
-            if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
-                mw.zsnr_checkbox.setChecked(settings.get("zsnr", False))
+            # ComfyUI 샘플링 모드 라디오 버튼 설정
+            if hasattr(mw, 'eps_radio') and hasattr(mw, 'v_pred_radio') and hasattr(mw, 'anima_radio'):
+                sampling_mode = settings.get("sampling_mode", "eps")
+
+                # 적절한 라디오 버튼 선택
+                if sampling_mode == "eps":
+                    mw.eps_radio.setChecked(True)
+                elif sampling_mode == "v_prediction":
+                    mw.v_pred_radio.setChecked(True)
+                elif sampling_mode == "anima":
+                    mw.anima_radio.setChecked(True)
+                else:
+                    mw.eps_radio.setChecked(True)  # 기본값
+
+                print(f"✅ ComfyUI 샘플링 모드 설정: {sampling_mode}")
             
             print(f"✅ 생성 파라미터 UI 적용 완료")
             

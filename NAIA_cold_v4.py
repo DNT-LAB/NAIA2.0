@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
     QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox, QSpinBox, QSlider, QDoubleSpinBox,
-    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy
+    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy, QRadioButton
 )
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
@@ -63,7 +63,7 @@ def setup_webengine():
     # QApplication 생성 전 필수 설정
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
-    os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
+    #os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
     
     # WebEngine 모듈 사전 로드
     try:
@@ -1709,17 +1709,45 @@ class ModernMainWindow(QMainWindow):
         comfyui_section_label.setStyleSheet(DARK_STYLES['label_style'].replace(f"font-size: {get_scaled_font_size(19)}px;", f"font-size: {get_scaled_font_size(18)}px; font-weight: 600;"))
         self.comfyui_option_widget_layout.addWidget(comfyui_section_label)
 
-        # v-prediction 체크박스
-        self.v_prediction_checkbox = QCheckBox("v-prediction")
-        self.v_prediction_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-        self.v_prediction_checkbox.setToolTip("v-prediction 샘플링 모드를 사용합니다 (최신 AI 모델 지원)")
-        self.comfyui_option_widget_layout.addWidget(self.v_prediction_checkbox)
+        # 샘플링 모드 선택 (라디오 버튼 그룹)
+        sampling_mode_label = QLabel("샘플링 모드:")
+        sampling_mode_label.setStyleSheet(DARK_STYLES['label_style'])
+        self.comfyui_option_widget_layout.addWidget(sampling_mode_label)
 
-        # ZSNR 체크박스
-        self.zsnr_checkbox = QCheckBox("ZSNR (Zero SNR)")
-        self.zsnr_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-        self.zsnr_checkbox.setToolTip("Zero Signal-to-Noise Ratio 옵션을 사용합니다")
-        self.comfyui_option_widget_layout.addWidget(self.zsnr_checkbox)
+        # 라디오 버튼 컨테이너
+        sampling_mode_container = QWidget()
+        sampling_mode_layout = QHBoxLayout(sampling_mode_container)
+        sampling_mode_layout.setContentsMargins(0, 0, 0, 0)
+        sampling_mode_layout.setSpacing(12)
+
+        # EPS 라디오 버튼 (기본값)
+        self.eps_radio = QRadioButton("EPS")
+        self.eps_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.eps_radio.setToolTip("기본 Epsilon 샘플링 모드 (CheckpointLoaderSimple 사용)")
+        self.eps_radio.setChecked(True)
+
+        # V-Pred 라디오 버튼
+        self.v_pred_radio = QRadioButton("V-Pred")
+        self.v_pred_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.v_pred_radio.setToolTip("V-Prediction 샘플링 모드 (CheckpointLoaderSimple + ModelSamplingDiscrete)")
+
+        # ANIMA 라디오 버튼
+        self.anima_radio = QRadioButton("ANIMA")
+        self.anima_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.anima_radio.setToolTip("최신 ANIMA 모델 형식 (UNETLoader + CLIPLoader 사용)")
+
+        # 버튼 그룹으로 묶기 (배타적 선택)
+        self.sampling_mode_group = QButtonGroup(self)
+        self.sampling_mode_group.addButton(self.eps_radio)
+        self.sampling_mode_group.addButton(self.v_pred_radio)
+        self.sampling_mode_group.addButton(self.anima_radio)
+
+        sampling_mode_layout.addWidget(self.eps_radio)
+        sampling_mode_layout.addWidget(self.v_pred_radio)
+        sampling_mode_layout.addWidget(self.anima_radio)
+        sampling_mode_layout.addStretch()
+
+        self.comfyui_option_widget_layout.addWidget(sampling_mode_container)
 
         # 1. 기존 라벨을 "워크플로우 선택"으로 재사용하고 활성화합니다.
         comfyui_workflow_label = QLabel("워크플로우 선택:")
@@ -2508,24 +2536,39 @@ class ModernMainWindow(QMainWindow):
             # 🆕 추가: ComfyUI 전용 파라미터들 (현재 모드가 ComfyUI일 때만)
             current_mode = self.get_current_api_mode()
             if current_mode == "COMFYUI":
-                if hasattr(self, 'v_prediction_checkbox') and hasattr(self, 'zsnr_checkbox'):
+                if hasattr(self, 'eps_radio') and hasattr(self, 'v_pred_radio') and hasattr(self, 'anima_radio'):
+                    # 선택된 샘플링 모드 확인
+                    if self.eps_radio.isChecked():
+                        sampling_mode = "eps"
+                        workflow_type = "checkpoint"
+                    elif self.v_pred_radio.isChecked():
+                        sampling_mode = "v_prediction"
+                        workflow_type = "checkpoint"
+                    elif self.anima_radio.isChecked():
+                        sampling_mode = "anima"
+                        workflow_type = "unet"
+                    else:
+                        # 기본값
+                        sampling_mode = "eps"
+                        workflow_type = "checkpoint"
+
                     params.update({
-                        "sampling_mode": "v_prediction" if self.v_prediction_checkbox.isChecked() else "eps",
-                        "zsnr": self.zsnr_checkbox.isChecked(),
+                        "sampling_mode": sampling_mode,
+                        "workflow_type": workflow_type,  # checkpoint 또는 unet
                         "filename_prefix": "NAIA_ComfyUI"  # 기본 파일명 접두사
                     })
-                    
+
                     # 디버그 정보
                     print(f"🎨 ComfyUI 파라미터 수집 완료:")
                     print(f"   - 샘플링 모드: {params['sampling_mode']}")
-                    print(f"   - ZSNR: {params['zsnr']}")
+                    print(f"   - 워크플로우 타입: {params['workflow_type']}")
                     print(f"   - 해상도: {params['width']}x{params['height']}")
                     print(f"   - 스텝: {params['steps']}, CFG: {params['cfg_scale']}")
                 else:
                     # ComfyUI 위젯이 아직 초기화되지 않은 경우 기본값 사용
                     params.update({
                         "sampling_mode": "eps",
-                        "zsnr": False,
+                        "workflow_type": "checkpoint",
                         "filename_prefix": "NAIA_ComfyUI"
                     })
                     print("⚠️ ComfyUI 위젯이 초기화되지 않아 기본값을 사용합니다.")

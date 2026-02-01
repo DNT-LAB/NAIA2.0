@@ -703,8 +703,21 @@ class GenerationController:
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
 
-        # 🆕 Turbo Sequence 요청인 경우 전용 에러 이벤트 발행
+        # 🆕 Interactive Mode 요청인 경우 전용 에러 이벤트 발행
         if self.current_generation_params:
+            is_interactive_mode = self.current_generation_params.get("interactive_mode_request", False)
+            if is_interactive_mode:
+                print(f"🎨 Interactive Mode 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "interactive_mode_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                # Interactive Mode 요청은 재시도 없이 종료
+                self.current_generation_params = None
+                return
+
+            # 🆕 Turbo Sequence 요청인 경우 전용 에러 이벤트 발행
             is_turbo_sequence = self.current_generation_params.get("turbo_sequence_request", False)
             if is_turbo_sequence:
                 turbo_index = self.current_generation_params.get("turbo_sequence_index", 0)

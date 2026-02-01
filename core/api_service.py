@@ -921,19 +921,27 @@ class APIService:
             def progress_callback(current: int, total: int):
                 if total <= 0:
                     return
-                    
+
                 progress_percent = int((current / total) * 100)
-                
+
                 # 5% 단위로 진행 바 생성 (총 20개 박스)
                 filled_boxes = int(progress_percent / 5)
                 empty_boxes = 20 - filled_boxes
                 progress_bar = "■" * filled_boxes + "□" * empty_boxes
-                
+
                 message = f"ComfyUI 생성 : {progress_percent}% ({current}/{total}) [{progress_bar}]"
-                
+
                 # 상태바에 진행률 표시
                 if hasattr(self, 'app_context') and self.app_context and hasattr(self.app_context, 'main_window'):
                     self.app_context.main_window.status_bar.showMessage(message)
+
+                # 🆕 Interactive Mode를 위한 진행도 이벤트 발행
+                if hasattr(self, 'app_context') and self.app_context:
+                    self.app_context.publish("generation_progress", {
+                        "current": current,
+                        "total": total,
+                        "percent": progress_percent
+                    })
             
             # 7. 이미지 생성 실행
             result = self.comfyui_service.generate_image(workflow, progress_callback)

@@ -245,10 +245,11 @@ class CharacterPromptBlock(BlockWidget):
     remove_character_clicked = pyqtSignal()
     random_field_requested = pyqtSignal(object, list, object, str) # editor, groups, subgroups, field_type
 
-    def __init__(self, index=1, parent=None):
+    def __init__(self, index=1, parent=None, app_context=None):
         # 타이틀: 캐릭터 프롬프트 {index}
         super().__init__(f"캐릭터 프롬프트 {index}", parent, block_type='latent')
         self.index = index
+        self.app_context = app_context
         self._init_content()
         
     def _init_content(self):
@@ -283,6 +284,10 @@ class CharacterPromptBlock(BlockWidget):
             """)
             self.btn_add.clicked.connect(self.add_character_clicked.emit)
             layout.addWidget(self.btn_add)
+
+            # COMFYUI 모드에서 "+ 캐릭터 추가" 버튼 숨김
+            if self.app_context and self.app_context.current_api_mode == 'COMFYUI':
+                self.btn_add.hide()
         else:
             self.btn_remove = QPushButton(" - 캐릭터 제거 ")
             self.btn_remove.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -322,6 +327,9 @@ class CharacterPromptBlock(BlockWidget):
         """
         data = self.get_data()
 
+        # COMFYUI 모드 확인
+        is_comfyui = self.app_context and self.app_context.current_api_mode == 'COMFYUI'
+
         # 1. 성별 태그 (필수, 기본값 "girl")
         gender = data.get('gender', 'girl')
         parts = [gender]
@@ -352,6 +360,10 @@ class CharacterPromptBlock(BlockWidget):
 
         # 네거티브 프롬프트
         negative = data.get('negative', '').strip()
+
+        # COMFYUI 모드: 모든 내용(시선 포함)을 하나의 문자열로 합침
+        if is_comfyui:
+            print(f"🎨 COMFYUI 캐릭터 프롬프트: 모든 필드 통합 (시선 포함)")
 
         return {
             "prompt": full_prompt,

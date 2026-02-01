@@ -30,10 +30,13 @@ class MainPromptBlock(BlockWidget):
     random_prompt_requested = pyqtSignal()  # 랜덤 프롬프트 요청
     generate_requested = pyqtSignal()  # 이미지 생성 요청
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_context=None):
         # block_type='image' (메인 컨텐츠/생성 관련 - 녹색 계열 추천)
         super().__init__("메인 프롬프트", parent, block_type='image')
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+
+        # AppContext 참조 (모드 확인용)
+        self.app_context = app_context
 
         # QuickSearchBlock 참조 (InteractiveWindow에서 설정)
         self.quick_search_block = None
@@ -277,6 +280,75 @@ class MainPromptBlock(BlockWidget):
         result = result.strip(', ')
 
         return result
+
+    def get_categorized_tags(self):
+        """
+        프롬프트를 카테고리별로 분리하여 반환 (COMFYUI + ANIMA 모드용)
+
+        Returns:
+            dict: {
+                "person_tags": str,      # 인원 수 태그 (1girl, 2girls 등)
+                "character_tags": str,   # 캐릭터 관련 태그 (Creatures 그룹)
+                "remaining_tags": str    # 나머지 태그
+            }
+        """
+        text = self.text_edit.toPlainText()
+
+        # PERSON_CATEGORIES 정의
+        PERSON_CATEGORIES = [
+            "none", "solo", "1girl", "2girls", "3girls", "4+girls",
+            "multiple girls", "1boy", "2boys", "3boys", "4+boys",
+            "multiple boys", "1other", "2others", "3others", "4+others",
+            "6+girls", "6+boys", "6+others"
+        ]
+
+        # 카테고리 헤더 제거 후 태그 추출
+        lines = text.split('\n')
+        all_tags = []
+
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            # 쉼표로 분리
+            tags = [tag.strip() for tag in line.split(',') if tag.strip()]
+            all_tags.extend(tags)
+
+        # 카테고리별로 분류
+        person_tags = []
+        character_tags = []
+        remaining_tags = []
+
+        # InteractiveAutocompleteManager에서 태그 데이터 가져오기
+        tags_data = None
+        if self.autocomplete_manager and hasattr(self.autocomplete_manager, 'datasets'):
+            tags_data = self.autocomplete_manager.datasets.get("general", {})
+
+        for tag in all_tags:
+            tag_lower = tag.lower()
+
+            # 1. PERSON_CATEGORIES 체크
+            if tag_lower in PERSON_CATEGORIES:
+                person_tags.append(tag)
+                continue
+
+            # 2. Creatures 그룹 체크 (캐릭터 태그)
+            if tags_data and tag_lower in tags_data:
+                tag_info = tags_data[tag_lower]
+                group = tag_info.get("group", "")
+
+                if group == "Creatures":
+                    character_tags.append(tag)
+                    continue
+
+            # 3. 나머지
+            remaining_tags.append(tag)
+
+        return {
+            "person_tags": ', '.join(person_tags),
+            "character_tags": ', '.join(character_tags),
+            "remaining_tags": ', '.join(remaining_tags)
+        }
 
     def set_prompt(self, prompt_text: str):
         """프롬프트 설정 (플레인 텍스트)"""
@@ -763,13 +835,19 @@ class MainPromptBlock(BlockWidget):
             'hair bun', 'double bun', 'bob cut', 'hime cut'
         ]
 
+        # 가슴 크기 관련
+        breast_sizes = [
+            'flat chest', 'small breasts', 'medium breasts',
+            'large breasts', 'huge breasts', 'gigantic breasts'
+        ]
+
         # 기타 캐릭터 특징
         other_features = [
             'pointy ears', 'animal ears', 'cat ears', 'fox ears',
             'horns', 'wings', 'tail', 'glasses', 'freckles'
         ]
 
-        all_features = hair_colors + eye_colors + hairstyles + other_features
+        all_features = hair_colors + eye_colors + hairstyles + breast_sizes + other_features
 
         return any(feature in tag for feature in all_features)
 

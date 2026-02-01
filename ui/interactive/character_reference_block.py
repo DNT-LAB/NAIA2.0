@@ -118,10 +118,12 @@ class ClickableFrame(QFrame):
 class CharacterReferenceBlock(BlockWidget):
     """
     캐릭터 레퍼런스 이미지 업로드 및 설정을 위한 블록
+    NAI 전용 - COMFYUI 모드에서는 숨김 처리됨
     """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_context=None):
         super().__init__(title="Character Reference", parent=parent)
-        
+
+        self.app_context = app_context
         self.current_image_path = None
         self.current_pil_image = None
         self.char_ref_data = None

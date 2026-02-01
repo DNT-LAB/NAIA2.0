@@ -10,12 +10,98 @@ class ComfyUIWorkflowManager:
     
     def __init__(self):
         self.base_workflow = self._load_base_workflow()
+        self.anima_workflow = self._load_anima_workflow()  # ANIMA 워크플로우 추가
         self.custom_workflows = {}
         self.user_workflow: Optional[Dict[str, Any]] = None
         self.user_workflow_ui: Optional[Dict[str, Any]] = None # [추가] UI 형식 워크플로우 저장
         self.user_workflow_node_map: Optional[Dict[str, str]] = None # 검증 후 생성된 노드 맵
 
         
+    def _load_anima_workflow(self) -> Dict[str, Any]:
+        """ANIMA 모델용 워크플로우 로드 (UNETLoader + CLIPLoader 사용)"""
+        return {
+            "1": {
+                "inputs": {
+                    "images": ["8", 0]
+                },
+                "class_type": "PreviewImage",
+                "_meta": {"title": "이미지 미리보기"}
+            },
+            "8": {
+                "inputs": {
+                    "samples": ["19", 0],
+                    "vae": ["15", 0]
+                },
+                "class_type": "VAEDecode",
+                "_meta": {"title": "VAE 디코드"}
+            },
+            "11": {
+                "inputs": {
+                    "text": "beautiful scenery nature glass bottle landscape, purple galaxy bottle",
+                    "clip": ["45", 0]
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {"title": "CLIP Text Encode (Positive Prompt)"}
+            },
+            "12": {
+                "inputs": {
+                    "text": "text, watermark",
+                    "clip": ["45", 0]
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {"title": "CLIP Text Encode (Negative Prompt)"}
+            },
+            "15": {
+                "inputs": {
+                    "vae_name": "qwen_image_vae.safetensors"
+                },
+                "class_type": "VAELoader",
+                "_meta": {"title": "VAE 로드"}
+            },
+            "19": {
+                "inputs": {
+                    "seed": 156680208750013,
+                    "steps": 30,
+                    "cfg": 4.0,
+                    "sampler_name": "euler_ancestral",
+                    "scheduler": "simple",
+                    "denoise": 1.0,
+                    "model": ["44", 0],
+                    "positive": ["11", 0],
+                    "negative": ["12", 0],
+                    "latent_image": ["28", 0]
+                },
+                "class_type": "KSampler",
+                "_meta": {"title": "KSampler"}
+            },
+            "28": {
+                "inputs": {
+                    "width": 832,
+                    "height": 1216,
+                    "batch_size": 1
+                },
+                "class_type": "EmptyLatentImage",
+                "_meta": {"title": "빈 잠재 이미지"}
+            },
+            "44": {
+                "inputs": {
+                    "unet_name": "anima-preview.safetensors",
+                    "weight_dtype": "default"
+                },
+                "class_type": "UNETLoader",
+                "_meta": {"title": "확산 모델 로드"}
+            },
+            "45": {
+                "inputs": {
+                    "clip_name": "qwen_3_06b_base.safetensors",
+                    "type": "stable_diffusion",
+                    "device": "default"
+                },
+                "class_type": "CLIPLoader",
+                "_meta": {"title": "CLIP 로드"}
+            }
+        }
+
     def _load_base_workflow(self) -> Dict[str, Any]:
         """기본 txt2img 워크플로우 로드 (ModelSamplingDiscrete 포함)"""
         return {
@@ -95,24 +181,44 @@ class ComfyUIWorkflowManager:
     
     def create_workflow_from_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """NAIA 파라미터를 ComfyUI 워크플로우로 변환"""
-        workflow = copy.deepcopy(self.base_workflow)
+        # workflow_type에 따라 적절한 베이스 워크플로우 선택
+        workflow_type = params.get('workflow_type', 'checkpoint')
+
+        if workflow_type == 'unet':
+            workflow = copy.deepcopy(self.anima_workflow)
+        else:
+            workflow = copy.deepcopy(self.base_workflow)
         
-        # 1. 체크포인트 모델 설정
+        # 1. 모델 설정 (workflow_type에 따라 다르게 처리)
         if 'model' in params:
-            workflow["1"]["inputs"]["ckpt_name"] = params['model']
-        
+            if workflow_type == 'unet':
+                # ANIMA 워크플로우: UNETLoader 사용 (노드 44)
+                workflow["44"]["inputs"]["unet_name"] = params['model']
+            else:
+                # 기본 워크플로우: CheckpointLoaderSimple 사용 (노드 1)
+                workflow["1"]["inputs"]["ckpt_name"] = params['model']
+
         # 2. 프롬프트 설정 (주석 및 개행문자 처리)
         if 'input' in params:
             cleaned_input = self._clean_prompt(params['input'])
-            workflow["2"]["inputs"]["text"] = cleaned_input
-        
+            if workflow_type == 'unet':
+                workflow["11"]["inputs"]["text"] = cleaned_input  # ANIMA: 노드 11
+            else:
+                workflow["2"]["inputs"]["text"] = cleaned_input   # 기본: 노드 2
+
         # 3. 네거티브 프롬프트 설정 (주석 및 개행문자 처리)
         if 'negative_prompt' in params:
             cleaned_negative = self._clean_prompt(params['negative_prompt'])
-            workflow["3"]["inputs"]["text"] = cleaned_negative
-        
+            if workflow_type == 'unet':
+                workflow["12"]["inputs"]["text"] = cleaned_negative  # ANIMA: 노드 12
+            else:
+                workflow["3"]["inputs"]["text"] = cleaned_negative   # 기본: 노드 3
+
         # 4. KSampler 파라미터 설정
-        ksampler = workflow["4"]["inputs"]
+        if workflow_type == 'unet':
+            ksampler = workflow["19"]["inputs"]  # ANIMA: 노드 19
+        else:
+            ksampler = workflow["4"]["inputs"]   # 기본: 노드 4
         
         # 시드 설정
         if 'seed' in params:
@@ -135,28 +241,36 @@ class ComfyUIWorkflowManager:
             ksampler["scheduler"] = params['scheduler']
         
         # 5. 해상도 설정
-        latent_image = workflow["5"]["inputs"]
+        if workflow_type == 'unet':
+            latent_image = workflow["28"]["inputs"]  # ANIMA: 노드 28
+        else:
+            latent_image = workflow["5"]["inputs"]   # 기본: 노드 5
+
         if 'width' in params:
             latent_image["width"] = params['width']
         if 'height' in params:
             latent_image["height"] = params['height']
-        
-        # 6. 파일명 접두사 설정
-        if 'filename_prefix' in params:
+
+        # 6. 파일명 접두사 설정 (PreviewImage는 filename_prefix 지원 안 함)
+        if 'filename_prefix' in params and workflow_type != 'unet':
             workflow["7"]["inputs"]["filename_prefix"] = params['filename_prefix']
-        
-        # 7. ModelSamplingDiscrete 설정 (v-prediction 지원)
-        model_sampling = workflow["8"]["inputs"]
-        
-        # v-prediction 모드 설정
-        if 'sampling_mode' in params:
-            sampling_mode = params['sampling_mode'].lower()
-            if sampling_mode in ['eps', 'v_prediction']:
-                model_sampling["sampling"] = sampling_mode
-        
-        # ZSNR (Zero Signal-to-Noise Ratio) 설정
-        if 'zsnr' in params:
-            model_sampling["zsnr"] = bool(params['zsnr'])
+
+        # 7. ModelSamplingDiscrete 설정 (checkpoint 워크플로우에서만 사용)
+        if workflow_type == 'checkpoint':
+            model_sampling = workflow["8"]["inputs"]
+
+            # sampling_mode 설정
+            if 'sampling_mode' in params:
+                sampling_mode = params['sampling_mode'].lower()
+                if sampling_mode in ['eps', 'v_prediction']:
+                    model_sampling["sampling"] = sampling_mode
+
+            # V-Pred 모드에서 ZSNR 자동 설정
+            if 'sampling_mode' in params:
+                if params['sampling_mode'] == 'v_prediction':
+                    model_sampling["zsnr"] = True
+                else:
+                    model_sampling["zsnr"] = False
         
         return workflow
 
@@ -259,44 +373,75 @@ class ComfyUIWorkflowManager:
         node_map = {}
         # [수정] KSampler 외에 다른 커스텀 샘플러도 인식하도록 리스트 사용
         recognized_sampler_types = ["KSampler", "SamplerCustom"]
-        
+
+        # [수정] UNETLoader + CLIPLoader 조합 또는 CheckpointLoaderSimple 중 하나만 있으면 됨
         required_nodes = {
-            "CheckpointLoaderSimple": "checkpoint_loader",
             "CLIPTextEncode": "prompt",
             # "KSampler": "sampler", # 특정 샘플러 대신 리스트 사용
             "EmptyLatentImage": "latent_image",
             "VAEDecode": "vae_decode",
             "SaveImage": "save_image",
             "PreviewImage": "preview_image",
-            "ModelSamplingDiscrete" : "model_sampler",
-            "AlignYourStepsScheduler": "ays_scheduler" # [추가]
+            # ModelSamplingDiscrete는 선택적 (CheckpointLoader 사용 시만 필요)
         }
-        
+
+        # 선택적 노드들 (CheckpointLoaderSimple 방식 또는 UNETLoader 방식)
+        loader_nodes = {
+            "CheckpointLoaderSimple": "checkpoint_loader",
+            "UNETLoader": "unet_loader",
+            "CLIPLoader": "clip_loader",
+            "VAELoader": "vae_loader",
+            "ModelSamplingDiscrete": "model_sampler",
+            "AlignYourStepsScheduler": "ays_scheduler"
+        }
+
         found_nodes = {key: [] for key in required_nodes.keys()}
+        found_loader_nodes = {key: [] for key in loader_nodes.keys()}
         found_sampler_nodes = []
 
         # --- 2. 노드 순회 및 분류 ---
         for node_id, node_data in nodes_by_id.items():
             class_type = node_data.get("type") or node_data.get("class_type")
-            
+
             if class_type in required_nodes:
                 found_nodes[class_type].append(node_id)
-            
+
+            if class_type in loader_nodes:
+                found_loader_nodes[class_type].append(node_id)
+
             # [핵심 수정] 인식 가능한 샘플러 타입인지 확인
             if class_type in recognized_sampler_types:
                 found_sampler_nodes.append(node_id)
 
         # --- 3. 필수 노드 존재 여부 확인 ---
-        if not found_nodes["CheckpointLoaderSimple"]: return False, {"error": "CheckpointLoaderSimple 노드를 찾을 수 없습니다."}
-        if len(found_nodes["CLIPTextEncode"]) < 2: return False, {"error": "CLIPTextEncode 노드가 2개 미만입니다 (Prompt/Negative)."}
-        
-        # [핵심 수정] KSampler 대신 인식된 샘플러가 있는지 확인
+        # 3-1. 모델 로더 확인 (CheckpointLoaderSimple 또는 UNETLoader 중 하나)
+        has_checkpoint_loader = bool(found_loader_nodes["CheckpointLoaderSimple"])
+        has_unet_loader = bool(found_loader_nodes["UNETLoader"])
+        has_clip_loader = bool(found_loader_nodes["CLIPLoader"])
+
+        if not has_checkpoint_loader and not (has_unet_loader and has_clip_loader):
+            return False, {"error": "CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader) 조합이 필요합니다."}
+
+        # 3-2. 프롬프트 인코더 확인
+        if len(found_nodes["CLIPTextEncode"]) < 2:
+            return False, {"error": "CLIPTextEncode 노드가 2개 미만입니다 (Prompt/Negative)."}
+
+        # 3-3. 샘플러 확인
         if not found_sampler_nodes:
             return False, {"error": f"필수 샘플러 노드({'/'.join(recognized_sampler_types)})를 찾을 수 없습니다."}
-            
-        if not found_nodes["ModelSamplingDiscrete"]: return False, {"error": "ModelSamplingDiscrete 노드를 찾을 수 없습니다."}
-        
-        node_map["checkpoint_loader"] = found_nodes["CheckpointLoaderSimple"][0]
+
+        # 3-4. 워크플로우 타입 판별 및 노드 맵 설정
+        if has_checkpoint_loader:
+            node_map["checkpoint_loader"] = found_loader_nodes["CheckpointLoaderSimple"][0]
+            node_map["workflow_type"] = "checkpoint"
+        else:
+            node_map["unet_loader"] = found_loader_nodes["UNETLoader"][0]
+            node_map["clip_loader"] = found_loader_nodes["CLIPLoader"][0]
+            node_map["workflow_type"] = "unet"
+
+            # VAELoader도 ANIMA 워크플로우에서 필요
+            if found_loader_nodes["VAELoader"]:
+                node_map["vae_loader"] = found_loader_nodes["VAELoader"][0]
         
         # --- 4. 샘플러에 연결된 프롬프트 노드 찾기 ---
         # [핵심 수정] 발견된 첫 번째 샘플러를 기준으로 삼음
@@ -327,12 +472,14 @@ class ComfyUIWorkflowManager:
         if found_nodes["EmptyLatentImage"]:
             node_map["latent_image"] = found_nodes["EmptyLatentImage"][0]
 
-        # [추가] AlignYourStepsScheduler 노드 ID 저장
-        if found_nodes.get("AlignYourStepsScheduler"):
-            node_map["ays_scheduler"] = found_nodes["AlignYourStepsScheduler"][0]
+        # [추가] AlignYourStepsScheduler 노드 ID 저장 (선택적)
+        if found_loader_nodes.get("AlignYourStepsScheduler"):
+            node_map["ays_scheduler"] = found_loader_nodes["AlignYourStepsScheduler"][0]
 
-        node_map["model_sampler"] = found_nodes["ModelSamplingDiscrete"][0]
-        
+        # ModelSamplingDiscrete는 checkpoint 워크플로우에서만 사용 (선택적)
+        if found_loader_nodes.get("ModelSamplingDiscrete"):
+            node_map["model_sampler"] = found_loader_nodes["ModelSamplingDiscrete"][0]
+
         return True, node_map
 
     def validate_workflow(self, workflow: Dict[str, Any]) -> bool:
@@ -387,18 +534,45 @@ class ComfyUIWorkflowManager:
             node_map = self.user_workflow_node_map
             workflow_ui = copy.deepcopy(self.user_workflow_ui)
         else:
-            # 기본 워크플로우 사용 시, 맵을 즉석에서 생성
-            is_valid, node_map = self.validate_and_map_workflow(self.base_workflow)
-            if not is_valid: 
-                print("❌ 기본 워크플로우가 유효하지 않습니다.")
-                return None
-            workflow = copy.deepcopy(self.base_workflow)
-            workflow_ui = None # 기본 워크플로우는 UI 형식이 없음
+            # 기본 워크플로우 선택 (workflow_type 파라미터 기반)
+            workflow_type = params.get('workflow_type', 'checkpoint')
+
+            if workflow_type == 'unet':
+                # ANIMA 워크플로우 사용
+                is_valid, node_map = self.validate_and_map_workflow(self.anima_workflow)
+                if not is_valid:
+                    print("❌ ANIMA 워크플로우가 유효하지 않습니다.")
+                    return None
+                workflow = copy.deepcopy(self.anima_workflow)
+            else:
+                # 기본 CheckpointLoader 워크플로우 사용
+                is_valid, node_map = self.validate_and_map_workflow(self.base_workflow)
+                if not is_valid:
+                    print("❌ 기본 워크플로우가 유효하지 않습니다.")
+                    return None
+                workflow = copy.deepcopy(self.base_workflow)
+
+            workflow_ui = None  # 기본 워크플로우는 UI 형식이 없음
 
         try:
-            # 1. 모델 설정
-            workflow[node_map["checkpoint_loader"]]["inputs"]["ckpt_name"] = params['model']
-            
+            # 1. 모델 설정 (워크플로우 타입에 따라 다르게 처리)
+            detected_workflow_type = node_map.get("workflow_type", "checkpoint")
+
+            if detected_workflow_type == "checkpoint" and "checkpoint_loader" in node_map:
+                # CheckpointLoaderSimple 사용
+                workflow[node_map["checkpoint_loader"]]["inputs"]["ckpt_name"] = params['model']
+                print(f"✅ CheckpointLoader 모델 설정: {params['model']}")
+
+            elif detected_workflow_type == "unet" and "unet_loader" in node_map:
+                # UNETLoader 사용
+                workflow[node_map["unet_loader"]]["inputs"]["unet_name"] = params['model']
+                print(f"✅ UNETLoader 모델 설정: {params['model']}")
+
+                # CLIP 모델은 기본값 유지 (필요시 params에서 가져올 수 있음)
+                if "clip_model" in params and "clip_loader" in node_map:
+                    workflow[node_map["clip_loader"]]["inputs"]["clip_name"] = params['clip_model']
+                    print(f"✅ CLIPLoader 모델 설정: {params['clip_model']}")
+
             # 2. 프롬프트 설정 (주석 및 개행문자 처리)
             # 입력 프롬프트 클리닝
             cleaned_input = self._clean_prompt(params['input'])
@@ -482,18 +656,29 @@ class ComfyUIWorkflowManager:
                  workflow[node_map["latent_image"]]["inputs"]["width"] = params['width']
                  workflow[node_map["latent_image"]]["inputs"]["height"] = params['height']
 
-            # 6. ModelSamplingDiscrete 설정 추가 ---
-            if "model_sampler" in node_map:
+            # 6. ModelSamplingDiscrete 설정 (checkpoint 워크플로우에서만 사용)
+            if "model_sampler" in node_map and detected_workflow_type == "checkpoint":
                 model_sampler_node = workflow[node_map["model_sampler"]]["inputs"]
-                
-                # sampling_mode가 params에 있으면 그 값을 사용, 없으면 기존 값 유지
+
+                # sampling_mode가 params에 있으면 그 값을 사용
                 if 'sampling_mode' in params:
-                    model_sampler_node["sampling"] = params['sampling_mode']
-                
-                # zsnr이 params에 있으면 그 값을 사용, 없으면 기존 값 유지
-                if 'zsnr' in params:
-                    model_sampler_node["zsnr"] = params['zsnr']
-            
+                    sampling_mode = params['sampling_mode']
+                    # "anima"는 unet 워크플로우 타입이므로, checkpoint에서는 eps로 처리
+                    if sampling_mode == "anima":
+                        sampling_mode = "eps"
+                    model_sampler_node["sampling"] = sampling_mode
+                    print(f"✅ ModelSamplingDiscrete sampling 설정: {sampling_mode}")
+
+                # ZSNR 설정 (V-Pred 모드에서 주로 사용)
+                if 'sampling_mode' in params:
+                    # V-Pred 모드일 때는 ZSNR을 True로 설정
+                    if params['sampling_mode'] == 'v_prediction':
+                        model_sampler_node["zsnr"] = True
+                        print(f"✅ ModelSamplingDiscrete ZSNR 설정: True (V-Pred 모드)")
+                    else:
+                        model_sampler_node["zsnr"] = False
+                        print(f"✅ ModelSamplingDiscrete ZSNR 설정: False")
+
             return workflow
             
         except KeyError as e:
@@ -573,9 +758,11 @@ class ComfyUIWorkflowManager:
         # [수정] KSampler 외 커스텀 샘플러 지원
         recognized_sampler_types = {"KSampler", "SamplerCustom"}
         required_node_types = {
-            "CheckpointLoaderSimple", "CLIPTextEncode", 
+            "CLIPTextEncode",
             "EmptyLatentImage", "VAEDecode", "SaveImage", "PreviewImage"
         }
+        # CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader) 중 하나 필요
+        loader_types = {"CheckpointLoaderSimple", "UNETLoader", "CLIPLoader", "VAELoader"}
         
         try:
             workflow_str = metadata.get('workflow') or metadata.get('workflow_api')
@@ -603,8 +790,9 @@ class ComfyUIWorkflowManager:
 
             # 2. 노드 분석
             found_required = set()
+            found_loaders = set()
             found_sampler = None
-            
+
             # class_type 키 이름 결정
             type_key = "type" if is_ui_format else "class_type"
 
@@ -613,6 +801,9 @@ class ComfyUIWorkflowManager:
                 if class_type in required_node_types:
                     result['required'].append(("PASS", class_type))
                     found_required.add(class_type)
+                elif class_type in loader_types:
+                    result['required'].append(("PASS", class_type))
+                    found_loaders.add(class_type)
                 elif class_type in recognized_sampler_types:
                     # 여러 샘플러가 있을 경우 첫 번째 것만 인정
                     if not found_sampler:
@@ -621,7 +812,15 @@ class ComfyUIWorkflowManager:
                     result['custom'].append(class_type)
 
             # 3. 최종 유효성 검사
-            # SaveImage 또는 PreviewImage 둘 중 하나만 있으면 됨
+            # 3-1. 로더 검증: CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader)
+            has_checkpoint = "CheckpointLoaderSimple" in found_loaders
+            has_unet_clip = "UNETLoader" in found_loaders and "CLIPLoader" in found_loaders
+
+            if not has_checkpoint and not has_unet_clip:
+                result['required'].append(("FAIL", "CheckpointLoaderSimple or (UNETLoader + CLIPLoader)"))
+                result['success'] = False
+
+            # 3-2. SaveImage 또는 PreviewImage 둘 중 하나만 있으면 됨
             if "SaveImage" in found_required or "PreviewImage" in found_required:
                 required_node_types.discard("SaveImage")
                 required_node_types.discard("PreviewImage")

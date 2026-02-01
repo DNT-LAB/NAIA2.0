@@ -110,14 +110,49 @@ class PromptProcessor:
             '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
             'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
         }
-        
+
         converted_main_tags = [tag_conversion_map.get(tag, tag) for tag in new_main_tags]
         if converted_main_tags:
             converted_main_tags.insert(0, '#랜덤프롬프트')  # Ensure 'main tags' is always the first tag
-        
+
         # 4. context 최종 업데이트
         context.main_tags = converted_main_tags
-        context.prefix_tags = sorted_person_tags + context.prefix_tags
+
+        # 4-1. 인원수 태그 배치 (ANIMA 모드 고려)
+        # settings에 workflow_type 정보가 없으므로 main_window에서 직접 확인
+        is_anima_mode = False
+        if self.app_context.current_api_mode == 'COMFYUI':
+            # AppContext를 통해 main_window의 라디오 버튼 상태 확인
+            if hasattr(self.app_context, 'main_window'):
+                main_window = self.app_context.main_window
+                if hasattr(main_window, 'anima_radio') and main_window.anima_radio.isChecked():
+                    is_anima_mode = True
+
+        is_comfyui = self.app_context.current_api_mode == 'COMFYUI'
+
+        if is_comfyui and is_anima_mode:
+            # ANIMA 모드: @ 태그 앞에 삽입
+            at_index = None
+            for i, tag in enumerate(context.prefix_tags):
+                if '@' in tag:
+                    at_index = i
+                    break
+
+            if at_index is not None:
+                # @ 태그 앞에 삽입
+                context.prefix_tags = (
+                    context.prefix_tags[:at_index] +
+                    sorted_person_tags +
+                    context.prefix_tags[at_index:]
+                )
+                print(f"🎨 ANIMA 모드: 인원수 태그를 @ 태그 앞 (인덱스 {at_index})에 삽입")
+            else:
+                # @ 태그가 없으면 맨 뒤에 삽입
+                context.prefix_tags = context.prefix_tags + sorted_person_tags
+                print(f"🎨 ANIMA 모드: @ 태그 없음, 인원수 태그를 맨 뒤에 삽입")
+        else:
+            # 기존 방식: 맨 앞에 삽입
+            context.prefix_tags = sorted_person_tags + context.prefix_tags
 
         # --- 이하 기존 로직 ---        
         all_tags = context.get_all_tags()

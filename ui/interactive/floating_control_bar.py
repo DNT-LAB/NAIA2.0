@@ -23,8 +23,10 @@ class FloatingControlBar(QWidget):
     float_pin_toggled = pyqtSignal(bool) # 플로팅 고정 토글 시그널
     tags_clicked = pyqtSignal() # 태그 뷰어 버튼 시그널
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_context=None):
         super().__init__(parent)
+        self.app_context = app_context
+        self.current_mode = app_context.current_api_mode if app_context else "NAI"
         self._init_ui()
         
     def _init_ui(self):
@@ -145,9 +147,8 @@ class FloatingControlBar(QWidget):
         self.btn_params.clicked.connect(self._toggle_parameter_panel)
         layout.addWidget(self.btn_params)
 
-        # 파라미터 패널 생성 (숨김 상태)
-        from ui.interactive.parameter_panel import ParameterPanel
-        self.param_panel = ParameterPanel(None) # Top-level popup style
+        # 파라미터 패널 생성 (모드별)
+        self._create_parameter_panel()
         self.param_panel.hide()
 
         # 7. [ Tags ] (버튼) - 독립 윈도우 태그 뷰어
@@ -160,6 +161,43 @@ class FloatingControlBar(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.container)
+
+    def _create_parameter_panel(self):
+        """현재 모드에 맞는 파라미터 패널 생성"""
+        if self.current_mode == "COMFYUI":
+            from ui.interactive.comfyui_parameter_panel import ComfyUIParameterPanel
+            self.param_panel = ComfyUIParameterPanel(None, self.app_context)
+        else:
+            # NAI, WEBUI 등은 NAI 파라미터 패널 사용
+            from ui.interactive.parameter_panel import ParameterPanel
+            self.param_panel = ParameterPanel(None)
+
+    def switch_parameter_panel(self, new_mode: str):
+        """
+        모드 변경 시 파라미터 패널 교체
+
+        Args:
+            new_mode: 새로운 API 모드 (NAI, WEBUI, COMFYUI)
+        """
+        # 기존 패널 숨기고 제거
+        if hasattr(self, 'param_panel') and self.param_panel:
+            was_visible = self.param_panel.isVisible()
+            self.param_panel.hide()
+            self.param_panel.deleteLater()
+        else:
+            was_visible = False
+
+        # 모드 업데이트
+        self.current_mode = new_mode
+
+        # 새 패널 생성
+        self._create_parameter_panel()
+
+        # 이전에 열려있었다면 다시 열기
+        if was_visible:
+            self._toggle_parameter_panel()
+
+        print(f"[FloatingControlBar] 파라미터 패널 전환: {new_mode}")
 
     def _toggle_parameter_panel(self):
         """파라미터 패널 토글"""

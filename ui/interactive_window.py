@@ -36,6 +36,10 @@ class InteractiveWindow(QMainWindow):
         # 플로팅 패널 최초 정렬 플래그 (1회만 실행)
         self._first_reposition_done = False
 
+        # 🆕 모드별 설정 관리 (윈도우가 열린 시점의 모드로 고정)
+        self.current_mode = app_context.current_api_mode if app_context else "NAI"
+        print(f"[InteractiveWindow] 모드 고정: {self.current_mode}")
+
         # 윈도우 설정
         self.setWindowFlags(
             Qt.WindowType.Window |
@@ -205,7 +209,7 @@ class InteractiveWindow(QMainWindow):
 
         # [하단 중앙] 컨트롤 바 (고정 배치)
         from ui.interactive.floating_control_bar import FloatingControlBar
-        self.control_bar = FloatingControlBar()
+        self.control_bar = FloatingControlBar(app_context=self.app_context)
         # 레이아웃에 추가 (하단 여백 및 정렬)
         right_layout.addWidget(self.control_bar, 0, Qt.AlignmentFlag.AlignCenter)
 
@@ -239,9 +243,9 @@ class InteractiveWindow(QMainWindow):
         # [플로팅 패널] 메인 프롬프트를 이미지 뷰어 위에 띄우기
         from ui.interactive.draggable_panel import DraggablePanel
         from ui.interactive.main_prompt_block import MainPromptBlock
-        
+
         # 1. 플로팅할 내용물 생성
-        float_main_block = MainPromptBlock()
+        float_main_block = MainPromptBlock(app_context=self.app_context)
         self.main_prompt_block = float_main_block # ✅ self 저장
         float_main_block.set_collapsed(False) # 펼쳐진 상태로 시작
         
@@ -303,23 +307,27 @@ class InteractiveWindow(QMainWindow):
         # 초기 위치는 showEvent에서
         self.floating_comp_panel.show()
 
-        # [플로팅] 캐릭터 레퍼런스 블록 (NAID4.5)
+        # [플로팅] 캐릭터 레퍼런스 블록 (NAID4.5 전용 - COMFYUI에서는 숨김)
         from ui.interactive.character_reference_block import CharacterReferenceBlock
-        
-        float_char_ref_block = CharacterReferenceBlock()
+
+        float_char_ref_block = CharacterReferenceBlock(app_context=self.app_context)
         self.char_ref_block = float_char_ref_block # ✅ self 저장
         # 기본값: 접힘 상태
         float_char_ref_block.set_collapsed(True)
 
         self.floating_char_ref_panel = DraggablePanel(
-            parent=self.right_panel, 
+            parent=self.right_panel,
             child_widget=float_char_ref_block
         )
         self.floating_char_ref_panel.setFixedWidth(get_scaled_size(220)) # 초기 접힘
         self._setup_responsive_panel(self.floating_char_ref_panel, float_char_ref_block)
-        self.floating_char_ref_panel.show()
 
-        self.floating_char_ref_panel.show()
+        # COMFYUI 모드에서는 캐릭터 레퍼런스 숨김
+        if self.current_mode == "COMFYUI":
+            self.floating_char_ref_panel.hide()
+            print(f"🎨 COMFYUI 모드: 캐릭터 레퍼런스 블록 숨김")
+        else:
+            self.floating_char_ref_panel.show()
 
         # [플로팅] 이미지 태거 블록 (WD14)
         from ui.interactive.image_tagger_block import ImageTaggerBlock
@@ -383,19 +391,19 @@ class InteractiveWindow(QMainWindow):
 
         # [플로팅] 캐릭터 프롬프트 블록 6개
         from ui.interactive.character_prompt_block import CharacterPromptBlock
-        
+
         self.char_blocks = []
         self.char_panels = [] # DraggablePanel 리스트
-        
+
         # 위치 잡기 (MainPromptBlock 아래)
         char_start_y = get_scaled_size(420)
-        
+
         for i in range(1, 7):
-            block = CharacterPromptBlock(index=i)
+            block = CharacterPromptBlock(index=i, app_context=self.app_context)
             # 1번 블록 버튼 연결
             if i == 1:
                 block.add_character_clicked.connect(self._on_add_character_click)
-                block.set_collapsed(True) 
+                block.set_collapsed(True)
             else:
                 block.remove_character_clicked.connect(self._on_remove_character_click)
                 block.set_collapsed(False)
@@ -406,7 +414,7 @@ class InteractiveWindow(QMainWindow):
 
             # 패널 생성
             panel = DraggablePanel(parent=self.right_panel, child_widget=block)
-            
+
             # 초기 너비 설정 (1번은 접힘=220, 나머지는 펼침=300? 아니면 다 접힘?)
             # 위 loop에서 1번만 접힘(True), 나머지는 펼침(False)로 설정했음.
             if i == 1:
@@ -415,16 +423,16 @@ class InteractiveWindow(QMainWindow):
                 panel.setFixedWidth(get_scaled_size(300))
 
             self._setup_responsive_panel(panel, block)
-            
+
             # 초기 위치: 좌측 중앙 (20, 420)
             # 초기 위치는 showEvent에서
             # panel.move(get_scaled_size(20), char_start_y)
-            
+
             if i == 1:
                 panel.show()
             else:
                 panel.hide()
-                
+
             self.char_blocks.append(block)
             self.char_panels.append(panel)
 
@@ -737,6 +745,11 @@ class InteractiveWindow(QMainWindow):
 
 
     def closeEvent(self, event):
+        """윈도우 닫힐 때 현재 모드 설정 저장"""
+        # 🆕 현재 모드 설정 저장
+        self.save_interactive_data()
+        print(f"[InteractiveWindow] {self.current_mode} 모드 설정 저장 후 종료")
+
         self.window_closed.emit()
         event.accept()
 
@@ -1098,13 +1111,85 @@ class InteractiveWindow(QMainWindow):
                     character_negatives.append(char_data.get('negative', ''))
 
         # 9. NAICharacterData 생성 (캐릭터가 있는 경우만)
+        # COMFYUI 모드: 캐릭터 프롬프트를 메인 프롬프트에 합치고, 네거티브를 메인 네거티브에 합침
         nai_characters = None
-        if character_prompts:
-            nai_characters = NAICharacterData(
-                characters=character_prompts,
-                uc=character_negatives
-                # character_positions는 나중에 추가 (현재는 없음)
-            )
+        if self.current_mode == "COMFYUI":
+            # COMFYUI 파라미터 패널에서 sampling_mode 확인
+            panel_params = {}
+            if hasattr(self, 'control_bar') and hasattr(self.control_bar, 'param_panel'):
+                panel_params = self.control_bar.param_panel.get_params()
+
+            is_anima_mode = panel_params.get('sampling_mode') == 'anima'
+
+            if is_anima_mode:
+                # 🎨 ANIMA 모드: 특별한 순서로 프롬프트 조합
+                # 1. 퀄리티 태그
+                quality_tags_str = self.quality_block.get_quality_tags()
+
+                # 2. 메인 프롬프트에서 카테고리별 태그 추출
+                categorized = self.main_prompt_block.get_categorized_tags()
+                person_tags = categorized['person_tags']
+                character_tags = categorized['character_tags']
+                remaining_tags = categorized['remaining_tags']
+
+                # 3. 캐릭터 프롬프트 블럭 내용
+                char_prompt_combined = ', '.join(character_prompts) if character_prompts else ""
+
+                # 4. 아티스트 태그
+                artist_tags = self.artist_block.get_tags()
+
+                # 5. 캐릭터 태그 (character_tags from main_prompt)
+                # 6. 메인 프롬프트 (remaining_tags)
+
+                # 최종 조합 (ANIMA 순서)
+                anima_parts = [
+                    quality_tags_str,    # 1. 퀄리티 태그
+                    person_tags,         # 2. 인원 수
+                    char_prompt_combined,# 3. 캐릭터 프롬프트 블럭
+                    artist_tags,         # 4. 아티스트 태그
+                    character_tags,      # 5. 캐릭터 태그
+                    remaining_tags       # 6. 메인 프롬프트
+                ]
+
+                final_prompt = ', '.join([p for p in anima_parts if p.strip()])
+
+                # 캐릭터 네거티브를 메인 네거티브 뒤에 추가
+                char_negative_combined = ', '.join([n for n in character_negatives if n.strip()])
+                if char_negative_combined:
+                    if final_negative:
+                        final_negative = f"{final_negative}, {char_negative_combined}"
+                    else:
+                        final_negative = char_negative_combined
+
+                print(f"🎨 COMFYUI + ANIMA 모드: 특별한 순서로 프롬프트 조합 완료")
+                print(f"   순서: 퀄리티 → 인원수 → 캐릭터블럭 → 아티스트 → 캐릭터태그 → 메인")
+            else:
+                # 기본 COMFYUI 모드 (EPS, V-Pred)
+                if character_prompts:
+                    # 캐릭터 프롬프트를 메인 프롬프트 뒤에 추가
+                    char_prompt_combined = ', '.join(character_prompts)
+                    if final_prompt:
+                        final_prompt = f"{final_prompt}, {char_prompt_combined}"
+                    else:
+                        final_prompt = char_prompt_combined
+
+                    # 캐릭터 네거티브를 메인 네거티브 뒤에 추가
+                    char_negative_combined = ', '.join([n for n in character_negatives if n.strip()])
+                    if char_negative_combined:
+                        if final_negative:
+                            final_negative = f"{final_negative}, {char_negative_combined}"
+                        else:
+                            final_negative = char_negative_combined
+
+                    print(f"🎨 COMFYUI: 캐릭터 프롬프트 통합 완료 ({len(character_prompts)}개)")
+        else:
+            # NAI/WEBUI: 기존 방식 (NAICharacterData 사용)
+            if character_prompts:
+                nai_characters = NAICharacterData(
+                    characters=character_prompts,
+                    uc=character_negatives
+                    # character_positions는 나중에 추가 (현재는 없음)
+                )
 
         # 9.5 Character Reference 데이터 수집 및 변환
         nai_char_reference = None
@@ -1181,6 +1266,12 @@ class InteractiveWindow(QMainWindow):
             'cfg_rescale': panel_params.get('cfg_rescale', 0.25),
         }
 
+        # ComfyUI 모드 전용 파라미터 추가
+        if self.current_mode == "COMFYUI":
+            params['sampling_mode'] = panel_params.get('sampling_mode', 'eps')
+            params['workflow_type'] = panel_params.get('workflow_type', 'checkpoint')
+            print(f"🎨 ComfyUI 모드: sampling_mode={params['sampling_mode']}, workflow_type={params['workflow_type']}")
+
         # 12. GenerationRequest 객체 생성
         generation_request = GenerationRequest(
             params=params,
@@ -1238,8 +1329,10 @@ class InteractiveWindow(QMainWindow):
             if generation_request.nai_character_reference:
                 print(f"  - Character Reference: 이미지 포함됨 (Fidelity: {generation_request.nai_character_reference.director_reference_secondary_strength_values[0]})")
 
-            # 3. Interactive Mode 전용 생성 완료 이벤트 구독
+            # 3. Interactive Mode 전용 이벤트 구독 (성공 + 에러 + 진행도)
             self.app_context.subscribe("generation_completed_for_interactive", self._on_generation_completed)
+            self.app_context.subscribe("generation_error", self._on_generation_error)
+            self.app_context.subscribe("generation_progress", self._on_generation_progress)
 
             # 4. 생성 버튼 비활성화 (MainPromptBlock)
             if hasattr(self.main_prompt_block, 'btn_generate'):
@@ -1269,9 +1362,15 @@ class InteractiveWindow(QMainWindow):
             result: PIL Image 객체
         """
         try:
-            # Interactive Mode 전용 구독 해제
+            # Interactive Mode 전용 구독 해제 (성공 + 에러 + 진행도)
             if "generation_completed_for_interactive" in self.app_context.subscribers:
                 self.app_context.subscribers["generation_completed_for_interactive"].remove(self._on_generation_completed)
+            if "generation_error" in self.app_context.subscribers:
+                if self._on_generation_error in self.app_context.subscribers["generation_error"]:
+                    self.app_context.subscribers["generation_error"].remove(self._on_generation_error)
+            if "generation_progress" in self.app_context.subscribers:
+                if self._on_generation_progress in self.app_context.subscribers["generation_progress"]:
+                    self.app_context.subscribers["generation_progress"].remove(self._on_generation_progress)
 
             # result가 PIL Image인지 확인
             if hasattr(result, 'mode'):  # PIL Image 확인
@@ -1301,16 +1400,148 @@ class InteractiveWindow(QMainWindow):
             traceback.print_exc()
             self._restore_generate_button()
 
+    def _on_generation_progress(self, progress_data: dict):
+        """
+        이미지 생성 진행도 콜백 (ComfyUI 전용)
+
+        Args:
+            progress_data: 진행도 정보 {"current": int, "total": int, "percent": int}
+        """
+        try:
+            percent = progress_data.get("percent", 0)
+
+            # 생성 버튼 텍스트에 진행도 표시
+            if hasattr(self.main_prompt_block, 'btn_generate'):
+                self.main_prompt_block.btn_generate.setText(f"🔄 생성 중... {percent}%")
+
+        except Exception as e:
+            print(f"❌ 진행도 업데이트 중 오류: {e}")
+
+    def _on_generation_error(self, error_data: dict):
+        """
+        이미지 생성 오류 콜백 (비동기)
+
+        Args:
+            error_data: 오류 정보 딕셔너리 {"message": str, "interactive_mode_request": bool}
+        """
+        try:
+            # Interactive Mode 요청이 아니면 무시
+            if not error_data.get("interactive_mode_request"):
+                return
+
+            error_message = error_data.get("message", "알 수 없는 오류가 발생했습니다.")
+            print(f"❌ Interactive Mode 생성 오류: {error_message}")
+
+            # Interactive Mode 전용 구독 해제 (성공 + 에러 + 진행도)
+            if "generation_completed_for_interactive" in self.app_context.subscribers:
+                if self._on_generation_completed in self.app_context.subscribers["generation_completed_for_interactive"]:
+                    self.app_context.subscribers["generation_completed_for_interactive"].remove(self._on_generation_completed)
+            if "generation_error" in self.app_context.subscribers:
+                if self._on_generation_error in self.app_context.subscribers["generation_error"]:
+                    self.app_context.subscribers["generation_error"].remove(self._on_generation_error)
+            if "generation_progress" in self.app_context.subscribers:
+                if self._on_generation_progress in self.app_context.subscribers["generation_progress"]:
+                    self.app_context.subscribers["generation_progress"].remove(self._on_generation_progress)
+
+            # 생성 버튼 복원
+            self._restore_generate_button()
+
+            # 사용자에게 에러 알림 (QMessageBox)
+            from PyQt6.QtWidgets import QMessageBox
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("이미지 생성 실패")
+            msg_box.setIcon(QMessageBox.Icon.Critical)
+            msg_box.setText("이미지 생성 중 오류가 발생했습니다.")
+
+            # 에러 메시지가 너무 길면 200자로 제한
+            display_message = error_message if len(error_message) <= 200 else error_message[:200] + "..."
+            msg_box.setInformativeText(display_message)
+
+            # 전체 메시지를 상세 정보로 표시
+            msg_box.setDetailedText(error_message)
+
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg_box.exec()
+
+            # 상태바 메시지
+            if hasattr(self.app_context, 'main_window'):
+                self.app_context.main_window.status_bar.showMessage(
+                    "❌ Interactive Mode: 이미지 생성 실패", 5000
+                )
+
+        except Exception as e:
+            print(f"❌ 에러 처리 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            # 최소한 버튼은 복원
+            self._restore_generate_button()
+
     def _restore_generate_button(self):
         """생성 버튼을 원래 상태로 복원"""
         if hasattr(self, 'main_prompt_block') and hasattr(self.main_prompt_block, 'btn_generate'):
             self.main_prompt_block.btn_generate.setEnabled(True)
             self.main_prompt_block.btn_generate.setText("🎨 이미지 생성")
 
-    def save_interactive_data(self):
+    def _on_mode_changed(self, data: dict):
         """
-        현재 블록들의 텍스트와 파라미터를 JSON 파일로 저장
-        
+        API 모드 변경 시 호출됨 (NAI ↔ WEBUI ↔ COMFYUI)
+
+        Args:
+            data: {"old_mode": str, "new_mode": str}
+        """
+        old_mode = data.get("old_mode")
+        new_mode = data.get("new_mode")
+
+        print(f"[InteractiveWindow] 모드 변경 감지: {old_mode} → {new_mode}")
+
+        # 1. 이전 모드 설정 저장
+        if old_mode:
+            self.save_interactive_data(mode=old_mode)
+            print(f"✅ {old_mode} 모드 설정 저장 완료")
+
+        # 2. 새 모드 설정 로드
+        if new_mode:
+            self.current_mode = new_mode
+            self.load_interactive_data(mode=new_mode)
+            print(f"✅ {new_mode} 모드 설정 로드 완료")
+
+        # 3. 파라미터 패널 교체
+        if hasattr(self, 'control_bar') and new_mode:
+            self.control_bar.switch_parameter_panel(new_mode)
+            print(f"✅ 파라미터 패널 교체 완료: {new_mode}")
+
+    def _get_mode_filename(self, mode: str = None) -> str:
+        """
+        모드별 설정 파일 경로 반환
+
+        Args:
+            mode: API 모드 (NAI, WEBUI, COMFYUI). None이면 현재 모드 사용
+
+        Returns:
+            str: 설정 파일 경로
+        """
+        if mode is None:
+            mode = self.current_mode
+
+        save_dir = os.path.join(os.getcwd(), 'save')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # NAI 모드는 기존 파일명 유지 (호환성)
+        if mode == "NAI":
+            filename = 'interactive_data.json'
+        else:
+            filename = f'interactive_data_{mode}.json'
+
+        return os.path.join(save_dir, filename)
+
+    def save_interactive_data(self, mode: str = None):
+        """
+        현재 블록들의 텍스트와 파라미터를 JSON 파일로 저장 (모드별)
+
+        Args:
+            mode: API 모드 (NAI, WEBUI, COMFYUI). None이면 현재 모드 사용
+
         저장 대상:
         - ArtistTagBlock, QualityTagBlock, NegativePromptBlock, MainPromptBlock의 텍스트
         - ParameterPanel의 설정값
@@ -1321,43 +1552,66 @@ class InteractiveWindow(QMainWindow):
             # 1. 텍스트 데이터 수집
             if hasattr(self, 'artist_block'):
                 data['artist_tags'] = self.artist_block.get_tags()
-            
+
             if hasattr(self, 'quality_block'):
                 data['quality_tags'] = self.quality_block.get_quality_tags()
-                
+
             if hasattr(self, 'negative_block'):
                 data['negative_prompt'] = self.negative_block.get_negative_prompt()
-                
+
             if hasattr(self, 'main_prompt_block'):
                 # MainPromptBlock은 get_prompt()가 정제된 값을 반환하므로 raw text 사용
                 if hasattr(self.main_prompt_block, 'text_edit'):
                     data['main_prompt'] = self.main_prompt_block.text_edit.toPlainText()
-            
+
             # 2. 파라미터 데이터 수집
             if hasattr(self, 'control_bar') and hasattr(self.control_bar, 'param_panel'):
                 data['parameters'] = self.control_bar.param_panel.get_params()
 
-            # 저장 경로 확인 및 생성 (save 폴더)
-            save_dir = os.path.join(os.getcwd(), 'save')
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-                
-            save_path = os.path.join(save_dir, 'interactive_data.json')
-            
+            # 🆕 모드별 저장 경로 사용
+            save_path = self._get_mode_filename(mode)
+
             with open(save_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
-                
-            print(f"[InteractiveWindow] 상태 데이터 저장됨: {save_path}")
-            
+
+            mode_name = mode if mode else self.current_mode
+            print(f"[InteractiveWindow] {mode_name} 모드 데이터 저장됨: {save_path}")
+
         except Exception as e:
             print(f"[InteractiveWindow] 상태 데이터 저장 실패: {e}")
 
-    def load_interactive_data(self):
+    def load_interactive_data(self, mode: str = None):
         """
-        저장된 JSON 파일에서 상태를 읽어와 복원
+        저장된 JSON 파일에서 상태를 읽어와 복원 (모드별)
+
+        Args:
+            mode: API 모드 (NAI, WEBUI, COMFYUI). None이면 현재 모드 사용
         """
-        save_path = os.path.join(os.getcwd(), 'save', 'interactive_data.json')
+        # 🆕 모드별 로드 경로 사용
+        save_path = self._get_mode_filename(mode)
+        mode_name = mode if mode else self.current_mode
+
         if not os.path.exists(save_path):
+            print(f"[InteractiveWindow] {mode_name} 모드 데이터 파일 없음 (첫 실행 또는 초기화됨)")
+
+            # COMFYUI 모드: 기본값 설정
+            if mode_name == "COMFYUI":
+                print(f"🎨 COMFYUI 모드 기본값 설정 중...")
+
+                # 퀄리티 태그 기본값
+                if hasattr(self, 'quality_block'):
+                    self.quality_block.set_text("masterpiece, best quality, score_7, newest, year2024")
+
+                # 아티스트 태그 기본값
+                if hasattr(self, 'artist_block'):
+                    self.artist_block.set_text("(@nanatsuta:0.55), (@signalviolet:0.6)")
+
+                # 네거티브 프롬프트 기본값
+                if hasattr(self, 'negative_block'):
+                    self.negative_block.set_text("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, mutated, bad hands")
+
+                print(f"✅ COMFYUI 모드 기본값 설정 완료")
+
             return
 
         try:
@@ -1367,25 +1621,26 @@ class InteractiveWindow(QMainWindow):
             # 1. 텍스트 데이터 복원
             if 'artist_tags' in data and hasattr(self, 'artist_block'):
                 self.artist_block.set_text(data['artist_tags'])
-                
+
             if 'quality_tags' in data and hasattr(self, 'quality_block'):
                 self.quality_block.set_text(data['quality_tags'])
-                
+
             if 'negative_prompt' in data and hasattr(self, 'negative_block'):
                 self.negative_block.set_text(data['negative_prompt'])
-                
+
             if 'main_prompt' in data and hasattr(self, 'main_prompt_block'):
                 # MainPromptBlock은 raw text 설정
                 if hasattr(self.main_prompt_block, 'text_edit'):
                     self.main_prompt_block.text_edit.setPlainText(data['main_prompt'])
                     # HTML 포맷팅 이슈가 있을 수 있지만, 저장된 raw text를 그대로 복원
-            
+
             # 2. 파라미터 데이터 복원
             if 'parameters' in data and hasattr(self, 'control_bar') and hasattr(self.control_bar, 'param_panel'):
                 self.control_bar.param_panel.set_params(data['parameters'])
-                
-            print(f"[InteractiveWindow] 상태 데이터 로드됨: {len(data)} 항목")
-            
+
+            mode_name = mode if mode else self.current_mode
+            print(f"[InteractiveWindow] {mode_name} 모드 데이터 로드됨: {len(data)} 항목")
+
         except Exception as e:
             print(f"[InteractiveWindow] 상태 데이터 로드 실패: {e}")
 

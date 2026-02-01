@@ -552,7 +552,7 @@ class QuickSearchBlock(BlockWidget):
             # 초기 파티션 로드 (q_1girl_solo.tgp)
             # PersonSettingsBlock의 초기값과 동기화: girls=1, solo=True, rating=questionable
             initial_info = {'girls': 1, 'boys': 0, 'others': 0, 'is_solo': True}
-            self.load_partition('questionable', initial_info)
+            self.load_partition('sensitive', initial_info)
         
         # 초기 상태 업데이트
         self.update_tag_grid()

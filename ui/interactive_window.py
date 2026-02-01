@@ -1110,6 +1110,7 @@ class InteractiveWindow(QMainWindow):
         # 8. 캐릭터 프롬프트 수집 (visible 블록만)
         character_prompts = []
         character_negatives = []
+        character_names = []  # 🆕 캐릭터명 별도 수집 (ANIMA 모드용)
 
         for block, panel in zip(self.char_blocks, self.char_panels):
             if panel.isVisible():
@@ -1118,6 +1119,13 @@ class InteractiveWindow(QMainWindow):
                 if prompt and not (prompt == "girl" or prompt == "boy" or prompt == "other"):  # 빈 프롬프트 제외
                     character_prompts.append(prompt)
                     character_negatives.append(char_data.get('negative', ''))
+
+                    # 🆕 캐릭터명 수집 (form.input_character_name)
+                    if hasattr(block, 'form') and hasattr(block.form, 'input_character_name'):
+                        char_name = block.form.input_character_name.text().strip()
+                        character_names.append(char_name)
+                    else:
+                        character_names.append("")
 
         # 9. NAICharacterData 생성 (캐릭터가 있는 경우만)
         # COMFYUI 모드: 캐릭터 프롬프트를 메인 프롬프트에 합치고, 네거티브를 메인 네거티브에 합침
@@ -1166,22 +1174,53 @@ class InteractiveWindow(QMainWindow):
                 character_tags = categorized['character_tags']
                 remaining_tags = categorized['remaining_tags']
 
-                # 3. 캐릭터 프롬프트 블럭 내용
-                char_prompt_combined = ', '.join(character_prompts) if character_prompts else ""
+                # 3. 캐릭터 프롬프트 블럭 내용 분리
+                # character_prompts에서 캐릭터명과 특징 분리
+                char_names_filtered = []  # 캐릭터명/작품명만 (비어있지 않은 것만)
+                char_features = []  # 캐릭터 특징들 (body, pose, attire 등)
+
+                for idx, char_prompt in enumerate(character_prompts):
+                    # 해당 블록의 캐릭터명 가져오기
+                    char_name = character_names[idx] if idx < len(character_names) else ""
+
+                    # 프롬프트에서 태그 분리
+                    tags = [tag.strip() for tag in char_prompt.split(',') if tag.strip()]
+
+                    # 캐릭터명이 있으면 프롬프트에서 제거
+                    if char_name:
+                        char_names_filtered.append(char_name)
+                        # 프롬프트에서 캐릭터명 제거
+                        tags = [tag for tag in tags if tag.lower() != char_name.lower()]
+
+                    # 'girl', 'boy', 'other' 제거 (NAI용 성별 태그)
+                    tags = [tag for tag in tags if tag.lower() not in ('girl', 'boy', 'other')]
+
+                    # 나머지는 특징들
+                    char_features.extend(tags)
+
+                char_prompt_combined = ', '.join(char_names_filtered) if char_names_filtered else ""
+                char_features_str = ', '.join(char_features) if char_features else ""
+
+                # character_tags에 캐릭터 특징 추가
+                if char_features_str:
+                    if character_tags:
+                        character_tags = f"{char_features_str}, {character_tags}"
+                    else:
+                        character_tags = char_features_str
 
                 # 4. 아티스트 태그
                 artist_tags = self.artist_block.get_tags()
 
-                # 5. 캐릭터 태그 (character_tags from main_prompt)
+                # 5. 캐릭터 태그 (character_tags from main_prompt + 캐릭터 특징)
                 # 6. 메인 프롬프트 (remaining_tags)
 
                 # 최종 조합 (ANIMA 순서)
                 anima_parts = [
                     quality_tags_str,    # 1. 퀄리티 태그
                     person_tags,         # 2. 인원 수
-                    char_prompt_combined,# 3. 캐릭터 프롬프트 블럭
+                    char_prompt_combined,# 3. 캐릭터명/작품명
                     artist_tags,         # 4. 아티스트 태그
-                    character_tags,      # 5. 캐릭터 태그
+                    character_tags,      # 5. 캐릭터 특징 + 캐릭터 태그
                     remaining_tags       # 6. 메인 프롬프트
                 ]
 

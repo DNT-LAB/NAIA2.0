@@ -915,46 +915,27 @@ class MainPromptBlock(BlockWidget):
         """
         캐릭터 특징 태그 판별
 
-        예: 머리색, 눈색, 헤어스타일 등
+        FilterDataManager의 characteristic_list를 사용하여 판별
         """
-        # 머리색 관련
-        hair_colors = [
-            'black hair', 'white hair', 'blonde hair', 'brown hair',
-            'red hair', 'pink hair', 'blue hair', 'green hair',
-            'purple hair', 'silver hair', 'grey hair', 'orange hair',
-            'multicolored hair', 'two-tone hair', 'gradient hair'
-        ]
-
-        # 눈색 관련
-        eye_colors = [
-            'black eyes', 'red eyes', 'blue eyes', 'green eyes',
-            'brown eyes', 'purple eyes', 'yellow eyes', 'pink eyes',
-            'heterochromia', 'multicolored eyes'
-        ]
-
-        # 헤어스타일
-        hairstyles = [
-            'long hair', 'short hair', 'medium hair', 'very long hair',
-            'ponytail', 'twintails', 'twin braids', 'braid', 'braided hair',
-            'ahoge', 'bangs', 'blunt bangs', 'side ponytail',
-            'hair bun', 'double bun', 'bob cut', 'hime cut'
-        ]
-
         # 가슴 크기 관련
         breast_sizes = [
             'flat chest', 'small breasts', 'medium breasts',
-            'large breasts', 'huge breasts', 'gigantic breasts'
+            'large breasts', 'huge breasts', 'gigantic breasts', 'alternate breast size'
         ]
 
-        # 기타 캐릭터 특징
-        other_features = [
-            'pointy ears', 'animal ears', 'cat ears', 'fox ears',
-            'horns', 'wings', 'tail', 'glasses', 'freckles'
-        ]
+        # FilterDataManager의 characteristic_list 사용
+        characteristic_list = []
+        if hasattr(self, 'app_context') and self.app_context:
+            filter_data_manager = getattr(self.app_context, 'filter_data_manager', None)
+            if filter_data_manager:
+                characteristic_list = getattr(filter_data_manager, 'characteristic_list', [])
 
-        all_features = hair_colors + eye_colors + hairstyles + breast_sizes + other_features
+        # characteristic_list와 breast_sizes 결합
+        all_features = characteristic_list + breast_sizes
 
-        return any(feature in tag for feature in all_features)
+        # 태그가 특징 리스트에 포함되는지 확인
+        tag_lower = tag.lower().strip()
+        return any(feature.lower() in tag_lower for feature in all_features)
 
     def _is_clothing(self, tag: str) -> bool:
         """

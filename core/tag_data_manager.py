@@ -17,9 +17,10 @@ class TagDataManager:
         self.limited_generals.update(dict(list(character_dict_count.items())[:15000]))
         self.limited_generals.update(artist_dict)
         self.limited_generals.update(copyright_dict)
-        
+
         self.artist_dict = artist_dict
         self.character_dict_count = character_dict_count
+        self.copyright_dict = copyright_dict
 
     def find_top_matches(self, target_element, additional_wildcards=None):
         matching_items = []

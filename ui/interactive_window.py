@@ -30,6 +30,14 @@ class InteractiveWindow(QMainWindow):
         self.parent_app = parent_app
         self.app_context = app_context
 
+        # 윈도우가 닫힐 때 자동으로 삭제되도록 설정
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        # parent_app이 종료되면 이 창도 닫기 (시그널 연결)
+        if parent_app:
+            parent_app.destroyed.connect(self.close)
+            print(f"[InteractiveWindow] parent_app의 destroyed 시그널에 연결됨")
+
         # Tag Viewer 위치 초기화 플래그 (1회만 실행)
         self._tag_viewer_repositioned = False
 
@@ -879,11 +887,12 @@ class InteractiveWindow(QMainWindow):
             chosen_list = random.choice(valid_lists)
 
             # 🆕 의상 필드의 경우 가중치 추가 (첫 태그 앞: 0.5::, 마지막 태그 뒤: ::)
-            if field_type == "attire" and chosen_list:
-                # 첫 태그에 0.5:: 추가
-                chosen_list[0] = f"0.5::{chosen_list[0]}"
-                # 마지막 태그에 :: 추가
-                chosen_list[-1] = f"{chosen_list[-1]} ::"
+            if self.current_mode == "NAI":
+                if field_type == "attire" and chosen_list:
+                    # 첫 태그에 0.5:: 추가
+                    chosen_list[0] = f"0.5::{chosen_list[0]}"
+                    # 마지막 태그에 :: 추가
+                    chosen_list[-1] = f"{chosen_list[-1]} ::"
 
             # 선택된 리스트의 모든 태그를 문자열로 변환
             new_tags_str = ", ".join(chosen_list)
@@ -1125,6 +1134,31 @@ class InteractiveWindow(QMainWindow):
                 # 🎨 ANIMA 모드: 특별한 순서로 프롬프트 조합
                 # 1. 퀄리티 태그
                 quality_tags_str = self.quality_block.get_quality_tags()
+
+                # 1.5 Rating 태그 자동 추가 (없는 경우)
+                rating_keywords = ["safe", "sensitive", "nsfw", "explicit"]
+                has_rating = any(keyword in quality_tags_str.lower() for keyword in rating_keywords)
+
+                if not has_rating and person_rating_tags:
+                    # person_rating_tags의 첫 번째 아이템 가져오기
+                    first_rating = person_rating_tags[0].lower().strip()
+
+                    # rating 태그 매핑
+                    rating_map = {
+                        'rating:general': 'safe',
+                        'rating:sensitive': 'sensitive',
+                        'rating:nsfw': 'nsfw',
+                        'rating:explicit': 'explicit'
+                    }
+
+                    # 매핑된 태그 추가
+                    if first_rating in rating_map:
+                        rating_tag = rating_map[first_rating]
+                        if quality_tags_str:
+                            quality_tags_str = f"{quality_tags_str}, {rating_tag}"
+                        else:
+                            quality_tags_str = rating_tag
+                        print(f"   ✨ Rating 태그 자동 추가: {rating_tag}")
 
                 # 2. 메인 프롬프트에서 카테고리별 태그 추출
                 categorized = self.main_prompt_block.get_categorized_tags()
@@ -1389,6 +1423,18 @@ class InteractiveWindow(QMainWindow):
                     self.app_context.main_window.status_bar.showMessage(
                         "✅ Interactive Mode: 이미지 생성 완료", 3000
                     )
+
+                # 🆕 자동 반복 생성 로직
+                if hasattr(self, 'main_prompt_block'):
+                    if self.main_prompt_block.is_repeat_generation_enabled():
+                        # 반복 생성: 0.5초 후 다시 생성
+                        print("[InteractiveWindow] 반복 생성 활성화 → 0.5초 후 재생성")
+                        QTimer.singleShot(500, self.main_prompt_block.trigger_generation)
+                    elif self.main_prompt_block.is_auto_random_generation_enabled():
+                        # 자동 랜덤생성: 0.5초 후 랜덤 프롬프트 + 생성
+                        print("[InteractiveWindow] 자동 랜덤생성 활성화 → 0.5초 후 랜덤 + 생성")
+                        QTimer.singleShot(500, self._on_control_bar_random_generate)
+
             else:
                 print(f"⚠️ 예상과 다른 결과 타입: {type(result)}")
                 self._restore_generate_button()
@@ -1600,7 +1646,7 @@ class InteractiveWindow(QMainWindow):
 
                 # 퀄리티 태그 기본값
                 if hasattr(self, 'quality_block'):
-                    self.quality_block.set_text("masterpiece, best quality, score_7, newest, year2024")
+                    self.quality_block.set_text("newest, year2024, year2025, masterpiece, best quality, score_7, highres")
 
                 # 아티스트 태그 기본값
                 if hasattr(self, 'artist_block'):
@@ -1608,7 +1654,7 @@ class InteractiveWindow(QMainWindow):
 
                 # 네거티브 프롬프트 기본값
                 if hasattr(self, 'negative_block'):
-                    self.negative_block.set_text("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, mutated, bad hands")
+                    self.negative_block.set_text("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, mutated, bad hands, watermark, patreon username, web address, patreon logo, weibo username, watermark")
 
                 print(f"✅ COMFYUI 모드 기본값 설정 완료")
 

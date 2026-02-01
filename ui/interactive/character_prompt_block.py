@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QTextEdit, QButtonGroup, QSizePolicy, QComboBox
+    QFrame, QTextEdit, QButtonGroup, QSizePolicy, QComboBox, QLineEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.interactive.block_widget import BlockWidget
@@ -9,6 +9,14 @@ from ui.interactive.interactive_theme import (
 )
 from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_size, get_scaled_font_size
+
+# 캐릭터 딕셔너리 import (character_name -> prompt_string)
+try:
+    from danbooru_character import character_dict
+    print(f"✅ character_dict 로딩 완료: {len(character_dict)}개 캐릭터")
+except ImportError:
+    print("⚠️ danbooru_character.character_dict를 찾을 수 없습니다. 빈 딕셔너리 사용")
+    character_dict = {}
 
 class GenderButton(QPushButton):
     """성별 선택 버튼"""
@@ -43,8 +51,10 @@ class CharacterForm(QWidget):
     """단일 캐릭터 설정 폼"""
     random_requested = pyqtSignal(object, list, object, str) # editor, groups, subgroups (dict or None), field_type
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_context=None, parent_window=None):
         super().__init__(parent)
+        self.app_context = app_context
+        self.parent_window = parent_window
         self._init_ui()
         
     def _init_ui(self):
@@ -71,7 +81,102 @@ class CharacterForm(QWidget):
             gender_layout.addWidget(btn, 1) # 균등 분할
             
         layout.addLayout(gender_layout)
-        
+
+        # 1.5. 캐릭터 / 작품명 (QLineEdit)
+        char_name_container = QWidget()
+        char_name_container.setStyleSheet("background-color: transparent;")
+        char_name_layout = QVBoxLayout(char_name_container)
+        char_name_layout.setContentsMargins(0, 0, 0, 0)
+        char_name_layout.setSpacing(4)
+
+        # 라벨 + 버튼 영역 (Header Row)
+        char_name_header = QWidget()
+        char_name_header.setStyleSheet("background-color: transparent;")
+        char_name_header_layout = QHBoxLayout(char_name_header)
+        char_name_header_layout.setContentsMargins(0, 0, 0, 0)
+        char_name_header_layout.setSpacing(8)
+
+        char_name_label = QLabel("캐릭터 / 작품명")
+        char_name_label.setStyleSheet(f"""
+            color: {COMMON_STYLES['text_secondary']};
+            font-family: {FONT_FAMILY};
+            font-size: {get_scaled_font_size(16)}px;
+            font-weight: bold;
+            background-color: transparent;
+            border: none;
+        """)
+        char_name_header_layout.addWidget(char_name_label)
+        char_name_header_layout.addStretch()  # 우측 공간 확보
+
+        # 랜덤 버튼 (🎲)
+        self.btn_char_random = QPushButton("🎲")
+        self.btn_char_random.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_char_random.setFixedSize(get_scaled_size(24), get_scaled_size(24))
+        self.btn_char_random.setToolTip("랜덤 캐릭터/작품 선택")
+        self.btn_char_random.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: #FFFFFF;
+                border: none;
+                margin: 0px;
+                padding: 0px;
+                text-align: center;
+                font-family: 'Segoe UI Emoji';
+                font-size: {get_scaled_font_size(18)}px;
+            }}
+            QPushButton:hover {{
+                color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.btn_char_random.clicked.connect(self._on_char_random_clicked)
+        char_name_header_layout.addWidget(self.btn_char_random)
+
+        # 새로고침 버튼 (🔄)
+        self.btn_char_refresh = QPushButton("🔄")
+        self.btn_char_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_char_refresh.setFixedSize(get_scaled_size(24), get_scaled_size(24))
+        self.btn_char_refresh.setToolTip("캐릭터/작품 새로고침")
+        self.btn_char_refresh.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: #FFFFFF;
+                border: none;
+                margin: 0px;
+                padding: 0px;
+                text-align: center;
+                font-family: 'Segoe UI Emoji';
+                font-size: {get_scaled_font_size(18)}px;
+            }}
+            QPushButton:hover {{
+                color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.btn_char_refresh.clicked.connect(self._on_char_refresh_clicked)
+        char_name_header_layout.addWidget(self.btn_char_refresh)
+
+        self.input_character_name = QLineEdit()
+        self.input_character_name.setPlaceholderText("특정 캐릭터 태그 미사용시 공란")
+        self.input_character_name.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COMMON_STYLES['input_bg']};
+                color: {COMMON_STYLES['text_primary']};
+                border: 1px solid {COMMON_STYLES['input_border']};
+                border-radius: 4px;
+                padding: {get_scaled_size(8)}px;
+                font-family: {FONT_FAMILY};
+                font-size: {get_scaled_font_size(14)}px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.input_character_name.setProperty("autocomplete_ignore", True)
+        self.input_character_name.setProperty("autocomplete_filter", "character")
+
+        char_name_layout.addWidget(char_name_header)
+        char_name_layout.addWidget(self.input_character_name)
+        layout.addWidget(char_name_container)
+
         # 2. 입력 필드들
         self.input_body = self._create_input_field("체형 / 특징 (Body / Features)", field_type="body")
         # Person_Body (체형, 가슴, 귀, 눈, 얼굴, 머리카락, 헤어스타일, 기계/사이버, 피부색, 꼬리, 문신, 날개)
@@ -219,9 +324,10 @@ class CharacterForm(QWidget):
     def get_data(self):
         gender_btn = self.gender_group.checkedButton()
         gender = gender_btn.value if gender_btn else "girl"
-        
+
         return {
             "gender": gender,
+            "character_name": self.input_character_name.text(),
             "body": self.input_body.toPlainText(),
             "pose": self.input_pose.toPlainText(),
             "attire": self.input_attire.toPlainText(),
@@ -234,11 +340,149 @@ class CharacterForm(QWidget):
         if gender == 'girl': self.btn_girl.setChecked(True)
         elif gender == 'boy': self.btn_boy.setChecked(True)
         else: self.btn_other.setChecked(True)
-        
+
+        self.input_character_name.setText(data.get('character_name', ''))
         self.input_body.setText(data.get('body', ''))
         self.input_pose.setText(data.get('pose', ''))
         self.input_attire.setText(data.get('attire', ''))
         self.input_negative.setText(data.get('negative', ''))
+
+    def _on_char_random_clicked(self):
+        """랜덤 버튼 클릭: character_dict에서 랜덤 선택"""
+        import random
+
+        try:
+            # 전역 character_dict 사용
+            if not character_dict:
+                print("⚠️ character_dict가 비어있습니다.")
+                return
+
+            # 랜덤 선택
+            character_name, character_prompt = random.choice(list(character_dict.items()))
+
+            # NAI 모드가 아닌 경우 괄호 이스케이프
+            if self.app_context and self.app_context.current_api_mode != 'NAI':
+                character_name = character_name.replace('(', r'\(').replace(')', r'\)')
+
+            # input_character_name에 설정
+            self.input_character_name.setText(character_name)
+
+            # 필터링 로직 적용
+            self._apply_character_prompt(character_prompt)
+
+            print(f"✅ 랜덤 캐릭터 선택: {character_name}")
+
+        except Exception as e:
+            print(f"⚠️ 랜덤 캐릭터 선택 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _on_char_refresh_clicked(self):
+        """새로고침 버튼 클릭: 현재 입력된 캐릭터명으로 프롬프트 조회"""
+        try:
+            # 현재 입력값 가져오기
+            current_text = self.input_character_name.text().strip()
+            if not current_text:
+                print("⚠️ 캐릭터/작품명이 입력되지 않았습니다.")
+                return
+
+            # 전역 character_dict 사용
+            if not character_dict:
+                print("⚠️ character_dict가 비어있습니다.")
+                return
+
+            # ',' 로 분리하고 strip하여 순서대로 조회
+            tags = [tag.strip() for tag in current_text.split(',') if tag.strip()]
+
+            character_prompt = None
+            matched_tag = None
+            for tag in tags:
+                if tag in character_dict:
+                    character_prompt = character_dict[tag]
+                    matched_tag = tag
+                    break
+
+            if not character_prompt:
+                print(f"⚠️ 매칭되는 캐릭터를 찾을 수 없습니다: {tags}")
+                return
+
+            # 필터링 로직 적용
+            self._apply_character_prompt(character_prompt)
+
+            print(f"✅ 캐릭터 프롬프트 새로고침: {matched_tag}")
+
+        except Exception as e:
+            print(f"⚠️ 캐릭터 프롬프트 새로고침 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _apply_character_prompt(self, character_prompt: str):
+        """
+        캐릭터 프롬프트를 body와 attire로 분리하여 적용
+
+        Args:
+            character_prompt: character_dict에서 가져온 프롬프트 문자열
+        """
+        try:
+            # InteractiveAutocompleteManager 접근
+            parent_window = self.parent_window
+
+            # parent_window를 찾지 못했으면 다시 시도
+            if not parent_window:
+                print("⚠️ parent_window를 찾을 수 없습니다. 재탐색 중...")
+                from PyQt6.QtWidgets import QApplication
+                for widget in QApplication.topLevelWidgets():
+                    if hasattr(widget, 'autocomplete_manager') and widget.__class__.__name__ == 'InteractiveWindow':
+                        parent_window = widget
+                        print(f"✅ QApplication을 통해 InteractiveWindow 발견")
+                        break
+
+            if not parent_window:
+                print("⚠️ InteractiveWindow를 찾을 수 없습니다. 프롬프트를 그대로 적용합니다.")
+                # 프롬프트를 그대로 attire에 적용
+                self.input_attire.setText(character_prompt)
+                return
+
+            autocomplete_manager = getattr(parent_window, 'autocomplete_manager', None)
+            if not autocomplete_manager:
+                print("⚠️ InteractiveAutocompleteManager를 찾을 수 없습니다. 프롬프트를 그대로 적용합니다.")
+                # 프롬프트를 그대로 attire에 적용
+                self.input_attire.setText(character_prompt)
+                return
+
+            # character_prompt를 ', '로 split
+            tags = [tag.strip() for tag in character_prompt.split(',') if tag.strip()]
+
+            # body 데이터셋 가져오기
+            body_dataset = autocomplete_manager.datasets.get('body', {})
+
+            # Person_Body 그룹 필터링
+            person_body_tags = {
+                tag: data for tag, data in body_dataset.items()
+                if data.get('group') == 'Person_Body'
+            }
+
+            # 태그 분류
+            body_tags = []
+            attire_tags = []
+
+            for tag in tags:
+                if tag in person_body_tags:
+                    body_tags.append(tag)
+                else:
+                    attire_tags.append(tag)
+
+            # 필드에 덮어씌우기
+            self.input_body.setText(', '.join(body_tags))
+            self.input_attire.setText(', '.join(attire_tags))
+
+            print(f"  📦 Body: {len(body_tags)}개 태그")
+            print(f"  👗 Attire: {len(attire_tags)}개 태그")
+
+        except Exception as e:
+            print(f"⚠️ 캐릭터 프롬프트 적용 실패: {e}")
+            import traceback
+            traceback.print_exc()
 
 class CharacterPromptBlock(BlockWidget):
     add_character_clicked = pyqtSignal()
@@ -255,8 +499,30 @@ class CharacterPromptBlock(BlockWidget):
     def _init_content(self):
         layout = self.get_content_layout()
         layout.setSpacing(get_scaled_size(12))
-        
-        self.form = CharacterForm()
+
+        # CharacterPromptBlock의 parent는 InteractiveWindow
+        parent_window = self.parent()
+        search_depth = 0
+        max_depth = 10
+
+        while parent_window and not hasattr(parent_window, 'autocomplete_manager') and search_depth < max_depth:
+            parent_window = parent_window.parent()
+            search_depth += 1
+
+        # InteractiveWindow를 찾았는지 확인
+        if parent_window and hasattr(parent_window, 'autocomplete_manager'):
+            print(f"✅ InteractiveWindow 발견 (depth: {search_depth})")
+        else:
+            print(f"⚠️ InteractiveWindow를 찾을 수 없습니다 (searched depth: {search_depth})")
+            # 대체 방법: QApplication을 통해 InteractiveWindow 찾기
+            from PyQt6.QtWidgets import QApplication
+            for widget in QApplication.topLevelWidgets():
+                if hasattr(widget, 'autocomplete_manager') and widget.__class__.__name__ == 'InteractiveWindow':
+                    parent_window = widget
+                    print(f"✅ QApplication을 통해 InteractiveWindow 발견")
+                    break
+
+        self.form = CharacterForm(parent=self, app_context=self.app_context, parent_window=parent_window)
         self.form.random_requested.connect(self.random_field_requested.emit)
         layout.addWidget(self.form)
         
@@ -330,9 +596,16 @@ class CharacterPromptBlock(BlockWidget):
         # COMFYUI 모드 확인
         is_comfyui = self.app_context and self.app_context.current_api_mode == 'COMFYUI'
 
+        parts = []
+
+        # 0. 캐릭터 / 작품명 (있는 경우 맨 앞에)
+        character_name = data.get('character_name', '').strip()
+        if character_name:
+            parts.append(character_name)
+
         # 1. 성별 태그 (필수, 기본값 "girl")
         gender = data.get('gender', 'girl')
-        parts = [gender]
+        parts.append(gender)
 
         # 2. 신체 (input_body)
         body = data.get('body', '').strip()

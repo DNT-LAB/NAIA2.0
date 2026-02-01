@@ -49,6 +49,51 @@ class MainPromptBlock(BlockWidget):
 
         self._init_content()
 
+    # 필터링할 태그 목록 (클래스 레벨 상수)
+    UNWANTED_TAGS = {
+        # 로고/사용자명 관련
+        'patreon username', 'artist logo', 'twitter logo', 'pixiv logo',
+        'logo parody', 'facebook logo', 'penguin logistics logo',
+        'kingdom of kazimierz logo', 'ursus empire logo', 'tiktok logo',
+        'twitch logo', 'artstation logo', 'subscribestar logo',
+        'super smash bros. logo', 'playstation logo', 'kjerag logo',
+        'great lungmen logo', 'tumblr logo', 'twitter x logo',
+        'email address', 'web address', 'patreon logo', 'weibo username',
+        'fanbox username', 'deviantart username', 'instagram username',
+        'pixiv username', 'facebook username', 'tumblr username',
+        'gumroad username', 'subscribestar username', 'twitter username',
+        'name connection', 'artist self-insert', 'brand name imitation',
+        'circle name', 'historical name connection', 'group name',
+        'artist self-reference', 'weapon name', 'artist glove',
+        'artist progress', 'place name', 'food name', 'artist name', 'signature',
+        # Watermark 관련
+        'watermark', 'sample watermark', 'character watermark',
+        'commission watermark', 'copyright notice', 'pixiv id', 'kanji'
+    }
+
+    @staticmethod
+    def _should_filter_tag(tag: str) -> bool:
+        """
+        태그를 필터링해야 하는지 확인
+
+        Args:
+            tag: 확인할 태그
+
+        Returns:
+            True if 필터링해야 함, False otherwise
+        """
+        tag_lower = tag.lower().strip()
+
+        # 1. UNWANTED_TAGS에 정확히 매칭되는지 확인
+        if tag_lower in MainPromptBlock.UNWANTED_TAGS:
+            return True
+
+        # 2. "text"를 포함하는지 확인
+        if 'text' in tag_lower:
+            return True
+
+        return False
+
     def _init_content(self):
         layout = self.get_content_layout()
 
@@ -246,6 +291,26 @@ class MainPromptBlock(BlockWidget):
         self.btn_random.clicked.connect(self._on_random_clicked)
         self.btn_generate.clicked.connect(self._on_generate_clicked)
 
+        layout.addSpacing(get_scaled_size(8))
+
+        # === 자동 생성 옵션 (배타적 선택) ===
+        auto_gen_layout = QHBoxLayout()
+        auto_gen_layout.setSpacing(get_scaled_size(8))
+
+        # 반복 생성 체크박스
+        self.chk_repeat_generation = QCheckBox("반복 생성")
+        self.chk_repeat_generation.setStyleSheet(f"color: {COMMON_STYLES['text_primary']}; font-family: {FONT_FAMILY}; font-size: {get_scaled_font_size(14)}px;")
+        self.chk_repeat_generation.stateChanged.connect(self._on_repeat_generation_toggled)
+        auto_gen_layout.addWidget(self.chk_repeat_generation, 1)  # stretch=1
+
+        # 자동 랜덤생성 체크박스
+        self.chk_auto_random_generation = QCheckBox("자동 랜덤생성")
+        self.chk_auto_random_generation.setStyleSheet(f"color: {COMMON_STYLES['text_primary']}; font-family: {FONT_FAMILY}; font-size: {get_scaled_font_size(14)}px;")
+        self.chk_auto_random_generation.stateChanged.connect(self._on_auto_random_generation_toggled)
+        auto_gen_layout.addWidget(self.chk_auto_random_generation, 1)  # stretch=1
+
+        layout.addLayout(auto_gen_layout)
+
         # 상하 늘어짐 방지
         layout.addStretch()
 
@@ -267,7 +332,13 @@ class MainPromptBlock(BlockWidget):
                 continue
             if line.startswith('#'):  # 카테고리 헤더 무시
                 continue
-            cleaned_lines.append(line)
+
+            # 라인 내의 태그들을 필터링
+            tags = [tag.strip() for tag in line.split(',') if tag.strip()]
+            filtered_tags = [tag for tag in tags if not self._should_filter_tag(tag)]
+
+            if filtered_tags:
+                cleaned_lines.append(', '.join(filtered_tags))
 
         # 쉼표로 조인하고 정리
         result = ', '.join(cleaned_lines)
@@ -312,7 +383,9 @@ class MainPromptBlock(BlockWidget):
                 continue
             # 쉼표로 분리
             tags = [tag.strip() for tag in line.split(',') if tag.strip()]
-            all_tags.extend(tags)
+            # 필터링 적용
+            filtered_tags = [tag for tag in tags if not self._should_filter_tag(tag)]
+            all_tags.extend(filtered_tags)
 
         # 카테고리별로 분류
         person_tags = []
@@ -473,6 +546,34 @@ class MainPromptBlock(BlockWidget):
 
         # 시그널 발행 (InteractiveWindow에서 처리)
         self.generate_requested.emit()
+
+    def _on_repeat_generation_toggled(self, state):
+        """반복 생성 체크박스 토글 핸들러 (배타적 선택)"""
+        if state == Qt.CheckState.Checked.value:
+            # 반복 생성이 체크되면 자동 랜덤생성 해제
+            if self.chk_auto_random_generation.isChecked():
+                self.chk_auto_random_generation.setChecked(False)
+            print("[MainPromptBlock] 반복 생성 활성화")
+        else:
+            print("[MainPromptBlock] 반복 생성 비활성화")
+
+    def _on_auto_random_generation_toggled(self, state):
+        """자동 랜덤생성 체크박스 토글 핸들러 (배타적 선택)"""
+        if state == Qt.CheckState.Checked.value:
+            # 자동 랜덤생성이 체크되면 반복 생성 해제
+            if self.chk_repeat_generation.isChecked():
+                self.chk_repeat_generation.setChecked(False)
+            print("[MainPromptBlock] 자동 랜덤생성 활성화")
+        else:
+            print("[MainPromptBlock] 자동 랜덤생성 비활성화")
+
+    def is_repeat_generation_enabled(self) -> bool:
+        """반복 생성 활성화 여부 반환"""
+        return self.chk_repeat_generation.isChecked()
+
+    def is_auto_random_generation_enabled(self) -> bool:
+        """자동 랜덤생성 활성화 여부 반환"""
+        return self.chk_auto_random_generation.isChecked()
 
     def _on_tag_viewer_toggled(self, state):
         """
@@ -787,6 +888,10 @@ class MainPromptBlock(BlockWidget):
 
             tag_lower = tag.lower()
 
+            # 0. 불필요한 태그 제거 (로고, watermark, text 포함 태그)
+            if self._should_filter_tag(tag):
+                continue
+
             # 1. 캐릭터 특징 제거
             if self.chk_remove_features.isChecked():
                 if self._is_character_feature(tag_lower):
@@ -853,18 +958,32 @@ class MainPromptBlock(BlockWidget):
 
     def _is_clothing(self, tag: str) -> bool:
         """
-        의류 태그 판별
+        의류 태그 판별 (InteractiveAutocompleteManager의 Clothing_Wear 그룹 사용)
         """
-        clothing_keywords = [
-            'dress', 'skirt', 'shirt', 'jacket', 'coat', 'pants',
-            'shorts', 'thighhighs', 'stockings', 'boots', 'shoes',
-            'hat', 'cap', 'gloves', 'scarf', 'tie', 'bow',
-            'uniform', 'school uniform', 'suit', 'bikini', 'swimsuit',
-            'underwear', 'bra', 'panties', 'naked', 'nude',
-            'kimono', 'yukata', 'apron', 'hoodie', 'sweater'
-        ]
+        # InteractiveAutocompleteManager에서 데이터 가져오기
+        if not self.autocomplete_manager or not hasattr(self.autocomplete_manager, 'datasets'):
+            # fallback: 하드코딩된 키워드 사용
+            clothing_keywords = [
+                'dress', 'skirt', 'shirt', 'jacket', 'coat', 'pants',
+                'shorts', 'thighhighs', 'stockings', 'boots', 'shoes',
+                'hat', 'cap', 'gloves', 'scarf', 'tie', 'bow',
+                'uniform', 'school uniform', 'suit', 'bikini', 'swimsuit',
+                'underwear', 'bra', 'panties', 'naked', 'nude',
+                'kimono', 'yukata', 'apron', 'hoodie', 'sweater'
+            ]
+            return any(keyword in tag for keyword in clothing_keywords)
 
-        return any(keyword in tag for keyword in clothing_keywords)
+        # datasets에서 "clothing" 데이터셋 가져오기
+        clothing_dataset = self.autocomplete_manager.datasets.get("clothing", {})
+
+        # Clothing_Wear 그룹의 태그들
+        clothing_tags = {
+            tag_key.lower() for tag_key, tag_data in clothing_dataset.items()
+            if tag_data.get("group") == "Clothing_Wear"
+        }
+
+        # 정확한 매칭 확인
+        return tag.lower() in clothing_tags
 
     def _is_background(self, tag: str) -> bool:
         """

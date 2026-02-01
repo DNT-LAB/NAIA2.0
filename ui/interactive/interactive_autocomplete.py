@@ -201,6 +201,7 @@ class InteractiveAutocompleteManager(QObject):
                 "nsfw": self._filter_by_group(all_tags, "NSFW"),
                 "culture": self._filter_by_group(all_tags, "Culture_Misc"),  # ✅ 수정
                 "quality": self._create_quality_dataset(all_tags),  # 🆕 퀄리티 태그 데이터셋
+                "character": self._create_character_dataset(),  # 🆕 캐릭터/작품 태그 데이터셋 (TagDataManager 기반)
             }
 
             # 데이터셋 크기 출력
@@ -314,6 +315,62 @@ class InteractiveAutocompleteManager(QObject):
 
         return quality_dataset
 
+    def _create_character_dataset(self) -> dict:
+        """
+        캐릭터/작품 태그 데이터셋 생성 (TagDataManager 기반)
+
+        TagDataManager의 copyright_dict와 character_dict_count를 사용하여
+        캐릭터 및 작품 태그만 포함하는 데이터셋을 생성합니다.
+
+        Returns:
+            dict: {tag: tag_data} 형식의 데이터셋
+        """
+        character_dataset = {}
+
+        try:
+            # parent_window를 통해 app_context 접근
+            app_context = getattr(self.parent_window, 'app_context', None)
+            if not app_context:
+                print("⚠️ app_context를 찾을 수 없습니다. character 데이터셋을 빈 상태로 생성합니다.")
+                return character_dataset
+
+            # TagDataManager 접근
+            tag_data_manager = getattr(app_context, 'tag_data_manager', None)
+            if not tag_data_manager:
+                print("⚠️ TagDataManager를 찾을 수 없습니다. character 데이터셋을 빈 상태로 생성합니다.")
+                return character_dataset
+
+            # 1. copyright_dict (작품 태그)
+            copyright_dict = getattr(tag_data_manager, 'copyright_dict', {})
+            for tag, count in copyright_dict.items():
+                character_dataset[tag] = {
+                    "group": "Character",
+                    "subgroup": "copyright",
+                    "freq": count,
+                    "description": "작품명",
+                    "keywords_kr": []
+                }
+
+            # 2. character_dict_count (캐릭터 태그)
+            character_dict_count = getattr(tag_data_manager, 'character_dict_count', {})
+            for tag, count in character_dict_count.items():
+                character_dataset[tag] = {
+                    "group": "Character",
+                    "subgroup": "character",
+                    "freq": count,
+                    "description": "캐릭터명",
+                    "keywords_kr": []
+                }
+
+            print(f"✅ character 데이터셋 생성 완료: {len(character_dataset)}개 태그")
+
+        except Exception as e:
+            print(f"⚠️ character 데이터셋 생성 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return character_dataset
+
     def _search_tags(self, query: str, dataset: dict) -> list:
         """
         태그 검색 엔진
@@ -419,8 +476,8 @@ class InteractiveAutocompleteManager(QObject):
 
         discovered_count = 0
         for widget in self.parent_window.findChildren((QTextEdit, QLineEdit)):
-            # autocomplete_dataset property가 있는 위젯만 자동 등록
-            dataset_id = widget.property("autocomplete_dataset")
+            # autocomplete_dataset 또는 autocomplete_filter property가 있는 위젯만 자동 등록
+            dataset_id = widget.property("autocomplete_dataset") or widget.property("autocomplete_filter")
             if dataset_id:
                 self.register_widget(widget, dataset_id)
                 discovered_count += 1
@@ -701,7 +758,10 @@ class InteractiveAutocompleteManager(QObject):
             self.popup.setMaximumWidth(500)
 
         # 현재 위젯의 데이터셋 가져오기
-        dataset_id = self.widget_dataset_map.get(self.current_widget, "general")
+        # widget_dataset_map에서 먼저 확인하고, 없으면 property에서 확인
+        dataset_id = self.widget_dataset_map.get(self.current_widget)
+        if not dataset_id:
+            dataset_id = self.current_widget.property("autocomplete_dataset") or self.current_widget.property("autocomplete_filter") or "general"
         current_dataset = self.datasets.get(dataset_id, {})
 
         if not current_dataset:

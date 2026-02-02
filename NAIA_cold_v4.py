@@ -652,8 +652,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 140"
-        self.setWindowTitle(self.base_title + " - 260201")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 141"
+        self.setWindowTitle(self.base_title + " - 260202")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2741,6 +2741,23 @@ class ModernMainWindow(QMainWindow):
             except Exception as e:
                 print(f"❌ 자동 생성 체크 실패: {e}")
 
+            # 🆕 Autosave: 특수 요청이 아닌 일반 생성 완료 시에만 자동 저장
+            try:
+                generation_params = result.get("generation_params", {})
+                is_special_request = (
+                    generation_params.get("assets_workshop_request", False) or
+                    generation_params.get("artist_thumb_request", False) or
+                    generation_params.get("studio_request", False) or
+                    generation_params.get("interactive_mode_request", False) or
+                    generation_params.get("turbo_sequence_request", False)
+                )
+
+                if not is_special_request:
+                    self._perform_autosave_on_generation()
+            except Exception as e:
+                # 자동 저장 실패해도 프로그램은 계속 동작
+                print(f"⚠️ [Autosave] 트리거 실패: {e}")
+
         except Exception as e:
             print(f"❌ update_ui_with_result 전체 에러: {e}")
             import traceback
@@ -4535,6 +4552,29 @@ class ModernMainWindow(QMainWindow):
 
         except Exception as e:
             print(f"⚠️ 멀티 계정 알림 표시 오류: {e}")
+
+    def _perform_autosave_on_generation(self):
+        """이미지 생성 완료 시 자동 저장 (특수 요청 제외)"""
+        try:
+            current_mode = self.app_context.get_api_mode()
+
+            # 1. 프리셋 저장 (PromptEngineeringModule)
+            prompt_eng_module = self.middle_section_controller.get_module_instance("PromptEngineeringModule")
+            if prompt_eng_module and hasattr(prompt_eng_module, 'save_on_exit'):
+                prompt_eng_module.save_on_exit()
+
+            # 2. 생성 파라미터 저장
+            self.generation_params_manager.save_mode_settings(current_mode)
+
+            # 3. 모드 대응 모듈 저장
+            self.app_context.mode_manager.save_all_current_mode()
+
+            # 상태바에 짧게 표시 (방해되지 않도록)
+            print(f"💾 자동 저장 완료")
+
+        except Exception as e:
+            # 자동 저장 실패해도 프로그램은 계속 동작
+            print(f"⚠️ [Autosave] 자동 저장 실패: {e}")
 
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장

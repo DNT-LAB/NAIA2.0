@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSplitter, QCheckBox, QPushButton, QScrollArea, QFrame,
     QApplication, QTextEdit
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QMetaObject
 from PyQt6.QtGui import QAction
 
 from ui.theme import DARK_COLORS
@@ -24,6 +24,9 @@ class InteractiveWindow(QMainWindow):
     """Interactive 창 - 좌우 분할 레이아웃"""
 
     window_closed = pyqtSignal()
+    # 🆕 자동 생성 트리거 시그널 (워커 스레드 → UI 스레드 전환)
+    _trigger_repeat_generation = pyqtSignal()
+    _trigger_random_generation = pyqtSignal()
 
     def __init__(self, parent_app=None, app_context=None):
         super().__init__(parent=None)
@@ -87,6 +90,9 @@ class InteractiveWindow(QMainWindow):
             }}
         """)
 
+        # 🆕 자동 생성 시그널 연결 (워커 스레드 → UI 스레드 전환)
+        self._trigger_repeat_generation.connect(self._schedule_repeat_generation)
+        self._trigger_random_generation.connect(self._schedule_random_generation)
 
         self._init_ui()
 
@@ -1463,16 +1469,16 @@ class InteractiveWindow(QMainWindow):
                         "✅ Interactive Mode: 이미지 생성 완료", 3000
                     )
 
-                # 🆕 자동 반복 생성 로직
+                # 🆕 자동 반복 생성 로직 (스레드 안전)
                 if hasattr(self, 'main_prompt_block'):
                     if self.main_prompt_block.is_repeat_generation_enabled():
-                        # 반복 생성: 0.5초 후 다시 생성
+                        # 반복 생성: 시그널을 발행하여 UI 스레드에서 처리
                         print("[InteractiveWindow] 반복 생성 활성화 → 0.5초 후 재생성")
-                        QTimer.singleShot(500, self.main_prompt_block.trigger_generation)
+                        self._trigger_repeat_generation.emit()
                     elif self.main_prompt_block.is_auto_random_generation_enabled():
-                        # 자동 랜덤생성: 0.5초 후 랜덤 프롬프트 + 생성
+                        # 자동 랜덤생성: 시그널을 발행하여 UI 스레드에서 처리
                         print("[InteractiveWindow] 자동 랜덤생성 활성화 → 0.5초 후 랜덤 + 생성")
-                        QTimer.singleShot(500, self._on_control_bar_random_generate)
+                        self._trigger_random_generation.emit()
 
             else:
                 print(f"⚠️ 예상과 다른 결과 타입: {type(result)}")
@@ -1484,6 +1490,22 @@ class InteractiveWindow(QMainWindow):
             import traceback
             traceback.print_exc()
             self._restore_generate_button()
+
+    def _schedule_repeat_generation(self):
+        """
+        반복 생성 스케줄링 (UI 스레드에서 안전하게 실행)
+
+        워커 스레드에서 시그널을 받아 UI 스레드에서 QTimer 실행
+        """
+        QTimer.singleShot(500, self.main_prompt_block.trigger_generation)
+
+    def _schedule_random_generation(self):
+        """
+        랜덤 생성 스케줄링 (UI 스레드에서 안전하게 실행)
+
+        워커 스레드에서 시그널을 받아 UI 스레드에서 QTimer 실행
+        """
+        QTimer.singleShot(500, self._on_control_bar_random_generate)
 
     def _on_generation_progress(self, progress_data: dict):
         """

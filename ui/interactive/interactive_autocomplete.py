@@ -765,7 +765,7 @@ class InteractiveAutocompleteManager(QObject):
         current_dataset = self.datasets.get(dataset_id, {})
 
         if not current_dataset:
-            print(f"⚠️ 데이터셋 '{dataset_id}'이(가) 비어있습니다")
+            # print(f"⚠️ 데이터셋 '{dataset_id}'이(가) 비어있습니다")
             self._hide_popup()  # ✅ TagViewer는 건드리지 않음
             return
 

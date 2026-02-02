@@ -1210,7 +1210,7 @@ class AutoCompleteManager(QObject):
         for tag, count in matches:
             if filter_category == "artist":
                 # artist: 접두사가 있거나 artist_list에 있는 태그만
-                if tag.startswith("artist:") or tag in artist_list:
+                if tag.startswith("artist:") or tag.startswith("@") or tag in artist_list:
                     filtered.append((tag, count))
 
             elif filter_category == "general":

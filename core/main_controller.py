@@ -618,17 +618,31 @@ class MainController:
         import requests
         import json
         
-        # URL 정규화 및 프로토콜 테스트
+        # URL 테스트 전략: 사용자 입력 → 기본 포트들 (8000, 8188)
         test_urls = []
-        clean_url = url.replace('https://', '').replace('http://', '')
-        
-        # 포트가 없으면 기본 ComfyUI 포트(8188) 추가
-        if ':' not in clean_url:
-            clean_url = f"{clean_url}:8188"
-        
-        # HTTP와 HTTPS 모두 테스트
-        test_urls.append(f"http://{clean_url}")
-        test_urls.append(f"https://{clean_url}")
+        original_url = url.strip().rstrip('/')
+
+        # 1. 사용자가 입력한 URL을 그대로 먼저 시도
+        if original_url.startswith('http://') or original_url.startswith('https://'):
+            test_urls.append(original_url)
+        else:
+            # 프로토콜이 없으면 http와 https 모두 시도
+            test_urls.append(f"http://{original_url}")
+            test_urls.append(f"https://{original_url}")
+
+        # 2. 포트가 없는 경우, 기본 포트들을 추가해서 재시도
+        clean_url = original_url.replace('https://', '').replace('http://', '')
+        has_port = ':' in clean_url.split('/')[0]  # 경로 제외하고 호스트:포트 부분만 체크
+
+        if not has_port:
+            # Cloudflare 터널이나 ngrok는 포트 불필요
+            is_remote_tunnel = 'trycloudflare.com' in clean_url or 'ngrok' in clean_url
+
+            if not is_remote_tunnel:
+                # 로컬 서버: 기본 포트들 시도 (8000, 8188)
+                for port in [8000, 8188]:
+                    test_urls.append(f"http://{clean_url}:{port}")
+                    test_urls.append(f"https://{clean_url}:{port}")
         
         for test_url in test_urls:
             try:

@@ -121,6 +121,10 @@ class DepthSearchWindow(QWidget):
         self.original_model = search_result
         self.current_model = SearchResultModel(search_result.get_dataframe().copy())
         self.search_engine = SearchEngine()
+
+        # 🔧 시그널 연결 추적 플래그
+        self._selection_connected = False
+
         self.init_ui()
         self.update_view()
 
@@ -394,7 +398,13 @@ class DepthSearchWindow(QWidget):
     
     # [신규] 마우스, 키보드 입력을 모두 처리하는 통합 슬롯
     def on_selection_changed(self, selected, deselected):
-        """선택된 행이 변경될 때마다 호출 (마우스 클릭, 키보드 이동 모두 포함)"""
+        """
+        선택된 행이 변경될 때마다 호출 (마우스 클릭, 키보드 이동 모두 포함)
+
+        🔧 크래시 방지 개선:
+        - 안전한 DataFrame 접근 (모델이 교체되는 중일 수 있음)
+        - setFocus() 재귀 루프 방지
+        """
         # 선택된 인덱스 목록에서 첫 번째 인덱스를 가져옴
         indexes = selected.indexes()
         if not indexes:
@@ -402,26 +412,70 @@ class DepthSearchWindow(QWidget):
 
         current_index = indexes[0]
         row = current_index.row()
-        df = self.table_view.model().dataframe()
-        
+
+        # 안전한 모델 및 DataFrame 접근
+        model = self.table_view.model()
+        if model is None:
+            return
+
         try:
+            df = model.dataframe()
+            if df is None or df.empty or row >= len(df):
+                return
+
             original_index = df.index[row]
             general_text = df.loc[original_index, 'general']
-            self.general_text_edit.setText(general_text)
-        except (KeyError, IndexError):
-            self.general_text_edit.setText("'general' 컬럼을 찾을 수 없거나 행이 잘못되었습니다.")
-            
-        # [핵심] 이벤트를 처리한 후, 테이블 뷰에 다시 키보드 포커스를 줌
-        self.table_view.setFocus()
+            self.general_text_edit.setText(str(general_text))
+        except (KeyError, IndexError, AttributeError) as e:
+            self.general_text_edit.setText(f"'general' 컬럼을 찾을 수 없거나 행이 잘못되었습니다. ({e})")
+        except Exception as e:
+            # 예상치 못한 오류 방지
+            print(f"⚠️ on_selection_changed 오류: {e}")
+
+        # 🔧 setFocus() 제거: 재귀 루프 방지
+        # self.table_view.setFocus()  # 제거됨
     
     def update_view(self):
-        """현재 모델 데이터로 테이블 뷰와 정보 레이블을 업데이트"""
+        """
+        현재 모델 데이터로 테이블 뷰와 정보 레이블을 업데이트
+
+        🔧 크래시 방지 개선:
+        - 이전 모델과 selectionModel의 시그널 안전하게 해제
+        - 시그널 중복 연결 방지 (중복 연결 시 스택 오버플로우 발생)
+        - Qt 객체 수명 관리 개선
+        """
+        # 1. 이전 selectionModel의 시그널 연결 해제 (메모리 누수 방지)
+        if self._selection_connected:
+            try:
+                old_selection_model = self.table_view.selectionModel()
+                if old_selection_model is not None:
+                    old_selection_model.selectionChanged.disconnect(self.on_selection_changed)
+            except (RuntimeError, TypeError):
+                # 이미 삭제된 객체이거나 연결되지 않은 경우 무시
+                pass
+            self._selection_connected = False
+
+        # 2. 이전 모델 저장 및 안전한 정리
+        old_model = self.table_view.model()
+
+        # 3. 새 모델 생성 및 설정
         df = self.current_model.get_dataframe()
-        model = PandasModel(df)
-        self.table_view.setModel(model) # 모델 설정
-        
-        # [핵심 수정] 모델이 설정된 직후에 selectionModel의 시그널을 연결합니다.
-        self.table_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        new_model = PandasModel(df)
+        self.table_view.setModel(new_model)
+
+        # 4. 이전 모델 명시적 정리 (Qt 객체 수명 관리)
+        if old_model is not None:
+            try:
+                old_model.deleteLater()
+            except RuntimeError:
+                pass  # 이미 삭제된 객체
+
+        # 5. 새 selectionModel의 시그널 연결 (한 번만)
+        if not self._selection_connected:
+            selection_model = self.table_view.selectionModel()
+            if selection_model is not None:
+                selection_model.selectionChanged.connect(self.on_selection_changed)
+                self._selection_connected = True
 
         self.info_label.setText(f"표시된 행: {len(df)} / 원본 행: {self.original_model.get_count()}")
 
@@ -593,5 +647,48 @@ class DepthSearchWindow(QWidget):
     def perform_instant_search(self, keyword: str):
         """단일 키워드로 즉시 재검색 수행"""
         self.d_search_input.setText(f'{keyword}') # 정확한 검색을 위해 따옴표 추가
-        self.d_exclude_input.clear()        
+        self.d_exclude_input.clear()
         self.apply_filters()
+
+    def cleanup(self):
+        """
+        윈도우 종료 시 안전한 정리
+
+        🔧 크래시 방지:
+        - 시그널 연결 해제
+        - Qt 객체 명시적 정리
+        - 메모리 누수 방지
+        """
+        try:
+            # 1. 시그널 연결 해제
+            if self._selection_connected:
+                selection_model = self.table_view.selectionModel()
+                if selection_model is not None:
+                    try:
+                        selection_model.selectionChanged.disconnect(self.on_selection_changed)
+                    except (RuntimeError, TypeError):
+                        pass
+                self._selection_connected = False
+
+            # 2. 모델 정리
+            model = self.table_view.model()
+            if model is not None:
+                try:
+                    self.table_view.setModel(None)
+                    model.deleteLater()
+                except RuntimeError:
+                    pass
+
+            # 3. 참조 해제
+            self.original_model = None
+            self.current_model = None
+
+            print("✅ DepthSearchWindow 정리 완료")
+
+        except Exception as e:
+            print(f"⚠️ DepthSearchWindow 정리 중 오류: {e}")
+
+    def closeEvent(self, event):
+        """창이 닫힐 때 자동으로 cleanup 호출"""
+        self.cleanup()
+        super().closeEvent(event)

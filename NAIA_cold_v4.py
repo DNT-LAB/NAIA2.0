@@ -653,7 +653,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev 141"
-        self.setWindowTitle(self.base_title + " - 260202b")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 260203c")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()

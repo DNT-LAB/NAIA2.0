@@ -12,7 +12,13 @@ import gc
 import requests
 
 def _force_cleanup_all_threads():
-    """모든 종류의 스레드 풀과 연결을 강제로 정리하는 함수"""
+    """
+    모든 종류의 스레드 풀과 연결을 강제로 정리하는 함수
+
+    ✅ 크로스 스레드 타이머 문제 해결:
+    - QTimer.singleShot + lambda 제거 (타이머 충돌 원인)
+    - 직접 processEvents() 호출로 대체
+    """
     try:
         # 1. 전역 urllib3 연결 풀 정리
         try:
@@ -45,12 +51,12 @@ def _force_cleanup_all_threads():
 
         # 4. 가비지 컬렉션 강제 실행
         gc.collect()
-        
-        # 5. Qt 이벤트 루프 강제 처리 (여러 번)
-        for i in range(3):
+
+        # 5. Qt 이벤트 루프 강제 처리 (직접 호출)
+        # ✅ 수정: QTimer.singleShot 제거 → 타이머 충돌 해결
+        for _ in range(5):
             QCoreApplication.processEvents()
-            QTimer.singleShot(10, lambda: QCoreApplication.processEvents())
-            
+
     except Exception:
         pass
 

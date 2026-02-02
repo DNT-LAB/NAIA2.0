@@ -145,17 +145,35 @@ class PromptProcessor:
                 # 1. 인원수 태그
                 anima_tags.extend(sorted_person_tags)
 
-                # 2. 캐릭터 태그 (metadata에서)
+                # 2. 캐릭터 태그 (metadata에서, 괄호 이스케이프 + 가중치 적용)
                 if 'anima_character' in context.metadata:
-                    anima_tags.append(context.metadata['anima_character'])
+                    character_str = context.metadata['anima_character']
+                    # 쉼표로 분리하여 리스트로 만들기
+                    char_list = [c.strip() for c in character_str.split(',')]
 
-                # 3. copyright 태그 (metadata에서)
+                    if char_list:
+                        # 괄호 이스케이프 처리
+                        char_list = [c.replace("(", r"\(").replace(")", r"\)") for c in char_list]
+
+                        # 첫 원소에 "(" 붙이기
+                        char_list[0] = f"({char_list[0]}"
+
+                        # 마지막 원소에 ":0.8)" 붙이기
+                        char_list[-1] = f"{char_list[-1]}:0.7)"
+
+                        # 다시 쉼표로 조인
+                        character = ', '.join(char_list)
+                        anima_tags.append(character)
+
+                # 3. copyright 태그 (metadata에서, 괄호 이스케이프)
                 if 'anima_copyright' in context.metadata:
-                    anima_tags.append(context.metadata['anima_copyright'])
+                    copyright_tag = context.metadata['anima_copyright'].replace("(", r"\(").replace(")", r"\)")
+                    anima_tags.append(copyright_tag)
 
-                # 4. @artist 태그 (metadata에서, @ 붙여서)
+                # 4. @artist 태그 (metadata에서, @ 붙이고 괄호 이스케이프)
                 if 'anima_artist' in context.metadata:
-                    anima_tags.append(f"@{context.metadata['anima_artist']}")
+                    artist = context.metadata['anima_artist'].replace("(", r"\(").replace(")", r"\)")
+                    anima_tags.append(f"@{artist}")
 
                 # @ 태그 앞에 삽입
                 context.prefix_tags = (
@@ -171,25 +189,63 @@ class PromptProcessor:
                 # 1. 인원수 태그
                 anima_tags.extend(sorted_person_tags)
 
-                # 2. 캐릭터 태그
+                # 2. 캐릭터 태그 (괄호 이스케이프 + 가중치 적용)
                 if 'anima_character' in context.metadata:
-                    anima_tags.append(context.metadata['anima_character'])
+                    character_str = context.metadata['anima_character']
+                    # 쉼표로 분리하여 리스트로 만들기
+                    char_list = [c.strip() for c in character_str.split(',')]
 
-                # 3. copyright 태그
+                    if char_list:
+                        # 괄호 이스케이프 처리
+                        char_list = [c.replace("(", r"\(").replace(")", r"\)") for c in char_list]
+
+                        # 첫 원소에 "(" 붙이기
+                        char_list[0] = f"({char_list[0]}"
+
+                        # 마지막 원소에 ":0.8)" 붙이기
+                        char_list[-1] = f"{char_list[-1]}:0.75)"
+
+                        # 다시 쉼표로 조인
+                        character = ', '.join(char_list)
+                        anima_tags.append(character)
+
+                # 3. copyright 태그 (괄호 이스케이프)
                 if 'anima_copyright' in context.metadata:
-                    anima_tags.append(context.metadata['anima_copyright'])
+                    copyright_tag = context.metadata['anima_copyright'].replace("(", r"\(").replace(")", r"\)")
+                    anima_tags.append(copyright_tag)
 
-                # 4. @artist 태그 (@ 붙여서)
+                # 4. @artist 태그 (@ 붙이고 괄호 이스케이프)
                 if 'anima_artist' in context.metadata:
-                    anima_tags.append(f"@{context.metadata['anima_artist']}")
+                    artist = context.metadata['anima_artist'].replace("(", r"\(").replace(")", r"\)")
+                    anima_tags.append(f"@{artist}")
 
                 context.prefix_tags = context.prefix_tags + anima_tags
                 print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
+
+            # 🆕 ANIMA 모드: main_tags에 가중치 적용 (0.75)
+            if context.main_tags:
+                # "#"로 시작하지 않는 첫 번째 인덱스 찾기
+                first_non_hash_idx = None
+                for i, tag in enumerate(context.main_tags):
+                    if not tag.startswith('#'):
+                        first_non_hash_idx = i
+                        break
+
+                # 첫 번째 non-# 태그와 마지막 태그에 가중치 적용
+                if first_non_hash_idx is not None:
+                    # 첫 번째 non-# 태그에 "(" 붙이기
+                    context.main_tags[first_non_hash_idx] = f"({context.main_tags[first_non_hash_idx]}"
+
+                    # 마지막 태그에 ":0.75)" 붙이기
+                    context.main_tags[-1] = f"{context.main_tags[-1]}:0.8)"
+
+                    print(f"🎨 ANIMA 모드: main_tags에 가중치 0.75 적용 (첫 인덱스: {first_non_hash_idx}, 마지막: {len(context.main_tags)-1})")
+
         else:
             # 기존 방식: 맨 앞에 삽입
             context.prefix_tags = sorted_person_tags + context.prefix_tags
 
-        # --- 이하 기존 로직 ---        
+        # --- 이하 기존 로직 ---
         all_tags = context.get_all_tags()
         seen = set()
         final_tags = []

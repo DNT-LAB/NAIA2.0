@@ -139,17 +139,52 @@ class PromptProcessor:
                     break
 
             if at_index is not None:
+                # ANIMA 모드: 순서대로 삽입 (인원수 → 캐릭터 → copyright → @artist)
+                anima_tags = []
+
+                # 1. 인원수 태그
+                anima_tags.extend(sorted_person_tags)
+
+                # 2. 캐릭터 태그 (metadata에서)
+                if 'anima_character' in context.metadata:
+                    anima_tags.append(context.metadata['anima_character'])
+
+                # 3. copyright 태그 (metadata에서)
+                if 'anima_copyright' in context.metadata:
+                    anima_tags.append(context.metadata['anima_copyright'])
+
+                # 4. @artist 태그 (metadata에서, @ 붙여서)
+                if 'anima_artist' in context.metadata:
+                    anima_tags.append(f"@{context.metadata['anima_artist']}")
+
                 # @ 태그 앞에 삽입
                 context.prefix_tags = (
                     context.prefix_tags[:at_index] +
-                    sorted_person_tags +
+                    anima_tags +
                     context.prefix_tags[at_index:]
                 )
-                print(f"🎨 ANIMA 모드: 인원수 태그를 @ 태그 앞 (인덱스 {at_index})에 삽입")
+                print(f"🎨 ANIMA 모드: 태그 삽입 완료 (인덱스 {at_index}): {', '.join(anima_tags)}")
             else:
                 # @ 태그가 없으면 맨 뒤에 삽입
-                context.prefix_tags = context.prefix_tags + sorted_person_tags
-                print(f"🎨 ANIMA 모드: @ 태그 없음, 인원수 태그를 맨 뒤에 삽입")
+                anima_tags = []
+
+                # 1. 인원수 태그
+                anima_tags.extend(sorted_person_tags)
+
+                # 2. 캐릭터 태그
+                if 'anima_character' in context.metadata:
+                    anima_tags.append(context.metadata['anima_character'])
+
+                # 3. copyright 태그
+                if 'anima_copyright' in context.metadata:
+                    anima_tags.append(context.metadata['anima_copyright'])
+
+                # 4. @artist 태그 (@ 붙여서)
+                if 'anima_artist' in context.metadata:
+                    anima_tags.append(f"@{context.metadata['anima_artist']}")
+
+                context.prefix_tags = context.prefix_tags + anima_tags
+                print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
         else:
             # 기존 방식: 맨 앞에 삽입
             context.prefix_tags = sorted_person_tags + context.prefix_tags

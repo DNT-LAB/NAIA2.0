@@ -828,12 +828,24 @@ class GenerationController:
                 self.context.main_window.status_bar.showMessage(f"🔄 재시도 {self.auto_retry_count}: 새 프롬프트 생성 후 재시도 중...")
                 
                 # 새 프롬프트 생성 요청
+                # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+                main_win = self.context.main_window
+                comfyui_sampling_mode = "eps"  # 기본값
+                if hasattr(main_win, 'anima_radio') and main_win.anima_radio.isChecked():
+                    comfyui_sampling_mode = "anima"
+                elif hasattr(main_win, 'v_pred_radio') and main_win.v_pred_radio.isChecked():
+                    comfyui_sampling_mode = "v_prediction"
+                elif hasattr(main_win, 'eps_radio') and main_win.eps_radio.isChecked():
+                    comfyui_sampling_mode = "eps"
+
                 settings = {
                     'prompt_fixed': False,
                     'auto_generate': True,
                     'turbo_mode': self.context.main_window.generation_checkboxes["터보 옵션"].isChecked(),
                     'wildcard_standalone': self.context.main_window.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-                    "auto_fit_resolution": self.context.main_window.auto_fit_resolution_checkbox.isChecked()
+                    "auto_fit_resolution": self.context.main_window.auto_fit_resolution_checkbox.isChecked(),
+                    'api_mode': self.context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+                    'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
                 }
                 
                 # 자동 생성 플래그 설정

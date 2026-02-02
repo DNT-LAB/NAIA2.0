@@ -671,7 +671,7 @@ def cleanup(self):
 **파일**: [data/CLAUDE.md](data/CLAUDE.md)
 
 **주요 파일**:
-- `tags/*.parquet` - 분할된 태그 데이터베이스 (130개 파일, ~100MB+)
+- `tags/*.parquet` - 분할된 태그 데이터베이스 (150개 파일, ~100MB+)
 - `characteristic_list.txt` - 특징 태그 사전 (1006개)
 - `clothes_list.txt` - 의류 태그 사전 (3700개)
 

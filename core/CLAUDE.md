@@ -564,6 +564,111 @@ def initialize_tabs(self):
             self._add_close_button_to_tab(tab_index, instance.tab_id)
 ```
 
+### SearchController: 검색 컨트롤러
+
+**파일**: `core/search_controller.py:8-149`
+
+#### 역할
+
+- 비동기 태그 검색 관리
+- 멀티프로세싱 기반 병렬 검색
+- 검색 진행률 추적
+- 검색 범위 제한 (max_129/max_149 모드)
+
+#### 주요 클래스
+
+**SearchWorker** - 백그라운드 검색 워커
+```python
+class SearchWorker(QObject):
+    progress_updated = pyqtSignal(int, int)  # (완료 수, 전체 수)
+    partial_result_ready = pyqtSignal(object)  # 부분 결과 (DataFrame)
+    search_finished = pyqtSignal(int)  # 총 결과 수
+    error_occurred = pyqtSignal(str)  # 에러 메시지
+
+    def __init__(self, search_params: dict, tags_dir: str = 'data/tags', max_file_index: int = None):
+        self.search_params = search_params
+        self.tags_dir = tags_dir
+        self.max_file_index = max_file_index  # None=전체, 129=max_129모드, 149=max_149모드
+```
+
+**SearchController** - 검색 컨트롤러
+```python
+class SearchController(QObject):
+    search_progress = pyqtSignal(int, int)
+    partial_search_result = pyqtSignal(object)
+    search_complete = pyqtSignal(int)
+    search_error = pyqtSignal(str)
+
+    def set_max_file_index(self, max_index: int = None):
+        """검색 파일 범위 설정 (None=전체, 129=max_129, 149=max_149)"""
+```
+
+#### 검색 범위 제한 기능 (2025-02-02 추가)
+
+**max_file_index 파라미터**로 검색할 파일 범위를 제한할 수 있습니다:
+
+| 모드 | max_file_index | 검색 파일 범위 | 파일 수 | 용도 |
+|------|----------------|----------------|---------|------|
+| **전체** | `None` | tags_00 ~ tags_149 | 150개 | 전체 데이터 검색 (최신) |
+| **max_149** | `149` | tags_00 ~ tags_149 | 150개 | 전체 데이터 검색 (명시적) |
+| **max_129** | `129` | tags_00 ~ tags_129 | 130개 | 이전 데이터셋 호환 |
+
+**사용 예시**:
+```python
+# SearchController 초기화
+search_controller = SearchController()
+
+# 전체 범위 검색 (기본값)
+search_controller.set_max_file_index(None)
+search_controller.start_search(search_params)
+
+# max_129 모드: 130개 파일만 검색 (빠른 검색)
+search_controller.set_max_file_index(129)
+search_controller.start_search(search_params)
+
+# max_149 모드: 150개 파일 전체 검색 (최신 데이터 포함)
+search_controller.set_max_file_index(149)
+search_controller.start_search(search_params)
+```
+
+**파일 필터링 로직** (`core/search_controller.py:29-48`):
+```python
+# 전체 파일 목록 가져오기
+all_files = [f for f in os.listdir(self.tags_dir) if f.endswith('.parquet') and f.startswith('tags_')]
+
+# max_file_index에 따라 파일 필터링
+if self.max_file_index is not None:
+    filtered_files = []
+    for f in all_files:
+        try:
+            file_index = int(f.split('_')[1].split('.')[0])  # tags_00.parquet -> 0
+            if file_index <= self.max_file_index:
+                filtered_files.append(f)
+        except (IndexError, ValueError):
+            continue
+    files_to_search = [os.path.join(self.tags_dir, f) for f in filtered_files]
+    print(f"🔍 검색 범위 제한: tags_00 ~ tags_{self.max_file_index:02d} ({len(files_to_search)}개 파일)")
+else:
+    files_to_search = [os.path.join(self.tags_dir, f) for f in all_files]
+    print(f"🔍 전체 범위 검색: {len(files_to_search)}개 파일")
+```
+
+**성능 비교**:
+- **max_129 모드**: 130개 파일 검색 → 약 13% 빠름
+- **max_149 모드**: 150개 파일 검색 → 최신 데이터 포함
+
+**실전 활용**:
+```python
+# UI에서 검색 모드 선택
+def on_search_mode_changed(self, mode_text: str):
+    if mode_text == "빠른 검색 (max_129)":
+        self.search_controller.set_max_file_index(129)
+    elif mode_text == "전체 검색 (max_149)":
+        self.search_controller.set_max_file_index(149)
+    else:
+        self.search_controller.set_max_file_index(None)
+```
+
 ### PromptGenerationController: 프롬프트 생성 컨트롤러
 
 **파일**: `core/prompt_generation_controller.py:8-116`

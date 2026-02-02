@@ -653,7 +653,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev 141"
-        self.setWindowTitle(self.base_title + " - 260202")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 260202b")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1057,10 +1057,57 @@ class ModernMainWindow(QMainWindow):
         
         rating_layout.addStretch(1)
 
+        # 검색 모드 라디오 버튼 (24.11 = max_129, 25.09 = max_149)
+        self.search_mode_2411 = QRadioButton("24.11")
+        self.search_mode_2411.setStyleSheet(f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                spacing: {get_scaled_size(5)}px;
+            }}
+            QRadioButton::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+        """)
+        self.search_mode_2411.setToolTip("24.11 데이터셋 (130개 파일, 빠른 검색)")
+        rating_layout.addWidget(self.search_mode_2411)
+
+        self.search_mode_2509 = QRadioButton("25.09")
+        self.search_mode_2509.setChecked(True)  # 기본값
+        self.search_mode_2509.setStyleSheet(f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                spacing: {get_scaled_size(5)}px;
+            }}
+            QRadioButton::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+        """)
+        self.search_mode_2509.setToolTip("25.09 데이터셋 (150개 파일, 최신 데이터)")
+        rating_layout.addWidget(self.search_mode_2509)
+
+        self.search_mode_1109 = QRadioButton("11-09")
+        self.search_mode_1109.setStyleSheet(f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                spacing: {get_scaled_size(5)}px;
+            }}
+            QRadioButton::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+        """)
+        self.search_mode_1109.setToolTip("11-09 신규 데이터 (20개 파일, tags_130~149)")
+        rating_layout.addWidget(self.search_mode_1109)
+
         self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(16)}px; margin-right: 10px;")
+        self.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(16)}px; margin-left: 10px; margin-right: 10px;")
         rating_layout.addWidget(self.progress_label)
-        
+
         self.search_btn = QPushButton("검색")
         self.search_btn.setStyleSheet(DARK_STYLES['primary_button'])
         rating_layout.addWidget(self.search_btn)
@@ -2366,12 +2413,12 @@ class ModernMainWindow(QMainWindow):
                                 normalized_url = normalized_url.replace("http://https://", "https://")
                             
                             # ✅ ComfyUI 웹뷰 탭 열기
-                            if self.image_window and hasattr(self.image_window, 'tab_controller'):
-                                self.image_window.tab_controller.add_tab_by_name(
-                                    'SimpleWebViewTabModule',
-                                    api_url=normalized_url,
-                                    api_mode='COMFYUI'
-                                )
+                            # if self.image_window and hasattr(self.image_window, 'tab_controller'):
+                            #     self.image_window.tab_controller.add_tab_by_name(
+                            #         'SimpleWebViewTabModule',
+                            #         api_url=normalized_url,
+                            #         api_mode='COMFYUI'
+                            #     )
 
                         else:
                             # ❌ 연결 실패
@@ -2826,12 +2873,23 @@ class ModernMainWindow(QMainWindow):
                 self.status_bar.showMessage("🔄 자동 생성: 다음 프롬프트 생성 중...")
                 
                 # 다음 프롬프트 생성 요청
+                # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+                comfyui_sampling_mode = "eps"  # 기본값
+                if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+                    comfyui_sampling_mode = "anima"
+                elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+                    comfyui_sampling_mode = "v_prediction"
+                elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+                    comfyui_sampling_mode = "eps"
+
                 settings = {
-                    'prompt_fixed': False, 
+                    'prompt_fixed': False,
                     'auto_generate': True,
                     'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
                     'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-                    "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked()
+                    "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked(),
+                    'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+                    'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
                 }
                 
                 # 프롬프트 생성 컨트롤러에 자동 생성 플래그 설정
@@ -2885,14 +2943,22 @@ class ModernMainWindow(QMainWindow):
         """'검색' 버튼 클릭 시 컨트롤러를 통해 검색을 시작하는 슬롯"""
         self.search_btn.setEnabled(False)
         self.search_btn.setText("검색 중...")
-        
+
         # [수정] 새 검색 시작 시 진행률 레이블을 다시 표시
         self.progress_label.setText("0/0") # 초기 텍스트 설정
         self.progress_label.setVisible(True)
-        
+
         # [신규] 새 검색 시작 시 기존 결과 초기화
         self.search_results = SearchResultModel()
         self.result_label1.setText("검색: 0")
+
+        # 🆕 검색 모드에 따라 파일 범위 설정 (2025-02-02)
+        if self.search_mode_2411.isChecked():
+            self.search_controller.set_file_range(None, 129)  # 24.11 데이터셋 (tags_00~129, 130개)
+        elif self.search_mode_2509.isChecked():
+            self.search_controller.set_file_range(None, 149)  # 25.09 데이터셋 (tags_00~149, 150개)
+        elif self.search_mode_1109.isChecked():
+            self.search_controller.set_file_range(130, 149)   # 11-09 신규 데이터 (tags_130~149, 20개)
 
         # UI에서 검색 파라미터 수집
         search_params = {
@@ -2903,7 +2969,7 @@ class ModernMainWindow(QMainWindow):
             'rating_s': self.rating_checkboxes['s'].isChecked(),
             'rating_g': self.rating_checkboxes['g'].isChecked(),
         }
-        
+
         try:
             save_dir = 'save'
             os.makedirs(save_dir, exist_ok=True)
@@ -3609,7 +3675,11 @@ class ModernMainWindow(QMainWindow):
             return
 
         # ComfyUI 서버 URL 가져오기
-        comfyui_url = self.app_context.settings.get("comfyui_url", "http://127.0.0.1:8188")
+        # secure_token_manager에서 저장된 URL 가져오기
+        comfyui_url = self.app_context.secure_token_manager.get_token('comfyui_url')
+        if not comfyui_url:
+            # 폴백: 기본값 사용
+            comfyui_url = "http://127.0.0.1:8188"
 
         # ComfyUI 서버에서 모델 리스트 가져오기 (CheckpointLoader + UNETLoader)
         models = ComfyUIAPIUtils.get_model_list(comfyui_url)
@@ -4213,11 +4283,22 @@ class ModernMainWindow(QMainWindow):
         self.status_bar.showMessage("추출된 태그로 프롬프트 생성 중...")
 
         # 현재 UI의 생성 설정값들을 가져옴
+        # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+        comfyui_sampling_mode = "eps"  # 기본값
+        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
             'auto_generate': self.generation_checkboxes["자동 생성"].isChecked(),
             'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
-            'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked()
+            'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
+            'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+            'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
 
         # 컨트롤러에 즉시 생성을 요청
@@ -4232,12 +4313,23 @@ class ModernMainWindow(QMainWindow):
         self.status_bar.showMessage("다음 프롬프트를 생성 중...")
 
         # UI에서 생성 관련 설정값들을 수집
+        # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+        comfyui_sampling_mode = "eps"  # 기본값
+        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
             'auto_generate': self.generation_checkboxes["자동 생성"].isChecked(),
             'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
             'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-            "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked()
+            "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked(),
+            'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+            'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
         self.app_context.publish("random_prompt_triggered")
 

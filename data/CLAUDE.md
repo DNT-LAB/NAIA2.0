@@ -39,7 +39,7 @@ data/
   ├── tags/                    # Parquet 태그 데이터베이스
   │   ├── tags_00.parquet      # 분할된 데이터 파일
   │   ├── tags_01.parquet
-  │   └── ...tags_129.parquet  # 130개 파일
+  │   └── ...tags_149.parquet  # 150개 파일
   ├── characteristic_list.txt  # 특징 태그 사전 (1006개)
   ├── clothes_list.txt         # 의류 태그 사전 (3700개)
   ├── ezmode/                  # EZ Mode JSON 파일 (GitHub, 668KB)
@@ -111,9 +111,9 @@ data/
 
 | 파일/디렉터리 | 크기 | 역할 | 주요 사용처 |
 |--------------|------|------|-----------|
-| **tags/** | ~100MB+ | 130개로 분할된 태그 데이터베이스 | `core/search_controller.py`, `core/search_engine.py` |
+| **tags/** | ~100MB+ | 150개로 분할된 태그 데이터베이스 | `core/search_controller.py`, `core/search_engine.py` |
 | **tags/tags_00.parquet** | ~800KB | 첫 번째 분할 (44,887 rows) | 검색 엔진 |
-| **tags/tags_01.parquet ~ tags_129.parquet** | 각 ~800KB | 나머지 분할 | 검색 엔진 |
+| **tags/tags_01.parquet ~ tags_149.parquet** | 각 ~800KB | 나머지 분할 | 검색 엔진 |
 | **characteristic_list.txt** | 34KB | 특징 태그 1006개 (신체/눈/머리/피부/꼬리/귀/날개/뿔/헤일로 등) | `core/filter_data_manager.py` |
 | **clothes_list.txt** | 156KB | 의류 태그 3700개 (옷/신발/액세서리/장신구/헤어 등) | `core/filter_data_manager.py` |
 
@@ -337,7 +337,7 @@ print(f"눈 색상 태그: {eye_colors}")
 
 ### 분할 전략
 
-**왜 130개 파일로 분할?**
+**왜 150개 파일로 분할?**
 
 1. **메모리 효율**: 전체 데이터를 한 번에 로드하지 않음
 2. **멀티프로세싱**: 각 프로세스가 독립적으로 파일 처리
@@ -550,11 +550,11 @@ large_images = df[(df['image_width'] >= 1024) & (df['image_height'] >= 1024)]
 
    full_df = pd.concat(all_data, ignore_index=True)
 
-   # 130개로 재분할
-   chunk_size = len(full_df) // 130
-   for i in range(130):
+   # 150개로 재분할
+   chunk_size = len(full_df) // 150
+   for i in range(150):
        start_idx = i * chunk_size
-       end_idx = start_idx + chunk_size if i < 129 else len(full_df)
+       end_idx = start_idx + chunk_size if i < 149 else len(full_df)
        chunk_df = full_df.iloc[start_idx:end_idx]
        chunk_df.to_parquet(f'data/tags/tags_{i:02d}.parquet')
    ```
@@ -1278,7 +1278,7 @@ with open(file_path, 'r', encoding='utf-8') as f:
 ### Q2: Parquet 파일 로드가 너무 느려요
 
 **증상**:
-- 130개 파일 로드에 10초 이상 소요
+- 150개 파일 로드에 10초 이상 소요
 - UI가 멈춤
 
 **원인**:
@@ -1537,7 +1537,7 @@ print(f"검색 시간: {end_time - start_time:.2f}초")
 
 **data/의 핵심**:
 - ✅ **텍스트 사전**: 카테고리별 태그 목록 (characteristic, clothes)
-- ✅ **Parquet 데이터베이스**: 분할된 대용량 태그 데이터 (130개 파일)
+- ✅ **Parquet 데이터베이스**: 분할된 대용량 태그 데이터 (150개 파일)
 - ✅ **FilterDataManager**: 텍스트 사전 로딩
 - ✅ **SearchController**: 멀티프로세싱 검색
 - ✅ **비동기 로딩**: UI 반응성 유지

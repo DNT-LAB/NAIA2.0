@@ -582,7 +582,7 @@ class APIManagementWindow(QWidget):
 
         self.comfyui_sampling_combo = QComboBox()
         self.comfyui_sampling_combo.setStyleSheet(DARK_STYLES['compact_lineedit'])
-        self.comfyui_sampling_combo.addItems(["eps", "v_prediction"])
+        self.comfyui_sampling_combo.addItems(["eps", "v_prediction", "anima"])  # 🆕 anima 옵션 추가
 
         sampling_layout.addWidget(sampling_label)
         sampling_layout.addWidget(self.comfyui_sampling_combo, 1)

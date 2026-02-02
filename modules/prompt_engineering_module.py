@@ -537,20 +537,43 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         if not skip_preprocessing:
             checkbox_options = options["preprocessing_options"]
 
+            # 🆕 ANIMA 모드 감지 (6-part 프롬프트 구조)
+            api_mode = context.settings.get('api_mode')
+            sampling_mode = context.settings.get('comfyui_sampling_mode')
+            is_anima_mode = (api_mode == 'COMFYUI' and sampling_mode == 'anima')
+
             # "remove_work_title"
             if not checkbox_options.get("remove_work_title"):
                 copyright = source_row.get("copyright")
-                if copyright: prefix_tags.insert(0, copyright)
+                if copyright:
+                    if is_anima_mode:
+                        # ANIMA: metadata에 저장 (나중에 위치 2에 배치)
+                        context.metadata['anima_copyright'] = copyright
+                    else:
+                        # NAI/WEBUI: prefix_tags에 추가
+                        prefix_tags.insert(0, copyright)
 
             # "remove_author"
             if not checkbox_options.get("remove_author"):
                 artist = source_row.get("artist")
-                if artist: prefix_tags.insert(0, artist)
+                if artist:
+                    if is_anima_mode:
+                        # ANIMA: metadata에 저장 (나중에 위치 1에 배치)
+                        context.metadata['anima_artist'] = artist
+                    else:
+                        # NAI/WEBUI: prefix_tags에 추가
+                        prefix_tags.insert(0, artist)
 
             # "remove_character_name"
             if not checkbox_options.get("remove_character_name"):
                 character = source_row.get("character")
-                if character: prefix_tags.insert(0, character)
+                if character:
+                    if is_anima_mode:
+                        # ANIMA: metadata에 저장 (나중에 위치 3에 배치)
+                        context.metadata['anima_character'] = character
+                    else:
+                        # NAI/WEBUI: prefix_tags에 추가
+                        prefix_tags.insert(0, character)
         else:
             # EZ Mode: checkbox_options 초기화 (이후 코드에서 사용하지 않도록)
             checkbox_options = {}

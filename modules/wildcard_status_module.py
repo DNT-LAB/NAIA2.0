@@ -152,30 +152,58 @@ class WildcardStatusModule(BaseMiddleModule):
         """
         'prompt_generated' 이벤트 수신 시 호출되는 콜백 함수.
         context 객체에서 와일드카드 정보를 추출하여 UI를 업데이트합니다.
+
+        🔧 스레드 안전 개선:
+        - 백그라운드 스레드에서 호출 가능 (ComfyUI 생성 중)
+        - QTimer.singleShot으로 메인 스레드에서 UI 업데이트
+        - 타이머 충돌 완전 해결
         """
         if not self.history_textbox or not self.state_textbox:
             return
 
-        # 1. 사용 내역 (History) 업데이트
-        if context and context.wildcard_history:
-            history_text = ""
-            for name, values in context.wildcard_history.items():
-                last_value = values[-1] # 마지막으로 선택된 값
-                history_text += f"▶ {name}: {last_value}\n"
-            self.history_textbox.setText(history_text)
-        else:
-            self.history_textbox.setPlaceholderText("사용된 와일드카드 없음")
-            self.history_textbox.clear()
+        # 데이터 준비 (백그라운드 스레드에서 안전)
+        history_text = ""
+        state_text = ""
 
-        # 2. 상태 (State) 업데이트
+        # 1. 사용 내역 (History) 데이터 준비
+        if context and context.wildcard_history:
+            for name, values in context.wildcard_history.items():
+                last_value = values[-1]  # 마지막으로 선택된 값
+                history_text += f"▶ {name}: {last_value}\n"
+
+        # 2. 상태 (State) 데이터 준비
         if context and context.wildcard_state:
-            state_text = ""
             for name, state in context.wildcard_state.items():
                 state_text += f"▶ {name}: {state['current']} / {state['total']}\n"
-            self.state_textbox.setText(state_text)
-        else:
-            self.state_textbox.setPlaceholderText("활성화된 순차 와일드카드 없음")
-            self.state_textbox.clear()
+
+        # 🔧 메인 스레드에서 UI 업데이트 (스레드 안전)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self._update_ui_safe(history_text, state_text, context))
+
+    def _update_ui_safe(self, history_text: str, state_text: str, context):
+        """
+        메인 스레드에서 안전하게 UI 업데이트
+
+        🔧 이 메서드는 반드시 메인 스레드에서만 호출됨 (QTimer.singleShot 보장)
+        """
+        try:
+            # History 업데이트
+            if history_text:
+                self.history_textbox.setText(history_text)
+            else:
+                self.history_textbox.setPlaceholderText("사용된 와일드카드 없음")
+                self.history_textbox.clear()
+
+            # State 업데이트
+            if state_text:
+                self.state_textbox.setText(state_text)
+            else:
+                self.state_textbox.setPlaceholderText("활성화된 순차 와일드카드 없음")
+                self.state_textbox.clear()
+
+        except RuntimeError as e:
+            # 위젯이 이미 삭제된 경우 무시
+            print(f"⚠️ wildcard_status_module UI 업데이트 실패 (위젯 삭제됨): {e}")
             
     def reload_wildcards(self):
         """

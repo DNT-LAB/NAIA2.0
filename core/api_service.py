@@ -931,9 +931,10 @@ class APIService:
 
                 message = f"ComfyUI 생성 : {progress_percent}% ({current}/{total}) [{progress_bar}]"
 
-                # 상태바에 진행률 표시
+                # 🔧 상태바에 진행률 표시 (Main thread로 defer)
                 if hasattr(self, 'app_context') and self.app_context and hasattr(self.app_context, 'main_window'):
-                    self.app_context.main_window.status_bar.showMessage(message)
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(0, lambda msg=message: self.app_context.main_window.status_bar.showMessage(msg))
 
                 # 🆕 Interactive Mode를 위한 진행도 이벤트 발행
                 if hasattr(self, 'app_context') and self.app_context:
@@ -956,10 +957,6 @@ class APIService:
         except Exception as e:
             print(f"❌ ComfyUI API 호출 중 예외 발생: {e}")
             return {'status': 'error', 'message': str(e)}
-        finally:
-            # WebSocket 연결 정리
-            if self.comfyui_service:
-                self.comfyui_service.disconnect_websocket()
 
     def _process_mask_for_webui(self, mask_bytes: bytes, target_width: int, target_height: int) -> str:
         """

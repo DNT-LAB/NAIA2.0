@@ -83,7 +83,7 @@ core/generation_controller.py
 | **autocomplete_manager.py** | 68K | 태그 자동완성 | `AutocompleteManager` |
 | **comfyui_workflow_manager.py** | 30K | ComfyUI 워크플로우 관리 | `ComfyUIWorkflowManager` |
 | **middle_section_controller.py** | 19K | 모듈 로딩 및 관리 | `MiddleSectionController` |
-| **comfyui_service.py** | 16K | ComfyUI HTTP/WS 통신 | `ComfyUIService` |
+| **comfyui_service.py** | 16K | 🔧 ComfyUI 순수 HTTP 통신 (Thread-Safe) | `ComfyUIService` |
 | **wildcard_processor.py** | 14K | 와일드카드 치환 | `WildcardProcessor` |
 | **image_crud_controller.py** | 17K | 이미지 파일 CRUD 관리 | `ImageCrudController` |
 | **tab_controller.py** | 9.4K | 탭 로딩 및 관리 | `TabController` |
@@ -2208,6 +2208,92 @@ class AppContext:
 # 어디서든
 app_context.my_service = MyService(app_context)
 ```
+
+### Q6: ComfyUI 생성 시 QObject::killTimer 오류가 발생해요
+
+**증상**:
+```
+QObject::killTimer: Timers cannot be stopped from another thread
+QObject::~QObject: Timers cannot be stopped from another thread
+```
+
+**원인**:
+1. **Background thread에서 Qt UI 객체 직접 접근**
+   - ComfyUI 생성이 QThread에서 실행되는 동안 UI 업데이트 시도
+   - `progress_callback`에서 `status_bar.showMessage()` 직접 호출
+   - WebSocket 메시지 처리 중 UI 업데이트
+
+2. **WebSocket의 내부 타이머 충돌**
+   - WebSocket 라이브러리가 자체 타이머 생성
+   - Background thread에서 연결/해제 시 Qt 타이머와 충돌
+
+**해결 (2026-02-03 적용됨)**:
+
+**1. ComfyUIService에서 WebSocket 완전 제거** ([comfyui_service.py:1-157](comfyui_service.py#L1-L157)):
+```python
+# ❌ 이전 (WebSocket 사용)
+import json
+import websocket
+self.ws = None
+def connect_websocket(self): ...
+def wait_for_completion(self, prompt_id):
+    ws_connected = self.connect_websocket()
+    if ws_connected and self.ws:
+        message = self.ws.recv()
+        # ... WebSocket 메시지 처리 ...
+
+# ✅ 현재 (순수 HTTP 폴링)
+import uuid
+import requests
+def wait_for_completion(self, prompt_id):
+    """워크플로우 완료 대기 (순수 HTTP 폴링)"""
+    while time.time() - start_time < timeout:
+        # 0.5초마다 HTTP GET 요청으로 상태 확인
+        response = requests.get(f"{self.server_url}/history/{prompt_id}")
+        if response.status_code == 200:
+            history = response.json()
+            if status.get('status_str') == 'success':
+                return True
+        time.sleep(0.1)
+```
+
+**2. APIService에서 progress_callback을 Main Thread로 Defer** ([api_service.py:936](api_service.py#L936)):
+```python
+# ❌ 이전 (Background thread에서 직접 UI 접근)
+def progress_callback(current: int, total: int):
+    message = f"ComfyUI 생성 : {progress_percent}%..."
+    self.app_context.main_window.status_bar.showMessage(message)  # ❌ 크래시!
+
+# ✅ 현재 (Main thread로 defer)
+def progress_callback(current: int, total: int):
+    message = f"ComfyUI 생성 : {progress_percent}%..."
+    from PyQt6.QtCore import QTimer
+    QTimer.singleShot(0, lambda msg=message:
+        self.app_context.main_window.status_bar.showMessage(msg))  # ✅ 안전!
+```
+
+**3. 이벤트 구독자에서도 Main Thread로 Defer** ([ui/interactive_window.py:1510-1542](ui/interactive_window.py#L1510)):
+```python
+def _on_generation_progress(self, progress_data):
+    percent = progress_data.get("percent", 0)
+    # ✅ Main thread로 defer
+    QTimer.singleShot(0, lambda: self._update_progress_ui_safe(percent))
+
+def _update_progress_ui_safe(self, percent):
+    # 안전 - Main thread에서 실행됨
+    self.main_prompt_block.btn_generate.setText(f"🔄 생성 중... {percent}%")
+```
+
+**핵심 원칙**:
+- ✅ **Background thread에서 Qt 객체 접근 금지**
+- ✅ **UI 업데이트는 반드시 `QTimer.singleShot(0, lambda: ...)` 패턴 사용**
+- ✅ **WebSocket 같은 복잡한 비동기 라이브러리는 HTTP 폴링으로 대체**
+- ✅ **진행률 콜백은 데이터 준비만 하고, UI 업데이트는 main thread에서**
+
+**추가 참고**:
+- [generation_controller.py:14-55](generation_controller.py#L14) - QTimer 제거
+- [wildcard_status_module.py:151-180](wildcard_status_module.py#L151) - Thread-safe UI 업데이트
+- [hooker_view.py:965-986](hooker_view.py#L965) - 타이머 cleanup 패턴
 
 ---
 

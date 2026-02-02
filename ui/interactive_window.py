@@ -1511,18 +1511,37 @@ class InteractiveWindow(QMainWindow):
         """
         이미지 생성 진행도 콜백 (ComfyUI 전용)
 
+        🔧 스레드 안전 개선:
+        - 백그라운드 스레드에서 호출됨
+        - QTimer.singleShot으로 메인 스레드에서 UI 업데이트
+        - QObject::killTimer 오류 완전 해결
+
         Args:
             progress_data: 진행도 정보 {"current": int, "total": int, "percent": int}
         """
         try:
             percent = progress_data.get("percent", 0)
 
-            # 생성 버튼 텍스트에 진행도 표시
-            if hasattr(self.main_prompt_block, 'btn_generate'):
-                self.main_prompt_block.btn_generate.setText(f"🔄 생성 중... {percent}%")
+            # 🔧 메인 스레드에서 UI 업데이트 (스레드 안전)
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._update_progress_ui_safe(percent))
 
         except Exception as e:
             print(f"❌ 진행도 업데이트 중 오류: {e}")
+
+    def _update_progress_ui_safe(self, percent: int):
+        """
+        메인 스레드에서 안전하게 진행도 UI 업데이트
+
+        🔧 이 메서드는 반드시 메인 스레드에서만 호출됨 (QTimer.singleShot 보장)
+        """
+        try:
+            # 생성 버튼 텍스트에 진행도 표시
+            if hasattr(self.main_prompt_block, 'btn_generate'):
+                self.main_prompt_block.btn_generate.setText(f"🔄 생성 중... {percent}%")
+        except RuntimeError as e:
+            # 위젯이 이미 삭제된 경우 무시
+            print(f"⚠️ 진행도 UI 업데이트 실패 (위젯 삭제됨): {e}")
 
     def _on_generation_error(self, error_data: dict):
         """

@@ -735,6 +735,7 @@ class ModernMainWindow(QMainWindow):
         # AppContext에 모드 변경 이벤트 구독
         self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
         self.app_context.subscribe_mode_swap(self._on_mode_changed_for_remote_tab)
+        self.app_context.subscribe_mode_swap(lambda *_: self._update_model_list_for_comfyui())
         
         # 초기 토큰 카운트 업데이트
         QTimer.singleShot(100, self.update_token_count)
@@ -3571,6 +3572,51 @@ class ModernMainWindow(QMainWindow):
 
         # 탭 가시성 설정
         self.prompt_tabs.setTabVisible(self.remote_tab_index, is_nai_mode)
+
+    def _update_model_list_for_comfyui(self):
+        """
+        ComfyUI 모드일 때 모델 리스트를 서버에서 가져와서 업데이트
+
+        CheckpointLoader + UNETLoader 모델을 모두 표시
+        """
+        current_mode = self.app_context.get_api_mode()
+
+        if current_mode != "COMFYUI":
+            # ComfyUI 모드가 아니면 NAI 기본 모델로 복원
+            self.model_combo.blockSignals(True)
+            self.model_combo.clear()
+            self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
+            self.model_combo.blockSignals(False)
+            print("✅ 모델 리스트: NAI 기본 모델로 복원")
+            return
+
+        # ComfyUI 서버에서 모델 리스트 가져오기
+        if hasattr(self.app_context, 'comfyui_service'):
+            comfyui_service = self.app_context.comfyui_service
+            models = comfyui_service.get_available_models()
+
+            if models:
+                # 현재 선택된 모델 저장
+                current_model = self.model_combo.currentText()
+
+                # 모델 리스트 업데이트
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItems(models)
+
+                # 이전 선택 복원 (가능한 경우)
+                if current_model in models:
+                    self.model_combo.setCurrentText(current_model)
+                else:
+                    # 첫 번째 모델 선택
+                    self.model_combo.setCurrentIndex(0)
+
+                self.model_combo.blockSignals(False)
+                print(f"✅ ComfyUI 모델 리스트 업데이트: {len(models)}개 모델")
+            else:
+                print("⚠️ ComfyUI 서버에서 모델을 가져올 수 없습니다.")
+        else:
+            print("⚠️ ComfyUI 서비스를 찾을 수 없습니다.")
 
     # === 임시 생성 창 관련 메서드 ===
 

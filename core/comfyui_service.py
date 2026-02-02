@@ -330,25 +330,55 @@ class ComfyUIService:
             return {'status': 'error', 'message': '이미지 다운로드 실패'}
     
     def get_available_models(self) -> List[str]:
-        """사용 가능한 모델 목록 조회"""
+        """
+        사용 가능한 모델 목록 조회 (CheckpointLoader + UNETLoader 합침)
+
+        CheckpointLoader와 UNETLoader의 모델을 모두 가져와서
+        set으로 중복 제거 후 정렬하여 반환
+
+        Returns:
+            모델 파일명 리스트 (중복 제거됨)
+        """
         try:
             response = requests.get(f"{self.server_url}/object_info", timeout=10)
-            
+
             if response.status_code == 200:
                 object_info = response.json()
+                all_models = set()  # 중복 제거를 위한 set
+
+                # 1. CheckpointLoaderSimple 모델 수집
                 checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-                input_info = checkpoint_loader.get('input', {})
-                required_info = input_info.get('required', {})
-                ckpt_name_info = required_info.get('ckpt_name', [])
-                
-                if isinstance(ckpt_name_info, list) and len(ckpt_name_info) > 0:
-                    return ckpt_name_info[0]  # 첫 번째 요소가 모델 리스트
-                
+                ckpt_input = checkpoint_loader.get('input', {}).get('required', {})
+                ckpt_info = ckpt_input.get('ckpt_name', [])
+
+                if isinstance(ckpt_info, list) and len(ckpt_info) > 0:
+                    checkpoint_models = ckpt_info[0]
+                    all_models.update(checkpoint_models)
+                    print(f"🔍 CheckpointLoader: {len(checkpoint_models)}개 모델 발견")
+
+                # 2. UNETLoader 모델 수집
+                unet_loader = object_info.get('UNETLoader', {})
+                unet_input = unet_loader.get('input', {}).get('required', {})
+                unet_info = unet_input.get('unet_name', [])
+
+                if isinstance(unet_info, list) and len(unet_info) > 0:
+                    unet_models = unet_info[0]
+                    all_models.update(unet_models)
+                    print(f"🔍 UNETLoader: {len(unet_models)}개 모델 발견")
+
+                # 3. 정렬하여 반환
+                if all_models:
+                    sorted_models = sorted(list(all_models))
+                    print(f"✅ 총 {len(sorted_models)}개 모델 (중복 제거됨): {sorted_models[:3]}{'...' if len(sorted_models) > 3 else ''}")
+                    return sorted_models
+
             print("❌ 모델 리스트 조회 실패")
             return []
-            
+
         except Exception as e:
             print(f"❌ 모델 리스트 조회 중 예외 발생: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def get_system_stats(self) -> Optional[Dict[str, Any]]:

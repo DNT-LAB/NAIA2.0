@@ -48,6 +48,7 @@ from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
 from core.main_controller import MainController
 from utils.token_calculator import get_token_calculator
+from core.comfyui_utils import ComfyUIAPIUtils
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
@@ -3590,33 +3591,33 @@ class ModernMainWindow(QMainWindow):
             print("✅ 모델 리스트: NAI 기본 모델로 복원")
             return
 
-        # ComfyUI 서버에서 모델 리스트 가져오기
-        if hasattr(self.app_context, 'comfyui_service'):
-            comfyui_service = self.app_context.comfyui_service
-            models = comfyui_service.get_available_models()
+        # ComfyUI 서버 URL 가져오기
+        comfyui_url = self.app_context.settings.get("comfyui_url", "http://127.0.0.1:8188")
 
-            if models:
-                # 현재 선택된 모델 저장
-                current_model = self.model_combo.currentText()
+        # ComfyUI 서버에서 모델 리스트 가져오기 (CheckpointLoader + UNETLoader)
+        models = ComfyUIAPIUtils.get_model_list(comfyui_url)
 
-                # 모델 리스트 업데이트
-                self.model_combo.blockSignals(True)
-                self.model_combo.clear()
-                self.model_combo.addItems(models)
+        if models:
+            # 현재 선택된 모델 저장
+            current_model = self.model_combo.currentText()
 
-                # 이전 선택 복원 (가능한 경우)
-                if current_model in models:
-                    self.model_combo.setCurrentText(current_model)
-                else:
-                    # 첫 번째 모델 선택
+            # 모델 리스트 업데이트
+            self.model_combo.blockSignals(True)
+            self.model_combo.clear()
+            self.model_combo.addItems(models)
+
+            # 이전 선택 복원 (가능한 경우)
+            if current_model in models:
+                self.model_combo.setCurrentText(current_model)
+            else:
+                # 첫 번째 모델 선택
+                if self.model_combo.count() > 0:
                     self.model_combo.setCurrentIndex(0)
 
-                self.model_combo.blockSignals(False)
-                print(f"✅ ComfyUI 모델 리스트 업데이트: {len(models)}개 모델")
-            else:
-                print("⚠️ ComfyUI 서버에서 모델을 가져올 수 없습니다.")
+            self.model_combo.blockSignals(False)
+            print(f"✅ ComfyUI 모델 리스트 업데이트: {len(models)}개 모델")
         else:
-            print("⚠️ ComfyUI 서비스를 찾을 수 없습니다.")
+            print("⚠️ ComfyUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
 
     # === 임시 생성 창 관련 메서드 ===
 

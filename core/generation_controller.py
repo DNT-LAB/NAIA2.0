@@ -263,7 +263,50 @@ class GenerationController:
         # 🆕 스레드 안전 관리를 위한 추가 변수
         self._thread_cleanup_in_progress = False  # 스레드 정리 중 여부
         self._pending_thread_refs = []  # 정리 대기 중인 스레드 참조
-        
+
+    def _prepare_comfyui_workflow_with_wildcards(self, params: dict) -> bool:
+        """
+        🌉 ComfyUI 전용 브릿지: 와일드카드 확장 → 워크플로우 생성
+
+        ComfyUI는 워크플로우에 프롬프트가 직접 삽입되므로,
+        와일드카드 확장을 먼저 수행한 후 워크플로우를 생성해야 합니다.
+
+        Args:
+            params: 생성 파라미터 딕셔너리 (in-place 수정됨)
+
+        Returns:
+            bool: 성공 여부
+        """
+        try:
+            # 1️⃣ 와일드카드 확장 (워크플로우 생성 전)
+            if 'input' in params and params['input']:
+                negative_prompt = params.get('negative_prompt', '')
+                expanded_input, processed_negative_prompt = self._expand_wildcards_in_input(
+                    params['input'],
+                    negative_prompt
+                )
+                params['input'] = expanded_input
+                params['negative_prompt'] = processed_negative_prompt
+
+                print(f"🎲 [ComfyUI Bridge] 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                if processed_negative_prompt != negative_prompt:
+                    print(f"➖ [ComfyUI Bridge] Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
+
+            # 2️⃣ 워크플로우 생성 (확장된 프롬프트 사용)
+            final_workflow = self.workflow_manager.apply_params_to_workflow(params)
+            if not final_workflow:
+                self.context.main_window.status_bar.showMessage("❌ 워크플로우 생성에 실패했습니다. 로그를 확인하세요.")
+                return False
+
+            params['workflow'] = final_workflow
+            print(f"✅ [ComfyUI Bridge] 워크플로우 생성 완료 (와일드카드 확장 적용됨)")
+            return True
+
+        except Exception as e:
+            print(f"❌ [ComfyUI Bridge] 오류 발생: {e}")
+            self.context.main_window.status_bar.showMessage(f"❌ ComfyUI 워크플로우 준비 실패: {e}")
+            return False
+
     def execute_generation_pipeline(self, overrides: dict = None, priority: int = 0, from_queue: bool = False):
         """
         7단계 생성 파이프라인을 실행합니다.
@@ -364,31 +407,29 @@ class GenerationController:
             if not is_valid:
                 self.context.main_window.status_bar.showMessage(f"⚠️ 유효성 검사 실패: {error_msg}")
                 return
-            
+
+            # --- ComfyUI vs NAI/WEBUI 처리 분기 ---
             if api_mode == "COMFYUI":
-                final_workflow = self.workflow_manager.apply_params_to_workflow(params)
-                if not final_workflow:
-                    self.context.main_window.status_bar.showMessage("❌ 워크플로우 생성에 실패했습니다. 로그를 확인하세요.")
-                    return
-                params['workflow'] = final_workflow
+                # 🌉 ComfyUI: 브릿지 사용 (와일드카드 확장 → 워크플로우 생성)
+                if not self._prepare_comfyui_workflow_with_wildcards(params):
+                    return  # 실패 시 조기 종료
+            else:
+                # 🎲 NAI/WEBUI: 와일드카드 확장만 수행
+                if 'input' in params and params['input']:
+                    negative_prompt = params.get('negative_prompt', '')
+                    expanded_input, processed_negative_prompt = self._expand_wildcards_in_input(
+                        params['input'],
+                        negative_prompt
+                    )
+                    params['input'] = expanded_input
+                    params['negative_prompt'] = processed_negative_prompt
 
-            # --- 와일드카드 확장 처리 (API 호출 전) ---
-            if 'input' in params and params['input']:
-                # negative_prompt도 함께 전달
-                negative_prompt = params.get('negative_prompt', '')
-                expanded_input, processed_negative_prompt = self._expand_wildcards_in_input(
-                    params['input'],
-                    negative_prompt
-                )
-                params['input'] = expanded_input
-                params['negative_prompt'] = processed_negative_prompt
+                    print(f"🎲 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                    if processed_negative_prompt != negative_prompt:
+                        print(f"➖ Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
 
-                print(f"🎲 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
-                if processed_negative_prompt != negative_prompt:
-                    print(f"➖ Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
-
-                # --- 🆕 FR-3: 임시 창 프롬프트 엔지니어링 훅 수동 실행 ---
-                if 'temp_window_prompt_engineering_tab' in params:
+            # --- 🆕 FR-3: 임시 창 프롬프트 엔지니어링 훅 수동 실행 (모든 모드 공통) ---
+            if 'input' in params and 'temp_window_prompt_engineering_tab' in params:
                     prompt_eng_tab = params['temp_window_prompt_engineering_tab']
                     print(f"[TempWindow] 프롬프트 엔지니어링 훅 수동 실행 중...")
 
@@ -437,16 +478,16 @@ class GenerationController:
                     except Exception as e:
                         print(f"⚠️ [TempWindow] 프롬프트 엔지니어링 훅 실행 오류: {e}")
 
-                # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
-                # processed_input = self._apply_conditional_prompts(params['input'])
-                # if processed_input != params['input']:
-                #     params['input'] = processed_input
-                #     print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+            # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
+            # processed_input = self._apply_conditional_prompts(params['input'])
+            # if processed_input != params['input']:
+            #     params['input'] = processed_input
+            #     print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
 
-                # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
-                if self.context.current_prompt_context:
-                    self.context.publish("prompt_generated", self.context.current_prompt_context)
-            
+            # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
+            if self.context.current_prompt_context:
+                self.context.publish("prompt_generated", self.context.current_prompt_context)
+
             # --- 5. 스레드에서 API 호출 시작 ---
             self._start_threaded_generation(params, source_row)
 

@@ -635,8 +635,18 @@ class MainController:
         has_port = ':' in clean_url.split('/')[0]  # 경로 제외하고 호스트:포트 부분만 체크
 
         if not has_port:
-            # Cloudflare 터널이나 ngrok는 포트 불필요
-            is_remote_tunnel = 'trycloudflare.com' in clean_url or 'ngrok' in clean_url
+            # 원격 터널 서비스 감지 (포트 불필요)
+            remote_tunnel_services = [
+                'trycloudflare.com',  # Cloudflare Tunnel
+                'ngrok',              # ngrok (ngrok.io, ngrok-free.app 등)
+                'gradio.live',        # Gradio Share
+                'serveo.net',         # Serveo
+                'localhost.run',      # localhost.run
+                'tunnelto.dev',       # Tunnelto
+                'localtunnel.me',     # Localtunnel
+            ]
+
+            is_remote_tunnel = any(service in clean_url for service in remote_tunnel_services)
 
             if not is_remote_tunnel:
                 # 로컬 서버: 기본 포트들 시도 (8000, 8188)

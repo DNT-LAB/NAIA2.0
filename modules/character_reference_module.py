@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QPushButton, QScrollArea, QCheckBox, QFileDialog,
     QMessageBox, QApplication, QDialog, QTabWidget, QGridLayout,
-    QMenu, QInputDialog, QSizePolicy, QTextEdit, QLineEdit, QSlider
+    QMenu, QInputDialog, QSizePolicy, QTextEdit, QLineEdit, QSlider,
+    QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QPixmap, QImage, QAction
@@ -48,9 +49,10 @@ class CharacterReferenceFrame(QFrame):
         self.image_data = self._file_to_base64(file_path)
         
         # Character reference data (simplified from vibe transfer)
-        self.style_aware = True    # Style Aware 체크박스 상태 (기본값: True)
-        self.fidelity = 1       # Fidelity 슬라이더 값 (기본값: 0.75)
-        self.is_enabled = False    # 단일 선택을 위한 활성화 상태
+        self.reference_type = "character&style"  # Reference type: "character&style", "character", "style"
+        self.strength = 1.0     # Strength 슬라이더 값 (기본값: 1.0)
+        self.fidelity = 0.8     # Fidelity 슬라이더 값 (기본값: 0.8, inverted → 0.2 for secondary_strength)
+        self.is_enabled = False    # 활성화 상태 (다중 선택 가능)
         
         # Setup UI
         self._setup_ui()
@@ -168,28 +170,32 @@ class CharacterReferenceFrame(QFrame):
         # Top row: Controls
         top_row = QHBoxLayout()
         top_row.setSpacing(get_scaled_size(4))
-        
+
         # Delete button
         delete_btn = QPushButton("❌닫기")
         delete_btn.setFixedSize(get_scaled_size(90), get_scaled_size(40))
         delete_btn.setStyleSheet(dynamic_styles['compact_button'])
         delete_btn.clicked.connect(lambda: self.removed.emit(self))
         top_row.addWidget(delete_btn)
-        
-        # File name label
-        name_label = QLabel(self.file_name[:20] + "..." if len(self.file_name) > 20 else self.file_name)
-        name_label.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(16)}px;")
-        top_row.addWidget(name_label)
-        
+
+        # Reference Type ComboBox (moved from controls area)
+        self.ref_type_combo = QComboBox()
+        self.ref_type_combo.addItems(["Character & Style", "Character", "Style"])
+        self.ref_type_combo.setCurrentText(self._api_to_display_value(self.reference_type))
+        self.ref_type_combo.setFixedHeight(get_scaled_size(40))
+        self.ref_type_combo.setStyleSheet(dynamic_styles['compact_combobox'])
+        self.ref_type_combo.currentTextChanged.connect(self._on_reference_type_combo_changed)
+        top_row.addWidget(self.ref_type_combo)
+
         top_row.addStretch()
-        
-        # Enable checkbox (single selection behavior)
+
+        # Enable checkbox
         self.enable_check = QCheckBox("Enable")
         self.enable_check.setChecked(self.is_enabled)
         self.enable_check.setStyleSheet(dynamic_styles['dark_checkbox'])
         self.enable_check.toggled.connect(self._on_enabled_changed)
         top_row.addWidget(self.enable_check)
-        
+
         main_layout.addLayout(top_row)
         
         # Content frame
@@ -233,11 +239,43 @@ class CharacterReferenceFrame(QFrame):
         controls_layout.setSpacing(get_scaled_size(8))
         controls_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.style_aware_check = QCheckBox("Style Aware")
-        self.style_aware_check.setChecked(self.style_aware)
-        self.style_aware_check.setStyleSheet(dynamic_styles['dark_checkbox'])
-        self.style_aware_check.toggled.connect(self._on_style_aware_changed)
-        controls_layout.addWidget(self.style_aware_check)
+        # Strength value label and slider container
+        strength_value_layout = QHBoxLayout()
+        strength_value_layout.setSpacing(get_scaled_size(8))
+
+        self.strength_value_label = QLabel(f"Strength: {self.strength:.2f}")
+        self.strength_value_label.setStyleSheet(f"color: #ff9900; font-size: {get_scaled_font_size(16)}px; font-weight: bold;")
+        strength_value_layout.addWidget(self.strength_value_label)
+        strength_value_layout.addStretch()
+
+        controls_layout.addLayout(strength_value_layout)
+
+        # Strength slider (0.0 to 1.0, step 0.05)
+        self.strength_slider = NoScrollSlider(Qt.Orientation.Horizontal)
+        self.strength_slider.setMinimum(0)
+        self.strength_slider.setMaximum(20)  # 0 to 1.0 in 0.05 steps = 20 steps
+        self.strength_slider.setValue(int(self.strength * 20))
+        self.strength_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.strength_slider.setTickInterval(1)
+        self.strength_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: #2a2a2a;
+                height: {get_scaled_size(8)}px;
+                border-radius: {get_scaled_size(4)}px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #ff9900;
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(20)}px;
+                margin: -{get_scaled_size(6)}px 0;
+                border-radius: {get_scaled_size(3)}px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: #ffb340;
+            }}
+        """)
+        self.strength_slider.valueChanged.connect(self._on_strength_changed)
+        controls_layout.addWidget(self.strength_slider)
 
         # Fidelity value label and slider container
         fidelity_value_layout = QHBoxLayout()
@@ -296,27 +334,39 @@ class CharacterReferenceFrame(QFrame):
         return ImageQt(pil_image)
     
     def _on_enabled_changed(self, checked: bool):
-        """Handle enable checkbox change - implement single selection logic"""
-        if checked:
-            # 단일 선택 로직: 다른 모든 프레임 비활성화
-            parent_module = self._get_parent_module()
-            if parent_module:
-                for other_frame in parent_module.character_frames:
-                    if other_frame != self and other_frame.is_enabled:
-                        other_frame.enable_check.setChecked(False)
-                        other_frame.is_enabled = False
-                        other_frame._update_enabled_display()
-        
+        """Handle enable checkbox change - allows multiple selection"""
         self.is_enabled = checked
         self._update_enabled_display()
         # Save image to storage when first enabled
         if checked:
             self._save_image_to_storage()
     
-    def _on_style_aware_changed(self, checked: bool):
-        """Handle style aware checkbox change"""
-        self.style_aware = checked
-        # No need to save settings - user controls this each time
+    def _on_reference_type_combo_changed(self, text: str):
+        """Handle reference type combobox change"""
+        self.reference_type = self._display_to_api_value(text)
+
+    def _api_to_display_value(self, api_value: str) -> str:
+        """Convert API value to display text"""
+        mapping = {
+            "character&style": "Character & Style",
+            "character": "Character",
+            "style": "Style"
+        }
+        return mapping.get(api_value, "Character & Style")
+
+    def _display_to_api_value(self, display_text: str) -> str:
+        """Convert display text to API value"""
+        mapping = {
+            "Character & Style": "character&style",
+            "Character": "character",
+            "Style": "style"
+        }
+        return mapping.get(display_text, "character&style")
+
+    def _on_strength_changed(self, value: int):
+        """Handle strength slider change"""
+        self.strength = value / 20.0  # Convert 0-20 to 0.0-1.0
+        self.strength_value_label.setText(f"Strength: {self.strength:.2f}")
 
     def _on_fidelity_changed(self, value: int):
         """Handle fidelity slider change"""
@@ -395,15 +445,20 @@ class CharacterReferenceFrame(QFrame):
         if not self.is_enabled or not self._is_naid45_model():
             return None
 
-        # Calculate fidelity with rounding and 0.05 step alignment
+        # Calculate strength and fidelity with rounding and 0.05 step alignment
+        # Strength: use as-is (0.0 to 1.0)
+        strength_value = round(self.strength * 20) / 20.0
+        strength_value = max(0.0, min(1.0, strength_value))
+
+        # Fidelity: invert for secondary_strength (1.0 - fidelity)
         inverted_fidelity = 1.0 - self.fidelity
-        # Round to 0.05 steps and clamp to [0.0, 1.0]
         fidelity_value = round(inverted_fidelity * 20) / 20.0
         fidelity_value = max(0.0, min(1.0, fidelity_value))
 
         return {
             "image_data": self.image_data,
-            "style_aware": self.style_aware,
+            "reference_type": self.reference_type,  # "character&style", "character", "style"
+            "strength": strength_value,
             "fidelity": fidelity_value,
             "file_path": self.file_path,
             "file_hash": self.file_hash
@@ -1209,7 +1264,8 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
             frames_data.append({
                 "file_path": frame.file_path,
                 "file_hash": frame.file_hash,
-                "style_aware": frame.style_aware,
+                "reference_type": frame.reference_type,
+                "strength": frame.strength,
                 "fidelity": frame.fidelity,
                 "is_enabled": frame.is_enabled
             })
@@ -1479,14 +1535,11 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
             frame = self._add_character_frame(image_path)
             
             if frame:
-                # Enable this frame (single selection) with default settings
+                # Enable this frame with default settings
+                # (reference_type="character&style", strength=1.0, fidelity=1.0 by default)
                 frame.enable_check.setChecked(True)
                 frame.is_enabled = True
                 frame._update_enabled_display()
-                
-                # Style Aware defaults to True (user can change if needed)
-                frame.style_aware_check.setChecked(True)
-                frame.style_aware = True
                     
                 # Success message with dark theme
                 msg_box = QMessageBox()
@@ -1546,46 +1599,50 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
         # Check if current model is supported
         if not self._is_naid45_model():
             return {}
-        
-        # Find the active frame (single selection)
-        active_frame = None
-        for frame in self.character_frames:
-            if frame.is_enabled:
-                active_frame = frame
-                break
-        
-        if not active_frame:
+
+        # Collect all enabled frames
+        enabled_frames = [frame for frame in self.character_frames if frame.is_enabled]
+
+        if not enabled_frames:
             return {}
-        
-        # Get character data
-        char_data = active_frame.get_character_data()
-        if not char_data:
-            return {}
-        
-        # Build API parameters based on Style Aware setting
-        if char_data["style_aware"]:
-            descriptions = [{
+
+        # Build arrays for multiple references
+        descriptions = []
+        images = []
+        information_extracted = []
+        strength_values = []
+        secondary_strength_values = []
+
+        for frame in enabled_frames:
+            char_data = frame.get_character_data()
+            if not char_data:
+                continue
+
+            # Add description based on reference_type
+            descriptions.append({
                 "caption": {
-                    "base_caption": "character&style",
+                    "base_caption": char_data["reference_type"],  # "character&style", "character", or "style"
                     "char_captions": []
                 },
                 "legacy_uc": False
-            }]
-        else:
-            descriptions = [{
-                "caption": {
-                    "base_caption": "character",
-                    "char_captions": []
-                },
-                "legacy_uc": False
-            }]
-        
+            })
+
+            # Add image and other parameters
+            images.append(char_data["image_data"])
+            information_extracted.append(1)
+            strength_values.append(char_data["strength"])
+            secondary_strength_values.append(char_data["fidelity"])
+
+        # If no valid data collected, return empty
+        if not descriptions:
+            return {}
+
         return {
             "director_reference_descriptions": descriptions,
-            "director_reference_images": [char_data["image_data"]],
-            "director_reference_information_extracted": [1],
-            "director_reference_secondary_strength_values": [char_data["fidelity"]],
-            "director_reference_strength_values": [1],
+            "director_reference_images": images,
+            "director_reference_information_extracted": information_extracted,
+            "director_reference_strength_values": strength_values,
+            "director_reference_secondary_strength_values": secondary_strength_values,
             "controlnet_strength": 1,
             "inpaintImg2ImgStrength": 1,
             "normalize_reference_strength_multiple": True

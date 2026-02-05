@@ -3659,14 +3659,19 @@ class ModernMainWindow(QMainWindow):
 
     def _update_model_list_for_comfyui(self):
         """
-        ComfyUI 모드일 때 모델 리스트를 서버에서 가져와서 업데이트
+        현재 API 모드에 맞게 모델 리스트를 업데이트
 
-        CheckpointLoader + UNETLoader 모델을 모두 표시
+        - NAI: 기본 NAI 모델 리스트
+        - WEBUI: SD-WebUI 서버에서 모델 가져오기
+        - COMFYUI: CheckpointLoader + UNETLoader 모델 가져오기
         """
         current_mode = self.app_context.get_api_mode()
 
-        if current_mode != "COMFYUI":
-            # ComfyUI 모드가 아니면 NAI 기본 모델로 복원
+        # 현재 선택된 모델 저장
+        current_model = self.model_combo.currentText()
+
+        if current_mode == "NAI":
+            # NAI 기본 모델로 복원
             self.model_combo.blockSignals(True)
             self.model_combo.clear()
             self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
@@ -3674,37 +3679,62 @@ class ModernMainWindow(QMainWindow):
             print("✅ 모델 리스트: NAI 기본 모델로 복원")
             return
 
-        # ComfyUI 서버 URL 가져오기
-        # secure_token_manager에서 저장된 URL 가져오기
-        comfyui_url = self.app_context.secure_token_manager.get_token('comfyui_url')
-        if not comfyui_url:
-            # 폴백: 기본값 사용
-            comfyui_url = "http://127.0.0.1:8188"
+        elif current_mode == "WEBUI":
+            # WEBUI 서버에서 모델 가져오기
+            from core.webui_utils import WebuiAPIUtils
 
-        # ComfyUI 서버에서 모델 리스트 가져오기 (CheckpointLoader + UNETLoader)
-        models = ComfyUIAPIUtils.get_model_list(comfyui_url)
+            webui_url = self.app_context.secure_token_manager.get_token('webui_url')
+            if not webui_url:
+                print("⚠️ WEBUI URL이 설정되지 않았습니다.")
+                return
 
-        if models:
-            # 현재 선택된 모델 저장
-            current_model = self.model_combo.currentText()
+            # URL 정규화
+            if not webui_url.startswith('http://') and not webui_url.startswith('https://'):
+                webui_url = f"http://{webui_url}"
 
-            # 모델 리스트 업데이트
-            self.model_combo.blockSignals(True)
-            self.model_combo.clear()
-            self.model_combo.addItems(models)
+            models = WebuiAPIUtils.get_model_list(webui_url)
 
-            # 이전 선택 복원 (가능한 경우)
-            if current_model in models:
-                self.model_combo.setCurrentText(current_model)
-            else:
-                # 첫 번째 모델 선택
-                if self.model_combo.count() > 0:
+            if models:
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItems(models)
+
+                # 이전 선택 복원 (가능한 경우)
+                if current_model in models:
+                    self.model_combo.setCurrentText(current_model)
+                elif self.model_combo.count() > 0:
                     self.model_combo.setCurrentIndex(0)
 
-            self.model_combo.blockSignals(False)
-            print(f"✅ ComfyUI 모델 리스트 업데이트: {len(models)}개 모델")
-        else:
-            print("⚠️ ComfyUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
+                self.model_combo.blockSignals(False)
+                print(f"✅ WEBUI 모델 리스트 업데이트: {len(models)}개 모델")
+            else:
+                print("⚠️ WEBUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
+            return
+
+        elif current_mode == "COMFYUI":
+            # ComfyUI 서버에서 모델 가져오기
+            comfyui_url = self.app_context.secure_token_manager.get_token('comfyui_url')
+            if not comfyui_url:
+                comfyui_url = "http://127.0.0.1:8188"
+
+            models = ComfyUIAPIUtils.get_model_list(comfyui_url)
+
+            if models:
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItems(models)
+
+                # 이전 선택 복원 (가능한 경우)
+                if current_model in models:
+                    self.model_combo.setCurrentText(current_model)
+                elif self.model_combo.count() > 0:
+                    self.model_combo.setCurrentIndex(0)
+
+                self.model_combo.blockSignals(False)
+                print(f"✅ ComfyUI 모델 리스트 업데이트: {len(models)}개 모델")
+            else:
+                print("⚠️ ComfyUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
+            return
 
     # === 임시 생성 창 관련 메서드 ===
 

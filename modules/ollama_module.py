@@ -1739,13 +1739,6 @@ IMPORTANT - SFW SCENE:
                 if best:
                     validated.append(best)
 
-        validated_lower = {v.lower().replace("_", " ") for v in validated}
-        for et in explicit_tags:
-            et_lower = et.lower().replace("_", " ")
-            if et_lower not in validated_lower:
-                validated.insert(0, et)
-                validated_lower.add(et_lower)
-
         validated = self._remove_duplicates(validated)
 
         return validated
@@ -2260,6 +2253,16 @@ Output only the descriptions, one per line:"""
 
         # 언더스코어 → 공백
         tags = [t.replace("_", " ") for t in tags]
+
+        # 중복 태그 제거 (정규화 기준, 순서 유지)
+        seen_norm = set()
+        deduped = []
+        for t in tags:
+            t_norm = t.lower().strip()
+            if t_norm not in seen_norm:
+                seen_norm.add(t_norm)
+                deduped.append(t)
+        tags = deduped
 
         all_parts = tags + natural_parts
         combined = ", ".join(all_parts)

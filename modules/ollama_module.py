@@ -1321,20 +1321,23 @@ Write each description on a new line, nothing else."""
                 return
 
             # ===== STAGE 5: 태그 확장 (LLM) =====
-            # e621 힌트 추출 + 중복 제거 (Stage 5에서 맥락에 맞는 것만 LLM이 선별)
-            e621_hint_tags = []
+            # e621 힌트 추출 + 그룹화 (Stage 5에서 맥락에 맞는 variant를 LLM이 선별)
+            e621_hint_grouped = []  # 그룹화된 표시용 ("penetration: extreme, urethral, ...")
+            e621_hint_flat = []     # 개별 태그 리스트 (검증용)
             if self.e621_nsfw_boost and "E621_NSFW_BOOST" in candidates:
                 e621_only_items = [
                     t for t in candidates["E621_NSFW_BOOST"]
                     if t.get("_e621_only")
                 ]
-                e621_hint_tags = self._deduplicate_e621_hints(e621_only_items)
+                e621_hint_grouped, e621_hint_flat = self._deduplicate_e621_hints(
+                    e621_only_items)
 
             enhance_tags_range = self._profile.get("enhance_tags", (0, 0))
             if enhance_tags_range[1] > 0:
                 self.status_changed.emit("Stage 5: 태그 확장 중...")
                 added_tags = self._stage5_enhance_tags(
-                    translation, selected_tags, natural_parts, e621_hint_tags)
+                    translation, selected_tags, natural_parts,
+                    e621_hints=e621_hint_grouped, e621_all_tags=e621_hint_flat)
 
                 if added_tags:
                     self.stage_output.emit("Stage 5: 태그 확장 (LLM)",
@@ -1853,59 +1856,89 @@ Output only the descriptions, one per line:"""
 
     # ===== e621 Hint Deduplication =====
 
-    def _deduplicate_e621_hints(self, e621_items: list) -> List[str]:
-        """유사 e621 힌트 중복 제거 — 핵심 단어를 공유하는 태그 그룹에서 최고 점수만 유지
+    def _deduplicate_e621_hints(self, e621_items: list) -> tuple:
+        """e621 힌트를 핵심 단어 기준으로 그룹화 — LLM이 variant를 직접 선택
 
-        예: extreme_penetration, urethral_penetration, ear_penetration, large_penetration
-        → 모두 "penetration" 공유 → 최고 점수 1개만 유지
+        예: extreme_penetration, urethral_penetration, ear_penetration
+        → "penetration: extreme, urethral, ear"
+
+        Returns: (grouped_lines: List[str], all_flat_tags: List[str])
+            - grouped_lines: LLM 프롬프트에 표시할 그룹화된 힌트
+            - all_flat_tags: 검증용 전체 개별 태그 리스트
         """
         if not e621_items:
-            return []
+            return [], []
 
-        MIN_TOKEN_LEN = 4  # 짧은 전치사/관사 무시 (in, on, of, etc.)
+        MIN_TOKEN_LEN = 4  # 짧은 전치사/관사 무시
 
         entries = []
+        token_freq: dict = {}  # 각 토큰이 몇 개 태그에 등장하는지
         for item in e621_items:
             tag = item["tag"].replace("_", " ")
-            tokens = frozenset(w for w in tag.split() if len(w) >= MIN_TOKEN_LEN)
+            tokens = [w for w in tag.split() if len(w) >= MIN_TOKEN_LEN]
             entries.append({
                 "tag": tag,
                 "score": item.get("_relevance", 0),
                 "tokens": tokens,
             })
+            for t in set(tokens):
+                token_freq[t] = token_freq.get(t, 0) + 1
 
-        # 토큰 공유 기반 그룹핑
-        groups: list = []  # List[List[dict]]
+        all_flat = [e["tag"] for e in entries]
+
+        # 각 태그를 가장 빈번한 공유 토큰(2회 이상) 기준으로 그룹핑
+        groups: dict = {}  # base_token → list of entries
+        standalone: list = []
         for entry in entries:
-            merged_idx = None
-            for i, group in enumerate(groups):
-                for member in group:
-                    if entry["tokens"] & member["tokens"]:  # 교집합 존재
-                        merged_idx = i
-                        break
-                if merged_idx is not None:
-                    break
-            if merged_idx is not None:
-                groups[merged_idx].append(entry)
+            tokens = entry["tokens"]
+            if not tokens:
+                standalone.append(entry)
+                continue
+            shared = [t for t in tokens if token_freq.get(t, 0) >= 2]
+            if shared:
+                base = max(shared, key=lambda t: token_freq[t])
+                if base not in groups:
+                    groups[base] = []
+                groups[base].append(entry)
             else:
-                groups.append([entry])
+                standalone.append(entry)
 
-        # 각 그룹에서 최고 점수 태그만 선택
-        result = []
-        for group in groups:
-            best = max(group, key=lambda e: e["score"])
-            result.append((best["tag"], best["score"]))
+        # 그룹 → "base: modifier1, modifier2, ..." 형식화
+        grouped_lines = []
+        sorted_groups = sorted(
+            groups.items(),
+            key=lambda x: max(m["score"] for m in x[1]),
+            reverse=True,
+        )
+        for base_token, members in sorted_groups:
+            if len(members) == 1:
+                # 그룹에 1개만 → 원본 태그 그대로
+                grouped_lines.append(members[0]["tag"])
+            else:
+                members.sort(key=lambda x: x["score"], reverse=True)
+                modifiers = []
+                for m in members:
+                    mods = [t for t in m["tag"].split() if t != base_token]
+                    modifiers.append(" ".join(mods) if mods else base_token)
+                grouped_lines.append(f"{base_token}: {', '.join(modifiers)}")
 
-        # 점수 내림차순 정렬
-        result.sort(key=lambda x: x[1], reverse=True)
-        return [tag for tag, _ in result]
+        for s in sorted(standalone, key=lambda x: x["score"], reverse=True):
+            grouped_lines.append(s["tag"])
+
+        return grouped_lines, all_flat
 
     # ===== STAGE 5: Tag Enhancement (LLM) =====
 
     def _stage5_enhance_tags(self, translation: str, existing_tags: List[str],
                               natural_parts: List[str],
-                              e621_hints: List[str] = None) -> List[str]:
-        """창의성 설정에 따라 추가 태그 제안 (기존 태그 보존, e621 힌트 활용)"""
+                              e621_hints: List[str] = None,
+                              e621_all_tags: List[str] = None) -> List[str]:
+        """창의성 설정에 따라 추가 태그 제안 (기존 태그 보존, e621 힌트 활용)
+
+        Args:
+            e621_hints: 그룹화된 힌트 라인 (프롬프트 표시용, "penetration: extreme, urethral, ...")
+            e621_all_tags: 개별 태그 플랫 리스트 (검증용, "extreme penetration", "urethral penetration", ...)
+        """
         enhance_range = self._profile.get("enhance_tags", (0, 0))
         min_add, max_add = enhance_range
         if max_add <= 0:
@@ -1923,23 +1956,26 @@ Output only the descriptions, one per line:"""
             system_content += """
 
 e621 INTEGRATION MODE (ACTIVE):
-You are provided with curated e621 tags as hints below.
-These are specialized NSFW/fetish tags from e621 that describe specific actions, restraints, or body interactions.
+You are provided with grouped e621 tag hints below.
+Format: "keyword: variant1, variant2, ..." — combine keyword + variant to form a tag.
+  Example: "penetration: vaginal, anal" → pick "vaginal penetration" or "anal penetration"
+These are specialized NSFW/fetish tags from e621 describing actions, restraints, or body interactions.
 RULES:
-- You MUST include at least 1-2 e621 hint tags in your output if they match the scene context
-- e621 tags use underscores (e.g., legs_tied, ball_gag) — output them as-is
-- Prefer e621 tags that directly describe physical actions, restraints, or interactions depicted in the scene
+- You MUST include at least 1-2 e621 tags in your output by picking the variant that best fits the scene
+- Combine the keyword with your chosen variant (e.g., "tied: legs" → output "legs tied")
+- Standalone tags (no colon) can be used directly
+- Prefer tags that describe physical actions, restraints, or interactions depicted in the scene
 - Do NOT ignore the e621 hint section"""
 
-        # e621 힌트 섹션
+        # e621 힌트 섹션 (그룹화된 형식)
         e621_section = ""
         if e621_hints:
-            e621_list = ", ".join(e621_hints)
+            e621_list = "\n".join(e621_hints)
             e621_section = f"""
 
-=== e621 SPECIALIZED TAGS (PRIORITY — pick 1-2 that match) ===
+=== e621 SPECIALIZED TAGS (pick 1-2 best variants for the scene) ===
 {e621_list}
-You MUST select at least 1 tag from this list if it matches the scene."""
+Pick the variant that best matches the scene. Combine keyword + variant to form the tag."""
 
         user_content = f"""Scene: {translation}
 
@@ -1962,7 +1998,7 @@ Output only the suggested tags, separated by commas:"""
 
         # 기존 태그 중복 제거 + DB 검증 (e621 힌트는 DB에 없어도 허용)
         existing_norm = {normalize_tag(t) for t in existing_tags}
-        e621_hint_norm = {normalize_tag(t) for t in (e621_hints or [])}
+        e621_hint_norm = {normalize_tag(t) for t in (e621_all_tags or [])}
         validated = []
         for tag in raw_tags:
             tag_norm = normalize_tag(tag)

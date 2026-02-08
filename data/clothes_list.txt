@@ -336,7 +336,6 @@ spiked bracelet
 bridal gauntlets
 detached sleeves
 arm warmers
-fingernails
 gloves
 boxing gloves
 elbow gloves
@@ -669,6 +668,7 @@ animal collar
 spiked collar
 studded collar
 pet cone
+headphones
 headphones around neck
 lanyard
 chain necklace
@@ -781,6 +781,7 @@ jockstrap
 ball bra
 penis sheath
 blindfold
+eyepatch
 gimp suit
 bondage outfit
 latex
@@ -1414,241 +1415,6 @@ industrial piercing
 eyebrow piercing
 anti-eyebrow piercing
 eyelid piercing
-small face
-small medium face
-medium face
-large face
-huge face
-sharp face
-pointed face
-peanut face
-round face
-egg-shaped face
-triangular face
-inverted triangle of faces
-squareface
-diamond face
-hexagonal face
-heart-shaped face
-white hair
-brown hair
-red hair
-pink hair
-orange hair
-yellow hair
-blonde hair
-light green hair
-green hair
-sky blue hair
-blue hair
-purple hair
-black hair
-rainbow hair
-two-tone hair
-streaked hair
-gradient hair
-split-color hair
-multicolored hair
-colored inner hair
-ombre
-sombre
-short hair
-very short hair
-absurdly short hair
-medium hair
-long hair
-very long hair
-absurdly long hair
-straight hair
-curly hair
-wavy hair
-spiked hair
-flipped hair
-bluntbangs
-pointy hair
-messy hair
-blunt bangs
-parted bangs
-crossed bangs
-swept bangs
-braided bangs
-hair over one eye
-hair over eyes
-hair between eyes
-asymmetrical bangs
-pixie cut
-undercut
-cornrows
-dreadlocks
-braid
-front braid
-side braid
-french braid
-crown braid
-single braid
-multiple braids
-twin braids
-tri braids
-quad braids
-hair bun
-braided bun
-single hair bun
-double bun
-triple bun
-cone hair bun
-doughnut hair bun
-heart hair bun
-one side up
-two side up
-ponytail
-folded ponytail
-front ponytail
-high ponytail
-short ponytail
-side ponytail
-split ponytail
-twintails
-low twintails
-short twintails
-uneven twintails
-tri tails
-quad tails
-quin tails
-gray hair streak
-white hair streak
-brown hair streak
-red hair streak
-pink hair streak
-orange hair streak
-yellow hair streak
-blonde hair streak
-light green hair streak
-green hair streak
-sky blue hair streak
-blue hair streak
-purple hair streak
-black hair streak
-rainbow hair streak
-eyes
-eyebrow
-eyelashes
-short eyes
-long eyes
-short eyebrow
-long eyebrow
-slender eyebrow
-heavy eyebrow
-short eyelashes
-long eyelashes
-slender eyelashes
-heavy eyelashes
-gray eyes
-white eyes
-brown eyes
-red eyes
-pink eyes
-orange eyes
-yellow eyes
-golden eyes
-light green eyes
-green eyes
-sky blue eyes
-blue eyes
-purple eyes
-black eyes
-odd eye
-multicolored eye
-heterochromia
-symbol-shaped pupils
-heart-shaped pupils
-spade-shaped pupils
-clover-shaped pupils
-diamond-shaped pupils
-star-shaped pupils
-flower-shaped pupils
-blanked eyes
-empty eyes
-sconstricted pupils
-dilated pupils
-bloodshot pupils
-flaming pupils
-glowing pupils
-eyeshadow
-eyeliner
-mascara
-uneven eyes
-gray lips
-white lips
-brown lips
-red lips
-pink lips
-orange lips
-yellow lips
-golden lips
-light green lips
-green lips
-sky blue lips
-blue lips
-purple lips
-black lips
-gray tongue
-white tongue
-brown tongue
-red tongue
-pink tongue
-orange tongue
-yellow tongue
-golden tongue
-light green tongue
-green tongue
-sky blue tongue
-blue tongue
-purple tongue
-black tongue
-ears
-earlobes
-long ears
-very short ears
-very long ears
-slender ears
-heavy ears
-short earlobes
-long earlobes
-pointy ears
-short pointy ears
-long pointy ears
-animal ears
-fake animal ears
-dog ears
-gorilla ears
-cat ears
-bear ears
-raccoon ears
-wolf ears
-squirrel ears
-pig ears
-horse ears
-bat ears
-deer ears
-lion ears
-cow ears
-sheep ears
-fox ears
-goat ears
-monkey ears
-ferret ears
-mouse ears
-rabbit ears
-panda ears
-tiger ears
-small nose
-long nose
-slender nose
-heavy nose
-broad nose
-high-end nose
-wild boogged nose
-aquiline nose
 official alternate costume
 alternate costume
 black gloves
@@ -4014,18 +3780,13 @@ single over-kneehigh
 single shoulder pad
 single off shoulder
 single vambrace
-single barefoot
 single bare arm
 single elbow pad
 single bang
 single half glove
-barefoot
 hair flower
 off shoulder
-armpits
 strapless
-bare legs
-toes
 highleg
 bell
 hood down

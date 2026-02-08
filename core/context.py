@@ -8,8 +8,9 @@ from core.tag_data_manager import TagDataManager
 from core.prompt_context import PromptContext
 from core.mode_ware_manager import ModeAwareModuleManager
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
+from core.generation_queue_manager import GenerationQueueManager
 import pandas as pd
-from datetime import datetime 
+from datetime import datetime
 from pathlib import Path       
 
 if TYPE_CHECKING:
@@ -43,15 +44,52 @@ class AppContext:
         self.filter_data_manager = FilterDataManager()
         self.current_source_row: Optional[pd.Series] = None
         self.current_prompt_context: Optional[PromptContext] = None
-        session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.session_save_path = Path("output") / session_timestamp
-        self.session_save_path.mkdir(parents=True, exist_ok=True)
+
+        # ✅ 세션 타임스탬프를 인스턴스 속성으로 명시적 저장
+        self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # 🆕 ImageCrudController 초기화
+        from core.image_crud_controller import ImageCrudController
+        self.image_crud_controller = ImageCrudController(self)
+
+        # 🆕 GenerationQueueManager 초기화 (이미지 생성 큐 관리)
+        self.generation_queue_manager = GenerationQueueManager(self)
+
+        # ⚠️ DEPRECATED: 하위 호환성만 유지, 향후 제거 예정
+        # 새 코드는 image_crud_controller.get_save_directory() 사용 권장
+        self._session_save_path = None
+
         self.subscribers: Dict[str, List[Callable]] = {}
         self.settings_manager = None
         
         # API payload 안전 저장소
         self._last_api_payload = None
         self._payload_lock = False
+
+        # 🆕 임시 생성 창 모드 플래그 (FR-2-1, FR-3-1)
+        self.temp_window_mode = False  # 임시 창 생성 중인지 여부
+        self.temp_window_character_tab = None  # VirtualCharacterTab 인스턴스
+        self.pipeline_hook_overrides = {}  # {hook_point: [(priority, module_instance), ...]}
+
+    @property
+    def session_save_path(self) -> Path:
+        """
+        [DEPRECATED] 하위 호환성 유지를 위한 속성
+
+        새 코드는 app_context.image_crud_controller.get_save_directory()를 사용하세요.
+        """
+        if hasattr(self, 'image_crud_controller'):
+            return self.image_crud_controller.get_save_directory()
+        else:
+            # 폴백 (초기화 중)
+            return Path("output") / self.session_timestamp
+
+    @session_save_path.setter
+    def session_save_path(self, value: Path):
+        """
+        [DEPRECATED] setter - 직접 설정 대신 set_base_save_directory() 사용 권장
+        """
+        self._session_save_path = value
 
     def set_api_mode(self, mode: str):
         """API 모드를 변경하고 모든 구독자에게 알림 (ComfyUI 지원 추가)"""
@@ -76,24 +114,13 @@ class AppContext:
         return self.current_api_mode
     
     def set_base_save_directory(self, base_path: str):
-        """기본 저장 디렉토리를 설정합니다"""
-        try:
-            # 새로운 기본 경로 설정
-            base_dir = Path(base_path)
-            base_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 세션 타임스탬프를 유지하면서 새 경로 설정
-            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.session_save_path = base_dir / session_timestamp
-            self.session_save_path.mkdir(parents=True, exist_ok=True)
-            
-            print(f"Save directory changed to: {self.session_save_path}")
-            
-            # 저장 경로 변경 이벤트 발행
-            self.publish("save_directory_changed", {"new_path": str(self.session_save_path)})
-            
-        except Exception as e:
-            print(f"Save directory setting failed: {e}")
+        """
+        [수정] 기본 저장 디렉토리를 ImageCrudController를 통해 설정
+        """
+        if hasattr(self, 'image_crud_controller'):
+            self.image_crud_controller.set_base_save_directory(base_path)
+
+        # ✅ 이벤트는 ImageCrudController.set_base_save_directory()에서 발행됨
     
     def subscribe_mode_swap(self, callback):
         """모드 변경 이벤트 구독"""
@@ -110,7 +137,11 @@ class AppContext:
         """지정된 이벤트에 대한 콜백 함수(구독자)를 등록합니다."""
         # 이벤트 이름에 해당하는 리스트가 없으면 생성하고 콜백 추가
         self.subscribers.setdefault(event_name, []).append(callback)
-        print(f"📬 이벤트 구독: '{event_name}' -> {callback.__self__.__class__.__name__}.{callback.__name__}")
+        # 메서드인지 일반 함수인지 확인하여 적절한 로그 출력
+        if hasattr(callback, '__self__'):
+            print(f"📬 이벤트 구독: '{event_name}' -> {callback.__self__.__class__.__name__}.{callback.__name__}")
+        else:
+            print(f"📬 이벤트 구독: '{event_name}' -> {callback.__name__}")
 
     def publish(self, event_name: str, *args, **kwargs):
         """지정된 이벤트의 모든 구독자에게 데이터를 전달하며 콜백을 실행합니다."""

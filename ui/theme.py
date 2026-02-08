@@ -23,6 +23,12 @@ DARK_COLORS = {
     'success': '#4CAF50',         # 성공 색상
     'warning': '#FF9800',         # 경고 색상
     'error': '#F44336',           # 오류 색상
+    # 호환성을 위한 추가 키
+    'background': '#212121',      # 메인 배경 (bg_primary와 동일)
+    'panel': '#2B2B2B',          # 패널 배경 (bg_secondary와 동일)
+    'input': '#2B2B2B',          # 입력 필드 배경 (bg_tertiary와 동일)
+    'highlight': '#1976D2',       # 하이라이트 (accent_blue와 동일)
+    'text': '#FFFFFF',            # 텍스트 (text_primary와 동일)
 }
 
 
@@ -77,6 +83,14 @@ def generate_dark_styles():
                 font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
                 font-size: {fonts['main']}px;
                 font-weight: 400;
+            }}
+            QToolTip {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {sizes['border_radius']}px;
+                padding: {sizes['padding_small']}px {sizes['padding_medium']}px;
+                font-size: {fonts['compact']}px;
             }}
         """,
         
@@ -704,3 +718,78 @@ def get_custom_styles():
 # 하위 호환성을 위한 CUSTOM 딕셔너리
 # 스케일링 매니저는 항상 사용 가능하므로 간단히 호출
 CUSTOM = get_custom_styles()
+
+
+# === Dark Theme MessageBox Helpers ===
+
+def get_message_box_stylesheet() -> str:
+    """Get dark theme stylesheet for QMessageBox"""
+    return f"""
+        QMessageBox {{
+            background-color: {DARK_COLORS['bg_primary']};
+        }}
+        QMessageBox QLabel {{
+            color: {DARK_COLORS['text_primary']};
+            font-size: {get_scaled_font_size(15)}px;
+        }}
+        QMessageBox QPushButton {{
+            background-color: {DARK_COLORS['bg_tertiary']};
+            color: {DARK_COLORS['text_primary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            padding: 6px 16px;
+            min-width: 80px;
+            font-size: {get_scaled_font_size(14)}px;
+        }}
+        QMessageBox QPushButton:hover {{
+            background-color: {DARK_COLORS['bg_hover']};
+        }}
+        QMessageBox QPushButton:pressed {{
+            background-color: {DARK_COLORS['bg_pressed']};
+        }}
+    """
+
+
+def show_info(parent, title: str, message: str):
+    """Show dark-themed information message box"""
+    from PyQt6.QtWidgets import QMessageBox
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Information)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStyleSheet(get_message_box_stylesheet())
+    msg.exec()
+
+
+def show_warning(parent, title: str, message: str):
+    """Show dark-themed warning message box"""
+    from PyQt6.QtWidgets import QMessageBox
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Warning)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStyleSheet(get_message_box_stylesheet())
+    msg.exec()
+
+
+def show_error(parent, title: str, message: str):
+    """Show dark-themed error message box"""
+    from PyQt6.QtWidgets import QMessageBox
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Critical)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStyleSheet(get_message_box_stylesheet())
+    msg.exec()
+
+
+def show_question(parent, title: str, message: str) -> bool:
+    """Show dark-themed question message box, returns True if Yes clicked"""
+    from PyQt6.QtWidgets import QMessageBox
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Icon.Question)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+    msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    msg.setStyleSheet(get_message_box_stylesheet())
+    return msg.exec() == QMessageBox.StandardButton.Yes

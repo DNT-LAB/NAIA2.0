@@ -1,51 +1,28 @@
 # core/comfyui_service.py
-import json
 import uuid
-import asyncio
-import websocket
 import requests
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 from PIL import Image
 from io import BytesIO
-from typing import List
-import threading
 
 class ComfyUIService:
-    """ComfyUI API 통신을 담당하는 서비스 클래스"""
-    
+    """
+    ComfyUI API 통신을 담당하는 서비스 클래스
+
+    🔧 완전한 스레드 안전 구현:
+    - WebSocket 완전 제거 (타이머 충돌 원인)
+    - 순수 HTTP 폴링만 사용
+    - QObject::killTimer 오류 완전 해결
+    """
+
     def __init__(self, server_url: str = "127.0.0.1:8188"):
         self.server_url = server_url.rstrip('/')
         if not self.server_url.startswith('http'):
             self.server_url = f"http://{self.server_url}"
-        
+
         self.client_id = str(uuid.uuid4())
-        self.ws = None
         self.progress_callback: Optional[Callable] = None
-        
-    def connect_websocket(self) -> bool:
-        """WebSocket 연결 설정 (수정된 버전)"""
-        try:
-            ws_url = self.server_url.replace('http', 'ws') + f"/ws?clientId={self.client_id}"
-            
-            # 🔧 수정: websocket-client 라이브러리 올바른 사용법
-            self.ws = websocket.create_connection(ws_url, timeout=10)
-            print(f"✅ ComfyUI WebSocket 연결 성공: {ws_url}")
-            return True
-        except Exception as e:
-            print(f"❌ ComfyUI WebSocket 연결 실패: {e}")
-            self.ws = None
-            return False
-    
-    def disconnect_websocket(self):
-        """WebSocket 연결 해제"""
-        if self.ws:
-            try:
-                self.ws.close()
-                print("✅ ComfyUI WebSocket 연결 해제")
-            except:
-                pass
-            self.ws = None
     
     def set_progress_callback(self, callback: Callable[[int, int], None]):
         """진행률 콜백 함수 설정"""
@@ -99,107 +76,61 @@ class ComfyUIService:
             return None
     
     def wait_for_completion(self, prompt_id: str, timeout: int = 300) -> bool:
-        """워크플로우 완료 대기 (폴링 방식으로 변경)"""
-        print(f"🔄 워크플로우 완료 대기 시작: {prompt_id}")
-        
+        """워크플로우 완료 대기 (순수 HTTP 폴링)"""
+        print(f"🔄 워크플로우 완료 대기 시작 (HTTP 폴링): {prompt_id}")
+
         start_time = time.time()
         last_progress = 0
-        
-        # WebSocket 연결 시도 (실패해도 폴링으로 대체)
-        ws_connected = self.connect_websocket()
-        
+        last_poll_time = 0
+
         try:
             while time.time() - start_time < timeout:
-                # 1. WebSocket으로 실시간 진행률 확인 (가능한 경우)
-                if ws_connected and self.ws:
-                    try:
-                        # 0.1초 타임아웃으로 논블로킹 체크
-                        self.ws.settimeout(0.1)
-                        message = self.ws.recv()
-                        
-                        if message:
-                            data = json.loads(message)
-                            msg_type = data.get('type')
-                            
-                            if msg_type == 'progress':
-                                progress_data = data.get('data', {})
-                                value = progress_data.get('value', 0)
-                                max_value = progress_data.get('max', 100)
-                                
-                                if self.progress_callback:
-                                    self.progress_callback(value, max_value)
-                                
-                                last_progress = value
-                                print(f"🔄 진행률: {value}/{max_value}")
-                            
-                            elif msg_type == 'executing':
-                                executing_data = data.get('data', {})
-                                node_id = executing_data.get('node')
-                                
-                                if node_id is None:
-                                    print("✅ 워크플로우 실행 완료 (WebSocket)")
-                                    return True
-                                else:
-                                    print(f"🔄 노드 실행 중: {node_id}")
-                            
-                            elif msg_type == 'execution_error':
-                                error_data = data.get('data', {})
-                                print(f"❌ 실행 오류: {error_data}")
-                                return False
-                    
-                    except websocket.WebSocketTimeoutException:
-                        # 타임아웃은 정상 (논블로킹)
-                        pass
-                    except Exception as ws_e:
-                        print(f"⚠️ WebSocket 오류, 폴링으로 전환: {ws_e}")
-                        ws_connected = False
-                        self.disconnect_websocket()
-                
-                # 2. HTTP 폴링으로 완료 상태 확인 (1초마다)
-                if int(time.time() - start_time) % 1 == 0:  # 1초마다 체크
+                current_time = time.time()
+
+                # HTTP 폴링으로 완료 상태 확인 (0.5초마다)
+                if current_time - last_poll_time >= 0.5:
+                    last_poll_time = current_time
+
                     try:
                         response = requests.get(f"{self.server_url}/history/{prompt_id}", timeout=5)
-                        
+
                         if response.status_code == 200:
                             history = response.json()
-                            
+
                             if prompt_id in history:
                                 result = history[prompt_id]
                                 status = result.get('status', {})
-                                
+
                                 # 완료 상태 확인
                                 if status.get('status_str') == 'success':
                                     print("✅ 워크플로우 실행 완료 (HTTP 폴링)")
+                                    if self.progress_callback:
+                                        self.progress_callback(100, 100)
                                     return True
                                 elif status.get('status_str') == 'error':
                                     print(f"❌ 워크플로우 실행 실패: {status}")
                                     return False
-                                
-                                # 진행률 업데이트 (WebSocket이 없는 경우)
-                                if not ws_connected and self.progress_callback:
-                                    # 간단한 추정 진행률
-                                    elapsed = time.time() - start_time
+
+                                # 진행률 추정 (실행 시간 기반)
+                                if self.progress_callback:
+                                    elapsed = current_time - start_time
                                     estimated_progress = min(int((elapsed / 60) * 100), 95)  # 최대 95%까지
                                     if estimated_progress > last_progress:
                                         self.progress_callback(estimated_progress, 100)
                                         last_progress = estimated_progress
-                    
+
                     except Exception as poll_e:
                         print(f"⚠️ 폴링 체크 실패: {poll_e}")
-                
+
                 # 0.1초 대기
                 time.sleep(0.1)
-            
+
             print("❌ 워크플로우 완료 대기 시간 초과")
             return False
-            
+
         except Exception as e:
             print(f"❌ 워크플로우 완료 대기 중 예외 발생: {e}")
             return False
-        finally:
-            # 정리
-            if ws_connected:
-                self.disconnect_websocket()
     
     def get_generation_result(self, prompt_id: str) -> List[Dict[str, Any]]:
         """
@@ -330,25 +261,55 @@ class ComfyUIService:
             return {'status': 'error', 'message': '이미지 다운로드 실패'}
     
     def get_available_models(self) -> List[str]:
-        """사용 가능한 모델 목록 조회"""
+        """
+        사용 가능한 모델 목록 조회 (CheckpointLoader + UNETLoader 합침)
+
+        CheckpointLoader와 UNETLoader의 모델을 모두 가져와서
+        set으로 중복 제거 후 정렬하여 반환
+
+        Returns:
+            모델 파일명 리스트 (중복 제거됨)
+        """
         try:
             response = requests.get(f"{self.server_url}/object_info", timeout=10)
-            
+
             if response.status_code == 200:
                 object_info = response.json()
+                all_models = set()  # 중복 제거를 위한 set
+
+                # 1. CheckpointLoaderSimple 모델 수집
                 checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-                input_info = checkpoint_loader.get('input', {})
-                required_info = input_info.get('required', {})
-                ckpt_name_info = required_info.get('ckpt_name', [])
-                
-                if isinstance(ckpt_name_info, list) and len(ckpt_name_info) > 0:
-                    return ckpt_name_info[0]  # 첫 번째 요소가 모델 리스트
-                
+                ckpt_input = checkpoint_loader.get('input', {}).get('required', {})
+                ckpt_info = ckpt_input.get('ckpt_name', [])
+
+                if isinstance(ckpt_info, list) and len(ckpt_info) > 0:
+                    checkpoint_models = ckpt_info[0]
+                    all_models.update(checkpoint_models)
+                    print(f"🔍 CheckpointLoader: {len(checkpoint_models)}개 모델 발견")
+
+                # 2. UNETLoader 모델 수집
+                unet_loader = object_info.get('UNETLoader', {})
+                unet_input = unet_loader.get('input', {}).get('required', {})
+                unet_info = unet_input.get('unet_name', [])
+
+                if isinstance(unet_info, list) and len(unet_info) > 0:
+                    unet_models = unet_info[0]
+                    all_models.update(unet_models)
+                    print(f"🔍 UNETLoader: {len(unet_models)}개 모델 발견")
+
+                # 3. 정렬하여 반환
+                if all_models:
+                    sorted_models = sorted(list(all_models))
+                    print(f"✅ 총 {len(sorted_models)}개 모델 (중복 제거됨): {sorted_models[:3]}{'...' if len(sorted_models) > 3 else ''}")
+                    return sorted_models
+
             print("❌ 모델 리스트 조회 실패")
             return []
-            
+
         except Exception as e:
             print(f"❌ 모델 리스트 조회 중 예외 발생: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def get_system_stats(self) -> Optional[Dict[str, Any]]:

@@ -17,9 +17,10 @@ class TagDataManager:
         self.limited_generals.update(dict(list(character_dict_count.items())[:15000]))
         self.limited_generals.update(artist_dict)
         self.limited_generals.update(copyright_dict)
-        
+
         self.artist_dict = artist_dict
         self.character_dict_count = character_dict_count
+        self.copyright_dict = copyright_dict
 
     def find_top_matches(self, target_element, additional_wildcards=None):
         matching_items = []
@@ -31,6 +32,12 @@ class TagDataManager:
             for key, value in self.artist_dict.items():
                 if query in key:
                     matching_items.append((f"artist:{key}", value))
+        elif target_clean.startswith("@"):
+            query = target_clean[1:]  # 첫 번째 @ 문자만 제거
+            matching_items.append(("@_@", 20598))
+            for key, value in self.artist_dict.items():
+                if query in key:
+                    matching_items.append((f"@{key}", value))
         elif target_clean.startswith("character:"):
             query = target_clean.replace("character:", "")
             for key, value in self.character_dict_count.items():

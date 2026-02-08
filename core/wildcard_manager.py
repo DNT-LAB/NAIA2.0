@@ -7,6 +7,8 @@ class WildcardManager:
     def __init__(self):
         self.wildcards_dir = os.path.join(os.getcwd(), 'wildcards')
         self.wildcard_dict_tree = {}
+        self.instant_wildcard_dict = {}  # 인스턴트 와일드카드 딕셔너리
+        self.instant_wildcard_tree = {}  # 인스턴트 와일드카드 트리 구조
         self.reload_callbacks = []
         self.activate_wildcards()
 
@@ -102,3 +104,36 @@ class WildcardManager:
         현재 로드된 와일드카드 개수를 반환합니다.
         """
         return len(self.wildcard_dict_tree)
+    
+    def update_instant_wildcards(self, instant_dict, instant_tree=None):
+        """
+        인스턴트 와일드카드 딕셔너리와 트리를 업데이트합니다.
+        InstantWildcardModule에서 호출됩니다.
+        """
+        self.instant_wildcard_dict = instant_dict.copy() if instant_dict else {}
+        self.instant_wildcard_tree = instant_tree.copy() if instant_tree else {}
+        try:
+            print(f"[OK] 인스턴트 와일드카드 업데이트: {len(self.instant_wildcard_dict)}개 항목, {len(self.instant_wildcard_tree)}개 그룹")
+        except UnicodeEncodeError:
+            print(f"[OK] Instant wildcards updated: {len(self.instant_wildcard_dict)} items, {len(self.instant_wildcard_tree)} groups")
+    
+    def get_instant_wildcards(self):
+        """
+        인스턴트 와일드카드 딕셔너리와 트리를 반환합니다.
+        Returns: (dict, tree) 튜플
+        """
+        return self.instant_wildcard_dict.copy(), self.instant_wildcard_tree.copy()
+    
+    def get_instant_wildcard_tree(self):
+        """
+        인스턴트 와일드카드 트리 구조만 반환합니다.
+        Returns: dict - 파일명을 키로 하는 그룹화된 와일드카드
+        """
+        return self.instant_wildcard_tree.copy()
+    
+    def get_instant_wildcard_dict(self):
+        """
+        인스턴트 와일드카드 플랫 딕셔너리만 반환합니다.
+        Returns: dict - 모든 와일드카드의 평면 딕셔너리
+        """
+        return self.instant_wildcard_dict.copy()

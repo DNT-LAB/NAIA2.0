@@ -1,15 +1,56 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QCheckBox, QPushButton, QFrame, QScrollArea
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRegularExpression
+from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
+from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List
 import re
+
+class CommentHighlighter(QSyntaxHighlighter):
+    """# 으로 시작해서 첫 번째 쉼표까지 회색 처리하는 구문 하이라이터"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # 회색 포맷 설정
+        self.comment_format = QTextCharFormat()
+        self.comment_format.setForeground(QColor("#808080"))
+
+    def highlightBlock(self, text: str):
+        """각 텍스트 블록(줄)에 대해 하이라이팅 적용 - 쉼표 단위로 규칙 분리"""
+        # 한 줄 내에서 쉼표로 구분된 여러 규칙을 처리
+        # 예: "(e):prefix+=nsfw, #(~e):prefix+=, (q):main+=test,"
+
+        pos = 0
+        while pos < len(text):
+            # 현재 위치에서 다음 쉼표 찾기
+            comma_index = text.find(',', pos)
+
+            if comma_index == -1:
+                # 더 이상 쉼표가 없으면 나머지 전체 확인
+                segment = text[pos:].strip()
+                if segment.startswith('#'):
+                    # 나머지 전체를 회색 처리
+                    self.setFormat(pos, len(text) - pos, self.comment_format)
+                break
+            else:
+                # 쉼표를 찾았으면 해당 구간 확인
+                segment = text[pos:comma_index].strip()
+
+                if segment.startswith('#'):
+                    # # 으로 시작하면 쉼표까지 (쉼표 포함) 회색 처리
+                    # pos부터 comma_index+1까지의 실제 문자열 길이 계산
+                    self.setFormat(pos, comma_index - pos + 1, self.comment_format)
+
+                # 다음 구간으로 이동 (쉼표 다음부터)
+                pos = comma_index + 1
 
 class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
     """
@@ -100,8 +141,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(rules_label)
 
         self.rules_textedit = QTextEdit()
+        self.rules_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.rules_textedit.setFixedHeight(200)
         self.rules_textedit.setStyleSheet(rules_textbox_style)
+        setModernStyle(self.rules_textedit)
         self.rules_textedit.setPlaceholderText(
             "규칙 예시:\n"
             "(e):prefix+=nsfw^rating:explicit,\n"
@@ -119,9 +162,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             "• 따옴표: 선택사항 (쉼표 포함 시 필수)\n"
             "• 주석: # 으로 시작하는 줄은 무시"
         )
-        
-        # 텍스트 변경 시 주석 하이라이팅
-        self.rules_textedit.textChanged.connect(self._highlight_comments)
+
+        # QSyntaxHighlighter 적용
+        self.comment_highlighter = CommentHighlighter(self.rules_textedit.document())
+
         layout.addWidget(self.rules_textedit)
 
         # 도움말 프레임
@@ -157,9 +201,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         layout.addWidget(log_label)
 
         self.log_textedit = QTextEdit()
+        self.log_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.log_textedit.setFixedHeight(250)
         self.log_textedit.setReadOnly(True)
         self.log_textedit.setStyleSheet(textbox_style + "color: #B0B0B0;")
+        setModernStyle(self.log_textedit)
         self.log_textedit.setPlaceholderText("규칙 실행 로그가 여기에 표시됩니다...")
         layout.addWidget(self.log_textedit)
 
@@ -196,40 +242,6 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 self.update_visibility_for_mode(current_mode)
 
         return widget
-    
-    def _highlight_comments(self):
-        """주석(#으로 시작하는 줄) 하이라이팅"""
-        if not self.rules_textedit:
-            return
-            
-        # 현재 커서 위치 저장
-        cursor = self.rules_textedit.textCursor()
-        cursor_position = cursor.position()
-        
-        # HTML 형식으로 텍스트 변환
-        text = self.rules_textedit.toPlainText()
-        lines = text.split('\n')
-        
-        html_lines = []
-        for line in lines:
-            stripped_line = line.strip()
-            if stripped_line.startswith('#'):
-                # 주석 줄은 연한 녹색으로 표시
-                html_lines.append(f'<span style="color: #F8FFDF;">{line}</span>')
-            else:
-                html_lines.append(line)
-        
-        html_content = '<br>'.join(html_lines)
-        
-        # HTML 설정 (텍스트 변경 신호 차단)
-        self.rules_textedit.blockSignals(True)
-        self.rules_textedit.setHtml(f'<div style="font-family: monospace; color: #FFFFFF;">{html_content}</div>')
-        
-        # 커서 위치 복원
-        cursor = self.rules_textedit.textCursor()
-        cursor.setPosition(min(cursor_position, len(self.rules_textedit.toPlainText())))
-        self.rules_textedit.setTextCursor(cursor)
-        self.rules_textedit.blockSignals(False)
 
     def collect_current_settings(self) -> Dict[str, Any]:
         """현재 UI 상태를 딕셔너리로 수집"""
@@ -555,58 +567,105 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         
         return self._evaluate_logical_expression(expression, all_tags)
     
+    def _matching_paren(self, s: str, start: int) -> int:
+        """시작 괄호의 짝을 찾음"""
+        depth = 1
+        for i in range(start + 1, len(s)):
+            if s[i] == '(':
+                depth += 1
+            elif s[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    return i
+        return -1
+
+    def _split_by_operator(self, expression: str, operator: str) -> List[str]:
+        """괄호 밖의 연산자로만 분할"""
+        parts = []
+        current = ""
+        depth = 0
+
+        for char in expression:
+            if char == '(':
+                depth += 1
+                current += char
+            elif char == ')':
+                depth -= 1
+                current += char
+            elif char == operator and depth == 0:
+                parts.append(current.strip())
+                current = ""
+            else:
+                current += char
+
+        if current.strip():
+            parts.append(current.strip())
+
+        return parts if len(parts) > 1 else [expression]
+
     def _evaluate_logical_expression(self, expression: str, all_tags: List[str]) -> bool:
-        """논리 표현식 평가"""
+        """논리 표현식 평가 - 중첩 괄호 지원"""
+        expression = expression.strip()
+
         if not expression:
             return True
-        
-        # AND 연산자로 분할 (상위 레벨)
-        and_parts = re.split(r'\s*&\s*', expression)
-        and_results = []
-        
-        for and_part in and_parts:
-            # OR 연산자로 분할 (하위 레벨)
-            or_parts = re.split(r'\s*\|\s*', and_part)
-            or_results = []
-            
-            for or_part in or_parts:
-                or_part = or_part.strip()
-                result = self._evaluate_single_condition(or_part, all_tags)
-                or_results.append(result)
-            
-            # OR 조건 평가 (하나라도 True면 True)
-            and_results.append(any(or_results))
-        
-        # AND 조건 평가 (모두 True여야 True)
-        return all(and_results)
+
+        # 최외곽 괄호 제거 (매칭되는 경우만)
+        while expression.startswith('(') and expression.endswith(')'):
+            matching_index = self._matching_paren(expression, 0)
+            if matching_index == len(expression) - 1:
+                expression = expression[1:-1].strip()
+            else:
+                break
+
+        # AND 연산자 분할 (괄호 밖에서만)
+        and_parts = self._split_by_operator(expression, '&')
+        if len(and_parts) > 1:
+            return all(self._evaluate_logical_expression(part, all_tags) for part in and_parts)
+
+        # OR 연산자 분할 (괄호 밖에서만)
+        or_parts = self._split_by_operator(expression, '|')
+        if len(or_parts) > 1:
+            return any(self._evaluate_logical_expression(part, all_tags) for part in or_parts)
+
+        # 단일 조건 평가
+        return self._evaluate_single_condition(expression, all_tags)
     
     def _evaluate_single_condition(self, condition: str, all_tags: List[str]) -> bool:
         """단일 조건 평가"""
         condition = condition.strip()
-        
+
         # 등급 조건 처리
         if condition in ['e', 'q', 's', 'g']:
             return self._check_rating_condition(condition, exact_match=True)
         elif condition in ['~e', '~q', '~s', '~g']:
             rating_char = condition[1:]  # ~ 제거
             return self._check_rating_condition(rating_char, exact_match=False)
-        
+
         # 기존 태그 조건 처리
         if condition.startswith('~!'):
             # 정확 불일치 조건 (~!tag)
-            tag = condition[2:]
-            return tag not in all_tags
+            tag = condition[2:].strip()
+            result = tag not in all_tags
+            print(f"  [~!{tag}] -> {result} (all_tags count: {len(all_tags)})")
+            return result
         elif condition.startswith('~'):
             # 불포함 조건 (~tag)
-            tag = condition[1:]
-            return not any(tag in element for element in all_tags)
+            tag = condition[1:].strip()
+            result = not any(tag in element for element in all_tags)
+            print(f"  [~{tag}] -> {result}")
+            return result
         elif condition.startswith('*'):
             # 정확 일치 조건 (*tag)
-            tag = condition[1:]
-            return tag in all_tags
+            tag = condition[1:].strip()
+            result = tag in all_tags
+            print(f"  [*{tag}] -> {result} (searching '{tag}' in {len(all_tags)} tags: {all_tags[:3]}...)")
+            return result
         else:
             # 포함 조건 (tag)
-            return any(condition in element for element in all_tags)
+            result = any(condition in element for element in all_tags)
+            print(f"  [{condition}] -> {result}")
+            return result
     
     def _check_rating_condition(self, rating_char: str, exact_match: bool) -> bool:
         """등급 조건을 확인"""
@@ -782,26 +841,26 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.current_source_row = sample_row
             self.app_context.current_prompt_context = test_context
             
+            # 디버깅: 초기 상태 출력
+            logs.insert(0, "")
+            logs.insert(0, f"  postfix_tags: {test_context.postfix_tags}")
+            logs.insert(0, f"  main_tags: {test_context.main_tags[:5]}{'...' if len(test_context.main_tags) > 5 else ''}")
+            logs.insert(0, f"  prefix_tags: {test_context.prefix_tags}")
+            logs.insert(0, f"초기 상태:")
+            logs.insert(0, f"  general: {sample_row.get('general', 'None')[:100]}...")
+            logs.insert(0, f"  character: {sample_row.get('character', 'None')}")
+            logs.insert(0, f"  rating: {sample_row.get('rating', 'None')}")
+            logs.insert(0, f"샘플링된 행:")
+            logs.insert(0, "=== 규칙 테스트 시작 ===")
+
             # 5. 규칙 적용
             modified_context = self._apply_rules(test_context, rules_text, logs)
-            
-            # logs.append(f"샘플링된 행:")
-            # logs.append(f"  rating: {sample_row.get('rating', 'None')}")
-            # logs.append(f"  general: {sample_row.get('general', 'None')}")
-            # logs.append(f"  character: {sample_row.get('character', 'None')}")
-            # logs.append("")
-            
-            # logs.append(f"초기 상태:")
-            # logs.append(f"  prefix_tags: {test_context.prefix_tags}")
-            # logs.append(f"  main_tags: {test_context.main_tags}")
-            # logs.append(f"  postfix_tags: {test_context.postfix_tags}")
-            # logs.append("")
 
-            # logs.append("")
-            # logs.append("=== 최종 결과 ===")
-            # logs.append(f"  prefix_tags: {modified_context.prefix_tags}")
-            # logs.append(f"  main_tags: {modified_context.main_tags}")
-            # logs.append(f"  postfix_tags: {modified_context.postfix_tags}")
+            logs.append("")
+            logs.append("=== 최종 결과 ===")
+            logs.append(f"  prefix_tags: {modified_context.prefix_tags}")
+            logs.append(f"  main_tags: {modified_context.main_tags[:5]}{'...' if len(modified_context.main_tags) > 5 else ''}")
+            logs.append(f"  postfix_tags: {modified_context.postfix_tags}")
             
             # 6. 실제 PromptProcessor로 전체 파이프라인 시뮬레이션 (선택사항)
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'prompt_gen_controller'):

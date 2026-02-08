@@ -188,16 +188,19 @@ class GenerationParamsManager:
                 settings["gen_cb_터보 옵션"] = False
                 settings["gen_cb_와일드카드 단독 모드"] = False
 
-            # 🆕 ComfyUI 모드일 때 ComfyUI 전용 파라미터 수집
-            if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
-                settings["v_prediction"] = mw.v_prediction_checkbox.isChecked()
+            # 🆕 ComfyUI 모드일 때 ComfyUI 전용 파라미터 수집 (라디오 버튼 기반)
+            if hasattr(mw, 'eps_radio') and hasattr(mw, 'v_pred_radio') and hasattr(mw, 'anima_radio'):
+                # 선택된 라디오 버튼 확인
+                if mw.eps_radio.isChecked():
+                    settings["sampling_mode"] = "eps"
+                elif mw.v_pred_radio.isChecked():
+                    settings["sampling_mode"] = "v_prediction"
+                elif mw.anima_radio.isChecked():
+                    settings["sampling_mode"] = "anima"
+                else:
+                    settings["sampling_mode"] = "eps"  # 기본값
             else:
-                settings["v_prediction"] = False
-            
-            if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
-                settings["zsnr"] = mw.zsnr_checkbox.isChecked()
-            else:
-                settings["zsnr"] = False
+                settings["sampling_mode"] = "eps"  # 기본값
 
             # WEBUI 전용 파라미터 수집
             if hasattr(mw, 'enable_hr_checkbox'):
@@ -284,9 +287,8 @@ class GenerationParamsManager:
             "gen_cb_터보 옵션": False,
             "gen_cb_와일드카드 단독 모드": False,
 
-            #comfyui
-            "v_prediction": False,
-            "zsnr": False,
+            # ComfyUI 샘플링 모드 (eps, v_prediction, anima)
+            "sampling_mode": "eps",
             
             # 기타 체크박스들
             "random_resolution_checked": False,
@@ -430,11 +432,21 @@ class GenerationParamsManager:
             if hasattr(mw, 'hires_steps_spinbox'):
                 mw.hires_steps_spinbox.setValue(settings.get("hires_steps", 0))
 
-            if hasattr(mw, 'v_prediction_checkbox') and mw.v_prediction_checkbox:
-                mw.v_prediction_checkbox.setChecked(settings.get("v_prediction", False))
-            
-            if hasattr(mw, 'zsnr_checkbox') and mw.zsnr_checkbox:
-                mw.zsnr_checkbox.setChecked(settings.get("zsnr", False))
+            # ComfyUI 샘플링 모드 라디오 버튼 설정
+            if hasattr(mw, 'eps_radio') and hasattr(mw, 'v_pred_radio') and hasattr(mw, 'anima_radio'):
+                sampling_mode = settings.get("sampling_mode", "eps")
+
+                # 적절한 라디오 버튼 선택
+                if sampling_mode == "eps":
+                    mw.eps_radio.setChecked(True)
+                elif sampling_mode == "v_prediction":
+                    mw.v_pred_radio.setChecked(True)
+                elif sampling_mode == "anima":
+                    mw.anima_radio.setChecked(True)
+                else:
+                    mw.eps_radio.setChecked(True)  # 기본값
+
+                print(f"✅ ComfyUI 샘플링 모드 설정: {sampling_mode}")
             
             print(f"✅ 생성 파라미터 UI 적용 완료")
             
@@ -549,18 +561,20 @@ class GenerationParamsManager:
             self.save_mode_settings(old_mode)
         
         # 2. 새 모드와 호환되는 경우에만 설정 로드
+        # load_mode_settings 내부에서 이미 load_webui_dynamic_options를 호출하므로
+        # 여기서는 추가로 호출하지 않음
         if self.is_compatible_with_mode(new_mode):
             self.load_mode_settings(new_mode)
-        
-        # 3. 모드별 UI 업데이트
-        if new_mode == "NAI":
-            self.update_ui_for_nai_mode()
-        elif new_mode == "WEBUI":
-            self.load_webui_dynamic_options()
-            self.update_ui_for_webui_mode()
-        elif new_mode == "COMFYUI":  # 🆕 ComfyUI 모드 추가
-            self.load_comfyui_dynamic_options()
-            self.update_ui_for_comfyui_mode()
+        else:
+            # 호환되지 않는 경우에만 UI 업데이트
+            if new_mode == "NAI":
+                self.update_ui_for_nai_mode()
+            elif new_mode == "WEBUI":
+                self.load_webui_dynamic_options()
+                self.update_ui_for_webui_mode()
+            elif new_mode == "COMFYUI":
+                self.load_comfyui_dynamic_options()
+                self.update_ui_for_comfyui_mode()
 
     def load_webui_dynamic_options(self):
         """WEBUI API에서 동적 옵션들을 로드하여 UI에 적용"""
@@ -839,7 +853,7 @@ class GenerationParamsManager:
             
             if hasattr(mw, 'sampler_combo'):
                 nai_samplers = ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "k_dpmpp_2s_ancestral", 
-                            "k_dpmpp_sde", "ddim_v3"]
+                            "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"]
                 mw.sampler_combo.clear()
                 mw.sampler_combo.addItems(nai_samplers)
             
@@ -922,7 +936,7 @@ class GenerationParamsManager:
             if hasattr(mw, 'sampler_combo'):
                 current_sampler = mw.sampler_combo.currentText()
                 nai_samplers = ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "k_dpmpp_2s_ancestral", 
-                            "k_dpmpp_sde", "ddim_v3"]
+                            "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"]
                 mw.sampler_combo.clear()
                 mw.sampler_combo.addItems(nai_samplers)
                 

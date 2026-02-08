@@ -27,7 +27,22 @@ class APIValidator(QObject):
             if data.get('perks', {}).get('unlimitedMaxPriority', False):
                 result_message, result_type, success = "✅ Opus 등급 구독이 확인되었습니다.", "info", True
             else:
-                result_message, result_type = "⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다.", "warning"
+                # Opus가 아닌 경우 trainingStepsLeft 체크
+                training_steps_left = data.get('trainingStepsLeft', {})
+                if training_steps_left:
+                    # fixedTrainingStepsLeft와 purchasedTrainingSteps의 합 계산
+                    fixed_steps = training_steps_left.get('fixedTrainingStepsLeft', 0)
+                    purchased_steps = training_steps_left.get('purchasedTrainingSteps', 0)
+                    total_steps = fixed_steps + purchased_steps
+                    
+                    if total_steps > 20:
+                        result_message = f"⚠️ Opus 구독 상태가 아닙니다. 유료 Anlas를 소진합니다. (보유: {total_steps} Anlas)"
+                        result_type, success = "warning", True
+                    else:
+                        result_message = f"⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다. (Anlas 부족: {total_steps})"
+                        result_type = "warning"
+                else:
+                    result_message, result_type = "⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다.", "warning"
         except requests.exceptions.HTTPError as e:
             result_message = f"인증 실패 (HTTP {e.response.status_code}): 유효하지 않은 토큰일 수 있습니다." if e.response.status_code == 401 else f"HTTP 오류: {e.response.status_code}"
         except requests.exceptions.RequestException as e:
@@ -101,35 +116,48 @@ class APIValidator(QObject):
             self.comfyui_models_loaded.emit(False, [], f"모델 목록 로드 중 오류 발생: {str(e)}")
 
     def _fetch_comfyui_models(self, url: str) -> Tuple[bool, List[str], str]:
-        """🆕 ComfyUI 서버에서 사용 가능한 모델 목록을 가져옴"""
+        """🆕 ComfyUI 서버에서 사용 가능한 모델 목록을 가져옴 (CheckpointLoader + UNETLoader)"""
         # URL 정규화
         clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
         normalized_url = f"http://{clean_url}"  # ComfyUI는 일반적으로 http
-        
+
         try:
             # ComfyUI object_info 엔드포인트에서 체크포인트 정보 가져오기
             response = requests.get(f"{normalized_url}/object_info", timeout=10)
-            
+
             if response.status_code == 200:
                 object_info = response.json()
-                
-                # CheckpointLoaderSimple 노드에서 모델 목록 추출
+                all_models = set()  # 중복 제거를 위한 set
+
+                # 1. CheckpointLoaderSimple 모델 수집
                 checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-                input_info = checkpoint_loader.get('input', {})
-                required_info = input_info.get('required', {})
-                ckpt_name_info = required_info.get('ckpt_name', [])
-                
-                if isinstance(ckpt_name_info, list) and len(ckpt_name_info) > 0:
-                    models = ckpt_name_info[0]  # 첫 번째 요소가 모델 리스트
-                    if isinstance(models, list) and len(models) > 0:
-                        return True, models, f"모델 {len(models)}개 발견"
-                    else:
-                        return False, [], "사용 가능한 모델이 없습니다."
+                ckpt_input = checkpoint_loader.get('input', {}).get('required', {})
+                ckpt_info = ckpt_input.get('ckpt_name', [])
+
+                if isinstance(ckpt_info, list) and len(ckpt_info) > 0:
+                    checkpoint_models = ckpt_info[0]
+                    if isinstance(checkpoint_models, list):
+                        all_models.update(checkpoint_models)
+
+                # 2. UNETLoader 모델 수집
+                unet_loader = object_info.get('UNETLoader', {})
+                unet_input = unet_loader.get('input', {}).get('required', {})
+                unet_info = unet_input.get('unet_name', [])
+
+                if isinstance(unet_info, list) and len(unet_info) > 0:
+                    unet_models = unet_info[0]
+                    if isinstance(unet_models, list):
+                        all_models.update(unet_models)
+
+                # 3. 정렬하여 반환
+                if all_models:
+                    sorted_models = sorted(list(all_models))
+                    return True, sorted_models, f"모델 {len(sorted_models)}개 발견"
                 else:
-                    return False, [], "모델 정보를 찾을 수 없습니다."
+                    return False, [], "사용 가능한 모델이 없습니다."
             else:
                 return False, [], f"API 응답 오류 (HTTP {response.status_code})"
-                
+
         except requests.exceptions.Timeout:
             return False, [], "모델 목록 로드 시간 초과"
         except requests.exceptions.ConnectionError:

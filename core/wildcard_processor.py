@@ -8,6 +8,32 @@ class WildcardProcessor:
     def __init__(self, wildcard_manager: WildcardManager):
         self.wildcard_manager = wildcard_manager
 
+    def _find_wildcard_key(self, name: str) -> str | None:
+        """
+        와일드카드 이름을 Fuzzy Matching으로 찾습니다.
+
+        1. 정확한 이름으로 먼저 찾기
+        2. 실패 시, 해당 이름으로 끝나는 키 찾기 (subfolder/name 지원)
+
+        Args:
+            name: 찾을 와일드카드 이름
+
+        Returns:
+            실제 와일드카드 키 (없으면 None)
+        """
+        wildcard_dict = self.wildcard_manager.wildcard_dict_tree
+
+        # 1. 정확한 이름으로 찾기
+        if name in wildcard_dict:
+            return name
+
+        # 2. 끝나는 이름으로 찾기 (subfolder/name 지원)
+        for key in wildcard_dict.keys():
+            if key.endswith('/' + name) or key.endswith('\\' + name):
+                return key
+
+        return None
+
     def expand_tags(self, tag_list: List[str], context: PromptContext) -> List[str]:
         """
         태그 리스트를 받아 리스트 내의 모든 와일드카드를 확장합니다.
@@ -15,12 +41,138 @@ class WildcardProcessor:
         """
         expanded_list = []
         for tag in tag_list:
-            expanded_list.extend(self._expand_recursive(tag, context))
+            # $ 로 시작하는 인스턴트 와일드카드 처리
+            if tag.startswith('$'):
+                instant_key = tag[1:].strip()  # $ 제거
+                
+                # ":" 포함 여부 확인하여 필터링 적용
+                if ":" in instant_key:
+                    parts = instant_key.split(":", 1)
+                    group_name = parts[0]
+                    filter_text = parts[1].lower() if len(parts) > 1 else ""
+                    
+                    # tree에서 그룹 찾기
+                    if group_name in self.wildcard_manager.instant_wildcard_tree:
+                        group_dict = self.wildcard_manager.instant_wildcard_tree[group_name]
+                        
+                        # filter_text를 포함하는 key들만 추출
+                        if filter_text and group_dict:
+                            filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
+                            
+                            if filtered_dict:
+                                # 필터링된 결과에서 무작위 선택
+                                random_key = random.choice(list(filtered_dict.keys()))
+                                random_value = filtered_dict[random_key]
+                            else:
+                                # 필터링 결과가 없으면 전체에서 무작위 선택
+                                random_key = random.choice(list(group_dict.keys()))
+                                random_value = group_dict[random_key]
+                        elif group_dict:
+                            # 필터 텍스트가 없으면 전체에서 무작위 선택
+                            random_key = random.choice(list(group_dict.keys()))
+                            random_value = group_dict[random_key]
+                        else:
+                            # 그룹이 비어있으면 원본 유지
+                            expanded_list.append(tag)
+                            continue
+                            
+                        # 값을 콤마로 분리하여 개별 태그로 추가
+                        instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                        expanded_list.extend(instant_tags)
+                    else:
+                        # 그룹을 찾을 수 없으면 원본 유지
+                        expanded_list.append(tag)
+                
+                # ":" 없이 단순 그룹명인 경우
+                elif instant_key in self.wildcard_manager.instant_wildcard_tree:
+                    # tree에서 해당 그룹의 딕셔너리 가져오기
+                    group_dict = self.wildcard_manager.instant_wildcard_tree[instant_key]
+                    if group_dict:
+                        # 무작위로 key-value 쌍 선택
+                        random_key = random.choice(list(group_dict.keys()))
+                        random_value = group_dict[random_key]
+                        # 값을 콤마로 분리하여 개별 태그로 추가
+                        instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                        expanded_list.extend(instant_tags)
+                    else:
+                        # 그룹이 비어있으면 원본 유지
+                        expanded_list.append(tag)
+                # tree에 없으면 기존 instant_wildcard_dict에서 검색
+                elif instant_key in self.wildcard_manager.instant_wildcard_dict:
+                    # 인스턴트 와일드카드의 값으로 대체
+                    instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
+                    # 값을 콤마로 분리하여 개별 태그로 추가
+                    instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
+                    expanded_list.extend(instant_tags)
+                else:
+                    # 인스턴트 와일드카드를 찾을 수 없으면 원본 유지
+                    expanded_list.append(tag)
+            else:
+                # 일반 와일드카드 처리
+                expanded_list.extend(self._expand_recursive(tag, context))
         return expanded_list
 
     def _expand_recursive(self, tag: str, context: PromptContext, depth=0) -> List[str]:
         """하나의 태그를 재귀적으로 확장합니다."""
         if depth > 10: return [tag]
+        
+        # $ 로 시작하는 인스턴트 와일드카드 처리 (재귀 호출에서도)
+        if tag.startswith('$'):
+            instant_key = tag[1:].strip()
+            
+            # ":" 포함 여부 확인하여 필터링 적용
+            if ":" in instant_key:
+                parts = instant_key.split(":", 1)
+                group_name = parts[0]
+                filter_text = parts[1].lower() if len(parts) > 1 else ""
+                
+                # tree에서 그룹 찾기
+                if group_name in self.wildcard_manager.instant_wildcard_tree:
+                    group_dict = self.wildcard_manager.instant_wildcard_tree[group_name]
+                    
+                    # filter_text를 포함하는 key들만 추출
+                    if filter_text and group_dict:
+                        filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
+                        
+                        if filtered_dict:
+                            # 필터링된 결과에서 무작위 선택
+                            random_key = random.choice(list(filtered_dict.keys()))
+                            random_value = filtered_dict[random_key]
+                        else:
+                            # 필터링 결과가 없으면 전체에서 무작위 선택
+                            random_key = random.choice(list(group_dict.keys()))
+                            random_value = group_dict[random_key]
+                    elif group_dict:
+                        # 필터 텍스트가 없으면 전체에서 무작위 선택
+                        random_key = random.choice(list(group_dict.keys()))
+                        random_value = group_dict[random_key]
+                    else:
+                        # 그룹이 비어있으면 원본 유지
+                        return [tag]
+                        
+                    # 값을 콤마로 분리하여 개별 태그로 추가
+                    instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                    return instant_tags
+                return [tag]
+            
+            # ":" 없이 단순 그룹명인 경우
+            elif instant_key in self.wildcard_manager.instant_wildcard_tree:
+                # tree에서 해당 그룹의 딕셔너리 가져오기
+                group_dict = self.wildcard_manager.instant_wildcard_tree[instant_key]
+                if group_dict:
+                    # 무작위로 key-value 쌍 선택
+                    random_key = random.choice(list(group_dict.keys()))
+                    random_value = group_dict[random_key]
+                    # 값을 콤마로 분리하여 개별 태그로 추가
+                    instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
+                    return instant_tags
+                return [tag]
+            # tree에 없으면 기존 instant_wildcard_dict에서 검색
+            elif instant_key in self.wildcard_manager.instant_wildcard_dict:
+                instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
+                instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
+                return instant_tags
+            return [tag]
 
         if tag.startswith('<') and tag.endswith('>'):
             wildcard_name = tag[1:-1]
@@ -96,43 +248,70 @@ class WildcardProcessor:
             except ValueError:
                 print(f"경고: 잘못된 종속 와일드카드 구문입니다: {wildcard_name}")
                 return None
-        
-        lines = self.wildcard_manager.wildcard_dict_tree.get(wildcard_name)
-        if not lines:
+
+        # Fuzzy Matching으로 실제 키 찾기
+        actual_wildcard_key = self._find_wildcard_key(wildcard_name)
+        if not actual_wildcard_key:
             print(f"경고: 와일드카드 '{wildcard_name}'을 찾을 수 없습니다.")
             return None
-        
+
+        lines = self.wildcard_manager.wildcard_dict_tree.get(actual_wildcard_key)
+        if not lines:
+            print(f"경고: 와일드카드 '{actual_wildcard_key}'의 내용이 비어있습니다.")
+            return None
+
         chosen_line = ""
         total_lines = len(lines)
-        
+
         if is_sequential:
-            counter = context.sequential_counters.get(wildcard_name, 0)
+            # sequential_counters는 실제 키로 저장
+            counter = context.sequential_counters.get(actual_wildcard_key, 0)
             chosen_line = lines[counter % total_lines]
-            context.sequential_counters[wildcard_name] = counter + 1
-            # [상태 관찰] 순차 와일드카드 상태 기록
-            context.wildcard_state[wildcard_name] = {'current': counter % total_lines + 1, 'total': total_lines}
+            context.sequential_counters[actual_wildcard_key] = counter + 1
+            # [상태 관찰] 순차 와일드카드 상태 기록 (실제 키 사용)
+            context.wildcard_state[actual_wildcard_key] = {'current': counter % total_lines + 1, 'total': total_lines}
 
         elif is_observer:
-            # 🔧 [수정] Master/Slave 의존성 로직 개선
-            master_counter = context.sequential_counters.get(master_name, 0)
-            
-            # Master 와일드카드의 길이를 가져와서 사이클 계산
-            master_lines = self.wildcard_manager.wildcard_dict_tree.get(master_name, [])
-            master_total = len(master_lines) if master_lines else 1
-            
-            # Master가 완전한 사이클을 몇 번 완료했는지 계산
-            # master_counter는 이미 1 증가된 상태이므로 -1 후 계산
-            completed_master_cycles = (master_counter - 1) // master_total if master_counter > 0 else 0
-            
-            # Slave는 master의 완전한 사이클 완료 횟수에 따라 진행
-            slave_index = completed_master_cycles % total_lines
-            chosen_line = lines[slave_index]
-            
-            # [상태 관찰] 종속 와일드카드 상태 기록
-            context.wildcard_state[wildcard_name] = {'current': slave_index + 1, 'total': total_lines, 'master_cycles': completed_master_cycles}
-            
+            # 🔧 [수정] Master/Slave 의존성 로직 개선 + Fuzzy Matching
+            # Master도 Fuzzy Matching으로 찾기
+            actual_master_key = self._find_wildcard_key(master_name)
+
+            if not actual_master_key:
+                print(f"경고: Master 와일드카드 '{master_name}'을 찾을 수 없습니다.")
+                # 기본값으로 첫 번째 항목 반환
+                chosen_line = lines[0]
+                slave_index = 0
+                completed_master_cycles = 0
+            else:
+                master_counter = context.sequential_counters.get(actual_master_key, 0)
+
+                # Master 와일드카드의 길이를 가져와서 사이클 계산
+                master_lines = self.wildcard_manager.wildcard_dict_tree.get(actual_master_key, [])
+                master_total = len(master_lines) if master_lines else 1
+
+                # Master가 완전한 사이클을 몇 번 완료했는지 계산
+                completed_master_cycles = master_counter // master_total if master_counter > 0 else 0
+
+                # Slave는 master의 완전한 사이클 완료 횟수에 따라 진행
+                slave_index = completed_master_cycles % total_lines
+                chosen_line = lines[slave_index]
+
+            # [상태 관찰] 종속 와일드카드 상태 기록 (실제 키 사용)
+            context.wildcard_state[actual_wildcard_key] = {
+                'current': slave_index + 1,
+                'total': total_lines,
+                'master_cycles': completed_master_cycles,
+                'master_name': actual_master_key if actual_master_key else 'unknown'  # 실제 Master 키 기록
+            }
+
+            # 🔧 [중요] 종속 와일드카드의 counter는 "전진 횟수"를 저장
+            # 전진 횟수 = Master가 완료한 사이클 수
+            # 다음 종속 와일드카드가 이 와일드카드를 Master로 참조할 때,
+            # completed_slave_cycles = counter // total_lines로 계산
+            context.sequential_counters[actual_wildcard_key] = completed_master_cycles
+
         else: # 일반 무작위 모드
             chosen_line = random.choice(lines)
-        
-        context.wildcard_history.setdefault(wildcard_name, []).append(chosen_line)
+
+        context.wildcard_history.setdefault(actual_wildcard_key, []).append(chosen_line)
         return chosen_line

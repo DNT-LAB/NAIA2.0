@@ -1,9 +1,11 @@
 import io
+import random
 from PIL import Image
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QPushButton, QDoubleSpinBox, QFrame, QSlider)
+                             QPushButton, QDoubleSpinBox, QFrame, QSlider, QCheckBox,
+                             QMessageBox, QProgressDialog)
 from PyQt6.QtGui import QPixmap, QPainter, QColor
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 from PIL.ImageQt import ImageQt
 import numpy as np
 from .theme import DARK_STYLES, DARK_COLORS
@@ -25,6 +27,8 @@ class Img2ImgPanel(QFrame):
         self.background_pixmap: QPixmap = None
         self.full_mask_pil: Image.Image = None
         self.small_mask_pil: Image.Image = None
+        self._mask_preset = False  # Flag to indicate if mask was preset from sketchbook
+        self._mask_from_sketchbook = False  # Additional flag for sketchbook source
         
         self.init_ui()
         self.setVisible(False)
@@ -45,18 +49,18 @@ class Img2ImgPanel(QFrame):
 
         # 상단: 타이틀 + 닫기 버튼
         header_layout = QHBoxLayout()
-        title_label = QLabel("Image2Image (NAI Only)")
-        title_label.setStyleSheet(f"font-size: {get_scaled_font_size(24)}px; font-weight: 600; color: white; background-color: transparent;")
+        self.title_label = QLabel("Image2Image & Inpaint")
+        self.title_label.setStyleSheet(f"font-size: {get_scaled_font_size(24)}px; font-weight: 600; color: white; background-color: transparent;")
 
         subtitle_label = QLabel("Transform your image.")
         subtitle_label.setStyleSheet(f"font-size: {get_scaled_font_size(14)}px; color: #CCCCCC; background-color: transparent;")
 
         title_vbox = QVBoxLayout()
-        title_vbox.addWidget(title_label)
+        title_vbox.addWidget(self.title_label)
         title_vbox.addWidget(subtitle_label)
 
         close_button = QPushButton("X")
-        close_button.setFixedSize(24, 24)
+        close_button.setFixedSize(48, 24)
         close_button.setStyleSheet("QPushButton { border-radius: 12px; background-color: #555; color: white; font-weight: bold; } QPushButton:hover { background-color: #777; }")
         close_button.clicked.connect(self.hide_panel)
 
@@ -128,18 +132,101 @@ class Img2ImgPanel(QFrame):
         noise_hlayout.addWidget(self.noise_value_label)
         controls_layout.addWidget(noise_group)
 
+        # Auto-Outpainting checkbox (only visible in inpaint mode)
+        self.auto_outpainting_checkbox = QCheckBox("Enable Auto-Outpainting (3:2)")
+        self.auto_outpainting_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                font-size: {get_scaled_font_size(16)}px;
+                color: white;
+                background-color: transparent;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid #555;
+                border-radius: 3px;
+                background-color: #22253F;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.auto_outpainting_checkbox.setVisible(False)  # Hidden by default
+        controls_layout.addWidget(self.auto_outpainting_checkbox)
+        
+        # Cropped image request checkbox (only visible in inpaint mode)
+        self.cropped_image_checkbox = QCheckBox("Get only mask area image (no exif)")
+        self.cropped_image_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                font-size: {get_scaled_font_size(16)}px;
+                color: white;
+                background-color: transparent;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid #555;
+                border-radius: 3px;
+                background-color: #22253F;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-color: {DARK_COLORS['accent_blue']};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.cropped_image_checkbox.setVisible(False)  # Hidden by default
+        controls_layout.addWidget(self.cropped_image_checkbox)
+        
+        # Connect mutual exclusion between auto_outpainting and cropped_image
+        self.auto_outpainting_checkbox.toggled.connect(self._on_auto_outpainting_toggled)
+        self.cropped_image_checkbox.toggled.connect(self._on_cropped_image_toggled)
+
         main_layout.addLayout(controls_layout)
         main_layout.addStretch(1)
 
-        # 하단: Inpaint 버튼
+        # 하단: Inpaint 버튼과 Upscale 버튼
+        bottom_button_layout = QHBoxLayout()
+        bottom_button_layout.addStretch()
+        
+        self.resize_button = QPushButton("Set 1MP")
+        self.resize_button.setStyleSheet(DARK_STYLES['primary_button'])
+        self.resize_button.clicked.connect(self._on_resize_button_clicked)
+        self.resize_button.setFixedWidth(120)
+        self.resize_button.setVisible(False)  # Initially hidden
+        bottom_button_layout.addWidget(self.resize_button)
+        
+        self.upscale_button = QPushButton("Upscale")
+        self.upscale_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.upscale_button.clicked.connect(self._on_upscale_button_clicked)
+        self.upscale_button.setFixedWidth(120)
+        bottom_button_layout.addWidget(self.upscale_button)
+        
         self.inpaint_button = QPushButton("Inpaint Image")
         self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
         self.inpaint_button.clicked.connect(self._on_inpaint_button_clicked) # [2단계] 연결 메서드 변경
         self.inpaint_button.setFixedWidth(200)
-        main_layout.addWidget(self.inpaint_button, alignment=Qt.AlignmentFlag.AlignRight)
+        bottom_button_layout.addWidget(self.inpaint_button)
+        
+        main_layout.addLayout(bottom_button_layout)
 
     def _on_inpaint_button_clicked(self):
         if not self.original_pil_image:
+            return
+        
+        # Check if mask was preset from sketchbook (only block the first time)
+        if self._mask_from_sketchbook and self.mode == 'inpaint' and self.full_mask_pil:
+            # Reset the flag so user can edit mask later if they want
+            self._mask_from_sketchbook = False
+            print("🎨 Using preset mask from Sketchbook (click again to edit)")
             return
 
         result = InpaintWindow.get_inpaint_data(self.original_pil_image, self.full_mask_pil, self)
@@ -179,14 +266,30 @@ class Img2ImgPanel(QFrame):
         if self.mode == 'inpaint':
             self.inpaint_button.setText("Edit Mask")
             self.inpaint_button.setStyleSheet(DARK_STYLES['primary_button']) # 강조 색상으로 변경
+            self.auto_outpainting_checkbox.setVisible(True)  # Show checkbox in inpaint mode
+            self.cropped_image_checkbox.setVisible(True)  # Show cropped image checkbox in inpaint mode
         else: # 'img2img'
             self.inpaint_button.setText("Inpaint Image")
             self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
+            self.auto_outpainting_checkbox.setVisible(False)  # Hide checkbox in img2img mode
+            self.auto_outpainting_checkbox.setChecked(False)  # Reset checkbox state
+            self.cropped_image_checkbox.setVisible(False)  # Hide cropped image checkbox in img2img mode
+            self.cropped_image_checkbox.setChecked(False)  # Reset checkbox state
 
     def _update_strength_label(self, value):
         """Strength 슬라이더 값 변경 시 라벨 업데이트"""
         strength_value = value / 100.0
         self.strength_value_label.setText(f"{strength_value:.2f}")
+    
+    def _on_auto_outpainting_toggled(self, checked):
+        """Auto-outpainting 체크박스 토글 시 cropped_image 체크박스 해제"""
+        if checked and self.cropped_image_checkbox.isChecked():
+            self.cropped_image_checkbox.setChecked(False)
+    
+    def _on_cropped_image_toggled(self, checked):
+        """Cropped image 체크박스 토글 시 auto_outpainting 체크박스 해제"""
+        if checked and self.auto_outpainting_checkbox.isChecked():
+            self.auto_outpainting_checkbox.setChecked(False)
 
     def _update_noise_label(self, value):
         """Noise 슬라이더 값 변경 시 라벨 업데이트"""
@@ -213,10 +316,155 @@ class Img2ImgPanel(QFrame):
         self.small_mask_pil = None
         self._update_ui_for_mode()
 
-        self.original_pil_image = pil_image
+        # 64배수 리사이징 및 크롭 적용
+        processed_image = self._resize_and_crop_to_64_multiple(pil_image)
+        self.original_pil_image = processed_image
+        
+        # 타이틀에 최종 이미지 크기 표시
+        final_width, final_height = processed_image.size
+        self.title_label.setText(f"Image2Image & Inpaint -> {final_width} x {final_height}")
+        
+        # 픽셀 수 체크하여 리사이징 버튼 표시 여부 결정
+        total_pixels = final_width * final_height
+        if total_pixels < 921600 or total_pixels > 1048576:
+            self.resize_button.setVisible(True)
+        else:
+            self.resize_button.setVisible(False)
+        
         self._set_cropped_background() # 배경은 원본 크롭 이미지로 설정
+        
+        # 새 이미지가 로드되면 Upscale 버튼 다시 표시
+        self.upscale_button.setVisible(True)
+        
         self.update() 
         self.setVisible(True)
+
+    def _resize_and_crop_to_64_multiple(self, pil_image: Image.Image) -> Image.Image:
+        """이미지를 64배수 크기로 리사이징하고 크롭합니다."""
+        width, height = pil_image.size
+        
+        # 1. 더 작은 값을 기준으로 가까운 64배수로 조정
+        min_dimension = min(width, height)
+        new_min_dimension = round(min_dimension / 64) * 64
+        
+        # 최소 64픽셀 보장
+        if new_min_dimension < 64:
+            new_min_dimension = 64
+        
+        # 2. 조정된 비율을 구해서 더 큰 값에 적용
+        scale_ratio = new_min_dimension / min_dimension
+        
+        if width <= height:  # width가 더 작거나 같은 경우
+            new_width = new_min_dimension
+            new_height = int(height * scale_ratio)
+        else:  # height가 더 작은 경우
+            new_height = new_min_dimension
+            new_width = int(width * scale_ratio)
+        
+        # 3. LANCZOS를 이용해 리사이징
+        resized_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # 4. 더 큰 값을 가장 가까운 64배수로 크롭
+        if new_width >= new_height:  # width가 더 크거나 같은 경우
+            target_width = round(new_width / 64) * 64
+            difference = new_width - target_width
+            
+            # 좌우에서 크롭
+            left_crop = difference // 2
+            right_crop = difference - left_crop  # 홀수인 경우 오른쪽에서 1픽셀 더
+            
+            # 실제로는 왼쪽에서 1픽셀 더 크롭하도록 조정 (요구사항에 따라)
+            if difference % 2 == 1:
+                left_crop += 1
+                right_crop -= 1
+            
+            final_image = resized_image.crop((left_crop, 0, new_width - right_crop, new_height))
+        else:  # height가 더 큰 경우
+            target_height = round(new_height / 64) * 64
+            difference = new_height - target_height
+            
+            # 상하에서 크롭
+            top_crop = difference // 2
+            bottom_crop = difference - top_crop  # 홀수인 경우 아래쪽에서 1픽셀 더
+            
+            # 실제로는 위쪽에서 1픽셀 더 크롭하도록 조정 (요구사항에 따라)
+            if difference % 2 == 1:
+                top_crop += 1
+                bottom_crop -= 1
+            
+            final_image = resized_image.crop((0, top_crop, new_width, new_height - bottom_crop))
+        
+        print(f"🖼️ 이미지 리사이징 완료: {width}x{height} → {final_image.size[0]}x{final_image.size[1]} (64배수)")
+        return final_image
+
+    def find_max_resolution(self, width, height, max_pixels=1048576, multiple_of=64):
+        """주어진 최대 픽셀 수 내에서 최적의 해상도를 찾습니다."""
+        ratio = int(width) / int(height)
+
+        max_width = int((max_pixels * ratio)**0.5)
+        max_height = int((max_pixels / ratio)**0.5)
+
+        max_width = (max_width // multiple_of) * multiple_of
+        max_height = (max_height // multiple_of) * multiple_of
+
+        while max_width * max_height > max_pixels:
+            max_width -= multiple_of
+            max_height = int(max_width / ratio)
+            max_height = (max_height // multiple_of) * multiple_of
+
+        if max_pixels == 1048576:
+            attempts = 0  
+            max_attempts = 10  
+            while (max_width % multiple_of + max_height % multiple_of) < 32 and attempts < max_attempts:
+                if random.choice([True, False]):
+                    if (max_width + multiple_of) * max_height <= max_pixels:
+                        max_width += multiple_of
+                else:
+                    if max_width * (max_height + multiple_of) <= max_pixels:
+                        max_height += multiple_of
+                attempts += 1
+
+        return (str(max_width), str(max_height))
+
+    def _on_resize_button_clicked(self):
+        """Auto Resize 버튼 클릭 시 처리"""
+        if not self.original_pil_image:
+            return
+            
+        current_width, current_height = self.original_pil_image.size
+        total_pixels = current_width * current_height
+        
+        # 픽셀 수에 따라 적절한 max_pixels 설정
+        if total_pixels < 921600:
+            max_pixels = 1048576  # 작으면 더 큰 해상도로
+        else:  # total_pixels > 1048576
+            max_pixels = 1048576 # 크면 더 작은 해상도로
+            
+        # 최적 해상도 계산
+        new_width_str, new_height_str = self.find_max_resolution(
+            current_width, current_height, max_pixels=max_pixels
+        )
+        new_width, new_height = int(new_width_str), int(new_height_str)
+        
+        # 이미지 리사이징
+        resized_image = self.original_pil_image.resize(
+            (new_width, new_height), Image.Resampling.LANCZOS
+        )
+        
+        # 이미지 업데이트
+        self.original_pil_image = resized_image
+        
+        # 타이틀 업데이트
+        self.title_label.setText(f"Image2Image & Inpaint -> {new_width} x {new_height}")
+        
+        # 배경 이미지 업데이트
+        self._set_cropped_background()
+        
+        # 리사이징 버튼 숨기기
+        self.resize_button.setVisible(False)
+        
+        self.update()
+        print(f"🔄 이미지 자동 리사이징: {current_width}x{current_height} → {new_width}x{new_height}")
 
     def _set_cropped_background(self):
         """원본 이미지의 중앙 상단을 기준으로 크롭하여 배경 이미지 설정."""
@@ -258,6 +506,15 @@ class Img2ImgPanel(QFrame):
         self.background_pixmap = None
         self.full_mask_pil = None
         self.small_mask_pil = None
+        self._mask_preset = False  # Reset preset flag
+        self._mask_from_sketchbook = False  # Reset sketchbook flag
+        
+        # 타이틀을 원래 상태로 복원
+        self.title_label.setText("Image2Image & Inpaint")
+        
+        # 패널이 숨겨질 때 버튼들도 초기화
+        self.upscale_button.setVisible(True)
+        self.resize_button.setVisible(False)
         self._update_ui_for_mode() # UI 상태도 초기화
 
     def get_parameters(self) -> dict | None:
@@ -281,10 +538,30 @@ class Img2ImgPanel(QFrame):
             params["type"] = "inpaint"
             api_mode = self.app_context.get_api_mode()
             
+            # Add auto_outpainting parameter if checkbox is checked
+            if self.auto_outpainting_checkbox.isChecked():
+                params["auto_outpainting"] = True
+                # Always provide full mask for auto-outpainting
+                params["full_mask_pil"] = self.full_mask_pil
+            
+            # Add cropped_image_request parameter if checkbox is checked
+            if self.cropped_image_checkbox.isChecked():
+                params["cropped_image_request"] = True
+                # Provide full mask for cropped image extraction
+                params["full_mask_pil"] = self.full_mask_pil
+            
             mask_to_use = self.small_mask_pil if api_mode == "NAI" else self.full_mask_pil
             
             # 🔥 수정: 모든 API에 대해 완벽한 이진 PNG 전송
+            # Convert to grayscale if needed
+            if mask_to_use.mode != 'L':
+                mask_to_use = mask_to_use.convert('L')
+            
             mask_array = np.array(mask_to_use)
+            
+            # Ensure 2D array (grayscale)
+            if len(mask_array.shape) > 2:
+                mask_array = mask_array[:, :, 0] if mask_array.shape[2] > 0 else mask_array[:, :]
             
             # 완벽한 이진화 강제 (혹시 모를 중간값 제거)
             mask_array = np.where(mask_array > 127, 255, 0).astype(np.uint8)
@@ -307,3 +584,127 @@ class Img2ImgPanel(QFrame):
             params["type"] = "img2img"
 
         return params
+    
+    def set_mask_from_sketchbook(self, mask_pil: Image.Image):
+        """Set mask from sketchbook and process it through InpaintWindow"""
+        if not self.original_pil_image:
+            print("⚠️ No image loaded to apply mask to")
+            return
+            
+        # Process mask through InpaintWindow with auto_accept
+        result = InpaintWindow.get_inpaint_data(
+            self.original_pil_image, 
+            mask_pil,  # Pass the mask from sketchbook
+            self, 
+            auto_accept=True  # Auto-accept to process the mask
+        )
+        
+        if result and "full_mask_image" in result:
+            print("🎨 Mask from Sketchbook processed successfully")
+            self.mode = 'inpaint'
+            self.full_mask_pil = result["full_mask_image"]
+            self.small_mask_pil = result["small_mask_image"]
+            
+            # Update preview if available
+            if "preview_image" in result:
+                preview_pil = result["preview_image"]
+                q_image = ImageQt(preview_pil.convert("RGBA"))
+                self.background_pixmap = QPixmap.fromImage(q_image).scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.update()
+            
+            self._update_ui_for_mode()
+            self._mask_from_sketchbook = True
+            return True
+        else:
+            print("⚠️ Failed to process mask from Sketchbook")
+            return False
+    
+    def _on_upscale_button_clicked(self):
+        """Upscale 버튼 클릭 시 처리"""
+        if not self.original_pil_image:
+            QMessageBox.warning(self, "경고", "업스케일할 이미지가 없습니다.")
+            return
+        
+        # NAI 모드 확인
+        if self.app_context.app_context.current_api_mode != "NAI":
+            QMessageBox.warning(self, "경고", "Upscale 기능은 NAI 모드에서만 사용 가능합니다.")
+            return
+        
+        # 원본 크기 저장
+        original_width = self.original_pil_image.width
+        original_height = self.original_pil_image.height
+        
+        # Progress dialog
+        self.progress_dialog = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+        self.progress_dialog.setWindowTitle("업스케일")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.show()
+        
+        # Worker thread 생성
+        self.upscale_worker = UpscaleWorker(
+            self.app_context,
+            self.original_pil_image,
+            original_width,
+            original_height
+        )
+        self.upscale_worker.finished.connect(self._on_upscale_finished)
+        self.upscale_worker.error.connect(self._on_upscale_error)
+        self.upscale_worker.start()
+    
+    def _on_upscale_finished(self, upscaled_image):
+        """업스케일 완료 처리"""
+        self.progress_dialog.close()
+        
+        # 업스케일된 이미지로 교체
+        self.original_pil_image = upscaled_image
+        
+        # 배경 이미지 업데이트
+        self._set_cropped_background()
+        
+        # Upscale 버튼 숨기기 (이미 업스케일 완료)
+        self.upscale_button.setVisible(False)
+        
+        # Anlas 업데이트
+        if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'update_anlas_display'):
+            self.app_context.main_window.update_anlas_display()
+        
+        QMessageBox.information(self, "완료", f"이미지가 2배 업스케일 후 원본 크기({upscaled_image.width}x{upscaled_image.height})로 리사이징되었습니다.")
+    
+    def _on_upscale_error(self, error_msg):
+        """업스케일 에러 처리"""
+        self.progress_dialog.close()
+        QMessageBox.critical(self, "업스케일 실패", f"업스케일 중 오류가 발생했습니다:\n{error_msg}")
+
+
+class UpscaleWorker(QThread):
+    """업스케일 작업을 수행하는 워커 스레드"""
+    finished = pyqtSignal(Image.Image)
+    error = pyqtSignal(str)
+    
+    def __init__(self, app_context, pil_image, target_width, target_height):
+        super().__init__()
+        self.app_context = app_context
+        self.pil_image = pil_image
+        self.target_width = target_width
+        self.target_height = target_height
+    
+    def run(self):
+        try:
+            # API service에서 업스케일 수행
+            result = self.app_context.app_context.api_service.upscale_NAI_from_inpaint(
+                self.pil_image,
+                self.target_width,
+                self.target_height
+            )
+            
+            if result['status'] == 'success':
+                self.finished.emit(result['image'])
+            else:
+                self.error.emit(result.get('message', 'Unknown error'))
+        except Exception as e:
+            self.error.emit(str(e))

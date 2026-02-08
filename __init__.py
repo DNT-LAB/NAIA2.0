@@ -24,8 +24,8 @@ class TagDataDownloader:
         self.data_dir = self.project_root / "data" / "tags"
         self.temp_zip_path = self.project_root / "temp_naia_tags.zip"
         
-        # 예상되는 파일 범위 (tags_00.parquet ~ tags_129.parquet)
-        self.expected_file_count = 130
+        # 예상되는 파일 범위 (tags_00.parquet ~ tags_149.parquet)
+        self.expected_file_count = 150
         
         print(f"🚀 NAIA v{__version__} 초기화 중...")
         print(f"📁 데이터 디렉토리: {self.data_dir}")
@@ -43,21 +43,24 @@ class TagDataDownloader:
     def check_existing_files(self) -> Tuple[bool, int]:
         """
         기존 파일들이 있는지 확인합니다.
-        
+
         Returns:
             Tuple[bool, int]: (충분한 파일이 있는지, 현재 파일 개수)
         """
         if not self.data_dir.exists():
             return False, 0
-        
+
         parquet_files = list(self.data_dir.glob("tags_*.parquet"))
         file_count = len(parquet_files)
-        
+
         print(f"📊 현재 태그 파일 개수: {file_count}/{self.expected_file_count}")
-        
-        # 80% 이상의 파일이 있으면 충분하다고 판단 (일부 파일이 누락되어도 사용 가능)
-        sufficient = file_count >= (self.expected_file_count * 0.8)
-        
+
+        # 정확히 예상 파일 개수와 일치할 때만 충분하다고 판단
+        sufficient = file_count >= self.expected_file_count
+
+        if file_count < self.expected_file_count:
+            print(f"⚠️ 파일이 부족합니다. {self.expected_file_count - file_count}개 파일이 더 필요합니다.")
+
         return sufficient, file_count
     
     def download_zip_file(self) -> Tuple[bool, str]:
@@ -203,6 +206,26 @@ class TagDataDownloader:
                 print(f"🧹 임시 ZIP 파일 삭제 완료")
         except Exception as e:
             print(f"⚠️ 임시 파일 삭제 중 오류: {e}")
+
+    def cleanup_backup_files(self) -> None:
+        """백업 디렉토리의 tags_ 파일들을 정리합니다"""
+        try:
+            backup_dir = self.data_dir.parent / "tags_backup"
+            if backup_dir.exists():
+                # tags_ 로 시작하는 parquet 파일들만 삭제
+                backup_tags = list(backup_dir.glob("tags_*.parquet"))
+                if backup_tags:
+                    for file_path in backup_tags:
+                        file_path.unlink()
+                    print(f"🧹 백업 디렉토리의 tags_ 파일 {len(backup_tags)}개 삭제 완료")
+
+                    # 디렉토리가 비었으면 디렉토리도 삭제
+                    remaining_files = list(backup_dir.iterdir())
+                    if not remaining_files:
+                        backup_dir.rmdir()
+                        print(f"🧹 빈 백업 디렉토리 삭제 완료")
+        except Exception as e:
+            print(f"⚠️ 백업 파일 삭제 중 오류: {e}")
     
     def verify_data_integrity(self) -> Tuple[bool, int]:
         """
@@ -243,15 +266,16 @@ class TagDataDownloader:
             
             print(f"📈 검증 결과: {valid_files}/{total_files} 파일이 유효함")
             print(f"📊 총 데이터 행 수: {total_rows:,}개")
-            
-            # 50% 이상의 파일이 유효하면 성공으로 간주
-            success = valid_files >= (total_files * 0.5) and valid_files > 0
-            
+
+            # 90% 이상의 파일이 유효하고, 최소 expected_file_count와 일치해야 성공
+            required_valid_files = int(self.expected_file_count * 0.9)
+            success = valid_files >= required_valid_files and total_files >= self.expected_file_count
+
             if success:
                 print("✅ 태그 데이터가 정상적으로 준비되었습니다!")
             else:
-                print(f"⚠️ 데이터 무결성 검증 실패: 유효한 파일이 부족합니다.")
-                
+                print(f"⚠️ 데이터 무결성 검증 실패: {valid_files}/{self.expected_file_count}개 (최소 {required_valid_files}개 필요)")
+
             return success, valid_files
                 
         except Exception as e:
@@ -299,13 +323,17 @@ class TagDataDownloader:
             
             # 6. 데이터 무결성 검증
             verify_success, valid_count = self.verify_data_integrity()
-            
+
             if verify_success:
+                # 7. 백업 파일 정리 (검증 성공 시)
+                self.cleanup_backup_files()
+
                 print(f"\n🎉 태그 데이터 설치가 성공적으로 완료되었습니다!")
                 print(f"   📊 사용 가능한 파일: {valid_count}개")
                 return True, valid_count
             else:
                 print(f"\n⚠️ 일부 파일에 문제가 있지만 기본 사용은 가능합니다.")
+                print(f"   💡 백업 파일은 보존됩니다: {self.data_dir.parent / 'tags_backup'}")
                 return True, valid_count  # 부분적 성공도 True로 처리
                 
         except Exception as e:
@@ -366,9 +394,9 @@ def get_data_path() -> Path:
 
 def get_tag_file_path(index: int) -> Path:
     """특정 인덱스의 태그 파일 경로를 반환"""
-    if not 0 <= index <= 129:
-        raise ValueError(f"인덱스는 0-129 범위여야 합니다. 입력값: {index}")
-    
+    if not 0 <= index <= 149:
+        raise ValueError(f"인덱스는 0-149 범위여야 합니다. 입력값: {index}")
+
     filename = f"tags_{index:02d}.parquet"
     return get_data_path() / filename
 
@@ -386,11 +414,11 @@ def check_data_availability() -> Tuple[bool, int, int]:
     
     parquet_files = list(data_path.glob("tags_*.parquet"))
     existing_count = len(parquet_files)
-    expected_count = 130  # tags_00.parquet ~ tags_129.parquet
-    
-    # 80% 이상의 파일이 있으면 충분하다고 판단
-    sufficient = existing_count >= (expected_count * 0.8)
-    
+    expected_count = 150  # tags_00.parquet ~ tags_149.parquet
+
+    # 정확히 예상 파일 개수와 일치할 때만 충분하다고 판단
+    sufficient = existing_count >= expected_count
+
     return sufficient, existing_count, expected_count
 
 def force_download() -> bool:

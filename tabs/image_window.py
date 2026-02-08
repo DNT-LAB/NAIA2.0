@@ -4,18 +4,26 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Any
 from io import BytesIO
+from pathlib import Path
 import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
-    QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog
+    QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox, QApplication,
+    QSpinBox, QRadioButton, QButtonGroup, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread
-from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeData, QUrl
+from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent, QDragEnterEvent, QDropEvent, QCursor
+from PyQt6.QtWidgets import QWidgetAction
 from PIL import Image, ImageQt
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from interfaces.base_tab_module import BaseTabModule
+from ui.img2img_popup import Img2ImgPopup
+from ui.metadata_viewer import MetadataViewerWindow
+from utils.image_info import ImageMetadataExtractor
 import piexif, io
+import requests
+import tempfile
 
 class ImageViewerModule(BaseTabModule):
     """'생성 결과' 탭을 위한 모듈"""
@@ -47,15 +55,25 @@ class ImageViewerModule(BaseTabModule):
         return self.image_window_widget
 
 class AllImagesDownloader(QObject):
+    """[리팩토링] ImageCrudController를 사용하는 일괄 저장 워커"""
     # 진행률 시그널: (현재 순번, 전체 개수, 파일명/메시지)
     progress_updated = pyqtSignal(int, int, str)
     # 완료 시그널: (실제로 저장된 파일 개수)
     finished = pyqtSignal(int)
 
-    def run(self, history_items, save_path, save_as_webp, save_counter_start):
-        """백그라운드 스레드에서 실행될 이미지 저장 로직"""
+    def __init__(self, image_crud_controller):
+        super().__init__()
+        self.image_crud = image_crud_controller
+
+    def run(self, history_items, save_as_webp):
+        """
+        백그라운드 스레드에서 실행될 이미지 저장 로직
+
+        Parameters:
+            history_items (list): 저장할 HistoryItem 리스트
+            save_as_webp (bool): WEBP 형식으로 저장 여부
+        """
         saved_count = 0
-        current_counter = save_counter_start
         total_items = len(history_items)
 
         for i, item in enumerate(history_items):
@@ -70,27 +88,29 @@ class AllImagesDownloader(QObject):
                     self.progress_updated.emit(i + 1, total_items, "[건너뜀] 원본 데이터 없음")
                     continue
 
-                # 3. 파일명 생성 및 저장
-                suffix = "webp" if save_as_webp else "png"
-                filename = f"{current_counter:05d}.{suffix}"
-                file_path = save_path / filename
+                # 3. 🆕 분류 정보 생성
+                classification_info = {
+                    "method": self.image_crud.get_classification_method(),
+                    "prompt": item.info_text,
+                    "image_size": item.image.size if item.image else (0, 0),
+                    "tags": item.prompt_context.get("main_tags", []) if isinstance(item.prompt_context, dict) else [],
+                    "backend_type": item.backend_type,
+                }
 
-                # PIL 이미지 객체로 변환
-                img = Image.open(io.BytesIO(item.raw_bytes))
-                
-                # 메타데이터와 함께 저장
-                if save_as_webp:
-                    exif = img.info.get('exif', b'')
-                    img.save(str(file_path), format='WEBP', quality=95, method=6, exif=exif)
+                # 4. ✅ ImageCrudController를 통한 저장 (분류 정보 포함)
+                success, filepath, error = self.image_crud.save_image(
+                    image_bytes=item.raw_bytes,
+                    as_webp=save_as_webp,
+                    classification_info=classification_info
+                )
+
+                if success:
+                    # HistoryItem 객체에 저장 경로 업데이트 (중복 저장 방지용)
+                    item.filepath = filepath
+                    saved_count += 1
+                    self.progress_updated.emit(i + 1, total_items, f"[저장됨] {os.path.basename(filepath)}")
                 else:
-                    with open(str(file_path), 'wb') as f:
-                        f.write(item.raw_bytes)
-
-                # HistoryItem 객체에 저장 경로 업데이트 (중복 저장 방지용)
-                item.filepath = str(file_path)
-                saved_count += 1
-                current_counter += 1
-                self.progress_updated.emit(i + 1, total_items, f"[저장됨] {filename}")
+                    self.progress_updated.emit(i + 1, total_items, f"[오류] {error}")
 
             except Exception as e:
                 self.progress_updated.emit(i + 1, total_items, f"[오류] {e}")
@@ -99,16 +119,85 @@ class AllImagesDownloader(QObject):
 
 # --- 1. ImageLabel 클래스: 오직 이미지 표시와 리사이징만 담당 ---
 class ImageLabel(QLabel):
+    # 드래그&드롭으로 이미지를 받았을 때 발생하는 시그널
+    image_dropped = pyqtSignal(Image.Image)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(1, 1)
         self.full_pixmap = None
+        # 드래그&드롭 활성화
+        self.setAcceptDrops(True)
 
     def setFullPixmap(self, pixmap: QPixmap | None):
         """원본 QPixmap을 저장하고, 첫 리사이징을 트리거합니다."""
         self.full_pixmap = pixmap
         # 위젯의 현재 크기에 맞춰 이미지 업데이트
         self.resizeEvent(None) 
+    
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """드래그가 들어왔을 때 이벤트 처리"""
+        mime_data = event.mimeData()
+        
+        # 이미지 파일이나 URL을 받을 수 있는지 확인
+        if mime_data.hasImage() or mime_data.hasUrls():
+            # URL이 있는 경우 이미지 파일인지 확인
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    if file_path and file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
+                        event.acceptProposedAction()
+                        return
+                    # 웹 URL인 경우도 처리
+                    if url.scheme() in ['http', 'https']:
+                        event.acceptProposedAction()
+                        return
+            # 직접 이미지 데이터가 있는 경우
+            elif mime_data.hasImage():
+                event.acceptProposedAction()
+    
+    def dropEvent(self, event: QDropEvent):
+        """드롭 이벤트 처리"""
+        mime_data = event.mimeData()
+        pil_image = None
+        
+        try:
+            # URL 처리 (파일 경로 또는 웹 URL)
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    
+                    # 로컬 파일인 경우
+                    if file_path and os.path.exists(file_path):
+                        pil_image = Image.open(file_path)
+                        break
+                    
+                    # 웹 URL인 경우
+                    elif url.scheme() in ['http', 'https']:
+                        # URL에서 이미지 다운로드
+                        response = requests.get(url.toString(), timeout=10)
+                        if response.status_code == 200:
+                            pil_image = Image.open(BytesIO(response.content))
+                        break
+            
+            # 직접 이미지 데이터가 있는 경우
+            elif mime_data.hasImage():
+                qimage = mime_data.imageData()
+                if qimage:
+                    # QImage를 PIL Image로 변환
+                    buffer = BytesIO()
+                    qimage.save(buffer, "PNG")
+                    buffer.seek(0)
+                    pil_image = Image.open(buffer)
+            
+            # 이미지를 성공적으로 로드했으면 시그널 발생
+            if pil_image:
+                self.image_dropped.emit(pil_image)
+                event.acceptProposedAction()
+            
+        except Exception as e:
+            print(f"Failed to process dropped image: {e}")
+            event.ignore()
 
     def resizeEvent(self, event):
         """위젯의 크기가 변경될 때마다 호출되는 이벤트 핸들러"""
@@ -148,6 +237,7 @@ class ImageHistoryWindow(QWidget):
     load_prompt_requested = pyqtSignal(str)
     reroll_requested = pyqtSignal(pd.Series)
     history_cleared = pyqtSignal()
+    save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -208,7 +298,16 @@ class ImageHistoryWindow(QWidget):
 
     def add_history_item(self, history_item: HistoryItem):
         """새로운 히스토리 아이템을 받아 위젯을 생성하고 목록 최상단에 추가"""
-        item_widget = HistoryItemWidget(history_item)
+        # app_context를 찾기 위해 부모 체인을 탐색
+        app_context = None
+        parent_widget = self.parent()
+        while parent_widget:
+            if hasattr(parent_widget, 'app_context'):
+                app_context = parent_widget.app_context
+                break
+            parent_widget = parent_widget.parent()
+        
+        item_widget = HistoryItemWidget(history_item, parent=None, app_context=app_context)
         item_widget.item_selected.connect(self.on_item_selected)
         item_widget.delete_requested.connect(self.on_item_delete_requested)
 
@@ -217,7 +316,8 @@ class ImageHistoryWindow(QWidget):
         # [추가] HistoryItemWidget의 시그널을 ImageHistoryWindow의 시그널에 연결
         item_widget.load_prompt_requested.connect(self.load_prompt_requested)
         item_widget.reroll_requested.connect(self.reroll_requested)
-        
+        item_widget.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)  # 🆕
+
         # 새 아이템을 레이아웃의 맨 위에 추가
         self.history_layout.insertWidget(0, item_widget)
         self.history_widgets.insert(0, item_widget)
@@ -332,10 +432,12 @@ class HistoryItemWidget(QWidget):
     delete_requested = pyqtSignal(object)
     select_previous_requested = pyqtSignal()
     select_next_requested = pyqtSignal()
+    save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
-    def __init__(self, history_item: HistoryItem, parent=None):
+    def __init__(self, history_item: HistoryItem, parent=None, app_context=None):
         super().__init__(parent)
         self.history_item = history_item
+        self.app_context = app_context
         self.is_selected = False
         self.init_ui()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -408,6 +510,23 @@ class HistoryItemWidget(QWidget):
         reroll_action.triggered.connect(self.emit_reroll_prompt)
         menu.addAction(reroll_action)
 
+        # 🆕 큐 추가 메뉴
+        menu.addSeparator()
+
+        enqueue_front_action = QAction("⬆️ 큐 앞에 추가", self)
+        enqueue_front_action.triggered.connect(self.enqueue_to_front)
+        # generation_params가 있는 경우에만 활성화
+        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
+            enqueue_front_action.setEnabled(False)
+        menu.addAction(enqueue_front_action)
+
+        enqueue_back_action = QAction("⬇️ 큐 뒤에 추가", self)
+        enqueue_back_action.triggered.connect(self.enqueue_to_back)
+        # generation_params가 있는 경우에만 활성화
+        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
+            enqueue_back_action.setEnabled(False)
+        menu.addAction(enqueue_back_action)
+
         # 🆕 메타데이터 복원 메뉴 추가
         menu.addSeparator()
         restore_params_action = QAction("⚙️ 생성 설정 복원", self)
@@ -429,6 +548,28 @@ class HistoryItemWidget(QWidget):
         copy_webp_action.triggered.connect(lambda: self.copy_image_to_clipboard('WEBP'))
         menu.addAction(copy_png_action)
         menu.addAction(copy_webp_action)
+        
+        # NAI Upscale 메뉴 추가
+        menu.addSeparator()
+        upscale_action = QAction("🔍 NAI 2x 업스케일", self)
+        upscale_action.triggered.connect(self.upscale_image_nai)
+        # NAI 모드가 아니면 비활성화
+        if hasattr(self, 'app_context'):
+            current_mode = self.app_context.get_api_mode() if self.app_context else None
+            if current_mode != "NAI":
+                upscale_action.setEnabled(False)
+                upscale_action.setToolTip("NAI 모드에서만 사용 가능합니다")
+        menu.addAction(upscale_action)
+        
+        # 🆕 리모트에 이벤트 저장 메뉴
+        menu.addSeparator()
+        save_to_remote_action = QAction("📌 리모트에 이벤트 저장", self)
+        # source_row가 없는 경우 비활성화
+        if self.history_item.source_row is None or self.history_item.source_row.empty:
+            save_to_remote_action.setEnabled(False)
+        save_to_remote_action.triggered.connect(self._emit_save_to_remote_event)
+        menu.addAction(save_to_remote_action)
+
         menu.addSeparator()
         delete_action = QAction("🗑️ 이미지 삭제", self)
         delete_action.triggered.connect(lambda: self.delete_requested.emit(self))
@@ -458,6 +599,89 @@ class HistoryItemWidget(QWidget):
     def emit_reroll_prompt(self):
         """'프롬프트 다시개봉' 시그널을 발생시킵니다."""
         self.reroll_requested.emit(self.history_item.source_row)
+
+    def _emit_save_to_remote_event(self):
+        """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
+        self.save_to_remote_event_requested.emit(self.history_item)
+
+    def enqueue_to_front(self):
+        """🆕 히스토리 아이템을 큐 앞에 추가 (우선순위 100)"""
+        self._enqueue_history_item(priority=100)
+
+    def enqueue_to_back(self):
+        """🆕 히스토리 아이템을 큐 뒤에 추가 (우선순위 0)"""
+        self._enqueue_history_item(priority=0)
+
+    def _enqueue_history_item(self, priority: int = 0):
+        """🆕 히스토리 아이템을 생성 큐에 추가"""
+        try:
+            if not self.app_context:
+                # print("❌ AppContext가 없습니다.")
+                return
+
+            # GenerationRequest 클래스 import
+            from core.generation_request import GenerationRequest
+
+            # 생성 파라미터 복사
+            params = self.history_item.generation_params.copy()
+
+            # [2] 랜덤 해상도 체크 - 직접 해상도 덮어쓰기
+            main_window = self.app_context.main_window
+            if hasattr(main_window, 'random_resolution_checkbox') and main_window.random_resolution_checkbox:
+                if main_window.random_resolution_checkbox.isChecked():
+                    # 무작위 해상도 선택
+                    import random
+                    random_index = random.randint(0, main_window.resolution_combo.count() - 1)
+                    selected_value = main_window.resolution_combo.itemText(random_index)
+                    width, height = map(int, selected_value.split(' x '))
+                    params['width'] = width
+                    params['height'] = height
+                    # print(f"✅ 랜덤 해상도 적용: {width}x{height}")
+
+            # [3] 시드 고정 체크 (체크되어 있지 않으면 무작위 시드 생성)
+            if hasattr(main_window, 'seed_fix_checkbox') and main_window.seed_fix_checkbox:
+                if not main_window.seed_fix_checkbox.isChecked():
+                    # 무작위 시드 생성 (0 ~ 9999999999 범위)
+                    import random
+                    random_seed = random.randint(0, 9999999999)
+                    params['seed'] = random_seed
+                    params['extra_noise_seed'] = random_seed
+                    # print(f"✅ 무작위 시드 적용: {random_seed}")
+
+            # source_row 가져오기 (없으면 빈 Series)
+            import pandas as pd
+            source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') and self.history_item.source_row is not None else pd.Series()
+
+            # GenerationRequest 생성
+            request = GenerationRequest(
+                params=params,
+                source_row=source_row,
+                priority=priority,
+                max_retries=0
+            )
+
+            # 큐 매니저 가져오기
+            queue_manager = self.app_context.generation_queue_manager
+
+            # 우선순위에 따라 큐에 추가
+            if priority > 0:
+                request_id = queue_manager.enqueue_with_priority(request)
+                queue_size = queue_manager.get_queue_size()
+                # print(f"✅ 큐 앞에 추가됨: {request_id[:8]}... (우선순위: {priority}, 큐 크기: {queue_size})")
+                if hasattr(main_window, 'status_bar'):
+                    main_window.status_bar.showMessage(f"✅ 큐 앞에 추가됨 (대기 중: {queue_size})", 3000)
+            else:
+                request_id = queue_manager.enqueue_request(request)
+                queue_size = queue_manager.get_queue_size()
+                # print(f"✅ 큐 뒤에 추가됨: {request_id[:8]}... (큐 크기: {queue_size})")
+                if hasattr(main_window, 'status_bar'):
+                    main_window.status_bar.showMessage(f"✅ 큐 뒤에 추가됨 (대기 중: {queue_size})", 3000)
+
+        except Exception as e:
+            # print(f"❌ 큐 추가 실패: {e}")
+            # import traceback
+            # traceback.print_exc()
+            pass
 
     def show_comfyui_workflow(self):
         """🆕 ComfyUI 워크플로우 정보를 보여주는 다이얼로그"""
@@ -570,6 +794,182 @@ class HistoryItemWidget(QWidget):
         qimg.loadFromData(buf.getvalue())
         QApplication.clipboard().setPixmap(qimg)
         print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
+    
+    def _show_styled_message(self, title, message, msg_type='warning'):
+        """다크 테마 스타일이 적용된 QMessageBox를 표시합니다."""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        
+        if msg_type == 'warning':
+            msg.setIcon(QMessageBox.Icon.Warning)
+        elif msg_type == 'critical':
+            msg.setIcon(QMessageBox.Icon.Critical)
+        elif msg_type == 'information':
+            msg.setIcon(QMessageBox.Icon.Information)
+        
+        # 다크 테마 스타일 적용
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QMessageBox QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                background-color: transparent;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 6px 20px;
+                border-radius: 4px;
+                min-width: 80px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border: 1px solid {DARK_COLORS['accent_blue']};
+            }}
+            QMessageBox QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_pressed']};
+            }}
+        """)
+        
+        msg.exec()
+    
+    def upscale_image_nai(self):
+        """NAI API를 사용하여 이미지를 2배 업스케일합니다."""
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+        from PyQt6.QtGui import QPixmap
+        import io
+        
+        # AppContext 가져오기 (self.app_context가 있으면 직접 사용)
+        if hasattr(self, 'app_context') and self.app_context:
+            app_context = self.app_context
+        else:
+            # 없으면 부모 체인에서 찾기
+            parent_widget = self.parent()
+            while parent_widget and not hasattr(parent_widget, 'app_context'):
+                parent_widget = parent_widget.parent()
+            
+            if not parent_widget or not hasattr(parent_widget, 'app_context'):
+                self._show_styled_message("오류", "AppContext를 찾을 수 없습니다.", 'warning')
+                return
+            
+            app_context = parent_widget.app_context
+        
+        # 현재 이미지를 QPixmap으로 변환
+        pil_img = self.history_item.image
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        buf.seek(0)
+        current_pixmap = QPixmap()
+        current_pixmap.loadFromData(buf.getvalue())
+        
+        # 진행 상황 다이얼로그 생성
+        progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+        progress.setWindowTitle("NAI 업스케일")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+        
+        # Worker 클래스 정의 (메서드 내부에 정의)
+        class UpscaleWorker(QObject):
+            finished = pyqtSignal(dict)
+            
+            def __init__(self, api_service, pixmap):
+                super().__init__()
+                self.api_service = api_service
+                self.pixmap = pixmap
+            
+            def run(self):
+                result = self.api_service.upscale_NAI(self.pixmap)
+                self.finished.emit(result)
+        
+        # Worker 스레드 설정
+        self.upscale_thread = QThread()
+        self.upscale_worker = UpscaleWorker(app_context.api_service, current_pixmap)
+        self.upscale_worker.moveToThread(self.upscale_thread)
+        
+        # 시그널 연결
+        self.upscale_thread.started.connect(self.upscale_worker.run)
+        self.upscale_worker.finished.connect(
+            lambda result: self._handle_upscale_result(result, progress, app_context)
+        )
+        self.upscale_worker.finished.connect(self.upscale_thread.quit)
+        self.upscale_worker.finished.connect(self.upscale_worker.deleteLater)
+        self.upscale_thread.finished.connect(self.upscale_thread.deleteLater)
+        
+        # 스레드 시작
+        self.upscale_thread.start()
+    
+    def _handle_upscale_result(self, result, progress, app_context):
+        """업스케일 결과를 처리합니다."""
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtCore import QBuffer, QIODevice
+        from PIL import Image
+        import io
+        
+        progress.close()
+        
+        if result['status'] == 'success':
+            # QPixmap을 PIL Image로 변환
+            upscaled_pixmap = result['image']
+            
+            # raw_bytes가 있으면 그대로 사용, 없으면 QPixmap에서 변환
+            if 'raw_bytes' in result and result['raw_bytes']:
+                image_data = result['raw_bytes']
+            else:
+                # QBuffer를 사용하여 QPixmap을 bytes로 변환
+                qbuffer = QBuffer()
+                qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                upscaled_pixmap.save(qbuffer, "PNG")
+                image_data = qbuffer.data().data()
+                qbuffer.close()
+            
+            # bytes를 PIL Image로 변환
+            buffer = io.BytesIO(image_data)
+            upscaled_image = Image.open(buffer)
+            
+            # 기존 메타데이터 복사
+            info_text = self.history_item.info_text + f"\nUpscaled: 2x ({upscaled_pixmap.width()}x{upscaled_pixmap.height()})"
+            metadata = self.history_item.metadata.copy() if hasattr(self.history_item, 'metadata') else {}
+            metadata['upscaled'] = True
+            metadata['upscale_factor'] = 2
+            
+            # source_row 가져오기 (원본 이미지의 생성 정보)
+            source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') else None
+            
+            # 히스토리에 추가
+            if hasattr(app_context, 'add_to_history'):
+                app_context.add_to_history(
+                    upscaled_image,
+                    image_data,  # raw_bytes 파라미터
+                    info_text,
+                    metadata,
+                    source_row
+                )
+                # 성공 메시지 제거 - 사용자 요청에 따라 성공시 메시지 표시 안함
+                print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+            else:
+                # 폴백: 직접 ImageWindow에 추가 시도
+                parent_widget = self.parent()
+                while parent_widget:
+                    if hasattr(parent_widget, 'add_to_history'):
+                        parent_widget.add_to_history(upscaled_image, image_data, info_text, metadata, source_row)
+                        # 성공 메시지 제거
+                        print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+                        return
+                    parent_widget = parent_widget.parent()
+                
+                # 히스토리에 추가할 방법이 없는 경우
+                self._show_styled_message("경고", 
+                    f"{result['message']}\n\n업스케일은 성공했지만 히스토리에 추가할 수 없습니다.", 'warning')
+        else:
+            self._show_styled_message("업스케일 실패", result['message'], 'critical')
 
     def restore_generation_params(self):
         """🆕 생성 파라미터를 UI에 복원"""
@@ -716,48 +1116,71 @@ class HistoryItemWidget(QWidget):
             traceback.print_exc()
 
     def show_full_metadata(self):
-        """🆕 전체 메타데이터를 다이얼로그에 표시"""
+        """메타데이터 뷰어 윈도우를 엽니다 (Img2ImgPopup 방식 참고)"""
         try:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QHBoxLayout, QPushButton
-            
-            dialog = QDialog(self)
-            dialog.setWindowTitle(f"이미지 메타데이터 - {self.history_item.backend_type}")
-            dialog.resize(800, 600)
-            
-            layout = QVBoxLayout(dialog)
-            
-            text_edit = QTextEdit()
-            text_edit.setReadOnly(True)
-            text_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
-            
-            # 메타데이터 포맷팅
-            metadata_text = self._format_metadata_for_display()
-            text_edit.setPlainText(metadata_text)
-            
-            layout.addWidget(text_edit)
-            
-            # 버튼 레이아웃
-            button_layout = QHBoxLayout()
-            
-            # 복원 버튼
-            restore_btn = QPushButton("⚙️ 설정 복원")
-            restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-            restore_btn.clicked.connect(self.restore_generation_params)
-            restore_btn.clicked.connect(dialog.accept)
-            button_layout.addWidget(restore_btn)
-            
-            # 닫기 버튼
-            close_btn = QPushButton("닫기")
-            close_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-            close_btn.clicked.connect(dialog.accept)
-            button_layout.addWidget(close_btn)
-            
-            layout.addLayout(button_layout)
-            
-            dialog.exec()
-            
+            # 1. 이미지에서 메타데이터 추출
+            if not self.history_item.image:
+                QMessageBox.warning(self, "경고", "이미지 데이터가 없습니다.")
+                return
+
+            # ImageMetadataExtractor를 사용하여 메타데이터 추출
+            has_metadata = ImageMetadataExtractor.has_metadata(self.history_item.image)
+
+            if not has_metadata:
+                QMessageBox.information(
+                    self,
+                    "메타데이터 없음",
+                    "이 이미지에는 추출 가능한 메타데이터가 없습니다."
+                )
+                return
+
+            metadata = ImageMetadataExtractor.extract_metadata(self.history_item.image)
+
+            if not metadata:
+                QMessageBox.warning(self, "경고", "메타데이터를 읽을 수 없습니다.")
+                return
+
+            # 2. MetadataViewerWindow 열기 (non-modal)
+            # app_context.main_window를 parent로 설정하여 시그널 연결
+            parent_window = None
+            if self.app_context and hasattr(self.app_context, 'main_window'):
+                parent_window = self.app_context.main_window
+
+            self.metadata_viewer = MetadataViewerWindow(
+                self.history_item.image,
+                metadata,
+                self.app_context,
+                parent_window
+            )
+
+            # 3. 시그널 연결 (MainWindow에서 처리하도록)
+            if parent_window:
+                # 프롬프트 적용 시그널 연결
+                if hasattr(parent_window, 'apply_prompt_from_metadata'):
+                    self.metadata_viewer.apply_prompt.connect(
+                        parent_window.apply_prompt_from_metadata
+                    )
+
+                # 설정 적용 시그널 연결
+                if hasattr(parent_window, 'apply_settings_from_metadata'):
+                    self.metadata_viewer.apply_all_settings.connect(
+                        parent_window.apply_settings_from_metadata
+                    )
+
+            # 4. 윈도우 표시
+            self.metadata_viewer.show()
+
+            print(f"✅ MetadataViewerWindow 열림 - {self.history_item.backend_type}")
+
         except Exception as e:
-            print(f"❌ 메타데이터 다이얼로그 표시 실패: {e}")
+            print(f"❌ 메타데이터 뷰어 표시 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "오류",
+                f"메타데이터 뷰어를 열 수 없습니다:\n{str(e)}"
+            )
 
     def _format_metadata_for_display(self) -> str:
         """🆕 메타데이터를 보기 좋게 포맷팅"""
@@ -820,6 +1243,7 @@ class ImageWindow(QWidget):
     instant_generation_requested = pyqtSignal(object)
     load_prompt_to_main_ui = pyqtSignal(str)
     send_to_inpaint_requested = pyqtSignal(object)
+    save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, app_context, parent=None):
         super().__init__(parent)
@@ -831,14 +1255,16 @@ class ImageWindow(QWidget):
         self.image_history_window: ImageHistoryWindow = None
         self.info_visible = True
         self.app_context = app_context
-        self.history_visible = True 
+        self.history_visible = True
         self.toggle_history_button: QPushButton = None
-        self.save_counter = 1  
-        self.current_history_item = None 
+        # ✅ ImageCrudController 사용 (save_counter 제거)
+        self.image_crud = app_context.image_crud_controller
+        self.current_history_item = None
         # 🆕 ComfyUI 워크플로우 캐시
         self.comfyui_workflow_cache: Dict[int, Dict] = {}
 
         self.init_ui()
+        self.load_settings()
 
     def init_ui(self):
         # 1. ImageWindow 자체의 메인 레이아웃 (수평)
@@ -854,10 +1280,11 @@ class ImageWindow(QWidget):
         left_layout.setContentsMargins(4, 0, 4, 0)
         left_layout.setSpacing(4)
 
-        # 3-1. 컨트롤 버튼 영역 (상단)
+        # 3-1. 컨트롤 버튼 영역 (상단) 
         control_layout = QHBoxLayout()
         self.auto_save_checkbox = QCheckBox("자동 저장")
         self.auto_save_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.auto_save_checkbox.toggled.connect(self.save_settings)
 
         self.toggle_history_button = QPushButton("📜 히스토리 숨기기")
         self.toggle_history_button.setCheckable(True)
@@ -888,6 +1315,16 @@ class ImageWindow(QWidget):
         download_clear_action.triggered.connect(lambda: self.start_download_all(clear_after=True))
         self.advanced_menu.addAction(download_clear_action)
 
+        clear_action = QAction("🧹 히스토리 정리 (다운로드 X)", self)
+        clear_action.triggered.connect(lambda: self.clear_history_only())
+        self.advanced_menu.addAction(clear_action)
+
+        # 구분선 추가
+        self.advanced_menu.addSeparator()
+        
+        # 메모리 관리 섹션 추가
+        self.create_memory_management_section()
+
         # 버튼에 메뉴를 영구적으로 할당합니다.
         self.advanced_button.setMenu(self.advanced_menu)
 
@@ -896,6 +1333,7 @@ class ImageWindow(QWidget):
         
         self.save_as_webp_checkbox = QCheckBox("WEBP로 저장")
         self.save_as_webp_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.save_as_webp_checkbox.toggled.connect(self.save_settings)
 
         # 초기화 버튼
         clear_button = QPushButton(" 🗑️ ")
@@ -956,6 +1394,9 @@ class ImageWindow(QWidget):
         """)
         self.main_image_label.setText("Generated Image")
         
+        # 드래그&드롭 시그널 연결
+        self.main_image_label.image_dropped.connect(self.show_img2img_popup)
+        
         # 3-2-b. 정보 패널 (제목 + 텍스트박스)
         self.info_panel = QWidget()
         info_panel_layout = QVBoxLayout(self.info_panel)
@@ -1015,10 +1456,57 @@ class ImageWindow(QWidget):
         # [추가] 히스토리 창에서 오는 시그널들을 메인 윈도우로 전달할 슬롯에 연결
         self.image_history_window.load_prompt_requested.connect(self.load_prompt_to_main_ui)
         self.image_history_window.reroll_requested.connect(self.instant_generation_requested)
-        
+        self.image_history_window.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)  # 🆕
+
         # [추가] 메인 이미지 레이블에 컨텍스트 메뉴 설정
         self.main_image_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_image_label.customContextMenuRequested.connect(self.show_main_image_context_menu)
+
+    def save_settings(self):
+        """체크박스 설정을 JSON 파일에 저장합니다."""
+        settings = {
+            "auto_save": self.auto_save_checkbox.isChecked(),
+            "save_as_webp": self.save_as_webp_checkbox.isChecked()
+        }
+        
+        settings_path = Path("save/image_window.json")
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Failed to save image_window settings: {e}")
+    
+    def load_settings(self):
+        """JSON 파일에서 체크박스 설정을 불러옵니다."""
+        settings_path = Path("save/image_window.json")
+        
+        if settings_path.exists():
+            try:
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                
+                # 설정 적용 (toggled 시그널 임시 차단)
+                self.auto_save_checkbox.blockSignals(True)
+                self.save_as_webp_checkbox.blockSignals(True)
+                
+                self.auto_save_checkbox.setChecked(settings.get("auto_save", False))
+                self.save_as_webp_checkbox.setChecked(settings.get("save_as_webp", False))
+                
+                self.auto_save_checkbox.blockSignals(False)
+                self.save_as_webp_checkbox.blockSignals(False)
+                
+            except Exception as e:
+                print(f"Failed to load image_window settings: {e}")
+                # 로드 실패시 기본값 사용
+                self.auto_save_checkbox.setChecked(False)
+                self.save_as_webp_checkbox.setChecked(False)
+        else:
+            # 파일이 없으면 기본값으로 설정하고 저장
+            self.auto_save_checkbox.setChecked(False)
+            self.save_as_webp_checkbox.setChecked(False)
+            self.save_settings()
 
     def show_main_image_context_menu(self, pos):
         """메인 이미지 우클릭 시 컨텍스트 메뉴를 표시합니다."""
@@ -1072,6 +1560,12 @@ class ImageWindow(QWidget):
         show_metadata_action = QAction("🔍 전체 메타데이터 보기", self)
         show_metadata_action.triggered.connect(self._show_current_metadata)
         menu.addAction(show_metadata_action)
+        
+        # 이미지 붙여넣기 메뉴 추가
+        menu.addSeparator()
+        paste_image_action = QAction("📋 이미지 붙여넣기", self)
+        paste_image_action.triggered.connect(self._paste_image_from_clipboard)
+        menu.addAction(paste_image_action)
 
         # [수정] 파일 경로가 있을 때만 '파일 위치 열기' 옵션을 추가합니다.
         filepath = self.current_history_item.filepath
@@ -1080,6 +1574,12 @@ class ImageWindow(QWidget):
             reveal_action = QAction("📁 파일 위치 열기", self)
             reveal_action.triggered.connect(lambda: self._open_file_in_explorer(filepath))
             menu.addAction(reveal_action)
+        else:
+            # 파일이 저장되지 않은 경우 저장 버튼 추가
+            menu.addSeparator()
+            save_action = QAction("💾 이미지 저장", self)
+            save_action.triggered.connect(self.save_image_manually)
+            menu.addAction(save_action)
         
         copy_png_action = QAction("PNG로 클립보드 복사", self)
         copy_webp_action = QAction("WEBP로 클립보드 복사", self)
@@ -1087,18 +1587,291 @@ class ImageWindow(QWidget):
         copy_webp_action.triggered.connect(lambda: self.copy_image_to_clipboard('WEBP'))
         menu.addAction(copy_png_action)
         menu.addAction(copy_webp_action)
+        
+        # NAI Upscale 메뉴 추가
+        menu.addSeparator()
+        upscale_action = QAction("🔍 NAI 2x 업스케일", self)
+        upscale_action.triggered.connect(self.upscale_current_image_nai)
+        # NAI 모드가 아니면 비활성화
+        current_mode = self.app_context.get_api_mode() if self.app_context else None
+        if current_mode != "NAI":
+            upscale_action.setEnabled(False)
+            upscale_action.setToolTip("NAI 모드에서만 사용 가능합니다")
+        menu.addAction(upscale_action)
 
         menu.addSeparator()
-        send_to_inpaint_action = QAction("🎨 Send to Inpaint (NAI)", self)
+        send_to_inpaint_action = QAction("🎨 Send to Inpaint", self)
         send_to_inpaint_action.triggered.connect(self._emit_send_to_inpaint)
         menu.addAction(send_to_inpaint_action)
         
+        # Add Send to Sketchbook action
+        send_to_sketchbook_action = QAction("🖌️ Send to Sketchbook (NAI)", self)
+        send_to_sketchbook_action.triggered.connect(self._send_to_sketchbook)
+        menu.addAction(send_to_sketchbook_action)
+        
+        # Add Send to Character Reference action
+        send_to_character_ref_action = QAction("📸 Send to Character Reference", self)
+        send_to_character_ref_action.triggered.connect(self._send_to_character_reference)
+        menu.addAction(send_to_character_ref_action)
+
+        # 🆕 리모트에 이벤트 저장 메뉴
+        menu.addSeparator()
+        save_to_remote_action = QAction("📌 리모트에 이벤트 저장", self)
+        # source_row가 없는 경우 비활성화
+        if self.current_history_item.source_row is None or self.current_history_item.source_row.empty:
+            save_to_remote_action.setEnabled(False)
+        save_to_remote_action.triggered.connect(self._emit_save_to_remote_event)
+        menu.addAction(save_to_remote_action)
+
         menu.exec(self.main_image_label.mapToGlobal(pos))
 
+    def save_image_manually(self):
+        """현재 표시된 이미지를 수동으로 저장합니다 - save_current_image와 동일한 기능."""
+        # 기존의 save_current_image 메소드를 호출
+        self.save_current_image()
+    
     def _emit_send_to_inpaint(self):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
+
+    def _emit_save_to_remote_event(self):
+        """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.save_to_remote_event_requested.emit(self.current_history_item)
+
+    def _paste_image_from_clipboard(self):
+        """클립보드에서 이미지를 가져와 img2img 팝업을 표시합니다."""
+        clipboard = QApplication.clipboard()
+        mime_data = clipboard.mimeData()
+        
+        pil_image = None
+        
+        try:
+            # URL이 있는 경우 (파일 경로)
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    if file_path and os.path.exists(file_path):
+                        pil_image = Image.open(file_path)
+                        break
+            
+            # 직접 이미지 데이터가 있는 경우
+            elif mime_data.hasImage():
+                qimage = clipboard.image()
+                if not qimage.isNull():
+                    # QImage를 PIL Image로 변환
+                    buffer = BytesIO()
+                    qimage.save(buffer, "PNG")
+                    buffer.seek(0)
+                    pil_image = Image.open(buffer)
+            
+            # 이미지를 찾았으면 팝업 표시
+            if pil_image:
+                self.show_img2img_popup(pil_image)
+            else:
+                QMessageBox.information(self, "알림", "클립보드에 이미지가 없습니다.")
+                
+        except Exception as e:
+            print(f"Failed to paste image from clipboard: {e}")
+            QMessageBox.warning(self, "오류", f"클립보드에서 이미지를 가져올 수 없습니다.\n{str(e)}")
+    
+    def show_img2img_popup(self, pil_image: Image.Image):
+        """이미지에 대한 작업 선택 팝업을 표시합니다."""
+        print(f"🔍 ImageWindow.show_img2img_popup: 이미지 모드 = {pil_image.mode}, 크기 = {pil_image.size}")
+        main_window = self.window()
+        popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
+        
+        # 팝업의 신호를 메인 윈도우의 슬롯에 연결
+        if hasattr(main_window, 'activate_img2img_panel'):
+            popup.img2img_requested.connect(main_window.activate_img2img_panel)
+        if hasattr(main_window, 'activate_inpaint_mode'):
+            popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
+        if hasattr(main_window, 'activate_vibe_transfer'):
+            popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
+        
+        # 팝업 위치 조정 및 실행
+        cursor_pos = QCursor.pos()
+        popup_rect = popup.geometry()
+        
+        # 팝업의 좌상단 위치 계산
+        new_x = cursor_pos.x() - popup_rect.width() // 2
+        new_y = cursor_pos.y() - popup_rect.height()
+        
+        # 화면 경계 처리
+        screen = main_window.screen()
+        screen_rect = screen.availableGeometry()
+        new_x = max(screen_rect.left() + 5, min(new_x, screen_rect.right() - popup_rect.width() - 5))
+        new_y = max(screen_rect.top() + 5, min(new_y, screen_rect.bottom() - popup_rect.height() - 5))
+        
+        popup.move(new_x, new_y)
+        popup.exec()
+    
+    def _send_to_sketchbook(self):
+        """Send current image to Sketchbook with prompts for inpaint mode."""
+        if not self.current_history_item:
+            return
+        
+        # Get prompts from the current item
+        main_prompt = ""
+        negative_prompt = ""
+        
+        if (hasattr(self.current_history_item, 'prompt_context') and 
+            self.current_history_item.prompt_context):
+            # Get main_prompt and negative_prompt from context
+            main_prompt = self.current_history_item.prompt_context.get('main_prompt', '')
+            negative_prompt = self.current_history_item.prompt_context.get('negative_prompt', '')
+        
+        # If main_prompt is empty, try to extract from info_text
+        if not main_prompt and self.current_history_item.info_text:
+            info_parts = self.current_history_item.info_text.split('Negative prompt:')
+            if len(info_parts) > 0:
+                main_prompt = info_parts[0].strip()
+            if len(info_parts) > 1:
+                # Extract negative prompt (up to Steps: or end)
+                neg_part = info_parts[1].split('Steps:')[0].strip()
+                negative_prompt = neg_part
+        
+        # Save image to temp file
+        import tempfile
+        import os
+        
+        temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        
+        # Save PIL Image to temp file
+        if self.current_history_item.image:
+            self.current_history_item.image.save(temp_path, 'PNG')
+            
+            # Access Sketchbook through Assets tab via RightView
+            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'image_window'):
+                right_view = self.app_context.main_window.image_window
+                if hasattr(right_view, 'tab_controller'):
+                    # Get Assets tab
+                    assets_tab = right_view.tab_controller.get_tab_instance('AssetsTabModule')
+                    if assets_tab and hasattr(assets_tab, 'widget') and hasattr(assets_tab.widget, 'sketchbook_widget'):
+                        sketchbook = assets_tab.widget.sketchbook_widget
+                        
+                        # Check if Sketchbook has layers
+                        # if hasattr(sketchbook, 'canvas') and sketchbook.canvas.layers:
+                        #     QMessageBox.warning(self, "전송 실패", 
+                        #                       "Sketchbook에 레이어가 이미 존재합니다.\n"
+                        #                       "인페인트 모드를 사용하려면 Sketchbook을 비워주세요.")
+                        #     try:
+                        #         os.unlink(temp_path)
+                        #     except:
+                        #         pass
+                        #     return
+                        
+                        # Add image to Sketchbook
+                        image_name = f"Inpaint_{os.path.basename(temp_path)}"
+                        sketchbook.add_image_from_path(temp_path, image_name)
+                        
+                        # Store prompts (will be applied when user manually enables inpaint mode)
+                        sketchbook.set_inpaint_prompts(main_prompt, negative_prompt)
+                        
+                        # Switch to Assets tab and show Sketchbook
+                        right_view.tab_controller.switch_to_tab('AssetsTabModule')
+                        
+                        # If Assets tab has tab widget, switch to Sketchbook tab
+                        if hasattr(assets_tab.widget, 'tab_widget'):
+                            # Find Sketchbook tab index
+                            for i in range(assets_tab.widget.tab_widget.count()):
+                                if assets_tab.widget.tab_widget.tabText(i) == "✏️ Sketchbook":
+                                    assets_tab.widget.tab_widget.setCurrentIndex(i)
+                                    break
+                        
+                        print(f"✅ Image sent to Sketchbook with prompts")
+                        print(f"   Main prompt: {main_prompt[:50]}...")
+                        print(f"   Negative prompt: {negative_prompt[:50]}...")
+                    else:
+                        QMessageBox.warning(self, "오류", "Sketchbook 탭을 찾을 수 없습니다.")
+            
+            # Clean up temp file after a delay
+            QTimer.singleShot(1000, lambda: self._cleanup_temp_file(temp_path))
+    
+    def _cleanup_temp_file(self, path):
+        """Clean up temporary file."""
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+        except:
+            pass
+
+    def _send_to_character_reference(self):
+        """Send current image to Character Reference module."""
+        if not self.current_history_item:
+            return
+        
+        # Save image to temp file
+        import tempfile
+        import time
+        from pathlib import Path
+        
+        # Create character_reference/temp folder
+        temp_folder = Path("save/character_reference/temp")
+        temp_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Generate temp file name with timestamp
+        temp_file = temp_folder / f"from_history_{int(time.time())}.png"
+        
+        # Save PIL Image to temp file
+        if self.current_history_item.image:
+            self.current_history_item.image.save(temp_file, 'PNG')
+            
+            # Get CharacterReferenceModule from app context
+            try:
+                if hasattr(self.app_context, 'middle_section_controller'):
+                    char_ref_module = self.app_context.middle_section_controller.get_module_instance("CharacterReferenceModule")
+                    if char_ref_module:
+                        # Add the image to character reference module
+                        frame = char_ref_module._add_character_frame(str(temp_file))
+                        if frame:
+                            print(f"✅ Image sent to Character Reference: {temp_file}")
+                            # Show success message
+                            from PyQt6.QtWidgets import QMessageBox
+                            msg_box = QMessageBox()
+                            msg_box.setIcon(QMessageBox.Icon.Information)
+                            msg_box.setWindowTitle("성공")
+                            msg_box.setText("이미지가 Character Reference 모듈에 추가되었습니다.")
+                            msg_box.setStyleSheet("""
+                                QMessageBox {
+                                    background-color: #1a1a1a;
+                                    color: white;
+                                }
+                                QMessageBox QLabel {
+                                    color: white;
+                                }
+                                QMessageBox QPushButton {
+                                    background-color: #3a3a3a;
+                                    color: white;
+                                    border: 1px solid #555;
+                                    padding: 5px 15px;
+                                    min-width: 60px;
+                                }
+                                QMessageBox QPushButton:hover {
+                                    background-color: #4a4a4a;
+                                }
+                            """)
+                            msg_box.exec()
+                        else:
+                            # Show error message if frame creation failed
+                            from PyQt6.QtWidgets import QMessageBox
+                            QMessageBox.warning(self, "오류", "Character Reference 모듈에 이미지를 추가하지 못했습니다.")
+                    else:
+                        # Show error if module not found
+                        from PyQt6.QtWidgets import QMessageBox
+                        QMessageBox.warning(self, "오류", "Character Reference 모듈을 찾을 수 없습니다.")
+                else:
+                    # Show error if context not available
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "오류", "앱 컨텍스트를 사용할 수 없습니다.")
+                    
+            except Exception as e:
+                print(f"❌ Error sending image to Character Reference: {e}")
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "오류", f"Character Reference로 이미지를 전송하는 중 오류가 발생했습니다: {str(e)}")
 
     def _load_current_prompt(self):
         """🆕 현재 표시 중인 이미지의 프롬프트를 불러옵니다 - main_prompt 우선 사용"""
@@ -1129,28 +1902,28 @@ class ImageWindow(QWidget):
         """🆕 현재 이미지의 ComfyUI 워크플로우를 표시합니다."""
         if self.current_history_item and self.current_history_item.comfyui_workflow:
             # HistoryItemWidget의 show_comfyui_workflow 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.show_comfyui_workflow()
 
     def _save_current_comfyui_workflow(self):
         """🆕 현재 이미지의 ComfyUI 워크플로우를 저장합니다."""
         if self.current_history_item and self.current_history_item.comfyui_workflow:
             # HistoryItemWidget의 save_comfyui_workflow 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.save_comfyui_workflow()
 
     def _restore_current_generation_params(self):
         """🆕 현재 이미지의 생성 파라미터를 복원합니다."""
         if self.current_history_item:
             # HistoryItemWidget의 restore_generation_params 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item, self)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.restore_generation_params()
 
     def _show_current_metadata(self):
         """🆕 현재 이미지의 전체 메타데이터를 표시합니다."""
         if self.current_history_item:
             # HistoryItemWidget의 show_full_metadata 메소드를 재사용
-            temp_widget = HistoryItemWidget(self.current_history_item, self)
+            temp_widget = HistoryItemWidget(self.current_history_item, self, self.app_context)
             temp_widget.show_full_metadata()
 
     # 🆕 ComfyUI 메타데이터 처리 메소드들
@@ -1304,23 +2077,25 @@ class ImageWindow(QWidget):
 
     def save_image_with_metadata(self, filename: str, image_bytes: bytes, info_text: str, as_webp=False):
         """
-        [수정] 이미지 바이트를 EXIF 손실 없이 그대로 파일에 저장합니다.
-        info_text 매개변수는 이제 사용되지 않지만 호환성을 위해 남겨둡니다.
+        [DEPRECATED] 하위 호환성을 위한 래퍼 메서드
+
+        ⚠️ 이 메서드는 더 이상 사용되지 않습니다.
+        새 코드는 app_context.image_crud_controller.save_image()를 직접 사용하세요.
+
+        info_text 매개변수는 무시됩니다 (ImageCrudController가 메타데이터를 자동 처리).
         """
-        try:
-            if as_webp:
-                # 이미지 객체로부터 WEBP로 저장
-                img = Image.open(io.BytesIO(image_bytes))
-                exif = img.info.get('exif', b'')
-                img.save(filename, format='WEBP', quality=95, method=6, exif=exif)
-                print(f"✅ WEBP(95%, exif) 저장 완료: {filename}")
-            else:
-                with open(filename, 'wb') as f:
-                    f.write(image_bytes)
-                print(f"✅ PNG 저장 완료: {filename}")
+        print(f"⚠️ [DEPRECATED] save_image_with_metadata 호출됨. ImageCrudController 사용 권장.")
+
+        # ✅ ImageCrudController로 위임 (파일명 무시, 컨트롤러가 자동 생성)
+        success, filepath, error = self.image_crud.save_image(
+            image_bytes=image_bytes,
+            as_webp=as_webp
+        )
+
+        if success:
             return True
-        except Exception as e:
-            print(f"❌ 이미지 저장 실패: {e}")
+        else:
+            print(f"❌ 저장 실패: {error}")
             return False
 
     def toggle_history_panel(self):
@@ -1529,13 +2304,68 @@ class ImageWindow(QWidget):
         filepath = None
         is_webp = self.save_as_webp_checkbox.isChecked()
         if self.auto_save_checkbox.isChecked():
-            save_path = self.app_context.session_save_path
-            suffix = "webp" if is_webp else "png"
-            filename = f"{self.save_counter:05d}.{suffix}"
-            filepath = save_path / filename
-            # 저장 함수에는 이제 info_text를 새로 생성한 것으로 전달
-            self.save_image_with_metadata(str(filepath), raw_bytes, info_text, as_webp=is_webp)
-            self.save_counter += 1
+            # 🆕 분류 정보 생성 (자동 저장용)
+            prompt_context = generation_result.get('prompt_context', {}) if generation_result else {}
+            main_tags = prompt_context.get('main_tags', [])
+
+            # 🔍 디버깅 (필요시 주석 해제)
+            # print(f"[DEBUG] generation_result keys: {list(generation_result.keys()) if generation_result else 'None'}")
+            # print(f"[DEBUG] prompt_context keys: {list(prompt_context.keys()) if prompt_context else 'None'}")
+            # print(f"[DEBUG] main_tags from prompt_context: {main_tags[:10] if main_tags else '(empty)'}")
+
+            # 🆕 Fallback: main_tags가 비어있으면 프롬프트에서 직접 추출
+            if not main_tags and info_text:
+                # generation_result에서 최종 프롬프트 추출
+                final_prompt = generation_result.get('generation_params', {}).get('input', '') if generation_result else ''
+                if final_prompt:
+                    import re
+
+                    # 1. 먼저 쉼표로 분리
+                    raw_tags = final_prompt.split(',')
+
+                    # 2. 각 태그에서 NAI 가중치 제거
+                    cleaned_tags = []
+                    for tag in raw_tags:
+                        tag = tag.strip()
+                        if not tag:
+                            continue
+
+                        # NAI 가중치 패턴 제거: "1.25::tag::" → "tag" 또는 "-1.15::tag::" → "tag"
+                        # 패턴: 숫자(선택적 음수, 소수점) + :: + 내용 + :: (끝 ::는 선택적)
+                        tag = re.sub(r'^-?\d+\.?\d*::', '', tag)  # 앞쪽 가중치 제거
+                        tag = re.sub(r'::$', '', tag)  # 뒤쪽 :: 제거
+                        tag = tag.strip()
+
+                        if tag:
+                            cleaned_tags.append(tag)
+
+                    main_tags = cleaned_tags
+                    # print(f"[DEBUG] 🔧 Fallback: 프롬프트에서 추출한 tags ({len(main_tags)}개)")
+                    # print(f"[DEBUG]   처음 10개: {main_tags[:10]}")
+                    # print(f"[DEBUG]   'solo' in tags: {'solo' in main_tags}")
+                    # print(f"[DEBUG]   'holding' in tags: {'holding' in main_tags}")
+                    # print(f"[DEBUG]   'standing' in tags: {'standing' in main_tags}")
+
+            classification_info = {
+                "method": self.app_context.image_crud_controller.get_classification_method(),
+                "prompt": info_text,
+                "image_size": image.size if image else (0, 0),
+                "tags": main_tags,
+                "backend_type": generation_result.get('backend_type', 'NAI') if generation_result else 'NAI',
+            }
+
+            # ✅ ImageCrudController를 통한 저장 (분류 정보 포함)
+            success, saved_filepath, error = self.image_crud.save_image(
+                image_bytes=raw_bytes,
+                as_webp=is_webp,
+                classification_info=classification_info
+            )
+
+            if success:
+                filepath = saved_filepath
+            else:
+                print(f"❌ 자동 저장 실패: {error}")
+                filepath = None
 
         # 🆕 확장된 메타데이터 수집
         enhanced_metadata = {}
@@ -1573,6 +2403,14 @@ class ImageWindow(QWidget):
 
         if self.image_history_window:
             self.image_history_window.add_history_item(history_item)
+            
+            # 🧠 히스토리 큐 제한 체크
+            self.check_and_apply_history_limit()
+        
+        # NAI 모드에서 히스토리 아이템 추가 시 Anlas 업데이트
+        if self.app_context.current_api_mode == "NAI":
+            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'update_anlas_display'):
+                self.app_context.main_window.update_anlas_display()
 
     def display_history_item(self, item: HistoryItem):
         """[수정] 선택된 히스토리 아이템의 내용을 메인 뷰어에 표시"""
@@ -1580,9 +2418,36 @@ class ImageWindow(QWidget):
         self.update_image(item.image)
         self.update_info(item.info_text) # 저장된 생성 정보로 업데이트
 
+    def _create_classification_info(self, item: HistoryItem) -> dict:
+        """
+        [신규] HistoryItem에서 classification_info를 생성합니다.
+
+        Parameters:
+            item (HistoryItem): 히스토리 아이템
+
+        Returns:
+            dict: classification_info
+        """
+        tags = item.prompt_context.get("main_tags", []) if isinstance(item.prompt_context, dict) else []
+
+        # 🔍 디버깅 (필요시 주석 해제)
+        # print(f"[DEBUG] _create_classification_info - tags: {tags[:10] if tags else '(empty)'}")
+        # print(f"[DEBUG] prompt_context type: {type(item.prompt_context)}")
+        # if isinstance(item.prompt_context, dict):
+        #     print(f"[DEBUG] prompt_context keys: {list(item.prompt_context.keys())}")
+
+        return {
+            "method": self.app_context.image_crud_controller.get_classification_method(),
+            "prompt": item.info_text,
+            "image_size": item.image.size if item.image else (0, 0),
+            "tags": tags,
+            "backend_type": item.backend_type,
+        }
+
     def save_current_image(self):
+        """[리팩토링] '이미지 저장' 버튼 클릭 시, 대화상자 없이 바로 저장"""
         is_webp = self.save_as_webp_checkbox.isChecked()
-        """[수정] '이미지 저장' 버튼 클릭 시, 대화상자 없이 바로 저장"""
+
         if not hasattr(self, 'current_history_item') or not self.current_history_item:
             # status_bar 접근 방법 수정
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'status_bar'):
@@ -1599,23 +2464,26 @@ class ImageWindow(QWidget):
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'status_bar'):
                 self.app_context.main_window.status_bar.showMessage("⚠️ 저장할 이미지의 원본 데이터가 없습니다.", 3000)
             return
-        
-        # 1. AppContext에서 세션 저장 경로를 가져옴
-        save_path = self.app_context.session_save_path
-        
-        # 2. 새로운 파일명 생성 (자동 저장과 카운터 공유)
-        suffix = "webp" if is_webp else "png"
-        filename = f"{self.save_counter:05d}.{suffix}"
-        file_path = save_path / filename
-        
-        # 3. 메타데이터와 함께 저장
-        success = self.save_image_with_metadata(str(file_path), item.raw_bytes, item.info_text, as_webp=is_webp)
-        
-        # 4. 카운터 증가
+
+        # 🆕 분류 정보 생성
+        classification_info = self._create_classification_info(item)
+
+        # ✅ ImageCrudController를 통한 저장 (에러 메시지 및 분류 정보 포함)
+        success, filepath, error = self.image_crud.save_image(
+            image_bytes=item.raw_bytes,
+            as_webp=is_webp,
+            classification_info=classification_info
+        )
+
         if success:
-            item.filepath = str(file_path)  # [핵심] 저장 성공 시 HistoryItem에 파일 경로 주입
-            self.save_counter += 1
-            self.app_context.main_window.status_bar.showMessage(f"✅ 이미지 저장 완료: {filename}", 3000)
+            item.filepath = filepath  # [핵심] 저장 성공 시 HistoryItem에 파일 경로 주입
+            self.app_context.main_window.status_bar.showMessage(
+                f"✅ 이미지 저장 완료: {os.path.basename(filepath)}", 3000
+            )
+        else:
+            self.app_context.main_window.status_bar.showMessage(
+                f"❌ 저장 실패: {error}", 5000
+            )
 
     
     def extract_info_from_image(self, image: Image.Image, _info):
@@ -1668,6 +2536,11 @@ class ImageWindow(QWidget):
     def open_folder(self):
         import sys, subprocess
         folder = str(self.app_context.session_save_path)
+        
+        # 폴더가 존재하지 않으면 생성
+        if not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
+        
         if sys.platform.startswith('darwin'):
             subprocess.run(['open', folder])
         elif os.name == 'nt':
@@ -1689,6 +2562,150 @@ class ImageWindow(QWidget):
         qimg.loadFromData(buf.getvalue())
         QApplication.clipboard().setPixmap(qimg)
         print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
+    
+    def _show_styled_message_main(self, title, message, msg_type='warning'):
+        """메인 이미지용 다크 테마 스타일이 적용된 QMessageBox를 표시합니다."""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        
+        if msg_type == 'warning':
+            msg.setIcon(QMessageBox.Icon.Warning)
+        elif msg_type == 'critical':
+            msg.setIcon(QMessageBox.Icon.Critical)
+        elif msg_type == 'information':
+            msg.setIcon(QMessageBox.Icon.Information)
+        
+        # 다크 테마 스타일 적용
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QMessageBox QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                background-color: transparent;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 6px 20px;
+                border-radius: 4px;
+                min-width: 80px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+                border: 1px solid {DARK_COLORS['accent_blue']};
+            }}
+            QMessageBox QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_pressed']};
+            }}
+        """)
+        
+        msg.exec()
+    
+    def upscale_current_image_nai(self):
+        """메인 이미지를 NAI API를 사용하여 2배 업스케일합니다."""
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QBuffer, QIODevice
+        from PyQt6.QtGui import QPixmap
+        from PIL import Image
+        import io
+        
+        if not self.current_history_item:
+            self._show_styled_message_main("오류", "업스케일할 이미지가 없습니다.", 'warning')
+            return
+        
+        # 현재 이미지를 QPixmap으로 변환
+        pil_img = self.current_history_item.image
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        buf.seek(0)
+        current_pixmap = QPixmap()
+        current_pixmap.loadFromData(buf.getvalue())
+        
+        # 진행 상황 다이얼로그 생성
+        progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
+        progress.setWindowTitle("NAI 업스케일")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+        
+        # Worker 클래스 정의 (메서드 내부에 정의)
+        class UpscaleWorker(QObject):
+            finished = pyqtSignal(dict)
+            
+            def __init__(self, api_service, pixmap):
+                super().__init__()
+                self.api_service = api_service
+                self.pixmap = pixmap
+            
+            def run(self):
+                result = self.api_service.upscale_NAI(self.pixmap)
+                self.finished.emit(result)
+        
+        # Worker 스레드 설정
+        self.upscale_thread = QThread()
+        self.upscale_worker = UpscaleWorker(self.app_context.api_service, current_pixmap)
+        self.upscale_worker.moveToThread(self.upscale_thread)
+        
+        # 시그널 연결
+        self.upscale_thread.started.connect(self.upscale_worker.run)
+        self.upscale_worker.finished.connect(
+            lambda result: self._handle_main_upscale_result(result, progress)
+        )
+        self.upscale_worker.finished.connect(self.upscale_thread.quit)
+        self.upscale_worker.finished.connect(self.upscale_worker.deleteLater)
+        self.upscale_thread.finished.connect(self.upscale_thread.deleteLater)
+        
+        # 스레드 시작
+        self.upscale_thread.start()
+    
+    def _handle_main_upscale_result(self, result, progress):
+        """메인 이미지 업스케일 결과를 처리합니다."""
+        from PyQt6.QtCore import QBuffer, QIODevice
+        from PIL import Image
+        import io
+        
+        progress.close()
+        
+        if result['status'] == 'success':
+            # QPixmap을 PIL Image로 변환
+            upscaled_pixmap = result['image']
+            
+            # raw_bytes가 있으면 그대로 사용, 없으면 QPixmap에서 변환
+            if 'raw_bytes' in result and result['raw_bytes']:
+                image_data = result['raw_bytes']
+            else:
+                # QBuffer를 사용하여 QPixmap을 bytes로 변환
+                qbuffer = QBuffer()
+                qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                upscaled_pixmap.save(qbuffer, "PNG")
+                image_data = qbuffer.data().data()
+                qbuffer.close()
+            
+            # bytes를 PIL Image로 변환
+            buffer = io.BytesIO(image_data)
+            upscaled_image = Image.open(buffer)
+            
+            # 기존 메타데이터 복사
+            info_text = self.current_history_item.info_text + f"\nUpscaled: 2x ({upscaled_pixmap.width()}x{upscaled_pixmap.height()})"
+            metadata = self.current_history_item.metadata.copy() if hasattr(self.current_history_item, 'metadata') else {}
+            metadata['upscaled'] = True
+            metadata['upscale_factor'] = 2
+            
+            # source_row 가져오기 (원본 이미지의 생성 정보)
+            source_row = self.current_history_item.source_row if hasattr(self.current_history_item, 'source_row') else None
+            
+            # 히스토리에 추가 (raw_bytes 포함)
+            self.add_to_history(upscaled_image, image_data, info_text, source_row)
+            # 성공 메시지 제거 - 콘솔에만 출력
+            print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+        else:
+            self._show_styled_message_main("업스케일 실패", result['message'], 'critical')
 
     # [신규] 전체 다운로드 작업을 시작하는 메서드
     def start_download_all(self, clear_after=False):
@@ -1700,24 +2717,24 @@ class ImageWindow(QWidget):
         items_to_save.reverse() # 오래된 이미지부터 순서대로 저장
 
         self.worker_thread = QThread()
-        self.downloader = AllImagesDownloader()
+        # ✅ ImageCrudController 전달
+        self.downloader = AllImagesDownloader(self.image_crud)
         self.downloader.moveToThread(self.worker_thread)
 
         self.downloader.progress_updated.connect(self.on_download_progress)
-        
+
         # 완료 후 동작 결정
         if clear_after:
             self.downloader.finished.connect(self.on_download_finished_and_clear)
         else:
             self.downloader.finished.connect(self.on_download_finished)
 
+        # ✅ 간소화된 run() 시그니처 (save_path, save_counter 제거)
         self.worker_thread.started.connect(lambda: self.downloader.run(
             items_to_save,
-            self.app_context.session_save_path,
-            self.save_as_webp_checkbox.isChecked(),
-            self.save_counter
+            self.save_as_webp_checkbox.isChecked()
         ))
-        
+
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.advanced_button.setEnabled(False)
         self.save_button.setEnabled(False)
@@ -1729,7 +2746,7 @@ class ImageWindow(QWidget):
 
     def on_download_finished(self, saved_count):
         self.app_context.main_window.status_bar.showMessage(f"✅ 전체 다운로드 완료. {saved_count}개 파일 저장됨.", 5000)
-        self.save_counter += saved_count
+        # ✅ 카운터 증가 제거 (ImageCrudController가 자동 처리)
         self.advanced_button.setEnabled(True)
         self.save_button.setEnabled(True)
         if self.worker_thread: self.worker_thread.quit()
@@ -1738,13 +2755,329 @@ class ImageWindow(QWidget):
         self.on_download_finished(saved_count)
         self.image_history_window.clear_all_items()
 
+    def clear_history_only(self):
+        """다운로드 없이 히스토리만 정리하고 가비지 콜렉션을 수행합니다."""
+        import gc
+        
+        if not self.image_history_window.history_widgets:
+            self.app_context.main_window.status_bar.showMessage("⚠️ 정리할 히스토리가 없습니다.", 3000)
+            return
+        
+        # 히스토리 정리
+        self.image_history_window.clear_all_items()
+        
+        # 가비지 콜렉션 수행
+        gc.collect()
+        
+        # 상태 메시지 표시
+        self.app_context.main_window.status_bar.showMessage("🧹 히스토리 정리 완료", 3000)
+
+    def create_memory_management_section(self):
+        """메모리 관리 섹션을 메뉴에 추가합니다."""
+        # 메모리 관리 위젯 컨테이너
+        memory_widget = QWidget()
+        memory_layout = QVBoxLayout(memory_widget)
+        memory_layout.setContentsMargins(10, 5, 10, 5)
+        memory_layout.setSpacing(5)
+        
+        # 섹션 제목
+        title_label = QLabel("🧠 메모리 관리")
+        title_label.setStyleSheet(f"""
+            font-size: {get_scaled_font_size(16)}px;
+            font-weight: bold;
+            color: {DARK_COLORS['text_primary']};
+            padding: 3px 0px;
+        """)
+        memory_layout.addWidget(title_label)
+        
+        # 히스토리 큐 제한 활성화 체크박스
+        self.history_limit_enabled = QCheckBox("히스토리 큐 제한 활성화")
+        self.history_limit_enabled.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.history_limit_enabled.toggled.connect(self.on_history_limit_toggled)
+        memory_layout.addWidget(self.history_limit_enabled)
+        
+        # 최대 히스토리 길이 설정
+        history_length_layout = QHBoxLayout()
+        history_length_label = QLabel("최대 히스토리 길이:")
+        history_length_label.setStyleSheet(f"""
+            color: {DARK_COLORS['text_primary']};
+            font-size: {get_scaled_font_size(14)}px;
+        """)
+        
+        self.max_history_length = QSpinBox()
+        self.max_history_length.setRange(100, 10000)
+        self.max_history_length.setSingleStep(100)
+        self.max_history_length.setValue(2000)
+        self.max_history_length.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 4px;
+                font-size: {get_scaled_font_size(14)}px;
+                min-width: 80px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border: 1px solid {DARK_COLORS['border']};
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """)
+        self.max_history_length.valueChanged.connect(self.save_memory_settings)
+        
+        history_length_layout.addWidget(history_length_label)
+        history_length_layout.addWidget(self.max_history_length)
+        history_length_layout.addStretch()
+        memory_layout.addLayout(history_length_layout)
+        
+        # 최대 히스토리 길이 도달시 동작 설정
+        action_label = QLabel("최대 히스토리 길이 도달시:")
+        action_label.setStyleSheet(f"""
+            color: {DARK_COLORS['text_primary']};
+            font-size: {get_scaled_font_size(14)}px;
+            font-weight: bold;
+            margin-top: 5px;
+        """)
+        memory_layout.addWidget(action_label)
+        
+        # 라디오 버튼 그룹
+        self.memory_action_group = QButtonGroup()
+        
+        self.auto_save_radio = QRadioButton("[1] 1장씩 자동저장+정리")
+        self.auto_delete_radio = QRadioButton("[2] 1장씩 저장없이 삭제")
+        self.stop_generation_radio = QRadioButton("[3] 자동생성 중단")
+        
+        # 기본값 설정
+        self.auto_save_radio.setChecked(True)
+        
+        radio_style = f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(13)}px;
+                padding: 2px;
+            }}
+            QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+            }}
+            QRadioButton::indicator::unchecked {{
+                border: 2px solid {DARK_COLORS['border']};
+                border-radius: 8px;
+                background-color: {DARK_COLORS['bg_secondary']};
+            }}
+            QRadioButton::indicator::checked {{
+                border: 2px solid {DARK_COLORS['accent_blue']};
+                border-radius: 8px;
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+        """
+        
+        self.auto_save_radio.setStyleSheet(radio_style)
+        self.auto_delete_radio.setStyleSheet(radio_style)
+        self.stop_generation_radio.setStyleSheet(radio_style)
+        
+        self.memory_action_group.addButton(self.auto_save_radio, 1)
+        self.memory_action_group.addButton(self.auto_delete_radio, 2)
+        self.memory_action_group.addButton(self.stop_generation_radio, 3)
+        self.memory_action_group.buttonClicked.connect(self.save_memory_settings)
+        
+        memory_layout.addWidget(self.auto_save_radio)
+        memory_layout.addWidget(self.auto_delete_radio)
+        memory_layout.addWidget(self.stop_generation_radio)
+        
+        # 초기 설정 비활성화
+        self.update_memory_controls_state(False)
+        
+        # 위젯을 메뉴에 추가
+        memory_action = QWidgetAction(self)
+        memory_action.setDefaultWidget(memory_widget)
+        self.advanced_menu.addAction(memory_action)
+        
+        # 설정 로드
+        self.load_memory_settings()
+
+    def on_history_limit_toggled(self, checked):
+        """히스토리 제한 체크박스 상태 변경 처리"""
+        self.update_memory_controls_state(checked)
+        self.save_memory_settings()
+    
+    def update_memory_controls_state(self, enabled):
+        """메모리 관리 컨트롤들의 활성화 상태 업데이트"""
+        self.max_history_length.setEnabled(enabled)
+        self.auto_save_radio.setEnabled(enabled)
+        self.auto_delete_radio.setEnabled(enabled)
+        self.stop_generation_radio.setEnabled(enabled)
+    
+    def save_memory_settings(self):
+        """메모리 관리 설정 저장"""
+        settings = {
+            'history_limit_enabled': self.history_limit_enabled.isChecked(),
+            'max_history_length': self.max_history_length.value(),
+            'memory_action': self.memory_action_group.checkedId()
+        }
+        
+        # 설정 파일에 저장
+        settings_path = Path("save/memory_management.json")
+        settings_path.parent.mkdir(exist_ok=True)
+        
+        try:
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"메모리 설정 저장 실패: {e}")
+    
+    def load_memory_settings(self):
+        """메모리 관리 설정 로드"""
+        settings_path = Path("save/memory_management.json")
+        
+        if not settings_path.exists():
+            return
+        
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # 설정 적용
+            self.history_limit_enabled.setChecked(settings.get('history_limit_enabled', False))
+            self.max_history_length.setValue(settings.get('max_history_length', 2000))
+            
+            action_id = settings.get('memory_action', 1)
+            button = self.memory_action_group.button(action_id)
+            if button:
+                button.setChecked(True)
+            
+            # 컨트롤 상태 업데이트
+            self.update_memory_controls_state(self.history_limit_enabled.isChecked())
+            
+        except Exception as e:
+            print(f"메모리 설정 로드 실패: {e}")
+
+    def check_and_apply_history_limit(self):
+        """히스토리 큐 제한을 체크하고 필요시 동작을 수행합니다."""
+        # 히스토리 제한이 비활성화되어 있으면 아무것도 하지 않음
+        if not hasattr(self, 'history_limit_enabled') or not self.history_limit_enabled.isChecked():
+            return
+        
+        # 현재 히스토리 개수가 제한을 초과하는지 확인
+        current_count = len(self.image_history_window.history_widgets)
+        max_limit = self.max_history_length.value()
+        
+        if current_count <= max_limit:
+            return  # 제한 내에 있으면 아무것도 하지 않음
+        
+        # 제한을 초과했을 때의 동작 결정
+        action_id = self.memory_action_group.checkedId()
+        
+        if action_id == 1:  # [1] 1장씩 자동저장+정리
+            self.handle_auto_save_and_clear()
+        elif action_id == 2:  # [2] 1장씩 저장없이 삭제
+            self.handle_auto_delete_only()
+        elif action_id == 3:  # [3] 자동생성 중단
+            self.handle_stop_generation()
+        
+        # 상태 메시지 표시
+        self.app_context.main_window.status_bar.showMessage(
+            f"🧠 히스토리 제한 도달 ({current_count}/{max_limit}) - 동작 수행됨", 3000
+        )
+
+    def handle_auto_save_and_clear(self):
+        """[1] 1장씩 자동저장+정리 동작"""
+        # 가장 오래된 히스토리 아이템 (맨 앞)을 가져옴
+        if not self.image_history_window.history_widgets:
+            return
+
+        oldest_widget = self.image_history_window.history_widgets[-1]
+        oldest_item = oldest_widget.history_item
+
+        # 해당 이미지를 저장 (중복 체크 추가)
+        if oldest_item.raw_bytes:
+            # 파일 경로가 있고, 실제 파일도 존재하면 저장 건너뛰기
+            if oldest_item.filepath and os.path.exists(oldest_item.filepath):
+                print(f"🧠 자동저장 건너뛰기: 이미 저장된 파일입니다 - {os.path.basename(oldest_item.filepath)}")
+            else:
+                is_webp = self.save_as_webp_checkbox.isChecked()
+
+                # 🆕 분류 정보 생성
+                classification_info = self._create_classification_info(oldest_item)
+
+                # ✅ ImageCrudController를 통한 저장 (분류 정보 포함)
+                success, filepath, error = self.image_crud.save_image(
+                    image_bytes=oldest_item.raw_bytes,
+                    as_webp=is_webp,
+                    classification_info=classification_info
+                )
+
+                if success:
+                    oldest_item.filepath = filepath  # 저장 성공 시 HistoryItem에 파일 경로 업데이트
+                    print(f"🧠 자동저장 완료: {os.path.basename(filepath)}")
+                else:
+                    print(f"🧠 자동저장 실패: {error}")
+
+        # 해당 아이템 삭제
+        self.image_history_window.on_item_delete_requested(oldest_widget)
+
+        # 가비지 콜렉션 수행
+        import gc
+        gc.collect()
+
+    def handle_auto_delete_only(self):
+        """[2] 1장씩 저장없이 삭제 동작"""
+        # 가장 오래된 히스토리 아이템 삭제
+        if not self.image_history_window.history_widgets:
+            return
+        
+        oldest_widget = self.image_history_window.history_widgets[-1]
+        self.image_history_window.on_item_delete_requested(oldest_widget)
+        
+        # 가비지 콜렉션 수행
+        import gc
+        gc.collect()
+        print("🧠 자동삭제 완료: 가장 오래된 히스토리 아이템 제거됨")
+
+    def handle_stop_generation(self):
+        """[3] 자동생성 중단 동작"""
+        # 생성 컨트롤러에 중단 신호 전송
+        if hasattr(self.app_context, 'generation_controller'):
+            generation_controller = self.app_context.generation_controller
+            if hasattr(generation_controller, 'stop_generation'):
+                generation_controller.stop_generation()
+                print("🧠 자동생성 중단: 히스토리 제한 도달로 인한 중단")
+        
+        # 자동 생성 체크박스 비활성화
+        if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'generation_checkboxes'):
+            auto_generate_checkbox = self.app_context.main_window.generation_checkboxes.get("자동 생성")
+            if auto_generate_checkbox and auto_generate_checkbox.isChecked():
+                auto_generate_checkbox.setChecked(False)
+        
+        # 메인 윈도우에 경고 메시지 표시
+        if hasattr(self.app_context, 'main_window'):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self.app_context.main_window, 
+                "히스토리 제한 도달", 
+                f"히스토리가 최대 길이({self.max_history_length.value()})에 도달하여 자동생성을 중단합니다.\n\n"
+                "히스토리를 정리하거나 제한 설정을 조정해주세요."
+            )
+
     def update_advanced_menu_state(self):
         """[신규] 고급 메뉴가 표시되기 직전에 호출되어 메뉴 항목의 활성화 상태를 결정합니다."""
         is_history_not_empty = bool(self.image_history_window.history_widgets)
         
-        # 메뉴에 포함된 모든 액션들의 활성화 상태를 현재 히스토리 상태에 따라 설정
+        # 메뉴에 포함된 액션들의 활성화 상태를 설정
+        # 히스토리 관련 액션들만 히스토리 상태에 따라 활성화/비활성화
         for action in self.advanced_menu.actions():
-            action.setEnabled(is_history_not_empty)
+            if isinstance(action, QWidgetAction):
+                # 메모리 관리 섹션(QWidgetAction)은 항상 활성화
+                action.setEnabled(True)
+            elif action.isSeparator():
+                # 구분선은 건드리지 않음
+                continue
+            else:
+                # 일반 액션들(다운로드, 정리 등)은 히스토리 상태에 따라 활성화
+                action.setEnabled(is_history_not_empty)
 
     def _open_file_in_explorer(self, filepath: str):
         """지정된 파일 경로를 각 운영체제에 맞는 파일 탐색기에서 엽니다."""

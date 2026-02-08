@@ -282,9 +282,6 @@ robot ears
 extra ears
 ear piercing
 ear protection
-earrings
-single earring
-headphones
 object behind ear
 roots
 alternate hair color
@@ -412,14 +409,10 @@ extra eyes
 no eyes
 covering own eyes
 bandage over one eye
-blindfold
-hat over eyes
-eyepatch
 eyelashes
 colored eyelashes
 fake eyelashes
 eyes visible through hair
-glasses
 makeup
 eyeliner
 eyeshadow
@@ -516,122 +509,11 @@ rabbit furry
 panda furry
 tiger furry
 furry
-burglar
-gyaru
-construction worker
-miner
-florist
-lumberjack
-librarian
-croupier
-merchant
-shepherd
-mechanic
-politician
-terrorist
-judge
-student
-hacker
-salaryman
-office lady
-guard
-police
-janitor
-soldier
-standard-bearer
-officer
-lifeguard
-sailor
-firefighter
-spy
-astronaut
-chef
-conductor
-bodyguard
-bartender
-waiter
-waitress
-butler
-cashier
-maid
-nurse maid
-ladies maid
-military maid
-victoria maid
-cybermaid
-steampunk maid
-japanese-style maid
-china-style maid
-classic maid
-kitchen maid
-faller maid
-french maid
-house maid
-housekeeper
-scientist
-chemist
-engineer
-geisha
-idol
-actor
-actress
-musician
-painter
-artist
-athlete
-footballer
-a basketball player.
-baseball player
-volleyball player
-golfer
-tennis player
-cyclist
-teacher
-math teacher
-science teacher
-english teacher
-health teacher
-school nurse
-driver
-pilot
-train attendant
-train conductor
-flight attendant
-trucker
-doctor
-nurse
-dentist
-slave
-farmer
-queen
-king
-prisoner
-dominatrix
-knight
-ninja
-witch
-wizard
-miko
-samurai
-priest
-nun
-monk
-alchemist
-warrior
-slut
-skank
-bitch
-whore
-call girl
-stripper
-prostitution
-porno actor
 yellow hair
 sky blue hair
 ombre
 sombre
 absurdly short hair
-bluntbangs
 gray hair streak
 white hair streak
 brown hair streak
@@ -667,7 +549,6 @@ spade-shaped pupils
 clover-shaped pupils
 blanked eyes
 empty eyes
-sconstricted pupils
 bloodshot pupils
 flaming pupils
 glowing pupils
@@ -882,12 +763,6 @@ pegasus wings
 long horns
 weasel tail
 pokemon tail
-hugging own tail
-orange wings
-ox horns
-goat tail
-expressive tail
-forked tail
 hugging own tail
 orange wings
 ox horns

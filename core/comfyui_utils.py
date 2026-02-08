@@ -60,23 +60,38 @@ class ComfyUIAPIUtils:
     
     @staticmethod
     def get_model_list(url: str) -> List[str]:
-        """CheckpointLoaderSimple에서 모델 목록 추출"""
+        """CheckpointLoaderSimple + UNETLoader에서 모델 목록 추출 (중복 제거)"""
         try:
             object_info = ComfyUIAPIUtils.get_object_info(url)
             if not object_info:
                 return []
-            
-            # CheckpointLoaderSimple 노드에서 ckpt_name 옵션 추출
+
+            all_models = set()  # 중복 제거를 위한 set
+
+            # 1. CheckpointLoaderSimple 모델 수집
             checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-            input_info = checkpoint_loader.get('input', {})
-            ckpt_name_info = input_info.get('required', {}).get('ckpt_name', [])
-            
-            if isinstance(ckpt_name_info, list) and len(ckpt_name_info) > 0:
-                # 첫 번째 요소가 모델 목록
-                models = ckpt_name_info[0]
-                if isinstance(models, list):
-                    return models
-            
+            ckpt_input = checkpoint_loader.get('input', {}).get('required', {})
+            ckpt_info = ckpt_input.get('ckpt_name', [])
+
+            if isinstance(ckpt_info, list) and len(ckpt_info) > 0:
+                checkpoint_models = ckpt_info[0]
+                if isinstance(checkpoint_models, list):
+                    all_models.update(checkpoint_models)
+
+            # 2. UNETLoader 모델 수집
+            unet_loader = object_info.get('UNETLoader', {})
+            unet_input = unet_loader.get('input', {}).get('required', {})
+            unet_info = unet_input.get('unet_name', [])
+
+            if isinstance(unet_info, list) and len(unet_info) > 0:
+                unet_models = unet_info[0]
+                if isinstance(unet_models, list):
+                    all_models.update(unet_models)
+
+            # 3. 정렬하여 반환
+            if all_models:
+                return sorted(list(all_models))
+
             return []
         except Exception as e:
             print(f"❌ ComfyUI 모델 목록 조회 실패: {e}")

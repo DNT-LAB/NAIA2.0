@@ -123,7 +123,6 @@ secrets.json
 *.pickle
 *.h5
 *.hdf5
-*.pt
 *.pth
 
 # 압축 파일
@@ -144,3 +143,40 @@ tabs/storyteller/save.json
 CLAUDE.md
 app_settings.json
 .claude/settings.local.json
+/tabs/assets/characters
+data/artist_thumbnail.json
+data/artist_thumbnail_nai.json
+GEMINI.md
+*.md
+!CLAUDE.md
+!**/.claude/*.md
+NAIA_generation_old.py
+/tabs/assets/backgrounds
+*.png
+/tabs/assets/Preset
+artist_tab_old.py
+artist_thumb/banned_artist.txt
+artist_thumb/generate_options.json
+temp_image.png
+*.naiv4vibebundle
+*.naiv4vibe
+desktop.ini
+
+# EZ Mode 데이터 분리 구조
+# - data/ezmode/: GitHub 포함 (JSON 파일들)
+# - data/.ezmode/: Hugging Face 전용 (matrices만)
+data/.ezmode/
+
+# Experimental folder
+.experimental/
+/data/quick_search
+data/NAIA_event_dataset_1girl.parquet
+data/NAIA_event_dataset_personal.json
+data/NAIA_event_dataset_personal.parquet
+tabs/turbo_event_sequence/NAIA_event_dataset_v4.parquet
+tabs/turbo_event_sequence/.claude/PRD_EVENT_VIEWER.md
+tabs/studio/.claude/STUDIO_PRESET_SRS.md
+data/tagger/model.onnx
+data/tagger/selected_tags.csv
+
+!/workflows/workflow.png

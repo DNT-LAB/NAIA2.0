@@ -1,6 +1,16 @@
 import __init__
+import core.dll_fix  # Windows DLL 로드 문제 해결
 import sys
 import os
+import subprocess
+
+# 과학 연산 라이브러리 스레드 제한 (메모리 누수 방지용)
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+
 import json
 import pandas as pd
 import random
@@ -11,7 +21,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
     QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox, QSpinBox, QSlider, QDoubleSpinBox,
-    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog
+    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy, QRadioButton
 )
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
@@ -21,9 +31,12 @@ from ui.scaling_manager import get_scaling_manager, get_scaled_font_size, get_sc
 from ui.scaling_settings_dialog import ScalingSettingsDialog
 from ui.collapsible import CollapsibleBox
 from ui.right_view import RightView
+from ui.temp_generation_window import TempGenerationWindow
 from ui.resolution_manager_dialog import ResolutionManagerDialog
-from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor
-from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData
+from ui.remote_window import RemoteWindow
+from ui.interactive_window import InteractiveWindow
+from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
+from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
 from core.autocomplete_manager import AutoCompleteManager
@@ -34,6 +47,8 @@ from utils.load_generation_params import GenerationParamsManager
 from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
 from core.main_controller import MainController
+from utils.token_calculator import get_token_calculator
+from core.comfyui_utils import ComfyUIAPIUtils
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
@@ -49,7 +64,7 @@ def setup_webengine():
     # QApplication 생성 전 필수 설정
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
-    os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
+    #os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
     
     # WebEngine 모듈 사전 로드
     try:
@@ -119,19 +134,11 @@ class ImageDownloadThread(QThread):
             # 이미지 데이터를 메모리로 읽기
             image_data = BytesIO(response.content)
             pil_image = Image.open(image_data)
-            
-            # RGB로 변환 (RGBA나 다른 모드일 수 있음)
-            if pil_image.mode in ('RGBA', 'LA'):
-                # 투명 배경을 흰색으로 변환
-                background = Image.new('RGB', pil_image.size, (255, 255, 255))
-                if pil_image.mode == 'RGBA':
-                    background.paste(pil_image, mask=pil_image.split()[-1])
-                else:
-                    background.paste(pil_image, mask=pil_image.split()[-1])
-                pil_image = background
-            elif pil_image.mode != 'RGB':
-                pil_image = pil_image.convert('RGB')
-            
+
+            # 이미지 모드를 유지 (RGBA의 경우 stealth PNG 메타데이터 보존)
+            # RGB/RGBA/기타 모드 모두 그대로 전달
+            print(f"✅ ImageDownloadThread: 이미지 다운로드 완료, 모드 = {pil_image.mode}")
+
             self.image_downloaded.emit(pil_image)
             
         except requests.exceptions.RequestException as e:
@@ -139,6 +146,152 @@ class ImageDownloadThread(QThread):
         except Exception as e:
             self.download_failed.emit(f"이미지 처리 오류: {str(e)}")
 
+
+class GitHubUpdateChecker(QThread):
+    """GitHub 저장소의 최신 커밋을 확인하는 스레드"""
+    update_available = pyqtSignal(str, str, str)  # latest_commit_sha, commit_message, commit_date
+
+    def __init__(self, owner, repo, branch, current_sha):
+        super().__init__()
+        self.owner = owner
+        self.repo = repo
+        self.branch = branch
+        self.current_sha = current_sha
+        # 특정 브랜치의 최신 커밋을 가져오는 API URL
+        self.request_url = f"https://api.github.com/repos/{self.owner}/{self.repo}/commits?sha={self.branch}&per_page=1"
+        self.is_running = True
+
+    def run(self):
+        if not self.current_sha:
+            print("⚠️ 로컬 버전 정보(SHA)가 없어 업데이트를 확인할 수 없습니다.")
+            return
+
+        try:
+            headers = {'User-Agent': 'NAIA-Update-Checker'}
+            response = requests.get(self.request_url, headers=headers, timeout=15)
+            response.raise_for_status()  # 200 OK가 아니면 예외 발생
+
+            latest_commit_data = response.json()[0]
+            latest_sha = latest_commit_data['sha'][:7]  # 짧은 형태로 저장
+            commit_message = latest_commit_data['commit']['message'].split('\n')[0]  # 첫 줄만 사용
+            
+            # 커밋 날짜 파싱 (ISO 8601 형식을 YYYYMMDD로 변환)
+            commit_date_str = latest_commit_data['commit']['author']['date']
+            from datetime import datetime
+            commit_date = datetime.fromisoformat(commit_date_str.replace('Z', '+00:00'))
+            commit_date_formatted = commit_date.strftime('%Y%m%d')
+
+            print(f"🔍 업데이트 확인 ({self.branch} 브랜치): 현재={self.current_sha[:7]}, 최신={latest_sha}")
+
+            # 항상 최신 버전 정보를 emit (같든 다르든)
+            self.update_available.emit(latest_sha, commit_message, commit_date_formatted)
+            
+            if self.current_sha[:7] != latest_sha:
+                print(f"✨ 새로운 업데이트 발견! {latest_sha}: {commit_message}")
+        except requests.exceptions.Timeout:
+            print("⏱️ GitHub API 요청 시간 초과 (네트워크가 느리거나 오프라인 상태)")
+        except requests.exceptions.ConnectionError:
+            print("🔌 네트워크 연결 오류 (오프라인 상태이거나 GitHub에 접속할 수 없음)")
+        except requests.exceptions.RequestException as e:
+            print(f"❌ GitHub API 요청 실패: {str(e)[:100]}")  # 긴 오류 메시지 제한
+        except Exception as e:
+            print(f"❌ 업데이트 확인 중 예기치 않은 오류: {str(e)[:100]}")
+
+    def stop(self):
+        self.is_running = False
+
+
+class PromptHighlighter(QSyntaxHighlighter):
+    """프롬프트 텍스트 하이라이터
+
+    규칙 1: '#'로 시작해서 쉼표까지 → 연노랑색 텍스트
+    규칙 2: '-'로 시작하고 [:6] 안에 '::'가 없으면 쉼표까지 → 연회색 텍스트
+    규칙 3: ':begin' 토큰 → 하늘색
+    규칙 4: ':seq' 토큰 → 조금 진한 연노랑색
+    규칙 5: ':end' 토큰 → 연보라색
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # 연노랑색 포맷 (# 주석용)
+        self.comment_format = QTextCharFormat()
+        self.comment_format.setForeground(QColor("#FFFFE0"))  # 연노랑색 텍스트
+
+        # 연회색 포맷 (- 음수 가중치용)
+        self.negative_weight_format = QTextCharFormat()
+        self.negative_weight_format.setForeground(QColor("#999999"))  # 연회색 텍스트
+
+        # 🆕 시퀀스 토큰 포맷
+        self.begin_format = QTextCharFormat()
+        self.begin_format.setForeground(QColor("#87CEEB"))  # 하늘색
+
+        self.seq_format = QTextCharFormat()
+        self.seq_format.setForeground(QColor("#FFD700"))  # 조금 진한 연노랑색 (골드)
+
+        self.end_format = QTextCharFormat()
+        self.end_format.setForeground(QColor("#DDA0DD"))  # 연보라색 (플럼)
+
+    def highlightBlock(self, text: str):
+        """각 텍스트 블록(줄)에 대해 하이라이팅 적용"""
+        # 🆕 먼저 시퀀스 토큰 하이라이팅 적용 (우선순위 높음)
+        self._highlight_sequence_tokens(text)
+
+        # 기존 로직: 세그먼트 기반 하이라이팅
+        pos = 0
+
+        while pos < len(text):
+            # 현재 위치에서 다음 쉼표 찾기
+            comma_index = text.find(',', pos)
+
+            if comma_index == -1:
+                # 더 이상 쉼표가 없으면 나머지 전체 확인
+                segment = text[pos:].strip()
+                self._apply_format_to_segment(text, pos, len(text), segment)
+                break
+            else:
+                # 쉼표를 찾았으면 해당 구간 확인
+                segment = text[pos:comma_index].strip()
+                self._apply_format_to_segment(text, pos, comma_index + 1, segment)
+
+                # 다음 구간으로 이동 (쉼표 다음부터)
+                pos = comma_index + 1
+
+    def _highlight_sequence_tokens(self, text: str):
+        """🆕 시퀀스 토큰(:begin, :seq, :end) 하이라이팅"""
+        import re
+
+        # :begin 토큰 찾기 (대소문자 무시)
+        for match in re.finditer(r':begin\b', text, re.IGNORECASE):
+            self.setFormat(match.start(), match.end() - match.start(), self.begin_format)
+
+        # :seq 토큰 찾기 (숫자/문자 포함, 대소문자 무시)
+        # 예: :seq1, :seqX, :seqabc 등
+        for match in re.finditer(r':seq[a-z0-9]*\b', text, re.IGNORECASE):
+            self.setFormat(match.start(), match.end() - match.start(), self.seq_format)
+
+        # :end 토큰 찾기 (대소문자 무시)
+        for match in re.finditer(r':end\b', text, re.IGNORECASE):
+            self.setFormat(match.start(), match.end() - match.start(), self.end_format)
+
+    def _apply_format_to_segment(self, text: str, start_pos: int, end_pos: int, segment: str):
+        """세그먼트에 포맷 적용"""
+        if not segment:
+            return
+
+        # 규칙 1: '#'으로 시작하면 연노랑색
+        if segment.startswith('#'):
+            self.setFormat(start_pos, end_pos - start_pos, self.comment_format)
+        # 규칙 2: '-'로 시작하고 [:6] 안에 '::'가 없으면 연회색
+        elif segment.startswith('-'):
+            # 원본 텍스트에서 실제 세그먼트 위치 찾기
+            actual_segment_start = text.find(segment, start_pos)
+            if actual_segment_start != -1:
+                # '-' 이후 최대 6자 확인
+                check_range = segment[:7] if len(segment) >= 7 else segment
+                if '::' not in check_range:
+                    # '::'가 없으면 쉼표까지 연회색 처리
+                    self.setFormat(start_pos, end_pos - start_pos, self.negative_weight_format)
 
 class PromptTextEdit(QTextEdit):
     def __init__(self, *args, **kwargs):
@@ -195,7 +348,7 @@ class PromptTextEdit(QTextEdit):
             return
             
         # 프로그레스 다이얼로그 생성
-        self.progress_dialog = QProgressDialog("이미지 다운로드 중...", "취소", 0, 0, self)
+        self.progress_dialog = QProgressDialog("이미지 다운로드 중... \n복사 붙여넣기를 권장합니다", "취소", 0, 0, self)
         self.progress_dialog.setWindowTitle("이미지 다운로드")
         self.progress_dialog.setModal(True)
         self.progress_dialog.show()
@@ -234,6 +387,7 @@ class PromptTextEdit(QTextEdit):
         self.on_download_finished()
 
     def show_img2img_popup(self, pil_image: Image.Image):
+        print(f"🔍 show_img2img_popup 호출: 이미지 모드 = {pil_image.mode}, 크기 = {pil_image.size}")
         main_window = self.window()
         popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
 
@@ -242,6 +396,8 @@ class PromptTextEdit(QTextEdit):
             popup.img2img_requested.connect(main_window.activate_img2img_panel)
         if hasattr(main_window, 'activate_inpaint_mode'):
             popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
+        if hasattr(main_window, 'activate_vibe_transfer'):
+            popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
 
         # 팝업 위치 조정 및 실행
         cursor_pos = QCursor.pos()
@@ -284,13 +440,236 @@ class PromptTextEdit(QTextEdit):
         
         super().dragMoveEvent(event)
 
+
+class TempWindowManager:
+    """임시 생성 창 관리자 - 여러 개의 임시 창 생명주기 관리"""
+
+    def __init__(self, main_window):
+        """
+        Args:
+            main_window: ModernMainWindow 인스턴스
+        """
+        self.main_window = main_window
+        self.temp_windows = {}  # {window_id: TempGenerationWindow}
+        self.next_window_id = 1
+
+    def create_temp_window(self):
+        """
+        새 임시 창 생성 및 초기화
+
+        Returns:
+            TempGenerationWindow: 생성된 임시 창 인스턴스
+        """
+        window_id = self.next_window_id
+        self.next_window_id += 1
+
+        # 임시 창 생성 (완전 독립)
+        temp_window = TempGenerationWindow(
+            window_id=window_id,
+            app_context=self.main_window.app_context,
+            parent=None  # 완전 독립
+        )
+
+        # 시그널 연결
+        temp_window.generate_requested.connect(
+            self.main_window.on_temp_window_generate_requested
+        )
+        temp_window.params_update_requested.connect(
+            self.main_window.apply_temp_params
+        )
+        temp_window.random_prompt_requested.connect(
+            self.handle_random_prompt_request
+        )
+        temp_window.window_closing.connect(
+            self.main_window.on_temp_window_closing
+        )
+
+        # 추적 딕셔너리에 추가
+        self.temp_windows[window_id] = temp_window
+
+        # 창 표시 (독립 창으로)
+        temp_window.show()
+        temp_window.raise_()
+        temp_window.activateWindow()
+
+        print(f"✅ [TempWindowManager] 임시 창 #{window_id} 생성 완료 (총 {len(self.temp_windows)}개)")
+
+        return temp_window
+
+    def handle_random_prompt_request(self, window_id: int):
+        """
+        🆕 Issue 1 Fix: 임시 창에서 Random/Next Prompt 요청 처리
+
+        메인 UI를 오염시키지 않고 독립적으로 프롬프트를 생성하여 임시 창에 반영합니다.
+
+        Args:
+            window_id: 요청한 창의 ID
+        """
+        print(f"[TempWindowManager] 임시 창 #{window_id}에서 Random/Next Prompt 요청 수신")
+
+        # 임시 창 확인
+        temp_window = self.temp_windows.get(window_id)
+        if not temp_window:
+            print(f"⚠️ [TempWindowManager] 임시 창 #{window_id}를 찾을 수 없습니다")
+            return
+
+        # 프롬프트 고정 체크박스 상태 확인
+        is_fixed = temp_window.prompt_fixed_checkbox.isChecked()
+
+        # 독립적인 프롬프트 생성 (메인 UI 메서드 사용하되 결과만 가져옴)
+        # 메인 UI의 프롬프트를 임시 저장
+        original_main_prompt = self.main_window.main_prompt_textedit.toPlainText()
+        original_negative_prompt = self.main_window.negative_prompt_textedit.toPlainText()
+
+        try:
+            # 🆕 FR-3: 메인 PromptEngineeringModule 훅 비활성화 (임시 창 자체 훅 사용)
+            self.main_window.app_context.skip_prompt_engineering_hook = True
+            print("[DEBUG] ✅ skip_prompt_engineering_hook = True 설정")
+
+            # 와일드카드 단독 모드 체크
+            is_wildcard_standalone = hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked()
+
+            if is_wildcard_standalone:
+                # 와일드카드 단독 모드: trigger_random_prompt()를 호출하지 않고 빈 프롬프트 사용
+                print("[DEBUG] 와일드카드 단독 모드: 랜덤 프롬프트 생성 건너뛰기")
+                new_main_prompt = ""  # 빈 프롬프트
+                new_negative_prompt = self.main_window.negative_prompt_textedit.toPlainText()
+            else:
+                # 일반 모드: 메인 UI의 프롬프트 생성 메서드 호출
+                if hasattr(self.main_window, 'trigger_random_prompt'):
+                    self.main_window.trigger_random_prompt()
+                else:
+                    print(f"⚠️ [TempWindowManager] MainWindow에 trigger_random_prompt 메서드가 없습니다")
+                    return
+
+                # 생성된 프롬프트 가져오기
+                new_main_prompt = self.main_window.main_prompt_textedit.toPlainText()
+                new_negative_prompt = self.main_window.negative_prompt_textedit.toPlainText()
+
+                print(f"[DEBUG] 메인 UI에서 생성된 프롬프트: {new_main_prompt[:50]}...")
+
+            # 🆕 FR-3: 임시 창의 프롬프트 엔지니어링 훅 수동 실행
+            if hasattr(temp_window, 'prompt_engineering_tab'):
+                print(f"[DEBUG] 임시 창 프롬프트 엔지니어링 훅 실행 중...")
+
+                # PromptContext 생성
+                from core.prompt_context import PromptContext
+                # pd는 이미 파일 상단에서 전역 import됨 (line 14)
+
+                # source_row 준비 (와일드카드 단독 모드 지원)
+                if hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked():
+                    # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
+                    empty_data = {
+                        'general': None,
+                        'character': None,
+                        'copyright': None,
+                        'artist': None,
+                        'meta': None
+                    }
+                    source_row = pd.Series(empty_data, name="wildcard_standalone")
+                    print(f"[DEBUG] 와일드카드 단독 모드: 빈 source_row 생성")
+                else:
+                    source_row = self.main_window.app_context.current_source_row
+                    if source_row is None:
+                        source_row = pd.Series({'general': None}, name="temp_window_random")
+
+                # tags 파싱 (쉼표로 분리)
+                input_tags = [tag.strip() for tag in new_main_prompt.split(',') if tag.strip()]
+
+                # PromptContext 초기화
+                temp_context = PromptContext(
+                    source_row=source_row,
+                    settings={},
+                    prefix_tags=[],
+                    main_tags=input_tags,
+                    postfix_tags=[]
+                )
+
+                # 수동 훅 실행
+                try:
+                    modified_context = temp_window.prompt_engineering_tab.execute_manual_hook(temp_context)
+
+                    # 수정된 태그를 다시 문자열로 결합
+                    all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+                    new_main_prompt = ', '.join(all_tags)
+
+                    print(f"[DEBUG] ✅ 임시 창 프롬프트 엔지니어링 적용 완료: {new_main_prompt[:50]}...")
+                except Exception as e:
+                    print(f"[DEBUG] ⚠️ 임시 창 프롬프트 엔지니어링 훅 실행 오류: {e}")
+            else:
+                print(f"[DEBUG] ⚠️ 임시 창에 prompt_engineering_tab이 없습니다")
+
+            # 임시 창에 프롬프트 업데이트
+            temp_window.update_prompts(new_main_prompt, new_negative_prompt)
+
+            print(f"[TempWindowManager] 임시 창 #{window_id} 프롬프트 업데이트 완료 (고정 모드: {is_fixed})")
+
+        finally:
+            # 🆕 FR-3: 메인 PromptEngineeringModule 훅 재활성화
+            self.main_window.app_context.skip_prompt_engineering_hook = False
+            print("[DEBUG] ✅ skip_prompt_engineering_hook = False 해제")
+
+            # 메인 UI 프롬프트 복원 (오염 방지)
+            self.main_window.main_prompt_textedit.setPlainText(original_main_prompt)
+            self.main_window.negative_prompt_textedit.setPlainText(original_negative_prompt)
+
+            print(f"[TempWindowManager] 메인 UI 프롬프트 복원 완료 (오염 방지)")
+
+    def close_temp_window(self, window_id: int):
+        """
+        임시 창 닫기 및 정리
+
+        Args:
+            window_id: 닫을 창의 ID
+        """
+        if window_id in self.temp_windows:
+            window = self.temp_windows[window_id]
+
+            # 창 닫기
+            window.close()
+
+            # deleteLater 호출하여 Qt 객체 정리
+            window.deleteLater()
+
+            # 딕셔너리에서 제거
+            del self.temp_windows[window_id]
+
+            print(f"🗑️ [TempWindowManager] 임시 창 #{window_id} 정리 완료 (남은 창: {len(self.temp_windows)}개)")
+
+    def cleanup_all_temp_windows(self):
+        """
+        모든 임시 창 강제 닫기 (메인 윈도우 닫을 때 호출)
+        """
+        window_ids = list(self.temp_windows.keys())
+
+        for window_id in window_ids:
+            self.close_temp_window(window_id)
+
+        print(f"🧹 [TempWindowManager] 모든 임시 창 정리 완료")
+
+
 class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NAIA v2.0.0 Dev")
+        # 기본 타이틀 설정 (Git 정보 없을 때 사용)
+        self.base_title = "NAIA v2.0.0 Dev 142"
+        self.setWindowTitle(self.base_title + " - 260203d")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
+        
+        # 업데이트 확인 스레드 변수 추가
+        self.update_checker_thread = None
+        self.github_repo_owner = "DNT-LAB"    # GitHub 사용자명
+        self.github_repo_name = "NAIA2.0"     # GitHub 저장소 이름
+        self.github_branch = "Dev0714"        # GitHub 브랜치
+        
+        # Git 정보 저장 변수
+        self.current_commit_sha = ""
+        self.current_commit_date = ""
+        self.latest_commit_sha = ""
+        self.latest_commit_date = ""
+        self.has_git = False
         
         self.set_initial_window_size()
         self.kr_tags_df = self._load_kr_tags()
@@ -323,6 +702,16 @@ class ModernMainWindow(QMainWindow):
 
         self.img2img_panel = Img2ImgPanel(self)
 
+        # TempWindowManager 초기화
+        self.temp_window_manager = TempWindowManager(self)
+
+        # EZ Mode 창 변수 초기화
+        self.ez_mode_window = None
+
+        # 🆕 임시 창 자동 종료를 위한 모드/모델 추적 변수
+        self._previous_api_mode = "NAI"
+        self._previous_nai_model = "NAID4.5F"
+
         # MainController 초기화 (UI 초기화 전에 생성)
         self.controller = MainController(self)
         self.scaling_manager.scaling_changed.connect(self.controller.on_scaling_changed)
@@ -346,7 +735,29 @@ class ModernMainWindow(QMainWindow):
         
         # AppContext에 모드 변경 이벤트 구독
         self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
+        self.app_context.subscribe_mode_swap(self._on_mode_changed_for_remote_tab)
+        self.app_context.subscribe_mode_swap(lambda *_: self._update_model_list_for_comfyui())
         
+        # 초기 토큰 카운트 업데이트
+        QTimer.singleShot(100, self.update_token_count)
+        QTimer.singleShot(100, self.update_negative_token_count)
+        
+        # CharacterModule 업데이트 시 토큰 카운트 업데이트
+        self.app_context.subscribe("character_changed", lambda: self.update_token_count())
+
+        # 큐 이벤트 구독 - 버튼 상태 자동 업데이트
+        def update_button_on_queue_event(_=None):
+            """큐 이벤트 발생 시 버튼 상태 업데이트"""
+            if hasattr(self, 'generation_controller') and self.generation_controller:
+                self.generation_controller._update_button_with_queue_size()
+
+        for queue_event in [
+            "queue_request_enqueued", "queue_request_dequeued",
+            "queue_queue_paused", "queue_queue_resumed",
+            "queue_queue_cleared", "queue_request_removed"
+        ]:
+            self.app_context.subscribe(queue_event, update_button_on_queue_event)
+
         # 초기 설정 로드 (NAI 모드)
         self.generation_params_manager.load_mode_settings("NAI")
 
@@ -366,9 +777,17 @@ class ModernMainWindow(QMainWindow):
         self.negative_prompt_textedit.viewport().installEventFilter(self)
 
         self.resolution_is_detected = False
-        
+
         # 초기화 완료 후 splitter stretch factor 업데이트
         QTimer.singleShot(100, self.update_splitter_stretch_factors)
+        # 초기 체크박스 색상 설정 (기본 모델에 따라)
+        QTimer.singleShot(300, self.update_naid_checkbox_colors)
+        
+        # 프로그램 시작 시 업데이트 확인 (UI 초기화 완료 후 충분한 시간 뒤에)
+        QTimer.singleShot(2000, self.check_for_updates)  # 2초 후 시작
+
+        # 🆕 멀티 NAI 계정 알림 (업데이트 확인 후)
+        QTimer.singleShot(3000, self._show_multi_account_notification)  # 3초 후 시작
 
     def apply_dynamic_styles(self):
         """동적 스타일시트 적용"""
@@ -441,8 +860,8 @@ class ModernMainWindow(QMainWindow):
         self.main_splitter.addWidget(left_panel)
         self.main_splitter.addWidget(self.image_window)
         # FHD 대응: 더 균형잡힌 패널 비율 (45:55)
-        self.main_splitter.setStretchFactor(0, 45)
-        self.main_splitter.setStretchFactor(1, 55)
+        self.main_splitter.setStretchFactor(0, 49)
+        self.main_splitter.setStretchFactor(1, 51)
 
         main_layout.addWidget(self.main_splitter)
 
@@ -471,6 +890,9 @@ class ModernMainWindow(QMainWindow):
 
             # [신규] 모듈 로드 완료 후 자동화 시그널 연결
             self.controller.connect_automation_signals()
+            
+            # E621 이벤트 모듈 시그널 연결
+            self.controller.connect_e621_event_signals()
 
             # 상태 메시지 업데이트
             loaded_count = len(self.middle_section_controller.module_instances)
@@ -500,23 +922,23 @@ class ModernMainWindow(QMainWindow):
         main_layout.setSpacing(6)
 
         # 🚀 핵심 수정: 단일 수직 스플리터로 통합
-        main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.setStyleSheet(CUSTOM["main_splitter"])
+        self.vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.vertical_splitter.setStyleSheet(CUSTOM["main_splitter"])
 
         # === 상단 영역: 검색 + 프롬프트 ===
         top_container = self.create_top_section()
-        main_splitter.addWidget(top_container)
+        self.vertical_splitter.addWidget(top_container)
 
         # === 중간 영역: 자동화 설정들 ===  
         middle_container = self.create_middle_section()
-        main_splitter.addWidget(middle_container)
+        self.vertical_splitter.addWidget(middle_container)
 
         # FHD 대응: 스플리터 비율 설정 (상단 45%, 중간 55%)
-        main_splitter.setStretchFactor(0, 45)
-        main_splitter.setStretchFactor(1, 55)
+        self.vertical_splitter.setStretchFactor(0, 45)
+        self.vertical_splitter.setStretchFactor(1, 55)
         
         # 메인 레이아웃에 스플리터 추가
-        main_layout.addWidget(main_splitter)
+        main_layout.addWidget(self.vertical_splitter)
         main_layout.insertWidget(1, self.img2img_panel)
 
         # === 하단 영역: 확장 가능한 생성 제어 영역 ===
@@ -539,6 +961,12 @@ class ModernMainWindow(QMainWindow):
 
         # 검색 및 필터링 섹션
         search_box = CollapsibleBox("프롬프트 검색 / 필터링 / API 관리")
+        self.search_collapsible_box = search_box  # 나중에 업데이트하기 위해 참조 저장
+        
+        # NAI 모드인지 확인하고 Anlas 표시
+        if self.app_context.current_api_mode == "NAI":
+            anlas = self.app_context.api_service.get_anlas()
+            search_box.update_anlas(anlas)
 
         # 전체 검색 레이아웃
         search_main_layout = QVBoxLayout()
@@ -629,10 +1057,57 @@ class ModernMainWindow(QMainWindow):
         
         rating_layout.addStretch(1)
 
+        # 검색 모드 라디오 버튼 (24.11 = max_129, 25.09 = max_149)
+        self.search_mode_2411 = QRadioButton("24.11")
+        self.search_mode_2411.setStyleSheet(f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                spacing: {get_scaled_size(5)}px;
+            }}
+            QRadioButton::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+        """)
+        self.search_mode_2411.setToolTip("24.11 데이터셋 (130개 파일, 빠른 검색)")
+        rating_layout.addWidget(self.search_mode_2411)
+
+        self.search_mode_2509 = QRadioButton("25.09")
+        self.search_mode_2509.setChecked(True)  # 기본값
+        self.search_mode_2509.setStyleSheet(f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                spacing: {get_scaled_size(5)}px;
+            }}
+            QRadioButton::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+        """)
+        self.search_mode_2509.setToolTip("25.09 데이터셋 (150개 파일, 최신 데이터)")
+        rating_layout.addWidget(self.search_mode_2509)
+
+        self.search_mode_1109 = QRadioButton("11-09")
+        self.search_mode_1109.setStyleSheet(f"""
+            QRadioButton {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                spacing: {get_scaled_size(5)}px;
+            }}
+            QRadioButton::indicator {{
+                width: {get_scaled_size(16)}px;
+                height: {get_scaled_size(16)}px;
+            }}
+        """)
+        self.search_mode_1109.setToolTip("11-09 신규 데이터 (20개 파일, tags_130~149)")
+        rating_layout.addWidget(self.search_mode_1109)
+
         self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(16)}px; margin-right: 10px;")
+        self.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(16)}px; margin-left: 10px; margin-right: 10px;")
         rating_layout.addWidget(self.progress_label)
-        
+
         self.search_btn = QPushButton("검색")
         self.search_btn.setStyleSheet(DARK_STYLES['primary_button'])
         rating_layout.addWidget(self.search_btn)
@@ -681,8 +1156,41 @@ class ModernMainWindow(QMainWindow):
         """)
         self.save_settings_btn.setToolTip("현재 모든 설정을 저장합니다")
         
-        self.restore_btn = QPushButton("복원")
+        self.restore_btn = QPushButton("⚙️ 복원")
         self.restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        
+        # 복원 버튼에 컨텍스트 메뉴 추가
+        self.restore_menu = QMenu(self)
+        menu_style = f"""
+            QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
+            QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
+            QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
+        """
+        self.restore_menu.setStyleSheet(menu_style)
+        
+        # 메뉴 액션들 추가
+        restore_search_action = QAction("🔄 검색결과 복원", self)
+        restore_search_action.triggered.connect(self.restore_search_results)
+        self.restore_menu.addAction(restore_search_action)
+        
+        load_parquet_action = QAction("📂 불러오기", self)
+        load_parquet_action.triggered.connect(self.load_custom_parquet)
+        self.restore_menu.addAction(load_parquet_action)
+        
+        merge_parquet_action = QAction("🔀 합치기", self)
+        merge_parquet_action.triggered.connect(self.merge_custom_parquet)
+        self.restore_menu.addAction(merge_parquet_action)
+        
+        export_parquet_action = QAction("💾 내보내기", self)
+        export_parquet_action.triggered.connect(self.export_custom_parquet)
+        self.restore_menu.addAction(export_parquet_action)
+        
+        save_execution_action = QAction("🚀 실행파일 저장", self)
+        save_execution_action.triggered.connect(self.save_to_execution_file)
+        self.restore_menu.addAction(save_execution_action)
+        
+        # 버튼에 메뉴 할당
+        self.restore_btn.setMenu(self.restore_menu)
         self.deep_search_btn = QPushButton("심층검색")
         self.deep_search_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         
@@ -692,9 +1200,21 @@ class ModernMainWindow(QMainWindow):
         top_layout.addWidget(self.search_result_frame)
         
         # 메인 프롬프트 창
-        prompt_tabs = QTabWidget()
-        prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
-        prompt_tabs.setMinimumHeight(100)
+        self.prompt_tabs = QTabWidget()
+        self.prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
+        self.prompt_tabs.setMinimumHeight(100)
+        
+        # 프롬프트 탭 분리 상태 추적
+        self.prompt_tabs_detached = False
+        self.prompt_tabs_window = None
+
+        # Custom API 창 분리 상태 추적
+        self.custom_api_detached = False
+        self.custom_api_window = None
+
+        # 탭 위젯에 우클릭 메뉴 추가
+        self.prompt_tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.prompt_tabs.customContextMenuRequested.connect(self.show_prompt_tabs_context_menu)
         
         main_prompt_widget = QWidget()
         negative_prompt_widget = QWidget()
@@ -707,6 +1227,7 @@ class ModernMainWindow(QMainWindow):
         
         # [수정] 메인 프롬프트 텍스트 위젯을 self 변수로 저장
         self.main_prompt_textedit = PromptTextEdit()
+        self.main_prompt_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.main_prompt_textedit.app_context = self.app_context # AppContext 주입
         self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.main_prompt_textedit.setPlaceholderText("메인 프롬프트를 입력하세요...")
@@ -715,21 +1236,165 @@ class ModernMainWindow(QMainWindow):
         self.main_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_prompt_textedit.customContextMenuRequested.connect(self.show_prompt_context_menu)
         self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
+
+        # PromptHighlighter 적용
+        self.main_prompt_highlighter = PromptHighlighter(self.main_prompt_textedit.document())
+
+        self.main_prompt_token_label = QLabel("Estimated Tokens : 0 (Main 0 + Character 0)")
+        main_prompt_layout.addWidget(self.main_prompt_token_label)
         
+        # Connect text change event to update token count
+        self.main_prompt_textedit.textChanged.connect(self.update_token_count)
+
         self.negative_prompt_textedit = PromptTextEdit()
+        self.negative_prompt_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
         self.negative_prompt_textedit.app_context = self.app_context
         self.negative_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.negative_prompt_textedit.setPlaceholderText("네거티브 프롬프트를 입력하세요...")
         self.negative_prompt_textedit.setMinimumHeight(100)
+        # 기본 QMenu 컨텍스트 메뉴 설정
+        self.negative_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.negative_prompt_textedit.customContextMenuRequested.connect(self.show_negative_prompt_context_menu)
         negative_prompt_layout.addWidget(self.negative_prompt_textedit)
         
-        prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
-        prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
-        top_layout.addWidget(prompt_tabs)
+        # 네거티브 프롬프트 토큰 카운트 라벨 추가
+        self.negative_prompt_token_label = QLabel("Estimated Tokens : 0")
+        negative_prompt_layout.addWidget(self.negative_prompt_token_label)
+        
+        # Connect negative prompt text change event to update token count
+        self.negative_prompt_textedit.textChanged.connect(self.update_negative_token_count)
+        
+        self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
+        self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
+
+        # 리모트 탭 추가 (클릭 시 새 창을 띄움)
+        remote_placeholder_widget = QWidget()
+        remote_placeholder_widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        self.prompt_tabs.addTab(remote_placeholder_widget, "리모트")
+        self.remote_tab_index = 2  # 리모트 탭의 인덱스
+        self.previous_tab_index = 0  # 이전 탭 인덱스 저장용
+        self.remote_window = None  # 리모트 창 참조
+        self.remote_window_open = False  # 리모트 창 열림 상태
+
+        # Interactive 탭 추가 (클릭 시 새 창을 띄움)
+        interactive_placeholder_widget = QWidget()
+        interactive_placeholder_widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        self.prompt_tabs.addTab(interactive_placeholder_widget, "🎨 Interactive")
+        self.interactive_tab_index = 3  # Interactive 탭의 인덱스
+        self.interactive_window = None  # Interactive 창 참조
+        self.interactive_window_open = False  # Interactive 창 열림 상태
+
+        # 탭 전환 이벤트 연결
+        self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
+
+        # 탭 바 우측 상단 버튼 컨테이너
+        corner_widget_container = QWidget()
+        corner_layout = QHBoxLayout(corner_widget_container)
+        corner_layout.setContentsMargins(0, 0, 0, 0)
+        corner_layout.setSpacing(2)
+
+        # 대기열 버튼 추가
+        self.queue_btn = QPushButton("대기열")
+        self.queue_btn.setFixedSize(80, 55)
+        self.queue_btn.setToolTip("생성 대기열 관리")
+        self.queue_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(14)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+        """)
+        self.queue_btn.clicked.connect(self.toggle_queue_window)
+        #corner_layout.addWidget(self.queue_btn)
+
+        # [Temp] 버튼 추가 (임시 생성 창)
+        self.prompt_tabs_temp_btn = QPushButton("📝")
+        self.prompt_tabs_temp_btn.setFixedSize(45, 55)
+        self.prompt_tabs_temp_btn.setToolTip("임시 생성 창 열기")
+        self.prompt_tabs_temp_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+        """)
+        self.prompt_tabs_temp_btn.clicked.connect(self.create_temp_generation_window)
+        corner_layout.addWidget(self.prompt_tabs_temp_btn)
+
+        # [EZ] 버튼 추가 (EZ Mode)
+        self.prompt_tabs_ez_btn = QPushButton("EZ")
+        self.prompt_tabs_ez_btn.setFixedSize(45, 55)
+        self.prompt_tabs_ez_btn.setToolTip("EZ Mode - Easy Prompt Generation")
+        self.prompt_tabs_ez_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['accent_blue']};
+                font-size: {get_scaled_font_size(16)}px;
+                font-weight: bold;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+                color: {DARK_COLORS['accent_blue_light']};
+            }}
+        """)
+        self.prompt_tabs_ez_btn.clicked.connect(self.open_ez_mode_window)
+        corner_layout.addWidget(self.prompt_tabs_ez_btn)
+
+        # detach 버튼 추가
+        self.prompt_tabs_detach_btn = QPushButton("🔓")
+        self.prompt_tabs_detach_btn.setFixedSize(45, 55)
+        self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
+        self.prompt_tabs_detach_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+        """)
+        self.prompt_tabs_detach_btn.clicked.connect(self.toggle_prompt_tabs_detach)
+        corner_layout.addWidget(self.prompt_tabs_detach_btn)
+
+        self.prompt_tabs.setCornerWidget(corner_widget_container, Qt.Corner.TopRightCorner)
+        
+        # 프롬프트 탭 컨테이너 생성 (분리/재부착을 위한 래퍼)
+        self.prompt_tabs_container = QWidget()
+        prompt_tabs_container_layout = QVBoxLayout(self.prompt_tabs_container)
+        prompt_tabs_container_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_tabs_container_layout.addWidget(self.prompt_tabs)
+        
+        top_layout.addWidget(self.prompt_tabs_container)
 
         top_scroll_area.setWidget(top_container)
         return top_scroll_area
 
+    def disable_wheel_event(self, widget):
+        """위젯의 마우스 휠 이벤트를 비활성화"""
+        def wheelEvent(event):
+            event.ignore()
+        widget.wheelEvent = wheelEvent
+        return widget
+    
     def create_enhanced_generation_area(self):
         """확장 가능한 생성 제어 영역 생성"""
         container = QWidget()
@@ -786,6 +1451,9 @@ class ModernMainWindow(QMainWindow):
         self.model_combo = QComboBox()
         self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
         self.model_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.model_combo)  # 마우스 휠 비활성화
+        self.model_combo.currentTextChanged.connect(self.update_naid_checkbox_colors)  # 모델 변경 시 체크박스 색상 업데이트
+        self.model_combo.currentTextChanged.connect(self._on_model_changing)  # 🆕 임시 창 자동 종료 체크
         params_grid.addWidget(self.model_combo, 0, 1)
         
         scheduler_label = QLabel("스케줄러")
@@ -795,18 +1463,20 @@ class ModernMainWindow(QMainWindow):
         self.scheduler_combo = QComboBox()
         self.scheduler_combo.addItems(["karras", "native", "exponential", "polyexponential"])
         self.scheduler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.scheduler_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.scheduler_combo, 0, 3)
         
         # === 두 번째 행: 해상도 + 랜덤 해상도 ===
         resolution_label = QLabel("해상도")
         resolution_label.setStyleSheet(param_label_style)
         params_grid.addWidget(resolution_label, 1, 0)
-        
+
         self.resolution_combo = QComboBox()
-        self.resolutions = ["1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216", 
-                        "1088 x 960", "1152 x 896", "1216 x 832"]
+        # ✅ JSON 파일에서 해상도 로드 (없으면 기본값 사용)
+        self.resolutions = self._load_resolutions()
         self.resolution_combo.addItems(self.resolutions)
         self.resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.resolution_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.resolution_combo, 1, 1)
         
         # 랜덤 해상도 체크박스
@@ -829,8 +1499,9 @@ class ModernMainWindow(QMainWindow):
         self.sampler_combo = QComboBox()
         # NAI 기본 샘플러들로 시작 (WEBUI 모드 전환 시 동적으로 변경됨)
         self.sampler_combo.addItems(["k_euler_ancestral", "k_euler", "k_dpmpp_2m", 
-                                    "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "ddim_v3"])
+                                    "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"])
         self.sampler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+        self.disable_wheel_event(self.sampler_combo)  # 마우스 휠 비활성화
         params_grid.addWidget(self.sampler_combo, 2, 1)
         
         steps_label = QLabel("Steps")
@@ -841,6 +1512,7 @@ class ModernMainWindow(QMainWindow):
         self.steps_spinbox.setRange(1, 150)
         self.steps_spinbox.setValue(28)
         self.steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.disable_wheel_event(self.steps_spinbox)  # 마우스 휠 비활성화
         params_grid.addWidget(self.steps_spinbox, 2, 3)
         
         # === 네 번째 행: CFG Scale + CFG Rescale ===
@@ -858,12 +1530,13 @@ class ModernMainWindow(QMainWindow):
         self.cfg_scale_slider.setRange(10, 100)  # 1.0 ~ 30.0을 10 ~ 300으로 표현
         self.cfg_scale_slider.setValue(50)  # 기본값 5.0
         self.cfg_scale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        self.disable_wheel_event(self.cfg_scale_slider)  # 마우스 휠 비활성화
         cfg_container_layout.addWidget(self.cfg_scale_slider)
         
         # CFG 값 표시 라벨
         self.cfg_value_label = QLabel("5.0")
         self.cfg_value_label.setStyleSheet(param_label_style)
-        self.cfg_value_label.setFixedWidth(50)  # 30 → 40으로 증가
+        self.cfg_value_label.setFixedWidth(60)  # 30 → 40으로 증가
         self.cfg_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cfg_container_layout.addWidget(self.cfg_value_label)
         
@@ -889,12 +1562,13 @@ class ModernMainWindow(QMainWindow):
         self.cfg_rescale_slider.setRange(-25, 100)  # 0.0 ~ 1.0을 0 ~ 100으로 표현
         self.cfg_rescale_slider.setValue(45)  # 기본값 0.2
         self.cfg_rescale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        self.disable_wheel_event(self.cfg_rescale_slider)  # 마우스 휠 비활성화
         rescale_container_layout.addWidget(self.cfg_rescale_slider)
         
         # CFG Rescale 값 표시 라벨
         self.cfg_rescale_value_label = QLabel("0.40")
         self.cfg_rescale_value_label.setStyleSheet(param_label_style)
-        self.cfg_rescale_value_label.setFixedWidth(50)  # 30 → 40으로 증가
+        self.cfg_rescale_value_label.setFixedWidth(68)  # 30 → 40으로 증가
         self.cfg_rescale_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rescale_container_layout.addWidget(self.cfg_rescale_value_label)
         
@@ -1004,6 +1678,7 @@ class ModernMainWindow(QMainWindow):
         self.hr_upscaler_combo.addItems(["Lanczos", "Nearest", "ESRGAN_4x", "LDSR", "SwinIR_4x"])
         self.hr_upscaler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.hr_upscaler_combo.setMinimumWidth(120)
+        self.disable_wheel_event(self.hr_upscaler_combo)  # 마우스 휠 비활성화
         self.hires_option_layout_row1.addWidget(self.hr_upscaler_combo)
         
         self.hires_option_layout_row1.addStretch()
@@ -1022,6 +1697,7 @@ class ModernMainWindow(QMainWindow):
         self.hires_steps_spinbox.setValue(0)  # 기본값 0 (use same as generation)
         self.hires_steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
         self.hires_steps_spinbox.setFixedWidth(80)
+        self.disable_wheel_event(self.hires_steps_spinbox)  # 마우스 휠 비활성화
         self.hires_option_layout_row2.addWidget(self.hires_steps_spinbox)
         
         # 구분선
@@ -1029,37 +1705,42 @@ class ModernMainWindow(QMainWindow):
         separator3.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(separator3)
         
-        # Denoising Strength 슬라이더 (이동)
+        # Denoising Strength 스핀박스로 변경
         denoising_label = QLabel("Denoise")
         denoising_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(denoising_label)
         
-        # Denoising 슬라이더 컨테이너
-        denoising_container = QWidget()
-        denoising_container_layout = QHBoxLayout(denoising_container)
-        denoising_container_layout.setContentsMargins(0, 0, 0, 0)
-        denoising_container_layout.setSpacing(5)
+        # Denoising 스핀박스
+        self.denoising_strength_spinbox = QDoubleSpinBox()
+        self.denoising_strength_spinbox.setRange(0.0, 1.0)  # 0.0 ~ 1.0
+        self.denoising_strength_spinbox.setSingleStep(0.01)  # 0.01 단위
+        self.denoising_strength_spinbox.setDecimals(2)  # 소수점 2자리
+        self.denoising_strength_spinbox.setValue(0.50)  # 기본값 0.5
+        self.denoising_strength_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.denoising_strength_spinbox.setFixedWidth(80)
+        self.disable_wheel_event(self.denoising_strength_spinbox)  # 마우스 휠 비활성화
+        self.hires_option_layout_row2.addWidget(self.denoising_strength_spinbox)
         
-        self.denoising_strength_slider = QSlider(Qt.Orientation.Horizontal)
-        self.denoising_strength_slider.setRange(0, 100)  # 0.0 ~ 1.0을 0~100으로 표현
-        self.denoising_strength_slider.setValue(50)  # 기본값 0.5
-        self.denoising_strength_slider.setStyleSheet(DARK_STYLES['compact_slider'])
-        self.denoising_strength_slider.setMinimumWidth(80)
-        denoising_container_layout.addWidget(self.denoising_strength_slider)
+        # 구분선
+        separator4 = QLabel("|")
+        separator4.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(separator4)
         
-        # 슬라이더 값 표시 라벨
-        self.denoising_value_label = QLabel("0.50")
-        self.denoising_value_label.setStyleSheet(param_label_style)
-        self.denoising_value_label.setFixedWidth(50)
-        self.denoising_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        denoising_container_layout.addWidget(self.denoising_value_label)
+        # hr_cfg 스핀박스 추가
+        hr_cfg_label = QLabel("hr CFG")
+        hr_cfg_label.setStyleSheet(param_label_style)
+        self.hires_option_layout_row2.addWidget(hr_cfg_label)
         
-        # 슬라이더 값 변경 시 라벨 업데이트
-        self.denoising_strength_slider.valueChanged.connect(
-            lambda value: self.denoising_value_label.setText(f"{value/100:.2f}")
-        )
+        self.hr_cfg_spinbox = QDoubleSpinBox()
+        self.hr_cfg_spinbox.setRange(0.0, 30.0)  # 0 ~ 30
+        self.hr_cfg_spinbox.setSingleStep(0.1)  # 0.1 단위
+        self.hr_cfg_spinbox.setDecimals(1)  # 소수점 1자리
+        self.hr_cfg_spinbox.setValue(0.0)  # 기본값 0
+        self.hr_cfg_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        self.hr_cfg_spinbox.setFixedWidth(80)
+        self.disable_wheel_event(self.hr_cfg_spinbox)  # 마우스 휠 비활성화
+        self.hires_option_layout_row2.addWidget(self.hr_cfg_spinbox)
         
-        self.hires_option_layout_row2.addWidget(denoising_container)
         self.hires_option_layout_row2.addStretch()
         
         # 위젯에 두 행 추가
@@ -1077,17 +1758,45 @@ class ModernMainWindow(QMainWindow):
         comfyui_section_label.setStyleSheet(DARK_STYLES['label_style'].replace(f"font-size: {get_scaled_font_size(19)}px;", f"font-size: {get_scaled_font_size(18)}px; font-weight: 600;"))
         self.comfyui_option_widget_layout.addWidget(comfyui_section_label)
 
-        # v-prediction 체크박스
-        self.v_prediction_checkbox = QCheckBox("v-prediction")
-        self.v_prediction_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-        self.v_prediction_checkbox.setToolTip("v-prediction 샘플링 모드를 사용합니다 (최신 AI 모델 지원)")
-        self.comfyui_option_widget_layout.addWidget(self.v_prediction_checkbox)
+        # 샘플링 모드 선택 (라디오 버튼 그룹)
+        sampling_mode_label = QLabel("샘플링 모드:")
+        sampling_mode_label.setStyleSheet(DARK_STYLES['label_style'])
+        self.comfyui_option_widget_layout.addWidget(sampling_mode_label)
 
-        # ZSNR 체크박스
-        self.zsnr_checkbox = QCheckBox("ZSNR (Zero SNR)")
-        self.zsnr_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-        self.zsnr_checkbox.setToolTip("Zero Signal-to-Noise Ratio 옵션을 사용합니다")
-        self.comfyui_option_widget_layout.addWidget(self.zsnr_checkbox)
+        # 라디오 버튼 컨테이너
+        sampling_mode_container = QWidget()
+        sampling_mode_layout = QHBoxLayout(sampling_mode_container)
+        sampling_mode_layout.setContentsMargins(0, 0, 0, 0)
+        sampling_mode_layout.setSpacing(12)
+
+        # EPS 라디오 버튼 (기본값)
+        self.eps_radio = QRadioButton("EPS")
+        self.eps_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.eps_radio.setToolTip("기본 Epsilon 샘플링 모드 (CheckpointLoaderSimple 사용)")
+        self.eps_radio.setChecked(True)
+
+        # V-Pred 라디오 버튼
+        self.v_pred_radio = QRadioButton("V-Pred")
+        self.v_pred_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.v_pred_radio.setToolTip("V-Prediction 샘플링 모드 (CheckpointLoaderSimple + ModelSamplingDiscrete)")
+
+        # ANIMA 라디오 버튼
+        self.anima_radio = QRadioButton("ANIMA")
+        self.anima_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.anima_radio.setToolTip("최신 ANIMA 모델 형식 (UNETLoader + CLIPLoader 사용)")
+
+        # 버튼 그룹으로 묶기 (배타적 선택)
+        self.sampling_mode_group = QButtonGroup(self)
+        self.sampling_mode_group.addButton(self.eps_radio)
+        self.sampling_mode_group.addButton(self.v_pred_radio)
+        self.sampling_mode_group.addButton(self.anima_radio)
+
+        sampling_mode_layout.addWidget(self.eps_radio)
+        sampling_mode_layout.addWidget(self.v_pred_radio)
+        sampling_mode_layout.addWidget(self.anima_radio)
+        sampling_mode_layout.addStretch()
+
+        self.comfyui_option_widget_layout.addWidget(sampling_mode_container)
 
         # 1. 기존 라벨을 "워크플로우 선택"으로 재사용하고 활성화합니다.
         comfyui_workflow_label = QLabel("워크플로우 선택:")
@@ -1155,10 +1864,39 @@ class ModernMainWindow(QMainWindow):
         params_layout.addWidget(self.comfyui_option_widget)  # 🆕 ComfyUI 위젯 추가
         
         # === Custom API 파라미터 섹션 ===
+        custom_api_header = QHBoxLayout()
+        custom_api_header.setSpacing(6)
+
         self.custom_api_checkbox = QCheckBox("Add custom/override api parameters")
         self.custom_api_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.custom_api_checkbox.toggled.connect(self.toggle_custom_api_params)
-        params_layout.addWidget(self.custom_api_checkbox)
+        custom_api_header.addWidget(self.custom_api_checkbox)
+
+        # Detach 버튼 추가
+        self.custom_api_detach_btn = QPushButton("🔓")
+        self.custom_api_detach_btn.setToolTip("외부 창으로 분리")
+        self.custom_api_detach_btn.setFixedSize(36, 24)
+        self.custom_api_detach_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                font-size: {get_scaled_font_size(14)}px;
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+            QPushButton:disabled {{
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+        self.custom_api_detach_btn.clicked.connect(self.toggle_custom_api_detach)
+        self.custom_api_detach_btn.setEnabled(False)  # 기본 비활성화 상태
+        custom_api_header.addWidget(self.custom_api_detach_btn)
+
+        custom_api_header.addStretch()
+        params_layout.addLayout(custom_api_header)
         
         # Custom Script 텍스트박스 (기본적으로 숨김)
         self.custom_script_textbox = QTextEdit()
@@ -1205,9 +1943,10 @@ class ModernMainWindow(QMainWindow):
             cb.setStyleSheet(DARK_STYLES['dark_checkbox'])
             gen_checkbox_layout.addWidget(cb, 1)  # stretch factor 1로 균등 배치
             self.generation_checkboxes[cb_text] = cb
-            #터보모드 미지원 상태이므로 조건문으로 block 처리
+            # 터보 옵션 체크박스 이벤트 연결
             if cb_text == "터보 옵션":
-                cb.setEnabled(False)
+                cb.setEnabled(True)  # 활성화됨
+                cb.clicked.connect(self.on_turbo_option_changed)
 
         # 오른쪽 여백을 위한 stretch (제거하지 않음)
         gen_checkbox_layout.addStretch()
@@ -1216,6 +1955,91 @@ class ModernMainWindow(QMainWindow):
         container_layout.addWidget(generation_control_frame)
         
         return container
+    
+    def on_turbo_option_changed(self, checked):
+        """터보 옵션 체크박스 상태 변경 시 호출"""
+        if checked:
+            # 체크박스 자동 해제
+            self.generation_checkboxes["터보 옵션"].setChecked(False)
+
+            # 터보 모드 선택 다이얼로그 표시
+            self._show_turbo_mode_dialog()
+
+    def _show_turbo_mode_dialog(self):
+        """터보 모드 선택 다이얼로그 표시"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("🚀 터보 모드 선택")
+        dialog.setFixedSize(350, 200)
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 타이틀
+        title = QLabel("터보 모드를 선택하세요")
+        title.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: bold;
+            color: {DARK_COLORS['text_primary']};
+        """)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # 설명
+        desc = QLabel("연속 이미지를 빠르게 생성할 수 있는 모드입니다.")
+        desc.setStyleSheet(f"""
+            font-size: 12px;
+            color: {DARK_COLORS['text_secondary']};
+        """)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        layout.addStretch()
+
+        # 연속 이미지 생성 버튼
+        inpaint_btn = QPushButton("🎬 연속 이미지 생성 (Inpaint)")
+        inpaint_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        inpaint_btn.setFixedHeight(40)
+        inpaint_btn.clicked.connect(lambda: self._on_turbo_mode_selected(dialog, 'inpaint'))
+        layout.addWidget(inpaint_btn)
+
+        # 취소 버튼
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        cancel_btn.clicked.connect(dialog.reject)
+        layout.addWidget(cancel_btn)
+
+        dialog.exec()
+
+    def _on_turbo_mode_selected(self, dialog, mode: str):
+        """터보 모드 선택됨"""
+        dialog.accept()
+
+        if mode == 'inpaint':
+            # TurboEventSequenceTabModule 동적 탭 생성
+            if self.image_window and hasattr(self.image_window, 'tab_controller'):
+                self.image_window.tab_controller.add_tab_by_name(
+                    'TurboEventSequenceTabModule',
+                    main_window=self
+                )
+                self.status_bar.showMessage("🚀 Turbo Sequence 탭이 생성되었습니다.")
+    
+    def on_turbo_preset_applied(self, preset):
+        """터보 프리셋이 적용되었을 때 호출"""
+        # 프리셋을 app_context에 저장하여 generation 시 사용
+        if hasattr(self.app_context, 'turbo_preset'):
+            self.app_context.turbo_preset = preset
+        else:
+            setattr(self.app_context, 'turbo_preset', preset)
+        self.status_bar.showMessage("✅ 터보 프리셋이 적용되었습니다.")
     
     def toggle_params_panel(self):
         """생성 파라미터 패널 토글"""
@@ -1234,12 +2058,115 @@ class ModernMainWindow(QMainWindow):
     
     def toggle_custom_api_params(self, checked):
         """Custom API 파라미터 텍스트박스 토글"""
-        self.custom_script_textbox.setVisible(checked)
+        # 분리된 상태가 아닐 때만 텍스트박스 가시성 토글
+        self.custom_script_textbox.setVisible(checked and not self.custom_api_detached)
+        # Detach 버튼은 항상 보이되, 체크박스가 켜질 때만 활성화
+        self.custom_api_detach_btn.setEnabled(checked)
         if checked:
             self.status_bar.showMessage("Custom API 파라미터 입력이 활성화되었습니다.")
         else:
             self.status_bar.showMessage("Custom API 파라미터 입력이 비활성화되었습니다.")
-    
+
+    def toggle_custom_api_detach(self):
+        """Custom API 텍스트박스 분리/복귀 토글"""
+        if self.custom_api_detached:
+            self.reattach_custom_api()
+        else:
+            self.detach_custom_api()
+
+    def detach_custom_api(self):
+        """Custom API 텍스트박스를 외부 창으로 분리"""
+        if self.custom_api_detached:
+            print("⚠️ Custom API 창이 이미 분리되어 있습니다.")
+            return
+
+        try:
+            print("🔧 Custom API 창 분리 시작...")
+
+            # 1. 텍스트박스를 레이아웃에서 분리
+            self.params_area.layout().removeWidget(self.custom_script_textbox)
+            self.custom_script_textbox.setParent(None)
+
+            # 2. 래핑 위젯 생성 (확장된 UI)
+            detached_widget = QWidget()
+            detached_layout = QVBoxLayout(detached_widget)
+            detached_layout.setContentsMargins(8, 8, 8, 8)
+
+            # 분리된 창에서는 텍스트박스 크기 확장
+            self.custom_script_textbox.setMinimumHeight(300)
+            self.custom_script_textbox.setMaximumHeight(16777215)  # 최대 높이 제한 해제
+            detached_layout.addWidget(self.custom_script_textbox)
+            self.custom_script_textbox.setVisible(True)
+
+            # 3. DetachedWindow 생성
+            from ui.detached_window import DetachedWindow
+            self.custom_api_window = DetachedWindow(
+                detached_widget,
+                "Custom API Parameters",
+                -1,
+                parent_container=self
+            )
+            self.custom_api_window.window_closed.connect(self.on_custom_api_window_closed)
+            self.custom_api_window.setMinimumSize(400, 400)
+            self.custom_api_window.resize(500, 450)
+            self.custom_api_window.show()
+            self.custom_api_window.raise_()
+            self.custom_api_window.activateWindow()
+
+            # 4. 상태 업데이트
+            self.custom_api_detached = True
+            self.custom_api_detach_btn.setText("🔒")
+            self.custom_api_detach_btn.setToolTip("원래 위치로 복귀")
+
+            print("✅ Custom API 창 분리 완료")
+
+        except Exception as e:
+            print(f"❌ Custom API 분리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def reattach_custom_api(self):
+        """분리된 Custom API 창을 원래 위치로 복귀"""
+        if not self.custom_api_detached:
+            print("⚠️ Custom API 창이 분리되어 있지 않습니다.")
+            return
+
+        try:
+            print("🔄 Custom API 창 복귀 시작...")
+
+            # 1. 창에서 위젯 회수
+            if self.custom_api_window:
+                detached_widget = self.custom_api_window.get_original_widget()
+                if detached_widget and detached_widget.layout():
+                    # 텍스트박스 추출
+                    detached_widget.layout().removeWidget(self.custom_script_textbox)
+                self.custom_api_window.close()
+
+            # 2. 원래 크기로 복원
+            self.custom_script_textbox.setParent(None)
+            self.custom_script_textbox.setFixedHeight(80)
+
+            # 3. 원래 레이아웃에 추가
+            self.params_area.layout().addWidget(self.custom_script_textbox)
+            self.custom_script_textbox.setVisible(self.custom_api_checkbox.isChecked())
+
+            # 4. 상태 업데이트
+            self.custom_api_detached = False
+            self.custom_api_window = None
+            self.custom_api_detach_btn.setText("🔓")
+            self.custom_api_detach_btn.setToolTip("외부 창으로 분리")
+
+            print("✅ Custom API 창 복귀 완료")
+
+        except Exception as e:
+            print(f"❌ Custom API 복귀 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_custom_api_window_closed(self, tab_index, widget):
+        """Custom API 창이 닫힐 때 호출"""
+        self.reattach_custom_api()
+
     def toggle_search_mode(self, mode):
         """NAI/WEBUI/COMFYUI 검색 모드 토글 (ComfyUI 지원 추가)"""
         if mode == "NAI":
@@ -1260,9 +2187,25 @@ class ModernMainWindow(QMainWindow):
                 widget.setVisible(False)
             for widget in self.comfyui_option_widgets:  # 🆕 추가
                 widget.setVisible(False)
-            
+
+            # 🆕 임시 창 자동 종료 체크
+            old_mode = self._previous_api_mode
+            if old_mode != mode:
+                if not self.check_and_close_temp_windows("API 모드", old_mode, mode):
+                    # 취소: 이전 모드로 롤백
+                    print(f"🔄 [ModernMainWindow] API 모드 변경 취소: {old_mode}로 복귀")
+                    self.toggle_search_mode(old_mode)
+                    return
+                self._previous_api_mode = mode
+
             self.status_bar.showMessage("NAI 모드로 전환되었습니다.")
             self.app_context.set_api_mode(mode)
+            
+            # NAI 모드로 전환 시 Anlas 업데이트
+            self.update_anlas_display()
+            
+            # 토큰 카운트 업데이트
+            self.update_token_count()
             
         elif mode == "WEBUI":
             # WEBUI 모드 선택 시 연결 테스트 수행 (기존 로직 유지)
@@ -1320,17 +2263,40 @@ class ModernMainWindow(QMainWindow):
                                 widget.setVisible(False)
                             
                             self.status_bar.showMessage(f"✅ WEBUI 모드로 전환되었습니다. ({validated_url})", 5000)
-                            
+
                             # 검증된 URL을 키링에 저장
                             clean_url = validated_url.replace('https://', '').replace('http://', '')
                             self.app_context.secure_token_manager.save_token('webui_url', clean_url)
+
+                            # 🆕 임시 창 자동 종료 체크
+                            old_mode = self._previous_api_mode
+                            if old_mode != mode:
+                                if not self.check_and_close_temp_windows("API 모드", old_mode, mode):
+                                    # 취소: 이전 모드로 롤백
+                                    print(f"🔄 [ModernMainWindow] API 모드 변경 취소: {old_mode}로 복귀")
+                                    self.toggle_search_mode(old_mode)
+                                    return
+                                self._previous_api_mode = mode
+
                             self.app_context.set_api_mode(mode)
                             
+                            # 토큰 카운트 업데이트
+                            self.update_token_count()
+                            
+                            # URL 정규화 (스마트 프로토콜 선택)
+                            normalized_url = validated_url.replace('https://', '').replace('http://', '')
+                            if normalized_url.startswith("127"):
+                                normalized_url = f"http://{normalized_url}"
+                            else:
+                                normalized_url = f"https://{normalized_url}"
+
                             # ✅ WEBUI 웹뷰 탭 열기
                             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                                 self.image_window.tab_controller.add_tab_by_name(
                                     'SimpleWebViewTabModule',
-                                    api_url=validated_url
+                                    api_url=normalized_url,
+                                    api_mode='WEBUI',
+                                    app_context=self.app_context
                                 )
                             
                         else:
@@ -1416,17 +2382,43 @@ class ModernMainWindow(QMainWindow):
                                 widget.setVisible(True)
                             
                             self.status_bar.showMessage(f"✅ ComfyUI 모드로 전환되었습니다. ({comfyui_url})", 5000)
-                            
+
                             # 검증된 URL을 키링에 저장
                             self.app_context.secure_token_manager.save_token('comfyui_url', comfyui_url)
+
+                            # 🆕 임시 창 자동 종료 체크
+                            old_mode = self._previous_api_mode
+                            if old_mode != mode:
+                                if not self.check_and_close_temp_windows("API 모드", old_mode, mode):
+                                    # 취소: 이전 모드로 롤백
+                                    print(f"🔄 [ModernMainWindow] API 모드 변경 취소: {old_mode}로 복귀")
+                                    self.toggle_search_mode(old_mode)
+                                    return
+                                self._previous_api_mode = mode
+
                             self.app_context.set_api_mode(mode)
                             
+                            # 토큰 카운트 업데이트1
+                            self.update_token_count()
+                            
+                            # URL 정규화 (http:// 중복 방지)
+                            normalized_url = comfyui_url
+                            if not normalized_url.startswith(("http://", "https://")):
+                                normalized_url = f"http://{normalized_url}"
+                            elif normalized_url.startswith("http://http://"):
+                                normalized_url = normalized_url.replace("http://http://", "http://")
+                            elif normalized_url.startswith("https://http://"):
+                                normalized_url = normalized_url.replace("https://http://", "http://")
+                            elif normalized_url.startswith("http://https://"):
+                                normalized_url = normalized_url.replace("http://https://", "https://")
+                            
                             # ✅ ComfyUI 웹뷰 탭 열기
-                            if self.image_window and hasattr(self.image_window, 'tab_controller'):
-                                self.image_window.tab_controller.add_tab_by_name(
-                                    'SimpleWebViewTabModule',
-                                    api_url=f"http://{comfyui_url}"
-                                )
+                            # if self.image_window and hasattr(self.image_window, 'tab_controller'):
+                            #     self.image_window.tab_controller.add_tab_by_name(
+                            #         'SimpleWebViewTabModule',
+                            #         api_url=normalized_url,
+                            #         api_mode='COMFYUI'
+                            #     )
 
                         else:
                             # ❌ 연결 실패
@@ -1465,6 +2457,18 @@ class ModernMainWindow(QMainWindow):
         else:
             self.status_bar.showMessage("⚠️ API 관리 탭을 열 수 없습니다.", 5000)
 
+    def update_anlas_display(self):
+        """NAI 모드에서 Anlas 값을 업데이트하여 CollapsibleBox 제목에 표시합니다."""
+        if not hasattr(self, 'search_collapsible_box'):
+            return
+        
+        # NAI 모드일 때만 Anlas 표시
+        if self.app_context.current_api_mode == "NAI":
+            anlas = self.app_context.api_service.get_anlas()
+            self.search_collapsible_box.update_anlas(anlas)
+        else:
+            self.search_collapsible_box.update_anlas(None)
+
     def create_right_panel(self):
        # [수정] 생성자에 main_window 참조를 전달합니다.
        right_view_instance = RightView(self.app_context)
@@ -1483,6 +2487,30 @@ class ModernMainWindow(QMainWindow):
         self.main_prompt_textedit.setPlainText(prompt)
         print(f"📋 프롬프트 불러오기 완료.")
         self.status_bar.showMessage("프롬프트가 성공적으로 로드되었습니다.", 3000)
+    
+    def update_naid_checkbox_colors(self, model_text: str = None):
+        """모델 선택에 따라 NAID 체크박스 색상을 업데이트합니다."""
+        if model_text is None or model_text == "":
+            model_text = self.model_combo.currentText()
+        
+        # NAID3일 때는 모든 체크박스 흰색, 그 외에는 SMEA, DYN, DECRISP를 회색으로
+        is_naid3 = (model_text == "NAID3")
+        
+        for option_name, checkbox in self.advanced_checkboxes.items():
+            if is_naid3:
+                # NAID3: 모든 체크박스 흰색
+                checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            else:
+                # 다른 모델: VAR+만 흰색, 나머지는 회색
+                if option_name == "VAR+":
+                    checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+                else:
+                    # SMEA, DYN, DECRISP는 회색으로
+                    gray_style = DARK_STYLES['dark_checkbox'].replace(
+                        f"color: {DARK_COLORS['text_primary']}", 
+                        f"color: {DARK_COLORS['text_secondary']}"
+                    )
+                    checkbox.setStyleSheet(gray_style)
 
     def get_main_parameters(self) -> dict:
         """메인 UI의 파라미터들을 수집하여 딕셔너리로 반환합니다."""
@@ -1546,31 +2574,50 @@ class ModernMainWindow(QMainWindow):
                     "enable_hr": self.enable_hr_checkbox.isChecked(),
                     "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 1.5,
                     "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Lanczos",
-                    "denoising_strength": self.denoising_strength_slider.value() / 100.0 if hasattr(self, 'denoising_strength_slider') else 0.5,
+                    "denoising_strength": self.denoising_strength_spinbox.value() if hasattr(self, 'denoising_strength_spinbox') else 0.5,
                     "hires_steps": self.hires_steps_spinbox.value() if hasattr(self, 'hires_steps_spinbox') else 0
                 })
+                
+                # WEBUI 모드에서 hr_cfg 추가
+                if self.get_current_api_mode() == "WEBUI" and hasattr(self, 'hr_cfg_spinbox'):
+                    params["hr_cfg"] = self.hr_cfg_spinbox.value()
                 
             # 🆕 추가: ComfyUI 전용 파라미터들 (현재 모드가 ComfyUI일 때만)
             current_mode = self.get_current_api_mode()
             if current_mode == "COMFYUI":
-                if hasattr(self, 'v_prediction_checkbox') and hasattr(self, 'zsnr_checkbox'):
+                if hasattr(self, 'eps_radio') and hasattr(self, 'v_pred_radio') and hasattr(self, 'anima_radio'):
+                    # 선택된 샘플링 모드 확인
+                    if self.eps_radio.isChecked():
+                        sampling_mode = "eps"
+                        workflow_type = "checkpoint"
+                    elif self.v_pred_radio.isChecked():
+                        sampling_mode = "v_prediction"
+                        workflow_type = "checkpoint"
+                    elif self.anima_radio.isChecked():
+                        sampling_mode = "anima"
+                        workflow_type = "unet"
+                    else:
+                        # 기본값
+                        sampling_mode = "eps"
+                        workflow_type = "checkpoint"
+
                     params.update({
-                        "sampling_mode": "v_prediction" if self.v_prediction_checkbox.isChecked() else "eps",
-                        "zsnr": self.zsnr_checkbox.isChecked(),
+                        "sampling_mode": sampling_mode,
+                        "workflow_type": workflow_type,  # checkpoint 또는 unet
                         "filename_prefix": "NAIA_ComfyUI"  # 기본 파일명 접두사
                     })
-                    
+
                     # 디버그 정보
                     print(f"🎨 ComfyUI 파라미터 수집 완료:")
                     print(f"   - 샘플링 모드: {params['sampling_mode']}")
-                    print(f"   - ZSNR: {params['zsnr']}")
+                    print(f"   - 워크플로우 타입: {params['workflow_type']}")
                     print(f"   - 해상도: {params['width']}x{params['height']}")
                     print(f"   - 스텝: {params['steps']}, CFG: {params['cfg_scale']}")
                 else:
                     # ComfyUI 위젯이 아직 초기화되지 않은 경우 기본값 사용
                     params.update({
                         "sampling_mode": "eps",
-                        "zsnr": False,
+                        "workflow_type": "checkpoint",
                         "filename_prefix": "NAIA_ComfyUI"
                     })
                     print("⚠️ ComfyUI 위젯이 초기화되지 않아 기본값을 사용합니다.")
@@ -1604,7 +2651,69 @@ class ModernMainWindow(QMainWindow):
                 print("❌ image_object가 None입니다.")
                 return
             try:
+                # 특수 요청 여부 확인
+                generation_params = result.get("generation_params", {})
+                is_assets_request = generation_params.get("assets_workshop_request", False)
+                is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
+                is_studio_request = generation_params.get("studio_request", False)
+                studio_frame_index = generation_params.get("studio_frame_index", 0)
+                
                 self.image_window.update_image(image_object)
+                
+                # Interactive Mode 요청인 경우 별도 이벤트 발행
+                is_interactive_request = generation_params.get("interactive_mode_request", False)
+                if is_interactive_request:
+                    print("🎮 Interactive Mode 요청 감지 - 전용 이벤트 발행")
+                    # AppContext를 통해 이벤트 발행
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_interactive", image_object)
+
+                # Assets Workshop 요청인 경우 별도 이벤트 발행
+                if is_assets_request:
+                    print("📦 Assets Workshop 요청 감지 - 전용 이벤트 발행")
+                    # AppContext를 통해 이벤트 발행
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_assets", image_object)
+
+                # Artist Thumb 요청인 경우 별도 이벤트 발행
+                if is_artist_thumb_request:
+                    print("🎨 Artist Thumb 요청 감지 - 전용 이벤트 발행")
+                    # AppContext를 통해 이벤트 발행
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_artist_thumb", image_object)
+
+                # Studio 요청인 경우 별도 이벤트 발행
+                if is_studio_request:
+                    print(f"🎬 Studio 요청 감지 - 전용 이벤트 발행 (frame: {studio_frame_index})")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_studio", {
+                            "image": image_object,
+                            "frame_index": studio_frame_index
+                        })
+
+                # Turbo Sequence 요청인 경우 별도 이벤트 발행
+                is_turbo_sequence_request = generation_params.get("turbo_sequence_request", False)
+                turbo_sequence_index = generation_params.get("turbo_sequence_index", 0)
+                if is_turbo_sequence_request:
+                    print(f"🚀 Turbo Sequence 요청 감지 - 전용 이벤트 발행 (index: {turbo_sequence_index})")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        # 🆕 인페인트 다이얼로그 식별자도 포함
+                        event_data = {
+                            "image": image_object,
+                            "turbo_sequence_request": True,
+                            "turbo_sequence_index": turbo_sequence_index
+                        }
+                        # 인페인트 다이얼로그에서 온 요청인 경우 식별자 추가
+                        if generation_params.get("sequence_inpaint_dialog"):
+                            event_data["sequence_inpaint_dialog"] = True
+                            event_data["sequence_inpaint_request_id"] = generation_params.get("sequence_inpaint_request_id")
+                        self.app_context.publish("generation_completed", event_data)
+
+                # Main Window → Assets 자동 전파 (추후 제거 가능)
+                # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능
+                if not is_assets_request:
+                    self.image_window.update_assets_image(image_object)  # ← 이 라인을 주석처리하면 전파 차단
+                    
             except Exception as e:
                 print(f"❌ 이미지 업데이트 실패: {e}")
                 return
@@ -1649,17 +2758,52 @@ class ModernMainWindow(QMainWindow):
 
             # 자동 생성 체크
             try:
-                if self.automation_module and self.automation_module.automation_controller.is_running:
+                # 자동 생성이 활성화되어 있고, 자동화가 실행 중일 때만 지연시간 적용
+                auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
+                if (auto_generate_checkbox and auto_generate_checkbox.isChecked() and 
+                    self.automation_module and self.automation_module.automation_controller.is_running):
                     delay = self.automation_module.get_generation_delay()
                     if delay > 0:
-                        from PyQt6.QtCore import QTimer
-                        QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
+                        print(f"⏱️ 생성 지연: {delay:.1f}초")
+                        # 카운트다운 스레드를 사용하여 지연 시각화
+                        if hasattr(self.automation_module, 'start_delay_countdown'):
+                            # 카운트다운 완료 시 자동 생성 트리거를 연결
+                            self.automation_module.countdown_thread = None  # 기존 연결 해제를 위해 초기화
+                            self.automation_module.start_delay_countdown_for_new_prompt(delay)
+                        else:
+                            # 폴백: 기존 방식 사용
+                            if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                                self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
+                            from PyQt6.QtCore import QTimer
+                            QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
                     else:
+                        if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                            self.automation_module.delay_info_label.setText("⚡ 지연 없음")
                         self._check_and_trigger_auto_generation()
                 else:
+                    # 자동화가 비활성화된 경우 지연 없이 즉시 실행
+                    if self.automation_module and hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                        self.automation_module.delay_info_label.setText("")
                     self._check_and_trigger_auto_generation()
             except Exception as e:
                 print(f"❌ 자동 생성 체크 실패: {e}")
+
+            # 🆕 Autosave: 특수 요청이 아닌 일반 생성 완료 시에만 자동 저장
+            try:
+                generation_params = result.get("generation_params", {})
+                is_special_request = (
+                    generation_params.get("assets_workshop_request", False) or
+                    generation_params.get("artist_thumb_request", False) or
+                    generation_params.get("studio_request", False) or
+                    generation_params.get("interactive_mode_request", False) or
+                    generation_params.get("turbo_sequence_request", False)
+                )
+
+                if not is_special_request:
+                    self._perform_autosave_on_generation()
+            except Exception as e:
+                # 자동 저장 실패해도 프로그램은 계속 동작
+                print(f"⚠️ [Autosave] 트리거 실패: {e}")
 
         except Exception as e:
             print(f"❌ update_ui_with_result 전체 에러: {e}")
@@ -1677,11 +2821,19 @@ class ModernMainWindow(QMainWindow):
             return  # 자동 생성 체크박스가 없으면 종료
 
         try:
-            if (hasattr(self, 'generation_controller') and 
+            # [큐 우선] 큐가 비어있지 않으면 큐 처리가 끝날 때까지 자동생성 대기
+            if hasattr(self, 'app_context') and self.app_context:
+                queue_manager = self.app_context.generation_queue_manager
+                if queue_manager and not queue_manager.is_empty() and not queue_manager.is_paused():
+                    self.status_bar.showMessage("큐 처리 중... 자동생성 대기")
+                    QTimer.singleShot(500, self._check_and_trigger_auto_generation)
+                    return
+
+            if (hasattr(self, 'generation_controller') and
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
                 # 약간의 지연 후 다시 시도
-                QTimer.singleShot(500, self._check_and_trigger_auto_generation)
+                QTimer.singleShot(800, self._check_and_trigger_auto_generation)
                 return
                 
             # [추가] 스레드 상태 확인
@@ -1708,7 +2860,7 @@ class ModernMainWindow(QMainWindow):
                 
             if auto_generate_checkbox.isChecked() and not prompt_fixed_checkbox.isChecked():
                 # 검색 결과가 있는지 확인
-                if self.search_results.is_empty():
+                if self.search_results.is_empty() and not self.generation_checkboxes["와일드카드 단독 모드"].isChecked():
                     self.status_bar.showMessage("⚠️ 검색 결과가 없어 자동 생성을 중단합니다.")
                     # 자동화 중단 (자동화가 활성화되어 있는 경우만)
                     if self.automation_module and self.automation_module.automation_controller.is_running:
@@ -1721,16 +2873,47 @@ class ModernMainWindow(QMainWindow):
                 self.status_bar.showMessage("🔄 자동 생성: 다음 프롬프트 생성 중...")
                 
                 # 다음 프롬프트 생성 요청
+                # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+                comfyui_sampling_mode = "eps"  # 기본값
+                if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+                    comfyui_sampling_mode = "anima"
+                elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+                    comfyui_sampling_mode = "v_prediction"
+                elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+                    comfyui_sampling_mode = "eps"
+
                 settings = {
-                    'prompt_fixed': False, 
+                    'prompt_fixed': False,
                     'auto_generate': True,
                     'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
                     'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-                    "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked()
+                    "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked(),
+                    'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+                    'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
                 }
                 
                 # 프롬프트 생성 컨트롤러에 자동 생성 플래그 설정
                 self.prompt_gen_controller.auto_generation_requested = True
+
+                #1009 변경사항 -> hooker와 호환되지 않는 NAI 캐릭터 프롬프트 처리 위치 변경
+                char_module = self.middle_section_controller.get_module_instance("CharacterModule")
+                if (char_module and 
+                    hasattr(char_module, 'is_auto_mode_active') and 
+                    char_module.is_auto_mode_active()):
+                    
+                    # 자동 생성 모드에서 이미지 생성 트리거
+                    self._trigger_auto_image_generation()
+
+                if (char_module and
+                    char_module.activate_checkbox.isChecked() and
+                    not char_module.reroll_on_generate_checkbox.isChecked()):
+
+                    print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
+                    char_module.process_and_update_view()
+
+                # 프리셋 랜더마이저 신호 발행 (자동 생성 시 랜덤 프리셋 적용)
+                self.app_context.publish("random_prompt_triggered_preset_randomizer")
+
                 self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
             elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():
                 self.auto_generation_in_progress = True
@@ -1760,14 +2943,22 @@ class ModernMainWindow(QMainWindow):
         """'검색' 버튼 클릭 시 컨트롤러를 통해 검색을 시작하는 슬롯"""
         self.search_btn.setEnabled(False)
         self.search_btn.setText("검색 중...")
-        
+
         # [수정] 새 검색 시작 시 진행률 레이블을 다시 표시
         self.progress_label.setText("0/0") # 초기 텍스트 설정
         self.progress_label.setVisible(True)
-        
+
         # [신규] 새 검색 시작 시 기존 결과 초기화
         self.search_results = SearchResultModel()
         self.result_label1.setText("검색: 0")
+
+        # 🆕 검색 모드에 따라 파일 범위 설정 (2025-02-02)
+        if self.search_mode_2411.isChecked():
+            self.search_controller.set_file_range(None, 129)  # 24.11 데이터셋 (tags_00~129, 130개)
+        elif self.search_mode_2509.isChecked():
+            self.search_controller.set_file_range(None, 149)  # 25.09 데이터셋 (tags_00~149, 150개)
+        elif self.search_mode_1109.isChecked():
+            self.search_controller.set_file_range(130, 149)   # 11-09 신규 데이터 (tags_130~149, 20개)
 
         # UI에서 검색 파라미터 수집
         search_params = {
@@ -1778,7 +2969,7 @@ class ModernMainWindow(QMainWindow):
             'rating_s': self.rating_checkboxes['s'].isChecked(),
             'rating_g': self.rating_checkboxes['g'].isChecked(),
         }
-        
+
         try:
             save_dir = 'save'
             os.makedirs(save_dir, exist_ok=True)
@@ -1845,11 +3036,32 @@ class ModernMainWindow(QMainWindow):
         result_file = 'naia_temp_rows.parquet'
         if os.path.exists(result_file):
             self.status_bar.showMessage("이전 검색 결과를 불러오는 중...", 3000)
+            
+            # 기존 스레드가 있으면 정리
+            if hasattr(self, 'load_thread') and self.load_thread is not None:
+                if self.load_thread.isRunning():
+                    self.load_thread.quit()
+                    self.load_thread.wait(1000)
+                try:
+                    self.load_thread.deleteLater()
+                except:
+                    pass
+                self.load_thread = None
+            
+            if hasattr(self, 'loader') and self.loader is not None:
+                try:
+                    self.loader.deleteLater()
+                except:
+                    pass
+                self.loader = None
+            
+            # 새로운 스레드와 로더 생성
             self.load_thread = QThread()
             self.loader = ParquetLoader()
             self.loader.moveToThread(self.load_thread)
             self.load_thread.started.connect(lambda: self.loader.run(result_file))
             self.loader.finished.connect(self.on_previous_results_loaded)
+            self.loader.finished.connect(self.loader.deleteLater)
             self.load_thread.finished.connect(self.load_thread.deleteLater)
             self.load_thread.start()
 
@@ -1857,15 +3069,45 @@ class ModernMainWindow(QMainWindow):
         """'naia_temp_rows.parquet' 파일이 있으면 비동기로 로드합니다."""
         result_file = 'naia_temp_rows.parquet'
         if os.path.exists(result_file):
+            self.search_results.set_dataframe(pd.DataFrame())
             self.status_bar.showMessage("이전 검색 결과를 복원하는 중...", 3000)
             
-            # 기존 앱 시작 시 사용했던 비동기 로더 재활용
+            # 기존 스레드가 실행 중이면 정리
+            if hasattr(self, 'load_thread') and self.load_thread is not None:
+                if self.load_thread.isRunning():
+                    self.load_thread.quit()
+                    self.load_thread.wait(1000)  # 최대 1초 대기
+                    if self.load_thread.isRunning():
+                        self.load_thread.terminate()
+                        self.load_thread.wait()
+                
+                # 기존 스레드 정리
+                try:
+                    self.load_thread.deleteLater()
+                except:
+                    pass
+                self.load_thread = None
+            
+            # 기존 로더 정리
+            if hasattr(self, 'loader') and self.loader is not None:
+                try:
+                    self.loader.deleteLater()
+                except:
+                    pass
+                self.loader = None
+            
+            # 새로운 스레드와 로더 생성
             self.load_thread = QThread()
             self.loader = ParquetLoader()
             self.loader.moveToThread(self.load_thread)
+            
+            # 연결 설정
             self.load_thread.started.connect(lambda: self.loader.run(result_file))
             self.loader.finished.connect(self.on_previous_results_loaded)
+            self.loader.finished.connect(self.loader.deleteLater)
             self.load_thread.finished.connect(self.load_thread.deleteLater)
+            
+            # 스레드 시작
             self.load_thread.start()
         else:
             self.status_bar.showMessage("⚠️ 복원할 검색 결과 파일(naia_temp_rows.parquet)이 없습니다.", 5000)
@@ -1874,12 +3116,1175 @@ class ModernMainWindow(QMainWindow):
     def on_previous_results_loaded(self, result_model: SearchResultModel):
         """비동기로 로드된 이전 검색 결과를 UI에 적용"""
         self.search_results.append_dataframe(result_model.get_dataframe())
-        self.search_results.deduplicate()
+        
+        # 라벨 업데이트
         count = self.search_results.get_count()
         self.result_label1.setText(f"검색: {count}")
         self.result_label2.setText(f"남음: {count}")
-        self.status_bar.showMessage(f"✅ 이전 검색 결과 {count}개를 불러왔습니다.", 5000)
-        self.load_thread.quit()         
+        self.status_bar.showMessage(f"✅ 이전 검색 결과 {count:,}개를 불러왔습니다.", 5000)
+    
+    def load_custom_parquet(self):
+        """사용자가 선택한 parquet 파일을 불러오기 (현재 결과를 비움)"""
+        # custom_tags 폴더 확인 및 생성
+        custom_tags_dir = os.path.join("save", "custom_tags")
+        if not os.path.exists(custom_tags_dir):
+            os.makedirs(custom_tags_dir, exist_ok=True)
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Parquet 파일 불러오기",
+            custom_tags_dir,
+            "Parquet Files (*.parquet);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # 현재 검색 결과 비우기
+                self.search_results.set_dataframe(pd.DataFrame())
+                
+                # 파일 불러오기
+                df = pd.read_parquet(file_path)
+                self.search_results.set_dataframe(df)
+                
+                row_count = len(df)
+                # UI 라벨 업데이트
+                self.result_label1.setText(f"검색: {row_count:,}")
+                self.result_label2.setText(f"남음: {row_count:,}")
+                self.status_bar.showMessage(f"✅ {os.path.basename(file_path)} 파일을 불러왔습니다. ({row_count:,}개 항목)", 5000)
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"파일을 불러오는 중 오류가 발생했습니다:\n{str(e)}")
+                self.status_bar.showMessage(f"❌ 파일 불러오기 실패: {str(e)}", 5000)
+    
+    def merge_custom_parquet(self):
+        """사용자가 선택한 parquet 파일을 현재 결과에 합치기"""
+        # custom_tags 폴더 확인 및 생성
+        custom_tags_dir = os.path.join("save", "custom_tags")
+        if not os.path.exists(custom_tags_dir):
+            os.makedirs(custom_tags_dir, exist_ok=True)
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Parquet 파일 합치기",
+            custom_tags_dir,
+            "Parquet Files (*.parquet);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # 새 파일 불러오기
+                new_df = pd.read_parquet(file_path)
+                
+                # 현재 데이터프레임과 합치기
+                current_df = self.search_results.get_dataframe()
+                if current_df.empty:
+                    merged_df = new_df
+                else:
+                    merged_df = pd.concat([current_df, new_df], ignore_index=True)
+                
+                self.search_results.set_dataframe(merged_df)
+                
+                new_count = len(new_df)
+                total_count = len(merged_df)
+                # UI 라벨 업데이트
+                self.result_label1.setText(f"검색: {total_count:,}")
+                self.result_label2.setText(f"남음: {total_count:,}")
+                self.status_bar.showMessage(
+                    f"✅ {os.path.basename(file_path)}을(를) 합쳤습니다. "
+                    f"(+{new_count:,}개, 총 {total_count:,}개 항목)", 
+                    5000
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"파일을 합치는 중 오류가 발생했습니다:\n{str(e)}")
+                self.status_bar.showMessage(f"❌ 파일 합치기 실패: {str(e)}", 5000)
+    
+    def export_custom_parquet(self):
+        """현재 검색 결과를 사용자가 지정한 이름으로 내보내기"""
+        # custom_tags 폴더 확인 및 생성
+        custom_tags_dir = os.path.join("save", "custom_tags")
+        if not os.path.exists(custom_tags_dir):
+            os.makedirs(custom_tags_dir, exist_ok=True)
+        
+        # 현재 데이터프레임 확인
+        current_df = self.search_results.get_dataframe()
+        if current_df.empty:
+            QMessageBox.warning(self, "경고", "내보낼 검색 결과가 없습니다.")
+            return
+        
+        # 파일 다이얼로그 열기
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Parquet 파일로 내보내기",
+            os.path.join(custom_tags_dir, "my_tags.parquet"),
+            "Parquet Files (*.parquet);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # .parquet 확장자 확인
+                if not file_path.endswith('.parquet'):
+                    file_path += '.parquet'
+                
+                # 파일 저장
+                current_df.to_parquet(file_path, index=False)
+                
+                row_count = len(current_df)
+                self.status_bar.showMessage(
+                    f"✅ {os.path.basename(file_path)}로 내보냈습니다. ({row_count:,}개 항목)", 
+                    5000
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"파일을 내보내는 중 오류가 발생했습니다:\n{str(e)}")
+                self.status_bar.showMessage(f"❌ 파일 내보내기 실패: {str(e)}", 5000)
+    
+    def save_to_execution_file(self):
+        """현재 남아있는 행으로 naia_temp_rows.parquet 업데이트"""
+        try:
+            # 현재 데이터프레임 가져오기
+            current_df = self.search_results.get_dataframe()
+            
+            if current_df.empty:
+                QMessageBox.warning(self, "경고", "저장할 검색 결과가 없습니다.")
+                return
+            
+            # naia_temp_rows.parquet에 저장
+            execution_file = 'naia_temp_rows.parquet'
+            current_df.to_parquet(execution_file, index=False)
+            
+            row_count = len(current_df)
+            self.status_bar.showMessage(
+                f"✅ 실행 파일(naia_temp_rows.parquet)을 업데이트했습니다. ({row_count:,}개 항목)", 
+                5000
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"실행 파일 저장 중 오류가 발생했습니다:\n{str(e)}")
+            self.status_bar.showMessage(f"❌ 실행 파일 저장 실패: {str(e)}", 5000)
+    
+    def show_prompt_tabs_context_menu(self, pos):
+        """프롬프트 탭 위젯의 컨텍스트 메뉴 표시"""
+        menu = QMenu(self)
+        menu.setStyleSheet(DARK_STYLES['menu_style'] if 'menu_style' in DARK_STYLES else "")
+        
+        if not self.prompt_tabs_detached:
+            detach_action = QAction("🔓 외부 창으로 분리", self)
+            detach_action.triggered.connect(self.detach_prompt_tabs)
+            menu.addAction(detach_action)
+        else:
+            reattach_action = QAction("🔒 원래 위치로 복귀", self)
+            reattach_action.triggered.connect(self.reattach_prompt_tabs)
+            menu.addAction(reattach_action)
+        
+        menu.exec(self.prompt_tabs.mapToGlobal(pos))
+    
+    def detach_prompt_tabs(self):
+        """프롬프트 탭을 외부 창으로 분리"""
+        if self.prompt_tabs_detached:
+            print("⚠️ 프롬프트 탭이 이미 분리되어 있습니다.")
+            return
+        
+        try:
+            print("🔧 프롬프트 탭 분리 시작...")
+            
+            # 1. 현재 컨테이너에서 탭 위젯 제거
+            self.prompt_tabs_container.layout().removeWidget(self.prompt_tabs)
+            self.prompt_tabs.setParent(None)
+            
+            # 2. 컨테이너를 레이아웃에서 제거 (공간 완전히 압축)
+            # top_layout을 찾기 위해 부모 위젯 탐색
+            parent_widget = self.prompt_tabs_container.parent()
+            if parent_widget and parent_widget.layout():
+                self.prompt_tabs_container_index = parent_widget.layout().indexOf(self.prompt_tabs_container)
+                parent_widget.layout().removeWidget(self.prompt_tabs_container)
+                self.prompt_tabs_container.setVisible(False)
+            
+            # 3. 스플리터 크기 조정 (프롬프트 영역 공간을 중간 섹션에 할당)
+            if hasattr(self, 'vertical_splitter'):
+                # 현재 스플리터 크기 저장
+                self.saved_splitter_sizes = self.vertical_splitter.sizes()
+                # 상단 영역 축소, 중간 영역 확장
+                total_height = sum(self.saved_splitter_sizes)
+                if total_height > 0:
+                    # 상단을 최소 크기로, 나머지를 중간에 할당
+                    new_top_size = max(100, self.saved_splitter_sizes[0] - 350)  # 최소 150px 유지
+                    new_middle_size = total_height - new_top_size
+                    self.vertical_splitter.setSizes([new_top_size, new_middle_size])
+            
+            # 3. 프롬프트 탭을 감싸는 위젯 생성 (버튼 추가를 위해)
+            detached_widget = QWidget()
+            detached_layout = QVBoxLayout(detached_widget)
+            detached_layout.setContentsMargins(8, 8, 8, 8)
+            detached_layout.setSpacing(8)
+            
+            # 탭 위젯 추가
+            detached_layout.addWidget(self.prompt_tabs)
+            
+            # 생성 파라미터 컨테이너 생성
+            params_container = QWidget()
+            params_layout = QVBoxLayout(params_container)
+            params_layout.setContentsMargins(8, 4, 8, 4)
+            params_layout.setSpacing(4)
+            
+            # Line 1: 해상도 관련 컨트롤
+            resolution_layout = QHBoxLayout()
+            resolution_layout.setSpacing(6)
+            
+            # 해상도 콤보박스 (복사본)
+            self.detached_resolution_combo = QComboBox()
+            self.detached_resolution_combo.addItems(self.resolutions)
+            self.detached_resolution_combo.setCurrentText(self.resolution_combo.currentText())
+            self.detached_resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
+            self.disable_wheel_event(self.detached_resolution_combo)  # 마우스 휠 비활성화
+            self.detached_resolution_combo.currentTextChanged.connect(self.sync_resolution_to_main)
+            resolution_layout.addWidget(self.detached_resolution_combo, 2)
+            
+            # 랜덤 해상도 체크박스 (복사본)
+            self.detached_random_resolution = QCheckBox("랜덤 해상도")
+            self.detached_random_resolution.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_random_resolution.setChecked(self.random_resolution_checkbox.isChecked())
+            self.detached_random_resolution.toggled.connect(self.sync_random_resolution_to_main)
+            resolution_layout.addWidget(self.detached_random_resolution)
+            
+            # 자동 맞춤 체크박스 (복사본)
+            self.detached_auto_fit = QCheckBox("자동 맞춤")
+            self.detached_auto_fit.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_auto_fit.setChecked(self.auto_fit_resolution_checkbox.isChecked())
+            self.detached_auto_fit.toggled.connect(self.sync_auto_fit_to_main)
+            resolution_layout.addWidget(self.detached_auto_fit)
+            
+            params_layout.addLayout(resolution_layout)
+            
+            # Line 2: 생성 옵션 체크박스들 (상단 마진 추가)
+            options_layout = QHBoxLayout()
+            options_layout.setSpacing(6)
+            options_layout.setContentsMargins(0, 8, 0, 0)  # 상단 마진 8px
+            
+            # 시드 고정 체크박스 (복사본)
+            self.detached_seed_fix = QCheckBox("시드 고정")
+            self.detached_seed_fix.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_seed_fix.setChecked(self.seed_fix_checkbox.isChecked())
+            self.detached_seed_fix.toggled.connect(self.sync_seed_fix_to_main)
+            options_layout.addWidget(self.detached_seed_fix)
+            
+            # 프롬프트 고정 체크박스 (복사본)
+            self.detached_prompt_fixed = QCheckBox("프롬프트 고정")
+            self.detached_prompt_fixed.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_prompt_fixed.setChecked(self.generation_checkboxes["프롬프트 고정"].isChecked())
+            self.detached_prompt_fixed.toggled.connect(self.sync_prompt_fixed_to_main)
+            options_layout.addWidget(self.detached_prompt_fixed)
+            
+            # 자동 생성 체크박스 (복사본)
+            self.detached_auto_generate = QCheckBox("자동 생성")
+            self.detached_auto_generate.setStyleSheet(DARK_STYLES['dark_checkbox'])
+            self.detached_auto_generate.setChecked(self.generation_checkboxes["자동 생성"].isChecked())
+            self.detached_auto_generate.toggled.connect(self.sync_auto_generate_to_main)
+            options_layout.addWidget(self.detached_auto_generate)
+            
+            params_layout.addLayout(options_layout)
+            detached_layout.addWidget(params_container)
+            
+            # 구분선 추가
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            separator.setStyleSheet(f"background-color: {DARK_COLORS['border']}; max-height: 1px;")
+            detached_layout.addWidget(separator)
+            
+            # 버튼 컨테이너 생성
+            button_container = QWidget()
+            button_layout = QHBoxLayout(button_container)
+            button_layout.setContentsMargins(0, 0, 0, 0)
+            button_layout.setSpacing(6)  # 메인 윈도우와 동일한 간격
+            
+            # 랜덤 프롬프트 버튼 (복사본)
+            self.detached_random_btn = QPushButton(self.random_prompt_btn.text())
+            self.detached_random_btn.setStyleSheet(DARK_STYLES['secondary_button'])  # 원본과 동일한 스타일
+            self.detached_random_btn.setEnabled(self.random_prompt_btn.isEnabled())
+            self.detached_random_btn.clicked.connect(self.trigger_random_prompt)
+            self.detached_random_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)  # 너비 확장
+            button_layout.addWidget(self.detached_random_btn, 1)  # stretch factor 1 for equal width
+            
+            # 생성 버튼 (복사본)
+            self.detached_generate_btn = QPushButton("🎨 이미지 생성 요청")
+            self.detached_generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
+            self.detached_generate_btn.setEnabled(self.generate_button_main.isEnabled())
+            self.detached_generate_btn.clicked.connect(self.generation_controller.execute_generation_pipeline)
+            self.detached_generate_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)  # 너비 확장
+            button_layout.addWidget(self.detached_generate_btn, 1)  # stretch factor 1 for equal width
+            
+            detached_layout.addWidget(button_container)
+            
+            # 4. DetachedWindow 생성
+            from ui.detached_window import DetachedWindow
+            self.prompt_tabs_window = DetachedWindow(
+                detached_widget,
+                "프롬프트 편집기",
+                -1,
+                parent_container=self
+            )
+            self.prompt_tabs_window.window_closed.connect(self.on_prompt_tabs_window_closed)
+            
+            # 최소 크기 설정
+            self.prompt_tabs_window.setMinimumSize(350, 650)
+            self.prompt_tabs_window.resize(600, 650)
+            
+            # 5. 창 표시
+            self.prompt_tabs_window.show()
+            self.prompt_tabs_window.raise_()
+            self.prompt_tabs_window.activateWindow()
+            
+            self.prompt_tabs_detached = True
+            
+            # detach 버튼 텍스트 업데이트
+            if hasattr(self, 'prompt_tabs_detach_btn'):
+                self.prompt_tabs_detach_btn.setText("🔒")
+                self.prompt_tabs_detach_btn.setToolTip("원래 위치로 복귀")
+            
+            # 메인 윈도우 컨트롤들과 연결 설정
+            self.setup_main_to_detached_sync()
+            
+            # 현재 버튼 상태 동기화
+            self.update_random_prompt_button_state()
+            
+            print("✅ 프롬프트 탭 분리 완료")
+            
+        except Exception as e:
+            print(f"❌ 프롬프트 탭 분리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 실패 시 복원
+            try:
+                if hasattr(self, 'prompt_tabs_placeholder'):
+                    self.prompt_tabs_container.layout().removeWidget(self.prompt_tabs_placeholder)
+                    self.prompt_tabs_placeholder.deleteLater()
+                self.prompt_tabs_container.layout().addWidget(self.prompt_tabs)
+                self.prompt_tabs_detached = False
+            except Exception as restore_error:
+                print(f"복원 실패: {restore_error}")
+    
+    def reattach_prompt_tabs(self):
+        """분리된 프롬프트 탭을 원래 위치로 복귀"""
+        if not self.prompt_tabs_detached:
+            print("⚠️ 프롬프트 탭이 분리되어 있지 않습니다.")
+            return
+        
+        try:
+            print("🔄 프롬프트 탭 복귀 시작...")
+            
+            # 1. 창에서 위젯 회수
+            if self.prompt_tabs_window:
+                detached_widget = self.prompt_tabs_window.get_original_widget()
+                # detached_widget에서 prompt_tabs 추출
+                if detached_widget and detached_widget.layout():
+                    # 탭 위젯 찾기
+                    for i in range(detached_widget.layout().count()):
+                        item = detached_widget.layout().itemAt(i)
+                        if item and item.widget() == self.prompt_tabs:
+                            detached_widget.layout().removeWidget(self.prompt_tabs)
+                            break
+                
+                self.prompt_tabs_window.close()
+                self.prompt_tabs_window = None
+            
+            # 2. 동기화 연결 해제
+            self.cleanup_main_to_detached_sync()
+            
+            # 3. 분리된 컨트롤들 정리
+            detached_controls = [
+                'detached_random_btn', 'detached_generate_btn',
+                'detached_resolution_combo', 'detached_random_resolution',
+                'detached_auto_fit', 'detached_seed_fix',
+                'detached_prompt_fixed', 'detached_auto_generate'
+            ]
+            
+            for control_name in detached_controls:
+                if hasattr(self, control_name):
+                    control = getattr(self, control_name)
+                    control.deleteLater()
+                    delattr(self, control_name)
+            
+            # 3. 프롬프트 탭을 컨테이너에 다시 추가
+            self.prompt_tabs_container.layout().addWidget(self.prompt_tabs)
+            
+            # 4. 컨테이너를 원래 레이아웃 위치에 복귀
+            parent_widget = self.prompt_tabs_container.parent()
+            if parent_widget and parent_widget.layout():
+                # 저장된 인덱스가 있으면 그 위치에, 없으면 마지막에 추가
+                if hasattr(self, 'prompt_tabs_container_index'):
+                    parent_widget.layout().insertWidget(self.prompt_tabs_container_index, self.prompt_tabs_container)
+                else:
+                    parent_widget.layout().addWidget(self.prompt_tabs_container)
+            self.prompt_tabs_container.setVisible(True)
+            
+            # 5. 스플리터 크기 복원
+            if hasattr(self, 'vertical_splitter') and hasattr(self, 'saved_splitter_sizes'):
+                self.vertical_splitter.setSizes(self.saved_splitter_sizes)
+            
+            self.prompt_tabs_detached = False
+            
+            # detach 버튼 텍스트 업데이트
+            if hasattr(self, 'prompt_tabs_detach_btn'):
+                self.prompt_tabs_detach_btn.setText("🔓")
+                self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
+            
+            print("✅ 프롬프트 탭 복귀 완료")
+            
+        except Exception as e:
+            print(f"❌ 프롬프트 탭 복귀 실패: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_prompt_tabs_window_closed(self, tab_index, widget):
+        """프롬프트 탭 분리 창이 닫힐 때 호출"""
+        self.reattach_prompt_tabs()
+    
+    def toggle_prompt_tabs_detach(self):
+        """프롬프트 탭 분리/복귀 토글"""
+        if self.prompt_tabs_detached:
+            self.reattach_prompt_tabs()
+        else:
+            self.detach_prompt_tabs()
+
+    # === 리모트 탭 관련 메서드 ===
+
+    def _on_prompt_tab_changed(self, index: int):
+        """프롬프트 탭 전환 이벤트 핸들러"""
+        # 리모트 탭 클릭 시
+        if index == self.remote_tab_index:
+            if self.remote_window_open and self.remote_window:
+                # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
+                self.remote_window.raise_()
+                self.remote_window.activateWindow()
+                QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
+            else:
+                # 새 창 열기
+                QTimer.singleShot(10, self._open_remote_window)
+            return
+
+        # Interactive 탭 클릭 시
+        if index == self.interactive_tab_index:
+            if self.interactive_window_open and self.interactive_window:
+                # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
+                self.interactive_window.raise_()
+                self.interactive_window.activateWindow()
+                QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
+            else:
+                # 새 창 열기
+                QTimer.singleShot(10, self._open_interactive_window)
+            return
+
+        # 일반 탭 클릭 시 이전 탭 인덱스 업데이트
+        self.previous_tab_index = index
+
+    def _open_remote_window(self):
+        """리모트 창 열기"""
+        if self.remote_window_open:
+            return
+
+        # 이전 탭으로 복귀
+        self.prompt_tabs.setCurrentIndex(self.previous_tab_index)
+
+        # 리모트 창 생성
+        self.remote_window = RemoteWindow(parent_app=self)
+        self.remote_window.window_closed.connect(self._on_remote_window_closed)
+        self.remote_window.show()
+
+        # 상태 업데이트
+        self.remote_window_open = True
+        self._update_remote_tab_style(disabled=True)
+
+    def _on_remote_window_closed(self):
+        """리모트 창 닫힘 이벤트"""
+        self.remote_window = None
+        self.remote_window_open = False
+        self._update_remote_tab_style(disabled=False)
+
+    # === Interactive 탭 관련 메서드 ===
+
+    def _open_interactive_window(self):
+        """Interactive 창 열기"""
+        if self.interactive_window_open:
+            return
+
+        # 이전 탭으로 복귀
+        self.prompt_tabs.setCurrentIndex(self.previous_tab_index)
+
+        # Interactive 창 생성
+        self.interactive_window = InteractiveWindow(parent_app=self, app_context=self.app_context)
+        self.interactive_window.window_closed.connect(self._on_interactive_window_closed)
+        self.interactive_window.show()
+
+        # 상태 업데이트
+        self.interactive_window_open = True
+        self._update_interactive_tab_style(disabled=True)
+
+    def _on_interactive_window_closed(self):
+        """Interactive 창 닫힘 이벤트"""
+        self.interactive_window = None
+        self.interactive_window_open = False
+        self._update_interactive_tab_style(disabled=False)
+
+    def _update_interactive_tab_style(self, disabled: bool):
+        """Interactive 탭 스타일 업데이트 (활성/비활성)"""
+        tab_bar = self.prompt_tabs.tabBar()
+        if disabled:
+            # 비활성 스타일 - 회색으로 표시
+            tab_bar.setTabTextColor(self.interactive_tab_index, QColor(DARK_COLORS['text_disabled']))
+        else:
+            # 활성 스타일 - 원래 색으로 복원
+            tab_bar.setTabTextColor(self.interactive_tab_index, QColor(DARK_COLORS['text_primary']))
+
+    def _update_remote_tab_style(self, disabled: bool):
+        """리모트 탭 스타일 업데이트 (활성/비활성)"""
+        tab_bar = self.prompt_tabs.tabBar()
+        if disabled:
+            # 비활성 스타일 - 회색으로 표시
+            tab_bar.setTabTextColor(self.remote_tab_index, QColor(DARK_COLORS['text_disabled']))
+            self.prompt_tabs.setTabText(self.remote_tab_index, "리모트(열림)")
+        else:
+            # 활성 스타일 - 원래 색상
+            tab_bar.setTabTextColor(self.remote_tab_index, QColor(DARK_COLORS['text_primary']))
+            self.prompt_tabs.setTabText(self.remote_tab_index, "리모트")
+
+    def _on_mode_changed_for_remote_tab(self, _old_mode: str, new_mode: str):
+        """모드 변경 시 리모트 탭 가시성 제어"""
+        is_nai_mode = (new_mode == "NAI")
+
+        # NAI 모드가 아니면 리모트 창 닫기
+        if not is_nai_mode and self.remote_window_open and self.remote_window:
+            self.remote_window.close()
+
+        # 탭 가시성 설정
+        self.prompt_tabs.setTabVisible(self.remote_tab_index, is_nai_mode)
+
+    def _update_model_list_for_comfyui(self):
+        """
+        현재 API 모드에 맞게 모델 리스트를 업데이트
+
+        - NAI: 기본 NAI 모델 리스트
+        - WEBUI: SD-WebUI 서버에서 모델 가져오기
+        - COMFYUI: CheckpointLoader + UNETLoader 모델 가져오기
+        """
+        current_mode = self.app_context.get_api_mode()
+
+        # 현재 선택된 모델 저장
+        current_model = self.model_combo.currentText()
+
+        if current_mode == "NAI":
+            # NAI 기본 모델로 복원
+            self.model_combo.blockSignals(True)
+            self.model_combo.clear()
+            self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
+            self.model_combo.blockSignals(False)
+            print("✅ 모델 리스트: NAI 기본 모델로 복원")
+            return
+
+        elif current_mode == "WEBUI":
+            # WEBUI 서버에서 모델 가져오기
+            from core.webui_utils import WebuiAPIUtils
+
+            webui_url = self.app_context.secure_token_manager.get_token('webui_url')
+            if not webui_url:
+                print("⚠️ WEBUI URL이 설정되지 않았습니다.")
+                return
+
+            # URL 정규화
+            if not webui_url.startswith('http://') and not webui_url.startswith('https://'):
+                webui_url = f"http://{webui_url}"
+
+            models = WebuiAPIUtils.get_model_list(webui_url)
+
+            if models:
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItems(models)
+
+                # 이전 선택 복원 (가능한 경우)
+                if current_model in models:
+                    self.model_combo.setCurrentText(current_model)
+                elif self.model_combo.count() > 0:
+                    self.model_combo.setCurrentIndex(0)
+
+                self.model_combo.blockSignals(False)
+                print(f"✅ WEBUI 모델 리스트 업데이트: {len(models)}개 모델")
+            else:
+                print("⚠️ WEBUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
+            return
+
+        elif current_mode == "COMFYUI":
+            # ComfyUI 서버에서 모델 가져오기
+            comfyui_url = self.app_context.secure_token_manager.get_token('comfyui_url')
+            if not comfyui_url:
+                comfyui_url = "http://127.0.0.1:8188"
+
+            models = ComfyUIAPIUtils.get_model_list(comfyui_url)
+
+            if models:
+                self.model_combo.blockSignals(True)
+                self.model_combo.clear()
+                self.model_combo.addItems(models)
+
+                # 이전 선택 복원 (가능한 경우)
+                if current_model in models:
+                    self.model_combo.setCurrentText(current_model)
+                elif self.model_combo.count() > 0:
+                    self.model_combo.setCurrentIndex(0)
+
+                self.model_combo.blockSignals(False)
+                print(f"✅ ComfyUI 모델 리스트 업데이트: {len(models)}개 모델")
+            else:
+                print("⚠️ ComfyUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
+            return
+
+    # === 임시 생성 창 관련 메서드 ===
+
+    def create_temp_generation_window(self):
+        """
+        임시 생성 창 생성
+
+        [Temp] 버튼 클릭 시 호출되어 새로운 TempGenerationWindow를 생성합니다.
+        TempWindowManager를 통해 창을 생성하고, 기존 메인 UI의 프롬프트를 복제합니다.
+        """
+        print("🔄 [ModernMainWindow] 임시 생성 창 생성 요청")
+
+        if hasattr(self, 'temp_window_manager'):
+            temp_window = self.temp_window_manager.create_temp_window()
+
+            # 기존 메인 UI의 프롬프트 복제
+            main_prompt = self.main_prompt_textedit.toPlainText()
+            negative_prompt = self.negative_prompt_textedit.toPlainText()
+
+            temp_window.set_prompts(main_prompt, negative_prompt)
+
+            # 🆕 기존 메인 UI의 생성 파라미터 복제
+            temp_window.set_initial_params(self)
+
+            # 🆕 Issue 2 Fix: 메인 UI 모듈 상태 복제 (캐릭터 등)
+            temp_window.initialize_from_main_modules(self)
+
+            print(f"✅ [ModernMainWindow] 임시 창 #{temp_window.window_id} 생성 완료 (프롬프트 + 파라미터 + 모듈 상태 복제됨)")
+        else:
+            print("❌ [ModernMainWindow] TempWindowManager가 초기화되지 않았습니다")
+
+    def on_temp_window_generate_requested(self, window_id: int, params: dict):
+        """
+        임시 생성 창에서 생성 요청 시 호출
+
+        Args:
+            window_id: 요청한 임시 창의 ID
+            params: 생성 파라미터 (input, negative_prompt, characters 등)
+
+        임시 창의 프롬프트를 사용하여 GenerationController를 통해 생성 파이프라인을 실행합니다.
+        """
+        print(f"\n{'='*80}")
+        print(f"📥 [ModernMainWindow] on_temp_window_generate_requested() 호출됨!")
+        print(f"📥 임시 창 ID: {window_id}")
+        print(f"📥 params keys: {list(params.keys()) if params else 'None'}")
+        print(f"{'='*80}\n")
+
+        try:
+            # 🆕 FR-2-1: 임시 창 모드 플래그 설정
+            print(f"[DEBUG] temp_window_manager 타입: {type(self.temp_window_manager).__name__}")
+            print(f"[DEBUG] temp_windows 딕셔너리 keys: {list(self.temp_window_manager.temp_windows.keys())}")
+            print(f"[DEBUG] 찾으려는 window_id: {window_id} (type: {type(window_id).__name__})")
+
+            temp_window = self.temp_window_manager.temp_windows.get(window_id)
+            print(f"[DEBUG] temp_window.get({window_id}) 결과: {temp_window}")
+
+            if temp_window:
+                print(f"[DEBUG] ✅ 임시 창 #{window_id} 찾음. AppContext 플래그 설정 중...")
+                print(f"[DEBUG] temp_window.character_tab 타입: {type(temp_window.character_tab).__name__}")
+
+                # 플래그 설정
+                self.app_context.temp_window_mode = True
+                self.app_context.temp_window_character_tab = temp_window.character_tab
+
+                print(f"[DEBUG] ✅ temp_window_mode = True")
+                print(f"[DEBUG] ✅ temp_window_character_tab = {type(temp_window.character_tab).__name__}")
+            else:
+                print(f"[DEBUG] ⚠️⚠️⚠️ 임시 창 #{window_id}를 찾을 수 없습니다!")
+                print(f"[DEBUG] ⚠️ 가능한 원인:")
+                print(f"[DEBUG] ⚠️   1. window_id 불일치 (찾는 ID: {window_id}, 실제 keys: {list(self.temp_window_manager.temp_windows.keys())})")
+                print(f"[DEBUG] ⚠️   2. 임시 창이 아직 등록되지 않음")
+                print(f"[DEBUG] ⚠️   3. 임시 창이 이미 닫힘")
+                print(f"[DEBUG] ⚠️ 플래그 설정 건너뜀 → temp_window_mode는 False로 유지됨")
+
+            # 생성 파라미터 수집
+            main_prompt = params.get('input', '')
+            negative_prompt = params.get('negative_prompt', '')
+
+            print(f"  - Main Prompt: {main_prompt[:50]}{'...' if len(main_prompt) > 50 else ''}")
+            print(f"  - Negative Prompt: {negative_prompt[:50]}{'...' if len(negative_prompt) > 50 else ''}")
+
+            # GenerationController를 통해 생성 파이프라인 실행
+            # 모든 params를 그대로 전달 (characters 포함)
+            overrides = params.copy()
+
+            # execute_generation_pipeline 호출
+            # (GenerationController가 자동으로 큐에 추가하거나 즉시 실행)
+            if hasattr(self, 'generation_controller'):
+                self.generation_controller.execute_generation_pipeline(overrides=overrides)
+                print(f"✅ [ModernMainWindow] 임시 창 #{window_id} 생성 요청 처리 완료")
+            else:
+                print("❌ [ModernMainWindow] GenerationController가 없습니다")
+                # 플래그 해제
+                self.app_context.temp_window_mode = False
+                self.app_context.temp_window_character_tab = None
+
+        except Exception as e:
+            print(f"❌ [ModernMainWindow] 임시 창 생성 요청 처리 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # 에러 발생 시 플래그 해제
+            self.app_context.temp_window_mode = False
+            self.app_context.temp_window_character_tab = None
+
+    def apply_temp_params(self, params: dict):
+        """
+        임시 생성 창에서 받은 파라미터를 메인 UI에 적용
+
+        Args:
+            params: TempGenerationParamsWidget.collect_parameters()에서 반환된 딕셔너리
+                    + input, negative_prompt
+                    + apply_sections (optional): 어떤 섹션을 적용할지 선택
+        """
+        print("[ModernMainWindow] 임시 창 파라미터를 메인 UI에 적용 중...")
+
+        # 선택적 적용 섹션 확인
+        apply_sections = params.get('apply_sections', {
+            'main_prompt': True,
+            'negative_prompt': True,
+            'generation_params': True,
+            'character': False,
+            'prompt_engineering': False
+        })
+
+        try:
+            # 1. 프롬프트 적용
+            if apply_sections.get('main_prompt', True) and 'input' in params:
+                self.main_prompt_textedit.setPlainText(params['input'])
+                print(f"  ✅ Main Prompt: {params['input'][:50]}{'...' if len(params['input']) > 50 else ''}")
+
+            if apply_sections.get('negative_prompt', True) and 'negative_prompt' in params:
+                self.negative_prompt_textedit.setPlainText(params['negative_prompt'])
+                print(f"  ✅ Negative Prompt: {params['negative_prompt'][:50]}{'...' if len(params['negative_prompt']) > 50 else ''}")
+
+            # 2. 생성 파라미터 적용 (선택된 경우만)
+            if apply_sections.get('generation_params', True):
+                # 해상도 적용
+                if 'width' in params and 'height' in params:
+                    resolution_text = f"{params['width']} x {params['height']}"
+                    index = self.resolution_combo.findText(resolution_text, Qt.MatchFlag.MatchContains)
+                    if index >= 0:
+                        self.resolution_combo.setCurrentIndex(index)
+                        print(f"  ✅ Resolution: {resolution_text}")
+
+                # 기본 파라미터 적용
+                if 'steps' in params:
+                    self.steps_spinbox.setValue(params['steps'])
+                    print(f"  ✅ Steps: {params['steps']}")
+
+                if 'scale' in params:
+                    self.cfg_scale_slider.setValue(int(params['scale'] * 10))
+                    print(f"  ✅ CFG Scale: {params['scale']}")
+
+                if 'seed' in params:
+                    self.seed_input.setText(str(params['seed']))
+                    print(f"  ✅ Seed: {params['seed']}")
+
+                if 'sampler' in params:
+                    index = self.sampler_combo.findText(params['sampler'])
+                    if index >= 0:
+                        self.sampler_combo.setCurrentIndex(index)
+                        print(f"  ✅ Sampler: {params['sampler']}")
+
+                if 'noise_schedule' in params:
+                    index = self.scheduler_combo.findText(params['noise_schedule'])
+                    if index >= 0:
+                        self.scheduler_combo.setCurrentIndex(index)
+                        print(f"  ✅ Scheduler: {params['noise_schedule']}")
+
+                # NAI 전용 파라미터
+                if self.app_context.get_api_mode() == "NAI":
+                    if 'model' in params:
+                        index = self.model_combo.findText(params['model'])
+                        if index >= 0:
+                            self.model_combo.setCurrentIndex(index)
+                            print(f"  ✅ NAI Model: {params['model']}")
+
+                    if 'cfg_rescale' in params:
+                        self.cfg_rescale_slider.setValue(int(params['cfg_rescale'] * 100))
+                        print(f"  ✅ CFG Rescale: {params['cfg_rescale']}")
+
+                    # NAI 옵션 체크박스
+                    if 'sm' in params:
+                        self.advanced_checkboxes['SMEA'].setChecked(params['sm'])
+                    if 'sm_dyn' in params:
+                        self.advanced_checkboxes['DYN'].setChecked(params['sm_dyn'])
+                    if 'variety_plus' in params:
+                        self.advanced_checkboxes['VAR+'].setChecked(params['variety_plus'])
+                    if 'decrisper' in params:
+                        self.advanced_checkboxes['DECRISP'].setChecked(params['decrisper'])
+
+                # WEBUI 전용 파라미터
+                elif self.app_context.get_api_mode() == "WEBUI":
+                    if 'enable_hr' in params and hasattr(self, 'enable_hr_checkbox'):
+                        self.enable_hr_checkbox.setChecked(params['enable_hr'])
+                    if 'hr_scale' in params and hasattr(self, 'hr_scale_spinbox'):
+                        self.hr_scale_spinbox.setValue(params['hr_scale'])
+                    if 'hr_upscaler' in params and hasattr(self, 'hr_upscaler_combo'):
+                        index = self.hr_upscaler_combo.findText(params['hr_upscaler'])
+                        if index >= 0:
+                            self.hr_upscaler_combo.setCurrentIndex(index)
+
+                # 체크박스들
+                if 'random_resolution' in params:
+                    self.random_resolution_checkbox.setChecked(params['random_resolution'])
+                if 'seed_fix' in params:
+                    self.seed_fix_checkbox.setChecked(params['seed_fix'])
+                if 'auto_fit_resolution' in params:
+                    self.auto_fit_resolution_checkbox.setChecked(params['auto_fit_resolution'])
+
+            # 3. 캐릭터 적용 (선택된 경우만)
+            if apply_sections.get('character', False):
+                if 'temp_window_character_tab' in params:
+                    # VirtualCharacterTab에서 텍스트만 추출하여 메인 CharacterModule에 덤핑
+                    temp_char_tab = params['temp_window_character_tab']
+                    character_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+
+                    if character_module and temp_char_tab and hasattr(temp_char_tab, 'get_display_text'):
+                        # VirtualCharacterTab에서 표시 중인 텍스트 가져오기
+                        display_text = temp_char_tab.get_display_text()
+
+                        if display_text:
+                            # CharacterModule의 첫 번째 캐릭터 위젯에 텍스트 덤핑
+                            if hasattr(character_module, 'character_widgets') and len(character_module.character_widgets) > 0:
+                                first_widget = character_module.character_widgets[0]
+                                if hasattr(first_widget, 'prompt_textbox'):
+                                    first_widget.prompt_textbox.setPlainText(display_text)
+                                    # 체크박스 활성화
+                                    if hasattr(first_widget, 'active_checkbox'):
+                                        first_widget.active_checkbox.setChecked(True)
+                                    print(f"  ✅ Character: 첫 번째 위젯에 텍스트 덤핑 완료 ({len(display_text)} 문자)")
+                            else:
+                                print(f"  ⚠️ Character: character_widgets를 찾을 수 없거나 비어있음")
+                        else:
+                            print(f"  ⚠️ Character: 덤핑할 텍스트가 비어있음")
+
+            # 4. 프롬프트 엔지니어링 적용 (선택된 경우만)
+            if apply_sections.get('prompt_engineering', False):
+                if 'temp_window_prompt_engineering_tab' in params:
+                    # 프롬프트 엔지니어링 모듈을 통해 설정 적용
+                    pe_module = self.app_context.middle_section_controller.get_module_instance("PromptEngineeringModule")
+                    temp_pe_tab = params['temp_window_prompt_engineering_tab']
+                    if pe_module and temp_pe_tab:
+                        # 텍스트 필드 복사
+                        if hasattr(temp_pe_tab, 'pre_textedit') and hasattr(pe_module, 'pre_textedit'):
+                            pe_module.pre_textedit.setPlainText(temp_pe_tab.pre_textedit.toPlainText())
+                        if hasattr(temp_pe_tab, 'post_textedit') and hasattr(pe_module, 'post_textedit'):
+                            pe_module.post_textedit.setPlainText(temp_pe_tab.post_textedit.toPlainText())
+                        if hasattr(temp_pe_tab, 'auto_hide_textedit') and hasattr(pe_module, 'auto_hide_textedit'):
+                            pe_module.auto_hide_textedit.setPlainText(temp_pe_tab.auto_hide_textedit.toPlainText())
+
+                        # 체크박스 복사
+                        if hasattr(temp_pe_tab, 'preprocessing_checkboxes') and hasattr(pe_module, 'preprocessing_checkboxes'):
+                            for key, checkbox in temp_pe_tab.preprocessing_checkboxes.items():
+                                if key in pe_module.preprocessing_checkboxes:
+                                    pe_module.preprocessing_checkboxes[key].setChecked(checkbox.isChecked())
+
+                        print(f"  ✅ Prompt Engineering: 설정 적용됨")
+
+            print(f"✅ [ModernMainWindow] 임시 창 파라미터 적용 완료: {len(params)} 항목")
+
+        except Exception as e:
+            print(f"❌ [ModernMainWindow] 파라미터 적용 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_temp_window_closing(self, window_id: int):
+        """
+        임시 생성 창이 닫힐 때 호출
+
+        Args:
+            window_id: 닫히는 임시 창의 ID
+
+        TempWindowManager를 통해 창을 정리합니다.
+        """
+        print(f"🔄 [ModernMainWindow] 임시 창 #{window_id} 닫기 요청 수신")
+
+        if hasattr(self, 'temp_window_manager'):
+            self.temp_window_manager.close_temp_window(window_id)
+            print(f"✅ [ModernMainWindow] 임시 창 #{window_id} 정리 완료")
+        else:
+            print("❌ [ModernMainWindow] TempWindowManager가 초기화되지 않았습니다")
+
+    def check_and_close_temp_windows(self, change_type: str, old_value: str, new_value: str) -> bool:
+        """
+        모드/모델 변경 시 임시 창 자동 종료 확인
+
+        Args:
+            change_type: 변경 타입 ("API 모드", "NAI 모델")
+            old_value: 이전 값
+            new_value: 새 값
+
+        Returns:
+            bool: True=계속 진행, False=변경 취소
+        """
+        from PyQt6.QtWidgets import QMessageBox
+
+        # 임시 창이 없으면 즉시 허용
+        if not hasattr(self, 'temp_window_manager'):
+            return True
+
+        temp_count = len(self.temp_window_manager.temp_windows)
+        if temp_count == 0:
+            return True
+
+        # 확인 다이얼로그 표시
+        print(f"⚠️ [ModernMainWindow] {change_type} 변경 감지: {old_value} → {new_value}")
+        print(f"   현재 {temp_count}개의 임시 창이 열려 있습니다")
+
+        reply = QMessageBox.question(
+            self,
+            "임시 생성 윈도우 종료 확인",
+            f"{temp_count}개의 임시 생성 윈도우가 자동으로 종료됩니다.\n\n"
+            f"변경 내용: {change_type}\n"
+            f"  • 이전: {old_value}\n"
+            f"  • 새로: {new_value}\n\n"
+            f"계속하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # 기본값: No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 모든 임시 창 종료
+            print(f"✅ [ModernMainWindow] 사용자 승인: 임시 창 {temp_count}개 종료 중...")
+            self.temp_window_manager.cleanup_all_temp_windows()
+            return True
+        else:
+            # 변경 취소
+            print(f"🚫 [ModernMainWindow] 사용자 취소: {change_type} 변경 취소됨")
+            return False
+
+    # === EZ Mode 관련 메서드 ===
+
+    def open_ez_mode_window(self):
+        """
+        EZ Mode 창 열기
+
+        [EZ] 버튼 클릭 시 호출되어 EZModeWindow를 생성하거나 기존 창을 활성화합니다.
+        """
+        print("[OK] [ModernMainWindow] EZ Mode 창 열기 요청")
+
+        # 이미 열려있으면 활성화
+        if hasattr(self, 'ez_mode_window') and self.ez_mode_window is not None:
+            if self.ez_mode_window.isVisible():
+                self.ez_mode_window.raise_()
+                self.ez_mode_window.activateWindow()
+                print("[OK] [ModernMainWindow] 기존 EZ Mode 창 활성화")
+                return
+
+        try:
+            from ui.ezmode.ezmode_window import EZModeWindow
+
+            # EZ Mode 창 생성
+            self.ez_mode_window = EZModeWindow(self.app_context, parent=self)
+
+            # 프롬프트 생성 이벤트 구독
+            self.app_context.subscribe('ez_mode_prompt_generated', self._on_ez_mode_prompt_generated)
+
+            # 즉시 생성 시그널 연결 (EZModeWindow → MainWindow)
+            self.ez_mode_window.instant_generation_requested.connect(self.on_generate_with_image_requested)
+            print("✅ EZ Mode instant_generation_requested 시그널이 연결되었습니다.")
+
+            # 창 닫기 이벤트 연결
+            self.ez_mode_window.destroyed.connect(self.on_ez_mode_window_closing)
+
+            # 창 표시
+            self.ez_mode_window.show()
+            self.ez_mode_window.raise_()
+            self.ez_mode_window.activateWindow()
+
+            print("[OK] [ModernMainWindow] EZ Mode 창 생성 완료")
+
+        except Exception as e:
+            print(f"[ERROR] [ModernMainWindow] EZ Mode 창 생성 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "EZ Mode 오류",
+                f"EZ Mode 창을 열 수 없습니다.\n\n{str(e)}"
+            )
+
+    def _on_ez_mode_prompt_generated(self, data: dict):
+        """
+        EZ Mode에서 프롬프트 생성 시 호출
+
+        Args:
+            data: {'prompt': str} - 생성된 프롬프트
+        """
+        prompt = data.get('prompt', '')
+
+        if prompt:
+            # 메인 프롬프트에 적용
+            self.main_prompt_textedit.setPlainText(prompt)
+            print(f"[OK] [ModernMainWindow] EZ Mode 프롬프트 적용: {len(prompt)} characters")
+
+    def on_ez_mode_window_closing(self):
+        """
+        EZ Mode 창이 닫힐 때 호출
+        """
+        print("[OK] [ModernMainWindow] EZ Mode 창 닫기")
+
+        # 이벤트 구독 해제
+        if hasattr(self, 'app_context'):
+            # Note: AppContext에 unsubscribe 메서드가 있다면 사용
+            pass
+
+        # 참조 제거
+        self.ez_mode_window = None
+
+    def _on_model_changing(self, new_model: str):
+        """
+        NAI 모델 변경 시 호출 (임시 창 자동 종료 체크)
+
+        NAID3 ↔ NAID4.x 전환 시에만 임시 창 종료 확인 필요
+        """
+        old_model = self._previous_nai_model
+        current_api_mode = self.app_context.get_api_mode()
+
+        # NAI 모드가 아니면 체크 불필요
+        if current_api_mode != "NAI":
+            self._previous_nai_model = new_model
+            return
+
+        # NAID3 ↔ 다른 모델 전환 감지
+        is_naid3_change = (
+            (old_model == "NAID3" and new_model != "NAID3") or
+            (old_model != "NAID3" and new_model == "NAID3")
+        )
+
+        if is_naid3_change:
+            # 임시 창 종료 확인
+            if not self.check_and_close_temp_windows("NAI 모델", old_model, new_model):
+                # 취소: 모델 선택 롤백
+                print(f"🔄 [ModernMainWindow] 모델 선택 롤백: {new_model} → {old_model}")
+                self.model_combo.blockSignals(True)
+                self.model_combo.setCurrentText(old_model)
+                self.model_combo.blockSignals(False)
+                return
+
+        # 정상 진행: 새 모델 저장
+        self._previous_nai_model = new_model
+        print(f"✅ [ModernMainWindow] NAI 모델 변경 완료: {old_model} → {new_model}")
+
+    def toggle_queue_window(self):
+        """대기열 창 열기/닫기 토글"""
+        # TODO: 대기열 창 구현
+        QMessageBox.information(self, "대기열", "대기열 기능은 아직 구현 중입니다.")
+    
+    # === 분리된 창의 컨트롤 동기화 메서드들 ===
+    
+    def sync_resolution_to_main(self, text):
+        """분리된 창의 해상도를 메인 윈도우에 동기화"""
+        if hasattr(self, 'resolution_combo'):
+            self.resolution_combo.setCurrentText(text)
+    
+    def sync_random_resolution_to_main(self, checked):
+        """분리된 창의 랜덤 해상도를 메인 윈도우에 동기화"""
+        if hasattr(self, 'random_resolution_checkbox'):
+            self.random_resolution_checkbox.setChecked(checked)
+    
+    def sync_auto_fit_to_main(self, checked):
+        """분리된 창의 자동 맞춤을 메인 윈도우에 동기화"""
+        if hasattr(self, 'auto_fit_resolution_checkbox'):
+            self.auto_fit_resolution_checkbox.setChecked(checked)
+    
+    def sync_seed_fix_to_main(self, checked):
+        """분리된 창의 시드 고정을 메인 윈도우에 동기화"""
+        if hasattr(self, 'seed_fix_checkbox'):
+            self.seed_fix_checkbox.setChecked(checked)
+    
+    def sync_prompt_fixed_to_main(self, checked):
+        """분리된 창의 프롬프트 고정을 메인 윈도우에 동기화"""
+        if "프롬프트 고정" in self.generation_checkboxes:
+            self.generation_checkboxes["프롬프트 고정"].setChecked(checked)
+            # 버튼 상태도 업데이트
+            self.update_random_prompt_button_state()
+    
+    def sync_auto_generate_to_main(self, checked):
+        """분리된 창의 자동 생성을 메인 윈도우에 동기화"""
+        if "자동 생성" in self.generation_checkboxes:
+            self.generation_checkboxes["자동 생성"].setChecked(checked)
+    
+    # === 메인 윈도우에서 분리된 창으로 동기화 ===
+    
+    def setup_main_to_detached_sync(self):
+        """메인 윈도우 컨트롤들의 시그널을 분리된 창과 연결"""
+        # 해상도 콤보박스
+        self.resolution_combo.currentTextChanged.connect(
+            lambda text: self.detached_resolution_combo.setCurrentText(text) 
+            if hasattr(self, 'detached_resolution_combo') else None
+        )
+        
+        # 체크박스들
+        self.random_resolution_checkbox.toggled.connect(
+            lambda checked: self.detached_random_resolution.setChecked(checked)
+            if hasattr(self, 'detached_random_resolution') else None
+        )
+        self.auto_fit_resolution_checkbox.toggled.connect(
+            lambda checked: self.detached_auto_fit.setChecked(checked)
+            if hasattr(self, 'detached_auto_fit') else None
+        )
+        self.seed_fix_checkbox.toggled.connect(
+            lambda checked: self.detached_seed_fix.setChecked(checked)
+            if hasattr(self, 'detached_seed_fix') else None
+        )
+        self.generation_checkboxes["프롬프트 고정"].toggled.connect(
+            lambda checked: self.detached_prompt_fixed.setChecked(checked)
+            if hasattr(self, 'detached_prompt_fixed') else None
+        )
+        self.generation_checkboxes["자동 생성"].toggled.connect(
+            lambda checked: self.detached_auto_generate.setChecked(checked)
+            if hasattr(self, 'detached_auto_generate') else None
+        )
+    
+    def cleanup_main_to_detached_sync(self):
+        """메인 윈도우 컨트롤들의 동기화 시그널 연결 해제"""
+        try:
+            # 기존 연결들을 안전하게 해제
+            self.resolution_combo.currentTextChanged.disconnect()
+        except TypeError:
+            pass  # 연결되지 않았으면 무시
+        
+        try:
+            self.random_resolution_checkbox.toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.auto_fit_resolution_checkbox.toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.seed_fix_checkbox.toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.generation_checkboxes["프롬프트 고정"].toggled.disconnect()
+        except TypeError:
+            pass
+        
+        try:
+            self.generation_checkboxes["자동 생성"].toggled.disconnect()
+        except TypeError:
+            pass         
 
     def open_depth_search_tab(self):
         """심층 검색 탭을 열거나, 이미 열려있으면 해당 탭으로 전환"""
@@ -1908,11 +4313,22 @@ class ModernMainWindow(QMainWindow):
         self.status_bar.showMessage("추출된 태그로 프롬프트 생성 중...")
 
         # 현재 UI의 생성 설정값들을 가져옴
+        # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+        comfyui_sampling_mode = "eps"  # 기본값
+        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
             'auto_generate': self.generation_checkboxes["자동 생성"].isChecked(),
             'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
-            'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked()
+            'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
+            'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+            'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
 
         # 컨트롤러에 즉시 생성을 요청
@@ -1921,15 +4337,29 @@ class ModernMainWindow(QMainWindow):
     def trigger_random_prompt(self):
         """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작"""
         self.random_prompt_btn.setEnabled(False)
+        # 분리된 버튼도 비활성화
+        if hasattr(self, 'detached_random_btn'):
+            self.detached_random_btn.setEnabled(False)
         self.status_bar.showMessage("다음 프롬프트를 생성 중...")
 
         # UI에서 생성 관련 설정값들을 수집
+        # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+        comfyui_sampling_mode = "eps"  # 기본값
+        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
             'auto_generate': self.generation_checkboxes["자동 생성"].isChecked(),
             'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
             'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-            "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked()
+            "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked(),
+            'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+            'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
         self.app_context.publish("random_prompt_triggered")
 
@@ -1961,16 +4391,24 @@ class ModernMainWindow(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(f"❌ 자동 이미지 생성 오류: {e}")
             print(f"자동 이미지 생성 오류: {e}")
-        
-    # on_prompt_generated 메서드에 플래그 해제 추가
+
     def on_prompt_generated(self, prompt_text: str):
         """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트"""
-        self.main_prompt_textedit.setText(prompt_text)
-        
+        self.main_prompt_textedit.setPlainText(prompt_text)
+
+        # 🆕 EZ Mode Skip Flags 해제 (항상 프롬프트 생성 후 정리)
+        if hasattr(self.app_context, 'skip_prompt_engineering_hook') and self.app_context.skip_prompt_engineering_hook:
+            self.app_context.skip_prompt_engineering_hook = False
+            print(f"[MainWindow] ✅ skip_prompt_engineering_hook = False 해제 (전체 훅 재활성화)")
+
+        if hasattr(self.app_context, 'skip_prompt_engineering_auto_hide') and self.app_context.skip_prompt_engineering_auto_hide:
+            self.app_context.skip_prompt_engineering_auto_hide = False
+            print(f"[MainWindow] ✅ skip_prompt_engineering_auto_hide = False 해제 (Auto Hide 재활성화)")
+
         # [신규] 새 프롬프트 생성 시 반복 카운터 리셋
         if self.automation_module:
             self.automation_module.reset_repeat_counter()
-        
+
         # [신규] 자동 생성 플래그 해제
         self.auto_generation_in_progress = False
         
@@ -1979,13 +4417,19 @@ class ModernMainWindow(QMainWindow):
             # 자동 생성 플래그 해제
             self.prompt_gen_controller.auto_generation_requested = False
 
-            char_module = self.middle_section_controller.get_module_instance("CharacterModule")
-            if (char_module and 
-                char_module.activate_checkbox.isChecked() and 
-                not char_module.reroll_on_generate_checkbox.isChecked()):
+            # char_module = self.middle_section_controller.get_module_instance("CharacterModule")
+            # if (char_module and 
+            #     hasattr(char_module, 'is_auto_mode_active') and 
+            #     char_module.is_auto_mode_active()):
                 
-                print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
-                char_module.process_and_update_view()
+            #     # 자동 생성 모드에서 이미지 생성 트리거
+            #     self._trigger_auto_image_generation()
+            # if (char_module and 
+            #     char_module.activate_checkbox.isChecked() and 
+            #     not char_module.reroll_on_generate_checkbox.isChecked()):
+                
+            #     print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
+            #     char_module.process_and_update_view()
             
             self.status_bar.showMessage("🔄 자동 생성: 프롬프트 생성 완료, 이미지 생성 시작...")
             
@@ -1996,6 +4440,9 @@ class ModernMainWindow(QMainWindow):
             # 수동 생성인 경우
             self.status_bar.showMessage("✅ 다음 프롬프트 생성 완료!", 3000)
             self.random_prompt_btn.setEnabled(True)
+            # 분리된 버튼도 활성화
+            if hasattr(self, 'detached_random_btn'):
+                self.detached_random_btn.setEnabled(True)
 
     def on_generation_error(self, error_message: str):
         """프롬프트 생성 중 오류 발생 시 호출"""
@@ -2004,6 +4451,9 @@ class ModernMainWindow(QMainWindow):
 
         self.status_bar.showMessage(f"❌ 생성 오류: {error_message}", 5000)
         self.random_prompt_btn.setEnabled(True)
+        # 분리된 버튼도 활성화
+        if hasattr(self, 'detached_random_btn'):
+            self.detached_random_btn.setEnabled(True)
 
     def load_generation_parameters(self):
         # 기존 방식 대신 모드별 로드
@@ -2015,26 +4465,275 @@ class ModernMainWindow(QMainWindow):
         current_mode = self.app_context.get_api_mode()
         self.generation_params_manager.save_mode_settings(current_mode)
     
+    def read_current_version(self) -> tuple:
+        """Git 명령어로 현재 브랜치, 커밋 SHA, 날짜를 가져옵니다.
+        반환: (branch, sha, date) 튜플 또는 ("", "", "") if Git 저장소가 아니거나 오류 발생
+        """
+        try:
+            # .git 폴더가 있는지 확인 (ZIP 다운로드 등의 경우 없을 수 있음)
+            git_dir = os.path.join(os.path.dirname(__file__), '.git')
+            if not os.path.exists(git_dir):
+                print("⚠️ .git 폴더가 없습니다. (ZIP 다운로드 또는 Git 저장소가 아님)")
+                self.has_git = False
+                return "", "", ""
+            
+            # Windows에서 콘솔 창 숨기기 위한 설정
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+            # macOS/Linux에서는 startupinfo가 None으로 유지됨 (정상 동작)
+            
+            # 현재 브랜치 이름 가져오기
+            branch_result = subprocess.run(
+                ['git', 'branch', '--show-current'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(__file__),
+                startupinfo=startupinfo
+            )
+            
+            # 현재 커밋 SHA 가져오기 (짧은 형태)
+            sha_result = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(__file__),
+                startupinfo=startupinfo
+            )
+            
+            # 현재 커밋 날짜 가져오기 (YYYYMMDD 형식)
+            date_result = subprocess.run(
+                ['git', 'show', '-s', '--format=%cd', '--date=format:%Y%m%d', 'HEAD'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(__file__),
+                startupinfo=startupinfo
+            )
+            
+            if branch_result.returncode == 0 and sha_result.returncode == 0 and date_result.returncode == 0:
+                branch = branch_result.stdout.strip()
+                sha = sha_result.stdout.strip()
+                date = date_result.stdout.strip()
+                
+                # shallow clone의 경우 브랜치 이름이 비어있을 수 있음
+                if not branch:
+                    # detached HEAD 상태일 수 있으므로 기본 브랜치 사용
+                    branch = self.github_branch
+                    print(f"⚠️ Detached HEAD 상태 또는 shallow clone. 기본 브랜치 사용: {branch}")
+                
+                self.has_git = True
+                print(f"📍 현재 Git 정보: 브랜치={branch}, SHA={sha}, 날짜={date}")
+                return branch, sha, date
+            else:
+                print("⚠️ Git 명령 실행 실패. Git이 설치되어 있지 않을 수 있습니다.")
+                self.has_git = False
+                
+        except FileNotFoundError:
+            print("⚠️ Git이 설치되어 있지 않습니다.")
+            self.has_git = False
+        except Exception as e:
+            print(f"⚠️ Git 정보 읽기 실패: {e}")
+            self.has_git = False
+        
+        return "", "", ""
+
+    def check_for_updates(self):
+        """업데이트 확인 스레드를 시작합니다."""
+        current_branch, current_sha, current_date = self.read_current_version()
+        
+        # Git 정보 저장
+        self.current_commit_sha = current_sha
+        self.current_commit_date = current_date
+        
+        # Git이 있는 경우 윈도우 타이틀 업데이트
+        if self.has_git and current_sha:
+            self.update_window_title()
+        
+        # 브랜치가 다르면 경고 메시지 출력
+        if current_branch and current_branch != self.github_branch:
+            print(f"⚠️ 브랜치 불일치: 로컬={current_branch}, 설정={self.github_branch}")
+            # 로컬 브랜치를 우선 사용
+            self.github_branch = current_branch
+        
+        if not current_sha:
+            print("⚠️ Git 정보를 가져올 수 없어 업데이트 확인을 건너뜁니다.")
+            return
+
+        # 이전 스레드가 실행 중이면 중복 실행 방지
+        if self.update_checker_thread and self.update_checker_thread.isRunning():
+            return
+
+        self.update_checker_thread = GitHubUpdateChecker(
+            owner=self.github_repo_owner,
+            repo=self.github_repo_name,
+            branch=self.github_branch,
+            current_sha=current_sha
+        )
+        self.update_checker_thread.update_available.connect(self.on_version_checked)
+        self.update_checker_thread.start()
+
+    def on_version_checked(self, latest_sha: str, commit_message: str, commit_date: str):
+        """버전 확인 결과를 처리하고 필요시 업데이트 알림을 표시합니다."""
+        # 최신 버전 정보 저장
+        self.latest_commit_sha = latest_sha
+        self.latest_commit_date = commit_date
+        
+        # 윈도우 타이틀 업데이트
+        self.update_window_title()
+        
+        # 업데이트가 있는 경우에만 상태 표시줄에 알림 표시
+        # if self.current_commit_sha != latest_sha:
+        #     # 클릭 가능한 라벨 생성
+        #     update_label = QLabel(f"✨ 새 버전 업데이트 가능 ({self.github_branch}): {commit_message[:30]}...")
+        #     update_label.setStyleSheet("color: #87CEEB; text-decoration: underline; cursor: pointer;")
+        #     update_label.setToolTip(f"클릭하여 GitHub {self.github_branch} 브랜치에서 변경 사항 확인")
+
+        #     # 라벨 클릭 시 GitHub 페이지 열기 - QDesktopServices 사용
+        #     # 브랜치별 커밋 페이지로 이동
+        #     repo_url = f"https://github.com/{self.github_repo_owner}/{self.github_repo_name}/commit/{latest_sha}"
+        #     update_label.mousePressEvent = lambda event: QDesktopServices.openUrl(QUrl(repo_url))
+
+        #     # 상태 표시줄 오른쪽에 영구 위젯으로 추가
+        #     self.status_bar.addPermanentWidget(update_label)
+        # else:
+        #     print("✅ 현재 최신 버전을 사용 중입니다.")
+    
+    def update_window_title(self):
+        """Git 정보를 기반으로 윈도우 타이틀을 업데이트합니다."""
+        if not self.has_git:
+            # Git이 없으면 기존 형식 유지
+            return
+        
+        # 기본 타이틀에 버전 정보 추가
+        title = f"{self.base_title} - {self.current_commit_sha} : {self.current_commit_date}"
+        
+        # 최신 버전 체크
+        if self.latest_commit_sha:
+            if self.current_commit_sha == self.latest_commit_sha:
+                title += " (최신 버전)"
+            else:
+                title += f" (업데이트가 있습니다 : {self.latest_commit_date})"
+        
+        self.setWindowTitle(title)
+
+    def _show_multi_account_notification(self):
+        """🆕 멀티 NAI 계정 활성화 시 시작 알림 표시"""
+        try:
+            import json
+            from pathlib import Path
+
+            # NAI 모드가 아니면 체크하지 않음
+            if self.app_context.current_api_mode != "NAI":
+                return
+
+            # save/nai_accounts.json 로드
+            accounts_file = Path("save/nai_accounts.json")
+
+            if not accounts_file.exists():
+                # 계정 파일이 없으면 알림 없음
+                return
+
+            with open(accounts_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # 🆕 안전장치: 자동 복구된 경우 알림 스킵
+            if data.get('auto_recovered', False):
+                print("ℹ️ 계정 자동 복구가 수행되었습니다. 시작 알림을 스킵합니다.")
+                return
+
+            accounts = data.get('accounts', [])
+            round_robin_enabled = data.get('round_robin_enabled', False)
+            main_account_enabled = data.get('main_account_enabled', True)
+
+            # 활성화된 추가 계정 카운트
+            enabled_additional_accounts = sum(1 for acc in accounts if acc.get('enabled', False))
+
+            # 🆕 총 활성 계정 = 메인(활성화 시 1) + 활성화된 추가 계정
+            total_active_accounts = (1 if main_account_enabled else 0) + enabled_additional_accounts
+
+            # 멀티 계정이 활성화된 경우에만 알림 표시
+            if total_active_accounts > 1:
+                mode_text = "라운드 로빈 모드" if round_robin_enabled else "단일 계정 모드"
+
+                # 상태바에 메시지 표시 (5초)
+                message = f"🔄 멀티 NAI 계정 활성화됨: {total_active_accounts}개 계정 ({mode_text})"
+                self.status_bar.showMessage(message, 5000)
+
+                # 콘솔에도 출력
+                print(f"\n{'='*60}")
+                print(f"🔄 멀티 NAI 계정 시스템 활성화")
+                print(f"   - 총 활성 계정: {total_active_accounts}개 (메인 {'1개' if main_account_enabled else '0개'} + 추가 {enabled_additional_accounts}개)")
+                print(f"   - 운영 모드: {mode_text}")
+                if round_robin_enabled:
+                    print(f"   - 이미지 생성 시 카운터 기반으로 계정을 순환합니다.")
+                else:
+                    print(f"   - 활성화된 단일 계정만 사용됩니다.")
+                print(f"{'='*60}\n")
+
+        except Exception as e:
+            print(f"⚠️ 멀티 계정 알림 표시 오류: {e}")
+
+    def _perform_autosave_on_generation(self):
+        """이미지 생성 완료 시 자동 저장 (특수 요청 제외)"""
+        try:
+            current_mode = self.app_context.get_api_mode()
+
+            # 1. 프리셋 저장 (PromptEngineeringModule)
+            prompt_eng_module = self.middle_section_controller.get_module_instance("PromptEngineeringModule")
+            if prompt_eng_module and hasattr(prompt_eng_module, 'save_on_exit'):
+                prompt_eng_module.save_on_exit()
+
+            # 2. 생성 파라미터 저장
+            self.generation_params_manager.save_mode_settings(current_mode)
+
+            # 3. 모드 대응 모듈 저장
+            self.app_context.mode_manager.save_all_current_mode()
+
+            # 상태바에 짧게 표시 (방해되지 않도록)
+            print(f"💾 자동 저장 완료")
+
+        except Exception as e:
+            # 자동 저장 실패해도 프로그램은 계속 동작
+            print(f"⚠️ [Autosave] 자동 저장 실패: {e}")
+
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장
         try:
+            # 🆕 생성 스레드 안전 종료 (가장 먼저 실행)
+            if hasattr(self, 'generation_controller') and self.generation_controller:
+                try:
+                    self.generation_controller.safe_shutdown(timeout_ms=3000)
+                except Exception as e:
+                    print(f"⚠️ 생성 스레드 종료 중 오류: {e}")
+
             # [추가] 분리된 모든 모듈 창 닫기 요청
             if self.middle_section_controller:
                 self.middle_section_controller.close_all_detached_modules()
 
+                # 퀵 프리셋 저장 (PromptEngineeringModule)
+                prompt_eng_module = self.middle_section_controller.get_module_instance("PromptEngineeringModule")
+                if prompt_eng_module and hasattr(prompt_eng_module, 'save_on_exit'):
+                    prompt_eng_module.save_on_exit()
+
             self.image_window.close_all_detached_windows()
+
+            # 모든 임시 생성 창 닫기
+            if hasattr(self, 'temp_window_manager'):
+                self.temp_window_manager.cleanup_all_temp_windows()
 
             current_mode = self.app_context.get_api_mode()
             self.generation_params_manager.save_mode_settings(current_mode)
-            
+
             # 모든 모드 대응 모듈들 설정 저장
             self.app_context.mode_manager.save_all_current_mode()
-            
+
             print(f"💾 프로그램 종료 시 {current_mode} 모드 설정 저장 완료")
-            
+
         except Exception as e:
             print(f"❌ 설정 저장 중 오류: {e}")
-        
+
         event.accept()
 
     def get_api_mode(self) -> str:
@@ -2047,29 +4746,110 @@ class ModernMainWindow(QMainWindow):
         self.resolution_is_detected = True
         self.status_bar.showMessage(f"✅ 해상도 자동 맞춤: {resolution_str}", 3000)
 
+    def _load_resolutions(self) -> list:
+        """JSON 파일에서 해상도 목록을 로드합니다."""
+        resolutions_file = "save/resolutions.json"
+        default_resolutions = [
+            "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
+            "1088 x 960", "1152 x 896", "1216 x 832"
+        ]
+
+        try:
+            if os.path.exists(resolutions_file):
+                with open(resolutions_file, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    # 유효성 검사: 리스트이고 비어있지 않은지
+                    if isinstance(loaded, list) and len(loaded) > 0:
+                        print(f"✅ 해상도 로드 완료: {len(loaded)}개 항목")
+                        return loaded
+                    else:
+                        print("⚠️ 저장된 해상도 목록이 비어있거나 유효하지 않음. 기본값 사용")
+                        return default_resolutions
+            else:
+                print("ℹ️ 해상도 파일 없음. 기본값 사용 및 저장")
+                # 기본값으로 파일 생성
+                self._save_resolutions(default_resolutions)
+                return default_resolutions
+
+        except Exception as e:
+            print(f"❌ 해상도 로드 실패: {e}. 기본값 사용")
+            return default_resolutions
+
+    def _save_resolutions(self, resolutions: list):
+        """해상도 목록을 JSON 파일에 저장합니다."""
+        resolutions_file = "save/resolutions.json"
+
+        try:
+            # print(f"[DEBUG] _save_resolutions 시작")
+            # print(f"[DEBUG] 저장할 해상도: {resolutions}")
+            # print(f"[DEBUG] 저장 경로: {resolutions_file}")
+
+            # save 디렉토리 생성
+            # print(f"[DEBUG] save 디렉토리 생성 시도...")
+            os.makedirs("save", exist_ok=True)
+            # print(f"[DEBUG] save 디렉토리 생성 완료 (또는 이미 존재)")
+
+            # 절대 경로 확인
+            # abs_path = os.path.abspath(resolutions_file)
+            # print(f"[DEBUG] 절대 경로: {abs_path}")
+
+            # JSON 저장
+            # print(f"[DEBUG] JSON 파일 쓰기 시작...")
+            with open(resolutions_file, 'w', encoding='utf-8') as f:
+                json.dump(resolutions, f, ensure_ascii=False, indent=2)
+            # print(f"[DEBUG] JSON 파일 쓰기 완료")
+
+            # 파일 존재 확인
+            # if os.path.exists(resolutions_file):
+            #     file_size = os.path.getsize(resolutions_file)
+            #     print(f"[DEBUG] 파일 생성 확인: {resolutions_file} (크기: {file_size} bytes)")
+            # else:
+            #     print(f"[DEBUG] ⚠️ 파일이 생성되지 않았음!")
+
+            print(f"✅ 해상도 저장 완료: {len(resolutions)}개 항목")
+
+        except Exception as e:
+            print(f"❌ 해상도 저장 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
     def open_resolution_manager(self):
         """해상도 관리 다이얼로그를 열고, 결과를 반영합니다."""
         dialog = ResolutionManagerDialog(self.resolutions, self)
-        
-        if dialog.exec():
+
+        # print(f"[DEBUG] 해상도 관리 다이얼로그 열림")
+        dialog_result = dialog.exec()
+        # print(f"[DEBUG] 다이얼로그 결과: {dialog_result}")
+
+        if dialog_result:
             new_resolutions = dialog.get_updated_resolutions()
+            # print(f"[DEBUG] 새 해상도 목록: {new_resolutions} (개수: {len(new_resolutions) if new_resolutions else 0})")
+
             if new_resolutions:
                 self.resolutions = new_resolutions
-                
+
+                # ✅ 파일에 저장
+                # print(f"[DEBUG] _save_resolutions 호출 시작")
+                self._save_resolutions(self.resolutions)
+                # print(f"[DEBUG] _save_resolutions 호출 완료")
+
                 # [수정-1] 메인 UI의 콤보박스 구성 업데이트
                 current_selection = self.resolution_combo.currentText()
                 self.resolution_combo.clear()
                 self.resolution_combo.addItems(self.resolutions)
-                
+
                 # 기존 선택 항목이 새 목록에도 있으면 유지, 없으면 첫 항목 선택
                 if current_selection in self.resolutions:
                     self.resolution_combo.setCurrentText(current_selection)
                 else:
                     self.resolution_combo.setCurrentIndex(0) # 첫 번째 항목을 기본값으로 설정
-                
-                self.status_bar.showMessage("✅ 해상도 목록이 업데이트되었습니다.", 3000)
+
+                self.status_bar.showMessage("✅ 해상도 목록이 저장되었습니다.", 3000)
             else:
+                # print(f"[DEBUG] 해상도 목록이 비어있음 - 경고 표시")
                 QMessageBox.warning(self, "경고", "해상도 목록이 비어있을 수 없습니다. 변경사항이 적용되지 않았습니다.")
+        # else:
+        #     print(f"[DEBUG] 다이얼로그 취소됨 (exec() = False)")
 
     # [신규] prompt_popped 시그널을 처리할 슬롯
     def on_prompt_popped(self, remaining_count: int):
@@ -2177,17 +4957,41 @@ class ModernMainWindow(QMainWindow):
         """ComfyUI 연결 테스트 함수 (test_webui와 유사한 패턴)"""
         import requests
         
-        # URL 정규화 및 프로토콜 테스트
+        # URL 테스트 전략: 사용자 입력 → 기본 포트들 (8000, 8188)
         test_urls = []
-        clean_url = url.replace('https://', '').replace('http://', '')
-        
-        # 포트가 없으면 기본 ComfyUI 포트(8188) 추가
-        if ':' not in clean_url:
-            clean_url = f"{clean_url}:8188"
-        
-        # HTTP와 HTTPS 모두 테스트
-        test_urls.append(f"http://{clean_url}")
-        test_urls.append(f"https://{clean_url}")
+        original_url = url.strip().rstrip('/')
+
+        # 1. 사용자가 입력한 URL을 그대로 먼저 시도
+        if original_url.startswith('http://') or original_url.startswith('https://'):
+            test_urls.append(original_url)
+        else:
+            # 프로토콜이 없으면 http와 https 모두 시도
+            test_urls.append(f"http://{original_url}")
+            test_urls.append(f"https://{original_url}")
+
+        # 2. 포트가 없는 경우, 기본 포트들을 추가해서 재시도
+        clean_url = original_url.replace('https://', '').replace('http://', '')
+        has_port = ':' in clean_url.split('/')[0]  # 경로 제외하고 호스트:포트 부분만 체크
+
+        if not has_port:
+            # 원격 터널 서비스 감지 (포트 불필요)
+            remote_tunnel_services = [
+                'trycloudflare.com',  # Cloudflare Tunnel
+                'ngrok',              # ngrok (ngrok.io, ngrok-free.app 등)
+                'gradio.live',        # Gradio Share
+                'serveo.net',         # Serveo
+                'localhost.run',      # localhost.run
+                'tunnelto.dev',       # Tunnelto
+                'localtunnel.me',     # Localtunnel
+            ]
+
+            is_remote_tunnel = any(service in clean_url for service in remote_tunnel_services)
+
+            if not is_remote_tunnel:
+                # 로컬 서버: 기본 포트들 시도 (8000, 8188)
+                for port in [8000, 8188]:
+                    test_urls.append(f"http://{clean_url}:{port}")
+                    test_urls.append(f"https://{clean_url}:{port}")
         
         for test_url in test_urls:
             try:
@@ -2235,16 +5039,25 @@ class ModernMainWindow(QMainWindow):
     def update_random_prompt_button_state(self):
         """generation_checkboxes 상태에 따라 random_prompt_btn을 활성화/비활성화"""
         try:
-            # "프롬프트 고정" 체크박스가 체크되어 있으면 버튼 비활성화
+            # "프롬프트 고정" 체크박스 확인
             prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
-            
-            if prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked():
+            prompt_fixed = prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked()
+
+            if prompt_fixed:
+                # 프롬프트 고정 모드
                 self.random_prompt_btn.setEnabled(False)
                 self.random_prompt_btn.setText("프롬프트 고정됨")
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(False)
+                    self.detached_random_btn.setText("프롬프트 고정됨")
             else:
+                # 일반 모드 (활성화)
                 self.random_prompt_btn.setEnabled(True)
                 self.random_prompt_btn.setText("랜덤/다음 프롬프트")
-                
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(True)
+                    self.detached_random_btn.setText("랜덤/다음 프롬프트")
+
         except Exception as e:
             print(f"❌ 버튼 상태 업데이트 오류: {e}")
 
@@ -2280,9 +5093,54 @@ class ModernMainWindow(QMainWindow):
             default_height = get_scaled_size(650)
             self.resize(default_width, default_height)
 
+    def show_negative_prompt_context_menu(self, pos):
+        """negative_prompt_textedit에서 우클릭 시 기본 QMenu를 표시합니다."""
+        # 기본 스타일의 QMenu 생성 (스타일시트 적용 없음)
+        menu = self.negative_prompt_textedit.createStandardContextMenu()
+        if menu:
+            # 선택된 텍스트가 있으면 인스턴트 와일드카드 추가 메뉴 표시
+            cursor = self.negative_prompt_textedit.textCursor()
+            selected_text = cursor.selectedText().strip()
+            
+            if selected_text:
+                # 인스턴트 와일드카드 모듈 찾기
+                instant_wildcard_module = None
+                if hasattr(self, 'middle_section_controller'):
+                    instant_wildcard_module = self.middle_section_controller.get_module_instance("InstantWildcardModule")
+                
+                if instant_wildcard_module:
+                    # 상단에 액션 삽입
+                    actions = menu.actions()
+                    add_wildcard_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                    add_wildcard_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                    
+                    if actions:
+                        menu.insertAction(actions[0], add_wildcard_action)
+                        menu.insertSeparator(actions[0])
+                    else:
+                        menu.addAction(add_wildcard_action)
+            
+            menu.exec(self.negative_prompt_textedit.mapToGlobal(pos))
+    
     def show_prompt_context_menu(self, pos):
         """main_prompt_textedit에서 우클릭 시 KR_tags 정보를 포함한 커스텀 메뉴를 표시합니다."""
         menu = QMenu(self)
+
+        # --- 0. 선택된 텍스트가 있으면 인스턴트 와일드카드 추가 메뉴 표시 ---
+        cursor = self.main_prompt_textedit.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        if selected_text:
+            # 인스턴트 와일드카드 모듈 찾기
+            instant_wildcard_module = None
+            if hasattr(self, 'middle_section_controller'):
+                instant_wildcard_module = self.middle_section_controller.get_module_instance("InstantWildcardModule")
+            
+            if instant_wildcard_module:
+                add_wildcard_action = QAction("➕ 인스턴트 와일드카드 추가", menu)
+                add_wildcard_action.triggered.connect(lambda: instant_wildcard_module.add_from_selection(selected_text))
+                menu.addAction(add_wildcard_action)
+                menu.addSeparator()
 
         # --- 1. 커서 위치의 태그 찾기 ---
         cursor = self.main_prompt_textedit.cursorForPosition(pos)
@@ -2481,6 +5339,67 @@ class ModernMainWindow(QMainWindow):
             self.save_settings_btn.setText("💾 설정 저장")
             self.save_settings_btn.setEnabled(True)
 
+    def update_token_count(self):
+        """Update the token count label based on current prompts and mode."""
+        try:
+            # Get token calculator
+            calculator = get_token_calculator()
+            if not calculator.available:
+                self.main_prompt_token_label.setText("Estimated Tokens : N/A (tiktoken not available)")
+                return
+            
+            # Get main prompt text
+            main_prompt = self.main_prompt_textedit.toPlainText()
+            
+            # Get current API mode
+            current_mode = self.get_current_api_mode()
+            
+            # Get character prompt if in NAI mode
+            character_prompt = ""
+            if current_mode == "NAI":
+                try:
+                    character_module = self.middle_section_controller.get_module_instance("CharacterModule")
+                    if character_module and hasattr(character_module, 'modifiable_clone'):
+                        characters = character_module.modifiable_clone.get('characters', [])
+                        if characters and character_module.activate_checkbox.isChecked():
+                            # Join all character strings into one
+                            character_prompt = ' '.join(str(char) for char in characters if char)
+                except Exception as e:
+                    print(f"Warning: Could not get character module data: {e}")
+            
+            # Calculate tokens
+            token_counts = calculator.count_prompt_tokens(main_prompt, character_prompt, current_mode)
+            
+            # Format and update label
+            label_text = calculator.format_token_label(token_counts, current_mode)
+            self.main_prompt_token_label.setText(label_text)
+            
+        except Exception as e:
+            print(f"Error updating token count: {e}")
+            self.main_prompt_token_label.setText("Estimated Tokens : Error")
+    
+    def update_negative_token_count(self):
+        """Update the negative prompt token count label."""
+        try:
+            # Get token calculator
+            calculator = get_token_calculator()
+            if not calculator.available:
+                self.negative_prompt_token_label.setText("Estimated Tokens : N/A (tiktoken not available)")
+                return
+            
+            # Get negative prompt text
+            negative_prompt = self.negative_prompt_textedit.toPlainText()
+            
+            # Calculate tokens (negative prompt only, no mode dependency)
+            token_count = calculator.count_tokens(negative_prompt)
+            
+            # Update label with simple format
+            self.negative_prompt_token_label.setText(f"Estimated Tokens : {token_count}")
+            
+        except Exception as e:
+            print(f"Error updating negative token count: {e}")
+            self.negative_prompt_token_label.setText("Estimated Tokens : Error")
+    
     def _load_custom_workflow_from_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "ComfyUI 워크플로우 이미지 선택", "", "Image Files (*.png)"
@@ -2541,34 +5460,569 @@ class ModernMainWindow(QMainWindow):
             self.img2img_panel.set_image(pil_image)
             self.status_bar.showMessage("Img2Img 패널이 활성화되었습니다.", 3000)
 
-    def activate_inpaint_mode(self, pil_image: Image.Image):
+    def activate_inpaint_mode(self, pil_image: Image.Image, skip_window: bool = False):
         """Img2ImgPopup의 요청을 받아 Img2ImgPanel을 활성화하고 즉시 Inpaint 창을 엽니다."""
         if hasattr(self, 'img2img_panel'):
             print(f"🎨 Inpaint 모드 활성화 요청 (이미지 크기: {pil_image.size})")
             # 1. 먼저 패널을 이미지와 함께 활성화
             self.img2img_panel.set_image(pil_image)
-            # 2. 패널의 Inpaint 버튼 클릭 로직을 즉시 실행
-            self.img2img_panel._on_inpaint_button_clicked()
+            # 2. 패널의 Inpaint 버튼 클릭 로직을 즉시 실행 (unless skip_window is True)
+            # Note: skip_window is now handled differently via set_mask_from_sketchbook
+            if not skip_window:
+                self.img2img_panel._on_inpaint_button_clicked()
+    
+    def activate_vibe_transfer(self, pil_image: Image.Image):
+        """Import Vibe Transfer 요청을 처리하여 이미지를 vibe transfer 모듈에 추가합니다."""
+        try:
+            # VibeTransferModule 찾기
+            if hasattr(self, 'middle_section_controller'):
+                vibe_module = self.middle_section_controller.get_module_instance("VibeTransferModule")
+                if vibe_module:
+                    # 임시 파일로 저장
+                    import hashlib
+                    from pathlib import Path
+                    temp_path = Path("temp") / f"vibe_import_{hashlib.sha256(str(pil_image).encode()).hexdigest()[:16]}.png"
+                    temp_path.parent.mkdir(exist_ok=True)
+                    pil_image.save(str(temp_path))
+                    
+                    # vibe frame 추가 (upload와 동일한 처리)
+                    vibe_module._add_vibe_frame(str(temp_path))
+                    print(f"📦 Vibe Transfer로 이미지 추가됨: {temp_path}")
+                    self.status_bar.showMessage("Vibe Transfer로 이미지가 추가되었습니다.", 3000)
+                else:
+                    QMessageBox.warning(self, "경고", "Vibe Transfer 모듈을 찾을 수 없습니다.")
+        except Exception as e:
+            print(f"Error adding image to vibe transfer: {e}")
+            QMessageBox.critical(self, "오류", f"Vibe Transfer에 이미지 추가 실패:\n{str(e)}")
+    
+    def apply_prompt_from_metadata(self, prompt: str, negative: str):
+        """메타데이터에서 프롬프트를 적용합니다."""
+        try:
+            # 메인 프롬프트 적용
+            if hasattr(self, 'prompt_input'):
+                self.prompt_input.setPlainText(prompt)
+            
+            # 네거티브 프롬프트 적용
+            if hasattr(self, 'negative_prompt_input'):
+                self.negative_prompt_input.setPlainText(negative)
+            
+            print(f"✅ 메타데이터에서 프롬프트 적용 완료")
+            self.status_bar.showMessage("프롬프트가 적용되었습니다.", 3000)
+        except Exception as e:
+            print(f"❌ 프롬프트 적용 중 오류: {e}")
+    
+    def apply_settings_from_metadata(self, settings: dict):
+        """메타데이터에서 설정값을 일괄 적용합니다."""
+        try:
+            current_mode = self.app_context.get_api_mode()
+            
+            # 메타데이터에서 소스 모드 감지
+            source_mode = self._detect_metadata_source_mode(settings)
+            
+            # 모드 호환성 체크
+            if source_mode and source_mode != current_mode:
+                # NAI ↔ WEBUI 간 상호 호환 불가
+                if (source_mode == "NAI" and current_mode == "WEBUI") or \
+                   (source_mode == "WEBUI" and current_mode == "NAI"):
+                    error_msg = QMessageBox(self)
+                    error_msg.setWindowTitle("호환되지 않는 모드")
+                    error_msg.setText(f"{source_mode} 모드의 설정값을 {current_mode} 모드에서 적용할 수 없습니다.\n\n"
+                                     f"동일한 모드로 전환한 후 다시 시도해주세요.")
+                    error_msg.setIcon(QMessageBox.Icon.Critical)
+                    
+                    # 다크 테마 및 하얀 텍스트 적용
+                    error_msg.setStyleSheet("""
+                        QMessageBox {
+                            background-color: #2b2b2b;
+                            color: white;
+                        }
+                        QMessageBox QLabel {
+                            color: white;
+                        }
+                        QMessageBox QPushButton {
+                            background-color: #404040;
+                            border: 1px solid #555555;
+                            color: white;
+                            padding: 5px 15px;
+                            border-radius: 3px;
+                        }
+                        QMessageBox QPushButton:hover {
+                            background-color: #505050;
+                        }
+                        QMessageBox QPushButton:pressed {
+                            background-color: #353535;
+                        }
+                    """)
+                    
+                    error_msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    error_msg.exec()
+                    return
+            
+            # 경고 메시지 표시
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("설정값 일괄 적용")
+            msg_box.setText("현재 프리셋의 설정값이 소실됩니다.\n계속하시겠습니까?")
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            
+            # 다크 테마 및 하얀 텍스트 적용
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2b2b2b;
+                    color: white;
+                }
+                QMessageBox QLabel {
+                    color: white;
+                }
+                QMessageBox QPushButton {
+                    background-color: #404040;
+                    border: 1px solid #555555;
+                    color: white;
+                    padding: 5px 15px;
+                    border-radius: 3px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #505050;
+                }
+                QMessageBox QPushButton:pressed {
+                    background-color: #353535;
+                }
+            """)
+            
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+            
+            if msg_box.exec() != QMessageBox.StandardButton.Yes:
+                return
+            
+            print(f"📝 메타데이터 설정 적용 시작 (모드: {current_mode})")
+            
+            # 랜덤 해상도 및 자동 해상도 맞춤 비활성화
+            if hasattr(self, 'random_resolution_checkbox'):
+                self.random_resolution_checkbox.setChecked(False)
+                print("  ✓ 랜덤 해상도: 비활성화")
+            
+            if hasattr(self, 'auto_fit_resolution_checkbox'):
+                self.auto_fit_resolution_checkbox.setChecked(False)
+                print("  ✓ 자동 해상도 맞춤: 비활성화")
+            
+            # 시드 고정 활성화
+            if hasattr(self, 'seed_checkbox'):
+                self.seed_checkbox.setChecked(True)
+                print("  ✓ 시드 고정: 활성화")
+            
+            # 호환성 딕셔너리 생성 (prompt_engineering_module 참조)
+            compat_settings = self._create_metadata_compatibility_dict(settings, current_mode)
+            
+            # 프롬프트 적용
+            if 'prompt' in compat_settings:
+                if hasattr(self, 'main_prompt_textedit'):
+                    self.main_prompt_textedit.setPlainText(compat_settings['prompt'])
+                elif hasattr(self, 'prompt_input'):
+                    self.prompt_input.setPlainText(compat_settings['prompt'])
+                print(f"  ✓ 프롬프트 적용 (길이: {len(compat_settings['prompt'])})")
+            
+            if 'negative' in compat_settings:
+                if hasattr(self, 'negative_prompt_textedit'):
+                    self.negative_prompt_textedit.setPlainText(compat_settings['negative'])
+                elif hasattr(self, 'negative_prompt_input'):
+                    self.negative_prompt_input.setPlainText(compat_settings['negative'])
+                print(f"  ✓ 네거티브 적용 (길이: {len(compat_settings['negative'])})")
+            
+            # apply_main_ui_settings 스타일로 설정 적용
+            if current_mode == "NAI":
+                self._apply_nai_settings(compat_settings)
+            elif current_mode == "WEBUI":
+                self._apply_webui_settings(compat_settings)
+            elif current_mode == "COMFYUI":
+                self._apply_comfyui_settings(compat_settings)
+            
+            print(f"✅ 메타데이터 설정 적용 완료")
+            # 성공 메시지는 출력하지 않음 (사용자 요청)
+            
+        except Exception as e:
+            import traceback
+            print(f"❌ 설정값 적용 중 오류: {e}")
+            traceback.print_exc()
+            self.status_bar.showMessage(f"설정 적용 중 일부 오류 발생: {e}", 5000)
+    
+    def _detect_metadata_source_mode(self, settings: dict) -> str:
+        """메타데이터에서 소스 모드를 감지합니다."""
+        # Software 필드 확인 (NAI)
+        if 'Software' in settings and settings['Software'] == 'NovelAI':
+            return 'NAI'
+        
+        # type 필드 확인
+        if 'type' in settings:
+            type_info = settings['type'].lower()
+            if type_info == 'nai':
+                return 'NAI'
+            elif type_info == 'webui':
+                return 'WEBUI'
+            elif type_info == 'comfyui':
+                return 'COMFYUI'
+        
+        # NAI 전용 파라미터 확인
+        nai_specific = ['noise_schedule', 'sm', 'sm_dyn', 'dynamic_thresholding', 
+                       'controlnet_strength', 'legacy', 'skip_cfg_above_sigma', 
+                       'uncond_scale', 'cfg_rescale']
+        for param in nai_specific:
+            if param in settings:
+                return 'NAI'
+        
+        # WebUI 전용 파라미터 확인
+        webui_specific = ['enable_hr', 'hr_scale', 'hr_upscaler', 'denoising_strength',
+                         'Model hash', 'Model', 'VAE', 'VAE hash', 'Clip skip',
+                         'Face restoration', 'RNG', 'Hires upscaler']
+        for param in webui_specific:
+            if param in settings:
+                return 'WEBUI'
+        
+        # parameters 필드 내부 확인
+        if 'parameters' in settings:
+            params = settings['parameters']
+            # WebUI 스타일 parameters
+            if any(key in params for key in ['Model hash', 'Model', 'VAE']):
+                return 'WEBUI'
+        
+        # ComfyUI workflow 확인
+        if 'workflow' in settings:
+            return 'COMFYUI'
+        
+        # 기본값: None (알 수 없음)
+        return None
+    
+    def _create_metadata_compatibility_dict(self, settings: dict, mode: str) -> dict:
+        """메타데이터를 현재 모드에 맞게 변환하는 호환성 딕셔너리 생성"""
+        compat = {}
+        
+        # 프롬프트 매핑
+        if 'prompt' in settings:
+            compat['prompt'] = settings['prompt']
+        
+        # 네거티브 프롬프트 매핑 (uc, negative, negative_prompt 등)
+        if 'negative' in settings:
+            compat['negative'] = settings['negative']
+        elif 'uc' in settings:
+            compat['negative'] = settings['uc']
+        elif 'negative_prompt' in settings:
+            compat['negative'] = settings['negative_prompt']
+        
+        # Steps 매핑
+        if 'steps' in settings:
+            compat['steps'] = int(settings['steps'])
+        
+        # CFG Scale 매핑 (scale, cfg_scale)
+        if 'scale' in settings:
+            compat['cfg_scale'] = float(settings['scale'])
+        elif 'cfg_scale' in settings:
+            compat['cfg_scale'] = float(settings['cfg_scale'])
+        
+        # Seed 매핑
+        if 'seed' in settings:
+            compat['seed'] = str(settings['seed'])
+        
+        # Sampler 매핑
+        if 'sampler' in settings:
+            compat['sampler'] = settings['sampler']
+        
+        # NAI 전용 파라미터
+        if mode == "NAI":
+            # Noise Schedule
+            if 'noise_schedule' in settings:
+                compat['noise_schedule'] = settings['noise_schedule']
+            
+            # SMEA 관련
+            if 'sm' in settings:
+                compat['SMEA'] = bool(settings['sm'])
+            if 'sm_dyn' in settings:
+                compat['DYN'] = bool(settings['sm_dyn'])
+            
+            # VAR+ (skip_cfg_above_sigma)
+            if 'skip_cfg_above_sigma' in settings:
+                skip_val = settings['skip_cfg_above_sigma']
+                compat['VAR+'] = bool(skip_val and skip_val != 0)
+            elif 'VAR+' in settings:
+                compat['VAR+'] = bool(settings['VAR+'])
+            
+            # DECRISP
+            if 'decrisper' in settings:
+                compat['DECRISP'] = bool(settings['decrisper'])
+            elif 'DECRISP' in settings:
+                compat['DECRISP'] = bool(settings['DECRISP'])
+            
+            # UC Strength
+            if 'uncond_scale' in settings:
+                compat['uncond_scale'] = float(settings['uncond_scale'])
+            
+            # CFG Rescale
+            if 'cfg_rescale' in settings:
+                compat['cfg_rescale'] = float(settings['cfg_rescale'])
+        
+        # WEBUI 전용 파라미터
+        elif mode == "WEBUI":
+            # Scheduler
+            if 'scheduler' in settings:
+                compat['scheduler'] = settings['scheduler']
+            elif 'noise_schedule' in settings:
+                # NAI noise_schedule을 WEBUI scheduler로 매핑
+                schedule_mapping = {
+                    'native': 'karras',
+                    'karras': 'karras',
+                    'exponential': 'exponential',
+                    'polyexponential': 'normal'
+                }
+                compat['scheduler'] = schedule_mapping.get(settings['noise_schedule'], 'normal')
+            
+            # Sampler 변환 (NAI → WEBUI)
+            if 'sampler' in compat:
+                sampler_mapping = {
+                    'k_euler_ancestral': 'Euler a',
+                    'k_euler': 'Euler',
+                    'k_dpmpp_2m': 'DPM++ 2M',
+                    'k_dpmpp_2s_ancestral': 'DPM++ 2S a',
+                    'k_dpmpp_sde': 'DPM++ SDE',
+                    'k_dpmpp_2m_sde': 'DPM++ 2M SDE',
+                    'ddim_v3': 'DDIM'
+                }
+                if compat['sampler'] in sampler_mapping:
+                    compat['sampler'] = sampler_mapping[compat['sampler']]
+            
+            # Hires Fix
+            if 'enable_hr' in settings:
+                compat['enable_hr'] = bool(settings['enable_hr'])
+            if 'hr_scale' in settings:
+                compat['hr_scale'] = float(settings['hr_scale'])
+            if 'hr_upscaler' in settings:
+                compat['hr_upscaler'] = settings['hr_upscaler']
+            if 'denoising_strength' in settings:
+                compat['denoising_strength'] = float(settings['denoising_strength'])
+        
+        # 해상도
+        if 'width' in settings and 'height' in settings:
+            compat['width'] = int(settings['width'])
+            compat['height'] = int(settings['height'])
+        
+        # 모델 정보
+        if 'model' in settings:
+            compat['model'] = settings['model']
+        
+        return compat
+    
+    def _apply_nai_settings(self, settings: dict):
+        """NAI 모드 설정 적용"""
+        print(f"  NAI 설정 적용 중...")
+        
+        # CFG Scale
+        if 'cfg_scale' in settings and hasattr(self, 'cfg_scale_slider'):
+            slider_value = int(float(settings['cfg_scale']) * 10)
+            self.cfg_scale_slider.setValue(slider_value)
+            if hasattr(self, 'cfg_value_label'):
+                self.cfg_value_label.setText(str(settings['cfg_scale']))
+            print(f"    ✓ CFG Scale: {settings['cfg_scale']}")
+        
+        # CFG Rescale (NAI 전용)
+        if 'cfg_rescale' in settings and hasattr(self, 'cfg_rescale_slider'):
+            slider_value = int(float(settings['cfg_rescale']) * 100)
+            self.cfg_rescale_slider.setValue(slider_value)
+            print(f"    ✓ CFG Rescale: {settings['cfg_rescale']}")
+        
+        # Sampler (독립적으로 적용)
+        if 'sampler' in settings and hasattr(self, 'sampler_combo'):
+            sampler_text = settings['sampler']
+            index = self.sampler_combo.findText(sampler_text)
+            if index >= 0:
+                self.sampler_combo.setCurrentIndex(index)
+                print(f"    ✓ Sampler: {sampler_text}")
+        
+        # Scheduler (별도 콤보박스로 적용)
+        if 'noise_schedule' in settings and hasattr(self, 'scheduler_combo'):
+            scheduler_text = settings['noise_schedule']
+            index = self.scheduler_combo.findText(scheduler_text)
+            if index >= 0:
+                self.scheduler_combo.setCurrentIndex(index)
+                print(f"    ✓ Scheduler: {scheduler_text}")
+        elif 'scheduler' in settings and hasattr(self, 'scheduler_combo'):
+            scheduler_text = settings['scheduler']
+            index = self.scheduler_combo.findText(scheduler_text)
+            if index >= 0:
+                self.scheduler_combo.setCurrentIndex(index)
+                print(f"    ✓ Scheduler: {scheduler_text}")
+        
+        # Steps
+        if 'steps' in settings and hasattr(self, 'steps_spinbox'):
+            self.steps_spinbox.setValue(int(settings['steps']))
+            print(f"    ✓ Steps: {settings['steps']}")
+        
+        # Advanced checkboxes
+        if hasattr(self, 'advanced_checkboxes'):
+            for key in ['SMEA', 'DYN', 'VAR+', 'DECRISP']:
+                if key in settings and key in self.advanced_checkboxes:
+                    self.advanced_checkboxes[key].setChecked(bool(settings[key]))
+                    print(f"    ✓ {key}: {settings[key]}")
+        
+        # Seed
+        if 'seed' in settings:
+            if hasattr(self, 'seed_checkbox'):
+                self.seed_checkbox.setChecked(True)
+            if hasattr(self, 'seed_input'):
+                self.seed_input.setText(str(settings['seed']))
+                print(f"    ✓ Seed: {settings['seed']}")
+        
+        # Model
+        if 'model' in settings and hasattr(self, 'model_combo'):
+            index = self.model_combo.findText(settings['model'])
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+                print(f"    ✓ Model: {settings['model']}")
+        
+        # Resolution
+        if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
+            resolution_text = f"{settings['width']} x {settings['height']}"
+            index = self.resolution_combo.findText(resolution_text)
+            if index >= 0:
+                self.resolution_combo.setCurrentIndex(index)
+                print(f"    ✓ Resolution: {resolution_text}")
+    
+    def _apply_webui_settings(self, settings: dict):
+        """WEBUI 모드 설정 적용"""
+        print(f"  WEBUI 설정 적용 중...")
+        
+        # CFG Scale
+        if 'cfg_scale' in settings and hasattr(self, 'cfg_scale_slider'):
+            slider_value = int(float(settings['cfg_scale']) * 10)
+            self.cfg_scale_slider.setValue(slider_value)
+            print(f"    ✓ CFG Scale: {settings['cfg_scale']}")
+        
+        # Sampler
+        if 'sampler' in settings and hasattr(self, 'sampler_combo'):
+            index = self.sampler_combo.findText(settings['sampler'])
+            if index >= 0:
+                self.sampler_combo.setCurrentIndex(index)
+                print(f"    ✓ Sampler: {settings['sampler']}")
+        
+        # Steps
+        if 'steps' in settings and hasattr(self, 'steps_spinbox'):
+            self.steps_spinbox.setValue(int(settings['steps']))
+            print(f"    ✓ Steps: {settings['steps']}")
+        
+        # Scheduler
+        if 'scheduler' in settings and hasattr(self, 'scheduler_combo'):
+            index = self.scheduler_combo.findText(settings['scheduler'])
+            if index >= 0:
+                self.scheduler_combo.setCurrentIndex(index)
+                print(f"    ✓ Scheduler: {settings['scheduler']}")
+        
+        # Hires Fix
+        if 'enable_hr' in settings and hasattr(self, 'enable_hr_checkbox'):
+            self.enable_hr_checkbox.setChecked(bool(settings['enable_hr']))
+            print(f"    ✓ Hires Fix: {settings['enable_hr']}")
+        
+        if 'hr_scale' in settings and hasattr(self, 'hr_scale_spinbox'):
+            self.hr_scale_spinbox.setValue(float(settings['hr_scale']))
+            print(f"    ✓ HR Scale: {settings['hr_scale']}")
+        
+        if 'hr_upscaler' in settings and hasattr(self, 'hr_upscaler_combo'):
+            index = self.hr_upscaler_combo.findText(settings['hr_upscaler'])
+            if index >= 0:
+                self.hr_upscaler_combo.setCurrentIndex(index)
+                print(f"    ✓ HR Upscaler: {settings['hr_upscaler']}")
+        
+        # Denoising strength
+        if 'denoising_strength' in settings and hasattr(self, 'denoising_strength_slider'):
+            slider_value = int(float(settings['denoising_strength']) * 100)
+            self.denoising_strength_slider.setValue(slider_value)
+            print(f"    ✓ Denoising Strength: {settings['denoising_strength']}")
+        
+        # Model
+        if 'model' in settings and hasattr(self, 'model_combo'):
+            index = self.model_combo.findText(settings['model'])
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+                print(f"    ✓ Model: {settings['model']}")
+        
+        # Seed
+        if 'seed' in settings:
+            if hasattr(self, 'seed_checkbox'):
+                self.seed_checkbox.setChecked(True)
+            if hasattr(self, 'seed_input'):
+                self.seed_input.setText(str(settings['seed']))
+                print(f"    ✓ Seed: {settings['seed']}")
+        
+        # Resolution
+        if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
+            resolution_text = f"{settings['width']} x {settings['height']}"
+            index = self.resolution_combo.findText(resolution_text)
+            if index >= 0:
+                self.resolution_combo.setCurrentIndex(index)
+                print(f"    ✓ Resolution: {resolution_text}")
+    
+    def _apply_comfyui_settings(self, settings: dict):
+        """COMFYUI 모드 설정 적용"""
+        print(f"  COMFYUI 설정 적용 중...")
+        
+        # COMFYUI는 워크플로우 기반이므로 기본적인 프롬프트만 적용
+        if 'workflow' in settings:
+            print(f"    ℹ️ Workflow: {settings['workflow']}")
+        
+        # 해상도는 공통으로 적용 가능
+        if 'width' in settings and 'height' in settings and hasattr(self, 'resolution_combo'):
+            resolution_text = f"{settings['width']} x {settings['height']}"
+            index = self.resolution_combo.findText(resolution_text)
+            if index >= 0:
+                self.resolution_combo.setCurrentIndex(index)
+                print(f"    ✓ Resolution: {resolution_text}")
+    
+    def send_to_img2img_with_metadata(self, pil_image: Image.Image, metadata: dict):
+        """메타데이터와 함께 img2img로 이미지를 전송합니다."""
+        try:
+            # img2img 패널 활성화
+            if hasattr(self, 'img2img_panel'):
+                self.img2img_panel.set_image(pil_image)
+                
+                # 메타데이터에서 프롬프트 정보 가져와서 설정 가능
+                if 'prompt' in metadata:
+                    # img2img 패널의 프롬프트 필드에 설정 (있다면)
+                    pass  # img2img 패널 구현에 따라 추가
+                
+                print(f"✅ 이미지와 메타데이터를 img2img로 전송 완료")
+                self.status_bar.showMessage("img2img로 이미지가 전송되었습니다.", 3000)
+        except Exception as e:
+            print(f"❌ img2img 전송 중 오류: {e}")
 
     def on_send_to_inpaint_requested(self, history_item):
         """
-        Inpaint 요청을 받아 API 모드를 NAI로 전환하고
-        InpaintWindow를 즉시 실행합니다.
+        Inpaint 요청을 받아 InpaintWindow를 즉시 실행합니다.
+        현재 선택된 API 모드(NAI/WEBUI/COMFYUI)를 그대로 사용합니다.
         """
         if not history_item or not hasattr(history_item, 'image'):
             return
 
-        # 1. 현재 API 모드 확인 및 NAI로 전환 (필요시)
+        # 현재 API 모드 확인 (강제 전환하지 않음)
         current_mode = self.get_current_api_mode()
-        if current_mode != "NAI":
-            self.status_bar.showMessage("🎨 NAI 모드로 자동 전환하고 Inpaint를 시작합니다.", 3000)
-            print(f"🔄 API 모드 자동 전환: {current_mode} -> NAI")
-            self.toggle_search_mode("NAI")
-        
-        # 2. Inpaint 모드 활성화
+        print(f"🎨 Inpaint 시작: 현재 모드 '{current_mode}'에서 실행됩니다.")
+        self.status_bar.showMessage(f"🎨 {current_mode} 모드에서 Inpaint를 시작합니다.", 3000)
+
+        # Inpaint 모드 활성화 (현재 모드 유지)
         pil_image = history_item.image
         self.activate_inpaint_mode(pil_image)
-    
+
+    def on_save_to_remote_event_requested(self, history_item):
+        """🆕 리모트 이벤트 저장 요청 처리"""
+        if not history_item:
+            print("⚠️ history_item이 없습니다.")
+            return
+
+        # RemoteWindow가 열려있다면 직접 추가
+        if self.remote_window_open and self.remote_window:
+            self.remote_window.add_remote_event(history_item)
+            self.status_bar.showMessage("📌 리모트 이벤트가 저장되었습니다.", 3000)
+        else:
+            # RemoteWindow가 없으면 열고 추가
+            self._open_remote_window()
+            if self.remote_window:
+                self.remote_window.add_remote_event(history_item)
+                self.status_bar.showMessage("📌 리모트 이벤트가 저장되었습니다.", 3000)
+
     def update_splitter_stretch_factors(self):
         """좌측 패널의 실제 필요 공간에 따라 splitter의 stretch factor를 동적으로 조정"""
         if not (hasattr(self, 'search_result_frame') and hasattr(self, 'main_splitter')):

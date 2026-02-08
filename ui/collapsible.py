@@ -3,24 +3,30 @@
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QScrollArea, QSizePolicy, QToolButton, QMenu, QFrame, QLabel
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QSizePolicy, QToolButton, QMenu, QFrame, QLabel
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QAction, QCursor
 
 class EnhancedCollapsibleBox(QWidget):
     """우클릭 컨텍스트 메뉴가 있는 향상된 접고 펼 수 있는 위젯"""
-    
+
     # 모듈을 외부 창으로 분리 요청 시그널 (title, content_widget)
     module_detach_requested = pyqtSignal(str, object)
-    
+
+    # 🆕 펼침/접힘 상태 변경 시그널 (title, is_expanded)
+    toggled = pyqtSignal(str, bool)
+
     def __init__(self, title="", parent=None, detachable=True):
         super().__init__(parent)
         self.title = title
         self.detachable = detachable
         self.content_widget = None
         self.is_detached = False
-        
+
+        # 🆕 스크롤 위치 저장
+        self._saved_scroll_position = 0
+
         self.setStyleSheet(DARK_STYLES['collapsible_box'])
         self.init_ui()
 
@@ -35,6 +41,11 @@ class EnhancedCollapsibleBox(QWidget):
         self.toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.toggle_button.setArrowType(Qt.ArrowType.RightArrow)
         self.toggle_button.toggled.connect(self.on_toggled)
+        
+        # Anlas 표시용 레이블 (NAI 모드 전용)
+        self.anlas_label = QLabel("")
+        self.anlas_label.setStyleSheet(f"color: #FFFF97; font-size: {get_scaled_font_size(19)}px; font-weight: bold; padding: 0 10px;")
+        self.anlas_label.setVisible(False)
         
         # 테마에서 이미 동적 스케일링이 적용되므로 추가 스타일링 불필요
         # DARK_STYLES['collapsible_box']에서 QToolButton 스타일을 사용
@@ -57,7 +68,15 @@ class EnhancedCollapsibleBox(QWidget):
             }
         """)
         
-        self.main_layout.addWidget(self.toggle_button)
+        # 헤더 레이아웃 (제목 버튼과 Anlas 레이블을 담을 수평 레이아웃)
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(0)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.addWidget(self.toggle_button)
+        header_layout.addWidget(self.anlas_label)
+        header_layout.addStretch()
+        
+        self.main_layout.addLayout(header_layout)
         self.main_layout.addWidget(self.content_area)
 
     def show_context_menu(self, position: QPoint):
@@ -104,18 +123,33 @@ class EnhancedCollapsibleBox(QWidget):
             except RuntimeError:
                 print(f"❌ 모듈 '{self.title}'의 위젯이 이미 삭제되었습니다.")
         else:
-            print(f"⚠️ 모듈 '{self.title}': content_widget이 None이거나 이미 분리된 상태입니다.")
+            print(f"[WARNING] Module '{self.title}': content_widget is None or already detached")
 
     def on_toggled(self, checked):
         """접기/펼치기 토글"""
         if self.is_detached:
             return  # 분리된 상태에서는 토글 비활성화
-            
+
         self.toggle_button.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
         if checked:
             self.content_area.setMaximumHeight(16777215)
+            # 🆕 스크롤 위치 복원
+            self._restore_scroll_position()
         else:
+            # 🆕 스크롤 위치 저장
+            self._save_scroll_position()
             self.content_area.setMaximumHeight(0)
+
+        # 🆕 펼침/접힘 상태 변경 시그널 발행
+        self.toggled.emit(self.title, checked)
+    
+    def update_anlas(self, anlas_value):
+        """Anlas 값을 업데이트합니다."""
+        if anlas_value is not None:
+            self.anlas_label.setText(f"[Anlas: {anlas_value}]")
+            self.anlas_label.setVisible(True)
+        else:
+            self.anlas_label.setVisible(False)
 
 
     def setContentLayout(self, layout):
@@ -124,7 +158,7 @@ class EnhancedCollapsibleBox(QWidget):
             print(f"⚠️ 모듈 '{self.title}': 레이아웃이 None입니다.")
             return
             
-        print(f"🔧 '{self.title}' 콘텐츠 설정 중...")
+        print(f"[CONFIG] Setting content for '{self.title}'...")
         print(f"   - 입력 레이아웃: {layout}")
         print(f"   - 레이아웃 타입: {type(layout).__name__}")
         
@@ -145,11 +179,11 @@ class EnhancedCollapsibleBox(QWidget):
         print(f"   - 생성된 content_widget: {content_widget}")
         print(f"   - content_widget 크기: {content_widget.size()}")
         print(f"   - content_widget 레이아웃: {content_widget.layout()}")
-        print(f"✅ 모듈 '{self.title}': 콘텐츠 위젯 설정 완료")
+        print(f"[OK] Module '{self.title}': Content widget setup complete")
 
     def request_detach(self):
         """모듈 분리 요청 (디버깅 강화 버전)"""
-        print(f"🔗 모듈 분리 요청: {self.title}")
+        print(f"[DETACH] Module detach request: {self.title}")
         print(f"   - content_widget: {self.content_widget}")
         print(f"   - is_detached: {self.is_detached}")
         
@@ -165,15 +199,15 @@ class EnhancedCollapsibleBox(QWidget):
                 self.module_detach_requested.emit(self.title, self.content_widget)
                 
             except RuntimeError as e:
-                print(f"❌ 모듈 '{self.title}'의 위젯이 이미 삭제되었습니다: {e}")
+                print(f"[ERROR] Module '{self.title}' widget already deleted: {e}")
         else:
-            print(f"⚠️ 모듈 '{self.title}': content_widget이 None이거나 이미 분리된 상태입니다.")
+            print(f"[WARNING] Module '{self.title}': content_widget is None or already detached")
             print(f"   - content_widget is None: {self.content_widget is None}")
             print(f"   - is_detached: {self.is_detached}")
 
     def set_detached_state(self, is_detached: bool):
         """분리 상태 설정 (디버깅 강화 버전)"""
-        print(f"🔧 '{self.title}' 분리 상태 변경: {self.is_detached} → {is_detached}")
+        print(f"[CONFIG] Detach state change for '{self.title}': {self.is_detached} -> {is_detached}")
         
         self.is_detached = is_detached
         
@@ -251,6 +285,66 @@ class EnhancedCollapsibleBox(QWidget):
     def get_content_widget(self):
         """콘텐츠 위젯 반환"""
         return self.content_widget
+
+    # 🆕 상태 추적 및 제어 메서드
+
+    def is_expanded(self) -> bool:
+        """현재 펼쳐진 상태인지 확인"""
+        return self.toggle_button.isChecked() and not self.is_detached
+
+    def set_expanded(self, expanded: bool, emit_signal: bool = True):
+        """프로그래밍 방식으로 펼치기/접기 (시그널 발행 여부 선택 가능)"""
+        if self.is_detached:
+            return
+
+        # 시그널 발행 방지를 위해 임시로 차단
+        if not emit_signal:
+            self.toggle_button.blockSignals(True)
+
+        self.toggle_button.setChecked(expanded)
+
+        if not emit_signal:
+            self.toggle_button.blockSignals(False)
+            # 수동으로 UI만 업데이트 (시그널 없이)
+            self.toggle_button.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+            if expanded:
+                self.content_area.setMaximumHeight(16777215)
+                self._restore_scroll_position()
+            else:
+                self._save_scroll_position()
+                self.content_area.setMaximumHeight(0)
+
+    def collapse(self, emit_signal: bool = True):
+        """접기 (편의 메서드)"""
+        self.set_expanded(False, emit_signal)
+
+    def expand(self, emit_signal: bool = True):
+        """펼치기 (편의 메서드)"""
+        self.set_expanded(True, emit_signal)
+
+    def _save_scroll_position(self):
+        """스크롤 위치 저장"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            self._saved_scroll_position = self.content_area.verticalScrollBar().value()
+            print(f"[SCROLL] '{self.title}' 스크롤 위치 저장: {self._saved_scroll_position}")
+
+    def _restore_scroll_position(self):
+        """스크롤 위치 복원"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            self.content_area.verticalScrollBar().setValue(self._saved_scroll_position)
+            print(f"[SCROLL] '{self.title}' 스크롤 위치 복원: {self._saved_scroll_position}")
+
+    def get_scroll_position(self) -> int:
+        """현재 스크롤 위치 반환"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            return self.content_area.verticalScrollBar().value()
+        return 0
+
+    def set_scroll_position(self, position: int):
+        """스크롤 위치 설정"""
+        if self.content_area and self.content_area.verticalScrollBar():
+            self.content_area.verticalScrollBar().setValue(position)
+            self._saved_scroll_position = position
 
 # 기존 CollapsibleBox는 호환성을 위해 유지
 class CollapsibleBox(EnhancedCollapsibleBox):

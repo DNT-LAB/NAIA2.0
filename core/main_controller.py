@@ -7,9 +7,9 @@ import os
 import json
 import pandas as pd
 import requests
-from PyQt6.QtWidgets import QMessageBox, QProgressDialog
-from PyQt6.QtCore import QThread, QTimer
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QMenu
+from PyQt6.QtCore import QThread, QTimer, Qt
+from PyQt6.QtGui import QTextCursor, QAction, QShortcut, QKeySequence
 from PIL import Image
 from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
@@ -166,13 +166,19 @@ class MainController:
         
         mw.search_btn.clicked.connect(mw.trigger_search)
         mw.save_settings_btn.clicked.connect(self.save_all_current_settings)
-        mw.restore_btn.clicked.connect(mw.restore_search_results)
+        # restore_btn은 이제 메뉴를 가지고 있으므로 개별 액션들이 connect됨
         mw.deep_search_btn.clicked.connect(mw.open_depth_search_tab)
         mw.random_prompt_btn.clicked.connect(mw.trigger_random_prompt)
         mw.image_window.instant_generation_requested.connect(self.on_instant_generation_requested)
-        mw.generate_button_main.clicked.connect(
-            mw.generation_controller.execute_generation_pipeline
-        )
+        # 🆕 큐 지원을 위해 wrapper 함수로 연결
+        mw.generate_button_main.clicked.connect(lambda: self.trigger_generation(priority=0))
+
+        # 🆕 생성 버튼에 우클릭 컨텍스트 메뉴 설정
+        self._setup_generation_button_context_menu()
+
+        # 🆕 키보드 단축키 설정
+        self._setup_keyboard_shortcuts()
+
         mw.prompt_gen_controller.prompt_generated.connect(self.on_prompt_generated)
         mw.prompt_gen_controller.generation_error.connect(self.on_generation_error)
         mw.prompt_gen_controller.prompt_popped.connect(self.on_prompt_popped)
@@ -197,7 +203,24 @@ class MainController:
             print("⚠️ generate_with_image_requested 시그널을 찾을 수 없습니다.")
         if hasattr(mw.image_window, 'send_to_inpaint_requested'):
             mw.image_window.send_to_inpaint_requested.connect(self.on_send_to_inpaint_requested)
-        
+
+        # 🆕 리모트 이벤트 저장 시그널 연결
+        if hasattr(mw.image_window, 'save_to_remote_event_requested'):
+            mw.image_window.save_to_remote_event_requested.connect(self.on_save_to_remote_event_requested)
+            print("✅ save_to_remote_event_requested 시그널이 연결되었습니다.")
+
+        # 🆕 큐 이벤트 구독
+        self.connect_queue_signals()
+
+    def connect_queue_signals(self):
+        """큐 이벤트 구독"""
+        if hasattr(self.main_window, 'app_context') and self.main_window.app_context:
+            # 큐 재개 이벤트 구독
+            self.main_window.app_context.subscribe("queue_queue_resumed", self.on_queue_resumed)
+            # 큐 일시정지 이벤트 구독
+            self.main_window.app_context.subscribe("queue_queue_paused", self.on_queue_paused)
+            print("✅ [QUEUE] 큐 이벤트 구독 완료")
+
     def connect_automation_signals(self):
         """자동화 모듈과의 시그널 연결"""
         # 자동화 모듈 찾기
@@ -207,32 +230,23 @@ class MainController:
                     self.main_window.automation_module = module
                     break
         
+        # NAIA_cold_v4.py에서 이미 콜백을 연결하므로 여기서는 모듈 참조만 설정
         if hasattr(self.main_window, 'automation_module') and self.main_window.automation_module:
-            try:
-                # 콜백 함수 등록 (시그널 대신)
-                self.main_window.automation_module.set_automation_status_callback(
-                    self.main_window.update_automation_status
-                )
-                
-                self.main_window.automation_module.set_generation_delay_callback(
-                    self.main_window.on_generation_delay_changed
-                )
-                
-                # [신규] 자동 생성 상태 확인 콜백 등록
-                self.main_window.automation_module.set_auto_generate_status_callback(
-                    self.get_auto_generate_status
-                )
-
-                # [신규] 자동화 활성 상태 확인 콜백 등록 (누락된 부분)
-                self.main_window.automation_module.set_automation_active_status_callback(
-                    self.main_window.get_automation_active_status
-                )
-                
-                print("✅ 자동화 모듈 콜백 연결 완료")
-            except Exception as e:
-                print(f"⚠️ 자동화 모듈 콜백 연결 실패: {e}")
+            print("✅ 자동화 모듈 참조 설정 완료")
         else:
             print("⚠️ 자동화 모듈을 찾을 수 없습니다.")
+    
+    def connect_e621_event_signals(self):
+        """E621 이벤트 모듈과의 시그널 연결"""
+        # E621EventModuleV2 찾기
+        if self.main_window.middle_section_controller:
+            for module in self.main_window.middle_section_controller.module_instances:
+                if module.__class__.__name__ == 'E621EventModuleV2':
+                    # generation_requested 시그널 연결
+                    if hasattr(module, 'signals') and hasattr(module.signals, 'generation_requested'):
+                        module.signals.generation_requested.connect(self.on_generate_with_image_requested)
+                        print("✅ E621EventModuleV2 generation_requested 시그널 연결 완료")
+                    break
         
     def connect_checkbox_signals(self):
         """체크박스 시그널을 연결하는 메서드 (init에서 호출)"""
@@ -246,7 +260,156 @@ class MainController:
             
         except Exception as e:
             print(f"❌ 체크박스 시그널 연결 오류: {e}")
-    
+
+    # === 🆕 Generation Queue Methods ===
+
+    def trigger_generation(self, priority: int = 0):
+        """
+        생성 요청을 트리거합니다 (큐 지원 포함)
+
+        Args:
+            priority: 우선순위 (0=일반, 100=긁급)
+        """
+        # auto_generation_requested 플래그 리셋 (수동 생성)
+        self.main_window.prompt_gen_controller.auto_generation_requested = False
+
+        # GenerationController의 execute_generation_pipeline 호출
+        self.main_window.generation_controller.execute_generation_pipeline(priority=priority)
+
+    def on_queue_resumed(self, data: dict):
+        """
+        큐 재개 이벤트 핸들러
+
+        재개 시 생성 중이 아니고 큐가 비어있지 않으면 자동으로 다음 요청 처리
+        """
+        queue_size = data.get('queue_size', 0)
+        print(f"[QUEUE] 큐 재개됨: {queue_size}개 대기 중")
+
+        # 버튼 텍스트 업데이트
+        self.main_window.generation_controller._update_button_with_queue_size()
+
+        # ⚡ 간단한 플래그 체크 후 즉시 처리
+        if queue_size > 0 and not self.main_window.generation_controller.is_generating:
+            print(f"[QUEUE] 자동 재시작: 다음 요청 처리 중...")
+            # 최소한의 지연 (50ms면 충분)
+            QTimer.singleShot(50, self.main_window.generation_controller._process_next_queue_request)
+        elif queue_size > 0:
+            print(f"[QUEUE] 생성 중이므로 대기... (완료 후 자동 처리됨)")
+
+    def on_queue_paused(self, data: dict):
+        """
+        큐 일시정지 이벤트 핸들러
+
+        일시정지 시 버튼 텍스트 업데이트
+        """
+        queue_size = data.get('queue_size', 0)
+        print(f"[QUEUE] 큐 일시정지됨: {queue_size}개 대기 중")
+
+        # 버튼 텍스트 업데이트
+        self.main_window.generation_controller._update_button_with_queue_size()
+
+    def _setup_generation_button_context_menu(self):
+        """생성 버튼에 우클릭 컨텍스트 메뉴를 설정합니다."""
+        mw = self.main_window
+
+        # 생성 버튼에 컨텍스트 메뉴 정책 설정
+        mw.generate_button_main.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        mw.generate_button_main.customContextMenuRequested.connect(self._show_queue_context_menu)
+
+        print("[QUEUE] 생성 버튼 컨텍스트 메뉴 설정 완료")
+
+    def _show_queue_context_menu(self, position):
+        """생성 버튼 우클릭 시 큐 제어 메뉴 표시"""
+        mw = self.main_window
+        queue_manager = mw.app_context.generation_queue_manager
+
+        menu = QMenu(mw)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 5px;
+                font-size: {get_scaled_font_size(14)}px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+            }}
+            QMenu::item:disabled {{
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+
+        # 큐 상태 표시 (비활성화, 정보 표시용)
+        queue_size = queue_manager.get_queue_size()
+        status_action = QAction(f"📊 대기 중: {queue_size}개", mw)
+        status_action.setEnabled(False)
+        menu.addAction(status_action)
+
+        menu.addSeparator()
+
+        # 일시정지/재개 액션
+        if queue_manager.is_paused():
+            pause_action = QAction("▶️ 큐 재개", mw)
+            pause_action.triggered.connect(queue_manager.resume_queue)
+        else:
+            pause_action = QAction("⏸️ 큐 일시정지", mw)
+            pause_action.triggered.connect(queue_manager.pause_queue)
+        menu.addAction(pause_action)
+
+        # 큐 비우기 액션
+        clear_action = QAction("🗑️ 큐 비우기", mw)
+        clear_action.triggered.connect(self._clear_queue_with_confirmation)
+        clear_action.setEnabled(queue_size > 0)  # 큐가 비어있으면 비활성화
+        menu.addAction(clear_action)
+
+        # 메뉴 표시
+        global_pos = mw.generate_button_main.mapToGlobal(position)
+        menu.exec(global_pos)
+
+    def _clear_queue_with_confirmation(self):
+        """큐 비우기 (확인 대화상자 포함)"""
+        queue_manager = self.main_window.app_context.generation_queue_manager
+        queue_size = queue_manager.get_queue_size()
+
+        if queue_size == 0:
+            return
+
+        # 확인 대화상자
+        reply = QMessageBox.question(
+            self.main_window,
+            '큐 비우기 확인',
+            f'대기 중인 {queue_size}개의 요청을 모두 제거하시겠습니까?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            queue_manager.clear_queue()
+            self.main_window.status_bar.showMessage(f"🗑️ {queue_size}개의 대기 요청이 제거되었습니다.")
+            print(f"[QUEUE] 사용자가 {queue_size}개의 요청을 제거했습니다.")
+
+    def _setup_keyboard_shortcuts(self):
+        """키보드 단축키를 설정합니다."""
+        mw = self.main_window
+
+        # Ctrl+Enter: 일반 생성 (우선순위 0)
+        ctrl_enter = QShortcut(QKeySequence(Qt.Modifier.CTRL.value | Qt.Key.Key_Return.value), mw)
+        ctrl_enter.activated.connect(lambda: self.trigger_generation(priority=0))
+
+        # Shift+Enter: 긴급 생성 (우선순위 100)
+        shift_enter = QShortcut(QKeySequence(Qt.Modifier.SHIFT.value | Qt.Key.Key_Return.value), mw)
+        shift_enter.activated.connect(lambda: self.trigger_generation(priority=100))
+
+        print("[QUEUE] 키보드 단축키 설정 완료:")
+        print("  - Ctrl+Enter: 일반 생성")
+        print("  - Shift+Enter: 긴급 생성")
+
     # === Helper Methods ===
     
     def get_auto_generate_status(self) -> bool:
@@ -455,17 +618,41 @@ class MainController:
         import requests
         import json
         
-        # URL 정규화 및 프로토콜 테스트
+        # URL 테스트 전략: 사용자 입력 → 기본 포트들 (8000, 8188)
         test_urls = []
-        clean_url = url.replace('https://', '').replace('http://', '')
-        
-        # 포트가 없으면 기본 ComfyUI 포트(8188) 추가
-        if ':' not in clean_url:
-            clean_url = f"{clean_url}:8188"
-        
-        # HTTP와 HTTPS 모두 테스트
-        test_urls.append(f"http://{clean_url}")
-        test_urls.append(f"https://{clean_url}")
+        original_url = url.strip().rstrip('/')
+
+        # 1. 사용자가 입력한 URL을 그대로 먼저 시도
+        if original_url.startswith('http://') or original_url.startswith('https://'):
+            test_urls.append(original_url)
+        else:
+            # 프로토콜이 없으면 http와 https 모두 시도
+            test_urls.append(f"http://{original_url}")
+            test_urls.append(f"https://{original_url}")
+
+        # 2. 포트가 없는 경우, 기본 포트들을 추가해서 재시도
+        clean_url = original_url.replace('https://', '').replace('http://', '')
+        has_port = ':' in clean_url.split('/')[0]  # 경로 제외하고 호스트:포트 부분만 체크
+
+        if not has_port:
+            # 원격 터널 서비스 감지 (포트 불필요)
+            remote_tunnel_services = [
+                'trycloudflare.com',  # Cloudflare Tunnel
+                'ngrok',              # ngrok (ngrok.io, ngrok-free.app 등)
+                'gradio.live',        # Gradio Share
+                'serveo.net',         # Serveo
+                'localhost.run',      # localhost.run
+                'tunnelto.dev',       # Tunnelto
+                'localtunnel.me',     # Localtunnel
+            ]
+
+            is_remote_tunnel = any(service in clean_url for service in remote_tunnel_services)
+
+            if not is_remote_tunnel:
+                # 로컬 서버: 기본 포트들 시도 (8000, 8188)
+                for port in [8000, 8188]:
+                    test_urls.append(f"http://{clean_url}:{port}")
+                    test_urls.append(f"https://{clean_url}:{port}")
         
         for test_url in test_urls:
             try:
@@ -522,7 +709,13 @@ class MainController:
         # 메인 윈도우에 위임
         if hasattr(self.main_window, 'on_send_to_inpaint_requested'):
             self.main_window.on_send_to_inpaint_requested(history_item)
-            
+
+    def on_save_to_remote_event_requested(self, history_item):
+        """🆕 리모트 이벤트 저장 요청 처리"""
+        # 메인 윈도우에 위임
+        if hasattr(self.main_window, 'on_save_to_remote_event_requested'):
+            self.main_window.on_save_to_remote_event_requested(history_item)
+
     def _load_custom_workflow_from_image(self):
         """이미지에서 커스텀 워크플로우 로드"""
         # 메인 윈도우에 위임

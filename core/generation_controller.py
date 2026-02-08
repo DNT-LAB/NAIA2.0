@@ -1,11 +1,64 @@
-from core.context import AppContext
+﻿from core.context import AppContext
+from core.generation_request import GenerationRequest
+from core.sequence_parser import SequenceParser
 from PIL import Image
 import piexif
 import piexif.helper
 import json
 import re, random
-from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool
 import pandas as pd
+import gc
+import requests
+
+def _force_cleanup_all_threads():
+    """
+    모든 종류의 스레드 풀과 연결을 강제로 정리하는 함수
+
+    ✅ 크로스 스레드 타이머 문제 해결:
+    - QTimer.singleShot + lambda 제거 (타이머 충돌 원인)
+    - 직접 processEvents() 호출로 대체
+    """
+    try:
+        # 1. 전역 urllib3 연결 풀 정리
+        try:
+            from urllib3.util import connection
+            from urllib3 import poolmanager
+            # 전역 연결 풀 매니저 정리
+            if hasattr(poolmanager, '_default_pool'):
+                poolmanager._default_pool = None
+        except Exception:
+            pass
+
+        # 2. requests 세션 정리
+        try:
+            # requests 모듈의 기본 세션 정리
+            if hasattr(requests, 'sessions'):
+                if hasattr(requests.sessions, 'Session'):
+                    # 기본 어댑터 정리
+                    session = requests.Session()
+                    session.close()
+        except Exception:
+            pass
+
+        # 3. Qt 스레드 풀 정리
+        try:
+            thread_pool = QThreadPool.globalInstance()
+            thread_pool.clear()
+            thread_pool.waitForDone(1000)  # 1초 대기
+        except Exception:
+            pass
+
+        # 4. 가비지 컬렉션 강제 실행
+        gc.collect()
+
+        # 5. Qt 이벤트 루프 강제 처리 (직접 호출)
+        # ✅ 수정: QTimer.singleShot 제거 → 타이머 충돌 해결
+        for _ in range(5):
+            QCoreApplication.processEvents()
+
+    except Exception:
+        pass
 
 class GenerationWorker(QObject):
     """API 호출을 담당하는 워커 클래스"""
@@ -13,12 +66,13 @@ class GenerationWorker(QObject):
     generation_progress = pyqtSignal(str)  # 진행 상황 메시지
     generation_finished = pyqtSignal(dict)  # 최종 결과
     generation_error = pyqtSignal(str)  # 오류 메시지
-    
+
     def __init__(self, context: 'AppContext'):
         super().__init__()
         self.context = context
         self.params = None
         self.source_row = None
+        self._is_running = False  # 🆕 실행 상태 추적
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -27,12 +81,31 @@ class GenerationWorker(QObject):
         
     def run_generation(self):
         """별도 스레드에서 실행될 생성 작업"""
+        self._is_running = True  # 🆕 실행 시작 표시
         try:
             self.generation_started.emit()
             self.generation_progress.emit("API 호출 중...")
             
             # API 호출 (이 부분이 시간이 오래 걸림)
             api_result = self.context.api_service.call_generation_api(self.params)
+            
+            # 🔧 FIX: API 결과가 error 상태인 경우 에러로 처리
+            if api_result.get('status') == 'error':
+                error_msg = api_result.get('message', 'Unknown API error')
+                print(f"❌ API 호출 실패: {error_msg}")
+                self.generation_error.emit(error_msg)
+                return
+
+            # 큐가 남아있는 경우 자동 재시도를 보류하고 큐를 먼저 처리
+            queue_manager = self.context.generation_queue_manager
+            if False and (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
+                self.auto_retry_pending = True
+                self.queue_hold_auto_gen = True
+                print(f"[QUEUE] 큐 우선. 자동 재시도 보류... (남은 큐: {queue_manager.get_queue_size()})")
+                # 대기 중이면 즉시 큐 처리 진입
+                if not self.is_generating:
+                    QTimer.singleShot(0, self._process_next_queue_request)
+                return
             
             self.generation_progress.emit("결과 처리 중...")
             
@@ -54,9 +127,11 @@ class GenerationWorker(QObject):
                 self._collect_enhanced_metadata(processed_result)
             
             self.generation_finished.emit(processed_result)
-            
+
         except Exception as e:
             self.generation_error.emit(str(e))
+        finally:
+            self._is_running = False  # 🆕 실행 완료 표시
     
     def _post_process(self, result: dict) -> dict:
         """결과 후처리 로직"""
@@ -175,21 +250,100 @@ class GenerationController:
         self.generation_thread = None
         self.generation_worker = None
         self.is_generating = False
-        
+        self.current_generation_params = None  # 🆕 현재 생성 중인 파라미터 (에러 처리용)
+        # arbitration flags between queue and auto-generation
+        self.queue_hold_auto_gen = False
+        self.auto_retry_pending = False
+
         # 🆕 자동 생성 재시도 관련 추가
         self.auto_retry_count = 0
-        self.max_auto_retries = 3  # 자동 생성 시 최대 재시도 횟수
-        self.retry_delay_ms = 2000  # 재시도 간격 (밀리초)
-        
-    def execute_generation_pipeline(self, overrides: dict = None):
-        """7단계 생성 파이프라인을 실행합니다."""
-        # 이미 생성 중인 경우 중복 실행 방지
-        if self.is_generating:
-            self.context.main_window.status_bar.showMessage("⚠️ 이미 생성 중입니다...")
-            return
-            
+        self.max_auto_retries = 2  # 자동 생성 시 최대 재시도 횟수 (API 자체에서 5회 재시도 하므로 줄임)
+        self.retry_delay_ms = 3000  # 재시도 간격 (밀리초) - 3초로 증가
+
+        # 🆕 스레드 안전 관리를 위한 추가 변수
+        self._thread_cleanup_in_progress = False  # 스레드 정리 중 여부
+        self._pending_thread_refs = []  # 정리 대기 중인 스레드 참조
+
+    def _prepare_comfyui_workflow_with_wildcards(self, params: dict) -> bool:
+        """
+        🌉 ComfyUI 전용 브릿지: 와일드카드 확장 → 워크플로우 생성
+
+        ComfyUI는 워크플로우에 프롬프트가 직접 삽입되므로,
+        와일드카드 확장을 먼저 수행한 후 워크플로우를 생성해야 합니다.
+
+        Args:
+            params: 생성 파라미터 딕셔너리 (in-place 수정됨)
+
+        Returns:
+            bool: 성공 여부
+        """
         try:
+            # 1️⃣ 와일드카드 확장 (워크플로우 생성 전)
+            if 'input' in params and params['input']:
+                negative_prompt = params.get('negative_prompt', '')
+                expanded_input, processed_negative_prompt = self._expand_wildcards_in_input(
+                    params['input'],
+                    negative_prompt
+                )
+                params['input'] = expanded_input
+                params['negative_prompt'] = processed_negative_prompt
+
+                print(f"🎲 [ComfyUI Bridge] 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                if processed_negative_prompt != negative_prompt:
+                    print(f"➖ [ComfyUI Bridge] Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
+
+            # 2️⃣ 워크플로우 생성 (확장된 프롬프트 사용)
+            final_workflow = self.workflow_manager.apply_params_to_workflow(params)
+            if not final_workflow:
+                self.context.main_window.status_bar.showMessage("❌ 워크플로우 생성에 실패했습니다. 로그를 확인하세요.")
+                return False
+
+            params['workflow'] = final_workflow
+            print(f"✅ [ComfyUI Bridge] 워크플로우 생성 완료 (와일드카드 확장 적용됨)")
+            return True
+
+        except Exception as e:
+            print(f"❌ [ComfyUI Bridge] 오류 발생: {e}")
+            self.context.main_window.status_bar.showMessage(f"❌ ComfyUI 워크플로우 준비 실패: {e}")
+            return False
+
+    def execute_generation_pipeline(self, overrides: dict = None, priority: int = 0, from_queue: bool = False):
+        """
+        7단계 생성 파이프라인을 실행합니다.
+
+        Args:
+            overrides: 파라미터 덮어쓰기 딕셔너리
+            priority: 우선순위 (0=일반, 100=긴급)
+            from_queue: 큐에서 호출되었는지 여부
+        """
+        # 이미 생성 중인 경우 → 큐에 추가
+        if self.is_generating and not from_queue:
+            print(f"[QUEUE] 생성 중이므로 요청을 큐에 추가합니다 (우선순위: {priority})")
+            self._enqueue_current_request(overrides, priority)
+            return
+
+        try:
+            # 🆕 시퀀스 프롬프트 감지 (큐에서 호출된 경우 제외)
+            if not from_queue:
+                main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+
+                if SequenceParser.is_sequence_prompt(main_prompt_text):
+                    print("[SEQUENCE] 시퀀스 프롬프트 감지됨. 시퀀스 모드로 전환합니다.")
+                    self._handle_sequence_generation(main_prompt_text, overrides, priority)
+                    return
+
             # --- 1 ~ 4 단계: 파라미터 수집 및 유효성 검사 ---
+            # 큐 우선: 대기 상태이고 큐가 있다면 큐를 먼저 처리하고 반환합니다.
+            try:
+                queue_manager = self.context.generation_queue_manager
+                if (not from_queue) and (not self.is_generating) and (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
+                    self.queue_hold_auto_gen = True
+                    self._update_button_with_queue_size()
+                    QTimer.singleShot(0, self._process_next_queue_request)
+                    return
+            except Exception:
+                pass
+
             api_mode = self.context.main_window.get_current_api_mode()
             if api_mode == "NAI": 
                 token = 'nai_token'
@@ -253,67 +407,312 @@ class GenerationController:
             if not is_valid:
                 self.context.main_window.status_bar.showMessage(f"⚠️ 유효성 검사 실패: {error_msg}")
                 return
-            
-            if api_mode == "COMFYUI":
-                final_workflow = self.workflow_manager.apply_params_to_workflow(params)
-                if not final_workflow:
-                    self.context.main_window.status_bar.showMessage("❌ 워크플로우 생성에 실패했습니다. 로그를 확인하세요.")
-                    return
-                params['workflow'] = final_workflow
 
-            # --- 와일드카드 확장 처리 (API 호출 전) ---
-            if 'input' in params and params['input']:
-                expanded_input = self._expand_wildcards_in_input(params['input'])
-                params['input'] = expanded_input
-                print(f"🎲 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
-                
-                # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
-                processed_input = self._apply_conditional_prompts(params['input'])
-                if processed_input != params['input']:
-                    params['input'] = processed_input
-                    print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
-                
-                # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
-                if self.context.current_prompt_context:
-                    self.context.publish("prompt_generated", self.context.current_prompt_context)
-            
+            # --- ComfyUI vs NAI/WEBUI 처리 분기 ---
+            if api_mode == "COMFYUI":
+                # 🌉 ComfyUI: 브릿지 사용 (와일드카드 확장 → 워크플로우 생성)
+                if not self._prepare_comfyui_workflow_with_wildcards(params):
+                    return  # 실패 시 조기 종료
+            else:
+                # 🎲 NAI/WEBUI: 와일드카드 확장만 수행
+                if 'input' in params and params['input']:
+                    negative_prompt = params.get('negative_prompt', '')
+                    expanded_input, processed_negative_prompt = self._expand_wildcards_in_input(
+                        params['input'],
+                        negative_prompt
+                    )
+                    params['input'] = expanded_input
+                    params['negative_prompt'] = processed_negative_prompt
+
+                    print(f"🎲 와일드카드 확장: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                    if processed_negative_prompt != negative_prompt:
+                        print(f"➖ Negative prompt 업데이트: '{processed_negative_prompt[:50]}{'...' if len(processed_negative_prompt) > 50 else ''}'")
+
+            # --- 🆕 FR-3: 임시 창 프롬프트 엔지니어링 훅 수동 실행 (모든 모드 공통) ---
+            if 'input' in params and 'temp_window_prompt_engineering_tab' in params:
+                    prompt_eng_tab = params['temp_window_prompt_engineering_tab']
+                    print(f"[TempWindow] 프롬프트 엔지니어링 훅 수동 실행 중...")
+
+                    # PromptContext 생성
+                    from core.prompt_context import PromptContext
+                    # pd는 이미 파일 상단에서 전역 import됨 (line 10)
+
+                    # source_row 준비 (와일드카드 단독 모드 지원)
+                    if params.get('wildcard_standalone', False):
+                        # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
+                        empty_data = {
+                            'general': None,
+                            'character': None,
+                            'copyright': None,
+                            'artist': None,
+                            'meta': None
+                        }
+                        source_row = pd.Series(empty_data, name="wildcard_standalone")
+                        print(f"[TempWindow] 와일드카드 단독 모드: 빈 source_row 생성")
+                    else:
+                        source_row = self.context.current_source_row
+                        if source_row is None:
+                            source_row = pd.Series({'general': None}, name="temp_window")
+
+                    # tags 파싱 (쉼표로 분리)
+                    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
+
+                    # PromptContext 초기화
+                    temp_context = PromptContext(
+                        source_row=source_row,
+                        settings=params,
+                        prefix_tags=[],
+                        main_tags=input_tags,
+                        postfix_tags=[]
+                    )
+
+                    # 수동 훅 실행
+                    try:
+                        modified_context = prompt_eng_tab.execute_manual_hook(temp_context)
+
+                        # 수정된 태그를 다시 문자열로 결합
+                        all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
+                        params['input'] = ', '.join(all_tags)
+
+                        print(f"✅ [TempWindow] 프롬프트 엔지니어링 적용 완료: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+                    except Exception as e:
+                        print(f"⚠️ [TempWindow] 프롬프트 엔지니어링 훅 실행 오류: {e}")
+
+            # --- 조건부 프롬프트 처리 (와일드카드 확장 후) ---
+            # processed_input = self._apply_conditional_prompts(params['input'])
+            # if processed_input != params['input']:
+            #     params['input'] = processed_input
+            #     print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
+
+            # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
+            if self.context.current_prompt_context:
+                self.context.publish("prompt_generated", self.context.current_prompt_context)
+
             # --- 5. 스레드에서 API 호출 시작 ---
             self._start_threaded_generation(params, source_row)
 
         except Exception as e:
             self.context.main_window.status_bar.showMessage(f"❌ 생성 준비 오류: {e}")
             print(f"오류 발생: {e}")
-    
+
+    def _enqueue_current_request(self, overrides: dict = None, priority: int = 0):
+        """
+        현재 생성 요청을 큐에 추가합니다.
+
+        Phase 2: Early Binding - NAI 데이터를 큐에 추가할 때 캡처
+
+        Args:
+            overrides: 파라미터 덮어쓰기 딕셔너리
+            priority: 우선순위 (0=일반, 100=긴급)
+        """
+        try:
+            # ✅ Phase 2: 통합된 파라미터 수집 메서드 사용
+            params = self._collect_generation_params()
+
+            # 인증 정보 확인
+            api_mode = params.get('api_mode', 'NAI')
+            if not params.get('credential'):
+                self.context.main_window.status_bar.showMessage(f"❌ {api_mode} 인증 정보가 없습니다.")
+                return
+
+            # source_row 설정
+            source_row = self.context.current_source_row
+            if source_row is None:
+                empty_data = {'general': None, 'character': None, 'copyright': None, 'artist': None, 'meta': None}
+                source_row = pd.Series(empty_data, name="wildcard_standalone")
+
+            # 덮어쓰기 적용
+            if overrides:
+                params.update(overrides)
+
+            # ✅ Phase 2: NAI 데이터 추출 (Early Binding)
+            nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params)
+
+            # GenerationRequest 생성 (NAI 데이터 포함)
+            request = GenerationRequest(
+                params=params,
+                source_row=source_row,
+                priority=priority,
+                max_retries=0,  # 재시도는 나중에 구현
+                nai_characters=nai_characters,
+                nai_vibe_transfer=nai_vibe_transfer,
+                nai_character_reference=nai_character_reference
+            )
+
+            # 큐에 추가 (우선순위에 따라)
+            queue_manager = self.context.generation_queue_manager
+            if priority > 0:
+                request_id = queue_manager.enqueue_with_priority(request)
+            else:
+                request_id = queue_manager.enqueue_request(request)
+
+            # UI 업데이트 (버튼 텍스트에 큐 크기 표시)
+            self._update_button_with_queue_size()
+
+            print(f"✅ [QUEUE] 요청 추가 완료: {request_id[:8]}... (우선순위: {priority})")
+
+        except Exception as e:
+            print(f"❌ [QUEUE] 요청 추가 실패: {e}")
+            self.context.main_window.status_bar.showMessage(f"❌ 큐 추가 실패: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _process_next_queue_request(self):
+        """
+        큐에서 다음 요청을 가져와 처리합니다.
+        """
+        queue_manager = self.context.generation_queue_manager
+        # 큐가 존재하는 동안 자동생성은 보류
+        self.queue_hold_auto_gen = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
+
+        # 추가 안전: 스레드 실행 중이면 대기
+        if self.generation_thread is not None:
+            try:
+                if self.generation_thread.isRunning():
+                    print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
+                    return
+            except RuntimeError:
+                # 스레드 객체가 이미 삭제된 경우 - 참조 정리 후 계속
+                self.generation_thread = None
+
+        # 🔒 이미 생성 중이면 나중에 재시도 (자동생성이 끼어들었을 수 있음)
+        if self.is_generating:
+            print("[QUEUE] 이미 생성 중입니다. 디스패처 대기.")
+            return
+
+        # 큐가 비어있는지 확인
+        if queue_manager.is_empty():
+            print("[QUEUE] 큐가 비어있습니다. 대기 종료.")
+            return
+
+        # 다음 요청 가져오기
+        next_request = queue_manager.dequeue_request()
+        if not next_request:
+            print("[QUEUE] 큐에서 요청을 가져오지 못했습니다 (일시정지 상태일 수 있음)")
+            return
+
+        print(f"[QUEUE] 요청 가져옴: {next_request.request_id[:8]}... "
+              f"(남은 큐: {queue_manager.get_queue_size()})")
+
+        # 요청 상태 업데이트
+        next_request.mark_processing()
+
+        # context 업데이트
+        self.context.current_source_row = next_request.source_row
+
+        # 생성 파이프라인 실행 (from_queue=True로 재귀 방지)
+        try:
+            # 자동생성 모드일 때, 큐 아이템도 동일 파이프라인으로 처리되도록 플래그 전달
+            try:
+                auto_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
+                if auto_checkbox and auto_checkbox.isChecked():
+                    if isinstance(next_request.params, dict):
+                        next_request.params["auto_generate"] = True
+            except Exception:
+                pass
+
+            # ✅ Phase 3: GenerationRequest를 params에 추가 (API Service가 NAI 데이터 접근 가능하도록)
+            if isinstance(next_request.params, dict):
+                next_request.params["_generation_request"] = next_request
+
+            self.execute_generation_pipeline(
+                overrides=next_request.params,
+                priority=next_request.priority,
+                from_queue=True
+            )
+        except Exception as e:
+            print(f"❌ [QUEUE] 큐 요청 처리 실패: {e}")
+            next_request.mark_failed(str(e))
+            # 다음 요청 처리
+            self._process_next_queue_request()
+
+    def _update_button_with_queue_size(self):
+        """생성 버튼 텍스트를 큐 크기로 업데이트합니다."""
+        queue_manager = self.context.generation_queue_manager
+        queue_size = queue_manager.get_queue_size()
+
+        if self.is_generating:
+            # 생성 중일 때
+            if queue_size > 0:
+                btn_text = f"🔄 생성 중... ({queue_size})"
+            else:
+                btn_text = "🔄 생성 중..."
+
+            self.context.main_window.generate_button_main.setText(btn_text)
+            if hasattr(self.context.main_window, 'detached_generate_btn'):
+                self.context.main_window.detached_generate_btn.setText(btn_text)
+        else:
+            # 생성 중이 아닐 때
+            if queue_size > 0:
+                btn_text = f"🎨 이미지 생성 요청 ({queue_size})"
+            else:
+                btn_text = "🎨 이미지 생성 요청"
+
+            self.context.main_window.generate_button_main.setText(btn_text)
+            if hasattr(self.context.main_window, 'detached_generate_btn'):
+                self.context.main_window.detached_generate_btn.setText(btn_text)
+
     def _start_threaded_generation(self, params: dict, source_row):
         """별도 스레드에서 생성 작업을 시작합니다."""
+        # 🆕 안전장치 0: 앱 종료 중이면 새 생성 차단
+        if self._thread_cleanup_in_progress:
+            print("⚠️ [THREAD] 앱 종료 중입니다. 새 생성이 차단됩니다.")
+            return
+
+        # 🆕 안전장치 1: 이전 스레드가 아직 실행 중인지 확인
+        if self.generation_thread is not None:
+            if self.generation_thread.isRunning():
+                print("⚠️ [THREAD] 이전 스레드가 아직 실행 중입니다. 안전하게 종료를 기다립니다...")
+                # 최대 5초 대기 (긴급 상황에서 무한 대기 방지)
+                if not self.generation_thread.wait(5000):
+                    print("❌ [THREAD] 이전 스레드 종료 대기 시간 초과. 강제 종료 시도...")
+                    self.generation_thread.terminate()
+                    self.generation_thread.wait(1000)
+
+            # 🆕 안전장치 2: 이전 참조를 정리 대기 목록에 추가 (GC가 나중에 정리)
+            if self.generation_thread is not None:
+                self._pending_thread_refs.append(self.generation_thread)
+            if self.generation_worker is not None:
+                self._pending_thread_refs.append(self.generation_worker)
+
         # 새 스레드와 워커 생성
         self.generation_thread = QThread()
+        self.generation_thread.setObjectName(f"GenThread-{id(self.generation_thread)}")
         self.generation_worker = GenerationWorker(self.context)
-        
+
         # 워커를 스레드로 이동
         self.generation_worker.moveToThread(self.generation_thread)
-        
+
         # 시그널 연결
         self.generation_worker.generation_started.connect(self._on_generation_started)
         self.generation_worker.generation_progress.connect(self._on_generation_progress)
         self.generation_worker.generation_finished.connect(self._on_generation_finished)
         self.generation_worker.generation_error.connect(self._on_generation_error)
-        
+
         # 스레드 시작/종료 연결
         self.generation_thread.started.connect(self.generation_worker.run_generation)
         self.generation_worker.generation_finished.connect(self.generation_thread.quit)
         self.generation_worker.generation_error.connect(self.generation_thread.quit)
+
+        # 🔧 올바른 deleteLater 연결 - 스레드 종료 시 해당 객체의 소유 스레드에서 안전하게 삭제
+        # 🆕 안전장치 3: finished 시그널에서 먼저 _on_thread_finished를 호출하고, 그 후에 deleteLater 처리
         self.generation_thread.finished.connect(self._on_thread_finished)
-        
+        # deleteLater는 _on_thread_finished 내부에서 지연 호출로 처리 (아래 참조 해제 후)
+
         # 파라미터 설정 및 스레드 시작
+        self.current_generation_params = params  # 🆕 현재 생성 파라미터 저장
         self.generation_worker.set_generation_params(params, source_row)
         self.generation_thread.start()
     
     def _on_generation_started(self):
         """생성 시작 시 호출되는 슬롯"""
         self.is_generating = True
-        self.context.main_window.generate_button_main.setEnabled(False)
-        self.context.main_window.generate_button_main.setText("🔄 생성 중...")
+        # 🆕 버튼 비활성화 제거 - 큐에 추가할 수 있도록 활성 상태 유지
+        # self.context.main_window.generate_button_main.setEnabled(False)
+
+        # 🆕 큐 크기를 반영한 버튼 텍스트 업데이트
+        self._update_button_with_queue_size()
+
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
     
     def _on_generation_progress(self, message: str):
@@ -322,64 +721,138 @@ class GenerationController:
     
     def _on_generation_finished(self, result: dict):
         """생성 완료 시 호출되는 슬롯"""
-        # 생성 완료 시 즉시 is_generating을 False로 설정
-        self.is_generating = False
-        self.context.main_window.generate_button_main.setEnabled(True)
-        self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
-        
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
-        
-        # UI 업데이트 (이제 is_generating이 False이므로 자동 생성이 가능)
+        # 🆕 현재 생성 파라미터 정리
+        self.current_generation_params = None
+
+        # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         self.context.main_window.update_ui_with_result(result)
+
+        # 🆕 큐에 대기 중인 요청이 있으면 다음 요청 처리
+        queue_manager = self.context.generation_queue_manager
+        if not queue_manager.is_empty() and not queue_manager.is_paused():
+            # 🔒 큐가 있으면 is_generating을 유지하여 자동생성 차단
+            print(f"[QUEUE] 생성 완료. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
+            # ⚡ 즉시 큐 처리 (자동생성이 끼어들 틈 없음)
+            # 다음 요청 디스패치는 스레드 종료에서 트리거합니다.
+        else:
+            # 큐가 비어있거나 일시정지 상태면 is_generating = False로 설정
+            # → 자동생성이 지연 없이 즉시 트리거 가능!
+            # is_generating 해제는 스레드 종료 핸들러에서 처리
+            self._update_button_with_queue_size()
+            if queue_manager.is_empty():
+                print("[QUEUE] 큐 비어있음. 자동생성 즉시 가능.")
+            else:
+                print("[QUEUE] 큐가 일시정지 상태입니다.")
 
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
-        # UI 상태 일시적으로 복원
-        self.is_generating = False
-        self.context.main_window.generate_button_main.setEnabled(True)
-        self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
-        
         print(f"❌ 생성 오류 발생: {error_message}")
-        
+
+        # 🆕 Interactive Mode 요청인 경우 전용 에러 이벤트 발행
+        if self.current_generation_params:
+            is_interactive_mode = self.current_generation_params.get("interactive_mode_request", False)
+            if is_interactive_mode:
+                print(f"🎨 Interactive Mode 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "interactive_mode_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                # Interactive Mode 요청은 재시도 없이 종료
+                self.current_generation_params = None
+                return
+
+            # 🆕 Turbo Sequence 요청인 경우 전용 에러 이벤트 발행
+            is_turbo_sequence = self.current_generation_params.get("turbo_sequence_request", False)
+            if is_turbo_sequence:
+                turbo_index = self.current_generation_params.get("turbo_sequence_index", 0)
+                print(f"🚀 Turbo Sequence 에러 감지 - 전용 에러 이벤트 발행 (index: {turbo_index})")
+                # 🆕 에러 이벤트 데이터 구성
+                error_data = {
+                    "message": error_message,
+                    "turbo_sequence_request": True,
+                    "turbo_sequence_index": turbo_index
+                }
+                # 인페인트 다이얼로그에서 온 요청인 경우 식별자 추가
+                if self.current_generation_params.get("sequence_inpaint_dialog"):
+                    error_data["sequence_inpaint_dialog"] = True
+                    error_data["sequence_inpaint_request_id"] = self.current_generation_params.get("sequence_inpaint_request_id")
+                self.context.publish("generation_error", error_data)
+                # Turbo Sequence 요청은 자동 재시도 없이 종료
+                self.current_generation_params = None
+                return
+
         # 🆕 자동 생성 모드에서의 재시도 로직
         auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
         is_auto_generation = auto_generate_checkbox and auto_generate_checkbox.isChecked()
-        
+
+        # 큐 확인 (재시도 및 큐 처리 여부 결정)
+        queue_manager = self.context.generation_queue_manager
+        has_queue = not queue_manager.is_empty() and not queue_manager.is_paused()
+
         if is_auto_generation and self.auto_retry_count < self.max_auto_retries:
-            # 자동 생성 모드에서 재시도 가능한 경우
+            # 🔒 자동 재시도 중에는 is_generating 유지 (차단)
             self.auto_retry_count += 1
             retry_message = f"🔄 자동 생성 재시도 {self.auto_retry_count}/{self.max_auto_retries} (오류: {error_message[:50]}...)"
             self.context.main_window.status_bar.showMessage(retry_message)
             print(f"🔄 자동 생성 재시도 시작: {self.auto_retry_count}/{self.max_auto_retries}")
-            
+
             # 지연 후 재시도
-            QTimer.singleShot(self.retry_delay_ms, self._retry_auto_generation)
-            
+            if has_queue:
+                # 큐를 먼저 소진하고 자동 재시도를 이어갑니다.
+                self.auto_retry_pending = True
+                print("[QUEUE] 큐 우선. 자동 재시도 보류.")
+            else:
+                QTimer.singleShot(self.retry_delay_ms, self._retry_auto_generation)
+
+        elif has_queue:
+            # 🔒 큐가 있으면 is_generating 유지하고 즉시 큐 처리
+            print(f"[QUEUE] 오류 발생. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
+            # 스레드 종료 시점에 큐 디스패치 수행
+
         else:
-            # 재시도 횟수 초과 또는 수동 생성 모드
+            # 재시도도 안 하고 큐도 없으면 is_generating = False
+            # is_generating 해제는 스레드 종료 핸들러에서 처리
+            self.context.main_window.generate_button_main.setEnabled(True)
+            self.context.main_window.generate_button_main.setText("🎨 이미지 생성 요청")
+            # 분리된 버튼도 활성화
+            if hasattr(self.context.main_window, 'detached_generate_btn'):
+                self.context.main_window.detached_generate_btn.setEnabled(True)
+                self.context.main_window.detached_generate_btn.setText("🎨 이미지 생성 요청")
+
+            # 재시도 횟수 초과 체크
             if is_auto_generation and self.auto_retry_count >= self.max_auto_retries:
-                # 최대 재시도 횟수 초과 시 자동 생성 중단
                 final_message = f"❌ 자동 생성 최대 재시도 횟수({self.max_auto_retries})를 초과했습니다. 자동 생성을 중단합니다."
                 self.context.main_window.status_bar.showMessage(final_message)
                 print(final_message)
-                
+
                 # 자동화 모듈이 있다면 중단
-                if (hasattr(self.context.main_window, 'automation_module') and 
-                    self.context.main_window.automation_module and 
+                if (hasattr(self.context.main_window, 'automation_module') and
+                    self.context.main_window.automation_module and
                     self.context.main_window.automation_module.automation_controller.is_running):
                     self.context.main_window.automation_module.stop_automation()
-                    
+
                 # 재시도 카운터 리셋
                 self.auto_retry_count = 0
-                
             else:
                 # 수동 생성 모드의 일반적인 오류 처리
                 self.context.main_window.status_bar.showMessage(f"❌ 생성 오류: {error_message}")
-    
+
+            print("[QUEUE] 큐 비어있음. 자동생성 가능.")
+
     def _retry_auto_generation(self):
         """🆕 자동 생성 재시도를 실행하는 메서드"""
         try:
+            # 한국어: 큐가 존재하면 자동생성 재시도를 보류하고 먼저 큐를 처리합니다.
+            queue_manager = self.context.generation_queue_manager
+            if (not queue_manager.is_empty()) and (not queue_manager.is_paused()):
+                self.auto_retry_pending = True
+                self.queue_hold_auto_gen = True
+                print("[QUEUE] 큐 우선. 자동 재시도 보류.")
+                QTimer.singleShot(0, self._process_next_queue_request)
+                return
             print(f"🔄 자동 생성 재시도 실행 중... ({self.auto_retry_count}/{self.max_auto_retries})")
             
             # 자동 생성이 여전히 활성화되어 있는지 확인
@@ -402,12 +875,24 @@ class GenerationController:
                 self.context.main_window.status_bar.showMessage(f"🔄 재시도 {self.auto_retry_count}: 새 프롬프트 생성 후 재시도 중...")
                 
                 # 새 프롬프트 생성 요청
+                # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
+                main_win = self.context.main_window
+                comfyui_sampling_mode = "eps"  # 기본값
+                if hasattr(main_win, 'anima_radio') and main_win.anima_radio.isChecked():
+                    comfyui_sampling_mode = "anima"
+                elif hasattr(main_win, 'v_pred_radio') and main_win.v_pred_radio.isChecked():
+                    comfyui_sampling_mode = "v_prediction"
+                elif hasattr(main_win, 'eps_radio') and main_win.eps_radio.isChecked():
+                    comfyui_sampling_mode = "eps"
+
                 settings = {
                     'prompt_fixed': False,
                     'auto_generate': True,
                     'turbo_mode': self.context.main_window.generation_checkboxes["터보 옵션"].isChecked(),
                     'wildcard_standalone': self.context.main_window.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-                    "auto_fit_resolution": self.context.main_window.auto_fit_resolution_checkbox.isChecked()
+                    "auto_fit_resolution": self.context.main_window.auto_fit_resolution_checkbox.isChecked(),
+                    'api_mode': self.context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
+                    'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
                 }
                 
                 # 자동 생성 플래그 설정
@@ -422,20 +907,114 @@ class GenerationController:
             self.auto_retry_count = 0
 
     def _on_thread_finished(self):
-        """스레드 완료 시 정리 작업"""
-        # 스레드와 워커 정리만 수행
-        if self.generation_thread:
-            self.generation_thread.deleteLater()
-            self.generation_thread = None
-        if self.generation_worker:
-            self.generation_worker.deleteLater()
-            self.generation_worker = None
+        """스레드 완료 시 정리 작업 - 🆕 안전한 스레드 정리 로직"""
+        # 🆕 안전한 스레드 정리: 참조를 먼저 로컬 변수에 저장
+        thread_to_cleanup = self.generation_thread
+        worker_to_cleanup = self.generation_worker
 
-    def _expand_wildcards_in_input(self, input_text: str) -> str:
-        """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)"""
+        # 🆕 참조 해제를 먼저 수행 (새 스레드 생성에 영향 없도록)
+        self.generation_thread = None
+        self.generation_worker = None
+
+        # 🔧 스레드 정리 함수 (지연 실행) - 별도 플래그 없이 안전하게 처리
+        def _safe_cleanup():
+            try:
+                # 워커 정리
+                if worker_to_cleanup is not None:
+                    try:
+                        # 워커가 아직 실행 중인지 확인
+                        if hasattr(worker_to_cleanup, '_is_running') and worker_to_cleanup._is_running:
+                            print("⚠️ [THREAD] 워커가 아직 실행 중입니다. 대기...")
+                            QCoreApplication.processEvents()
+                        worker_to_cleanup.deleteLater()
+                    except RuntimeError as e:
+                        # "wrapped C/C++ object has been deleted" 오류 무시
+                        print(f"[THREAD] 워커 이미 삭제됨: {e}")
+                    except Exception as e:
+                        print(f"[THREAD] 워커 정리 오류: {e}")
+
+                # 스레드 정리
+                if thread_to_cleanup is not None:
+                    try:
+                        # 스레드가 아직 실행 중인지 확인
+                        if thread_to_cleanup.isRunning():
+                            print("⚠️ [THREAD] 스레드가 아직 실행 중입니다. 대기...")
+                            thread_to_cleanup.wait(500)  # 최대 500ms 대기
+                        thread_to_cleanup.deleteLater()
+                    except RuntimeError as e:
+                        print(f"[THREAD] 스레드 이미 삭제됨: {e}")
+                    except Exception as e:
+                        print(f"[THREAD] 스레드 정리 오류: {e}")
+
+                # 정리 대기 목록에서 오래된 참조 제거 (최대 10개 유지)
+                while len(self._pending_thread_refs) > 10:
+                    old_ref = self._pending_thread_refs.pop(0)
+                    try:
+                        if hasattr(old_ref, 'deleteLater'):
+                            old_ref.deleteLater()
+                    except Exception:
+                        pass
+
+                # 강력한 스레드 정리 실행
+                _force_cleanup_all_threads()
+
+            except Exception as e:
+                print(f"[THREAD] 정리 중 예외 발생: {e}")
+
+        # 🆕 안전장치: 지연 실행으로 이벤트 루프에서 안전하게 처리
+        QTimer.singleShot(100, _safe_cleanup)
+
+        # 스레드 종료 시점에서만 is_generating을 False로 전환하고 다음 작업을 결정
+        try:
+            self.is_generating = False
+
+            queue_manager = self.context.generation_queue_manager
+            has_queue = (not queue_manager.is_empty()) and (not queue_manager.is_paused())
+
+            if has_queue:
+                # 큐 우선 처리: 자동생성을 보류한 상태에서 다음 요청을 즉시 디스패치
+                self.queue_hold_auto_gen = True
+                print(f"[QUEUE] 스레드 종료. 큐 디스패치 시작... (남은 큐: {queue_manager.get_queue_size()})")
+                QTimer.singleShot(0, self._process_next_queue_request)
+            else:
+                # 큐가 비면 자동생성 보류 해제
+                if self.queue_hold_auto_gen:
+                    print("[QUEUE] 큐 비었음. 자동생성 보류 해제.")
+                self.queue_hold_auto_gen = False
+
+                # 보류 중인 자동 재시도 수행
+                if self.auto_retry_pending:
+                    self.auto_retry_pending = False
+                    print("[AUTO] 보류된 자동 재시도 실행.")
+                    QTimer.singleShot(0, self._retry_auto_generation)
+
+            # UI 상태 업데이트
+            self._update_button_with_queue_size()
+
+            # 🆕 FR-2-1: 임시 창 모드 플래그 해제
+            if self.context.temp_window_mode:
+                print(f"[DEBUG] 생성 완료. 임시 창 모드 플래그 해제")
+                self.context.temp_window_mode = False
+                self.context.temp_window_character_tab = None
+
+        except Exception as _e:
+            print(f"[GEN] thread-finish 후 디스패치 오류: {_e}")
+
+            # 에러 발생 시에도 플래그 해제
+            if self.context.temp_window_mode:
+                print(f"[DEBUG] 에러 발생. 임시 창 모드 플래그 강제 해제")
+                self.context.temp_window_mode = False
+                self.context.temp_window_character_tab = None
+
+    def _expand_wildcards_in_input(self, input_text: str, negative_prompt: str = "") -> tuple[str, str]:
+        """generation_controller 전용 와일드카드 처리 (_expand_recursive와 동일한 기능 지원)
+
+        Returns:
+            tuple[str, str]: (expanded_input, processed_negative_prompt)
+        """
         if not input_text or not input_text.strip():
-            return input_text
-        
+            return input_text, negative_prompt
+
         try:
             # AppContext의 기존 컨텍스트에서 순차 카운터 가져오기 (공유를 위해)
             if self.context.current_prompt_context:
@@ -443,40 +1022,63 @@ class GenerationController:
             else:
                 # 컨텍스트가 없으면 새로 생성하여 AppContext에 저장
                 from core.prompt_context import PromptContext
-                import pandas as pd
-                
+                # pd는 이미 파일 상단에서 전역 import됨 (line 10)
+
                 self.context.current_prompt_context = PromptContext(
-                    source_row=pd.Series(), 
+                    source_row=pd.Series(),
                     settings={}
                 )
                 prompt_context = self.context.current_prompt_context
-            
+
             # WildcardProcessor를 사용하여 기존 처리 방식과 동일하게 처리
             from core.wildcard_processor import WildcardProcessor
             wildcard_processor = WildcardProcessor(self.context.wildcard_manager)
-            
-            # 1. 전체 문자열을 콤마로 분해하여 태그 리스트 생성 (기존 방식과 동일)
-            input_tags = [tag.strip() for tag in input_text.split(',') if tag.strip()]
-            
+
+            # 1. 전체 문자열을 콤마로 분해하여 태그 리스트 생성 (주석, 개행문자, negative prompt 처리)
+            cleaned_tags = []
+            processed_negative_prompt = negative_prompt  # 초기값
+
+            for tag in input_text.split(','):
+                processed_tag = tag.replace('\n', '').strip()
+
+                # 주석 제거
+                if not processed_tag or processed_tag.startswith('#'):
+                    continue
+
+                # - prefix 처리 (::가 없는 경우만)
+                if processed_tag.startswith('-') and '::' not in processed_tag:
+                    # '-'를 제거하고 negative prompt에 추가
+                    negative_tag = processed_tag[1:].strip()  # '-' 제거
+                    if negative_tag:
+                        if processed_negative_prompt:
+                            processed_negative_prompt += ', ' + negative_tag
+                        else:
+                            processed_negative_prompt = negative_tag
+                else:
+                    # 일반 태그
+                    cleaned_tags.append(processed_tag)
+
+            input_tags = cleaned_tags
+
             # 2. expand_tags 호출하여 완전한 와일드카드 확장 수행 (기존 방식과 동일)
             expanded_tags = wildcard_processor.expand_tags(input_tags, prompt_context)
-            
+
             # 3. global_append_tags가 있다면 뒤에 추가 (기존 방식과 동일)
             result_parts = expanded_tags.copy()
             if prompt_context.global_append_tags:
                 result_parts.extend(prompt_context.global_append_tags)
                 # global_append_tags 소비 후 초기화
                 prompt_context.global_append_tags.clear()
-            
+
             # 4. 확장된 태그들을 콤마로 연결하여 단일 문자열로 반환
             expanded_result = ', '.join(result_parts) if result_parts else input_text
-            
-            return expanded_result
-            
+
+            return expanded_result, processed_negative_prompt
+
         except Exception as e:
             print(f"⚠️ 와일드카드 확장 중 오류 발생: {e}")
             # 오류 발생 시 원본 텍스트 반환
-            return input_text
+            return input_text, negative_prompt
 
     def _apply_conditional_prompts(self, input_text: str) -> str:
         """generation_controller 전용 조건부 프롬프트 처리 (와일드카드 확장 후 실행)"""
@@ -553,3 +1155,368 @@ class GenerationController:
         """🆕 외부에서 재시도 카운터를 리셋할 수 있는 메서드"""
         self.auto_retry_count = 0
         print("🔄 자동 생성 재시도 카운터가 리셋되었습니다.")
+
+    # ==================== 🆕 시퀀스 생성 메서드 ====================
+
+    def _handle_sequence_generation(self, prompt_text: str, overrides: dict = None, priority: int = 0):
+        """
+        🆕 시퀀스 생성 처리
+
+        Args:
+            prompt_text: 원본 프롬프트 텍스트
+            overrides: 파라미터 덮어쓰기
+            priority: 우선순위
+        """
+        try:
+            # 1. 파싱
+            print("[SEQUENCE] 프롬프트 파싱 중...")
+            parsed = SequenceParser.parse_prompt(prompt_text)
+
+            # 2. 검증
+            is_valid, error_msg = SequenceParser.validate_structure(parsed)
+            if not is_valid:
+                self.context.main_window.status_bar.showMessage(f"❌ 시퀀스 검증 실패: {error_msg}")
+                print(f"[SEQUENCE] 검증 실패: {error_msg}")
+                return
+
+            # 3. 프롬프트 세트 생성
+            print("[SEQUENCE] 프롬프트 세트 생성 중...")
+            prompt_sets = SequenceParser.generate_prompt_sets(parsed)
+            print(f"[SEQUENCE] {len(prompt_sets)}개 프롬프트 세트 생성됨")
+
+            # 🔧 FIX MEDIUM-1: 빈 prompt_sets 체크
+            if not prompt_sets:
+                self.context.main_window.status_bar.showMessage("❌ 프롬프트 세트 생성 실패: 빈 결과")
+                print("[SEQUENCE] 오류: 프롬프트 세트가 비어있습니다.")
+                return
+
+            # 디버깅: 생성된 프롬프트 출력
+            for i, prompt in enumerate(prompt_sets, 1):
+                print(f"[SEQUENCE] #{i}: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
+
+            # 4. 해상도 결정
+            fixed_resolution = self._determine_fixed_resolution(prompt_sets[0])
+            print(f"[SEQUENCE] 고정 해상도: {fixed_resolution[0]}x{fixed_resolution[1]}")
+
+            # 5. 큐에 일괄 추가
+            print("[SEQUENCE] 큐에 요청 추가 중...")
+            self._enqueue_sequence_requests(prompt_sets, fixed_resolution, overrides, priority)
+
+            # 6. 상태바 업데이트
+            self.context.main_window.status_bar.showMessage(
+                f"✅ 시퀀스 생성: {len(prompt_sets)}개 요청이 큐에 추가되었습니다."
+            )
+
+            # 7. 큐 처리 시작
+            print("[SEQUENCE] 큐 처리 시작...")
+            QTimer.singleShot(0, self._process_next_queue_request)
+
+        except ValueError as e:
+            # 파싱 오류
+            self.context.main_window.status_bar.showMessage(f"❌ 시퀀스 파싱 오류: {e}")
+            print(f"[SEQUENCE] 파싱 오류: {e}")
+        except Exception as e:
+            self.context.main_window.status_bar.showMessage(f"❌ 시퀀스 생성 오류: {e}")
+            print(f"[SEQUENCE] 생성 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _determine_fixed_resolution(self, first_prompt: str) -> tuple[int, int]:
+        """
+        🆕 첫 번째 프롬프트에서 해상도 결정
+
+        Args:
+            first_prompt: 첫 번째 프롬프트 텍스트
+
+        Returns:
+            tuple: (width, height)
+        """
+        # 1. resolution: 태그 확인
+        resolution_match = re.search(r'resolution:(\d+)x(\d+)', first_prompt)
+        if resolution_match:
+            width = int(resolution_match.group(1))
+            height = int(resolution_match.group(2))
+            print(f"[SEQUENCE] resolution: 태그에서 해상도 추출: {width}x{height}")
+            return (width, height)
+
+        # 2. UI 해상도 콤보박스 값 사용
+        try:
+            selected_value = self.context.main_window.resolution_combo.currentText()
+            width, height = map(int, selected_value.split('x'))
+            print(f"[SEQUENCE] UI 콤보박스에서 해상도 추출: {width}x{height}")
+            return (width, height)
+        except Exception as e:
+            print(f"[SEQUENCE] 해상도 추출 실패, 기본값 사용: {e}")
+            return (832, 1216)  # 기본값
+
+    def _enqueue_sequence_requests(
+        self,
+        prompt_sets: list,
+        fixed_resolution: tuple[int, int],
+        overrides: dict = None,
+        priority: int = 0
+    ):
+        """
+        🆕 시퀀스 요청을 큐에 일괄 추가
+
+        Phase 2: Early Binding - NAI 데이터를 시퀀스 전체에 대해 한 번만 캡처
+
+        Args:
+            prompt_sets: 프롬프트 리스트
+            fixed_resolution: (width, height)
+            overrides: 파라미터 덮어쓰기
+            priority: 우선순위
+        """
+        queue_manager = self.context.generation_queue_manager
+
+        # 🔧 FIX HIGH-1: 파라미터를 루프 밖에서 한 번만 수집
+        # (캐릭터 리롤이 각 시퀀스마다 반복되지 않도록)
+        base_params = self._collect_generation_params()
+
+        # ✅ Phase 2: NAI 데이터를 시퀀스 전체에 대해 한 번만 추출 (Early Binding)
+        nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(base_params)
+
+        # 🆕 API 모드 확인 (시드 처리 분기용)
+        api_mode = base_params.get('api_mode', 'NAI')
+        seed_is_fixed = self.context.main_window.seed_fix_checkbox.isChecked()
+
+        for i, prompt in enumerate(prompt_sets):
+            try:
+                # 각 요청마다 base_params를 복사하여 사용
+                params = base_params.copy()
+
+                # seed: 태그 처리 (각 프롬프트마다 독립적)
+                # 🔧 FIX MEDIUM-2: seed: 태그를 추출 후 프롬프트에서 제거
+                seed_match = re.search(r'seed:(\d+)', prompt)
+                if seed_match:
+                    params['seed'] = int(seed_match.group(1))
+                    print(f"[SEQUENCE] 프롬프트 #{i+1}: seed:{params['seed']} 적용")
+                    # 프롬프트에서 seed: 태그 제거
+                    prompt = re.sub(r'seed:\d+,?\s*', '', prompt).strip()
+                else:
+                    # 🆕 seed: 태그가 없는 경우, NAI 모드에서는 랜덤 시드 생성
+                    if api_mode == "NAI" and not seed_is_fixed:
+                        params['seed'] = random.randint(0, 9999999999)
+                        print(f"[SEQUENCE] 프롬프트 #{i+1}: NAI 랜덤 시드 생성 - {params['seed']}")
+                    # WEBUI/COMFYUI는 고정 시드 사용 (base_params의 seed 유지)
+
+                # 프롬프트 설정 (메인 프롬프트를 각 시퀀스 프롬프트로 대체)
+                params['input'] = prompt
+
+                # 해상도 설정 (고정)
+                params['width'] = fixed_resolution[0]
+                params['height'] = fixed_resolution[1]
+
+                # 덮어쓰기 적용
+                if overrides:
+                    params.update(overrides)
+
+                # source_row 설정
+                source_row = self.context.current_source_row
+                if source_row is None:
+                    empty_data = {
+                        'general': None,
+                        'character': None,
+                        'copyright': None,
+                        'artist': None,
+                        'meta': None
+                    }
+                    source_row = pd.Series(empty_data, name=f"sequence_{i+1}")
+
+                # GenerationRequest 생성 (NAI 데이터 포함)
+                request = GenerationRequest(
+                    params=params,
+                    source_row=source_row,
+                    priority=priority,
+                    max_retries=0,
+                    nai_characters=nai_characters,
+                    nai_vibe_transfer=nai_vibe_transfer,
+                    nai_character_reference=nai_character_reference
+                )
+
+                # 큐에 추가
+                if priority > 0:
+                    request_id = queue_manager.enqueue_with_priority(request)
+                else:
+                    request_id = queue_manager.enqueue_request(request)
+
+                print(f"[SEQUENCE] 요청 {i+1}/{len(prompt_sets)} 추가됨: {request_id[:8]}...")
+
+            except Exception as e:
+                print(f"[SEQUENCE] 요청 {i+1} 추가 실패: {e}")
+                continue
+
+        # 버튼 텍스트 업데이트
+        self._update_button_with_queue_size()
+
+    def _collect_generation_params(self) -> dict:
+        """
+        🆕 생성 파라미터 수집 (기존 로직 재사용)
+
+        Returns:
+            dict: 생성 파라미터
+        """
+        # API 모드 및 인증 정보
+        api_mode = self.context.main_window.get_current_api_mode()
+
+        if api_mode == "NAI":
+            token = 'nai_token'
+            # NAI 모드에서 캐릭터 리롤 처리
+            char_module = self.context.middle_section_controller.get_module_instance("CharacterModule")
+            if (char_module and
+                char_module.activate_checkbox.isChecked() and
+                char_module.reroll_on_generate_checkbox.isChecked()):
+                print("🔄️ 생성 시 Reroll: 캐릭터 와일드카드를 갱신합니다.")
+                char_module.process_and_update_view()
+        elif api_mode == "COMFYUI":
+            token = 'comfyui_url'
+        else:
+            token = 'webui_url'
+
+        credential = self.context.secure_token_manager.get_token(token)
+
+        # 메인 파라미터
+        params = self.context.main_window.get_main_parameters()
+        params['api_mode'] = api_mode
+        params['credential'] = credential
+
+        # 모듈 파라미터 수집
+        for module in self.module_instances:
+            module_params = module.get_parameters()
+            if module_params:
+                params.update(module_params)
+
+        # 랜덤 해상도 처리
+        if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
+            random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
+            self.context.main_window.resolution_combo.setCurrentIndex(random_index)
+            selected_value = self.context.main_window.resolution_combo.currentText()
+            width, height = map(int, selected_value.split('x'))
+            params['width'] = width
+            params['height'] = height
+            print(f"랜덤 해상도 설정: {width}x{height}")
+
+        # Img2Img 파라미터
+        img2img_params = self.context.main_window.img2img_panel.get_parameters()
+        if img2img_params:
+            print("🖼️ Img2Img 패널 활성화됨. 파라미터를 추가합니다.")
+            params.update(img2img_params)
+
+        # ComfyUI 워크플로우 처리
+        if api_mode == "COMFYUI":
+            final_workflow = self.workflow_manager.apply_params_to_workflow(params)
+            if final_workflow:
+                params['workflow'] = final_workflow
+
+        return params
+
+    def _extract_nai_data(self, params: dict) -> tuple:
+        """
+        🆕 NAI 전용 데이터를 추출하여 타입 안전한 dataclass로 변환
+
+        Phase 2: Early Binding - 큐에 추가될 때 데이터 캡처
+
+        Args:
+            params: 생성 파라미터 (모듈에서 수집된 데이터 포함)
+
+        Returns:
+            Tuple of (NAICharacterData | None, NAIVibeTransferData | None, NAICharacterReferenceData | None)
+        """
+        from core.generation_request import (
+            NAICharacterData,
+            NAIVibeTransferData,
+            NAICharacterReferenceData
+        )
+        from typing import Optional, Tuple
+
+        nai_characters: Optional[NAICharacterData] = None
+        nai_vibe_transfer: Optional[NAIVibeTransferData] = None
+        nai_character_reference: Optional[NAICharacterReferenceData] = None
+
+        # API 모드 확인 (NAI가 아니면 모두 None 반환)
+        api_mode = params.get('api_mode', 'NAI')
+        if api_mode != "NAI":
+            return nai_characters, nai_vibe_transfer, nai_character_reference
+
+        try:
+            # 1. Character Module (NAID4)
+            if 'characters' in params and params['characters']:
+                nai_characters = NAICharacterData.from_params(params)
+                if nai_characters:
+                    print(f"✅ [EarlyBinding] Character Data 캡처: {len(nai_characters.characters)}명")
+
+            # 2. Vibe Transfer Module
+            vibe_keys = ['reference_image_multiple', 'reference_strength_multiple']
+            if all(key in params for key in vibe_keys):
+                nai_vibe_transfer = NAIVibeTransferData.from_params(params)
+                if nai_vibe_transfer:
+                    print(f"✅ [EarlyBinding] Vibe Transfer Data 캡처: {len(nai_vibe_transfer.reference_image_multiple)}개")
+
+            # 3. Character Reference Module (NAID4.5 Director Tool)
+            ref_keys = ['director_reference_descriptions', 'director_reference_images']
+            if all(key in params for key in ref_keys):
+                nai_character_reference = NAICharacterReferenceData.from_params(params)
+                if nai_character_reference:
+                    print(f"✅ [EarlyBinding] Character Reference Data 캡처")
+
+        except ValueError as e:
+            # 데이터 검증 실패
+            print(f"⚠️ [EarlyBinding] NAI 데이터 검증 실패: {e}")
+        except Exception as e:
+            # 예상치 못한 오류
+            print(f"❌ [EarlyBinding] NAI 데이터 추출 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return nai_characters, nai_vibe_transfer, nai_character_reference
+
+    def safe_shutdown(self, timeout_ms: int = 5000):
+        """
+        🆕 앱 종료 시 안전하게 스레드를 정리합니다.
+
+        Args:
+            timeout_ms: 스레드 종료 대기 시간 (밀리초)
+        """
+        print("[THREAD] 안전 종료 시작...")
+
+        # 1. 생성 플래그 해제
+        self.is_generating = False
+        self._thread_cleanup_in_progress = True  # 새 작업 방지
+
+        # 2. 현재 스레드 종료 대기
+        if self.generation_thread is not None:
+            try:
+                if self.generation_thread.isRunning():
+                    print(f"[THREAD] 실행 중인 스레드 종료 대기 중... (최대 {timeout_ms}ms)")
+                    self.generation_thread.quit()
+                    if not self.generation_thread.wait(timeout_ms):
+                        print("⚠️ [THREAD] 스레드 정상 종료 실패. 강제 종료 시도...")
+                        self.generation_thread.terminate()
+                        self.generation_thread.wait(1000)
+                print("[THREAD] 스레드 종료 완료")
+            except RuntimeError as e:
+                print(f"[THREAD] 스레드 이미 삭제됨: {e}")
+            except Exception as e:
+                print(f"[THREAD] 스레드 종료 중 오류: {e}")
+
+        # 3. 참조 정리
+        self.generation_thread = None
+        self.generation_worker = None
+
+        # 4. 대기 중인 참조 정리
+        for ref in self._pending_thread_refs:
+            try:
+                if hasattr(ref, 'isRunning') and ref.isRunning():
+                    ref.quit()
+                    ref.wait(500)
+                if hasattr(ref, 'deleteLater'):
+                    ref.deleteLater()
+            except Exception:
+                pass
+        self._pending_thread_refs.clear()
+
+        # 5. 강력한 정리
+        _force_cleanup_all_threads()
+
+        self._thread_cleanup_in_progress = False
+        print("[THREAD] 안전 종료 완료")

@@ -2,8 +2,12 @@ import requests
 import zipfile
 import io, time, re, json
 import base64
+import numpy as np
+import gc
 from PIL import Image
 from typing import Dict, Any, TYPE_CHECKING, List
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import QCoreApplication, QThreadPool
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 
@@ -23,46 +27,241 @@ class APIService:
         self.NAI_V3_API_URL = "https://image.novelai.net/ai/generate-image"
         self.comfyui_service = None
         self.workflow_manager = ComfyUIWorkflowManager()
+    
+    def _cleanup_http_threads(self):
+        """HTTP 연결 관련 스레드 정리"""
+        try:
+            # urllib3 연결 풀 정리
+            try:
+                from urllib3.util import connection
+                from urllib3 import poolmanager
+                if hasattr(poolmanager, '_default_pool'):
+                    poolmanager._default_pool = None
+            except Exception:
+                pass
+            
+            # requests 세션 정리
+            try:
+                if hasattr(requests, 'sessions'):
+                    if hasattr(requests.sessions, 'Session'):
+                        session = requests.Session()
+                        session.close()
+            except Exception:
+                pass
+            
+            # Qt 스레드 풀 정리
+            try:
+                thread_pool = QThreadPool.globalInstance()
+                thread_pool.clear()
+                thread_pool.waitForDone(100)
+            except Exception:
+                pass
+            
+            # 가비지 컬렉션
+            gc.collect()
+            
+            # Qt 이벤트 루프 처리
+            for _ in range(2):
+                QCoreApplication.processEvents()
+        except Exception:
+            pass
 
     def call_generation_api(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
         최대 5회까지 예외 발생 시 재시도합니다.
         """
+        # 입력 프롬프트에서 주석 및 개행문자 처리
+        if 'input' in parameters and isinstance(parameters['input'], str):
+            original_prompt = parameters['input']
+            cleaned_tags = []
+            for tag in original_prompt.split(','):
+                processed_tag = tag.replace('\n', '').strip()
+                if processed_tag and not processed_tag.startswith('#'):
+                    cleaned_tags.append(processed_tag)
+            
+            cleaned_prompt = ', '.join(cleaned_tags)
+            if original_prompt != cleaned_prompt:
+                parameters['input'] = cleaned_prompt
+                print(f"[CLEAN] APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
+        
+        # resolution:, seed: 파라미터 처리
+        if 'input' in parameters and isinstance(parameters['input'], str):
+            processed_prompt = parameters['input']
+            fix_seed_value = str(parameters.get('seed', 0))
+            fix_res_value = [parameters.get('width', 1024), parameters.get('height', 1024)]
+            
+            fix_check = processed_prompt.split(', ')
+            after_check = fix_check.copy()
+            
+            for i, v in enumerate(fix_check):
+                if "seed:" in v and v.startswith("seed:"):
+                    fix_seed_value = v[5:]  # "seed:" 부분 제거
+                    after_check.remove(fix_check[i])
+                elif "resolution:" in v and v.startswith("resolution:"):
+                    try:
+                        fix_res_value = [int(l) for l in v[11:].split('x')]  # "resolution:" 부분 제거
+                        if len(fix_res_value) == 2:
+                            parameters['width'] = fix_res_value[0]
+                            parameters['height'] = fix_res_value[1]
+                    except:
+                        fix_res_value = [1024, 1024]
+                    after_check.remove(fix_check[i])
+            
+            # seed 값 업데이트
+            try:
+                parameters['seed'] = int(fix_seed_value)
+            except:
+                parameters['seed'] = 0
+            
+            # 처리된 프롬프트 업데이트 (seed:, resolution: 태그 제거)
+            cleaned_tags_prompt = ', '.join(after_check)
+            if cleaned_tags_prompt != processed_prompt:
+                parameters['input'] = cleaned_tags_prompt
+                print(f"[PARAM] APIService: seed/resolution 태그 처리 완료")
+                print(f"   - Seed: {parameters.get('seed')}")
+                print(f"   - Resolution: {parameters.get('width')}x{parameters.get('height')}")
+                print(f"   - 정리된 프롬프트: '{cleaned_tags_prompt[:100]}...'")
+        
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
-        print(f"🛰️ APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
-        print(f"   📋 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
+        print(f"[API] APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
+        print(f"   [파라미터] 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
             f"모델: {parameters.get('model', 'N/A')}, 샘플러: {parameters.get('sampler', 'N/A')}")
 
-        max_retries = 5
+        max_retries = 3  # 5회에서 3회로 줄임
         last_exception = None
 
+        result = None
         for attempt in range(1, max_retries + 1):
             if attempt > 1:
-                print(f"🔄 재시도 {attempt}/{max_retries}...")
+                print(f"[RETRY] 재시도 {attempt}/{max_retries}...")
             try:
                 if api_mode == "NAI":
-                    return self._call_nai_api(parameters)
+                    result = self._call_nai_api(parameters)
                 elif api_mode == "WEBUI":
-                    return self._call_webui_api(parameters)
+                    result = self._call_webui_api(parameters)
                 elif api_mode == "COMFYUI":  # 🆕 새로 추가
-                    return self._call_comfyui_api(parameters)
+                    result = self._call_comfyui_api(parameters)
                 else:
-                    return {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+                    result = {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
+                
+                # 🔧 FIX: API 호출 결과가 error인 경우에도 재시도하도록 수정
+                if result and result.get('status') == 'error':
+                    error_msg = result.get('message', 'Unknown error')
+                    print(f"[WARNING] API 오류 응답 (시도 {attempt}/{max_retries}): {error_msg}")
+                    
+                    # HTTP 520 등 서버 오류는 재시도 가능
+                    if 'HTTP 520' in error_msg or 'HTTP 502' in error_msg or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg:
+                        if attempt < max_retries:
+                            print(f"[WAIT] 서버 오류 감지. {2 * attempt}초 후 재시도합니다...")
+                            time.sleep(2 * attempt)  # 점진적으로 대기 시간 증가
+                            continue
+                    
+                    # 재시도할 수 없는 오류는 즉시 반환
+                    last_exception = error_msg
+                    if attempt < max_retries:
+                        time.sleep(1)  # 1초 대기 후 재시도
+                        continue
+                    else:
+                        # 마지막 시도에서도 실패하면 에러 반환
+                        return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {error_msg}"}
+                
+                # Check if cropped_image_request is enabled
+                if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
+                    print("✂️ Cropped image request enabled, extracting mask area...")
+                    result = self._extract_cropped_image(result, parameters)
+                
+                # Check if auto_outpainting is enabled and first generation was successful
+                elif result and result.get('status') == 'success' and parameters.get('auto_outpainting'):
+                    print("🎨 Auto-Outpainting enabled, processing second pass...")
+                    result = self._auto_outpainting(result, parameters)
+                
+                return result
+                
             except Exception as e:
-                print(f"⚠️ API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
+                print(f"[WARNING] API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
                 last_exception = e
                 if attempt < max_retries:
                     time.sleep(1)  # 1초 대기 후 재시도 (필요에 따라 시간 조정 가능)
                 else:
                     # 마지막 시도에서도 실패하면 에러 반환
-                    return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 {max_retries}회 초과): {e}"}
+                    return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {e}"}
 
+
+    def _get_active_nai_token(self) -> str:
+        """
+        🆕 멀티 계정 지원: 라운드 로빈 모드에 따라 활성 NAI 토큰을 반환합니다.
+
+        Returns:
+            str: 활성 NAI 토큰 (메인 또는 추가 계정)
+        """
+        try:
+            import json
+            from pathlib import Path
+
+            # save/nai_accounts.json 로드
+            accounts_file = Path("save/nai_accounts.json")
+
+            if not accounts_file.exists():
+                # 계정 파일이 없으면 메인 토큰 반환
+                main_token = self.app_context.secure_token_manager.get_token('nai_token')
+                return main_token
+
+            with open(accounts_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            accounts = data.get('accounts', [])
+            round_robin_enabled = data.get('round_robin_enabled', False)
+            main_account_enabled = data.get('main_account_enabled', True)  # 🆕 메인 계정 활성화 여부
+
+            # 활성화된 계정 목록 생성 (메인 + 추가 계정)
+            active_tokens = []
+
+            # 1. 메인 토큰 추가 (활성화된 경우만)
+            main_token = self.app_context.secure_token_manager.get_token('nai_token')
+            if main_token and main_account_enabled:
+                active_tokens.append(('nai_token', main_token))
+
+            # 2. 활성화된 추가 계정 추가
+            for account in accounts:
+                if account.get('enabled', False):
+                    account_id = account.get('id')
+                    token = self.app_context.secure_token_manager.get_token(account_id)
+                    if token:
+                        active_tokens.append((account_id, token))
+
+            # 활성화된 토큰이 없으면 메인 토큰 반환
+            if not active_tokens:
+                return main_token if main_token else ""
+
+            # 라운드 로빈 모드 확인
+            if round_robin_enabled and len(active_tokens) > 1:
+                # 카운터 기반 라운드 로빈
+                counter = self.app_context.image_crud_controller.get_counter()
+                index = counter % len(active_tokens)
+
+                selected_id, selected_token = active_tokens[index]
+                print(f"🔄 [Round-Robin] 카운터: {counter}, 계정 인덱스: {index}/{len(active_tokens)}, 선택된 계정: {selected_id}")
+
+                return selected_token
+            else:
+                # 라운드 로빈 비활성화: 첫 번째 활성 토큰 사용
+                first_id, first_token = active_tokens[0]
+                print(f"✅ [Single Account] 선택된 계정: {first_id}")
+
+                return first_token
+
+        except Exception as e:
+            print(f"⚠️ 멀티 계정 토큰 선택 오류: {e}. 메인 토큰으로 폴백합니다.")
+            # 에러 발생 시 메인 토큰으로 폴백
+            main_token = self.app_context.secure_token_manager.get_token('nai_token')
+            return main_token if main_token else ""
 
     def _call_nai_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다."""
         try:
-            token = params.get('credential')
+            # 🆕 멀티 계정 지원: 라운드 로빈 토큰 선택
+            token = self._get_active_nai_token()
             if not token:
                 raise ValueError("NAI 토큰이 제공되지 않았습니다.")
 
@@ -70,7 +269,7 @@ class APIService:
                 "NAID4.5F": 'nai-diffusion-4-5-full',
                 "NAID4.5C": 'nai-diffusion-4-5-curated',
                 "NAID4.0F": 'nai-diffusion-4-full',
-                "NAID4.0C": 'nai-diffusion-4-curated',
+                "NAID4.0C": 'nai-diffusion-4-curated-preview',
                 "NAID3": 'nai-diffusion-3'
             }
             
@@ -104,6 +303,22 @@ class APIService:
                 "legacy": False,
                 "legacy_v3_extend": False,
             }
+            
+            # skip_cfg_above_sigma 처리 (VAR+ 파라미터에 따라)
+            if params.get('VAR+', False):
+                # VAR+가 True일 때 모델에 따라 다른 값 설정
+                if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated']:
+                    api_parameters["skip_cfg_above_sigma"] = 58
+                elif model_name in ['nai-diffusion-4-full', 'nai-diffusion-4-curated', 'nai-diffusion-3']:
+                    api_parameters["skip_cfg_above_sigma"] = 19
+                # inpainting 모델도 동일하게 처리
+                elif model_name in ['nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:
+                    api_parameters["skip_cfg_above_sigma"] = 58
+                elif model_name in ['nai-diffusion-4-full-inpainting', 'nai-diffusion-4-curated-inpainting', 'nai-diffusion-3-inpainting']:
+                    api_parameters["skip_cfg_above_sigma"] = 19
+            else:
+                # VAR+가 False일 때는 null (Python에서는 None이지만 JSON 전송 시 제외됨)
+                api_parameters["skip_cfg_above_sigma"] = None
 
             if is_img2img:
                 api_parameters["image"] = base64.b64encode(params['image_bytes']).decode()
@@ -157,25 +372,202 @@ class APIService:
                     }
                 })
 
-                # 캐릭터 모듈 처리 (기존과 동일)
-                char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
-                if char_module and char_module.activate_checkbox.isChecked():
-                    print("✅ 캐릭터 모듈 활성화됨. 파라미터를 가져옵니다.")
-                    char_params = char_module.get_parameters()
-                    
-                    if char_params and char_params.get("characters"):
-                        characters = char_params["characters"]
-                        ucs = char_params["uc"]
-                        
-                        for i, prompt in enumerate(characters):
+                # 캐릭터 모듈 처리 - Sketchbook character prompts take priority
+                if params.get('sketchbook_character_prompts'):
+                    # Use sketchbook character prompts instead of character module
+                    print("📝 Using Sketchbook character prompts instead of Character Module")
+                    sketchbook_prompts = params['sketchbook_character_prompts']
+
+                    for i, (prompt, uc) in enumerate(sketchbook_prompts):
+                        # Sketchbook uses default center position (no custom positioning yet)
+                        centers = [{"x": 0.5, "y": 0.5}]
+
+                        api_parameters['v4_prompt']['caption']['char_captions'].append({
+                            'char_caption': prompt,
+                            'centers': centers
+                        })
+                        api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                            'char_caption': uc or "",
+                            'centers': centers
+                        })
+
+                    print(f"✅ Added {len(sketchbook_prompts)} Sketchbook character prompts")
+                else:
+                    # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character 데이터 가져오기
+                    generation_request = params.get('_generation_request')
+                    if generation_request and generation_request.nai_characters:
+                        print("✅ [EarlyBinding] Character Data from GenerationRequest")
+                        nai_char_data = generation_request.nai_characters
+
+                        # 캐릭터 프롬프트를 v4_prompt에 추가
+                        for i, prompt in enumerate(nai_char_data.characters):
+                            # 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
+                            if i < len(nai_char_data.character_positions):
+                                centers = [nai_char_data.character_positions[i].to_dict()]
+                            else:
+                                centers = [{"x": 0.5, "y": 0.5}]
+
                             api_parameters['v4_prompt']['caption']['char_captions'].append({
                                 'char_caption': prompt,
-                                'centers': [{"x": 0.5, "y": 0.5}]
+                                'centers': centers
                             })
                             api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                'char_caption': ucs[i] if i < len(ucs) else "",
-                                'centers': [{"x": 0.5, "y": 0.5}]
+                                'char_caption': nai_char_data.uc[i] if i < len(nai_char_data.uc) else "",
+                                'centers': centers
                             })
+
+                        print(f"  - {len(nai_char_data.characters)} character(s) added")
+                        if nai_char_data.character_positions:
+                            print(f"  - Position data: {[pos.to_dict() for pos in nai_char_data.character_positions]}")
+                    elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
+                        # 🆕 FR-2-1: Temporary Window Mode (Late Binding fallback for temp windows)
+                        print("🪟 [TempWindow] Using VirtualCharacterTab (Late Binding fallback)")
+                        char_module = self.app_context.temp_window_character_tab
+
+                        if hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                            char_params = char_module.get_parameters()
+
+                            if char_params and char_params.get("characters"):
+                                characters = char_params["characters"]
+                                ucs = char_params["uc"]
+                                character_positions = char_params.get("character_positions", [])
+
+                                for i, prompt in enumerate(characters):
+                                    if i < len(character_positions):
+                                        centers = [character_positions[i]]
+                                    else:
+                                        centers = [{"x": 0.5, "y": 0.5}]
+
+                                    api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                        'char_caption': prompt,
+                                        'centers': centers
+                                    })
+                                    api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                        'char_caption': ucs[i] if i < len(ucs) else "",
+                                        'centers': centers
+                                    })
+
+                                print(f"  - {len(characters)} character(s) from temp window")
+                    else:
+                        # 🔄 Late Binding fallback for direct generation (non-queue)
+                        print("  - No GenerationRequest. Using Late Binding fallback (direct generation)")
+                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+
+                        if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                            char_params = char_module.get_parameters()
+
+                            if char_params and char_params.get("characters"):
+                                characters = char_params["characters"]
+                                ucs = char_params["uc"]
+                                character_positions = char_params.get("character_positions", [])
+
+                                for i, prompt in enumerate(characters):
+                                    if i < len(character_positions):
+                                        centers = [character_positions[i]]
+                                    else:
+                                        centers = [{"x": 0.5, "y": 0.5}]
+
+                                    api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                        'char_caption': prompt,
+                                        'centers': centers
+                                    })
+                                    api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                        'char_caption': ucs[i] if i < len(ucs) else "",
+                                        'centers': centers
+                                    })
+
+                                print(f"  - {len(characters)} character(s) from Late Binding fallback")
+            
+            # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
+            generation_request = params.get('_generation_request')
+            if generation_request and generation_request.nai_vibe_transfer:
+                print("✅ [EarlyBinding] Vibe Transfer Data from GenerationRequest")
+                nai_vibe_data = generation_request.nai_vibe_transfer
+
+                # Update api_parameters with vibe transfer data
+                api_parameters['normalize_reference_strength_multiple'] = nai_vibe_data.normalize
+                api_parameters['reference_image_multiple'] = nai_vibe_data.reference_image_multiple
+                api_parameters['reference_strength_multiple'] = nai_vibe_data.reference_strength_multiple
+
+                # Add NAID3-specific parameter if present
+                if nai_vibe_data.reference_information_extracted_multiple:
+                    api_parameters['reference_information_extracted_multiple'] = nai_vibe_data.reference_information_extracted_multiple
+                    print(f"  - NAID3 IE values: {nai_vibe_data.reference_information_extracted_multiple}")
+
+                print(f"  - {len(nai_vibe_data.reference_image_multiple)} vibe(s) added")
+                print(f"  - Normalization: {nai_vibe_data.normalize}")
+                print(f"  - Strengths: {nai_vibe_data.reference_strength_multiple}")
+            else:
+                # 🔄 Late Binding fallback for direct generation (non-queue)
+                vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
+                if vibe_module:
+                    vibe_data = vibe_module.get_vibe_transfer_multiple_data()
+                    if vibe_data and vibe_data.get('reference_image_multiple'):
+                        print("🔄 [LateBinding] Vibe Transfer from module (direct generation)")
+
+                        # Update api_parameters with vibe transfer data
+                        api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
+                        api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
+                        api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
+
+                        # Add NAID3-specific parameter if present
+                        if 'reference_information_extracted_multiple' in vibe_data:
+                            api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
+
+                        print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
+
+            # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
+            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated']: # 다음 모델 제외: 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting'
+                generation_request = params.get('_generation_request')
+                if generation_request and generation_request.nai_character_reference:
+                    print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
+                    nai_ref_data = generation_request.nai_character_reference
+
+                    # Director 파라미터 추가
+                    api_parameters['director_reference_descriptions'] = nai_ref_data.director_reference_descriptions
+                    api_parameters['director_reference_images'] = nai_ref_data.director_reference_images
+                    api_parameters['director_reference_information_extracted'] = nai_ref_data.director_reference_information_extracted
+                    api_parameters['director_reference_secondary_strength_values'] = nai_ref_data.director_reference_secondary_strength_values
+                    api_parameters['director_reference_strength_values'] = nai_ref_data.director_reference_strength_values
+
+                    # Character Reference 활성화 시 skip_cfg_above_sigma 제거
+                    if 'skip_cfg_above_sigma' in api_parameters:
+                        del api_parameters['skip_cfg_above_sigma']
+                        print("  - skip_cfg_above_sigma 파라미터 제거됨 (Character Reference 활성화)")
+
+                    # Character Reference Module에서 추가된 파라미터들
+                    api_parameters['controlnet_strength'] = nai_ref_data.controlnet_strength
+                    api_parameters['inpaintImg2ImgStrength'] = nai_ref_data.inpaint_img2img_strength
+                    api_parameters['normalize_reference_strength_multiple'] = nai_ref_data.normalize_reference_strength_multiple
+
+                    print(f"  - Director images: {len(nai_ref_data.director_reference_images)}")
+                    print(f"  - Director strengths: {nai_ref_data.director_reference_strength_values}")
+                    print(f"  - Fidelity values: {nai_ref_data.director_reference_secondary_strength_values}")
+                elif params.get('director_reference_descriptions'):
+                    # 🔄 Late Binding fallback for direct generation (non-queue)
+                    print("🔄 [LateBinding] Character Reference from params (direct generation)")
+
+                    # Director 파라미터 추가
+                    api_parameters['director_reference_descriptions'] = params['director_reference_descriptions']
+                    api_parameters['director_reference_images'] = params['director_reference_images']
+                    api_parameters['director_reference_information_extracted'] = params['director_reference_information_extracted']
+                    api_parameters['director_reference_secondary_strength_values'] = params['director_reference_secondary_strength_values']
+                    api_parameters['director_reference_strength_values'] = params['director_reference_strength_values']
+
+                    # Character Reference 활성화 시 skip_cfg_above_sigma 제거
+                    if 'skip_cfg_above_sigma' in api_parameters:
+                        del api_parameters['skip_cfg_above_sigma']
+                        print("  - skip_cfg_above_sigma 파라미터 제거됨 (Character Reference 활성화)")
+
+                    # Character Reference Module에서 추가된 파라미터들
+                    if 'controlnet_strength' in params:
+                        api_parameters['controlnet_strength'] = params['controlnet_strength']
+                    if 'inpaintImg2ImgStrength' in params:
+                        api_parameters['inpaintImg2ImgStrength'] = params['inpaintImg2ImgStrength']
+                    if 'normalize_reference_strength_multiple' in params:
+                        api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
+
+                    print(f"  - Director images: {len(params['director_reference_images'])}")
             
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):
@@ -194,17 +586,28 @@ class APIService:
                 "Content-Type": "application/json"
             }
             
-            print("📤 NAI API 요청 페이로드:", payload)
+            # print("📤 NAI API 요청 페이로드:", payload)
             
             # API payload를 안전하게 저장
             self.app_context.store_api_payload(payload, "NAI")
             
-            response = requests.post(
-                self.NAI_V3_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=180
-            )
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    self.NAI_V3_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=180
+                )
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             response.raise_for_status()
             
             # 이미지 처리
@@ -223,7 +626,13 @@ class APIService:
             return {'status': 'error', 'message': str(e)}
 
     def _call_webui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Stable Diffusion WebUI API를 호출합니다."""
+        """
+        Stable Diffusion WebUI API를 호출합니다.
+
+        ⚠️ Inpaint 모드:
+        - NAI 사양의 작은 마스크(152x104 등)를 전달하면 자동으로 원본 이미지 크기로 변환됩니다.
+        - mask_bytes에 NAI 사양 마스크를 그대로 전달해도 WebUI에서 정상 작동합니다.
+        """
         try:
             webui_url = params.get('credential')
             if not webui_url:
@@ -233,11 +642,11 @@ class APIService:
                     webui_url = f"https://{webui_url}"
                 else:
                     webui_url = f"http://{webui_url}"
-            
+
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None
             is_inpaint = is_img2img and params.get('type') == 'inpaint'
             api_endpoint = f"{webui_url}/sdapi/v1/img2img" if is_img2img else f"{webui_url}/sdapi/v1/txt2img"
-            
+
             # WEBUI API 페이로드 구성
             payload = {
                 "prompt": params.get('input', ''),
@@ -264,14 +673,36 @@ class APIService:
             if is_img2img:
                 payload["init_images"] = [base64.b64encode(params['image_bytes']).decode()]
                 payload["denoising_strength"] = params.get('strength', 0.5)
+                # 🔥 중요: img2img API에 필수 파라미터 추가
+                payload["include_init_images"] = True
 
                 if is_inpaint:
-                    mask_bytes = params['mask_bytes']
-                    processed_mask = self._process_mask_data(mask_bytes, is_nai=False)
+                    # 마스크 데이터 처리
+                    mask_bytes = params.get('mask_bytes')
+                    if not mask_bytes:
+                        raise ValueError("Inpaint 모드에서는 mask_bytes가 필수입니다.")
+
+                    # 마스크를 원본 이미지 크기로 변환 (NAI 작은 마스크 → WebUI 큰 마스크)
+                    target_width = params.get('width', 1024)
+                    target_height = params.get('height', 1216)
+                    processed_mask = self._process_mask_for_webui(mask_bytes, target_width, target_height)
                     payload["mask"] = processed_mask
-                    payload["inpainting_fill"] = 1
-                    payload["inpaint_full_res"] = True
-                    payload["inpaint_full_res_padding"] = 32
+
+                    # 🔥 Inpaint 전용 파라미터 추가
+                    payload["mask_blur"] = params.get('mask_blur', 4)
+                    payload["inpainting_fill"] = params.get('inpainting_fill', 1)  # 0: fill, 1: original, 2: latent noise, 3: latent nothing
+                    payload["inpaint_full_res"] = params.get('inpaint_full_res', True)
+                    payload["inpaint_full_res_padding"] = params.get('inpaint_full_res_padding', 32)
+                    payload["inpainting_mask_invert"] = params.get('inpainting_mask_invert', 0)  # 0: inpaint masked, 1: inpaint not masked
+                    payload["initial_noise_multiplier"] = params.get('initial_noise_multiplier', 1.0)
+
+                    print(f"🎨 [WEBUI Inpaint] 파라미터 설정 완료")
+                    print(f"   - 마스크: {target_width}x{target_height} (NAI 작은 마스크 자동 변환 지원)")
+                    print(f"   - mask_blur: {payload['mask_blur']}")
+                    print(f"   - inpainting_fill: {payload['inpainting_fill']}")
+                    print(f"   - inpaint_full_res: {payload['inpaint_full_res']}")
+                    print(f"   - inpaint_full_res_padding: {payload['inpaint_full_res_padding']}")
+                    print(f"   - inpainting_mask_invert: {payload['inpainting_mask_invert']}")
             
             if payload["enable_hr"]:
                 payload.update({
@@ -279,7 +710,8 @@ class APIService:
                     "hr_upscaler": params.get('hr_upscaler', 'Lanczos'),
                     "hr_second_pass_steps": params.get('steps', 28) // 2,
                     "hr_resize_x": int(payload["width"] * params.get('hr_scale', 1.5)),
-                    "hr_resize_y": int(payload["height"] * params.get('hr_scale', 1.5))
+                    "hr_resize_y": int(payload["height"] * params.get('hr_scale', 1.5)),
+                    "hr_cfg": params.get('hr_cfg', 0)  # hr_cfg 추가, 기본값 0
                 })
             
             # 🔥 개선된 커스텀 파라미터 처리
@@ -294,7 +726,18 @@ class APIService:
             self.app_context.store_api_payload(payload, "WEBUI")
             
             headers = {"Content-Type": "application/json"}
-            response = requests.post(api_endpoint, headers=headers, json=payload, timeout=300)
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(api_endpoint, headers=headers, json=payload, timeout=300)
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
             response.raise_for_status()
             
             result = response.json()
@@ -476,9 +919,30 @@ class APIService:
 
             # 6. 진행률 콜백 설정
             def progress_callback(current: int, total: int):
-                # 메인 윈도우에 진행률 업데이트 (필요시 구현)
-                progress_percent = int((current / total) * 100) if total > 0 else 0
-                print(f"🔄 ComfyUI 생성 진행률: {progress_percent}% ({current}/{total})")
+                if total <= 0:
+                    return
+
+                progress_percent = int((current / total) * 100)
+
+                # 5% 단위로 진행 바 생성 (총 20개 박스)
+                filled_boxes = int(progress_percent / 5)
+                empty_boxes = 20 - filled_boxes
+                progress_bar = "■" * filled_boxes + "□" * empty_boxes
+
+                message = f"ComfyUI 생성 : {progress_percent}% ({current}/{total}) [{progress_bar}]"
+
+                # 🔧 상태바에 진행률 표시 (Main thread로 defer)
+                if hasattr(self, 'app_context') and self.app_context and hasattr(self.app_context, 'main_window'):
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(0, lambda msg=message: self.app_context.main_window.status_bar.showMessage(msg))
+
+                # 🆕 Interactive Mode를 위한 진행도 이벤트 발행
+                if hasattr(self, 'app_context') and self.app_context:
+                    self.app_context.publish("generation_progress", {
+                        "current": current,
+                        "total": total,
+                        "percent": progress_percent
+                    })
             
             # 7. 이미지 생성 실행
             result = self.comfyui_service.generate_image(workflow, progress_callback)
@@ -493,61 +957,887 @@ class APIService:
         except Exception as e:
             print(f"❌ ComfyUI API 호출 중 예외 발생: {e}")
             return {'status': 'error', 'message': str(e)}
-        finally:
-            # WebSocket 연결 정리
-            if self.comfyui_service:
-                self.comfyui_service.disconnect_websocket()
+
+    def _process_mask_for_webui(self, mask_bytes: bytes, target_width: int, target_height: int) -> str:
+        """
+        WebUI용 마스크를 처리합니다. NAI 작은 마스크를 원본 이미지 크기로 자동 변환합니다.
+
+        Args:
+            mask_bytes (bytes): 마스크 바이너리 데이터 (NAI 작은 마스크 또는 큰 마스크)
+            target_width (int): 목표 이미지 너비
+            target_height (int): 목표 이미지 높이
+
+        Returns:
+            str: Base64로 인코딩된 처리된 마스크 문자열 (원본 이미지 크기)
+        """
+        try:
+            # 이미지 데이터 로드
+            img = Image.open(io.BytesIO(mask_bytes))
+
+            # 1. 그레이스케일로 변환
+            img_gray = img.convert('L')
+
+            # 2. 이진화 적용 (임계값 기준으로 흑백으로 변환)
+            threshold = 128
+            img_binary = img_gray.point(lambda x: 255 if x > threshold else 0, '1')
+
+            # 3. 마스크 크기 확인
+            mask_width, mask_height = img_binary.size
+
+            # 4. 마스크가 목표 크기보다 작으면 확대 (NAI 작은 마스크 대응)
+            if mask_width < target_width or mask_height < target_height:
+                print(f"🔍 [WebUI] 작은 마스크 감지: {mask_width}x{mask_height} → {target_width}x{target_height}")
+                # NEAREST 보간으로 확대 (픽셀화된 경계 유지)
+                img_resized = img_binary.resize((target_width, target_height), Image.NEAREST)
+            else:
+                # 이미 큰 마스크면 그대로 사용
+                img_resized = img_binary
+                print(f"✅ [WebUI] 마스크 크기 확인: {mask_width}x{mask_height} (변환 불필요)")
+
+            # 5. RGB 모드로 변환
+            img_final = img_resized.convert('RGB')
+
+            # 6. Base64 인코딩
+            buffer = io.BytesIO()
+            img_final.save(buffer, format='PNG')
+            base64_string = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            print(f"✅ [WebUI] 마스크 처리 완료: 최종 크기 {img_final.size}")
+            return base64_string
+
+        except Exception as e:
+            print(f"❌ WebUI 마스크 처리 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            # 폴백: 원본 데이터를 그대로 base64 인코딩
+            return base64.b64encode(mask_bytes).decode()
 
     def _process_mask_data(self, mask_bytes: bytes, is_nai: bool = True) -> str:
         """
-        Base64 인코딩된 이미지 또는 파일에서 이진 마스크를 생성하고 확대합니다.
-        
+        마스크 데이터를 처리하여 Base64 문자열로 반환합니다.
+
         Args:
             mask_bytes (bytes): 마스크 바이너리 데이터
-            is_nai (bool): NAI API 여부 (기본값: True)
-        
+            is_nai (bool): NAI API 여부 (True: NAI는 8배 확대, False: WebUI는 원본 크기)
+
         Returns:
             str: Base64로 인코딩된 처리된 마스크 문자열
         """
         import numpy as np
-        
+
         try:
-            # 이미지 데이터 가져오기
-            base64_string = base64.b64encode(mask_bytes).decode('utf-8')
-            
-            # Base64 디코딩
-            image_data = base64.b64decode(base64_string)
-            img = Image.open(io.BytesIO(image_data))
-            
+            # 이미지 데이터 로드
+            img = Image.open(io.BytesIO(mask_bytes))
+
             # 1. 그레이스케일로 변환
             img_gray = img.convert('L')
-            
+
             # 2. 이진화 적용 (임계값 기준으로 흑백으로 변환)
             threshold = 128
             img_binary = img_gray.point(lambda x: 255 if x > threshold else 0, '1')
-            
+
             # 3. 원본 크기 저장
             original_width, original_height = img_binary.size
-            
-            # 4. 새 크기 계산 (정수로 변환)
-            scale_factor = 8
-            new_width = int(original_width * scale_factor)
-            new_height = int(original_height * scale_factor)
-            
-            # 5. 이진 이미지 확대 - nearest neighbor 사용하여 픽셀화된 경계 유지
-            img_resized = img_binary.resize((new_width, new_height), Image.NEAREST)
-            
-            # 6. 다시 RGB 모드로 변환 (필요한 경우)
-            img_final = img_resized.convert('RGB')
 
+            if is_nai:
+                # NAI: 8배 확대 (작은 마스크를 큰 이미지로 확대)
+                scale_factor = 8
+                new_width = int(original_width * scale_factor)
+                new_height = int(original_height * scale_factor)
+
+                # 이진 이미지 확대 - nearest neighbor 사용하여 픽셀화된 경계 유지
+                img_resized = img_binary.resize((new_width, new_height), Image.NEAREST)
+
+                # RGB 모드로 변환
+                img_final = img_resized.convert('RGB')
+
+                print(f"✅ [NAI] 마스크 처리 완료: {original_width}x{original_height} → {new_width}x{new_height}")
+            else:
+                # WebUI: 원본 크기 유지, RGB 변환만 수행
+                img_final = img_binary.convert('RGB')
+
+                print(f"✅ [WebUI] 마스크 처리 완료: {original_width}x{original_height} (원본 크기 유지)")
+
+            # Base64 인코딩
             buffer = io.BytesIO()
             img_final.save(buffer, format='PNG')
             new_base64_string = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            print(f"✅ 마스크 처리 완료: {original_width}x{original_height} → {new_width}x{new_height}")
+
             return new_base64_string
-            
+
         except Exception as e:
             print(f"❌ 마스크 데이터 처리 실패: {e}")
+            import traceback
+            traceback.print_exc()
             # 폴백: 원본 데이터를 그대로 base64 인코딩
             return base64.b64encode(mask_bytes).decode()
+    
+    def _extract_cropped_image(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract only the mask area from the generated image.
+        Returns the cropped image without EXIF data.
+        
+        Args:
+            result: Generation result with image bytes
+            parameters: Original generation parameters including full_mask_pil
+            
+        Returns:
+            Modified result with cropped image
+        """
+        try:
+            print("✂️ Starting cropped image extraction...")
+            
+            # 1. Get the generated image
+            generated_image = result.get('image')
+            if not generated_image:
+                print("   ⚠️ No generated image found, returning original result")
+                return result
+            
+            # 2. Get the mask
+            mask_image = parameters.get('full_mask_pil')
+            if mask_image:
+                print(f"   ℹ️ Using provided mask: {mask_image.size}")
+                
+                # Ensure mask is in grayscale mode
+                if mask_image.mode != 'L':
+                    mask_image = mask_image.convert('L')
+                
+                # Find bounding box of the mask (white areas)
+                mask_array = np.array(mask_image)
+                white_pixels = np.where(mask_array > 127)
+                
+                if len(white_pixels[0]) > 0:
+                    # Get bounding box of the masked area
+                    y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
+                    x_min, x_max = white_pixels[1].min(), white_pixels[1].max()
+                    
+                    # Crop the generated image to the mask area
+                    cropped_image = generated_image.crop((x_min, y_min, x_max + 1, y_max + 1))
+                    print(f"   ✅ Cropped to mask area: {cropped_image.size}")
+                    
+                    # Replace the original image with cropped one
+                    result['image'] = cropped_image
+                    
+                    # Remove EXIF data by creating a new image
+                    clean_image = Image.new(cropped_image.mode, cropped_image.size)
+                    clean_image.putdata(list(cropped_image.getdata()))
+                    result['image'] = clean_image
+                    
+                    # Update image bytes for saving
+                    buffer = io.BytesIO()
+                    clean_image.save(buffer, format='PNG')
+                    result['image_bytes'] = buffer.getvalue()
+                    
+                    print("   ✅ Cropped image extraction completed (EXIF removed)")
+                else:
+                    print("   ⚠️ No mask area found, returning original image")
+            else:
+                print("   ⚠️ No mask provided, returning original image")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ Cropped image extraction failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Return original result on error
+            return result
+    
+    def _auto_outpainting(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Auto-Outpainting 처리를 수행합니다.
+        첫 번째 생성 결과를 받아 3:2 비율로 확장하여 두 번째 생성을 수행합니다.
+        
+        Args:
+            result: 첫 번째 생성 결과 (이미지 바이트 포함)
+            parameters: 원본 생성 파라미터
+            
+        Returns:
+            두 번째 생성 결과 또는 에러 시 원본 결과
+        """
+        try:
+            import numpy as np
+            
+            # 1. Extract the generated image from result
+            print("🎨 Step 1: Extracting generated image...")
+            
+            generated_image = None
+            raw_bytes = None
+            
+            # Check for 'image' key (PIL Image object)
+            if 'image' in result and result['image'] is not None:
+                generated_image = result['image']
+                print(f"   ✅ Found PIL Image: {generated_image.size}")
+            
+            # Also check for raw_bytes for saving later
+            if 'raw_bytes' in result:
+                raw_bytes = result['raw_bytes']
+                if generated_image is None:
+                    generated_image = Image.open(io.BytesIO(raw_bytes))
+                    print(f"   ✅ Created PIL Image from raw_bytes: {generated_image.size}")
+            
+            if generated_image is None:
+                print("   ❌ No image found in result")
+                return result
+            
+            # Get the full mask data for auto-outpainting
+            # Use full_mask_pil if available (for auto-outpainting), otherwise use mask_bytes
+            full_mask_pil = parameters.get('full_mask_pil')
+            if full_mask_pil:
+                # Use the full mask PIL object directly
+                mask_image = full_mask_pil
+                if mask_image.mode != 'L':
+                    mask_image = mask_image.convert('L')
+                print(f"   ✅ Using full mask PIL: {mask_image.size}")
+            elif parameters.get('mask_bytes'):
+                # Fallback to mask_bytes if no full_mask_pil
+                mask_bytes = parameters.get('mask_bytes')
+                # Decode mask and find the inpainted region
+                mask_image = Image.open(io.BytesIO(mask_bytes))
+                if mask_image.mode != 'L':
+                    mask_image = mask_image.convert('L')
+                print(f"   ⚠️ Using mask_bytes (may be small): {mask_image.size}")
+            else:
+                mask_image = None
+            
+            if mask_image:
+                # Find bounding box of the mask (white areas)
+                mask_array = np.array(mask_image)
+                white_pixels = np.where(mask_array > 127)
+                
+                if len(white_pixels[0]) > 0:
+                    # Get bounding box of the masked area
+                    y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
+                    x_min, x_max = white_pixels[1].min(), white_pixels[1].max()
+                    
+                    # Crop the generated image to the mask area
+                    cropped_image = generated_image.crop((x_min, y_min, x_max + 1, y_max + 1))
+                    print(f"   ✅ Cropped to mask area: {cropped_image.size}")
+                else:
+                    # No mask found, use the entire image
+                    cropped_image = generated_image
+                    print("   ⚠️ No mask area found, using entire image")
+            else:
+                # No mask provided, use the entire image
+                cropped_image = generated_image
+                print("   ℹ️ No mask provided, using entire image")
+            
+            # 2. Create expanded canvas (1216 x 832)
+            print("🎨 Step 2: Creating expanded canvas...")
+            
+            canvas_width = 1216
+            canvas_height = 832
+            
+            # Create white canvas
+            canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
+            
+            # Calculate position to center the cropped image
+            crop_w, crop_h = cropped_image.size
+            x_offset = (canvas_width - crop_w) // 2
+            y_offset = (canvas_height - crop_h) // 2
+            
+            # Ensure the cropped image is in RGBA mode
+            if cropped_image.mode != 'RGBA':
+                cropped_image = cropped_image.convert('RGBA')
+            
+            # Paste the cropped image in the center
+            canvas.paste(cropped_image, (x_offset, y_offset))
+            print(f"   ✅ Canvas created: {canvas_width}x{canvas_height}, image centered at ({x_offset}, {y_offset})")
+            
+            # 3. Generate outpainting mask
+            print("🎨 Step 3: Generating outpainting mask...")
+            
+            # Create mask - white for areas to inpaint, black for areas to keep
+            mask = Image.new('L', (canvas_width, canvas_height), 255)  # Start with all white
+            
+            # Create black rectangle for the original image area
+            mask_draw = np.array(mask)
+            mask_draw[y_offset:y_offset + crop_h, x_offset:x_offset + crop_w] = 0
+            
+            # Add 32px white border around the original image for blending
+            border_size = 64
+            # Top border
+            if y_offset - border_size >= 0:
+                mask_draw[max(0, y_offset - border_size):y_offset, 
+                         max(0, x_offset - border_size):min(canvas_width, x_offset + crop_w + border_size)] = 255
+            # Bottom border  
+            if y_offset + crop_h + border_size <= canvas_height:
+                mask_draw[y_offset + crop_h:min(canvas_height, y_offset + crop_h + border_size),
+                         max(0, x_offset - border_size):min(canvas_width, x_offset + crop_w + border_size)] = 255
+            # Left border
+            if x_offset - border_size >= 0:
+                mask_draw[max(0, y_offset - border_size):min(canvas_height, y_offset + crop_h + border_size),
+                         max(0, x_offset - border_size):x_offset] = 255
+            # Right border
+            if x_offset + crop_w + border_size <= canvas_width:
+                mask_draw[max(0, y_offset - border_size):min(canvas_height, y_offset + crop_h + border_size),
+                         x_offset + crop_w:min(canvas_width, x_offset + crop_w + border_size)] = 255
+            
+            mask = Image.fromarray(mask_draw.astype(np.uint8), mode='L')
+            
+            # Resize mask to NAI small size (152x104) and ensure perfect binary
+            nai_width = 152
+            nai_height = 104
+            
+            # Resize to NAI dimensions
+            mask_small = mask.resize((nai_width, nai_height), Image.NEAREST)
+            
+            # Ensure perfect binary (0 or 255 only)
+            mask_array_small = np.array(mask_small)
+            mask_array_small = np.where(mask_array_small > 127, 255, 0).astype(np.uint8)
+            
+            # Add 4-pixel inpaint margin inside the boundaries between black and white areas
+            # This helps with edge blending in the small mask
+            margin = 6
+            
+            # Use scipy for efficient dilation if available, otherwise use numpy
+            try:
+                from scipy import ndimage
+                # Create a circular kernel for dilation
+                kernel = np.ones((margin*2+1, margin*2+1), dtype=np.uint8)
+                # Dilate white areas (expand them by margin pixels)
+                mask_array_small = ndimage.binary_dilation(mask_array_small == 255, kernel).astype(np.uint8) * 255
+                print(f"   ✅ Added {margin}px inpaint margin using scipy dilation")
+            except ImportError:
+                # Fallback: simple numpy-based dilation
+                mask_copy = mask_array_small.copy()
+                for y in range(nai_height):
+                    for x in range(nai_width):
+                        # If current pixel is black (0)
+                        if mask_copy[y, x] == 0:
+                            # Check if any pixel within margin distance is white
+                            for dy in range(max(0, y-margin), min(nai_height, y+margin+1)):
+                                for dx in range(max(0, x-margin), min(nai_width, x+margin+1)):
+                                    if mask_copy[dy, dx] == 255:
+                                        mask_array_small[y, x] = 255
+                                        break
+                                if mask_array_small[y, x] == 255:
+                                    break
+                print(f"   ✅ Added {margin}px inpaint margin using numpy")
+            
+            mask_small_binary = Image.fromarray(mask_array_small, mode='L')
+            
+            # Save mask without compression
+            mask_byte_arr = io.BytesIO()
+            mask_small_binary.save(mask_byte_arr, format='PNG', compress_level=0, optimize=False)
+            mask_bytes_raw = mask_byte_arr.getvalue()
+            
+            print(f"   ✅ Mask generated: original {mask.size} → NAI size {mask_small_binary.size}")
+            print(f"   ✅ Binary values: {np.unique(mask_array_small)}")
+            
+            # 4. Prepare parameters for second generation
+            print("🎨 Step 4: Preparing parameters for second generation...")
+            
+            # Copy parameters
+            new_params = parameters.copy()
+            
+            # Convert expanded canvas to bytes
+            canvas_byte_arr = io.BytesIO()
+            canvas.save(canvas_byte_arr, format='PNG')
+            new_params['image_bytes'] = canvas_byte_arr.getvalue()
+            
+            # Set mask bytes (raw, without 8x scaling)
+            new_params['mask_bytes'] = mask_bytes_raw
+            
+            # Update dimensions
+            new_params['width'] = canvas_width
+            new_params['height'] = canvas_height
+            
+            # Set as inpaint type
+            new_params['type'] = 'inpaint'
+            
+            # Keep strength from original or set default
+            if 'strength' not in new_params:
+                new_params['strength'] = 0.7
+            
+            # Remove auto_outpainting flag to prevent infinite recursion
+            if 'auto_outpainting' in new_params:
+                del new_params['auto_outpainting']
+            
+            print(f"   ✅ Parameters prepared: {canvas_width}x{canvas_height}, strength={new_params.get('strength')}")
+            
+            # 5. Call API for second generation
+            print("🎨 Step 5: Calling API for second generation...")
+            
+            second_result = self.call_generation_api(new_params)
+            
+            if second_result and second_result.get('status') == 'success':
+                print("   ✅ Auto-Outpainting completed successfully!")
+                return second_result
+            else:
+                print("   ⚠️ Second generation failed, returning original result")
+                return result
+            
+        except Exception as e:
+            print(f"❌ Auto-Outpainting failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # On error, return the original result
+            return result
+    
+    def upscale_NAI(self, pixmap: 'QPixmap', token: str = None) -> Dict[str, Any]:
+        """
+        NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
+        
+        Args:
+            pixmap: QPixmap 형식의 이미지
+            token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
+        
+        Returns:
+            Dict with 'status', 'image' (upscaled QPixmap), and 'message'
+        """
+        import zipfile
+        from PyQt6.QtCore import QBuffer, QIODevice
+        
+        try:
+            # 토큰 가져오기
+            if not token:
+                token = self.app_context.secure_token_manager.get_token('nai_token')
+                if not token:
+                    return {
+                        'status': 'error',
+                        'message': 'NAI 토큰이 설정되지 않았습니다.'
+                    }
+            
+            # QPixmap을 bytes로 변환
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buffer, "PNG")
+            image_bytes = buffer.data().data()
+            buffer.close()
+            
+            # Base64 인코딩
+            img_base64 = base64.b64encode(image_bytes).decode()
+            
+            # 원본 이미지 크기
+            width = pixmap.width()
+            height = pixmap.height()
+            
+            # API 요청 데이터
+            data = {
+                "image": img_base64,
+                "width": width,
+                "height": height,
+                "scale": 2  # 2배 업스케일
+            }
+            
+            # API 호출
+            print(f"🔍 NAI Upscale API 호출 중... (원본: {width}x{height})")
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    "https://api.novelai.net/ai/upscale",
+                    json=data,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=60
+                )
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
+            
+            if response.status_code != 200:
+                error_msg = f"API 에러 (코드: {response.status_code})"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"{error_msg}: {error_detail.get('message', 'Unknown error')}"
+                except:
+                    pass
+                return {
+                    'status': 'error',
+                    'message': error_msg
+                }
+            
+            # 응답이 ZIP 파일 형식
+            try:
+                zipped = zipfile.ZipFile(io.BytesIO(response.content))
+                if not zipped.namelist():
+                    return {
+                        'status': 'error',
+                        'message': '업스케일 결과가 비어있습니다.'
+                    }
+                
+                # 첫 번째 이미지 추출
+                file_info = zipped.infolist()[0]
+                image_bytes = zipped.read(file_info)
+                
+                # bytes를 QPixmap으로 변환
+                upscaled_pixmap = QPixmap()
+                upscaled_pixmap.loadFromData(image_bytes)
+                
+                if upscaled_pixmap.isNull():
+                    return {
+                        'status': 'error',
+                        'message': '업스케일된 이미지를 로드할 수 없습니다.'
+                    }
+                
+                print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+                
+                return {
+                    'status': 'success',
+                    'image': upscaled_pixmap,
+                    'message': f'이미지가 {upscaled_pixmap.width()}x{upscaled_pixmap.height()}로 업스케일되었습니다.'
+                }
+                
+            except zipfile.BadZipFile:
+                return {
+                    'status': 'error',
+                    'message': '업스케일 응답 형식이 올바르지 않습니다.'
+                }
+                
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': 'API 요청 시간 초과 (60초)'
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                'status': 'error',
+                'message': '네트워크 연결 오류'
+            }
+        except Exception as e:
+            print(f"❌ 업스케일 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'status': 'error',
+                'message': f'업스케일 중 오류 발생: {str(e)}'
+            }
+    
+    def get_anlas(self) -> int:
+        """NAI 구독의 Anlas 잔액을 가져옵니다."""
+        if self.app_context.current_api_mode != "NAI":
+            return None
+        
+        try:
+            # NAI 토큰 가져오기 - secure_token_manager 사용
+            nai_access_token = self.app_context.secure_token_manager.get_token('nai_token')
+            if not nai_access_token:
+                return None
+            
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.get(
+                    "https://api.novelai.net/user/subscription",
+                    headers={"Authorization": f"Bearer {nai_access_token}"},
+                    timeout=3
+                )
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
+            
+            if response.status_code == 200:
+                data = response.json()
+                training_steps = data.get('trainingStepsLeft', {})
+                fixed_steps = int(training_steps.get('fixedTrainingStepsLeft', 0))
+                purchased_steps = int(training_steps.get('purchasedTrainingSteps', 0))
+                anlas = fixed_steps + purchased_steps
+                return anlas
+            
+        except Exception as e:
+            print(f"⚠️ Anlas 조회 실패: {e}")
+        
+        return None
+    
+    def nai_bg_removal_pil(self, pil_image: Image.Image, save_counter: int, token: str = None) -> Dict[str, Any]:
+        """
+        NovelAI BG-Removal API를 사용하여 이미지 배경을 제거합니다 (PIL Image 버전).
+        
+        Args:
+            pil_image: PIL Image 형식의 이미지
+            save_counter: 저장 카운터
+            token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
+        
+        Returns:
+            Dict with 'status', 'selected_image' (3rd QPixmap), and 'message'
+        """
+        import zipfile
+        import io
+        import base64
+        from pathlib import Path
+        from PyQt6.QtGui import QPixmap
+        
+        try:
+            # 토큰 가져오기
+            if not token:
+                token = self.app_context.secure_token_manager.get_token('nai_token')
+                if not token:
+                    return {
+                        'status': 'error',
+                        'message': 'NAI 토큰이 설정되지 않았습니다.'
+                    }
+            
+            # PIL Image를 bytes로 변환
+            img_buffer = io.BytesIO()
+            pil_image.save(img_buffer, format="PNG")
+            image_bytes = img_buffer.getvalue()
+            
+            # Base64 인코딩
+            img_base64 = base64.b64encode(image_bytes).decode()
+            
+            # 원본 이미지 크기
+            width, height = pil_image.size
+            
+            # API 요청 데이터
+            data = {
+                "image": img_base64,
+                "width": width,
+                "height": height,
+                "req_type": "bg-removal"
+            }
+            
+            # API 호출
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    "https://image.novelai.net/ai/augment-image",
+                    json=data,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=120  # 배경 제거는 시간이 더 걸릴 수 있음
+                )
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
+            
+            if response.status_code != 200:
+                error_msg = f"API 에러 (코드: {response.status_code})"
+                try:
+                    error_detail = response.json()
+                    error_msg = f"{error_msg}: {error_detail.get('message', 'Unknown error')}"
+                except:
+                    pass
+                return {
+                    'status': 'error',
+                    'message': error_msg
+                }
+            
+            # 응답이 ZIP 파일 형식으로 3개 이미지 포함
+            try:
+                zipped = zipfile.ZipFile(io.BytesIO(response.content))
+                file_list = zipped.namelist()
+                
+                if not file_list:
+                    return {
+                        'status': 'error',
+                        'message': '배경 제거 결과가 비어있습니다.'
+                    }
+                
+                # bg_removal 폴더 생성
+                save_path = self.app_context.session_save_path / "bg_removal"
+                save_path.mkdir(parents=True, exist_ok=True)
+                
+                # 모든 이미지 추출 및 저장
+                images = []
+                image_bytes_list = []
+                suffixes = ["_masked", "_generated", "_blend"]
+                
+                for idx, file_info in enumerate(zipped.infolist()):
+                    img_bytes = zipped.read(file_info)
+                    image_bytes_list.append(img_bytes)
+                    
+                    # bytes를 QPixmap으로 변환
+                    temp_pixmap = QPixmap()
+                    temp_pixmap.loadFromData(img_bytes)
+                    
+                    if not temp_pixmap.isNull():
+                        images.append(temp_pixmap)
+                        
+                        # 파일로 저장
+                        if idx < len(suffixes):
+                            filename = f"{save_counter:05d}{suffixes[idx]}.png"
+                            filepath = save_path / filename
+                            temp_pixmap.save(str(filepath), "PNG")
+                
+                # 3번째 이미지 선택 (인덱스 2)
+                selected_image = None
+                selected_bytes = None
+                if len(images) >= 3:
+                    selected_image = images[2]  # 3번째 이미지 (blend)
+                    selected_bytes = image_bytes_list[2]
+                elif images:
+                    # 3개 미만인 경우 마지막 이미지 선택
+                    selected_image = images[-1]
+                    selected_bytes = image_bytes_list[-1]
+                
+                if not selected_image:
+                    return {
+                        'status': 'error',
+                        'message': '배경 제거된 이미지를 로드할 수 없습니다.'
+                    }
+                
+                return {
+                    'status': 'success',
+                    'selected_image': selected_image,  # 선택된 3번째 이미지
+                    'raw_bytes': selected_bytes,  # 선택된 이미지의 원본 바이트
+                    'message': f'배경 제거 완료: {len(images)}개 이미지 생성'
+                }
+                
+            except zipfile.BadZipFile:
+                return {
+                    'status': 'error',
+                    'message': '배경 제거 응답 형식이 올바르지 않습니다.'
+                }
+                
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': 'API 요청 시간 초과 (120초)'
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                'status': 'error',
+                'message': '네트워크 연결 오류'
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'배경 제거 중 오류 발생: {str(e)}'
+            }
+    
+    def upscale_NAI_from_inpaint(self, pil_image: Image.Image, target_width: int, target_height: int) -> Dict[str, Any]:
+        """
+        Inpaint 패널에서 PIL 이미지를 업스케일하고 원본 크기로 리사이징합니다.
+        
+        Args:
+            pil_image: 업스케일할 PIL 이미지
+            target_width: 최종 리사이징할 너비
+            target_height: 최종 리사이징할 높이
+        
+        Returns:
+            Dict with 'status', 'image' (PIL Image), and 'message'
+        """
+        try:
+            # 1. PIL 이미지를 base64로 변환
+            buffered = io.BytesIO()
+            pil_image.save(buffered, format="PNG")
+            image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            
+            # 2. NAI 토큰 가져오기
+            token = self.app_context.secure_token_manager.get_token('nai_token')
+            if not token:
+                return {
+                    'status': 'error',
+                    'message': 'NAI 토큰이 없습니다.'
+                }
+            
+            # 3. NAI Upscale API 호출
+            # 디버깅: 원본 이미지 크기 확인
+            print(f"🔍 DEBUG - Original image size: {pil_image.width}x{pil_image.height}")
+            print(f"🔍 DEBUG - Target upscale size: {pil_image.width * 2}x{pil_image.height * 2}")
+            print(f"🔍 DEBUG - Base64 string length: {len(image_base64)}")
+            
+            # NAI API는 width/height가 아닌 원본 크기를 받고 scale로 배수를 결정
+            data = {
+                "image": image_base64,
+                "width": pil_image.width,  # 원본 너비
+                "height": pil_image.height,  # 원본 높이
+                "scale": 2  # 2배 업스케일 (scale 4는 4배를 의미)
+            }
+            
+            # 디버깅: 요청 데이터 확인
+            print(f"🔍 DEBUG - Request data keys: {data.keys()}")
+            print(f"🔍 DEBUG - Width: {data['width']}, Height: {data['height']}, Scale: {data['scale']}")
+            print(f"🔍 DEBUG - Token exists: {bool(token)}")
+            print(f"🔍 DEBUG - Token length: {len(token) if token else 0}")
+            
+            # HTTP 세션을 사용하여 연결 정리
+            with requests.Session() as session:
+                response = session.post(
+                    "https://api.novelai.net/ai/upscale",
+                    json=data,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=60
+                )
+                # 세션 정리
+                session.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+            
+            # HTTP 스레드 정리
+            self._cleanup_http_threads()
+            
+            # 디버깅: 응답 상세 정보
+            print(f"🔍 DEBUG - Response status code: {response.status_code}")
+            print(f"🔍 DEBUG - Response headers: {dict(response.headers)}")
+            
+            if response.status_code != 200:
+                # 디버깅: 에러 응답 내용 확인
+                try:
+                    error_content = response.text
+                    print(f"🔍 DEBUG - Error response content: {error_content}")
+                    
+                    # JSON 응답인 경우 파싱 시도
+                    try:
+                        error_json = response.json()
+                        print(f"🔍 DEBUG - Error JSON: {error_json}")
+                    except:
+                        pass
+                except:
+                    print(f"🔍 DEBUG - Could not read error response")
+                
+                return {
+                    'status': 'error',
+                    'message': f'API 오류: {response.status_code}\n응답: {response.text[:500] if response.text else "No response text"}'
+                }
+            
+            # 4. 응답 처리 (ZIP 파일)
+            zip_data = io.BytesIO(response.content)
+            with zipfile.ZipFile(zip_data, 'r') as zip_file:
+                image_data = zip_file.read(zip_file.namelist()[0])
+            
+            # 5. 업스케일된 이미지를 PIL로 변환
+            upscaled_image = Image.open(io.BytesIO(image_data))
+            
+            # 6. 원본 크기로 리사이징 (LANCZOS)
+            resized_image = upscaled_image.resize(
+                (target_width, target_height),
+                Image.Resampling.LANCZOS
+            )
+            
+            print(f"✅ 업스케일 완료: {pil_image.width}x{pil_image.height} → "
+                  f"{upscaled_image.width}x{upscaled_image.height} → "
+                  f"{resized_image.width}x{resized_image.height}")
+            
+            return {
+                'status': 'success',
+                'image': resized_image,
+                'message': '업스케일 성공'
+            }
+            
+        except requests.exceptions.Timeout:
+            return {
+                'status': 'error',
+                'message': '요청 시간 초과'
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                'status': 'error',
+                'message': '네트워크 연결 오류'
+            }
+        except Exception as e:
+            print(f"❌ 업스케일 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'status': 'error',
+                'message': f'업스케일 중 오류 발생: {str(e)}'
+            }

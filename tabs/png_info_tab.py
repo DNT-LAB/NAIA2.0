@@ -1,6 +1,6 @@
 from typing import Union
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, 
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QTextEdit, QFileDialog, QMessageBox, QSplitter, QFrame, QScrollArea,
     QGroupBox, QLineEdit, QCheckBox, QProgressBar
 )
@@ -10,7 +10,9 @@ from PIL import Image, ImageQt, ImageGrab
 from PIL.PngImagePlugin import PngInfo
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size
+from ui.img2img_popup import Img2ImgPopup
 from interfaces.base_tab_module import BaseTabModule
+from utils.image_info import ImageMetadataExtractor
 import json
 import re
 import os
@@ -38,8 +40,9 @@ class PngInfoTabModule(BaseTabModule):
         if self.png_info_widget is None:
             self.png_info_widget = PngInfoTab(parent)
             
-            # AppContext가 주입된 후, 위젯에 필요한 시그널 연결 등을 수행할 수 있음
-            # 예: self.png_info_widget.parameters_extracted.connect(...)
+            # AppContext 전달
+            if hasattr(self, 'app_context') and self.app_context:
+                self.png_info_widget.app_context = self.app_context
             
         return self.png_info_widget
 
@@ -201,9 +204,11 @@ class PngInfoTab(QWidget):
         super().__init__(parent)
         self.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']};")
         self.current_image_path = None
+        self.current_pil_image = None  # 현재 로드된 PIL 이미지 저장
         self.current_parameters = {}
         self.download_thread = None
         self.downloader = None
+        self.app_context = None  # AppContext 저장용
         self.init_ui()
         
     def init_ui(self):
@@ -245,6 +250,37 @@ class PngInfoTab(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
+        # [이미지 정보 추출] 버튼을 맨 위에 추가
+        self.extract_info_button = QPushButton("🔍 이미지 정보 추출")
+        self.extract_info_button.clicked.connect(self.show_img2img_popup)
+        self.extract_info_button.setEnabled(False)  # 이미지가 로드되기 전까지 비활성화
+        self.extract_info_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #2E7D32;
+                border: 1px solid #388E3C;
+                border-radius: 6px;
+                padding: 10px 16px;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-weight: 600;
+                color: #FFFFFF;
+                font-size: {get_scaled_font_size(20)}px;
+            }}
+            QPushButton:hover:enabled {{
+                background-color: #388E3C;
+                border: 1px solid #43A047;
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed:enabled {{
+                background-color: #1B5E20;
+                color: #FFFFFF;
+            }}
+            QPushButton:disabled {{
+                background-color: #1B5E20;
+                border: 1px solid #2E7D32;
+                color: rgba(255, 255, 255, 0.5);
+            }}
+        """)
+        layout.addWidget(self.extract_info_button)
         
         # 드래그 앤 드롭 영역
         self.drop_area = ImageDropArea(self)
@@ -541,6 +577,8 @@ class PngInfoTab(QWidget):
                     self.parameters_extracted.emit(parsed_params)
 
                 self.current_image_path = None  # 클립보드 이미지는 경로가 없음
+                self.current_pil_image = pil_image  # PIL 이미지 저장
+                self.extract_info_button.setEnabled(True)  # 버튼 활성화
                 print("✅ 클립보드 이미지 로드 완료")
 
             # URL이 클립보드에 있는 경우 (웹 이미지) - 파일이 아닌 웹 URL
@@ -634,53 +672,52 @@ class PngInfoTab(QWidget):
             self.load_image_from_path(file_path)
     
     def read_info_from_image(self, image: Image.Image):
-        """AUTOMATIC1111 스타일의 메타데이터 읽기"""
+        """통합 메타데이터 추출 - stealth PNG 지원 포함"""
         IGNORED_INFO_KEYS = {
             'jfif', 'jfif_version', 'jfif_unit', 'jfif_density', 'dpi',
             'loop', 'background', 'timestamp', 'duration', 'progressive', 'progression',
             'icc_profile', 'chromaticity', 'photoshop',
-            # exif는 제거하지 않음 - 중요한 데이터 포함
         }
-        
+
+        # ImageMetadataExtractor 사용하여 모든 메타데이터 추출 (stealth PNG 포함)
+        extracted_metadata = ImageMetadataExtractor.extract_metadata(image)
+
         items = (image.info or {}).copy()
+        geninfo = None
+
+        # 1. 먼저 기본 parameters 필드 확인
         geninfo = items.pop('parameters', None)
 
-        # EXIF 데이터 확인 - AUTOMATIC1111 방식 적용
-        if "exif" in items and not geninfo:
-            exif_data = items["exif"]
-            try:
-                exif = piexif.load(exif_data)
-                user_comment = (exif or {}).get("Exif", {}).get(piexif.ExifIFD.UserComment, b'')
-                
-                if user_comment:
-                    try:
-                        # AUTOMATIC1111과 동일한 방식: piexif.helper 먼저 시도
-                        geninfo = piexif.helper.UserComment.load(user_comment)
-                    except ValueError:
-                        # fallback: UTF-8 디코딩
-                        try:
-                            geninfo = user_comment.decode('utf8', errors="ignore")
-                        except:
-                            # 최후 수단: UTF-16 디코딩
-                            if user_comment.startswith(b'UNICODE\x00\x00'):
-                                utf16_data = user_comment[9:]
-                                geninfo = utf16_data.decode('utf-16le', errors='ignore')
-                                
-            except Exception as e:
-                print(f"EXIF 읽기 오류: {e}")
-        
-        # GIF 댓글 확인 (기존 코드)
-        if not geninfo and "comment" in items:
-            if isinstance(items["comment"], bytes):
-                geninfo = items["comment"].decode('utf8', errors="ignore")
-            else:
-                geninfo = items["comment"]
+        # 2. ImageMetadataExtractor가 추출한 데이터 확인
+        if not geninfo and extracted_metadata:
+            # WebUI 형식
+            if extracted_metadata.get('type') == 'webui':
+                prompt = extracted_metadata.get('prompt', '')
+                negative = extracted_metadata.get('negative', '')
+                params = extracted_metadata.get('parameters', {})
 
-        # NovelAI 이미지 처리 (기존 코드)
-        if items.get("Software", None) == "NovelAI":
-            try:
-                json_info = json.loads(items["Comment"])
-                
+                # WebUI 형식으로 재구성
+                geninfo = prompt
+                if negative:
+                    geninfo += f"\nNegative prompt: {negative}"
+
+                # 파라미터 추가
+                if params:
+                    param_parts = []
+                    for key, value in params.items():
+                        param_parts.append(f"{key.replace('_', ' ').title()}: {value}")
+                    if param_parts:
+                        geninfo += "\n" + ", ".join(param_parts)
+
+            # NovelAI 형식
+            elif extracted_metadata.get('type') == 'nai' or extracted_metadata.get('Software') == 'NovelAI':
+                if extracted_metadata.get('Software') == 'NovelAI':
+                    extracted_metadata = extracted_metadata.get('Comment')
+                prompt = extracted_metadata.get('prompt', '')
+                uc = extracted_metadata.get('uc', '')
+                params = extracted_metadata.get('parameters', {})
+                if not params: params = extracted_metadata
+
                 sampler_map = {
                     "k_euler_ancestral": "Euler a",
                     "k_euler": "Euler",
@@ -688,14 +725,38 @@ class PngInfoTab(QWidget):
                     "k_dpmpp_2m": "DPM++ 2M",
                     "k_dpmpp_sde": "DPM++ SDE",
                 }
-                sampler = sampler_map.get(json_info.get("sampler", ""), "Euler a")
+                sampler = params.get("sampler", "")
 
-                geninfo = f"""{items.get("Description", "")}
-    Negative prompt: {json_info.get("uc", "")}
-    Steps: {json_info.get("steps", "")}, Sampler: {sampler}, CFG scale: {json_info.get("scale", "")}, Seed: {json_info.get("seed", "")}, Size: {image.width}x{image.height}, Clip skip: 2, ENSD: 31337"""
-                            
+                geninfo = f"""{prompt}
+Negative prompt: {uc}
+Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('scale', '')}, Seed: {params.get('seed', '')}, Size: {image.width}x{image.height}, Clip skip: 2, ENSD: 31337"""
+
+        # 3. EXIF 데이터 확인 (기존 방식 유지)
+        if not geninfo and "exif" in items:
+            exif_data = items["exif"]
+            try:
+                exif = piexif.load(exif_data)
+                user_comment = (exif or {}).get("Exif", {}).get(piexif.ExifIFD.UserComment, b'')
+
+                if user_comment:
+                    try:
+                        geninfo = piexif.helper.UserComment.load(user_comment)
+                    except ValueError:
+                        try:
+                            geninfo = user_comment.decode('utf8', errors="ignore")
+                        except:
+                            if user_comment.startswith(b'UNICODE\x00\x00'):
+                                utf16_data = user_comment[9:]
+                                geninfo = utf16_data.decode('utf-16le', errors='ignore')
             except Exception as e:
-                print(f"NovelAI 파라미터 파싱 오류: {e}")
+                print(f"EXIF 읽기 오류: {e}")
+
+        # 4. GIF 댓글 확인
+        if not geninfo and "comment" in items:
+            if isinstance(items["comment"], bytes):
+                geninfo = items["comment"].decode('utf8', errors="ignore")
+            else:
+                geninfo = items["comment"]
 
         # 무시할 키들 제거
         for field in IGNORED_INFO_KEYS:
@@ -706,16 +767,22 @@ class PngInfoTab(QWidget):
     def display_raw_metadata(self, metadata, geninfo):
         """개선된 원본 메타데이터 표시"""
         raw_text = "🔍 이미지 메타데이터\n" + "="*50 + "\n\n"
-        
+
         # 생성 정보가 있으면 먼저 표시
         if geninfo:
             raw_text += "📋 생성 정보 (Generation Info):\n"
             raw_text += f"{geninfo}\n\n"
             raw_text += "="*50 + "\n\n"
-        
+
         # 나머지 메타데이터 표시
         if not metadata:
-            raw_text += "추가 메타데이터가 없습니다."
+            # geninfo가 있으면 메타데이터가 성공적으로 추출된 것
+            if geninfo:
+                raw_text += "💡 생성 정보가 성공적으로 추출되었습니다. (Stealth PNG 또는 표준 메타데이터)\n"
+                raw_text += "추가 메타데이터 필드는 없습니다."
+            else:
+                raw_text += "⚠️ 메타데이터를 찾을 수 없습니다.\n"
+                raw_text += "이 이미지는 생성 정보를 포함하지 않습니다."
         else:
             raw_text += "📌 기타 메타데이터:\n\n"
             for key, value in metadata.items():
@@ -723,10 +790,10 @@ class PngInfoTab(QWidget):
                 value_str = str(value)
                 if len(value_str) > 500:
                     value_str = value_str[:500] + "... (truncated)"
-                
+
                 raw_text += f"🔹 {key}:\n"
                 raw_text += f"{value_str}\n\n"
-        
+
         self.raw_text_edit.setText(raw_text)
 
     def load_image_from_path(self, file_path):
@@ -737,32 +804,36 @@ class PngInfoTab(QWidget):
                 return
                 
             # PIL로 이미지 열기
-            with Image.open(file_path) as img:
-                self.current_image_path = file_path
+            img = Image.open(file_path)
+            self.current_image_path = file_path
+            self.current_pil_image = img.copy()  # PIL 이미지 복사본 저장
+            
+            # 개선된 메타데이터 추출
+            geninfo, metadata = self.read_info_from_image(img)
+            
+            # 드롭 영역에 이미지 표시
+            self.drop_area.set_image(file_path)
+            
+            # 원본 데이터 표시 (전체 메타데이터)
+            self.display_raw_metadata(metadata, geninfo)
+            
+            # 파라미터 파싱 및 표시 - 함수명 수정
+            if geninfo:
+                # geninfo를 직접 파싱
+                parsed_params = self.parse_generation_parameters(geninfo)
+                self.current_parameters = parsed_params
+                self.display_parsed_parameters(parsed_params)
+                self.display_copy_text(parsed_params, geninfo)
                 
-                # 개선된 메타데이터 추출
-                geninfo, metadata = self.read_info_from_image(img)
-                
-                # 드롭 영역에 이미지 표시
-                self.drop_area.set_image(file_path)
-                
-                # 원본 데이터 표시 (전체 메타데이터)
-                self.display_raw_metadata(metadata, geninfo)
-                
-                # 파라미터 파싱 및 표시 - 함수명 수정
-                if geninfo:
-                    # geninfo를 직접 파싱
-                    parsed_params = self.parse_generation_parameters(geninfo)
-                    self.current_parameters = parsed_params
-                    self.display_parsed_parameters(parsed_params)
-                    self.display_copy_text(parsed_params, geninfo)
-                    
-                    # 시그널 발송
-                    self.parameters_extracted.emit(parsed_params)
-                else:
-                    self.clear_parameter_displays()
-                
-                print(f"✅ 이미지 로드 완료: {file_path}")
+                # 시그널 발송
+                self.parameters_extracted.emit(parsed_params)
+            else:
+                self.clear_parameter_displays()
+            
+            # 버튼 활성화
+            self.extract_info_button.setEnabled(True)
+            
+            print(f"✅ 이미지 로드 완료: {file_path}")
                 
         except Exception as e:
             QMessageBox.critical(self, "오류", f"이미지 로드 중 오류 발생:\n{str(e)}")
@@ -1051,11 +1122,39 @@ class PngInfoTab(QWidget):
     def clear_all(self):
         """모든 내용 지우기"""
         self.current_image_path = None
+        self.current_pil_image = None
         self.current_parameters = {}
         self.drop_area.clear_image()
         self.raw_text_edit.clear()
         self.copy_text_edit.clear()
         self.clear_parameter_displays()
+        self.extract_info_button.setEnabled(False)  # 버튼 비활성화
+    
+    def show_img2img_popup(self):
+        """Img2ImgPopup을 표시합니다."""
+        if not self.current_pil_image:
+            QMessageBox.warning(self, "경고", "로드된 이미지가 없습니다.")
+            return
+        
+        # MainWindow 찾기
+        main_window = self.window()
+        
+        # Img2ImgPopup 표시
+        popup = Img2ImgPopup(self.current_pil_image, self.app_context, main_window)
+        
+        # 시그널 연결 (MainWindow가 처리하도록)
+        if hasattr(main_window, 'send_to_img2img'):
+            popup.img2img_requested.connect(main_window.send_to_img2img)
+        if hasattr(main_window, 'send_to_inpaint'):
+            popup.inpaint_requested.connect(main_window.send_to_inpaint)
+        if hasattr(main_window, 'activate_vibe_transfer'):
+            popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
+        
+        # 팝업 위치 설정 (버튼 근처)
+        button_pos = self.extract_info_button.mapToGlobal(self.extract_info_button.rect().center())
+        popup.move(button_pos.x() - popup.width() // 2, button_pos.y())
+        
+        popup.exec()
 
 class ImageDropArea(QLabel):
     file_dropped = pyqtSignal(str)

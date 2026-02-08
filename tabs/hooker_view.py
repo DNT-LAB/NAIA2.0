@@ -963,9 +963,26 @@ class HookerView(QWidget):
             print("🔍 프롬프트 생성 완료 - 파이프라인 데이터 유지됨")
     
     def cleanup(self):
-        """정리 작업"""
+        """
+        정리 작업
+
+        🔧 크래시 방지:
+        - api_payload_timer 중지
+        - 타이머 삭제
+        """
+        # 1. 모니터링 중지
         if self.is_monitoring:
             self.stop_monitoring()
+
+        # 2. 타이머 중지 및 정리 (크로스 스레드 타이머 오류 방지)
+        if hasattr(self, 'api_payload_timer') and self.api_payload_timer is not None:
+            try:
+                self.api_payload_timer.stop()
+                self.api_payload_timer.deleteLater()
+                self.api_payload_timer = None
+            except RuntimeError:
+                pass  # 이미 삭제된 객체
+
         print("🧹 Hooker 뷰 정리 완료")
             
     def _execute_user_script_for_stage(self, stage_name: str, context: PromptContext) -> PromptContext:

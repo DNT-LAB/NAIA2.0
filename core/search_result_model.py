@@ -15,6 +15,23 @@ class SearchResultModel:
         if new_df is None or new_df.empty:
             return
         self.df = pd.concat([self.df, new_df], ignore_index=True)
+    
+    def set_dataframe(self, new_df: pd.DataFrame):
+        """기존 데이터프레임을 안전하게 제거하고 새로운 데이터프레임으로 교체합니다."""
+        import gc
+        
+        # 기존 데이터프레임 메모리 해제
+        if hasattr(self, 'df') and self.df is not None:
+            # 기존 데이터프레임을 명시적으로 비우기
+            self.df.drop(self.df.index, inplace=True)
+            del self.df
+            gc.collect()  # 가비지 컬렉션 강제 실행
+        
+        # 새로운 데이터프레임 설정
+        if new_df is None:
+            self.df = pd.DataFrame()
+        else:
+            self.df = new_df.reset_index(drop=True)
 
     def get_dataframe(self) -> pd.DataFrame:
         """결과 데이터프레임을 반환합니다."""

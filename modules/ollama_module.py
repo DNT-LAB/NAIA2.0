@@ -1321,14 +1321,14 @@ Write each description on a new line, nothing else."""
                 return
 
             # ===== STAGE 5: 태그 확장 (LLM) =====
-            # e621 힌트 추출 (Stage 5에서 맥락에 맞는 것만 LLM이 선별)
+            # e621 힌트 추출 + 중복 제거 (Stage 5에서 맥락에 맞는 것만 LLM이 선별)
             e621_hint_tags = []
             if self.e621_nsfw_boost and "E621_NSFW_BOOST" in candidates:
-                e621_hint_tags = [
-                    t["tag"].replace("_", " ")
-                    for t in candidates["E621_NSFW_BOOST"]
+                e621_only_items = [
+                    t for t in candidates["E621_NSFW_BOOST"]
                     if t.get("_e621_only")
                 ]
+                e621_hint_tags = self._deduplicate_e621_hints(e621_only_items)
 
             enhance_tags_range = self._profile.get("enhance_tags", (0, 0))
             if enhance_tags_range[1] > 0:
@@ -1851,6 +1851,55 @@ Output only the descriptions, one per line:"""
             parts.append(line)
         return parts
 
+    # ===== e621 Hint Deduplication =====
+
+    def _deduplicate_e621_hints(self, e621_items: list) -> List[str]:
+        """유사 e621 힌트 중복 제거 — 핵심 단어를 공유하는 태그 그룹에서 최고 점수만 유지
+
+        예: extreme_penetration, urethral_penetration, ear_penetration, large_penetration
+        → 모두 "penetration" 공유 → 최고 점수 1개만 유지
+        """
+        if not e621_items:
+            return []
+
+        MIN_TOKEN_LEN = 4  # 짧은 전치사/관사 무시 (in, on, of, etc.)
+
+        entries = []
+        for item in e621_items:
+            tag = item["tag"].replace("_", " ")
+            tokens = frozenset(w for w in tag.split() if len(w) >= MIN_TOKEN_LEN)
+            entries.append({
+                "tag": tag,
+                "score": item.get("_relevance", 0),
+                "tokens": tokens,
+            })
+
+        # 토큰 공유 기반 그룹핑
+        groups: list = []  # List[List[dict]]
+        for entry in entries:
+            merged_idx = None
+            for i, group in enumerate(groups):
+                for member in group:
+                    if entry["tokens"] & member["tokens"]:  # 교집합 존재
+                        merged_idx = i
+                        break
+                if merged_idx is not None:
+                    break
+            if merged_idx is not None:
+                groups[merged_idx].append(entry)
+            else:
+                groups.append([entry])
+
+        # 각 그룹에서 최고 점수 태그만 선택
+        result = []
+        for group in groups:
+            best = max(group, key=lambda e: e["score"])
+            result.append((best["tag"], best["score"]))
+
+        # 점수 내림차순 정렬
+        result.sort(key=lambda x: x[1], reverse=True)
+        return [tag for tag, _ in result]
+
     # ===== STAGE 5: Tag Enhancement (LLM) =====
 
     def _stage5_enhance_tags(self, translation: str, existing_tags: List[str],
@@ -1869,15 +1918,28 @@ Output only the descriptions, one per line:"""
         if not self._is_nsfw:
             system_content += "\n\nIMPORTANT - SFW SCENE: Do NOT suggest any nudity, sexual, or body exposure tags."
 
+        # e621 부스트 활성 시 시스템 프롬프트 강화
+        if e621_hints:
+            system_content += """
+
+e621 INTEGRATION MODE (ACTIVE):
+You are provided with curated e621 tags as hints below.
+These are specialized NSFW/fetish tags from e621 that describe specific actions, restraints, or body interactions.
+RULES:
+- You MUST include at least 1-2 e621 hint tags in your output if they match the scene context
+- e621 tags use underscores (e.g., legs_tied, ball_gag) — output them as-is
+- Prefer e621 tags that directly describe physical actions, restraints, or interactions depicted in the scene
+- Do NOT ignore the e621 hint section"""
+
         # e621 힌트 섹션
         e621_section = ""
         if e621_hints:
             e621_list = ", ".join(e621_hints)
             e621_section = f"""
 
-e621 TAG HINTS (you may pick relevant ones from this list):
+=== e621 SPECIALIZED TAGS (PRIORITY — pick 1-2 that match) ===
 {e621_list}
-These are specialized tags. ONLY pick tags that accurately match the described scene. Ignore irrelevant ones."""
+You MUST select at least 1 tag from this list if it matches the scene."""
 
         user_content = f"""Scene: {translation}
 

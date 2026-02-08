@@ -291,7 +291,8 @@ class WildcardProcessor:
                 master_total = len(master_entries) if master_entries else 1
 
                 # Master가 완전한 사이클을 몇 번 완료했는지 계산
-                completed_master_cycles = master_counter // master_total if master_counter > 0 else 0
+                # master_counter는 같은 프롬프트에서 이미 +1 된 post-increment 값이므로 -1 보정
+                completed_master_cycles = (master_counter - 1) // master_total if master_counter > 0 else 0
 
                 # Slave는 master의 완전한 사이클 완료 횟수에 따라 진행
                 slave_index = completed_master_cycles % total_entries

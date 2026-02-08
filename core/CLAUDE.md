@@ -1407,6 +1407,14 @@ def _step_3_expand_wildcards(self, context: PromptContext) -> PromptContext:
     return context
 ```
 
+**라인 선택 모드** (`WildcardProcessor._get_wildcard_line()`):
+
+| 모드 | 구문 예시 | 선택 방식 | 가중치 |
+|------|-----------|-----------|--------|
+| 랜덤 | `__name__`, `<name>` | `random.choices(weights=)` | **적용** |
+| 순차 | `__*name__` | `entries[counter % total][1]` | 무시 |
+| 종속 | `__$master:slave__` | `entries[slave_index][1]` | 무시 |
+
 ### 최종 포맷팅
 
 `core/prompt_processor.py:76-144`
@@ -1597,26 +1605,41 @@ character_positions = [
 - Instant Wildcard 관리
 - 리로드 콜백
 
-#### 와일드카드 로딩
+#### 와일드카드 로딩 및 가중치 파싱
 
 `core/wildcard_manager.py:15-75`
 
+각 라인은 `(weight, text)` 튜플로 파싱되어 `wildcard_dict_tree`에 저장됩니다.
+
+**가중치 구문**: `{정수}:텍스트` — 단, `{정수}::` (NAI 가중치)는 제외
+- 정규식: `^(\d+):(?!:)(.*)`
+- 기본 가중치: `100` (접두사 없는 라인)
+
 ```python
-def activate_wildcards(self):
-    """wildcards/ 디렉터리 재귀 탐색 및 로드"""
-    for root, dirs, files in os.walk(self.wildcards_dir):
-        for file in files:
-            if file.endswith('.txt'):
-                file_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_path, self.wildcards_dir)
-                wildcard_name = Path(relative_path).with_suffix('').as_posix()
-
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    lines = [line.strip() for line in f if line.strip()]
-
-                if lines:
-                    self.wildcard_dict_tree[wildcard_name] = lines
+# 파싱 예시
+"100: 0.68::artist:ciloranko ::"  → (100, "0.68::artist:ciloranko ::")
+"1.5::artist collaboration ::"   → (100, "1.5::artist collaboration ::")  # NAI 구문, 기본값
+"200: 1::some text"              → (200, "1::some text")
+"500:high_weight"                → (500, "high_weight")
+"plain text"                     → (100, "plain text")                    # 접두사 없음, 기본값
+"100::nai_hundred"               → (100, "100::nai_hundred")             # (?!:) 실패, 기본값
 ```
+
+**자료구조 변경** (2026-02-08):
+```python
+# 이전: list[str]
+wildcard_dict_tree["outfit"] = ["school uniform", "gothic dress"]
+
+# 현재: list[tuple[int, str]]
+wildcard_dict_tree["outfit"] = [(100, "school uniform"), (150, "gothic dress")]
+```
+
+**소비자 영향**:
+- `WildcardProcessor._get_wildcard_line()`: 랜덤 모드에서 `random.choices(weights=)` 사용
+- 순차(`*`) / 종속(`$`) 모드: `entries[index][1]`로 text 추출 (가중치 무시)
+- `WildcardCombinationGenerator.get_wildcard_items()`: `[text for _, text in entries]`로 text만 반환
+- `WildcardAnalyzer._get_wildcard_count()`: `len(entries)` (동일)
+- `TagDataManager`, `WildcardManagerWindow`: `len()` / `.keys()` 만 사용 (변경 불필요)
 
 **와일드카드 구조**:
 ```

@@ -81,6 +81,7 @@ BaseMiddleModule 상속 클래스 찾기
 | **conditional_prompt_module.py** | 38K | 조건부 프롬프트 | 파이프라인 훅, 조건 평가 |
 | **e621_event_module.py** | 40K | E621 이벤트 태그 관리 | Parquet 데이터, 즐겨찾기, 숨김/복원, 검색 |
 | **wildcard_status_module.py** | 16K | 와일드카드 상태 표시 | PromptContext 구독 |
+| **ollama_module.py** | 80K+ | 🆕 자연어→태그 변환 (Ollama LLM) | GPU Only, v2 파이프라인, Lazy 초기화, Progress Bar, Session 제어, e621 NSFW Boost |
 
 ---
 
@@ -1404,6 +1405,95 @@ class MyModule(BaseMiddleModule):
         print(f"완료: {result}")
 ```
 
+### Ollama Module 패턴 (Lazy 초기화 + Session 제어 + Progress Bar) 🆕
+
+**파일**: `modules/ollama_module.py`
+
+Ollama 로컬 LLM을 사용하여 자연어→태그 변환을 수행하는 모듈. 대부분의 사용자가 Ollama를 설치하지 않으므로, Lazy Pattern으로 UI 블로킹 없이 상태를 확인합니다.
+
+**아키텍처 (6개 클래스)**:
+
+| 클래스 | 역할 |
+|--------|------|
+| `TagDatabase` | e621/danbooru 태그 DB, 4-tier 검색, e621 NSFW Boost (wiki 텍스트 역인덱스 + 태그 이름 역인덱스) |
+| `DebugPanel(QDialog)` | 스테이지별 디버그 출력 (C/C++ 안전, `WA_DeleteOnClose=False`) |
+| `OllamaStatusCheckWorker(QThread)` | 비동기 설치/서버 상태 확인 (HTTP→subprocess 2단계) |
+| `OllamaServerActionWorker(QThread)` | 비동기 서버 시작/중지 |
+| `OllamaConversionWorker(QThread)` | v2 파이프라인 (5단계 LLM/Code 혼합) |
+| `OllamaModule(BaseMiddleModule)` | UI 모듈 (Lazy init, Session 제어, Progress Bar) |
+
+**Lazy 초기화 패턴**:
+```python
+# create_widget()에서 비동기 상태 확인 시작
+QTimer.singleShot(0, self._start_status_check)
+
+def _start_status_check(self):
+    worker = OllamaStatusCheckWorker()
+    worker.check_completed.connect(self._on_status_check_complete)
+    worker.start()  # UI 블로킹 없음
+
+def _on_status_check_complete(self, result: dict):
+    # result: {"installed": bool, "server_running": bool, "models": list}
+    # → install_guide_row / server_control_row 가시성 업데이트
+```
+
+**UI 레이아웃**:
+```
+[1] Status row: [status_label] [stretch] [debug_btn] [refresh_btn]
+[2] Install guide row (미설치 시): [설치하러 가기] [설치 확인]
+[3] Server control row (설치 시): [● indicator] [서버 시작/중지] [VRAM 상태]
+[4] Model row: [model_combo] [LOAD checkbox]
+[5] Offload checkbox
+[6] Creativity + e621 NSFW Boost
+[7] Input → Buttons → Progress Bar → Output
+```
+
+**v2 파이프라인 (progress_updated 시그널)**:
+
+| 스테이지 | 퍼센트 | 타입 |
+|----------|--------|------|
+| Pre-processing | 5% | Code |
+| Stage 0: 번역 | 15% | Code (Google Translate) |
+| Stage 1: 의도 분해 | 35% | LLM |
+| Stage 2: 후보 검색 | 50% | Code (TagDatabase) |
+| Stage 2.5: e621 NSFW Boost | 55% | Code (선택, NSFW 특화 검색) |
+| Stage 3: 태그 선택 | 80% | LLM |
+| Stage 4: 자연어 생성 | 95% | LLM |
+| 최종 결과 | 100% | Code |
+
+**핵심 규칙**:
+- 서버 시작/중지는 반드시 `OllamaServerActionWorker`로 비동기 실행 (`time.sleep` 루프 포함)
+- `DebugPanel`은 `QDialog` + `WA_DeleteOnClose=False` + `try/except RuntimeError` 가드
+- `_finalize_result()`: 전체 lowercase + 쉼표 앞 온점 제거 + SFW blocklist
+
+**e621 NSFW Boost 시스템** (Stage 2.5):
+
+Stage 1의 의도 개념(ACTION, SEXUAL_ACT, BODY_EXPOSURE, RESTRAINT)을 소스로 사용하여 e621 wiki/태그 이름을 검색, NSFW 전문 태그(bondage, restraint, sexual acts, body exposure)를 반환합니다.
+
+*주요 상수*:
+- `E621_NSFW_BOOST_CATEGORIES`: 소스 카테고리 (`{"ACTION", "SEXUAL_ACT", "BODY_EXPOSURE", "RESTRAINT"}`)
+- `E621_NSFW_BOOST_EXCLUDE_PATTERNS`: 외형 키워드 필터 (hair, eyes 등, 의류는 제거하여 torn_dress/bottomless 허용)
+- `E621_WIKI_STOPWORDS`: 영어 기능어 + e621 마크업 노이즈 (~200개)
+
+*TagDatabase 인덱스 (로드 시 빌드)*:
+- `_e621_siblings`: 태그 → 형제 태그 리스트 (hierarchy 기반)
+- `_e621_wiki_links`: 태그 → `[[link]]` 참조 태그 리스트
+- `_e621_wiki_text_index`: 키워드 → 태그 리스트 (wiki_body 역인덱스, 키워드당 2~500개 제한)
+- `_e621_tag_name_index`: 키워드 → 태그 리스트 (태그 이름 토큰 역인덱스, 키워드당 ≤200개)
+
+*검색 흐름 (`e621_nsfw_boost()`)*:
+
+| Phase | 설명 | Base Score |
+|-------|------|-----------|
+| Phase 1a: Direct match | 개념이 e621 태그명과 직접 매치 | 3.0 |
+| Phase 1c: Tag name index | 개념 word가 태그 이름 토큰에 포함 | 2.0 |
+| Phase 2: Wiki link | 직접 매치 태그의 `[[link]]` + siblings 확장 | 2.0 / 1.5 |
+| Phase 3: Wiki text | 개념 키워드가 wiki_body 본문에 등장하는 태그 | 1.0 (다중 단어 시 +0.5) |
+
+*최종 점수*: `base_score * (log10(danbooru_freq) / 4.0)`, `min_danbooru_freq` 기본값: 100
+
+*필터링*: 기존 후보 제외, 외형 키워드 제외, danbooru 미등록 제외, `min_danbooru_freq` 미만 제외
+
 ### 다이얼로그 패턴
 
 **예제**: `modules/character_module.py:24-400+`
@@ -2321,7 +2411,27 @@ def _reset_randomized_state(self):
 
 ## 변경 이력
 
-### 2025-01-08: 프리셋 랜덤화 시스템 추가 🆕
+### 2026-02-08: e621 NSFW Boost 재설계 (Intent Boost → NSFW 특화) 🆕
+
+**파일**: `modules/ollama_module.py`
+
+**문제**: 이전 e621 Intent Boost가 EXPRESSION/SETTING/OBJECT 카테고리를 사용하여 범용 감정 태그(sad, frown, happy)만 반환. NSFW 태그(bondage, restraint, sexual acts) 미활용.
+
+**해결**:
+- **카테고리 변경**: `E621_NSFW_BOOST_CATEGORIES = {ACTION, SEXUAL_ACT, BODY_EXPOSURE, RESTRAINT}` (EXPRESSION/SETTING/OBJECT 제거)
+- **제외 패턴 축소**: `E621_NSFW_BOOST_EXCLUDE_PATTERNS` — 의류 키워드 제거 (torn_dress, bottomless 통과 허용)
+- **태그 이름 역인덱스 추가**: `_build_tag_name_index()` — e621 태그명 토큰 기반 검색 (예: "tied" → legs_tied, tied_up, arms_tied)
+- **Phase 1b(O(N) 전체 순회) 제거** → Phase 1c(태그 이름 인덱스, score 2.0) 대체
+- **min_danbooru_freq 500 → 100**: NSFW 태그는 빈도 낮으므로 임계값 완화
+- **리네임**: `e621_intent_boost()` → `e621_nsfw_boost()`, `E621_BOOST` → `E621_NSFW_BOOST`
+- **UI**: 체크박스 "e621 Boost" → "e621 NSFW Boost", 툴팁 NSFW 전문 태그 설명
+- **LLM 헤더**: "NSFW BOOST (specialized NSFW tags from e621)"
+
+**테스트**: `.experimental/test_ollama_module.py` — 97/97 통과
+
+---
+
+### 2025-01-08: 프리셋 랜덤화 시스템 추가
 
 **파일**: `modules/prompt_engineering_module.py`
 
@@ -2582,6 +2692,6 @@ if checkbox_options.get("remove_color"):
 
 ---
 
-*문서 버전: 1.4*
-*최종 업데이트: 2025-01-20*
+*문서 버전: 1.5*
+*최종 업데이트: 2026-02-08*
 *담당 영역: modules/ 디렉터리*

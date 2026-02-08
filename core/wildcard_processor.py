@@ -255,21 +255,22 @@ class WildcardProcessor:
             print(f"경고: 와일드카드 '{wildcard_name}'을 찾을 수 없습니다.")
             return None
 
-        lines = self.wildcard_manager.wildcard_dict_tree.get(actual_wildcard_key)
-        if not lines:
+        # entries: [(weight, text), ...] 형식
+        entries = self.wildcard_manager.wildcard_dict_tree.get(actual_wildcard_key)
+        if not entries:
             print(f"경고: 와일드카드 '{actual_wildcard_key}'의 내용이 비어있습니다.")
             return None
 
         chosen_line = ""
-        total_lines = len(lines)
+        total_entries = len(entries)
 
         if is_sequential:
             # sequential_counters는 실제 키로 저장
             counter = context.sequential_counters.get(actual_wildcard_key, 0)
-            chosen_line = lines[counter % total_lines]
+            chosen_line = entries[counter % total_entries][1]  # text 부분
             context.sequential_counters[actual_wildcard_key] = counter + 1
             # [상태 관찰] 순차 와일드카드 상태 기록 (실제 키 사용)
-            context.wildcard_state[actual_wildcard_key] = {'current': counter % total_lines + 1, 'total': total_lines}
+            context.wildcard_state[actual_wildcard_key] = {'current': counter % total_entries + 1, 'total': total_entries}
 
         elif is_observer:
             # 🔧 [수정] Master/Slave 의존성 로직 개선 + Fuzzy Matching
@@ -279,27 +280,27 @@ class WildcardProcessor:
             if not actual_master_key:
                 print(f"경고: Master 와일드카드 '{master_name}'을 찾을 수 없습니다.")
                 # 기본값으로 첫 번째 항목 반환
-                chosen_line = lines[0]
+                chosen_line = entries[0][1]
                 slave_index = 0
                 completed_master_cycles = 0
             else:
                 master_counter = context.sequential_counters.get(actual_master_key, 0)
 
                 # Master 와일드카드의 길이를 가져와서 사이클 계산
-                master_lines = self.wildcard_manager.wildcard_dict_tree.get(actual_master_key, [])
-                master_total = len(master_lines) if master_lines else 1
+                master_entries = self.wildcard_manager.wildcard_dict_tree.get(actual_master_key, [])
+                master_total = len(master_entries) if master_entries else 1
 
                 # Master가 완전한 사이클을 몇 번 완료했는지 계산
                 completed_master_cycles = master_counter // master_total if master_counter > 0 else 0
 
                 # Slave는 master의 완전한 사이클 완료 횟수에 따라 진행
-                slave_index = completed_master_cycles % total_lines
-                chosen_line = lines[slave_index]
+                slave_index = completed_master_cycles % total_entries
+                chosen_line = entries[slave_index][1]
 
             # [상태 관찰] 종속 와일드카드 상태 기록 (실제 키 사용)
             context.wildcard_state[actual_wildcard_key] = {
                 'current': slave_index + 1,
-                'total': total_lines,
+                'total': total_entries,
                 'master_cycles': completed_master_cycles,
                 'master_name': actual_master_key if actual_master_key else 'unknown'  # 실제 Master 키 기록
             }
@@ -310,8 +311,9 @@ class WildcardProcessor:
             # completed_slave_cycles = counter // total_lines로 계산
             context.sequential_counters[actual_wildcard_key] = completed_master_cycles
 
-        else: # 일반 무작위 모드
-            chosen_line = random.choice(lines)
+        else: # 일반 무작위 모드 — 가중치 기반 선택
+            weights = [w for w, _ in entries]
+            chosen_line = random.choices([t for _, t in entries], weights=weights, k=1)[0]
 
         context.wildcard_history.setdefault(actual_wildcard_key, []).append(chosen_line)
         return chosen_line

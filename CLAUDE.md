@@ -17,8 +17,8 @@
 - **링크 방식**: 메인 문서에서 핵심만 설명, 상세는 레퍼런스 링크로 안내
   - 예: `**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)`
 
-**📚 문서화 현황** (2026-02-03 업데이트):
-- ✅ **core/CLAUDE.md** (v1.8): AppContext, 컨트롤러, 파이프라인, API 서비스
+**📚 문서화 현황** (2026-02-08 업데이트):
+- ✅ **core/CLAUDE.md** (v1.9): AppContext, 컨트롤러, 파이프라인, API 서비스
   - 🆕 ImageCrudController 파일명 형식, 분류 시스템, 타임스탬프 폴더 토글
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
   - 🆕 **SequenceParser**: 시퀀스 프롬프트 파싱 (`:begin`, `:seq`, `:end`)
@@ -28,8 +28,11 @@
   - 🆕 **AutoCompleteManager**: 팝업 외부 클릭 시 자동 닫기 기능
   - 🔧 **ComfyUIService** (2026-02-03): WebSocket 완전 제거, 순수 HTTP 폴링, QObject::killTimer 오류 해결
   - 🔧 **APIService**: Background thread UI 접근 방지, QTimer.singleShot 패턴 적용
-- ✅ **modules/CLAUDE.md** (v1.3): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
+  - 🆕 **WildcardManager** (2026-02-08): 가중치 구문 지원 (`{int}:text`), `wildcard_dict_tree` 자료구조 `list[tuple[int, str]]`로 변경
+  - 🔧 **WildcardProcessor**: `random.choices(weights=)` 기반 가중치 랜덤 선택, 순차/종속 모드 가중치 무시
+- ✅ **modules/CLAUDE.md** (v1.5): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
   - 🆕 **프리셋 랜덤화 시스템**: `*randomized` 특수 프리셋, 랜덤 프리셋 풀 관리, 자동/수동 프리셋 선택
+  - 🆕 **e621 Intent Boost**: Intent 기반 3-phase wiki 텍스트 검색, 외형 필터, 상황 태그 반환
 - ✅ **tabs/CLAUDE.md** (v1.6): 탭 개발 가이드, 시그널 브리징, 생명주기
   - 🆕 Settings 탭: 타임스탬프 폴더 토글, 분류 규칙 UI, 2차 분류 시스템
   - 🆕 **모듈/탭 가시성**: 프로그램 시작 시 자동 적용, 재시도 메커니즘, 디버깅 로그

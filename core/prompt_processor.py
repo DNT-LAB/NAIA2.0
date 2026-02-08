@@ -237,7 +237,7 @@ class PromptProcessor:
                     context.main_tags[first_non_hash_idx] = f"({context.main_tags[first_non_hash_idx]}"
 
                     # 마지막 태그에 ":0.75)" 붙이기
-                    context.main_tags[-1] = f"{context.main_tags[-1]}:0.8)"
+                    context.main_tags[-1] = f"{context.main_tags[-1]}:0.75)"
 
                     print(f"🎨 ANIMA 모드: main_tags에 가중치 0.75 적용 (첫 인덱스: {first_non_hash_idx}, 마지막: {len(context.main_tags)-1})")
 

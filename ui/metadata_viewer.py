@@ -129,7 +129,11 @@ class MetadataViewerWindow(QDialog):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
-        
+
+        # v4 캐릭터 데이터 사전 추출 (버튼 표시 판단에 필요)
+        if 'v4_prompt' in self.metadata and 'caption' in self.metadata.get('v4_prompt', {}):
+            self._extract_v4_characters()
+
         # 왼쪽: 이미지 미리보기
         left_panel = self.create_left_panel()
         
@@ -234,7 +238,14 @@ class MetadataViewerWindow(QDialog):
         settings_btn.setStyleSheet(self.dynamic_styles['primary_button'])
         settings_btn.clicked.connect(self._on_apply_settings)
         button_layout.addWidget(settings_btn)
-        
+
+        # 설정값 + 캐릭터 일괄 적용 버튼 (캐릭터 데이터가 있을 때만)
+        if self.metadata.get('characters') or self.metadata.get('char_captions'):
+            char_settings_btn = QPushButton("🎭 설정값 + 캐릭터 일괄 적용")
+            char_settings_btn.setStyleSheet(self.dynamic_styles['primary_button'])
+            char_settings_btn.clicked.connect(self._on_apply_settings_with_characters)
+            button_layout.addWidget(char_settings_btn)
+
         # img2img 전송 버튼
         img2img_btn = QPushButton("🖼️ img2img로 전송")
         img2img_btn.setStyleSheet(self.dynamic_styles['secondary_button'])
@@ -901,7 +912,37 @@ class MetadataViewerWindow(QDialog):
 
         self.apply_all_settings.emit(settings)
         # 적용 완료 메시지는 표시하지 않음
-        
+
+    def _on_apply_settings_with_characters(self):
+        """설정값 + 캐릭터 일괄 적용"""
+        settings = {
+            'prompt': self._get_prompt_text(),
+            'negative': self._get_negative_text()
+        }
+
+        if 'Software' in self.metadata:
+            settings['Software'] = self.metadata['Software']
+        if 'type' in self.metadata:
+            settings['type'] = self.metadata['type']
+
+        extracted_params = self._extract_all_parameters()
+        settings.update(extracted_params)
+
+        settings['width'] = self.pil_image.width
+        settings['height'] = self.pil_image.height
+
+        # 캐릭터 데이터 포함
+        characters = self.metadata.get('characters', [])
+        if not characters:
+            characters = self.metadata.get('char_captions', [])
+        characters_uc = self.metadata.get('characters_uc', [])
+
+        if characters:
+            settings['characters'] = characters
+            settings['characters_uc'] = characters_uc
+
+        self.apply_all_settings.emit(settings)
+
     def _on_send_img2img(self):
         """img2img로 전송"""
         self.send_to_img2img.emit(self.pil_image, self.metadata)

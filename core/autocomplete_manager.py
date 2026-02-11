@@ -459,6 +459,11 @@ class AutoCompleteManager(QObject):
         if filter_category:
             matches = self._apply_filter(matches, filter_category)
 
+        # @로 시작하고 2글자 이상 입력된 경우 @_@ 이모티콘 필터링
+        # 예: @ke, @gamuo 등 아티스트 이름 입력 시 @_@ 제외
+        if target_text.startswith('@') and len(target_text) >= 3:
+            matches = [(tag, count) for tag, count in matches if tag != '@_@']
+
         # 매칭 결과가 없으면 팝업 숨기기
         if not matches:
             self._hide_all_popups()
@@ -898,6 +903,41 @@ class AutoCompleteManager(QObject):
 
         stripped_token, prefix, suffix = self._strip_brackets(token)
 
+        # WebUI/ANIMA 가중치 구문 처리: (text:weight), text:weight), (text
+        # 예: (@kele mimi:1.15) → 괄호 제거 후 "@kele mimi:1.15" → ":1.15" 제거
+        # 예: (@gamuo → 매칭되지 않는 "(" 제거
+        # 예: @setmen:0.33) → ":0.33)" 제거
+        stripped_clean = stripped_token.strip()
+        extra_prefix = ''
+        extra_suffix = ''
+
+        # 매칭되지 않는 여는 괄호 처리: (text → "(" 분리
+        while stripped_clean and stripped_clean[0] == '(':
+            if stripped_clean.count('(') > stripped_clean.count(')'):
+                extra_prefix += '('
+                stripped_clean = stripped_clean[1:]
+            else:
+                break
+
+        # WebUI/ANIMA 가중치 검출: text:float 또는 text:float)
+        # 괄호 컨텍스트가 있을 때만 적용 (일반 태그의 : 구분자와 구별)
+        has_bracket_context = (
+            bool(extra_prefix) or '(' in prefix or ')' in suffix or ')' in stripped_clean
+        )
+        webui_weight_detected = False
+        if has_bracket_context:
+            webui_weight_match = re.search(r':(\d+\.?\d*|\.\d+)\)?$', stripped_clean)
+            if webui_weight_match:
+                before_weight = stripped_clean[:webui_weight_match.start()]
+                if before_weight:  # 가중치 앞에 텍스트가 있어야 함
+                    extra_suffix = stripped_clean[webui_weight_match.start():] + extra_suffix
+                    stripped_clean = before_weight
+                    webui_weight_detected = True
+
+        prefix = prefix + extra_prefix
+        suffix = extra_suffix + suffix
+        stripped_token = stripped_clean
+
         # NAI :: 가중치 값을 편집 중인 경우 자동완성 무시
         # 예: "0.7::pixel art" 에서 0.7을 편집할 때
         # weight_suffix가 있고 (:: 로 시작) stripped_token이 숫자 형태인 경우
@@ -911,6 +951,15 @@ class AutoCompleteManager(QObject):
                     is_weight_value = True
                 except ValueError:
                     pass
+
+        # WebUI/ANIMA 가중치 값 편집 중인 경우 자동완성 무시
+        # 예: (@kele mimi:1.15) 에서 커서가 :1.15 부분에 있을 때
+        if not is_weight_value and webui_weight_detected:
+            token_weight_match = re.search(r':(\d+\.?\d*|\.\d+)\)?$', token.rstrip())
+            if token_weight_match:
+                cursor_in_token = pos - start_pos
+                if cursor_in_token > token_weight_match.start():
+                    is_weight_value = True
 
         return {
             'text': token,

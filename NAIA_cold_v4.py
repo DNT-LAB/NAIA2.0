@@ -652,8 +652,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 143"
-        self.setWindowTitle(self.base_title + " - 260208")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 144"
+        self.setWindowTitle(self.base_title + " - 260211")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -5559,9 +5559,13 @@ class ModernMainWindow(QMainWindow):
                     return
             
             # 경고 메시지 표시
+            has_characters = 'characters' in settings
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("설정값 일괄 적용")
-            msg_box.setText("현재 프리셋의 설정값이 소실됩니다.\n계속하시겠습니까?")
+            if has_characters:
+                msg_box.setText("현재 프리셋의 설정값이 소실되며,\n캐릭터 프롬프트가 추가됩니다.\n(기존 캐릭터는 비활성화)\n\n계속하시겠습니까?")
+            else:
+                msg_box.setText("현재 프리셋의 설정값이 소실됩니다.\n계속하시겠습니까?")
             msg_box.setIcon(QMessageBox.Icon.Warning)
             
             # 다크 테마 및 하얀 텍스트 적용
@@ -5635,16 +5639,68 @@ class ModernMainWindow(QMainWindow):
                 self._apply_webui_settings(compat_settings)
             elif current_mode == "COMFYUI":
                 self._apply_comfyui_settings(compat_settings)
-            
+
+            # 캐릭터 프롬프트 적용 (settings에 characters 키가 있을 때만)
+            if 'characters' in settings:
+                self._apply_character_settings_from_metadata(settings)
+
             print(f"✅ 메타데이터 설정 적용 완료")
             # 성공 메시지는 출력하지 않음 (사용자 요청)
-            
+
         except Exception as e:
             import traceback
             print(f"❌ 설정값 적용 중 오류: {e}")
             traceback.print_exc()
             self.status_bar.showMessage(f"설정 적용 중 일부 오류 발생: {e}", 5000)
-    
+
+    def _apply_character_settings_from_metadata(self, settings: dict):
+        """메타데이터의 캐릭터 프롬프트를 CharacterModule에 적용
+
+        기존 캐릭터 위젯은 유지하고, 최하단에 새 위젯을 추가하여
+        메타데이터 캐릭터 프롬프트를 할당한 뒤 자동으로 활성화합니다.
+        """
+        try:
+            characters = settings.get('characters', [])
+            characters_uc = settings.get('characters_uc', [])
+
+            if not characters:
+                return
+
+            if not hasattr(self, 'middle_section_controller'):
+                print("  ⚠️ middle_section_controller를 찾을 수 없습니다.")
+                return
+
+            char_module = self.middle_section_controller.get_module_instance("CharacterModule")
+            if not char_module:
+                print("  ⚠️ CharacterModule을 찾을 수 없습니다.")
+                return
+
+            # 기존 위젯 비활성화
+            for widget in char_module.character_widgets:
+                widget.active_checkbox.setChecked(False)
+
+            # 최하단에 새 캐릭터 위젯 추가
+            for i, char_prompt in enumerate(characters):
+                char_uc = characters_uc[i] if i < len(characters_uc) else ""
+                char_module.add_character_widget(
+                    prompt_text=char_prompt,
+                    uc_text=char_uc,
+                    is_enabled=True
+                )
+
+            # CharacterModule 활성화
+            if hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox:
+                char_module.activate_checkbox.setChecked(True)
+
+            # 미리보기 갱신
+            if hasattr(char_module, 'process_and_update_view'):
+                char_module.process_and_update_view()
+
+            print(f"  ✓ 캐릭터 프롬프트 적용 ({len(characters)}명 추가, 기존 유지)")
+
+        except Exception as e:
+            print(f"  ⚠️ 캐릭터 적용 실패: {e}")
+
     def _detect_metadata_source_mode(self, settings: dict) -> str:
         """메타데이터에서 소스 모드를 감지합니다."""
         # Software 필드 확인 (NAI)

@@ -2092,6 +2092,33 @@ Output only the descriptions, one per line:"""
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
 
+            if response.status_code == 404:
+                # 모델이 없으면 자동 다운로드 시도
+                self.status_changed.emit(f"모델 '{self.model}' 미설치 → 자동 다운로드 시작...")
+                self.stage_output.emit("모델 다운로드",
+                    f"모델 '{self.model}'이(가) 설치되어 있지 않습니다.\n"
+                    f"자동으로 다운로드를 시작합니다...",
+                    "#ffaa00")
+
+                if not self._pull_model(self.model):
+                    raise RuntimeError(
+                        f"모델 '{self.model}' 다운로드에 실패했습니다.\n"
+                        f"수동으로 설치하세요: ollama pull {self.model}")
+
+                # 다운로드 성공 → 재시도
+                self.status_changed.emit("모델 다운로드 완료, 재시도 중...")
+                with requests.Session() as session2:
+                    response = session2.post(
+                        f"{OLLAMA_BASE_URL}/api/chat",
+                        json=payload,
+                        timeout=180
+                    )
+                    session2.close()
+                    if hasattr(session2, 'adapters'):
+                        for adapter in session2.adapters.values():
+                            if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                                adapter.poolmanager.clear()
+
             if response.status_code != 200:
                 error_text = response.text[:200]
                 raise RuntimeError(
@@ -2103,6 +2130,51 @@ Output only the descriptions, one per line:"""
             raise RuntimeError("Ollama 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.")
         except requests.Timeout:
             raise RuntimeError("Ollama 응답 시간 초과 (180초). 모델이 로드 중이거나 서버가 과부하일 수 있습니다.")
+
+    def _pull_model(self, model_name: str) -> bool:
+        """Ollama 모델 자동 다운로드 (스트리밍 진행률 표시)"""
+        try:
+            with requests.post(
+                f"{OLLAMA_BASE_URL}/api/pull",
+                json={"name": model_name, "stream": True},
+                stream=True,
+                timeout=1800
+            ) as resp:
+                if resp.status_code != 200:
+                    return False
+
+                for line in resp.iter_lines():
+                    if self._is_cancelled:
+                        return False
+                    if not line:
+                        continue
+
+                    data = json.loads(line)
+                    status = data.get('status', '')
+
+                    if 'total' in data and 'completed' in data:
+                        total = data['total']
+                        completed = data['completed']
+                        if total > 0:
+                            pct = int(completed / total * 100)
+                            size_mb = total / (1024 * 1024)
+                            done_mb = completed / (1024 * 1024)
+                            self.status_changed.emit(
+                                f"모델 다운로드: {pct}% ({done_mb:.0f}/{size_mb:.0f}MB)")
+                    else:
+                        self.status_changed.emit(f"모델 다운로드: {status}")
+
+                    if status == 'success':
+                        self.stage_output.emit("모델 다운로드",
+                            f"모델 '{model_name}' 다운로드 완료!", "#00ff00")
+                        return True
+
+            return True
+
+        except Exception as e:
+            self.stage_output.emit("다운로드 실패",
+                f"모델 다운로드 실패: {e}", "#ff0000")
+            return False
 
     # ===== 유틸리티 =====
 

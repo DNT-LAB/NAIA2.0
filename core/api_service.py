@@ -517,7 +517,7 @@ class APIService:
                         print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
-            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated']: # 다음 모델 제외: 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting'
+            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']: # 다음 모델 제외: 
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:
                     print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")

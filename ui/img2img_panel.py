@@ -41,7 +41,7 @@ class Img2ImgPanel(QFrame):
                 border-radius: 8px;
             }}
         """)
-        self.setMinimumHeight(220)
+        self.setMinimumHeight(280)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 15, 20, 15)

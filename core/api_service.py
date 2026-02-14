@@ -85,15 +85,15 @@ class APIService:
                 parameters['input'] = cleaned_prompt
                 print(f"[CLEAN] APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
         
-        # resolution:, seed: 파라미터 처리
+        # resolution:, seed:, cfg_scale:, cfg_rescale:, sampler:, scheduler: 파라미터 처리
         if 'input' in parameters and isinstance(parameters['input'], str):
             processed_prompt = parameters['input']
             fix_seed_value = str(parameters.get('seed', 0))
             fix_res_value = [parameters.get('width', 1024), parameters.get('height', 1024)]
-            
+
             fix_check = processed_prompt.split(', ')
             after_check = fix_check.copy()
-            
+
             for i, v in enumerate(fix_check):
                 if "seed:" in v and v.startswith("seed:"):
                     fix_seed_value = v[5:]  # "seed:" 부분 제거
@@ -107,22 +107,64 @@ class APIService:
                     except:
                         fix_res_value = [1024, 1024]
                     after_check.remove(fix_check[i])
-            
+                elif v.startswith("cfg_scale:"):
+                    try:
+                        val = float(v[10:])
+                        if 1.0 <= val <= 10.0:
+                            parameters['cfg_scale'] = val
+                    except ValueError:
+                        pass
+                    after_check.remove(fix_check[i])
+                elif v.startswith("cfg_rescale:"):
+                    try:
+                        val = float(v[12:])
+                        if -1.0 <= val <= 1.0:
+                            parameters['cfg_rescale'] = val
+                    except ValueError:
+                        pass
+                    after_check.remove(fix_check[i])
+                elif v.startswith("sampler:"):
+                    val = v[8:]
+                    valid_samplers = ["k_euler", "k_euler_ancestral", "k_dpmpp_2m",
+                                      "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"]
+                    if val in valid_samplers:
+                        parameters['sampler'] = val
+                    after_check.remove(fix_check[i])
+                elif v.startswith("scheduler:"):
+                    val = v[10:]
+                    valid_schedulers = ["native", "karras", "exponential", "polyexponential"]
+                    if val in valid_schedulers:
+                        parameters['scheduler'] = val
+                    after_check.remove(fix_check[i])
+                elif v.startswith("steps:"):
+                    try:
+                        val = int(v[6:])
+                        if 1 <= val <= 150:
+                            parameters['steps'] = val
+                    except ValueError:
+                        pass
+                    after_check.remove(fix_check[i])
+
             # seed 값 업데이트
             try:
                 parameters['seed'] = int(fix_seed_value)
             except:
                 parameters['seed'] = 0
-            
-            # 처리된 프롬프트 업데이트 (seed:, resolution: 태그 제거)
+
+            # 처리된 프롬프트 업데이트 (인라인 파라미터 태그 제거)
             cleaned_tags_prompt = ', '.join(after_check)
             if cleaned_tags_prompt != processed_prompt:
                 parameters['input'] = cleaned_tags_prompt
-                print(f"[PARAM] APIService: seed/resolution 태그 처리 완료")
+                print(f"[PARAM] APIService: 인라인 파라미터 태그 처리 완료")
                 print(f"   - Seed: {parameters.get('seed')}")
                 print(f"   - Resolution: {parameters.get('width')}x{parameters.get('height')}")
+                print(f"   - CFG Scale: {parameters.get('cfg_scale', 'default')}")
+                print(f"   - CFG Rescale: {parameters.get('cfg_rescale', 'default')}")
+                print(f"   - Sampler: {parameters.get('sampler', 'default')}")
+                print(f"   - Scheduler: {parameters.get('scheduler', 'default')}")
+                print(f"   - Steps: {parameters.get('steps', 'default')}")
                 print(f"   - 정리된 프롬프트: '{cleaned_tags_prompt[:100]}...'")
-        
+
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
         print(f"[API] APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
         print(f"   [파라미터] 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "

@@ -1300,6 +1300,9 @@ class GenerationController:
                         print(f"[SEQUENCE] 프롬프트 #{i+1}: NAI 랜덤 시드 생성 - {params['seed']}")
                     # WEBUI/COMFYUI는 고정 시드 사용 (base_params의 seed 유지)
 
+                # TODO: 시퀀스 생성에서도 cfg_scale:, cfg_rescale:, sampler:, scheduler: 인라인 파라미터 지원 예정
+                # 참고: api_service.py의 call_generation_api()에 구현된 파싱 로직 참조
+
                 # 프롬프트 설정 (메인 프롬프트를 각 시퀀스 프롬프트로 대체)
                 params['input'] = prompt
 

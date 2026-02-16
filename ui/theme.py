@@ -18,6 +18,9 @@ DARK_COLORS = {
     'accent_blue': '#1976D2',     # 강조 파란색
     'accent_blue_hover': '#1565C0',
     'accent_blue_light': '#42A5F5',
+    'accent_purple': '#7B1FA2',          # Material Purple 700
+    'accent_purple_hover': '#6A1B9A',    # Material Purple 800
+    'accent_purple_light': '#AB47BC',    # Material Purple 300
     'border': '#333333',          # 경계선
     'border_light': '#666666',    # 밝은 경계선
     'success': '#4CAF50',         # 성공 색상

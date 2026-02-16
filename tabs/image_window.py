@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Any
@@ -9,14 +10,14 @@ import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
     QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox, QApplication,
-    QSpinBox, QRadioButton, QButtonGroup, QFrame
+    QSpinBox, QRadioButton, QButtonGroup, QFrame, QSlider
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeData, QUrl
 from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent, QDragEnterEvent, QDropEvent, QCursor
 from PyQt6.QtWidgets import QWidgetAction
 from PIL import Image, ImageQt
 from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from interfaces.base_tab_module import BaseTabModule
 from ui.img2img_popup import Img2ImgPopup
 from ui.metadata_viewer import MetadataViewerWindow
@@ -116,6 +117,168 @@ class AllImagesDownloader(QObject):
                 self.progress_updated.emit(i + 1, total_items, f"[오류] {e}")
 
         self.finished.emit(saved_count)
+
+
+class EnhanceSettingsDialog(QDialog):
+    """Enhance 설정 다이얼로그 — Upscale Amount, Strength, Magnitude 프리셋"""
+
+    def __init__(self, current_upscale: float, current_strength: float, current_noise: float = 0.0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Enhance Settings")
+        self.setModal(True)
+        self.setFixedWidth(get_scaled_size(340))
+
+        self._upscale = current_upscale
+        self._strength = current_strength
+        self._noise = current_noise
+
+        self._build_ui()
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+        """)
+
+    # ── UI 구성 ──────────────────────────────────────────────
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(get_scaled_size(10))
+
+        label_style = f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(13)}px; font-weight: bold;"
+
+        # ── Upscale Amount ──
+        layout.addWidget(self._make_label("Upscale Amount", label_style))
+
+        upscale_row = QHBoxLayout()
+        self._btn_1x = QPushButton("1x")
+        self._btn_15x = QPushButton("1.5x")
+        for btn, val in [(self._btn_1x, 1.0), (self._btn_15x, 1.5)]:
+            btn.setCheckable(True)
+            btn.setChecked(self._upscale == val)
+            btn.clicked.connect(lambda checked, v=val: self._set_upscale(v))
+            btn.setStyleSheet(self._toggle_style(self._upscale == val))
+            upscale_row.addWidget(btn)
+        layout.addLayout(upscale_row)
+
+        # ── Strength ──
+        strength_header = QHBoxLayout()
+        strength_header.addWidget(self._make_label("Strength", label_style))
+        self._strength_value_label = QLabel(f"{self._strength:.1f}")
+        self._strength_value_label.setStyleSheet(f"color: {DARK_COLORS['accent_purple_light']}; font-size: {get_scaled_font_size(13)}px; font-weight: bold;")
+        self._strength_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        strength_header.addWidget(self._strength_value_label)
+        layout.addLayout(strength_header)
+
+        self._strength_slider = QSlider(Qt.Orientation.Horizontal)
+        self._strength_slider.setRange(1, 9)
+        self._strength_slider.setValue(int(self._strength * 10))
+        self._strength_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._strength_slider.setTickInterval(1)
+        self._strength_slider.setStyleSheet(DARK_STYLES.get('compact_slider', ''))
+        self._strength_slider.valueChanged.connect(self._on_slider_changed)
+        layout.addWidget(self._strength_slider)
+
+        # ── Magnitude Presets ──
+        layout.addWidget(self._make_label("Magnitude Presets", label_style))
+
+        mag_row = QHBoxLayout()
+        presets = [(1, 0.2, 0.0), (2, 0.3, 0.0), (3, 0.4, 0.0), (4, 0.5, 0.0), (5, 0.7, 0.1)]
+        for num, strength, noise in presets:
+            btn = QPushButton(str(num))
+            btn.setFixedSize(get_scaled_size(42), get_scaled_size(32))
+            btn.setStyleSheet(self._magnitude_style())
+            btn.clicked.connect(lambda checked, s=strength, n=noise: self._apply_preset(s, n))
+            mag_row.addWidget(btn)
+        layout.addLayout(mag_row)
+
+        # ── OK / Cancel ──
+        btn_row = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_purple']};
+                color: white; border: none; border-radius: 4px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(16)}px;
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['accent_purple_hover']}; }}
+        """)
+        ok_btn.clicked.connect(self.accept)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        cancel_btn.clicked.connect(self.reject)
+
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+    # ── 헬퍼 ────────────────────────────────────────────────
+    @staticmethod
+    def _make_label(text: str, style: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(style)
+        return lbl
+
+    def _toggle_style(self, selected: bool) -> str:
+        if selected:
+            return f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['accent_purple']};
+                    color: white; border: none; border-radius: 4px;
+                    padding: {get_scaled_size(6)}px {get_scaled_size(14)}px;
+                    font-size: {get_scaled_font_size(13)}px; font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: {DARK_COLORS['accent_purple_hover']}; }}
+            """
+        return f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_secondary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px; padding: {get_scaled_size(6)}px {get_scaled_size(14)}px;
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; }}
+        """
+
+    @staticmethod
+    def _magnitude_style() -> str:
+        return f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px; font-size: {get_scaled_font_size(13)}px; font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_purple']};
+                color: white; border: 1px solid {DARK_COLORS['accent_purple']};
+            }}
+        """
+
+    # ── 슬롯 ────────────────────────────────────────────────
+    def _set_upscale(self, value: float):
+        self._upscale = value
+        self._btn_1x.setChecked(value == 1.0)
+        self._btn_15x.setChecked(value == 1.5)
+        self._btn_1x.setStyleSheet(self._toggle_style(value == 1.0))
+        self._btn_15x.setStyleSheet(self._toggle_style(value == 1.5))
+
+    def _on_slider_changed(self, val: int):
+        self._strength = val / 10.0
+        self._strength_value_label.setText(f"{self._strength:.1f}")
+
+    def _apply_preset(self, strength: float, noise: float = 0.0):
+        self._strength = strength
+        self._noise = noise
+        self._strength_slider.setValue(int(strength * 10))
+
+    # ── 결과 ────────────────────────────────────────────────
+    def get_settings(self) -> tuple:
+        """(upscale, strength, noise) 튜플 반환"""
+        return self._upscale, self._strength, self._noise
+
 
 # --- 1. ImageLabel 클래스: 오직 이미지 표시와 리사이징만 담당 ---
 class ImageLabel(QLabel):
@@ -1263,6 +1426,11 @@ class ImageWindow(QWidget):
         # 🆕 ComfyUI 워크플로우 캐시
         self.comfyui_workflow_cache: Dict[int, Dict] = {}
 
+        # Enhance 설정
+        self._enhance_upscale = 1.5    # 1.0 or 1.5
+        self._enhance_strength = 0.2   # 0.1 ~ 0.9
+        self._enhance_noise = 0.0      # 0.0 ~ 0.1
+
         self.init_ui()
         self.load_settings()
 
@@ -1403,6 +1571,11 @@ class ImageWindow(QWidget):
         info_panel_layout.setContentsMargins(0, 4, 0, 0)
         info_panel_layout.setSpacing(4)
         
+        # ── 생성 정보 타이틀 + Enhance 버튼 (한 줄) ──
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(get_scaled_size(4))
+
         info_title = QLabel("📝 생성 정보")
         info_title.setStyleSheet(f"""
             QLabel {{
@@ -1412,8 +1585,44 @@ class ImageWindow(QWidget):
                 padding: 2px 4px;
             }}
         """)
-        info_panel_layout.addWidget(info_title)
-        
+        title_row.addWidget(info_title)
+        title_row.addStretch()
+
+        btn_h = get_scaled_size(24)
+        self.enhance_button = QPushButton(f"✨Enhance x{self._enhance_upscale:g} | {self._enhance_strength:.1f}")
+        self.enhance_button.setFixedHeight(btn_h)
+        self.enhance_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_purple']};
+                color: white; border: none; border-radius: {get_scaled_size(3)}px;
+                padding: 0px {get_scaled_size(8)}px;
+                font-size: {get_scaled_font_size(11)}px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['accent_purple_hover']}; }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+        self.enhance_button.setEnabled(False)
+        self.enhance_button.clicked.connect(self._execute_enhance)
+
+        self.enhance_settings_button = QPushButton("⚙️")
+        self.enhance_settings_button.setFixedSize(btn_h, btn_h)
+        self.enhance_settings_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px; font-size: {get_scaled_font_size(11)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; }}
+        """)
+        self.enhance_settings_button.clicked.connect(self._show_enhance_settings)
+
+        title_row.addWidget(self.enhance_button)
+        title_row.addWidget(self.enhance_settings_button)
+        info_panel_layout.addLayout(title_row)
+
         self.info_textbox = QTextEdit()
         self.info_textbox.setReadOnly(True)
         self.info_textbox.setStyleSheet(DARK_STYLES['compact_textedit'])
@@ -1424,7 +1633,7 @@ class ImageWindow(QWidget):
         image_info_splitter.addWidget(self.main_image_label)
         image_info_splitter.addWidget(self.info_panel)
         image_info_splitter.setStretchFactor(0, 50)
-        image_info_splitter.setStretchFactor(1, 1)
+        image_info_splitter.setStretchFactor(1, 3)
         
         # 왼쪽 패널 레이아웃에 수직 스플리터 추가
         left_layout.addWidget(image_info_splitter)
@@ -1462,11 +1671,18 @@ class ImageWindow(QWidget):
         self.main_image_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_image_label.customContextMenuRequested.connect(self.show_main_image_context_menu)
 
+        # Enhance 버튼 상태 — 모드 변경 시 업데이트
+        if self.app_context:
+            self.app_context.subscribe("api_mode_changed", lambda _: self._update_enhance_button_state())
+
     def save_settings(self):
         """체크박스 설정을 JSON 파일에 저장합니다."""
         settings = {
             "auto_save": self.auto_save_checkbox.isChecked(),
-            "save_as_webp": self.save_as_webp_checkbox.isChecked()
+            "save_as_webp": self.save_as_webp_checkbox.isChecked(),
+            "enhance_upscale": self._enhance_upscale,
+            "enhance_strength": self._enhance_strength,
+            "enhance_noise": self._enhance_noise,
         }
         
         settings_path = Path("save/image_window.json")
@@ -1493,9 +1709,15 @@ class ImageWindow(QWidget):
                 
                 self.auto_save_checkbox.setChecked(settings.get("auto_save", False))
                 self.save_as_webp_checkbox.setChecked(settings.get("save_as_webp", False))
-                
+
                 self.auto_save_checkbox.blockSignals(False)
                 self.save_as_webp_checkbox.blockSignals(False)
+
+                # Enhance 설정 복원
+                self._enhance_upscale = settings.get("enhance_upscale", 1.5)
+                self._enhance_strength = settings.get("enhance_strength", 0.2)
+                self._enhance_noise = settings.get("enhance_noise", 0.0)
+                self._update_enhance_button_text()
                 
             except Exception as e:
                 print(f"Failed to load image_window settings: {e}")
@@ -2417,6 +2639,7 @@ class ImageWindow(QWidget):
         self.current_history_item = item # 현재 아이템 추적
         self.update_image(item.image)
         self.update_info(item.info_text) # 저장된 생성 정보로 업데이트
+        self._update_enhance_button_state()
 
     def _create_classification_info(self, item: HistoryItem) -> dict:
         """
@@ -2607,6 +2830,155 @@ class ImageWindow(QWidget):
         
         msg.exec()
     
+    # ═══════════════════════════════════════════════════════════
+    #  Enhance (img2img 고해상도 보강)
+    # ═══════════════════════════════════════════════════════════
+
+    def _update_enhance_button_text(self):
+        """Enhance 버튼 라벨을 현재 설정에 맞게 갱신"""
+        if hasattr(self, 'enhance_button'):
+            self.enhance_button.setText(
+                f"✨Enhance x{self._enhance_upscale:g} | {self._enhance_strength:.1f}"
+            )
+
+    def _update_enhance_button_state(self):
+        """조건에 따라 Enhance 버튼 활성/비활성"""
+        if not hasattr(self, 'enhance_button'):
+            return
+        enabled = (
+            self.current_history_item is not None
+            and self.current_history_item.image is not None
+            and getattr(self.app_context, 'current_api_mode', '') == 'NAI'
+            and bool(getattr(self.current_history_item, 'generation_params', None))
+        )
+        self.enhance_button.setEnabled(enabled)
+
+    @staticmethod
+    def _round_to_64(value: float) -> int:
+        return math.ceil(value / 64) * 64
+
+    def _show_enhance_settings(self):
+        """Enhance 설정 다이얼로그 열기"""
+        dialog = EnhanceSettingsDialog(self._enhance_upscale, self._enhance_strength, self._enhance_noise, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._enhance_upscale, self._enhance_strength, self._enhance_noise = dialog.get_settings()
+            self._update_enhance_button_text()
+            self.save_settings()
+
+    def _execute_enhance(self):
+        """Enhance 실행 — img2img API 호출"""
+        from PyQt6.QtWidgets import QProgressDialog
+        import io, copy
+
+        item = self.current_history_item
+        if not item or not item.image:
+            self._show_styled_message_main("오류", "Enhance 할 이미지가 없습니다.", 'warning')
+            return
+        if getattr(self.app_context, 'current_api_mode', '') != 'NAI':
+            self._show_styled_message_main("오류", "Enhance는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
+            return
+        if not getattr(item, 'generation_params', None):
+            self._show_styled_message_main("오류", "생성 파라미터가 없는 이미지입니다.", 'warning')
+            return
+
+        # x1 Enhance는 동일 해상도 img2img → 생성 중이면 API 충돌 방지
+        if self._enhance_upscale == 1.0:
+            gen_ctrl = getattr(self.app_context, 'generation_controller', None)
+            if gen_ctrl and getattr(gen_ctrl, 'is_generating', False):
+                self._show_styled_message_main(
+                    "Enhance 대기", "이미지 생성 중에는 x1 Enhance를 사용할 수 없습니다.\n생성 완료 후 다시 시도해주세요.", 'warning')
+                return
+
+        # 이미지 → PNG bytes
+        buf = io.BytesIO()
+        item.image.save(buf, format='PNG')
+        image_bytes = buf.getvalue()
+
+        # 해상도 계산
+        orig_w, orig_h = item.image.size
+        if self._enhance_upscale == 1.5:
+            new_w = self._round_to_64(orig_w * 1.5)
+            new_h = self._round_to_64(orig_h * 1.5)
+        else:
+            new_w, new_h = orig_w, orig_h
+
+        # 파라미터 구성
+        params = copy.deepcopy(item.generation_params)
+        params['image_bytes'] = image_bytes
+        params['strength'] = self._enhance_strength
+        params['noise'] = self._enhance_noise
+        params['width'] = new_w
+        params['height'] = new_h
+        params['api_mode'] = 'NAI'
+        # inpaint 관련 키 제거 — 반드시 img2img로 실행
+        params.pop('type', None)
+        params.pop('mask_bytes', None)
+
+        # 진행 다이얼로그
+        progress = QProgressDialog("Enhance 처리 중...", None, 0, 0, self)
+        progress.setWindowTitle("Enhance")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+
+        self.enhance_button.setEnabled(False)
+
+        # Worker (inline)
+        class EnhanceWorker(QObject):
+            finished = pyqtSignal(dict)
+
+            def __init__(self, api_service, params):
+                super().__init__()
+                self.api_service = api_service
+                self.params = params
+
+            def run(self):
+                result = self.api_service.call_generation_api(self.params)
+                self.finished.emit(result)
+
+        self._enhance_thread = QThread()
+        self._enhance_worker = EnhanceWorker(self.app_context.api_service, params)
+        self._enhance_worker.moveToThread(self._enhance_thread)
+
+        self._enhance_thread.started.connect(self._enhance_worker.run)
+        self._enhance_worker.finished.connect(
+            lambda result: self._handle_enhance_result(result, progress, orig_w, orig_h, new_w, new_h)
+        )
+        self._enhance_worker.finished.connect(self._enhance_thread.quit)
+        self._enhance_worker.finished.connect(self._enhance_worker.deleteLater)
+        self._enhance_thread.finished.connect(self._enhance_thread.deleteLater)
+
+        self._enhance_thread.start()
+
+    def _handle_enhance_result(self, result: dict, progress, orig_w, orig_h, new_w, new_h):
+        """Enhance API 결과 처리"""
+        import io as _io
+        progress.close()
+        self._update_enhance_button_state()
+
+        if result.get('status') == 'success':
+            pil_image = result.get('image')
+            raw_bytes = result.get('raw_bytes')
+
+            if pil_image is None and raw_bytes:
+                pil_image = Image.open(_io.BytesIO(raw_bytes))
+            if pil_image is None:
+                self._show_styled_message_main("Enhance 실패", "결과 이미지를 처리할 수 없습니다.", 'critical')
+                return
+
+            info_text = self.current_history_item.info_text
+            info_text += (
+                f"\nEnhanced: x{self._enhance_upscale:g}, strength={self._enhance_strength:.1f}, noise={self._enhance_noise:.1f}"
+                f" ({new_w}x{new_h})"
+            )
+
+            source_row = getattr(self.current_history_item, 'source_row', None)
+            self.add_to_history(pil_image, raw_bytes, info_text, source_row)
+            print(f"✅ Enhance 성공: {orig_w}x{orig_h} → {new_w}x{new_h}")
+        else:
+            error_msg = result.get('message', '알 수 없는 오류')
+            self._show_styled_message_main("Enhance 실패", error_msg, 'critical')
+
     def upscale_current_image_nai(self):
         """메인 이미지를 NAI API를 사용하여 2배 업스케일합니다."""
         from PyQt6.QtWidgets import QProgressDialog

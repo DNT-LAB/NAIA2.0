@@ -73,6 +73,8 @@ class GenerationWorker(QObject):
         self.params = None
         self.source_row = None
         self._is_running = False  # 🆕 실행 상태 추적
+        self._pending_progress_data = None  # 🔧 스레드 안전한 진행률 데이터 전달용
+        self._main_prompt_text = ''  # 🔧 메인 스레드에서 캡처한 프롬프트 텍스트
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -85,9 +87,14 @@ class GenerationWorker(QObject):
         try:
             self.generation_started.emit()
             self.generation_progress.emit("API 호출 중...")
-            
+
+            # 🔧 FIX: 스레드 안전한 진행률 콜백 (시그널 emit은 Qt에서 크로스 스레드 안전)
+            def _progress_callback(message, current, total, percent):
+                self.generation_progress.emit(message)
+                self._pending_progress_data = {"current": current, "total": total, "percent": percent}
+
             # API 호출 (이 부분이 시간이 오래 걸림)
-            api_result = self.context.api_service.call_generation_api(self.params)
+            api_result = self.context.api_service.call_generation_api(self.params, progress_callback=_progress_callback)
             
             # 🔧 FIX: API 결과가 error 상태인 경우 에러로 처리
             if api_result.get('status') == 'error':
@@ -197,13 +204,8 @@ class GenerationWorker(QObject):
             
             result['generation_params'] = params_copy
             
-            # 🆕 main_prompt 수집 (UI에서 직접 가져와 \n\n 포함하여 보존)
-            main_prompt_raw = ""
-            try:
-                if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
-                    main_prompt_raw = self.context.main_window.main_prompt_textedit.toPlainText()
-            except Exception as e:
-                print(f"⚠️ main_prompt 수집 실패: {e}")
+            # 🔧 FIX: 메인 스레드에서 캡처한 텍스트 사용 (크로스 스레드 UI 접근 방지)
+            main_prompt_raw = getattr(self, '_main_prompt_text', '')
             
             # 프롬프트 컨텍스트 정보
             result['prompt_context'] = {
@@ -702,6 +704,14 @@ class GenerationController:
         # 파라미터 설정 및 스레드 시작
         self.current_generation_params = params  # 🆕 현재 생성 파라미터 저장
         self.generation_worker.set_generation_params(params, source_row)
+
+        # 🔧 FIX: 메인 스레드에서 main_prompt 텍스트 캡처 (워커에서 크로스 스레드 UI 접근 방지)
+        try:
+            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
+                self.generation_worker._main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+        except Exception:
+            pass
+
         self.generation_thread.start()
     
     def _on_generation_started(self):
@@ -716,8 +726,14 @@ class GenerationController:
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
     
     def _on_generation_progress(self, message: str):
-        """생성 진행 상황 업데이트 슬롯"""
+        """생성 진행 상황 업데이트 슬롯 (메인 스레드에서 실행)"""
         self.context.main_window.status_bar.showMessage(message)
+
+        # 🔧 메인 스레드에서 안전하게 generation_progress 이벤트 발행 (Interactive Mode 등)
+        if self.generation_worker and hasattr(self.generation_worker, '_pending_progress_data'):
+            data = self.generation_worker._pending_progress_data
+            if data:
+                self.context.publish("generation_progress", data)
     
     def _on_generation_finished(self, result: dict):
         """생성 완료 시 호출되는 슬롯"""

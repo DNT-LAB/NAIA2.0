@@ -66,10 +66,15 @@ class APIService:
         except Exception:
             pass
 
-    def call_generation_api(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
         최대 5회까지 예외 발생 시 재시도합니다.
+
+        Args:
+            parameters: 생성 파라미터
+            progress_callback: ComfyUI 진행률 콜백 (message, current, total, percent)
+                워커 스레드에서 호출되므로 시그널 emit 등 스레드 안전한 방식으로 전달해야 함
         """
         # 입력 프롬프트에서 주석 및 개행문자 처리
         if 'input' in parameters and isinstance(parameters['input'], str):
@@ -183,7 +188,7 @@ class APIService:
                 elif api_mode == "WEBUI":
                     result = self._call_webui_api(parameters)
                 elif api_mode == "COMFYUI":  # 🆕 새로 추가
-                    result = self._call_comfyui_api(parameters)
+                    result = self._call_comfyui_api(parameters, progress_callback=progress_callback)
                 else:
                     result = {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
                 
@@ -936,7 +941,7 @@ class APIService:
             print(f"응답 데이터(zip) 처리 실패: {e}")
             return None
 
-    def _call_comfyui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _call_comfyui_api(self, params: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
         """ComfyUI API를 호출합니다."""
         try:
             # 1. ComfyUI 서버 URL 가져오기
@@ -960,7 +965,9 @@ class APIService:
             workflow = params['workflow']
 
             # 6. 진행률 콜백 설정
-            def progress_callback(current: int, total: int):
+            # 🔧 FIX: QTimer.singleShot 및 app_context.publish를 워커 스레드에서 직접 호출하지 않음
+            # 외부에서 전달된 progress_callback(시그널 emit)을 통해 메인 스레드로 안전하게 전달
+            def _comfyui_progress(current: int, total: int):
                 if total <= 0:
                     return
 
@@ -973,21 +980,12 @@ class APIService:
 
                 message = f"ComfyUI 생성 : {progress_percent}% ({current}/{total}) [{progress_bar}]"
 
-                # 🔧 상태바에 진행률 표시 (Main thread로 defer)
-                if hasattr(self, 'app_context') and self.app_context and hasattr(self.app_context, 'main_window'):
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(0, lambda msg=message: self.app_context.main_window.status_bar.showMessage(msg))
+                # 스레드 안전: 외부 콜백 호출 (GenerationWorker의 시그널 emit)
+                if progress_callback:
+                    progress_callback(message, current, total, progress_percent)
 
-                # 🆕 Interactive Mode를 위한 진행도 이벤트 발행
-                if hasattr(self, 'app_context') and self.app_context:
-                    self.app_context.publish("generation_progress", {
-                        "current": current,
-                        "total": total,
-                        "percent": progress_percent
-                    })
-            
             # 7. 이미지 생성 실행
-            result = self.comfyui_service.generate_image(workflow, progress_callback)
+            result = self.comfyui_service.generate_image(workflow, _comfyui_progress)
             
             if result and result['status'] == 'success':
                 print(f"✅ ComfyUI 이미지 생성 완료: {result['filename']}")

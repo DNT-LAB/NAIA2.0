@@ -180,3 +180,6 @@ data/tagger/model.onnx
 data/tagger/selected_tags.csv
 
 !/workflows/workflow.png
+
+#개발중
+/ui/variational

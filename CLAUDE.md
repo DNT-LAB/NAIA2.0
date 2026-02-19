@@ -26,8 +26,8 @@
   - 🆕 **AutoCompleteManager**: NAI `::` 가중치 편집 시 자동완성 무시, 괄호 쌍 매칭 로직
   - 🐛 **버그 수정** (2025-01-12): 자동완성 토큰 범위 오류 수정 (엔터 시 토큰 정보 갱신)
   - 🆕 **AutoCompleteManager**: 팝업 외부 클릭 시 자동 닫기 기능
-  - 🔧 **ComfyUIService** (2026-02-03): WebSocket 완전 제거, 순수 HTTP 폴링, QObject::killTimer 오류 해결
-  - 🔧 **APIService**: Background thread UI 접근 방지, QTimer.singleShot 패턴 적용
+  - 🔧 **ComfyUIService** (2026-02-03): WebSocket 완전 제거, 순수 HTTP 폴링
+  - 🔧 **APIService/GenerationWorker** (2026-02-19): QObject::killTimer 완전 해결 — progress_callback을 `pyqtSignal.emit()` 기반으로 변경, 워커 스레드 QTimer.singleShot/app_context.publish 제거, 크로스 스레드 UI 접근(`toPlainText()`) 제거
   - 🆕 **WildcardManager** (2026-02-08): 가중치 구문 지원 (`{int}:text`), `wildcard_dict_tree` 자료구조 `list[tuple[int, str]]`로 변경
   - 🔧 **WildcardProcessor**: `random.choices(weights=)` 기반 가중치 랜덤 선택, 순차/종속 모드 가중치 무시
 - ✅ **modules/CLAUDE.md** (v1.5): 모듈 개발 가이드, 파이프라인 훅, 모드 인식

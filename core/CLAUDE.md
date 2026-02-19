@@ -770,32 +770,27 @@ class GenerationWorker(QObject):
     generation_finished = pyqtSignal(dict)
     generation_error = pyqtSignal(str)
 
+    def __init__(self, context):
+        super().__init__()
+        self._pending_progress_data = None   # 🔧 스레드 안전한 진행률 데이터 전달용
+        self._main_prompt_text = ''          # 🔧 메인 스레드에서 캡처한 프롬프트 텍스트
+
     def run_generation(self):
         """별도 스레드에서 실행되는 생성 작업"""
         try:
             self.generation_started.emit()
             self.generation_progress.emit("API 호출 중...")
 
-            # 시간이 오래 걸리는 API 호출
-            api_result = self.context.api_service.call_generation_api(self.params)
+            # 🔧 스레드 안전한 진행률 콜백 (시그널 emit은 크로스 스레드 안전)
+            def _progress_callback(message, current, total, percent):
+                self.generation_progress.emit(message)
+                self._pending_progress_data = {"current": current, "total": total, "percent": percent}
 
-            # 에러 확인
-            if api_result.get('status') == 'error':
-                self.generation_error.emit(api_result.get('message'))
-                return
-
-            # 후처리
-            processed_result = self._post_process(api_result)
-
-            # 메타데이터 추출
-            if processed_result.get('image'):
-                info_text = self._extract_info_from_image(processed_result['image'])
-                processed_result['info'] = info_text
-
-            self.generation_finished.emit(processed_result)
-
-        except Exception as e:
-            self.generation_error.emit(str(e))
+            # 시간이 오래 걸리는 API 호출 (progress_callback으로 진행률 전달)
+            api_result = self.context.api_service.call_generation_api(
+                self.params, progress_callback=_progress_callback
+            )
+            # ...
 ```
 
 #### 스레드 정리
@@ -2280,38 +2275,56 @@ def wait_for_completion(self, prompt_id):
         time.sleep(0.1)
 ```
 
-**2. APIService에서 progress_callback을 Main Thread로 Defer** ([api_service.py:936](api_service.py#L936)):
-```python
-# ❌ 이전 (Background thread에서 직접 UI 접근)
-def progress_callback(current: int, total: int):
-    message = f"ComfyUI 생성 : {progress_percent}%..."
-    self.app_context.main_window.status_bar.showMessage(message)  # ❌ 크래시!
+**2. APIService에서 progress_callback을 시그널 기반으로 변경** (2026-02-19 재수정):
 
-# ✅ 현재 (Main thread로 defer)
-def progress_callback(current: int, total: int):
-    message = f"ComfyUI 생성 : {progress_percent}%..."
-    from PyQt6.QtCore import QTimer
+```python
+# ❌ 이전 v1 (Background thread에서 직접 UI 접근)
+def progress_callback(current, total):
+    self.app_context.main_window.status_bar.showMessage(msg)  # ❌ 크래시!
+
+# ❌ 이전 v2 (QTimer.singleShot - 워커 스레드에 타이머 누적)
+def progress_callback(current, total):
     QTimer.singleShot(0, lambda msg=message:
-        self.app_context.main_window.status_bar.showMessage(msg))  # ✅ 안전!
+        self.app_context.main_window.status_bar.showMessage(msg))  # ❌ killTimer!
+    self.app_context.publish("generation_progress", {...})        # ❌ 구독자도 killTimer!
+
+# ✅ 현재 (시그널 emit으로 메인 스레드 전달 - 완전 해결)
+# api_service.py: 외부 콜백만 호출 (QTimer/publish 없음)
+def _comfyui_progress(current, total):
+    if progress_callback:
+        progress_callback(message, current, total, progress_percent)
+
+# generation_controller.py: 워커가 시그널 emit (크로스 스레드 안전)
+def _progress_callback(message, current, total, percent):
+    self.generation_progress.emit(message)  # → 메인 스레드 슬롯으로 전달
+    self._pending_progress_data = {"current": current, "total": total, "percent": percent}
+
+# generation_controller.py: 메인 스레드 슬롯에서 UI 업데이트 + 이벤트 발행
+def _on_generation_progress(self, message):
+    self.context.main_window.status_bar.showMessage(message)
+    if self.generation_worker and self.generation_worker._pending_progress_data:
+        self.context.publish("generation_progress", self.generation_worker._pending_progress_data)
 ```
 
-**3. 이벤트 구독자에서도 Main Thread로 Defer** ([ui/interactive_window.py:1510-1542](ui/interactive_window.py#L1510)):
-```python
-def _on_generation_progress(self, progress_data):
-    percent = progress_data.get("percent", 0)
-    # ✅ Main thread로 defer
-    QTimer.singleShot(0, lambda: self._update_progress_ui_safe(percent))
+**3. 워커 스레드의 크로스 스레드 UI 접근 제거** (2026-02-19):
 
-def _update_progress_ui_safe(self, percent):
-    # 안전 - Main thread에서 실행됨
-    self.main_prompt_block.btn_generate.setText(f"🔄 생성 중... {percent}%")
+```python
+# ❌ 이전 (_collect_enhanced_metadata에서 워커 스레드가 UI 직접 접근)
+main_prompt_raw = self.context.main_window.main_prompt_textedit.toPlainText()  # ❌ 크로스 스레드!
+
+# ✅ 현재 (메인 스레드에서 캡처 후 워커에 전달)
+# _start_generation_thread에서 스레드 시작 전 캡처:
+self.generation_worker._main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+# _collect_enhanced_metadata에서 캡처된 텍스트 사용:
+main_prompt_raw = getattr(self, '_main_prompt_text', '')
 ```
 
 **핵심 원칙**:
 - ✅ **Background thread에서 Qt 객체 접근 금지**
-- ✅ **UI 업데이트는 반드시 `QTimer.singleShot(0, lambda: ...)` 패턴 사용**
+- ✅ **UI 업데이트는 `pyqtSignal.emit()` → 메인 스레드 슬롯 패턴 사용** (QTimer.singleShot 대신)
 - ✅ **WebSocket 같은 복잡한 비동기 라이브러리는 HTTP 폴링으로 대체**
-- ✅ **진행률 콜백은 데이터 준비만 하고, UI 업데이트는 main thread에서**
+- ✅ **진행률 콜백은 시그널 emit만 하고, UI 업데이트와 이벤트 발행은 메인 스레드에서**
+- ✅ **워커가 필요한 UI 데이터는 스레드 시작 전 메인 스레드에서 캡처하여 전달**
 
 **추가 참고**:
 - [generation_controller.py:14-55](generation_controller.py#L14) - QTimer 제거
@@ -2456,8 +2469,8 @@ print(f"스레드 목록: {[t.name for t in threading.enumerate()]}")
 
 ---
 
-*문서 버전: 1.7*
-*최종 업데이트: 2025-01-18*
+*문서 버전: 1.8*
+*최종 업데이트: 2026-02-19*
 *담당 영역: core/ 디렉터리*
 
 **변경사항**: [상세 변경 로그](.claude/CHANGELOG_CLAUDE.md) 참조

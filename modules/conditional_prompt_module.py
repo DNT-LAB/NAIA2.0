@@ -437,8 +437,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             elif char == ')':
                 paren_count -= 1
             
-            # 따옴표 처리
-            if char in ['"', "'"] and (i == 0 or rules_text[i-1] != '\\'):
+            # 따옴표 처리 (큰따옴표만 인용 구분자로 사용 - 작은따옴표는 태그 내 아포스트로피로 허용)
+            if char == '"' and (i == 0 or rules_text[i-1] != '\\'):
                 if not in_quotes:
                     in_quotes = True
                     quote_char = char

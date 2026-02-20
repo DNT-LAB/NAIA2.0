@@ -716,17 +716,28 @@ class GenerationController:
 
         # 🔧 메인 스레드에서 캐릭터 프롬프트 캡처 (NAI 모드)
         try:
-            if params.get('api_mode') == 'NAI' and hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'middle_section_controller'):
-                char_module = self.context.main_window.middle_section_controller.get_module_instance("CharacterModule")
-                if char_module and hasattr(char_module, 'character_widgets'):
-                    char_prompts = []
-                    for w in char_module.character_widgets:
-                        if w.active_checkbox.isChecked():
-                            char_prompts.append({
-                                'prompt': w.prompt_textbox.toPlainText(),
-                                'uc': w.uc_textbox.toPlainText(),
-                            })
-                    self.generation_worker._character_prompts = char_prompts
+            if params.get('api_mode') == 'NAI':
+                # override에 sketchbook_character_prompts가 있으면 그것을 사용
+                # tuple list [(prompt, uc)] → dict list [{'prompt': ..., 'uc': ...}]
+                if params.get('sketchbook_character_prompts'):
+                    converted = []
+                    for item in params['sketchbook_character_prompts']:
+                        if isinstance(item, tuple):
+                            converted.append({'prompt': item[0], 'uc': item[1]})
+                        elif isinstance(item, dict):
+                            converted.append(item)
+                    self.generation_worker._character_prompts = converted
+                elif hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'middle_section_controller'):
+                    char_module = self.context.main_window.middle_section_controller.get_module_instance("CharacterModule")
+                    if char_module and hasattr(char_module, 'character_widgets'):
+                        char_prompts = []
+                        for w in char_module.character_widgets:
+                            if w.active_checkbox.isChecked():
+                                char_prompts.append({
+                                    'prompt': w.prompt_textbox.toPlainText(),
+                                    'uc': w.uc_textbox.toPlainText(),
+                                })
+                        self.generation_worker._character_prompts = char_prompts
         except Exception:
             pass
 

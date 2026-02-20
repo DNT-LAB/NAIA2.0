@@ -1942,10 +1942,26 @@ class ImageWindow(QWidget):
         popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
         
         # 팝업의 신호를 메인 윈도우의 슬롯에 연결
+        # history_item이 있으면 캐릭터 프롬프트 등 컨텍스트를 함께 전달
+        history_item = self.current_history_item if hasattr(self, 'current_history_item') else None
         if hasattr(main_window, 'activate_img2img_panel'):
-            popup.img2img_requested.connect(main_window.activate_img2img_panel)
+            if history_item and hasattr(main_window, 'img2img_window_manager'):
+                popup.img2img_requested.connect(
+                    lambda img, hi=history_item: main_window.img2img_window_manager.create_window(
+                        img, mode='img2img', history_item=hi
+                    )
+                )
+            else:
+                popup.img2img_requested.connect(main_window.activate_img2img_panel)
         if hasattr(main_window, 'activate_inpaint_mode'):
-            popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
+            if history_item and hasattr(main_window, 'img2img_window_manager'):
+                popup.inpaint_requested.connect(
+                    lambda img, hi=history_item: self._open_inpaint_with_history(
+                        main_window, img, hi
+                    )
+                )
+            else:
+                popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
         if hasattr(main_window, 'on_tag_interrogation_requested'):
@@ -1968,6 +1984,20 @@ class ImageWindow(QWidget):
         popup.move(new_x, new_y)
         popup.exec()
     
+    def _open_inpaint_with_history(self, main_window, pil_image, history_item):
+        """history_item의 캐릭터 프롬프트를 유지하며 Inpaint 윈도우를 엽니다."""
+        from ui.inpaint_window import InpaintWindow
+        result = InpaintWindow.get_inpaint_data(pil_image, None, main_window)
+        if result:
+            mask_data = {
+                'full_mask_image': result.get('full_mask_image'),
+                'small_mask_image': result.get('small_mask_image'),
+            }
+            main_window.img2img_window_manager.create_window(
+                pil_image, mode='inpaint', mask_data=mask_data,
+                history_item=history_item
+            )
+
     def _send_to_sketchbook(self):
         """Send current image to Sketchbook with prompts for inpaint mode."""
         if not self.current_history_item:

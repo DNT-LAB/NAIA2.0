@@ -681,6 +681,8 @@ class Img2ImgWindowManager:
         self.main_window = main_window
         self.windows = {}  # {window_id: Img2ImgWindow}
         self._next_id = 1
+        self._last_strength = 50  # 0~99 (기본값 0.50)
+        self._last_noise = 0      # 0~99 (기본값 0.00)
 
     def create_window(self, pil_image, mode='img2img',
                       mask_data=None, outpaint_data=None,
@@ -703,6 +705,10 @@ class Img2ImgWindowManager:
         else:
             window.initialize_from_main_ui(self.main_window)
 
+        # 마지막 Strength/Noise 값 적용
+        window.strength_slider.setValue(self._last_strength)
+        window.noise_slider.setValue(self._last_noise)
+
         self.windows[window_id] = window
         window.show()
 
@@ -714,6 +720,10 @@ class Img2ImgWindowManager:
 
     def _on_window_closing(self, window_id):
         if window_id in self.windows:
+            window = self.windows[window_id]
+            # Strength/Noise 값 기억
+            self._last_strength = window.strength_slider.value()
+            self._last_noise = window.noise_slider.value()
             self.windows.pop(window_id)
 
     def close_all(self):

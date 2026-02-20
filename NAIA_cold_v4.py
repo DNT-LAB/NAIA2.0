@@ -5535,22 +5535,31 @@ class ModernMainWindow(QMainWindow):
         QTimer.singleShot(100, self.generation_controller.execute_generation_pipeline)
 
     def activate_img2img_panel(self, pil_image: Image.Image):
-        """Img2ImgPopup의 요청을 받아 Img2ImgPanel을 기본 모드로 활성화합니다."""
-        if hasattr(self, 'img2img_panel'):
-            print(f"🖼️ Img2Img 패널 활성화 (이미지 크기: {pil_image.size})")
-            self.img2img_panel.set_image(pil_image)
-            self.status_bar.showMessage("Img2Img 패널이 활성화되었습니다.", 3000)
+        """Img2ImgPopup의 요청을 받아 독립 Img2Img 윈도우를 엽니다."""
+        print(f"🖼️ Img2Img 윈도우 열기 (이미지 크기: {pil_image.size})")
+        self.img2img_window_manager.create_window(pil_image, mode='img2img')
+        self.status_bar.showMessage("Img2Img 윈도우가 열렸습니다.", 3000)
 
     def activate_inpaint_mode(self, pil_image: Image.Image, skip_window: bool = False):
-        """Img2ImgPopup의 요청을 받아 Img2ImgPanel을 활성화하고 즉시 Inpaint 창을 엽니다."""
-        if hasattr(self, 'img2img_panel'):
-            print(f"🎨 Inpaint 모드 활성화 요청 (이미지 크기: {pil_image.size})")
-            # 1. 먼저 패널을 이미지와 함께 활성화
-            self.img2img_panel.set_image(pil_image)
-            # 2. 패널의 Inpaint 버튼 클릭 로직을 즉시 실행 (unless skip_window is True)
-            # Note: skip_window is now handled differently via set_mask_from_sketchbook
-            if not skip_window:
-                self.img2img_panel._on_inpaint_button_clicked()
+        """Img2ImgPopup의 요청을 받아 InpaintWindow → 독립 Img2Img 윈도우를 엽니다.
+        skip_window=True: 스케치북 등에서 마스크를 이미 갖고 있는 경우 (기존 패널 방식)
+        """
+        print(f"🎨 Inpaint 모드 활성화 요청 (이미지 크기: {pil_image.size})")
+        if skip_window:
+            # 스케치북 등 기존 호출: img2img_panel 사용 (호출자가 이후 패널 직접 접근)
+            if hasattr(self, 'img2img_panel'):
+                self.img2img_panel.set_image(pil_image)
+            return
+        from ui.inpaint_window import InpaintWindow
+        result = InpaintWindow.get_inpaint_data(pil_image, None, self)
+        if result:
+            mask_data = {
+                'full_mask_image': result.get('full_mask_image'),
+                'small_mask_image': result.get('small_mask_image'),
+            }
+            self.img2img_window_manager.create_window(
+                pil_image, mode='inpaint', mask_data=mask_data
+            )
     
     def activate_vibe_transfer(self, pil_image: Image.Image):
         """Import Vibe Transfer 요청을 처리하여 이미지를 vibe transfer 모듈에 추가합니다."""
@@ -6317,19 +6326,14 @@ class ModernMainWindow(QMainWindow):
                 print(f"    ✓ Resolution: {resolution_text}")
     
     def send_to_img2img_with_metadata(self, pil_image: Image.Image, metadata: dict):
-        """메타데이터와 함께 img2img로 이미지를 전송합니다."""
+        """메타데이터와 함께 독립 Img2Img 윈도우를 엽니다."""
         try:
-            # img2img 패널 활성화
-            if hasattr(self, 'img2img_panel'):
-                self.img2img_panel.set_image(pil_image)
-                
-                # 메타데이터에서 프롬프트 정보 가져와서 설정 가능
-                if 'prompt' in metadata:
-                    # img2img 패널의 프롬프트 필드에 설정 (있다면)
-                    pass  # img2img 패널 구현에 따라 추가
-                
-                print(f"✅ 이미지와 메타데이터를 img2img로 전송 완료")
-                self.status_bar.showMessage("img2img로 이미지가 전송되었습니다.", 3000)
+            # 메타데이터에서 프롬프트 추출 시 메인 프롬프트에 설정
+            if 'prompt' in metadata and metadata['prompt']:
+                self.main_prompt_textedit.setPlainText(metadata['prompt'])
+            self.img2img_window_manager.create_window(pil_image, mode='img2img')
+            print(f"✅ 이미지와 메타데이터로 Img2Img 윈도우 열기 완료")
+            self.status_bar.showMessage("Img2Img 윈도우가 열렸습니다.", 3000)
         except Exception as e:
             print(f"❌ img2img 전송 중 오류: {e}")
 

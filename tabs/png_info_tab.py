@@ -1143,10 +1143,10 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
         popup = Img2ImgPopup(self.current_pil_image, self.app_context, main_window)
         
         # 시그널 연결 (MainWindow가 처리하도록)
-        if hasattr(main_window, 'send_to_img2img'):
-            popup.img2img_requested.connect(main_window.send_to_img2img)
-        if hasattr(main_window, 'send_to_inpaint'):
-            popup.inpaint_requested.connect(main_window.send_to_inpaint)
+        if hasattr(main_window, 'activate_img2img_panel'):
+            popup.img2img_requested.connect(main_window.activate_img2img_panel)
+        if hasattr(main_window, 'activate_inpaint_mode'):
+            popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
         if hasattr(main_window, 'on_tag_interrogation_requested'):

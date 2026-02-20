@@ -46,6 +46,7 @@ from core.prompt_generation_controller import PromptGenerationController
 from utils.load_generation_params import GenerationParamsManager
 from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
+from ui.img2img_window import Img2ImgWindow
 from core.main_controller import MainController
 from utils.token_calculator import get_token_calculator
 from core.comfyui_utils import ComfyUIAPIUtils
@@ -648,6 +649,54 @@ class TempWindowManager:
         print(f"🧹 [TempWindowManager] 모든 임시 창 정리 완료")
 
 
+class Img2ImgWindowManager:
+    """독립 Img2Img/Inpaint 윈도우 관리자"""
+
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.windows = {}  # {window_id: Img2ImgWindow}
+        self._next_id = 1
+
+    def create_window(self, pil_image, mode='img2img',
+                      mask_data=None, outpaint_data=None,
+                      history_item=None, auto_generate=False):
+        """새 독립 Img2Img 윈도우 생성"""
+        window_id = self._next_id
+        self._next_id += 1
+
+        window = Img2ImgWindow(window_id, self.main_window.app_context)
+        window.generate_requested.connect(self.main_window.on_img2img_window_generate)
+        window.window_closing.connect(self._on_window_closing)
+
+        window.set_image(pil_image, mode, mask_data, outpaint_data)
+
+        # 프롬프트 초기화
+        if (history_item and
+                hasattr(history_item, 'prompt_context') and
+                history_item.prompt_context):
+            window.initialize_from_history_item(history_item)
+        else:
+            window.initialize_from_main_ui(self.main_window)
+
+        self.windows[window_id] = window
+        window.show()
+
+        # 즉시 생성 (Outpaint Accept 등)
+        if auto_generate:
+            window.on_generate_clicked()
+
+        return window
+
+    def _on_window_closing(self, window_id):
+        if window_id in self.windows:
+            self.windows.pop(window_id)
+
+    def close_all(self):
+        for w in list(self.windows.values()):
+            w.close()
+        self.windows.clear()
+
+
 class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -704,6 +753,9 @@ class ModernMainWindow(QMainWindow):
 
         # TempWindowManager 초기화
         self.temp_window_manager = TempWindowManager(self)
+
+        # Img2ImgWindowManager 초기화
+        self.img2img_window_manager = Img2ImgWindowManager(self)
 
         # EZ Mode 창 변수 초기화
         self.ez_mode_window = None
@@ -4723,6 +4775,10 @@ class ModernMainWindow(QMainWindow):
             if hasattr(self, 'temp_window_manager'):
                 self.temp_window_manager.cleanup_all_temp_windows()
 
+            # 모든 Img2Img 독립 윈도우 닫기
+            if hasattr(self, 'img2img_window_manager'):
+                self.img2img_window_manager.close_all()
+
             current_mode = self.app_context.get_api_mode()
             self.generation_params_manager.save_mode_settings(current_mode)
 
@@ -6046,28 +6102,37 @@ class ModernMainWindow(QMainWindow):
             print(f"❌ img2img 전송 중 오류: {e}")
 
     def on_send_to_inpaint_requested(self, history_item):
-        """
-        Inpaint 요청을 받아 InpaintWindow를 즉시 실행합니다.
-        현재 선택된 API 모드(NAI/WEBUI/COMFYUI)를 그대로 사용합니다.
-        """
+        """InpaintWindow에서 마스크 그린 후 → 독립 윈도우 열기"""
         if not history_item or not hasattr(history_item, 'image'):
             return
 
-        # 현재 API 모드 확인 (강제 전환하지 않음)
-        current_mode = self.get_current_api_mode()
-        print(f"🎨 Inpaint 시작: 현재 모드 '{current_mode}'에서 실행됩니다.")
-        self.status_bar.showMessage(f"🎨 {current_mode} 모드에서 Inpaint를 시작합니다.", 3000)
-
-        # Inpaint 모드 활성화 (현재 모드 유지)
         pil_image = history_item.image
-        self.activate_inpaint_mode(pil_image)
+
+        from ui.inpaint_window import InpaintWindow
+        result = InpaintWindow.get_inpaint_data(pil_image, None, self)
+        if result is None:
+            return
+
+        mask_data = {
+            'full_mask_image': result.get('full_mask_image'),
+            'small_mask_image': result.get('small_mask_image'),
+        }
+        self.img2img_window_manager.create_window(
+            pil_image=pil_image,
+            mode='inpaint',
+            mask_data=mask_data,
+            history_item=history_item
+        )
 
     def on_send_to_img2img_requested(self, history_item):
-        """img2img 패널 활성화 (마스크 없이)"""
+        """독립 Img2Img 윈도우 열기"""
         if not history_item or not hasattr(history_item, 'image'):
             return
-        pil_image = history_item.image
-        self.activate_img2img_panel(pil_image)
+        self.img2img_window_manager.create_window(
+            pil_image=history_item.image,
+            mode='img2img',
+            history_item=history_item
+        )
 
     def on_instant_outpaint_requested(self, history_item):
         """즉시 Auto-Outpainting 실행 (img2img 패널 바이패스)"""
@@ -6088,16 +6153,27 @@ class ModernMainWindow(QMainWindow):
         self.generation_controller.execute_generation_pipeline(overrides=overrides)
 
     def on_send_to_outpaint_requested(self, history_item):
-        """OutpaintWindow 열고 결과를 패널에 설정"""
+        """OutpaintWindow → 독립 윈도우로 결과 전달"""
         if not history_item or not hasattr(history_item, 'image'):
             return
         pil_image = history_item.image
+
         from ui.outpaint_window import OutpaintWindow
         result = OutpaintWindow.get_outpaint_data(pil_image, self)
-        if result:
-            self.img2img_panel.set_image(pil_image)
-            self.img2img_panel._outpaint_data = result
-            self.img2img_panel._apply_outpaint_preview(result)
+        if result is None:
+            return
+
+        self.img2img_window_manager.create_window(
+            pil_image=pil_image,
+            mode='auto_outpainting',
+            outpaint_data=result,
+            history_item=history_item,
+            auto_generate=True
+        )
+
+    def on_img2img_window_generate(self, _window_id: int, params: dict):
+        """독립 Img2Img 윈도우에서 생성 요청"""
+        self.generation_controller.execute_generation_pipeline(overrides=params)
 
     def on_save_to_remote_event_requested(self, history_item):
         """🆕 리모트 이벤트 저장 요청 처리"""

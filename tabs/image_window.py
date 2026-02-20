@@ -1406,6 +1406,9 @@ class ImageWindow(QWidget):
     instant_generation_requested = pyqtSignal(object)
     load_prompt_to_main_ui = pyqtSignal(str)
     send_to_inpaint_requested = pyqtSignal(object)
+    send_to_img2img_requested = pyqtSignal(object)
+    instant_outpaint_requested = pyqtSignal(object)
+    send_to_outpaint_requested = pyqtSignal(object)
     save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, app_context, parent=None):
@@ -1822,14 +1825,33 @@ class ImageWindow(QWidget):
         menu.addAction(upscale_action)
 
         menu.addSeparator()
-        send_to_inpaint_action = QAction("🎨 Send to Inpaint", self)
-        send_to_inpaint_action.triggered.connect(self._emit_send_to_inpaint)
-        menu.addAction(send_to_inpaint_action)
+        nai_inpaint_menu = QMenu("🎨 NAI 인페인트 메뉴", menu)
+        nai_inpaint_menu.setStyleSheet(menu.styleSheet())
+
+        send_img2img = QAction("Send to img2img", nai_inpaint_menu)
+        send_img2img.triggered.connect(self._emit_send_to_img2img)
+        nai_inpaint_menu.addAction(send_img2img)
+
+        send_inpaint = QAction("Send to Inpaint", nai_inpaint_menu)
+        send_inpaint.triggered.connect(self._emit_send_to_inpaint)
+        nai_inpaint_menu.addAction(send_inpaint)
+
+        nai_inpaint_menu.addSeparator()
+
+        instant_outpaint = QAction("Instant Outpaint Request", nai_inpaint_menu)
+        instant_outpaint.triggered.connect(self._emit_instant_outpaint)
+        nai_inpaint_menu.addAction(instant_outpaint)
+
+        send_outpaint = QAction("Send to Outpainting", nai_inpaint_menu)
+        send_outpaint.triggered.connect(self._emit_send_to_outpaint)
+        nai_inpaint_menu.addAction(send_outpaint)
+
+        menu.addMenu(nai_inpaint_menu)
         
         # Add Send to Sketchbook action
         send_to_sketchbook_action = QAction("🖌️ Send to Sketchbook (NAI)", self)
         send_to_sketchbook_action.triggered.connect(self._send_to_sketchbook)
-        menu.addAction(send_to_sketchbook_action)
+        # menu.addAction(send_to_sketchbook_action)
         
         # Add Send to Character Reference action
         send_to_character_ref_action = QAction("📸 Send to Character Reference", self)
@@ -1852,10 +1874,25 @@ class ImageWindow(QWidget):
         # 기존의 save_current_image 메소드를 호출
         self.save_current_image()
     
+    def _emit_send_to_img2img(self):
+        """'Send to img2img' 요청 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.send_to_img2img_requested.emit(self.current_history_item)
+
     def _emit_send_to_inpaint(self):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
+
+    def _emit_instant_outpaint(self):
+        """'Instant Outpaint Request' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.instant_outpaint_requested.emit(self.current_history_item)
+
+    def _emit_send_to_outpaint(self):
+        """'Send to Outpainting' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.send_to_outpaint_requested.emit(self.current_history_item)
 
     def _emit_save_to_remote_event(self):
         """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""

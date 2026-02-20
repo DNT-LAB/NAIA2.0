@@ -1483,6 +1483,28 @@ def _cleanup_http_threads(self):
 
 **중요**: 모든 API 메서드 마지막에 반드시 호출!
 
+### Auto-Outpainting (단일 패스) 🆕
+
+**파일**: `core/api_service.py` — `_single_pass_outpainting()`
+
+**흐름**:
+1. `call_generation_api()`에서 `type == 'auto_outpainting'` 인터셉트 (API 모드 분기 전)
+2. OutpaintWindow 데이터가 있으면 (`outpaint_canvas_bytes`, `outpaint_mask_bytes`) 직접 사용
+3. 없으면 기본 캔버스 자동 생성:
+   - 가로 이미지 (`src_w > src_h`) → 1024×1024 (1:1)
+   - 세로/정사각 이미지 → 1216×832 (3:2)
+   - 이미지를 캔버스에 fit (`min(canvas_w/src_w, canvas_h/src_h)`)하여 중앙 배치
+4. 마스크 자동 생성 (이미지 영역=검정, 나머지=흰색, 8px 블렌딩 보더)
+5. NAI용 1/8 축소 마스크 + scipy dilation 마진 확장
+6. `type='inpaint'`로 변환하여 `call_generation_api()` 재호출
+
+**디버그**: `DEBUG_OUTPAINTING = True`로 각 단계 `img.show()` 출력
+
+**UI 연동** (`ui/img2img_panel.py`):
+- Auto-Outpainting 체크박스 (img2img 모드): 기본 캔버스로 자동 처리
+- Outpaint 버튼 (img2img 모드, 독립): OutpaintWindow에서 설정한 캔버스/마스크 직접 전달
+- `get_parameters()` 우선순위: `_outpaint_data` > auto_outpainting 체크 > img2img
+
 ### 캐릭터 위치 동적 좌표 처리 🆕
 
 **파일**: `core/api_service.py:424-452`

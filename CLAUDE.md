@@ -39,7 +39,9 @@
   - 🐛 **버그 수정** (2025-01-21): 분류 방법 변경 시 크래시 해결 (AttributeError)
   - 🆕 **Studio Tab** (v2.0): 다중 프레임 그리드, 순차 생성, 프리셋 시스템, 그리드 내보내기
     - **tabs/studio/CLAUDE.md**: 전용 상세 가이드 추가
-- ✅ **ui/CLAUDE.md** (v1.3): 테마 시스템, 스케일링, 공용 위젯, 분리 창
+- ✅ **ui/CLAUDE.md** (v1.4): 테마 시스템, 스케일링, 공용 위젯, 분리 창
+  - 🆕 **OutpaintWindow** (`ui/outpaint_window.py`): 아웃페인팅 설정 다이얼로그, 캔버스/이미지 배치, 리사이즈 핸들, RGBA 회전
+  - 🆕 **Auto-Outpainting**: 단일 패스 아웃페인팅 (`_single_pass_outpainting`), 가로→1:1/세로→3:2 기본 캔버스
   - 🆕 **CollapsibleBox**: 상태 추적, 스크롤 위치 저장/복원, 프로그래밍 제어
   - 🆕 **PromptHighlighter**: 시퀀스 토큰 하이라이팅 (`:begin`, `:seq`, `:end`)
   - 🆕 **ui/interactive/CLAUDE.md** (v1.0): Interactive Mode 전용 가이드

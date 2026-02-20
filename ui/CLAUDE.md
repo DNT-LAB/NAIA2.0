@@ -20,11 +20,12 @@
 6. [메타데이터 뷰어](#메타데이터-뷰어)
 7. [해상도 관리 다이얼로그](#해상도-관리-다이얼로그)
 8. [RightView 탭 컨테이너](#rightview-탭-컨테이너)
-9. [분리 창 시스템](#분리-창-시스템)
-10. [임시 생성 창 시스템](#임시-생성-창-시스템)
-11. [리모트 컨트롤 창](#리모트-컨트롤-창)
-12. [체크리스트](#체크리스트)
-13. [참고 자료](#참고-자료)
+9. [아웃페인팅 시스템](#아웃페인팅-시스템)
+10. [분리 창 시스템](#분리-창-시스템)
+11. [임시 생성 창 시스템](#임시-생성-창-시스템)
+12. [리모트 컨트롤 창](#리모트-컨트롤-창)
+13. [체크리스트](#체크리스트)
+14. [참고 자료](#참고-자료)
 
 ---
 
@@ -103,8 +104,9 @@ ui/
 | **hooker_view.py** | - | 훅 뷰어 (디버깅) | - |
 | **resolution_manager_dialog.py** | 8.4K | 해상도 관리 다이얼로그 | `ResolutionManagerDialog` (인접값 자동 제안) |
 | **scaling_settings_dialog.py** | - | 스케일링 설정 다이얼로그 | - |
-| **inpaint_window.py** | - | 인페인트 윈도우 | - |
-| **img2img_panel.py** | - | Img2Img 패널 | - |
+| **inpaint_window.py** | - | 인페인트 윈도우 | `InpaintWindow`, `get_inpaint_data()` |
+| **img2img_panel.py** | - | Img2Img/Inpaint 패널 | Auto-Outpainting 체크박스, Outpaint 버튼 |
+| **outpaint_window.py** | - | 아웃페인팅 설정 다이얼로그 | `OutpaintWindow`, `get_outpaint_data()` |
 
 ---
 
@@ -708,6 +710,67 @@ highlighter = PromptHighlighter(self.prompt_edit.document())
 - **Q3**: CollapsibleBox가 비어 보여요
 - **Q4**: DetachedWindow가 메인 창 뒤에 숨어요
 - **Q5**: ModernMenu 태그 정보가 안 나와요
+
+---
+
+## 아웃페인팅 시스템
+
+### 개요
+
+이미지를 더 넓은 캔버스에 배치하고 주변을 AI로 채우는 아웃페인팅 기능. 두 가지 모드 제공:
+
+1. **Auto-Outpainting** (체크박스): img2img 모드에서 체크 → 기본 캔버스에 자동 배치 후 인페인트
+2. **Outpaint 버튼** (독립): OutpaintWindow에서 캔버스 크기/이미지 위치를 직접 설정
+
+### 파일 구조
+
+| 파일 | 역할 |
+|------|------|
+| `ui/outpaint_window.py` | 아웃페인팅 설정 다이얼로그 (캔버스/배치/마스크) |
+| `ui/img2img_panel.py` | Auto-Outpainting 체크박스 + Outpaint 버튼 |
+| `core/api_service.py` | `_single_pass_outpainting()` — 단일 패스 인페인트 실행 |
+
+### OutpaintWindow (`ui/outpaint_window.py`)
+
+QDialog 기반 다이얼로그. 정적 팩토리 메서드로 호출:
+
+```python
+from ui.outpaint_window import OutpaintWindow
+result = OutpaintWindow.get_outpaint_data(pil_image, parent)
+# result: dict | None
+# {
+#     "canvas_image": Image (RGB),
+#     "full_mask_image": Image (L),
+#     "small_mask_image": Image (L, 1/8 축소),
+#     "canvas_width": int,
+#     "canvas_height": int,
+# }
+```
+
+**주요 기능**:
+- **캔버스 크기**: QSpinBox (64단위), 프리셋 (3:2, 2:3, 1:1, 16:9)
+- **이미지 변환**: 스케일 슬라이더 (10~200%), 회전 슬라이더 (-180°~+180°)
+- **드래그 배치**: QGraphicsView에서 이미지를 마우스로 드래그, 8px 그리드 스냅
+- **리사이즈 핸들**: 4 코너 핸들로 직접 스케일 조절
+- **자동 맞춤**: 윈도우 열 때 & 해상도 변경 시 이미지를 캔버스에 자동 fit + 중앙 배치
+- **기본 캔버스**: 가로 이미지 → 1024×1024 (1:1), 세로 이미지 → 1216×832 (3:2)
+- **마스크 자동 생성**: 이미지 영역=검정(보존), 나머지=흰색(채움), 블렌딩 보더(8px), scipy dilation
+- **RGBA 회전**: 회전 시 투명 배경 유지 → 프리뷰에서 캔버스/오버레이가 자연스럽게 비침
+
+### img2img_panel.py 연동
+
+- **Auto-Outpainting 체크박스**: img2img 모드에서 표시. 체크 시 `type="auto_outpainting"` → `_single_pass_outpainting()`으로 기본 캔버스 자동 처리
+- **Outpaint 버튼**: img2img 모드에서 항상 표시 (체크박스와 독립). OutpaintWindow 결과를 `_outpaint_data`에 저장
+- **get_parameters() 우선순위**: `_outpaint_data` 존재 시 > auto_outpainting 체크 시 > 기본 img2img
+
+### API 서비스 (`core/api_service.py`)
+
+`_single_pass_outpainting(parameters)`:
+1. OutpaintWindow 데이터가 있으면 직접 사용 (canvas_bytes, mask_bytes)
+2. 없으면 기본 캔버스 자동 생성 (가로→1024×1024, 세로→1216×832), 이미지 fit 배치
+3. `type='inpaint'`로 변환하여 `call_generation_api()` 재호출
+
+`DEBUG_OUTPAINTING = True` 플래그로 각 단계에서 `img.show()` 디버그 출력 가능.
 
 ---
 

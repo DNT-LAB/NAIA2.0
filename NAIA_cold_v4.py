@@ -6062,6 +6062,43 @@ class ModernMainWindow(QMainWindow):
         pil_image = history_item.image
         self.activate_inpaint_mode(pil_image)
 
+    def on_send_to_img2img_requested(self, history_item):
+        """img2img 패널 활성화 (마스크 없이)"""
+        if not history_item or not hasattr(history_item, 'image'):
+            return
+        pil_image = history_item.image
+        self.activate_img2img_panel(pil_image)
+
+    def on_instant_outpaint_requested(self, history_item):
+        """즉시 Auto-Outpainting 실행 (img2img 패널 바이패스)"""
+        if not history_item or not hasattr(history_item, 'image'):
+            return
+        pil_image = history_item.image
+        byte_arr = BytesIO()
+        pil_image.save(byte_arr, format='PNG')
+        overrides = {
+            "image_bytes": byte_arr.getvalue(),
+            "type": "auto_outpainting",
+            "strength": 0.70,
+            "noise": 0.00,
+            "width": pil_image.width,
+            "height": pil_image.height,
+        }
+        self.status_bar.showMessage("🎨 Instant Outpainting 요청 중...", 3000)
+        self.generation_controller.execute_generation_pipeline(overrides=overrides)
+
+    def on_send_to_outpaint_requested(self, history_item):
+        """OutpaintWindow 열고 결과를 패널에 설정"""
+        if not history_item or not hasattr(history_item, 'image'):
+            return
+        pil_image = history_item.image
+        from ui.outpaint_window import OutpaintWindow
+        result = OutpaintWindow.get_outpaint_data(pil_image, self)
+        if result:
+            self.img2img_panel.set_image(pil_image)
+            self.img2img_panel._outpaint_data = result
+            self.img2img_panel._apply_outpaint_preview(result)
+
     def on_save_to_remote_event_requested(self, history_item):
         """🆕 리모트 이벤트 저장 요청 처리"""
         if not history_item:

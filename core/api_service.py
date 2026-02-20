@@ -171,6 +171,12 @@ class APIService:
                 print(f"   - 정리된 프롬프트: '{cleaned_tags_prompt[:100]}...'")
 
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
+
+        # Auto-Outpainting 인터셉트 (API 모드 분기 전에 처리)
+        if parameters.get('type') == 'auto_outpainting':
+            print(f"[API] Auto-Outpainting 단일 패스 모드로 전환합니다.")
+            return self._single_pass_outpainting(parameters)
+
         print(f"[API] APIService: '{api_mode}' 모드로 API 호출을 시작합니다.")
         print(f"   [파라미터] 주요 파라미터: {parameters.get('width', 'N/A')}x{parameters.get('height', 'N/A')}, "
             f"모델: {parameters.get('model', 'N/A')}, 샘플러: {parameters.get('sampler', 'N/A')}")
@@ -217,11 +223,6 @@ class APIService:
                 if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
                     print("✂️ Cropped image request enabled, extracting mask area...")
                     result = self._extract_cropped_image(result, parameters)
-                
-                # Check if auto_outpainting is enabled and first generation was successful
-                elif result and result.get('status') == 'success' and parameters.get('auto_outpainting'):
-                    print("🎨 Auto-Outpainting enabled, processing second pass...")
-                    result = self._auto_outpainting(result, parameters)
                 
                 return result
                 
@@ -1183,237 +1184,193 @@ class APIService:
             # Return original result on error
             return result
     
-    def _auto_outpainting(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def _single_pass_outpainting(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Auto-Outpainting 처리를 수행합니다.
-        첫 번째 생성 결과를 받아 3:2 비율로 확장하여 두 번째 생성을 수행합니다.
-        
+        단일 패스 Auto-Outpainting을 수행합니다.
+        원본 이미지를 직접 캔버스에 배치하고, 마스크를 자동 생성하여 인페인트 요청합니다.
+
         Args:
-            result: 첫 번째 생성 결과 (이미지 바이트 포함)
-            parameters: 원본 생성 파라미터
-            
+            parameters: 생성 파라미터 (image_bytes 포함)
+
         Returns:
-            두 번째 생성 결과 또는 에러 시 원본 결과
+            아웃페인팅 결과 또는 에러
         """
+        DEBUG_OUTPAINTING = False
+
         try:
-            import numpy as np
-            
-            # 1. Extract the generated image from result
-            print("🎨 Step 1: Extracting generated image...")
-            
-            generated_image = None
-            raw_bytes = None
-            
-            # Check for 'image' key (PIL Image object)
-            if 'image' in result and result['image'] is not None:
-                generated_image = result['image']
-                print(f"   ✅ Found PIL Image: {generated_image.size}")
-            
-            # Also check for raw_bytes for saving later
-            if 'raw_bytes' in result:
-                raw_bytes = result['raw_bytes']
-                if generated_image is None:
-                    generated_image = Image.open(io.BytesIO(raw_bytes))
-                    print(f"   ✅ Created PIL Image from raw_bytes: {generated_image.size}")
-            
-            if generated_image is None:
-                print("   ❌ No image found in result")
-                return result
-            
-            # Get the full mask data for auto-outpainting
-            # Use full_mask_pil if available (for auto-outpainting), otherwise use mask_bytes
-            full_mask_pil = parameters.get('full_mask_pil')
-            if full_mask_pil:
-                # Use the full mask PIL object directly
-                mask_image = full_mask_pil
-                if mask_image.mode != 'L':
-                    mask_image = mask_image.convert('L')
-                print(f"   ✅ Using full mask PIL: {mask_image.size}")
-            elif parameters.get('mask_bytes'):
-                # Fallback to mask_bytes if no full_mask_pil
-                mask_bytes = parameters.get('mask_bytes')
-                # Decode mask and find the inpainted region
-                mask_image = Image.open(io.BytesIO(mask_bytes))
-                if mask_image.mode != 'L':
-                    mask_image = mask_image.convert('L')
-                print(f"   ⚠️ Using mask_bytes (may be small): {mask_image.size}")
+            # 1. 원본 이미지 로드
+            print("🎨 [Outpainting] Step 1: 원본 이미지 로드...")
+            source_image = Image.open(io.BytesIO(parameters['image_bytes']))
+            src_w, src_h = source_image.size
+            print(f"   ✅ 원본 이미지: {src_w}x{src_h}")
+
+            if DEBUG_OUTPAINTING:
+                source_image.show()  # DEBUG: 원본 이미지
+
+            # OutpaintWindow에서 미리 준비된 캔버스/마스크가 있는 경우 직접 사용
+            if parameters.get('outpaint_canvas_bytes') and parameters.get('outpaint_mask_bytes'):
+                print("🎨 [Outpainting] OutpaintWindow 데이터 사용...")
+                canvas_bytes = parameters['outpaint_canvas_bytes']
+                mask_bytes = parameters['outpaint_mask_bytes']
+                canvas_width = parameters.get('outpaint_canvas_width', 1216)
+                canvas_height = parameters.get('outpaint_canvas_height', 832)
+
+                if DEBUG_OUTPAINTING:
+                    Image.open(io.BytesIO(canvas_bytes)).show()  # DEBUG: 캔버스
+                    Image.open(io.BytesIO(mask_bytes)).show()  # DEBUG: 마스크
             else:
-                mask_image = None
-            
-            if mask_image:
-                # Find bounding box of the mask (white areas)
-                mask_array = np.array(mask_image)
-                white_pixels = np.where(mask_array > 127)
-                
-                if len(white_pixels[0]) > 0:
-                    # Get bounding box of the masked area
-                    y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
-                    x_min, x_max = white_pixels[1].min(), white_pixels[1].max()
-                    
-                    # Crop the generated image to the mask area
-                    cropped_image = generated_image.crop((x_min, y_min, x_max + 1, y_max + 1))
-                    print(f"   ✅ Cropped to mask area: {cropped_image.size}")
+                # 2. 기본 캔버스 생성 (가로 이미지 → 1:1, 세로/정사각 → 3:2)
+                print("🎨 [Outpainting] Step 2: 캔버스 생성...")
+                if src_w > src_h:
+                    canvas_width = 1024
+                    canvas_height = 1024
                 else:
-                    # No mask found, use the entire image
-                    cropped_image = generated_image
-                    print("   ⚠️ No mask area found, using entire image")
-            else:
-                # No mask provided, use the entire image
-                cropped_image = generated_image
-                print("   ℹ️ No mask provided, using entire image")
-            
-            # 2. Create expanded canvas (1216 x 832)
-            print("🎨 Step 2: Creating expanded canvas...")
-            
-            canvas_width = 1216
-            canvas_height = 832
-            
-            # Create white canvas
-            canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 255))
-            
-            # Calculate position to center the cropped image
-            crop_w, crop_h = cropped_image.size
-            x_offset = (canvas_width - crop_w) // 2
-            y_offset = (canvas_height - crop_h) // 2
-            
-            # Ensure the cropped image is in RGBA mode
-            if cropped_image.mode != 'RGBA':
-                cropped_image = cropped_image.convert('RGBA')
-            
-            # Paste the cropped image in the center
-            canvas.paste(cropped_image, (x_offset, y_offset))
-            print(f"   ✅ Canvas created: {canvas_width}x{canvas_height}, image centered at ({x_offset}, {y_offset})")
-            
-            # 3. Generate outpainting mask
-            print("🎨 Step 3: Generating outpainting mask...")
-            
-            # Create mask - white for areas to inpaint, black for areas to keep
-            mask = Image.new('L', (canvas_width, canvas_height), 255)  # Start with all white
-            
-            # Create black rectangle for the original image area
-            mask_draw = np.array(mask)
-            mask_draw[y_offset:y_offset + crop_h, x_offset:x_offset + crop_w] = 0
-            
-            # Add 32px white border around the original image for blending
-            border_size = 64
-            # Top border
-            if y_offset - border_size >= 0:
-                mask_draw[max(0, y_offset - border_size):y_offset, 
-                         max(0, x_offset - border_size):min(canvas_width, x_offset + crop_w + border_size)] = 255
-            # Bottom border  
-            if y_offset + crop_h + border_size <= canvas_height:
-                mask_draw[y_offset + crop_h:min(canvas_height, y_offset + crop_h + border_size),
-                         max(0, x_offset - border_size):min(canvas_width, x_offset + crop_w + border_size)] = 255
-            # Left border
-            if x_offset - border_size >= 0:
-                mask_draw[max(0, y_offset - border_size):min(canvas_height, y_offset + crop_h + border_size),
-                         max(0, x_offset - border_size):x_offset] = 255
-            # Right border
-            if x_offset + crop_w + border_size <= canvas_width:
-                mask_draw[max(0, y_offset - border_size):min(canvas_height, y_offset + crop_h + border_size),
-                         x_offset + crop_w:min(canvas_width, x_offset + crop_w + border_size)] = 255
-            
-            mask = Image.fromarray(mask_draw.astype(np.uint8), mode='L')
-            
-            # Resize mask to NAI small size (152x104) and ensure perfect binary
-            nai_width = 152
-            nai_height = 104
-            
-            # Resize to NAI dimensions
-            mask_small = mask.resize((nai_width, nai_height), Image.NEAREST)
-            
-            # Ensure perfect binary (0 or 255 only)
-            mask_array_small = np.array(mask_small)
-            mask_array_small = np.where(mask_array_small > 127, 255, 0).astype(np.uint8)
-            
-            # Add 4-pixel inpaint margin inside the boundaries between black and white areas
-            # This helps with edge blending in the small mask
-            margin = 6
-            
-            # Use scipy for efficient dilation if available, otherwise use numpy
-            try:
-                from scipy import ndimage
-                # Create a circular kernel for dilation
-                kernel = np.ones((margin*2+1, margin*2+1), dtype=np.uint8)
-                # Dilate white areas (expand them by margin pixels)
-                mask_array_small = ndimage.binary_dilation(mask_array_small == 255, kernel).astype(np.uint8) * 255
-                print(f"   ✅ Added {margin}px inpaint margin using scipy dilation")
-            except ImportError:
-                # Fallback: simple numpy-based dilation
-                mask_copy = mask_array_small.copy()
-                for y in range(nai_height):
-                    for x in range(nai_width):
-                        # If current pixel is black (0)
-                        if mask_copy[y, x] == 0:
-                            # Check if any pixel within margin distance is white
-                            for dy in range(max(0, y-margin), min(nai_height, y+margin+1)):
-                                for dx in range(max(0, x-margin), min(nai_width, x+margin+1)):
-                                    if mask_copy[dy, dx] == 255:
-                                        mask_array_small[y, x] = 255
-                                        break
-                                if mask_array_small[y, x] == 255:
-                                    break
-                print(f"   ✅ Added {margin}px inpaint margin using numpy")
-            
-            mask_small_binary = Image.fromarray(mask_array_small, mode='L')
-            
-            # Save mask without compression
-            mask_byte_arr = io.BytesIO()
-            mask_small_binary.save(mask_byte_arr, format='PNG', compress_level=0, optimize=False)
-            mask_bytes_raw = mask_byte_arr.getvalue()
-            
-            print(f"   ✅ Mask generated: original {mask.size} → NAI size {mask_small_binary.size}")
-            print(f"   ✅ Binary values: {np.unique(mask_array_small)}")
-            
-            # 4. Prepare parameters for second generation
-            print("🎨 Step 4: Preparing parameters for second generation...")
-            
-            # Copy parameters
+                    canvas_width = 1216
+                    canvas_height = 832
+
+                # 이미지를 캔버스에 맞게 스케일 (fit)
+                fit_ratio = min(canvas_width / src_w, canvas_height / src_h)
+                if fit_ratio < 1.0 or fit_ratio > 1.0:
+                    new_w = int(src_w * fit_ratio)
+                    new_h = int(src_h * fit_ratio)
+                    # 8의 배수로 정렬
+                    new_w = max(8, (new_w // 8) * 8)
+                    new_h = max(8, (new_h // 8) * 8)
+                    source_image = source_image.resize((new_w, new_h), Image.LANCZOS)
+                    src_w, src_h = new_w, new_h
+                    print(f"   ✅ 이미지 캔버스 맞춤: {new_w}x{new_h} (ratio={fit_ratio:.2f})")
+
+                canvas = Image.new('RGB', (canvas_width, canvas_height), (255, 255, 255))
+
+                # 8px 그리드에 맞춰 중앙 배치
+                x_offset = ((canvas_width - src_w) // 2 // 8) * 8
+                y_offset = ((canvas_height - src_h) // 2 // 8) * 8
+
+                if source_image.mode == 'RGBA':
+                    canvas.paste(source_image, (x_offset, y_offset), source_image)
+                else:
+                    canvas.paste(source_image, (x_offset, y_offset))
+
+                print(f"   ✅ 캔버스: {canvas_width}x{canvas_height}, 이미지 위치: ({x_offset}, {y_offset})")
+
+                if DEBUG_OUTPAINTING:
+                    canvas.show()  # DEBUG: 캔버스 + 이미지
+
+                # 3. 마스크 자동 생성
+                print("🎨 [Outpainting] Step 3: 마스크 생성...")
+                mask_array = np.full((canvas_height, canvas_width), 255, dtype=np.uint8)
+                # 이미지 영역을 검정(보존)으로 설정
+                mask_array[y_offset:y_offset + src_h, x_offset:x_offset + src_w] = 0
+
+                # 경계 블렌딩 보더 (이미지 가장자리 8px를 마스크에 포함)
+                border = 8
+                if src_h > border * 2 and src_w > border * 2:
+                    # 상단 가장자리
+                    mask_array[y_offset:y_offset + border, x_offset:x_offset + src_w] = 255
+                    # 하단 가장자리
+                    mask_array[y_offset + src_h - border:y_offset + src_h, x_offset:x_offset + src_w] = 255
+                    # 좌측 가장자리
+                    mask_array[y_offset:y_offset + src_h, x_offset:x_offset + border] = 255
+                    # 우측 가장자리
+                    mask_array[y_offset:y_offset + src_h, x_offset + src_w - border:x_offset + src_w] = 255
+
+                mask_full = Image.fromarray(mask_array, mode='L')
+
+                if DEBUG_OUTPAINTING:
+                    mask_full.show()  # DEBUG: 풀사이즈 마스크
+
+                # NAI용 1/8 축소 마스크 생성
+                api_mode = parameters.get('api_mode', 'NAI')
+                if api_mode == "NAI":
+                    small_w = canvas_width // 8
+                    small_h = canvas_height // 8
+                    mask_small = mask_full.resize((small_w, small_h), Image.NEAREST)
+                    mask_small_array = np.array(mask_small)
+                    mask_small_array = np.where(mask_small_array > 127, 255, 0).astype(np.uint8)
+
+                    # Dilation으로 마진 확장 (블렌딩 개선)
+                    margin = 4
+                    try:
+                        from scipy import ndimage
+                        kernel = np.ones((margin * 2 + 1, margin * 2 + 1), dtype=np.uint8)
+                        mask_small_array = ndimage.binary_dilation(
+                            mask_small_array == 255, kernel
+                        ).astype(np.uint8) * 255
+                        print(f"   ✅ {margin}px 마진 확장 (scipy)")
+                    except ImportError:
+                        mask_copy = mask_small_array.copy()
+                        for y in range(small_h):
+                            for x in range(small_w):
+                                if mask_copy[y, x] == 0:
+                                    for dy in range(max(0, y - margin), min(small_h, y + margin + 1)):
+                                        for dx in range(max(0, x - margin), min(small_w, x + margin + 1)):
+                                            if mask_copy[dy, dx] == 255:
+                                                mask_small_array[y, x] = 255
+                                                break
+                                        if mask_small_array[y, x] == 255:
+                                            break
+                        print(f"   ✅ {margin}px 마진 확장 (numpy)")
+
+                    mask_to_encode = Image.fromarray(mask_small_array, mode='L')
+                else:
+                    # WebUI/ComfyUI는 풀사이즈 마스크 사용
+                    mask_to_encode = mask_full
+
+                # 마스크를 PNG 바이트로 변환
+                mask_byte_arr = io.BytesIO()
+                mask_to_encode.save(mask_byte_arr, format='PNG', compress_level=0, optimize=False)
+                mask_bytes = mask_byte_arr.getvalue()
+
+                # 캔버스를 PNG 바이트로 변환
+                canvas_byte_arr = io.BytesIO()
+                canvas.save(canvas_byte_arr, format='PNG')
+                canvas_bytes = canvas_byte_arr.getvalue()
+
+                print(f"   ✅ 마스크 생성 완료: {mask_to_encode.size}, 값: {np.unique(np.array(mask_to_encode))}")
+
+            # 4. 인페인트 파라미터 구성
+            print("🎨 [Outpainting] Step 4: 인페인트 파라미터 구성...")
             new_params = parameters.copy()
-            
-            # Convert expanded canvas to bytes
-            canvas_byte_arr = io.BytesIO()
-            canvas.save(canvas_byte_arr, format='PNG')
-            new_params['image_bytes'] = canvas_byte_arr.getvalue()
-            
-            # Set mask bytes (raw, without 8x scaling)
-            new_params['mask_bytes'] = mask_bytes_raw
-            
-            # Update dimensions
+            new_params['image_bytes'] = canvas_bytes
+            new_params['mask_bytes'] = mask_bytes
             new_params['width'] = canvas_width
             new_params['height'] = canvas_height
-            
-            # Set as inpaint type
             new_params['type'] = 'inpaint'
-            
-            # Keep strength from original or set default
-            if 'strength' not in new_params:
+
+            # strength 기본값 설정
+            if 'strength' not in new_params or new_params['strength'] < 0.5:
                 new_params['strength'] = 0.7
-            
-            # Remove auto_outpainting flag to prevent infinite recursion
-            if 'auto_outpainting' in new_params:
-                del new_params['auto_outpainting']
-            
-            print(f"   ✅ Parameters prepared: {canvas_width}x{canvas_height}, strength={new_params.get('strength')}")
-            
-            # 5. Call API for second generation
-            print("🎨 Step 5: Calling API for second generation...")
-            
-            second_result = self.call_generation_api(new_params)
-            
-            if second_result and second_result.get('status') == 'success':
-                print("   ✅ Auto-Outpainting completed successfully!")
-                return second_result
-            else:
-                print("   ⚠️ Second generation failed, returning original result")
+
+            # 무한 재귀 방지
+            new_params.pop('auto_outpainting', None)
+            new_params.pop('outpaint_canvas_bytes', None)
+            new_params.pop('outpaint_mask_bytes', None)
+            new_params.pop('outpaint_canvas_width', None)
+            new_params.pop('outpaint_canvas_height', None)
+
+            print(f"   ✅ 파라미터: {canvas_width}x{canvas_height}, strength={new_params.get('strength')}")
+
+            # 5. API 호출
+            print("🎨 [Outpainting] Step 5: API 호출...")
+            result = self.call_generation_api(new_params)
+
+            if result and result.get('status') == 'success':
+                print("   ✅ Auto-Outpainting 완료!")
+                if DEBUG_OUTPAINTING:
+                    if 'image' in result and result['image']:
+                        result['image'].show()  # DEBUG: 최종 결과
+                    elif 'raw_bytes' in result:
+                        Image.open(io.BytesIO(result['raw_bytes'])).show()
                 return result
-            
+            else:
+                print("   ❌ Auto-Outpainting 실패")
+                return result or {'status': 'error', 'message': 'Auto-outpainting API 호출 실패'}
+
         except Exception as e:
-            print(f"❌ Auto-Outpainting failed: {e}")
+            print(f"❌ Auto-Outpainting 오류: {e}")
             import traceback
             traceback.print_exc()
-            # On error, return the original result
-            return result
+            return {'status': 'error', 'message': f'Auto-outpainting 실패: {e}'}
     
     def upscale_NAI(self, pixmap: 'QPixmap', token: str = None) -> Dict[str, Any]:
         """

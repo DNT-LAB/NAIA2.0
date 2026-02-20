@@ -75,6 +75,7 @@ class GenerationWorker(QObject):
         self._is_running = False  # 🆕 실행 상태 추적
         self._pending_progress_data = None  # 🔧 스레드 안전한 진행률 데이터 전달용
         self._main_prompt_text = ''  # 🔧 메인 스레드에서 캡처한 프롬프트 텍스트
+        self._character_prompts = []  # 🔧 메인 스레드에서 캡처한 캐릭터 프롬프트
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -213,6 +214,7 @@ class GenerationWorker(QObject):
                 'processed_input': self.params.get('input', ''),  # 필요시 파이프라인 처리 후 값으로 교체
                 'negative_prompt': self.params.get('negative_prompt', ''),
                 'main_prompt': main_prompt_raw,  # 🆕 UI에서 가져온 원본 프롬프트 (\n\n 포함)
+                'character_prompts': getattr(self, '_character_prompts', []),
                 'source_tags': self.source_row.to_dict() if self.source_row is not None else {},
                 'wildcard_resolved': self.source_row is not None
             }
@@ -709,6 +711,22 @@ class GenerationController:
         try:
             if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
                 self.generation_worker._main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+        except Exception:
+            pass
+
+        # 🔧 메인 스레드에서 캐릭터 프롬프트 캡처 (NAI 모드)
+        try:
+            if params.get('api_mode') == 'NAI' and hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'middle_section_controller'):
+                char_module = self.context.main_window.middle_section_controller.get_module_instance("CharacterModule")
+                if char_module and hasattr(char_module, 'character_widgets'):
+                    char_prompts = []
+                    for w in char_module.character_widgets:
+                        if w.active_checkbox.isChecked():
+                            char_prompts.append({
+                                'prompt': w.prompt_textbox.toPlainText(),
+                                'uc': w.uc_textbox.toPlainText(),
+                            })
+                    self.generation_worker._character_prompts = char_prompts
         except Exception:
             pass
 

@@ -29,6 +29,7 @@ class Img2ImgPanel(QFrame):
         self.small_mask_pil: Image.Image = None
         self._mask_preset = False  # Flag to indicate if mask was preset from sketchbook
         self._mask_from_sketchbook = False  # Additional flag for sketchbook source
+        self._outpaint_data = None  # OutpaintWindow에서 설정된 데이터
         
         self.init_ui()
         self.setVisible(False)
@@ -132,8 +133,8 @@ class Img2ImgPanel(QFrame):
         noise_hlayout.addWidget(self.noise_value_label)
         controls_layout.addWidget(noise_group)
 
-        # Auto-Outpainting checkbox (only visible in inpaint mode)
-        self.auto_outpainting_checkbox = QCheckBox("Enable Auto-Outpainting (3:2)")
+        # Auto-Outpainting checkbox (img2img 모드에서 표시)
+        self.auto_outpainting_checkbox = QCheckBox("Auto-Outpainting")
         self.auto_outpainting_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 font-size: {get_scaled_font_size(16)}px;
@@ -210,12 +211,19 @@ class Img2ImgPanel(QFrame):
         self.upscale_button.setFixedWidth(120)
         bottom_button_layout.addWidget(self.upscale_button)
         
+        self.outpaint_button = QPushButton("Outpaint")
+        self.outpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.outpaint_button.clicked.connect(self._on_outpaint_button_clicked)
+        self.outpaint_button.setFixedWidth(120)
+        self.outpaint_button.setVisible(False)  # img2img 모드에서만 표시
+        bottom_button_layout.addWidget(self.outpaint_button)
+
         self.inpaint_button = QPushButton("Inpaint Image")
         self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
         self.inpaint_button.clicked.connect(self._on_inpaint_button_clicked) # [2단계] 연결 메서드 변경
         self.inpaint_button.setFixedWidth(200)
         bottom_button_layout.addWidget(self.inpaint_button)
-        
+
         main_layout.addLayout(bottom_button_layout)
 
     def _on_inpaint_button_clicked(self):
@@ -261,20 +269,60 @@ class Img2ImgPanel(QFrame):
             self.update() # 패널 다시 그리기 요청
             self._update_ui_for_mode()
 
+    def _on_outpaint_button_clicked(self):
+        """Outpaint Setup 윈도우를 열어 사용자가 캔버스/이미지 배치를 설정합니다."""
+        if not self.original_pil_image:
+            return
+
+        from .outpaint_window import OutpaintWindow
+        result = OutpaintWindow.get_outpaint_data(self.original_pil_image, self)
+
+        if result is None:
+            return  # 사용자가 취소함
+
+        # 아웃페인트 데이터 저장
+        self._outpaint_data = result
+        self._apply_outpaint_preview(result)
+
+    def _apply_outpaint_preview(self, result):
+        """아웃페인트 결과를 프리뷰에 반영합니다."""
+        canvas = result["canvas_image"].convert("RGBA")
+        canvas_array = np.array(canvas)
+        mask_array = np.array(result["full_mask_image"])
+        # 마스크 영역에 파란 오버레이
+        mask_indices = mask_array == 255
+        canvas_array[mask_indices] = [100, 100, 255, 160]
+        preview = Image.fromarray(canvas_array, 'RGBA')
+
+        q_image = ImageQt(preview)
+        self.background_pixmap = QPixmap.fromImage(q_image).scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        cw, ch = result["canvas_width"], result["canvas_height"]
+        self.title_label.setText(f"Outpaint → {cw}x{ch}")
+        self.update()
+        print(f"🎨 Outpaint 설정 적용: {cw}x{ch}")
+
     # [2단계] 모드에 따라 UI를 업데이트하는 헬퍼 메서드
     def _update_ui_for_mode(self):
         if self.mode == 'inpaint':
             self.inpaint_button.setText("Edit Mask")
             self.inpaint_button.setStyleSheet(DARK_STYLES['primary_button']) # 강조 색상으로 변경
-            self.auto_outpainting_checkbox.setVisible(True)  # Show checkbox in inpaint mode
+            self.auto_outpainting_checkbox.setVisible(False)  # 인페인트 모드에서는 숨김
+            self.auto_outpainting_checkbox.setChecked(False)
             self.cropped_image_checkbox.setVisible(True)  # Show cropped image checkbox in inpaint mode
         else: # 'img2img'
             self.inpaint_button.setText("Inpaint Image")
             self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
-            self.auto_outpainting_checkbox.setVisible(False)  # Hide checkbox in img2img mode
-            self.auto_outpainting_checkbox.setChecked(False)  # Reset checkbox state
+            self.auto_outpainting_checkbox.setVisible(True)  # img2img 모드에서 표시
             self.cropped_image_checkbox.setVisible(False)  # Hide cropped image checkbox in img2img mode
             self.cropped_image_checkbox.setChecked(False)  # Reset checkbox state
+        # Outpaint 버튼: img2img 모드에서 항상 표시
+        if hasattr(self, 'outpaint_button'):
+            self.outpaint_button.setVisible(self.mode != 'inpaint')
 
     def _update_strength_label(self, value):
         """Strength 슬라이더 값 변경 시 라벨 업데이트"""
@@ -282,7 +330,7 @@ class Img2ImgPanel(QFrame):
         self.strength_value_label.setText(f"{strength_value:.2f}")
     
     def _on_auto_outpainting_toggled(self, checked):
-        """Auto-outpainting 체크박스 토글 시 cropped_image 체크박스 해제"""
+        """Auto-outpainting 체크박스 토글 시 관련 UI 업데이트"""
         if checked and self.cropped_image_checkbox.isChecked():
             self.cropped_image_checkbox.setChecked(False)
     
@@ -314,6 +362,7 @@ class Img2ImgPanel(QFrame):
         self.mode = 'img2img'
         self.full_mask_pil = None
         self.small_mask_pil = None
+        self._outpaint_data = None  # 아웃페인트 데이터 초기화
         self._update_ui_for_mode()
 
         # 64배수 리사이징 및 크롭 적용
@@ -508,7 +557,8 @@ class Img2ImgPanel(QFrame):
         self.small_mask_pil = None
         self._mask_preset = False  # Reset preset flag
         self._mask_from_sketchbook = False  # Reset sketchbook flag
-        
+        self._outpaint_data = None  # Reset outpaint data
+
         # 타이틀을 원래 상태로 복원
         self.title_label.setText("Image2Image & Inpaint")
         
@@ -537,39 +587,33 @@ class Img2ImgPanel(QFrame):
         if self.mode == 'inpaint':
             params["type"] = "inpaint"
             api_mode = self.app_context.get_api_mode()
-            
-            # Add auto_outpainting parameter if checkbox is checked
-            if self.auto_outpainting_checkbox.isChecked():
-                params["auto_outpainting"] = True
-                # Always provide full mask for auto-outpainting
-                params["full_mask_pil"] = self.full_mask_pil
-            
+
             # Add cropped_image_request parameter if checkbox is checked
             if self.cropped_image_checkbox.isChecked():
                 params["cropped_image_request"] = True
                 # Provide full mask for cropped image extraction
                 params["full_mask_pil"] = self.full_mask_pil
-            
+
             mask_to_use = self.small_mask_pil if api_mode == "NAI" else self.full_mask_pil
-            
+
             # 🔥 수정: 모든 API에 대해 완벽한 이진 PNG 전송
             # Convert to grayscale if needed
             if mask_to_use.mode != 'L':
                 mask_to_use = mask_to_use.convert('L')
-            
+
             mask_array = np.array(mask_to_use)
-            
+
             # Ensure 2D array (grayscale)
             if len(mask_array.shape) > 2:
                 mask_array = mask_array[:, :, 0] if mask_array.shape[2] > 0 else mask_array[:, :]
-            
+
             # 완벽한 이진화 강제 (혹시 모를 중간값 제거)
             mask_array = np.where(mask_array > 127, 255, 0).astype(np.uint8)
-            
+
             # 완벽한 이진 마스크를 PNG로 변환
             mask_image_clean = Image.fromarray(mask_array, mode='L')
             mask_byte_arr = io.BytesIO()
-            
+
             if api_mode == "NAI":
                 # NAI: 무압축 PNG로 저장하여 완벽한 품질 보장
                 mask_image_clean.save(mask_byte_arr, format='PNG', compress_level=0, optimize=False)
@@ -580,6 +624,21 @@ class Img2ImgPanel(QFrame):
                 mask_image_clean.save(mask_byte_arr, format='PNG', compress_level=1, optimize=False)
                 params["mask_bytes"] = mask_byte_arr.getvalue()
                 print(f"✅ PNG 마스크 전송 (WebUI, Size: {mask_array.shape})")
+        elif hasattr(self, '_outpaint_data') and self._outpaint_data:
+            # Outpaint 버튼으로 설정된 데이터 사용 (우선)
+            params["type"] = "auto_outpainting"
+            data = self._outpaint_data
+            canvas_bytes = io.BytesIO()
+            data["canvas_image"].save(canvas_bytes, format='PNG')
+            mask_bytes = io.BytesIO()
+            data["small_mask_image"].save(mask_bytes, format='PNG', compress_level=0, optimize=False)
+            params["outpaint_canvas_bytes"] = canvas_bytes.getvalue()
+            params["outpaint_mask_bytes"] = mask_bytes.getvalue()
+            params["outpaint_canvas_width"] = data["canvas_width"]
+            params["outpaint_canvas_height"] = data["canvas_height"]
+        elif self.auto_outpainting_checkbox.isChecked():
+            # Auto-Outpainting 모드: 기본 캔버스로 단일 패스 처리
+            params["type"] = "auto_outpainting"
         else:
             params["type"] = "img2img"
 

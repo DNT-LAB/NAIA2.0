@@ -399,6 +399,8 @@ class PromptTextEdit(QTextEdit):
             popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
+        if hasattr(main_window, 'on_tag_interrogation_requested'):
+            popup.tag_interrogation_requested.connect(main_window.on_tag_interrogation_requested)
 
         # 팝업 위치 조정 및 실행
         cursor_pos = QCursor.pos()
@@ -440,6 +442,29 @@ class PromptTextEdit(QTextEdit):
                     return
         
         super().dragMoveEvent(event)
+
+
+class _PipInstallWorker(QObject):
+    """백그라운드에서 pip install을 실행하는 워커"""
+    finished = pyqtSignal(bool, str)  # (success, message)
+
+    def __init__(self, python_exe: str, package: str):
+        super().__init__()
+        self._python_exe = python_exe
+        self._package = package
+
+    def run(self):
+        import subprocess
+        try:
+            result = subprocess.run(
+                [self._python_exe, '-m', 'pip', 'install', self._package],
+                check=True, capture_output=True, text=True
+            )
+            self.finished.emit(True, result.stdout)
+        except subprocess.CalledProcessError as e:
+            self.finished.emit(False, e.stderr or str(e))
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 
 class TempWindowManager:
@@ -701,8 +726,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 147c"
-        self.setWindowTitle(self.base_title + " - 260219")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 148"
+        self.setWindowTitle(self.base_title + " - 260220")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -5551,6 +5576,213 @@ class ModernMainWindow(QMainWindow):
             print(f"Error adding image to vibe transfer: {e}")
             QMessageBox.critical(self, "오류", f"Vibe Transfer에 이미지 추가 실패:\n{str(e)}")
     
+    # ─── Tag Interrogation (Danbooru 태그 분석) ──────────────
+
+    def on_tag_interrogation_requested(self, pil_image: Image.Image):
+        """Tag Interrogation: WD14 태그 분석 요청 처리"""
+        import importlib.util
+        import os
+
+        # Step 1: onnxruntime 설치 확인
+        has_ort = importlib.util.find_spec('onnxruntime') is not None
+        if not has_ort:
+            reply = QMessageBox.question(
+                self, "onnxruntime 필요",
+                "태그 분석을 위해 onnxruntime 라이브러리가 필요합니다.\n"
+                "설치하시겠습니까? (pip install onnxruntime)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._tag_pil_image = pil_image
+                self._start_onnxruntime_install()
+            return
+
+        # Step 2: 모델 파일 확인
+        base_dir = os.path.join(os.getcwd(), "data", "tagger")
+        onnx_path = os.path.join(base_dir, "model.onnx")
+        csv_path = os.path.join(base_dir, "selected_tags.csv")
+
+        if not os.path.exists(onnx_path) or not os.path.exists(csv_path):
+            from ui.interactive.image_tagger_block import (
+                TaggerDownloadWorker, DownloadProgressDialog
+            )
+            self._tag_pil_image = pil_image
+            self._tag_download_dialog = DownloadProgressDialog(self)
+            self._tag_download_worker = TaggerDownloadWorker()
+            self._tag_download_worker.progress.connect(
+                lambda pct, msg: (
+                    self._tag_download_dialog.progress_bar.setValue(pct),
+                    self._tag_download_dialog.status_label.setText(msg)
+                )
+            )
+            self._tag_download_worker.finished.connect(self._on_tag_download_finished)
+            self._tag_download_dialog.show()
+            self._tag_download_worker.start()
+            return
+
+        # Step 3: 태그 분석 실행
+        from ui.interactive.image_tagger_block import TaggerWorker
+        self._tag_pil_image = pil_image
+        self.status_bar.showMessage("🏷️ 태그 분석 중...")
+
+        self._tagger_worker = TaggerWorker(pil_image, general_th=0.56, character_th=0.85)
+        self._tagger_worker.progress.connect(
+            lambda msg: self.status_bar.showMessage(f"🏷️ {msg}")
+        )
+        self._tagger_worker.finished.connect(self._on_tag_interrogation_finished)
+        self._tagger_worker.error.connect(self._on_tag_interrogation_error)
+        self._tagger_worker.start()
+
+    def _start_onnxruntime_install(self):
+        """onnxruntime 설치를 백그라운드 스레드에서 실행"""
+        import sys
+
+        # 설치 진행 다이얼로그
+        self._ort_install_dialog = QProgressDialog(
+            "onnxruntime 설치 중...", None, 0, 0, self
+        )
+        self._ort_install_dialog.setWindowTitle("패키지 설치")
+        self._ort_install_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self._ort_install_dialog.setCancelButton(None)
+        self._ort_install_dialog.setMinimumDuration(0)
+        self._ort_install_dialog.show()
+
+        # 워커 스레드에서 pip install 실행
+        self._ort_install_thread = QThread()
+        self._ort_install_worker = _PipInstallWorker(sys.executable, 'onnxruntime')
+        self._ort_install_worker.moveToThread(self._ort_install_thread)
+        self._ort_install_thread.started.connect(self._ort_install_worker.run)
+        self._ort_install_worker.finished.connect(self._on_onnxruntime_install_finished)
+        self._ort_install_worker.finished.connect(self._ort_install_thread.quit)
+        self._ort_install_thread.finished.connect(self._ort_install_worker.deleteLater)
+        self._ort_install_thread.finished.connect(self._ort_install_thread.deleteLater)
+        self._ort_install_thread.start()
+
+    def _on_onnxruntime_install_finished(self, success: bool, message: str):
+        """onnxruntime 설치 완료 콜백"""
+        if hasattr(self, '_ort_install_dialog') and self._ort_install_dialog:
+            self._ort_install_dialog.close()
+            self._ort_install_dialog = None
+
+        if success:
+            # 동적으로 onnxruntime import → 모듈에 ort + HAS_TAGGER_LIBS 갱신
+            try:
+                import onnxruntime as ort
+                import ui.interactive.image_tagger_block as tagger_mod
+                tagger_mod.ort = ort
+                tagger_mod.HAS_TAGGER_LIBS = True
+            except ImportError:
+                QMessageBox.critical(
+                    self, "오류",
+                    "onnxruntime 설치 후 로드에 실패했습니다.\n프로그램을 재시작해주세요."
+                )
+                return
+
+            QMessageBox.information(
+                self, "설치 완료",
+                "onnxruntime이 설치되었습니다.\n태그 분석을 자동으로 시작합니다."
+            )
+            # 자동으로 태그 분석 재시도
+            if hasattr(self, '_tag_pil_image') and self._tag_pil_image:
+                self.on_tag_interrogation_requested(self._tag_pil_image)
+        else:
+            QMessageBox.critical(self, "설치 실패", f"설치 중 오류:\n{message}")
+
+    def _on_tag_download_finished(self, success: bool, message: str):
+        """태그 모델 다운로드 완료"""
+        if hasattr(self, '_tag_download_dialog') and self._tag_download_dialog:
+            self._tag_download_dialog.close()
+            self._tag_download_dialog = None
+        if success:
+            if hasattr(self, '_tag_pil_image') and self._tag_pil_image:
+                self.on_tag_interrogation_requested(self._tag_pil_image)
+        else:
+            QMessageBox.warning(self, "다운로드 실패", message)
+
+    def _on_tag_interrogation_error(self, error_msg: str):
+        """태그 분석 오류"""
+        self.status_bar.showMessage(f"태그 분석 실패: {error_msg}", 5000)
+        QMessageBox.warning(self, "태그 분석 오류", error_msg)
+
+    def _on_tag_interrogation_finished(self, result: dict):
+        """태그 분석 완료 → 파이프라인 처리 → 결과 창 표시"""
+        self.status_bar.showMessage("🏷️ 태그 분석 완료. 프롬프트 생성 중...")
+
+        # general 태그 추출 + 언더스코어 제거
+        general_tags = result.get("general", [])
+        tag_strings = [t[0].replace("_", " ") for t in general_tags]
+        tags_dict = {"general": tag_strings}
+
+        # 설정 수집 (on_instant_generation_requested와 동일)
+        comfyui_sampling_mode = "eps"
+        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
+        settings = {
+            'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
+            'auto_generate': self.generation_checkboxes["자동 생성"].isChecked(),
+            'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
+            'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
+            'api_mode': self.app_context.get_api_mode(),
+            'comfyui_sampling_mode': comfyui_sampling_mode
+        }
+
+        # 파이프라인 정제 (side-effect 없음)
+        final_prompt = self.prompt_gen_controller.generate_instant_source_silent(tags_dict, settings)
+        if final_prompt is None:
+            final_prompt = ", ".join(tag_strings)
+
+        # 결과 윈도우 표시
+        from ui.tag_result_window import TagResultWindow
+
+        self._tag_result_window = TagResultWindow(
+            pil_image=self._tag_pil_image,
+            prompt_text=final_prompt,
+            parent=None
+        )
+        self._tag_result_window.apply_to_main_prompt.connect(
+            lambda text: self.main_prompt_textedit.setPlainText(text)
+        )
+        self._tag_result_window.instant_generate_requested.connect(
+            self._on_tag_result_instant_generate
+        )
+        self._tag_result_window.img2img_requested.connect(
+            self._on_tag_result_img2img
+        )
+        self._tag_result_window.inpaint_requested.connect(
+            self._on_tag_result_inpaint
+        )
+        self._tag_result_window.show()
+        self.status_bar.showMessage("🏷️ 태그 분석 결과가 표시되었습니다.", 3000)
+
+    def _on_tag_result_instant_generate(self, prompt_text: str):
+        """태그 결과 창에서 즉시 생성 요청"""
+        overrides = {'input': prompt_text}
+        self.generation_controller.execute_generation_pipeline(overrides=overrides)
+
+    def _on_tag_result_img2img(self, pil_image, prompt_text: str):
+        """태그 결과 창에서 img2img 요청"""
+        self.main_prompt_textedit.setPlainText(prompt_text)
+        self.img2img_window_manager.create_window(pil_image, mode='img2img')
+
+    def _on_tag_result_inpaint(self, pil_image, prompt_text: str):
+        """태그 결과 창에서 Inpaint 요청"""
+        self.main_prompt_textedit.setPlainText(prompt_text)
+        from ui.inpaint_window import InpaintWindow
+        result = InpaintWindow.get_inpaint_data(pil_image, None, self)
+        if result:
+            mask_data = {
+                'full_mask_image': result.get('full_mask_image'),
+                'small_mask_image': result.get('small_mask_image'),
+            }
+            self.img2img_window_manager.create_window(
+                pil_image, mode='inpaint', mask_data=mask_data
+            )
+
     def apply_prompt_from_metadata(self, prompt: str, negative: str):
         """메타데이터에서 프롬프트를 적용합니다."""
         try:

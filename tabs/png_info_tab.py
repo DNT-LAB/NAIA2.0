@@ -1149,7 +1149,9 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
             popup.inpaint_requested.connect(main_window.send_to_inpaint)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
-        
+        if hasattr(main_window, 'on_tag_interrogation_requested'):
+            popup.tag_interrogation_requested.connect(main_window.on_tag_interrogation_requested)
+
         # 팝업 위치 설정 (버튼 근처)
         button_pos = self.extract_info_button.mapToGlobal(self.extract_info_button.rect().center())
         popup.move(button_pos.x() - popup.width() // 2, button_pos.y())

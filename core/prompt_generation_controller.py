@@ -54,6 +54,29 @@ class PromptGenerationController(QObject):
             # ✅ 와일드카드 상태 뷰를 위한 이벤트 발행
             self.app_context.publish("prompt_generated", context)
         
+    def generate_instant_source_silent(self, instant_row: dict, settings: dict) -> str | None:
+        """태그를 프롬프트로 정제하여 반환 (시그널 미발행, app_context 상태 복원)"""
+        saved_source = self.app_context.current_source_row
+        saved_context = self.app_context.current_prompt_context
+        try:
+            processed = {}
+            for key, value in instant_row.items():
+                if isinstance(value, list):
+                    processed[key] = ', '.join(map(str, value))
+                else:
+                    processed[key] = value
+            series = pd.Series(processed)
+            self.app_context.current_source_row = series
+            self.app_context.current_prompt_context = self._create_initial_context(series, settings)
+            final_context = self.processor.process()
+            return final_context.final_prompt if final_context else None
+        except Exception as e:
+            print(f"[TagInterrogation] Silent generation error: {e}")
+            return None
+        finally:
+            self.app_context.current_source_row = saved_source
+            self.app_context.current_prompt_context = saved_context
+
     def generate_instant_source(self, instant_row: dict | pd.Series, settings: dict):
         """즉시 생성 요청을 처리합니다. (단순화)"""
         if isinstance(instant_row, dict):

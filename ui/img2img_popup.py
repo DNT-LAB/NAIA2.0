@@ -12,6 +12,7 @@ class Img2ImgPopup(QDialog):
     img2img_requested = pyqtSignal(Image.Image)
     inpaint_requested = pyqtSignal(Image.Image)
     import_vibe_transfer_requested = pyqtSignal(Image.Image)
+    tag_interrogation_requested = pyqtSignal(Image.Image)
 
     def __init__(self, pil_image: Image.Image,  app_context=None, parent=None):
         super().__init__(parent)
@@ -104,6 +105,32 @@ class Img2ImgPopup(QDialog):
             metadata_button.clicked.connect(self.on_metadata_view)
             main_layout.addWidget(metadata_button)
         
+        # Tag Interrogation 버튼 (항상 표시)
+        tag_button = QPushButton("🏷️ Danbooru 태그 분석")
+        tag_button.setFixedSize(512, 40)
+        tag_font_size = get_scaled_font_size(19)
+        tag_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #5C3D00;
+                border: 1px solid #8C6E14;
+                color: #FFD580;
+                font-size: {tag_font_size}px;
+                font-weight: 500;
+                border-radius: 4px;
+                padding: 8px 24px;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+            }}
+            QPushButton:hover {{
+                background-color: #6C4D10;
+                border: 1px solid #9C7E24;
+            }}
+            QPushButton:pressed {{
+                background-color: #4C2D00;
+            }}
+        """)
+        tag_button.clicked.connect(self.on_tag_interrogation)
+        main_layout.addWidget(tag_button)
+
         # Import Vibe Transfer 버튼 (NAI 모드일 때만 표시)
         if self.app_context and hasattr(self.app_context, 'get_api_mode'):
             if self.app_context.get_api_mode() == "NAI":
@@ -187,6 +214,12 @@ class Img2ImgPopup(QDialog):
         # 현재 팝업도 닫기 (사용자가 메타데이터 윈도우에서 작업 가능)
         self.accept()
     
+    def on_tag_interrogation(self):
+        """태그 분석 버튼 클릭 시 신호를 발생시키고 닫습니다."""
+        print("태그 분석 작업 요청 신호 발생")
+        self.tag_interrogation_requested.emit(self.pil_image)
+        self.accept()
+
     def on_import_vibe_transfer(self):
         """Import Vibe Transfer 버튼 클릭 시 신호를 발생시키고 닫습니다."""
         print("Import Vibe Transfer 작업 요청 신호 발생")

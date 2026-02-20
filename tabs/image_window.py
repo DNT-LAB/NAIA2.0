@@ -1948,7 +1948,9 @@ class ImageWindow(QWidget):
             popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
-        
+        if hasattr(main_window, 'on_tag_interrogation_requested'):
+            popup.tag_interrogation_requested.connect(main_window.on_tag_interrogation_requested)
+
         # 팝업 위치 조정 및 실행
         cursor_pos = QCursor.pos()
         popup_rect = popup.geometry()

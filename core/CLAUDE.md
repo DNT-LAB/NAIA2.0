@@ -717,6 +717,19 @@ def _create_initial_context(self, source_row: pd.Series, settings: dict) -> Prom
     return context
 ```
 
+#### Side-effect 없는 프롬프트 생성 🆕
+
+`core/prompt_generation_controller.py`
+
+```python
+def generate_instant_source_silent(self, instant_row: dict, settings: dict) -> str | None:
+    """태그를 프롬프트로 정제하여 반환 (시그널 미발행, app_context 상태 복원)"""
+```
+
+- Tag Interrogation 등에서 사용: 프롬프트 파이프라인을 실행하되 메인 UI에 side-effect 없음
+- `app_context.current_source_row`, `current_prompt_context`를 save/restore (finally 블록)
+- 실패 시 `None` 반환
+
 #### 프롬프트 생성 실행
 
 `core/prompt_generation_controller.py:85-115`
@@ -808,6 +821,26 @@ def _force_cleanup_all_threads():
 ```
 
 **중요**: 모든 API 호출 후 반드시 `_force_cleanup_all_threads()` 호출!
+
+#### 캐릭터 프롬프트 캡처 우선순위 🆕
+
+`core/generation_controller.py:717-742`
+
+메인 스레드에서 캐릭터 프롬프트를 캡처하여 `GenerationWorker._character_prompts`에 저장.
+이 값이 `prompt_context.character_prompts`로 history_item에 기록됩니다.
+
+**우선순위**:
+1. `params['sketchbook_character_prompts']` (독립 Img2ImgWindow의 override) — tuple→dict 변환 포함
+2. 메인 UI `CharacterModule.character_widgets` (active인 것만)
+
+```python
+if params.get('sketchbook_character_prompts'):
+    # [(prompt, uc)] tuple → [{'prompt': ..., 'uc': ...}] dict 변환
+    converted = [{'prompt': p, 'uc': u} if isinstance(item, tuple) else item ...]
+    self.generation_worker._character_prompts = converted
+elif ...:
+    # 메인 UI CharacterModule에서 캡처
+```
 
 #### 임시 창 Virtual Module 훅 수동 실행
 

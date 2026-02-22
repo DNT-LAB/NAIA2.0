@@ -17,8 +17,8 @@
 - **링크 방식**: 메인 문서에서 핵심만 설명, 상세는 레퍼런스 링크로 안내
   - 예: `**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)`
 
-**📚 문서화 현황** (2026-02-08 업데이트):
-- ✅ **core/CLAUDE.md** (v1.9): AppContext, 컨트롤러, 파이프라인, API 서비스
+**📚 문서화 현황** (2026-02-20 업데이트):
+- ✅ **core/CLAUDE.md** (v2.0): AppContext, 컨트롤러, 파이프라인, API 서비스
   - 🆕 ImageCrudController 파일명 형식, 분류 시스템, 타임스탬프 폴더 토글
   - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
   - 🆕 **SequenceParser**: 시퀀스 프롬프트 파싱 (`:begin`, `:seq`, `:end`)
@@ -30,6 +30,8 @@
   - 🔧 **APIService/GenerationWorker** (2026-02-19): QObject::killTimer 완전 해결 — progress_callback을 `pyqtSignal.emit()` 기반으로 변경, 워커 스레드 QTimer.singleShot/app_context.publish 제거, 크로스 스레드 UI 접근(`toPlainText()`) 제거
   - 🆕 **WildcardManager** (2026-02-08): 가중치 구문 지원 (`{int}:text`), `wildcard_dict_tree` 자료구조 `list[tuple[int, str]]`로 변경
   - 🔧 **WildcardProcessor**: `random.choices(weights=)` 기반 가중치 랜덤 선택, 순차/종속 모드 가중치 무시
+  - 🆕 **GenerationController** (2026-02-20): `sketchbook_character_prompts` override 시 `prompt_context.character_prompts`에도 반영 (tuple→dict 변환)
+  - 🆕 **PromptGenerationController**: `generate_instant_source_silent()` — side-effect 없는 프롬프트 파이프라인 처리
 - ✅ **modules/CLAUDE.md** (v1.5): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
   - 🆕 **프리셋 랜덤화 시스템**: `*randomized` 특수 프리셋, 랜덤 프리셋 풀 관리, 자동/수동 프리셋 선택
   - 🆕 **e621 Intent Boost**: Intent 기반 3-phase wiki 텍스트 검색, 외형 필터, 상황 태그 반환
@@ -39,7 +41,10 @@
   - 🐛 **버그 수정** (2025-01-21): 분류 방법 변경 시 크래시 해결 (AttributeError)
   - 🆕 **Studio Tab** (v2.0): 다중 프레임 그리드, 순차 생성, 프리셋 시스템, 그리드 내보내기
     - **tabs/studio/CLAUDE.md**: 전용 상세 가이드 추가
-- ✅ **ui/CLAUDE.md** (v1.4): 테마 시스템, 스케일링, 공용 위젯, 분리 창
+- ✅ **ui/CLAUDE.md** (v1.5): 테마 시스템, 스케일링, 공용 위젯, 분리 창
+  - 🆕 **Img2ImgWindow** (`ui/img2img_window.py`): 독립 Img2Img/Inpaint 윈도우 (3-column, 캐릭터 탭, Strength/Noise 기억)
+  - 🆕 **TagResultWindow** (`ui/tag_result_window.py`): WD14 태그 분석 결과 윈도우 (프롬프트 편집 + 5 액션 버튼)
+  - 🆕 **Img2ImgPopup**: Danbooru 태그 분석 버튼 추가, img2img/inpaint → 독립 윈도우로 리다이렉트
   - 🆕 **OutpaintWindow** (`ui/outpaint_window.py`): 아웃페인팅 설정 다이얼로그, 캔버스/이미지 배치, 리사이즈 핸들, RGBA 회전
   - 🆕 **Auto-Outpainting**: 단일 패스 아웃페인팅 (`_single_pass_outpainting`), 가로→1:1/세로→3:2 기본 캔버스
   - 🆕 **CollapsibleBox**: 상태 추적, 스크롤 위치 저장/복원, 프로그래밍 제어

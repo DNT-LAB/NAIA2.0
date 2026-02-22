@@ -94,8 +94,8 @@ tabs/
 
 | 파일 | 크기 | 역할 | 타입 | 주요 기능 |
 |------|------|------|------|----------|
-| **image_window.py** | 42K | 생성 이미지 표시 및 관리 | core | 이미지 뷰어, 히스토리, 일괄 저장, ImageCrudController 통합, 🆕 큐 추가 기능 (랜덤 옵션 지원) |
-| **png_info_tab.py** | 47K | 이미지 메타데이터 추출 | core | PNG/JPEG/WebP 정보 파싱, Stealth PNG 지원 |
+| **image_window.py** | 45K | 생성 이미지 표시 및 관리 | core | 이미지 뷰어, 히스토리, 일괄 저장, ImageCrudController 통합, 큐 추가 기능, 🆕 팝업→독립 Img2Img 윈도우 연동, history_item 컨텍스트 전달 |
+| **png_info_tab.py** | 47K | 이미지 메타데이터 추출 | core | PNG/JPEG/WebP 정보 파싱, Stealth PNG 지원, 🆕 팝업 시그널 통일 (`activate_img2img_panel`/`activate_inpaint_mode`) |
 | **setting_tabs.py** | 28K | 애플리케이션 설정 | core | 자동완성, 저장 경로, 타임스탬프 폴더 토글, 이미지 카운터, 파일명 형식, 분류 규칙, 🆕 2차 분류 시스템, 모듈/탭 가시성 (시작 시 자동 적용), UI 스케일 |
 | **studio_tab.py** | 대형 | 🆕 다중 프레임 생성 | core | 다중 프레임 그리드, 순차 생성, 프리셋 저장/로드 (부분 로드 지원), 그리드 내보내기 (클립보드 복사), 시드 고정 (레이블에 값 표시), 스택 네비게이션, 일괄 편집, 🆕 시퀀스 텍스트 생성 |
 | **turbo_event_sequence/** | 대형 | 🆕 터보 이벤트 시퀀스 생성 | core | Parent/Child 이벤트 검색, Sliding Window Inpaint, 연속/재생성 지원, 프롬프트 엔지니어링, Skip 기능, Split Screen 개선 |
@@ -1034,6 +1034,27 @@ if hasattr(self, 'secondary_classification_label'):
 | `QFileDialog` | 파일 선택 다이얼로그 | `tabs/setting_tabs.py:408-412` |
 | `QMessageBox` | 메시지 박스 | 모든 탭 |
 | `QTimer` | 지연 실행 | `tabs/setting_tabs.py:549-560` |
+
+### 🆕 팝업 → 독립 Img2Img 윈도우 연동 (image_window.py)
+
+**위치**: `tabs/image_window.py:show_img2img_popup()`
+
+ImageWindow에서 팝업 호출 시 `current_history_item`을 확인하여 독립 Img2ImgWindow에 전달합니다.
+이를 통해 이전 생성의 캐릭터 프롬프트가 새 윈도우에서도 유지됩니다.
+
+**패턴**:
+```python
+history_item = self.current_history_item
+if history_item and hasattr(main_window, 'img2img_window_manager'):
+    popup.img2img_requested.connect(
+        lambda img, hi=history_item: main_window.img2img_window_manager.create_window(
+            img, mode='img2img', history_item=hi
+        )
+    )
+```
+
+- Inpaint도 동일 패턴: `_open_inpaint_with_history()` 헬퍼 사용
+- `history_item`이 없으면 (외부 드롭 등) 기존 `activate_img2img_panel` 직접 연결
 
 ### 🆕 히스토리에서 큐에 추가 기능 (image_window.py)
 

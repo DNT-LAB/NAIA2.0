@@ -14,7 +14,8 @@ from PIL import Image
 from PIL.ImageQt import ImageQt
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QTextEdit, QPushButton, QScrollArea, QSlider, QTabWidget, QCheckBox
+    QTextEdit, QPushButton, QScrollArea, QSlider, QTabWidget, QCheckBox,
+    QSpinBox, QProgressBar
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QCloseEvent
@@ -32,6 +33,7 @@ class Img2ImgWindow(QMainWindow):
     # 시그널 정의
     generate_requested = pyqtSignal(int, dict)  # (window_id, overrides)
     window_closing = pyqtSignal(int)            # (window_id)
+    cancel_batch_requested = pyqtSignal(int)    # (window_id)
 
     def __init__(self, window_id: int, app_context, parent=None):
         super().__init__(parent=parent)
@@ -118,12 +120,83 @@ class Img2ImgWindow(QMainWindow):
 
         main_layout.addLayout(content_layout)
 
-        # === 하단: Generate 버튼 ===
+        # === 하단: 횟수 + Generate + Cancel + Progress ===
+        bottom_layout = QVBoxLayout()
+        bottom_layout.setSpacing(get_scaled_size(4))
+
+        # Row 1: [횟수: SpinBox] [Generate] [Cancel(hidden)]
+        row1 = QHBoxLayout()
+        row1.setSpacing(get_scaled_size(6))
+
+        repeat_label = QLabel("횟수:")
+        repeat_label.setStyleSheet(
+            f"font-size: {get_scaled_font_size(14)}px; color: {DARK_COLORS['text_primary']};"
+        )
+        row1.addWidget(repeat_label)
+
+        self.repeat_spin = QSpinBox()
+        self.repeat_spin.setRange(1, 99)
+        self.repeat_spin.setValue(1)
+        self.repeat_spin.setFixedWidth(get_scaled_size(60))
+        self.repeat_spin.setStyleSheet(DARK_STYLES['compact_spinbox'])
+        row1.addWidget(self.repeat_spin)
+
         self.generate_btn = QPushButton("🎨 Generate")
         self.generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
         self.generate_btn.setMinimumHeight(get_scaled_size(42))
         self.generate_btn.clicked.connect(self.on_generate_clicked)
-        main_layout.addWidget(self.generate_btn)
+        row1.addWidget(self.generate_btn, stretch=1)
+
+        self.cancel_btn = QPushButton("■ 중지")
+        self.cancel_btn.setMinimumHeight(get_scaled_size(42))
+        self.cancel_btn.setFixedWidth(get_scaled_size(80))
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #8B0000;
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid #B22222;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: {get_scaled_font_size(14)}px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: #A52A2A;
+                border: 1px solid #CD5C5C;
+            }}
+            QPushButton:pressed {{
+                background-color: #660000;
+            }}
+        """)
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        self.cancel_btn.setVisible(False)
+        row1.addWidget(self.cancel_btn)
+
+        bottom_layout.addLayout(row1)
+
+        # Row 2: Progress Bar (hidden until batch)
+        self.batch_progress = QProgressBar()
+        self.batch_progress.setFixedHeight(get_scaled_size(20))
+        self.batch_progress.setTextVisible(True)
+        self.batch_progress.setFormat("")
+        self.batch_progress.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {DARK_COLORS['bg_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(4)}px;
+                text-align: center;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {DARK_COLORS['accent_blue']};
+                border-radius: {get_scaled_size(3)}px;
+            }}
+        """)
+        self.batch_progress.setVisible(False)
+        bottom_layout.addWidget(self.batch_progress)
+
+        main_layout.addLayout(bottom_layout)
 
     # ─── 좌측 패널 ───────────────────────────────────────────
 
@@ -656,7 +729,14 @@ class Img2ImgWindow(QMainWindow):
 
         params = self._collect_generation_params()
 
-        print(f"[Img2ImgWindow #{self.window_id}] 생성 요청: mode={self.mode}")
+        # 배치 메타데이터 추가
+        repeat_count = self.repeat_spin.value()
+        if repeat_count > 1:
+            params['img2img_batch_request'] = True
+            params['img2img_batch_total'] = repeat_count
+        params['img2img_batch_window_id'] = self.window_id
+
+        print(f"[Img2ImgWindow #{self.window_id}] 생성 요청: mode={self.mode}, repeat={repeat_count}")
         self.generate_requested.emit(self.window_id, params)
 
         # 1초 후 버튼 복원
@@ -667,6 +747,35 @@ class Img2ImgWindow(QMainWindow):
         self.generate_btn.setText("🎨 Generate")
         self.generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
         self.generate_btn.setEnabled(True)
+
+    # ─── 배치 UI 제어 ──────────────────────────────────────
+
+    def start_batch_ui(self, total: int):
+        """배치 시작 시 UI 전환 (WindowManager가 호출)"""
+        self.batch_progress.setMaximum(total)
+        self.batch_progress.setValue(0)
+        self.batch_progress.setFormat(f"0 / {total}")
+        self.batch_progress.setVisible(True)
+        self.cancel_btn.setVisible(True)
+        self.repeat_spin.setEnabled(False)
+        self.generate_btn.setEnabled(False)
+
+    def update_batch_progress(self, current: int, total: int):
+        """배치 진행률 업데이트 (WindowManager가 호출)"""
+        self.batch_progress.setValue(current)
+        self.batch_progress.setFormat(f"{current} / {total}")
+
+    def finish_batch_ui(self):
+        """배치 완료/취소 시 UI 복원 (WindowManager가 호출)"""
+        self.batch_progress.setVisible(False)
+        self.cancel_btn.setVisible(False)
+        self.repeat_spin.setEnabled(True)
+        self._restore_button()
+
+    def _on_cancel_clicked(self):
+        """중지 버튼 클릭 → 배치 취소 시그널"""
+        print(f"[Img2ImgWindow #{self.window_id}] 배치 중지 요청")
+        self.cancel_batch_requested.emit(self.window_id)
 
     def _collect_generation_params(self) -> dict:
         """현재 윈도우 상태에서 생성 파라미터 수집"""
@@ -781,8 +890,9 @@ class Img2ImgWindow(QMainWindow):
     # ─── 창 닫기 ─────────────────────────────────────────────
 
     def closeEvent(self, event: QCloseEvent):
-        """창 닫기 → 리소스 해제 + window_closing 시그널 발행"""
+        """창 닫기 → 배치 취소 + 리소스 해제 + window_closing 시그널 발행"""
         print(f"🔄 [Img2ImgWindow] 창 #{self.window_id} 닫기")
+        self.cancel_batch_requested.emit(self.window_id)
         self.window_closing.emit(self.window_id)
         # 이미지 리소스 해제
         self.pil_image = None

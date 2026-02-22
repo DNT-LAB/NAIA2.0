@@ -683,6 +683,7 @@ class Img2ImgWindowManager:
         self._next_id = 1
         self._last_strength = 50  # 0~99 (기본값 0.50)
         self._last_noise = 0      # 0~99 (기본값 0.00)
+        self._batch_states = {}   # {window_id: {'total', 'current', 'params'}}
 
     def create_window(self, pil_image, mode='img2img',
                       mask_data=None, outpaint_data=None,
@@ -694,6 +695,7 @@ class Img2ImgWindowManager:
         window = Img2ImgWindow(window_id, self.main_window.app_context)
         window.generate_requested.connect(self.main_window.on_img2img_window_generate)
         window.window_closing.connect(self._on_window_closing)
+        window.cancel_batch_requested.connect(self._on_cancel_batch)
 
         window.set_image(pil_image, mode, mask_data, outpaint_data)
 
@@ -725,19 +727,88 @@ class Img2ImgWindowManager:
             self._last_strength = window.strength_slider.value()
             self._last_noise = window.noise_slider.value()
             self.windows.pop(window_id)
+        self._batch_states.pop(window_id, None)
+
+    # ─── 배치 반복 생성 ─────────────────────────────────
+
+    def setup_batch(self, window_id: int, params: dict, total: int):
+        """배치 초기화 — 윈도우에 Progress UI 표시"""
+        self._batch_states[window_id] = {
+            'total': total,
+            'current': 0,
+            'params': params.copy(),
+        }
+        window = self.windows.get(window_id)
+        if window:
+            window.start_batch_ui(total)
+        print(f"[Img2ImgBatch] Window #{window_id}: 배치 시작 ({total}회)")
+
+    def on_batch_generation_completed(self, window_id: int):
+        """한 건 완료 → 진행률 갱신 → 다음 트리거 또는 배치 종료"""
+        state = self._batch_states.get(window_id)
+        if not state:
+            return  # 취소됨 or 창 닫힘
+
+        state['current'] += 1
+        current, total = state['current'], state['total']
+
+        window = self.windows.get(window_id)
+        if window:
+            window.update_batch_progress(current, total)
+
+        print(f"[Img2ImgBatch] Window #{window_id}: {current}/{total} 완료")
+
+        if current < total:
+            QTimer.singleShot(100, lambda: self._trigger_next_batch(window_id))
+        else:
+            self._finish_batch(window_id)
+
+    def _trigger_next_batch(self, window_id: int):
+        """다음 생성 트리거 (동일 params 재사용)"""
+        state = self._batch_states.get(window_id)
+        if not state or window_id not in self.windows:
+            self._batch_states.pop(window_id, None)
+            return
+        params = state['params'].copy()
+        params['img2img_batch_request'] = True
+        params['img2img_batch_total'] = state['total']
+        params['img2img_batch_window_id'] = window_id
+        self.main_window.generation_controller.execute_generation_pipeline(overrides=params)
+
+    def _finish_batch(self, window_id: int):
+        """배치 정상 완료"""
+        self._batch_states.pop(window_id, None)
+        window = self.windows.get(window_id)
+        if window:
+            window.finish_batch_ui()
+        print(f"[Img2ImgBatch] Window #{window_id}: 배치 완료")
+
+    def _on_cancel_batch(self, window_id: int):
+        """배치 취소 요청 처리"""
+        if window_id in self._batch_states:
+            state = self._batch_states.pop(window_id)
+            window = self.windows.get(window_id)
+            if window:
+                window.finish_batch_ui()
+            print(f"[Img2ImgBatch] Window #{window_id}: 배치 중지 ({state['current']}/{state['total']})")
+
+    def is_any_batch_running(self) -> bool:
+        """배치 진행 중 여부"""
+        return len(self._batch_states) > 0
 
     def close_all(self):
         for w in list(self.windows.values()):
             w.close()
         self.windows.clear()
+        self._batch_states.clear()
 
 
 class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 148"
-        self.setWindowTitle(self.base_title + " - 260220")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 148b"
+        self.setWindowTitle(self.base_title + " - 260221")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2796,6 +2867,13 @@ class ModernMainWindow(QMainWindow):
                             event_data["sequence_inpaint_request_id"] = generation_params.get("sequence_inpaint_request_id")
                         self.app_context.publish("generation_completed", event_data)
 
+                # Img2Img Batch 요청인 경우 다음 생성 트리거
+                is_img2img_batch_request = generation_params.get("img2img_batch_request", False)
+                if is_img2img_batch_request and hasattr(self, 'img2img_window_manager'):
+                    img2img_batch_window_id = generation_params.get("img2img_batch_window_id", -1)
+                    print(f"🔄 Img2Img Batch 완료 감지 (window #{img2img_batch_window_id})")
+                    self.img2img_window_manager.on_batch_generation_completed(img2img_batch_window_id)
+
                 # Main Window → Assets 자동 전파 (추후 제거 가능)
                 # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능
                 if not is_assets_request:
@@ -2883,7 +2961,8 @@ class ModernMainWindow(QMainWindow):
                     generation_params.get("artist_thumb_request", False) or
                     generation_params.get("studio_request", False) or
                     generation_params.get("interactive_mode_request", False) or
-                    generation_params.get("turbo_sequence_request", False)
+                    generation_params.get("turbo_sequence_request", False) or
+                    generation_params.get("img2img_batch_request", False)
                 )
 
                 if not is_special_request:
@@ -2932,12 +3011,18 @@ class ModernMainWindow(QMainWindow):
                 return
 
             # [신규] 반복 생성 중인지 확인 - 반복 중이면 자동 생성 건너뛰기
-            if (self.automation_module and 
-                hasattr(self.automation_module, 'current_repeat_count') and 
+            if (self.automation_module and
+                hasattr(self.automation_module, 'current_repeat_count') and
                 self.automation_module.current_repeat_count > 0):
                 print(f"🔁 반복 생성 중이므로 자동 생성 건너뜀 (현재 반복: {self.automation_module.current_repeat_count})")
                 return
-            
+
+            # Img2Img 배치 반복 생성 중이면 자동 생성 건너뛰기
+            if (hasattr(self, 'img2img_window_manager') and
+                self.img2img_window_manager.is_any_batch_running()):
+                print("🔄 Img2Img 배치 생성 중이므로 자동 생성 건너뜀")
+                return
+
             # [신규] 중복 실행 방지 - 시간 기반 체크
             import time
             current_time = time.time()
@@ -6419,6 +6504,12 @@ class ModernMainWindow(QMainWindow):
 
     def on_img2img_window_generate(self, _window_id: int, params: dict):
         """독립 Img2Img 윈도우에서 생성 요청"""
+        # 배치 반복 생성 셋업
+        batch_total = params.get('img2img_batch_total', 1)
+        if batch_total > 1:
+            self.img2img_window_manager.setup_batch(_window_id, params, batch_total)
+            params['img2img_batch_request'] = True
+            params['img2img_batch_window_id'] = _window_id
         self.generation_controller.execute_generation_pipeline(overrides=params)
 
     def on_save_to_remote_event_requested(self, history_item):

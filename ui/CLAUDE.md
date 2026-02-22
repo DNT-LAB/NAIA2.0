@@ -105,7 +105,10 @@ ui/
 | **resolution_manager_dialog.py** | 8.4K | 해상도 관리 다이얼로그 | `ResolutionManagerDialog` (인접값 자동 제안) |
 | **scaling_settings_dialog.py** | - | 스케일링 설정 다이얼로그 | - |
 | **inpaint_window.py** | - | 인페인트 윈도우 | `InpaintWindow`, `get_inpaint_data()` |
-| **img2img_panel.py** | - | Img2Img/Inpaint 패널 | Auto-Outpainting 체크박스, Outpaint 버튼 |
+| **img2img_popup.py** | 6K | 이미지 작업 선택 팝업 | `Img2ImgPopup` — Img2Img/Inpaint/Metadata/태그분석/Vibe Transfer |
+| **img2img_window.py** | 25K | 독립 Img2Img/Inpaint 윈도우 | `Img2ImgWindow` — 3-column 레이아웃, 캐릭터 탭, Strength/Noise |
+| **img2img_panel.py** | - | Img2Img/Inpaint 패널 (레거시) | Auto-Outpainting 체크박스, Outpaint 버튼 |
+| **tag_result_window.py** | 7K | 태그 분석 결과 윈도우 | `TagResultWindow` — 프롬프트 편집 + 5 액션 버튼 |
 | **outpaint_window.py** | - | 아웃페인팅 설정 다이얼로그 | `OutpaintWindow`, `get_outpaint_data()` |
 
 ---
@@ -710,6 +713,90 @@ highlighter = PromptHighlighter(self.prompt_edit.document())
 - **Q3**: CollapsibleBox가 비어 보여요
 - **Q4**: DetachedWindow가 메인 창 뒤에 숨어요
 - **Q5**: ModernMenu 태그 정보가 안 나와요
+
+---
+
+## 독립 Img2Img 윈도우 시스템 🆕
+
+### 개요
+
+드롭된 이미지 또는 생성 결과를 독립 `QMainWindow`에서 Img2Img/Inpaint 처리하는 시스템.
+기존 `img2img_panel.py` (레거시 패널)를 대체합니다.
+
+### Img2ImgWindow (`ui/img2img_window.py`)
+
+**3-column 레이아웃**:
+```
+[이미지 + Strength/Noise] | [메인 프롬프트] | [캐릭터 탭 | UC 탭]
+```
+
+**주요 기능**:
+- Strength/Noise 슬라이더 (마지막 값을 세션 동안 기억)
+- 캐릭터 프롬프트 관리 (추가/삭제/활성 토글, QCheckBox)
+- Edit Mask 버튼 → InpaintWindow로 마스크 재편집
+- `sketchbook_character_prompts` 키로 캐릭터 프롬프트 오버라이드
+
+**시그널**: `generate_requested(int, dict)`, `window_closing(int)`
+
+### Img2ImgWindowManager (`NAIA_cold_v4.py`)
+
+```python
+class Img2ImgWindowManager:
+    _last_strength: int  # 0~99, 세션 동안 기억
+    _last_noise: int     # 0~99, 세션 동안 기억
+
+    def create_window(pil_image, mode, mask_data, outpaint_data, history_item, auto_generate)
+```
+
+- `history_item` 전달 시 → `initialize_from_history_item()` (캐릭터 프롬프트 유지)
+- `history_item` 없을 시 → `initialize_from_main_ui()` (메인 UI에서 캡처)
+
+### Img2ImgPopup → 독립 윈도우 리다이렉트
+
+`Img2ImgPopup`의 img2img/inpaint 시그널은 기존 패널이 아닌 독립 윈도우를 엽니다:
+- `activate_img2img_panel()` → `img2img_window_manager.create_window(mode='img2img')`
+- `activate_inpaint_mode()` → `InpaintWindow` → `create_window(mode='inpaint')`
+- `skip_window=True` (스케치북) → 기존 패널 방식 유지 (하위 호환)
+
+ImageWindow에서 팝업 호출 시 `current_history_item`을 함께 전달하여 캐릭터 프롬프트 컨텍스트 보존.
+
+---
+
+## Tag Interrogation (Danbooru 태그 분석) 🆕
+
+### 개요
+
+드롭된 이미지의 Danbooru 태그를 WD14 v3 모델로 추출 → 프롬프트 파이프라인 정제 → 편집 가능한 결과 윈도우 표시.
+
+### 시그널 플로우
+
+```
+Img2ImgPopup [🏷️ 태그 분석] → on_tag_interrogation_requested(pil_image)
+  ├─ onnxruntime 미설치 → QProgressDialog + _PipInstallWorker (백그라운드 pip install)
+  ├─ 모델 미존재 → DownloadProgressDialog + TaggerDownloadWorker
+  └─ TaggerWorker(general_th=0.56) → _on_tag_interrogation_finished
+       ├─ generate_instant_source_silent() → 파이프라인 정제 (side-effect 없음)
+       └─ TagResultWindow 표시
+```
+
+### TagResultWindow (`ui/tag_result_window.py`)
+
+**레이아웃**: `[이미지 프리뷰 35%] | [편집 가능 QTextEdit 65%]` + 하단 버튼 바
+
+**5 액션 버튼**:
+
+| 버튼 | 시그널 | 창 닫기 |
+|------|--------|---------|
+| 메인 프롬프트 적용 | `apply_to_main_prompt(str)` | O |
+| 즉시 생성 (주황) | `instant_generate_requested(str)` | X |
+| img2img | `img2img_requested(object, str)` | O |
+| Inpaint | `inpaint_requested(object, str)` | O |
+| 닫기 | `self.close()` | O |
+
+### _PipInstallWorker (`NAIA_cold_v4.py`)
+
+백그라운드 pip install 워커. `QProgressDialog` + `QThread`로 UI 블로킹 없이 패키지 설치.
+설치 완료 후 `image_tagger_block` 모듈에 `ort` + `HAS_TAGGER_LIBS` 동적 주입.
 
 ---
 

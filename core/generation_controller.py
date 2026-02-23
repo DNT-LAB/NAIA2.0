@@ -414,6 +414,20 @@ class GenerationController:
 
             # --- ComfyUI vs NAI/WEBUI 처리 분기 ---
             if api_mode == "COMFYUI":
+                # Studio 요청 시 ComfyUI 파라미터 디버그 로깅
+                if params.get('studio_request'):
+                    print(f"🎬 [Studio+ComfyUI] 파라미터 덤프:")
+                    print(f"   - prompt: {params.get('input', '')[:80]}...")
+                    print(f"   - negative: {params.get('negative_prompt', '')[:60]}...")
+                    print(f"   - model: {params.get('model')}")
+                    print(f"   - sampling_mode: {params.get('sampling_mode', 'NOT SET')}")
+                    print(f"   - workflow_type: {params.get('workflow_type', 'NOT SET')}")
+                    print(f"   - steps: {params.get('steps')}, cfg: {params.get('cfg_scale')}")
+                    print(f"   - sampler: {params.get('sampler')}, scheduler: {params.get('scheduler')}")
+                    print(f"   - resolution: {params.get('width')}x{params.get('height')}")
+                    print(f"   - seed: {params.get('seed')}")
+                    print(f"   - user_workflow active: {bool(self.workflow_manager.user_workflow)}")
+
                 # 🌉 ComfyUI: 브릿지 사용 (와일드카드 확장 → 워크플로우 생성)
                 if not self._prepare_comfyui_workflow_with_wildcards(params):
                     return  # 실패 시 조기 종료
@@ -498,6 +512,15 @@ class GenerationController:
         except Exception as e:
             self.context.main_window.status_bar.showMessage(f"❌ 생성 준비 오류: {e}")
             print(f"오류 발생: {e}")
+
+            # Studio 요청 실패 시 프레임 매니저에 알림
+            if overrides and overrides.get('studio_request'):
+                error_data = {
+                    "message": str(e),
+                    "studio_request": True,
+                    "studio_frame_index": overrides.get('studio_frame_index', 0)
+                }
+                self.context.publish("generation_error_for_studio", error_data)
 
     def _enqueue_current_request(self, overrides: dict = None, priority: int = 0):
         """
@@ -826,6 +849,20 @@ class GenerationController:
                     error_data["sequence_inpaint_request_id"] = self.current_generation_params.get("sequence_inpaint_request_id")
                 self.context.publish("generation_error", error_data)
                 # Turbo Sequence 요청은 자동 재시도 없이 종료
+                self.current_generation_params = None
+                return
+
+            # Studio 요청인 경우: 프레임 매니저에 실패 알림
+            is_studio_request = self.current_generation_params.get("studio_request", False)
+            if is_studio_request:
+                studio_frame_index = self.current_generation_params.get("studio_frame_index", 0)
+                print(f"🎬 Studio 에러 감지 - 프레임 #{studio_frame_index + 1} 실패 알림")
+                error_data = {
+                    "message": error_message,
+                    "studio_request": True,
+                    "studio_frame_index": studio_frame_index
+                }
+                self.context.publish("generation_error_for_studio", error_data)
                 self.current_generation_params = None
                 return
 

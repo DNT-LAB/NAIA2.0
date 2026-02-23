@@ -427,38 +427,90 @@ PREVIEW_SIZE = 1024  # 미리보기 최대 크기
 ### 순차 생성 프로세스
 
 ```
-1. StudioTab._on_generate_all_clicked()
+1. StudioTab._on_start_clicked()
    ↓
 2. Manager.start_generation(repeat_count)
    - 활성 프레임 수집
-   - generation_queue 구성
-   - generation_started 시그널 발신
+   - generation_queue 구성: [(frame_index, repeat_index), ...]
+   - _lock_all_frames() → generation_started 시그널 발신
    ↓
 3. Manager._process_next_generation()
    - 큐에서 다음 항목 추출
    - 해당 프레임 generating 상태로 변경
    - frame_updated 시그널 발신
    ↓
-4. StudioTab._generate_for_frame(frame_index)
+4. StudioTab._on_frame_updated(frame_index)
    - 프레임의 prompt_data 수집
-   - 글로벌 프롬프트 병합
+   - 글로벌 Prefix/Postfix/Negative 병합
    - 해상도 오버라이드 적용
-   - API 호출
+   - 독립 랜덤 시드 생성 (Fix Seed OFF 시)
+   - gen_controller.execute_generation_pipeline(overrides=override_params)
    ↓
-5. Manager.on_generation_completed(index, pixmap, pil_image)
-   - 프레임에 이미지 추가
-   - generating 상태 해제
-   - 다음 항목으로 진행 (3번으로)
+5. GenerationController → API 호출 → update_ui_with_result
+   - "generation_completed_for_studio" 이벤트 발행 (image, frame_index, seed)
    ↓
-6. (큐 비어있음) generation_stopped 시그널 발신
+6. StudioTab._on_image_generated(result)
+   - PIL→QPixmap 변환 (BytesIO 기반, ImageQt 사용 금지)
+   - Manager.on_generation_completed(index, pixmap, pil_image)
+   ↓
+7. Manager: 큐에 남은 항목 → 3번으로 / 큐 비어있음 → _unlock_all_frames()
 ```
+
+### 에러 처리 흐름 (v2.3)
+
+```
+GenerationController._on_generation_error()
+   - studio_request 감지 → "generation_error_for_studio" 이벤트 발행
+   ↓
+StudioTab._on_generation_error(error_data)
+   - frame_manager.on_generation_failed(frame_index, message)
+   ↓
+Manager.on_generation_failed()
+   - 큐에 남은 항목 → _process_next_generation() / 큐 비어있음 → _unlock_all_frames()
+```
+
+⚠️ **중요**: `execute_generation_pipeline`의 `except` 블록에서도 Studio 실패 이벤트를 발행하여, 파이프라인 준비 단계 오류 시에도 프레임 잠금이 해제됩니다.
 
 ### 프롬프트 병합 규칙
 
 ```python
-final_prompt = f"{global_prefix} {frame_prompt} {global_postfix}".strip()
-final_negative = f"{global_negative} {frame_negative}".strip()
+# 쉼표로 결합
+full_prompt = ", ".join([prefix, main_prompt, postfix])  # 빈 항목은 제외됨
+full_negative = ", ".join([global_negative, additional_negative])
 ```
+
+### 시드 처리 규칙 (v2.3)
+
+```python
+# Fix Seed ON: 마지막 생성 시드를 모든 프레임에 재사용
+if fix_seed_mode:
+    override_params['seed'] = last_seed  # 없으면 새 랜덤 생성 후 저장
+
+# Fix Seed OFF: 매 생성마다 독립적인 랜덤 시드
+else:
+    override_params['seed'] = random.randint(0, 9999999999)
+```
+
+⚠️ **주의**: Studio는 메인 윈도우의 `seed_fix_checkbox`와 독립적으로 동작해야 합니다. override에 항상 seed를 명시적으로 설정하여 메인 윈도우 상태에 종속되지 않도록 합니다.
+
+### PIL → QPixmap 변환 규칙 (v2.3)
+
+```python
+# ❌ 위험: ImageQt 사용 금지 (반복 생성 시 SEGFAULT)
+from PIL.ImageQt import ImageQt
+q_image = ImageQt(image)        # PIL 버퍼를 래핑 (참조)
+pixmap = QPixmap.fromImage(q_image)  # deep copy 미보장
+
+# ✅ 안전: BytesIO 기반 변환 (완전한 데이터 복사)
+from io import BytesIO
+buffer = BytesIO()
+image.save(buffer, format='PNG')
+buffer.seek(0)
+pixmap = QPixmap()
+pixmap.loadFromData(buffer.getvalue())
+```
+
+**크래시 원인**: `ImageQt`는 PIL 이미지의 원본 메모리 버퍼를 참조만 합니다. 메서드 리턴 후 `q_image`가 스코프를 벗어나면 Python GC가 버퍼를 해제할 수 있으나, `QPixmap`이 해당 버퍼를 여전히 참조하여 C++ 레벨 SEGFAULT가 발생합니다. 특히 같은 슬롯에 반복 생성 시 이전 `q_image`의 GC 수거가 트리거되어 확률적으로 발생합니다.
 
 ---
 
@@ -610,8 +662,15 @@ line_edit.setProperty("autocomplete_ignore", True)
 
 ---
 
-*문서 버전: 2025-01-09*
-*Studio Tab v2.2 - 시드 고정, 스택 네비게이션, 부분 로드, 일괄 편집, 시퀀스 생성*
+*문서 버전: 2026-02-23*
+*Studio Tab v2.3 - ComfyUI 호환성 수정, 크래시 수정, 에러 처리 강화*
+*변경사항 (v2.3):*
+- *🐛 **ImageQt 크래시 수정**: PIL→QPixmap 변환을 BytesIO 기반으로 변경 (반복 생성 시 SEGFAULT 해결)*
+- *🐛 **시드 고정 버그 수정**: Fix Seed OFF 시에도 메인 윈도우 시드 상태에 종속되던 문제 해결 (독립 랜덤 시드 생성)*
+- *🆕 **Studio 에러 처리 추가**: `generation_error_for_studio` 이벤트로 생성 실패 시 프레임 잠금 해제*
+- *🆕 **시드 전달 개선**: `generation_completed_for_studio` 이벤트에 seed 정보 포함*
+- *🆕 **ComfyUI 디버그 로깅**: Studio+ComfyUI 생성 시 워크플로우 파라미터 덤프*
+
 *변경사항 (v2.2):*
 - *🆕 시퀀스 텍스트 생성 기능 추가*
   - *`sequence_generator.py` - 시퀀스 텍스트 변환 유틸리티*

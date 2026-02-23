@@ -822,6 +822,39 @@ def _force_cleanup_all_threads():
 
 **중요**: 모든 API 호출 후 반드시 `_force_cleanup_all_threads()` 호출!
 
+#### 특수 요청별 에러 처리 (`_on_generation_error`)
+
+`core/generation_controller.py` 내 `_on_generation_error`는 특수 요청 타입별로 전용 에러 처리를 수행합니다.
+
+**처리 순서** (먼저 매칭된 것이 처리됨):
+
+| 요청 타입 | 파라미터 키 | 에러 이벤트 | 재시도 |
+|-----------|------------|------------|--------|
+| Interactive Mode | `interactive_mode_request` | `generation_error` | 없음 |
+| Turbo Sequence | `turbo_sequence_request` | `generation_error` | 없음 |
+| **Studio** 🆕 | `studio_request` | `generation_error_for_studio` | 없음 |
+| Img2Img Batch | `img2img_batch_request` | (직접 콜백) | 배치 계속 |
+| 일반 (자동 생성) | - | - | 자동 재시도 (최대 N회) |
+
+**⚠️ 새 특수 요청 타입 추가 시**: 반드시 `_on_generation_error`에 전용 핸들러를 추가해야 합니다. 누락 시 요청자(탭/윈도우)가 실패 알림을 받지 못해 잠금 상태에 빠질 수 있습니다.
+
+**파이프라인 준비 단계 에러**: `execute_generation_pipeline`의 `except` 블록에서도 Studio 에러 이벤트를 발행합니다 (스레드 시작 전 오류 처리).
+
+#### ComfyUI Studio 디버그 로깅 🆕
+
+`core/generation_controller.py` — ComfyUI 모드에서 Studio 요청 시 워크플로우 생성 직전에 전체 파라미터를 덤프합니다:
+
+```
+🎬 [Studio+ComfyUI] 파라미터 덤프:
+   - prompt: ...
+   - model: ..., sampling_mode: ..., workflow_type: ...
+   - steps: ..., cfg: ..., sampler: ..., scheduler: ...
+   - resolution: WxH, seed: ...
+   - user_workflow active: True/False
+```
+
+ComfyUI Studio 생성 결과가 비정상적일 때 이 로그를 일반 생성 로그와 비교하여 차이점을 확인할 수 있습니다.
+
 #### 캐릭터 프롬프트 캡처 우선순위 🆕
 
 `core/generation_controller.py:717-742`
@@ -2524,8 +2557,8 @@ print(f"스레드 목록: {[t.name for t in threading.enumerate()]}")
 
 ---
 
-*문서 버전: 1.8*
-*최종 업데이트: 2026-02-19*
+*문서 버전: 1.9*
+*최종 업데이트: 2026-02-23*
 *담당 영역: core/ 디렉터리*
 
 **변경사항**: [상세 변경 로그](.claude/CHANGELOG_CLAUDE.md) 참조

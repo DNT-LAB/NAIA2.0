@@ -2844,9 +2844,11 @@ class ModernMainWindow(QMainWindow):
                 if is_studio_request:
                     print(f"🎬 Studio 요청 감지 - 전용 이벤트 발행 (frame: {studio_frame_index})")
                     if hasattr(self, 'app_context') and self.app_context:
+                        studio_seed = generation_params.get("seed", -1)
                         self.app_context.publish("generation_completed_for_studio", {
                             "image": image_object,
-                            "frame_index": studio_frame_index
+                            "frame_index": studio_frame_index,
+                            "seed": studio_seed
                         })
 
                 # Turbo Sequence 요청인 경우 별도 이벤트 발행

@@ -32,6 +32,7 @@
   - 🔧 **WildcardProcessor**: `random.choices(weights=)` 기반 가중치 랜덤 선택, 순차/종속 모드 가중치 무시
   - 🆕 **GenerationController** (2026-02-20): `sketchbook_character_prompts` override 시 `prompt_context.character_prompts`에도 반영 (tuple→dict 변환)
   - 🆕 **PromptGenerationController**: `generate_instant_source_silent()` — side-effect 없는 프롬프트 파이프라인 처리
+  - 🆕 **GenerationController** (2026-02-23): Studio 전용 에러 처리 (`generation_error_for_studio` 이벤트), ComfyUI Studio 디버그 로깅
 - ✅ **modules/CLAUDE.md** (v1.5): 모듈 개발 가이드, 파이프라인 훅, 모드 인식
   - 🆕 **프리셋 랜덤화 시스템**: `*randomized` 특수 프리셋, 랜덤 프리셋 풀 관리, 자동/수동 프리셋 선택
   - 🆕 **e621 Intent Boost**: Intent 기반 3-phase wiki 텍스트 검색, 외형 필터, 상황 태그 반환
@@ -41,6 +42,7 @@
   - 🐛 **버그 수정** (2025-01-21): 분류 방법 변경 시 크래시 해결 (AttributeError)
   - 🆕 **Studio Tab** (v2.0): 다중 프레임 그리드, 순차 생성, 프리셋 시스템, 그리드 내보내기
     - **tabs/studio/CLAUDE.md**: 전용 상세 가이드 추가
+  - 🐛 **Studio Tab** (v2.3, 2026-02-23): ImageQt SEGFAULT 수정 (BytesIO 변환), 시드 독립성 수정, Studio 에러 처리 추가
 - ✅ **ui/CLAUDE.md** (v1.5): 테마 시스템, 스케일링, 공용 위젯, 분리 창
   - 🆕 **Img2ImgWindow** (`ui/img2img_window.py`): 독립 Img2Img/Inpaint 윈도우 (3-column, 캐릭터 탭, Strength/Noise 기억)
   - 🆕 **TagResultWindow** (`ui/tag_result_window.py`): WD14 태그 분석 결과 윈도우 (프롬프트 편집 + 5 액션 버튼)

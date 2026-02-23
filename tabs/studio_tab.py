@@ -763,6 +763,7 @@ class StudioTab(BaseTabModule):
         # Subscribe to events
         if app_context:
             app_context.subscribe("generation_completed_for_studio", self._on_image_generated)
+            app_context.subscribe("generation_error_for_studio", self._on_generation_error)
 
         self._update_start_button()
 
@@ -926,10 +927,14 @@ class StudioTab(BaseTabModule):
             override_params['seed'] = last_seed
             print(f"  Using fixed seed: {last_seed}")
         else:
-            # Legacy: apply seed if specified in prompt data
+            # Always generate independent random seed for Studio
+            # (overrides main window's seed_fix_checkbox state)
             seed = prompt_data.get('seed', -1)
             if seed != -1:
                 override_params['seed'] = seed
+            else:
+                override_params['seed'] = random.randint(0, 9999999999)
+            print(f"  Using random seed: {override_params['seed']}")
 
         print(f"Studio: Requesting generation for frame #{frame_index + 1}")
         print(f"  Resolution: {width}x{height}")
@@ -970,10 +975,15 @@ class StudioTab(BaseTabModule):
                 image = result  # Direct PIL image
 
             if image and hasattr(image, 'mode'):
-                # Convert PIL image to QPixmap
-                from PIL.ImageQt import ImageQt
-                q_image = ImageQt(image)
-                pixmap = QPixmap.fromImage(q_image)
+                # Convert PIL image to QPixmap (safe byte-based conversion)
+                # NOTE: PIL.ImageQt causes crashes on repeated generation because
+                # the underlying buffer goes out of scope while QPixmap still references it.
+                from io import BytesIO
+                buffer = BytesIO()
+                image.save(buffer, format='PNG')
+                buffer.seek(0)
+                pixmap = QPixmap()
+                pixmap.loadFromData(buffer.getvalue())
 
                 self.frame_manager.on_generation_completed(frame_index, pixmap, image)
                 print(f"Studio: Image added to frame #{frame_index + 1}")
@@ -983,6 +993,22 @@ class StudioTab(BaseTabModule):
             if isinstance(result, dict):
                 frame_index = result.get('frame_index', 0)
                 self.frame_manager.on_generation_failed(frame_index, str(e))
+
+    def _on_generation_error(self, error_data):
+        """Handle generation error for Studio requests"""
+        if not self.frame_manager:
+            return
+
+        try:
+            frame_index = error_data.get('studio_frame_index', 0) if isinstance(error_data, dict) else 0
+            message = error_data.get('message', 'Unknown error') if isinstance(error_data, dict) else str(error_data)
+            print(f"Studio: Generation failed for frame #{frame_index + 1}: {message}")
+            self.frame_manager.on_generation_failed(frame_index, message)
+        except Exception as e:
+            print(f"Studio: Error handling generation error: {e}")
+            # Unlock all frames as a safety fallback
+            if self.frame_manager:
+                self.frame_manager._unlock_all_frames()
 
     def _update_start_button(self):
         """Update start button with total generation count (active frames × repeat)"""
@@ -1920,5 +1946,9 @@ class StudioTab(BaseTabModule):
         if self.app_context:
             try:
                 self.app_context.unsubscribe("generation_completed_for_studio", self._on_image_generated)
+            except:
+                pass
+            try:
+                self.app_context.unsubscribe("generation_error_for_studio", self._on_generation_error)
             except:
                 pass

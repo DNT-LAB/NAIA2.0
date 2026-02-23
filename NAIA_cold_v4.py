@@ -807,8 +807,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 148b"
-        self.setWindowTitle(self.base_title + " - 260221")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 149"
+        self.setWindowTitle(self.base_title + " - 260222")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1737,7 +1737,41 @@ class ModernMainWindow(QMainWindow):
         
         params_grid.addWidget(rescale_container, 3, 3)
         self.nai_rescale_ui = [self.cfg_rescale_label, rescale_container]
-        
+
+        # ComfyUI Rescale CFG (ANIMA 모드 전용) - NAI CFG Rescale과 동일 위치 (row 3, col 2-3)
+        self.comfyui_rescale_label = QLabel("Rescale CFG")
+        self.comfyui_rescale_label.setStyleSheet(param_label_style)
+        params_grid.addWidget(self.comfyui_rescale_label, 3, 2)
+
+        comfyui_rescale_container = QWidget()
+        comfyui_rescale_layout = QHBoxLayout(comfyui_rescale_container)
+        comfyui_rescale_layout.setContentsMargins(0, 0, 0, 0)
+        comfyui_rescale_layout.setSpacing(5)
+
+        self.comfyui_rescale_slider = QSlider(Qt.Orientation.Horizontal)
+        self.comfyui_rescale_slider.setRange(0, 100)  # 0.00 ~ 1.00
+        self.comfyui_rescale_slider.setValue(70)  # 기본값 0.70
+        self.comfyui_rescale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
+        self.disable_wheel_event(self.comfyui_rescale_slider)
+        comfyui_rescale_layout.addWidget(self.comfyui_rescale_slider)
+
+        self.comfyui_rescale_value_label = QLabel("0.70")
+        self.comfyui_rescale_value_label.setStyleSheet(param_label_style)
+        self.comfyui_rescale_value_label.setFixedWidth(68)
+        self.comfyui_rescale_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        comfyui_rescale_layout.addWidget(self.comfyui_rescale_value_label)
+
+        self.comfyui_rescale_slider.valueChanged.connect(
+            lambda value: self.comfyui_rescale_value_label.setText(f"{value/100:.2f}")
+        )
+
+        params_grid.addWidget(comfyui_rescale_container, 3, 3)
+        self.comfyui_rescale_ui = [self.comfyui_rescale_label, comfyui_rescale_container]
+
+        # ComfyUI Rescale CFG는 초기에 숨김 (ComfyUI + ANIMA 모드에서만 표시)
+        for w in self.comfyui_rescale_ui:
+            w.setVisible(False)
+
         # === 다섯 번째 행: 시드 입력 + 시드 고정 ===
         seed_label = QLabel("시드")
         seed_label.setStyleSheet(param_label_style)
@@ -1953,6 +1987,9 @@ class ModernMainWindow(QMainWindow):
         sampling_mode_layout.addWidget(self.v_pred_radio)
         sampling_mode_layout.addWidget(self.anima_radio)
         sampling_mode_layout.addStretch()
+
+        # ANIMA 라디오 토글 시 Rescale CFG 가시성 제어
+        self.sampling_mode_group.buttonClicked.connect(self._on_sampling_mode_changed)
 
         self.comfyui_option_widget_layout.addWidget(sampling_mode_container)
 
@@ -2346,6 +2383,12 @@ class ModernMainWindow(QMainWindow):
             for widget in self.comfyui_option_widgets:  # 🆕 추가
                 widget.setVisible(False)
 
+            # NAI CFG Rescale 표시, ComfyUI Rescale CFG 숨김
+            for w in self.nai_rescale_ui:
+                w.setVisible(True)
+            for w in self.comfyui_rescale_ui:
+                w.setVisible(False)
+
             # 🆕 임시 창 자동 종료 체크
             old_mode = self._previous_api_mode
             if old_mode != mode:
@@ -2419,7 +2462,13 @@ class ModernMainWindow(QMainWindow):
                                 widget.setVisible(True)
                             for widget in self.comfyui_option_widgets:  # 🆕 추가
                                 widget.setVisible(False)
-                            
+
+                            # WEBUI: NAI/ComfyUI Rescale 둘 다 숨김
+                            for w in self.nai_rescale_ui:
+                                w.setVisible(False)
+                            for w in self.comfyui_rescale_ui:
+                                w.setVisible(False)
+
                             self.status_bar.showMessage(f"✅ WEBUI 모드로 전환되었습니다. ({validated_url})", 5000)
 
                             # 검증된 URL을 키링에 저장
@@ -2538,7 +2587,14 @@ class ModernMainWindow(QMainWindow):
                                 widget.setVisible(False)
                             for widget in self.comfyui_option_widgets:
                                 widget.setVisible(True)
-                            
+
+                            # ComfyUI: NAI Rescale 숨김, ComfyUI Rescale은 ANIMA 선택 시만 표시
+                            for w in self.nai_rescale_ui:
+                                w.setVisible(False)
+                            is_anima = hasattr(self, 'anima_radio') and self.anima_radio.isChecked()
+                            for w in self.comfyui_rescale_ui:
+                                w.setVisible(is_anima)
+
                             self.status_bar.showMessage(f"✅ ComfyUI 모드로 전환되었습니다. ({comfyui_url})", 5000)
 
                             # 검증된 URL을 키링에 저장
@@ -2765,10 +2821,16 @@ class ModernMainWindow(QMainWindow):
                         "filename_prefix": "NAIA_ComfyUI"  # 기본 파일명 접두사
                     })
 
+                    # ANIMA 모드: Rescale CFG 값 추가
+                    if workflow_type == "unet" and hasattr(self, 'comfyui_rescale_slider'):
+                        params["rescale_cfg"] = self.comfyui_rescale_slider.value() / 100.0
+
                     # 디버그 정보
                     print(f"🎨 ComfyUI 파라미터 수집 완료:")
                     print(f"   - 샘플링 모드: {params['sampling_mode']}")
                     print(f"   - 워크플로우 타입: {params['workflow_type']}")
+                    if 'rescale_cfg' in params:
+                        print(f"   - Rescale CFG: {params['rescale_cfg']}")
                     print(f"   - 해상도: {params['width']}x{params['height']}")
                     print(f"   - 스텝: {params['steps']}, CFG: {params['cfg_scale']}")
                 else:
@@ -5620,6 +5682,14 @@ class ModernMainWindow(QMainWindow):
             # 커스텀 워크플로우가 비워졌으므로 버튼을 다시 비활성화
             self.workflow_custom_btn.setEnabled(False)
             self.status_bar.showMessage("🔄 기본 워크플로우로 전환되었습니다.", 3000)
+
+    def _on_sampling_mode_changed(self, button):
+        """ComfyUI 샘플링 모드 변경 시 Rescale CFG 가시성 제어"""
+        is_anima = (button == self.anima_radio)
+        # ComfyUI 모드일 때만 Rescale CFG 표시/숨김 처리
+        if self.get_current_api_mode() == "COMFYUI":
+            for w in self.comfyui_rescale_ui:
+                w.setVisible(is_anima)
 
     def on_generate_with_image_requested(self, tags_dict: dict):
         """WebView에서 추출된 태그로 프롬프트를 생성하고 바로 이미지 생성을 시작합니다."""

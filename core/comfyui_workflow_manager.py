@@ -66,7 +66,7 @@ class ComfyUIWorkflowManager:
                     "sampler_name": "euler_ancestral",
                     "scheduler": "simple",
                     "denoise": 1.0,
-                    "model": ["44", 0],
+                    "model": ["46", 0],
                     "positive": ["11", 0],
                     "negative": ["12", 0],
                     "latent_image": ["28", 0]
@@ -99,6 +99,14 @@ class ComfyUIWorkflowManager:
                 },
                 "class_type": "CLIPLoader",
                 "_meta": {"title": "CLIP 로드"}
+            },
+            "46": {
+                "inputs": {
+                    "multiplier": 0.7,
+                    "model": ["44", 0]
+                },
+                "class_type": "RescaleCFG",
+                "_meta": {"title": "CFG 리스케일"}
             }
         }
 
@@ -255,6 +263,10 @@ class ComfyUIWorkflowManager:
         if 'filename_prefix' in params and workflow_type != 'unet':
             workflow["7"]["inputs"]["filename_prefix"] = params['filename_prefix']
 
+        # 6-1. RescaleCFG 설정 (ANIMA/unet 워크플로우에서만 사용)
+        if workflow_type == 'unet' and 'rescale_cfg' in params:
+            workflow["46"]["inputs"]["multiplier"] = params['rescale_cfg']
+
         # 7. ModelSamplingDiscrete 설정 (checkpoint 워크플로우에서만 사용)
         if workflow_type == 'checkpoint':
             model_sampling = workflow["8"]["inputs"]
@@ -392,6 +404,7 @@ class ComfyUIWorkflowManager:
             "CLIPLoader": "clip_loader",
             "VAELoader": "vae_loader",
             "ModelSamplingDiscrete": "model_sampler",
+            "RescaleCFG": "rescale_cfg",
             "AlignYourStepsScheduler": "ays_scheduler"
         }
 
@@ -479,6 +492,10 @@ class ComfyUIWorkflowManager:
         # ModelSamplingDiscrete는 checkpoint 워크플로우에서만 사용 (선택적)
         if found_loader_nodes.get("ModelSamplingDiscrete"):
             node_map["model_sampler"] = found_loader_nodes["ModelSamplingDiscrete"][0]
+
+        # RescaleCFG는 unet(ANIMA) 워크플로우에서 사용 (선택적)
+        if found_loader_nodes.get("RescaleCFG"):
+            node_map["rescale_cfg"] = found_loader_nodes["RescaleCFG"][0]
 
         return True, node_map
 
@@ -656,7 +673,13 @@ class ComfyUIWorkflowManager:
                  workflow[node_map["latent_image"]]["inputs"]["width"] = params['width']
                  workflow[node_map["latent_image"]]["inputs"]["height"] = params['height']
 
-            # 6. ModelSamplingDiscrete 설정 (checkpoint 워크플로우에서만 사용)
+            # 6. RescaleCFG 설정 (unet/ANIMA 워크플로우에서 사용)
+            if "rescale_cfg" in node_map and 'rescale_cfg' in params:
+                rescale_node = workflow[node_map["rescale_cfg"]]["inputs"]
+                rescale_node["multiplier"] = params['rescale_cfg']
+                print(f"✅ RescaleCFG multiplier 설정: {params['rescale_cfg']}")
+
+            # 7. ModelSamplingDiscrete 설정 (checkpoint 워크플로우에서만 사용)
             if "model_sampler" in node_map and detected_workflow_type == "checkpoint":
                 model_sampler_node = workflow[node_map["model_sampler"]]["inputs"]
 
@@ -762,7 +785,7 @@ class ComfyUIWorkflowManager:
             "EmptyLatentImage", "VAEDecode", "SaveImage", "PreviewImage"
         }
         # CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader) 중 하나 필요
-        loader_types = {"CheckpointLoaderSimple", "UNETLoader", "CLIPLoader", "VAELoader"}
+        loader_types = {"CheckpointLoaderSimple", "UNETLoader", "CLIPLoader", "VAELoader", "RescaleCFG"}
         
         try:
             workflow_str = metadata.get('workflow') or metadata.get('workflow_api')

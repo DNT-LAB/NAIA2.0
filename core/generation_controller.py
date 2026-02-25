@@ -818,8 +818,21 @@ class GenerationController:
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
 
-        # 🆕 Interactive Mode 요청인 경우 전용 에러 이벤트 발행
+        # 특수 요청 에러 라우팅
         if self.current_generation_params:
+            # Event Preset 요청인 경우 전용 에러 이벤트 발행
+            is_event_preset = self.current_generation_params.get("event_preset_request", False)
+            if is_event_preset:
+                print(f"📋 Event Preset 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "event_preset_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
+            # Interactive Mode 요청인 경우 전용 에러 이벤트 발행
             is_interactive_mode = self.current_generation_params.get("interactive_mode_request", False)
             if is_interactive_mode:
                 print(f"🎨 Interactive Mode 에러 감지 - 전용 에러 이벤트 발행")

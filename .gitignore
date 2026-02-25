@@ -183,3 +183,5 @@ data/tagger/selected_tags.csv
 
 #개발중
 /ui/variational
+ui/event_preset/naia_prompt_preset
+data/KR_tags.parquet.bak

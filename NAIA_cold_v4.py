@@ -807,8 +807,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 149"
-        self.setWindowTitle(self.base_title + " - 260222")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 150"
+        self.setWindowTitle(self.base_title + " - 260225")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -893,7 +893,7 @@ class ModernMainWindow(QMainWindow):
         
         # AppContext에 모드 변경 이벤트 구독
         self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
-        self.app_context.subscribe_mode_swap(self._on_mode_changed_for_remote_tab)
+        self.app_context.subscribe_mode_swap(self._on_mode_changed_for_remote)
         self.app_context.subscribe_mode_swap(lambda *_: self._update_model_list_for_comfyui())
         
         # 초기 토큰 카운트 업데이트
@@ -1425,22 +1425,15 @@ class ModernMainWindow(QMainWindow):
         self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
         self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
 
-        # 리모트 탭 추가 (클릭 시 새 창을 띄움)
-        remote_placeholder_widget = QWidget()
-        remote_placeholder_widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
-        self.prompt_tabs.addTab(remote_placeholder_widget, "리모트")
-        self.remote_tab_index = 2  # 리모트 탭의 인덱스
         self.previous_tab_index = 0  # 이전 탭 인덱스 저장용
-        self.remote_window = None  # 리모트 창 참조
-        self.remote_window_open = False  # 리모트 창 열림 상태
 
-        # Interactive 탭 추가 (클릭 시 새 창을 띄움)
-        interactive_placeholder_widget = QWidget()
-        interactive_placeholder_widget.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
-        self.prompt_tabs.addTab(interactive_placeholder_widget, "🎨 Interactive")
-        self.interactive_tab_index = 3  # Interactive 탭의 인덱스
-        self.interactive_window = None  # Interactive 창 참조
-        self.interactive_window_open = False  # Interactive 창 열림 상태
+        # 외부 창 상태 추적
+        self.remote_window = None
+        self.remote_window_open = False
+        self.interactive_window = None
+        self.interactive_window_open = False
+        self.event_preset_window = None
+        self.event_preset_window_open = False
 
         # 탭 전환 이벤트 연결
         self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
@@ -1450,6 +1443,58 @@ class ModernMainWindow(QMainWindow):
         corner_layout = QHBoxLayout(corner_widget_container)
         corner_layout.setContentsMargins(0, 0, 0, 0)
         corner_layout.setSpacing(2)
+
+        # 확장 기능 버튼 (컨텍스트 메뉴)
+        self.extra_features_btn = QPushButton("🎨확장기능")
+        self.extra_features_btn.setFixedSize(95, 55)
+        self.extra_features_btn.setToolTip("확장 기능")
+        self.extra_features_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border-radius: 4px;
+            }}
+            QPushButton::menu-indicator {{
+                width: 0px;
+            }}
+        """)
+
+        # 확장 기능 컨텍스트 메뉴
+        self.extra_features_menu = QMenu(self)
+        self.extra_features_menu.setStyleSheet(f"""
+            QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
+            QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
+            QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
+        """)
+
+        # Event Preset 액션 (최상위)
+        self.event_preset_action = QAction("📋 Event Preset", self)
+        self.event_preset_action.triggered.connect(self._open_event_preset_window)
+        self.extra_features_menu.addAction(self.event_preset_action)
+
+        # Remote Window 액션
+        self.remote_action = QAction("📡 리모트", self)
+        self.remote_action.triggered.connect(self._open_remote_window)
+        self.extra_features_menu.addAction(self.remote_action)
+
+        # Interactive Window 액션
+        self.interactive_action = QAction("🎨 Interactive Window", self)
+        self.interactive_action.triggered.connect(self._open_interactive_window)
+        self.extra_features_menu.addAction(self.interactive_action)
+
+        # EZ Mode 액션
+        self.ez_mode_action = QAction("⚡ EZ Mode", self)
+        self.ez_mode_action.triggered.connect(self.open_ez_mode_window)
+        self.extra_features_menu.addAction(self.ez_mode_action)
+
+        self.extra_features_btn.setMenu(self.extra_features_menu)
+        corner_layout.addWidget(self.extra_features_btn)
 
         # 대기열 버튼 추가
         self.queue_btn = QPushButton("대기열")
@@ -1490,28 +1535,6 @@ class ModernMainWindow(QMainWindow):
         """)
         self.prompt_tabs_temp_btn.clicked.connect(self.create_temp_generation_window)
         corner_layout.addWidget(self.prompt_tabs_temp_btn)
-
-        # [EZ] 버튼 추가 (EZ Mode)
-        self.prompt_tabs_ez_btn = QPushButton("EZ")
-        self.prompt_tabs_ez_btn.setFixedSize(45, 55)
-        self.prompt_tabs_ez_btn.setToolTip("EZ Mode - Easy Prompt Generation")
-        self.prompt_tabs_ez_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                color: {DARK_COLORS['accent_blue']};
-                font-size: {get_scaled_font_size(16)}px;
-                font-weight: bold;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                border-radius: 4px;
-                color: {DARK_COLORS['accent_blue_light']};
-            }}
-        """)
-        self.prompt_tabs_ez_btn.clicked.connect(self.open_ez_mode_window)
-        corner_layout.addWidget(self.prompt_tabs_ez_btn)
 
         # detach 버튼 추가
         self.prompt_tabs_detach_btn = QPushButton("🔓")
@@ -2902,6 +2925,13 @@ class ModernMainWindow(QMainWindow):
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_artist_thumb", image_object)
 
+                # Event Preset 요청인 경우 별도 이벤트 발행
+                is_event_preset_request = generation_params.get("event_preset_request", False)
+                if is_event_preset_request:
+                    print("📋 Event Preset 요청 감지 - 전용 이벤트 발행")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_event_preset", image_object)
+
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:
                     print(f"🎬 Studio 요청 감지 - 전용 이벤트 발행 (frame: {studio_frame_index})")
@@ -3025,6 +3055,7 @@ class ModernMainWindow(QMainWindow):
                     generation_params.get("artist_thumb_request", False) or
                     generation_params.get("studio_request", False) or
                     generation_params.get("interactive_mode_request", False) or
+                    generation_params.get("event_preset_request", False) or
                     generation_params.get("turbo_sequence_request", False) or
                     generation_params.get("img2img_batch_request", False)
                 )
@@ -3781,44 +3812,20 @@ class ModernMainWindow(QMainWindow):
         else:
             self.detach_prompt_tabs()
 
-    # === 리모트 탭 관련 메서드 ===
+    # === 리모트/Interactive/EZ 관련 메서드 ===
 
     def _on_prompt_tab_changed(self, index: int):
         """프롬프트 탭 전환 이벤트 핸들러"""
-        # 리모트 탭 클릭 시
-        if index == self.remote_tab_index:
-            if self.remote_window_open and self.remote_window:
-                # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
-                self.remote_window.raise_()
-                self.remote_window.activateWindow()
-                QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
-            else:
-                # 새 창 열기
-                QTimer.singleShot(10, self._open_remote_window)
-            return
-
-        # Interactive 탭 클릭 시
-        if index == self.interactive_tab_index:
-            if self.interactive_window_open and self.interactive_window:
-                # 이미 창이 열려 있으면 창 활성화 후 이전 탭으로 복귀
-                self.interactive_window.raise_()
-                self.interactive_window.activateWindow()
-                QTimer.singleShot(10, lambda: self.prompt_tabs.setCurrentIndex(self.previous_tab_index))
-            else:
-                # 새 창 열기
-                QTimer.singleShot(10, self._open_interactive_window)
-            return
-
         # 일반 탭 클릭 시 이전 탭 인덱스 업데이트
         self.previous_tab_index = index
 
     def _open_remote_window(self):
         """리모트 창 열기"""
-        if self.remote_window_open:
+        if self.remote_window_open and self.remote_window:
+            # 이미 열려있으면 활성화
+            self.remote_window.raise_()
+            self.remote_window.activateWindow()
             return
-
-        # 이전 탭으로 복귀
-        self.prompt_tabs.setCurrentIndex(self.previous_tab_index)
 
         # 리모트 창 생성
         self.remote_window = RemoteWindow(parent_app=self)
@@ -3827,23 +3834,25 @@ class ModernMainWindow(QMainWindow):
 
         # 상태 업데이트
         self.remote_window_open = True
-        self._update_remote_tab_style(disabled=True)
+        self.remote_action.setText("📡 리모트 (열림)")
+        self.remote_action.setEnabled(False)
 
     def _on_remote_window_closed(self):
         """리모트 창 닫힘 이벤트"""
         self.remote_window = None
         self.remote_window_open = False
-        self._update_remote_tab_style(disabled=False)
+        self.remote_action.setText("📡 리모트")
+        self.remote_action.setEnabled(True)
 
     # === Interactive 탭 관련 메서드 ===
 
     def _open_interactive_window(self):
         """Interactive 창 열기"""
-        if self.interactive_window_open:
+        if self.interactive_window_open and self.interactive_window:
+            # 이미 열려있으면 활성화
+            self.interactive_window.raise_()
+            self.interactive_window.activateWindow()
             return
-
-        # 이전 탭으로 복귀
-        self.prompt_tabs.setCurrentIndex(self.previous_tab_index)
 
         # Interactive 창 생성
         self.interactive_window = InteractiveWindow(parent_app=self, app_context=self.app_context)
@@ -3852,46 +3861,63 @@ class ModernMainWindow(QMainWindow):
 
         # 상태 업데이트
         self.interactive_window_open = True
-        self._update_interactive_tab_style(disabled=True)
+        self.interactive_action.setText("🎨 Interactive Window (열림)")
+        self.interactive_action.setEnabled(False)
 
     def _on_interactive_window_closed(self):
         """Interactive 창 닫힘 이벤트"""
         self.interactive_window = None
         self.interactive_window_open = False
-        self._update_interactive_tab_style(disabled=False)
+        self.interactive_action.setText("🎨 Interactive Window")
+        self.interactive_action.setEnabled(True)
 
-    def _update_interactive_tab_style(self, disabled: bool):
-        """Interactive 탭 스타일 업데이트 (활성/비활성)"""
-        tab_bar = self.prompt_tabs.tabBar()
-        if disabled:
-            # 비활성 스타일 - 회색으로 표시
-            tab_bar.setTabTextColor(self.interactive_tab_index, QColor(DARK_COLORS['text_disabled']))
-        else:
-            # 활성 스타일 - 원래 색으로 복원
-            tab_bar.setTabTextColor(self.interactive_tab_index, QColor(DARK_COLORS['text_primary']))
+    # === Event Preset 관련 메서드 ===
 
-    def _update_remote_tab_style(self, disabled: bool):
-        """리모트 탭 스타일 업데이트 (활성/비활성)"""
-        tab_bar = self.prompt_tabs.tabBar()
-        if disabled:
-            # 비활성 스타일 - 회색으로 표시
-            tab_bar.setTabTextColor(self.remote_tab_index, QColor(DARK_COLORS['text_disabled']))
-            self.prompt_tabs.setTabText(self.remote_tab_index, "리모트(열림)")
-        else:
-            # 활성 스타일 - 원래 색상
-            tab_bar.setTabTextColor(self.remote_tab_index, QColor(DARK_COLORS['text_primary']))
-            self.prompt_tabs.setTabText(self.remote_tab_index, "리모트")
+    def _open_event_preset_window(self):
+        """Event Preset 창 열기"""
+        if self.event_preset_window_open and self.event_preset_window:
+            self.event_preset_window.raise_()
+            self.event_preset_window.activateWindow()
+            return
 
-    def _on_mode_changed_for_remote_tab(self, _old_mode: str, new_mode: str):
-        """모드 변경 시 리모트 탭 가시성 제어"""
+        from ui.event_preset import EventPresetWindow
+
+        # 데이터 확인 + 다운로드 (윈도우 생성 전 사전작업)
+        if not EventPresetWindow.ensure_data_available(parent=self):
+            return
+
+        self.event_preset_window = EventPresetWindow(
+            app_context=self.app_context,
+            kr_tags_df=self.kr_tags_df,
+            parent=None,
+        )
+        self.event_preset_window.window_closed.connect(self._on_event_preset_window_closed)
+        self.event_preset_window.apply_to_main_prompt.connect(
+            self.on_instant_generation_requested
+        )
+        self.event_preset_window.show()
+
+        self.event_preset_window_open = True
+        self.event_preset_action.setText("📋 Event Preset (열림)")
+        self.event_preset_action.setEnabled(False)
+
+    def _on_event_preset_window_closed(self):
+        """Event Preset 창 닫힘 이벤트"""
+        self.event_preset_window = None
+        self.event_preset_window_open = False
+        self.event_preset_action.setText("📋 Event Preset")
+        self.event_preset_action.setEnabled(True)
+
+    def _on_mode_changed_for_remote(self, _old_mode: str, new_mode: str):
+        """모드 변경 시 리모트 메뉴 가시성 제어"""
         is_nai_mode = (new_mode == "NAI")
 
         # NAI 모드가 아니면 리모트 창 닫기
         if not is_nai_mode and self.remote_window_open and self.remote_window:
             self.remote_window.close()
 
-        # 탭 가시성 설정
-        self.prompt_tabs.setTabVisible(self.remote_tab_index, is_nai_mode)
+        # 메뉴 액션 가시성 설정
+        self.remote_action.setVisible(is_nai_mode)
 
     def _update_model_list_for_comfyui(self):
         """
@@ -4342,6 +4368,10 @@ class ModernMainWindow(QMainWindow):
             self.ez_mode_window.raise_()
             self.ez_mode_window.activateWindow()
 
+            # 메뉴 액션 상태 업데이트
+            self.ez_mode_action.setText("⚡ EZ Mode (열림)")
+            self.ez_mode_action.setEnabled(False)
+
             print("[OK] [ModernMainWindow] EZ Mode 창 생성 완료")
 
         except Exception as e:
@@ -4383,6 +4413,10 @@ class ModernMainWindow(QMainWindow):
 
         # 참조 제거
         self.ez_mode_window = None
+
+        # 메뉴 액션 상태 복원
+        self.ez_mode_action.setText("⚡ EZ Mode")
+        self.ez_mode_action.setEnabled(True)
 
     def _on_model_changing(self, new_model: str):
         """

@@ -199,6 +199,7 @@ class ClothesPresetWindow(QMainWindow):
         self._pair_mode = "Balanced"
         self._generating = False
         self._qimage_ref = None  # GC 방지
+        self._prompt_plain_text = ""
         self._seed_region_counts: dict[str, int] = {r: 0 for r in REGIONS}
 
         # 한글→영어 검색 인덱스 (kr_tags_df 기반)
@@ -591,7 +592,7 @@ class ClothesPresetWindow(QMainWindow):
             self._rating_checkboxes[rating_name] = cb
         right_l.addLayout(prompt_row)
         self._prompt_edit = QTextEdit()
-        self._prompt_edit.setAcceptRichText(False)
+        self._prompt_edit.setAcceptRichText(True)
         self._prompt_edit.setPlaceholderText("Prompt preview based on current staged tags")
         self._prompt_edit.setMaximumHeight(get_scaled_size(120))
         right_l.addWidget(self._prompt_edit)
@@ -622,9 +623,9 @@ class ClothesPresetWindow(QMainWindow):
                 background-color: {DARK_COLORS['bg_primary']};
             }}
             QToolTip {{
-                background-color: #FFFFF0;
-                color: #1A1A1A;
-                border: 1px solid #AAAAAA;
+                background-color: #2B2B2B;
+                color: #FFFFFF;
+                border: 1px solid #555555;
                 font-size: {fs(15)}px;
                 padding: {ss(4)}px {ss(6)}px;
             }}
@@ -1587,23 +1588,46 @@ class ClothesPresetWindow(QMainWindow):
     def _rebuild_prompt_preview(self) -> None:
         # Global Stage (promoted) + Local Stage (region) 합집합
         seen: set[str] = set()
-        all_tags: list[str] = []
+        clothing_tags: list[str] = []
         for slot in DISPLAY_SLOTS:
             for tag in self._region_staged.get(slot, []):
                 if tag and tag not in seen:
                     seen.add(tag)
-                    all_tags.append(tag)
-        # Expression 태그 추가
+                    clothing_tags.append(tag)
+        # Expression 태그 (비의상)
+        expr_tags: list[str] = []
         for tag in self._staged_expressions:
             if tag and tag not in seen:
                 seen.add(tag)
-                all_tags.append(tag)
+                expr_tags.append(tag)
         rating_tags = self._get_selected_rating_tags()
+
+        # 프롬프트 텍스트 빌드 (plain text — 복사/생성용)
+        all_tags = clothing_tags + expr_tags
         text = PromptBuilder.build(all_tags, self._current_combo, rating_tags=rating_tags)
-        self._prompt_edit.setPlainText(text)
+
+        # HTML 빌드 — 비의상 태그 회색, 의상 태그 흰색
+        _GRAY_TAGS = {"1girl", "general", "sensitive", "questionable", "explicit", "safe", "nsfw"}
+        clothing_set = set(clothing_tags)
+        parts = [t.strip() for t in text.split(",") if t.strip()]
+        html_parts: list[str] = []
+        for p in parts:
+            if p in _GRAY_TAGS or p not in clothing_set:
+                html_parts.append(f'<span style="color:#777777;">{p}</span>')
+            else:
+                html_parts.append(f'<span style="color:#EEEEEE;">{p}</span>')
+        html = ", ".join(html_parts)
+
+        self._prompt_edit.setHtml(
+            f'<div style="font-size:{get_scaled_font_size(17)}px;">{html}</div>'
+        )
+        # plain text 보관
+        self._prompt_plain_text = text
+        # 의상 태그만 (Copy to Clipboard 용)
+        self._clothing_only_text = ", ".join(clothing_tags) if clothing_tags else ""
 
     def _on_copy_to_clipboard(self) -> None:
-        text = self._prompt_edit.toPlainText().strip()
+        text = getattr(self, '_clothing_only_text', '') or ''
         if not text:
             return
         QApplication.clipboard().setText(text)
@@ -1647,7 +1671,7 @@ class ClothesPresetWindow(QMainWindow):
         if not main_window:
             return
 
-        prompt = self._prompt_edit.toPlainText().strip()
+        prompt = getattr(self, '_prompt_plain_text', '') or self._prompt_edit.toPlainText().strip()
         if not prompt:
             return
 

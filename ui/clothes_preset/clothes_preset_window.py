@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QImage, QPixmap
+from PyQt6.QtWidgets import QGraphicsOpacityEffect
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -198,6 +199,7 @@ class ClothesPresetWindow(QMainWindow):
         self._active_slot: str = DISPLAY_SLOTS[0]
         self._pair_mode = "Balanced"
         self._generating = False
+        self._lucky_generating = False
         self._qimage_ref = None  # GC 방지
         self._prompt_plain_text = ""
         self._seed_region_counts: dict[str, int] = {r: 0 for r in REGIONS}
@@ -566,17 +568,51 @@ class ClothesPresetWindow(QMainWindow):
         self._image_preview.setText("832 × 1216")
         right_l.addWidget(self._image_preview, stretch=1)
 
-        # Generate 버튼 (full-width)
+        # Generate + I Feel Lucky 버튼 행
+        gen_row = QHBoxLayout()
+        gen_row.setSpacing(get_scaled_size(6))
+
         self._generate_btn = QPushButton("Generate")
         self._generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._generate_btn.clicked.connect(self._on_generate_clicked)
-        right_l.addWidget(self._generate_btn)
+        gen_row.addWidget(self._generate_btn, stretch=3)
 
-        # 프롬프트 + Rating 체크박스
+        self._lucky_btn = QPushButton("I Feel Lucky")
+        self._lucky_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._lucky_btn.clicked.connect(self._on_lucky_clicked)
+        gen_row.addWidget(self._lucky_btn, stretch=2)
+
+        right_l.addLayout(gen_row)
+
+        # 프롬프트 + 자동 랜덤 + Rating 체크박스
         prompt_row = QHBoxLayout()
         prompt_row.setSpacing(get_scaled_size(6))
         prompt_label = QLabel("Prompt")
         prompt_row.addWidget(prompt_label)
+
+        # 자동 랜덤 체크박스 (I Feel Lucky 후 노출, Prompt 옆)
+        self._auto_random_cb = QCheckBox("자동 랜덤")
+        self._auto_random_cb.setStyleSheet(f"""
+            QCheckBox {{
+                color: #FFB0C8;
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QCheckBox::indicator {{
+                width: {get_scaled_size(14)}px;
+                height: {get_scaled_size(14)}px;
+            }}
+        """)
+        self._auto_random_cb.setVisible(False)
+        self._auto_random_opacity = QGraphicsOpacityEffect(self._auto_random_cb)
+        self._auto_random_opacity.setOpacity(1.0)
+        self._auto_random_cb.setGraphicsEffect(self._auto_random_opacity)
+        self._auto_random_fade_anim: QPropertyAnimation | None = None
+        self._auto_random_fade_timer = QTimer(self)
+        self._auto_random_fade_timer.setSingleShot(True)
+        self._auto_random_fade_timer.timeout.connect(self._start_auto_random_fade)
+        self._auto_random_cb.toggled.connect(self._on_auto_random_toggled)
+        prompt_row.addWidget(self._auto_random_cb)
+
         prompt_row.addStretch(1)
 
         from PyQt6.QtWidgets import QButtonGroup
@@ -805,6 +841,25 @@ class ClothesPresetWindow(QMainWindow):
             }}
         """)
 
+        # I Feel Lucky 버튼 (보라색)
+        self._lucky_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #7B2FBE;
+                color: white;
+                padding: {ss(6)}px {ss(12)}px;
+                border-radius: {ss(4)}px;
+                font-size: {fs(14)}px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: #9B4FDE;
+            }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_hover']};
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+
     # ------------------------------------------------------------------
     # 패널 비율 고정
     # ------------------------------------------------------------------
@@ -843,16 +898,23 @@ class ClothesPresetWindow(QMainWindow):
     def _init_debounce_timers(self) -> None:
         self._combo_search_timer = QTimer(self)
         self._combo_search_timer.setSingleShot(True)
-        self._combo_search_timer.setInterval(SEARCH_DEBOUNCE_MS)
-        self._combo_search_timer.timeout.connect(self._refresh_combo_candidates_from_stage)
+        self._combo_search_timer.setInterval(350)
+        self._combo_search_timer.timeout.connect(self._do_combo_search)
 
         self._region_search_timer = QTimer(self)
         self._region_search_timer.setSingleShot(True)
-        self._region_search_timer.setInterval(SEARCH_DEBOUNCE_MS)
+        self._region_search_timer.setInterval(350)
         self._region_search_timer.timeout.connect(self._refresh_region_tables)
 
     def _on_combo_search_changed(self, _text: str) -> None:
         self._combo_search_timer.start()
+
+    def _do_combo_search(self) -> None:
+        """디바운스 후 실제 콤보 검색 실행. 2글자 미만이면 무시."""
+        needle = self._combo_search.text().strip()
+        if needle and len(needle) < 2:
+            return
+        self._refresh_combo_candidates_from_stage()
 
     def _on_region_search_changed(self, _text: str) -> None:
         self._region_search_timer.start()
@@ -1641,6 +1703,7 @@ class ClothesPresetWindow(QMainWindow):
         self._generating = generating
         self._generate_btn.setEnabled(not generating)
         self._generate_btn.setText("Generating..." if generating else "Generate")
+        self._lucky_btn.setEnabled(not generating)
 
     @staticmethod
     def _collect_main_settings(main_window) -> dict:
@@ -1713,10 +1776,83 @@ class ClothesPresetWindow(QMainWindow):
             print(f"[ClothesPreset] 생성 오류: {e}")
             self._set_generating_state(False)
 
+    def _on_lucky_clicked(self) -> None:
+        """I Feel Lucky: 스테이징 초기화 → tag>=4 콤보 중 랜덤 1개 스테이징 → Generate."""
+        if not self._data_loaded or self._generating:
+            return
+        self._run_lucky_round()
+        # 자동 랜덤 체크박스 노출
+        self._show_auto_random_cb()
+
+    def _run_lucky_round(self) -> None:
+        """Lucky 1회 실행: 랜덤 콤보 선택 → 스테이징 → Generate."""
+        import random
+        candidates = [
+            c for c in self._combo_summaries
+            if c.tag_count >= 4
+            and "cosplay" not in c.clothing_combo
+            and "alternate" not in c.clothing_combo
+        ]
+        if not candidates:
+            return
+        chosen = random.choice(candidates)
+        # 1. 스테이징 초기화
+        self._staged_tags = []
+        self._region_staged = {s: [] for s in DISPLAY_SLOTS}
+        self._promoted_set = set()
+        self._promoted_set_balanced = set()
+        self._staged_expressions = []
+        self._pinned_expr_item = None
+        self._reset_expr_tree_styles()
+        # 2. 선택된 콤보 태그를 스테이징
+        self._stage_combo_tags(chosen.tags)
+        # 3. Generate
+        self._lucky_generating = True
+        self._on_generate_clicked()
+
+    def _show_auto_random_cb(self) -> None:
+        """자동 랜덤 체크박스를 즉시 보이게 (페이드 중이면 중단)."""
+        self._auto_random_fade_timer.stop()
+        if self._auto_random_fade_anim is not None:
+            self._auto_random_fade_anim.stop()
+            self._auto_random_fade_anim = None
+        self._auto_random_opacity.setOpacity(1.0)
+        self._auto_random_cb.setVisible(True)
+
+    def _on_auto_random_toggled(self, checked: bool) -> None:
+        """체크 시 페이드 타이머 취소, 항상 보이도록."""
+        if checked:
+            self._auto_random_fade_timer.stop()
+            if self._auto_random_fade_anim is not None:
+                self._auto_random_fade_anim.stop()
+                self._auto_random_fade_anim = None
+            self._auto_random_opacity.setOpacity(1.0)
+
+    def _start_auto_random_fade(self) -> None:
+        """5초 경과 후 체크 안 됐으면 페이드아웃."""
+        if self._auto_random_cb.isChecked():
+            return
+        anim = QPropertyAnimation(self._auto_random_opacity, b"opacity", self)
+        anim.setDuration(800)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.InQuad)
+        anim.finished.connect(self._on_auto_random_fade_done)
+        self._auto_random_fade_anim = anim
+        anim.start()
+
+    def _on_auto_random_fade_done(self) -> None:
+        """페이드 완료 후 숨김."""
+        self._auto_random_cb.setVisible(False)
+        self._auto_random_opacity.setOpacity(1.0)
+        self._auto_random_fade_anim = None
+
     def _on_generate_completed(self, image_obj) -> None:
         print(f"[ClothesPreset] _on_generate_completed 호출됨, image_obj type={type(image_obj)}")
         self._unsubscribe_generation()
         self._set_generating_state(False)
+        was_lucky = self._lucky_generating
+        self._lucky_generating = False
         if image_obj is None:
             return
         try:
@@ -1739,6 +1875,13 @@ class ClothesPresetWindow(QMainWindow):
         except Exception as e:
             print(f"[ClothesPreset] 이미지 표시 실패: {e}")
 
+        # 자동 랜덤: 체크 상태면 즉시 다음 라운드, 아니면 5초 후 페이드아웃
+        if was_lucky:
+            if self._auto_random_cb.isChecked():
+                QTimer.singleShot(300, self._run_lucky_round)
+            else:
+                self._auto_random_fade_timer.start(5000)
+
     def _on_generate_error(self, error_data) -> None:
         is_ours = (
             isinstance(error_data, dict)
@@ -1748,6 +1891,7 @@ class ClothesPresetWindow(QMainWindow):
             return
         self._unsubscribe_generation()
         self._set_generating_state(False)
+        self._lucky_generating = False
         print(f"[ClothesPreset] 생성 에러: {error_data.get('message', '')}")
 
     def _unsubscribe_generation(self) -> None:

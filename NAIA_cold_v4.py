@@ -808,7 +808,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 151"
+        self.base_title = "NAIA v2.0.0 Dev 151b"
         self.setWindowTitle(self.base_title + " - 260226")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -5045,6 +5045,12 @@ class ModernMainWindow(QMainWindow):
             # 모든 Img2Img 독립 윈도우 닫기
             if hasattr(self, 'img2img_window_manager'):
                 self.img2img_window_manager.close_all()
+
+            # EventPreset / ClothesPreset 윈도우 닫기
+            if self.event_preset_window:
+                self.event_preset_window.close()
+            if self.clothes_preset_window:
+                self.clothes_preset_window.close()
 
             current_mode = self.app_context.get_api_mode()
             self.generation_params_manager.save_mode_settings(current_mode)

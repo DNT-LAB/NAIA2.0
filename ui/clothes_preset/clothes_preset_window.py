@@ -958,6 +958,7 @@ class ClothesPresetWindow(QMainWindow):
         self._filtered_combo_summaries = rows
         self._combo_table_reloading = True
         self._combo_model.replace(self._filtered_combo_summaries)
+        self._combo_table.scrollToTop()
         self._combo_table_reloading = False
 
         shown = len(self._filtered_combo_summaries)

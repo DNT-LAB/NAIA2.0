@@ -1562,7 +1562,12 @@ class EventPresetWindow(QMainWindow):
         self.apply_to_main_prompt.emit({"general": prompt})
 
     def _on_send_and_generate(self) -> None:
-        """메인 프롬프트에 파이프라인 경유 전송 + Event Preset 내 이미지 생성."""
+        """메인 프롬프트에 파이프라인 경유 전송 + Event Preset 내 이미지 생성.
+
+        on_generate_with_image_requested 패턴:
+        1) apply_to_main_prompt → on_instant_generation_requested (풀 파이프라인)
+        2) QTimer 100ms 후 execute_generation_pipeline (파이프라인 결과로 생성)
+        """
         prompt = self._prompt_edit.toPlainText().strip()
         if not prompt:
             return
@@ -1570,7 +1575,6 @@ class EventPresetWindow(QMainWindow):
             return
 
         self._set_generating_state(True)
-        self._pending_send_prompt = prompt  # 타이머 콜백에서 사용
 
         # 1) 메인 프롬프트에 파이프라인 경유 전송 (풀 버전으로 업데이트)
         self.apply_to_main_prompt.emit({"general": prompt})
@@ -1579,7 +1583,12 @@ class EventPresetWindow(QMainWindow):
         QTimer.singleShot(100, self._trigger_send_and_generate)
 
     def _trigger_send_and_generate(self) -> None:
-        """전송 완료 후 이미지 생성 트리거."""
+        """전송 완료 후 이미지 생성 트리거.
+
+        on_generate_with_image_requested 패턴을 따름:
+        - input override 없음 → step 1에서 파이프라인이 처리한 프롬프트 사용
+        - event_preset_request + 해상도만 override
+        """
         main_window = getattr(self.app_context, 'main_window', None)
         if not main_window:
             self._set_generating_state(False)
@@ -1593,10 +1602,7 @@ class EventPresetWindow(QMainWindow):
         )
         self.app_context.subscribe("generation_error", self._on_send_gen_error)
 
-        # 명시적 input override (100ms 레이스 방지)
-        prompt = getattr(self, '_pending_send_prompt', '')
         override_params = {
-            'input': prompt,
             'event_preset_request': True,
             'width': 1024,
             'height': 1024,

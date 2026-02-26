@@ -4,6 +4,39 @@ from typing import List
 from .prompt_context import PromptContext
 from .wildcard_manager import WildcardManager
 
+
+def split_tags_smart(text: str) -> list[str]:
+    """
+    콤마로 태그를 분리하되, <...> 블록 내부의 콤마는 보존합니다.
+
+    예시:
+        "a, <angry,shy|b|c>, d" -> ["a", "<angry,shy|b|c>", "d"]
+        "a, <lora:model:0.8>, b" -> ["a", "<lora:model:0.8>", "b"]
+        "a, b, c" -> ["a", "b", "c"]
+    """
+    if not text:
+        return []
+    result, current, depth = [], [], 0
+    for char in text:
+        if char == '<':
+            depth += 1
+            current.append(char)
+        elif char == '>':
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif char == ',' and depth == 0:
+            tag = ''.join(current).strip()
+            if tag:
+                result.append(tag)
+            current = []
+        else:
+            current.append(char)
+    tag = ''.join(current).strip()
+    if tag:
+        result.append(tag)
+    return result
+
+
 class WildcardProcessor:
     def __init__(self, wildcard_manager: WildcardManager):
         self.wildcard_manager = wildcard_manager
@@ -176,12 +209,22 @@ class WildcardProcessor:
 
         if tag.startswith('<') and tag.endswith('>'):
             wildcard_name = tag[1:-1]
-            
+
+            # Lora/모델 참조 태그 보호 (WEBUI/ComfyUI 모드)
+            _SKIP_PREFIXES = ('lora:', 'hypernet:', 'lyco:', 'embedding:')
+            if any(wildcard_name.lower().startswith(p) for p in _SKIP_PREFIXES):
+                return [tag]
+
             # 인라인 와일드카드 처리
             if '|' in wildcard_name:
                 options = wildcard_name.split('|')
                 chosen_option = random.choice(options).strip()
-                return self._expand_recursive(chosen_option, context, depth + 1)
+                # 선택된 옵션을 콤마로 분리하여 각 서브 태그를 개별 확장 (__name__ 등 지원)
+                sub_tags = [t.strip() for t in chosen_option.split(',') if t.strip()]
+                result = []
+                for sub_tag in sub_tags:
+                    result.extend(self._expand_recursive(sub_tag, context, depth + 1))
+                return result
 
             # 파일 기반 와일드카드 처리 - <태그명> 형태는 기존 로직 유지
             line = self._get_wildcard_line(wildcard_name, context)

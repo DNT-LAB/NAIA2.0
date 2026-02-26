@@ -1,6 +1,7 @@
 ﻿from core.context import AppContext
 from core.generation_request import GenerationRequest
 from core.sequence_parser import SequenceParser
+from core.wildcard_processor import split_tags_smart
 from PIL import Image
 import piexif
 import piexif.helper
@@ -472,8 +473,8 @@ class GenerationController:
                         if source_row is None:
                             source_row = pd.Series({'general': None}, name="temp_window")
 
-                    # tags 파싱 (쉼표로 분리)
-                    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
+                    # tags 파싱 (쉼표로 분리, <...> 블록 보존)
+                    input_tags = split_tags_smart(params['input'])
 
                     # PromptContext 초기화
                     temp_context = PromptContext(
@@ -832,6 +833,18 @@ class GenerationController:
                 self.current_generation_params = None
                 return
 
+            # Clothes Preset 요청인 경우 전용 에러 이벤트 발행
+            is_clothes_preset = self.current_generation_params.get("clothes_preset_request", False)
+            if is_clothes_preset:
+                print(f"👗 Clothes Preset 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "clothes_preset_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
             # Interactive Mode 요청인 경우 전용 에러 이벤트 발행
             is_interactive_mode = self.current_generation_params.get("interactive_mode_request", False)
             if is_interactive_mode:
@@ -1144,7 +1157,7 @@ class GenerationController:
             cleaned_tags = []
             processed_negative_prompt = negative_prompt  # 초기값
 
-            for tag in input_text.split(','):
+            for tag in split_tags_smart(input_text):
                 processed_tag = tag.replace('\n', '').strip()
 
                 # 주석 제거
@@ -1213,8 +1226,8 @@ class GenerationController:
             
             print("🔀 조건부 프롬프트 처리 시작...")
             
-            # 입력 문자열을 태그 리스트로 분해
-            input_tags = [tag.strip() for tag in input_text.split(',') if tag.strip()]
+            # 입력 문자열을 태그 리스트로 분해 (<...> 블록 보존)
+            input_tags = split_tags_smart(input_text)
             
             # prefix, main, postfix 구분 (간소화: 모두 main으로 처리)
             prefix_tags = []

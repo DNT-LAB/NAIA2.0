@@ -8,6 +8,7 @@ from ui.theme import get_dynamic_styles, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from ui.modern_menu import setModernStyle
 from typing import Dict, Any, Optional
+from core.wildcard_processor import split_tags_smart
 import os, json
 from pathlib import Path
 
@@ -739,8 +740,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         if hasattr(self, 'context') and self.context:
             filter_manager = getattr(self.context, 'filter_data_manager', None)
 
-        # 메인 태그 파싱
-        main_tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
+        # 메인 태그 파싱 (<...> 블록 보존)
+        main_tags = split_tags_smart(prompt)
         removed_tags = []
 
         options = self.get_parameters()
@@ -891,8 +892,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         prefix_tags = options["pre_prompt"]
         postfix_tags = options["post_prompt"]
 
-        # 메인 태그 파싱
-        main_tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
+        # 메인 태그 파싱 (<...> 블록 보존)
+        main_tags = split_tags_smart(prompt)
         removed_tags = []
 
         # 2. 자동 태그 제거 옵션 처리
@@ -1040,9 +1041,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 최종 파라미터 딕셔너리 구성
         params = {
-            "pre_prompt": [tag.strip() for tag in self.pre_textedit.toPlainText().split(',') if tag.strip()],
-            "post_prompt": [tag.strip() for tag in self.post_textedit.toPlainText().split(',') if tag.strip()],
-            "auto_hide": [tag.strip() for tag in self.auto_hide_textedit.toPlainText().split(',') if tag.strip()],
+            "pre_prompt": split_tags_smart(self.pre_textedit.toPlainText()),
+            "post_prompt": split_tags_smart(self.post_textedit.toPlainText()),
+            "auto_hide": split_tags_smart(self.auto_hide_textedit.toPlainText()),
             "preprocessing_options": options
         }
         return params

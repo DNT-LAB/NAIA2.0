@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
 from core.generation_controller import GenerationController
+from core.wildcard_processor import split_tags_smart
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM, get_dynamic_styles
 from ui.scaling_manager import get_scaling_manager, get_scaled_font_size, get_scaled_size
 from ui.scaling_settings_dialog import ScalingSettingsDialog
@@ -1434,6 +1435,8 @@ class ModernMainWindow(QMainWindow):
         self.interactive_window_open = False
         self.event_preset_window = None
         self.event_preset_window_open = False
+        self.clothes_preset_window = None
+        self.clothes_preset_window_open = False
 
         # 탭 전환 이벤트 연결
         self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
@@ -1477,6 +1480,11 @@ class ModernMainWindow(QMainWindow):
         self.event_preset_action = QAction("📋 Event Preset", self)
         self.event_preset_action.triggered.connect(self._open_event_preset_window)
         self.extra_features_menu.addAction(self.event_preset_action)
+
+        # Clothes Preset 액션
+        self.clothes_preset_action = QAction("👗 Clothes Preset", self)
+        self.clothes_preset_action.triggered.connect(self._open_clothes_preset_window)
+        self.extra_features_menu.addAction(self.clothes_preset_action)
 
         # Remote Window 액션
         self.remote_action = QAction("📡 리모트", self)
@@ -2772,9 +2780,9 @@ class ModernMainWindow(QMainWindow):
                 seed_value = random.randint(0, 9999999999)
                 self.seed_input.setText(str(seed_value))
 
-            # 프롬프트 처리 (쉼표 기준 정리)
-            processed_input = ', '.join([item.strip() for item in self.main_prompt_textedit.toPlainText().split(',') if item.strip()])
-            processed_negative_prompt = ', '.join([item.strip() for item in self.negative_prompt_textedit.toPlainText().split(',') if item.strip()])
+            # 프롬프트 처리 (쉼표 기준 정리, <...> 블록 보존)
+            processed_input = ', '.join(split_tags_smart(self.main_prompt_textedit.toPlainText()))
+            processed_negative_prompt = ', '.join(split_tags_smart(self.negative_prompt_textedit.toPlainText()))
 
             # 🔧 기존 구조 유지: 실제 위젯 이름에 맞게 파라미터 수집
             params = {
@@ -2932,6 +2940,13 @@ class ModernMainWindow(QMainWindow):
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_event_preset", image_object)
 
+                # Clothes Preset 요청인 경우 별도 이벤트 발행
+                is_clothes_preset_request = generation_params.get("clothes_preset_request", False)
+                if is_clothes_preset_request:
+                    print("👗 Clothes Preset 요청 감지 - 전용 이벤트 발행")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_clothes_preset", image_object)
+
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:
                     print(f"🎬 Studio 요청 감지 - 전용 이벤트 발행 (frame: {studio_frame_index})")
@@ -3056,6 +3071,7 @@ class ModernMainWindow(QMainWindow):
                     generation_params.get("studio_request", False) or
                     generation_params.get("interactive_mode_request", False) or
                     generation_params.get("event_preset_request", False) or
+                    generation_params.get("clothes_preset_request", False) or
                     generation_params.get("turbo_sequence_request", False) or
                     generation_params.get("img2img_batch_request", False)
                 )
@@ -3907,6 +3923,42 @@ class ModernMainWindow(QMainWindow):
         self.event_preset_window_open = False
         self.event_preset_action.setText("📋 Event Preset")
         self.event_preset_action.setEnabled(True)
+
+    def _open_clothes_preset_window(self):
+        """Clothes Preset 창 열기"""
+        if self.clothes_preset_window_open and self.clothes_preset_window:
+            self.clothes_preset_window.raise_()
+            self.clothes_preset_window.activateWindow()
+            return
+
+        from ui.clothes_preset import ClothesPresetWindow
+
+        if not ClothesPresetWindow.ensure_data_available(parent=self):
+            return
+
+        self.clothes_preset_window = ClothesPresetWindow(
+            app_context=self.app_context,
+            kr_tags_df=self.kr_tags_df,
+            parent=None,
+        )
+        self.clothes_preset_window.window_closed.connect(
+            self._on_clothes_preset_window_closed
+        )
+        self.clothes_preset_window.apply_to_main_prompt.connect(
+            self.on_instant_generation_requested
+        )
+        self.clothes_preset_window.show()
+
+        self.clothes_preset_window_open = True
+        self.clothes_preset_action.setText("👗 Clothes Preset (열림)")
+        self.clothes_preset_action.setEnabled(False)
+
+    def _on_clothes_preset_window_closed(self):
+        """Clothes Preset 창 닫힘 이벤트"""
+        self.clothes_preset_window = None
+        self.clothes_preset_window_open = False
+        self.clothes_preset_action.setText("👗 Clothes Preset")
+        self.clothes_preset_action.setEnabled(True)
 
     def _on_mode_changed_for_remote(self, _old_mode: str, new_mode: str):
         """모드 변경 시 리모트 메뉴 가시성 제어"""

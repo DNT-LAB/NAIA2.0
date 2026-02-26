@@ -4,6 +4,7 @@ from core.search_result_model import SearchResultModel
 from core.prompt_processor import PromptProcessor
 from core.context import AppContext
 from core.prompt_context import PromptContext
+from core.wildcard_processor import split_tags_smart
 
 class PromptGenerationController(QObject):
     """UI와 PromptProcessor를 중재하고 프롬프트 생성을 관리 (단순화됨)"""
@@ -37,7 +38,7 @@ class PromptGenerationController(QObject):
         
         general_str = source_row.get('general', '')
         if pd.notna(general_str) and isinstance(general_str, str):
-            context.main_tags = [tag.strip() for tag in general_str.split(',')]
+            context.main_tags = split_tags_smart(general_str)
         return context
 
     def _handle_processed_context(self, context):

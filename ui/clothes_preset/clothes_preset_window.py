@@ -83,6 +83,7 @@ from .widgets import (
 
 DATA_DIR = Path(__file__).resolve().parent
 DATA_ZIP_PATH = DATA_DIR / PACKAGE_FILE_NAME
+_EMPTY_FSET: frozenset[int] = frozenset()  # 호환성 필터용 빈 집합 센티널
 
 
 # ---------------------------------------------------------------------------
@@ -202,17 +203,27 @@ class ClothesPresetWindow(QMainWindow):
 
         # 한글→영어 검색 인덱스 (kr_tags_df 기반)
         self._kr_search_index: dict[str, set[str]] = {}
+        self._kr_tag_cache: dict[str, tuple[str, str]] = {}  # tag → (category, desc)
         self._build_kr_search_index()
+        self._build_kr_tag_cache()
 
         # UI 빌드
         self._build_ui()
         self._init_debounce_timers()
         self._apply_theme()
 
-        # 데이터 로드
+        # 데이터 로드 (deferred — 윈도우 먼저 표시 후 다음 이벤트 루프에서 로드)
         self._dm = ClothesPresetDataManager()
+        self._data_loaded = False
+        QTimer.singleShot(0, self._deferred_init)
+
+    def _deferred_init(self) -> None:
+        """윈도우 표시 후 데이터 로드 + 초기 갱신."""
+        if self._data_loaded or not self.isVisible():
+            return
         self._load_all()
         self._refresh_combo_candidates_from_stage()
+        self._data_loaded = True
 
     # ------------------------------------------------------------------
     # 한글→영어 검색 인덱스
@@ -241,6 +252,18 @@ class ClothesPresetWindow(QMainWindow):
                     kw = kw.strip().lower()
                     if kw and len(kw) >= 2:
                         self._kr_search_index.setdefault(kw, set()).add(tag_lower)
+
+    def _build_kr_tag_cache(self) -> None:
+        """kr_tags_df → dict[tag, (category, desc)] 사전 구축 (O(1) 번역 조회용)."""
+        if self._kr_tags_df is None or self._kr_tags_df.empty:
+            return
+        for _, row in self._kr_tags_df.iterrows():
+            tag = str(row.get("tag", "")).strip()
+            if not tag:
+                continue
+            cat = str(row.get("category", "")) if pd.notna(row.get("category")) else ""
+            desc = str(row.get("desc", "")) if pd.notna(row.get("desc")) else ""
+            self._kr_tag_cache[tag] = (cat, desc)
 
     def _kr_search(self, query: str) -> set[str]:
         """한글 쿼리로 영어 태그 집합을 반환."""
@@ -597,6 +620,13 @@ class ClothesPresetWindow(QMainWindow):
         self.setStyleSheet(f"""
             QMainWindow {{
                 background-color: {DARK_COLORS['bg_primary']};
+            }}
+            QToolTip {{
+                background-color: #FFFFF0;
+                color: #1A1A1A;
+                border: 1px solid #AAAAAA;
+                font-size: {fs(15)}px;
+                padding: {ss(4)}px {ss(6)}px;
             }}
             QWidget {{
                 background-color: {DARK_COLORS['bg_primary']};
@@ -981,7 +1011,7 @@ class ClothesPresetWindow(QMainWindow):
         self._stage_combo_tags(summary.tags)
 
     def _stage_combo_tags(self, tags: tuple[str, ...]) -> None:
-        if not tags:
+        if not tags or not self._data_loaded:
             return
         all_region = self._all_region_staged_tags()
         region_lookup = {r.tag: r for r in self._region_tags}
@@ -1043,6 +1073,8 @@ class ClothesPresetWindow(QMainWindow):
         return result
 
     def _add_selected_region_tag(self, slot: str | None = None) -> None:
+        if not self._data_loaded:
+            return
         use_slot = slot or self._active_slot
         tag = self._selected_region_tag(use_slot)
         if not tag or tag in self._all_region_staged_tags():
@@ -1256,17 +1288,24 @@ class ClothesPresetWindow(QMainWindow):
             if slot_tags:
                 slot_combo_ids: set[int] | None = None
                 for st in slot_tags:
-                    tag_ids = self._combo_tag_to_ids.get(st, set())
+                    tag_ids = self._combo_tag_to_ids.get(st)
+                    if tag_ids is None:
+                        slot_combo_ids = set()
+                        break
                     if slot_combo_ids is None:
                         slot_combo_ids = set(tag_ids)
                     else:
                         slot_combo_ids &= tag_ids
-                if not slot_combo_ids:
-                    slot_combo_ids = set()
-                rows = [
-                    r for r in rows
-                    if self._combo_tag_to_ids.get(r.tag, set()) & slot_combo_ids
-                ]
+                        if not slot_combo_ids:
+                            break
+                if slot_combo_ids:
+                    _ctid = self._combo_tag_to_ids
+                    rows = [
+                        r for r in rows
+                        if not _ctid.get(r.tag, _EMPTY_FSET).isdisjoint(slot_combo_ids)
+                    ]
+                else:
+                    rows = []
 
             if keyword:
                 rows = [
@@ -1471,19 +1510,17 @@ class ClothesPresetWindow(QMainWindow):
         )
 
     def _lookup_tag_translation(self, tag_name: str) -> tuple[str, str]:
-        """KR_tags에서 태그 번역 조회. (category, desc) 반환."""
-        if not tag_name or self._kr_tags_df is None or self._kr_tags_df.empty:
+        """KR_tags에서 태그 번역 조회. (category, desc) 반환. O(1) 캐시 사용."""
+        if not tag_name:
             return "", ""
-        rows = self._kr_tags_df[self._kr_tags_df["tag"] == tag_name]
-        if rows.empty:
-            tag_norm = tag_name.replace("_", " ")
-            rows = self._kr_tags_df[self._kr_tags_df["tag"] == tag_norm]
-        if rows.empty:
-            return "", ""
-        data = rows.iloc[0]
-        cat = str(data.get("category", "")) if pd.notna(data.get("category")) else ""
-        desc = str(data.get("desc", "")) if pd.notna(data.get("desc")) else ""
-        return cat, desc
+        result = self._kr_tag_cache.get(tag_name)
+        if result is not None:
+            return result
+        tag_norm = tag_name.replace("_", " ")
+        result = self._kr_tag_cache.get(tag_norm)
+        if result is not None:
+            return result
+        return "", ""
 
     def _make_tag_tooltip(self, tag_name: str) -> str:
         """태그 번역 툴팁 문자열 생성."""

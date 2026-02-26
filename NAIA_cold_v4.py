@@ -808,8 +808,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 150"
-        self.setWindowTitle(self.base_title + " - 260225")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 151"
+        self.setWindowTitle(self.base_title + " - 260226")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -3943,9 +3943,6 @@ class ModernMainWindow(QMainWindow):
         )
         self.clothes_preset_window.window_closed.connect(
             self._on_clothes_preset_window_closed
-        )
-        self.clothes_preset_window.apply_to_main_prompt.connect(
-            self.on_instant_generation_requested
         )
         self.clothes_preset_window.show()
 

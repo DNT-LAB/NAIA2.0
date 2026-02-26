@@ -12,8 +12,10 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QTextDocument
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy, QWidget,
+    QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy,
+    QStyle, QStyleOptionViewItem, QStyledItemDelegate, QWidget,
 )
 
 from ui.theme import DARK_COLORS
@@ -105,7 +107,7 @@ class StagedTagChip(QWidget):
     tag_clicked = pyqtSignal(str)
     remove_clicked = pyqtSignal(str)
 
-    def __init__(self, tag: str, border_color: str = "", parent: QWidget | None = None) -> None:
+    def __init__(self, tag: str, border_color: str = "", text_color: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tag = tag
 
@@ -116,6 +118,7 @@ class StagedTagChip(QWidget):
         fs = get_scaled_font_size
         ss = get_scaled_size
         bc = border_color or DARK_COLORS['accent_blue_light']
+        tc = text_color or DARK_COLORS['text_primary']
 
         self._label_btn = QPushButton(tag)
         self._label_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -127,7 +130,7 @@ class StagedTagChip(QWidget):
                 border-bottom-left-radius: {ss(3)}px;
                 border-top-right-radius: 0px;
                 border-bottom-right-radius: 0px;
-                color: {DARK_COLORS['text_primary']};
+                color: {tc};
                 background: {DARK_COLORS['bg_secondary']};
                 border: 1px solid {bc};
                 border-right: none;
@@ -179,9 +182,13 @@ class ComboTableModel(QAbstractTableModel):
 
     _HEADERS = ["Observed Clothing Combo", "Count"]
 
+    # HTML delegate가 읽을 커스텀 role
+    HtmlRole = Qt.ItemDataRole.UserRole + 100
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows: list[ComboSummary] = []
+        self._promoted: set[str] = set()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return len(self._rows)
@@ -205,6 +212,9 @@ class ComboTableModel(QAbstractTableModel):
             if col == 1:
                 return fmt_k_count(item.post_count)
             return None
+
+        if role == self.HtmlRole and col == 0:
+            return self._build_highlighted_html(item)
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if col == 1:
@@ -243,3 +253,106 @@ class ComboTableModel(QAbstractTableModel):
 
     def row_count(self) -> int:
         return len(self._rows)
+
+    def _build_highlighted_html(self, item: ComboSummary) -> str:
+        """combo text에서 promoted 태그를 연노랑으로 하이라이트한 HTML 반환."""
+        if not self._promoted:
+            return item.clothing_combo
+        parts: list[str] = []
+        for tag in item.tags:
+            if tag in self._promoted:
+                parts.append(f'<span style="color:#F5E6A3;">{tag}</span>')
+            else:
+                parts.append(tag)
+        return ", ".join(parts)
+
+    def set_promoted(self, promoted: set[str]) -> None:
+        """promoted 태그 집합 갱신 → 하이라이트 재렌더링."""
+        if promoted != self._promoted:
+            self._promoted = set(promoted)
+            if self._rows:
+                self.dataChanged.emit(
+                    self.index(0, 0),
+                    self.index(len(self._rows) - 1, 0),
+                    [self.HtmlRole],
+                )
+
+
+# ---------------------------------------------------------------------------
+# HTML Delegate — ComboTableModel 0번 컬럼 하이라이트 렌더링
+# ---------------------------------------------------------------------------
+
+class ComboHtmlDelegate(QStyledItemDelegate):
+    """Combo 테이블 0번 컬럼을 HTML로 렌더링하는 delegate."""
+
+    def paint(self, painter, option, index):
+        html = index.data(ComboTableModel.HtmlRole)
+        if not html or index.column() != 0:
+            super().paint(painter, option, index)
+            return
+
+        self.initStyleOption(option, index)
+
+        painter.save()
+
+        doc = QTextDocument()
+        fs = get_scaled_font_size(19)
+        doc.setDefaultStyleSheet(
+            f"body {{ color: {DARK_COLORS['text_primary']}; font-size: {fs}px; }}"
+        )
+        doc.setHtml(f"<body>{html}</body>")
+        doc.setTextWidth(option.rect.width())
+
+        # 선택/호버 배경 그리기
+        style = option.widget.style() if option.widget else None
+        if style:
+            option.text = ""
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, option, painter, option.widget)
+
+        painter.translate(option.rect.topLeft())
+        doc.drawContents(painter)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        html = index.data(ComboTableModel.HtmlRole)
+        if not html or index.column() != 0:
+            return super().sizeHint(option, index)
+
+        doc = QTextDocument()
+        fs = get_scaled_font_size(19)
+        doc.setDefaultStyleSheet(f"body {{ font-size: {fs}px; }}")
+        doc.setHtml(f"<body>{html}</body>")
+        doc.setTextWidth(option.rect.width() if option.rect.width() > 0 else 300)
+        return QSize(int(doc.idealWidth()), int(doc.size().height()))
+
+
+# ---------------------------------------------------------------------------
+# ExprTreeDelegate — pinned 항목이 hover에 의해 덮이지 않도록 보호
+# ---------------------------------------------------------------------------
+
+PINNED_ROLE = Qt.ItemDataRole.UserRole + 101
+
+
+class ExprTreeDelegate(QStyledItemDelegate):
+    """Expression 트리 전용 delegate.
+
+    pinned 항목: 파란색 배경 + 흰색 텍스트 (hover 무관)
+    일반 항목 : 기본 스타일
+    """
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        pinned = index.data(PINNED_ROLE)
+        if pinned:
+            painter.save()
+            painter.fillRect(option.rect, QColor(DARK_COLORS["accent_blue"]))
+            painter.setPen(QColor("#FFFFFF"))
+            text_rect = option.rect.adjusted(get_scaled_size(4), 0, 0, 0)
+            painter.setFont(option.font)
+            painter.drawText(
+                text_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                index.data(Qt.ItemDataRole.DisplayRole) or "",
+            )
+            painter.restore()
+        else:
+            super().paint(painter, option, index)

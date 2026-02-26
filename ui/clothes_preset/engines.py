@@ -7,6 +7,7 @@ viewer_clothes.py의 핵심 알고리즘을 4개 엔진 클래스로 분리.
 from __future__ import annotations
 
 from collections import defaultdict
+from math import ceil
 from typing import Any
 
 from .data_manager import (
@@ -109,10 +110,50 @@ class ClothingTaxonomyEngine:
             "slot_rows_cache": slot_rows,
         }
 
+    # 태그 레벨 명시적 슬롯 오버라이드 (data 오배치 보정)
+    # 형식: norm_text(tag) → (slot, group)
+    _TAG_SLOT_OVERRIDES: dict[str, tuple[str, str]] = {
+        # ── LEGS_FEET: 발가락/발톱 관련 ──────────────────────
+        "toe nails":           ("LEGS_FEET", "nails"),
+        "toenails":            ("LEGS_FEET", "nails"),
+        "painted toenails":    ("LEGS_FEET", "nails"),
+        "toe nail polish":     ("LEGS_FEET", "nails"),
+        "toenail polish":      ("LEGS_FEET", "nails"),
+        # ── ARMS_HANDS: 손가락/손톱 관련 ────────────────────
+        "long fingernails":    ("ARMS_HANDS", "nails"),
+        "fingernails":         ("ARMS_HANDS", "nails"),
+        "painted nails":       ("ARMS_HANDS", "nails"),
+        "nail art":            ("ARMS_HANDS", "nails"),
+        "nail polish":         ("ARMS_HANDS", "nails"),
+        "long nails":          ("ARMS_HANDS", "nails"),
+        "sharp nails":         ("ARMS_HANDS", "nails"),
+        "claw":                ("ARMS_HANDS", "nails"),
+        "claws":               ("ARMS_HANDS", "nails"),
+        "decorated nails":     ("ARMS_HANDS", "nails"),
+        # ── STYLE: 렌더링/색감/신체 드로잉 스타일 ───────────
+        "anime coloring":      ("STYLE", "fashion style"),
+        "cel shading":         ("STYLE", "fashion style"),
+        "lineart":             ("STYLE", "fashion style"),
+        "body writing":        ("STYLE", "design modifiers"),
+        "clothes writing":     ("STYLE", "design modifiers"),
+        "text on clothes":     ("STYLE", "design modifiers"),
+        "tattoo":              ("STYLE", "design modifiers"),
+        "body tattoo":         ("STYLE", "design modifiers"),
+        "brand name":          ("STYLE", "design modifiers"),
+        "logo":                ("STYLE", "design modifiers"),
+        "skin tight":          ("STYLE", "silhouette & exposure"),
+        "painted body":        ("STYLE", "design modifiers"),
+    }
+
     def _assign_slot_and_group(self, row: RegionTag) -> tuple[str, str]:
+        t = norm_text(row.tag)
+
+        # 0. 태그 레벨 명시적 오버라이드 (최우선)
+        if t in self._TAG_SLOT_OVERRIDES:
+            return self._TAG_SLOT_OVERRIDES[t]
+
         group = self._display_subgroup(row)
         g = norm_text(group)
-        t = norm_text(row.tag)
 
         if self._is_style_non_garment(row, group):
             return "STYLE", self._map_style_subgroup(row.tag, row.subgroup)
@@ -132,6 +173,12 @@ class ClothingTaxonomyEngine:
         # 어휘 기반 보정 (collar/shirt 계열)
         if any(k in t for k in ("shirt", "blouse", "t-shirt", "top", "camisole", "cardigan", "jacket", "coat", "hoodie", "sweater", "bra")):
             return "UPPER_BODY", group
+
+        # 어휘 기반 보정 (손발톱/발 관련 폴백)
+        if any(k in t for k in ("toe nail", "toenail")):
+            return "LEGS_FEET", "nails"
+        if any(k in t for k in ("fingernail", "finger nail")):
+            return "ARMS_HANDS", "nails"
 
         region = self._effective_region(row)
         if region in {"LEGS", "FEET"}:
@@ -193,6 +240,13 @@ class ClothingTaxonomyEngine:
         if any(k in tag for k in (
             "cutout", "open clothes", "under clothes", "see-through",
             "highleg", "off-shoulder", "strapless", "wet clothes", "torn clothes",
+        )):
+            return True
+        # 렌더링/색감/신체 그래픽 스타일 — 의류 아님
+        if any(k in tag for k in (
+            "coloring", "shading", "lineart", "cel shading",
+            "body writing", "clothes writing", "text on clothes",
+            "tattoo", "painted body", "brand name", " logo",
         )):
             return True
         return False
@@ -484,9 +538,15 @@ class PromptBuilder:
     """
 
     @staticmethod
-    def build(staged_tags: list[str], current_combo: str = "") -> str:
-        """'1girl, tag1, tag2, ...' 형태의 프롬프트 빌드."""
+    def build(staged_tags: list[str], current_combo: str = "",
+              rating_tags: list[str] | None = None) -> str:
+        """'1girl, rating_tags..., tag1, tag2, ...' 형태의 프롬프트 빌드.
+
+        rating_tags가 주어지면 '1girl' 바로 뒤(인덱스 1)에 삽입한다.
+        """
         tags: list[str] = ["1girl"]
+        if rating_tags:
+            tags.extend(rating_tags)
         tags.extend([t for t in staged_tags if t])
         if len(tags) <= 1 and current_combo:
             tags.extend(parse_csv_tags(current_combo))
@@ -507,3 +567,119 @@ def _expression_sort_key(row: dict[str, Any]) -> tuple[int, float, int, str]:
         -int(row.get("count", 0)),
         str(row.get("expression_combo", "")),
     )
+
+
+def compute_promoted_tags(
+    region_staged: dict[str, list[str]],
+    assigned_row_by_tag: dict[str, RegionTag],
+    assigned_group_by_tag: dict[str, str],
+    slot_top_pct: float = 0.25,
+    subgroup_top_pct: float = 0.50,
+) -> set[str]:
+    """region_staged에서 promoted(메인 스테이지) 태그 집합을 계산.
+
+    기준 (OR 조건 — 어느 하나라도 만족하면 promoted):
+    1. 슬롯 내 post_count 상위 ceil(N * slot_top_pct) 태그
+    2. 서브그룹 내 post_count 상위 ceil(N * subgroup_top_pct) 태그
+    """
+    promoted: set[str] = set()
+
+    def _pc(tag: str) -> int:
+        row = assigned_row_by_tag.get(tag)
+        return int(row.post_count) if row is not None else 0
+
+    # 기준 1: 슬롯별 상위 20%
+    for slot, tags in region_staged.items():
+        if not tags:
+            continue
+        sorted_tags = sorted(tags, key=_pc, reverse=True)
+        top_n = ceil(len(sorted_tags) * slot_top_pct)
+        for tag in sorted_tags[:top_n]:
+            promoted.add(tag)
+
+    # 기준 2: 서브그룹별 상위 40%
+    by_subgroup: dict[str, list[str]] = defaultdict(list)
+    for tags in region_staged.values():
+        for tag in tags:
+            sg = assigned_group_by_tag.get(tag, "other")
+            by_subgroup[sg].append(tag)
+
+    for sg, tags in by_subgroup.items():
+        if not tags:
+            continue
+        sorted_tags = sorted(tags, key=_pc, reverse=True)
+        top_n = ceil(len(sorted_tags) * subgroup_top_pct)
+        for tag in sorted_tags[:top_n]:
+            promoted.add(tag)
+
+    return promoted
+
+
+# ---------------------------------------------------------------------------
+# Expression 그룹 분류
+# ---------------------------------------------------------------------------
+
+_EXPR_MODIFIERS: set[str] = {
+    "blush", "light blush", "blush stickers", "nose blush",
+    "open mouth", "closed mouth",
+    "closed eyes", "one eye closed", "half-closed eyes",
+    "raised eyebrows",
+}
+
+# (그룹명, 표시 라벨, 앵커 태그)  — 우선순위 순서
+EXPRESSION_GROUPS: list[tuple[str, str, set[str]]] = [
+    ("tears",      "tears (슬픔)",
+     {"tears", "crying", "crying with eyes open", "tearing up"}),
+    ("angry",      "angry (화남)",
+     {"angry", "frown", "light frown", "annoyed", "defeat"}),
+    ("shy",        "shy (수줍음)",
+     {"embarrassed", "shy", "nervous", "sweatdrop"}),
+    ("emoticon",   "emoticon (이모티콘)",
+     {":d", ":3", ":p", ":q", ";d", ";)", ";p", ":>", "^^^", ";o"}),
+    ("surprise",   "surprise (놀람)",
+     {":o", ";o", "surprised"}),
+    ("displeased", "displeased (불만)",
+     {":<", ":/"}),
+    ("grin",       "grin (씩웃음)",
+     {"grin", "smirk", "smug", "evil smile", "evil grin", "seductive smile"}),
+    ("smile",      "smile (미소)",
+     {"smile", "light smile", "happy"}),
+    ("stoic",      "stoic (무표정)",
+     {"expressionless", "serious", "sleepy", "wavy mouth",
+      "dot mouth", "sideways mouth"}),
+    ("physical",   "physical (신체반응)",
+     {"blood on face", "blood from mouth", "nosebleed", "snot",
+      "saliva", "heavy breathing", "drunk"}),
+    ("special",    "special (특수)",
+     {"facepaint", "reverse trap", "food on face", "averting eyes"}),
+]
+
+
+def classify_expression_combo(expr_combo: str) -> str:
+    """표정 combo → 그룹 key 반환."""
+    tags = {t.strip() for t in expr_combo.split(",") if t.strip()}
+    core = tags - _EXPR_MODIFIERS
+    if not core:
+        return "base"
+    for group_key, _label, anchors in EXPRESSION_GROUPS:
+        if core & anchors:
+            return group_key
+    return "other"
+
+
+def build_expression_group_tree(
+    expr_global: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """expr_global 리스트를 그룹별로 분류하여 반환.
+
+    Returns: {group_key: [row, ...]}  — 각 row 는 expr_global 의 원본 dict.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in expr_global:
+        combo = str(row.get("expression_combo", ""))
+        key = classify_expression_combo(combo)
+        grouped.setdefault(key, []).append(row)
+    # count 내림차순 정렬
+    for rows in grouped.values():
+        rows.sort(key=lambda r: -int(r.get("count", 0)))
+    return grouped

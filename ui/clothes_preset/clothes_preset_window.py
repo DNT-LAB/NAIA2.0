@@ -21,6 +21,7 @@ from PyQt6.QtGui import QBrush, QColor, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QGridLayout,
     QHBoxLayout,
@@ -34,8 +35,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QTableView,
-    QTableWidget,
-    QTableWidgetItem,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -66,11 +65,16 @@ from .engines import (
     SEARCH_DEBOUNCE_MS,
     SLOT_LABELS,
     ClothingTaxonomyEngine,
-    ExpressionEngine,
+    EXPRESSION_GROUPS,
     PromptBuilder,
     RulesEngine,
+    build_expression_group_tree,
+    compute_promoted_tags,
 )
-from .widgets import ComboTableModel, FlowLayout, StagedTagChip
+from .widgets import (
+    PINNED_ROLE, ComboHtmlDelegate, ComboTableModel,
+    ExprTreeDelegate, FlowLayout, StagedTagChip,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +93,6 @@ class ClothesPresetWindow(QMainWindow):
     """Clothes Preset 메인 윈도우 — 의류 택소노미 브라우저."""
 
     window_closed = pyqtSignal()
-    apply_to_main_prompt = pyqtSignal(dict)
 
     # ------------------------------------------------------------------
     # Static: 데이터 확인 + 다운로드
@@ -147,8 +150,8 @@ class ClothesPresetWindow(QMainWindow):
         self._kr_tags_df = kr_tags_df if kr_tags_df is not None else pd.DataFrame()
 
         self.setWindowTitle("Clothes Preset")
-        self.setMinimumSize(get_scaled_size(1680), get_scaled_size(980))
-        self.resize(get_scaled_size(1960), get_scaled_size(1190))
+        self.setMinimumSize(get_scaled_size(1800), get_scaled_size(980))
+        self.resize(get_scaled_size(2200), get_scaled_size(1190))
 
         # 엔진
         self._taxonomy = ClothingTaxonomyEngine()
@@ -188,6 +191,9 @@ class ClothesPresetWindow(QMainWindow):
         self._combo_seed_tags: list[str] = []
         self._staged_tags: list[str] = []
         self._region_staged: dict[str, list[str]] = {s: [] for s in DISPLAY_SLOTS}
+        self._promoted_set: set[str] = set()
+        self._staged_expressions: list[str] = []
+        self._pinned_expr_item: QTreeWidgetItem | None = None
         self._active_slot: str = DISPLAY_SLOTS[0]
         self._pair_mode = "Balanced"
         self._generating = False
@@ -267,7 +273,8 @@ class ClothesPresetWindow(QMainWindow):
         splitter.setHandleWidth(get_scaled_size(4))
         main_layout.addWidget(splitter, 1)
         self._main_splitter = splitter
-        self._panel_ratio = (1.0, 2.4, 1.0)
+        self._panel_ratio = (1.0, 2.4, 1.5)
+        self._left_panel: QWidget | None = None  # _apply_panel_ratio에서 고정 너비 부여
 
         # ---- LEFT PANEL ----
         left = QWidget()
@@ -290,8 +297,15 @@ class ClothesPresetWindow(QMainWindow):
         top_row.addWidget(self._pair_mode_combo)
         left_l.addLayout(top_row)
 
+        count_row = QHBoxLayout()
+        count_row.setSpacing(get_scaled_size(4))
         self._combo_count_label = QLabel("0 combos")
-        left_l.addWidget(self._combo_count_label)
+        count_row.addWidget(self._combo_count_label, 1)
+        self._clear_all_btn = QPushButton("Clear All Staged")
+        self._clear_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_all_btn.clicked.connect(self._clear_staging)
+        count_row.addWidget(self._clear_all_btn)
+        left_l.addLayout(count_row)
 
         # LEFT 내부 분할: Combo : Expression
         left_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -305,6 +319,12 @@ class ClothesPresetWindow(QMainWindow):
         self._combo_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._combo_table.verticalHeader().setVisible(False)
         self._combo_table.setWordWrap(True)
+        self._combo_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._combo_table.setSizePolicy(
+            QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        )
         self._combo_table.verticalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
@@ -313,31 +333,36 @@ class ClothesPresetWindow(QMainWindow):
         combo_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         combo_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self._combo_table.setColumnWidth(1, get_scaled_size(55))
+        self._combo_table.setItemDelegateForColumn(0, ComboHtmlDelegate(self._combo_table))
         self._combo_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._combo_table.customContextMenuRequested.connect(self._on_combo_context_menu)
         self._combo_table.selectionModel().currentRowChanged.connect(
             lambda _cur, _prev: self._on_combo_selected()
         )
+        self._combo_table.doubleClicked.connect(self._on_combo_double_clicked)
         left_splitter.addWidget(self._combo_table)
 
-        # Expression 테이블
+        # Expression 트리 (그룹별)
         expr_widget = QWidget()
         expr_l = QVBoxLayout(expr_widget)
         expr_l.setContentsMargins(0, 0, 0, 0)
         expr_l.setSpacing(get_scaled_size(2))
         self._expr_count_label = QLabel("0 expression sets")
         expr_l.addWidget(self._expr_count_label)
-        self._expr_table = QTableWidget()
-        self._expr_table.setColumnCount(3)
-        self._expr_table.setHorizontalHeaderLabels(["Expression Set", "Count", "Conf"])
-        self._expr_table.horizontalHeader().setStretchLastSection(True)
-        self._expr_table.setColumnWidth(1, get_scaled_size(55))
-        self._expr_table.setColumnWidth(2, get_scaled_size(75))
-        self._expr_table.verticalHeader().setVisible(False)
-        self._expr_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._expr_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._expr_table.setSortingEnabled(True)
-        expr_l.addWidget(self._expr_table)
+        self._expr_tree = QTreeWidget()
+        self._expr_tree.setObjectName("exprTree")
+        self._expr_tree.setColumnCount(1)
+        self._expr_tree.setHeaderHidden(True)
+        self._expr_tree.setRootIsDecorated(True)
+        self._expr_tree.setIndentation(get_scaled_size(16))
+        self._expr_tree.setUniformRowHeights(True)
+        self._expr_tree.setAlternatingRowColors(False)
+        self._expr_tree.setSelectionMode(QTreeWidget.SelectionMode.NoSelection)
+        self._expr_tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._expr_tree.header().setStretchLastSection(True)
+        self._expr_tree.setItemDelegate(ExprTreeDelegate(self._expr_tree))
+        self._expr_tree.itemClicked.connect(self._on_expr_tree_clicked)
+        expr_l.addWidget(self._expr_tree)
         left_splitter.addWidget(expr_widget)
 
         left_splitter.setStretchFactor(0, 3)   # Combo
@@ -368,19 +393,18 @@ class ClothesPresetWindow(QMainWindow):
         search_box.addWidget(self._region_search_clear_btn)
         top_bar.addLayout(search_box, 1)
 
-        # 우측: 번역 2줄 (태그+카테고리 / 설명)
-        info_box = QVBoxLayout()
-        info_box.setSpacing(get_scaled_size(1))
-        self._info_line1 = QLabel("")
-        self._info_line1.setObjectName("infoLine1")
-        self._info_line1.setTextFormat(Qt.TextFormat.RichText)
-        self._info_line1.setWordWrap(True)
-        info_box.addWidget(self._info_line1)
-        self._info_line2 = QLabel("")
-        self._info_line2.setObjectName("infoLine2")
-        self._info_line2.setWordWrap(True)
-        info_box.addWidget(self._info_line2)
-        top_bar.addLayout(info_box, 4)
+        # 우측: 번역 패널 (단일 고정 높이 RichText 라벨)
+        self._info_label = QLabel()
+        self._info_label.setObjectName("infoLabel")
+        self._info_label.setTextFormat(Qt.TextFormat.RichText)
+        self._info_label.setWordWrap(True)
+        self._info_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        h = get_scaled_size(52)
+        self._info_label.setFixedHeight(h)
+        self._hide_info_labels()  # 플레이스홀더
+        top_bar.addWidget(self._info_label, 4)
 
         center_l.addLayout(top_bar)
 
@@ -463,7 +487,6 @@ class ClothesPresetWindow(QMainWindow):
                 }}
             """)
             stage_panel.setMinimumHeight(get_scaled_size(52))
-            stage_panel.setMaximumHeight(get_scaled_size(80))
             stage_panel_l = QVBoxLayout(stage_panel)
             stage_panel_l.setContentsMargins(
                 get_scaled_size(4), get_scaled_size(2),
@@ -512,60 +535,51 @@ class ClothesPresetWindow(QMainWindow):
         # 이미지 프리뷰 (832:1216 비율 고정)
         self._image_preview = QLabel()
         self._image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._image_preview.setMinimumSize(get_scaled_size(208), get_scaled_size(304))
+        self._image_preview.setMinimumSize(get_scaled_size(280), get_scaled_size(410))
         self._image_preview.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         )
         self._image_preview.setText("832 × 1216")
         right_l.addWidget(self._image_preview, stretch=1)
 
-        # Generate 버튼
+        # Generate 버튼 (full-width)
         self._generate_btn = QPushButton("Generate")
-        self._generate_btn.setFixedWidth(get_scaled_size(130))
         self._generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._generate_btn.clicked.connect(self._on_generate_clicked)
-        gen_row = QHBoxLayout()
-        gen_row.addStretch(1)
-        gen_row.addWidget(self._generate_btn)
-        gen_row.addStretch(1)
-        right_l.addLayout(gen_row)
+        right_l.addWidget(self._generate_btn)
 
-        # 프롬프트
+        # 프롬프트 + Rating 체크박스
+        prompt_row = QHBoxLayout()
+        prompt_row.setSpacing(get_scaled_size(6))
         prompt_label = QLabel("Prompt")
-        right_l.addWidget(prompt_label)
+        prompt_row.addWidget(prompt_label)
+        prompt_row.addStretch(1)
+
+        from PyQt6.QtWidgets import QButtonGroup
+        self._rating_checkboxes: dict[str, QCheckBox] = {}
+        self._rating_group = QButtonGroup(self)
+        self._rating_group.setExclusive(True)
+        for rating_name in ("general", "sensitive", "questionable", "explicit"):
+            cb = QCheckBox(rating_name)
+            cb.setChecked(rating_name == "sensitive")
+            self._rating_group.addButton(cb)
+            cb.toggled.connect(lambda checked, name=rating_name: self._on_rating_toggled(name, checked))
+            prompt_row.addWidget(cb)
+            self._rating_checkboxes[rating_name] = cb
+        right_l.addLayout(prompt_row)
         self._prompt_edit = QTextEdit()
         self._prompt_edit.setAcceptRichText(False)
         self._prompt_edit.setPlaceholderText("Prompt preview based on current staged tags")
         self._prompt_edit.setMaximumHeight(get_scaled_size(120))
         right_l.addWidget(self._prompt_edit)
 
-        # 버튼 행: [메인 프롬프트에 전송] [전송 + 즉시 생성]
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(get_scaled_size(4))
-
-        self._send_to_main_btn = QPushButton("메인 프롬프트에 전송")
-        self._send_to_main_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._send_to_main_btn.clicked.connect(self._on_send_to_main)
-        btn_row.addWidget(self._send_to_main_btn)
-
-        self._send_and_gen_btn = QPushButton("전송 + 즉시 생성")
-        self._send_and_gen_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._send_and_gen_btn.clicked.connect(self._on_send_and_generate)
-        btn_row.addWidget(self._send_and_gen_btn)
-        right_l.addLayout(btn_row)
-
-        # 유틸 행: [Copy to Clipboard] [Clear All Staged]
-        util_row = QHBoxLayout()
-        util_row.setSpacing(get_scaled_size(4))
+        # 유틸 행: [Copy to Clipboard]
         self._copy_btn = QPushButton("Copy to Clipboard")
         self._copy_btn.clicked.connect(self._on_copy_to_clipboard)
-        util_row.addWidget(self._copy_btn)
-        self._clear_all_btn = QPushButton("Clear All Staged")
-        self._clear_all_btn.clicked.connect(self._clear_staging)
-        util_row.addWidget(self._clear_all_btn)
-        right_l.addLayout(util_row)
+        right_l.addWidget(self._copy_btn)
 
         # 스플리터에 패널 추가 + 핸들 드래그 비활성
+        self._left_panel = left
         splitter.addWidget(left)
         splitter.addWidget(center)
         splitter.addWidget(right)
@@ -618,12 +632,16 @@ class ClothesPresetWindow(QMainWindow):
                 font-size: {fs(17)}px;
             }}
             QTableView, QTableWidget {{
-                background-color: {DARK_COLORS['bg_secondary']};
+                background-color: #1A1A1A;
                 color: {DARK_COLORS['text_primary']};
                 border: 1px solid {DARK_COLORS['border']};
                 gridline-color: {DARK_COLORS['border']};
                 font-size: {fs(19)}px;
-                alternate-background-color: {DARK_COLORS['bg_primary']};
+                alternate-background-color: #1E1E1E;
+            }}
+            QTableView::item:selected, QTableWidget::item:selected {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: #FFFFFF;
             }}
             QHeaderView::section {{
                 background-color: {DARK_COLORS['bg_primary']};
@@ -710,12 +728,15 @@ class ClothesPresetWindow(QMainWindow):
         for lbl in self._region_count_labels.values():
             lbl.setStyleSheet(secondary_lbl_style)
 
-        # 번역 바 스타일 (2줄 컴팩트)
-        self._info_line1.setStyleSheet(
-            f"color: {DARK_COLORS['text_primary']}; font-size: {fs(15)}px; border: none; padding: 0px;"
-        )
-        self._info_line2.setStyleSheet(
-            f"color: {DARK_COLORS['text_primary']}; font-size: {fs(14)}px; border: none; padding: 0px;"
+        # 번역 패널 스타일 (흰색 배경, 고정 높이)
+        self._info_label.setStyleSheet(
+            f"QLabel#infoLabel {{"
+            f"  background-color: #F5F5F5;"
+            f"  border: 1px solid {DARK_COLORS['border']};"
+            f"  border-radius: {ss(3)}px;"
+            f"  padding: {ss(3)}px {ss(6)}px;"
+            f"  color: #1A1A1A;"
+            f"}}"
         )
 
         # 검색 Clear 버튼
@@ -734,15 +755,14 @@ class ClothesPresetWindow(QMainWindow):
             }}
         """)
 
-        # Generate 버튼 (event_preset 패턴)
+        # Generate 버튼
         self._generate_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK_COLORS['accent_blue']};
                 color: white;
-                font-weight: 600;
-                padding: {ss(6)}px {ss(16)}px;
+                padding: {ss(6)}px {ss(12)}px;
                 border-radius: {ss(4)}px;
-                font-size: {fs(19)}px;
+                font-size: {fs(14)}px;
                 border: none;
             }}
             QPushButton:hover {{
@@ -754,41 +774,16 @@ class ClothesPresetWindow(QMainWindow):
             }}
         """)
 
-        # 전송 버튼 스타일
-        send_btn_style = f"""
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_hover']};
-                color: {DARK_COLORS['text_primary']};
-                padding: {ss(6)}px {ss(12)}px;
-                border-radius: {ss(4)}px;
-                font-size: {fs(14)}px;
-                border: 1px solid {DARK_COLORS['border']};
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['border']};
-            }}
-        """
-        self._send_to_main_btn.setStyleSheet(send_btn_style)
-        self._send_and_gen_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_hover']};
-                color: {DARK_COLORS['text_primary']};
-                padding: {ss(6)}px {ss(12)}px;
-                border-radius: {ss(4)}px;
-                font-size: {fs(14)}px;
-                border: 1px solid {DARK_COLORS['accent_blue']};
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['border']};
-            }}
-        """)
-
     # ------------------------------------------------------------------
     # 패널 비율 고정
     # ------------------------------------------------------------------
 
     def _apply_panel_ratio(self) -> None:
-        """1:2.4:1 비율로 스플리터 크기 고정."""
+        """1:2.4:1.5 비율로 스플리터 크기 고정.
+
+        LEFT 패널은 setFixedWidth로 강제 고정하여 테이블 컨텐츠 변경 시
+        minimumSizeHint가 비율을 무너뜨리지 못하도록 한다.
+        """
         sp = self._main_splitter
         available = sp.width() - sp.handleWidth() * (sp.count() - 1)
         if available <= 0:
@@ -798,6 +793,9 @@ class ClothesPresetWindow(QMainWindow):
         sizes = [int(available * v / total) for v in r]
         sizes[-1] = available - sum(sizes[:-1])  # 나머지 보정
         sp.setSizes(sizes)
+        # LEFT 패널 너비를 직접 고정 — QSplitter가 컨텐츠 hint에 의해 밀리는 것을 방지
+        if self._left_panel is not None:
+            self._left_panel.setFixedWidth(sizes[0])
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -942,12 +940,10 @@ class ClothesPresetWindow(QMainWindow):
             for i, c in enumerate(self._filtered_combo_summaries):
                 if c.clothing_combo == selected_combo:
                     self._combo_table.selectRow(i)
-                    self._refresh_expected_expressions()
                     return
         if not self._combo_initialized_once and self._filtered_combo_summaries:
             self._combo_initialized_once = True
             self._combo_table.selectRow(0)
-        self._refresh_expected_expressions()
 
     # ------------------------------------------------------------------
     # 콤보 선택 / 스테이징
@@ -963,7 +959,6 @@ class ClothesPresetWindow(QMainWindow):
         self._current_combo = summary.clothing_combo
         self._combo_seed_tags = list(summary.tags)
         self._refresh_staging()
-        self._refresh_expected_expressions()
         self._refresh_translation_panel()
 
     def _on_combo_context_menu(self, pos) -> None:
@@ -978,16 +973,27 @@ class ClothesPresetWindow(QMainWindow):
         if action == add_action:
             self._stage_combo_tags(summary.tags)
 
+    def _on_combo_double_clicked(self, index) -> None:
+        row = index.row()
+        if row < 0 or row >= len(self._filtered_combo_summaries):
+            return
+        summary = self._filtered_combo_summaries[row]
+        self._stage_combo_tags(summary.tags)
+
     def _stage_combo_tags(self, tags: tuple[str, ...]) -> None:
         if not tags:
             return
-        staged_set = set(self._staged_tags)
+        all_region = self._all_region_staged_tags()
+        region_lookup = {r.tag: r for r in self._region_tags}
         added = False
         for t in tags:
-            if not t or t in staged_set:
+            if not t or t in all_region:
                 continue
-            self._staged_tags.append(t)
-            staged_set.add(t)
+            slot = self._slot_for_tag(t, region_lookup)
+            if not slot:
+                slot = "STYLE"
+            self._region_staged.setdefault(slot, []).append(t)
+            all_region.add(t)
             added = True
         if added:
             self._refresh_all_from_staging()
@@ -1029,17 +1035,40 @@ class ClothesPresetWindow(QMainWindow):
             return tag.strip()
         return item.text(0).strip()
 
+    def _all_region_staged_tags(self) -> set[str]:
+        """_region_staged 전체 태그 집합 (중복 체크용)."""
+        result: set[str] = set()
+        for tags in self._region_staged.values():
+            result.update(tags)
+        return result
+
     def _add_selected_region_tag(self, slot: str | None = None) -> None:
-        tag = self._selected_region_tag(slot)
-        if not tag or tag in self._staged_tags:
+        use_slot = slot or self._active_slot
+        tag = self._selected_region_tag(use_slot)
+        if not tag or tag in self._all_region_staged_tags():
             return
-        self._staged_tags.append(tag)
+        self._region_staged.setdefault(use_slot, []).append(tag)
         self._refresh_all_from_staging()
 
     def _clear_staging(self) -> None:
         self._staged_tags = []
         self._region_staged = {s: [] for s in DISPLAY_SLOTS}
+        self._promoted_set = set()
+        self._staged_expressions = []
+        self._pinned_expr_item = None
+        self._reset_expr_tree_styles()
         self._refresh_all_from_staging()
+
+    def _reset_expr_tree_styles(self) -> None:
+        """Expression 트리의 모든 고정 스타일 초기화."""
+        for i in range(self._expr_tree.topLevelItemCount()):
+            parent = self._expr_tree.topLevelItem(i)
+            if parent is None:
+                continue
+            for j in range(parent.childCount()):
+                child = parent.child(j)
+                if child is not None:
+                    self._update_expr_item_style(child, False)
 
     # ------------------------------------------------------------------
     # Pair 모드
@@ -1052,12 +1081,36 @@ class ClothesPresetWindow(QMainWindow):
         self._refresh_all_from_staging()
 
     # ------------------------------------------------------------------
+    # promoted 재계산
+    # ------------------------------------------------------------------
+
+    def _recompute_staged_tags(self) -> None:
+        """_region_staged → _promoted_set / _staged_tags 재계산."""
+        self._promoted_set = compute_promoted_tags(
+            self._region_staged,
+            self._assigned_row_by_tag,
+            self._assigned_group_by_tag,
+        )
+        # promoted 태그만 flat list 로 (DISPLAY_SLOTS 순서, 삽입 순서 유지)
+        seen: set[str] = set()
+        result: list[str] = []
+        for slot in DISPLAY_SLOTS:
+            for tag in self._region_staged.get(slot, []):
+                if tag in self._promoted_set and tag not in seen:
+                    seen.add(tag)
+                    result.append(tag)
+        self._staged_tags = result
+        # 콤보 테이블 하이라이트 갱신
+        self._combo_model.set_promoted(self._promoted_set)
+
+    # ------------------------------------------------------------------
     # 갱신 캐스케이드
     # ------------------------------------------------------------------
 
     def _refresh_all_from_staging(self) -> None:
         self._combo_search_timer.stop()
         self._region_search_timer.stop()
+        self._recompute_staged_tags()
         self._refresh_staging()
         self._refresh_rules()
         self._refresh_seed_regions()
@@ -1106,25 +1159,19 @@ class ClothesPresetWindow(QMainWindow):
         return ""
 
     def _refresh_slot_stage_labels(self) -> None:
-        region_lookup = {r.tag: r for r in self._region_tags}
-        by_slot: dict[str, list[str]] = {s: [] for s in DISPLAY_SLOTS}
-        for tag in self._staged_tags:
-            slot = self._slot_for_tag(tag, region_lookup)
-            if slot in by_slot:
-                by_slot[slot].append(tag)
-
-        # region_staged 동기화
-        self._region_staged = {s: list(tags) for s, tags in by_slot.items()}
-
         for slot in DISPLAY_SLOTS:
             flow = self._slot_chip_layouts.get(slot)
             if flow is None:
                 continue
             flow.clear_widgets()
-            tags = by_slot.get(slot, [])
+            tags = self._region_staged.get(slot, [])
             slot_color = self._slot_accent_colors.get(slot, "")
             for tag in tags:
-                chip = StagedTagChip(tag, border_color=slot_color)
+                text_color = "#F5E6A3" if tag in self._promoted_set else ""
+                chip = StagedTagChip(tag, border_color=slot_color, text_color=text_color)
+                tip = self._make_tag_tooltip(tag)
+                if tip:
+                    chip.setToolTip(tip)
                 chip.tag_clicked.connect(self._on_chip_tag_clicked)
                 chip.remove_clicked.connect(self._on_chip_remove_clicked)
                 flow.addWidget(chip)
@@ -1138,22 +1185,18 @@ class ClothesPresetWindow(QMainWindow):
         self._show_translation_for_tags([tag])
 
     def _on_chip_remove_clicked(self, tag: str) -> None:
-        """칩 × 클릭 → staged에서 태그 제거."""
-        if tag in self._staged_tags:
-            self._staged_tags.remove(tag)
-            self._refresh_all_from_staging()
+        """칩 × 클릭 → region_staged에서 태그 제거."""
+        for slot_tags in self._region_staged.values():
+            if tag in slot_tags:
+                slot_tags.remove(tag)
+                break
+        self._refresh_all_from_staging()
 
     def _on_slot_clear(self, slot: str) -> None:
-        """해당 슬롯의 staged 태그 전부 제거."""
-        region_lookup = {r.tag: r for r in self._region_tags}
-        to_remove = [
-            tag for tag in self._staged_tags
-            if self._slot_for_tag(tag, region_lookup) == slot
-        ]
-        if not to_remove:
+        """해당 슬롯의 region_staged 태그 전부 제거."""
+        if not self._region_staged.get(slot):
             return
-        for tag in to_remove:
-            self._staged_tags.remove(tag)
+        self._region_staged[slot] = []
         self._refresh_all_from_staging()
 
     def _show_translation_for_tags(self, tags: list[str]) -> None:
@@ -1177,15 +1220,16 @@ class ClothesPresetWindow(QMainWindow):
 
     def _refresh_region_tables(self) -> None:
         keyword = self._region_search.text().strip().lower()
-        staged = set(self._staged_tags)
-        candidate_set: set[str] = set(staged)
+        staged_promoted = set(self._staged_tags)
+        all_region_tags = self._all_region_staged_tags()
+        candidate_set: set[str] = set(all_region_tags)
 
         # 한글 검색 지원
         kr_matched_tags: set[str] = set()
         if keyword:
             kr_matched_tags = self._kr_search(keyword)
 
-        if staged:
+        if staged_promoted:
             candidate_set.update(self._current_reco_agg.keys())
             candidate_set.update(self._current_pair_agg.keys())
 
@@ -1202,9 +1246,27 @@ class ClothesPresetWindow(QMainWindow):
 
             all_rows = list(self._slot_rows_cache.get(slot, []))
             rows = list(all_rows)
-            if staged:
+            if staged_promoted:
                 rows = [r for r in rows if r.tag in candidate_set]
-            rows = [r for r in rows if r.tag not in staged]
+            # 모든 region_staged 태그를 트리에서 숨김
+            rows = [r for r in rows if r.tag not in all_region_tags]
+
+            # 리전 호환성 필터: 슬롯 내 staged 태그와 combo 교집합이 0이 되는 태그 숨김
+            slot_tags = self._region_staged.get(slot, [])
+            if slot_tags:
+                slot_combo_ids: set[int] | None = None
+                for st in slot_tags:
+                    tag_ids = self._combo_tag_to_ids.get(st, set())
+                    if slot_combo_ids is None:
+                        slot_combo_ids = set(tag_ids)
+                    else:
+                        slot_combo_ids &= tag_ids
+                if not slot_combo_ids:
+                    slot_combo_ids = set()
+                rows = [
+                    r for r in rows
+                    if self._combo_tag_to_ids.get(r.tag, set()) & slot_combo_ids
+                ]
 
             if keyword:
                 rows = [
@@ -1223,7 +1285,7 @@ class ClothesPresetWindow(QMainWindow):
 
             rows.sort(
                 key=lambda r: (
-                    0 if r.tag in staged else 1,
+                    0 if r.tag in all_region_tags else 1,
                     -signal_cache[r.tag][0],
                     -signal_cache[r.tag][1],
                     -signal_cache[r.tag][2],
@@ -1302,6 +1364,9 @@ class ClothesPresetWindow(QMainWindow):
                     child = QTreeWidgetItem([f"{x.tag}  ({count_str})"])
                     child.setData(0, Qt.ItemDataRole.UserRole, x.tag)
                     child.setBackground(0, item_brush)
+                    tip = self._make_tag_tooltip(x.tag)
+                    if tip:
+                        child.setToolTip(0, tip)
                     children.append(child)
                 parent.addChildren(children)
                 parents_batch.append(parent)
@@ -1313,9 +1378,8 @@ class ClothesPresetWindow(QMainWindow):
 
             tree.setUpdatesEnabled(True)
             total = len(all_rows)
-            subgroup_count = len(subgroup_order)
             self._region_count_labels[slot].setText(
-                f"showing {len(rows):,} / {int(total):,} | subgroup {subgroup_count}"
+                f"{len(rows):,} / {int(total):,}"
             )
             if tree.topLevelItemCount() > 0 and not tree.selectedItems():
                 tree.setCurrentItem(tree.topLevelItem(0))
@@ -1331,36 +1395,64 @@ class ClothesPresetWindow(QMainWindow):
         return self._filtered_combo_summaries[row].clothing_combo
 
     def _refresh_expected_expressions(self) -> None:
-        selected_combo = self._current_selected_combo()
-        staged = [t for t in self._staged_tags if t]
-        source = "global"
+        grouped = build_expression_group_tree(self._expr_global)
+        total = sum(len(v) for v in grouped.values())
 
-        if selected_combo and selected_combo in self._expr_by_combo:
-            rows = list(self._expr_by_combo.get(selected_combo, []))
-            source = "selected combo"
-        elif staged:
-            rows = ExpressionEngine.aggregate_for_staged(staged, self._expr_by_combo)
-            source = "staged-match"
+        self._expr_tree.setUpdatesEnabled(False)
+        self._expr_tree.clear()
+
+        # EXPRESSION_GROUPS 순서대로, 이후 base/other
+        group_order = [key for key, _label, _anchors in EXPRESSION_GROUPS]
+        for extra in ("base", "other"):
+            if extra not in group_order:
+                group_order.append(extra)
+
+        label_map = {key: label for key, label, _a in EXPRESSION_GROUPS}
+        label_map["base"] = "base (수식어만)"
+        label_map["other"] = "other (미분류)"
+
+        for gkey in group_order:
+            rows = grouped.get(gkey)
+            if not rows:
+                continue
+            label = label_map.get(gkey, gkey)
+            parent = QTreeWidgetItem([f"{label} ({len(rows)})"])
+            parent.setFlags(parent.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            for r in rows:
+                combo = str(r["expression_combo"])
+                count = int(r.get("count", 0))
+                count_str = f"{count:,}" if count >= 1000 else str(count)
+                child = QTreeWidgetItem([f"{combo}  ({count_str})"])
+                child.setData(0, Qt.ItemDataRole.UserRole, combo)
+                parent.addChild(child)
+            self._expr_tree.addTopLevelItem(parent)
+
+        self._expr_tree.setUpdatesEnabled(True)
+        self._expr_count_label.setText(f"{total:,} expression sets")
+
+    def _on_expr_tree_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
+        if item.parent() is None:
+            return
+        combo = item.data(0, Qt.ItemDataRole.UserRole)
+        if not combo:
+            return
+        # 같은 항목 재클릭 → 해제
+        if item is self._pinned_expr_item:
+            self._staged_expressions = []
+            self._update_expr_item_style(item, False)
+            self._pinned_expr_item = None
         else:
-            rows = list(self._expr_global)
+            # 이전 고정 해제
+            if self._pinned_expr_item is not None:
+                self._update_expr_item_style(self._pinned_expr_item, False)
+            # 새 고정
+            self._staged_expressions = [t.strip() for t in combo.split(",") if t.strip()]
+            self._update_expr_item_style(item, True)
+            self._pinned_expr_item = item
+        self._rebuild_prompt_preview()
 
-        max_rows = 300
-        shown = rows[:max_rows]
-        prev_sort = self._expr_table.isSortingEnabled()
-        self._expr_table.setUpdatesEnabled(False)
-        self._expr_table.setSortingEnabled(False)
-        self._expr_table.setRowCount(len(shown))
-        for i, r in enumerate(shown):
-            self._expr_table.setItem(i, 0, QTableWidgetItem(str(r["expression_combo"])))
-            it1 = QTableWidgetItem(f"{int(r['count']):,}")
-            it2 = QTableWidgetItem(f"{float(r['confidence']):.4f}")
-            it1.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            it2.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._expr_table.setItem(i, 1, it1)
-            self._expr_table.setItem(i, 2, it2)
-        self._expr_table.setSortingEnabled(prev_sort)
-        self._expr_table.setUpdatesEnabled(True)
-        self._expr_count_label.setText(f"{len(shown):,} / {len(rows):,} expression sets ({source})")
+    def _update_expr_item_style(self, item: QTreeWidgetItem, pinned: bool) -> None:
+        item.setData(0, PINNED_ROLE, pinned)
 
     # ------------------------------------------------------------------
     # 번역 패널
@@ -1371,51 +1463,106 @@ class ClothesPresetWindow(QMainWindow):
         pass
 
     def _hide_info_labels(self) -> None:
-        """번역 바 초기화."""
-        self._info_line1.setText("")
-        self._info_line2.setText("")
+        """번역 패널 플레이스홀더로 초기화."""
+        fs = get_scaled_font_size
+        self._info_label.setText(
+            f'<span style="color:#555555; font-size:{fs(18)}px; font-weight:bold;">Translated Tags</span><br>'
+            f'<span style="color:#888888; font-size:{fs(15)}px;">아이템을 선택하거나, 마우스를 올려두면 번역이 나타납니다.</span>'
+        )
+
+    def _lookup_tag_translation(self, tag_name: str) -> tuple[str, str]:
+        """KR_tags에서 태그 번역 조회. (category, desc) 반환."""
+        if not tag_name or self._kr_tags_df is None or self._kr_tags_df.empty:
+            return "", ""
+        rows = self._kr_tags_df[self._kr_tags_df["tag"] == tag_name]
+        if rows.empty:
+            tag_norm = tag_name.replace("_", " ")
+            rows = self._kr_tags_df[self._kr_tags_df["tag"] == tag_norm]
+        if rows.empty:
+            return "", ""
+        data = rows.iloc[0]
+        cat = str(data.get("category", "")) if pd.notna(data.get("category")) else ""
+        desc = str(data.get("desc", "")) if pd.notna(data.get("desc")) else ""
+        return cat, desc
+
+    def _make_tag_tooltip(self, tag_name: str) -> str:
+        """태그 번역 툴팁 문자열 생성."""
+        cat, desc = self._lookup_tag_translation(tag_name)
+        parts: list[str] = [tag_name]
+        if cat:
+            parts[0] += f"  ({cat})"
+        if desc:
+            parts.append(desc)
+        return "\n".join(parts) if desc or cat else ""
 
     def _update_tag_info(self, tag_name: str) -> None:
-        """단일 태그의 KR_tags 정보를 2줄 번역 바에 표시.
+        """단일 태그의 KR_tags 정보를 단일 RichText 라벨에 표시.
 
-        Line 1: <tag name 연노랑> <category 연회색>
-        Line 2: <desc 흰색>
+        1줄: 태그명 (어두운 파란색 볼드) + 카테고리 (회색)
+        2줄: 설명 (검은색, +2px)
         """
-        self._hide_info_labels()
         if not tag_name:
+            self._hide_info_labels()
             return
 
-        # 기본값 — DB 매칭 실패 시 태그명만 표시
-        tag_html = f'<span style="color:#F5E6A3; font-weight:bold;">{tag_name}</span>'
-        category_html = ""
-        desc_text = ""
+        fs = get_scaled_font_size
+        cat, desc_text = self._lookup_tag_translation(tag_name)
 
-        if self._kr_tags_df is not None and not self._kr_tags_df.empty:
-            rows = self._kr_tags_df[self._kr_tags_df["tag"] == tag_name]
-            if rows.empty:
-                tag_norm = tag_name.replace("_", " ")
-                rows = self._kr_tags_df[self._kr_tags_df["tag"] == tag_norm]
-            if not rows.empty:
-                data = rows.iloc[0]
-                # 카테고리
-                cat = str(data.get("category", "")) if pd.notna(data.get("category")) else ""
-                if cat:
-                    category_html = f'  <span style="color:#B0B0B0;">{cat}</span>'
-                # 설명
-                desc_text = str(data.get("desc", "")) if pd.notna(data.get("desc")) else ""
+        tag_html = f'<span style="color:#1A5276; font-size:{fs(18)}px; font-weight:bold;">{tag_name}</span>'
+        if cat:
+            tag_html += f'  <span style="color:#555555; font-size:{fs(16)}px;">{cat}</span>'
 
-        # Line 1: 태그명 + 카테고리
-        self._info_line1.setText(f"{tag_html}{category_html}")
+        desc_html = ""
+        if desc_text:
+            desc_html = f'<br><span style="color:#1A1A1A; font-size:{fs(18)}px;">{desc_text}</span>'
 
-        # Line 2: 설명
-        self._info_line2.setText(desc_text)
+        self._info_label.setText(f"{tag_html}{desc_html}")
 
     # ------------------------------------------------------------------
     # 프롬프트
     # ------------------------------------------------------------------
 
+    def _get_selected_rating_tags(self) -> list[str]:
+        """체크된 rating 체크박스에 대응하는 태그 리스트 반환."""
+        _RATING_TAG_MAP = {
+            "general": ["general", "safe"],
+            "sensitive": ["sensitive"],
+            "questionable": ["questionable", "nsfw"],
+            "explicit": ["explicit", "nsfw"],
+        }
+        tags: list[str] = []
+        for name, cb in self._rating_checkboxes.items():
+            if cb.isChecked():
+                tags.extend(_RATING_TAG_MAP[name])
+        # 중복 제거 (순서 보존)
+        seen: set[str] = set()
+        unique: list[str] = []
+        for t in tags:
+            if t not in seen:
+                seen.add(t)
+                unique.append(t)
+        return unique
+
+    def _on_rating_toggled(self, name: str, checked: bool) -> None:
+        """rating 체크박스 토글 → 프롬프트 갱신."""
+        self._rebuild_prompt_preview()
+
     def _rebuild_prompt_preview(self) -> None:
-        text = PromptBuilder.build(self._staged_tags, self._current_combo)
+        # Global Stage (promoted) + Local Stage (region) 합집합
+        seen: set[str] = set()
+        all_tags: list[str] = []
+        for slot in DISPLAY_SLOTS:
+            for tag in self._region_staged.get(slot, []):
+                if tag and tag not in seen:
+                    seen.add(tag)
+                    all_tags.append(tag)
+        # Expression 태그 추가
+        for tag in self._staged_expressions:
+            if tag and tag not in seen:
+                seen.add(tag)
+                all_tags.append(tag)
+        rating_tags = self._get_selected_rating_tags()
+        text = PromptBuilder.build(all_tags, self._current_combo, rating_tags=rating_tags)
         self._prompt_edit.setPlainText(text)
 
     def _on_copy_to_clipboard(self) -> None:
@@ -1431,50 +1578,81 @@ class ClothesPresetWindow(QMainWindow):
     def _set_generating_state(self, generating: bool) -> None:
         self._generating = generating
         self._generate_btn.setEnabled(not generating)
-        self._send_and_gen_btn.setEnabled(not generating)
         self._generate_btn.setText("Generating..." if generating else "Generate")
+
+    @staticmethod
+    def _collect_main_settings(main_window) -> dict:
+        """메인 윈도우에서 PromptProcessor에 필요한 settings 수집."""
+        comfyui_sampling_mode = "eps"
+        if hasattr(main_window, 'anima_radio') and main_window.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(main_window, 'v_pred_radio') and main_window.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(main_window, 'eps_radio') and main_window.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
+        cb = main_window.generation_checkboxes
+        return {
+            'prompt_fixed': cb["프롬프트 고정"].isChecked(),
+            'auto_generate': False,
+            'turbo_mode': cb["터보 옵션"].isChecked(),
+            'wildcard_standalone': cb["와일드카드 단독 모드"].isChecked(),
+            'api_mode': main_window.app_context.get_api_mode(),
+            'comfyui_sampling_mode': comfyui_sampling_mode,
+        }
 
     def _on_generate_clicked(self) -> None:
         """Generate 클릭 → 프롬프트 파이프라인 경유 → 이미지 생성 (메인 프롬프트 변경 없음)."""
         if not self.app_context or self._generating:
             return
+
+        main_window = getattr(self.app_context, "main_window", None)
+        if not main_window:
+            return
+
         prompt = self._prompt_edit.toPlainText().strip()
         if not prompt:
             return
 
-        self._set_generating_state(True)
-
-        main_window = getattr(self.app_context, "main_window", None)
-        if not main_window:
-            self._set_generating_state(False)
-            return
-
-        # 프롬프트 파이프라인 없이 직접 생성
         try:
-            gen_input = main_window.prompt_generation_controller.generate_instant_source_silent(
-                self.app_context, prompt
+            self._set_generating_state(True)
+
+            # 메인 윈도우 settings 수집
+            settings = self._collect_main_settings(main_window)
+
+            # 프롬프트를 파이프라인에 통과 (silent — 메인 창 무변경)
+            self.app_context.skip_prompt_engineering_auto_hide = True
+            tags_dict = {"general": prompt}
+            processed = main_window.prompt_gen_controller.generate_instant_source_silent(
+                tags_dict, settings,
             )
+            final_prompt = processed or prompt
+
+            # 처리된 프롬프트로 이미지 생성 요청 (832×1216 고정)
+            override_params = {
+                "input": final_prompt,
+                "clothes_preset_request": True,
+                "width": 832,
+                "height": 1216,
+            }
+
+            self.app_context.subscribe(
+                "generation_completed_for_clothes_preset",
+                self._on_generate_completed,
+            )
+            self.app_context.subscribe("generation_error", self._on_generate_error)
+
+            print(f"[ClothesPreset] 생성 시작: overrides={list(override_params.keys())}, prompt={final_prompt[:60]}...")
+            main_window.generation_controller.execute_generation_pipeline(
+                overrides=override_params,
+            )
+
         except Exception as e:
-            print(f"[ClothesPreset] generate_instant_source_silent 실패: {e}")
+            print(f"[ClothesPreset] 생성 오류: {e}")
             self._set_generating_state(False)
-            return
-
-        self.app_context.subscribe(
-            "generation_completed_for_clothes_preset",
-            self._on_generate_completed,
-        )
-        self.app_context.subscribe("generation_error", self._on_generate_error)
-
-        override = {
-            "clothes_preset_request": True,
-            "width": 832,
-            "height": 1216,
-        }
-        main_window.generation_controller.execute_generation_pipeline(
-            input=gen_input, overrides=override
-        )
 
     def _on_generate_completed(self, image_obj) -> None:
+        print(f"[ClothesPreset] _on_generate_completed 호출됨, image_obj type={type(image_obj)}")
         self._unsubscribe_generation()
         self._set_generating_state(False)
         if image_obj is None:
@@ -1511,77 +1689,17 @@ class ClothesPresetWindow(QMainWindow):
         print(f"[ClothesPreset] 생성 에러: {error_data.get('message', '')}")
 
     def _unsubscribe_generation(self) -> None:
-        if self.app_context:
-            self.app_context.unsubscribe(
-                "generation_completed_for_clothes_preset",
-                self._on_generate_completed,
-            )
-            self.app_context.unsubscribe(
-                "generation_error", self._on_generate_error
-            )
-
-    def _on_send_to_main(self) -> None:
-        """현재 프롬프트를 파이프라인 경유로 메인 프롬프트에 전송."""
-        prompt = self._prompt_edit.toPlainText().strip()
-        if not prompt:
+        if not self.app_context:
             return
-        self.apply_to_main_prompt.emit({"general": prompt})
-
-    def _on_send_and_generate(self) -> None:
-        """메인 프롬프트에 파이프라인 경유 전송 + Clothes Preset 내 이미지 생성."""
-        prompt = self._prompt_edit.toPlainText().strip()
-        if not prompt or self._generating:
-            return
-
-        self._set_generating_state(True)
-        self.apply_to_main_prompt.emit({"general": prompt})
-        QTimer.singleShot(100, self._trigger_send_and_generate)
-
-    def _trigger_send_and_generate(self) -> None:
-        main_window = getattr(self.app_context, "main_window", None) if self.app_context else None
-        if not main_window:
-            self._set_generating_state(False)
-            return
-
-        self.app_context.subscribe(
-            "generation_completed_for_clothes_preset",
-            self._on_send_gen_completed,
-        )
-        self.app_context.subscribe("generation_error", self._on_send_gen_error)
-
-        override = {
-            "clothes_preset_request": True,
-            "width": 832,
-            "height": 1216,
-        }
-        main_window.generation_controller.execute_generation_pipeline(
-            overrides=override,
-        )
-
-    def _on_send_gen_completed(self, image_obj) -> None:
-        self._unsubscribe_send_gen()
-        self._set_generating_state(False)
-        self._on_generate_completed(image_obj)
-
-    def _on_send_gen_error(self, error_data) -> None:
-        is_ours = (
-            isinstance(error_data, dict)
-            and error_data.get("clothes_preset_request")
-        )
-        if not is_ours:
-            return
-        self._unsubscribe_send_gen()
-        self._set_generating_state(False)
-
-    def _unsubscribe_send_gen(self) -> None:
-        if self.app_context:
-            self.app_context.unsubscribe(
-                "generation_completed_for_clothes_preset",
-                self._on_send_gen_completed,
-            )
-            self.app_context.unsubscribe(
-                "generation_error", self._on_send_gen_error
-            )
+        for event_name, callback in [
+            ("generation_completed_for_clothes_preset", self._on_generate_completed),
+            ("generation_error", self._on_generate_error),
+        ]:
+            if event_name in self.app_context.subscribers:
+                try:
+                    self.app_context.subscribers[event_name].remove(callback)
+                except ValueError:
+                    pass
 
     # ------------------------------------------------------------------
     # 윈도우 이벤트
@@ -1589,7 +1707,6 @@ class ClothesPresetWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._unsubscribe_generation()
-        self._unsubscribe_send_gen()
         self._dm.close()
         self.window_closed.emit()
         super().closeEvent(event)

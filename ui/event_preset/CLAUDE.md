@@ -2,6 +2,9 @@
 
 > **목적**: Danbooru 이벤트 택소노미 브라우저 + 멀티 이벤트 콤보 프롬프트 생성기. 385MB ZIP 데이터셋(`naia_prompt_preset`)을 기반으로 이벤트 탐색, 공기 태그 추천, 이미지 생성 파이프라인 연동을 제공한다.
 
+**레퍼런스 문서**:
+- [Full Mode 가이드](.claude/FULL_MODE_CLAUDE.md) — Quick Search 기반 raw 콤보 확장, allowlist 필터링, 다운로드 유도
+
 ---
 
 ## 파일 구조
@@ -91,6 +94,14 @@ EventPresetWindow (3-panel UI, 생성 파이프라인 연동)
 | `StagingEngine` | 이벤트 스테이징 (최대 3개), N-way 콤보 교차, 호환성 체크 |
 | `RecommendationEngine` | 공기 태그 쿼리/병합, 칩 토글 상태, affinity 역방향 룩업, 색상 필터링 |
 | `PromptBuilder` | person 태그 + rating + 이벤트 + deps + recs → 최종 프롬프트 문자열 |
+| `QuickSearchComboProvider` | Full Mode용 Quick Search `.tgp` raw 콤보 추출 (allowlist 필터링) |
+
+**QuickSearchComboProvider** (Full Mode):
+- `data/quick_search/` `.tgp` 파티션 스토어에서 원시 이벤트 콤보를 추출
+- `try_create(category_df, dependency_df)` 팩토리 — Quick Search 데이터 미설치 시 `None` 반환
+- **Allowlist 필터링**: 이벤트 태그(`is_event`) + 이벤트-앵커 의존성 태그(`dependency_rules.parquet`)만 허용 (~4,200 태그)
+- 파티션 스토어 lazy load + 캐시, CSR 버퍼 직접 접근으로 빠른 태그 추출
+- 최대 `RAW_COMBO_LIMIT=1000`개 콤보 반환, 빈도 내림차순
 
 ### `widgets.py` — 커스텀 위젯
 

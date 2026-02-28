@@ -6,14 +6,17 @@ viewer_multi.py PartitionBoundViewer를 NAIA 테마로 재작성.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -38,7 +41,7 @@ from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 from .data_manager import EventPresetDataManager
-from .download_worker import EventPresetDownloadDialog, EventPresetDownloadWorker
+from .download_worker import EventPresetDownloadDialog, EventPresetDownloadWorker, ThumbnailDownloadWorker
 from .engines import (
     MAX_STAGED,
     PERSON_PARTITION_LABELS,
@@ -48,6 +51,7 @@ from .engines import (
     RATING_TOGGLES,
     TOP_N,
     PromptBuilder,
+    QuickSearchComboProvider,
     RecommendationEngine,
     StagingEngine,
     TaxonomyEngine,
@@ -96,6 +100,27 @@ def _partition_html(rating_prefix: str, person_key: str, count: int) -> str:
     return f'{badge}<span style="color:{DARK_COLORS["text_primary"]}"> {person_label} ({count_str})</span>'
 
 
+# ---------------------------------------------------------------------------
+# 백그라운드 썸네일 로더
+# ---------------------------------------------------------------------------
+
+class _ThumbnailLoader(QThread):
+    """백그라운드에서 event_preset_thumbnail JSON 로딩."""
+    finished = pyqtSignal(dict)
+
+    def __init__(self, path: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._path = path
+
+    def run(self) -> None:
+        try:
+            with self._path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.finished.emit(data)
+        except Exception:
+            self.finished.emit({})
+
+
 # =========================================================================
 # EventPresetWindow
 # =========================================================================
@@ -118,6 +143,8 @@ class EventPresetWindow(QMainWindow):
         """
         dm = EventPresetDataManager()
         if dm.is_data_available():
+            # preset 존재 → 썸네일만 확인
+            EventPresetWindow._ensure_thumbnail_available(parent)
             return True
 
         msg = QMessageBox(parent)
@@ -153,7 +180,35 @@ class EventPresetWindow(QMainWindow):
         dialog.exec()
         worker.wait()
 
+        if success_flag[0]:
+            # preset 다운로드 성공 → 썸네일도 확인
+            EventPresetWindow._ensure_thumbnail_available(parent)
+
         return success_flag[0]
+
+    @staticmethod
+    def _ensure_thumbnail_available(parent=None) -> None:
+        """썸네일 파일 존재 확인. 없으면 자동 다운로드."""
+        thumb_path = Path(__file__).resolve().parent.parent.parent / "data" / "event_preset_thumbnail"
+        if thumb_path.exists():
+            return
+
+        dialog = EventPresetDownloadDialog(parent)
+        dialog.setWindowTitle("Event Preset 썸네일 다운로드")
+        worker = ThumbnailDownloadWorker(thumb_path)
+
+        def on_finished(success: bool, message: str):
+            if not success:
+                print(f"[EventPreset] 썸네일 다운로드 실패: {message}")
+            dialog.mark_finished()
+
+        worker.progress_updated.connect(dialog.update_progress)
+        worker.download_finished.connect(on_finished)
+        dialog.canceled.connect(worker.cancel)
+
+        worker.start()
+        dialog.exec()
+        worker.wait()
 
     # ------------------------------------------------------------------
     # 생성자
@@ -196,6 +251,11 @@ class EventPresetWindow(QMainWindow):
         self._partition_row_counts: dict = {}
         self._ui_ready = False  # UI 구축 완료 전 시그널 억제
         self._detail_event_items: dict[str, QTreeWidgetItem] = {}
+        self._show_all_combos = False  # False=Top 100, True=All
+        self._qs_combo_provider: QuickSearchComboProvider | None = None
+        self._dependency_rules_df: pd.DataFrame | None = None
+        self._thumbnail_data: dict[str, list[str]] = {}
+        self._thumb_loader: _ThumbnailLoader | None = None
 
         # UI 구축
         self._build_ui()
@@ -521,10 +581,33 @@ class EventPresetWindow(QMainWindow):
         self._staging_bar.clear_requested.connect(self._clear_staging)
         center_layout.addWidget(self._staging_bar)
 
-        # Switch-to Partition Bar
+        # Switch-to Partition Bar + Full Mode 체크박스
+        switch_row = QWidget()
+        switch_row_layout = QHBoxLayout(switch_row)
+        switch_row_layout.setContentsMargins(0, 0, 0, 0)
+        switch_row_layout.setSpacing(get_scaled_size(8))
+
         self._switch_bar = SwitchPartitionBar()
         self._switch_bar.partition_selected.connect(self._on_switch_partition_selected)
-        center_layout.addWidget(self._switch_bar)
+        switch_row_layout.addWidget(self._switch_bar, stretch=1)
+
+        self._full_mode_cb = QCheckBox("Full Mode")
+        self._full_mode_cb.setToolTip("Show all observed combos instead of top 100")
+        self._full_mode_cb.setStyleSheet(f"""
+            QCheckBox {{
+                color: {DARK_COLORS['text_secondary']};
+                font-size: {get_scaled_font_size(15)}px;
+                spacing: {get_scaled_size(4)}px;
+            }}
+            QCheckBox::indicator {{
+                width: {get_scaled_size(14)}px;
+                height: {get_scaled_size(14)}px;
+            }}
+        """)
+        self._full_mode_cb.toggled.connect(self._on_combo_full_mode_toggled)
+        switch_row_layout.addWidget(self._full_mode_cb)
+
+        center_layout.addWidget(switch_row)
 
         # 분석 탭
         tab_style = f"""
@@ -776,12 +859,26 @@ class EventPresetWindow(QMainWindow):
                 self._data_manager.get_color_prefixes(),
             )
             self._partition_row_counts = self._data_manager.get_partition_row_counts()
+            self._dependency_rules_df = assets.get("dependency_rules.parquet")
+
+            # Quick Search combo provider (데이터 미설치 시 None — Full Mode 토글 시 다운로드 유도)
+            self._qs_combo_provider = QuickSearchComboProvider.try_create(
+                self._taxonomy.category,
+                self._dependency_rules_df,
+            )
 
             # 파티션 바인딩
             self._refresh_character_combo()
             self._refresh_partition_binding()
 
             self._title_label.setText("Select an event")
+
+            # 썸네일 백그라운드 로딩
+            thumb_path = Path(__file__).resolve().parent.parent.parent / "data" / "event_preset_thumbnail"
+            if thumb_path.exists():
+                self._thumb_loader = _ThumbnailLoader(thumb_path, parent=self)
+                self._thumb_loader.finished.connect(self._on_thumbnails_loaded)
+                self._thumb_loader.start()
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1062,6 +1159,30 @@ class EventPresetWindow(QMainWindow):
         # Switch-to 파티션 콤보
         self._update_switch_to_combo(event_name)
 
+        # 썸네일 표시
+        self._show_event_thumbnail(event_name)
+
+    # ------------------------------------------------------------------
+    # 썸네일 표시
+    # ------------------------------------------------------------------
+
+    def _on_thumbnails_loaded(self, data: dict) -> None:
+        """백그라운드 썸네일 JSON 로딩 완료."""
+        self._thumbnail_data = data
+        print(f"[EventPreset] 썸네일 로딩 완료: {len(data)}개")
+        if self.current_event:
+            self._show_event_thumbnail(self.current_event)
+
+    def _show_event_thumbnail(self, event_name: str) -> None:
+        """이벤트 썸네일을 _image_preview에 표시."""
+        if not self._thumbnail_data:
+            return
+        b64_list = self._thumbnail_data.get(event_name)
+        if b64_list:
+            self._image_preview.display_base64(b64_list[0])
+        else:
+            self._image_preview.clear_image()
+
     def _update_tag_info(self, event_name: str) -> None:
         """센터 상단 KR_tags 정보 갱신."""
         # 기본값: 정보 없으면 숨김
@@ -1105,40 +1226,129 @@ class EventPresetWindow(QMainWindow):
         highlight = {event_name} | set(self._staging.staged_events)
         self._combo_tag_delegate.set_event_tags(highlight)
 
-        if self._step15_active_data is None:
-            self._combo_table.setRowCount(0)
-            return
-
-        combo_df = self._step15_active_data.get("combo", pd.DataFrame())
-        if combo_df.empty:
-            self._combo_table.setRowCount(0)
-            return
-
-        # 스테이징 모드 확인
-        if self._staging.staged_events and event_name not in self._staging.staged_events:
-            # 멀티 이벤트 콤보
-            combos = self._staging.get_multi_event_combos(event_name, combo_df)
-            self._combo_table.setSortingEnabled(False)
-            self._combo_table.setRowCount(len(combos))
-            for row_idx, (combo_text, score) in enumerate(combos):
-                self._combo_table.setItem(row_idx, 0, QTableWidgetItem(combo_text))
-                self._combo_table.setItem(row_idx, 1, _NumItem(int(score)))
-            self._combo_table.setSortingEnabled(True)
-            self._combo_table.sortByColumn(1, Qt.SortOrder.DescendingOrder)
+        if self._show_all_combos:
+            # Full Mode: event_combo_index 우선, 없으면 step15 파티션 fallback
+            combos = self._get_raw_combos(event_name)
+            if not combos:
+                combos = self._get_partition_combos(event_name)
+        elif self._step15_active_data is not None:
+            combos = self._get_partition_combos(event_name)
         else:
-            # 단일 이벤트 콤보
-            combos = self._staging.get_single_event_combos(event_name, combo_df)
-            self._combo_table.setSortingEnabled(False)
-            self._combo_table.setRowCount(len(combos))
-            for row_idx, (combo_text, count) in enumerate(combos):
-                self._combo_table.setItem(row_idx, 0, QTableWidgetItem(combo_text))
-                self._combo_table.setItem(row_idx, 1, _NumItem(int(count)))
-            self._combo_table.setSortingEnabled(True)
-            self._combo_table.sortByColumn(1, Qt.SortOrder.DescendingOrder)
+            self._combo_table.setRowCount(0)
+            return
+
+        self._combo_table.setUpdatesEnabled(False)
+        self._combo_table.setSortingEnabled(False)
+        self._combo_table.setRowCount(len(combos))
+        for row_idx, (combo_text, count_or_score) in enumerate(combos):
+            self._combo_table.setItem(row_idx, 0, QTableWidgetItem(combo_text))
+            self._combo_table.setItem(row_idx, 1, _NumItem(int(count_or_score)))
+        self._combo_table.setSortingEnabled(True)
+        self._combo_table.sortByColumn(1, Qt.SortOrder.DescendingOrder)
+        self._combo_table.setUpdatesEnabled(True)
 
         self._combo_table.scrollToTop()
         if self._combo_table.rowCount() > 0:
             self._combo_table.setCurrentCell(0, 0)
+
+    def _get_partition_combos(self, event_name: str) -> list[tuple[str, int | float]]:
+        """step15 파티션 데이터에서 콤보 조회."""
+        if self._step15_active_data is None:
+            return []
+        combo_df = self._step15_active_data.get("combo", pd.DataFrame())
+        if combo_df.empty:
+            return []
+        limit = None if self._show_all_combos else TOP_N
+        if self._staging.staged_events and event_name not in self._staging.staged_events:
+            return self._staging.get_multi_event_combos(event_name, combo_df, limit=limit)
+        return self._staging.get_single_event_combos(event_name, combo_df, limit=limit)
+
+    def _get_raw_combos(self, event_name: str) -> list[tuple[str, int]]:
+        """Full Mode: Quick Search 우선, event_combo_index fallback."""
+        # Tier 1: Quick Search .tgp
+        if self._qs_combo_provider is not None:
+            partition = self._step15_active_partition or self._base_partition
+            combos = self._qs_combo_provider.get_combos(event_name, partition)
+            if combos:
+                return combos
+
+        # Tier 2: event_combo_index (기존 fallback)
+        if self._taxonomy is None:
+            return []
+        idx = self._taxonomy.event_combo_index
+        if not idx:
+            return []
+        lookup_key = event_name.replace(" ", "_")
+        counter = idx.get(lookup_key) or idx.get(event_name)
+        if not counter:
+            return []
+        return [
+            (", ".join(tag.replace("_", " ") for tag in combo), count)
+            for combo, count in counter.most_common(1000)
+        ]
+
+    def _on_combo_full_mode_toggled(self, checked: bool) -> None:
+        """Full Mode 토글 — Top 100 ↔ 전체 콤보. 데이터 없으면 다운로드 유도."""
+        if checked and self._qs_combo_provider is None:
+            self._full_mode_cb.setChecked(False)
+            if self._prompt_qs_download():
+                self._qs_combo_provider = QuickSearchComboProvider.try_create(
+                    self._taxonomy.category,
+                    self._dependency_rules_df,
+                )
+                if self._qs_combo_provider is not None:
+                    self._full_mode_cb.setChecked(True)
+            return
+
+        self._show_all_combos = checked
+        if self.current_event:
+            self._fill_observed_combos(self.current_event)
+
+    def _prompt_qs_download(self) -> bool:
+        """Quick Search 데이터 다운로드 유도. True=성공."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Full Mode 데이터")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setText(
+            "Full Mode에는 Quick Search 데이터가 필요합니다.\n"
+            "다운로드하시겠습니까? (~238MB)"
+        )
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+
+        if msg.exec() != QMessageBox.StandardButton.Yes:
+            return False
+
+        from ui.remote.quick_search_tab import (
+            HUGGINGFACE_DATA_URL,
+            QUICK_SEARCH_DIR,
+            PartitionDataDownloadWorker,
+        )
+        from .download_worker import EventPresetDownloadDialog
+
+        dialog = EventPresetDownloadDialog(self)
+        dialog.setWindowTitle("Quick Search 데이터 다운로드")
+        worker = PartitionDataDownloadWorker(HUGGINGFACE_DATA_URL, QUICK_SEARCH_DIR)
+
+        success_flag = [False]
+
+        def on_finished(success: bool, message: str):
+            success_flag[0] = success
+            if not success:
+                QMessageBox.warning(self, "다운로드 실패", message)
+            dialog.mark_finished()
+
+        worker.progress_updated.connect(dialog.update_progress)
+        worker.download_finished.connect(on_finished)
+        dialog.canceled.connect(worker.cancel)
+
+        worker.start()
+        dialog.exec()
+        worker.wait()
+
+        return success_flag[0]
 
     def _fill_cooccurrence_tables(self, event_name: str) -> None:
         """Expression/Clothing/Characteristic 테이블 채우기."""
@@ -1334,6 +1544,11 @@ class EventPresetWindow(QMainWindow):
             data = self._data_manager.load_partition_data(partition_name)
         except Exception:
             return
+
+        # Full Mode 해제 (파티션 전환 시 대량 로드 방지)
+        if self._show_all_combos:
+            self._show_all_combos = False
+            self._full_mode_cb.setChecked(False)
 
         # 파티션 데이터만 교체 (좌측 패널 상태 유지)
         self._step15_active_partition = partition_name

@@ -71,10 +71,14 @@ PARTITION_FILES = [
 class EventPresetDataManager:
     """naia_prompt_preset ZIP 아카이브 관리자."""
 
+    # 클래스 레벨 파티션 캐시: 모든 인스턴스가 공유
+    # (Event Preset Window에서 로드한 파티션을 Quick Event Module에서 재사용)
+    _shared_step15_cache: dict[str, dict[str, Any]] = {}
+
     def __init__(self, data_path: Path | None = None):
         self._data_path = data_path or DATA_ZIP_PATH
         self._zip_ref: zipfile.ZipFile | None = None
-        self._step15_cache: dict[str, dict[str, Any]] = {}
+        self._step15_cache = EventPresetDataManager._shared_step15_cache
         self._available_partitions: set[str] | None = None
         self._recommendations: dict | None = None
         self._event_partition_index: dict | None = None
@@ -291,14 +295,14 @@ class EventPresetDataManager:
         self._step15_cache.clear()
 
     def close(self):
-        """ZIP 파일 닫기."""
+        """ZIP 파일 닫기 (공유 파티션 캐시는 유지)."""
         if self._zip_ref is not None:
             try:
                 self._zip_ref.close()
             except Exception:
                 pass
             self._zip_ref = None
-        self._step15_cache.clear()
+        # _shared_step15_cache는 다른 인스턴스가 재사용하므로 유지
         self._available_partitions = None
         self._recommendations = None
         self._event_partition_index = None

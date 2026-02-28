@@ -33,6 +33,7 @@ except ImportError:
 # 다운로드 URL
 # ---------------------------------------------------------------------------
 DOWNLOAD_URL = "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/naia_prompt_preset"
+THUMBNAIL_DOWNLOAD_URL = "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/event_preset_thumbnail"
 
 
 class EventPresetDownloadWorker(QThread):
@@ -135,6 +136,82 @@ class EventPresetDownloadWorker(QThread):
                 return all(name in zf.namelist() for name in required)
         except (zipfile.BadZipFile, Exception):
             return False
+
+
+class ThumbnailDownloadWorker(QThread):
+    """event_preset_thumbnail 다운로드 워커 (QThread)."""
+
+    progress_updated = pyqtSignal(int, str)     # (percent, message)
+    download_finished = pyqtSignal(bool, str)   # (success, message)
+
+    def __init__(self, target_path: Path, parent=None):
+        super().__init__(parent)
+        self._target_path = target_path
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        """다운로드 실행."""
+        try:
+            if self._target_path.exists():
+                self.download_finished.emit(True, "썸네일 데이터가 이미 존재합니다.")
+                return
+
+            self.progress_updated.emit(10, "썸네일 다운로드 시작...")
+
+            headers = {'User-Agent': 'NAIA/2.0.0 EventPreset Thumbnail'}
+            request = urllib.request.Request(THUMBNAIL_DOWNLOAD_URL, headers=headers)
+
+            temp_path = self._target_path.with_suffix(".download_tmp")
+
+            with urllib.request.urlopen(request, context=SSL_CONTEXT) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                block_size = 8192
+                downloaded = 0
+
+                with open(temp_path, 'wb') as out_file:
+                    while True:
+                        if self._cancelled:
+                            out_file.close()
+                            temp_path.unlink(missing_ok=True)
+                            self.download_finished.emit(False, "다운로드가 취소되었습니다.")
+                            return
+
+                        block = response.read(block_size)
+                        if not block:
+                            break
+                        downloaded += len(block)
+                        out_file.write(block)
+
+                        if total_size > 0:
+                            percent = min(90, 10 + (downloaded * 80) // total_size)
+                            downloaded_mb = downloaded / (1024 * 1024)
+                            total_mb = total_size / (1024 * 1024)
+                            self.progress_updated.emit(
+                                percent,
+                                f"썸네일 다운로드 중... {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)"
+                            )
+
+            # 간단 검증: 파일 크기 > 1MB (435MB 파일이므로)
+            if temp_path.stat().st_size < 1_000_000:
+                temp_path.unlink(missing_ok=True)
+                self.download_finished.emit(False, "다운로드된 썸네일 파일이 손상되었습니다.")
+                return
+
+            temp_path.rename(self._target_path)
+            self.progress_updated.emit(100, "완료!")
+            self.download_finished.emit(True, "썸네일 데이터 다운로드 완료")
+
+        except urllib.error.HTTPError as e:
+            self.download_finished.emit(False, f"HTTP 오류 {e.code}: {e.reason}")
+        except urllib.error.URLError as e:
+            self.download_finished.emit(False, f"네트워크 오류: {e.reason}")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.download_finished.emit(False, f"썸네일 다운로드 오류: {str(e)}")
 
 
 class EventPresetDownloadDialog(QDialog):

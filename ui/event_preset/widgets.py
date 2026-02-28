@@ -633,6 +633,24 @@ class ImagePreviewWidget(QLabel):
             self.clear_image()
             print(f"[EventPreset] 이미지 표시 오류: {e}")
 
+    def display_base64(self, b64_string: str) -> None:
+        """base64 인코딩된 JPEG를 표시."""
+        import base64
+        try:
+            img_bytes = base64.b64decode(b64_string)
+            qimage = QImage()
+            qimage.loadFromData(img_bytes)
+            self._qimage = qimage  # GC 방지
+            pixmap = QPixmap.fromImage(qimage)
+            scaled = pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.setPixmap(scaled)
+        except Exception:
+            self.clear_image()
+
     def clear_image(self) -> None:
         """이미지 초기화."""
         self._qimage = None

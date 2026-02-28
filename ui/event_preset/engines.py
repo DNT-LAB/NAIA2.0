@@ -6,8 +6,12 @@ viewer_multi.py의 핵심 알고리즘을 UI 비종속적 엔진으로 추출.
 from __future__ import annotations
 
 import itertools
+import lzma
+import pickle
 import re
+import struct
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -15,7 +19,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
-TOP_N = 30
+TOP_N = 100
 STAGED_COMBO_TOP_N = 5
 MAX_STAGED = 3
 OBSERVED_RETAIN_CONFIDENCE_GT = 0.9
@@ -495,9 +499,12 @@ class StagingEngine:
 
     def get_single_event_combos(
         self, event_name: str, combo_df: pd.DataFrame,
+        limit: int | None = TOP_N,
     ) -> list[tuple[str, int]]:
         """단일 이벤트의 콤보 목록."""
-        sub = combo_df[combo_df["event_tag"] == event_name].sort_values("count", ascending=False).head(TOP_N)
+        sub = combo_df[combo_df["event_tag"] == event_name].sort_values("count", ascending=False)
+        if limit is not None:
+            sub = sub.head(limit)
         result = []
         for _, row in sub.iterrows():
             combo_text = str(row["observed_event_combo"])
@@ -512,6 +519,7 @@ class StagingEngine:
 
     def get_multi_event_combos(
         self, event_name: str, combo_df: pd.DataFrame,
+        limit: int | None = TOP_N,
     ) -> list[tuple[str, float]]:
         """N-way cross-product 콤보 교차 (스테이징 + 현재 이벤트)."""
         staged_combo_lists: list[list[tuple[frozenset[str], int]]] = []
@@ -529,7 +537,9 @@ class StagingEngine:
         # 현재 이벤트의 콤보
         current_sub = combo_df[combo_df["event_tag"] == event_name].sort_values(
             "count", ascending=False
-        ).head(TOP_N)
+        )
+        if limit is not None:
+            current_sub = current_sub.head(limit)
         current_combos: list[tuple[frozenset[str], int]] = []
         for _, row in current_sub.iterrows():
             c_text = str(row["observed_event_combo"])
@@ -598,7 +608,9 @@ class StagingEngine:
             candidates.append((sorted(merged), score))
 
         candidates.sort(key=lambda x: -x[1])
-        return [(", ".join(evts), sc) for evts, sc in candidates[:TOP_N]]
+        if limit is not None:
+            candidates = candidates[:limit]
+        return [(", ".join(evts), sc) for evts, sc in candidates]
 
 
 # =========================================================================
@@ -854,3 +866,222 @@ class PromptBuilder:
             else:
                 clean.append(ev)
         return clean
+
+
+# =========================================================================
+# QuickSearchComboProvider
+# =========================================================================
+
+class QuickSearchComboProvider:
+    """Quick Search .tgp 파티션에서 raw 콤보 추출 (Full Mode 전용).
+
+    data/quick_search/ 가 존재하는 경우에만 사용 가능.
+    ``try_create()`` 팩토리로 생성하며, 데이터 미설치 시 ``None`` 반환.
+
+    필터링: 이벤트 태그 + 이벤트-앵커 의존성/부모 태그만 허용 (allowlist).
+    """
+
+    QUICK_SEARCH_DIR = Path("data/quick_search")
+    METADATA_FILE = QUICK_SEARCH_DIR / "metadata.tgpm"
+    _TGPS_MAGIC = b"TGPS"
+    RAW_COMBO_LIMIT = 1000
+
+    def __init__(self) -> None:
+        self._tag_to_id: dict[str, int] = {}
+        self._id_to_tag: dict[int, str] = {}
+        self._allow_set: set[str] = set()
+        self._partition_cache: dict[str, Any] = {}  # partition_name → store
+
+    # ------------------------------------------------------------------
+    # 팩토리
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def try_create(
+        cls,
+        category_df: pd.DataFrame,
+        dependency_df: pd.DataFrame | None = None,
+    ) -> "QuickSearchComboProvider | None":
+        """Quick Search 데이터 존재 확인 + 초기화. 사용 불가면 None."""
+        provider = cls()
+        if not provider._check_availability():
+            return None
+        if not provider._load_metadata():
+            return None
+        provider._build_allowlist(category_df, dependency_df)
+        return provider
+
+    # ------------------------------------------------------------------
+    # 내부 초기화
+    # ------------------------------------------------------------------
+
+    def _check_availability(self) -> bool:
+        if not self.QUICK_SEARCH_DIR.exists():
+            return False
+        if not self.METADATA_FILE.exists():
+            return False
+        tgp_count = sum(1 for _ in self.QUICK_SEARCH_DIR.glob("*.tgp"))
+        if tgp_count < 10:
+            return False
+        return True
+
+    def _load_metadata(self) -> bool:
+        """metadata.tgpm → tag_to_id, id_to_tag."""
+        try:
+            with open(self.METADATA_FILE, "rb") as f:
+                magic = f.read(4)
+                if magic != self._TGPS_MAGIC:
+                    return False
+                _ = struct.unpack("<H", f.read(2))[0]
+                clen = struct.unpack("<I", f.read(4))[0]
+                compressed = f.read(clen)
+            data = pickle.loads(lzma.decompress(compressed))
+            raw_t2i = data.get("tag_to_id", {})
+            if len(raw_t2i) <= 13053:
+                return False
+            self._tag_to_id = {norm_text(k): int(v) for k, v in raw_t2i.items()}
+            self._id_to_tag = {
+                int(k): norm_text(v)
+                for k, v in data.get("id_to_tag", {}).items()
+            }
+            return True
+        except Exception as exc:
+            print(f"[EventPreset/QS] metadata load failed: {exc}")
+            return False
+
+    def _build_allowlist(
+        self,
+        category_df: pd.DataFrame,
+        dependency_df: pd.DataFrame | None = None,
+    ) -> None:
+        """이벤트 태그 + 이벤트-앵커 의존성/부모 태그 allowlist 구축.
+
+        Codex query_quick_search_full_mode.py의 load_allowlist_sets() 로직 이식:
+        1. event_set: tag_category.parquet is_event == True
+        2. dependency_set: dependency_rules.parquet에서 이벤트-앵커 행의 child/parent 태그
+        3. allow_set = event_set | dependency_set
+        """
+        # 1) 이벤트 태그 세트
+        event_set: set[str] = set()
+        if "is_event" in category_df.columns:
+            event_set.update(
+                norm_text(t) for t in
+                category_df.loc[category_df["is_event"] == True, "tag_name"]
+            )
+
+        # 2) 이벤트-앵커 의존성 태그
+        dependency_set: set[str] = set()
+        if dependency_df is not None and not dependency_df.empty:
+            dep = dependency_df.copy()
+            for col in ("child_tag", "parent_tag"):
+                if col in dep.columns:
+                    dep[col] = dep[col].astype(str).map(norm_text)
+
+            # 이벤트 카테고리 or 이벤트 태그에 연결된 행만 유지
+            masks = []
+            if "child_category" in dep.columns:
+                masks.append(dep["child_category"].astype(str) == "event")
+            if "parent_category" in dep.columns:
+                masks.append(dep["parent_category"].astype(str) == "event")
+            if "child_tag" in dep.columns:
+                masks.append(dep["child_tag"].isin(event_set))
+            if "parent_tag" in dep.columns:
+                masks.append(dep["parent_tag"].isin(event_set))
+
+            if masks:
+                combined_mask = masks[0]
+                for m in masks[1:]:
+                    combined_mask = combined_mask | m
+                dep_event = dep[combined_mask]
+
+                if "child_tag" in dep_event.columns:
+                    dependency_set.update(dep_event["child_tag"].tolist())
+                if "parent_tag" in dep_event.columns:
+                    dependency_set.update(dep_event["parent_tag"].tolist())
+
+        self._allow_set = event_set | dependency_set
+        # 빈 문자열 제거
+        self._allow_set.discard("")
+
+    # ------------------------------------------------------------------
+    # 파티션 스토어
+    # ------------------------------------------------------------------
+
+    def _get_store(self, partition_name: str) -> Any | None:
+        """파티션 스토어 lazy load + 캐시."""
+        if partition_name in self._partition_cache:
+            store = self._partition_cache[partition_name]
+            return store if getattr(store, "_loaded", False) else None
+
+        tgp_path = self.QUICK_SEARCH_DIR / f"{partition_name}.tgp"
+        if not tgp_path.exists():
+            return None
+
+        try:
+            from ui.interactive.quick_search_data import SinglePartitionStore
+            store = SinglePartitionStore.load(str(tgp_path))
+        except Exception:
+            return None
+
+        self._partition_cache[partition_name] = store
+        return store if getattr(store, "_loaded", False) else None
+
+    # ------------------------------------------------------------------
+    # 콤보 조회
+    # ------------------------------------------------------------------
+
+    def get_combos(
+        self, event_name: str, partition_name: str,
+    ) -> list[tuple[str, int]]:
+        """Quick Search에서 event_name 콤보 추출.
+
+        Returns:
+            빈도 내림차순 ``[(combo_text, count), ...]``, 최대 RAW_COMBO_LIMIT 개.
+            데이터 없으면 빈 리스트.
+        """
+        store = self._get_store(partition_name)
+        if store is None:
+            return []
+
+        # event_name은 이미 스페이스 포맷, tag_to_id도 norm_text 적용 완료
+        if event_name not in self._tag_to_id:
+            return []
+
+        indices = store.filter_events(
+            required_tags=[event_name],
+            excluded_tags=None,
+            tag_to_id=self._tag_to_id,
+        )
+        if len(indices) == 0:
+            return []
+
+        # CSR 버퍼에서 이벤트별 태그 추출 + allowlist 필터 + 집계
+        combo_counter: Counter[tuple[str, ...]] = Counter()
+        indptr = store._event_tag_indptr
+        tag_indices = store._event_tag_indices
+        id_to_tag = self._id_to_tag
+        allow_set = self._allow_set
+
+        for evt_idx in indices:
+            start = int(indptr[int(evt_idx)])
+            end = int(indptr[int(evt_idx) + 1])
+
+            kept: list[str] = []
+            for tid in tag_indices[start:end]:
+                name = id_to_tag.get(int(tid))
+                if not name:
+                    continue
+                if name not in allow_set:
+                    continue
+                kept.append(name)
+
+            if kept:
+                combo_counter[tuple(sorted(set(kept)))] += 1
+
+        if not combo_counter:
+            return []
+
+        return [
+            (", ".join(combo), count)
+            for combo, count in combo_counter.most_common(self.RAW_COMBO_LIMIT)
+        ]

@@ -808,8 +808,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 151b"
-        self.setWindowTitle(self.base_title + " - 260226")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 152"
+        self.setWindowTitle(self.base_title + " - 260228")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1500,6 +1500,7 @@ class ModernMainWindow(QMainWindow):
         self.ez_mode_action = QAction("⚡ EZ Mode", self)
         self.ez_mode_action.triggered.connect(self.open_ez_mode_window)
         self.extra_features_menu.addAction(self.ez_mode_action)
+
 
         self.extra_features_btn.setMenu(self.extra_features_menu)
         corner_layout.addWidget(self.extra_features_btn)
@@ -3923,6 +3924,7 @@ class ModernMainWindow(QMainWindow):
         self.event_preset_window_open = False
         self.event_preset_action.setText("📋 Event Preset")
         self.event_preset_action.setEnabled(True)
+
 
     def _open_clothes_preset_window(self):
         """Clothes Preset 창 열기"""

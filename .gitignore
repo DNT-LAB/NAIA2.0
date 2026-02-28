@@ -185,3 +185,5 @@ data/tagger/selected_tags.csv
 /ui/variational
 ui/event_preset/naia_prompt_preset
 data/KR_tags.parquet.bak
+data/event_preset_thumbnail
+ui/event_preset/build_quick_event_combos.py

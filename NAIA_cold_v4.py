@@ -51,6 +51,7 @@ from ui.img2img_window import Img2ImgWindow
 from core.main_controller import MainController
 from utils.token_calculator import get_token_calculator
 from core.comfyui_utils import ComfyUIAPIUtils
+from ui.terminal.terminal_widget import TerminalWidget
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
@@ -1015,8 +1016,8 @@ class ModernMainWindow(QMainWindow):
         self.main_splitter.addWidget(left_panel)
         self.main_splitter.addWidget(self.image_window)
         # FHD 대응: 더 균형잡힌 패널 비율 (45:55)
-        self.main_splitter.setStretchFactor(0, 49)
-        self.main_splitter.setStretchFactor(1, 51)
+        self.main_splitter.setStretchFactor(0, 51)
+        self.main_splitter.setStretchFactor(1, 49)
 
         main_layout.addWidget(self.main_splitter)
 
@@ -1226,6 +1227,7 @@ class ModernMainWindow(QMainWindow):
 
         self.search_btn = QPushButton("검색")
         self.search_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        self.search_btn.setFixedWidth(get_scaled_size(120))
         rating_layout.addWidget(self.search_btn)
         search_layout.addLayout(rating_layout)
 
@@ -1375,6 +1377,11 @@ class ModernMainWindow(QMainWindow):
 
         self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
         self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
+
+        # CLI 터미널 탭
+        self.terminal_widget = TerminalWidget()
+        self.prompt_tabs.addTab(self.terminal_widget, "CLI")
+        self._terminal_started = False
 
         self.previous_tab_index = 0
 
@@ -3131,6 +3138,11 @@ class ModernMainWindow(QMainWindow):
         self.search_btn.setEnabled(False)
         self.search_btn.setText("검색 중...")
 
+        # 검색 중 라디오 버튼 숨김 (공간 확보)
+        self.search_mode_2411.setVisible(False)
+        self.search_mode_2509.setVisible(False)
+        self.search_mode_1109.setVisible(False)
+
         # [수정] 새 검색 시작 시 진행률 레이블을 다시 표시
         self.progress_label.setText("0/0") # 초기 텍스트 설정
         self.progress_label.setVisible(True)
@@ -3728,6 +3740,10 @@ class ModernMainWindow(QMainWindow):
 
     def _on_prompt_tab_changed(self, index: int):
         """프롬프트 탭 전환 이벤트 핸들러"""
+        # CLI 탭 선택 시 터미널 세션 lazy 시작
+        if self.prompt_tabs.widget(index) is self.terminal_widget and not self._terminal_started:
+            self._terminal_started = True
+            self.terminal_widget.start_session()
         # 일반 탭 클릭 시 이전 탭 인덱스 업데이트
         self.previous_tab_index = index
 
@@ -4948,6 +4964,10 @@ class ModernMainWindow(QMainWindow):
                 self.event_preset_window.close()
             if self.clothes_preset_window:
                 self.clothes_preset_window.close()
+
+            # 터미널 세션 정리
+            if hasattr(self, 'terminal_widget'):
+                self.terminal_widget.cleanup()
 
             current_mode = self.app_context.get_api_mode()
             self.generation_params_manager.save_mode_settings(current_mode)

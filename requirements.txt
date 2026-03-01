@@ -40,6 +40,7 @@ PyQt6_sip==13.10.2
 python-dateutil==2.9.0.post0
 pytz==2025.2
 pywin32>=310
+pywinpty
 pywin32-ctypes==0.2.3
 referencing==0.36.2
 requests==2.32.4

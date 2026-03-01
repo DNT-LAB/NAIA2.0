@@ -1,9 +1,17 @@
 import os
+import random
 import pandas as pd
 from multiprocessing import Pool, cpu_count
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from core.search_engine import SearchEngine
 from core.search_result_model import SearchResultModel
+
+
+def _search_single_file(args):
+    """imap_unordered용 래퍼 — 단일 tuple 인자를 언패킹하여 검색 수행"""
+    file_path, search_params = args
+    return SearchEngine().search_in_file(file_path, search_params)
+
 
 class SearchWorker(QObject):
     """실제 검색 작업을 수행하는 백그라운드 워커"""
@@ -63,7 +71,7 @@ class SearchWorker(QObject):
             self.error_occurred.emit("검색할 .parquet 파일이 없습니다.")
             return
 
-        engine = SearchEngine()
+        random.shuffle(files_to_search)
         process_args = [(file, self.search_params) for file in files_to_search]
         total_files = len(files_to_search)
         completed_count = 0
@@ -75,7 +83,7 @@ class SearchWorker(QObject):
 
             with Pool(processes=num_processes) as pool:
                 # [수정] imap_unordered를 사용하여 결과가 나오는 즉시 처리
-                results_iterator = pool.starmap(engine.search_in_file, process_args)
+                results_iterator = pool.imap_unordered(_search_single_file, process_args)
                 
                 for df_result in results_iterator:
                     if self.is_cancelled:

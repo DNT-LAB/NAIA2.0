@@ -464,6 +464,9 @@ class MainController:
         self.main_window.search_btn.setEnabled(True)
         self.main_window.search_btn.setText("검색")
         self.main_window.progress_label.setVisible(False)
+        self.main_window.search_mode_2411.setVisible(True)
+        self.main_window.search_mode_2509.setVisible(True)
+        self.main_window.search_mode_1109.setVisible(True)
         self.main_window.status_bar.showMessage(f"✅ 검색 완료! {total_count}개의 결과를 찾았습니다.", 5000)
 
         # [신규] 검색 결과 Parquet 파일로 저장
@@ -478,6 +481,9 @@ class MainController:
         self.main_window.search_btn.setEnabled(True)
         self.main_window.search_btn.setText("검색")
         self.main_window.progress_label.setVisible(False)
+        self.main_window.search_mode_2411.setVisible(True)
+        self.main_window.search_mode_2509.setVisible(True)
+        self.main_window.search_mode_1109.setVisible(True)
         self.main_window.status_bar.showMessage(f"❌ 검색 오류: {error_message}", 5000)
         
     # === 생성 관련 이벤트 핸들러 ===

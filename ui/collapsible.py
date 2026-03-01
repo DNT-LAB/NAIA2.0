@@ -53,8 +53,9 @@ class EnhancedCollapsibleBox(QWidget):
 
         # 콘텐츠 영역: 순수 QWidget (QScrollArea 아님)
         self.content_area = QWidget()
-        self.content_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.content_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.content_area.setMaximumHeight(0)
+        self.content_area.setMinimumHeight(0)
         self.content_area.setStyleSheet("background-color: transparent;")
         self._content_layout = QVBoxLayout(self.content_area)
         self._content_layout.setContentsMargins(0, 0, 0, 0)

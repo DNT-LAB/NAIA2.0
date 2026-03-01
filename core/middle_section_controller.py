@@ -278,17 +278,9 @@ class MiddleSectionController:
             # 1. CollapsibleBox에서 위젯을 안전하게 분리
             print(f"   - CollapsibleBox에서 위젯 분리 중...")
             
-            # takeWidget()을 사용하여 위젯을 안전하게 제거
-            actual_widget = box.content_area.takeWidget()
-            
-            if actual_widget != content_widget:
-                print(f"⚠️ 예상과 다른 위젯: expected={content_widget}, actual={actual_widget}")
-                # 실제 위젯이 다르면 실제 위젯을 사용
-                content_widget = actual_widget
-            
-            if not content_widget:
-                print(f"❌ 모듈 '{module_title}': 추출된 위젯이 None입니다.")
-                return
+            # content_area는 순수 QWidget이므로 레이아웃에서 위젯을 분리
+            box._content_layout.removeWidget(content_widget)
+            content_widget.setParent(None)
             
             print(f"   - 추출된 위젯: {content_widget}")
             print(f"   - 추출된 위젯 크기: {content_widget.size()}")
@@ -340,7 +332,7 @@ class MiddleSectionController:
             try:
                 if content_widget:
                     print(f"   - 복원 시도: 위젯을 CollapsibleBox로 되돌림")
-                    box.content_area.setWidget(content_widget)
+                    box._content_layout.addWidget(content_widget)
                 box.set_detached_state(False)
             except Exception as restore_error:
                 print(f"   - 복원 실패: {restore_error}")
@@ -367,16 +359,17 @@ class MiddleSectionController:
             # CollapsibleBox 가져오기
             box = self.module_boxes[module_title]
             
-            # 기존 플레이스홀더 제거
-            old_placeholder = box.content_area.takeWidget()
-            if old_placeholder:
-                print(f"   - 플레이스홀더 제거: {old_placeholder}")
-                old_placeholder.deleteLater()
-            
+            # 기존 플레이스홀더 제거 (content_layout의 모든 위젯 정리)
+            while box._content_layout.count():
+                item = box._content_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    print(f"   - 플레이스홀더 제거: {widget}")
+                    widget.deleteLater()
+
             # 위젯을 박스로 복귀
             print(f"   - 위젯을 CollapsibleBox로 복귀: {content_widget}")
-            content_widget.setParent(box.content_area)
-            box.content_area.setWidget(content_widget)
+            box._content_layout.addWidget(content_widget)
             
             # 위젯 강제 표시
             content_widget.show()

@@ -524,8 +524,8 @@ class InstantWildcardModule(BaseMiddleModule):
         self.instant_wildcard_dict.clear()
         self.instant_wildcard_tree.clear()
         
-        # JSON 파일 목록 가져오기
-        json_files = sorted([f.name for f in self.save_path.glob("*.json")])
+        # JSON 파일 목록 가져오기 (메타데이터 파일 제외)
+        json_files = sorted([f.name for f in self.save_path.glob("*.json") if f.name != "wc_metadata.json"])
         
         # default.json을 우선 로드
         if "default.json" in json_files:

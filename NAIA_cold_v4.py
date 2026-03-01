@@ -30,7 +30,7 @@ from core.wildcard_processor import split_tags_smart
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM, get_dynamic_styles
 from ui.scaling_manager import get_scaling_manager, get_scaled_font_size, get_scaled_size
 from ui.scaling_settings_dialog import ScalingSettingsDialog
-from ui.collapsible import CollapsibleBox
+from ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
 from ui.right_view import RightView
 from ui.temp_generation_window import TempGenerationWindow
 from ui.resolution_manager_dialog import ResolutionManagerDialog
@@ -808,8 +808,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 152"
-        self.setWindowTitle(self.base_title + " - 260228")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 153"
+        self.setWindowTitle(self.base_title + " - 260301")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -829,13 +829,9 @@ class ModernMainWindow(QMainWindow):
         
         self.set_initial_window_size()
         self.kr_tags_df = self._load_kr_tags()
-        self.params_expanded = False
-        
+
         # 동적 테마 적용
         self.apply_dynamic_styles()
-        
-        # 새로 추가: 파라미터 확장 상태 추적
-        self.params_expanded = False
 
         # 🆕 모듈 시스템 관련 변수 추가
         self.middle_section_controller = None
@@ -1024,199 +1020,160 @@ class ModernMainWindow(QMainWindow):
 
         main_layout.addWidget(self.main_splitter)
 
-    def create_middle_section(self):
-        """중간 섹션: 동적 모듈 로드 및 EnhancedCollapsibleBox 하위로 배치"""
-        
-        # 스크롤 영역 설정 (기존과 동일)
-        middle_scroll_area = QScrollArea()
-        middle_scroll_area.setWidgetResizable(True)
-        middle_scroll_area.setStyleSheet(CUSTOM["middle_scroll_area"])
-
-        # 모듈 컨테이너
-        middle_container = QWidget()
-        middle_layout = QVBoxLayout(middle_container)
-        middle_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        middle_layout.setContentsMargins(6, 6, 6, 6)
-        middle_layout.setSpacing(6)
-
-        try:
-            # 모듈 디렉토리 경로
-            modules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'modules')
-
-            # 컨트롤러 생성 및 모듈 로드
-            self.middle_section_controller = MiddleSectionController(modules_dir, self.app_context, parent=self)
-            self.middle_section_controller.build_ui(middle_layout)
-
-            # [신규] 모듈 로드 완료 후 자동화 시그널 연결
-            self.controller.connect_automation_signals()
-            
-            # E621 이벤트 모듈 시그널 연결
-            self.controller.connect_e621_event_signals()
-
-            # 상태 메시지 업데이트
-            loaded_count = len(self.middle_section_controller.module_instances)
-            self.status_bar.showMessage(f"✅ 모듈 시스템 활성화: {loaded_count}개 모듈 로드 완료 (분리 기능 포함)")
-            
-            print(f"🎉 모듈 시스템 성공적으로 활성화! {loaded_count}개 모듈 로드됨 (분리 기능 활성화)")
-            
-        except Exception as e:
-            print(f"❌ 모듈 시스템 오류: {e}")
-            self.status_bar.showMessage(f"⚠️ 모듈 시스템 오류 - 기본 모드로 동작")
-            
-            # 폴백: 기본 레이블 표시
-            fallback_label = QLabel("모듈 로드 중 오류가 발생했습니다.")
-            fallback_label.setStyleSheet(DARK_STYLES['label_style'])
-            middle_layout.addWidget(fallback_label)
-
-        middle_scroll_area.setWidget(middle_container)
-        return middle_scroll_area
-
     def create_left_panel(self):
         # 메인 컨테이너 위젯
         main_container = QWidget()
         main_container.setStyleSheet(DARK_STYLES['main_container'])
-        
+
         main_layout = QVBoxLayout(main_container)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(6)
+        m = get_scaled_size(6)
+        main_layout.setContentsMargins(m, m, m, m)
+        main_layout.setSpacing(0)
 
-        # 🚀 핵심 수정: 단일 수직 스플리터로 통합
-        self.vertical_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.vertical_splitter.setStyleSheet(CUSTOM["main_splitter"])
+        # 통합 스크롤 영역
+        self.left_panel_scroll_area = QScrollArea()
+        self.left_panel_scroll_area.setWidgetResizable(True)
+        self.left_panel_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.left_panel_scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: transparent;
+                border: none;
+            }}
+            QScrollBar:vertical {{
+                background-color: {DARK_COLORS['bg_primary']};
+                width: {get_scaled_size(8)}px;
+                border-radius: {get_scaled_size(4)}px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {DARK_COLORS['border_light']};
+                border-radius: {get_scaled_size(4)}px;
+                min-height: {get_scaled_size(30)}px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {DARK_COLORS['text_secondary']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
 
-        # === 상단 영역: 검색 + 프롬프트 ===
-        top_container = self.create_top_section()
-        self.vertical_splitter.addWidget(top_container)
+        scroll_content = QWidget()
+        self.left_panel_layout = QVBoxLayout(scroll_content)
+        self.left_panel_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.left_panel_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_panel_layout.setSpacing(get_scaled_size(6))
 
-        # === 중간 영역: 자동화 설정들 ===  
-        middle_container = self.create_middle_section()
-        self.vertical_splitter.addWidget(middle_container)
+        # 빌더 메서드로 각 섹션 구성
+        self._build_search_section(self.left_panel_layout)
+        self._build_search_result_frame(self.left_panel_layout)
+        self._build_prompt_section(self.left_panel_layout)
+        self.left_panel_layout.addWidget(self.img2img_panel)
+        self._build_module_section(self.left_panel_layout)
+        self.left_panel_layout.addStretch()
 
-        # FHD 대응: 스플리터 비율 설정 (상단 45%, 중간 55%)
-        self.vertical_splitter.setStretchFactor(0, 45)
-        self.vertical_splitter.setStretchFactor(1, 55)
-        
-        # 메인 레이아웃에 스플리터 추가
-        main_layout.addWidget(self.vertical_splitter)
-        main_layout.insertWidget(1, self.img2img_panel)
+        self.left_panel_scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(self.left_panel_scroll_area, 1)
 
-        # === 하단 영역: 확장 가능한 생성 제어 영역 ===
-        bottom_area = self.create_enhanced_generation_area()
-        main_layout.addWidget(bottom_area)
+        # 생성 파라미터 토글 (스크롤 영역 외부)
+        self._build_params_toggle_area(main_layout)
+
+        # 하단 고정 생성 컨트롤
+        generation_control = self._build_generation_controls()
+        main_layout.addWidget(generation_control, 0)
 
         return main_container
 
-    def create_top_section(self):
-        """상단 섹션: 검색 및 프롬프트 입력"""
-        top_scroll_area = QScrollArea()
-        top_scroll_area.setWidgetResizable(True)
-        top_scroll_area.setStyleSheet(CUSTOM["top_scroll_area"])
-        
-        top_container = QWidget()
-        top_layout = QVBoxLayout(top_container)
-        top_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(6)
+    # ===== Builder Methods (새 레이아웃 구성) =====
 
-        # 검색 및 필터링 섹션
+    def _build_search_section(self, parent_layout):
+        """검색 및 필터링 섹션 (CollapsibleBox)"""
         search_box = CollapsibleBox("프롬프트 검색 / 필터링 / API 관리")
-        self.search_collapsible_box = search_box  # 나중에 업데이트하기 위해 참조 저장
-        
-        # NAI 모드인지 확인하고 Anlas 표시
+        self.search_collapsible_box = search_box
+
         if self.app_context.current_api_mode == "NAI":
             anlas = self.app_context.api_service.get_anlas()
             search_box.update_anlas(anlas)
 
-        # 전체 검색 레이아웃
         search_main_layout = QVBoxLayout()
-        search_main_layout.setSpacing(8)
-        
-        # === API 관리 레이아웃 (상단) ===
-        api_layout = QHBoxLayout()
-        api_layout.setSpacing(6)
+        search_main_layout.setSpacing(get_scaled_size(8))
 
-        # NAI 토글 버튼
+        # === API 관리 레이아웃 ===
+        api_layout = QHBoxLayout()
+        api_layout.setSpacing(get_scaled_size(6))
+
         self.nai_toggle_btn = QPushButton("NAI")
         self.nai_toggle_btn.setCheckable(True)
-        self.nai_toggle_btn.setChecked(True)  # 기본값: NAI 선택
-        self.nai_toggle_btn.setFixedHeight(38)
+        self.nai_toggle_btn.setChecked(True)
+        self.nai_toggle_btn.setFixedHeight(get_scaled_size(38))
         self.nai_toggle_btn.clicked.connect(lambda: self.toggle_search_mode("NAI"))
 
-        # WEBUI 토글 버튼
         self.webui_toggle_btn = QPushButton("WEBUI")
         self.webui_toggle_btn.setCheckable(True)
         self.webui_toggle_btn.setChecked(False)
-        self.webui_toggle_btn.setFixedHeight(38)
+        self.webui_toggle_btn.setFixedHeight(get_scaled_size(38))
         self.webui_toggle_btn.clicked.connect(lambda: self.toggle_search_mode("WEBUI"))
 
-        # 🆕 ComfyUI 토글 버튼 추가
         self.comfyui_toggle_btn = QPushButton("COMFYUI")
         self.comfyui_toggle_btn.setCheckable(True)
         self.comfyui_toggle_btn.setChecked(False)
-        self.comfyui_toggle_btn.setFixedHeight(38)
+        self.comfyui_toggle_btn.setFixedHeight(get_scaled_size(38))
         self.comfyui_toggle_btn.clicked.connect(lambda: self.toggle_search_mode("COMFYUI"))
 
-        # API 관리 버튼
         api_manage_btn = QPushButton("API 관리")
-        api_manage_btn.setFixedHeight(38)
+        api_manage_btn.setFixedHeight(get_scaled_size(38))
         api_manage_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         api_manage_btn.clicked.connect(self.open_search_management)
 
-        # 토글 버튼 스타일 정의
         toggle_active_style = CUSTOM["toggle_active_style"]
         toggle_inactive_style = CUSTOM["toggle_inactive_style"]
 
-        # 초기 스타일 적용
         self.nai_toggle_btn.setStyleSheet(toggle_active_style)
         self.webui_toggle_btn.setStyleSheet(toggle_inactive_style)
-        self.comfyui_toggle_btn.setStyleSheet(toggle_inactive_style)  # 🆕 추가
+        self.comfyui_toggle_btn.setStyleSheet(toggle_inactive_style)
 
-        # 스타일을 나중에 사용하기 위해 저장
         self.toggle_active_style = toggle_active_style
         self.toggle_inactive_style = toggle_inactive_style
 
-        # 🔧 수정: 4개 버튼을 균등하게 배치 (API 관리 버튼 포함)
         api_layout.addWidget(self.nai_toggle_btn, 1)
         api_layout.addWidget(self.webui_toggle_btn, 1)
-        api_layout.addWidget(self.comfyui_toggle_btn, 1)  # 🆕 추가
+        api_layout.addWidget(self.comfyui_toggle_btn, 1)
         api_layout.addWidget(api_manage_btn, 1)
 
         search_main_layout.addLayout(api_layout)
-        
-        # === 기존 검색 레이아웃 (하단) ===
+
+        # === 검색 입력 필드 ===
         search_layout = QVBoxLayout()
-        search_layout.setSpacing(6)
-        
+        search_layout.setSpacing(get_scaled_size(6))
+
         search_label = QLabel("검색 키워드")
         search_label.setStyleSheet(DARK_STYLES['label_style'])
         search_layout.addWidget(search_label)
         self.search_input = QLineEdit()
         self.search_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
         search_layout.addWidget(self.search_input)
-        
+
         exclude_label = QLabel("제외 키워드")
         exclude_label.setStyleSheet(DARK_STYLES['label_style'])
         search_layout.addWidget(exclude_label)
         self.exclude_input = QLineEdit()
         self.exclude_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
         search_layout.addWidget(self.exclude_input)
-        
+
         rating_layout = QHBoxLayout()
-        rating_layout.setSpacing(8)
-        
-        # [수정] 체크박스들을 딕셔너리로 관리
+        rating_layout.setSpacing(get_scaled_size(8))
+
         self.rating_checkboxes = {}
         checkboxes_map = {"Explicit": "e", "NSFW": "q", "Sensitive": "s", "General": "g"}
         for text, key in checkboxes_map.items():
             cb = QCheckBox(text)
             cb.setStyleSheet(DARK_STYLES['dark_checkbox'])
-            cb.setChecked(True) # 기본적으로 모두 체크
+            cb.setChecked(True)
             rating_layout.addWidget(cb)
             self.rating_checkboxes[key] = cb
-        
+
         rating_layout.addStretch(1)
 
-        # 검색 모드 라디오 버튼 (24.11 = max_129, 25.09 = max_149)
+        # 검색 모드 라디오 버튼
         self.search_mode_2411 = QRadioButton("24.11")
         self.search_mode_2411.setStyleSheet(f"""
             QRadioButton {{
@@ -1233,7 +1190,7 @@ class ModernMainWindow(QMainWindow):
         rating_layout.addWidget(self.search_mode_2411)
 
         self.search_mode_2509 = QRadioButton("25.09")
-        self.search_mode_2509.setChecked(True)  # 기본값
+        self.search_mode_2509.setChecked(True)
         self.search_mode_2509.setStyleSheet(f"""
             QRadioButton {{
                 color: {DARK_COLORS['text_primary']};
@@ -1264,33 +1221,30 @@ class ModernMainWindow(QMainWindow):
         rating_layout.addWidget(self.search_mode_1109)
 
         self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(16)}px; margin-left: 10px; margin-right: 10px;")
+        self.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(16)}px; margin-left: {get_scaled_size(10)}px; margin-right: {get_scaled_size(10)}px;")
         rating_layout.addWidget(self.progress_label)
 
         self.search_btn = QPushButton("검색")
         self.search_btn.setStyleSheet(DARK_STYLES['primary_button'])
         rating_layout.addWidget(self.search_btn)
         search_layout.addLayout(rating_layout)
-        
-        # 메인 레이아웃에 검색 레이아웃 추가
-        search_main_layout.addLayout(search_layout)
-        
-        # CollapsibleBox에 전체 레이아웃 설정
-        search_box.setContentLayout(search_main_layout)
-        top_layout.addWidget(search_box)
 
-        # 검색 결과 표시 프레임
+        search_main_layout.addLayout(search_layout)
+        search_box.setContentLayout(search_main_layout)
+        parent_layout.addWidget(search_box)
+
+    def _build_search_result_frame(self, parent_layout):
+        """검색 결과 표시 프레임 (독립 배치)"""
         self.search_result_frame = QFrame()
         self.search_result_frame.setStyleSheet(DARK_STYLES['compact_card'])
         search_result_layout = QHBoxLayout(self.search_result_frame)
-        search_result_layout.setContentsMargins(10, 6, 10, 6)
-        
-        # [수정] 결과 레이블을 self 변수로 저장
+        search_result_layout.setContentsMargins(get_scaled_size(10), get_scaled_size(6), get_scaled_size(10), get_scaled_size(6))
+
         self.result_label1 = QLabel("검색: 0")
         self.result_label1.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-family: 'Pretendard'; font-size: {get_scaled_font_size(18)}px;")
         self.result_label2 = QLabel("남음: 0")
         self.result_label2.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-family: 'Pretendard'; font-size: {get_scaled_font_size(18)}px;")
-        
+
         search_result_layout.addWidget(self.result_label1)
         search_result_layout.addWidget(self.result_label2)
         search_result_layout.addStretch(1)
@@ -1302,7 +1256,7 @@ class ModernMainWindow(QMainWindow):
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
                 font-weight: bold;
                 font-size: {get_scaled_font_size(12)}px;
             }}
@@ -1314,11 +1268,10 @@ class ModernMainWindow(QMainWindow):
             }}
         """)
         self.save_settings_btn.setToolTip("현재 모든 설정을 저장합니다")
-        
+
         self.restore_btn = QPushButton("⚙️ 복원")
         self.restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-        
-        # 복원 버튼에 컨텍스트 메뉴 추가
+
         self.restore_menu = QMenu(self)
         menu_style = f"""
             QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
@@ -1326,43 +1279,42 @@ class ModernMainWindow(QMainWindow):
             QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
         """
         self.restore_menu.setStyleSheet(menu_style)
-        
-        # 메뉴 액션들 추가
+
         restore_search_action = QAction("🔄 검색결과 복원", self)
         restore_search_action.triggered.connect(self.restore_search_results)
         self.restore_menu.addAction(restore_search_action)
-        
+
         load_parquet_action = QAction("📂 불러오기", self)
         load_parquet_action.triggered.connect(self.load_custom_parquet)
         self.restore_menu.addAction(load_parquet_action)
-        
+
         merge_parquet_action = QAction("🔀 합치기", self)
         merge_parquet_action.triggered.connect(self.merge_custom_parquet)
         self.restore_menu.addAction(merge_parquet_action)
-        
+
         export_parquet_action = QAction("💾 내보내기", self)
         export_parquet_action.triggered.connect(self.export_custom_parquet)
         self.restore_menu.addAction(export_parquet_action)
-        
+
         save_execution_action = QAction("🚀 실행파일 저장", self)
         save_execution_action.triggered.connect(self.save_to_execution_file)
         self.restore_menu.addAction(save_execution_action)
-        
-        # 버튼에 메뉴 할당
+
         self.restore_btn.setMenu(self.restore_menu)
         self.deep_search_btn = QPushButton("심층검색")
         self.deep_search_btn.setStyleSheet(DARK_STYLES['secondary_button'])
-        
+
         search_result_layout.addWidget(self.save_settings_btn)
         search_result_layout.addWidget(self.restore_btn)
         search_result_layout.addWidget(self.deep_search_btn)
-        top_layout.addWidget(self.search_result_frame)
-        
-        # 메인 프롬프트 창
-        self.prompt_tabs = QTabWidget()
-        self.prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
-        self.prompt_tabs.setMinimumHeight(100)
-        
+        parent_layout.addWidget(self.search_result_frame)
+
+    def _build_prompt_section(self, parent_layout):
+        """프롬프트 섹션 (FixedBox, 항상 펼침 + 높이 조절)"""
+        self.prompt_fixed_box = FixedBox(
+            "프롬프트", detachable=True
+        )
+
         # 프롬프트 탭 분리 상태 추적
         self.prompt_tabs_detached = False
         self.prompt_tabs_window = None
@@ -1371,62 +1323,60 @@ class ModernMainWindow(QMainWindow):
         self.custom_api_detached = False
         self.custom_api_window = None
 
-        # 탭 위젯에 우클릭 메뉴 추가
+        self.prompt_tabs = QTabWidget()
+        self.prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
+        self.prompt_tabs.setMinimumHeight(get_scaled_size(100))
+
         self.prompt_tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.prompt_tabs.customContextMenuRequested.connect(self.show_prompt_tabs_context_menu)
-        
+
         main_prompt_widget = QWidget()
         negative_prompt_widget = QWidget()
-        
+
         main_prompt_layout = QVBoxLayout(main_prompt_widget)
         negative_prompt_layout = QVBoxLayout(negative_prompt_widget)
-        
-        main_prompt_layout.setContentsMargins(4, 4, 4, 4)
-        negative_prompt_layout.setContentsMargins(4, 4, 4, 4)
-        
-        # [수정] 메인 프롬프트 텍스트 위젯을 self 변수로 저장
+
+        m4 = get_scaled_size(4)
+        main_prompt_layout.setContentsMargins(m4, m4, m4, m4)
+        negative_prompt_layout.setContentsMargins(m4, m4, m4, m4)
+
         self.main_prompt_textedit = PromptTextEdit()
-        self.main_prompt_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
-        self.main_prompt_textedit.app_context = self.app_context # AppContext 주입
+        self.main_prompt_textedit.setAcceptRichText(False)
+        self.main_prompt_textedit.app_context = self.app_context
         self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.main_prompt_textedit.setPlaceholderText("메인 프롬프트를 입력하세요...")
-        self.main_prompt_textedit.setMinimumHeight(100)
+        self.main_prompt_textedit.setMinimumHeight(get_scaled_size(100))
         main_prompt_layout.addWidget(self.main_prompt_textedit)
         self.main_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_prompt_textedit.customContextMenuRequested.connect(self.show_prompt_context_menu)
         self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
 
-        # PromptHighlighter 적용
         self.main_prompt_highlighter = PromptHighlighter(self.main_prompt_textedit.document())
 
         self.main_prompt_token_label = QLabel("Estimated Tokens : 0 (Main 0 + Character 0)")
         main_prompt_layout.addWidget(self.main_prompt_token_label)
-        
-        # Connect text change event to update token count
+
         self.main_prompt_textedit.textChanged.connect(self.update_token_count)
 
         self.negative_prompt_textedit = PromptTextEdit()
-        self.negative_prompt_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
+        self.negative_prompt_textedit.setAcceptRichText(False)
         self.negative_prompt_textedit.app_context = self.app_context
         self.negative_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.negative_prompt_textedit.setPlaceholderText("네거티브 프롬프트를 입력하세요...")
-        self.negative_prompt_textedit.setMinimumHeight(100)
-        # 기본 QMenu 컨텍스트 메뉴 설정
+        self.negative_prompt_textedit.setMinimumHeight(get_scaled_size(100))
         self.negative_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.negative_prompt_textedit.customContextMenuRequested.connect(self.show_negative_prompt_context_menu)
         negative_prompt_layout.addWidget(self.negative_prompt_textedit)
-        
-        # 네거티브 프롬프트 토큰 카운트 라벨 추가
+
         self.negative_prompt_token_label = QLabel("Estimated Tokens : 0")
         negative_prompt_layout.addWidget(self.negative_prompt_token_label)
-        
-        # Connect negative prompt text change event to update token count
+
         self.negative_prompt_textedit.textChanged.connect(self.update_negative_token_count)
-        
+
         self.prompt_tabs.addTab(main_prompt_widget, "메인 프롬프트")
         self.prompt_tabs.addTab(negative_prompt_widget, "네거티브 프롬프트 (UC)")
 
-        self.previous_tab_index = 0  # 이전 탭 인덱스 저장용
+        self.previous_tab_index = 0
 
         # 외부 창 상태 추적
         self.remote_window = None
@@ -1438,18 +1388,17 @@ class ModernMainWindow(QMainWindow):
         self.clothes_preset_window = None
         self.clothes_preset_window_open = False
 
-        # 탭 전환 이벤트 연결
         self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
 
         # 탭 바 우측 상단 버튼 컨테이너
         corner_widget_container = QWidget()
         corner_layout = QHBoxLayout(corner_widget_container)
         corner_layout.setContentsMargins(0, 0, 0, 0)
-        corner_layout.setSpacing(2)
+        corner_layout.setSpacing(get_scaled_size(2))
 
-        # 확장 기능 버튼 (컨텍스트 메뉴)
+        # 확장 기능 버튼
         self.extra_features_btn = QPushButton("🎨확장기능")
-        self.extra_features_btn.setFixedSize(95, 55)
+        self.extra_features_btn.setFixedSize(get_scaled_size(95), get_scaled_size(55))
         self.extra_features_btn.setToolTip("확장 기능")
         self.extra_features_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1468,7 +1417,6 @@ class ModernMainWindow(QMainWindow):
             }}
         """)
 
-        # 확장 기능 컨텍스트 메뉴
         self.extra_features_menu = QMenu(self)
         self.extra_features_menu.setStyleSheet(f"""
             QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
@@ -1476,38 +1424,32 @@ class ModernMainWindow(QMainWindow):
             QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
         """)
 
-        # Event Preset 액션 (최상위)
         self.event_preset_action = QAction("📋 Event Preset", self)
         self.event_preset_action.triggered.connect(self._open_event_preset_window)
         self.extra_features_menu.addAction(self.event_preset_action)
 
-        # Clothes Preset 액션
         self.clothes_preset_action = QAction("👗 Clothes Preset", self)
         self.clothes_preset_action.triggered.connect(self._open_clothes_preset_window)
         self.extra_features_menu.addAction(self.clothes_preset_action)
 
-        # Remote Window 액션
         self.remote_action = QAction("📡 리모트", self)
         self.remote_action.triggered.connect(self._open_remote_window)
         self.extra_features_menu.addAction(self.remote_action)
 
-        # Interactive Window 액션
         self.interactive_action = QAction("🎨 Interactive Window", self)
         self.interactive_action.triggered.connect(self._open_interactive_window)
         self.extra_features_menu.addAction(self.interactive_action)
 
-        # EZ Mode 액션
         self.ez_mode_action = QAction("⚡ EZ Mode", self)
         self.ez_mode_action.triggered.connect(self.open_ez_mode_window)
         self.extra_features_menu.addAction(self.ez_mode_action)
 
-
         self.extra_features_btn.setMenu(self.extra_features_menu)
         corner_layout.addWidget(self.extra_features_btn)
 
-        # 대기열 버튼 추가
+        # 대기열 버튼
         self.queue_btn = QPushButton("대기열")
-        self.queue_btn.setFixedSize(80, 55)
+        self.queue_btn.setFixedSize(get_scaled_size(80), get_scaled_size(55))
         self.queue_btn.setToolTip("생성 대기열 관리")
         self.queue_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1523,11 +1465,10 @@ class ModernMainWindow(QMainWindow):
             }}
         """)
         self.queue_btn.clicked.connect(self.toggle_queue_window)
-        #corner_layout.addWidget(self.queue_btn)
 
-        # [Temp] 버튼 추가 (임시 생성 창)
+        # 임시 생성 창 버튼
         self.prompt_tabs_temp_btn = QPushButton("📝")
-        self.prompt_tabs_temp_btn.setFixedSize(45, 55)
+        self.prompt_tabs_temp_btn.setFixedSize(get_scaled_size(45), get_scaled_size(55))
         self.prompt_tabs_temp_btn.setToolTip("임시 생성 창 열기")
         self.prompt_tabs_temp_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1545,9 +1486,9 @@ class ModernMainWindow(QMainWindow):
         self.prompt_tabs_temp_btn.clicked.connect(self.create_temp_generation_window)
         corner_layout.addWidget(self.prompt_tabs_temp_btn)
 
-        # detach 버튼 추가
+        # detach 버튼
         self.prompt_tabs_detach_btn = QPushButton("🔓")
-        self.prompt_tabs_detach_btn.setFixedSize(45, 55)
+        self.prompt_tabs_detach_btn.setFixedSize(get_scaled_size(45), get_scaled_size(55))
         self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
         self.prompt_tabs_detach_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1566,211 +1507,222 @@ class ModernMainWindow(QMainWindow):
         corner_layout.addWidget(self.prompt_tabs_detach_btn)
 
         self.prompt_tabs.setCornerWidget(corner_widget_container, Qt.Corner.TopRightCorner)
-        
-        # 프롬프트 탭 컨테이너 생성 (분리/재부착을 위한 래퍼)
+
+        # 프롬프트 탭 컨테이너 (분리/재부착 호환)
         self.prompt_tabs_container = QWidget()
         prompt_tabs_container_layout = QVBoxLayout(self.prompt_tabs_container)
         prompt_tabs_container_layout.setContentsMargins(0, 0, 0, 0)
         prompt_tabs_container_layout.addWidget(self.prompt_tabs)
-        
-        top_layout.addWidget(self.prompt_tabs_container)
 
-        top_scroll_area.setWidget(top_container)
-        return top_scroll_area
+        # FixedBox에 컨테이너 설정
+        prompt_content_layout = QVBoxLayout()
+        prompt_content_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_content_layout.addWidget(self.prompt_tabs_container)
+        self.prompt_fixed_box.setContentLayout(prompt_content_layout)
+        parent_layout.addWidget(self.prompt_fixed_box)
 
-    def disable_wheel_event(self, widget):
-        """위젯의 마우스 휠 이벤트를 비활성화"""
-        def wheelEvent(event):
-            event.ignore()
-        widget.wheelEvent = wheelEvent
-        return widget
-    
-    def create_enhanced_generation_area(self):
-        """확장 가능한 생성 제어 영역 생성"""
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(0)
-        
-        # 1. 투명 배경의 확장 버튼 프레임
-        self.expand_button_frame = QFrame(container)
-        self.expand_button_frame.setStyleSheet(DARK_STYLES['transparent_frame'])
-        expand_button_layout = QHBoxLayout(self.expand_button_frame)
-        expand_button_layout.setContentsMargins(8, 4, 8, 4)
-        
-        # 왼쪽 스페이서
-        expand_button_layout.addStretch(1)
-        
-        # 확장/축소 토글 버튼
+    def _build_module_section(self, parent_layout):
+        """모듈 섹션: MiddleSectionController의 모듈들을 직접 parent_layout에 추가"""
+        try:
+            modules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'modules')
+            self.middle_section_controller = MiddleSectionController(modules_dir, self.app_context, parent=self)
+            self.middle_section_controller.build_ui(parent_layout)
+
+            self.controller.connect_automation_signals()
+            self.controller.connect_e621_event_signals()
+
+            loaded_count = len(self.middle_section_controller.module_instances)
+            self.status_bar.showMessage(f"✅ 모듈 시스템 활성화: {loaded_count}개 모듈 로드 완료")
+            print(f"🎉 모듈 시스템 성공적으로 활성화! {loaded_count}개 모듈 로드됨")
+
+        except Exception as e:
+            print(f"❌ 모듈 시스템 오류: {e}")
+            self.status_bar.showMessage(f"⚠️ 모듈 시스템 오류 - 기본 모드로 동작")
+            fallback_label = QLabel("모듈 로드 중 오류가 발생했습니다.")
+            fallback_label.setStyleSheet(DARK_STYLES['label_style'])
+            parent_layout.addWidget(fallback_label)
+
+    def _build_params_toggle_area(self, main_layout):
+        """생성 파라미터 토글 패널 (스크롤 영역 외부 하단)"""
+        # 토글 버튼 컨테이너 (중앙 정렬용)
+        toggle_container = QWidget()
+        toggle_container.setStyleSheet("background-color: transparent;")
+        toggle_container_layout = QHBoxLayout(toggle_container)
+        toggle_container_layout.setContentsMargins(0, get_scaled_size(6), 0, get_scaled_size(4))
+        toggle_container_layout.setSpacing(0)
+
         self.params_toggle_button = QPushButton("▲ 생성 파라미터 열기")
-        self.params_toggle_button.setStyleSheet(DARK_STYLES['expand_toggle_button'])
+        self.params_toggle_button.setFixedHeight(get_scaled_size(30))
+        self.params_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.params_toggle_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                border-radius: {get_scaled_size(4)}px;
+                font-size: {get_scaled_font_size(14)}px;
+                font-weight: bold;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+                padding: 0 {get_scaled_size(24)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {DARK_COLORS['bg_pressed']};
+            }}
+        """)
         self.params_toggle_button.clicked.connect(self.toggle_params_panel)
-        expand_button_layout.addWidget(self.params_toggle_button)
-        
-        # 오른쪽 스페이서
-        expand_button_layout.addStretch(1)
-        
-        container_layout.addWidget(self.expand_button_frame)
-        
-        # 2. 확장 가능한 생성 파라미터 영역
-        self.params_area = QWidget(container)
-        self.params_area.setVisible(False)  # 기본적으로 숨김
-        self.params_area.setStyleSheet(DARK_STYLES['compact_card'])
-        
-        params_layout = QVBoxLayout(self.params_area)
-        params_layout.setContentsMargins(12, 12, 12, 12)
-        params_layout.setSpacing(8)
-        
-        # 생성 파라미터 제목
-        params_title = QLabel("🎛️ 생성 파라미터")
-        params_title.setStyleSheet(CUSTOM["params_title"])
-        params_layout.addWidget(params_title)
-        
+
+        toggle_container_layout.addStretch()
+        toggle_container_layout.addWidget(self.params_toggle_button)
+        toggle_container_layout.addStretch()
+
+        main_layout.addWidget(toggle_container, 0)
+
+        # 파라미터 영역 (기본 숨김)
+        self.params_area = QWidget()
+        self.params_expanded = False
+        self.params_area.setVisible(False)
+
+        params_widget = self.params_area
+        params_layout = QVBoxLayout(params_widget)
+        params_layout.setContentsMargins(get_scaled_size(12), get_scaled_size(12), get_scaled_size(12), get_scaled_size(12))
+        params_layout.setSpacing(get_scaled_size(8))
+
         # 파라미터 그리드 레이아웃
         params_grid = QGridLayout()
-        params_grid.setSpacing(8)
-        
-        # 생성 파라미터 라벨들을 위한 공통 스타일
+        params_grid.setSpacing(get_scaled_size(8))
+
         param_label_style = CUSTOM["param_label_style"]
-        
+
         # === 첫 번째 행: 모델 선택 + 스케줄러 ===
         model_label = QLabel("모델 선택")
         model_label.setStyleSheet(param_label_style)
         params_grid.addWidget(model_label, 0, 0)
-        
+
         self.model_combo = QComboBox()
         self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
         self.model_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        self.disable_wheel_event(self.model_combo)  # 마우스 휠 비활성화
-        self.model_combo.currentTextChanged.connect(self.update_naid_checkbox_colors)  # 모델 변경 시 체크박스 색상 업데이트
-        self.model_combo.currentTextChanged.connect(self._on_model_changing)  # 🆕 임시 창 자동 종료 체크
+        self.disable_wheel_event(self.model_combo)
+        self.model_combo.currentTextChanged.connect(self.update_naid_checkbox_colors)
+        self.model_combo.currentTextChanged.connect(self._on_model_changing)
         params_grid.addWidget(self.model_combo, 0, 1)
-        
+
         scheduler_label = QLabel("스케줄러")
         scheduler_label.setStyleSheet(param_label_style)
         params_grid.addWidget(scheduler_label, 0, 2)
-        
+
         self.scheduler_combo = QComboBox()
         self.scheduler_combo.addItems(["karras", "native", "exponential", "polyexponential"])
         self.scheduler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        self.disable_wheel_event(self.scheduler_combo)  # 마우스 휠 비활성화
+        self.disable_wheel_event(self.scheduler_combo)
         params_grid.addWidget(self.scheduler_combo, 0, 3)
-        
+
         # === 두 번째 행: 해상도 + 랜덤 해상도 ===
         resolution_label = QLabel("해상도")
         resolution_label.setStyleSheet(param_label_style)
         params_grid.addWidget(resolution_label, 1, 0)
 
         self.resolution_combo = QComboBox()
-        # ✅ JSON 파일에서 해상도 로드 (없으면 기본값 사용)
         self.resolutions = self._load_resolutions()
         self.resolution_combo.addItems(self.resolutions)
         self.resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        self.disable_wheel_event(self.resolution_combo)  # 마우스 휠 비활성화
+        self.disable_wheel_event(self.resolution_combo)
         params_grid.addWidget(self.resolution_combo, 1, 1)
-        
-        # 랜덤 해상도 체크박스
+
         self.random_resolution_checkbox = QCheckBox("랜덤 해상도")
         self.random_resolution_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         params_grid.addWidget(self.random_resolution_checkbox, 1, 2)
-        
-        # 해상도 관리 버튼
+
         resolution_manage_btn = QPushButton("해상도 관리")
         resolution_manage_btn.setStyleSheet(DARK_STYLES['compact_button'])
-        resolution_manage_btn.setFixedWidth(100)
-        resolution_manage_btn.clicked.connect(self.open_resolution_manager) 
+        resolution_manage_btn.setFixedWidth(get_scaled_size(100))
+        resolution_manage_btn.clicked.connect(self.open_resolution_manager)
         params_grid.addWidget(resolution_manage_btn, 1, 3)
-        
+
         # === 세 번째 행: 샘플러 + Steps ===
         sampler_label = QLabel("샘플러")
         sampler_label.setStyleSheet(param_label_style)
         params_grid.addWidget(sampler_label, 2, 0)
-        
+
         self.sampler_combo = QComboBox()
-        # NAI 기본 샘플러들로 시작 (WEBUI 모드 전환 시 동적으로 변경됨)
-        self.sampler_combo.addItems(["k_euler_ancestral", "k_euler", "k_dpmpp_2m", 
+        self.sampler_combo.addItems(["k_euler_ancestral", "k_euler", "k_dpmpp_2m",
                                     "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"])
         self.sampler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        self.disable_wheel_event(self.sampler_combo)  # 마우스 휠 비활성화
+        self.disable_wheel_event(self.sampler_combo)
         params_grid.addWidget(self.sampler_combo, 2, 1)
-        
+
         steps_label = QLabel("Steps")
         steps_label.setStyleSheet(param_label_style)
         params_grid.addWidget(steps_label, 2, 2)
-        
+
         self.steps_spinbox = QSpinBox()
         self.steps_spinbox.setRange(1, 150)
         self.steps_spinbox.setValue(28)
         self.steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
-        self.disable_wheel_event(self.steps_spinbox)  # 마우스 휠 비활성화
+        self.disable_wheel_event(self.steps_spinbox)
         params_grid.addWidget(self.steps_spinbox, 2, 3)
-        
+
         # === 네 번째 행: CFG Scale + CFG Rescale ===
         cfg_label = QLabel("CFG Scale")
         cfg_label.setStyleSheet(param_label_style)
         params_grid.addWidget(cfg_label, 3, 0)
-        
-        # CFG Scale 슬라이더 컨테이너
+
         cfg_container = QWidget()
         cfg_container_layout = QHBoxLayout(cfg_container)
         cfg_container_layout.setContentsMargins(0, 0, 0, 0)
-        cfg_container_layout.setSpacing(5)
-        
+        cfg_container_layout.setSpacing(get_scaled_size(5))
+
         self.cfg_scale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.cfg_scale_slider.setRange(10, 100)  # 1.0 ~ 30.0을 10 ~ 300으로 표현
-        self.cfg_scale_slider.setValue(50)  # 기본값 5.0
+        self.cfg_scale_slider.setRange(10, 100)
+        self.cfg_scale_slider.setValue(50)
         self.cfg_scale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
-        self.disable_wheel_event(self.cfg_scale_slider)  # 마우스 휠 비활성화
+        self.disable_wheel_event(self.cfg_scale_slider)
         cfg_container_layout.addWidget(self.cfg_scale_slider)
-        
-        # CFG 값 표시 라벨
+
         self.cfg_value_label = QLabel("5.0")
         self.cfg_value_label.setStyleSheet(param_label_style)
-        self.cfg_value_label.setFixedWidth(60)  # 30 → 40으로 증가
+        self.cfg_value_label.setFixedWidth(get_scaled_size(60))
         self.cfg_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cfg_container_layout.addWidget(self.cfg_value_label)
-        
-        # CFG 슬라이더 값 변경 시 라벨 업데이트
+
         self.cfg_scale_slider.valueChanged.connect(
             lambda value: self.cfg_value_label.setText(f"{value/10:.1f}")
         )
-        
+
         params_grid.addWidget(cfg_container, 3, 1)
-        
-        # CFG Rescale (NAI 전용) 라벨
+
         self.cfg_rescale_label = QLabel("CFG Rescale")
         self.cfg_rescale_label.setStyleSheet(param_label_style)
         params_grid.addWidget(self.cfg_rescale_label, 3, 2)
-        
-        # CFG Rescale 슬라이더 컨테이너
+
         rescale_container = QWidget()
         rescale_container_layout = QHBoxLayout(rescale_container)
         rescale_container_layout.setContentsMargins(0, 0, 0, 0)
-        rescale_container_layout.setSpacing(5)
-        
+        rescale_container_layout.setSpacing(get_scaled_size(5))
+
         self.cfg_rescale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.cfg_rescale_slider.setRange(-25, 100)  # 0.0 ~ 1.0을 0 ~ 100으로 표현
-        self.cfg_rescale_slider.setValue(45)  # 기본값 0.2
+        self.cfg_rescale_slider.setRange(-25, 100)
+        self.cfg_rescale_slider.setValue(45)
         self.cfg_rescale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
-        self.disable_wheel_event(self.cfg_rescale_slider)  # 마우스 휠 비활성화
+        self.disable_wheel_event(self.cfg_rescale_slider)
         rescale_container_layout.addWidget(self.cfg_rescale_slider)
-        
-        # CFG Rescale 값 표시 라벨
+
         self.cfg_rescale_value_label = QLabel("0.40")
         self.cfg_rescale_value_label.setStyleSheet(param_label_style)
-        self.cfg_rescale_value_label.setFixedWidth(68)  # 30 → 40으로 증가
+        self.cfg_rescale_value_label.setFixedWidth(get_scaled_size(68))
         self.cfg_rescale_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rescale_container_layout.addWidget(self.cfg_rescale_value_label)
-        
-        # CFG Rescale 슬라이더 값 변경 시 라벨 업데이트
+
         self.cfg_rescale_slider.valueChanged.connect(
             lambda value: self.cfg_rescale_value_label.setText(f"{value/100:.2f}")
         )
-        
+
         params_grid.addWidget(rescale_container, 3, 3)
         self.nai_rescale_ui = [self.cfg_rescale_label, rescale_container]
 
-        # ComfyUI Rescale CFG (ANIMA 모드 전용) - NAI CFG Rescale과 동일 위치 (row 3, col 2-3)
+        # ComfyUI Rescale CFG
         self.comfyui_rescale_label = QLabel("Rescale CFG")
         self.comfyui_rescale_label.setStyleSheet(param_label_style)
         params_grid.addWidget(self.comfyui_rescale_label, 3, 2)
@@ -1778,18 +1730,18 @@ class ModernMainWindow(QMainWindow):
         comfyui_rescale_container = QWidget()
         comfyui_rescale_layout = QHBoxLayout(comfyui_rescale_container)
         comfyui_rescale_layout.setContentsMargins(0, 0, 0, 0)
-        comfyui_rescale_layout.setSpacing(5)
+        comfyui_rescale_layout.setSpacing(get_scaled_size(5))
 
         self.comfyui_rescale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.comfyui_rescale_slider.setRange(0, 100)  # 0.00 ~ 1.00
-        self.comfyui_rescale_slider.setValue(70)  # 기본값 0.70
+        self.comfyui_rescale_slider.setRange(0, 100)
+        self.comfyui_rescale_slider.setValue(70)
         self.comfyui_rescale_slider.setStyleSheet(DARK_STYLES['compact_slider'])
         self.disable_wheel_event(self.comfyui_rescale_slider)
         comfyui_rescale_layout.addWidget(self.comfyui_rescale_slider)
 
         self.comfyui_rescale_value_label = QLabel("0.70")
         self.comfyui_rescale_value_label.setStyleSheet(param_label_style)
-        self.comfyui_rescale_value_label.setFixedWidth(68)
+        self.comfyui_rescale_value_label.setFixedWidth(get_scaled_size(68))
         self.comfyui_rescale_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         comfyui_rescale_layout.addWidget(self.comfyui_rescale_value_label)
 
@@ -1799,8 +1751,6 @@ class ModernMainWindow(QMainWindow):
 
         params_grid.addWidget(comfyui_rescale_container, 3, 3)
         self.comfyui_rescale_ui = [self.comfyui_rescale_label, comfyui_rescale_container]
-
-        # ComfyUI Rescale CFG는 초기에 숨김 (ComfyUI + ANIMA 모드에서만 표시)
         for w in self.comfyui_rescale_ui:
             w.setVisible(False)
 
@@ -1808,208 +1758,183 @@ class ModernMainWindow(QMainWindow):
         seed_label = QLabel("시드")
         seed_label.setStyleSheet(param_label_style)
         params_grid.addWidget(seed_label, 4, 0)
-        
+
         self.seed_input = QLineEdit("0")
         self.seed_input.setStyleSheet(DARK_STYLES['compact_lineedit'])
         self.seed_input.setPlaceholderText("0 = 랜덤")
         self.seed_input.setProperty("autocomplete_ignore", True)
         params_grid.addWidget(self.seed_input, 4, 1)
-        
-        # 시드 관련 체크박스들
+
         seed_controls_layout = QHBoxLayout()
-        seed_controls_layout.setSpacing(12)
-        
+        seed_controls_layout.setSpacing(get_scaled_size(12))
+
         self.seed_fix_checkbox = QCheckBox("시드 고정")
         self.seed_fix_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         seed_controls_layout.addWidget(self.seed_fix_checkbox)
-        
+
         self.auto_fit_resolution_checkbox = QCheckBox("자동 해상도 맞춤")
         self.auto_fit_resolution_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         seed_controls_layout.addWidget(self.auto_fit_resolution_checkbox)
-        
+
         seed_controls_layout.addStretch()
-        
-        params_grid.addLayout(seed_controls_layout, 4, 2, 1, 2)  # 2칸 차지
-        
+
+        params_grid.addLayout(seed_controls_layout, 4, 2, 1, 2)
+
         params_layout.addLayout(params_grid)
-        
-        # === NAID Option / Hires Option 라인 (모드별 전환) ===
-        # 섹션 라벨 (모드에 따라 텍스트 변경)
+
+        # === NAID Option / Hires Option / ComfyUI Option ===
         self.option_section_label = QLabel("NAID Option")
         self.option_section_label.setStyleSheet(CUSTOM["naid_options_label"])
-        
-        # NAI 모드 전용 레이아웃
+
         self.naid_option_layout = QHBoxLayout()
-        self.naid_option_layout.setSpacing(12)
+        self.naid_option_layout.setSpacing(get_scaled_size(12))
         self.naid_option_layout.addWidget(self.option_section_label)
-        
-        # 4개의 NAID 옵션 체크박스
+
         naid_options = ["SMEA", "DYN", "VAR+", "DECRISP"]
         self.advanced_checkboxes = {}
-        
+
         for option in naid_options:
             checkbox = QCheckBox(option)
             checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
             self.naid_option_layout.addWidget(checkbox)
             self.advanced_checkboxes[option] = checkbox
-        
-        self.naid_option_layout.addStretch()  # 오른쪽 여백
-        
-        # 🔥 수정: WEBUI 모드 전용 레이아웃을 2행으로 분리
+
+        self.naid_option_layout.addStretch()
+
+        # WEBUI Hires 옵션
         self.hires_option_widget = QWidget()
         self.hires_option_widget_layout = QVBoxLayout(self.hires_option_widget)
-        self.hires_option_widget_layout.setSpacing(8)
+        self.hires_option_widget_layout.setSpacing(get_scaled_size(8))
         self.hires_option_widget_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 첫 번째 행: Hires-fix 활성화 + 배율 + 업스케일러
+
         self.hires_option_layout_row1 = QHBoxLayout()
-        self.hires_option_layout_row1.setSpacing(8)
-        
-        # Hires-fix 활성화 체크박스
+        self.hires_option_layout_row1.setSpacing(get_scaled_size(8))
+
         self.enable_hr_checkbox = QCheckBox("Hires-fix 활성화")
         self.enable_hr_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.hires_option_layout_row1.addWidget(self.enable_hr_checkbox)
-        
-        # 구분선
+
         separator1 = QLabel("|")
         separator1.setStyleSheet(param_label_style)
         self.hires_option_layout_row1.addWidget(separator1)
-        
-        # HR Scale 스핀박스
+
         hr_scale_label = QLabel("배율")
         hr_scale_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row1.addWidget(hr_scale_label)
-        
+
         self.hr_scale_spinbox = QDoubleSpinBox()
         self.hr_scale_spinbox.setRange(1.0, 4.0)
         self.hr_scale_spinbox.setSingleStep(0.1)
         self.hr_scale_spinbox.setValue(1.5)
         self.hr_scale_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
-        self.hr_scale_spinbox.setFixedWidth(80)
+        self.hr_scale_spinbox.setFixedWidth(get_scaled_size(80))
         self.hires_option_layout_row1.addWidget(self.hr_scale_spinbox)
-        
-        # 구분선
+
         separator2 = QLabel("|")
         separator2.setStyleSheet(param_label_style)
         self.hires_option_layout_row1.addWidget(separator2)
-        
-        # HR 업스케일러 콤보박스
+
         hr_upscaler_label = QLabel("업스케일러")
         hr_upscaler_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row1.addWidget(hr_upscaler_label)
-        
+
         self.hr_upscaler_combo = QComboBox()
         self.hr_upscaler_combo.addItems(["Lanczos", "Nearest", "ESRGAN_4x", "LDSR", "SwinIR_4x"])
         self.hr_upscaler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
-        self.hr_upscaler_combo.setMinimumWidth(120)
-        self.disable_wheel_event(self.hr_upscaler_combo)  # 마우스 휠 비활성화
+        self.hr_upscaler_combo.setMinimumWidth(get_scaled_size(120))
+        self.disable_wheel_event(self.hr_upscaler_combo)
         self.hires_option_layout_row1.addWidget(self.hr_upscaler_combo)
-        
+
         self.hires_option_layout_row1.addStretch()
-        
-        # 두 번째 행: Hires Steps + Denoising Strength
+
         self.hires_option_layout_row2 = QHBoxLayout()
-        self.hires_option_layout_row2.setSpacing(8)
-        
-        # Hires Steps 스핀박스
+        self.hires_option_layout_row2.setSpacing(get_scaled_size(8))
+
         hires_steps_label = QLabel("Hires Steps")
         hires_steps_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(hires_steps_label)
-        
+
         self.hires_steps_spinbox = QSpinBox()
         self.hires_steps_spinbox.setRange(0, 150)
-        self.hires_steps_spinbox.setValue(0)  # 기본값 0 (use same as generation)
+        self.hires_steps_spinbox.setValue(0)
         self.hires_steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
-        self.hires_steps_spinbox.setFixedWidth(80)
-        self.disable_wheel_event(self.hires_steps_spinbox)  # 마우스 휠 비활성화
+        self.hires_steps_spinbox.setFixedWidth(get_scaled_size(80))
+        self.disable_wheel_event(self.hires_steps_spinbox)
         self.hires_option_layout_row2.addWidget(self.hires_steps_spinbox)
-        
-        # 구분선
+
         separator3 = QLabel("|")
         separator3.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(separator3)
-        
-        # Denoising Strength 스핀박스로 변경
+
         denoising_label = QLabel("Denoise")
         denoising_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(denoising_label)
-        
-        # Denoising 스핀박스
+
         self.denoising_strength_spinbox = QDoubleSpinBox()
-        self.denoising_strength_spinbox.setRange(0.0, 1.0)  # 0.0 ~ 1.0
-        self.denoising_strength_spinbox.setSingleStep(0.01)  # 0.01 단위
-        self.denoising_strength_spinbox.setDecimals(2)  # 소수점 2자리
-        self.denoising_strength_spinbox.setValue(0.50)  # 기본값 0.5
+        self.denoising_strength_spinbox.setRange(0.0, 1.0)
+        self.denoising_strength_spinbox.setSingleStep(0.01)
+        self.denoising_strength_spinbox.setDecimals(2)
+        self.denoising_strength_spinbox.setValue(0.50)
         self.denoising_strength_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
-        self.denoising_strength_spinbox.setFixedWidth(80)
-        self.disable_wheel_event(self.denoising_strength_spinbox)  # 마우스 휠 비활성화
+        self.denoising_strength_spinbox.setFixedWidth(get_scaled_size(80))
+        self.disable_wheel_event(self.denoising_strength_spinbox)
         self.hires_option_layout_row2.addWidget(self.denoising_strength_spinbox)
-        
-        # 구분선
+
         separator4 = QLabel("|")
         separator4.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(separator4)
-        
-        # hr_cfg 스핀박스 추가
+
         hr_cfg_label = QLabel("hr CFG")
         hr_cfg_label.setStyleSheet(param_label_style)
         self.hires_option_layout_row2.addWidget(hr_cfg_label)
-        
+
         self.hr_cfg_spinbox = QDoubleSpinBox()
-        self.hr_cfg_spinbox.setRange(0.0, 30.0)  # 0 ~ 30
-        self.hr_cfg_spinbox.setSingleStep(0.1)  # 0.1 단위
-        self.hr_cfg_spinbox.setDecimals(1)  # 소수점 1자리
-        self.hr_cfg_spinbox.setValue(0.0)  # 기본값 0
+        self.hr_cfg_spinbox.setRange(0.0, 30.0)
+        self.hr_cfg_spinbox.setSingleStep(0.1)
+        self.hr_cfg_spinbox.setDecimals(1)
+        self.hr_cfg_spinbox.setValue(0.0)
         self.hr_cfg_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
-        self.hr_cfg_spinbox.setFixedWidth(80)
-        self.disable_wheel_event(self.hr_cfg_spinbox)  # 마우스 휠 비활성화
+        self.hr_cfg_spinbox.setFixedWidth(get_scaled_size(80))
+        self.disable_wheel_event(self.hr_cfg_spinbox)
         self.hires_option_layout_row2.addWidget(self.hr_cfg_spinbox)
-        
+
         self.hires_option_layout_row2.addStretch()
-        
-        # 위젯에 두 행 추가
+
         self.hires_option_widget_layout.addLayout(self.hires_option_layout_row1)
         self.hires_option_widget_layout.addLayout(self.hires_option_layout_row2)
-        
-        # Comfyui
+
+        # ComfyUI 옵션
         self.comfyui_option_widget = QWidget()
         self.comfyui_option_widget_layout = QVBoxLayout(self.comfyui_option_widget)
         self.comfyui_option_widget_layout.setContentsMargins(0, 0, 0, 0)
-        self.comfyui_option_widget_layout.setSpacing(8)
+        self.comfyui_option_widget_layout.setSpacing(get_scaled_size(8))
 
-        # ComfyUI 섹션 제목
         comfyui_section_label = QLabel("🎨 ComfyUI 옵션")
         comfyui_section_label.setStyleSheet(DARK_STYLES['label_style'].replace(f"font-size: {get_scaled_font_size(19)}px;", f"font-size: {get_scaled_font_size(18)}px; font-weight: 600;"))
         self.comfyui_option_widget_layout.addWidget(comfyui_section_label)
 
-        # 샘플링 모드 선택 (라디오 버튼 그룹)
         sampling_mode_label = QLabel("샘플링 모드:")
         sampling_mode_label.setStyleSheet(DARK_STYLES['label_style'])
         self.comfyui_option_widget_layout.addWidget(sampling_mode_label)
 
-        # 라디오 버튼 컨테이너
         sampling_mode_container = QWidget()
         sampling_mode_layout = QHBoxLayout(sampling_mode_container)
         sampling_mode_layout.setContentsMargins(0, 0, 0, 0)
-        sampling_mode_layout.setSpacing(12)
+        sampling_mode_layout.setSpacing(get_scaled_size(12))
 
-        # EPS 라디오 버튼 (기본값)
         self.eps_radio = QRadioButton("EPS")
         self.eps_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.eps_radio.setToolTip("기본 Epsilon 샘플링 모드 (CheckpointLoaderSimple 사용)")
         self.eps_radio.setChecked(True)
 
-        # V-Pred 라디오 버튼
         self.v_pred_radio = QRadioButton("V-Pred")
         self.v_pred_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.v_pred_radio.setToolTip("V-Prediction 샘플링 모드 (CheckpointLoaderSimple + ModelSamplingDiscrete)")
 
-        # ANIMA 라디오 버튼
         self.anima_radio = QRadioButton("ANIMA")
         self.anima_radio.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.anima_radio.setToolTip("최신 ANIMA 모델 형식 (UNETLoader + CLIPLoader 사용)")
 
-        # 버튼 그룹으로 묶기 (배타적 선택)
         self.sampling_mode_group = QButtonGroup(self)
         self.sampling_mode_group.addButton(self.eps_radio)
         self.sampling_mode_group.addButton(self.v_pred_radio)
@@ -2020,25 +1945,21 @@ class ModernMainWindow(QMainWindow):
         sampling_mode_layout.addWidget(self.anima_radio)
         sampling_mode_layout.addStretch()
 
-        # ANIMA 라디오 토글 시 Rescale CFG 가시성 제어
         self.sampling_mode_group.buttonClicked.connect(self._on_sampling_mode_changed)
 
         self.comfyui_option_widget_layout.addWidget(sampling_mode_container)
 
-        # 1. 기존 라벨을 "워크플로우 선택"으로 재사용하고 활성화합니다.
         comfyui_workflow_label = QLabel("워크플로우 선택:")
         comfyui_workflow_label.setStyleSheet(DARK_STYLES['label_style'])
         comfyui_workflow_label.setEnabled(True)
         self.comfyui_option_widget_layout.addWidget(comfyui_workflow_label)
 
-        # 2. 기존 QWidget과 QHBoxLayout을 버튼들을 담을 컨테이너로 재사용합니다.
         self.comfyui_workflow_section = QWidget()
         self.comfyui_workflow_section.setEnabled(True)
         comfyui_workflow_layout = QHBoxLayout(self.comfyui_workflow_section)
         comfyui_workflow_layout.setContentsMargins(0, 0, 0, 0)
-        comfyui_workflow_layout.setSpacing(6)
+        comfyui_workflow_layout.setSpacing(get_scaled_size(6))
 
-        # 3. 토글 버튼들을 생성합니다. (클래스 멤버 변수로 선언해야 다른 메서드에서 접근 가능)
         self.workflow_default_btn = QPushButton("기본")
         self.workflow_default_btn.setCheckable(True)
         self.workflow_default_btn.setChecked(True)
@@ -2046,63 +1967,47 @@ class ModernMainWindow(QMainWindow):
 
         self.workflow_custom_btn = QPushButton("커스텀")
         self.workflow_custom_btn.setCheckable(True)
-        self.workflow_custom_btn.setEnabled(False) # 커스텀 워크플로우 로드 전까지 비활성화
+        self.workflow_custom_btn.setEnabled(False)
         self.workflow_custom_btn.setStyleSheet(DARK_STYLES['toggle_button'])
 
-        # 4. QButtonGroup으로 토글 버튼들을 그룹화하여 하나만 선택되도록 합니다.
         self.workflow_toggle_group = QButtonGroup(self)
         self.workflow_toggle_group.addButton(self.workflow_default_btn)
         self.workflow_toggle_group.addButton(self.workflow_custom_btn)
         self.workflow_toggle_group.setExclusive(True)
 
-        # 5. '불러오기' 버튼을 생성합니다.
         self.workflow_load_btn = QPushButton("불러오기(이미지)")
         self.workflow_load_btn.setStyleSheet(DARK_STYLES['secondary_button'])
 
-        # 6. 버튼들을 레이아웃에 추가합니다.
         comfyui_workflow_layout.addWidget(self.workflow_default_btn, 1)
         comfyui_workflow_layout.addWidget(self.workflow_custom_btn, 1)
         comfyui_workflow_layout.addWidget(self.workflow_load_btn, 1)
-        
-        # 7. 버튼 컨테이너 위젯을 최종적으로 부모 레이아웃에 추가합니다.
+
         self.comfyui_option_widget_layout.addWidget(self.comfyui_workflow_section)
 
-        # 모드별 위젯 그룹 정리 (기존 코드 수정)
-        self.naid_option_widgets = [
-            self.option_section_label
-        ] + list(self.advanced_checkboxes.values())
+        # 모드별 위젯 그룹
+        self.naid_option_widgets = [self.option_section_label] + list(self.advanced_checkboxes.values())
+        self.hires_option_widgets = [self.hires_option_widget]
+        self.comfyui_option_widgets = [self.comfyui_option_widget]
 
-        self.hires_option_widgets = [
-            self.hires_option_widget  # 전체 위젯 컨테이너만 포함
-        ]
-
-        # 🆕 ComfyUI 위젯 그룹 추가
-        self.comfyui_option_widgets = [
-            self.comfyui_option_widget  # 전체 ComfyUI 위젯 컨테이너
-        ]
-
-        # 기본적으로 NAI 모드로 시작 (다른 모드 위젯들 숨김)
         self.hires_option_widget.setVisible(False)
-        self.comfyui_option_widget.setVisible(False)  # 🆕 ComfyUI 위젯도 기본 숨김
+        self.comfyui_option_widget.setVisible(False)
 
-        # 레이아웃에 추가 (기존 코드에 ComfyUI 위젯 추가)
         params_layout.addLayout(self.naid_option_layout)
         params_layout.addWidget(self.hires_option_widget)
-        params_layout.addWidget(self.comfyui_option_widget)  # 🆕 ComfyUI 위젯 추가
-        
+        params_layout.addWidget(self.comfyui_option_widget)
+
         # === Custom API 파라미터 섹션 ===
         custom_api_header = QHBoxLayout()
-        custom_api_header.setSpacing(6)
+        custom_api_header.setSpacing(get_scaled_size(6))
 
         self.custom_api_checkbox = QCheckBox("Add custom/override api parameters")
         self.custom_api_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.custom_api_checkbox.toggled.connect(self.toggle_custom_api_params)
         custom_api_header.addWidget(self.custom_api_checkbox)
 
-        # Detach 버튼 추가
         self.custom_api_detach_btn = QPushButton("🔓")
         self.custom_api_detach_btn.setToolTip("외부 창으로 분리")
-        self.custom_api_detach_btn.setFixedSize(36, 24)
+        self.custom_api_detach_btn.setFixedSize(get_scaled_size(36), get_scaled_size(24))
         self.custom_api_detach_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
@@ -2119,70 +2024,83 @@ class ModernMainWindow(QMainWindow):
             }}
         """)
         self.custom_api_detach_btn.clicked.connect(self.toggle_custom_api_detach)
-        self.custom_api_detach_btn.setEnabled(False)  # 기본 비활성화 상태
+        self.custom_api_detach_btn.setEnabled(False)
         custom_api_header.addWidget(self.custom_api_detach_btn)
 
         custom_api_header.addStretch()
         params_layout.addLayout(custom_api_header)
-        
-        # Custom Script 텍스트박스 (기본적으로 숨김)
+
         self.custom_script_textbox = QTextEdit()
         self.custom_script_textbox.setStyleSheet(DARK_STYLES['compact_textedit'])
         self.custom_script_textbox.setPlaceholderText("Custom API parameters (JSON format)...")
-        self.custom_script_textbox.setFixedHeight(80)
-        self.custom_script_textbox.setVisible(False)  # 기본적으로 숨김
+        self.custom_script_textbox.setFixedHeight(get_scaled_size(80))
+        self.custom_script_textbox.setVisible(False)
         self.custom_script_textbox.setProperty("autocomplete_ignore", True)
         params_layout.addWidget(self.custom_script_textbox)
-        
-        container_layout.addWidget(self.params_area)
-        
-        # 3. 기존 생성 제어 프레임
-        generation_control_frame = QFrame(container)
+
+        # params_content_widget 참조 저장 (Custom API detach/reattach에 필요)
+        self.params_content_widget = self.params_area
+        main_layout.addWidget(self.params_area, 0)
+
+    def _build_generation_controls(self):
+        """하단 고정 생성 컨트롤 프레임"""
+        generation_control_frame = QFrame()
         generation_control_frame.setStyleSheet(DARK_STYLES['compact_card'])
         gen_control_layout = QVBoxLayout(generation_control_frame)
-        gen_control_layout.setContentsMargins(12, 12, 12, 12)
-        gen_control_layout.setSpacing(8)
-        
+        gen_control_layout.setContentsMargins(get_scaled_size(8), get_scaled_size(8), get_scaled_size(8), get_scaled_size(8))
+        gen_control_layout.setSpacing(get_scaled_size(8))
+
         self.gen_button_layout = QHBoxLayout()
-        self.gen_button_layout.setSpacing(6)
-        
+        self.gen_button_layout.setSpacing(get_scaled_size(6))
+
         self.random_prompt_btn = QPushButton("랜덤/다음 프롬프트")
         self.random_prompt_btn.setStyleSheet(DARK_STYLES['secondary_button'])
         self.gen_button_layout.addWidget(self.random_prompt_btn)
-        
+
         self.generate_button_main = QPushButton("🎨 이미지 생성 요청")
         self.generate_button_main.setStyleSheet(DARK_STYLES['primary_button'])
         self.gen_button_layout.addWidget(self.generate_button_main)
-        
+
         gen_control_layout.addLayout(self.gen_button_layout)
-        gen_control_layout.addSpacing(12)
-        
-        # 🔥 수정: 체크박스 레이아웃을 화면 너비에 맞춰 조정
+
         gen_checkbox_layout = QHBoxLayout()
-        gen_checkbox_layout.setSpacing(12)
-        
+        gen_checkbox_layout.setSpacing(get_scaled_size(12))
+
         self.generation_checkboxes = {}
         checkbox_texts = ["프롬프트 고정", "자동 생성", "터보 옵션", "와일드카드 단독 모드"]
-        
-        # 체크박스들을 균등하게 배치
+
         for i, cb_text in enumerate(checkbox_texts):
             cb = QCheckBox(cb_text)
             cb.setStyleSheet(DARK_STYLES['dark_checkbox'])
-            gen_checkbox_layout.addWidget(cb, 1)  # stretch factor 1로 균등 배치
+            gen_checkbox_layout.addWidget(cb, 1)
             self.generation_checkboxes[cb_text] = cb
-            # 터보 옵션 체크박스 이벤트 연결
             if cb_text == "터보 옵션":
-                cb.setEnabled(True)  # 활성화됨
+                cb.setEnabled(True)
                 cb.clicked.connect(self.on_turbo_option_changed)
 
-        # 오른쪽 여백을 위한 stretch (제거하지 않음)
         gen_checkbox_layout.addStretch()
         gen_control_layout.addLayout(gen_checkbox_layout)
-        
-        container_layout.addWidget(generation_control_frame)
-        
-        return container
-    
+
+        return generation_control_frame
+
+    def toggle_params_panel(self):
+        """생성 파라미터 토글 패널 열기/닫기"""
+        if self.params_expanded:
+            self.params_area.setVisible(False)
+            self.params_toggle_button.setText("▲ 생성 파라미터 열기")
+            self.params_expanded = False
+        else:
+            self.params_area.setVisible(True)
+            self.params_toggle_button.setText("▼ 생성 파라미터 닫기")
+            self.params_expanded = True
+
+    def disable_wheel_event(self, widget):
+        """위젯의 마우스 휠 이벤트를 비활성화"""
+        def wheelEvent(event):
+            event.ignore()
+        widget.wheelEvent = wheelEvent
+        return widget
+
     def on_turbo_option_changed(self, checked):
         """터보 옵션 체크박스 상태 변경 시 호출"""
         if checked:
@@ -2268,21 +2186,6 @@ class ModernMainWindow(QMainWindow):
             setattr(self.app_context, 'turbo_preset', preset)
         self.status_bar.showMessage("✅ 터보 프리셋이 적용되었습니다.")
     
-    def toggle_params_panel(self):
-        """생성 파라미터 패널 토글"""
-        if self.params_expanded:
-            # 축소
-            self.params_area.setVisible(False)
-            self.params_toggle_button.setText("▲ 생성 파라미터 열기")
-            self.params_expanded = False
-            self.status_bar.showMessage("생성 파라미터 패널이 축소되었습니다.")
-        else:
-            # 확장
-            self.params_area.setVisible(True)
-            self.params_toggle_button.setText("▼ 생성 파라미터 닫기")
-            self.params_expanded = True
-            self.status_bar.showMessage("생성 파라미터 패널이 확장되었습니다.")
-    
     def toggle_custom_api_params(self, checked):
         """Custom API 파라미터 텍스트박스 토글"""
         # 분리된 상태가 아닐 때만 텍스트박스 가시성 토글
@@ -2311,7 +2214,7 @@ class ModernMainWindow(QMainWindow):
             print("🔧 Custom API 창 분리 시작...")
 
             # 1. 텍스트박스를 레이아웃에서 분리
-            self.params_area.layout().removeWidget(self.custom_script_textbox)
+            self.params_content_widget.layout().removeWidget(self.custom_script_textbox)
             self.custom_script_textbox.setParent(None)
 
             # 2. 래핑 위젯 생성 (확장된 UI)
@@ -2374,7 +2277,7 @@ class ModernMainWindow(QMainWindow):
             self.custom_script_textbox.setFixedHeight(80)
 
             # 3. 원래 레이아웃에 추가
-            self.params_area.layout().addWidget(self.custom_script_textbox)
+            self.params_content_widget.layout().addWidget(self.custom_script_textbox)
             self.custom_script_textbox.setVisible(self.custom_api_checkbox.isChecked())
 
             # 4. 상태 업데이트
@@ -3582,18 +3485,10 @@ class ModernMainWindow(QMainWindow):
                 parent_widget.layout().removeWidget(self.prompt_tabs_container)
                 self.prompt_tabs_container.setVisible(False)
             
-            # 3. 스플리터 크기 조정 (프롬프트 영역 공간을 중간 섹션에 할당)
-            if hasattr(self, 'vertical_splitter'):
-                # 현재 스플리터 크기 저장
-                self.saved_splitter_sizes = self.vertical_splitter.sizes()
-                # 상단 영역 축소, 중간 영역 확장
-                total_height = sum(self.saved_splitter_sizes)
-                if total_height > 0:
-                    # 상단을 최소 크기로, 나머지를 중간에 할당
-                    new_top_size = max(100, self.saved_splitter_sizes[0] - 350)  # 최소 150px 유지
-                    new_middle_size = total_height - new_top_size
-                    self.vertical_splitter.setSizes([new_top_size, new_middle_size])
-            
+            # 프롬프트 FixedBox 숨기기
+            if hasattr(self, 'prompt_fixed_box'):
+                self.prompt_fixed_box.setVisible(False)
+
             # 3. 프롬프트 탭을 감싸는 위젯 생성 (버튼 추가를 위해)
             detached_widget = QWidget()
             detached_layout = QVBoxLayout(detached_widget)
@@ -3800,9 +3695,9 @@ class ModernMainWindow(QMainWindow):
                     parent_widget.layout().addWidget(self.prompt_tabs_container)
             self.prompt_tabs_container.setVisible(True)
             
-            # 5. 스플리터 크기 복원
-            if hasattr(self, 'vertical_splitter') and hasattr(self, 'saved_splitter_sizes'):
-                self.vertical_splitter.setSizes(self.saved_splitter_sizes)
+            # 5. 프롬프트 FixedBox 복원
+            if hasattr(self, 'prompt_fixed_box'):
+                self.prompt_fixed_box.setVisible(True)
             
             self.prompt_tabs_detached = False
             

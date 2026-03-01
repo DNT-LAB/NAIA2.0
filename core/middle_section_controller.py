@@ -475,9 +475,6 @@ class MiddleSectionController:
             if self.accordion_mode:
                 self._collapse_other_modules(module_title)
 
-            # 📜 자동 스크롤: 해당 모듈로 이동
-            self._scroll_to_module(module_title)
-
         else:
             # 접힌 모듈로 등록
             self.module_states['expanded'].discard(module_title)
@@ -513,8 +510,13 @@ class MiddleSectionController:
             print(f"⚠️ [SCROLL] '{module_title}': 부모 스크롤 영역을 찾을 수 없습니다.")
             return
 
-        # 박스의 Y 위치 계산
-        box_y = box.y()
+        # 박스의 Y 위치 계산 (스크롤 영역의 content widget 기준으로 매핑)
+        from PyQt6.QtCore import QPoint
+        scroll_content = scroll_area.widget()
+        if scroll_content:
+            box_y = box.mapTo(scroll_content, QPoint(0, 0)).y()
+        else:
+            box_y = box.y()
         print(f"📜 [SCROLL] '{module_title}'로 스크롤 이동: Y={box_y}")
 
         # 스크롤 이동 (QTimer로 지연 - UI 업데이트 대기)

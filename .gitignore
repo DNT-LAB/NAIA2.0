@@ -189,5 +189,6 @@ ui/event_preset/naia_prompt_preset
 data/KR_tags.parquet.bak
 data/event_preset_thumbnail
 ui/event_preset/build_quick_event_combos.py
-ui/terminal/.cli/
+ui/terminal/.cli/*
+!ui/terminal/.cli/stickman_prompt_guide.md
 stickman_canvas_tmp.webp

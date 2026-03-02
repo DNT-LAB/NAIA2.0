@@ -810,7 +810,7 @@ class ModernMainWindow(QMainWindow):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
         self.base_title = "NAIA v2.0.0 Dev 153"
-        self.setWindowTitle(self.base_title + " - 260301")  # 기존 형식 유지
+        self.setWindowTitle(self.base_title + " - 260302")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1380,6 +1380,12 @@ class ModernMainWindow(QMainWindow):
 
         # CLI 터미널 탭
         self.terminal_widget = TerminalWidget()
+        self.terminal_widget.apply_to_main_prompt.connect(
+            self.on_instant_generation_requested
+        )
+        self.terminal_widget.send_and_generate.connect(
+            self._on_terminal_send_and_generate
+        )
         self.prompt_tabs.addTab(self.terminal_widget, "CLI")
         self._terminal_started = False
 
@@ -2123,7 +2129,7 @@ class ModernMainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("🚀 터보 모드 선택")
-        dialog.setFixedSize(350, 200)
+        dialog.setFixedSize(350, 250)
         dialog.setStyleSheet(f"""
             QDialog {{
                 background-color: {DARK_COLORS['bg_primary']};
@@ -2156,7 +2162,14 @@ class ModernMainWindow(QMainWindow):
 
         layout.addStretch()
 
-        # 연속 이미지 생성 버튼
+        # TODO: Comic Generator 장기 개발 — 연속 이미지 생성 (t2i/inpaint 선택 가능)
+        story_btn = QPushButton("🎬 연속 이미지 생성")
+        story_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        story_btn.setFixedHeight(40)
+        story_btn.clicked.connect(lambda: self._on_turbo_mode_selected(dialog, 'comic'))
+        # layout.addWidget(story_btn)
+
+        # 연속 이미지 생성 (Inpaint 전용)
         inpaint_btn = QPushButton("🎬 연속 이미지 생성 (Inpaint)")
         inpaint_btn.setStyleSheet(DARK_STYLES['primary_button'])
         inpaint_btn.setFixedHeight(40)
@@ -2175,7 +2188,15 @@ class ModernMainWindow(QMainWindow):
         """터보 모드 선택됨"""
         dialog.accept()
 
-        if mode == 'inpaint':
+        if mode == 'comic':
+            # ComicGeneratorTabModule 동적 탭 생성
+            if self.image_window and hasattr(self.image_window, 'tab_controller'):
+                self.image_window.tab_controller.add_tab_by_name(
+                    'ComicGeneratorTabModule',
+                    main_window=self
+                )
+                self.status_bar.showMessage("📖 Comic Generator 탭이 생성되었습니다.")
+        elif mode == 'inpaint':
             # TurboEventSequenceTabModule 동적 탭 생성
             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                 self.image_window.tab_controller.add_tab_by_name(
@@ -3746,6 +3767,11 @@ class ModernMainWindow(QMainWindow):
             self.terminal_widget.start_session()
         # 일반 탭 클릭 시 이전 탭 인덱스 업데이트
         self.previous_tab_index = index
+
+    def _on_terminal_send_and_generate(self, tags_dict: dict):
+        """CLI 터미널 → 메인 프롬프트 전송 + 이미지 생성."""
+        self.on_instant_generation_requested(tags_dict)
+        QTimer.singleShot(100, lambda: self.generation_controller.execute_generation_pipeline())
 
     def _open_remote_window(self):
         """리모트 창 열기"""

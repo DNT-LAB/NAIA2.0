@@ -496,6 +496,29 @@ class APIService:
                                     })
 
                                 print(f"  - {len(characters)} character(s) from temp window")
+                    elif params.get('characters'):
+                        # 🔧 Saved Params fallback (Enhance 등 저장된 generation_params 재사용 시)
+                        # generation_params에 이미 확장된 캐릭터 프롬프트가 있으면 그대로 사용
+                        characters = params['characters']
+                        ucs = params.get('uc', [])
+                        character_positions = params.get('character_positions', [])
+
+                        for i, prompt in enumerate(characters):
+                            if i < len(character_positions):
+                                centers = [character_positions[i]]
+                            else:
+                                centers = [{"x": 0.5, "y": 0.5}]
+
+                            api_parameters['v4_prompt']['caption']['char_captions'].append({
+                                'char_caption': prompt,
+                                'centers': centers
+                            })
+                            api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
+                                'char_caption': ucs[i] if i < len(ucs) else "",
+                                'centers': centers
+                            })
+
+                        print(f"  - {len(characters)} character(s) from saved params")
                     else:
                         # 🔄 Late Binding fallback for direct generation (non-queue)
                         print("  - No GenerationRequest. Using Late Binding fallback (direct generation)")

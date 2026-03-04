@@ -215,6 +215,10 @@ class ClothesPresetWindow(QMainWindow):
         self._init_debounce_timers()
         self._apply_theme()
 
+        # 자동화 중단 이벤트 구독 (자동 랜덤 체크 해제)
+        if self.app_context:
+            self.app_context.subscribe("automation_stopped", self._on_automation_stopped)
+
         # 데이터 로드 (deferred — 윈도우 먼저 표시 후 다음 이벤트 루프에서 로드)
         self._dm = ClothesPresetDataManager()
         self._data_loaded = False
@@ -1819,6 +1823,25 @@ class ClothesPresetWindow(QMainWindow):
         self._auto_random_opacity.setOpacity(1.0)
         self._auto_random_cb.setVisible(True)
 
+    def _on_automation_stopped(self, *args) -> None:
+        """자동화 중단/완료 시 자동 랜덤 체크 해제."""
+        if self._auto_random_cb.isChecked():
+            self._auto_random_cb.setChecked(False)
+            print("[ClothesPreset] 자동화 중단으로 자동 랜덤 해제")
+
+    def _get_automation_delay_ms(self) -> int:
+        """자동화 모듈의 생성 딜레이를 ms로 반환. 없으면 기본 300ms."""
+        try:
+            if self.app_context and hasattr(self.app_context, 'main_window'):
+                module = getattr(self.app_context.main_window, 'automation_module', None)
+                if module:
+                    delay = module.get_generation_delay()
+                    if delay > 0:
+                        return int(delay * 1000)
+        except Exception:
+            pass
+        return 300
+
     def _on_auto_random_toggled(self, checked: bool) -> None:
         """체크 시 페이드 타이머 취소, 항상 보이도록."""
         if checked:
@@ -1875,10 +1898,11 @@ class ClothesPresetWindow(QMainWindow):
         except Exception as e:
             print(f"[ClothesPreset] 이미지 표시 실패: {e}")
 
-        # 자동 랜덤: 체크 상태면 즉시 다음 라운드, 아니면 5초 후 페이드아웃
+        # 자동 랜덤: 체크 상태면 다음 라운드 (자동화 딜레이 반영), 아니면 5초 후 페이드아웃
         if was_lucky:
             if self._auto_random_cb.isChecked():
-                QTimer.singleShot(300, self._run_lucky_round)
+                delay_ms = self._get_automation_delay_ms()
+                QTimer.singleShot(delay_ms, self._run_lucky_round)
             else:
                 self._auto_random_fade_timer.start(5000)
 
@@ -1901,11 +1925,9 @@ class ClothesPresetWindow(QMainWindow):
             ("generation_completed_for_clothes_preset", self._on_generate_completed),
             ("generation_error", self._on_generate_error),
         ]:
-            if event_name in self.app_context.subscribers:
-                try:
-                    self.app_context.subscribers[event_name].remove(callback)
-                except ValueError:
-                    pass
+            subs = self.app_context.subscribers.get(event_name)
+            if subs and callback in subs:
+                subs.remove(callback)
 
     # ------------------------------------------------------------------
     # 윈도우 이벤트
@@ -1913,6 +1935,11 @@ class ClothesPresetWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._unsubscribe_generation()
+        # 자동화 중단 이벤트 구독 해제
+        if self.app_context:
+            subs = self.app_context.subscribers.get("automation_stopped")
+            if subs and self._on_automation_stopped in subs:
+                subs.remove(self._on_automation_stopped)
         self._dm.close()
         self.window_closed.emit()
         super().closeEvent(event)

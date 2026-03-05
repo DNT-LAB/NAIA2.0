@@ -30,7 +30,7 @@ ANALYSIS_PATH = DATA_DIR / "character_analysis.json"
 # ---- 썸네일 저장 경로 ----
 THUMB_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "character_thumbnails"
 THUMB_INDEX_PATH = THUMB_DIR / "index.json"
-THUMB_MAX_SIZE = (416, 608)
+THUMB_MAX_SIZE = (896, 1152)  # 원본 해상도 유지, WebP 압축으로 용량 절감
 
 # ---- 태그 저장 경로 ----
 SAVE_DIR = Path(__file__).resolve().parent.parent.parent / "save"
@@ -138,6 +138,7 @@ class CharacterViewerWindow(QMainWindow):
         self._current_group_key = None
         self._current_char_name = None
         self._current_char_data = None
+        self._current_variant_label = None  # None=Default, str=alternate label
         self._alternates_list: list[dict] = []
         self._generating = False
         self._preview_qimage = None
@@ -1044,13 +1045,14 @@ class CharacterViewerWindow(QMainWindow):
         self._current_group_key = group_key
         self._current_char_name = char_name
         self._current_char_data = data
+        self._current_variant_label = None
         self.group_btn.setText(f"Group: {group_key}")
         self.group_btn.setVisible(True)
 
         alternates = data.get("alternates", [])
         self._setup_alternate_buttons(alternates)
         self._show_variant_view(None)
-        self._load_thumbnail_for_char(group_key, char_name)
+        self._load_thumbnail_for_current()
 
     def _setup_alternate_buttons(self, alternates):
         self.alt_tree.clear()
@@ -1102,7 +1104,9 @@ class CharacterViewerWindow(QMainWindow):
                     child.setFont(0, f)
                     child.setForeground(0, QColor(DARK_COLORS['text_primary']))
 
+        self._current_variant_label = variant.get("label") if variant else None
         self._show_variant_view(variant)
+        self._load_thumbnail_for_current()
 
     def _show_variant_view(self, variant):
         data = self._current_char_data
@@ -1520,15 +1524,13 @@ class CharacterViewerWindow(QMainWindow):
             from PIL import Image
             THUMB_DIR.mkdir(parents=True, exist_ok=True)
 
-            key = f"{self._current_group_key}::{self._current_char_name}"
-            safe_name = re.sub(r'[<>:"/\\|?*]', '_', key.replace('::', '__')) + ".jpg"
+            key = self._thumb_key()
+            safe_name = re.sub(r'[<>:"/\\|?*]', '_', key.replace('::', '__')) + ".webp"
 
-            # 리사이즈 + JPEG 저장
+            # 리사이즈 + WebP 저장
             thumb = pil_image.copy()
             thumb.thumbnail(THUMB_MAX_SIZE, Image.Resampling.LANCZOS)
-            if thumb.mode == 'RGBA':
-                thumb = thumb.convert('RGB')
-            thumb.save(THUMB_DIR / safe_name, "JPEG", quality=85)
+            thumb.save(THUMB_DIR / safe_name, "WEBP", quality=82)
 
             # 인덱스 업데이트
             self._thumb_index[key] = safe_name
@@ -1537,9 +1539,16 @@ class CharacterViewerWindow(QMainWindow):
         except Exception as e:
             print(f"[CharacterViewer] 썸네일 저장 실패: {e}")
 
-    def _load_thumbnail_for_char(self, group_key, char_name):
-        """캐릭터 선택 시 기존 썸네일 로드."""
-        key = f"{group_key}::{char_name}"
+    def _thumb_key(self) -> str:
+        """현재 캐릭터+variant의 썸네일 키."""
+        key = f"{self._current_group_key}::{self._current_char_name}"
+        if self._current_variant_label:
+            key += f"::{self._current_variant_label}"
+        return key
+
+    def _load_thumbnail_for_current(self):
+        """현재 캐릭터+variant의 썸네일 로드."""
+        key = self._thumb_key()
         filename = self._thumb_index.get(key)
         if not filename:
             self.preview_label.setText("Preview")

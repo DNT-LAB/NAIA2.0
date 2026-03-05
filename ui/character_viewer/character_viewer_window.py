@@ -10,13 +10,13 @@ import math
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QModelIndex, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QModelIndex, QTimer, QPoint, pyqtSignal
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor, QFont, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QListView, QTreeWidget, QTreeWidgetItem, QLabel, QLineEdit,
     QSplitter, QHeaderView, QFrame, QTextEdit, QPushButton, QCheckBox,
-    QSizePolicy, QTabWidget, QGridLayout, QMessageBox,
+    QSizePolicy, QTabWidget, QGridLayout, QMessageBox, QDialog,
 )
 
 from ui.theme import DARK_COLORS, DARK_STYLES
@@ -90,11 +90,187 @@ class TagSearchProxyModel(QSortFilterProxyModel):
             return self._filter_text in tag_str.lower()
 
 
+class CosplaySearchPopup(QDialog):
+    """Cosplay 대상 캐릭터 검색 팝업."""
+
+    text_selected = pyqtSignal(str)
+
+    def __init__(self, analysis_data: dict, parent=None,
+                 include_copyright: bool = False, include_characteristics: bool = True):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setFixedSize(get_scaled_size(600), get_scaled_size(400))
+        self.setStyleSheet(f"""
+            QDialog {{
+                background: {DARK_COLORS['bg_primary']};
+                border: 1px solid {DARK_COLORS['border_light']};
+                border-radius: {get_scaled_size(4)}px;
+            }}
+        """)
+
+        self._include_copyright = include_copyright
+        self._include_characteristics = include_characteristics
+
+        # flat list: [(group_key, char_name, data), ...]
+        self._all_chars: list[tuple[str, str, dict]] = []
+        for gk, chars in analysis_data.items():
+            for cname, cdata in chars.items():
+                self._all_chars.append((gk, cname, cdata))
+        self._all_chars.sort(key=lambda x: x[1].lower())
+
+        self._build_ui()
+        self._populate_model()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(get_scaled_size(8), get_scaled_size(8),
+                                get_scaled_size(8), get_scaled_size(8))
+        root.setSpacing(get_scaled_size(6))
+
+        # 검색 입력
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("캐릭터 검색...")
+        self._search_edit.setProperty("autocomplete_ignore", True)
+        self._search_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
+        root.addWidget(self._search_edit)
+
+        # 좌우 분할
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # 좌측: 캐릭터 리스트
+        self._model = QStandardItemModel(self)
+        self._proxy = QSortFilterProxyModel(self)
+        self._proxy.setSourceModel(self._model)
+        self._proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._proxy.setFilterRole(Qt.ItemDataRole.DisplayRole)
+
+        self._list_view = QListView()
+        self._list_view.setModel(self._proxy)
+        self._list_view.setStyleSheet(f"""
+            QListView {{
+                background: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                font-size: {get_scaled_font_size(17)}px;
+            }}
+            QListView::item:selected {{
+                background: {DARK_COLORS['accent_blue']};
+            }}
+            QListView::item:hover {{
+                background: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+        self._list_view.selectionModel().currentChanged.connect(self._on_char_selected)
+        splitter.addWidget(self._list_view)
+
+        # 우측: 상세
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(get_scaled_size(4), 0, 0, 0)
+        right_layout.setSpacing(get_scaled_size(6))
+
+        self._char_label = QLabel("캐릭터를 선택하세요")
+        self._char_label.setWordWrap(True)
+        self._char_label.setStyleSheet(
+            f"color: {DARK_COLORS['text_primary']}; "
+            f"font-size: {get_scaled_font_size(14)}px; "
+            f"font-weight: bold;"
+        )
+        right_layout.addWidget(self._char_label)
+
+        self._detail_edit = QTextEdit()
+        self._detail_edit.setAcceptRichText(False)
+        self._detail_edit.setReadOnly(False)
+        self._detail_edit.setStyleSheet(
+            f"background: {DARK_COLORS['bg_secondary']}; "
+            f"color: {DARK_COLORS['text_primary']}; "
+            f"border: 1px solid {DARK_COLORS['border']}; "
+            f"font-size: {get_scaled_font_size(17)}px;"
+        )
+        right_layout.addWidget(self._detail_edit, stretch=1)
+
+        self._copy_btn = QPushButton("복사")
+        self._copy_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        self._copy_btn.clicked.connect(self._on_copy)
+        right_layout.addWidget(self._copy_btn)
+
+        splitter.addWidget(right_widget)
+        splitter.setSizes([get_scaled_size(220), get_scaled_size(360)])
+        root.addWidget(splitter, stretch=1)
+
+        # 검색 디바운스
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(350)
+        self._search_timer.timeout.connect(self._apply_filter)
+        self._search_edit.textChanged.connect(lambda: self._search_timer.start())
+
+    def _populate_model(self):
+        for gk, cname, cdata in self._all_chars:
+            item = QStandardItem(cname)
+            item.setData((gk, cname, cdata), Qt.ItemDataRole.UserRole)
+            self._model.appendRow(item)
+
+    def _apply_filter(self):
+        text = self._search_edit.text().strip()
+        self._proxy.setFilterFixedString(text)
+
+    def _on_char_selected(self, current: QModelIndex, _previous: QModelIndex):
+        if not current.isValid():
+            return
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        gk, cname, cdata = data
+
+        self._char_label.setText(f"캐릭터명: {cname}")
+
+        # 태그 조합: char_name (copyright), personal_color, breast_size top, characteristics
+        tags = [cname]
+
+        if self._include_copyright:
+            tags.append(gk)
+
+        pc_list = cdata.get("personal_color", [])
+        for pc in pc_list:
+            tag = pc.get("tag", "")
+            if tag:
+                tags.append(tag)
+
+        bs = cdata.get("breast_size", {})
+        dist = bs.get("distribution", [])
+        if dist:
+            top = max(dist, key=lambda x: x.get("pct", 0))
+            top_tag = top.get("tag", "")
+            if top_tag:
+                tags.append(top_tag)
+
+        if self._include_characteristics:
+            ch_list = cdata.get("characteristics", [])
+            for ch in ch_list:
+                tag = ch.get("tag", "")
+                if tag:
+                    tags.append(tag)
+
+        self._detail_edit.setPlainText(", ".join(tags))
+
+    def _on_copy(self):
+        cursor = self._detail_edit.textCursor()
+        if cursor.hasSelection():
+            text = cursor.selectedText()
+        else:
+            text = self._detail_edit.toPlainText().strip()
+        if text:
+            self.text_selected.emit(text)
+            from PyQt6.QtWidgets import QApplication
+            QApplication.clipboard().setText(text)
+
+
 class CharacterViewerWindow(QMainWindow):
     """Character Viewer 확장기능 윈도우."""
 
     window_closed = pyqtSignal()
-    apply_to_main_prompt = pyqtSignal(dict)
 
     # ---- static: 데이터 확인 ----
     @staticmethod
@@ -139,6 +315,7 @@ class CharacterViewerWindow(QMainWindow):
         self._current_char_name = None
         self._current_char_data = None
         self._current_variant_label = None  # None=Default, str=alternate label
+        self._current_variant = None  # None=Default, dict=alternate variant object
         self._alternates_list: list[dict] = []
         self._generating = False
         self._preview_qimage = None
@@ -423,7 +600,7 @@ class CharacterViewerWindow(QMainWindow):
         self.prefix_edit = QTextEdit()
         self.prefix_edit.setAcceptRichText(False)
         self.prefix_edit.setPlaceholderText("Prefix Tags (1girl, artist tags, pose)")
-        self.prefix_edit.setMaximumHeight(get_scaled_size(66))
+        self.prefix_edit.setMaximumHeight(get_scaled_size(44))
         self.prefix_edit.setStyleSheet(f"color: {DARK_COLORS['text_secondary']};")
 
         prefix_row.addWidget(self.prefix_edit)
@@ -438,11 +615,33 @@ class CharacterViewerWindow(QMainWindow):
         self.postfix_edit = QTextEdit()
         self.postfix_edit.setAcceptRichText(False)
         self.postfix_edit.setPlaceholderText("Postfix Tags (Quality Tags)")
-        self.postfix_edit.setMaximumHeight(get_scaled_size(66))
+        self.postfix_edit.setMaximumHeight(get_scaled_size(44))
         self.postfix_edit.setStyleSheet(f"color: {DARK_COLORS['text_secondary']};")
 
         postfix_row.addWidget(self.postfix_edit)
         prompt_layout.addLayout(postfix_row, stretch=1)
+
+        # Cosplay row
+        cosplay_row = QHBoxLayout()
+        cosplay_row.setSpacing(get_scaled_size(6))
+        self.cosplay_cb = QCheckBox("캐릭터 cosplay 적용")
+        self.cosplay_cb.stateChanged.connect(self._on_cosplay_toggled)
+        cosplay_row.addWidget(self.cosplay_cb)
+        self.cosplay_name_label = QLabel("캐릭터명:")
+        cosplay_row.addWidget(self.cosplay_name_label)
+        self.cosplay_search_btn = QPushButton("검색")
+        self.cosplay_search_btn.setFixedWidth(get_scaled_size(50))
+        self.cosplay_search_btn.setStyleSheet(DARK_STYLES['compact_button'])
+        self.cosplay_search_btn.clicked.connect(self._open_cosplay_search)
+        cosplay_row.addWidget(self.cosplay_search_btn)
+        self.cosplay_name_edit = QLineEdit()
+        self.cosplay_name_edit.setPlaceholderText("e.g. nahida (genshin impact), green eyes, white hair")
+        self.cosplay_name_edit.setStyleSheet(f"color: {DARK_COLORS['text_secondary']};")
+        self.cosplay_name_edit.textChanged.connect(self._on_cosplay_name_changed)
+        cosplay_row.addWidget(self.cosplay_name_edit, stretch=1)
+        prompt_layout.addLayout(cosplay_row)
+        # 초기 비활성화 스타일
+        self._update_cosplay_style(False)
 
         # Controls
         ctrl_layout = QHBoxLayout()
@@ -469,6 +668,10 @@ class CharacterViewerWindow(QMainWindow):
         self.auto_characteristics_cb.setChecked(True)
         ctrl_layout.addWidget(self.auto_characteristics_cb)
 
+        self.hide_charname_cb = QCheckBox("캐릭터명 숨김(저장 X)")
+        self.hide_charname_cb.stateChanged.connect(self._on_prompt_option_changed)
+        ctrl_layout.addWidget(self.hide_charname_cb)
+
         ctrl_layout.addStretch()
 
         gen_opts_frame = QFrame()
@@ -491,17 +694,16 @@ class CharacterViewerWindow(QMainWindow):
         self.empty_thumb_only_cb.setChecked(True)
         gen_opts_layout.addWidget(self.empty_thumb_only_cb)
 
+        self.no_save_cb = QCheckBox("이미지 저장 안함")
+        self.no_save_cb.setStyleSheet(f"color: {DARK_COLORS['warning']};")
+        gen_opts_layout.addWidget(self.no_save_cb)
+
         ctrl_layout.addWidget(gen_opts_frame)
 
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.setFixedWidth(get_scaled_size(80))
         self.copy_btn.clicked.connect(self._on_copy_prompt)
         ctrl_layout.addWidget(self.copy_btn)
-
-        self.send_btn = QPushButton("Send to Main")
-        self.send_btn.setFixedWidth(get_scaled_size(160))
-        self.send_btn.clicked.connect(self._on_send_to_main)
-        ctrl_layout.addWidget(self.send_btn)
 
         self.generate_btn = QPushButton("Generate")
         self.generate_btn.setFixedWidth(get_scaled_size(160))
@@ -1046,6 +1248,7 @@ class CharacterViewerWindow(QMainWindow):
         self._current_char_name = char_name
         self._current_char_data = data
         self._current_variant_label = None
+        self._current_variant = None
         self.group_btn.setText(f"Group: {group_key}")
         self.group_btn.setVisible(True)
 
@@ -1105,6 +1308,7 @@ class CharacterViewerWindow(QMainWindow):
                     child.setForeground(0, QColor(DARK_COLORS['text_primary']))
 
         self._current_variant_label = variant.get("label") if variant else None
+        self._current_variant = variant
         self._show_variant_view(variant)
         self._load_thumbnail_for_current()
 
@@ -1202,38 +1406,148 @@ class CharacterViewerWindow(QMainWindow):
     #  Prompt
     # ==================================================================
 
+    def _on_prompt_option_changed(self, _state=None):
+        """체크박스 변경 시 프롬프트 재생성."""
+        if self._current_char_data:
+            self._show_variant_view(self._current_variant)
+
+    def _on_cosplay_toggled(self, state):
+        """cosplay 체크 → 캐릭터명 숨김 해제/비활성화 + 프롬프트 재생성."""
+        enabled = bool(state)
+        if enabled:
+            self.hide_charname_cb.setChecked(False)
+            self.hide_charname_cb.setEnabled(False)
+        else:
+            self.hide_charname_cb.setEnabled(True)
+        self._update_cosplay_style(enabled)
+        self._on_prompt_option_changed()
+
+    def _update_cosplay_style(self, enabled: bool):
+        """cosplay 행의 라벨/입력/검색버튼 활성/비활성 스타일."""
+        color = DARK_COLORS['text_secondary'] if enabled else DARK_COLORS['text_disabled']
+        self.cosplay_name_label.setStyleSheet(f"color: {color};")
+        self.cosplay_name_edit.setStyleSheet(f"color: {color};")
+        self.cosplay_name_edit.setEnabled(enabled)
+        self.cosplay_search_btn.setEnabled(enabled)
+
+    def _open_cosplay_search(self):
+        """cosplay 검색 팝업 열기."""
+        popup = CosplaySearchPopup(
+            self.analysis, parent=self,
+            include_copyright=self.auto_copyright_cb.isChecked(),
+            include_characteristics=self.auto_characteristics_cb.isChecked(),
+        )
+        popup.text_selected.connect(self._on_cosplay_search_selected)
+        btn_pos = self.cosplay_search_btn.mapToGlobal(QPoint(0, 0))
+        popup.move(btn_pos.x(), btn_pos.y() - popup.height())
+        popup.show()
+
+    def _on_cosplay_search_selected(self, text: str):
+        """cosplay 검색 팝업에서 텍스트 선택 → cosplay_name_edit에 반영."""
+        self.cosplay_name_edit.setText(text)
+
+    def _on_cosplay_name_changed(self, _text):
+        """cosplay 이름 변경 시 실시간 프롬프트 재생성."""
+        if self.cosplay_cb.isChecked():
+            self._on_prompt_option_changed()
+
     def _update_prompt(self, data=None, ch_items=None, attire_items=None, variant_label=None):
         if data is None:
             self.prompt_edit.clear()
             return
         is_nai = self.app_context and self.app_context.get_api_mode() == "NAI"
-        char_name = getattr(self, "_current_char_name", "")
-        if variant_label:
-            char_name = f"{char_name} ({variant_label})"
-        # non-NAI: 캐릭터 이름의 괄호 이스케이프
-        if not is_nai and char_name:
-            char_name = char_name.replace("(", r"\(").replace(")", r"\)")
+        cosplay_mode = self.cosplay_cb.isChecked()
         # 프롬프트에 큰 영향을 주는 태그 치환/제거
         _TAG_REPLACE = {"loli": "young female"}
         _TAG_EXCLUDE = {"mature female"}
 
+        # cosplay 입력 파싱
+        cosplay_char = ""
+        cosplay_extra = []
+        if cosplay_mode:
+            cosplay_parts = [t.strip() for t in self.cosplay_name_edit.text().split(",") if t.strip()]
+            if cosplay_parts:
+                cosplay_char = cosplay_parts[0]
+                cosplay_extra = cosplay_parts[1:]
+
+        # char_name 결정
+        if self.hide_charname_cb.isChecked():
+            char_name = "original"
+        elif cosplay_mode and cosplay_char:
+            # cosplay 캐릭터명이 girl 뒤 위치에 들어감
+            char_name = cosplay_char
+            if not is_nai:
+                char_name = char_name.replace("(", r"\(").replace(")", r"\)")
+        else:
+            char_name = getattr(self, "_current_char_name", "")
+            if variant_label:
+                char_name = f"{char_name} ({variant_label})"
+            if not is_nai and char_name:
+                char_name = char_name.replace("(", r"\(").replace(")", r"\)")
+
         tags = []
-        for entry in data.get("personal_color", []):
-            tag = entry["tag"]
-            if tag in _TAG_EXCLUDE:
-                continue
-            tags.append(_TAG_REPLACE.get(tag, tag))
-        if self.auto_characteristics_cb.isChecked():
-            for entry in (ch_items or data.get("characteristics", [])):
+        self._cosplay_excluded_pc = []
+        if cosplay_mode:
+            # breast_size 태그 식별 (제거 대상)
+            bs_tag = None
+            bs = data.get("breast_size", {})
+            bs_dist = bs.get("distribution", [])
+            if bs_dist:
+                bs_tag = max(bs_dist, key=lambda x: x["pct"])["tag"]
+
+            # cosplay markers + extra tags
+            extra = cosplay_extra
+            if not is_nai:
+                extra = [t.replace("(", r"\(").replace(")", r"\)") for t in extra]
+            tags.extend(["alternate costume", "borrowed character"])
+            tags.extend(extra)
+
+            # 원본 캐릭터명 (cosplay) → borrowed clothes 앞에 배치
+            original_name = getattr(self, "_current_char_name", "")
+            if original_name:
+                if not is_nai:
+                    original_name = original_name.replace("(", r"\(").replace(")", r"\)")
+                cosplay_suffix = r"\(cosplay\)" if not is_nai else "(cosplay)"
+                tags.append(f"{original_name} {cosplay_suffix}")
+
+            tags.append("borrowed clothes")
+
+            # characteristics (breast_size 제외)
+            if self.auto_characteristics_cb.isChecked():
+                for entry in (ch_items or data.get("characteristics", [])):
+                    tag = entry["tag"]
+                    if tag in _TAG_EXCLUDE or tag == bs_tag:
+                        continue
+                    tags.append(_TAG_REPLACE.get(tag, tag))
+            # attire
+            for entry in (attire_items or []):
                 tag = entry["tag"]
                 if tag in _TAG_EXCLUDE:
                     continue
                 tags.append(_TAG_REPLACE.get(tag, tag))
-        for entry in (attire_items or []):
-            tag = entry["tag"]
-            if tag in _TAG_EXCLUDE:
-                continue
-            tags.append(_TAG_REPLACE.get(tag, tag))
+
+            # 제거된 personal_color → 네거티브용 보관
+            for entry in data.get("personal_color", []):
+                tag = entry["tag"]
+                if tag not in _TAG_EXCLUDE:
+                    self._cosplay_excluded_pc.append(tag)
+        else:
+            for entry in data.get("personal_color", []):
+                tag = entry["tag"]
+                if tag in _TAG_EXCLUDE:
+                    continue
+                tags.append(_TAG_REPLACE.get(tag, tag))
+            if self.auto_characteristics_cb.isChecked():
+                for entry in (ch_items or data.get("characteristics", [])):
+                    tag = entry["tag"]
+                    if tag in _TAG_EXCLUDE:
+                        continue
+                    tags.append(_TAG_REPLACE.get(tag, tag))
+            for entry in (attire_items or []):
+                tag = entry["tag"]
+                if tag in _TAG_EXCLUDE:
+                    continue
+                tags.append(_TAG_REPLACE.get(tag, tag))
         # prefix 구성: girl, {캐릭터}, {copyright(옵션)},
         prefix_parts = []
         if char_name:
@@ -1272,12 +1586,6 @@ class CharacterViewerWindow(QMainWindow):
         if text:
             QApplication.clipboard().setText(text)
 
-    def _on_send_to_main(self):
-        """Send to Main 버튼 → 메인 프롬프트 업데이트만 (생성 없음)."""
-        tags_dict = self._build_tags_dict()
-        if tags_dict.get("general"):
-            self.apply_to_main_prompt.emit(tags_dict)
-
     def _on_generate_clicked(self):
         """Generate 버튼 → overrides로 프롬프트 직접 주입 (메인 프롬프트 미변경)."""
         char_prompt = self.prompt_edit.toPlainText().strip()
@@ -1290,6 +1598,14 @@ class CharacterViewerWindow(QMainWindow):
 
         self._save_tags()
         self._set_generating_state(True)
+
+        # 생성 요청 시점의 캐릭터 정보 캡처 (완료 시 올바른 캐릭터로 저장)
+        self._gen_snapshot = {
+            "group_key": self._current_group_key,
+            "char_name": self._current_char_name,
+            "variant_label": self._current_variant_label,
+            "save_blocked": self.no_save_cb.isChecked() or self.hide_charname_cb.isChecked() or self.cosplay_cb.isChecked(),
+        }
 
         is_nai = self.app_context and self.app_context.get_api_mode() == "NAI"
 
@@ -1305,7 +1621,9 @@ class CharacterViewerWindow(QMainWindow):
             }
             if char_prompt:
                 cv_overrides["characters"] = [char_prompt]
-                cv_overrides["uc"] = [""]
+                # cosplay 모드: 제거된 personal_color를 캐릭터 UC에 삽입
+                uc_text = ", ".join(getattr(self, "_cosplay_excluded_pc", []))
+                cv_overrides["uc"] = [uc_text]
         else:
             # WEBUI/COMFYUI: 캐릭터 이름만 girl 뒤에, 나머지 태그는 prefix 뒤에 배치
             char_tags = [t.strip() for t in char_prompt.split(",") if t.strip()] if char_prompt else []
@@ -1326,6 +1644,12 @@ class CharacterViewerWindow(QMainWindow):
                     break
             # [1girl, 캐릭터이름] + [prefix 나머지] + [특성태그] + [postfix]
             merged = prefix_tags[:insert_idx] + char_name_tags + prefix_tags[insert_idx:] + char_trait_tags + postfix_tags
+
+            # cosplay 모드: 제거된 personal_color를 "-tag" 형태로 추가
+            # → 파이프라인이 자동으로 네거티브 프롬프트로 전환
+            excluded_pc = getattr(self, "_cosplay_excluded_pc", [])
+            for tag in excluded_pc:
+                merged.append(f"-{tag}")
 
             cv_overrides = {
                 "character_viewer_request": True,
@@ -1384,7 +1708,9 @@ class CharacterViewerWindow(QMainWindow):
         try:
             if hasattr(result, 'mode'):  # PIL Image
                 self._display_preview_image(result)
-                self._save_thumbnail(result)
+                snap = getattr(self, "_gen_snapshot", None)
+                if snap and not snap["save_blocked"]:
+                    self._save_thumbnail(result, snap)
         except Exception as e:
             print(f"[CharacterViewer] 완료 처리 오류: {e}")
         if self.continuous_gen_cb.isChecked():
@@ -1483,6 +1809,8 @@ class CharacterViewerWindow(QMainWindow):
             data = {
                 "prefix": self.prefix_edit.toPlainText(),
                 "postfix": self.postfix_edit.toPlainText(),
+                "cosplay_enabled": self.cosplay_cb.isChecked(),
+                "cosplay_name": self.cosplay_name_edit.text(),
             }
             SAVE_DIR.mkdir(parents=True, exist_ok=True)
             with open(TAGS_SAVE_PATH, 'w', encoding='utf-8') as f:
@@ -1504,6 +1832,8 @@ class CharacterViewerWindow(QMainWindow):
                 data = json.load(f)
             self.prefix_edit.setPlainText(data.get("prefix", ""))
             self.postfix_edit.setPlainText(data.get("postfix", ""))
+            self.cosplay_cb.setChecked(data.get("cosplay_enabled", False))
+            self.cosplay_name_edit.setText(data.get("cosplay_name", ""))
         except Exception as e:
             print(f"[CharacterViewer] 태그 로드 실패: {e}")
 
@@ -1521,15 +1851,20 @@ class CharacterViewerWindow(QMainWindow):
             except Exception as e:
                 print(f"[CharacterViewer] 썸네일 인덱스 로드 실패: {e}")
 
-    def _save_thumbnail(self, pil_image):
-        """현재 캐릭터의 썸네일을 저장."""
-        if not self._current_group_key or not self._current_char_name:
+    def _save_thumbnail(self, pil_image, snapshot=None):
+        """캐릭터 썸네일을 저장. snapshot이 있으면 해당 정보 사용."""
+        gk = snapshot["group_key"] if snapshot else self._current_group_key
+        name = snapshot["char_name"] if snapshot else self._current_char_name
+        vl = snapshot["variant_label"] if snapshot else self._current_variant_label
+        if not gk or not name:
             return
         try:
             from PIL import Image
             THUMB_DIR.mkdir(parents=True, exist_ok=True)
 
-            key = self._thumb_key()
+            key = f"{gk}::{name}"
+            if vl:
+                key += f"::{vl}"
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', key.replace('::', '__')) + ".webp"
 
             # 리사이즈 + WebP 저장
@@ -1566,7 +1901,8 @@ class CharacterViewerWindow(QMainWindow):
             return
         qimage = QImage(str(thumb_path))
         self._preview_qimage = qimage
-        self._refresh_preview_scale()
+        # 탭 전환 전에 호출될 수 있으므로 레이아웃 안정 후 스케일링
+        QTimer.singleShot(0, self._refresh_preview_scale)
 
     def _set_generating_state(self, generating: bool):
         """Generate 버튼 상태 제어."""

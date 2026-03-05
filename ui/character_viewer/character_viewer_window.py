@@ -391,6 +391,7 @@ class CharacterViewerWindow(QMainWindow):
 
         self.group_search = QLineEdit()
         self.group_search.setPlaceholderText("Search groups...")
+        self.group_search.setProperty("autocomplete_ignore", True)
         left_layout.addWidget(self.group_search)
 
         self.group_model = QStandardItemModel()
@@ -411,6 +412,7 @@ class CharacterViewerWindow(QMainWindow):
 
         self.char_search = QLineEdit()
         self.char_search.setPlaceholderText("Search characters or tags...")
+        self.char_search.setProperty("autocomplete_ignore", True)
         mid_layout.addWidget(self.char_search)
 
         self.char_model = QStandardItemModel()
@@ -662,10 +664,12 @@ class CharacterViewerWindow(QMainWindow):
 
         self.auto_copyright_cb = QCheckBox("copyright 자동 추가")
         self.auto_copyright_cb.setChecked(False)
+        self.auto_copyright_cb.stateChanged.connect(self._on_prompt_option_changed)
         ctrl_layout.addWidget(self.auto_copyright_cb)
 
         self.auto_characteristics_cb = QCheckBox("characteristics 자동 추가")
         self.auto_characteristics_cb.setChecked(True)
+        self.auto_characteristics_cb.stateChanged.connect(self._on_prompt_option_changed)
         ctrl_layout.addWidget(self.auto_characteristics_cb)
 
         self.hide_charname_cb = QCheckBox("캐릭터명 숨김(저장 X)")

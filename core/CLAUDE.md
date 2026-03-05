@@ -50,7 +50,10 @@ core/generation_controller.py
 | **prompt_generation_controller.py** | 프롬프트 생성, side-effect 없는 생성 |
 | **prompt_context.py** | PromptContext 데이터 클래스 |
 | **mode_ware_manager.py** | 모드 인식 모듈 일괄 저장/로드 |
+| **ui_state_manager.py** | UI 레이아웃 상태 저장/복원 (창 크기, 스플리터, 모듈 접기 등) |
 | **generation_request.py** | GenerationRequest 데이터 클래스 |
+| **filter_data_manager.py** | 텍스트/JSON 태그 사전 로드, noise whitelist |
+| **tag_filter_helpers.py** | 공유 태그 필터링 (10라운드), 색상 예외 |
 
 ---
 
@@ -322,6 +325,24 @@ widget.setProperty("autocomplete_ignore", True)
 큐가 비어있지 않으면 큐 우선, 비면 자동생성 재개. 플래그: `queue_hold_auto_gen`, `auto_retry_pending`.
 
 **상세 레퍼런스**: [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
+
+---
+
+## UIStateManager (`ui_state_manager.py`)
+
+프로그램 종료 시 UI 레이아웃을 `save/ui_state.json`에 저장하고, 시작 시 복원.
+
+**저장 항목**:
+- 창 위치/크기 (`saveGeometry`/`restoreGeometry`) + 최대화 상태
+- 좌/우 패널 스플리터 비율
+- 프롬프트 FixedBox 높이
+- 생성 파라미터 패널 펼침/접힘
+- 좌측 스크롤 위치
+- 모듈 접기/펼치기 상태 (`MiddleSectionController`에 위임 → `save/module_states.json`)
+
+**호출 시점**:
+- 저장: `MainWindow.closeEvent()` → `ui_state_manager.save_state(self)`
+- 복원: `MainWindow.__init__()` 말미 `QTimer.singleShot(150ms)` → `restore_state(self)`
 
 ---
 

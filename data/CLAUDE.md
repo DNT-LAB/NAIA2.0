@@ -10,8 +10,16 @@
 data/
   ├── tags/                    # Parquet 태그 데이터베이스 (150개 파일, ~100MB+)
   │   └── tags_00~149.parquet  # 각 ~800KB, ~30K-50K rows
-  ├── characteristic_list.txt  # 특징 태그 사전 (1006개, UTF-8, 한 줄 = 하나의 태그)
-  ├── clothes_list.txt         # 의류 태그 사전 (3700개, 동일 형식)
+  ├── taglist/                 # JSON 태그 필터 + 빈도 데이터
+  │   ├── expression_tags.json     # 표정 태그 (modifiers + groups)
+  │   ├── pose_action_tags.json    # 포즈/행동 태그 (categories)
+  │   ├── location_tags.json       # 장소/배경 태그
+  │   ├── meta_tags.json           # 메타/구도 태그
+  │   ├── object_tags.json         # 사물 태그
+  │   ├── clothing_regions.json    # 의류 Region 매핑
+  │   └── unique_tags.json         # 태그 빈도 (noise 필터용)
+  ├── characteristic_list.txt  # 특징 태그 사전 (UTF-8, 한 줄 = 하나의 태그)
+  ├── clothes_list.txt         # 의류 태그 사전 (동일 형식)
   ├── ezmode/                  # EZ Mode JSON (GitHub, 668KB)
   │   ├── category_index.json  # 411개 카테고리 메타데이터 + UI 트리
   │   ├── output.json          # 태그명→인덱스 매핑
@@ -25,9 +33,10 @@ data/
 ## 데이터 흐름
 
 ```
-data/tags/*.parquet → core/search_controller.py (멀티프로세싱) → tabs/search_tab.py
-data/*.txt          → core/filter_data_manager.py (동기 로드)  → modules/
-data/ezmode/*.json  → ui/ezmode/ezmode_data_manager.py         → ezmode STEP 1~3
+data/tags/*.parquet  → core/search_controller.py (멀티프로세싱) → tabs/search_tab.py
+data/*.txt           → core/filter_data_manager.py (동기 로드)  → modules/
+data/taglist/*.json  → core/filter_data_manager.py (동기 로드)  → core/tag_filter_helpers.py
+data/ezmode/*.json   → ui/ezmode/ezmode_data_manager.py         → ezmode STEP 1~3
 data/.ezmode/       → ui/ezmode/ezmode_data_manager.py (LRU 3) → ezmode STEP 4
 ```
 
@@ -74,15 +83,33 @@ data/.ezmode/       → ui/ezmode/ezmode_data_manager.py (LRU 3) → ezmode STEP
 
 ```python
 filter_manager = FilterDataManager(data_dir='data')
-clothes = filter_manager.clothes_list       # 3700개
-characteristics = filter_manager.characteristic_list  # 1006개
+clothes = filter_manager.clothes_list          # 텍스트 사전 (list)
+characteristics = filter_manager.characteristic_list
+filter_manager._expression_set                 # JSON 필터 (set, 빠른 조회)
+filter_manager._location_set
+filter_manager._pose_action_set
+filter_manager._meta_set
+filter_manager._object_set
+filter_manager.filter_noise_tags(tags)         # whitelist 기반 저빈도 필터
 ```
+
+### 태그 필터 파이프라인 (`core/tag_filter_helpers.py`)
+
+`apply_tag_filters()` — 10라운드 순차 필터링, `filter_log` 반환:
+
+1. Auto Hide → 2. 캐릭터 특징 → 3. 의류 → 4. 색상 → 5. 위치/배경 → 6. 표정 → 7. 포즈/행동 → 8. 메타 → 9. 사물 → 10. 노이즈
 
 ### 새 사전 추가 방법
 
+**텍스트 사전** (`.txt`):
 1. `data/my_list.txt` 생성 (UTF-8, 한 줄 = 하나의 태그)
 2. `FilterDataManager.__init__`에 `self.my_list = []` 추가
 3. `load_all_filters()`에 `self.my_list = self._load_list_from_file('my_list.txt')` 추가
+
+**JSON 필터** (`data/taglist/*.json`):
+1. JSON 파일 생성 (`{"tags": [...]}` 또는 `{"categories": {...}}`)
+2. `_load_json_filters()`에 로드 + set 변환 추가
+3. `apply_tag_filters()`에 라운드 추가
 
 ---
 

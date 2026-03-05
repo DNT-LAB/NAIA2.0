@@ -197,9 +197,10 @@ class MiddleSectionController:
                 # 4. EnhancedCollapsibleBox 생성 (분리 가능)
                 module_title = module_instance.get_title()
                 box = EnhancedCollapsibleBox(
-                    title=module_title, 
-                    parent=self.parent_widget, 
-                    detachable=True  # 모든 모듈을 분리 가능하게 설정
+                    title=module_title,
+                    parent=self.parent_widget,
+                    detachable=True,  # 모든 모듈을 분리 가능하게 설정
+                    start_expanded=getattr(module_instance, 'start_expanded', False)
                 )
                 
                 # 5. 모듈 분리 요청 시그널 연결

@@ -845,6 +845,18 @@ class GenerationController:
                 self.current_generation_params = None
                 return
 
+            # Character Viewer 요청인 경우 전용 에러 이벤트 발행
+            is_character_viewer = self.current_generation_params.get("character_viewer_request", False)
+            if is_character_viewer:
+                print(f"🔍 Character Viewer 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "character_viewer_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
             # Interactive Mode 요청인 경우 전용 에러 이벤트 발행
             is_interactive_mode = self.current_generation_params.get("interactive_mode_request", False)
             if is_interactive_mode:

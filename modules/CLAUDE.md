@@ -232,13 +232,17 @@ finally:
 - `load_preset_random()`: pre_prompt, post_prompt, main_settings(prompt 제외)만 적용
 - API 모드 변경 시 상태 초기화
 
-### 색상 필터링 예외 (`prompt_engineering_module.py`)
+### 태그 필터링 (`core/tag_filter_helpers.py`)
 
-`_is_color_exception(tag)`: 색상과 무관한 태그 보호.
+`apply_tag_filters()`: 10라운드 순차 필터링. `prompt_engineering_module.py`와 `virtual_prompt_engineering_tab.py`에서 공유.
 
-- `COLOR_EXCEPTION_EXACT`: `turn pale`, `rainbow`, `darkness`
-- `COLOR_EXCEPTION_PREFIXES`: `covered`, `shared`, `armored`, `scared` 등
-- `COLOR_EXCEPTION_CONTAINS`: `palette`, `impaled`, `blueberry`, ` fire`, ` outline` 등
+1. Auto Hide → 2. 캐릭터 특징 → 3. 의류 → 4. 색상 → 5. 위치/배경 → 6. 표정 → 7. 포즈/행동 → 8. 메타 → 9. 사물 → 10. 노이즈
+
+`_is_color_exception(tag)`: 색상과 무관한 태그 보호 (예: `blueberry`, `rainbow`, `covered`).
+
+### 필터 디버깅 윈도우 (`filter_debug_window.py`)
+
+`FilterDebugWindow(QDialog)`: 라운드별 필터 제거 내역 시각화. 소스 정보(캐릭터/작품/아티스트/ID) + 라운드별 색상 코딩 (주황=제거, 초록=통과, 회색=비활성).
 
 ---
 

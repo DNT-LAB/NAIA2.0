@@ -261,7 +261,10 @@ class _ResizeHandle(QFrame):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = False
+            if self._dragging:
+                self._dragging = False
+                # 드래그 완료 시 높이 변경 시그널 발행
+                self._parent_box.height_changed.emit(self._parent_box._current_height)
             event.accept()
 
 
@@ -270,6 +273,7 @@ class FixedBox(QWidget):
 
     module_detach_requested = pyqtSignal(str, object)
     toggled = pyqtSignal(str, bool)
+    height_changed = pyqtSignal(int)  # 리사이즈 완료 시 새 높이 전달
 
     def __init__(self, title="", parent=None, detachable=True, min_height=200, default_height=400):
         super().__init__(parent)

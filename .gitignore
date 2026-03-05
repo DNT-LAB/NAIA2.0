@@ -188,6 +188,7 @@ data/tagger/selected_tags.csv
 ui/event_preset/naia_prompt_preset
 data/KR_tags.parquet.bak
 data/event_preset_thumbnail
+data/character_thumbnails
 ui/event_preset/build_quick_event_combos.py
 ui/terminal/.cli/*
 !ui/terminal/.cli/stickman_prompt_guide.md

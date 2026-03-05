@@ -49,6 +49,7 @@ from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
 from ui.img2img_window import Img2ImgWindow
 from core.main_controller import MainController
+from core.ui_state_manager import UIStateManager
 from utils.token_calculator import get_token_calculator
 from core.comfyui_utils import ComfyUIAPIUtils
 from ui.terminal.terminal_widget import TerminalWidget
@@ -809,8 +810,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 153"
-        self.setWindowTitle(self.base_title + " - 260302")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 154"
+        self.setWindowTitle(self.base_title + " - 260305")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -867,6 +868,9 @@ class ModernMainWindow(QMainWindow):
         # 🆕 임시 창 자동 종료를 위한 모드/모델 추적 변수
         self._previous_api_mode = "NAI"
         self._previous_nai_model = "NAID4.5F"
+
+        # UI 상태 매니저 초기화
+        self.ui_state_manager = UIStateManager()
 
         # MainController 초기화 (UI 초기화 전에 생성)
         self.controller = MainController(self)
@@ -936,6 +940,8 @@ class ModernMainWindow(QMainWindow):
 
         # 초기화 완료 후 splitter stretch factor 업데이트
         QTimer.singleShot(100, self.update_splitter_stretch_factors)
+        # UI 레이아웃 상태 복원 (splitter 등 위젯 배치 완료 후)
+        QTimer.singleShot(150, lambda: self.ui_state_manager.restore_state(self))
         # 초기 체크박스 색상 설정 (기본 모델에 따라)
         QTimer.singleShot(300, self.update_naid_checkbox_colors)
         
@@ -1400,6 +1406,8 @@ class ModernMainWindow(QMainWindow):
         self.event_preset_window_open = False
         self.clothes_preset_window = None
         self.clothes_preset_window_open = False
+        self.character_viewer_window = None
+        self.character_viewer_window_open = False
 
         self.prompt_tabs.currentChanged.connect(self._on_prompt_tab_changed)
 
@@ -1456,6 +1464,10 @@ class ModernMainWindow(QMainWindow):
         self.ez_mode_action = QAction("⚡ EZ Mode", self)
         self.ez_mode_action.triggered.connect(self.open_ez_mode_window)
         self.extra_features_menu.addAction(self.ez_mode_action)
+
+        self.character_viewer_action = QAction("👤 Character Viewer", self)
+        self.character_viewer_action.triggered.connect(self._open_character_viewer_window)
+        self.extra_features_menu.addAction(self.character_viewer_action)
 
         self.extra_features_btn.setMenu(self.extra_features_menu)
         corner_layout.addWidget(self.extra_features_btn)
@@ -2879,6 +2891,13 @@ class ModernMainWindow(QMainWindow):
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_clothes_preset", image_object)
 
+                # Character Viewer 요청인 경우 별도 이벤트 발행
+                is_character_viewer_request = generation_params.get("character_viewer_request", False)
+                if is_character_viewer_request:
+                    print("🔍 Character Viewer 요청 감지 - 전용 이벤트 발행")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_character_viewer", image_object)
+
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:
                     print(f"🎬 Studio 요청 감지 - 전용 이벤트 발행 (frame: {studio_frame_index})")
@@ -3004,6 +3023,7 @@ class ModernMainWindow(QMainWindow):
                     generation_params.get("interactive_mode_request", False) or
                     generation_params.get("event_preset_request", False) or
                     generation_params.get("clothes_preset_request", False) or
+                    generation_params.get("character_viewer_request", False) or
                     generation_params.get("turbo_sequence_request", False) or
                     generation_params.get("img2img_batch_request", False)
                 )
@@ -3895,6 +3915,42 @@ class ModernMainWindow(QMainWindow):
         self.clothes_preset_window_open = False
         self.clothes_preset_action.setText("👗 Clothes Preset")
         self.clothes_preset_action.setEnabled(True)
+
+    def _open_character_viewer_window(self):
+        """Character Viewer 창 열기"""
+        if self.character_viewer_window_open and self.character_viewer_window:
+            self.character_viewer_window.raise_()
+            self.character_viewer_window.activateWindow()
+            return
+
+        from ui.character_viewer import CharacterViewerWindow
+
+        if not CharacterViewerWindow.ensure_data_available(parent=self):
+            return
+
+        self.character_viewer_window = CharacterViewerWindow(
+            app_context=self.app_context,
+            kr_tags_df=self.kr_tags_df,
+            parent=None,
+        )
+        self.character_viewer_window.window_closed.connect(
+            self._on_character_viewer_window_closed
+        )
+        self.character_viewer_window.apply_to_main_prompt.connect(
+            self.on_instant_generation_requested
+        )
+        self.character_viewer_window.show()
+
+        self.character_viewer_window_open = True
+        self.character_viewer_action.setText("👤 Character Viewer (열림)")
+        self.character_viewer_action.setEnabled(False)
+
+    def _on_character_viewer_window_closed(self):
+        """Character Viewer 창 닫힘 이벤트"""
+        self.character_viewer_window = None
+        self.character_viewer_window_open = False
+        self.character_viewer_action.setText("👤 Character Viewer")
+        self.character_viewer_action.setEnabled(True)
 
     def _on_mode_changed_for_remote(self, _old_mode: str, new_mode: str):
         """모드 변경 시 리모트 메뉴 가시성 제어"""
@@ -4985,11 +5041,13 @@ class ModernMainWindow(QMainWindow):
             if hasattr(self, 'img2img_window_manager'):
                 self.img2img_window_manager.close_all()
 
-            # EventPreset / ClothesPreset 윈도우 닫기
+            # EventPreset / ClothesPreset / CharacterViewer 윈도우 닫기
             if self.event_preset_window:
                 self.event_preset_window.close()
             if self.clothes_preset_window:
                 self.clothes_preset_window.close()
+            if self.character_viewer_window:
+                self.character_viewer_window.close()
 
             # 터미널 세션 정리
             if hasattr(self, 'terminal_widget'):
@@ -5000,6 +5058,9 @@ class ModernMainWindow(QMainWindow):
 
             # 모든 모드 대응 모듈들 설정 저장
             self.app_context.mode_manager.save_all_current_mode()
+
+            # UI 레이아웃 상태 저장
+            self.ui_state_manager.save_state(self)
 
             print(f"💾 프로그램 종료 시 {current_mode} 모드 설정 저장 완료")
 

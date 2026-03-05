@@ -1307,20 +1307,25 @@ class CharacterViewerWindow(QMainWindow):
                 cv_overrides["characters"] = [char_prompt]
                 cv_overrides["uc"] = [""]
         else:
-            # WEBUI/COMFYUI: char_prompt에서 "girl" 제거 후 prefix의 girl 태그 뒤에 삽입
+            # WEBUI/COMFYUI: 캐릭터 이름만 girl 뒤에, 나머지 태그는 prefix 뒤에 배치
             char_tags = [t.strip() for t in char_prompt.split(",") if t.strip()] if char_prompt else []
             char_tags = [t for t in char_tags if t.lower() != "girl"]
+
+            # 첫 번째 태그를 캐릭터 이름으로 간주, 나머지는 특성 태그
+            char_name_tags = [char_tags[0]] if char_tags else []
+            char_trait_tags = char_tags[1:] if len(char_tags) > 1 else []
 
             prefix_tags = [t.strip() for t in prefix_text.split(",") if t.strip()] if prefix_text else []
             postfix_tags = [t.strip() for t in postfix_text.split(",") if t.strip()] if postfix_text else []
 
-            # prefix에서 "girl"을 포함하는 첫 번째 태그 뒤에 캐릭터 태그 삽입
+            # prefix에서 "girl"을 포함하는 첫 번째 태그 뒤에 캐릭터 이름 삽입
             insert_idx = 0  # fallback: prefix 맨 앞
             for i, tag in enumerate(prefix_tags):
                 if "girl" in tag.lower():
                     insert_idx = i + 1
                     break
-            merged = prefix_tags[:insert_idx] + char_tags + prefix_tags[insert_idx:] + postfix_tags
+            # [1girl, 캐릭터이름] + [prefix 나머지] + [특성태그] + [postfix]
+            merged = prefix_tags[:insert_idx] + char_name_tags + prefix_tags[insert_idx:] + char_trait_tags + postfix_tags
 
             cv_overrides = {
                 "character_viewer_request": True,

@@ -810,8 +810,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 154c"
-        self.setWindowTitle(self.base_title + " - 260305")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 155"
+        self.setWindowTitle(self.base_title + " - 260306")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -4601,14 +4601,79 @@ class ModernMainWindow(QMainWindow):
         """심층 검색 탭을 열거나, 이미 열려있으면 해당 탭으로 전환"""
         if self.search_results.is_empty():
             return
-            
-        # ✅ RightView의 tab_controller를 통해 동적 탭 생성을 요청
+        if not (self.image_window and hasattr(self.image_window, 'tab_controller')):
+            return
+
+        tab_controller = self.image_window.tab_controller
+
+        # 이미 열려있으면 전환만
+        for inst in tab_controller.module_instances.values():
+            if inst.__class__.__name__ == 'DepthSearchTabModule':
+                tab_controller.switch_to_tab(inst.tab_id)
+                return
+
+        # 이미 빌드 중이면 무시
+        if hasattr(self, '_depth_build_thread') and self._depth_build_thread is not None:
+            try:
+                if self._depth_build_thread.isRunning():
+                    return
+            except RuntimeError:
+                pass
+
+        # 백그라운드에서 tags_string 빌드 후 탭 생성
+        from PyQt6.QtWidgets import QProgressDialog
+        from tabs.depth_search_window import TagsStringBuildThread
+
+        progress = QProgressDialog("심층 검색 데이터 준비 중...", "취소", 0, 0, self)
+        progress.setWindowTitle("심층 검색")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        # QThread 서브클래스 — parent=self로 GC 방지
+        thread = TagsStringBuildThread(self.search_results.get_dataframe(), parent=self)
+        self._depth_build_thread = thread
+        self._depth_build_progress = progress
+
+        # build_finished → MainWindow 메서드 (QObject→QObject, QueuedConnection 자동)
+        thread.build_finished.connect(self._on_depth_build_finished)
+        thread.finished.connect(self._on_depth_build_cleanup)
+        progress.canceled.connect(self._on_depth_build_cancelled)
+        thread.start()
+
+    def _on_depth_build_finished(self, prepared_df):
+        """빌드 완료 → 탭 생성"""
+        if hasattr(self, '_depth_build_progress') and self._depth_build_progress:
+            self._depth_build_progress.close()
+            self._depth_build_progress = None
+
+        prepared_model = SearchResultModel(prepared_df)
         if self.image_window and hasattr(self.image_window, 'tab_controller'):
             self.image_window.tab_controller.add_tab_by_name(
-                'DepthSearchTabModule', # ◀ 모듈의 클래스 이름을 문자열로 전달
-                search_results=self.search_results, 
+                'DepthSearchTabModule',
+                search_results=prepared_model,
                 main_window=self
             )
+
+    def _on_depth_build_cancelled(self):
+        """취소 → 시그널 해제 + 스레드 정리"""
+        thread = getattr(self, '_depth_build_thread', None)
+        if thread:
+            thread.is_cancelled = True
+            try:
+                thread.build_finished.disconnect(self._on_depth_build_finished)
+            except (RuntimeError, TypeError):
+                pass
+        if hasattr(self, '_depth_build_progress') and self._depth_build_progress:
+            self._depth_build_progress.close()
+            self._depth_build_progress = None
+
+    def _on_depth_build_cleanup(self):
+        """스레드 종료 후 참조 해제"""
+        thread = getattr(self, '_depth_build_thread', None)
+        if thread:
+            thread.deleteLater()
+        self._depth_build_thread = None
 
     def on_depth_search_results_assigned(self, new_search_result: SearchResultModel):
         """심층 검색 탭에서 할당된 결과를 메인 UI에 반영"""

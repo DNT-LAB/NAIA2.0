@@ -2,14 +2,32 @@ import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QLineEdit, QCheckBox, QTableView, QHeaderView, QAbstractItemView,
-    QFileDialog, QMessageBox, QSplitter, QFrame, QTextEdit, QMenu
+    QFileDialog, QMessageBox, QSplitter, QFrame, QTextEdit, QMenu, QScrollArea
 )
 from PyQt6.QtGui import QCursor, QAction, QIntValidator
-from PyQt6.QtCore import QAbstractTableModel, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, Qt, pyqtSignal, QObject, QThread
 from core.search_result_model import SearchResultModel
 from core.search_engine import SearchEngine
 from ui.theme import DARK_COLORS
 from interfaces.base_tab_module import BaseTabModule
+
+class TagsStringBuildThread(QThread):
+    """tags_string 컬럼을 백그라운드에서 빌드하는 스레드"""
+    build_finished = pyqtSignal(object)
+
+    def __init__(self, df: pd.DataFrame, parent=None):
+        super().__init__(parent)
+        self.df = df
+        self.is_cancelled = False
+
+    def run(self):
+        engine = SearchEngine()
+        result_df = self.df.copy()
+        if not result_df.empty:
+            result_df['tags_string'] = engine._build_tags_string(result_df)
+        if not self.is_cancelled:
+            self.build_finished.emit(result_df)
+
 
 class DepthSearchTabModule(BaseTabModule):
     """'심층 검색' 탭을 동적으로 로드하기 위한 모듈"""
@@ -110,6 +128,48 @@ class PandasModel(QAbstractTableModel):
     def dataframe(self):
         return self._df
 
+
+class StagingItemWidget(QFrame):
+    """스테이징된 검색 결과 항목 위젯"""
+    remove_requested = pyqtSignal(int)
+
+    def __init__(self, index: int, query: str, exclude: str, count: int, parent=None):
+        super().__init__(parent)
+        self.staging_index = index
+        self.setStyleSheet(f"""
+            StagingItemWidget {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+            }}
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(8)
+
+        count_html = f'<span style="color: #FFFACD; font-weight: bold;">[{count:,}]</span>'
+        info_parts = [count_html]
+        if query:
+            info_parts.append(f"검색: {query}")
+        if exclude:
+            info_parts.append(f"제외: {exclude}")
+
+        info_label = QLabel(" ".join(info_parts))
+        info_label.setTextFormat(Qt.TextFormat.RichText)
+        info_label.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: 14px; border: none;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label, 1)
+
+        remove_btn = QPushButton("X")
+        remove_btn.setFixedSize(22, 22)
+        remove_btn.setStyleSheet("""
+            QPushButton { background: #F44336; color: white; border: none; border-radius: 3px; font-weight: bold; font-size: 11px; }
+            QPushButton:hover { background: #E53935; }
+        """)
+        remove_btn.clicked.connect(lambda: self.remove_requested.emit(self.staging_index))
+        layout.addWidget(remove_btn)
+
+
 class DepthSearchWindow(QWidget):
     """심층 검색 탭 UI 및 기능 클래스"""
     results_assigned = pyqtSignal(SearchResultModel)
@@ -122,7 +182,13 @@ class DepthSearchWindow(QWidget):
         self.current_model = SearchResultModel(search_result.get_dataframe().copy())
         self.search_engine = SearchEngine()
 
-        # 🔧 시그널 연결 추적 플래그
+        # tags_string 사전 빌드 (검색 속도 최적화)
+        self._ensure_tags_string(self.current_model.get_dataframe())
+
+        # 스테이징 데이터
+        self.staged_items = []  # list of {'query': str, 'exclude': str, 'df': DataFrame}
+
+        # 시그널 연결 추적 플래그
         self._selection_connected = False
 
         self.init_ui()
@@ -219,12 +285,27 @@ class DepthSearchWindow(QWidget):
         checkbox_style = f"color: {DARK_COLORS['text_primary']};"
 
         grid = QGridLayout()
-        grid.addWidget(QLabel("검색 키워드:", self, styleSheet=label_style), 0, 0, 1, 4)
+        search_header_layout = QHBoxLayout()
+        search_header_layout.addWidget(QLabel("검색 키워드:", self, styleSheet=label_style))
+        search_header_layout.addStretch(1)
+        self.promote_to_origin_btn = QPushButton("현재 검색 결과를 원본 행으로")
+        self.promote_to_origin_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent; border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px; padding: 2px 6px; color: {DARK_COLORS['text_secondary']}; font-size: 11px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; color: {DARK_COLORS['text_primary']}; }}
+        """)
+        self.promote_to_origin_btn.clicked.connect(self.promote_current_to_original)
+        search_header_layout.addWidget(self.promote_to_origin_btn)
+        grid.addLayout(search_header_layout, 0, 0, 1, 4)
         self.d_search_input = QLineEdit(styleSheet=input_style)
+        self.d_search_input.returnPressed.connect(self.apply_filters)
         grid.addWidget(self.d_search_input, 1, 0, 1, 4)
-        
+
         grid.addWidget(QLabel("제외 키워드:", self, styleSheet=label_style), 2, 0, 1, 4)
         self.d_exclude_input = QLineEdit(styleSheet=input_style)
+        self.d_exclude_input.returnPressed.connect(self.apply_filters)
         grid.addWidget(self.d_exclude_input, 3, 0, 1, 4)
 
         rating_layout = QHBoxLayout()
@@ -360,14 +441,11 @@ class DepthSearchWindow(QWidget):
         return container
 
     def _create_stacker_layout(self) -> QWidget:
-        # [수정] 스타일 적용
         container = QFrame()
         container.setStyleSheet("border: none;")
         layout = QVBoxLayout(container)
-        # title = QLabel("데이터 스태커")
-        # title.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-size: 16px; font-weight: 600; margin-bottom: 5px;")
-        # layout.addWidget(title)
-        
+
+        # --- general 태그 표시 (기본 표시) ---
         self.general_text_edit = QTextEdit()
         self.general_text_edit.setReadOnly(True)
         self.general_text_edit.setStyleSheet(f"""
@@ -375,8 +453,47 @@ class DepthSearchWindow(QWidget):
             border-radius: 4px; padding: 5px; color: {DARK_COLORS['text_primary']};
         """)
         self.general_text_edit.setPlaceholderText("테이블 행을 클릭하여 general 태그 보기...")
-        layout.addWidget(self.general_text_edit, 1) # Stretch factor 1
-        
+        layout.addWidget(self.general_text_edit, 1)
+
+        # --- 스테이징 프레임 (숨김 상태, general_text_edit 자리를 대체) ---
+        self.staging_frame = QFrame()
+        self.staging_frame.setVisible(False)
+        self.staging_frame.setStyleSheet(f"""
+            QFrame#stagingFrame {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+            }}
+        """)
+        self.staging_frame.setObjectName("stagingFrame")
+        staging_inner = QVBoxLayout(self.staging_frame)
+        staging_inner.setContentsMargins(6, 6, 6, 6)
+        staging_inner.setSpacing(4)
+
+        staging_header = QLabel("스테이징 목록")
+        staging_header.setStyleSheet(f"color: {DARK_COLORS['text_primary']}; font-weight: bold; font-size: 13px; border: none;")
+        staging_inner.addWidget(staging_header)
+
+        self.staging_scroll = QScrollArea()
+        self.staging_scroll.setWidgetResizable(True)
+        self.staging_scroll.setStyleSheet("border: none; background: transparent;")
+        self.staging_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        staging_content = QWidget()
+        staging_content.setStyleSheet("background: transparent;")
+        self.staging_items_layout = QVBoxLayout(staging_content)
+        self.staging_items_layout.setContentsMargins(0, 0, 0, 0)
+        self.staging_items_layout.setSpacing(3)
+        self.staging_items_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.staging_scroll.setWidget(staging_content)
+        staging_inner.addWidget(self.staging_scroll, 1)
+
+        self.staging_summary_label = QLabel("")
+        self.staging_summary_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: 12px; border: none;")
+        staging_inner.addWidget(self.staging_summary_label)
+
+        layout.addWidget(self.staging_frame, 1)
+
+        # --- 버튼 영역 ---
         button_style = f"""
             QPushButton {{
                 background-color: {DARK_COLORS['bg_tertiary']}; border: 1px solid {DARK_COLORS['border']};
@@ -384,6 +501,38 @@ class DepthSearchWindow(QWidget):
             }}
             QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; }}
         """
+        staging_add_style = f"""
+            QPushButton {{
+                background-color: #1565C0; border: none;
+                border-radius: 4px; padding: 8px; color: white; font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: #1976D2; }}
+        """
+        staging_merge_style = f"""
+            QPushButton {{
+                background-color: #2E7D32; border: none;
+                border-radius: 4px; padding: 8px; color: white; font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: #388E3C; }}
+        """
+
+        self.add_staging_btn = QPushButton("+ 스테이징에 추가")
+        self.add_staging_btn.setStyleSheet(staging_add_style)
+        self.add_staging_btn.clicked.connect(self.add_to_staging)
+        layout.addWidget(self.add_staging_btn)
+
+        self.merge_staging_btn = QPushButton("스테이징 병합 -> 현재 뷰")
+        self.merge_staging_btn.setStyleSheet(staging_merge_style)
+        self.merge_staging_btn.clicked.connect(self.merge_staging)
+        self.merge_staging_btn.setVisible(False)
+        layout.addWidget(self.merge_staging_btn)
+
+        self.clear_staging_btn = QPushButton("스테이징 초기화")
+        self.clear_staging_btn.setStyleSheet(button_style)
+        self.clear_staging_btn.clicked.connect(self.clear_staging)
+        self.clear_staging_btn.setVisible(False)
+        layout.addWidget(self.clear_staging_btn)
+
         export_btn = QPushButton("현재 뷰 내보내기 (.parquet)", styleSheet=button_style)
         export_btn.clicked.connect(self.export_to_parquet)
         import_btn = QPushButton("Parquet 불러와 합치기", styleSheet=button_style)
@@ -523,7 +672,7 @@ class DepthSearchWindow(QWidget):
                 temp_df = temp_df[temp_df['tokens'] <= int(self.token_max_input.text())]
                 
         except (ValueError, KeyError) as e:
-            QMessageBox.warning(self, "입력 오류", f"필터 값에 유효한 숫자를 입력해주세요.\n오류: {e}")
+            self._show_msg(QMessageBox.Icon.Warning, "입력 오류", f"필터 값에 유효한 숫자를 입력해주세요.\n오류: {e}")
             return
         
         # 빠른 종료: 숫자 필터 후 결과가 없으면 중단
@@ -578,7 +727,7 @@ class DepthSearchWindow(QWidget):
             self.update_view()
             #QMessageBox.information(self, "성공", "데이터를 성공적으로 불러와 합쳤습니다.")
         except Exception as e:
-            QMessageBox.critical(self, "오류", f"파일을 불러오는 중 오류 발생:\n{e}")
+            self._show_msg(QMessageBox.Icon.Critical, "오류", f"파일을 불러오는 중 오류 발생:\n{e}")
             
     def clear_current_view(self):
         self.current_model = SearchResultModel()
@@ -589,24 +738,158 @@ class DepthSearchWindow(QWidget):
         self.results_assigned.emit(self.current_model)
         #QMessageBox.information(self, "완료", f"{self.current_model.get_count()}개의 결과가 메인 UI에 할당되었습니다.")
 
+    def promote_current_to_original(self):
+        """현재 필터링된 결과를 원본 행으로 승격"""
+        current_count = self.current_model.get_count()
+        original_count = self.original_model.get_count()
+
+        if current_count == original_count:
+            self._show_msg(QMessageBox.Icon.Warning, "경고", "표시된 행과 원본 행이 동일합니다.")
+            return
+
+        df = self.current_model.get_dataframe().copy()
+        if 'tags_string' in df.columns:
+            df = df.drop(columns=['tags_string'])
+        self.original_model = SearchResultModel(df)
+        self.current_model = SearchResultModel(df.copy())
+        self._ensure_tags_string(self.current_model.get_dataframe())
+
+        # 검색 텍스트 초기화
+        self.d_search_input.clear()
+        self.d_exclude_input.clear()
+        self.update_view()
+
     def restore_to_original(self):
         """뷰를 초기 데이터 상태로 되돌림"""
         self.current_model = SearchResultModel(self.original_model.get_dataframe().copy())
+        self._ensure_tags_string(self.current_model.get_dataframe())
         self.update_view()
 
     def export_to_parquet(self):
         """현재 뷰의 데이터를 Parquet 파일로 저장"""
         if self.current_model.is_empty():
-            QMessageBox.warning(self, "경고", "내보낼 데이터가 없습니다.")
+            self._show_msg(QMessageBox.Icon.Warning, "경고", "내보낼 데이터가 없습니다.")
             return
 
         path, _ = QFileDialog.getSaveFileName(self, "Parquet 파일로 저장", "", "Parquet Files (*.parquet)")
         if path:
             try:
                 self.current_model.get_dataframe().to_parquet(path)
-                QMessageBox.information(self, "성공", f"'{path}'에 성공적으로 저장했습니다.")
+                self._show_msg(QMessageBox.Icon.Information, "성공", f"'{path}'에 성공적으로 저장했습니다.")
             except Exception as e:
-                QMessageBox.critical(self, "오류", f"파일 저장 중 오류 발생:\n{e}")
+                self._show_msg(QMessageBox.Icon.Critical, "오류", f"파일 저장 중 오류 발생:\n{e}")
+
+    # --- 검색 속도 최적화 ---
+
+    def _show_msg(self, icon, title, text):
+        """밝은 배경의 QMessageBox 표시 (다크 테마 상속 방지)"""
+        msg = QMessageBox(icon, title, text, QMessageBox.StandardButton.Ok, self)
+        msg.setStyleSheet("""
+            QMessageBox { background-color: #F0F0F0; color: #1a1a1a; }
+            QLabel { color: #1a1a1a; background: transparent; }
+            QPushButton { background-color: white; color: black; border: 1px solid #B0B0B0;
+                          border-radius: 4px; padding: 6px 16px; }
+            QPushButton:hover { background-color: #E0E0E0; }
+        """)
+        msg.exec()
+
+    def _ensure_tags_string(self, df):
+        """tags_string 컬럼이 없으면 빌드하여 캐싱 (이후 재검색 시 재빌드 불필요)"""
+        if not df.empty and 'tags_string' not in df.columns:
+            df['tags_string'] = self.search_engine._build_tags_string(df)
+
+    # --- 스테이징 기능 ---
+
+    def add_to_staging(self):
+        """현재 뷰의 필터링된 결과를 스테이징에 추가"""
+        if self.current_model.is_empty():
+            self._show_msg(QMessageBox.Icon.Warning, "경고", "스테이징에 추가할 데이터가 없습니다.")
+            return
+
+        if self.current_model.get_count() == self.original_model.get_count():
+            self._show_msg(QMessageBox.Icon.Warning, "경고", "표시된 행과 원본 행이 동일합니다. 필터를 적용한 후 추가해주세요.")
+            return
+
+        query = self.d_search_input.text().strip()
+        exclude = self.d_exclude_input.text().strip()
+        df = self.current_model.get_dataframe().copy()
+
+        # tags_string 파생 컬럼은 저장하지 않음 (메모리 절약)
+        if 'tags_string' in df.columns:
+            df = df.drop(columns=['tags_string'])
+
+        self.staged_items.append({
+            'query': query or '(전체)',
+            'exclude': exclude,
+            'df': df
+        })
+        self._update_staging_ui()
+
+        # 검색/제외 키워드 초기화 및 원본 행 복원
+        self.d_search_input.clear()
+        self.d_exclude_input.clear()
+        self.restore_to_original()
+
+    def remove_from_staging(self, index):
+        """스테이징에서 항목 제거"""
+        if 0 <= index < len(self.staged_items):
+            self.staged_items.pop(index)
+            self._update_staging_ui()
+
+    def merge_staging(self):
+        """스테이징된 모든 항목을 병합하여 현재 뷰에 적용"""
+        if not self.staged_items:
+            return
+
+        dfs = [item['df'] for item in self.staged_items]
+        merged = pd.concat(dfs, ignore_index=True)
+
+        # 중복 제거 (general 컬럼 기준)
+        if 'general' in merged.columns:
+            merged.drop_duplicates(subset=['general'], keep='first', inplace=True)
+            merged.reset_index(drop=True, inplace=True)
+
+        self.current_model = SearchResultModel(merged)
+        self._ensure_tags_string(self.current_model.get_dataframe())
+
+        self.staged_items.clear()
+        self._update_staging_ui()
+        self.update_view()
+
+    def clear_staging(self):
+        """스테이징 목록 초기화"""
+        self.staged_items.clear()
+        self._update_staging_ui()
+
+    def _update_staging_ui(self):
+        """스테이징 UI 갱신 (프레임 가시성 전환 + 항목 위젯 재구성)"""
+        has_items = len(self.staged_items) > 0
+
+        # general_text_edit <-> staging_frame 가시성 전환
+        self.general_text_edit.setVisible(not has_items)
+        self.staging_frame.setVisible(has_items)
+        self.merge_staging_btn.setVisible(has_items)
+        self.clear_staging_btn.setVisible(has_items)
+
+        # 기존 위젯 제거
+        while self.staging_items_layout.count():
+            child = self.staging_items_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # 항목 위젯 추가
+        total_rows = 0
+        for i, item in enumerate(self.staged_items):
+            count = len(item['df'])
+            total_rows += count
+            widget = StagingItemWidget(i, item['query'], item['exclude'], count)
+            widget.remove_requested.connect(self.remove_from_staging)
+            self.staging_items_layout.addWidget(widget)
+
+        if has_items:
+            self.staging_summary_label.setText(
+                f"총 {len(self.staged_items)}개 항목, {total_rows:,}건 (병합 시 중복 제거)"
+            )
 
     def on_header_clicked(self, logicalIndex):
         """헤더 클릭 시 커스텀 정렬 수행 (내림차순 우선)"""
@@ -679,7 +962,11 @@ class DepthSearchWindow(QWidget):
                 except RuntimeError:
                     pass
 
-            # 3. 참조 해제
+            # 3. 스테이징 정리
+            if hasattr(self, 'staged_items'):
+                self.staged_items.clear()
+
+            # 4. 참조 해제
             self.original_model = None
             self.current_model = None
 

@@ -160,6 +160,7 @@ class ImageCrudController:
         - "time_number": 143052_00001.png (HHMMSS_카운터)
         - "datetime": 20250108_143052.png (YYYYMMDD_HHMMSS)
         - "prompt": prompt.png (프롬프트 기반, 최대 250자)
+        - "wildcard": wildcard.png (와일드카드 결과 기반, '__' 구분자)
 
         중복 방지:
         - number_only/time_number: 카운터 자동 증가
@@ -233,6 +234,18 @@ class ImageCrudController:
             final_filename = self._resolve_duplicate_filename(save_dir, base_filename, extension)
             return final_filename
 
+        elif filename_format == "wildcard":
+            # 와일드카드 히스토리에서 파일명 조합
+            wildcard_name = self._build_wildcard_filename()
+            if not wildcard_name:
+                # fallback: timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                base_filename = f"{timestamp}.{extension}"
+            else:
+                base_filename = f"{wildcard_name}.{extension}"
+            final_filename = self._resolve_duplicate_filename(save_dir, base_filename, extension)
+            return final_filename
+
         else:
             # 기본값: number_only
             with self._counter_lock:
@@ -243,6 +256,36 @@ class ImageCrudController:
                     print(f"⚠️ 파일 중복 방지: {filename} 건너뜀 (카운터 증가)")
                     self._save_counter += 1
             return filename
+
+    def _build_wildcard_filename(self) -> str:
+        """현재 PromptContext의 wildcard_history에서 파일명용 문자열 생성.
+
+        각 와일드카드의 마지막 선택값을 개별 sanitize 후 '__'로 결합.
+        와일드카드 값은 깨끗한 태그명이므로 최소한의 정제만 수행.
+        """
+        ctx = getattr(self.app_context, 'current_prompt_context', None)
+        if not ctx or not ctx.wildcard_history:
+            return ""
+        parts = []
+        for key, values in ctx.wildcard_history.items():
+            if values:
+                sanitized = self._sanitize_wildcard_value(values[-1])
+                if sanitized:
+                    parts.append(sanitized)
+        return "__".join(parts) if parts else ""
+
+    def _sanitize_wildcard_value(self, text: str, max_length: int = 100) -> str:
+        """와일드카드 값을 파일명에 안전한 문자열로 변환 (최소한의 정제)."""
+        import re
+        # Windows 금지 문자 → 언더스코어
+        text = re.sub(r'[<>:"/\\|?*]', '_', text)
+        # 공백 → 언더스코어
+        text = text.replace(' ', '_')
+        # 연속 언더스코어 정리, 앞뒤 제거
+        text = re.sub(r'_+', '_', text).strip('_')
+        if len(text) > max_length:
+            text = text[:max_length].rstrip('_')
+        return text
 
     def _sanitize_filename(self, text: str, max_length: int = 230) -> str:
         """
@@ -392,12 +435,12 @@ class ImageCrudController:
         파일명 형식을 설정합니다.
 
         Parameters:
-            format (str): "number_only", "time_number", "datetime", "prompt" 중 하나
+            format (str): "number_only", "time_number", "datetime", "prompt", "wildcard" 중 하나
 
         Raises:
             ValueError: 유효하지 않은 형식인 경우
         """
-        valid_formats = ["number_only", "time_number", "datetime", "prompt"]
+        valid_formats = ["number_only", "time_number", "datetime", "prompt", "wildcard"]
         if format not in valid_formats:
             raise ValueError(f"유효하지 않은 파일명 형식: {format}. 사용 가능: {valid_formats}")
 

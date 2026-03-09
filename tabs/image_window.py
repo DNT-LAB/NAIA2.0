@@ -673,22 +673,33 @@ class HistoryItemWidget(QWidget):
         reroll_action.triggered.connect(self.emit_reroll_prompt)
         menu.addAction(reroll_action)
 
-        # 🆕 큐 추가 메뉴
+        # 🆕 큐 추가 서브메뉴
         menu.addSeparator()
+        has_gen_params = hasattr(self.history_item, 'generation_params') and self.history_item.generation_params
 
-        enqueue_front_action = QAction("⬆️ 큐 앞에 추가", self)
-        enqueue_front_action.triggered.connect(self.enqueue_to_front)
-        # generation_params가 있는 경우에만 활성화
-        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
-            enqueue_front_action.setEnabled(False)
-        menu.addAction(enqueue_front_action)
+        enqueue_front_menu = QMenu("⬆️ 큐 앞에 추가", self)
+        enqueue_front_menu.setStyleSheet(menu_style)
+        front_original = QAction("원본 프롬프트 유지", self)
+        front_original.triggered.connect(lambda: self._enqueue_history_item(priority=100, use_current_ui=False))
+        front_current = QAction("현재 UI 프롬프트 반영", self)
+        front_current.triggered.connect(lambda: self._enqueue_history_item(priority=100, use_current_ui=True))
+        enqueue_front_menu.addAction(front_original)
+        enqueue_front_menu.addAction(front_current)
+        if not has_gen_params:
+            enqueue_front_menu.setEnabled(False)
+        menu.addMenu(enqueue_front_menu)
 
-        enqueue_back_action = QAction("⬇️ 큐 뒤에 추가", self)
-        enqueue_back_action.triggered.connect(self.enqueue_to_back)
-        # generation_params가 있는 경우에만 활성화
-        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
-            enqueue_back_action.setEnabled(False)
-        menu.addAction(enqueue_back_action)
+        enqueue_back_menu = QMenu("⬇️ 큐 뒤에 추가", self)
+        enqueue_back_menu.setStyleSheet(menu_style)
+        back_original = QAction("원본 프롬프트 유지", self)
+        back_original.triggered.connect(lambda: self._enqueue_history_item(priority=0, use_current_ui=False))
+        back_current = QAction("현재 UI 프롬프트 반영", self)
+        back_current.triggered.connect(lambda: self._enqueue_history_item(priority=0, use_current_ui=True))
+        enqueue_back_menu.addAction(back_original)
+        enqueue_back_menu.addAction(back_current)
+        if not has_gen_params:
+            enqueue_back_menu.setEnabled(False)
+        menu.addMenu(enqueue_back_menu)
 
         # 🆕 메타데이터 복원 메뉴 추가
         menu.addSeparator()
@@ -767,55 +778,70 @@ class HistoryItemWidget(QWidget):
         """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
         self.save_to_remote_event_requested.emit(self.history_item)
 
-    def enqueue_to_front(self):
-        """🆕 히스토리 아이템을 큐 앞에 추가 (우선순위 100)"""
-        self._enqueue_history_item(priority=100)
+    def _enqueue_history_item(self, priority: int = 0, use_current_ui: bool = False):
+        """히스토리 아이템을 생성 큐에 추가
 
-    def enqueue_to_back(self):
-        """🆕 히스토리 아이템을 큐 뒤에 추가 (우선순위 0)"""
-        self._enqueue_history_item(priority=0)
-
-    def _enqueue_history_item(self, priority: int = 0):
-        """🆕 히스토리 아이템을 생성 큐에 추가"""
+        Args:
+            priority: 0=일반(뒤), 100=긴급(앞)
+            use_current_ui: True면 현재 UI의 프롬프트/캐릭터 반영, False면 원본 유지
+        """
         try:
             if not self.app_context:
-                # print("❌ AppContext가 없습니다.")
                 return
 
-            # GenerationRequest 클래스 import
             from core.generation_request import GenerationRequest
+            import random
+            import pandas as pd
 
-            # 생성 파라미터 복사
-            params = self.history_item.generation_params.copy()
-
-            # [2] 랜덤 해상도 체크 - 직접 해상도 덮어쓰기
             main_window = self.app_context.main_window
+
+            if use_current_ui:
+                # 현재 UI 상태로 파라미터 수집 (해상도/모델 등은 원본 유지, 프롬프트/캐릭터만 갱신)
+                params = self.history_item.generation_params.copy()
+                current_params = main_window.get_main_parameters()
+                params['input'] = current_params.get('input', params.get('input', ''))
+                params['negative_prompt'] = current_params.get('negative_prompt', params.get('negative_prompt', ''))
+                # 캐릭터: 현재 UI 모듈에서 가져오기
+                char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                    char_params = char_module.get_parameters()
+                    if char_params and char_params.get("characters"):
+                        params['characters'] = char_params['characters']
+                        params['uc'] = char_params['uc']
+                        params['character_positions'] = char_params.get('character_positions', [])
+                    else:
+                        params.pop('characters', None)
+                        params.pop('uc', None)
+                        params.pop('character_positions', None)
+                else:
+                    params.pop('characters', None)
+                    params.pop('uc', None)
+                    params.pop('character_positions', None)
+                mode_label = "현재 UI"
+            else:
+                # 원본 파라미터 그대로 사용
+                params = self.history_item.generation_params.copy()
+                mode_label = "원본"
+
+            # 랜덤 해상도 체크
             if hasattr(main_window, 'random_resolution_checkbox') and main_window.random_resolution_checkbox:
                 if main_window.random_resolution_checkbox.isChecked():
-                    # 무작위 해상도 선택
-                    import random
                     random_index = random.randint(0, main_window.resolution_combo.count() - 1)
                     selected_value = main_window.resolution_combo.itemText(random_index)
                     width, height = map(int, selected_value.split(' x '))
                     params['width'] = width
                     params['height'] = height
-                    # print(f"✅ 랜덤 해상도 적용: {width}x{height}")
 
-            # [3] 시드 고정 체크 (체크되어 있지 않으면 무작위 시드 생성)
+            # 시드 고정 체크 (체크되어 있지 않으면 무작위 시드 생성)
             if hasattr(main_window, 'seed_fix_checkbox') and main_window.seed_fix_checkbox:
                 if not main_window.seed_fix_checkbox.isChecked():
-                    # 무작위 시드 생성 (0 ~ 9999999999 범위)
-                    import random
                     random_seed = random.randint(0, 9999999999)
                     params['seed'] = random_seed
                     params['extra_noise_seed'] = random_seed
-                    # print(f"✅ 무작위 시드 적용: {random_seed}")
 
             # source_row 가져오기 (없으면 빈 Series)
-            import pandas as pd
             source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') and self.history_item.source_row is not None else pd.Series()
 
-            # GenerationRequest 생성
             request = GenerationRequest(
                 params=params,
                 source_row=source_row,
@@ -823,27 +849,21 @@ class HistoryItemWidget(QWidget):
                 max_retries=0
             )
 
-            # 큐 매니저 가져오기
             queue_manager = self.app_context.generation_queue_manager
+            position_label = "앞" if priority > 0 else "뒤"
 
-            # 우선순위에 따라 큐에 추가
             if priority > 0:
-                request_id = queue_manager.enqueue_with_priority(request)
-                queue_size = queue_manager.get_queue_size()
-                # print(f"✅ 큐 앞에 추가됨: {request_id[:8]}... (우선순위: {priority}, 큐 크기: {queue_size})")
-                if hasattr(main_window, 'status_bar'):
-                    main_window.status_bar.showMessage(f"✅ 큐 앞에 추가됨 (대기 중: {queue_size})", 3000)
+                queue_manager.enqueue_with_priority(request)
             else:
-                request_id = queue_manager.enqueue_request(request)
-                queue_size = queue_manager.get_queue_size()
-                # print(f"✅ 큐 뒤에 추가됨: {request_id[:8]}... (큐 크기: {queue_size})")
-                if hasattr(main_window, 'status_bar'):
-                    main_window.status_bar.showMessage(f"✅ 큐 뒤에 추가됨 (대기 중: {queue_size})", 3000)
+                queue_manager.enqueue_request(request)
+
+            queue_size = queue_manager.get_queue_size()
+            if hasattr(main_window, 'status_bar'):
+                main_window.status_bar.showMessage(
+                    f"✅ 큐 {position_label}에 추가됨 [{mode_label}] (대기 중: {queue_size})", 3000
+                )
 
         except Exception as e:
-            # print(f"❌ 큐 추가 실패: {e}")
-            # import traceback
-            # traceback.print_exc()
             pass
 
     def show_comfyui_workflow(self):

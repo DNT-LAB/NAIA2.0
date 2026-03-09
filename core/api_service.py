@@ -420,134 +420,78 @@ class APIService:
                     }
                 })
 
-                # 캐릭터 모듈 처리 - Sketchbook character prompts take priority
+                # 캐릭터 모듈 처리 — 소스별 정규화 후 공통 적용
+                # 정규화 형식: characters=[str], ucs=[str], positions=[{'x','y'}]
+                char_source = None
+                characters, ucs, character_positions = [], [], []
+
                 if params.get('sketchbook_character_prompts'):
-                    # Use sketchbook character prompts instead of character module
-                    print("📝 Using Sketchbook character prompts instead of Character Module")
-                    sketchbook_prompts = params['sketchbook_character_prompts']
+                    # 1) Sketchbook / Img2ImgWindow 오버라이드
+                    char_source = "Sketchbook"
+                    for item in params['sketchbook_character_prompts']:
+                        if isinstance(item, tuple):
+                            characters.append(item[0])
+                            ucs.append(item[1] or "")
+                        elif isinstance(item, dict):
+                            characters.append(item.get('prompt', ''))
+                            ucs.append(item.get('uc', ''))
+                        # Sketchbook은 위치 미지원 → 기본값(0.5, 0.5)
 
-                    for i, (prompt, uc) in enumerate(sketchbook_prompts):
-                        # Sketchbook uses default center position (no custom positioning yet)
-                        centers = [{"x": 0.5, "y": 0.5}]
+                else:
+                    generation_request = params.get('_generation_request')
 
+                    if generation_request and generation_request.nai_characters:
+                        # 2) Early Binding — GenerationRequest (큐)
+                        char_source = "EarlyBinding"
+                        nai_char_data = generation_request.nai_characters
+                        characters = list(nai_char_data.characters)
+                        ucs = list(nai_char_data.uc)
+                        character_positions = [pos.to_dict() for pos in nai_char_data.character_positions]
+
+                    elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
+                        # 3) Temporary Window — VirtualCharacterTab
+                        char_module = self.app_context.temp_window_character_tab
+                        if hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                            char_params = char_module.get_parameters()
+                            if char_params and char_params.get("characters"):
+                                char_source = "TempWindow"
+                                characters = char_params["characters"]
+                                ucs = char_params["uc"]
+                                character_positions = char_params.get("character_positions", [])
+
+                    elif params.get('characters'):
+                        # 4) Saved Params — Enhance 등 저장된 generation_params 재사용
+                        char_source = "SavedParams"
+                        characters = params['characters']
+                        ucs = params.get('uc', [])
+                        character_positions = params.get('character_positions', [])
+
+                    else:
+                        # 5) Late Binding — 메인 UI CharacterModule (직접 생성)
+                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                        if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                            char_params = char_module.get_parameters()
+                            if char_params and char_params.get("characters"):
+                                char_source = "LateBind"
+                                characters = char_params["characters"]
+                                ucs = char_params["uc"]
+                                character_positions = char_params.get("character_positions", [])
+
+                # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
+                if characters:
+                    default_center = {"x": 0.5, "y": 0.5}
+                    for i, prompt in enumerate(characters):
+                        centers = [character_positions[i]] if i < len(character_positions) else [default_center]
                         api_parameters['v4_prompt']['caption']['char_captions'].append({
                             'char_caption': prompt,
                             'centers': centers
                         })
                         api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                            'char_caption': uc or "",
+                            'char_caption': ucs[i] if i < len(ucs) else "",
                             'centers': centers
                         })
-
-                    print(f"✅ Added {len(sketchbook_prompts)} Sketchbook character prompts")
-                else:
-                    # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character 데이터 가져오기
-                    generation_request = params.get('_generation_request')
-                    if generation_request and generation_request.nai_characters:
-                        print("✅ [EarlyBinding] Character Data from GenerationRequest")
-                        nai_char_data = generation_request.nai_characters
-
-                        # 캐릭터 프롬프트를 v4_prompt에 추가
-                        for i, prompt in enumerate(nai_char_data.characters):
-                            # 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
-                            if i < len(nai_char_data.character_positions):
-                                centers = [nai_char_data.character_positions[i].to_dict()]
-                            else:
-                                centers = [{"x": 0.5, "y": 0.5}]
-
-                            api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                'char_caption': prompt,
-                                'centers': centers
-                            })
-                            api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                'char_caption': nai_char_data.uc[i] if i < len(nai_char_data.uc) else "",
-                                'centers': centers
-                            })
-
-                        print(f"  - {len(nai_char_data.characters)} character(s) added")
-                        if nai_char_data.character_positions:
-                            print(f"  - Position data: {[pos.to_dict() for pos in nai_char_data.character_positions]}")
-                    elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
-                        # 🆕 FR-2-1: Temporary Window Mode (Late Binding fallback for temp windows)
-                        print("🪟 [TempWindow] Using VirtualCharacterTab (Late Binding fallback)")
-                        char_module = self.app_context.temp_window_character_tab
-
-                        if hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
-                            char_params = char_module.get_parameters()
-
-                            if char_params and char_params.get("characters"):
-                                characters = char_params["characters"]
-                                ucs = char_params["uc"]
-                                character_positions = char_params.get("character_positions", [])
-
-                                for i, prompt in enumerate(characters):
-                                    if i < len(character_positions):
-                                        centers = [character_positions[i]]
-                                    else:
-                                        centers = [{"x": 0.5, "y": 0.5}]
-
-                                    api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                        'char_caption': prompt,
-                                        'centers': centers
-                                    })
-                                    api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                        'char_caption': ucs[i] if i < len(ucs) else "",
-                                        'centers': centers
-                                    })
-
-                                print(f"  - {len(characters)} character(s) from temp window")
-                    elif params.get('characters'):
-                        # 🔧 Saved Params fallback (Enhance 등 저장된 generation_params 재사용 시)
-                        # generation_params에 이미 확장된 캐릭터 프롬프트가 있으면 그대로 사용
-                        characters = params['characters']
-                        ucs = params.get('uc', [])
-                        character_positions = params.get('character_positions', [])
-
-                        for i, prompt in enumerate(characters):
-                            if i < len(character_positions):
-                                centers = [character_positions[i]]
-                            else:
-                                centers = [{"x": 0.5, "y": 0.5}]
-
-                            api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                'char_caption': prompt,
-                                'centers': centers
-                            })
-                            api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                'char_caption': ucs[i] if i < len(ucs) else "",
-                                'centers': centers
-                            })
-
-                        print(f"  - {len(characters)} character(s) from saved params")
-                    else:
-                        # 🔄 Late Binding fallback for direct generation (non-queue)
-                        print("  - No GenerationRequest. Using Late Binding fallback (direct generation)")
-                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
-
-                        if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
-                            char_params = char_module.get_parameters()
-
-                            if char_params and char_params.get("characters"):
-                                characters = char_params["characters"]
-                                ucs = char_params["uc"]
-                                character_positions = char_params.get("character_positions", [])
-
-                                for i, prompt in enumerate(characters):
-                                    if i < len(character_positions):
-                                        centers = [character_positions[i]]
-                                    else:
-                                        centers = [{"x": 0.5, "y": 0.5}]
-
-                                    api_parameters['v4_prompt']['caption']['char_captions'].append({
-                                        'char_caption': prompt,
-                                        'centers': centers
-                                    })
-                                    api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-                                        'char_caption': ucs[i] if i < len(ucs) else "",
-                                        'centers': centers
-                                    })
-
-                                print(f"  - {len(characters)} character(s) from Late Binding fallback")
+                    print(f"✅ [{char_source}] {len(characters)} character(s) added"
+                          f"{' (positions: ' + str(character_positions) + ')' if character_positions else ''}")
             
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             generation_request = params.get('_generation_request')

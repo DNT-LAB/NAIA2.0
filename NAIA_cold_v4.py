@@ -810,8 +810,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 155"
-        self.setWindowTitle(self.base_title + " - 260306")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 155b"
+        self.setWindowTitle(self.base_title + " - 260308")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -3051,27 +3051,41 @@ class ModernMainWindow(QMainWindow):
 
         try:
             # [큐 우선] 큐가 비어있지 않으면 큐 처리가 끝날 때까지 자동생성 대기
+            # generation_controller._on_thread_finished에서 큐 완료 후 자동생성을 트리거하므로
+            # 여기서는 재시도 루프를 만들지 않고 즉시 반환합니다.
             if hasattr(self, 'app_context') and self.app_context:
                 queue_manager = self.app_context.generation_queue_manager
                 if queue_manager and not queue_manager.is_empty() and not queue_manager.is_paused():
                     self.status_bar.showMessage("큐 처리 중... 자동생성 대기")
-                    QTimer.singleShot(500, self._check_and_trigger_auto_generation)
                     return
+
+            # 큐 보류 플래그가 켜져 있으면 _on_thread_finished에서 자동생성을 대신 트리거합니다.
+            if (hasattr(self, 'generation_controller') and
+                self.generation_controller.queue_hold_auto_gen):
+                return
 
             if (hasattr(self, 'generation_controller') and
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
-                # 약간의 지연 후 다시 시도
+                # 약간의 지연 후 다시 시도 (최대 재시도 횟수 제한)
+                self._auto_gen_retry_count = getattr(self, '_auto_gen_retry_count', 0) + 1
+                if self._auto_gen_retry_count > 30:
+                    print("⚠️ 자동 생성 재시도 상한 도달. 루프를 중단합니다.")
+                    self._auto_gen_retry_count = 0
+                    return
                 QTimer.singleShot(800, self._check_and_trigger_auto_generation)
                 return
-                
+
             # [추가] 스레드 상태 확인
-            if (hasattr(self, 'generation_controller') and 
-                self.generation_controller.generation_thread and 
+            if (hasattr(self, 'generation_controller') and
+                self.generation_controller.generation_thread and
                 self.generation_controller.generation_thread.isRunning()):
                 print("🔄 이전 스레드가 아직 실행 중이므로 잠시 대기...")
                 QTimer.singleShot(200, self._check_and_trigger_auto_generation)
                 return
+
+            # 정상 진입 — 재시도 카운터 리셋
+            self._auto_gen_retry_count = 0
 
             # [신규] 반복 생성 중인지 확인 - 반복 중이면 자동 생성 건너뛰기
             if (self.automation_module and
@@ -6707,6 +6721,17 @@ class ModernMainWindow(QMainWindow):
             "width": pil_image.width,
             "height": pil_image.height,
         }
+        # 히스토리 아이템의 프롬프트/캐릭터 사용 (메인 UI 대신)
+        if history_item.generation_params:
+            gp = history_item.generation_params
+            if 'input' in gp:
+                overrides['input'] = gp['input']
+            if 'negative_prompt' in gp:
+                overrides['negative_prompt'] = gp['negative_prompt']
+            if 'characters' in gp:
+                overrides['characters'] = gp['characters']
+                overrides['uc'] = gp.get('uc', [])
+                overrides['character_positions'] = gp.get('character_positions', [])
         self.status_bar.showMessage("🎨 Instant Outpainting 요청 중...", 3000)
         self.generation_controller.execute_generation_pipeline(overrides=overrides)
 

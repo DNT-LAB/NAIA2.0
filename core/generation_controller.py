@@ -738,30 +738,33 @@ class GenerationController:
         except Exception:
             pass
 
-        # 🔧 메인 스레드에서 캐릭터 프롬프트 캡처 (NAI 모드)
+        # 🔧 메인 스레드에서 캐릭터 프롬프트 캡처 (NAI 모드, 결과 메타데이터용)
         try:
             if params.get('api_mode') == 'NAI':
-                # override에 sketchbook_character_prompts가 있으면 그것을 사용
-                # tuple list [(prompt, uc)] → dict list [{'prompt': ..., 'uc': ...}]
+                char_prompts = []
                 if params.get('sketchbook_character_prompts'):
-                    converted = []
+                    # Sketchbook/Img2ImgWindow 오버라이드 (tuple 또는 dict)
                     for item in params['sketchbook_character_prompts']:
                         if isinstance(item, tuple):
-                            converted.append({'prompt': item[0], 'uc': item[1]})
+                            char_prompts.append({'prompt': item[0], 'uc': item[1]})
                         elif isinstance(item, dict):
-                            converted.append(item)
-                    self.generation_worker._character_prompts = converted
+                            char_prompts.append(item)
+                elif params.get('characters'):
+                    # Saved Params (Enhance 등 재사용)
+                    p_ucs = params.get('uc', [])
+                    for i, p in enumerate(params['characters']):
+                        char_prompts.append({'prompt': p, 'uc': p_ucs[i] if i < len(p_ucs) else ''})
                 elif hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'middle_section_controller'):
+                    # 메인 UI CharacterModule (Late Binding)
                     char_module = self.context.main_window.middle_section_controller.get_module_instance("CharacterModule")
                     if char_module and hasattr(char_module, 'character_widgets'):
-                        char_prompts = []
                         for w in char_module.character_widgets:
                             if w.active_checkbox.isChecked():
                                 char_prompts.append({
                                     'prompt': w.prompt_textbox.toPlainText(),
                                     'uc': w.uc_textbox.toPlainText(),
                                 })
-                        self.generation_worker._character_prompts = char_prompts
+                self.generation_worker._character_prompts = char_prompts
         except Exception:
             pass
 

@@ -49,22 +49,19 @@ class PromptProcessor:
         """[신규] 해상도 자동 맞춤 로직을 파이프라인의 한 단계로 추가합니다."""
         settings = context.settings
         source_row = context.source_row
-        
+
         if not settings.get('auto_fit_resolution', False) or settings.get('wildcard_standalone', False):
             return context
 
-        if 'image_width' not in source_row or 'image_height' not in source_row:
-            return context
+        if 'image_width' in source_row and 'image_height' in source_row:
+            try:
+                width = int(source_row['image_width'])
+                height = int(source_row['image_height'])
+                if width > 0 and height > 0:
+                    context.metadata['detected_resolution'] = (width, height)
+            except (ValueError, TypeError):
+                pass
 
-        try:
-            width = int(source_row['image_width'])
-            height = int(source_row['image_height'])
-            if width > 0 and height > 0:
-                # 처리 결과를 context의 metadata에 저장합니다.
-                context.metadata['detected_resolution'] = (width, height)
-        except (ValueError, TypeError):
-            pass
-            
         return context
 
     def _step_3_expand_wildcards(self, context: PromptContext) -> PromptContext:

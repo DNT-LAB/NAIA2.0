@@ -35,6 +35,7 @@ from ui.right_view import RightView
 from ui.temp_generation_window import TempGenerationWindow
 from ui.resolution_manager_dialog import ResolutionManagerDialog
 from ui.remote_window import RemoteWindow
+from ui.translate_dialog import TranslateDialog
 from ui.interactive_window import InteractiveWindow
 from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
@@ -810,8 +811,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 155b"
-        self.setWindowTitle(self.base_title + " - 260308")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 155c"
+        self.setWindowTitle(self.base_title + " - 260309")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -1599,9 +1600,37 @@ class ModernMainWindow(QMainWindow):
         """)
         self.params_toggle_button.clicked.connect(self.toggle_params_panel)
 
+        # 번역 버튼과 동일 크기의 투명 스페이서 (중앙 정렬 균형용)
+        translate_btn_width = get_scaled_size(32)
+        left_spacer = QWidget()
+        left_spacer.setFixedWidth(translate_btn_width)
+        toggle_container_layout.addWidget(left_spacer)
+
         toggle_container_layout.addStretch()
         toggle_container_layout.addWidget(self.params_toggle_button)
         toggle_container_layout.addStretch()
+
+        # 번역 버튼
+        self.translate_btn = QPushButton("あ")
+        self.translate_btn.setFixedSize(translate_btn_width, get_scaled_size(28))
+        self.translate_btn.setToolTip("한→영 번역")
+        self.translate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.translate_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {DARK_COLORS['text_primary']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 0px;
+                border-radius: {get_scaled_size(4)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+            }}
+        """)
+        self.translate_btn.clicked.connect(self._open_translate_dialog)
+        self.translate_dialog = None
+        toggle_container_layout.addWidget(self.translate_btn)
 
         main_layout.addWidget(toggle_container, 0)
 
@@ -3806,6 +3835,16 @@ class ModernMainWindow(QMainWindow):
         """CLI 터미널 → 메인 프롬프트 전송 + 이미지 생성."""
         self.on_instant_generation_requested(tags_dict)
         QTimer.singleShot(100, lambda: self.generation_controller.execute_generation_pipeline())
+
+    def _open_translate_dialog(self):
+        """번역 팝업 열기/토글"""
+        if self.translate_dialog and self.translate_dialog.isVisible():
+            self.translate_dialog.raise_()
+            self.translate_dialog.activateWindow()
+            return
+        if not self.translate_dialog:
+            self.translate_dialog = TranslateDialog(self)
+        self.translate_dialog.show_at_button(self.translate_btn)
 
     def _open_remote_window(self):
         """리모트 창 열기"""

@@ -48,6 +48,12 @@ class PromptGenerationController(QObject):
             if 'detected_resolution' in context.metadata:
                 width, height = context.metadata['detected_resolution']
                 self.resolution_detected.emit(width, height)
+            elif context.settings.get('auto_fit_resolution', False):
+                # 해상도 미감지 → 이전 사이클의 감지 플래그를 리셋
+                # (랜덤 해상도 등 후속 처리가 올바르게 작동하도록)
+                main_window = self.app_context.main_window
+                if hasattr(main_window, 'resolution_is_detected'):
+                    main_window.resolution_is_detected = False
             
             # 최종 프롬프트 시그널 발생
             self.prompt_generated.emit(context.final_prompt)

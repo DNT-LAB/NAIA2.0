@@ -1112,15 +1112,22 @@ class GenerationController:
                 QTimer.singleShot(0, self._process_next_queue_request)
             else:
                 # 큐가 비면 자동생성 보류 해제
-                if self.queue_hold_auto_gen:
+                was_holding = self.queue_hold_auto_gen
+                if was_holding:
                     print("[QUEUE] 큐 비었음. 자동생성 보류 해제.")
                 self.queue_hold_auto_gen = False
 
-                # 보류 중인 자동 재시도 수행
+                # 보류 중인 자동 재시도 수행 (에러 후 재시도)
                 if self.auto_retry_pending:
                     self.auto_retry_pending = False
                     print("[AUTO] 보류된 자동 재시도 실행.")
                     QTimer.singleShot(0, self._retry_auto_generation)
+                elif was_holding:
+                    # 큐 처리 완료 후 자동생성 복귀: 자동생성이 켜져 있으면 재개
+                    auto_gen_cb = self.context.main_window.generation_checkboxes.get("자동 생성")
+                    if auto_gen_cb and auto_gen_cb.isChecked():
+                        print("[AUTO] 큐 처리 완료. 자동생성 복귀.")
+                        QTimer.singleShot(0, self.context.main_window._check_and_trigger_auto_generation)
 
             # UI 상태 업데이트
             self._update_button_with_queue_size()

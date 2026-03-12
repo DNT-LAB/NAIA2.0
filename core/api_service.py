@@ -1339,16 +1339,17 @@ class APIService:
             traceback.print_exc()
             return {'status': 'error', 'message': f'Auto-outpainting 실패: {e}'}
     
-    def upscale_NAI(self, pixmap: 'QPixmap', token: str = None) -> Dict[str, Any]:
+    def upscale_NAI(self, pixmap: 'QPixmap', token: str = None, raw_bytes: bytes = None) -> Dict[str, Any]:
         """
         NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
-        
+
         Args:
             pixmap: QPixmap 형식의 이미지
             token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
-        
+            raw_bytes: 원본 PNG bytes (메타데이터 보존용, 제공 시 pixmap 재인코딩 생략)
+
         Returns:
-            Dict with 'status', 'image' (upscaled QPixmap), and 'message'
+            Dict with 'status', 'image' (upscaled QPixmap), 'raw_bytes', and 'message'
         """
         import zipfile
         from PyQt6.QtCore import QBuffer, QIODevice
@@ -1363,15 +1364,16 @@ class APIService:
                         'message': 'NAI 토큰이 설정되지 않았습니다.'
                     }
             
-            # QPixmap을 bytes로 변환
-            buffer = QBuffer()
-            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            pixmap.save(buffer, "PNG")
-            image_bytes = buffer.data().data()
-            buffer.close()
-            
-            # Base64 인코딩
-            img_base64 = base64.b64encode(image_bytes).decode()
+            # Base64 인코딩 (raw_bytes 우선, 없으면 QPixmap 재인코딩)
+            if raw_bytes:
+                img_base64 = base64.b64encode(raw_bytes).decode()
+            else:
+                buffer = QBuffer()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                pixmap.save(buffer, "PNG")
+                image_bytes = buffer.data().data()
+                buffer.close()
+                img_base64 = base64.b64encode(image_bytes).decode()
             
             # 원본 이미지 크기
             width = pixmap.width()
@@ -1441,10 +1443,11 @@ class APIService:
                     }
                 
                 print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
-                
+
                 return {
                     'status': 'success',
                     'image': upscaled_pixmap,
+                    'raw_bytes': image_bytes,
                     'message': f'이미지가 {upscaled_pixmap.width()}x{upscaled_pixmap.height()}로 업스케일되었습니다.'
                 }
                 
@@ -1784,6 +1787,7 @@ class APIService:
             return {
                 'status': 'success',
                 'image': resized_image,
+                'raw_bytes': image_data,
                 'message': '업스케일 성공'
             }
             

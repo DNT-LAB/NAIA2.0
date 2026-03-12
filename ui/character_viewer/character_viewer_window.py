@@ -354,6 +354,18 @@ class CharacterViewerWindow(QMainWindow):
         super().resizeEvent(event)
         self._refresh_preview_scale()
 
+    def wheelEvent(self, event):
+        """Characters 탭 활성 시 마우스 휠로 페이지 전환"""
+        if self.right_tabs.currentIndex() == 0:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._grid_prev_page()
+            elif delta < 0:
+                self._grid_next_page()
+            event.accept()
+            return
+        super().wheelEvent(event)
+
     def _refresh_preview_scale(self):
         """저장된 QImage를 preview_label 크기에 맞게 재스케일."""
         if not self._preview_qimage or self._preview_qimage.isNull():

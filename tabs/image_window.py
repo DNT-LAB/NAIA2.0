@@ -1045,36 +1045,38 @@ class HistoryItemWidget(QWidget):
             app_context = parent_widget.app_context
         
         # 현재 이미지를 QPixmap으로 변환
+        history_raw_bytes = self.history_item.raw_bytes
         pil_img = self.history_item.image
         buf = io.BytesIO()
         pil_img.save(buf, format='PNG')
         buf.seek(0)
         current_pixmap = QPixmap()
         current_pixmap.loadFromData(buf.getvalue())
-        
+
         # 진행 상황 다이얼로그 생성
         progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
         progress.setWindowTitle("NAI 업스케일")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setCancelButton(None)
         progress.show()
-        
+
         # Worker 클래스 정의 (메서드 내부에 정의)
         class UpscaleWorker(QObject):
             finished = pyqtSignal(dict)
-            
-            def __init__(self, api_service, pixmap):
+
+            def __init__(self, api_service, pixmap, raw_bytes=None):
                 super().__init__()
                 self.api_service = api_service
                 self.pixmap = pixmap
-            
+                self.raw_bytes = raw_bytes
+
             def run(self):
-                result = self.api_service.upscale_NAI(self.pixmap)
+                result = self.api_service.upscale_NAI(self.pixmap, raw_bytes=self.raw_bytes)
                 self.finished.emit(result)
-        
+
         # Worker 스레드 설정
         self.upscale_thread = QThread()
-        self.upscale_worker = UpscaleWorker(app_context.api_service, current_pixmap)
+        self.upscale_worker = UpscaleWorker(app_context.api_service, current_pixmap, history_raw_bytes)
         self.upscale_worker.moveToThread(self.upscale_thread)
         
         # 시그널 연결
@@ -3081,36 +3083,38 @@ class ImageWindow(QWidget):
             return
         
         # 현재 이미지를 QPixmap으로 변환
+        history_raw_bytes = self.current_history_item.raw_bytes
         pil_img = self.current_history_item.image
         buf = io.BytesIO()
         pil_img.save(buf, format='PNG')
         buf.seek(0)
         current_pixmap = QPixmap()
         current_pixmap.loadFromData(buf.getvalue())
-        
+
         # 진행 상황 다이얼로그 생성
         progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
         progress.setWindowTitle("NAI 업스케일")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setCancelButton(None)
         progress.show()
-        
+
         # Worker 클래스 정의 (메서드 내부에 정의)
         class UpscaleWorker(QObject):
             finished = pyqtSignal(dict)
-            
-            def __init__(self, api_service, pixmap):
+
+            def __init__(self, api_service, pixmap, raw_bytes=None):
                 super().__init__()
                 self.api_service = api_service
                 self.pixmap = pixmap
-            
+                self.raw_bytes = raw_bytes
+
             def run(self):
-                result = self.api_service.upscale_NAI(self.pixmap)
+                result = self.api_service.upscale_NAI(self.pixmap, raw_bytes=self.raw_bytes)
                 self.finished.emit(result)
-        
+
         # Worker 스레드 설정
         self.upscale_thread = QThread()
-        self.upscale_worker = UpscaleWorker(self.app_context.api_service, current_pixmap)
+        self.upscale_worker = UpscaleWorker(self.app_context.api_service, current_pixmap, history_raw_bytes)
         self.upscale_worker.moveToThread(self.upscale_thread)
         
         # 시그널 연결

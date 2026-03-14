@@ -242,7 +242,15 @@ finally:
 
 ### 필터 디버깅 윈도우 (`filter_debug_window.py`)
 
-`FilterDebugWindow(QDialog)`: 라운드별 필터 제거 내역 시각화. 소스 정보(캐릭터/작품/아티스트/ID) + 라운드별 색상 코딩 (주황=제거, 초록=통과, 회색=비활성).
+`FilterDebugWindow(QDialog)`: 라운드별 필터 제거 내역 시각화. 소스 정보(캐릭터/작품/아티스트/ID) + 라운드별 색상 코딩 (주황=제거, 초록=통과, 회색=비활성). e621 Auto-Boost 섹션(연주황색)으로 입력 태그 및 추천 결과 표시.
+
+### e621 Auto-Boost (`prompt_engineering_module.py`)
+
+`data/e621_boost_static.py`의 `recommend_detailed()`를 호출하여 main_tags 뒤에 추천 태그를 추가. 하이라이터 연주황색 표시.
+
+- **일반 모드**: `post_processing` hook에서 즉시 처리 (prefix_tags + 필터링 전 원본 main_tags)
+- **와일드카드 단독 모드**: `post_processing`에서 원본 태그를 `context.metadata['_e621_source_tags']`에 보존 → `after_wildcard` hook에서 전개된 prefix_tags와 합쳐 처리
+- **after_wildcard hook 등록**: `create_widget()`에서 `_E621AfterWildcardHook` 위임 객체를 직접 `register_pipeline_hook()` 호출로 등록 (get_pipeline_hook_info 미사용)
 
 ---
 

@@ -130,6 +130,20 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     '파이프라인 훅' 시스템을 통해 PromptProcessor의 처리 과정에 직접 개입합니다.
     """
 
+    class _E621AfterWildcardHook:
+        """after_wildcard hook 위임 객체.
+        와일드카드 단독 모드 + e621 Auto-Boost 동시 사용 시에만 작동.
+        전개된 prefix_tags를 e621 입력으로 사용하여 main_tags에 추가."""
+
+        def __init__(self, parent: 'PromptEngineeringModule'):
+            self._parent = parent
+
+        def get_title(self):
+            return "e621 Auto-Boost (after_wildcard)"
+
+        def execute_pipeline_hook(self, context):
+            return self._parent._execute_e621_after_wildcard(context)
+
     def __init__(self):
         BaseMiddleModule.__init__(self)
         ModeAwareModule.__init__(self)
@@ -265,6 +279,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.subscribe("random_prompt_triggered_preset_randomizer", self._on_random_prompt_triggered)
     
     def create_widget(self, parent: QWidget) -> QWidget:
+        # after_wildcard hook 등록 (와일드카드 단독 + e621 동시 사용 대응)
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.register_pipeline_hook(
+                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 10},
+                self._E621AfterWildcardHook(self),
+            )
+
         widget = QWidget(parent)
         layout = QVBoxLayout(widget)
         layout.setSpacing(6)
@@ -535,6 +556,58 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self._debug_window.raise_()
         self._debug_window.activateWindow()
 
+    def _run_e621_boost(self, context, input_tags: list, target_tags: list):
+        """e621 추천을 실행하여 target_tags에 결과를 추가한다."""
+        try:
+            if not hasattr(self, '_e621_recommend'):
+                import importlib.util
+                _e621_file = Path(__file__).resolve().parent.parent / "data" / "e621_boost_static.py"
+                _spec = importlib.util.spec_from_file_location("e621_boost_static", _e621_file)
+                _mod = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                self._e621_recommend = _mod.recommend_detailed
+            recommend_detailed = self._e621_recommend
+            boost_prompt = ", ".join(input_tags)
+            print(f"[e621 DEBUG] input tags ({len(input_tags)}): {boost_prompt[:200]}{'...' if len(boost_prompt) > 200 else ''}")
+            boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3)
+            print(f"[e621 DEBUG] results ({len(boost_results)}): {[(t, f'{s:.4f}', c) for t, s, c, src in boost_results]}")
+            if boost_results:
+                _PERSON_TAGS = {"1boy","2boys","3boys","4boys","5boys","6+boys",
+                                "1girl","2girls","3girls","4girls","5girls","6+girls",
+                                "1other","2others","3others","4others","5others","6+others"}
+                boost_tags = [tag.replace("_", " ") for tag, score, cat, src in boost_results
+                              if tag not in _PERSON_TAGS]
+                target_tags.extend(boost_tags)
+                context.metadata['e621_boost_tags'] = [
+                    {"tag": tag, "score": score, "cat": cat, "src": src}
+                    for tag, score, cat, src in boost_results
+                ]
+                context.metadata['e621_debug_info'] = {
+                    'input_tags': input_tags,
+                    'results': [
+                        {"tag": tag, "score": score, "cat": cat, "src": src}
+                        for tag, score, cat, src in boost_results
+                    ],
+                }
+                main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+                if main_window and hasattr(main_window, 'main_prompt_highlighter'):
+                    main_window.main_prompt_highlighter.set_e621_tags(set(boost_tags))
+                print(f"🔥 e621 Auto-Boost: {len(boost_results)} tags added")
+        except ImportError:
+            print("⚠️ e621_boost_static not found — Auto-Boost skipped")
+        except Exception as e:
+            print(f"⚠️ e621 Auto-Boost error: {e}")
+
+    def _execute_e621_after_wildcard(self, context) -> 'PromptContext':
+        """after_wildcard hook: 와일드카드 단독 + e621 동시 사용 시에만 작동."""
+        if '_e621_source_tags' not in context.metadata:
+            return context
+        _e621_source = context.metadata.pop('_e621_source_tags')
+        _e621_input = list(context.prefix_tags) + _e621_source
+        self._run_e621_boost(context, _e621_input, context.main_tags)
+        self._update_debug_window(context.metadata)
+        return context
+
     def _update_debug_window(self, metadata: dict):
         """디버그 윈도우가 열려있으면 새 데이터를 추가한다."""
         try:
@@ -663,50 +736,22 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             'artist': source_row.get('artist', ''),
             'id': source_row.get('id', ''),
         }
-        # e621 Auto-Boost: main_tags 뒤에 e621 추천 태그를 추가
-        if not skip_preprocessing and not checkbox_options.get("e621_auto_boost"):
+        # e621 Auto-Boost
+        _e621_enabled = not skip_preprocessing and checkbox_options.get("e621_auto_boost")
+        _is_wildcard_standalone = context.settings.get('wildcard_standalone', False)
+
+        if not _e621_enabled:
             # 비활성 시 하이라이팅 클리어
             main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
             if main_window and hasattr(main_window, 'main_prompt_highlighter') and main_window.main_prompt_highlighter._e621_tags:
                 main_window.main_prompt_highlighter.set_e621_tags(set())
-        if not skip_preprocessing and checkbox_options.get("e621_auto_boost"):
-            try:
-                if not hasattr(self, '_e621_recommend'):
-                    import importlib.util
-                    _e621_file = Path(__file__).resolve().parent.parent / "data" / "e621_boost_static.py"
-                    _spec = importlib.util.spec_from_file_location("e621_boost_static", _e621_file)
-                    _mod = importlib.util.module_from_spec(_spec)
-                    _spec.loader.exec_module(_mod)
-                    self._e621_recommend = _mod.recommend_detailed
-                recommend_detailed = self._e621_recommend
-                _e621_input_tags = list(prefix_tags) + _e621_source_tags
-                boost_prompt = ", ".join(_e621_input_tags)
-                print(f"[e621 DEBUG] input tags ({len(_e621_input_tags)}): {boost_prompt[:200]}{'...' if len(boost_prompt) > 200 else ''}")
-                boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3)
-                print(f"[e621 DEBUG] results ({len(boost_results)}): {[(t, f'{s:.4f}', c) for t, s, c, src in boost_results]}")
-                if boost_results:
-                    boost_tags = [tag.replace("_", " ") for tag, score, cat, src in boost_results]
-                    main_tags.extend(boost_tags)
-                    context.metadata['e621_boost_tags'] = [
-                        {"tag": tag, "score": score, "cat": cat, "src": src}
-                        for tag, score, cat, src in boost_results
-                    ]
-                    context.metadata['e621_debug_info'] = {
-                        'input_tags': _e621_input_tags,
-                        'results': [
-                            {"tag": tag, "score": score, "cat": cat, "src": src}
-                            for tag, score, cat, src in boost_results
-                        ],
-                    }
-                    # 하이라이터에 e621 태그 주입
-                    main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
-                    if main_window and hasattr(main_window, 'main_prompt_highlighter'):
-                        main_window.main_prompt_highlighter.set_e621_tags(set(boost_tags))
-                    print(f"🔥 e621 Auto-Boost: {len(boost_results)} tags added")
-            except ImportError:
-                print("⚠️ e621_boost_static not found — Auto-Boost skipped")
-            except Exception as e:
-                print(f"⚠️ e621 Auto-Boost error: {e}")
+        elif _is_wildcard_standalone:
+            # 와일드카드 단독 모드: after_wildcard hook에서 처리 (원본 태그 보존)
+            context.metadata['_e621_source_tags'] = list(_e621_source_tags)
+            print("[e621] 와일드카드 단독 모드 — after_wildcard에서 처리 예정")
+        else:
+            # 일반 모드: 여기서 즉시 처리
+            self._run_e621_boost(context, list(prefix_tags) + _e621_source_tags, main_tags)
 
         self._update_debug_window(context.metadata)
 

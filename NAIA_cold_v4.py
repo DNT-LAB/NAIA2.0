@@ -219,6 +219,13 @@ class PromptHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        # e621 boost 태그 하이라이팅용
+        self._e621_tags: set[str] = set()
+
+        # 연주황색 포맷 (e621 boost 태그용)
+        self.e621_format = QTextCharFormat()
+        self.e621_format.setForeground(QColor("#FFDAB9"))  # 연주황색 (peach puff)
+
         # 연노랑색 포맷 (# 주석용)
         self.comment_format = QTextCharFormat()
         self.comment_format.setForeground(QColor("#FFFFE0"))  # 연노랑색 텍스트
@@ -279,9 +286,19 @@ class PromptHighlighter(QSyntaxHighlighter):
         for match in re.finditer(r':end\b', text, re.IGNORECASE):
             self.setFormat(match.start(), match.end() - match.start(), self.end_format)
 
+    def set_e621_tags(self, tags: set[str]):
+        """e621 boost 태그 목록을 설정하고 하이라이팅을 갱신합니다."""
+        self._e621_tags = tags
+        self.rehighlight()
+
     def _apply_format_to_segment(self, text: str, start_pos: int, end_pos: int, segment: str):
         """세그먼트에 포맷 적용"""
         if not segment:
+            return
+
+        # 규칙 0: e621 boost 태그면 연주황색
+        if self._e621_tags and segment in self._e621_tags:
+            self.setFormat(start_pos, end_pos - start_pos, self.e621_format)
             return
 
         # 규칙 1: '#'으로 시작하면 연노랑색
@@ -832,6 +849,7 @@ class ModernMainWindow(QMainWindow):
         
         self.set_initial_window_size()
         self.kr_tags_df = self._load_kr_tags()
+        self.e621_kr_tags_df = self._load_kr_tags('data/e621_KR_tags.parquet')
 
         # 동적 테마 적용
         self.apply_dynamic_styles()
@@ -5658,7 +5676,68 @@ class ModernMainWindow(QMainWindow):
 
                 menu.addSeparator()
 
-        # --- 3. 기존 표준 메뉴 (복사, 붙여넣기 등) 추가 ---
+        # --- 3. e621 KR_tags 데이터 조회 ---
+        if not self.e621_kr_tags_df.empty and tag_under_cursor:
+            # e621 태그는 underscore 형식이므로 space→underscore 변환
+            e621_key = tag_under_cursor.replace(' ', '_')
+            e621_rows = self.e621_kr_tags_df[self.e621_kr_tags_df['tag'] == e621_key]
+
+            if not e621_rows.empty:
+                e6data = e621_rows.iloc[0]
+
+                # 클릭 불가능한 정보 표시용 액션 (create_info_action이 이미 정의되지 않았을 수 있으므로 재정의)
+                def create_e621_info_action(text, font_size, is_bold=False, word_wrap=False):
+                    widget_action = QWidgetAction(menu)
+                    widget = QWidget()
+                    layout = QHBoxLayout(widget)
+                    layout.setContentsMargins(8, 4, 8, 4)
+                    label = QLabel(str(text))
+                    style = f"font-size: {font_size}px; color: #000000;"
+                    if is_bold: style += " font-weight: 600;"
+                    label.setStyleSheet(style)
+                    if word_wrap:
+                        label.setWordWrap(True)
+                        label.setMinimumWidth(300)
+                    layout.addWidget(label)
+                    widget_action.setDefaultWidget(widget)
+                    widget_action.setEnabled(False)
+                    return widget_action
+
+                # e621 헤더
+                e621_title_action = QWidgetAction(menu)
+                e621_title_widget = QWidget()
+                e621_title_layout = QHBoxLayout(e621_title_widget)
+                e621_title_layout.setContentsMargins(8, 4, 8, 4)
+
+                e621_tag_label = QLabel(f"e621: {e6data.get('tag', '')}")
+                e621_tag_label.setStyleSheet(f"font-size: {get_scaled_font_size(20)}px; font-weight: 600; color: #0062CC;")
+
+                e621_count_val = e6data.get('count', 0)
+                e621_count_label = QLabel(f"{e621_count_val:,}" if pd.notna(e621_count_val) else "")
+                e621_count_label.setStyleSheet(f"font-size: {get_scaled_font_size(14)}px; color: #111111;")
+
+                e621_title_layout.addWidget(e621_tag_label)
+                e621_title_layout.addStretch()
+                e621_title_layout.addWidget(e621_count_label)
+                e621_title_action.setDefaultWidget(e621_title_widget)
+                e621_title_action.setEnabled(False)
+                menu.addAction(e621_title_action)
+
+                e621_cat = e6data.get('category')
+                if pd.notna(e621_cat) and e621_cat:
+                    menu.addAction(create_e621_info_action(f"Category: {e621_cat}", 16))
+
+                e621_desc = e6data.get('desc')
+                if pd.notna(e621_desc) and e621_desc:
+                    menu.addAction(create_e621_info_action(e621_desc, 14, word_wrap=True))
+
+                e621_kw = e6data.get('keywords')
+                if pd.notna(e621_kw) and e621_kw:
+                    menu.addAction(create_e621_info_action(f"Keywords: {e621_kw}", 14))
+
+                menu.addSeparator()
+
+        # --- 4. 기존 표준 메뉴 (복사, 붙여넣기 등) 추가 ---
         standard_menu = self.main_prompt_textedit.createStandardContextMenu()
         menu.addActions(standard_menu.actions())
 
@@ -5689,9 +5768,8 @@ class ModernMainWindow(QMainWindow):
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(new_tag)
 
-    def _load_kr_tags(self):
-        """data/KR_tags.parquet 파일을 로드하여 DataFrame으로 반환합니다."""
-        filepath = 'data/KR_tags.parquet'
+    def _load_kr_tags(self, filepath: str = 'data/KR_tags.parquet'):
+        """parquet 태그 파일을 로드하여 DataFrame으로 반환합니다."""
         if os.path.exists(filepath):
             try:
                 print(f"🔍 '{filepath}' 파일 로딩 중...")

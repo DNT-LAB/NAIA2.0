@@ -170,6 +170,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "랜덤 프롬프트의 메타 태그를 제거": "remove_meta_tags",
             "랜덤 프롬프트의 사물 태그를 제거": "remove_object_tags",
             "랜덤 프롬프트의 저빈도 태그를 제거": "remove_noise_tags",
+            "[실험적] e621 Auto-Boost": "e621_auto_boost",
         }
         
         # 퀵 프리셋 관련 초기화
@@ -465,13 +466,23 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         checkbox_grid = QGridLayout()
         checkbox_grid.setSpacing(get_scaled_size(4))
         checkbox_grid.setContentsMargins(0, 0, 0, 0)
+        # 연분홍색 체크박스 스타일 (실험적 기능용)
+        pink_checkbox_style = dynamic_styles['dark_checkbox'].replace(
+            f"color: {DARK_COLORS['text_primary']};",
+            "color: #FFD1DC;",
+            1
+        )
+
         # 첫 3개(작가명/작품명/캐릭터명)는 연노랑색
         yellow_keys = {"remove_author", "remove_work_title", "remove_character_name"}
+        pink_keys = {"e621_auto_boost"}
         for i, text in enumerate(self.option_key_map.keys()):
             cb = QCheckBox(text)
             key = self.option_key_map[text]
             if key in yellow_keys:
                 cb.setStyleSheet(yellow_checkbox_style)
+            elif key in pink_keys:
+                cb.setStyleSheet(pink_checkbox_style)
             else:
                 cb.setStyleSheet(dynamic_styles['dark_checkbox'])
             row = i // 2
@@ -537,7 +548,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         source_info = metadata.get('debug_source_info', {})
         original = metadata.get('original_tag_count', 0)
         remaining = metadata.get('remaining_tag_count', 0)
-        self._debug_window.add_entry(source_info, filter_log, original, remaining)
+        e621_info = metadata.get('e621_debug_info')
+        self._debug_window.add_entry(source_info, filter_log, original, remaining, e621_info)
 
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
         return {
@@ -628,6 +640,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             auto_hide = []
 
         # 3. Auto Hide + 필터 체크박스 통합 처리 (공유 헬퍼)
+        # e621 boost용 원본 태그 보존 (필터링 전 전체 맥락)
+        _e621_source_tags = list(main_tags)
         original_count = len(main_tags)
         filter_result = apply_tag_filters(
             main_tags, removed_tags, checkbox_options, auto_hide,
@@ -649,6 +663,51 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             'artist': source_row.get('artist', ''),
             'id': source_row.get('id', ''),
         }
+        # e621 Auto-Boost: main_tags 뒤에 e621 추천 태그를 추가
+        if not skip_preprocessing and not checkbox_options.get("e621_auto_boost"):
+            # 비활성 시 하이라이팅 클리어
+            main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+            if main_window and hasattr(main_window, 'main_prompt_highlighter') and main_window.main_prompt_highlighter._e621_tags:
+                main_window.main_prompt_highlighter.set_e621_tags(set())
+        if not skip_preprocessing and checkbox_options.get("e621_auto_boost"):
+            try:
+                if not hasattr(self, '_e621_recommend'):
+                    import importlib.util
+                    _e621_file = Path(__file__).resolve().parent.parent / "data" / "e621_boost_static.py"
+                    _spec = importlib.util.spec_from_file_location("e621_boost_static", _e621_file)
+                    _mod = importlib.util.module_from_spec(_spec)
+                    _spec.loader.exec_module(_mod)
+                    self._e621_recommend = _mod.recommend_detailed
+                recommend_detailed = self._e621_recommend
+                _e621_input_tags = list(prefix_tags) + _e621_source_tags
+                boost_prompt = ", ".join(_e621_input_tags)
+                print(f"[e621 DEBUG] input tags ({len(_e621_input_tags)}): {boost_prompt[:200]}{'...' if len(boost_prompt) > 200 else ''}")
+                boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3)
+                print(f"[e621 DEBUG] results ({len(boost_results)}): {[(t, f'{s:.4f}', c) for t, s, c, src in boost_results]}")
+                if boost_results:
+                    boost_tags = [tag.replace("_", " ") for tag, score, cat, src in boost_results]
+                    main_tags.extend(boost_tags)
+                    context.metadata['e621_boost_tags'] = [
+                        {"tag": tag, "score": score, "cat": cat, "src": src}
+                        for tag, score, cat, src in boost_results
+                    ]
+                    context.metadata['e621_debug_info'] = {
+                        'input_tags': _e621_input_tags,
+                        'results': [
+                            {"tag": tag, "score": score, "cat": cat, "src": src}
+                            for tag, score, cat, src in boost_results
+                        ],
+                    }
+                    # 하이라이터에 e621 태그 주입
+                    main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+                    if main_window and hasattr(main_window, 'main_prompt_highlighter'):
+                        main_window.main_prompt_highlighter.set_e621_tags(set(boost_tags))
+                    print(f"🔥 e621 Auto-Boost: {len(boost_results)} tags added")
+            except ImportError:
+                print("⚠️ e621_boost_static not found — Auto-Boost skipped")
+            except Exception as e:
+                print(f"⚠️ e621 Auto-Boost error: {e}")
+
         self._update_debug_window(context.metadata)
 
         # 수정된 context를 다음 훅 또는 파이프라인으로 전달

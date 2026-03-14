@@ -215,6 +215,73 @@ class FilterDebugWindow(QDialog):
         self._summary_label.hide()
         self._content_layout.addWidget(self._summary_label)
 
+        # 구분선 3 (e621 섹션 위)
+        self._sep3 = self._make_separator()
+        self._sep3.hide()
+        self._content_layout.addWidget(self._sep3)
+
+        # e621 Auto-Boost 섹션
+        self._e621_header = QLabel()
+        self._e621_header.setStyleSheet(
+            f"font-size: {_ROUND_FONT()}px; color: #FFDAB9; font-weight: bold;"
+        )
+        self._e621_header.hide()
+        self._content_layout.addWidget(self._e621_header)
+
+        self._e621_input_edit = QTextEdit()
+        self._e621_input_edit.setReadOnly(True)
+        self._e621_input_edit.setAcceptRichText(False)
+        self._e621_input_edit.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._e621_input_edit.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._e621_input_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        self._e621_input_edit.setStyleSheet(f"""
+            QTextEdit {{
+                font-size: {get_scaled_font_size(13)}px;
+                color: {DARK_COLORS['text_secondary']};
+                background-color: transparent;
+                border: none;
+                padding-left: {get_scaled_size(10)}px;
+            }}
+        """)
+        self._e621_input_edit.document().documentLayout().documentSizeChanged.connect(
+            lambda: self._adjust_src_height(self._e621_input_edit)
+        )
+        self._e621_input_edit.hide()
+        self._content_layout.addWidget(self._e621_input_edit)
+
+        self._e621_results_edit = QTextEdit()
+        self._e621_results_edit.setReadOnly(True)
+        self._e621_results_edit.setAcceptRichText(False)
+        self._e621_results_edit.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._e621_results_edit.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._e621_results_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        self._e621_results_edit.setStyleSheet(f"""
+            QTextEdit {{
+                font-size: {get_scaled_font_size(14)}px;
+                color: #FFDAB9;
+                background-color: transparent;
+                border: none;
+                padding-left: {get_scaled_size(10)}px;
+            }}
+        """)
+        self._e621_results_edit.document().documentLayout().documentSizeChanged.connect(
+            lambda: self._adjust_src_height(self._e621_results_edit)
+        )
+        self._e621_results_edit.hide()
+        self._content_layout.addWidget(self._e621_results_edit)
+
         self._scroll.setWidget(self._content)
         layout.addWidget(self._scroll)
 
@@ -246,6 +313,7 @@ class FilterDebugWindow(QDialog):
         filter_log: List[Dict[str, Any]],
         original_count: int,
         remaining_count: int,
+        e621_info: Dict[str, Any] | None = None,
     ):
         """최근 1건의 디버그 정보로 교체한다."""
         self._entry_count += 1
@@ -288,6 +356,37 @@ class FilterDebugWindow(QDialog):
         )
         self._summary_label.show()
 
+        # -- e621 Auto-Boost 섹션
+        if e621_info and e621_info.get('results'):
+            input_tags = e621_info.get('input_tags', [])
+            results = e621_info['results']
+
+            self._sep3.show()
+            self._e621_header.setText(
+                f"● e621 Auto-Boost — {len(results)}개 추천 (입력 {len(input_tags)}개 태그)"
+            )
+            self._e621_header.show()
+
+            # 입력 태그 표시
+            self._e621_input_edit.setPlainText("  입력: " + ", ".join(input_tags))
+            self._e621_input_edit.show()
+
+            # 결과 표시: tag (score) [cat] ← source
+            lines = []
+            for r in results:
+                tag = r.get('tag', '')
+                score = r.get('score', 0)
+                cat = r.get('cat', '')
+                src = r.get('src', '')
+                lines.append(f"  {tag} ({score:.4f}) [{cat}] ← {src}")
+            self._e621_results_edit.setPlainText("\n".join(lines))
+            self._e621_results_edit.show()
+        else:
+            self._sep3.hide()
+            self._e621_header.hide()
+            self._e621_input_edit.hide()
+            self._e621_results_edit.hide()
+
         # 스크롤 맨 위로
         self._scroll.verticalScrollBar().setValue(0)
 
@@ -299,5 +398,9 @@ class FilterDebugWindow(QDialog):
             rw.hide()
         self._sep2.hide()
         self._summary_label.hide()
+        self._sep3.hide()
+        self._e621_header.hide()
+        self._e621_input_edit.hide()
+        self._e621_results_edit.hide()
         self._entry_count = 0
         self._counter_label.setText("#0")

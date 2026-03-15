@@ -5118,8 +5118,17 @@ _FEMALE_ONLY_TAGS: frozenset[str] = frozenset({
 # ═══════════════════════════════════════════════════════════════
 
 _OUTPUT_BLOCKLIST: frozenset[str] = frozenset({
+    "bisexual",
+    "cum_from_nose",
+    "cum_through",
+    "gaping_anus",
+    "gaping_vagina",
+    "magic_user",
+    "oblivious_sex",
     "running_makeup",
     "running_mascara",
+    "tentacle_trap",
+    "unawareacles",  # data artifact: "unaware" + "tentacles" 합성 오류
 })
 
 # Source Blocklist — 의미적으로 깨진 source 태그 차단
@@ -5274,6 +5283,10 @@ _ANCHOR_GATES: dict[str, frozenset[str]] = {
     "vore": frozenset({
         "cannibalism", "dissolving", "imminent_vore",
         "in_mouth", "swallowing", "vore",
+    }),
+    "writing": frozenset({
+        "body_writing", "holding_marker", "marker",
+        "writing", "writing_on_body",
     }),
     "young": frozenset({
         "adolescent", "age_difference", "aged_down", "baby",

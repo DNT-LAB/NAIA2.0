@@ -5249,6 +5249,11 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
 # ═══════════════════════════════════════════════════════════════
 
 _ANCHOR_GATES: dict[str, frozenset[str]] = {
+    "chastity": frozenset({
+        "chastity", "chastity_belt", "chastity_cage",
+        "chastity_device", "chastity_piercing",
+        "flat_chastity_cage", "metal_chastity_cage",
+    }),
     "diaper": frozenset({
         "abdl", "adult_baby", "baby_bottle", "diaper",
         "infantilism", "pacifier", "wearing_diaper",

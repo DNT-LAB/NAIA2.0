@@ -823,7 +823,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             print(f"[Danbooru Auto-Weight] skipped (valid tags={valid_count} < 3)")
             return
 
-        # 2단계: 전역 범위 정규화 → 가중치 계산 → 래핑
+        # 2단계: 전역 범위 정규화 → 가중치 계산 → 미세 섭동 → 래핑
+        import random
         weighted_count = 0
         for idx, tag in enumerate(main_tags):
             bv = blended_values[idx]
@@ -836,6 +837,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
             if abs(weight - 1.0) < 0.01:
                 continue
+
+            # 미세 섭동: ±0~10% 랜덤 변동 (매 생성마다 고유한 가중치)
+            jitter = random.uniform(-0.10, 0.10)
+            weight = weight * (1.0 + jitter)
+            weight = max(min_w, min(max_w, weight))
 
             clean = tag.strip()
             if is_nai:

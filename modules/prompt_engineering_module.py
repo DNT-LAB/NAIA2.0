@@ -2620,7 +2620,40 @@ class _E621SettingsWindow(QWidget):
         validator = QDoubleValidator(-5.0, 5.0, 4, self)
         validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         self._weight_edit.setValidator(validator)
-        layout.addWidget(self._weight_edit)
+
+        step_btn_style = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: #FFD1DC;
+                border: 1px solid #FFD1DC;
+                border-radius: 3px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """
+        weight_row = QHBoxLayout()
+        weight_row.setSpacing(get_scaled_size(4))
+        btn_l = QPushButton("<")
+        btn_l.setFixedSize(get_scaled_size(32), get_scaled_size(28))
+        btn_l.setStyleSheet(step_btn_style)
+        btn_r = QPushButton(">")
+        btn_r.setFixedSize(get_scaled_size(32), get_scaled_size(28))
+        btn_r.setStyleSheet(step_btn_style)
+        def _step_weight(delta):
+            try:
+                val = float(self._weight_edit.text().strip())
+            except ValueError:
+                val = 0.0
+            val = round(max(-5.0, min(5.0, val + delta)), 2)
+            self._weight_edit.setText(str(val))
+        btn_l.clicked.connect(lambda: _step_weight(-0.1))
+        btn_r.clicked.connect(lambda: _step_weight(0.1))
+        weight_row.addWidget(btn_l)
+        weight_row.addWidget(self._weight_edit, 1)
+        weight_row.addWidget(btn_r)
+        layout.addLayout(weight_row)
 
         # ── 숨김 태그 섹션 ──
         hidden_label = QLabel("숨김 태그 (쉼표로 구분, 추천에서 제외)")

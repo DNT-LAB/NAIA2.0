@@ -709,16 +709,16 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     _danbooru_norm_high_default = 10.0
     # Magnitude 레벨 → (min_w, max_w, scale) 매핑 (10단계, 앵커 보간)
     _DANBOORU_MAGNITUDE_TABLE = {
-        1:  {"min_weight": 0.88, "max_weight": 1.15, "scale": 0.15, "label": "미미"},
-        2:  {"min_weight": 0.84, "max_weight": 1.25, "scale": 0.25, "label": "미세"},
-        3:  {"min_weight": 0.80, "max_weight": 1.35, "scale": 0.35, "label": "약한"},
-        4:  {"min_weight": 0.75, "max_weight": 1.42, "scale": 0.42, "label": "보통"},
-        5:  {"min_weight": 0.70, "max_weight": 1.50, "scale": 0.50, "label": "중간"},
-        6:  {"min_weight": 0.62, "max_weight": 1.60, "scale": 0.60, "label": "강조"},
-        7:  {"min_weight": 0.55, "max_weight": 1.70, "scale": 0.70, "label": "강한"},
-        8:  {"min_weight": 0.50, "max_weight": 1.80, "scale": 0.80, "label": "적극"},
-        9:  {"min_weight": 0.45, "max_weight": 1.90, "scale": 0.90, "label": "공격"},
-        10: {"min_weight": 0.40, "max_weight": 2.00, "scale": 1.00, "label": "최대"},
+        1:  {"min_weight": 0.88, "max_weight": 1.15, "scale": 0.15, "label": "약한"},
+        2:  {"min_weight": 0.84, "max_weight": 1.25, "scale": 0.25, "label": "중간"},
+        3:  {"min_weight": 0.80, "max_weight": 1.35, "scale": 0.35, "label": "추천"},
+        4:  {"min_weight": 0.75, "max_weight": 1.42, "scale": 0.42, "label": "강한"},
+        5:  {"min_weight": 0.70, "max_weight": 1.50, "scale": 0.50, "label": "최대"},
+        6:  {"min_weight": 0.62, "max_weight": 1.60, "scale": 0.60, "label": "최대+"},
+        7:  {"min_weight": 0.55, "max_weight": 1.70, "scale": 0.70, "label": "최대++"},
+        8:  {"min_weight": 0.50, "max_weight": 1.80, "scale": 0.80, "label": "극한"},
+        9:  {"min_weight": 0.45, "max_weight": 1.90, "scale": 0.90, "label": "극한+"},
+        10: {"min_weight": 0.40, "max_weight": 2.00, "scale": 1.00, "label": "극한++"},
     }
 
     def _get_danbooru_tag_counts(self) -> dict:

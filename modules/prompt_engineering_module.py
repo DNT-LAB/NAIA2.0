@@ -2936,6 +2936,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
             btn_r.setStyleSheet(step_btn_style)
 
             def _step(delta):
+                cb.setChecked(True)  # 버튼 조작 시 자동 체크 ON
                 try:
                     val = float(edit.text().strip())
                 except ValueError:
@@ -2944,6 +2945,13 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 edit.setText(str(val))
             btn_l.clicked.connect(lambda: _step(-step))
             btn_r.clicked.connect(lambda: _step(step))
+
+            # edit에 사용자가 직접 포커스하여 타이핑 시 자동 체크 ON
+            _orig_focus = edit.focusInEvent
+            def _on_focus(event, _cb=cb, _orig=_orig_focus):
+                _cb.setChecked(True)
+                _orig(event)
+            edit.focusInEvent = _on_focus
 
             row.addWidget(btn_l)
             row.addWidget(edit, 1)
@@ -2956,7 +2964,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
             hint_lbl.setContentsMargins(ss(20), 0, 0, 0)
             left.addWidget(hint_lbl)
 
-            # 비활성 시 숨김
+            # 초기 상태: 비활성 (magnitude 프리셋 사용)
             edit.setEnabled(False)
             btn_l.setEnabled(False)
             btn_r.setEnabled(False)
@@ -3035,16 +3043,18 @@ class _DanbooruWeightSettingsWindow(QWidget):
         # 초기값 설정
         self._magnitude = settings.get("magnitude", 3)
         self._blend = settings.get("rating_blend", 0.3)
-        # 오버라이드 복원
+        # 오버라이드 edit을 프리셋 값으로 초기 동기화
+        self._sync_override_edits()
+        # 저장된 오버라이드 복원 (동기화 후에 체크해야 값이 유지됨)
         if settings.get("override_scale_on"):
-            self._override_scale_cb.setChecked(True)
             self._override_scale_edit.setText(str(settings.get("override_scale", 0.35)))
+            self._override_scale_cb.setChecked(True)
         if settings.get("override_min_on"):
-            self._override_min_cb.setChecked(True)
             self._override_min_edit.setText(str(settings.get("override_min", 0.80)))
+            self._override_min_cb.setChecked(True)
         if settings.get("override_max_on"):
-            self._override_max_cb.setChecked(True)
             self._override_max_edit.setText(str(settings.get("override_max", 1.35)))
+            self._override_max_cb.setChecked(True)
         self._update_mag_display()
         self._update_blend_display()
         self._update_preview()
@@ -3080,10 +3090,23 @@ class _DanbooruWeightSettingsWindow(QWidget):
             self._rating_totals = [1, 1, 1, 1]
 
     def _step_magnitude(self, delta):
-        """magnitude 증감"""
+        """magnitude 증감 — 오버라이드 해제 + edit을 프리셋 값으로 동기화"""
         self._magnitude = max(1, min(10, self._magnitude + delta))
+        # 오버라이드 해제
+        self._override_scale_cb.setChecked(False)
+        self._override_min_cb.setChecked(False)
+        self._override_max_cb.setChecked(False)
+        # edit을 현재 프리셋 값으로 동기화 (사용자가 현재 값을 볼 수 있도록)
+        self._sync_override_edits()
         self._update_mag_display()
         self._update_preview()
+
+    def _sync_override_edits(self):
+        """오버라이드 edit을 현재 magnitude 프리셋 값으로 동기화"""
+        params = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE.get(self._magnitude, {})
+        self._override_scale_edit.setText(str(params.get("scale", 0.35)))
+        self._override_min_edit.setText(str(params.get("min_weight", 0.80)))
+        self._override_max_edit.setText(str(params.get("max_weight", 1.35)))
 
     def _step_blend(self, delta):
         """rating blend 증감"""

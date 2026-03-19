@@ -5249,6 +5249,11 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
 # ═══════════════════════════════════════════════════════════════
 
 _ANCHOR_GATES: dict[str, frozenset[str]] = {
+    "cum": frozenset({
+        "after_anal", "after_fellatio", "after_sex", "after_vaginal",
+        "bukkake", "cum", "cumdrip", "ejaculation", "facial",
+        "fellatio", "handjob", "hetero", "overflow", "penis", "sex",
+    }),
     "chastity": frozenset({
         "chastity", "chastity_belt", "chastity_cage",
         "chastity_device", "chastity_piercing",

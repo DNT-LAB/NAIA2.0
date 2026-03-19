@@ -838,17 +838,17 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if abs(weight - 1.0) < 0.01:
                 continue
 
-            # 미세 섭동: 대부분 ±5% 이내, 드물게 ±10% 스파이크
-            # 70%: 0~3%, 20%: 3~6%, 8%: 6~9%, 2%: 9~10%
+            # 미세 섭동: 85% 0~2%, 10% 2~5%, 4% 5~8%, 1% 8~10%
+            # 각 구간 내에서도 하한 쪽에 편향 (beta 분포 α=1, β=3)
             r = random.random()
-            if r < 0.70:
-                mag = random.uniform(0.0, 0.03)
-            elif r < 0.90:
-                mag = random.uniform(0.03, 0.06)
-            elif r < 0.98:
-                mag = random.uniform(0.06, 0.09)
+            if r < 0.85:
+                mag = random.betavariate(1, 3) * 0.02
+            elif r < 0.95:
+                mag = 0.02 + random.betavariate(1, 3) * 0.03
+            elif r < 0.99:
+                mag = 0.05 + random.betavariate(1, 3) * 0.03
             else:
-                mag = random.uniform(0.09, 0.10)
+                mag = 0.08 + random.betavariate(1, 3) * 0.02
             jitter = mag * random.choice((-1, 1))
             weight = weight * (1.0 + jitter)
             weight = max(min_w, min(max_w, weight))

@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox, QHBoxLayout, QComboBox, QPushButton, QDialog, QGridLayout, QLineEdit, QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox, QInputDialog, QSplitter, QSizePolicy, QApplication
+from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox, QHBoxLayout, QComboBox, QPushButton, QDialog, QGridLayout, QLineEdit, QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox, QInputDialog, QSplitter, QSizePolicy, QApplication, QTabWidget
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer, QMimeData, QEvent
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage, QClipboard
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage, QClipboard, QDoubleValidator
 from interfaces.base_module import BaseMiddleModule
 from core.prompt_context import PromptContext
 from interfaces.mode_aware_module import ModeAwareModule
@@ -12,6 +12,13 @@ from core.wildcard_processor import split_tags_smart
 from core.tag_filter_helpers import _is_color_exception, apply_tag_filters
 import os, json
 from pathlib import Path
+
+# 인원 태그 — 가중치/필터에서 공통 스킵 대상
+_PERSON_TAGS = frozenset({
+    "1boy","2boys","3boys","4boys","5boys","6+boys",
+    "1girl","2girls","3girls","4girls","5girls","6+girls",
+    "1other","2others","3others","4others","5others","6+others",
+})
 
 class PresetPreviewWidget(QWidget):
     """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
@@ -166,6 +173,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.auto_hide_collapsed = False
         self.preprocessing_checkboxes = {}
         self._debug_window = None
+        self._e621_settings_window = None
+        self._e621_settings = self._load_e621_settings()
+        self._danbooru_weight_settings_window = None
+        self._danbooru_weight_settings = self._load_danbooru_weight_settings()
+        self._danbooru_tag_counts = None  # lazy-load cache
+        self._danbooru_rating_totals = [1, 1, 1, 1]  # [g, s, q, e] — _get_danbooru_tag_counts()에서 설정
 
         # 기존 설정 파일 경로 유지
         self.settings_file = os.path.join('save', 'PromptEngineeringModule.json')
@@ -184,7 +197,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "랜덤 프롬프트의 메타 태그를 제거": "remove_meta_tags",
             "랜덤 프롬프트의 사물 태그를 제거": "remove_object_tags",
             "랜덤 프롬프트의 저빈도 태그를 제거": "remove_noise_tags",
-            "[실험적] e621 Auto-Boost": "e621_auto_boost",
+            "e621 Auto-Boost": "e621_auto_boost",
+            "Danbooru Auto-Weight": "danbooru_auto_weight",
         }
         
         # 퀵 프리셋 관련 초기화
@@ -228,7 +242,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "preprocessing_options": {
                 self.option_key_map.get(text): cb.isChecked()
                 for text, cb in self.preprocessing_checkboxes.items()
-            }
+            },
+            "e621_settings": self._e621_settings,
+            "danbooru_weight_settings": self._danbooru_weight_settings,
         }
         return settings
     
@@ -266,6 +282,18 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if key in options:
                 cb.setChecked(options[key])
                 print(f"      체크박스 '{text}' = {options[key]}")
+
+        # e621 설정 복원
+        e621 = settings.get("e621_settings")
+        if e621:
+            self._e621_settings = e621
+            self._save_e621_settings()
+
+        # danbooru weight 설정 복원
+        dw = settings.get("danbooru_weight_settings")
+        if dw:
+            self._danbooru_weight_settings = dw
+            self._save_danbooru_weight_settings()
     
     # 🆕 누락된 메서드 추가
     def initialize_with_context(self, context):
@@ -493,10 +521,22 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "color: #FFD1DC;",
             1
         )
+        # 연청록색 체크박스 스타일 (Danbooru Auto-Weight용)
+        teal_checkbox_style = dynamic_styles['dark_checkbox'].replace(
+            f"color: {DARK_COLORS['text_primary']};",
+            "color: #B2DFDB;",
+            1
+        )
 
         # 첫 3개(작가명/작품명/캐릭터명)는 연노랑색
         yellow_keys = {"remove_author", "remove_work_title", "remove_character_name"}
         pink_keys = {"e621_auto_boost"}
+        teal_keys = {"danbooru_auto_weight"}
+        # 설정 버튼이 필요한 항목 — 셀 내 HBoxLayout(체크박스 + 버튼)으로 배치
+        _settings_btn_map = {
+            "e621_auto_boost":       ("#FFD1DC", self._open_e621_settings),
+            "danbooru_auto_weight":  ("#B2DFDB", self._open_danbooru_weight_settings),
+        }
         for i, text in enumerate(self.option_key_map.keys()):
             cb = QCheckBox(text)
             key = self.option_key_map[text]
@@ -504,11 +544,40 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 cb.setStyleSheet(yellow_checkbox_style)
             elif key in pink_keys:
                 cb.setStyleSheet(pink_checkbox_style)
+            elif key in teal_keys:
+                cb.setStyleSheet(teal_checkbox_style)
             else:
                 cb.setStyleSheet(dynamic_styles['dark_checkbox'])
             row = i // 2
             col = i % 2
-            checkbox_grid.addWidget(cb, row, col)
+            if key in _settings_btn_map:
+                color, handler = _settings_btn_map[key]
+                cell_layout = QHBoxLayout()
+                cell_layout.setSpacing(get_scaled_size(4))
+                cell_layout.setContentsMargins(0, 0, 0, 0)
+                cell_layout.addWidget(cb)
+                settings_btn = QPushButton("설정")
+                settings_btn.setFixedHeight(get_scaled_size(20))
+                settings_btn.setFixedWidth(get_scaled_size(36))
+                settings_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: transparent;
+                        color: {color};
+                        border: 1px solid {color};
+                        border-radius: {get_scaled_size(3)}px;
+                        font-size: {get_scaled_font_size(10)}px;
+                        padding: 0px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {DARK_COLORS['bg_hover']};
+                    }}
+                """)
+                settings_btn.clicked.connect(handler)
+                cell_layout.addWidget(settings_btn)
+                cell_layout.addStretch()
+                checkbox_grid.addLayout(cell_layout, row, col)
+            else:
+                checkbox_grid.addWidget(cb, row, col)
             self.preprocessing_checkboxes[text] = cb
         layout.addLayout(checkbox_grid)
 
@@ -556,6 +625,223 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self._debug_window.raise_()
         self._debug_window.activateWindow()
 
+    # ─── e621 설정 관리 ───────────────────────────────────────
+    _E621_SETTINGS_FILE = os.path.join('save', 'e621_boost_user.json')
+
+    def _load_e621_settings(self) -> dict:
+        """e621 사용자 설정 로드"""
+        try:
+            with open(self._E621_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"weight": 0.0, "hidden_tags": []}
+
+    def _save_e621_settings(self):
+        """e621 사용자 설정 저장"""
+        os.makedirs(os.path.dirname(self._E621_SETTINGS_FILE), exist_ok=True)
+        with open(self._E621_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self._e621_settings, f, ensure_ascii=False, indent=2)
+
+    def _open_e621_settings(self):
+        """e621 설정 윈도우 열기 (비모달)"""
+        # C/C++ 삭제 안전 처리
+        try:
+            if self._e621_settings_window is not None:
+                self._e621_settings_window.isVisible()
+        except RuntimeError:
+            self._e621_settings_window = None
+
+        if self._e621_settings_window is None:
+            self._e621_settings_window = _E621SettingsWindow(self._e621_settings, parent=self.widget)
+            self._e621_settings_window.settings_changed.connect(self._on_e621_settings_changed)
+
+        self._e621_settings_window.load_settings(self._e621_settings)
+        self._e621_settings_window.show()
+        self._e621_settings_window.raise_()
+        self._e621_settings_window.activateWindow()
+
+    def _on_e621_settings_changed(self, settings: dict):
+        """e621 설정 윈도우에서 저장 시 호출"""
+        self._e621_settings = settings
+        self._save_e621_settings()
+
+    # ─── Danbooru Auto-Weight 설정 관리 ─────────────────────────
+    _DANBOORU_WEIGHT_SETTINGS_FILE = os.path.join('save', 'danbooru_auto_weight_user.json')
+
+    def _load_danbooru_weight_settings(self) -> dict:
+        try:
+            with open(self._DANBOORU_WEIGHT_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"magnitude": 3}
+
+    def _save_danbooru_weight_settings(self):
+        os.makedirs(os.path.dirname(self._DANBOORU_WEIGHT_SETTINGS_FILE), exist_ok=True)
+        with open(self._DANBOORU_WEIGHT_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self._danbooru_weight_settings, f, ensure_ascii=False, indent=2)
+
+    def _open_danbooru_weight_settings(self):
+        try:
+            if self._danbooru_weight_settings_window is not None:
+                self._danbooru_weight_settings_window.isVisible()
+        except RuntimeError:
+            self._danbooru_weight_settings_window = None
+
+        if self._danbooru_weight_settings_window is None:
+            self._danbooru_weight_settings_window = _DanbooruWeightSettingsWindow(
+                self._danbooru_weight_settings, parent=self.widget, module=self
+            )
+            self._danbooru_weight_settings_window.settings_changed.connect(self._on_danbooru_weight_settings_changed)
+
+        self._danbooru_weight_settings_window.load_settings(self._danbooru_weight_settings)
+        self._danbooru_weight_settings_window.show()
+        self._danbooru_weight_settings_window.raise_()
+        self._danbooru_weight_settings_window.activateWindow()
+
+    def _on_danbooru_weight_settings_changed(self, settings: dict):
+        self._danbooru_weight_settings = settings
+        self._save_danbooru_weight_settings()
+
+    # Rating → 인덱스 매핑 (danbooru_tag_counts_by_rating.json의 partition_order와 일치)
+    _RATING_INDEX = {"g": 0, "s": 1, "q": 2, "e": 3}
+    # 정규화 클리핑 범위 (클래스 상수 — 설정 윈도우에서도 참조)
+    _danbooru_norm_low_default = 1.0
+    _danbooru_norm_high_default = 10.0
+    # Magnitude 레벨 → (min_w, max_w, scale) 매핑 (10단계, 앵커 보간)
+    _DANBOORU_MAGNITUDE_TABLE = {
+        1:  {"min_weight": 0.88, "max_weight": 1.15, "scale": 0.15, "label": "미미"},
+        2:  {"min_weight": 0.84, "max_weight": 1.25, "scale": 0.25, "label": "미세"},
+        3:  {"min_weight": 0.80, "max_weight": 1.35, "scale": 0.35, "label": "약한"},
+        4:  {"min_weight": 0.75, "max_weight": 1.42, "scale": 0.42, "label": "보통"},
+        5:  {"min_weight": 0.70, "max_weight": 1.50, "scale": 0.50, "label": "중간"},
+        6:  {"min_weight": 0.62, "max_weight": 1.60, "scale": 0.60, "label": "강조"},
+        7:  {"min_weight": 0.55, "max_weight": 1.70, "scale": 0.70, "label": "강한"},
+        8:  {"min_weight": 0.50, "max_weight": 1.80, "scale": 0.80, "label": "적극"},
+        9:  {"min_weight": 0.45, "max_weight": 1.90, "scale": 0.90, "label": "공격"},
+        10: {"min_weight": 0.40, "max_weight": 2.00, "scale": 1.00, "label": "최대"},
+    }
+
+    def _get_danbooru_tag_counts(self) -> dict:
+        """Rating 조건부 태그 빈도 데이터 로드 + 전역 IDF 범위 사전 계산 (lazy, 1회만)"""
+        if self._danbooru_tag_counts is not None:
+            return self._danbooru_tag_counts
+        import math
+        path = Path(__file__).resolve().parent.parent / "data" / "danbooru_tag_counts_by_rating.json"
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        meta = data.pop("_meta")
+        self._danbooru_rating_totals = meta["total_posts"]  # [g, s, q, e]
+        self._danbooru_tag_counts = data  # {tag: [g, s, q, e]}
+
+        # 전역 IDF 범위 사전 계산 (정규화 기준)
+        global_total = sum(self._danbooru_rating_totals)
+        global_idfs = {}
+        for tag, counts in data.items():
+            gc = sum(counts)
+            if gc > 0:
+                global_idfs[tag] = -math.log2(gc / global_total)
+        self._danbooru_global_idfs = global_idfs
+        # 정규화 범위: 실용 태그 대역 (IDF 1~10) 으로 클리핑
+        self._danbooru_norm_low = self._danbooru_norm_low_default
+        self._danbooru_norm_high = self._danbooru_norm_high_default
+        self._danbooru_global_total = global_total
+        print(f"[Danbooru Auto-Weight] loaded {len(data):,} tags, "
+              f"norm range: {self._danbooru_norm_low}~{self._danbooru_norm_high}")
+        return self._danbooru_tag_counts
+
+    # Rating 보정 블렌드 비율 (0=전역만, 1=rating만)
+    _RATING_BLEND = 0.3
+
+    def _apply_danbooru_auto_weight(self, main_tags: list, context: PromptContext):
+        """전역 IDF + Rating 조건부 보정 블렌딩, 전역 범위 정규화 (main_tags in-place 수정)
+
+        blended_idf = global_idf + α * (rating_idf - global_idf)
+        norm = (blended_idf - global_min) / (global_max - global_min)   # 전역 범위 [0,1]
+        weight = 1.0 + scale * (2*norm - 1)
+        """
+        import math
+
+        try:
+            tag_counts = self._get_danbooru_tag_counts()
+        except Exception as e:
+            print(f"⚠️ Danbooru Auto-Weight: 태그 데이터 로드 실패 — {e}")
+            return
+
+        settings = self._danbooru_weight_settings
+        mag = settings.get("magnitude", 3)
+        mag_params = self._DANBOORU_MAGNITUDE_TABLE.get(mag, self._DANBOORU_MAGNITUDE_TABLE[3])
+        scale = mag_params["scale"]
+        min_w = mag_params["min_weight"]
+        max_w = mag_params["max_weight"]
+        is_nai = context.settings.get('api_mode') == 'NAI'
+        alpha = settings.get("rating_blend", self._RATING_BLEND)
+
+        # Rating 조건부: context에서 rating 추출
+        rating = context.settings.get('rating', 's')
+        if rating not in self._RATING_INDEX:
+            rating = 's'
+        ri = self._RATING_INDEX[rating]
+        rating_total = max(self._danbooru_rating_totals[ri], 1)
+
+        # 실용 대역 클리핑 정규화 범위 (IDF 1~10)
+        n_low = self._danbooru_norm_low
+        n_high = self._danbooru_norm_high
+        n_range = n_high - n_low
+
+        global_idfs = self._danbooru_global_idfs
+
+        # 1단계: 각 태그의 블렌딩 IDF 계산
+        blended_values = []
+        valid_count = 0
+        for tag in main_tags:
+            clean = tag.strip()
+            if clean in _PERSON_TAGS or clean not in tag_counts:
+                blended_values.append(None)
+                continue
+            # 전역 IDF
+            g_idf = global_idfs.get(clean)
+            if g_idf is None:
+                blended_values.append(None)
+                continue
+            # Rating 조건부 IDF
+            r_count = tag_counts[clean][ri]
+            if r_count > 0:
+                r_idf = -math.log2(r_count / rating_total)
+                blended = g_idf + alpha * (r_idf - g_idf)
+            else:
+                # 해당 rating에서 미출현 → 전역 IDF만 사용
+                blended = g_idf
+            blended_values.append(blended)
+            valid_count += 1
+
+        if valid_count < 3:
+            print(f"[Danbooru Auto-Weight] skipped (valid tags={valid_count} < 3)")
+            return
+
+        # 2단계: 전역 범위 정규화 → 가중치 계산 → 래핑
+        weighted_count = 0
+        for idx, tag in enumerate(main_tags):
+            bv = blended_values[idx]
+            if bv is None:
+                continue
+
+            norm = max(0.0, min(1.0, (bv - n_low) / n_range))
+            weight = 1.0 + scale * (2 * norm - 1)
+            weight = max(min_w, min(max_w, weight))
+
+            if abs(weight - 1.0) < 0.01:
+                continue
+
+            clean = tag.strip()
+            if is_nai:
+                main_tags[idx] = f"{weight:.2f}::{clean} ::"
+            else:
+                main_tags[idx] = f"({clean}:{weight:.2f})"
+            weighted_count += 1
+
+        print(f"[Danbooru Auto-Weight] {weighted_count}/{valid_count} tags weighted "
+              f"(rating={rating}, mag={mag} [{mag_params['label']}], {min_w}~{max_w})")
+
     def _run_e621_boost(self, context, input_tags: list, target_tags: list):
         """e621 추천을 실행하여 target_tags에 결과를 추가한다."""
         try:
@@ -572,11 +858,20 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3)
             print(f"[e621 DEBUG] results ({len(boost_results)}): {[(t, f'{s:.4f}', c) for t, s, c, src in boost_results]}")
             if boost_results:
-                _PERSON_TAGS = {"1boy","2boys","3boys","4boys","5boys","6+boys",
-                                "1girl","2girls","3girls","4girls","5girls","6+girls",
-                                "1other","2others","3others","4others","5others","6+others"}
+                # 숨김 태그 필터링
+                _hidden = set(self._e621_settings.get("hidden_tags", []))
                 boost_tags = [tag.replace("_", " ") for tag, score, cat, src in boost_results
-                              if tag not in _PERSON_TAGS]
+                              if tag not in _PERSON_TAGS and tag not in _hidden]
+                # 가중치 래핑
+                weight = self._e621_settings.get("weight", 0.0)
+                if boost_tags and weight != 0:
+                    is_nai = context.settings.get('api_mode') == 'NAI'
+                    if is_nai:
+                        boost_tags[0] = f"{weight}::" + boost_tags[0]
+                        boost_tags[-1] = boost_tags[-1] + " ::"
+                    else:
+                        boost_tags[0] = "(" + boost_tags[0]
+                        boost_tags[-1] = boost_tags[-1] + f":{weight})"
                 target_tags.extend(boost_tags)
                 context.metadata['e621_boost_tags'] = [
                     {"tag": tag, "score": score, "cat": cat, "src": src}
@@ -736,6 +1031,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             'artist': source_row.get('artist', ''),
             'id': source_row.get('id', ''),
         }
+        # Danbooru Auto-Weight (e621 boost 전에 적용)
+        _danbooru_weight_enabled = not skip_preprocessing and checkbox_options.get("danbooru_auto_weight")
+        if _danbooru_weight_enabled:
+            self._apply_danbooru_auto_weight(main_tags, context)
+
         # e621 Auto-Boost
         _e621_enabled = not skip_preprocessing and checkbox_options.get("e621_auto_boost")
         _is_wildcard_standalone = context.settings.get('wildcard_standalone', False)
@@ -2265,3 +2565,508 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             import traceback
             print(f"❌ 랜덤 프리셋 로드 실패: {e}")
             traceback.print_exc()
+
+
+class _E621SettingsWindow(QWidget):
+    """e621 Auto-Boost 사용자 설정 윈도우 (비모달)"""
+    settings_changed = pyqtSignal(dict)
+
+    def __init__(self, settings: dict, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("e621 Auto-Boost 설정")
+        self.resize(500, 400)
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QLineEdit, QTextEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px;
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+
+        # ── 가중치 섹션 ──
+        weight_label = QLabel("가중치 (0 = 비활성, 범위: -5.0 ~ 5.0)")
+        weight_label.setToolTip("e621 태그 묶음에 적용할 NovelAI 가중치\n예: 0.8 → 0.8::tag1, tag2, ..., tagN ::")
+        layout.addWidget(weight_label)
+
+        self._weight_edit = QLineEdit()
+        self._weight_edit.setPlaceholderText("예: 0.8")
+        self._weight_edit.setProperty("autocomplete_ignore", True)
+        validator = QDoubleValidator(-5.0, 5.0, 4, self)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self._weight_edit.setValidator(validator)
+        layout.addWidget(self._weight_edit)
+
+        # ── 숨김 태그 섹션 ──
+        hidden_label = QLabel("숨김 태그 (쉼표로 구분, 추천에서 제외)")
+        hidden_label.setToolTip("예: chastity device, gaping anus, magic user")
+        layout.addWidget(hidden_label)
+
+        self._hidden_edit = QTextEdit()
+        self._hidden_edit.setMinimumHeight(200)
+        self._hidden_edit.setProperty("autocomplete_ignore", True)
+        self._hidden_edit.setPlaceholderText("예: chastity device, gaping anus, magic user")
+        layout.addWidget(self._hidden_edit)
+
+        # ── 저장/닫기 버튼 (3:1) ──
+        btn_row = QHBoxLayout()
+        self._save_btn = QPushButton("저장")
+        self._save_btn.clicked.connect(self._save)
+        close_btn = QPushButton("닫기")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self._save_btn, 3)
+        btn_row.addWidget(close_btn, 1)
+        layout.addLayout(btn_row)
+
+        self.load_settings(settings)
+
+    def load_settings(self, settings: dict):
+        """설정을 UI에 반영 (언더바→공백으로 표시)"""
+        self._weight_edit.setText(str(settings.get("weight", 0.0)))
+        hidden_tags = settings.get("hidden_tags", [])
+        display_tags = [tag.replace("_", " ") for tag in hidden_tags]
+        self._hidden_edit.setPlainText(", ".join(display_tags) if display_tags else "")
+
+    def _save(self):
+        """저장 버튼 클릭 시 — 1초간 피드백"""
+        self.settings_changed.emit(self._collect())
+        self._save_btn.setText("저장됨!")
+        self._save_btn.setEnabled(False)
+        QTimer.singleShot(1000, lambda: (
+            self._save_btn.setText("저장"),
+            self._save_btn.setEnabled(True),
+        ))
+
+    def _collect(self) -> dict:
+        try:
+            weight = float(self._weight_edit.text().strip())
+            weight = max(-5.0, min(5.0, weight))
+        except ValueError:
+            weight = 0.0
+        # 쉼표/개행 split + strip, 공백→언더스코어, 빈 문자열 제거
+        import re
+        raw = self._hidden_edit.toPlainText()
+        hidden_tags = []
+        for tag in re.split(r'[,\n]+', raw):
+            tag = tag.strip().replace(" ", "_")
+            if tag and tag not in hidden_tags:
+                hidden_tags.append(tag)
+        return {"weight": weight, "hidden_tags": hidden_tags}
+
+    def closeEvent(self, event):
+        """닫을 때 자동 저장"""
+        self.settings_changed.emit(self._collect())
+        super().closeEvent(event)
+
+
+class _DanbooruWeightSettingsWindow(QWidget):
+    """Danbooru Auto-Weight 사용자 설정 윈도우 (비모달, 실시간 미리보기)"""
+    settings_changed = pyqtSignal(dict)
+
+    # 레이팅별 샘플 프롬프트 (다양한 빈도 대역 포함)
+    _SAMPLE_CASES = {
+        "e": ("Explicit", [
+            "breasts", "blush", "open mouth", "navel", "nipples",
+            "nude", "sweat", "spread legs", "sex", "cowgirl position",
+            "girl on top", "bed", "pillow", "on back", "tongue out",
+            "saliva", "cum", "fellatio", "onsen", "steam",
+        ]),
+        "s": ("Sensitive", [
+            "long hair", "blue eyes", "smile", "looking at viewer",
+            "school uniform", "thighhighs", "hair ornament", "ponytail",
+            "heterochromia", "pleated skirt", "wind", "cherry blossoms",
+            "umbrella", "lantern", "rooftop", "starry sky",
+        ]),
+        "q": ("Questionable", [
+            "breasts", "cleavage", "navel", "thighs", "midriff",
+            "swimsuit", "bikini", "wet", "ass", "sideboob",
+            "underboob", "side-tie bikini bottom", "see-through",
+            "cameltoe", "garter straps", "maid",
+        ]),
+        "g": ("General", [
+            "sky", "cloud", "smile", "sitting", "standing",
+            "tree", "flower", "grass", "no humans", "scenery",
+            "building", "sunset", "rain", "snow", "mountain",
+            "river", "lamp", "ruins",
+        ]),
+    }
+
+    def __init__(self, settings: dict, parent=None, module=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Danbooru Auto-Weight 설정")
+        self.resize(960, 580)
+        self._module = module  # PromptEngineeringModule 참조 (데이터 공유용)
+        self._tag_data = None  # fallback lazy
+        self._global_idfs = None
+        self._rating_totals = None
+
+        fs = get_scaled_font_size
+        ss = get_scaled_size
+
+        tab_style = f"""
+            QTabWidget::pane {{
+                border: 1px solid {DARK_COLORS['border']};
+                background-color: {DARK_COLORS['bg_secondary']};
+            }}
+            QTabBar::tab {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 5px 14px;
+                font-size: {fs(17)}px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+                border-bottom: 2px solid #B2DFDB;
+            }}
+        """
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+                font-size: {fs(17)}px;
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {fs(17)}px;
+            }}
+            QLineEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 5px;
+                font-size: {fs(18)}px;
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 6px 14px;
+                font-size: {fs(17)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+            {tab_style}
+        """)
+
+        hint_style = f"color: #FFFACD; font-size: {fs(16)}px; margin-bottom: 2px;"
+        mag_table = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE
+
+        # ── 메인 레이아웃: 좌측 설정 | 우측 미리보기 ──
+        root = QHBoxLayout(self)
+        root.setSpacing(ss(14))
+
+        # ━━━ 좌측: 설정 패널 ━━━
+        left = QVBoxLayout()
+        left.setSpacing(ss(8))
+
+        left.addWidget(QLabel("가중치 강도"))
+
+        # < [2단계 - 보통] > 컨트롤
+        mag_row = QHBoxLayout()
+        mag_row.setSpacing(ss(6))
+        step_btn_style = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: #B2DFDB;
+                border: 1px solid #B2DFDB;
+                border-radius: 4px;
+                font-size: {fs(22)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """
+        self._mag_down = QPushButton("\u25C0")
+        self._mag_down.setFixedSize(ss(44), ss(44))
+        self._mag_down.setStyleSheet(step_btn_style)
+        self._mag_down.clicked.connect(lambda: self._step_magnitude(-1))
+        mag_row.addWidget(self._mag_down)
+
+        self._mag_label = QLabel("")
+        self._mag_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mag_label.setStyleSheet(f"""
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            padding: 8px;
+            font-size: {fs(20)}px;
+            font-weight: bold;
+        """)
+        mag_row.addWidget(self._mag_label, 1)
+
+        self._mag_up = QPushButton("\u25B6")
+        self._mag_up.setFixedSize(ss(44), ss(44))
+        self._mag_up.setStyleSheet(step_btn_style)
+        self._mag_up.clicked.connect(lambda: self._step_magnitude(1))
+        mag_row.addWidget(self._mag_up)
+        left.addLayout(mag_row)
+
+        # 현재 레벨 설명
+        self._mag_desc = QLabel("")
+        self._mag_desc.setStyleSheet(hint_style)
+        self._mag_desc.setWordWrap(True)
+        self._mag_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left.addWidget(self._mag_desc)
+
+        left.addSpacing(ss(10))
+
+        # ── 전문가 설정: Rating 블렌드 ──
+        sep2 = QWidget()
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
+        left.addWidget(sep2)
+        left.addSpacing(ss(6))
+
+        blend_title = QLabel("Rating 블렌드 (전문가)")
+        blend_title.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {fs(15)}px;")
+        left.addWidget(blend_title)
+
+        blend_row = QHBoxLayout()
+        blend_row.setSpacing(ss(6))
+        self._blend_down = QPushButton("\u25C0")
+        self._blend_down.setFixedSize(ss(36), ss(32))
+        self._blend_down.setStyleSheet(step_btn_style)
+        self._blend_down.clicked.connect(lambda: self._step_blend(-0.1))
+        blend_row.addWidget(self._blend_down)
+
+        self._blend_label = QLabel("")
+        self._blend_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._blend_label.setStyleSheet(f"""
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 3px;
+            padding: 4px;
+            font-size: {fs(17)}px;
+        """)
+        blend_row.addWidget(self._blend_label, 1)
+
+        self._blend_up = QPushButton("\u25B6")
+        self._blend_up.setFixedSize(ss(36), ss(32))
+        self._blend_up.setStyleSheet(step_btn_style)
+        self._blend_up.clicked.connect(lambda: self._step_blend(0.1))
+        blend_row.addWidget(self._blend_up)
+        left.addLayout(blend_row)
+
+        blend_hint = QLabel("0.0 = 전역만, 0.3 = 기본, 0.5+ = rating 강하게 반영")
+        blend_hint.setStyleSheet(f"color: #FFFACD; font-size: {fs(14)}px;")
+        blend_hint.setWordWrap(True)
+        left.addWidget(blend_hint)
+
+        left.addStretch()
+
+        # 저장/닫기
+        btn_row = QHBoxLayout()
+        self._save_btn = QPushButton("저장")
+        self._save_btn.clicked.connect(self._save)
+        close_btn = QPushButton("닫기")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self._save_btn, 3)
+        btn_row.addWidget(close_btn, 1)
+        left.addLayout(btn_row)
+
+        root.addLayout(left, 2)
+
+        # ━━━ 구분선 ━━━
+        sep = QWidget()
+        sep.setFixedWidth(1)
+        sep.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
+        root.addWidget(sep)
+
+        # ━━━ 우측: 탭 미리보기 패널 ━━━
+        right = QVBoxLayout()
+        right.setSpacing(ss(4))
+
+        self._tab_widget = QTabWidget()
+        self._preview_tabs = {}
+        preview_font_style = f"""
+            QTextEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                padding: 8px;
+                font-family: 'Consolas', 'D2Coding', monospace;
+                font-size: {fs(17)}px;
+                line-height: 1.4;
+            }}
+        """
+        for rating in ["e", "s", "q", "g"]:
+            label, _ = self._SAMPLE_CASES[rating]
+            te = QTextEdit()
+            te.setReadOnly(True)
+            te.setProperty("autocomplete_ignore", True)
+            te.setStyleSheet(preview_font_style)
+            self._preview_tabs[rating] = te
+            self._tab_widget.addTab(te, f"{label} ({rating})")
+        right.addWidget(self._tab_widget)
+
+        root.addLayout(right, 4)
+
+        # 초기값 설정 + 미리보기 갱신
+        self._magnitude = settings.get("magnitude", 3)
+        self._blend = settings.get("rating_blend", 0.3)
+        self._update_mag_display()
+        self._update_blend_display()
+        self._update_preview()
+
+    def _ensure_tag_data(self):
+        """미리보기용 태그 데이터 — 모듈 캐시 공유, 없으면 자체 로드"""
+        if self._tag_data is not None:
+            return
+        # 모듈이 이미 로드한 데이터가 있으면 공유
+        if self._module and self._module._danbooru_tag_counts is not None:
+            self._tag_data = self._module._danbooru_tag_counts
+            self._global_idfs = self._module._danbooru_global_idfs
+            self._rating_totals = self._module._danbooru_rating_totals
+            return
+        # 모듈 데이터 없으면 자체 로드 (설정 윈도우 단독 오픈 시)
+        import math
+        path = Path(__file__).resolve().parent.parent / "data" / "danbooru_tag_counts_by_rating.json"
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            meta = data.pop("_meta")
+            self._rating_totals = meta["total_posts"]
+            self._tag_data = data
+            global_total = sum(self._rating_totals)
+            self._global_idfs = {}
+            for tag, counts in data.items():
+                gc = sum(counts)
+                if gc > 0:
+                    self._global_idfs[tag] = -math.log2(gc / global_total)
+        except Exception:
+            self._tag_data = {}
+            self._global_idfs = {}
+            self._rating_totals = [1, 1, 1, 1]
+
+    def _step_magnitude(self, delta):
+        """magnitude 증감"""
+        self._magnitude = max(1, min(10, self._magnitude + delta))
+        self._update_mag_display()
+        self._update_preview()
+
+    def _step_blend(self, delta):
+        """rating blend 증감"""
+        self._blend = round(max(0.0, min(1.0, self._blend + delta)), 1)
+        self._update_blend_display()
+        self._update_preview()
+
+    def _update_blend_display(self):
+        """blend 라벨 갱신"""
+        self._blend_label.setText(f"\u03B1 = {self._blend:.1f}")
+        self._blend_down.setEnabled(self._blend > 0.0)
+        self._blend_up.setEnabled(self._blend < 1.0)
+
+    def _update_mag_display(self):
+        """magnitude 라벨/설명 갱신"""
+        mag = self._magnitude
+        params = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE.get(mag, {})
+        label = params.get("label", "?")
+        min_w = params.get("min_weight", 0)
+        max_w = params.get("max_weight", 0)
+        self._mag_label.setText(f"{mag}단계 — {label}")
+        self._mag_desc.setText(f"흔한 태그 {min_w} ~ 희귀 태그 {max_w}")
+        # 경계에서 버튼 비활성
+        self._mag_down.setEnabled(mag > 1)
+        self._mag_up.setEnabled(mag < 10)
+
+    def _calc_weight(self, tag, rating, scale, min_w, max_w):
+        """단일 태그의 가중치 계산 — PromptEngineeringModule과 동일 공식"""
+        import math
+        if not self._global_idfs or tag not in self._global_idfs:
+            return None
+        g_idf = self._global_idfs[tag]
+        ri = PromptEngineeringModule._RATING_INDEX[rating]
+        r_total = max(self._rating_totals[ri], 1)
+        r_count = self._tag_data[tag][ri]
+        alpha = self._blend
+        n_low = PromptEngineeringModule._danbooru_norm_low_default
+        n_high = PromptEngineeringModule._danbooru_norm_high_default
+        if r_count > 0:
+            r_idf = -math.log2(r_count / r_total)
+            blended = g_idf + alpha * (r_idf - g_idf)
+        else:
+            blended = g_idf
+        norm = max(0.0, min(1.0, (blended - n_low) / (n_high - n_low)))
+        weight = 1.0 + scale * (2 * norm - 1)
+        return max(min_w, min(max_w, weight))
+
+    def _update_preview(self):
+        """현재 설정으로 각 탭의 샘플 미리보기 갱신"""
+        self._ensure_tag_data()
+        params = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE.get(self._magnitude, {})
+        scale = params.get("scale", 0.35)
+        min_w = params.get("min_weight", 0.8)
+        max_w = params.get("max_weight", 1.3)
+
+        for rating, te in self._preview_tabs.items():
+            _, tags = self._SAMPLE_CASES[rating]
+            results = []
+            for tag in tags:
+                w = self._calc_weight(tag, rating, scale, min_w, max_w)
+                if w is not None:
+                    results.append((tag, w))
+            results.sort(key=lambda x: x[1])
+
+            lines = []
+            max_bar = 12  # 최대 바 길이 (문자 수)
+            if results:
+                w_lo = min(w for _, w in results)
+                w_hi = max(w for _, w in results)
+                w_range = w_hi - w_lo if w_hi > w_lo else 1.0
+                for tag, w in results:
+                    bar_len = int((w - w_lo) / w_range * max_bar)
+                    bar = "\u2588" * bar_len
+                    lines.append(f"  {tag:25s} {w:.2f} {bar}")
+                lines.append("")
+                lines.append(f"  spread: {w_hi - w_lo:.2f}")
+            te.setPlainText("\n".join(lines))
+
+    def _current_settings(self) -> dict:
+        return {"magnitude": self._magnitude, "rating_blend": self._blend}
+
+    def load_settings(self, settings: dict):
+        self._magnitude = settings.get("magnitude", 3)
+        self._blend = settings.get("rating_blend", 0.3)
+        self._update_mag_display()
+        self._update_blend_display()
+        self._update_preview()
+
+    def _save(self):
+        self.settings_changed.emit(self._current_settings())
+        self._save_btn.setText("저장됨!")
+        self._save_btn.setEnabled(False)
+        QTimer.singleShot(1000, lambda: (
+            self._save_btn.setText("저장"),
+            self._save_btn.setEnabled(True),
+        ))
+
+    def closeEvent(self, event):
+        self.settings_changed.emit(self._current_settings())
+        super().closeEvent(event)

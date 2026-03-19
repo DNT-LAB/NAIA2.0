@@ -1037,6 +1037,15 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             return context
         context.metadata.pop('_danbooru_weight_deferred')
         if context.prefix_tags:
+            # __wildcard__ 전개 결과가 'tag1, tag2, tag3' 형태의 단일 문자열일 수 있음
+            # 개별 태그로 분리하여 in-place 교체
+            flat_tags = []
+            for tag in context.prefix_tags:
+                if ',' in tag:
+                    flat_tags.extend(t.strip() for t in tag.split(',') if t.strip())
+                else:
+                    flat_tags.append(tag)
+            context.prefix_tags[:] = flat_tags
             print(f"[Danbooru Auto-Weight] after_wildcard: applying to {len(context.prefix_tags)} prefix_tags")
             self._apply_danbooru_auto_weight(context.prefix_tags, context)
         return context

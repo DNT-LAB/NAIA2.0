@@ -2648,8 +2648,8 @@ class _E621SettingsWindow(QWidget):
                 val = 0.0
             val = round(max(-5.0, min(5.0, val + delta)), 2)
             self._weight_edit.setText(str(val))
-        btn_l.clicked.connect(lambda: _step_weight(-0.1))
-        btn_r.clicked.connect(lambda: _step_weight(0.1))
+        btn_l.clicked.connect(lambda: _step_weight(-0.05))
+        btn_r.clicked.connect(lambda: _step_weight(0.05))
         weight_row.addWidget(btn_l)
         weight_row.addWidget(self._weight_edit, 1)
         weight_row.addWidget(btn_r)

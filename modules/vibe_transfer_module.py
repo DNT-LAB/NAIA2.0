@@ -23,27 +23,54 @@ from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
+def _get_current_model_from_context(app_context) -> str:
+    """AppContext에서 현재 선택된 모델명을 반환하는 공용 헬퍼"""
+    try:
+        if hasattr(app_context, 'main_window') and hasattr(app_context.main_window, 'model_combo'):
+            current_text = app_context.main_window.model_combo.currentText()
+            return current_text.replace("/", "_").replace("\\", "_").replace(":", "").replace(
+                "*", "").replace("?", "").replace('"', "").replace("<", "").replace(">", "").replace("|", "")
+    except Exception as e:
+        print(f"Failed to get current model: {e}")
+    return "default"
+
+
+def _is_naid3_model_from_context(app_context) -> bool:
+    """현재 모델이 NAID3인지 확인하는 공용 헬퍼"""
+    return "NAID3" in _get_current_model_from_context(app_context)
+
+
 class VibeEncodingWorker(QThread):
     """Background worker for vibe encoding API calls"""
     encoding_finished = pyqtSignal(bool, str, dict)  # success, message, result
-    
-    def __init__(self, image_data: str, info_extracted: float, access_token: str):
+
+    # 모델명 → API 모델 ID 매핑
+    MODEL_API_MAP = {
+        'NAID4.5F': 'nai-diffusion-4-5-full',
+        'NAID4.5C': 'nai-diffusion-4-5-curated',
+        'NAID4.0F': 'nai-diffusion-4-full',
+        'NAID4.0C': 'nai-diffusion-4-curated',
+    }
+    DEFAULT_MODEL = 'nai-diffusion-4-5-full'
+
+    def __init__(self, image_data: str, info_extracted: float, access_token: str, model: str = None):
         super().__init__()
         self.image_data = image_data
         self.info_extracted = info_extracted
         self.access_token = access_token
-        
+        self.api_model = self.MODEL_API_MAP.get(model, self.DEFAULT_MODEL)
+
     def run(self):
         try:
             headers = {
                 "Authorization": f"Bearer {self.access_token}",
                 "Content-Type": "application/json"
             }
-            
+
             data = {
                 "image": self.image_data,
                 "information_extracted": self.info_extracted,
-                "model": "nai-diffusion-4-5-full"
+                "model": self.api_model
             }
             
             response = requests.post(
@@ -140,22 +167,11 @@ class VibeTransferFrame(QFrame):
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
         
     def _get_current_model(self) -> str:
-        """Get the current model from main window's model combo"""
-        try:
-            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'model_combo'):
-                current_text = self.app_context.main_window.model_combo.currentText()
-                # Keep dots for model names like NAID4.5F, only remove unsafe file system characters
-                sanitized = current_text.replace("/", "_").replace("\\", "_").replace(":", "").replace("*", "").replace("?", "").replace('"', "").replace("<", "").replace(">", "").replace("|", "")
-                return sanitized
-        except Exception as e:
-            print(f"Failed to get current model: {e}")
-        return "default"
-    
+        return _get_current_model_from_context(self.app_context)
+
     def _is_naid3_model(self) -> bool:
-        """Check if current model is NAID3"""
-        model = self._get_current_model()
-        return "NAID3" in model
-    
+        return _is_naid3_model_from_context(self.app_context)
+
     def _save_naid3_encoding(self):
         """Save NAID3 encoding with image data as the encoding value"""
         # For NAID3, use image data itself as encoding
@@ -417,6 +433,7 @@ class VibeTransferFrame(QFrame):
         self.ref_strength_slider.valueChanged.connect(
             lambda v: self._update_ref_strength(v / 100.0)
         )
+        self.ref_strength_slider.wheelEvent = lambda e: e.ignore()
         controls_layout.addWidget(self.ref_strength_slider)
         
         # Information Extracted (hide for no_image frames)
@@ -434,6 +451,7 @@ class VibeTransferFrame(QFrame):
             self.info_extracted_slider.valueChanged.connect(
                 lambda v: self._update_info_extracted(v / 100.0)
             )
+            self.info_extracted_slider.wheelEvent = lambda e: e.ignore()
             controls_layout.addWidget(self.info_extracted_slider)
         
         # Encoding status (hide for NAID3 and no_image)
@@ -557,18 +575,22 @@ class VibeTransferFrame(QFrame):
                 self.current_vibe_label.setVisible(True)
             return
             
-        # Check if current Information Extracted value matches an encoded value
-        current_value_exists = self.information_extracted in self.vibe_encodings
-        
+        # 부동소수점 직접 비교 대신 가장 가까운 키와의 거리로 판단
+        if self.vibe_encodings:
+            closest_key = min(self.vibe_encodings.keys(),
+                              key=lambda k: abs(k - self.information_extracted))
+            current_value_exists = abs(closest_key - self.information_extracted) < 1e-9
+        else:
+            closest_key = None
+            current_value_exists = False
+
         # Update encode button visibility
         self.encode_btn.setVisible(not current_value_exists)
-        
+
         # Update current vibe encoding label
-        if current_value_exists and self.vibe_encodings:
-            # Find the encoding string for the current value
-            encoding_string = self.vibe_encodings[self.information_extracted]
+        if current_value_exists and closest_key is not None:
+            encoding_string = self.vibe_encodings[closest_key]
             if encoding_string:
-                # Display the first 8 characters of the encoding
                 display_text = encoding_string[:8] if len(encoding_string) >= 8 else encoding_string
                 self.current_vibe_label.setText(display_text)
                 self.current_vibe_label.setVisible(True)
@@ -1075,16 +1097,7 @@ class VibeStorageWindow(QDialog):
         grid_layout.setColumnStretch(max_cols, 1)
     
     def _get_current_model(self) -> str:
-        """Get the current model from main window's model combo"""
-        try:
-            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'model_combo'):
-                current_text = self.app_context.main_window.model_combo.currentText()
-                # Keep dots for model names like NAID4.5F, only remove unsafe file system characters
-                sanitized = current_text.replace("/", "_").replace("\\", "_").replace(":", "").replace("*", "").replace("?", "").replace('"', "").replace("<", "").replace(">", "").replace("|", "")
-                return sanitized
-        except Exception as e:
-            print(f"Failed to get current model: {e}")
-        return "default"
+        return _get_current_model_from_context(self.app_context)
 
 
 class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
@@ -1107,6 +1120,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         self.vibe_frames: List[VibeTransferFrame] = []
         self.normalize_strength = False
         self.encoding_worker = None
+        self._encoding_target_frame: Optional[VibeTransferFrame] = None
         
         # UI references
         self.scroll_layout: QVBoxLayout = None
@@ -1167,15 +1181,21 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             "normalize_strength": self.normalize_checkbox.isChecked() if self.normalize_checkbox else False,
             "vibe_frames": []
         }
-        
+
         for frame in self.vibe_frames:
-            settings["vibe_frames"].append({
+            entry = {
                 "file_path": frame.file_path,
                 "reference_strength": frame.reference_strength,
                 "information_extracted": frame.information_extracted,
-                "is_enabled": frame.is_enabled
-            })
-            
+                "is_enabled": frame.is_enabled,
+                "is_no_image": frame.is_no_image,
+            }
+            if frame.is_no_image:
+                # 가상 경로는 파일이 없으므로 인코딩 데이터를 직접 저장
+                entry["vibe_encodings"] = {str(k): v for k, v in frame.vibe_encodings.items()}
+                entry["target_model"] = frame.target_model
+            settings["vibe_frames"].append(entry)
+
         return settings
         
     def apply_settings(self, settings: Dict[str, Any]):
@@ -1186,21 +1206,43 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         # Clear existing frames
         for frame in self.vibe_frames[:]:
             self._remove_frame(frame)
-            
+
         # Restore frames
         for frame_data in settings.get("vibe_frames", []):
-            if os.path.exists(frame_data["file_path"]):
+            is_no_image = frame_data.get("is_no_image", False)
+
+            if is_no_image:
+                # no_image 프레임: 저장된 인코딩 데이터로 직접 복원
+                saved_encodings = frame_data.get("vibe_encodings", {})
+                if not saved_encodings:
+                    continue
+                file_path = frame_data.get("file_path", "")
+                per_hash = hashlib.sha256(file_path.encode()).hexdigest()[:16]
+                no_image_path = f"no_image_restored_{per_hash}"
+                per_vibe_data = {
+                    'reference_image_multiple': list(saved_encodings.values()),
+                    'reference_strength_multiple': [frame_data.get("reference_strength", 0.6)],
+                    'reference_information_extracted_multiple': [float(k) for k in saved_encodings.keys()],
+                    'source_model': frame_data.get("target_model", self._get_current_model()),
+                }
+                frame = self._add_vibe_frame_from_metadata(no_image_path, per_vibe_data)
+                if frame:
+                    frame.is_enabled = frame_data.get("is_enabled", True)
+                    frame.enable_check.setChecked(frame.is_enabled)
+            else:
+                if not os.path.exists(frame_data["file_path"]):
+                    continue
                 frame = self._add_vibe_frame(frame_data["file_path"])
                 if frame:
                     frame.reference_strength = frame_data.get("reference_strength", 0.6)
                     frame.information_extracted = frame_data.get("information_extracted", 1.0)
                     frame.is_enabled = frame_data.get("is_enabled", True)
-                    
+
                     # Update UI
                     frame.ref_strength_slider.setValue(int(frame.reference_strength * 100))
                     frame.info_extracted_slider.setValue(int(frame.information_extracted * 100))
                     frame.enable_check.setChecked(frame.is_enabled)
-                    
+
                     # Update labels
                     frame.ref_strength_label.setText(f"Reference Strength {frame.reference_strength:.2f}")
                     frame.info_extracted_label.setText(f"Information Extracted {frame.information_extracted:.2f}")
@@ -1325,13 +1367,21 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         if mimedata.hasImage():
             image = mimedata.imageData()
             if image:
-                # Save clipboard image temporarily
-                temp_path = Path("temp") / f"clipboard_vibe_{hashlib.sha256(str(image).encode()).hexdigest()[:8]}.png"
+                # 픽셀 데이터 기반으로 안정적인 해시 계산
+                from PyQt6.QtCore import QBuffer, QIODevice
+                buf = QBuffer()
+                buf.open(QIODevice.OpenModeFlag.WriteOnly)
+                QPixmap(image).save(buf, "PNG")
+                img_bytes = buf.data().data()
+                img_hash = hashlib.sha256(img_bytes).hexdigest()[:8]
+
+                temp_path = Path("temp") / f"clipboard_vibe_{img_hash}.png"
                 temp_path.parent.mkdir(exist_ok=True)
-                
-                pixmap = QPixmap(image)
-                pixmap.save(str(temp_path))
-                
+
+                if not temp_path.exists():
+                    with open(str(temp_path), 'wb') as f:
+                        f.write(img_bytes)
+
                 self._add_vibe_frame(str(temp_path))
         else:
             QMessageBox.warning(self.widget, "Warning", "No image found in clipboard")
@@ -1450,6 +1500,14 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                         imported_any = True
             
             # Add frame if any encodings were imported
+            # Extract importInfo.strength if present
+            import_strength = None
+            import_info = vibe_data.get('importInfo')
+            if isinstance(import_info, dict):
+                s = import_info.get('strength')
+                if s is not None:
+                    import_strength = float(s)
+
             if imported_any and image_path:
                 # Check if this is a no_image case
                 is_no_image = "no_image_" in image_path
@@ -1503,7 +1561,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     current_model = self._get_current_model()
                     vibe_folder = Path("save/vibe_transfer") / current_model
                     json_file = vibe_folder / f"{file_hash}.json"
-                    
+
                     if json_file.exists():
                         with open(json_file, 'r', encoding='utf-8') as f:
                             data = json.load(f)
@@ -1513,7 +1571,13 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                         if not is_no_image:
                             frame._update_encoding_status()
                             frame._update_encode_button_visibility()
-                
+
+                    # Apply importInfo.strength if available
+                    if import_strength is not None:
+                        frame.reference_strength = import_strength
+                        frame.ref_strength_slider.setValue(int(import_strength * 100))
+                        frame.ref_strength_label.setText(f"Reference Strength {import_strength:.2f}")
+
                 return True
                 
             return False
@@ -1564,9 +1628,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             print(f"Error saving imported vibe: {e}")
             
     def _is_naid3_model(self) -> bool:
-        """Check if current model is NAID3"""
-        model = self._get_current_model()
-        return "NAID3" in model
+        return _is_naid3_model_from_context(self.app_context)
     
     def _add_vibe_frame(self, file_path: str) -> Optional[VibeTransferFrame]:
         """Add a new vibe transfer frame"""
@@ -1665,10 +1727,9 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     if i < len(ref_img_multiple):
                         frame.vibe_encodings[float(ie_value)] = ref_img_multiple[i]
             else:
-                # Default: use 1.0 as key for all encodings (non-NAID3 compatible)
-                for i, encoding in enumerate(ref_img_multiple):
+                # Default: use 1.0 as key (non-NAID3 models)
+                for encoding in ref_img_multiple:
                     frame.vibe_encodings[1.0] = encoding
-                    break  # Only use the first encoding with key 1.0
 
             # Mark this as a no_image frame by setting special properties
             frame.file_name = no_image_path
@@ -1741,10 +1802,15 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                         frame.vibe_encodings[float(ie_value)] = encoding
             else:
                 # Default: use 1.0 as key for all encodings (non-NAID3 models)
-                # The actual encoding values in reference_image_multiple are what matter
-                for i, encoding in enumerate(ref_img_multiple):
+                for encoding in ref_img_multiple:
                     frame.vibe_encodings[1.0] = encoding
-                    break  # Only use the first encoding with key 1.0
+
+            # Apply reference_strength if provided
+            if ref_str_multiple:
+                strength = float(ref_str_multiple[0])
+                frame.reference_strength = strength
+                frame.ref_strength_slider.setValue(int(strength * 100))
+                frame.ref_strength_label.setText(f"Reference Strength {strength:.2f}")
 
             # Mark this as a no_image frame by setting special properties
             frame.file_name = no_image_path
@@ -1778,17 +1844,8 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         return hash_sha256.hexdigest()[:16]
     
     def _get_current_model(self) -> str:
-        """Get the current model from main window's model combo"""
-        try:
-            if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'model_combo'):
-                current_text = self.app_context.main_window.model_combo.currentText()
-                # Keep dots for model names like NAID4.5F, only remove unsafe file system characters
-                sanitized = current_text.replace("/", "_").replace("\\", "_").replace(":", "").replace("*", "").replace("?", "").replace('"', "").replace("<", "").replace(">", "").replace("|", "")
-                return sanitized
-        except Exception as e:
-            print(f"Failed to get current model: {e}")
-        return "default"
-            
+        return _get_current_model_from_context(self.app_context)
+
     def _remove_frame(self, frame: VibeTransferFrame):
         """Remove a vibe frame and clean up volatile files if needed"""
         if frame in self.vibe_frames:
@@ -1827,33 +1884,40 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         self.encoding_worker = VibeEncodingWorker(
             frame.image_data,
             info_extracted,
-            self.app_context.secure_token_manager.get_token('nai_token')
+            self.app_context.secure_token_manager.get_token('nai_token'),
+            self._get_current_model()
         )
         
-        self.encoding_worker.encoding_finished.connect(
-            lambda success, msg, result: self._on_encoding_finished(success, msg, result, frame)
-        )
-        
+        self._encoding_target_frame = frame
+        self.encoding_worker.encoding_finished.connect(self._on_encoding_finished)
+
         frame.encode_btn.setEnabled(False)
         frame.encode_btn.setText("⏳...")
         self.encoding_worker.start()
-        
-    def _on_encoding_finished(self, success: bool, message: str, result: dict, frame: VibeTransferFrame):
+
+    def _on_encoding_finished(self, success: bool, message: str, result: dict):
         """Handle encoding completion"""
+        # Clean up worker first
+        if self.encoding_worker:
+            self.encoding_worker.deleteLater()
+            self.encoding_worker = None
+
+        frame = self._encoding_target_frame
+        self._encoding_target_frame = None
+
+        # 프레임이 이미 삭제된 경우 무시
+        if frame not in self.vibe_frames:
+            return
+
         frame.encode_btn.setEnabled(True)
         frame.encode_btn.setText("Encode:2")
-        
+
         if success and result:
             for info_str, encoded_data in result.items():
                 frame.add_encoding(float(info_str), encoded_data)
             QMessageBox.information(self.widget, "Success", "Vibe encoding completed successfully")
         else:
             QMessageBox.critical(self.widget, "Error", message)
-            
-        # Clean up worker
-        if self.encoding_worker:
-            self.encoding_worker.deleteLater()
-            self.encoding_worker = None
             
     def _on_model_changed(self):
         """Handle model combo changes"""
@@ -1979,6 +2043,9 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             # Check if this vibe is already loaded
             for frame in self.vibe_frames:
                 if frame.file_hash == file_hash:
+                    # no_image 프레임은 슬라이더가 없으므로 스킵
+                    if frame.is_no_image:
+                        return
                     # If already loaded, just update the slider value
                     frame.info_extracted_slider.setValue(int(selected_encoding * 100))
                     frame.information_extracted = selected_encoding
@@ -2086,30 +2153,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         return result
     
     def get_parameters(self) -> dict:
-        """Get parameters for generation"""
-        vibes = []
-        
-        for frame in self.vibe_frames:
-            vibe_data = frame.get_vibe_data()
-            if vibe_data:
-                vibes.append(vibe_data)
-                
-        if not vibes:
-            return {}
-            
-        # Normalize reference strength values if enabled
-        if self.normalize_checkbox and self.normalize_checkbox.isChecked() and len(vibes) > 1:
-            total_strength = sum(v["reference_strength"] for v in vibes)
-            for vibe in vibes:
-                vibe["reference_strength"] = vibe["reference_strength"] / total_strength
-                
-        return {
-            "vibe_transfer": {
-                "enabled": True,
-                "vibes": vibes,
-                "normalized": self.normalize_checkbox.isChecked() if self.normalize_checkbox else False
-            }
-        }
+        # Vibe Transfer 데이터는 api_service.py의 LateBinding에서
+        # get_vibe_transfer_multiple_data()로 직접 수집됨.
+        # generation_controller.py의 EarlyBinding은 top-level 'reference_image_multiple' 키를
+        # 기대하므로 이 포맷("vibe_transfer" 래핑)과 호환되지 않아 항상 miss.
+        # 정규화는 get_vibe_transfer_multiple_data() 내부에서만 수행.
+        return {}
     
     def _load_volatile_tracking(self):
         """Load volatile file tracking from disk"""

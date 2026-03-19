@@ -1083,28 +1083,32 @@ class MetadataViewerWindow(QDialog):
                 return
             
             # vibe 데이터 추출
-            vibe_data = {
-                'normalize_reference_strength_multiple': self.metadata.get('normalize_reference_strength_multiple'),
-                'reference_image_multiple': self.metadata.get('reference_image_multiple'),
-                'reference_strength_multiple': self.metadata.get('reference_strength_multiple'),
-                'reference_information_extracted_multiple': self.metadata.get('reference_information_extracted_multiple'),
-                'source_model': self._get_model_compatibility()  # Add the model info
-            }
-            
-            # _no_image 모드로 vibe frame 추가
             import hashlib
-            from pathlib import Path
-            
-            # 고유한 ID 생성
-            data_hash = hashlib.sha256(str(vibe_data).encode()).hexdigest()[:16]
-            
-            # no_image 파일 경로 생성 (실제 파일은 없음)
-            no_image_path = f"no_image_metadata_{data_hash}"
-            
-            # vibe module에 직접 프레임 추가
-            vibe_module._add_vibe_frame_from_metadata(no_image_path, vibe_data)
-            
-            QMessageBox.information(self, "성공", "Vibe Transfer 데이터가 복원되었습니다.")
+            ref_img_multiple = self.metadata.get('reference_image_multiple') or []
+            ref_str_multiple = self.metadata.get('reference_strength_multiple') or []
+            ref_ie_multiple  = self.metadata.get('reference_information_extracted_multiple') or []
+            source_model = self._get_model_compatibility()
+
+            if not ref_img_multiple:
+                QMessageBox.warning(self, "경고", "Metadata에 유효한 Vibe Transfer 데이터가 없습니다.")
+                return
+
+            # reference_image_multiple의 각 항목 = 독립적인 vibe 1개 → 프레임 1개씩 생성
+            added_count = 0
+            for i, encoding in enumerate(ref_img_multiple):
+                per_vibe_data = {
+                    'reference_image_multiple': [encoding],
+                    'reference_strength_multiple': [ref_str_multiple[i]] if i < len(ref_str_multiple) else [0.6],
+                    'reference_information_extracted_multiple': [ref_ie_multiple[i]] if i < len(ref_ie_multiple) else [],
+                    'source_model': source_model,
+                }
+                per_hash = hashlib.sha256(encoding.encode()).hexdigest()[:16]
+                no_image_path = f"no_image_metadata_{per_hash}"
+                frame = vibe_module._add_vibe_frame_from_metadata(no_image_path, per_vibe_data)
+                if frame:
+                    added_count += 1
+
+            QMessageBox.information(self, "성공", f"Vibe Transfer {added_count}개가 복원되었습니다.")
             
         except Exception as e:
             print(f"Error restoring vibe transfer: {e}")

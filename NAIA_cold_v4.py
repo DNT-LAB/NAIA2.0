@@ -828,8 +828,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 156b"
-        self.setWindowTitle(self.base_title + " - 260314")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 157"
+        self.setWindowTitle(self.base_title + " - 260319")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -5613,9 +5613,12 @@ class ModernMainWindow(QMainWindow):
         text = self.main_prompt_textedit.toPlainText()
         tag_under_cursor, start_pos, end_pos = self._get_tag_at_cursor(cursor)
 
+        # 가중치 래핑 구문 제거 (NAI: '0.89::tag ::', A1111: '(tag:1.2)')
+        lookup_tag = self._strip_weight_syntax_for_lookup(tag_under_cursor) if tag_under_cursor else ''
+
         # --- 2. Parquet 데이터 조회 및 커스텀 메뉴 생성 ---
-        if not self.kr_tags_df.empty and tag_under_cursor:
-            matching_rows = self.kr_tags_df[self.kr_tags_df['tag'] == tag_under_cursor]
+        if not self.kr_tags_df.empty and lookup_tag:
+            matching_rows = self.kr_tags_df[self.kr_tags_df['tag'] == lookup_tag]
 
             if not matching_rows.empty:
                 data = matching_rows.iloc[0]
@@ -5677,9 +5680,9 @@ class ModernMainWindow(QMainWindow):
                 menu.addSeparator()
 
         # --- 3. e621 KR_tags 데이터 조회 ---
-        if not self.e621_kr_tags_df.empty and tag_under_cursor:
+        if not self.e621_kr_tags_df.empty and lookup_tag:
             # e621 태그는 underscore 형식이므로 space→underscore 변환
-            e621_key = tag_under_cursor.replace(' ', '_')
+            e621_key = lookup_tag.replace(' ', '_')
             e621_rows = self.e621_kr_tags_df[self.e621_kr_tags_df['tag'] == e621_key]
 
             if not e621_rows.empty:
@@ -5760,6 +5763,44 @@ class ModernMainWindow(QMainWindow):
         
         tag = text[temp_start:end_pos].strip()
         return tag, start_pos, end_pos
+
+    @staticmethod
+    def _strip_weight_syntax_for_lookup(tag: str) -> str:
+        """태그에서 가중치 래핑 구문을 제거하여 순수 태그명만 반환.
+        NAI: '0.89::maid headdress ::' → 'maid headdress'
+        A1111/ComfyUI: '(tag:1.20)' → 'tag'
+        NAI 그룹: '1.05::tag1, tag2 ::' → 마지막 태그만 (커서가 그룹 내 특정 위치)
+        """
+        s = tag.strip()
+        if not s:
+            return s
+        # NAI 형식 처리
+        # 완전체: '0.89::tag ::' → 'tag'
+        # 그룹 앞쪽: '1.05::tag1' (쉼표로 잘림) → 'tag1'
+        # 그룹 뒤쪽: 'tag2 ::' (쉼표로 잘림) → 'tag2'
+        if '::' in s:
+            # 후행 '::' 또는 ' ::' 먼저 제거
+            if s.endswith('::'):
+                s = s[:-2].strip()
+            # 선행 'weight::' 제거
+            if '::' in s:
+                parts = s.split('::', 1)
+                try:
+                    float(parts[0].strip())
+                    s = parts[1].strip()
+                except ValueError:
+                    pass
+        # A1111/ComfyUI 형식: '(tag:weight)'
+        if s.startswith('(') and s.endswith(')'):
+            inner = s[1:-1]
+            colon_idx = inner.rfind(':')
+            if colon_idx > 0:
+                try:
+                    float(inner[colon_idx + 1:])
+                    s = inner[:colon_idx].strip()
+                except ValueError:
+                    pass
+        return s
 
     def _replace_tag_in_prompt(self, new_tag, start, end):
         """선택한 추천 태그로 프롬프트를 교체하는 헬퍼 메서드"""

@@ -151,6 +151,20 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         def execute_pipeline_hook(self, context):
             return self._parent._execute_e621_after_wildcard(context)
 
+    class _DanbooruAfterWildcardHook:
+        """after_wildcard hook 위임 객체.
+        와일드카드 단독 모드 + Danbooru Auto-Weight 동시 사용 시에만 작동.
+        전개된 prefix_tags에 가중치를 in-place 적용."""
+
+        def __init__(self, parent: 'PromptEngineeringModule'):
+            self._parent = parent
+
+        def get_title(self):
+            return "Danbooru Auto-Weight (after_wildcard)"
+
+        def execute_pipeline_hook(self, context):
+            return self._parent._execute_danbooru_weight_after_wildcard(context)
+
     def __init__(self):
         BaseMiddleModule.__init__(self)
         ModeAwareModule.__init__(self)
@@ -312,6 +326,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.register_pipeline_hook(
                 {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 10},
                 self._E621AfterWildcardHook(self),
+            )
+            self.app_context.register_pipeline_hook(
+                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 15},
+                self._DanbooruAfterWildcardHook(self),
             )
 
         widget = QWidget(parent)
@@ -752,6 +770,85 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     # Rating 보정 블렌드 비율 (0=전역만, 1=rating만)
     _RATING_BLEND = 0.3
 
+    @staticmethod
+    def _strip_weight_syntax(tag: str) -> str:
+        """태그에서 가중치 래핑 구문을 제거하여 순수 태그명만 반환.
+        NAI: '1.20::tag ::' → 'tag'
+        A1111/ComfyUI: '(tag:1.20)' → 'tag'
+        """
+        s = tag.strip()
+        # NAI 형식 처리
+        # 완전체: '0.89::tag ::' → 'tag'
+        # 그룹 앞쪽: '1.05::tag1' (쉼표로 잘림) → 'tag1'
+        # 그룹 뒤쪽: 'tag2 ::' (쉼표로 잘림) → 'tag2'
+        if '::' in s:
+            # 후행 '::' 먼저 제거
+            if s.endswith('::'):
+                s = s[:-2].strip()
+            # 선행 'weight::' 제거
+            if '::' in s:
+                parts = s.split('::', 1)
+                try:
+                    float(parts[0].strip())
+                    s = parts[1].strip()
+                except ValueError:
+                    pass
+        # A1111/ComfyUI 형식: '(tag:weight)'
+        if s.startswith('(') and s.endswith(')'):
+            inner = s[1:-1]
+            colon_idx = inner.rfind(':')
+            if colon_idx > 0:
+                try:
+                    float(inner[colon_idx + 1:])
+                    s = inner[:colon_idx].strip()
+                except ValueError:
+                    pass
+        return s
+
+    def _infer_rating_from_tags(self, tags: list) -> str:
+        """태그 분포 기반 rating 추론 (와일드카드 단독 모드 전용).
+        danbooru_tag_counts_by_rating.json의 per-rating 빈도를 사용하여
+        Naive Bayes 방식으로 가장 높은 우도를 가진 rating을 반환.
+        """
+        import math
+
+        if not tags:
+            return 's'
+
+        tag_counts = self._get_danbooru_tag_counts()
+        totals = self._danbooru_rating_totals  # [g, s, q, e]
+        vocab_size = len(tag_counts)
+
+        # 로그 사전확률 (uniform — 편향 없이 시작)
+        log_scores = [0.0, 0.0, 0.0, 0.0]  # g, s, q, e
+
+        matched = 0
+        for tag in tags:
+            clean = self._strip_weight_syntax(tag)
+            if clean in _PERSON_TAGS or clean not in tag_counts:
+                continue
+            counts = tag_counts[clean]
+            matched += 1
+            for ri in range(4):
+                # Laplace smoothing: (count + 1) / (total + V)
+                prob = (counts[ri] + 1) / (totals[ri] + vocab_size)
+                log_scores[ri] += math.log(prob)
+
+        if matched < 3:
+            return 's'  # 데이터 부족 — 보수적 기본값
+
+        # 가장 높은 score의 rating 선택
+        max_score = max(log_scores)
+        rating_labels = ['g', 's', 'q', 'e']
+        best_ri = log_scores.index(max_score)
+        best_rating = rating_labels[best_ri]
+
+        print(f"[Danbooru Auto-Weight] inferred rating='{best_rating}' "
+              f"from {matched} tags (scores: "
+              f"g={log_scores[0]-max_score:.1f}, s={log_scores[1]-max_score:.1f}, "
+              f"q={log_scores[2]-max_score:.1f}, e={log_scores[3]-max_score:.1f})")
+        return best_rating
+
     def _apply_danbooru_auto_weight(self, main_tags: list, context: PromptContext):
         """전역 IDF + Rating 조건부 보정 블렌딩, 전역 범위 정규화 (main_tags in-place 수정)
 
@@ -781,10 +878,19 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         is_nai = context.settings.get('api_mode') == 'NAI'
         alpha = settings.get("rating_blend", self._RATING_BLEND)
 
-        # Rating 조건부: context에서 rating 추출
-        rating = context.settings.get('rating', 's')
-        if rating not in self._RATING_INDEX:
-            rating = 's'
+        # Rating 조건부: 오버라이드 > source_row > 추론 > fallback
+        if settings.get("rating_override_on") and settings.get("rating_override") in self._RATING_INDEX:
+            rating = settings["rating_override"]
+        else:
+            _raw_rating = context.source_row.get('rating', None)
+            # NaN/None/NaT 등 pandas missing 타입 모두 처리
+            rating = str(_raw_rating).strip().lower() if _raw_rating is not None and _raw_rating == _raw_rating else None
+            if rating not in self._RATING_INDEX:
+                # 와일드카드 단독 모드: 태그에서 추론
+                if context.settings.get('wildcard_standalone', False):
+                    rating = self._infer_rating_from_tags(main_tags)
+                else:
+                    rating = 's'  # fallback
         ri = self._RATING_INDEX[rating]
         rating_total = max(self._danbooru_rating_totals[ri], 1)
 
@@ -842,14 +948,14 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # 각 구간 내에서도 하한 쪽에 편향 (beta 분포 α=1, β=3)
             r = random.random()
             if r < 0.85:
-                mag = random.betavariate(1, 3) * 0.02
+                jitter_mag = random.betavariate(1, 3) * 0.02
             elif r < 0.95:
-                mag = 0.02 + random.betavariate(1, 3) * 0.03
+                jitter_mag = 0.02 + random.betavariate(1, 3) * 0.03
             elif r < 0.99:
-                mag = 0.05 + random.betavariate(1, 3) * 0.03
+                jitter_mag = 0.05 + random.betavariate(1, 3) * 0.03
             else:
-                mag = 0.08 + random.betavariate(1, 3) * 0.02
-            jitter = mag * random.choice((-1, 1))
+                jitter_mag = 0.08 + random.betavariate(1, 3) * 0.02
+            jitter = jitter_mag * random.choice((-1, 1))
             weight = weight * (1.0 + jitter)
             weight = max(min_w, min(max_w, weight))
 
@@ -922,6 +1028,17 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         _e621_input = list(context.prefix_tags) + _e621_source
         self._run_e621_boost(context, _e621_input, context.main_tags)
         self._update_debug_window(context.metadata)
+        return context
+
+    def _execute_danbooru_weight_after_wildcard(self, context) -> 'PromptContext':
+        """after_wildcard hook (priority 15): 와일드카드 단독 + Danbooru Auto-Weight 동시 사용 시
+        전개된 prefix_tags에 가중치를 in-place 적용. e621(priority 10) 이후에 실행."""
+        if '_danbooru_weight_deferred' not in context.metadata:
+            return context
+        context.metadata.pop('_danbooru_weight_deferred')
+        if context.prefix_tags:
+            print(f"[Danbooru Auto-Weight] after_wildcard: applying to {len(context.prefix_tags)} prefix_tags")
+            self._apply_danbooru_auto_weight(context.prefix_tags, context)
         return context
 
     def _update_debug_window(self, metadata: dict):
@@ -1056,6 +1173,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         _danbooru_weight_enabled = not skip_preprocessing and checkbox_options.get("danbooru_auto_weight")
         if _danbooru_weight_enabled:
             self._apply_danbooru_auto_weight(main_tags, context)
+            _is_wildcard_standalone = context.settings.get('wildcard_standalone', False)
+            if _is_wildcard_standalone:
+                context.metadata['_danbooru_weight_deferred'] = True
 
         # e621 Auto-Boost
         _e621_enabled = not skip_preprocessing and checkbox_options.get("e621_auto_boost")
@@ -3002,6 +3122,73 @@ class _DanbooruWeightSettingsWindow(QWidget):
 
         left.addWidget(self._override_container)
 
+        # ── Rating 오버라이드 ──
+        left.addSpacing(ss(4))
+        sep_rating = QWidget()
+        sep_rating.setFixedHeight(1)
+        sep_rating.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
+        left.addWidget(sep_rating)
+        left.addSpacing(ss(4))
+
+        self._rating_override_cb = QCheckBox("Rating 오버라이드")
+        self._rating_override_cb.setStyleSheet(f"font-size: {fs(17)}px; color: {DARK_COLORS['text_secondary']};")
+        left.addWidget(self._rating_override_cb)
+
+        rating_hint = QLabel("IDF 보정에 사용할 rating을 강제 지정합니다.\n자동 판별(parquet/추론) 대신 선택한 rating 기준으로 가중치를 계산합니다.")
+        rating_hint.setStyleSheet(f"color: #FFFACD; font-size: {fs(15)}px;")
+        rating_hint.setWordWrap(True)
+        left.addWidget(rating_hint)
+
+        self._rating_override_container = QWidget()
+        ro_layout = QHBoxLayout(self._rating_override_container)
+        ro_layout.setContentsMargins(ss(8), ss(4), 0, 0)
+        ro_layout.setSpacing(ss(6))
+
+        self._rating_override_btns = {}
+        _rating_labels = [("g", "General"), ("s", "Sensitive"), ("q", "Questionable"), ("e", "Explicit")]
+        rating_btn_style_off = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-size: {fs(16)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """
+        rating_btn_style_on = f"""
+            QPushButton {{
+                background-color: #2E7D32;
+                color: #FFFFFF;
+                border: 1px solid #4CAF50;
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-size: {fs(16)}px;
+                font-weight: bold;
+            }}
+        """
+        self._rating_btn_style_off = rating_btn_style_off
+        self._rating_btn_style_on = rating_btn_style_on
+
+        for code, label in _rating_labels:
+            btn = QPushButton(f"{label[0]}  ({code})")
+            btn.setCheckable(True)
+            btn.setStyleSheet(rating_btn_style_off)
+            btn.clicked.connect(lambda checked, c=code: self._on_rating_override_clicked(c))
+            ro_layout.addWidget(btn, 1)
+            self._rating_override_btns[code] = btn
+
+        left.addWidget(self._rating_override_container)
+        self._rating_override_container.setEnabled(False)
+        self._rating_override_cb.toggled.connect(self._rating_override_container.setEnabled)
+        self._rating_override_cb.toggled.connect(lambda _: self._update_preview())
+        self._selected_rating_override = 's'  # 기본 선택
+        self._rating_override_btns['s'].setChecked(True)
+        self._rating_override_btns['s'].setStyleSheet(rating_btn_style_on)
+
         # 체크 OFF: 컨테이너 비활성, 체크 ON: 활성
         self._override_container.setEnabled(False)
         self._override_cb.toggled.connect(self._override_container.setEnabled)
@@ -3074,6 +3261,15 @@ class _DanbooruWeightSettingsWindow(QWidget):
             self._override_min_edit.setText(str(settings.get("override_min", 0.80)))
             self._override_max_edit.setText(str(settings.get("override_max", 1.35)))
             self._override_cb.setChecked(True)
+        # Rating 오버라이드 복원 (시그널 차단)
+        if settings.get("rating_override_on"):
+            self._rating_override_cb.blockSignals(True)
+            self._rating_override_cb.setChecked(True)
+            self._rating_override_cb.blockSignals(False)
+            self._rating_override_container.setEnabled(True)
+            override_rating = settings.get("rating_override", 's')
+            if override_rating in self._rating_override_btns:
+                self._set_rating_override_selection(override_rating)
         self._update_mag_display()
         self._update_blend_display()
         self._update_preview()
@@ -3107,6 +3303,24 @@ class _DanbooruWeightSettingsWindow(QWidget):
             self._tag_data = {}
             self._global_idfs = {}
             self._rating_totals = [1, 1, 1, 1]
+
+    def _set_rating_override_selection(self, code: str):
+        """버튼 시각 상태만 갱신 — preview 호출 없음 (초기화/load용)"""
+        self._selected_rating_override = code
+        for c, btn in self._rating_override_btns.items():
+            if c == code:
+                btn.setChecked(True)
+                btn.setStyleSheet(self._rating_btn_style_on)
+            else:
+                btn.setChecked(False)
+                btn.setStyleSheet(self._rating_btn_style_off)
+
+    def _on_rating_override_clicked(self, code: str):
+        """Rating 오버라이드 버튼 클릭 — 라디오 동작 (하나만 선택)"""
+        if code not in self._rating_override_btns:
+            return
+        self._set_rating_override_selection(code)
+        self._update_preview()
 
     def _step_magnitude(self, delta):
         """magnitude 증감 — 오버라이드 해제 + edit을 프리셋 값으로 동기화"""
@@ -3185,11 +3399,22 @@ class _DanbooruWeightSettingsWindow(QWidget):
             min_w = _pf(self._override_min_edit, min_w)
             max_w = _pf(self._override_max_edit, max_w)
 
-        for rating, te in self._preview_tabs.items():
-            _, tags = self._SAMPLE_CASES[rating]
+        # Rating 오버라이드: 모든 탭의 IDF 보정을 지정 rating 기준으로 계산
+        _rating_override_on = self._rating_override_cb.isChecked()
+        _rating_override = self._selected_rating_override
+
+        for tab_idx, (rating, te) in enumerate(self._preview_tabs.items()):
+            tab_label, tags = self._SAMPLE_CASES[rating]
+            calc_rating = _rating_override if _rating_override_on else rating
+            # 탭 제목에 오버라이드 표시
+            if _rating_override_on and calc_rating != rating:
+                override_label = self._SAMPLE_CASES[calc_rating][0]
+                self._tab_widget.setTabText(tab_idx, f"{tab_label} ({rating}) \u2190 {override_label}")
+            else:
+                self._tab_widget.setTabText(tab_idx, f"{tab_label} ({rating})")
             results = []
             for tag in tags:
-                w = self._calc_weight(tag, rating, scale, min_w, max_w)
+                w = self._calc_weight(tag, calc_rating, scale, min_w, max_w)
                 if w is not None:
                     results.append((tag, w))
             results.sort(key=lambda x: x[1])
@@ -3205,7 +3430,10 @@ class _DanbooruWeightSettingsWindow(QWidget):
                     bar = "\u2588" * bar_len
                     lines.append(f"  {tag:25s} {w:.2f} {bar}")
                 lines.append("")
-                lines.append(f"  spread: {w_hi - w_lo:.2f}")
+                spread_line = f"  spread: {w_hi - w_lo:.2f}"
+                if _rating_override_on and calc_rating != rating:
+                    spread_line += f"  (IDF: {calc_rating} 기준)"
+                lines.append(spread_line)
             te.setPlainText("\n".join(lines))
 
     def _current_settings(self) -> dict:
@@ -3219,11 +3447,27 @@ class _DanbooruWeightSettingsWindow(QWidget):
             s["override_scale"] = _pf(self._override_scale_edit, 0.35)
             s["override_min"] = _pf(self._override_min_edit, 0.80)
             s["override_max"] = _pf(self._override_max_edit, 1.35)
+        # Rating 오버라이드
+        s["rating_override_on"] = self._rating_override_cb.isChecked()
+        s["rating_override"] = self._selected_rating_override
         return s
 
     def load_settings(self, settings: dict):
         self._magnitude = settings.get("magnitude", 3)
         self._blend = settings.get("rating_blend", 0.3)
+        # Rating 오버라이드 복원 (시그널 차단하여 중복 preview 방지)
+        self._rating_override_cb.blockSignals(True)
+        if settings.get("rating_override_on"):
+            self._rating_override_cb.setChecked(True)
+            override_rating = settings.get("rating_override", 's')
+            if override_rating in self._rating_override_btns:
+                self._set_rating_override_selection(override_rating)
+            else:
+                self._set_rating_override_selection('s')
+        else:
+            self._rating_override_cb.setChecked(False)
+        self._rating_override_cb.blockSignals(False)
+        self._rating_override_container.setEnabled(self._rating_override_cb.isChecked())
         self._update_mag_display()
         self._update_blend_display()
         self._update_preview()

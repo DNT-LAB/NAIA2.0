@@ -25,7 +25,7 @@ modules/
 | **character_module.py** | 캐릭터 검색, 5x5 위치 그리드 | ModeAware, 파이프라인 훅 |
 | **character_reference_module.py** | Character Reference 관리 | NAI 전용 |
 | **vibe_transfer_module.py** | Vibe Transfer 이미지 | NAI 전용, 다중 이미지 |
-| **prompt_engineering_module.py** | 프롬프트 엔지니어링 | 태그 조작, 프리셋 랜덤화 |
+| **prompt_engineering_module.py** | 프롬프트 엔지니어링 | 태그 조작, 프리셋 랜덤화, Danbooru Auto-Weight(IDF), e621 Auto-Boost |
 | **automation_module.py** | 자동 생성 | QThread, 타이머/횟수/무제한 |
 | **instant_wildcard_module.py** | 인스턴트 와일드카드 | JSON 저장/로드 |
 | **conditional_prompt_module.py** | 조건부 프롬프트 | 파이프라인 훅 |
@@ -243,6 +243,18 @@ finally:
 ### 필터 디버깅 윈도우 (`filter_debug_window.py`)
 
 `FilterDebugWindow(QDialog)`: 라운드별 필터 제거 내역 시각화. 소스 정보(캐릭터/작품/아티스트/ID) + 라운드별 색상 코딩 (주황=제거, 초록=통과, 회색=비활성). e621 Auto-Boost 섹션(연주황색)으로 입력 태그 및 추천 결과 표시.
+
+### Danbooru Auto-Weight (`prompt_engineering_module.py`)
+
+IDF(역문서빈도) 기반 태그 자동 가중치. Danbooru 800만 건의 태그 빈도 데이터(`danbooru_tag_counts_by_rating.json`)를 사용.
+
+- **원리**: `blended_idf = global_idf + α*(rating_idf - global_idf)` → 정규화 → `weight = 1.0 + scale*(2*norm - 1)`
+- **Rating 판별 우선순위**: Rating 오버라이드(설정) > `source_row['rating']`(parquet) > `_infer_rating_from_tags`(Naive Bayes 추론, 와일드카드 단독) > `'s'` fallback
+- **Rating 오버라이드**: 설정 윈도우에서 G/S/Q/E 강제 지정 가능. `_danbooru_weight_settings`에 `rating_override_on`, `rating_override` 키로 저장
+- **가중치 구문 파싱**: `_strip_weight_syntax()` — NAI(`0.89::tag ::`)와 A1111(`(tag:1.2)`) 양쪽 형식 지원. 후행 `::` 먼저 제거 → 선행 `weight::` 제거 순서 (그룹 래핑 뒤쪽 조각 처리)
+- **`__wildcard__` 전개 호환**: `_execute_danbooru_weight_after_wildcard`에서 콤마 합쳐진 단일 문자열을 개별 태그로 flat split 후 가중치 적용 (wildcard_processor가 `__wc__`를 `['tag1, tag2']` 형태로 반환하므로)
+- **after_wildcard hook**: priority 15 (e621 priority 10 이후). `_DanbooruWeightAfterWildcardHook` 위임 객체
+- **설정 윈도우**: `_DanbooruWeightSettingsWindow` — 강도(1-10단계), 커스텀 오버라이드(scale/min/max), Rating 블렌드(α), Rating 오버라이드(G/S/Q/E), 4탭 실시간 미리보기
 
 ### e621 Auto-Boost (`prompt_engineering_module.py`)
 

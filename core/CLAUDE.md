@@ -166,6 +166,15 @@ UI와 PromptProcessor 중재. PromptContext 생성/초기화, 파이프라인 �
 | 순차 | `__*name__` | `entries[counter % total][1]` | 무시 |
 | 종속 | `__$master:slave__` | `entries[slave_index][1]` | 무시 |
 
+**⚠️ 전개 결과 형식 차이** (`wildcard_processor.py`):
+
+| 구문 | 반환 형식 | 예시 |
+|------|-----------|------|
+| `$wildcard` | 개별 태그 리스트 | `['tag1', 'tag2', 'tag3']` |
+| `__wildcard__` | 콤마 합쳐진 단일 문자열 | `['tag1, tag2, tag3']` |
+
+`__wildcard__`는 `_expand_recursive`에서 `''.join(result_parts)` 반환 (복합 패턴 `prefix__wc__suffix` 지원 목적). 개별 태그를 순회하는 downstream 훅에서는 콤마 split 필요.
+
 ---
 
 ## GenerationController (`generation_controller.py`)

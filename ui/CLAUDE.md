@@ -49,6 +49,7 @@ ui/detached_window.py (분리 창)
 | **img2img_window.py** | 독립 Img2Img/Inpaint 윈도우 | `Img2ImgWindow` |
 | **tag_result_window.py** | 태그 분석 결과 윈도우 | `TagResultWindow` |
 | **outpaint_window.py** | 아웃페인팅 설정 | `OutpaintWindow` |
+| **image_viewer_window.py** | Honeyview 스타일 이미지 뷰어 | `NAIAImageViewer`, `ViewerBindingsDialog` |
 
 ---
 
@@ -174,6 +175,25 @@ self.prompt_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
 `OutpaintWindow` 주요 기능: 캔버스 크기 프리셋, 스케일/회전 슬라이더, 드래그 배치 (8px 그리드 스냅), 리사이즈 핸들, 마스크 자동 생성 (블렌딩 보더 8px), RGBA 회전.
 
 API: `_single_pass_outpainting()` → OutpaintWindow 데이터 사용 또는 기본 캔버스 자동 생성 (가로→1:1, 세로→3:2).
+
+---
+
+## 이미지 뷰어 (`image_viewer_window.py`)
+
+Honeyview 스타일 전체화면 이미지 뷰어. `tabs/image_window.py`의 `[뷰어]` 버튼에서 진입.
+
+**핵심 기능**:
+- 전체화면/윈도우 모드 전환 (F/F11, 윈도우 모드 시 OS 네이티브 프레임)
+- 마우스 휠 = 페이지 탐색, 좌클릭+휠 = 줌, 좌클릭+드래그 = 패닝
+- 상단/하단 플로팅 오버레이 (마우스 호버 100px 영역, Pin 고정 가능)
+- 페이지 슬라이더 + 경계 경고/순환 (첫/마지막 이미지)
+- 사용자 정의 키/마우스 바인딩 → 복사/이동/삭제 액션 (최대 3개, `save/app_settings.json` 영속화)
+- 복사/이동 대상 경로 설정 가능 (기본: `~/Pictures/꿀뷰/NAIA/{세션명}`)
+- 우클릭 컨텍스트 메뉴: 클립보드 복사, 복사/이동/삭제, 파일 위치 열기, 키 바인딩 설정
+- LRU 캐시 (31장) + QThread 백그라운드 프리로드 (뒤 10장, 앞 20장)
+- `image_counter_changed` 이벤트 구독 + 포커스 시 폴더 mtime 체크로 실시간 동기화
+
+**주요 클래스**: `NAIAImageViewer` (메인), `ImageViewerGraphicsView` (커스텀 QGraphicsView), `ViewerBindingsDialog` (설정), `PixmapCache`, `_PixmapCacheWorker`
 
 ---
 

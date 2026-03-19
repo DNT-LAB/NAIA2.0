@@ -1511,7 +1511,11 @@ class NAIAImageViewer(QWidget):
     def _on_naia_image_saved(self, data: dict):
         if not self.isVisible():
             return
-        self._refresh_if_changed()
+        was_at_last = (self._current_index >= len(self._image_list) - 1)
+        changed = self._refresh_if_changed()
+        if changed and was_at_last and self._image_list:
+            self._current_index = len(self._image_list) - 1
+            self._display_current()
 
     def _display_current(self):
         if not self._image_list or self._current_index < 0:

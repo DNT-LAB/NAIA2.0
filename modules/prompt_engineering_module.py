@@ -773,12 +773,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         scale = mag_params["scale"]
         min_w = mag_params["min_weight"]
         max_w = mag_params["max_weight"]
-        # 오버라이드 적용 (체크된 항목만)
-        if settings.get("override_scale_on"):
+        # 커스텀 오버라이드 적용
+        if settings.get("override_on"):
             scale = settings.get("override_scale", scale)
-        if settings.get("override_min_on"):
             min_w = settings.get("override_min", min_w)
-        if settings.get("override_max_on"):
             max_w = settings.get("override_max", max_w)
         is_nai = context.settings.get('api_mode') == 'NAI'
         alpha = settings.get("rating_blend", self._RATING_BLEND)
@@ -2740,7 +2738,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 color: {DARK_COLORS['text_secondary']};
                 border: 1px solid {DARK_COLORS['border']};
                 padding: 5px 14px;
-                font-size: {fs(17)}px;
+                font-size: {fs(19)}px;
             }}
             QTabBar::tab:selected {{
                 background-color: {DARK_COLORS['bg_primary']};
@@ -2753,11 +2751,11 @@ class _DanbooruWeightSettingsWindow(QWidget):
             QWidget {{
                 background-color: {DARK_COLORS['bg_primary']};
                 color: {DARK_COLORS['text_primary']};
-                font-size: {fs(17)}px;
+                font-size: {fs(19)}px;
             }}
             QLabel {{
                 color: {DARK_COLORS['text_primary']};
-                font-size: {fs(17)}px;
+                font-size: {fs(19)}px;
             }}
             QLineEdit {{
                 background-color: {DARK_COLORS['bg_secondary']};
@@ -2765,7 +2763,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 border: 1px solid {DARK_COLORS['border']};
                 border-radius: 3px;
                 padding: 5px;
-                font-size: {fs(18)}px;
+                font-size: {fs(20)}px;
             }}
             QPushButton {{
                 background-color: {DARK_COLORS['bg_secondary']};
@@ -2773,7 +2771,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 border: 1px solid {DARK_COLORS['border']};
                 border-radius: 3px;
                 padding: 6px 14px;
-                font-size: {fs(17)}px;
+                font-size: {fs(19)}px;
             }}
             QPushButton:hover {{
                 background-color: {DARK_COLORS['bg_hover']};
@@ -2781,7 +2779,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
             {tab_style}
         """)
 
-        hint_style = f"color: #FFFACD; font-size: {fs(16)}px; margin-bottom: 2px;"
+        hint_style = f"color: #FFFACD; font-size: {fs(18)}px; margin-bottom: 2px;"
         mag_table = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE
 
         # ── 메인 레이아웃: 좌측 설정 | 우측 미리보기 ──
@@ -2803,7 +2801,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 color: #B2DFDB;
                 border: 1px solid #B2DFDB;
                 border-radius: 4px;
-                font-size: {fs(22)}px;
+                font-size: {fs(24)}px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -2823,7 +2821,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
             border: 1px solid {DARK_COLORS['border']};
             border-radius: 4px;
             padding: 8px;
-            font-size: {fs(20)}px;
+            font-size: {fs(22)}px;
             font-weight: bold;
         """)
         mag_row.addWidget(self._mag_label, 1)
@@ -2842,64 +2840,25 @@ class _DanbooruWeightSettingsWindow(QWidget):
         self._mag_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left.addWidget(self._mag_desc)
 
-        left.addSpacing(ss(10))
+        left.addSpacing(ss(8))
 
-        # ── 전문가 설정: Rating 블렌드 ──
+        # ── 커스텀 오버라이드 (통합 체크박스 1개) ──
         sep2 = QWidget()
         sep2.setFixedHeight(1)
         sep2.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
         left.addWidget(sep2)
-        left.addSpacing(ss(6))
-
-        blend_title = QLabel("Rating 블렌드 (전문가)")
-        blend_title.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {fs(15)}px;")
-        left.addWidget(blend_title)
-
-        blend_row = QHBoxLayout()
-        blend_row.setSpacing(ss(6))
-        self._blend_down = QPushButton("\u25C0")
-        self._blend_down.setFixedSize(ss(36), ss(32))
-        self._blend_down.setStyleSheet(step_btn_style)
-        self._blend_down.clicked.connect(lambda: self._step_blend(-0.1))
-        blend_row.addWidget(self._blend_down)
-
-        self._blend_label = QLabel("")
-        self._blend_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._blend_label.setStyleSheet(f"""
-            background-color: {DARK_COLORS['bg_secondary']};
-            border: 1px solid {DARK_COLORS['border']};
-            border-radius: 3px;
-            padding: 4px;
-            font-size: {fs(17)}px;
-        """)
-        blend_row.addWidget(self._blend_label, 1)
-
-        self._blend_up = QPushButton("\u25B6")
-        self._blend_up.setFixedSize(ss(36), ss(32))
-        self._blend_up.setStyleSheet(step_btn_style)
-        self._blend_up.clicked.connect(lambda: self._step_blend(0.1))
-        blend_row.addWidget(self._blend_up)
-        left.addLayout(blend_row)
-
-        blend_hint = QLabel("0.0 = 전역만, 0.3 = 기본, 0.5+ = rating 강하게 반영")
-        blend_hint.setStyleSheet(f"color: #FFFACD; font-size: {fs(14)}px;")
-        blend_hint.setWordWrap(True)
-        left.addWidget(blend_hint)
-
-        left.addSpacing(ss(8))
-
-        # ── 전문가 설정: 오버라이드 ──
-        sep3 = QWidget()
-        sep3.setFixedHeight(1)
-        sep3.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
-        left.addWidget(sep3)
         left.addSpacing(ss(4))
 
-        override_title = QLabel("파라미터 오버라이드 (전문가)")
-        override_title.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {fs(15)}px;")
-        left.addWidget(override_title)
+        self._override_cb = QCheckBox("커스텀 오버라이드")
+        self._override_cb.setStyleSheet(f"font-size: {fs(17)}px; color: {DARK_COLORS['text_secondary']};")
+        left.addWidget(self._override_cb)
 
-        override_hint_style = f"color: #FFFACD; font-size: {fs(13)}px;"
+        # 오버라이드 컨테이너 (체크 시 활성화)
+        self._override_container = QWidget()
+        ov_layout = QVBoxLayout(self._override_container)
+        ov_layout.setContentsMargins(ss(8), ss(4), 0, 0)
+        ov_layout.setSpacing(ss(4))
+
         override_edit_style = f"""
             QLineEdit {{
                 background-color: {DARK_COLORS['bg_secondary']};
@@ -2907,20 +2866,17 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 border: 1px solid {DARK_COLORS['border']};
                 border-radius: 3px;
                 padding: 3px;
-                font-size: {fs(15)}px;
+                font-size: {fs(17)}px;
             }}
         """
 
-        def _make_override_row(label_text, placeholder, lo, hi, step, hint_text):
-            """체크박스 + < edit > + hint 구조"""
-            cb = QCheckBox(label_text)
-            cb.setStyleSheet(f"font-size: {fs(15)}px; color: {DARK_COLORS['text_secondary']};")
-            left.addWidget(cb)
-
+        def _make_param_row(parent_layout, label_text, placeholder, lo, hi, step, hint_text):
+            """라벨 + < edit > + hint"""
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(f"font-size: {fs(16)}px; color: {DARK_COLORS['text_secondary']};")
+            parent_layout.addWidget(lbl)
             row = QHBoxLayout()
             row.setSpacing(ss(4))
-            row.setContentsMargins(ss(20), 0, 0, 0)  # 들여쓰기
-
             btn_l = QPushButton("<")
             btn_l.setFixedSize(ss(28), ss(24))
             btn_l.setStyleSheet(step_btn_style)
@@ -2934,62 +2890,81 @@ class _DanbooruWeightSettingsWindow(QWidget):
             btn_r = QPushButton(">")
             btn_r.setFixedSize(ss(28), ss(24))
             btn_r.setStyleSheet(step_btn_style)
-
             def _step(delta):
-                cb.setChecked(True)  # 버튼 조작 시 자동 체크 ON
                 try:
                     val = float(edit.text().strip())
                 except ValueError:
                     val = float(placeholder)
-                val = round(max(lo, min(hi, val + delta)), 2)
-                edit.setText(str(val))
+                edit.setText(str(round(max(lo, min(hi, val + delta)), 2)))
             btn_l.clicked.connect(lambda: _step(-step))
             btn_r.clicked.connect(lambda: _step(step))
-
-            # edit에 사용자가 직접 포커스하여 타이핑 시 자동 체크 ON
-            _orig_focus = edit.focusInEvent
-            def _on_focus(event, _cb=cb, _orig=_orig_focus):
-                _cb.setChecked(True)
-                _orig(event)
-            edit.focusInEvent = _on_focus
-
             row.addWidget(btn_l)
             row.addWidget(edit, 1)
             row.addWidget(btn_r)
-            left.addLayout(row)
-
+            parent_layout.addLayout(row)
             hint_lbl = QLabel(hint_text)
-            hint_lbl.setStyleSheet(override_hint_style)
+            hint_lbl.setStyleSheet(f"color: #FFFACD; font-size: {fs(15)}px;")
             hint_lbl.setWordWrap(True)
-            hint_lbl.setContentsMargins(ss(20), 0, 0, 0)
-            left.addWidget(hint_lbl)
-
-            # 초기 상태: 비활성 (magnitude 프리셋 사용)
-            edit.setEnabled(False)
-            btn_l.setEnabled(False)
-            btn_r.setEnabled(False)
-            cb.toggled.connect(edit.setEnabled)
-            cb.toggled.connect(btn_l.setEnabled)
-            cb.toggled.connect(btn_r.setEnabled)
-            cb.toggled.connect(lambda _: self._update_preview())
+            parent_layout.addWidget(hint_lbl)
             edit.textChanged.connect(lambda _: self._update_preview())
+            return edit
 
-            return cb, edit
+        self._override_scale_edit = _make_param_row(
+            ov_layout, "스케일", "0.35", 0.0, 1.0, 0.05,
+            "weight = 1.0 + scale*(2*norm-1). 편차 폭 제어")
+        self._override_min_edit = _make_param_row(
+            ov_layout, "하한", "0.80", 0.0, 1.0, 0.05,
+            "흔한 태그의 최저 가중치")
+        self._override_max_edit = _make_param_row(
+            ov_layout, "상한", "1.35", 1.0, 5.0, 0.05,
+            "희귀 태그의 최고 가중치")
 
-        self._override_scale_cb, self._override_scale_edit = _make_override_row(
-            "스케일 오버라이드", "0.35", 0.0, 1.0, 0.05,
-            "weight = 1.0 + scale*(2*norm - 1)\n편차 폭을 직접 제어. 0=무효과, 1.0=최대"
-        )
-        left.addSpacing(ss(2))
-        self._override_min_cb, self._override_min_edit = _make_override_row(
-            "하한 오버라이드", "0.80", 0.0, 1.0, 0.05,
-            "흔한 태그의 최저 가중치"
-        )
-        left.addSpacing(ss(2))
-        self._override_max_cb, self._override_max_edit = _make_override_row(
-            "상한 오버라이드", "1.35", 1.0, 5.0, 0.05,
-            "희귀 태그의 최고 가중치"
-        )
+        ov_layout.addSpacing(ss(4))
+
+        # Rating 블렌드
+        blend_lbl = QLabel("Rating 블렌드")
+        blend_lbl.setStyleSheet(f"font-size: {fs(16)}px; color: {DARK_COLORS['text_secondary']};")
+        ov_layout.addWidget(blend_lbl)
+        blend_row = QHBoxLayout()
+        blend_row.setSpacing(ss(4))
+        self._blend_down = QPushButton("<")
+        self._blend_down.setFixedSize(ss(28), ss(24))
+        self._blend_down.setStyleSheet(step_btn_style)
+        self._blend_down.clicked.connect(lambda: self._step_blend(-0.1))
+        self._blend_label = QLabel("")
+        self._blend_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._blend_label.setStyleSheet(f"""
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 3px; padding: 3px; font-size: {fs(17)}px;
+        """)
+        self._blend_up = QPushButton(">")
+        self._blend_up.setFixedSize(ss(28), ss(24))
+        self._blend_up.setStyleSheet(step_btn_style)
+        self._blend_up.clicked.connect(lambda: self._step_blend(0.1))
+        blend_row.addWidget(self._blend_down)
+        blend_row.addWidget(self._blend_label, 1)
+        blend_row.addWidget(self._blend_up)
+        ov_layout.addLayout(blend_row)
+        blend_hint = QLabel("0.0 = 전역만, 0.3 = 기본, 0.5+ = rating 강하게 반영")
+        blend_hint.setStyleSheet(f"color: #FFFACD; font-size: {fs(15)}px;")
+        blend_hint.setWordWrap(True)
+        ov_layout.addWidget(blend_hint)
+
+        left.addWidget(self._override_container)
+
+        # 체크 OFF: 컨테이너 비활성, 체크 ON: 활성
+        self._override_container.setEnabled(False)
+        self._override_cb.toggled.connect(self._override_container.setEnabled)
+        self._override_cb.toggled.connect(lambda _: self._update_preview())
+
+        # 오버라이드 내 아무 슬라이더 조작 시 자동 체크 ON
+        for edit in [self._override_scale_edit, self._override_min_edit, self._override_max_edit]:
+            _orig = edit.focusInEvent
+            def _on_focus(event, _orig=_orig):
+                self._override_cb.setChecked(True)
+                _orig(event)
+            edit.focusInEvent = _on_focus
 
         left.addStretch()
 
@@ -3024,7 +2999,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 border: none;
                 padding: 8px;
                 font-family: 'Consolas', 'D2Coding', monospace;
-                font-size: {fs(17)}px;
+                font-size: {fs(19)}px;
                 line-height: 1.4;
             }}
         """
@@ -3043,18 +3018,13 @@ class _DanbooruWeightSettingsWindow(QWidget):
         # 초기값 설정
         self._magnitude = settings.get("magnitude", 3)
         self._blend = settings.get("rating_blend", 0.3)
-        # 오버라이드 edit을 프리셋 값으로 초기 동기화
         self._sync_override_edits()
-        # 저장된 오버라이드 복원 (동기화 후에 체크해야 값이 유지됨)
-        if settings.get("override_scale_on"):
+        # 저장된 오버라이드 복원
+        if settings.get("override_on"):
             self._override_scale_edit.setText(str(settings.get("override_scale", 0.35)))
-            self._override_scale_cb.setChecked(True)
-        if settings.get("override_min_on"):
             self._override_min_edit.setText(str(settings.get("override_min", 0.80)))
-            self._override_min_cb.setChecked(True)
-        if settings.get("override_max_on"):
             self._override_max_edit.setText(str(settings.get("override_max", 1.35)))
-            self._override_max_cb.setChecked(True)
+            self._override_cb.setChecked(True)
         self._update_mag_display()
         self._update_blend_display()
         self._update_preview()
@@ -3092,11 +3062,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
     def _step_magnitude(self, delta):
         """magnitude 증감 — 오버라이드 해제 + edit을 프리셋 값으로 동기화"""
         self._magnitude = max(1, min(10, self._magnitude + delta))
-        # 오버라이드 해제
-        self._override_scale_cb.setChecked(False)
-        self._override_min_cb.setChecked(False)
-        self._override_max_cb.setChecked(False)
-        # edit을 현재 프리셋 값으로 동기화 (사용자가 현재 값을 볼 수 있도록)
+        self._override_cb.setChecked(False)
         self._sync_override_edits()
         self._update_mag_display()
         self._update_preview()
@@ -3162,14 +3128,12 @@ class _DanbooruWeightSettingsWindow(QWidget):
         min_w = params.get("min_weight", 0.8)
         max_w = params.get("max_weight", 1.3)
         # 오버라이드 적용
-        def _pf(edit, default):
-            try: return float(edit.text().strip())
-            except ValueError: return default
-        if self._override_scale_cb.isChecked():
+        if self._override_cb.isChecked():
+            def _pf(edit, default):
+                try: return float(edit.text().strip())
+                except ValueError: return default
             scale = _pf(self._override_scale_edit, scale)
-        if self._override_min_cb.isChecked():
             min_w = _pf(self._override_min_edit, min_w)
-        if self._override_max_cb.isChecked():
             max_w = _pf(self._override_max_edit, max_w)
 
         for rating, te in self._preview_tabs.items():
@@ -3197,18 +3161,14 @@ class _DanbooruWeightSettingsWindow(QWidget):
 
     def _current_settings(self) -> dict:
         s = {"magnitude": self._magnitude, "rating_blend": self._blend}
-        # 오버라이드
-        s["override_scale_on"] = self._override_scale_cb.isChecked()
-        s["override_min_on"] = self._override_min_cb.isChecked()
-        s["override_max_on"] = self._override_max_cb.isChecked()
-        def _pf(edit, default):
-            try: return float(edit.text().strip())
-            except ValueError: return default
-        if s["override_scale_on"]:
+        override_on = self._override_cb.isChecked()
+        s["override_on"] = override_on
+        if override_on:
+            def _pf(edit, default):
+                try: return float(edit.text().strip())
+                except ValueError: return default
             s["override_scale"] = _pf(self._override_scale_edit, 0.35)
-        if s["override_min_on"]:
             s["override_min"] = _pf(self._override_min_edit, 0.80)
-        if s["override_max_on"]:
             s["override_max"] = _pf(self._override_max_edit, 1.35)
         return s
 

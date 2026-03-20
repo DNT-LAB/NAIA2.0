@@ -10,7 +10,7 @@ from ui.modern_menu import setModernStyle
 from typing import Dict, Any, Optional
 from core.wildcard_processor import split_tags_smart
 from core.tag_filter_helpers import _is_color_exception, apply_tag_filters
-import os, json
+import os, json, re
 from pathlib import Path
 
 # 인원 태그 — 가중치/필터에서 공통 스킵 대상
@@ -19,6 +19,10 @@ _PERSON_TAGS = frozenset({
     "1girl","2girls","3girls","4girls","5girls","6+girls",
     "1other","2others","3others","4others","5others","6+others",
 })
+
+# 가중치 포맷 감지 패턴 (NAI: '1.05::tag ::', WEBUI: '(tag:1.05)')
+_WEIGHT_NAI_DETECT = re.compile(r'^[\d.]+::.*::$')
+_WEIGHT_WEBUI_DETECT = re.compile(r'^\(.*:[\d.]+\)$')
 
 class PresetPreviewWidget(QWidget):
     """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
@@ -849,7 +853,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
               f"q={log_scores[2]-max_score:.1f}, e={log_scores[3]-max_score:.1f})")
         return best_rating
 
-    def _apply_danbooru_auto_weight(self, main_tags: list, context: PromptContext):
+    def _apply_danbooru_auto_weight(self, main_tags: list, context: PromptContext, *, min_valid_count: int = 3):
         """전역 IDF + Rating 조건부 보정 블렌딩, 전역 범위 정규화 (main_tags in-place 수정)
 
         blended_idf = global_idf + α * (rating_idf - global_idf)
@@ -875,6 +879,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             scale = settings.get("override_scale", scale)
             min_w = settings.get("override_min", min_w)
             max_w = settings.get("override_max", max_w)
+        invert = settings.get("invert_weight", False)
         is_nai = context.settings.get('api_mode') == 'NAI'
         alpha = settings.get("rating_blend", self._RATING_BLEND)
 
@@ -925,8 +930,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             blended_values.append(blended)
             valid_count += 1
 
-        if valid_count < 3:
-            print(f"[Danbooru Auto-Weight] skipped (valid tags={valid_count} < 3)")
+        if valid_count < min_valid_count:
+            print(f"[Danbooru Auto-Weight] skipped (valid tags={valid_count} < {min_valid_count})")
             return
 
         # 2단계: 전역 범위 정규화 → 가중치 계산 → 미세 섭동 → 래핑
@@ -938,6 +943,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 continue
 
             norm = max(0.0, min(1.0, (bv - n_low) / n_range))
+            if invert:
+                norm = 1.0 - norm
             weight = 1.0 + scale * (2 * norm - 1)
             weight = max(min_w, min(max_w, weight))
 
@@ -1032,8 +1039,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
     def _execute_danbooru_weight_after_wildcard(self, context) -> 'PromptContext':
         """after_wildcard hook (priority 15): 와일드카드 단독 + Danbooru Auto-Weight 동시 사용 시
-        전개된 prefix_tags에 가중치를 in-place 적용. e621(priority 10) 이후에 실행."""
+        전개된 prefix_tags에 가중치를 in-place 적용. e621(priority 10) 이후에 실행.
+        또한, 조건부 프롬프트 등이 main_tags에 추가한 미처리 태그에도 가중치 적용."""
         if '_danbooru_weight_deferred' not in context.metadata:
+            # deferred가 아니어도 main_tags 미처리 태그 처리는 수행
+            applied = context.metadata.get('_danbooru_weight_applied_tags')
+            if applied is not None and context.main_tags:
+                self._apply_weight_to_new_main_tags(context, applied)
             return context
         context.metadata.pop('_danbooru_weight_deferred')
         if context.prefix_tags:
@@ -1048,7 +1060,52 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             context.prefix_tags[:] = flat_tags
             print(f"[Danbooru Auto-Weight] after_wildcard: applying to {len(context.prefix_tags)} prefix_tags")
             self._apply_danbooru_auto_weight(context.prefix_tags, context)
+        # main_tags 미처리 태그에도 가중치 적용
+        applied = context.metadata.get('_danbooru_weight_applied_tags')
+        if applied is not None and context.main_tags:
+            self._apply_weight_to_new_main_tags(context, applied)
         return context
+
+    def _apply_weight_to_new_main_tags(self, context, applied_tags: set):
+        """main_tags에서 Auto-Weight 미적용 raw 태그를 찾아 가중치 적용.
+        이미 가중치 포맷, e621 그룹 래핑 태그는 스킵."""
+        # e621 부스트 태그 수집 — 그룹 래핑 간섭 방지
+        e621_tags = set()
+        for item in context.metadata.get('e621_boost_tags', []):
+            e621_tags.add(item['tag'].replace('_', ' '))
+
+        new_tags = []
+        in_e621_group = False
+        for i, tag in enumerate(context.main_tags):
+            clean = tag.strip()
+            # 이미 가중치 포맷이면 스킵
+            if _WEIGHT_NAI_DETECT.match(clean) or _WEIGHT_WEBUI_DETECT.match(clean):
+                continue
+            # e621 그룹 래핑 감지: '1.05::tag' (opening) ~ 'tag ::' (closing)
+            if clean.endswith('::'):
+                in_e621_group = False  # 그룹 종료
+                continue
+            if re.match(r'^[\d.]+::', clean):
+                in_e621_group = True   # 그룹 시작
+                continue
+            if in_e621_group:
+                continue               # 그룹 중간 태그
+            # e621 부스트 태그면 스킵 (가중치 0인 경우 래핑 없이 추가됨)
+            if clean in e621_tags:
+                continue
+            # 이미 post_processing에서 처리된 태그면 스킵
+            if clean in applied_tags:
+                continue
+            new_tags.append(i)
+        if not new_tags:
+            return
+        # 미처리 태그만 추출하여 가중치 적용
+        temp_tags = [context.main_tags[i] for i in new_tags]
+        print(f"[Danbooru Auto-Weight] after_wildcard: applying to {len(temp_tags)} new main_tags")
+        self._apply_danbooru_auto_weight(temp_tags, context, min_valid_count=1)
+        # 결과를 원래 위치에 반영
+        for j, idx in enumerate(new_tags):
+            context.main_tags[idx] = temp_tags[j]
 
     def _update_debug_window(self, metadata: dict):
         """디버그 윈도우가 열려있으면 새 데이터를 추가한다."""
@@ -1181,7 +1238,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # Danbooru Auto-Weight (e621 boost 전에 적용)
         _danbooru_weight_enabled = not skip_preprocessing and checkbox_options.get("danbooru_auto_weight")
         if _danbooru_weight_enabled:
+            # 적용 전 raw 태그명 기록 (after_wildcard에서 미처리 태그 감지용)
+            pre_weight_tags = {tag.strip() for tag in main_tags}
             self._apply_danbooru_auto_weight(main_tags, context)
+            context.metadata['_danbooru_weight_applied_tags'] = pre_weight_tags
             _is_wildcard_standalone = context.settings.get('wildcard_standalone', False)
             if _is_wildcard_standalone:
                 context.metadata['_danbooru_weight_deferred'] = True
@@ -3088,14 +3148,14 @@ class _DanbooruWeightSettingsWindow(QWidget):
             return edit
 
         self._override_scale_edit = _make_param_row(
-            ov_layout, "스케일", "0.35", 0.0, 1.0, 0.05,
-            "weight = 1.0 + scale*(2*norm-1). 편차 폭 제어")
+            ov_layout, "스케일", "0.35", 0.0, 5.0, 0.05,
+            "weight = 1.0 ± scale. 실제 범위를 결정하는 핵심 값")
         self._override_min_edit = _make_param_row(
-            ov_layout, "하한", "0.80", 0.0, 1.0, 0.05,
-            "흔한 태그의 최저 가중치")
+            ov_layout, "하한", "0.80", 0.0, 5.0, 0.05,
+            "흔한 태그의 최저 가중치 (권장: 0.4 ~ 1.0)")
         self._override_max_edit = _make_param_row(
-            ov_layout, "상한", "1.35", 1.0, 5.0, 0.05,
-            "희귀 태그의 최고 가중치")
+            ov_layout, "상한", "1.35", 0.0, 10.0, 0.05,
+            "희귀 태그의 최고 가중치 (권장: 1.0 ~ 2.0)")
 
         ov_layout.addSpacing(ss(4))
 
@@ -3258,6 +3318,13 @@ class _DanbooruWeightSettingsWindow(QWidget):
             self._tab_widget.addTab(te, f"{label} ({rating})")
         right.addWidget(self._tab_widget)
 
+        # 가중치 반전 체크박스
+        self._invert_cb = QCheckBox("가중치 반전 (고빈도 태그 강화, 저빈도 태그 약화)")
+        self._invert_cb.setStyleSheet(f"font-size: {fs(15)}px; color: {DARK_COLORS['text_secondary']}; spacing: {ss(6)}px;")
+        self._invert_cb.setChecked(settings.get("invert_weight", False))
+        self._invert_cb.toggled.connect(lambda _: self._update_preview())
+        right.addWidget(self._invert_cb)
+
         root.addLayout(right, 4)
 
         # 초기값 설정
@@ -3371,7 +3438,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
         self._mag_down.setEnabled(mag > 1)
         self._mag_up.setEnabled(mag < 10)
 
-    def _calc_weight(self, tag, rating, scale, min_w, max_w):
+    def _calc_weight(self, tag, rating, scale, min_w, max_w, invert=False):
         """단일 태그의 가중치 계산 — PromptEngineeringModule과 동일 공식"""
         import math
         if not self._global_idfs or tag not in self._global_idfs:
@@ -3389,6 +3456,8 @@ class _DanbooruWeightSettingsWindow(QWidget):
         else:
             blended = g_idf
         norm = max(0.0, min(1.0, (blended - n_low) / (n_high - n_low)))
+        if invert:
+            norm = 1.0 - norm
         weight = 1.0 + scale * (2 * norm - 1)
         return max(min_w, min(max_w, weight))
 
@@ -3411,6 +3480,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
         # Rating 오버라이드: 모든 탭의 IDF 보정을 지정 rating 기준으로 계산
         _rating_override_on = self._rating_override_cb.isChecked()
         _rating_override = self._selected_rating_override
+        _invert = self._invert_cb.isChecked()
 
         for tab_idx, (rating, te) in enumerate(self._preview_tabs.items()):
             tab_label, tags = self._SAMPLE_CASES[rating]
@@ -3423,7 +3493,7 @@ class _DanbooruWeightSettingsWindow(QWidget):
                 self._tab_widget.setTabText(tab_idx, f"{tab_label} ({rating})")
             results = []
             for tag in tags:
-                w = self._calc_weight(tag, calc_rating, scale, min_w, max_w)
+                w = self._calc_weight(tag, calc_rating, scale, min_w, max_w, invert=_invert)
                 if w is not None:
                     results.append((tag, w))
             results.sort(key=lambda x: x[1])
@@ -3459,6 +3529,8 @@ class _DanbooruWeightSettingsWindow(QWidget):
         # Rating 오버라이드
         s["rating_override_on"] = self._rating_override_cb.isChecked()
         s["rating_override"] = self._selected_rating_override
+        # 가중치 반전
+        s["invert_weight"] = self._invert_cb.isChecked()
         return s
 
     def load_settings(self, settings: dict):
@@ -3477,6 +3549,8 @@ class _DanbooruWeightSettingsWindow(QWidget):
             self._rating_override_cb.setChecked(False)
         self._rating_override_cb.blockSignals(False)
         self._rating_override_container.setEnabled(self._rating_override_cb.isChecked())
+        # 가중치 반전 복원
+        self._invert_cb.setChecked(settings.get("invert_weight", False))
         self._update_mag_display()
         self._update_blend_display()
         self._update_preview()

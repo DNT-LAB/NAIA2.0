@@ -13,6 +13,43 @@ from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List
 import re
 
+# NAI: '1.05::tag ::' → 'tag'
+_WEIGHT_NAI_RE = re.compile(r'^([\d.]+)::(.+?)\s*::$')
+# WEBUI: '(tag:1.05)' or '(tag (example):0.70)' → 'tag' or 'tag (example)'
+# 마지막 ':숫자)' 패턴으로 분리 (태그 자체에 괄호 포함 가능)
+_WEIGHT_WEBUI_RE = re.compile(r'^\((.+):([\d.]+)\)$')
+
+
+def _strip_weight_format(tag: str) -> str:
+    """가중치 포맷에서 raw 태그명 추출. 세 가지 형식 지원:
+    - NAI:   '1.05::tag ::' → 'tag'
+    - WEBUI: '(tag:1.05)' → 'tag'
+    - WEBUI (괄호 포함 태그): '(tag (example):0.7)' → 'tag (example)'
+    - raw:   'tag' → 'tag'
+    """
+    tag = tag.strip()
+    m = _WEIGHT_NAI_RE.match(tag)
+    if m:
+        return m.group(2).strip()
+    m = _WEIGHT_WEBUI_RE.match(tag)
+    if m:
+        return m.group(1).strip()
+    return tag
+
+
+def _replace_tag_in_weight_format(weighted_tag: str, new_raw_tag: str) -> str:
+    """가중치 포맷을 유지하면서 태그명만 교체.
+    raw 태그(가중치 없음)이면 new_raw_tag 그대로 반환."""
+    weighted_tag = weighted_tag.strip()
+    m = _WEIGHT_NAI_RE.match(weighted_tag)
+    if m:
+        return f"{m.group(1)}::{new_raw_tag} ::"
+    m = _WEIGHT_WEBUI_RE.match(weighted_tag)
+    if m:
+        return f"({new_raw_tag}:{m.group(2)})"
+    return new_raw_tag
+
+
 class CommentHighlighter(QSyntaxHighlighter):
     """# 으로 시작해서 첫 번째 쉼표까지 회색 처리하는 구문 하이라이터"""
 
@@ -728,17 +765,25 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                         return prefix_tags, main_tags, postfix_tags
                         
         elif action['type'] == 'replace':
-            # 대체 액션
+            # 대체 액션 — 가중치 포맷('1.05::tag ::' / '(tag:1.05)') 인식 매칭
             old_tag = action['old_tag']
             new_tag_list = action.get('new_tag_list', [action.get('new_tag', '')])
-            
+
             # prefix -> main -> postfix 순서로 검색하여 첫 번째 일치 항목 대체
             for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
                 for i, tag in enumerate(tag_list_ref):
-                    if old_tag == tag:
+                    raw_tag = _strip_weight_format(tag)
+                    if old_tag == raw_tag:
+                        # 첫 번째 새 태그에 기존 가중치 포맷 유지
+                        # 단, 새 태그가 이미 가중치 포맷이면 사용자 의도 존중 — 승계하지 않음
+                        weighted_new_list = list(new_tag_list)
+                        if weighted_new_list and raw_tag != tag.strip():
+                            first_new = weighted_new_list[0].strip()
+                            if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
+                                weighted_new_list[0] = _replace_tag_in_weight_format(tag, weighted_new_list[0])
                         # 기존 태그를 제거하고 새 태그들을 그 자리에 삽입
                         tag_list_ref.pop(i)
-                        for j, new_tag in enumerate(reversed(new_tag_list)):
+                        for j, new_tag in enumerate(reversed(weighted_new_list)):
                             tag_list_ref.insert(i, new_tag)
                         return prefix_tags, main_tags, postfix_tags
         

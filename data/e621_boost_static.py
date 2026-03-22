@@ -5119,8 +5119,6 @@ _FEMALE_ONLY_TAGS: frozenset[str] = frozenset({
 
 _OUTPUT_BLOCKLIST: frozenset[str] = frozenset({
     "bisexual",
-    "cum_from_nose",
-    "cum_through",
     "gaping_anus",
     "gaping_vagina",
     "magic_user",
@@ -5163,7 +5161,7 @@ _SOURCE_BLOCKLIST: frozenset[str] = frozenset({
 # ═══════════════════════════════════════════════════════════════
 
 _NOISE_TAGS: frozenset[str] = frozenset({
-    "cum_from_ass", "cum_from_vagina",
+    "cum_from_ass", "cum_from_nose", "cum_from_vagina", "cum_through",
     "first_person_view", "from_front_position", "front_view",
     "holding_object", "missionary_position",
     "on_bottom", "on_front", "on_top",
@@ -5172,7 +5170,9 @@ _NOISE_TAGS: frozenset[str] = frozenset({
 
 _NOISE_WHITELIST: dict[str, frozenset[str]] = {
     "cum_from_ass": frozenset({"after_anal", "after_sex", "cum_in_ass", "anal_only", "gaping", "pull_out", "after_rape"}),
+    "cum_from_nose": frozenset({"cum_in_nose", "cum_bubble", "cum_in_throat", "cheek_bulge", "cum_in_mouth", "cum_on_lips", "cum_overflow", "cum_inflation"}),
     "cum_from_vagina": frozenset({"after_vaginal", "after_sex", "cum_overflow", "impregnation", "pull_out", "after_rape"}),
+    "cum_through": frozenset({"cum_in_nose", "cum_inflation", "cum_overflow", "inflation"}),
     "first_person_view": frozenset({"assertive_female", "female_pov", "guided_penetration", "pov_hands", "reverse_footjob"}),
     "from_front_position": frozenset({"cowgirl_position", "guided_penetration", "leg_wrap", "lotus_position", "mating_press", "power_bottom", "reverse_spitroast", "straddling"}),
     "front_view": frozenset({"turnaround"}),
@@ -5194,7 +5194,10 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
     "ball_slap": frozenset({"assertive_female", "bouncing_breasts", "doggystyle", "irrumatio", "mating_press"}),
     "bathing_together": frozenset({"tall_female"}),
     "bestiality_impregnation": frozenset({"ovum", "sperm_cell"}),
-    "body_part_in_pussy": frozenset({"assertive_female"}),
+    "assisted_fellatio": frozenset({"hand_on_another's_head"}),
+    "assisted_oral": frozenset({"hand_on_another's_head"}),
+    "body_part_in_pussy": frozenset({"assertive_female", "bouncing_breasts"}),
+    "bouncing_butt": frozenset({"bouncing_breasts"}),
     "chastity_device": frozenset({"blindfold", "metal_collar", "wrist_cuffs", "o-ring", "vibrator"}),
     "closed_frown": frozenset({"nipple_jewelry"}),
     "cum_from_mouth": frozenset({"cum_overflow"}),
@@ -5240,7 +5243,16 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
     "submissive_human": frozenset({"amazon_position", "assertive_female"}),
     "trampling": frozenset({"armored_boots"}),
     "two_tone_speedo": frozenset({"nipple_jewelry"}),
+    "eye_roll": frozenset({"cum_overflow"}),
     "floor_bondage": frozenset({"armored_boots"}),
+    "holding_partner": frozenset({"torogao", "cum_overflow"}),
+    "looking_up_at_another": frozenset({"hand_on_another's_head"}),
+    "looking_up_at_partner": frozenset({"hand_on_another's_head"}),
+    "noisy_oral": frozenset({"hand_on_another's_head"}),
+    "stretched_pussy": frozenset({"torogao"}),
+    "tight_fit": frozenset({"torogao"}),
+    "tongue_on_penis": frozenset({"hand_on_another's_head"}),
+    "vaginal_tugging": frozenset({"torogao"}),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -5251,8 +5263,13 @@ _PAIR_BLOCKLIST: dict[str, frozenset[str]] = {
 _ANCHOR_GATES: dict[str, frozenset[str]] = {
     "cum": frozenset({
         "after_anal", "after_fellatio", "after_sex", "after_vaginal",
-        "bukkake", "cum", "cumdrip", "ejaculation", "facial",
-        "fellatio", "handjob", "hetero", "overflow", "penis", "sex",
+        "bukkake", "cum", "cum_bath", "cum_bubble", "cum_in_ass",
+        "cum_in_mouth", "cum_in_nose", "cum_in_throat", "cum_inflation",
+        "cum_on_body", "cum_on_breasts", "cum_on_lips", "cum_on_self",
+        "cum_on_tongue", "cum_overflow", "cum_pool", "cum_string",
+        "cumdrip", "ejaculation", "excessive_cum", "facial",
+        "fellatio", "handjob", "hetero", "licking_cum",
+        "overflow", "penis", "sex",
     }),
     "chastity": frozenset({
         "chastity", "chastity_belt", "chastity_cage",
@@ -5381,10 +5398,13 @@ _DOMAIN_GATES: dict[frozenset[str], frozenset[str]] = {
 # ═══════════════════════════════════════════════════════════════
 
 _SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
-    # bestiality feral variants
-    frozenset({"human_on_feral", "anthro_on_feral", "male_on_feral", "female_on_feral"}),
-    frozenset({"human_penetrating_feral", "anthro_penetrating_feral"}),
-    frozenset({"feral_penetrating", "feral_penetrating_anthro", "feral_penetrating_human"}),
+    # bestiality feral variants — 전체 통합 dedup (최고 score 1개만 생존)
+    frozenset({
+        "human_on_feral", "anthro_on_feral", "male_on_feral", "female_on_feral",
+        "human_penetrating_feral", "anthro_penetrating_feral",
+        "feral_penetrating", "feral_penetrating_anthro", "feral_penetrating_human",
+        "feral_penetrated",
+    }),
     # internal view
     frozenset({"internal", "internal_vaginal"}),
     # cum variants
@@ -5464,11 +5484,7 @@ _MUTEX_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"looking_up_at_another", "looking_down_at_another"}),
     frozenset({"looking_up_at_partner", "looking_down_at_partner"}),
     frozenset({"looking_up_at_viewer", "looking_down_at_viewer"}),
-    frozenset({
-        "human_penetrating_feral", "anthro_penetrating_feral",
-        "feral_penetrating", "feral_penetrating_human",
-        "feral_penetrating_anthro", "feral_penetrated",
-    }),
+    # (feral variants는 _SYNONYM_GROUPS에서 통합 처리)
     frozenset({"on_top", "on_bottom"}),
     frozenset({"female_virgin", "male_virgin"}),
     frozenset({"larger_human", "smaller_human"}),
@@ -5613,6 +5629,496 @@ _CHAR_PAIR_WHITELIST: dict[str, frozenset[str]] = {
     "smeared_lipstick": frozenset({"running_makeup", "running_mascara"}),
 }
 
+# ═══════════════════════════════════════════════════════════════
+# Single-Source Gate — 단독 source + 단어 겹침 없는 output 쌍 제어
+# whitelist에 있으면 허용, 없으면 DROP
+# 태그 자체를 차단하지 않음 — 미래에 새 source가 추가되면 자동 통과
+# ═══════════════════════════════════════════════════════════════
+
+_SINGLE_SOURCE_WHITELIST: frozenset[tuple[str, str]] = frozenset({
+    ("after_cunnilingus", "saliva_on_pussy"),
+    ("against_locker", "male_fingering_female"),
+    ("against_locker", "penis_leash"),
+    ("all_the_way_through", "anal_threading"),
+    ("all_the_way_through", "ear_threading"),
+    ("all_the_way_through", "in_one_ear_and_out_the_other"),
+    ("all_the_way_through", "mismatched_threading"),
+    ("all_the_way_through", "oral_threading"),
+    ("all_the_way_through", "threaded_by_penis"),
+    ("amazon_position", "reverse_mating_press"),
+    ("amputee", "1_missing_limb"),
+    ("anal_fingering", "thumb_in_ass"),
+    ("anal_hook", "hogtied"),
+    ("anal_only", "band-aid_on_genitals"),
+    ("anal_only", "band-aid_on_pussy"),
+    ("armpit_focus", "musky_pussy"),
+    ("asphyxiation", "choking_on_penis"),
+    ("ass_on_glass", "butt_squish"),
+    ("autofellatio", "autotitfuck"),
+    ("autofellatio", "masturbating_while_penetrated"),
+    ("autofellatio", "penis_in_own_mouth"),
+    ("balaclava", "crime"),
+    ("balaclava", "robbery"),
+    ("ballet_boots", "fleshlight_gag"),
+    ("barking", "woof_(sound_effect)"),
+    ("bending", "butt_fluff"),
+    ("bent_over_furniture", "reverse_table_lotus_position"),
+    ("bent_over_furniture", "standing_doggystyle"),
+    ("bestiality", "anthro_on_feral"),
+    ("bestiality", "anthro_penetrating_feral"),
+    ("bestiality", "female_on_feral"),
+    ("bestiality", "feral_penetrated"),
+    ("bestiality", "feral_penetrating"),
+    ("bestiality", "feral_penetrating_anthro"),
+    ("bestiality", "feral_penetrating_human"),
+    ("bestiality", "human_on_feral"),
+    ("bestiality", "human_penetrating_feral"),
+    ("bestiality", "male_on_feral"),
+    ("between_legs", "sit_and_blow_position"),
+    ("bicycle", "cycling"),
+    ("bisexual_male", "both_sexes_in_same_situation"),
+    ("blackmail", "pedophilia_humiliation"),
+    ("bladder", "prostate_penetration"),
+    ("blanket_grab", "under_covers_sex"),
+    ("blowing_smoke", "smoking_during_sex"),
+    ("body_control", "forced_masturbation"),
+    ("bone_necklace", "warpaint"),
+    ("bored", "unimpressed"),
+    ("bouncing", "plap_(sound)"),
+    ("bouncing_penis", "balls_deep"),
+    ("bouncing_penis", "intersex_penetrating_intersex"),
+    ("bound_together", "collar_to_collar"),
+    ("broken_condom", "pregnancy_risk"),
+    ("broken_condom", "unwanted_ejaculation"),
+    ("bumping", "squish_(sound_effect)"),
+    ("car_interior", "ordering_food"),
+    ("cardiophilia", "endosoma"),
+    ("cat_o'_nine_tails", "flogger"),
+    ("cat_o'_nine_tails", "sex_dungeon"),
+    ("censored_text", "grawlixes"),
+    ("child_on_child", "brother_penetrating_sister"),
+    ("crotch_focus", "genital_shot"),
+    ("crotch_rope", "bound_midriff"),
+    ("crucifixion", "limb_torture"),
+    ("crucifixion", "restrained_feet"),
+    ("cum_bath", "infinite_genital_fluids"),
+    ("cum_in_throat", "internal_oral"),
+    ("cum_on_legwear", "musky_feet"),
+    ("cum_on_legwear", "sock_fetish"),
+    ("cum_on_legwear", "sockjob"),
+    ("cum_on_legwear", "steamy_feet"),
+    ("cum_on_sheets", "after_anal_penetration"),
+    ("curious", "curiosity"),
+    ("curious", "genital_exploration"),
+    ("curled_fingers", "retracted_sheath"),
+    ("curled_up", "fetal_pose"),
+    ("damage_numbers", "button_prompt"),
+    ("damage_numbers", "cum_meter"),
+    ("defloration", "female_virgin"),
+    ("defloration", "male_virgin"),
+    ("delinquent", "apologetic"),
+    ("delinquent", "fangs_bared"),
+    ("dirty_talk", "cum_request"),
+    ("display_case", "quadruple_amputee_portal"),
+    ("dissolving", "graphic_digestion"),
+    ("dog_costume", "forced_bestiality"),
+    ("dog_costume", "intraspecies_bestiality"),
+    ("double_amputee", "2_artificial_limbs"),
+    ("double_dildo", "feeldoe"),
+    ("double_dildo", "female_penetrating_female"),
+    ("double_dildo", "toying_each_other"),
+    ("double_vaginal", "mixed_cum_impregnation"),
+    ("downward_dog", "jack-o'_pose"),
+    ("downward_dog", "naked_yoga"),
+    ("drinking_straw_in_mouth", "sipping"),
+    ("drowning", "drowned"),
+    ("drugged", "drugging"),
+    ("easel", "nude_modelling"),
+    ("eavesdropping", "voyeur"),
+    ("enema", "anal_tube"),
+    ("examination", "glove_snap"),
+    ("examination", "rectal_thermometer"),
+    ("expressionless", "emotionless"),
+    ("face_in_pillow", "speed_bump_position"),
+    ("face_punch", "head_torture"),
+    ("fake_tail", "plug_(sex_toy)"),
+    ("falling_money", "striptease"),
+    ("fallopian_tubes", "cum_in_ovaries"),
+    ("farming", "udder_lactation"),
+    ("fat_mons", "plump_labia"),
+    ("female_orgasm", "hands-free"),
+    ("female_orgasm", "vaginal_squirting_while_penetrated"),
+    ("fetus", "abortion"),
+    ("fetus", "bestiality_pregnancy"),
+    ("fetus", "interspecies_pregnancy"),
+    ("flapping", "velocity_sound_effect"),
+    ("fleeing", "running_away"),
+    ("floating_object", "effects"),
+    ("folded", "wrists_to_ankles"),
+    ("food_insertion", "banana_in_ass"),
+    ("full-face_blush", "flushed"),
+    ("gas_mask", "fart_tubes"),
+    ("gem", "jewel_buttplug"),
+    ("giggling", "chuckling"),
+    ("giving_up_the_ghost", "x_eyes"),
+    ("hand_on_another's_chest", "reverse_carry_position"),
+    ("hand_on_own_cheek", "standing_over"),
+    ("hand_on_own_cheek", "standing_over_viewer"),
+    ("hand_on_own_chin", "secretly_loves_it"),
+    ("hands_on_another's_head", "two-handed_face_fucking"),
+    ("heads_together", "narrowed_eyebrows"),
+    ("heartbeat", "throbbing_balls"),
+    ("high_five", "eiffel_tower_position"),
+    ("holding_baby", "sex_during_birth"),
+    ("holding_comb", "trimming_(grooming)"),
+    ("holding_key", "forced_chastity"),
+    ("holding_planet", "multilevel_macro"),
+    ("holding_popsicle", "pawpsicle"),
+    ("holding_riding_crop", "master/slave"),
+    ("holding_skull", "bone_disposal"),
+    ("holding_skull", "oral_bone_disposal"),
+    ("hookah", "smoke_from_nose"),
+    ("huge_clitoris", "pseudo-penis"),
+    ("husband_and_wife", "good_clean_married_sex"),
+    ("ice_skates", "hockey"),
+    ("imagining", "daydream"),
+    ("imminent_cunnilingus", "looking_at_vulva"),
+    ("imminent_cunnilingus", "oral_request"),
+    ("imminent_cunnilingus", "sex_request"),
+    ("imminent_cunnilingus", "vulva_sniffing"),
+    ("in_mouth", "on_tongue"),
+    ("invisible_penis", "voodoo_penetration"),
+    ("invisible_penis", "voodoo_sex"),
+    ("iron_cross", "reverse_wheelbarrow_position"),
+    ("irrumatio", "face_mounting"),
+    ("irrumatio", "oral_only"),
+    ("jack-o'-lantern", "cum_in_pumpkin"),
+    ("jack-o'-lantern", "penetrating_pumpkin"),
+    ("jack-o'-lantern", "pumpkin_masturbation"),
+    ("josou_seme", "girly_dominant"),
+    ("karate", "unconscious_male"),
+    ("key_necklace", "casual_chastity"),
+    ("key_necklace", "long_term_chastity"),
+    ("kindergarten_uniform", "holding_both_ankles"),
+    ("knee_grab", "scissored_leg_glider_position"),
+    ("laundry_basket", "sniffing_while_masturbating"),
+    ("leather_boots", "foot_on_balls"),
+    ("legs_behind_head", "full_viennese_oyster_position"),
+    ("licking_own_nipple", "self_suckle"),
+    ("linked_piercing", "nipple_bondage"),
+    ("listening", "spying"),
+    ("livestream", "cam_show"),
+    ("looking_at_bulge", "erection_under_clothing"),
+    ("looking_at_hand", "verbal_reaction_to_tf"),
+    ("m16", "holding_rifle"),
+    ("magic_circle", "spell"),
+    ("masquerade_mask", "purring"),
+    ("meditation", "crosslegged_pose"),
+    ("mind_reading", "eye_mist"),
+    ("mmm_threesome", "penetrating_while_penetrated"),
+    ("mounting", "mating_grip"),
+    ("muffled", "face_imprint"),
+    ("multiple_insertions", "quadruple_anal"),
+    ("multiple_insertions", "quintuple_penetration"),
+    ("multitasking", "casual_sex"),
+    ("multitasking", "distracted_sex"),
+    ("mutation", "genital_growth"),
+    ("mutation", "penis_growth"),
+    ("muzzle_flash", "firing_weapon"),
+    ("muzzle_flash", "shooting_gun"),
+    ("necrophilia", "child_murder"),
+    ("nipple_penetration", "cum_inflated_breasts"),
+    ("objectification", "forniphilia"),
+    ("on_food", "cake_sitting"),
+    ("oral_invitation", "cumshot_in_mouth"),
+    ("oral_sandwich", "female_rimming"),
+    ("oral_sandwich", "male_rimmed"),
+    ("oral_sandwich", "male_rimming_male"),
+    ("oral_sandwich", "rimming"),
+    ("oral_sandwich", "rimming_male"),
+    ("orgasm_denial", "begging_to_cum"),
+    ("orgasm_denial", "cum_blockage"),
+    ("ouroboros", "head_in_pussy"),
+    ("ovaries", "cum_in_fallopian_tubes"),
+    ("parachute", "skydiving"),
+    ("parasite", "nipple_birth"),
+    ("parasite", "urethra_worm"),
+    ("pecjob", "moobjob"),
+    ("pecjob", "pec_squeeze"),
+    ("pegging", "female_penetrating"),
+    ("pegging", "female_penetrating_male"),
+    ("pegging", "strapon_in_ass"),
+    ("pegging", "strapon_sex"),
+    ("penis_awe", "describing_genitalia"),
+    ("penis_in_panties", "presenting_underwear"),
+    ("penis_on_head", "ball_lick"),
+    ("penis_on_head", "ball_worship"),
+    ("penis_on_pussy", "outercourse"),
+    ("penis_on_pussy", "sex_shot"),
+    ("penises_touching", "handjob_frottage"),
+    ("pillow_fight", "indoor_nudity"),
+    ("power_bottom", "leashed_top"),
+    ("prostate", "bladder_penetration"),
+    ("prostate", "cum_while_penetrated"),
+    ("prostate_milking", "electroejaculation"),
+    ("public_urination", "peeing_while_erect"),
+    ("public_use", "cum_dumpster"),
+    ("pussy_juice_in_mouth", "clitoral_sucking"),
+    ("pussy_juice_in_mouth", "tongue_penetration"),
+    ("pussy_juice_stain", "sweating_profusely"),
+    ("pussy_juice_trail", "vaginal_fluid_splatter"),
+    ("pussy_juice_trail", "vaginal_fluids_on_ground"),
+    ("radiation_symbol", "radioactive"),
+    ("rape", "male_raping_female"),
+    ("rattle", "baby_powder"),
+    ("reverse_footjob", "raised_calf"),
+    ("reverse_grip", "handjob_while_rimming"),
+    ("reverse_grip", "intense_orgasm"),
+    ("reverse_spitroast", "female_facesitting_male"),
+    ("reverse_spitroast", "ffm"),
+    ("reverse_spitroast", "oral_while_penetrating"),
+    ("ripples", "butt_jiggle"),
+    ("roasting", "cooking_with_humanoids"),
+    ("roasting", "fully_impaled"),
+    ("roasting", "implied_cannibalism"),
+    ("runny_nose", "foaming_at_mouth"),
+    ("sandwiched", "between_butts"),
+    ("scope", "sniper"),
+    ("severed_head", "reverse_blowjob"),
+    ("sexting", "dick_pic"),
+    ("sexting", "sending_nudes"),
+    ("shackles", "shackled"),
+    ("shoejob", "cum_on_boots"),
+    ("shoejob", "cum_on_shoes"),
+    ("sitting_on_head", "lifting_another"),
+    ("sitting_on_head", "standing_position"),
+    ("slam", "spurting_sound_effect"),
+    ("sleep_talking", "sexsomnia"),
+    ("slime_sex", "ambiguous_penetrated"),
+    ("slime_sex", "goo_penetration"),
+    ("slime_sex", "male_penetrating_ambiguous"),
+    ("slime_sex", "translucent_tentacles"),
+    ("slurping", "licking_sound_effect"),
+    ("smegma", "hyper_foreskin"),
+    ("smegma", "musky_penis"),
+    ("smell", "penis_sniffing"),
+    ("snort", "cloud_emanata"),
+    ("snort", "dialogue_with_sound_effects"),
+    ("spike_piercing", "anal_beads_in_urethra"),
+    ("spike_piercing", "sex_toy_in_urethra"),
+    ("spraying", "anal_glands"),
+    ("spraying", "farting_while_penetrated"),
+    ("spraying", "hyper_fart"),
+    ("spraying", "male_farting"),
+    ("standing_on_object", "height_assist"),
+    ("stealth_masturbation", "dildo_sitting_reveal"),
+    ("stealth_masturbation", "hidden_sex_toy"),
+    ("steaming_body", "steamy_breath"),
+    ("steaming_body", "steamy_penis"),
+    ("stingray", "claspers"),
+    ("stomping", "stomped"),
+    ("storefront", "sex_shop"),
+    ("strangling", "garrote"),
+    ("swaying", "shaking_butt"),
+    ("swaying", "swinging_penis"),
+    ("take_your_pick", "jack_and_jill"),
+    ("teaching", "innocent_expression"),
+    ("teamwork", "close_nipples"),
+    ("teamwork", "collaborative_titfuck"),
+    ("telekinesis", "psychic_powers"),
+    ("tentacle_pit", "oblivious_sex"),
+    ("trolling", "mischievous_smile"),
+    ("under_clothes", "upskirt_sex"),
+    ("unsheathing", "becoming_erect"),
+    ("unsheathing", "fully_sheathed"),
+    ("unsheathing", "knot_swelling"),
+    ("unsheathing", "throbbing_knot"),
+    ("uppercut", "knockout"),
+    ("urine_meter", "bladder_bulge"),
+    ("urine_meter", "fuel_gauge"),
+    ("veiny_tentacles", "egg_bulge"),
+    ("view_between_legs", "kneeling_oral_position"),
+    ("view_between_legs", "reverse_jackhammer_position"),
+    ("virgin", "female_defloration"),
+    ("virgin", "male_defloration"),
+    ("virtual_reality", "ambiguous_pov"),
+    ("virtual_reality", "consistent_pov"),
+    ("walk-in", "caught_masturbating"),
+    ("wet_face", "dripping_water"),
+    ("wet_pants", "urine_stain"),
+    ("whipping", "butt_torture"),
+    ("whispering", "dotted_line_speech_bubble"),
+    ("wooden_box", "ball_stretching"),
+    ("wooden_box", "saint_andrew's_cross"),
+    ("wooden_box", "torture_device"),
+})
+
+# UNCERTAIN — 미분류 (검토 후 whitelist 또는 noise로 이동)
+# ("leg_focus", "offscreen_sex"),  # 0.2436 NSFW
+# ("in_cup", "leaning_on_edge"),  # 0.2333 Actions
+# ("side", "view"),  # 0.1988 Actions
+# ("balaclava", "elderly_intersex"),  # 0.1761 Danger
+# ("weightlifting", "barbell_squats"),  # 0.17 Actions
+# ("medicine", "ribbon_restrained"),  # 0.1599 Actions
+# ("tribadism", "kissing_with_both_sets_of_lips"),  # 0.151 Actions
+# ("dragging", "knot_hanging"),  # 0.1441 Danger
+# ("broken_weapon", "tied_to_tree"),  # 0.1358 Actions
+# ("cheerleader", "cheerleading_pose"),  # 0.1317 Actions
+# ("writing_on_wall", "squat_position"),  # 0.1259 Actions
+# ("autocunnilingus", "contortionism"),  # 0.1248 Actions
+# ("wet_face", "trunk_play"),  # 0.1214 Actions
+# ("scan", "looking_at_own_hand"),  # 0.1174 Actions
+# ("wet_face", "squelching"),  # 0.1131 Danger
+# ("nose_hook", "nasal_penetration"),  # 0.111 NSFW
+# ("rivalry", "fighting_over_boy"),  # 0.111 Actions
+# ("alchemy", "holding_potion"),  # 0.1072 Actions
+# ("tribadism", "pussy_stacking"),  # 0.1068 NSFW
+# ("symmetry", "grabbing_both_breasts"),  # 0.1065 Actions
+# ("bite_mark_on_shoulder", "biting_partner"),  # 0.1027 Actions
+# ("wheat_field", "bare_sheath"),  # 0.1009 NSFW
+# ("wheat_field", "skin_sheath"),  # 0.1009 NSFW
+# ("on_ball", "butt_massage"),  # 0.0888 NSFW
+# ("fidgeting", "muffled_speech"),  # 0.0886 Danger
+# ("heater", "window_sill"),  # 0.0825 Effects
+# ("leg_focus", "bottom_view"),  # 0.0789 Actions
+# ("holding_reins", "cringing"),  # 0.0787 Expressions
+# ("tribadism", "obscured_vaginal"),  # 0.0724 NSFW
+# ("fetus", "recursive_penetration"),  # 0.069 NSFW
+# ("arms_around_waist", "hugging_from_behind"),  # 0.0632 Actions
+# ("dragging", "cock_hanging"),  # 0.061 Danger
+# ("heater", "bestiality_kiss"),  # 0.055 Danger
+# ("navel_focus", "unusual_fingering"),  # 0.0521 NSFW
+# ("balaclava", "mature_intersex"),  # 0.0509 NSFW
+# ("torterra", "turtle_penis"),  # 0.0493 NSFW
+# ("writing_on_wall", "male/male_symbol"),  # 0.047 NSFW
+# ("floating_object", "resisting"),  # 0.0461 Danger
+# ("leg_focus", "cum_on_pawpads"),  # 0.0454 NSFW
+# ("swirl", "cum_creature"),  # 0.045 NSFW
+# ("tribadism", "obscured_genitals"),  # 0.0445 NSFW
+# ("navel_focus", "breast_tuft"),  # 0.0443 NSFW
+# ("holding_dumbbell", "hyper_bulge"),  # 0.0439 NSFW
+# ("leg_focus", "suspended_by_penis"),  # 0.0438 NSFW
+# ("hands_on_another's_head", "condom_decoration"),  # 0.0426 NSFW
+# ("balaclava", "testicle_cuff"),  # 0.0422 Danger
+# ("masquerade_mask", "cheating_girlfriend"),  # 0.0414 NSFW
+# ("writing_on_wall", "sexuality_symbol"),  # 0.0403 NSFW
+# ("teaching", "erect_tail"),  # 0.0358 NSFW
+# ("writing_on_wall", "sexist_slur"),  # 0.0354 NSFW
+# ("writing_on_wall", "stated_homosexuality"),  # 0.0325 NSFW
+# ("holding_dumbbell", "huge_bulge"),  # 0.0314 NSFW
+# ("iron_cross", "penis_ring_(piercing)"),  # 0.0313 NSFW
+# ("balaclava", "saggy_balls"),  # 0.0287 NSFW
+# ("sitting_on_head", "accidental_sex"),  # 0.0286 NSFW
+# ("helping", "looking_at_another's_genitalia"),  # 0.0254 NSFW
+# ("anatomy", "penis_shot"),  # 0.0252 NSFW
+# ("eye_reflection", "glistening"),  # 0.0252 Effects
+# ("age_difference", "older_penetrated"),  # 0.0251 NSFW
+# ("star_pasties", "mostly_nude_intersex"),  # 0.0251 NSFW
+# ("glory_wall", "anal_wink"),  # 0.025 NSFW
+# ("shampoo_bottle", "heavy_balls"),  # 0.0246 NSFW
+# ("full_nelson", "shaft_divide"),  # 0.0243 NSFW
+# ("helping", "looking_at_partner's_penis"),  # 0.0243 NSFW
+# ("hologram", "herm/herm"),  # 0.0243 NSFW
+# ("smoliv", "looking_at_sex"),  # 0.0243 NSFW
+# ("nibbling", "penis_bite"),  # 0.0242 NSFW
+# ("shaking_head", "reverse_forced_oral"),  # 0.0241 NSFW
+# ("oiled", "penis_between_breasts"),  # 0.024 NSFW
+# ("pull_out", "after_vaginal_penetration"),  # 0.024 NSFW
+# ("salt_shaker", "wife"),  # 0.0238 NSFW
+# ("crotch_zipper", "pussy_close-up"),  # 0.0233 NSFW
+# ("standing_sex", "bodyguard_position"),  # 0.0232 NSFW
+# ("on_boat", "pussy_juice_on_balls"),  # 0.0231 NSFW
+# ("lineup", "butt_size_difference"),  # 0.023 NSFW
+# ("penis_on_shoulder", "4_balls"),  # 0.023 NSFW
+# ("gourd", "intersex_on_top"),  # 0.0229 NSFW
+# ("spiked_helmet", "partial_nudity"),  # 0.0229 NSFW
+# ("husband_and_husband", "father_penetrating_son"),  # 0.0227 NSFW
+# ("spill", "lube_on_penis"),  # 0.0227 NSFW
+# ("karate", "cum_through_pants"),  # 0.0226 NSFW
+# ("arm_on_knee", "pubes_exposed"),  # 0.0224 NSFW
+# ("mining_helmet", "vaginal_fluids_on_butt"),  # 0.0224 NSFW
+# ("tonguejob", "oversized_oral"),  # 0.0224 NSFW
+# ("after_anal", "cum_on_perineum"),  # 0.0223 NSFW
+# ("horseshoe", "anatomically_correct_anus"),  # 0.0222 NSFW
+# ("mind_break", "until_they_like_it"),  # 0.0222 NSFW
+# ("perineum", "backsack"),  # 0.0221 NSFW
+# ("bra_pull", "flashing_breasts"),  # 0.022 NSFW
+# ("vivillon", "autofellatio_while_penetrated"),  # 0.022 NSFW
+# ("interrupted", "yelling"),  # 0.0216 Expressions
+# ("after_vaginal", "leaking_cum"),  # 0.0215 NSFW
+# ("on_roof", "looking_down_at_penis"),  # 0.0215 NSFW
+# ("nursing_handjob", "breastfeeding_during_sex"),  # 0.0214 NSFW
+# ("star_pasties", "clothed_intersex"),  # 0.0213 NSFW
+# ("collarbone_piercing", "multi_nipple"),  # 0.0212 NSFW
+# ("aztec", "belly_markings"),  # 0.0211 NSFW
+# ("living_room", "sofa_sex"),  # 0.0211 NSFW
+# ("on_roof", "looking_down_at_genitalia"),  # 0.021 NSFW
+# ("shirt_down", "exposed_breasts"),  # 0.021 NSFW
+# ("twirling_hair", "back_boob"),  # 0.0209 NSFW
+# ("clitoris_slip", "nipple_outline"),  # 0.0207 NSFW
+# ("spiked_gloves", "handwear_only"),  # 0.0207 NSFW
+# ("clitoris_slip", "barely_visible_genitalia"),  # 0.0204 NSFW
+# ("dirndl", "bdsm_gear"),  # 0.0204 NSFW
+# ("spitroast", "two_doms_one_sub"),  # 0.0204 NSFW
+# ("on_desk", "table_lotus_position"),  # 0.0203 NSFW
+# ("breeding_mount", "flared_penis"),  # 0.02 NSFW
+# ("tonguejob", "genital_danger_play"),  # 0.02 NSFW
+# ("under_clothes", "obscured_oral"),  # 0.02 NSFW
+
+_STOPWORDS: frozenset[str] = frozenset({
+    "on", "in", "at", "of", "the", "a", "to", "from", "by", "and",
+    "with", "for", "an", "is", "it", "or", "as", "up", "no",
+})
+
+
+def _has_word_overlap(source: str, e621_tag: str) -> bool:
+    """source와 e621_tag 사이에 의미 있는 단어 겹침이 있는지 확인."""
+    src_words = set(source.replace("'s", "").replace("-", "_").split("_")) - _STOPWORDS
+    tag_words = set(e621_tag.replace("-", "_").split("_")) - _STOPWORDS
+    if src_words & tag_words:
+        return True
+    for sw in src_words:
+        if len(sw) < 4:
+            continue
+        for tw in tag_words:
+            if len(tw) < 4:
+                continue
+            if sw in tw or tw in sw:
+                return True
+    return False
+
+
+# Pre-compute: 단독 source이고 단어 겹침 없는 output 태그 집합
+# → 이 집합에 해당하면 _SINGLE_SOURCE_WHITELIST 체크 필요
+_SINGLE_SOURCE_GATE: frozenset[str] = frozenset()  # placeholder
+
+
+def _build_single_source_gate() -> frozenset[str]:
+    """_BOOST_MAP에서 단독 source + 단어 겹침 없는 output 태그를 추출."""
+    from collections import defaultdict
+    reverse: dict[str, list[str]] = defaultdict(list)
+    for source, entries in _BOOST_MAP.items():
+        for e621_tag, score, _ in entries:
+            if score >= DEFAULT_SCORE_FLOOR:
+                reverse[e621_tag].append(source)
+
+    gated: set[str] = set()
+    for e621_tag, sources in reverse.items():
+        if len(sources) == 1 and not _has_word_overlap(sources[0], e621_tag):
+            gated.add(e621_tag)
+    return frozenset(gated)
+
+
+_SINGLE_SOURCE_GATE = _build_single_source_gate()
+del _build_single_source_gate
+
+
+def _check_single_source_gate(source_tag: str, e621_tag: str) -> bool:
+    """단독 source gate. True=통과, False=차단."""
+    if e621_tag not in _SINGLE_SOURCE_GATE:
+        return True  # multi-source이거나 단어 겹침 있음 → 통과
+    return (source_tag, e621_tag) in _SINGLE_SOURCE_WHITELIST
+
 
 def _check_characteristic_filter(source_tag: str, e621_tag: str) -> bool:
     """Characteristic source에서 온 추천이 의미 있는지 확인.
@@ -5685,17 +6191,76 @@ def _check_pair_block(e621_tag: str, source_tag: str) -> bool:
 
 def _dedupe_group_results(
     sorted_all: list[tuple[str, tuple[float, str, str]]],
+    mode: str = "stable",
 ) -> list[tuple[str, tuple[float, str, str]]]:
-    """동의어 그룹에서 최고 score 1개만 남긴다."""
-    seen_groups: set[int] = set()
-    deduped: list[tuple[str, tuple[float, str, str]]] = []
+    """동의어 그룹 dedup.
+
+    mode:
+        "stable"  — 그룹당 최고 score 1개만 남긴다 (결정적).
+        "confused" — 최소 1개 보장(가중 랜덤) + 나머지 score/total 확률로 추가.
+    """
+    if mode == "stable":
+        seen_groups: set[int] = set()
+        deduped: list[tuple[str, tuple[float, str, str]]] = []
+        for e621_tag, payload in sorted_all:
+            group_ids = _DEDUPE_GROUP_LOOKUP.get(e621_tag)
+            if group_ids is not None:
+                if any(group_idx in seen_groups for group_idx in group_ids):
+                    continue
+                seen_groups.update(group_ids)
+            deduped.append((e621_tag, payload))
+        return deduped
+
+    # ── confused mode ──
+    import random
+
+    # 1) 그룹별 멤버 수집 (등장 순서 유지)
+    group_members: dict[int, list[tuple[str, tuple[float, str, str]]]] = {}
+    tag_group_map: dict[str, int] = {}  # tag → 대표 group_id
+    ungrouped: list[tuple[str, tuple[float, str, str]]] = []
+
     for e621_tag, payload in sorted_all:
         group_ids = _DEDUPE_GROUP_LOOKUP.get(e621_tag)
-        if group_ids is not None:
-            if any(group_idx in seen_groups for group_idx in group_ids):
-                continue
-            seen_groups.update(group_ids)
-        deduped.append((e621_tag, payload))
+        if group_ids is None:
+            ungrouped.append((e621_tag, payload))
+            continue
+        gid = group_ids[0]
+        tag_group_map[e621_tag] = gid
+        if gid not in group_members:
+            group_members[gid] = []
+        group_members[gid].append((e621_tag, payload))
+
+    # 2) 그룹별 확률적 선택
+    selected_tags: set[str] = set()
+    for gid, members in group_members.items():
+        scores = [p[0] for _, p in members]
+        total = sum(scores)
+        if total <= 0:
+            continue
+
+        # Step A: 가중 랜덤으로 1개 보장
+        r = random.random() * total
+        cumul = 0.0
+        for tag, payload in members:
+            cumul += payload[0]
+            if r < cumul:
+                selected_tags.add(tag)
+                break
+
+        # Step B: 나머지 각각 P=score/total로 추가
+        for tag, payload in members:
+            if tag not in selected_tags and random.random() < payload[0] / total:
+                selected_tags.add(tag)
+
+    # 3) 원래 순서 유지하며 결과 조립
+    deduped: list[tuple[str, tuple[float, str, str]]] = []
+    for e621_tag, payload in sorted_all:
+        if e621_tag in tag_group_map:
+            if e621_tag in selected_tags:
+                deduped.append((e621_tag, payload))
+        else:
+            deduped.append((e621_tag, payload))
+
     return deduped
 
 
@@ -5709,6 +6274,7 @@ def recommend(
     top_n: int = DEFAULT_TOP_N,
     diversity_cap: int = DEFAULT_DIVERSITY_CAP,
     score_floor: float = DEFAULT_SCORE_FLOOR,
+    mode: str = "stable",
 ) -> list[str]:
     """프롬프트 문자열에서 e621 부스트 태그 추천.
 
@@ -5717,12 +6283,13 @@ def recommend(
         top_n: 최대 결과 수
         diversity_cap: 카테고리별 최대 수 (0=무제한)
         score_floor: 최소 score 임계값 (기본 0.02)
+        mode: "stable" (결정적 top-1) 또는 "confused" (확률적 다중 선택)
 
     Returns:
         추천 e621 태그 리스트 (underscore form, score 내림차순)
     """
     results = recommend_detailed(prompt, top_n=top_n, diversity_cap=diversity_cap,
-                                 score_floor=score_floor)
+                                 score_floor=score_floor, mode=mode)
     return [r[0] for r in results]
 
 
@@ -5732,8 +6299,12 @@ def recommend_detailed(
     top_n: int = DEFAULT_TOP_N,
     diversity_cap: int = DEFAULT_DIVERSITY_CAP,
     score_floor: float = DEFAULT_SCORE_FLOOR,
+    mode: str = "stable",
 ) -> list[tuple[str, float, str, str]]:
     """프롬프트에서 e621 부스트 태그 추천 (상세 정보 포함).
+
+    Args:
+        mode: "stable" (결정적 top-1) 또는 "confused" (확률적 다중 선택)
 
     Returns:
         [(e621_tag, score, category, source_tag), ...] score 내림차순
@@ -5790,12 +6361,15 @@ def recommend_detailed(
             # Characteristic filter: 외형 태그는 단어 겹침 있을 때만 허용
             if not _check_characteristic_filter(tag_us, e621_tag):
                 continue
+            # Single-source gate: 단독 source + 단어 무관 output은 whitelist 필요
+            if not _check_single_source_gate(tag_us, e621_tag):
+                continue
             if e621_tag not in merged or score > merged[e621_tag][0]:
                 merged[e621_tag] = (score, cat, tag_us.replace("_", " "))
 
     # Sort by score descending
     sorted_all = sorted(merged.items(), key=lambda x: -x[1][0])
-    sorted_all = _dedupe_group_results(sorted_all)
+    sorted_all = _dedupe_group_results(sorted_all, mode=mode)
 
     # Source-keyword dedup: 동일 키워드(4자+) 공유 시 상위 _SKD_CAP개만 유지
     skd_counts: dict[str, int] = {}

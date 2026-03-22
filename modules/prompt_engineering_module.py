@@ -656,7 +656,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             with open(self._E621_SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"weight": 0.0, "hidden_tags": []}
+            return {"weight": 0.0, "hidden_tags": [], "mode": "stable"}
 
     def _save_e621_settings(self):
         """e621 사용자 설정 저장"""
@@ -989,7 +989,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             recommend_detailed = self._e621_recommend
             boost_prompt = ", ".join(input_tags)
             print(f"[e621 DEBUG] input tags ({len(input_tags)}): {boost_prompt[:200]}{'...' if len(boost_prompt) > 200 else ''}")
-            boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3)
+            _mode = self._e621_settings.get("mode", "stable")
+            boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3, mode=_mode)
             print(f"[e621 DEBUG] results ({len(boost_results)}): {[(t, f'{s:.4f}', c) for t, s, c, src in boost_results]}")
             if boost_results:
                 # 숨김 태그 필터링
@@ -2860,6 +2861,32 @@ class _E621SettingsWindow(QWidget):
         weight_row.addWidget(btn_r)
         layout.addLayout(weight_row)
 
+        # ── 적용 모드 섹션 ──
+        mode_label = QLabel("적용 모드")
+        mode_label.setToolTip(
+            "stable: dedup 그룹에서 최고 score 1개만 선택 (결정적)\n"
+            "confused: 최소 1개 보장 + 나머지 score 비례 확률 추가 (다양성)"
+        )
+        layout.addWidget(mode_label)
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("stable — 안정 (그룹당 1개)", "stable")
+        self._mode_combo.addItem("confused — 다양성 (확률적 다중 선택)", "confused")
+        self._mode_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+        """)
+        layout.addWidget(self._mode_combo)
+
         # ── 숨김 태그 섹션 ──
         hidden_label = QLabel("숨김 태그 (쉼표로 구분, 추천에서 제외)")
         hidden_label.setToolTip("예: chastity device, gaping anus, magic user")
@@ -2886,6 +2913,11 @@ class _E621SettingsWindow(QWidget):
     def load_settings(self, settings: dict):
         """설정을 UI에 반영 (언더바→공백으로 표시)"""
         self._weight_edit.setText(str(settings.get("weight", 0.0)))
+        # mode
+        mode = settings.get("mode", "stable")
+        idx = self._mode_combo.findData(mode)
+        self._mode_combo.setCurrentIndex(max(0, idx))
+        # hidden tags
         hidden_tags = settings.get("hidden_tags", [])
         display_tags = [tag.replace("_", " ") for tag in hidden_tags]
         self._hidden_edit.setPlainText(", ".join(display_tags) if display_tags else "")
@@ -2914,7 +2946,8 @@ class _E621SettingsWindow(QWidget):
             tag = tag.strip().replace(" ", "_")
             if tag and tag not in hidden_tags:
                 hidden_tags.append(tag)
-        return {"weight": weight, "hidden_tags": hidden_tags}
+        mode = self._mode_combo.currentData() or "stable"
+        return {"weight": weight, "hidden_tags": hidden_tags, "mode": mode}
 
     def closeEvent(self, event):
         """닫을 때 자동 저장"""

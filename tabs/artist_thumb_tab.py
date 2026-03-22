@@ -1573,7 +1573,7 @@ class ArtistThumbModule(BaseTabModule):
         self.filter_mode = "전체 목록 보기"  # 필터링 모드
         
     def get_tab_title(self) -> str:
-        return "🎨 Artist Thumb"
+        return "🎨 Artists"
     
     def get_tab_order(self) -> int:
         return 50  # 중간 위치

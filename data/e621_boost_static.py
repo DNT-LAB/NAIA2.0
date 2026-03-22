@@ -5170,7 +5170,7 @@ _NOISE_TAGS: frozenset[str] = frozenset({
 
 _NOISE_WHITELIST: dict[str, frozenset[str]] = {
     "cum_from_ass": frozenset({"after_anal", "after_sex", "cum_in_ass", "anal_only", "gaping", "pull_out", "after_rape"}),
-    "cum_from_nose": frozenset({"cum_in_nose", "cum_bubble", "cum_in_throat", "cheek_bulge", "cum_in_mouth", "cum_on_lips", "cum_overflow", "cum_inflation"}),
+    "cum_from_nose": frozenset({"cum_in_nose", "cum_bubble", "cum_in_throat", "cheek_bulge", "cum_in_mouth", "cum_on_lips", "cum_inflation"}),
     "cum_from_vagina": frozenset({"after_vaginal", "after_sex", "cum_overflow", "impregnation", "pull_out", "after_rape"}),
     "cum_through": frozenset({"cum_in_nose", "cum_inflation", "cum_overflow", "inflation"}),
     "first_person_view": frozenset({"assertive_female", "female_pov", "guided_penetration", "pov_hands", "reverse_footjob"}),
@@ -5184,6 +5184,12 @@ _NOISE_WHITELIST: dict[str, frozenset[str]] = {
     "side_view": frozenset({"turnaround"}),
     "submissive": frozenset({"femdom", "dominatrix", "assertive_female", "power_bottom"}),
     "three-quarter_view": frozenset({"bear_ears"}),
+}
+
+# Confused 모드 전용 noise whitelist 확장
+# stable에서는 차단되지만 confused에서는 확률적으로 허용되는 (output, source) 쌍
+_NOISE_WHITELIST_CONFUSED: dict[str, frozenset[str]] = {
+    "cum_from_nose": frozenset({"cum_overflow"}),
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -6349,7 +6355,17 @@ def recommend_detailed(
             if e621_tag in _NOISE_TAGS:
                 allowed = _NOISE_WHITELIST.get(e621_tag)
                 if not allowed or tag_us not in allowed:
-                    continue
+                    # confused 모드: 확장 whitelist + 확률적 허용
+                    if mode == "confused":
+                        confused_allowed = _NOISE_WHITELIST_CONFUSED.get(e621_tag)
+                        if confused_allowed and tag_us in confused_allowed:
+                            import random
+                            if random.random() >= score:  # score가 높을수록 통과 확률 높음
+                                continue
+                        else:
+                            continue
+                    else:
+                        continue
             # Anchor gate: 도메인 특화 태그의 맥락 검증
             if not _check_anchor_gate(e621_tag, tags_set):
                 continue

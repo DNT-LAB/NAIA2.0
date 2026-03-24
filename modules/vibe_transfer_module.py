@@ -411,7 +411,7 @@ class VibeTransferFrame(QFrame):
         controls_layout.addWidget(self.ref_strength_label)
         
         self.ref_strength_slider = QSlider(Qt.Orientation.Horizontal)
-        self.ref_strength_slider.setRange(1, 100)
+        self.ref_strength_slider.setRange(-100, 100)
         self.ref_strength_slider.setValue(int(self.reference_strength * 100))
         self.ref_strength_slider.setFixedHeight(get_scaled_size(20))  # Fixed height to save space
         self.ref_strength_slider.setStyleSheet("""

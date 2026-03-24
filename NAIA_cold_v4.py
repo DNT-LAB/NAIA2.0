@@ -4855,17 +4855,17 @@ class ModernMainWindow(QMainWindow):
             # 대신 간단한 시간 기반 중복 방지만 적용
             import time
             current_time = time.time()
-            
+
             # 마지막 이미지 생성 시간 체크 (0.5초 이내 중복 방지)
             if not hasattr(self, 'last_image_generation_time'):
                 self.last_image_generation_time = 0
-                
+
             if (current_time - self.last_image_generation_time) < 0.5:
                 print(f"⚠️ 이미지 생성 중복 방지: time_diff={current_time - self.last_image_generation_time:.2f}s")
                 return
-                
+
             self.last_image_generation_time = current_time
-            
+
             # 이미지 생성 실행
             self.generation_controller.execute_generation_pipeline()
             

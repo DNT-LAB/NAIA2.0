@@ -263,6 +263,61 @@ class PromptProcessor:
                 formatted_tag = tag
                 formatted_prompt.append(formatted_tag)
 
+        # 와일드카드 단독 모드 + NAI + 사용자 활성화: 프롬프트 squeeze 적용
+        if (context.settings.get('wildcard_standalone', False) and
+                self.app_context.current_api_mode == 'NAI' and
+                getattr(self.app_context, 'prompt_squeeze_enabled', False)):
+            formatted_prompt = self._apply_prompt_squeeze(formatted_prompt)
+
         final_string = ', '.join(formatted_prompt)
 
         return final_string
+
+    def _apply_prompt_squeeze(self, formatted_prompt: list) -> list:
+        """와일드카드 단독 모드에서 동일 프롬프트 해시 검출을 회피하기 위한 미세 변형.
+        기존 태그에서 조각을 추출하여 극저 가중치로 무작위 삽입."""
+        import re
+        import random
+
+        # 1. 태그에서 pure text 조각 수집
+        fragments = []
+        for tag in formatted_prompt:
+            stripped = tag.strip()
+            if not stripped or stripped.startswith('#') or stripped.startswith('\n'):
+                continue
+
+            # 가중치/구문 제거 → pure text
+            pure = stripped
+            pure = re.sub(r'^\d+\.?\d*::', '', pure)   # 선행 "0.85::"
+            pure = re.sub(r'\s*::$', '', pure)          # 후행 " ::"
+            pure = re.sub(r'[{}\[\]()]', '', pure)      # 괄호류
+            pure = re.sub(r':\d+\.?\d*', '', pure)      # ":1.2" 등
+            pure = pure.strip()
+
+            if not pure:
+                continue
+            if 'artist' in pure.lower():
+                continue
+            if re.search(r'\d', pure):
+                continue
+
+            # 공백/_로 분해, 2글자 이상만
+            parts = re.split(r'[\s_]+', pure)
+            fragments.extend(p for p in parts if len(p) >= 2)
+
+        if not fragments:
+            return formatted_prompt
+
+        # 2. 무작위 조각을 극저 가중치로 삽입
+        result = formatted_prompt.copy()
+        num_insert = random.randint(1, min(3, len(fragments)))
+        selected = random.sample(fragments, k=min(num_insert, len(fragments)))
+
+        for frag in selected:
+            weight = random.randint(1, 9) / 100
+            dummy = f"{weight}::{frag} ::"
+            start = max(1, len(result) // 2)
+            pos = random.randint(start, max(start, len(result) - 1))
+            result.insert(pos, dummy)
+
+        return result

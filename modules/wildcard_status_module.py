@@ -3,7 +3,7 @@ import json
 import subprocess
 import platform
 from pathlib import Path
-from PyQt6.QtWidgets import QVBoxLayout, QWidget, QLabel, QTextEdit, QPushButton, QHBoxLayout
+from PyQt6.QtWidgets import QVBoxLayout, QWidget, QLabel, QTextEdit, QPushButton, QHBoxLayout, QCheckBox
 from PyQt6.QtCore import Qt
 from interfaces.base_module import BaseMiddleModule
 from core.context import AppContext
@@ -17,11 +17,14 @@ class WildcardStatusModule(BaseMiddleModule):
     🎴 프롬프트 생성 시 사용된 와일드카드의 내역과 상태를 표시하는 UI 모듈
     """
 
+    SETTINGS_PATH = "save/wildcard_status_settings.json"
+
     def __init__(self):
         super().__init__()
         self.history_textbox: QTextEdit = None
         self.state_textbox: QTextEdit = None
-        self.ignore_save_load = True 
+        self.prompt_squeeze_checkbox: QCheckBox = None
+        self.ignore_save_load = True
 
     def get_title(self) -> str:
         return "🃏 와일드카드 모듈"
@@ -142,7 +145,19 @@ class WildcardStatusModule(BaseMiddleModule):
         bottom_layout.addStretch()
         
         layout.addLayout(bottom_layout)
-        
+
+        # 403 방지 체크박스
+        self.prompt_squeeze_checkbox = QCheckBox("NovelAI 403 방지 (와일드카드 단독 모드)")
+        self.prompt_squeeze_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.prompt_squeeze_checkbox.setToolTip(
+            "와일드카드 단독 모드 + NAI 사용 시, 동일 프롬프트 반복 검출을 회피하기 위해\n"
+            "기존 태그 조각을 극저 가중치로 삽입합니다. 생성 결과에 거의 영향 없음.")
+        self.prompt_squeeze_checkbox.stateChanged.connect(self._on_squeeze_changed)
+        layout.addWidget(self.prompt_squeeze_checkbox)
+
+        # 저장된 설정 로드
+        self._load_settings()
+
         # 초기 메시지 설정
         self.update_view(None)
 
@@ -296,6 +311,35 @@ class WildcardStatusModule(BaseMiddleModule):
         except Exception as e:
             print(f"❌ 와일드카드 관리 창 열기 중 오류 발생: {e}")
     
+    def _on_squeeze_changed(self, state):
+        enabled = self.prompt_squeeze_checkbox.isChecked()
+        self.context.prompt_squeeze_enabled = enabled
+        self._save_settings()
+
+    def _load_settings(self):
+        enabled = True
+        try:
+            with open(self.SETTINGS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            enabled = data.get('prompt_squeeze_enabled', True)
+        except (FileNotFoundError, json.JSONDecodeError):
+            # 파일 없으면 기본값 True로 생성
+            self.prompt_squeeze_checkbox.setChecked(True)
+            self.context.prompt_squeeze_enabled = True
+            self._save_settings()
+            return
+        self.prompt_squeeze_checkbox.setChecked(enabled)
+        self.context.prompt_squeeze_enabled = enabled
+
+    def _save_settings(self):
+        try:
+            os.makedirs(os.path.dirname(self.SETTINGS_PATH), exist_ok=True)
+            with open(self.SETTINGS_PATH, 'w', encoding='utf-8') as f:
+                json.dump({'prompt_squeeze_enabled': self.prompt_squeeze_checkbox.isChecked()},
+                          f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"⚠️ wildcard_status 설정 저장 실패: {e}")
+
     def sync_instant_wildcards_to_txt(self):
         """
         save/instant_wildcard 폴더의 JSON 파일들을 읽어서

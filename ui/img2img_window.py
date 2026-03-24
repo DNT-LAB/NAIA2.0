@@ -439,9 +439,49 @@ class Img2ImgWindow(QMainWindow):
 
     # ─── 이미지/모드 설정 ─────────────────────────────────────
 
+    @staticmethod
+    def _find_best_resolution(width, height, max_pixels=1048576, multiple_of=64):
+        """비율을 유지하면서 max_pixels 이내의 최적 64배수 해상도를 계산합니다."""
+        ratio = width / height
+
+        best_w = int((max_pixels * ratio) ** 0.5)
+        best_h = int((max_pixels / ratio) ** 0.5)
+
+        best_w = (best_w // multiple_of) * multiple_of
+        best_h = (best_h // multiple_of) * multiple_of
+
+        # max_pixels 초과 시 축소
+        while best_w * best_h > max_pixels:
+            best_w -= multiple_of
+            best_h = int(best_w / ratio)
+            best_h = (best_h // multiple_of) * multiple_of
+
+        # 최소 64 보장
+        best_w = max(best_w, multiple_of)
+        best_h = max(best_h, multiple_of)
+
+        return best_w, best_h
+
+    def _ensure_valid_resolution(self, pil_image):
+        """이미지를 64배수 + 1MP 이내 해상도로 리사이징합니다."""
+        w, h = pil_image.size
+
+        # 이미 64배수이고 1MP 이내면 그대로 반환
+        if w % 64 == 0 and h % 64 == 0 and w * h <= 1048576:
+            return pil_image
+
+        new_w, new_h = self._find_best_resolution(w, h)
+
+        if new_w == w and new_h == h:
+            return pil_image
+
+        resized = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        print(f"🖼️ [Img2ImgWindow] 해상도 조정: {w}x{h} → {new_w}x{new_h} (64배수, ≤1MP)")
+        return resized
+
     def set_image(self, pil_image, mode='img2img', mask_data=None, outpaint_data=None):
         """이미지/모드/마스크/아웃페인트 데이터 설정 및 프리뷰 업데이트"""
-        self.pil_image = pil_image
+        self.pil_image = self._ensure_valid_resolution(pil_image)
         self.mode = mode
         self._outpaint_data = outpaint_data
 

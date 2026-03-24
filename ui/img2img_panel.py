@@ -389,61 +389,19 @@ class Img2ImgPanel(QFrame):
         self.setVisible(True)
 
     def _resize_and_crop_to_64_multiple(self, pil_image: Image.Image) -> Image.Image:
-        """이미지를 64배수 크기로 리사이징하고 크롭합니다."""
+        """이미지를 64배수 + 1MP 이내 크기로 리사이징합니다."""
         width, height = pil_image.size
-        
-        # 1. 더 작은 값을 기준으로 가까운 64배수로 조정
-        min_dimension = min(width, height)
-        new_min_dimension = round(min_dimension / 64) * 64
-        
-        # 최소 64픽셀 보장
-        if new_min_dimension < 64:
-            new_min_dimension = 64
-        
-        # 2. 조정된 비율을 구해서 더 큰 값에 적용
-        scale_ratio = new_min_dimension / min_dimension
-        
-        if width <= height:  # width가 더 작거나 같은 경우
-            new_width = new_min_dimension
-            new_height = int(height * scale_ratio)
-        else:  # height가 더 작은 경우
-            new_height = new_min_dimension
-            new_width = int(width * scale_ratio)
-        
-        # 3. LANCZOS를 이용해 리사이징
-        resized_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        # 4. 더 큰 값을 가장 가까운 64배수로 크롭
-        if new_width >= new_height:  # width가 더 크거나 같은 경우
-            target_width = round(new_width / 64) * 64
-            difference = new_width - target_width
-            
-            # 좌우에서 크롭
-            left_crop = difference // 2
-            right_crop = difference - left_crop  # 홀수인 경우 오른쪽에서 1픽셀 더
-            
-            # 실제로는 왼쪽에서 1픽셀 더 크롭하도록 조정 (요구사항에 따라)
-            if difference % 2 == 1:
-                left_crop += 1
-                right_crop -= 1
-            
-            final_image = resized_image.crop((left_crop, 0, new_width - right_crop, new_height))
-        else:  # height가 더 큰 경우
-            target_height = round(new_height / 64) * 64
-            difference = new_height - target_height
-            
-            # 상하에서 크롭
-            top_crop = difference // 2
-            bottom_crop = difference - top_crop  # 홀수인 경우 아래쪽에서 1픽셀 더
-            
-            # 실제로는 위쪽에서 1픽셀 더 크롭하도록 조정 (요구사항에 따라)
-            if difference % 2 == 1:
-                top_crop += 1
-                bottom_crop -= 1
-            
-            final_image = resized_image.crop((0, top_crop, new_width, new_height - bottom_crop))
-        
-        print(f"🖼️ 이미지 리사이징 완료: {width}x{height} → {final_image.size[0]}x{final_image.size[1]} (64배수)")
+
+        # 이미 64배수이고 1MP 이내면 그대로 반환
+        if width % 64 == 0 and height % 64 == 0 and width * height <= 1048576:
+            print(f"🖼️ 이미지 리사이징 불필요: {width}x{height} (이미 64배수, ≤1MP)")
+            return pil_image
+
+        new_w_str, new_h_str = self.find_max_resolution(width, height, max_pixels=1048576)
+        new_w, new_h = int(new_w_str), int(new_h_str)
+
+        final_image = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        print(f"🖼️ 이미지 리사이징 완료: {width}x{height} → {new_w}x{new_h} (64배수, ≤1MP)")
         return final_image
 
     def find_max_resolution(self, width, height, max_pixels=1048576, multiple_of=64):

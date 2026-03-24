@@ -2166,26 +2166,23 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if hasattr(main_window, 'negative_prompt_textedit'):
                 settings['negative'] = main_window.negative_prompt_textedit.toPlainText()
             
-            # 생성 파라미터
-            params = main_window.get_main_parameters() if hasattr(main_window, 'get_main_parameters') else {}
-            
+            # 생성 파라미터 — 위젯에서 직접 읽기 (get_main_parameters()는 시드 부작용 있음)
             mode = self.app_context.get_api_mode()
             if mode == "NAI":
-                # 직접 위젯에서 값 가져오기 (params가 비어있을 수 있음)
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
-                    settings['cfg_scale'] = params.get('cfg_scale', 5.0)
-                    
+                    settings['cfg_scale'] = 5.0
+
                 if hasattr(main_window, 'sampler_combo'):
                     settings['sampler'] = main_window.sampler_combo.currentText()
                 else:
-                    settings['sampler'] = params.get('sampler', 'k_euler')
-                    
+                    settings['sampler'] = 'k_euler'
+
                 if hasattr(main_window, 'steps_spinbox'):
                     settings['steps'] = main_window.steps_spinbox.value()
                 else:
-                    settings['steps'] = params.get('steps', 28)
+                    settings['steps'] = 28
                 # 체크박스들 - advanced_checkboxes 딕셔너리에서 가져오기
                 if hasattr(main_window, 'advanced_checkboxes'):
                     settings['SMEA'] = main_window.advanced_checkboxes.get("SMEA", QCheckBox()).isChecked()
@@ -2193,86 +2190,84 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     settings['VAR+'] = main_window.advanced_checkboxes.get("VAR+", QCheckBox()).isChecked()
                     settings['DECRISP'] = main_window.advanced_checkboxes.get("DECRISP", QCheckBox()).isChecked()
                 else:
-                    settings['SMEA'] = params.get('SMEA', False)
-                    settings['DYN'] = params.get('DYN', False)
-                    settings['VAR+'] = params.get('VAR+', False)
-                    settings['DECRISP'] = params.get('DECRISP', False)
+                    settings['SMEA'] = False
+                    settings['DYN'] = False
+                    settings['VAR+'] = False
+                    settings['DECRISP'] = False
             elif mode == "WEBUI":
-                # WEBUI도 NAI와 동일한 위젯 이름 사용하므로 직접 위젯에서 값 가져오기
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
-                    settings['cfg_scale'] = params.get('cfg_scale', 7.0)
-                    
+                    settings['cfg_scale'] = 7.0
+
                 if hasattr(main_window, 'sampler_combo'):
                     settings['sampler'] = main_window.sampler_combo.currentText()
                 else:
-                    settings['sampler'] = params.get('sampler_name', 'Euler')
-                
+                    settings['sampler'] = 'Euler'
+
                 # WEBUI에서는 scheduler도 저장해야 함
                 if hasattr(main_window, 'scheduler_combo'):
                     settings['scheduler'] = main_window.scheduler_combo.currentText()
                 else:
-                    settings['scheduler'] = params.get('scheduler', 'SGM Uniform')
-                    
+                    settings['scheduler'] = 'SGM Uniform'
+
                 if hasattr(main_window, 'steps_spinbox'):
                     settings['steps'] = main_window.steps_spinbox.value()
                 else:
-                    settings['steps'] = params.get('steps', 20)
-                
+                    settings['steps'] = 20
+
                 # WEBUI 전용 설정들
                 if hasattr(main_window, 'enable_hr_checkbox'):
                     settings['enable_hr'] = main_window.enable_hr_checkbox.isChecked()
                 else:
-                    settings['enable_hr'] = params.get('enable_hr', False)
-                    
+                    settings['enable_hr'] = False
+
                 if hasattr(main_window, 'hr_scale_spinbox'):
                     settings['hr_scale'] = main_window.hr_scale_spinbox.value()
                 else:
-                    settings['hr_scale'] = params.get('hr_scale', 1.5)
+                    settings['hr_scale'] = 1.5
                     
                 if hasattr(main_window, 'hr_upscaler_combo'):
                     settings['hr_upscaler'] = main_window.hr_upscaler_combo.currentText()
                 else:
-                    settings['hr_upscaler'] = params.get('hr_upscaler', 'Lanczos')
-                
+                    settings['hr_upscaler'] = 'Lanczos'
+
                 # denoising_strength도 저장
                 if hasattr(main_window, 'denoising_strength_slider'):
                     settings['denoising_strength'] = main_window.denoising_strength_slider.value() / 100.0
                 else:
-                    settings['denoising_strength'] = params.get('denoising_strength', 0.5)
+                    settings['denoising_strength'] = 0.5
             elif mode == "COMFYUI":
-                # ComfyUI도 NAI/WEBUI와 동일한 위젯 이름 사용
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
-                    settings['cfg_scale'] = params.get('cfg_scale', 7.0)
-                    
+                    settings['cfg_scale'] = 7.0
+
                 if hasattr(main_window, 'sampler_combo'):
                     settings['sampler'] = main_window.sampler_combo.currentText()
                 else:
-                    settings['sampler'] = params.get('sampler', 'euler')
-                
+                    settings['sampler'] = 'euler'
+
                 if hasattr(main_window, 'scheduler_combo'):
                     settings['scheduler'] = main_window.scheduler_combo.currentText()
                 else:
-                    settings['scheduler'] = params.get('scheduler', 'normal')
-                    
+                    settings['scheduler'] = 'normal'
+
                 if hasattr(main_window, 'steps_spinbox'):
                     settings['steps'] = main_window.steps_spinbox.value()
                 else:
-                    settings['steps'] = params.get('steps', 20)
-                
+                    settings['steps'] = 20
+
                 # ComfyUI 전용 설정
                 if hasattr(main_window, 'v_prediction_checkbox'):
                     settings['v_prediction'] = main_window.v_prediction_checkbox.isChecked()
                 else:
-                    settings['v_prediction'] = params.get('v_prediction', False)
-                    
+                    settings['v_prediction'] = False
+
                 if hasattr(main_window, 'zsnr_checkbox'):
                     settings['zsnr'] = main_window.zsnr_checkbox.isChecked()
                 else:
-                    settings['zsnr'] = params.get('zsnr', False)
+                    settings['zsnr'] = False
             
         except Exception as e:
             print(f"⚠️ 메인 UI 설정 수집 중 오류: {e}")

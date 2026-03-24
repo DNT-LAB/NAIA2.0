@@ -6206,12 +6206,16 @@ class ModernMainWindow(QMainWindow):
 
         if success:
             # 동적으로 onnxruntime import → 모듈에 ort + HAS_TAGGER_LIBS 갱신
+            # 실패한 import 캐시를 제거해야 새로 설치된 패키지를 로드할 수 있음
+            import sys as _sys
+            for mod_name in [k for k in _sys.modules if k == 'onnxruntime' or k.startswith('onnxruntime.')]:
+                del _sys.modules[mod_name]
             try:
                 import onnxruntime as ort
                 import ui.interactive.image_tagger_block as tagger_mod
                 tagger_mod.ort = ort
                 tagger_mod.HAS_TAGGER_LIBS = True
-            except ImportError:
+            except (ImportError, OSError):
                 QMessageBox.critical(
                     self, "오류",
                     "onnxruntime 설치 후 로드에 실패했습니다.\n프로그램을 재시작해주세요."

@@ -750,7 +750,34 @@ class Img2ImgWindowManager:
             self.windows.pop(window_id)
         self._batch_states.pop(window_id, None)
 
+    # ─── 단일 생성 완료 통지 ────────────────────────────
+
+    def on_single_generation_completed(self, window_id: int):
+        """단일 img2img 생성 완료/에러 → 버튼 복원"""
+        window = self.windows.get(window_id)
+        if window:
+            window._restore_button()
+
     # ─── 배치 반복 생성 ─────────────────────────────────
+
+    def _get_batch_delay_ms(self) -> int:
+        """Automation Module의 전역 딜레이를 ms 단위로 가져옵니다."""
+        automation = getattr(self.main_window, 'automation_module', None)
+        if not automation:
+            return 100
+
+        delay = getattr(automation, 'delay_seconds', 0)
+        if delay <= 0:
+            return 100
+
+        # 랜덤 딜레이 적용
+        if (hasattr(automation, 'random_delay_checkbox') and
+                automation.random_delay_checkbox and
+                automation.random_delay_checkbox.isChecked()):
+            variation = delay * 0.5
+            delay += random.uniform(-variation, variation)
+
+        return max(100, int(delay * 1000))
 
     def setup_batch(self, window_id: int, params: dict, total: int):
         """배치 초기화 — 윈도우에 Progress UI 표시"""
@@ -765,7 +792,7 @@ class Img2ImgWindowManager:
         print(f"[Img2ImgBatch] Window #{window_id}: 배치 시작 ({total}회)")
 
     def on_batch_generation_completed(self, window_id: int):
-        """한 건 완료 → 진행률 갱신 → 다음 트리거 또는 배치 종료"""
+        """한 건 완료 → 진행률 갱신 → 딜레이 후 다음 트리거 또는 배치 종료"""
         state = self._batch_states.get(window_id)
         if not state:
             return  # 취소됨 or 창 닫힘
@@ -780,7 +807,10 @@ class Img2ImgWindowManager:
         print(f"[Img2ImgBatch] Window #{window_id}: {current}/{total} 완료")
 
         if current < total:
-            QTimer.singleShot(100, lambda: self._trigger_next_batch(window_id))
+            delay_ms = self._get_batch_delay_ms()
+            if delay_ms > 100:
+                print(f"[Img2ImgBatch] 다음 생성까지 {delay_ms / 1000:.1f}초 대기")
+            QTimer.singleShot(delay_ms, lambda: self._trigger_next_batch(window_id))
         else:
             self._finish_batch(window_id)
 
@@ -828,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 160b"
+        self.base_title = "NAIA v2.0.0 Dev 160c"
         self.setWindowTitle(self.base_title + " - 260323")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -2974,12 +3004,16 @@ class ModernMainWindow(QMainWindow):
                             event_data["sequence_inpaint_request_id"] = generation_params.get("sequence_inpaint_request_id")
                         self.app_context.publish("generation_completed", event_data)
 
-                # Img2Img Batch 요청인 경우 다음 생성 트리거
+                # Img2Img 요청 완료 처리
                 is_img2img_batch_request = generation_params.get("img2img_batch_request", False)
-                if is_img2img_batch_request and hasattr(self, 'img2img_window_manager'):
-                    img2img_batch_window_id = generation_params.get("img2img_batch_window_id", -1)
-                    print(f"🔄 Img2Img Batch 완료 감지 (window #{img2img_batch_window_id})")
-                    self.img2img_window_manager.on_batch_generation_completed(img2img_batch_window_id)
+                img2img_window_id = generation_params.get("img2img_batch_window_id")
+                if hasattr(self, 'img2img_window_manager') and img2img_window_id is not None:
+                    if is_img2img_batch_request:
+                        print(f"🔄 Img2Img Batch 완료 감지 (window #{img2img_window_id})")
+                        self.img2img_window_manager.on_batch_generation_completed(img2img_window_id)
+                    else:
+                        # 단일 img2img 완료 → 버튼 복원
+                        self.img2img_window_manager.on_single_generation_completed(img2img_window_id)
 
                 # Main Window → Assets 자동 전파 (추후 제거 가능)
                 # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능

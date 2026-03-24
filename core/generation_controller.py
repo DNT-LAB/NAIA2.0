@@ -907,16 +907,21 @@ class GenerationController:
                 self.current_generation_params = None
                 return
 
-            # Img2Img Batch 요청인 경우: 해당 건 건너뛰고 배치 계속 진행
+            # Img2Img 요청 에러 처리
             is_img2img_batch = self.current_generation_params.get("img2img_batch_request", False)
+            img2img_window_id = self.current_generation_params.get("img2img_batch_window_id")
             if is_img2img_batch:
-                window_id = self.current_generation_params.get("img2img_batch_window_id", -1)
-                print(f"🔄 Img2Img Batch 에러 (window #{window_id}) - 배치 계속 진행")
+                print(f"🔄 Img2Img Batch 에러 (window #{img2img_window_id}) - 배치 계속 진행")
                 main_window = self.context.main_window
                 if hasattr(main_window, 'img2img_window_manager'):
-                    main_window.img2img_window_manager.on_batch_generation_completed(window_id)
+                    main_window.img2img_window_manager.on_batch_generation_completed(img2img_window_id)
                 self.current_generation_params = None
                 return
+            elif img2img_window_id is not None:
+                # 단일 img2img 에러 → 버튼 복원 (이후 일반 에러 처리 계속)
+                main_window = self.context.main_window
+                if hasattr(main_window, 'img2img_window_manager'):
+                    main_window.img2img_window_manager.on_single_generation_completed(img2img_window_id)
 
         # 🆕 자동 생성 모드에서의 재시도 로직
         auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")

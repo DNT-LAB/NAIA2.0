@@ -481,6 +481,7 @@ class Img2ImgWindow(QMainWindow):
 
     def set_image(self, pil_image, mode='img2img', mask_data=None, outpaint_data=None):
         """이미지/모드/마스크/아웃페인트 데이터 설정 및 프리뷰 업데이트"""
+        original_size = pil_image.size
         self.pil_image = self._ensure_valid_resolution(pil_image)
         self.mode = mode
         self._outpaint_data = outpaint_data
@@ -488,6 +489,15 @@ class Img2ImgWindow(QMainWindow):
         if mask_data:
             self.full_mask_pil = mask_data.get('full_mask_image')
             self.small_mask_pil = mask_data.get('small_mask_image')
+            # 이미지가 리사이즈된 경우 마스크도 함께 리사이즈
+            if self.pil_image.size != original_size:
+                new_w, new_h = self.pil_image.size
+                if self.full_mask_pil:
+                    self.full_mask_pil = self.full_mask_pil.resize(
+                        (new_w, new_h), Image.Resampling.NEAREST)
+                if self.small_mask_pil:
+                    self.small_mask_pil = self.small_mask_pil.resize(
+                        (new_w // 8, new_h // 8), Image.Resampling.NEAREST)
         else:
             self.full_mask_pil = None
             self.small_mask_pil = None
@@ -779,8 +789,8 @@ class Img2ImgWindow(QMainWindow):
         print(f"[Img2ImgWindow #{self.window_id}] 생성 요청: mode={self.mode}, repeat={repeat_count}")
         self.generate_requested.emit(self.window_id, params)
 
-        # 1초 후 버튼 복원
-        QTimer.singleShot(1000, self._restore_button)
+        # 단일 생성: 버튼은 생성 완료/에러 시 WindowManager가 복원
+        # 배치 생성: start_batch_ui()가 버튼을 관리
 
     def _restore_button(self):
         """Generate 버튼 상태 복원"""

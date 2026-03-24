@@ -25,7 +25,7 @@ import subprocess
 try:
     import onnxruntime as ort
     HAS_TAGGER_LIBS = True
-except ImportError:
+except (ImportError, OSError):
     HAS_TAGGER_LIBS = False
     # print("ImageTaggerBlock: Required library (onnxruntime) found.")
 
@@ -373,9 +373,16 @@ class TaggerWorker(QThread):
 
     def run(self):
         try:
+            global HAS_TAGGER_LIBS, ort
             if not HAS_TAGGER_LIBS:
-                self.error.emit("onnxruntime 라이브러리가 필요합니다.")
-                return
+                # find_spec과 실제 import 불일치 대비: 한번 더 시도
+                try:
+                    import onnxruntime as _ort
+                    ort = _ort
+                    HAS_TAGGER_LIBS = True
+                except (ImportError, OSError):
+                    self.error.emit("onnxruntime 라이브러리가 필요합니다.")
+                    return
 
             self.progress.emit("모델 로딩 중...")
             ensure_model_loaded()

@@ -858,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 161"
+        self.base_title = "NAIA v2.0.0 Dev 161b"
         self.setWindowTitle(self.base_title + " - 260324")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -6117,11 +6117,14 @@ class ModernMainWindow(QMainWindow):
 
     def on_tag_interrogation_requested(self, pil_image: Image.Image):
         """Tag Interrogation: WD14 태그 분석 요청 처리"""
-        import importlib.util
         import os
 
-        # Step 1: onnxruntime 설치 확인
-        has_ort = importlib.util.find_spec('onnxruntime') is not None
+        # Step 1: onnxruntime 설치 확인 (find_spec 대신 실제 import 시도)
+        try:
+            import onnxruntime
+            has_ort = True
+        except (ImportError, OSError):
+            has_ort = False
         if not has_ort:
             reply = QMessageBox.question(
                 self, "onnxruntime 필요",

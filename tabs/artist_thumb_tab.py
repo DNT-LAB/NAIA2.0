@@ -1560,12 +1560,15 @@ class ArtistThumbModule(BaseTabModule):
         super().__init__()
         self.widget = None
         self.artist_data = {}
+        self.nai_data = {}
+        self.noob_data = {}
         self.artist_list = []
         self.current_artist = None
         self.search_popup = None      # ✅ QListWidget 팝업
         self.max_suggestions = 20     # ✅ 원하는 추천 개수
         self.current_mode = None      # 현재 선택된 썸네일 모드
         self.tab_initialized = False  # 탭 초기화 여부
+        self.mode_placeholder_text = "Select thumbnail mode..."
         
         # 관심/제외 작가 리스트
         self.favorite_artists = []
@@ -1596,7 +1599,7 @@ class ArtistThumbModule(BaseTabModule):
             self.tab_initialized = True
     
     def _check_and_initialize_data(self):
-        """데이터 파일 체크 및 콤보박스 업데이트"""
+        """데이터 파일 체크 및 콤보박스 초기 상태 구성"""
         data_path = Path("data")
         nai_file = data_path / "artist_thumbnail_nai.json"
         noob_file = data_path / "artist_thumbnail.json"
@@ -1604,36 +1607,29 @@ class ArtistThumbModule(BaseTabModule):
         nai_exists = nai_file.exists()
         noob_exists = noob_file.exists()
 
-        # 콤보박스 초기화
+        # 자동 로드 없이 선택 가능한 모드만 준비
         self.mode_combo.blockSignals(True)
         self.mode_combo.clear()
+        self.mode_combo.addItems([
+            self.mode_placeholder_text,
+            "NAID4.5F-31000",
+            "NoobNAI-XL-33000"
+        ])
+        self.mode_combo.setCurrentText(self.mode_placeholder_text)
+        self.mode_combo.blockSignals(False)
 
-        if nai_exists or noob_exists:
-            self.mode_combo.addItems(["NAID4.5F-31000", "NoobNAI-XL-33000"])
-            if nai_exists:
-                self.current_mode = "NAID4.5F-31000"
-                self.mode_combo.setCurrentText("NAID4.5F-31000")
-                self._previous_mode = "NAID4.5F-31000"
-            else:
-                self.current_mode = "NoobNAI-XL-33000"
-                self.mode_combo.setCurrentText("NoobNAI-XL-33000")
-                self._previous_mode = "NoobNAI-XL-33000"
-            self.mode_combo.blockSignals(False)
+        self.current_mode = None
+        self._previous_mode = self.mode_placeholder_text
 
-            # 비동기로 초기 데이터 로드
-            primary_file = nai_file if nai_exists else noob_file
-            self._init_primary_mode = self.current_mode
-            self._init_secondary_file = noob_file if nai_exists and noob_exists else None
-            self._load_thumbnail_data(self.current_mode, primary_file)
-        else:
-            # 두 파일 모두 없는 경우
-            self.mode_combo.addItems(["다운로드 필요", "NAID4.5F-31000", "NoobNAI-XL-33000"])
-            self.current_mode = "다운로드 필요"
-            self._previous_mode = "다운로드 필요"
-            self.mode_combo.setCurrentText("다운로드 필요")
+        if not (nai_exists or noob_exists):
             self.nai_data = {}
             self.noob_data = {}
-            self.mode_combo.blockSignals(False)
+
+        self.artist_data = {}
+        self.artist_list = []
+        self.current_artist = None
+        self._update_listbox([])
+        self._show_default_thumbnail()
     
     def create_widget(self, parent: QWidget) -> QWidget:
         """메인 위젯 생성"""
@@ -1755,7 +1751,7 @@ class ArtistThumbModule(BaseTabModule):
         """)
         
         # 초기에는 기본 항목만 추가 (파일 체크는 탭 활성화 시)
-        self.mode_combo.addItems(["다운로드 필요", "NAID4.5F-31000", "NoobNAI-XL-33000"])
+        self.mode_combo.addItems([self.mode_placeholder_text, "NAID4.5F-31000", "NoobNAI-XL-33000"])
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
 
@@ -2381,15 +2377,6 @@ class ArtistThumbModule(BaseTabModule):
         return panel
     
     
-    def _on_secondary_load_finished(self, data, error_message: str):
-        """보조 JSON 파일 (두 번째 모델 데이터) 로드 완료"""
-        if hasattr(self, '_secondary_load_worker') and self._secondary_load_worker:
-            self._secondary_load_worker.deleteLater()
-            self._secondary_load_worker = None
-        if data is not None and error_message == "":
-            # 초기 로드에서 primary가 NAI였으면 secondary는 Noob
-            self.noob_data = data
-
     def _update_artist_list_from_data(self):
         """현재 artist_data로부터 아티스트 리스트 업데이트"""
         if self.artist_data:
@@ -2403,12 +2390,25 @@ class ArtistThumbModule(BaseTabModule):
     
     def _on_mode_changed(self, mode: str):
         """썸네일 모드 변경 시 처리"""
-        if mode == "다운로드 필요":
-            # 아무것도 하지 않음
+        if mode == self.mode_placeholder_text:
             return
-            
+
+        if mode == "NAID4.5F-31000" and self.nai_data:
+            self.current_mode = mode
+            self.artist_data = self.nai_data
+            self._previous_mode = mode
+            self._update_artist_list_from_data()
+            return
+
+        if mode == "NoobNAI-XL-33000" and self.noob_data:
+            self.current_mode = mode
+            self.artist_data = self.noob_data
+            self._previous_mode = mode
+            self._update_artist_list_from_data()
+            return
+
         self.current_mode = mode
-        
+
         # 파일 경로 결정
         data_path = Path("data")
         if mode == "NAID4.5F-31000":
@@ -2431,11 +2431,9 @@ class ArtistThumbModule(BaseTabModule):
             if msg.exec() == QMessageBox.StandardButton.Yes:
                 self._download_thumbnail_data(mode, file_path)
             else:
-                # 다운로드 취소 시 콤보박스를 이전 상태로
-                if hasattr(self, '_previous_mode'):
-                    self.mode_combo.blockSignals(True)
-                    self.mode_combo.setCurrentText(self._previous_mode)
-                    self.mode_combo.blockSignals(False)
+                self.mode_combo.blockSignals(True)
+                self.mode_combo.setCurrentText(self._previous_mode)
+                self.mode_combo.blockSignals(False)
         else:
             # 파일이 있으면 로드
             self._load_thumbnail_data(mode, file_path)
@@ -2563,14 +2561,6 @@ class ArtistThumbModule(BaseTabModule):
 
         # 리스트 업데이트
         self._update_artist_list_from_data()
-
-        # 초기 로드 시 보조 파일도 백그라운드 로드 (UI 차단 없이)
-        secondary = getattr(self, '_init_secondary_file', None)
-        if secondary and secondary.exists():
-            self._init_secondary_file = None  # 한 번만 실행
-            self._secondary_load_worker = JsonLoadWorker(secondary)
-            self._secondary_load_worker.load_finished.connect(self._on_secondary_load_finished)
-            self._secondary_load_worker.start()
     
     
     def _update_listbox(self, items: List[str]):
@@ -3107,7 +3097,7 @@ class ArtistThumbModule(BaseTabModule):
             self.download_worker.deleteLater()
 
         # JSON 로드 워커 정리
-        for attr in ('_json_load_worker', '_secondary_load_worker'):
+        for attr in ('_json_load_worker',):
             worker = getattr(self, attr, None)
             if worker:
                 if hasattr(worker, 'cancel'):

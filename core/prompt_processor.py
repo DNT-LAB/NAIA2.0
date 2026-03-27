@@ -1,8 +1,90 @@
+import re
 import pandas as pd
 from typing import Dict, Any
 from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor # 이전 단계에서 생성
 from core.context import AppContext
+
+# 가중치 구문 감지 정규식 (C-2: \d+\.?\d* 로 정밀화)
+_WEIGHT_WEBUI_RE = re.compile(r'^\(.*:\d+\.?\d*\)$')   # (tag:1.2) — A1111 개별 가중치
+_WEIGHT_NAI_RE = re.compile(r'^\d+\.?\d*::.*\s*::$')    # 0.85::tag :: — NAI 개별 가중치
+_E621_GROUP_CLOSE_RE = re.compile(r':\d+\.?\d*\)$')     # tag:1.05) — e621 그룹 종료
+
+
+def _escape_parens_in_content(s: str) -> str:
+    """이미 이스케이프된 \\( \\) 보호하면서 리터럴 괄호를 이스케이프."""
+    result = s.replace('\\(', '\x00').replace('\\)', '\x01')
+    result = result.replace('(', '\\(').replace(')', '\\)')
+    result = result.replace('\x00', '\\(').replace('\x01', '\\)')
+    return result
+
+
+def _find_weighted_indices(tags: list, start: int) -> set:
+    """main_tags[start:] 중 이미 가중치가 적용된 태그의 인덱스 집합을 반환.
+    반환값에는 개별 가중치(individual) 및 e621 그룹(group_start~group_end)이 포함."""
+    weighted = set()
+
+    # 1) 개별 가중치 (Danbooru, NAI) 감지
+    for i in range(start, len(tags)):
+        tag = tags[i].strip()
+        if _WEIGHT_WEBUI_RE.match(tag) or _WEIGHT_NAI_RE.match(tag):
+            weighted.add(i)
+
+    # 2) e621 그룹 감지: 뒤에서부터 스캔
+    group_end = None
+    for i in range(len(tags) - 1, start - 1, -1):
+        tag = tags[i].strip()
+        if i in weighted:
+            continue
+        if _E621_GROUP_CLOSE_RE.search(tag) and not _WEIGHT_WEBUI_RE.match(tag):
+            group_end = i
+            break
+
+    if group_end is not None:
+        group_start = None
+        for i in range(group_end, start - 1, -1):
+            tag = tags[i].strip()
+            if i in weighted:
+                break
+            if tag.startswith('(') and not _WEIGHT_WEBUI_RE.match(tag):
+                group_start = i
+                break
+
+        if group_start is not None:
+            for i in range(group_start, group_end + 1):
+                weighted.add(i)
+
+    return weighted
+
+
+def _escape_main_tags_parens(tags: list, weighted: set):
+    """main_tags 리터럴 괄호를 in-place 이스케이프. weighted 인덱스의 가중치 구문은 보존."""
+    for i, tag in enumerate(tags):
+        if tag.startswith('#'):
+            continue
+
+        if i in weighted:
+            # 가중치 태그: 가중치 구문 괄호는 보존, 콘텐츠 내 괄호만 이스케이프
+            if _WEIGHT_WEBUI_RE.match(tag):
+                # (content:weight) → 내부만 이스케이프
+                inner = tag[1:]
+                colon_idx = inner.rfind(':')
+                content = inner[:colon_idx]
+                suffix = inner[colon_idx:]
+                tags[i] = '(' + _escape_parens_in_content(content) + suffix
+            elif tag.startswith('('):
+                # e621 그룹 시작: 선행 ( 보존 + 내부 이스케이프
+                tags[i] = '(' + _escape_parens_in_content(tag[1:])
+            elif _E621_GROUP_CLOSE_RE.search(tag):
+                # e621 그룹 종료: :weight) 보존 + 내부 이스케이프
+                close_m = _E621_GROUP_CLOSE_RE.search(tag)
+                tags[i] = _escape_parens_in_content(tag[:close_m.start()]) + close_m.group()
+            else:
+                # e621 그룹 중간: 전체 이스케이프
+                tags[i] = _escape_parens_in_content(tag)
+        else:
+            # 비가중치 태그: 전체 이스케이프
+            tags[i] = _escape_parens_in_content(tag)
 
 class PromptProcessor:
     PIPELINE_NAME = "PromptProcessor"
@@ -115,6 +197,22 @@ class PromptProcessor:
         # 4. context 최종 업데이트
         context.main_tags = converted_main_tags
 
+        # 4-0. 가중치 인덱스 계산 (이스케이프 + ANIMA 래핑에서 공유)
+        is_nai = self.app_context.current_api_mode == 'NAI'
+        first_non_hash = next(
+            (i for i, t in enumerate(context.main_tags) if not t.startswith('#')),
+            len(context.main_tags)
+        )
+        weighted_indices = (
+            _find_weighted_indices(context.main_tags, first_non_hash)
+            if not is_nai and first_non_hash < len(context.main_tags)
+            else set()
+        )
+
+        # 4-0b. non-NAI 모드: main_tags 리터럴 괄호 이스케이프 (인덱스 기반)
+        if not is_nai:
+            _escape_main_tags_parens(context.main_tags, weighted_indices)
+
         # 4-1. 인원수 태그 배치 (ANIMA 모드 고려)
         # settings에 workflow_type 정보가 없으므로 main_window에서 직접 확인
         is_anima_mode = False
@@ -220,23 +318,29 @@ class PromptProcessor:
                 print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
 
             # 🆕 ANIMA 모드: main_tags에 가중치 적용 (0.75)
-            if context.main_tags:
-                # "#"로 시작하지 않는 첫 번째 인덱스 찾기
-                first_non_hash_idx = None
-                for i, tag in enumerate(context.main_tags):
-                    if not tag.startswith('#'):
-                        first_non_hash_idx = i
-                        break
+            # 이미 가중치가 적용된 태그(Danbooru/e621)는 제외하고 비가중치 연속 구간만 래핑
+            # weighted_indices는 4-0 단계에서 이미 계산됨 (이스케이프 후에도 유효)
+            if context.main_tags and first_non_hash < len(context.main_tags):
+                # 비가중치 태그의 연속 구간(run) 찾기
+                runs = []
+                run_start = None
+                for i in range(first_non_hash, len(context.main_tags)):
+                    if i not in weighted_indices:
+                        if run_start is None:
+                            run_start = i
+                    else:
+                        if run_start is not None:
+                            runs.append((run_start, i - 1))
+                            run_start = None
+                if run_start is not None:
+                    runs.append((run_start, len(context.main_tags) - 1))
 
-                # 첫 번째 non-# 태그와 마지막 태그에 가중치 적용
-                if first_non_hash_idx is not None:
-                    # 첫 번째 non-# 태그에 "(" 붙이기
-                    context.main_tags[first_non_hash_idx] = f"({context.main_tags[first_non_hash_idx]}"
+                # 각 연속 구간을 개별 0.75 그룹으로 래핑
+                for start, end in runs:
+                    context.main_tags[start] = f"({context.main_tags[start]}"
+                    context.main_tags[end] = f"{context.main_tags[end]}:0.75)"
 
-                    # 마지막 태그에 ":0.75)" 붙이기
-                    context.main_tags[-1] = f"{context.main_tags[-1]}:0.75)"
-
-                    print(f"🎨 ANIMA 모드: main_tags에 가중치 0.75 적용 (첫 인덱스: {first_non_hash_idx}, 마지막: {len(context.main_tags)-1})")
+                print(f"🎨 ANIMA 모드: main_tags 가중치 0.75 적용 — {len(runs)}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
 
         else:
             # 기존 방식: 맨 앞에 삽입
@@ -244,14 +348,20 @@ class PromptProcessor:
 
         # --- 이하 기존 로직 ---
         all_tags = context.get_all_tags()
-        seen = set()
+        seen_person = set()
         final_tags = []
 
         for tag in all_tags:
-            if '\n\n' in tag or tag not in seen:
+            if not isinstance(tag, str):
+                continue
+            if '\n\n' in tag:
                 final_tags.append(tag)
-                if '\n\n' not in tag:
-                    seen.add(tag)
+            elif tag in all_person_tags and tag in seen_person:
+                pass  # 인물 태그 중복만 제거
+            else:
+                final_tags.append(tag)
+                if tag in all_person_tags:
+                    seen_person.add(tag)
         
         formatted_prompt = []
         for tag in final_tags:

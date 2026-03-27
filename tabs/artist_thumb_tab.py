@@ -161,8 +161,6 @@ class StableImageWidget(QWidget):
                 self._pil_image.save(file_path)
 
 
-from artist_dictionary import artist_dict
-
 
 class JsonLoadWorker(QThread):
     """대용량 JSON 파일 로드 워커 스레드"""
@@ -1568,7 +1566,9 @@ class ArtistThumbModule(BaseTabModule):
         self.max_suggestions = 20     # ✅ 원하는 추천 개수
         self.current_mode = None      # 현재 선택된 썸네일 모드
         self.tab_initialized = False  # 탭 초기화 여부
-        self.mode_placeholder_text = "Select thumbnail mode..."
+        self.mode_placeholder_text = "모드를 선택하세요..."
+        self._previous_mode = self.mode_placeholder_text
+        self._download_canceled = False  # 다운로드 취소 플래그
         
         # 관심/제외 작가 리스트
         self.favorite_artists = []
@@ -1599,15 +1599,8 @@ class ArtistThumbModule(BaseTabModule):
             self.tab_initialized = True
     
     def _check_and_initialize_data(self):
-        """데이터 파일 체크 및 콤보박스 초기 상태 구성"""
-        data_path = Path("data")
-        nai_file = data_path / "artist_thumbnail_nai.json"
-        noob_file = data_path / "artist_thumbnail.json"
-
-        nai_exists = nai_file.exists()
-        noob_exists = noob_file.exists()
-
-        # 자동 로드 없이 선택 가능한 모드만 준비
+        """데이터 파일 체크 및 콤보박스 초기 상태 구성 (로드는 사용자 모드 선택 시)"""
+        # 콤보박스 구성 — 항상 플레이스홀더로 시작
         self.mode_combo.blockSignals(True)
         self.mode_combo.clear()
         self.mode_combo.addItems([
@@ -1621,14 +1614,19 @@ class ArtistThumbModule(BaseTabModule):
         self.current_mode = None
         self._previous_mode = self.mode_placeholder_text
 
-        if not (nai_exists or noob_exists):
-            self.nai_data = {}
-            self.noob_data = {}
+        # artist_dict fallback: 썸네일 미로드 상태에서도 아티스트 목록 표시
+        if artist_dict:
+            self.artist_list = sorted(
+                artist_dict.keys(),
+                key=lambda k: artist_dict.get(k, 0),
+                reverse=True
+            )
+            self._update_listbox(
+                [a for a in self.artist_list if a not in self.banned_artists]
+            )
+        else:
+            self._update_listbox([])
 
-        self.artist_data = {}
-        self.artist_list = []
-        self.current_artist = None
-        self._update_listbox([])
         self._show_default_thumbnail()
     
     def create_widget(self, parent: QWidget) -> QWidget:
@@ -2000,6 +1998,7 @@ class ArtistThumbModule(BaseTabModule):
         layout.addWidget(thumbnail_container)
 
         self.positive_prompt = QTextEdit()
+        self.positive_prompt.setAcceptRichText(False)
         self.positive_prompt.setPlaceholderText("아티스트 스타일과 함께 사용할 프롬프트...")
         self.positive_prompt.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
         self.positive_prompt.setFixedHeight(get_scaled_size(100))
@@ -2018,6 +2017,7 @@ class ArtistThumbModule(BaseTabModule):
         layout.addWidget(prefix_label)
 
         self.prefix_textedit = QTextEdit()
+        self.prefix_textedit.setAcceptRichText(False)
         self.prefix_textedit.setPlaceholderText("1girl, usada pekora, ...")
         self.prefix_textedit.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
         self.prefix_textedit.setFixedHeight(get_scaled_size(80))
@@ -2029,13 +2029,11 @@ class ArtistThumbModule(BaseTabModule):
         layout.addWidget(postfix_label)
 
         self.postfix_textedit = QTextEdit()
+        self.postfix_textedit.setAcceptRichText(False)
         self.postfix_textedit.setPlaceholderText("no text, best quality, masterpiece, year 2024, ...")
         self.postfix_textedit.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
         self.postfix_textedit.setFixedHeight(get_scaled_size(80))
         layout.addWidget(self.postfix_textedit)
-
-        # 저장된 생성 옵션 로드
-        self._load_generate_options()
 
         # 관심 작가 및 제외 버튼 추가
         button_layout = QHBoxLayout()
@@ -2407,8 +2405,6 @@ class ArtistThumbModule(BaseTabModule):
             self._update_artist_list_from_data()
             return
 
-        self.current_mode = mode
-
         # 파일 경로 결정
         data_path = Path("data")
         if mode == "NAID4.5F-31000":
@@ -2417,7 +2413,7 @@ class ArtistThumbModule(BaseTabModule):
             file_path = data_path / "artist_thumbnail.json"
         else:
             return
-            
+
         # 파일 존재 확인
         if not file_path.exists():
             # 다운로드 확인 다이얼로그
@@ -2427,19 +2423,17 @@ class ArtistThumbModule(BaseTabModule):
             msg.setInformativeText(f"약 2.6GB의 데이터를 다운로드합니다.\n계속하시겠습니까?")
             msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             msg.setIcon(QMessageBox.Icon.Information)
-            
+
             if msg.exec() == QMessageBox.StandardButton.Yes:
+                self.current_mode = mode
                 self._download_thumbnail_data(mode, file_path)
             else:
                 self.mode_combo.blockSignals(True)
                 self.mode_combo.setCurrentText(self._previous_mode)
                 self.mode_combo.blockSignals(False)
         else:
-            # 파일이 있으면 로드
+            # 파일이 있으면 로드 (current_mode, _previous_mode는 로드 성공 시 갱신)
             self._load_thumbnail_data(mode, file_path)
-            
-        # 현재 모드 저장
-        self._previous_mode = mode
     
     def _download_thumbnail_data(self, mode: str, file_path: Path):
         """썸네일 데이터 다운로드"""
@@ -2465,13 +2459,14 @@ class ArtistThumbModule(BaseTabModule):
 
     def _on_download_canceled(self):
         """다운로드 취소 처리"""
+        self._download_canceled = True
         if hasattr(self, 'download_worker') and self.download_worker:
             self.download_worker.cancel()
-            # 콤보박스를 이전 상태로 복원
-            if hasattr(self, '_previous_mode'):
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(self._previous_mode)
-                self.mode_combo.blockSignals(False)
+        # 콤보박스를 이전 상태로 복원
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText(self._previous_mode)
+        self.mode_combo.blockSignals(False)
+        self.current_mode = self._previous_mode if self._previous_mode != self.mode_placeholder_text else None
     
     def _on_download_progress(self, percent: int, message: str):
         """다운로드 진행률 업데이트"""
@@ -2483,10 +2478,15 @@ class ArtistThumbModule(BaseTabModule):
         """다운로드 완료 처리"""
         if hasattr(self, 'progress_dialog'):
             self.progress_dialog.close()
-            
+
         if hasattr(self, 'download_worker'):
             self.download_worker.deleteLater()
-            
+
+        # 사용자가 이미 취소한 경우 중복 처리 방지
+        if self._download_canceled:
+            self._download_canceled = False
+            return
+
         if success:
             QMessageBox.information(self.widget, "다운로드 완료", message)
             # 파일 로드
@@ -2498,11 +2498,11 @@ class ArtistThumbModule(BaseTabModule):
             self._load_thumbnail_data(self.current_mode, file_path)
         else:
             QMessageBox.critical(self.widget, "다운로드 실패", f"다운로드 중 오류가 발생했습니다:\n{message}")
-            # 실패 시 콤보박스를 이전 상태로
-            if hasattr(self, '_previous_mode'):
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(self._previous_mode)
-                self.mode_combo.blockSignals(False)
+            # 실패 시 콤보박스 및 current_mode 롤백
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText(self._previous_mode)
+            self.mode_combo.blockSignals(False)
+            self.current_mode = self._previous_mode if self._previous_mode != self.mode_placeholder_text else None
     
     def _load_thumbnail_data(self, mode: str, file_path: Path):
         """썸네일 데이터 파일 로드 (비동기)"""
@@ -2522,6 +2522,12 @@ class ArtistThumbModule(BaseTabModule):
         )
         self._load_dialog.show()
         QApplication.processEvents()
+
+        # 이전 로드 워커가 실행 중이면 시그널 해제 (결과 무시)
+        if hasattr(self, '_json_load_worker') and self._json_load_worker:
+            self._json_load_worker.load_finished.disconnect(self._on_json_load_finished)
+            self._json_load_worker.deleteLater()
+            self._json_load_worker = None
 
         # 워커 스레드 시작
         self._load_mode = mode
@@ -2544,13 +2550,13 @@ class ArtistThumbModule(BaseTabModule):
         # 에러 발생
         if data is None:
             QMessageBox.critical(self.widget, "오류", f"파일을 열 수 없습니다:\n{error_message}")
-            if hasattr(self, '_previous_mode'):
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(self._previous_mode)
-                self.mode_combo.blockSignals(False)
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText(self._previous_mode)
+            self.mode_combo.blockSignals(False)
+            self.current_mode = self._previous_mode if self._previous_mode != self.mode_placeholder_text else None
             return
 
-        # 데이터 저장
+        # 데이터 저장 + 상태 갱신
         mode = self._load_mode
         if mode == "NAID4.5F-31000":
             self.nai_data = data
@@ -2558,6 +2564,9 @@ class ArtistThumbModule(BaseTabModule):
         else:
             self.noob_data = data
             self.artist_data = self.noob_data
+
+        self.current_mode = mode
+        self._previous_mode = mode
 
         # 리스트 업데이트
         self._update_artist_list_from_data()
@@ -2784,35 +2793,6 @@ class ArtistThumbModule(BaseTabModule):
         else:
             if hasattr(self, 'thumbnail_label'):
                 self._show_default_thumbnail()
-    
-    def _display_artist_image(self, artist_name: str):
-        """아티스트 이미지 표시 (하위 호환성)"""
-        img_data_list = self.artist_data.get(artist_name, [])
-        
-        if img_data_list and img_data_list[0]:
-            try:
-                # base64 디코딩
-                img_bytes = base64.b64decode(img_data_list[0])
-                
-                # PIL 이미지로 변환
-                img = Image.open(io.BytesIO(img_bytes))
-                img = img.resize((512, 512), Image.Resampling.LANCZOS)
-                
-                # QPixmap으로 변환
-                img_bytes = io.BytesIO()
-                img.save(img_bytes, format='PNG')
-                img_bytes.seek(0)
-                
-                pixmap = QPixmap()
-                pixmap.loadFromData(img_bytes.read())
-                
-                self.image_label.setPixmap(pixmap)
-                
-            except Exception as e:
-                print(f"이미지 표시 오류: {e}")
-                self._show_default_image()
-        else:
-            self._show_default_image()
     
     def _on_popup_item_clicked(self, item):
         artist = item.data(Qt.ItemDataRole.UserRole)
@@ -3224,7 +3204,10 @@ class ArtistThumbModule(BaseTabModule):
 
         if not artist_list:
             from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self.widget, "경고", f"표시할 아티스트가 없습니다.\n(필터: {current_filter})")
+            if not self.artist_data:
+                QMessageBox.warning(self.widget, "경고", "썸네일 모드를 먼저 선택해주세요.\n(썸네일 데이터가 로드되지 않았습니다)")
+            else:
+                QMessageBox.warning(self.widget, "경고", f"표시할 아티스트가 없습니다.\n(필터: {current_filter})")
             return
 
         self.gallery_window = ArtistGalleryWindow(

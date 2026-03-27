@@ -1172,7 +1172,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # "remove_work_title"
             if not checkbox_options.get("remove_work_title"):
                 copyright = source_row.get("copyright")
-                if copyright:
+                if isinstance(copyright, str) and copyright:
                     if is_anima_mode:
                         # ANIMA: metadata에 저장 (나중에 위치 2에 배치)
                         context.metadata['anima_copyright'] = copyright
@@ -1183,7 +1183,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # "remove_author"
             if not checkbox_options.get("remove_author"):
                 artist = source_row.get("artist")
-                if artist:
+                if isinstance(artist, str) and artist:
                     if is_anima_mode:
                         # ANIMA: metadata에 저장 (나중에 위치 1에 배치)
                         context.metadata['anima_artist'] = artist
@@ -1194,7 +1194,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # "remove_character_name"
             if not checkbox_options.get("remove_character_name"):
                 character = source_row.get("character")
-                if character:
+                if isinstance(character, str) and character:
                     if is_anima_mode:
                         # ANIMA: metadata에 저장 (나중에 위치 3에 배치)
                         context.metadata['anima_character'] = character
@@ -1335,19 +1335,19 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # "remove_work_title" - 제거 옵션이 꺼져있으면 copyright 추가
         if not checkbox_options.get("remove_work_title"):
             copyright_val = source_row.get("copyright")
-            if copyright_val:
+            if isinstance(copyright_val, str) and copyright_val:
                 prefix_tags = [copyright_val] + prefix_tags
 
         # "remove_author" - 제거 옵션이 꺼져있으면 artist 추가
         if not checkbox_options.get("remove_author"):
             artist = source_row.get("artist")
-            if artist:
+            if isinstance(artist, str) and artist:
                 prefix_tags = [artist] + prefix_tags
 
         # "remove_character_name" - 제거 옵션이 꺼져있으면 character 추가
         if not checkbox_options.get("remove_character_name"):
             character = source_row.get("character")
-            if character:
+            if isinstance(character, str) and character:
                 prefix_tags = [character] + prefix_tags
 
         # 3. Auto Hide + 필터 체크박스 통합 처리 (공유 헬퍼)

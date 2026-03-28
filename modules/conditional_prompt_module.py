@@ -798,22 +798,35 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
             if _is_pattern(old_tag):
                 # 패턴 모드: __tag, tag__, __tag__ — 매칭되는 모든 태그를 일괄 처리
+                # 주의: __wildcard__ 확장 결과는 콤마 합쳐진 단일 문자열일 수 있음
+                #   예: "red hair, platform footwear, nun" (1개 요소)
+                #   이 경우 매칭 서브태그만 제거하고 나머지를 보존해야 함
                 for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
                     for i in range(len(tag_list_ref) - 1, -1, -1):
-                        raw_tag = _strip_weight_format(tag_list_ref[i])
-                        if _match_pattern_tag(old_tag, raw_tag):
+                        element = tag_list_ref[i]
+                        raw_element = _strip_weight_format(element)
+
+                        # 콤마 구분 복합 요소 처리 (__wildcard__ 전개 결과)
+                        if ',' in raw_element:
+                            sub_tags = [t.strip() for t in raw_element.split(',') if t.strip()]
+                            remaining = [t for t in sub_tags if not _match_pattern_tag(old_tag, t)]
+                            if len(remaining) < len(sub_tags):
+                                if remaining:
+                                    tag_list_ref[i] = ', '.join(remaining)
+                                else:
+                                    tag_list_ref.pop(i)
+                        elif _match_pattern_tag(old_tag, raw_element):
                             if new_tag_list:
                                 # 치환: 가중치 포맷 승계 + 삽입
                                 weighted_new_list = list(new_tag_list)
-                                if weighted_new_list and raw_tag != tag_list_ref[i].strip():
+                                if weighted_new_list and raw_element != element.strip():
                                     first_new = weighted_new_list[0].strip()
                                     if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
-                                        weighted_new_list[0] = _replace_tag_in_weight_format(tag_list_ref[i], weighted_new_list[0])
+                                        weighted_new_list[0] = _replace_tag_in_weight_format(element, weighted_new_list[0])
                                 tag_list_ref.pop(i)
                                 for j, new_tag in enumerate(reversed(weighted_new_list)):
                                     tag_list_ref.insert(i, new_tag)
                             else:
-                                # 삭제: pop만
                                 tag_list_ref.pop(i)
                 return prefix_tags, main_tags, postfix_tags
 

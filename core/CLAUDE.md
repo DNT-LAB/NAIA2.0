@@ -155,7 +155,7 @@ UI와 PromptProcessor 중재. PromptContext 생성/초기화, 파이프라인 �
 4. 와일드카드 확장           (내부)
 5. after_wildcard 훅       ← 모듈 개입
 6. final_hookpoint 훅      ← 모듈 개입
-7. 최종 포맷팅              (내부: 인물 정렬, 중복 제거, 주석 포맷)
+7. 최종 포맷팅              (내부: 인물 정렬, 인물 태그만 중복 제거, 괄호 이스케이프, 주석 포맷)
 ```
 
 **와일드카드 라인 선택 모드** (`WildcardProcessor`):

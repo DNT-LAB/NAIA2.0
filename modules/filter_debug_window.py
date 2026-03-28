@@ -215,6 +215,45 @@ class FilterDebugWindow(QDialog):
         self._summary_label.hide()
         self._content_layout.addWidget(self._summary_label)
 
+        # 태그 함축 압축 섹션
+        self._impl_sep = self._make_separator()
+        self._impl_sep.hide()
+        self._content_layout.addWidget(self._impl_sep)
+
+        self._impl_header = QLabel()
+        self._impl_header.setStyleSheet(
+            f"font-size: {_ROUND_FONT()}px; color: #80CBC4; font-weight: bold;"
+        )
+        self._impl_header.hide()
+        self._content_layout.addWidget(self._impl_header)
+
+        self._impl_results_edit = QTextEdit()
+        self._impl_results_edit.setReadOnly(True)
+        self._impl_results_edit.setAcceptRichText(False)
+        self._impl_results_edit.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._impl_results_edit.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._impl_results_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        self._impl_results_edit.setStyleSheet(f"""
+            QTextEdit {{
+                font-size: {get_scaled_font_size(14)}px;
+                color: #80CBC4;
+                background-color: transparent;
+                border: none;
+                padding-left: {get_scaled_size(10)}px;
+            }}
+        """)
+        self._impl_results_edit.document().documentLayout().documentSizeChanged.connect(
+            lambda: self._adjust_src_height(self._impl_results_edit)
+        )
+        self._impl_results_edit.hide()
+        self._content_layout.addWidget(self._impl_results_edit)
+
         # 구분선 3 (e621 섹션 위)
         self._sep3 = self._make_separator()
         self._sep3.hide()
@@ -314,6 +353,7 @@ class FilterDebugWindow(QDialog):
         original_count: int,
         remaining_count: int,
         e621_info: Dict[str, Any] | None = None,
+        impl_info: List[Dict[str, str]] | None = None,
     ):
         """최근 1건의 디버그 정보로 교체한다."""
         self._entry_count += 1
@@ -355,6 +395,21 @@ class FilterDebugWindow(QDialog):
             f"원본: {original_count}개 → 남은: {remaining_count}개 (제거: {total_removed}개)"
         )
         self._summary_label.show()
+
+        # -- 태그 함축 압축 섹션
+        if impl_info:
+            self._impl_sep.show()
+            self._impl_header.setText(
+                f"● 태그 함축 압축 — {len(impl_info)}개 제거"
+            )
+            self._impl_header.show()
+            lines = [f"  {r['removed']}  <-  {r['by']}" for r in impl_info]
+            self._impl_results_edit.setPlainText("\n".join(lines))
+            self._impl_results_edit.show()
+        else:
+            self._impl_sep.hide()
+            self._impl_header.hide()
+            self._impl_results_edit.hide()
 
         # -- e621 Auto-Boost 섹션
         if e621_info and e621_info.get('results'):
@@ -398,6 +453,9 @@ class FilterDebugWindow(QDialog):
             rw.hide()
         self._sep2.hide()
         self._summary_label.hide()
+        self._impl_sep.hide()
+        self._impl_header.hide()
+        self._impl_results_edit.hide()
         self._sep3.hide()
         self._e621_header.hide()
         self._e621_input_edit.hide()

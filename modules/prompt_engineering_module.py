@@ -217,6 +217,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "랜덤 프롬프트의 저빈도 태그를 제거": "remove_noise_tags",
             "e621 Auto-Boost": "e621_auto_boost",
             "Danbooru Auto-Weight": "danbooru_auto_weight",
+            "태그 함축 압축 (Implication)": "tag_implication_compression",
         }
         
         # 퀵 프리셋 관련 초기화
@@ -553,7 +554,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # 첫 3개(작가명/작품명/캐릭터명)는 연노랑색
         yellow_keys = {"remove_author", "remove_work_title", "remove_character_name"}
         pink_keys = {"e621_auto_boost"}
-        teal_keys = {"danbooru_auto_weight"}
+        teal_keys = {"danbooru_auto_weight", "tag_implication_compression"}
         # 설정 버튼이 필요한 항목 — 셀 내 HBoxLayout(체크박스 + 버튼)으로 배치
         _settings_btn_map = {
             "e621_auto_boost":       ("#FFD1DC", self._open_e621_settings),
@@ -853,6 +854,34 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
               f"q={log_scores[2]-max_score:.1f}, e={log_scores[3]-max_score:.1f})")
         return best_rating
 
+    def _compress_implied_main_tags(self, main_tags: list) -> list:
+        """main_tags에서 단어 부분집합 관계인 태그를 제거.
+        예: 'pleated skirt'가 있으면 'skirt'는 함축되므로 제거.
+        Returns: [{'removed': str, 'by': str}, ...] 제거된 태그와 근거."""
+        entries = []
+        for tag in main_tags:
+            t = tag.strip()
+            if t and not t.startswith('#'):
+                entries.append((tag, set(t.split())))
+
+        if len(entries) < 2:
+            return []
+
+        to_remove = {}  # tag_a -> tag_b (superset)
+        for i, (tag_a, ws_a) in enumerate(entries):
+            for j, (tag_b, ws_b) in enumerate(entries):
+                if i != j and ws_a < ws_b:  # proper subset
+                    to_remove[tag_a] = tag_b
+                    break
+
+        if not to_remove:
+            return []
+
+        result = [{'removed': k, 'by': v} for k, v in sorted(to_remove.items())]
+        main_tags[:] = [t for t in main_tags if t not in to_remove]
+        print(f"[Implication] {len(result)}개 태그 압축: {[r['removed'] for r in result]}")
+        return result
+
     def _apply_danbooru_auto_weight(self, main_tags: list, context: PromptContext, *, min_valid_count: int = 3):
         """전역 IDF + Rating 조건부 보정 블렌딩, 전역 범위 정규화 (main_tags in-place 수정)
 
@@ -1122,7 +1151,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         original = metadata.get('original_tag_count', 0)
         remaining = metadata.get('remaining_tag_count', 0)
         e621_info = metadata.get('e621_debug_info')
-        self._debug_window.add_entry(source_info, filter_log, original, remaining, e621_info)
+        impl_info = metadata.get('implication_compressed_tags')
+        self._debug_window.add_entry(source_info, filter_log, original, remaining, e621_info, impl_info)
 
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
         return {
@@ -1236,6 +1266,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             'artist': source_row.get('artist', ''),
             'id': source_row.get('id', ''),
         }
+        # ★ Tag implication compression — Auto-Weight 이전에 처리
+        if not skip_preprocessing and checkbox_options.get("tag_implication_compression"):
+            compressed = self._compress_implied_main_tags(main_tags)
+            if compressed:
+                context.metadata['implication_compressed_tags'] = compressed
+
         # Danbooru Auto-Weight (e621 boost 전에 적용)
         _danbooru_weight_enabled = not skip_preprocessing and checkbox_options.get("danbooru_auto_weight")
         if _danbooru_weight_enabled:

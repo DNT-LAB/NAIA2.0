@@ -333,13 +333,18 @@ class APIService:
             if params.get('type') == 'inpaint':
                 model_name += "-inpainting"
 
+            # NAI 서버는 seed를 uint64로 파싱하므로 음수 방지
+            nai_seed = params.get('seed', 0)
+            if not isinstance(nai_seed, int) or nai_seed < 0:
+                nai_seed = 0
+
             # API가 요구하는 파라미터 구조 생성
             api_parameters = {
                 "width": params.get('width', 832),
                 "height": params.get('height', 1216),
                 "n_samples": 1,
-                "seed": params.get('seed', 0),
-                "extra_noise_seed": params.get('seed', 0),
+                "seed": nai_seed,
+                "extra_noise_seed": nai_seed,
                 "sampler": params.get('sampler', 'k_euler_ancestral'),
                 "steps": params.get('steps', 28),
                 "scale": params.get('cfg_scale', 5.0),

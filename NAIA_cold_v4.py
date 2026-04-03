@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 163"
-        self.setWindowTitle(self.base_title + " - 260328")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 164"
+        self.setWindowTitle(self.base_title + " - 260403")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -894,6 +894,7 @@ class ModernMainWindow(QMainWindow):
 
         #  검색 결과를 저장할 변수 및 컨트롤러 초기화
         self.search_results = SearchResultModel()
+        self._search_results_snapshot = None  # 소진 시 자동 복원용 원본 사본
         self.search_controller = SearchController()
         # 검색 컨트롤러 시그널 연결은 MainController에서 처리됩니다
 
@@ -2795,8 +2796,11 @@ class ModernMainWindow(QMainWindow):
             if self.seed_fix_checkbox.isChecked():
                 try:
                     seed_value = int(self.seed_input.text())
-                except ValueError:
-                    seed_value = -1
+                    if seed_value < 0:
+                        seed_value = 0
+                except (ValueError, TypeError):
+                    seed_value = 0
+                    self.seed_input.setText("0")
             else:
                 seed_value = random.randint(0, 9999999999)
                 self.seed_input.setText(str(seed_value))
@@ -3191,11 +3195,15 @@ class ModernMainWindow(QMainWindow):
             if auto_generate_checkbox.isChecked() and not prompt_fixed_checkbox.isChecked():
                 # 검색 결과가 있는지 확인
                 if self.search_results.is_empty() and not self.generation_checkboxes["와일드카드 단독 모드"].isChecked():
-                    self.status_bar.showMessage("⚠️ 검색 결과가 없어 자동 생성을 중단합니다.")
-                    # 자동화 중단 (자동화가 활성화되어 있는 경우만)
-                    if self.automation_module and self.automation_module.automation_controller.is_running:
-                        self.automation_module.stop_automation()
-                    return
+                    # 스냅샷에서 자동 복원 시도
+                    if self._restore_from_snapshot():
+                        pass  # 복원 성공 → 아래 생성 로직으로 계속 진행
+                    else:
+                        self.status_bar.showMessage("⚠️ 검색 결과가 없어 자동 생성을 중단합니다.")
+                        # 자동화 중단 (자동화가 활성화되어 있는 경우만)
+                        if self.automation_module and self.automation_module.automation_controller.is_running:
+                            self.automation_module.stop_automation()
+                        return
                 
                 # [신규] 자동 생성 플래그 설정
                 self.auto_generation_in_progress = True
@@ -3336,6 +3344,7 @@ class ModernMainWindow(QMainWindow):
 
         # [신규] 검색 결과 Parquet 파일로 저장
         if not self.search_results.is_empty():
+            self._save_search_snapshot()  # 소진 시 자동 복원용
             try:
                 self.search_results.get_dataframe().to_parquet('naia_temp_rows.parquet')
             except Exception as e:
@@ -3402,6 +3411,7 @@ class ModernMainWindow(QMainWindow):
 
     def restore_search_results(self):
         """'naia_temp_rows.parquet' 파일이 있으면 비동기로 로드합니다."""
+        self._search_results_snapshot = None  # 명시적 복원 시 스냅샷 휘발
         result_file = 'naia_temp_rows.parquet'
         if os.path.exists(result_file):
             self.search_results.set_dataframe(pd.DataFrame())
@@ -3481,7 +3491,8 @@ class ModernMainWindow(QMainWindow):
                 # 파일 불러오기
                 df = pd.read_parquet(file_path)
                 self.search_results.set_dataframe(df)
-                
+                self._save_search_snapshot()  # 소진 시 자동 복원용
+
                 row_count = len(df)
                 # UI 라벨 업데이트
                 self.result_label1.setText(f"검색: {row_count:,}")
@@ -3490,7 +3501,7 @@ class ModernMainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "오류", f"파일을 불러오는 중 오류가 발생했습니다:\n{str(e)}")
                 self.status_bar.showMessage(f"❌ 파일 불러오기 실패: {str(e)}", 5000)
-    
+
     def merge_custom_parquet(self):
         """사용자가 선택한 parquet 파일을 현재 결과에 합치기"""
         # custom_tags 폴더 확인 및 생성
@@ -3519,7 +3530,8 @@ class ModernMainWindow(QMainWindow):
                     merged_df = pd.concat([current_df, new_df], ignore_index=True)
                 
                 self.search_results.set_dataframe(merged_df)
-                
+                self._save_search_snapshot()  # 소진 시 자동 복원용
+
                 new_count = len(new_df)
                 total_count = len(merged_df)
                 # UI 라벨 업데이트
@@ -4783,6 +4795,7 @@ class ModernMainWindow(QMainWindow):
     def on_depth_search_results_assigned(self, new_search_result: SearchResultModel):
         """심층 검색 탭에서 할당된 결과를 메인 UI에 반영"""
         self.search_results = new_search_result
+        self._save_search_snapshot()  # 소진 시 자동 복원용
         count = self.search_results.get_count()
         self.result_label1.setText(f"검색: {count}")
         self.result_label2.setText(f"남음: {count}")
@@ -4843,6 +4856,14 @@ class ModernMainWindow(QMainWindow):
             'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
         self.app_context.publish("random_prompt_triggered")
+
+        # 소진 시 스냅샷에서 자동 복원
+        if self.search_results.is_empty() and not settings.get('wildcard_standalone', False):
+            if not self._restore_from_snapshot():
+                self.random_prompt_btn.setEnabled(True)
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(True)
+                return
 
         # [수정] 수동 생성 시에는 자동 생성 플래그를 False로 설정
         self.prompt_gen_controller.auto_generation_requested = False
@@ -4935,6 +4956,24 @@ class ModernMainWindow(QMainWindow):
         # 분리된 버튼도 활성화
         if hasattr(self, 'detached_random_btn'):
             self.detached_random_btn.setEnabled(True)
+
+    # --- 검색 결과 스냅샷 (소진 시 자동 복원용) ---
+    def _save_search_snapshot(self):
+        """현재 search_results의 원본 사본을 메모리에 저장"""
+        if not self.search_results.is_empty():
+            self._search_results_snapshot = self.search_results.get_dataframe().copy()
+
+    def _restore_from_snapshot(self) -> bool:
+        """스냅샷에서 search_results 복원. 성공 시 True."""
+        if self._search_results_snapshot is not None and not self._search_results_snapshot.empty:
+            self.search_results.set_dataframe(self._search_results_snapshot.copy())
+            count = self.search_results.get_count()
+            self.result_label1.setText(f"검색: {count:,}")
+            self.result_label2.setText(f"남음: {count:,}")
+            self.status_bar.showMessage(f"🔄 데이터셋 자동 복원 ({count:,}개)", 3000)
+            print(f"🔄 search_results 자동 복원: {count}개 행")
+            return True
+        return False
 
     def load_generation_parameters(self):
         # 기존 방식 대신 모드별 로드

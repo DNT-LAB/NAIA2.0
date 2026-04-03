@@ -566,6 +566,26 @@ class EventTabMixin:
         queue_clear_btn.clicked.connect(self._on_event_queue_clear)
         queue_row.addWidget(queue_clear_btn)
 
+        # 대���열 Parquet 내보내기 버튼
+        queue_export_btn = QPushButton("💾 내보내기")
+        queue_export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['success']};
+                border: 1px solid {DARK_COLORS['success']};
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: {get_scaled_font_size(12)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['success']};
+                color: {DARK_COLORS['bg_primary']};
+            }}
+        """)
+        queue_export_btn.setToolTip("대기열(또는 필터 결과)을 Parquet 파일로 내보내기")
+        queue_export_btn.clicked.connect(self._on_event_export_parquet)
+        queue_row.addWidget(queue_export_btn)
+
         queue_row.addStretch()
 
         self.event_auto_generate_check = QCheckBox("자동 생성")
@@ -1017,3 +1037,56 @@ class EventTabMixin:
         self._save_remote_events()
         self._update_events_list()
         print(f"✅ 이벤트 삭제: {event_id}")
+
+    def _on_event_export_parquet(self):
+        """대기열(또는 필터 결과) 이벤트를 Parquet 파일로 내보내기"""
+        import pandas as pd
+        from PyQt6.QtWidgets import QFileDialog
+
+        # 대기열이 있으면 대기열 기준, 없으면 현재 필터 결과 기준
+        if hasattr(self, 'event_queue') and self.event_queue:
+            target_ids = set(self.event_queue)
+            source_label = "대기열"
+        elif hasattr(self, 'event_filtered_ids') and self.event_filtered_ids:
+            target_ids = self.event_filtered_ids
+            source_label = "필터 결과"
+        else:
+            self._show_warning("알림", "내보낼 이벤트가 없습니다.\n대기열에 추가하거나 필터 결과가 있어야 합니다.")
+            return
+
+        # source_row dict 수집
+        rows = []
+        for evt in self.remote_events:
+            if evt.get("id") in target_ids:
+                source_row = evt.get("source_row", {})
+                if source_row:
+                    rows.append(source_row)
+
+        if not rows:
+            self._show_warning("알림", "내보낼 유효한 이벤트 데이터가 없습니다.")
+            return
+
+        df = pd.DataFrame(rows)
+
+        # 저장 경로
+        save_dir = Path("save/custom_tags")
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "이벤트 Parquet 내보내기",
+            str(save_dir / "remote_events_export.parquet"),
+            "Parquet Files (*.parquet)"
+        )
+
+        if file_path:
+            try:
+                df.to_parquet(file_path, index=False)
+                self._show_info(
+                    "내보내기 완료",
+                    f"{source_label}에서 {len(rows)}개 이벤트를 내보냈습니다.\n\n"
+                    f"메인 윈도우 복원 메뉴 → 📂 불러오기로 로드하세요."
+                )
+                print(f"✅ 이벤트 Parquet 내보내기: {len(rows)}개 → {file_path}")
+            except Exception as e:
+                self._show_warning("내보내기 실패", f"파일 저장 중 오류:\n{e}")

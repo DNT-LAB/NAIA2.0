@@ -37,6 +37,11 @@ DATASET_CONFIG = {
         'url': 'https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAIA_event_dataset_1girl.parquet',
         'description': '1girl 시퀀스만 포함'
     },
+    'NAIA_story': {
+        'filename': 'NAIA_event_dataset_1girl_story.parquet',
+        'url': None,
+        'description': '1girl story_group linked sequences'
+    },
     'Favorites': {
         'filename': 'NAIA_event_dataset_personal.parquet',
         'url': None,  # 로컬 전용

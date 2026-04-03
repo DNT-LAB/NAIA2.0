@@ -616,6 +616,10 @@ class AutomationModule(BaseMiddleModule):
         # 🔒 자동 생성 즉시 중단 (수동 중단 시에도 API 요청 방지)
         self._disable_auto_generate_immediately()
 
+        # 🔔 외부 윈도우에 자동화 중단 알림 (ClothesPresetWindow 등)
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.publish("automation_stopped")
+
         # ✅ 설정 저장
         self.save_settings()
     
@@ -635,6 +639,10 @@ class AutomationModule(BaseMiddleModule):
             self.repeat_info_label.setText("")
         if hasattr(self, 'delay_info_label'):
             self.delay_info_label.setText("")
+
+        # 🔔 외부 윈도우에 자동화 완료 알림 (ClothesPresetWindow 등)
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.publish("automation_stopped")
 
         # ✅ 비차단 알림 표시
         if self.automation_controller and self.automation_controller.notify_on_finish:

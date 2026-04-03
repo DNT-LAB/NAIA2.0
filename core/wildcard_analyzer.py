@@ -124,8 +124,8 @@ class WildcardAnalyzer:
         if not actual_key:
             return 0
 
-        lines = self.wildcard_manager.wildcard_dict_tree.get(actual_key)
-        return len(lines) if lines else 0
+        entries = self.wildcard_manager.wildcard_dict_tree.get(actual_key)
+        return len(entries) if entries else 0
 
     def build_dependency_chain(self, wildcards: List[WildcardInfo]) -> List[WildcardInfo]:
         """

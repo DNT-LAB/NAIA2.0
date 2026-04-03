@@ -1,95 +1,28 @@
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox, QHBoxLayout, QComboBox, QPushButton, QDialog, QGridLayout, QLineEdit, QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox, QInputDialog, QSplitter, QSizePolicy, QApplication
+from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QTextEdit, QCheckBox, QHBoxLayout, QComboBox, QPushButton, QDialog, QGridLayout, QLineEdit, QMessageBox, QListWidget, QListWidgetItem, QDialogButtonBox, QInputDialog, QSplitter, QSizePolicy, QApplication, QTabWidget
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer, QMimeData, QEvent
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage, QClipboard
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage, QClipboard, QDoubleValidator
 from interfaces.base_module import BaseMiddleModule
 from core.prompt_context import PromptContext
 from interfaces.mode_aware_module import ModeAwareModule
 from ui.theme import get_dynamic_styles, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.modern_menu import setModernStyle
 from typing import Dict, Any, Optional
-import os, json
+from core.wildcard_processor import split_tags_smart
+from core.tag_filter_helpers import _is_color_exception, apply_tag_filters
+import os, json, re
 from pathlib import Path
 
-# ===================== 색상 필터링 예외 패턴 =====================
-# Critical Issue: 색상 태그 필터링 문제 해결 (2025-01-20)
-# 참조: .experimental/Critical_Issue_Colors.md
+# 인원 태그 — 가중치/필터에서 공통 스킵 대상
+_PERSON_TAGS = frozenset({
+    "1boy","2boys","3boys","4boys","5boys","6+boys",
+    "1girl","2girls","3girls","4girls","5girls","6+girls",
+    "1other","2others","3others","4others","5others","6+others",
+})
 
-# 접두사 예외 (이 단어로 시작하면 색상 필터링 예외)
-COLOR_EXCEPTION_PREFIXES = [
-    'covered',      # covered nipples, covered eyes 등
-    'shared',       # shared clothes, shared umbrella 등
-    'armored',      # armored boots, armored dress 등
-    'layered',      # layered sleeves, layered dress 등
-    'feathered',    # feathered wings
-    'colored',      # colored shadow, colored skin 등
-    'multicolored', # multicolored hair 등
-    'checkered',    # checkered (패턴)
-    'mirrored',     # mirrored text
-    'captured',     # captured (상황)
-    'scared',       # scared (표정)
-    'striped',      # striped (패턴, 단독 사용)
-]
-
-# 포함 예외 (이 문자열이 포함되면 색상 필터링 예외)
-COLOR_EXCEPTION_CONTAINS = [
-    'palette',      # turn pale이 아닌 palette
-    'impaled',      # 관통됨
-    'blueberry',    # 블루베리
-    'blueprint',    # 청사진
-    'goldfish',     # 금붕어
-    'marigold',     # 금잔화
-    'strawberry',   # 딸기
-    'pinky out',    # 새끼손가락 포즈
-    'footprints',   # 발자국
-    'darkness',     # 어둠
-    'dark aura',    # 어두운 기운
-    'rainbow',      # 무지개
-    ' fire',        # blue fire 등
-    ' theme',       # blue theme 등
-    ' border',      # black border 등
-    ' outline',     # white outline 등
-    ' gradient',    # rainbow gradient 등
-    'scooping',     # goldfish scooping
-]
-
-# 정확히 일치하는 예외
-COLOR_EXCEPTION_EXACT = [
-    'turn pale',    # 창백해지다
-    'checkered',    # 체크무늬 (단독)
-    'striped',      # 줄무늬 (단독)
-    'rainbow',      # 무지개
-    'darkness',     # 어둠
-]
-
-def _is_color_exception(tag: str) -> bool:
-    """
-    색상 필터링 예외 여부를 판단합니다.
-
-    Args:
-        tag: 검사할 태그
-
-    Returns:
-        True: 예외 (필터링하지 않음)
-        False: 필터링 대상
-    """
-    tag_lower = tag.lower()
-
-    # 1. 정확히 일치하는 예외
-    if tag_lower in COLOR_EXCEPTION_EXACT:
-        return True
-
-    # 2. 접두사 예외
-    for prefix in COLOR_EXCEPTION_PREFIXES:
-        if tag_lower.startswith(prefix):
-            return True
-
-    # 3. 포함 예외
-    for pattern in COLOR_EXCEPTION_CONTAINS:
-        if pattern in tag_lower:
-            return True
-
-    return False
+# 가중치 포맷 감지 패턴 (NAI: '1.05::tag ::', WEBUI: '(tag:1.05)')
+_WEIGHT_NAI_DETECT = re.compile(r'^[\d.]+::.*::$')
+_WEIGHT_WEBUI_DETECT = re.compile(r'^\(.*:[\d.]+\)$')
 
 class PresetPreviewWidget(QWidget):
     """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
@@ -208,9 +141,38 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     '파이프라인 훅' 시스템을 통해 PromptProcessor의 처리 과정에 직접 개입합니다.
     """
 
+    class _E621AfterWildcardHook:
+        """after_wildcard hook 위임 객체.
+        와일드카드 단독 모드 + e621 Auto-Boost 동시 사용 시에만 작동.
+        전개된 prefix_tags를 e621 입력으로 사용하여 main_tags에 추가."""
+
+        def __init__(self, parent: 'PromptEngineeringModule'):
+            self._parent = parent
+
+        def get_title(self):
+            return "e621 Auto-Boost (after_wildcard)"
+
+        def execute_pipeline_hook(self, context):
+            return self._parent._execute_e621_after_wildcard(context)
+
+    class _DanbooruAfterWildcardHook:
+        """after_wildcard hook 위임 객체.
+        와일드카드 단독 모드 + Danbooru Auto-Weight 동시 사용 시에만 작동.
+        전개된 prefix_tags에 가중치를 in-place 적용."""
+
+        def __init__(self, parent: 'PromptEngineeringModule'):
+            self._parent = parent
+
+        def get_title(self):
+            return "Danbooru Auto-Weight (after_wildcard)"
+
+        def execute_pipeline_hook(self, context):
+            return self._parent._execute_danbooru_weight_after_wildcard(context)
+
     def __init__(self):
         BaseMiddleModule.__init__(self)
         ModeAwareModule.__init__(self)
+        self.start_expanded = True
 
         # 🆕 ModeAwareModule 필수 속성들
         self.settings_base_filename = "PromptEngineeringModule"
@@ -225,7 +187,16 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.pre_textedit = None
         self.post_textedit = None
         self.auto_hide_textedit = None
+        self.auto_hide_toggle_btn = None
+        self.auto_hide_collapsed = False
         self.preprocessing_checkboxes = {}
+        self._debug_window = None
+        self._e621_settings_window = None
+        self._e621_settings = self._load_e621_settings()
+        self._danbooru_weight_settings_window = None
+        self._danbooru_weight_settings = self._load_danbooru_weight_settings()
+        self._danbooru_tag_counts = None  # lazy-load cache
+        self._danbooru_rating_totals = [1, 1, 1, 1]  # [g, s, q, e] — _get_danbooru_tag_counts()에서 설정
 
         # 기존 설정 파일 경로 유지
         self.settings_file = os.path.join('save', 'PromptEngineeringModule.json')
@@ -238,7 +209,15 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "랜덤 프롬프트의 캐릭터 특징을 제거": "remove_character_features",
             "랜덤 프롬프트의 의류 태그를 제거": "remove_clothes",
             "랜덤 프롬프트의 색상포함 태그를 제거": "remove_color",
-            "랜덤 프롬프트의 장소와 배경색을 제거": "remove_location_and_background_color"
+            "랜덤 프롬프트의 장소와 배경색을 제거": "remove_location_and_background_color",
+            "랜덤 프롬프트의 표정 태그를 제거": "remove_expression",
+            "랜덤 프롬프트의 포즈/행동 태그를 제거": "remove_pose_action",
+            "랜덤 프롬프트의 메타 태그를 제거": "remove_meta_tags",
+            "랜덤 프롬프트의 사물 태그를 제거": "remove_object_tags",
+            "랜덤 프롬프트의 저빈도 태그를 제거": "remove_noise_tags",
+            "e621 Auto-Boost": "e621_auto_boost",
+            "Danbooru Auto-Weight": "danbooru_auto_weight",
+            "태그 함축 압축 (Implication)": "tag_implication_compression",
         }
         
         # 퀵 프리셋 관련 초기화
@@ -263,7 +242,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         return "🔧 프롬프트 엔지니어링/자동화/프리셋"
 
     def get_order(self) -> int:
-        return 900
+        return 0
     
     def get_module_name(self) -> str:
         """ModeAwareModule 인터페이스 구현"""
@@ -278,10 +257,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "pre_prompt": self.pre_textedit.toPlainText(),
             "post_prompt": self.post_textedit.toPlainText(),
             "auto_hide_prompt": self.auto_hide_textedit.toPlainText(),
+            "auto_hide_collapsed": self.auto_hide_collapsed,
             "preprocessing_options": {
                 self.option_key_map.get(text): cb.isChecked()
                 for text, cb in self.preprocessing_checkboxes.items()
-            }
+            },
+            "e621_settings": self._e621_settings,
+            "danbooru_weight_settings": self._danbooru_weight_settings,
         }
         return settings
     
@@ -305,7 +287,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.pre_textedit.setText(pre_prompt)
         self.post_textedit.setText(post_prompt)
         self.auto_hide_textedit.setText(auto_hide)
-        
+
+        # 자동 숨김 프롬프트 접기 상태 적용
+        collapsed = settings.get("auto_hide_collapsed", False)
+        self._set_auto_hide_collapsed(collapsed)
+
         # 체크박스 설정 적용
         options = settings.get("preprocessing_options", {})
         print(f"      preprocessing_options: {options}")
@@ -315,6 +301,18 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if key in options:
                 cb.setChecked(options[key])
                 print(f"      체크박스 '{text}' = {options[key]}")
+
+        # e621 설정 복원
+        e621 = settings.get("e621_settings")
+        if e621:
+            self._e621_settings = e621
+            self._save_e621_settings()
+
+        # danbooru weight 설정 복원
+        dw = settings.get("danbooru_weight_settings")
+        if dw:
+            self._danbooru_weight_settings = dw
+            self._save_danbooru_weight_settings()
     
     # 🆕 누락된 메서드 추가
     def initialize_with_context(self, context):
@@ -328,6 +326,17 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.subscribe("random_prompt_triggered_preset_randomizer", self._on_random_prompt_triggered)
     
     def create_widget(self, parent: QWidget) -> QWidget:
+        # after_wildcard hook 등록 (와일드카드 단독 + e621 동시 사용 대응)
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.register_pipeline_hook(
+                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 10},
+                self._E621AfterWildcardHook(self),
+            )
+            self.app_context.register_pipeline_hook(
+                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 15},
+                self._DanbooruAfterWildcardHook(self),
+            )
+
         widget = QWidget(parent)
         layout = QVBoxLayout(widget)
         layout.setSpacing(6)
@@ -460,10 +469,31 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         setModernStyle(self.post_textedit)
         layout.addWidget(self.post_textedit)
 
-        # 자동 숨김 프롬프트
+        # 자동 숨김 프롬프트 (접기/펼치기)
+        auto_hide_header = QHBoxLayout()
+        auto_hide_header.setSpacing(4)
         auto_hide_label = QLabel("자동 숨김 프롬프트:")
         auto_hide_label.setStyleSheet(dynamic_styles['label_style'])
-        layout.addWidget(auto_hide_label)
+        auto_hide_header.addWidget(auto_hide_label)
+        auto_hide_header.addStretch()
+        self.auto_hide_toggle_btn = QPushButton("접기")
+        self.auto_hide_toggle_btn.setFixedSize(get_scaled_size(50), get_scaled_size(20))
+        self.auto_hide_toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                font-size: {get_scaled_font_size(11)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+        self.auto_hide_toggle_btn.clicked.connect(self._toggle_auto_hide)
+        auto_hide_header.addWidget(self.auto_hide_toggle_btn)
+        layout.addLayout(auto_hide_header)
 
         self.auto_hide_textedit = QTextEdit()
         self.auto_hide_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
@@ -472,16 +502,107 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         setModernStyle(self.auto_hide_textedit)
         layout.addWidget(self.auto_hide_textedit)
 
-        # 프롬프트 전처리 옵션들
+        # 프롬프트 전처리 옵션들 (2단 그리드)
+        preprocessing_header = QHBoxLayout()
+        preprocessing_header.setSpacing(4)
         preprocessing_label = QLabel("프롬프트 전처리 옵션:")
         preprocessing_label.setStyleSheet(dynamic_styles['label_style'])
-        layout.addWidget(preprocessing_label)
+        preprocessing_header.addWidget(preprocessing_label)
+        preprocessing_header.addStretch()
+        self.debug_window_btn = QPushButton("디버깅 윈도우")
+        self.debug_window_btn.setFixedSize(get_scaled_size(90), get_scaled_size(20))
+        self.debug_window_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                font-size: {get_scaled_font_size(11)}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+        self.debug_window_btn.clicked.connect(self._open_debug_window)
+        preprocessing_header.addWidget(self.debug_window_btn)
+        layout.addLayout(preprocessing_header)
 
-        for text in self.option_key_map.keys():
+        # 연노랑색 체크박스 스타일 (작가명/작품명/캐릭터명용) — dark_checkbox 기반, 색상만 변경
+        yellow_checkbox_style = dynamic_styles['dark_checkbox'].replace(
+            f"color: {DARK_COLORS['text_primary']};",
+            "color: #FFFACD;",
+            1
+        )
+
+        checkbox_grid = QGridLayout()
+        checkbox_grid.setSpacing(get_scaled_size(4))
+        checkbox_grid.setContentsMargins(0, 0, 0, 0)
+        # 연분홍색 체크박스 스타일 (실험적 기능용)
+        pink_checkbox_style = dynamic_styles['dark_checkbox'].replace(
+            f"color: {DARK_COLORS['text_primary']};",
+            "color: #FFD1DC;",
+            1
+        )
+        # 연청록색 체크박스 스타일 (Danbooru Auto-Weight용)
+        teal_checkbox_style = dynamic_styles['dark_checkbox'].replace(
+            f"color: {DARK_COLORS['text_primary']};",
+            "color: #B2DFDB;",
+            1
+        )
+
+        # 첫 3개(작가명/작품명/캐릭터명)는 연노랑색
+        yellow_keys = {"remove_author", "remove_work_title", "remove_character_name"}
+        pink_keys = {"e621_auto_boost"}
+        teal_keys = {"danbooru_auto_weight", "tag_implication_compression"}
+        # 설정 버튼이 필요한 항목 — 셀 내 HBoxLayout(체크박스 + 버튼)으로 배치
+        _settings_btn_map = {
+            "e621_auto_boost":       ("#FFD1DC", self._open_e621_settings),
+            "danbooru_auto_weight":  ("#B2DFDB", self._open_danbooru_weight_settings),
+        }
+        for i, text in enumerate(self.option_key_map.keys()):
             cb = QCheckBox(text)
-            cb.setStyleSheet(dynamic_styles['dark_checkbox'])
-            layout.addWidget(cb)
+            key = self.option_key_map[text]
+            if key in yellow_keys:
+                cb.setStyleSheet(yellow_checkbox_style)
+            elif key in pink_keys:
+                cb.setStyleSheet(pink_checkbox_style)
+            elif key in teal_keys:
+                cb.setStyleSheet(teal_checkbox_style)
+            else:
+                cb.setStyleSheet(dynamic_styles['dark_checkbox'])
+            row = i // 2
+            col = i % 2
+            if key in _settings_btn_map:
+                color, handler = _settings_btn_map[key]
+                cell_layout = QHBoxLayout()
+                cell_layout.setSpacing(get_scaled_size(4))
+                cell_layout.setContentsMargins(0, 0, 0, 0)
+                cell_layout.addWidget(cb)
+                settings_btn = QPushButton("설정")
+                settings_btn.setFixedHeight(get_scaled_size(20))
+                settings_btn.setFixedWidth(get_scaled_size(36))
+                settings_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: transparent;
+                        color: {color};
+                        border: 1px solid {color};
+                        border-radius: {get_scaled_size(3)}px;
+                        font-size: {get_scaled_font_size(10)}px;
+                        padding: 0px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {DARK_COLORS['bg_hover']};
+                    }}
+                """)
+                settings_btn.clicked.connect(handler)
+                cell_layout.addWidget(settings_btn)
+                cell_layout.addStretch()
+                checkbox_grid.addLayout(cell_layout, row, col)
+            else:
+                checkbox_grid.addWidget(cb, row, col)
             self.preprocessing_checkboxes[text] = cb
+        layout.addLayout(checkbox_grid)
 
         # 🆕 생성된 위젯 저장 (가시성 제어용)
         self.widget = widget
@@ -497,11 +618,547 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         return widget
 
+    def _toggle_auto_hide(self):
+        """자동 숨김 프롬프트 접기/펼치기 토글"""
+        self._set_auto_hide_collapsed(not self.auto_hide_collapsed)
+
+    def _set_auto_hide_collapsed(self, collapsed: bool):
+        """자동 숨김 프롬프트 접기 상태 설정"""
+        self.auto_hide_collapsed = collapsed
+        if self.auto_hide_textedit:
+            self.auto_hide_textedit.setVisible(not collapsed)
+        if self.auto_hide_toggle_btn:
+            self.auto_hide_toggle_btn.setText("펼치기" if collapsed else "접기")
+
+    def _open_debug_window(self):
+        """전처리 디버깅 윈도우 열기"""
+        from modules.filter_debug_window import FilterDebugWindow
+
+        # C/C++ 삭제 안전 처리
+        try:
+            if self._debug_window is not None:
+                self._debug_window.isVisible()
+        except RuntimeError:
+            self._debug_window = None
+
+        if self._debug_window is None:
+            self._debug_window = FilterDebugWindow(self.widget)
+
+        self._debug_window.show()
+        self._debug_window.raise_()
+        self._debug_window.activateWindow()
+
+    # ─── e621 설정 관리 ───────────────────────────────────────
+    _E621_SETTINGS_FILE = os.path.join('save', 'e621_boost_user.json')
+
+    def _load_e621_settings(self) -> dict:
+        """e621 사용자 설정 로드"""
+        try:
+            with open(self._E621_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"weight": 0.0, "hidden_tags": [], "mode": "stable"}
+
+    def _save_e621_settings(self):
+        """e621 사용자 설정 저장"""
+        os.makedirs(os.path.dirname(self._E621_SETTINGS_FILE), exist_ok=True)
+        with open(self._E621_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self._e621_settings, f, ensure_ascii=False, indent=2)
+
+    def _open_e621_settings(self):
+        """e621 설정 윈도우 열기 (비모달)"""
+        # C/C++ 삭제 안전 처리
+        try:
+            if self._e621_settings_window is not None:
+                self._e621_settings_window.isVisible()
+        except RuntimeError:
+            self._e621_settings_window = None
+
+        if self._e621_settings_window is None:
+            self._e621_settings_window = _E621SettingsWindow(self._e621_settings, parent=self.widget)
+            self._e621_settings_window.settings_changed.connect(self._on_e621_settings_changed)
+
+        self._e621_settings_window.load_settings(self._e621_settings)
+        self._e621_settings_window.show()
+        self._e621_settings_window.raise_()
+        self._e621_settings_window.activateWindow()
+
+    def _on_e621_settings_changed(self, settings: dict):
+        """e621 설정 윈도우에서 저장 시 호출"""
+        self._e621_settings = settings
+        self._save_e621_settings()
+
+    # ─── Danbooru Auto-Weight 설정 관리 ─────────────────────────
+    _DANBOORU_WEIGHT_SETTINGS_FILE = os.path.join('save', 'danbooru_auto_weight_user.json')
+
+    def _load_danbooru_weight_settings(self) -> dict:
+        try:
+            with open(self._DANBOORU_WEIGHT_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"magnitude": 3}
+
+    def _save_danbooru_weight_settings(self):
+        os.makedirs(os.path.dirname(self._DANBOORU_WEIGHT_SETTINGS_FILE), exist_ok=True)
+        with open(self._DANBOORU_WEIGHT_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self._danbooru_weight_settings, f, ensure_ascii=False, indent=2)
+
+    def _open_danbooru_weight_settings(self):
+        try:
+            if self._danbooru_weight_settings_window is not None:
+                self._danbooru_weight_settings_window.isVisible()
+        except RuntimeError:
+            self._danbooru_weight_settings_window = None
+
+        if self._danbooru_weight_settings_window is None:
+            self._danbooru_weight_settings_window = _DanbooruWeightSettingsWindow(
+                self._danbooru_weight_settings, parent=self.widget, module=self
+            )
+            self._danbooru_weight_settings_window.settings_changed.connect(self._on_danbooru_weight_settings_changed)
+
+        self._danbooru_weight_settings_window.load_settings(self._danbooru_weight_settings)
+        self._danbooru_weight_settings_window.show()
+        self._danbooru_weight_settings_window.raise_()
+        self._danbooru_weight_settings_window.activateWindow()
+
+    def _on_danbooru_weight_settings_changed(self, settings: dict):
+        self._danbooru_weight_settings = settings
+        self._save_danbooru_weight_settings()
+
+    # Rating → 인덱스 매핑 (danbooru_tag_counts_by_rating.json의 partition_order와 일치)
+    _RATING_INDEX = {"g": 0, "s": 1, "q": 2, "e": 3}
+    # 정규화 클리핑 범위 (클래스 상수 — 설정 윈도우에서도 참조)
+    _danbooru_norm_low_default = 1.0
+    _danbooru_norm_high_default = 10.0
+    # Magnitude 레벨 → (min_w, max_w, scale) 매핑 (10단계, 앵커 보간)
+    _DANBOORU_MAGNITUDE_TABLE = {
+        1:  {"min_weight": 0.88, "max_weight": 1.15, "scale": 0.15, "label": "약한"},
+        2:  {"min_weight": 0.84, "max_weight": 1.25, "scale": 0.25, "label": "중간"},
+        3:  {"min_weight": 0.80, "max_weight": 1.35, "scale": 0.35, "label": "추천"},
+        4:  {"min_weight": 0.75, "max_weight": 1.42, "scale": 0.42, "label": "강한"},
+        5:  {"min_weight": 0.70, "max_weight": 1.50, "scale": 0.50, "label": "최대"},
+        6:  {"min_weight": 0.62, "max_weight": 1.60, "scale": 0.60, "label": "최대+"},
+        7:  {"min_weight": 0.55, "max_weight": 1.70, "scale": 0.70, "label": "최대++"},
+        8:  {"min_weight": 0.50, "max_weight": 1.80, "scale": 0.80, "label": "극한"},
+        9:  {"min_weight": 0.45, "max_weight": 1.90, "scale": 0.90, "label": "극한+"},
+        10: {"min_weight": 0.40, "max_weight": 2.00, "scale": 1.00, "label": "극한++"},
+    }
+
+    def _get_danbooru_tag_counts(self) -> dict:
+        """Rating 조건부 태그 빈도 데이터 로드 + 전역 IDF 범위 사전 계산 (lazy, 1회만)"""
+        if self._danbooru_tag_counts is not None:
+            return self._danbooru_tag_counts
+        import math
+        path = Path(__file__).resolve().parent.parent / "data" / "danbooru_tag_counts_by_rating.json"
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        meta = data.pop("_meta")
+        self._danbooru_rating_totals = meta["total_posts"]  # [g, s, q, e]
+        self._danbooru_tag_counts = data  # {tag: [g, s, q, e]}
+
+        # 전역 IDF 범위 사전 계산 (정규화 기준)
+        global_total = sum(self._danbooru_rating_totals)
+        global_idfs = {}
+        for tag, counts in data.items():
+            gc = sum(counts)
+            if gc > 0:
+                global_idfs[tag] = -math.log2(gc / global_total)
+        self._danbooru_global_idfs = global_idfs
+        # 정규화 범위: 실용 태그 대역 (IDF 1~10) 으로 클리핑
+        self._danbooru_norm_low = self._danbooru_norm_low_default
+        self._danbooru_norm_high = self._danbooru_norm_high_default
+        self._danbooru_global_total = global_total
+        print(f"[Danbooru Auto-Weight] loaded {len(data):,} tags, "
+              f"norm range: {self._danbooru_norm_low}~{self._danbooru_norm_high}")
+        return self._danbooru_tag_counts
+
+    # Rating 보정 블렌드 비율 (0=전역만, 1=rating만)
+    _RATING_BLEND = 0.3
+
+    @staticmethod
+    def _strip_weight_syntax(tag: str) -> str:
+        """태그에서 가중치 래핑 구문을 제거하여 순수 태그명만 반환.
+        NAI: '1.20::tag ::' → 'tag'
+        A1111/ComfyUI: '(tag:1.20)' → 'tag'
+        """
+        s = tag.strip()
+        # NAI 형식 처리
+        # 완전체: '0.89::tag ::' → 'tag'
+        # 그룹 앞쪽: '1.05::tag1' (쉼표로 잘림) → 'tag1'
+        # 그룹 뒤쪽: 'tag2 ::' (쉼표로 잘림) → 'tag2'
+        if '::' in s:
+            # 후행 '::' 먼저 제거
+            if s.endswith('::'):
+                s = s[:-2].strip()
+            # 선행 'weight::' 제거
+            if '::' in s:
+                parts = s.split('::', 1)
+                try:
+                    float(parts[0].strip())
+                    s = parts[1].strip()
+                except ValueError:
+                    pass
+        # A1111/ComfyUI 형식: '(tag:weight)'
+        if s.startswith('(') and s.endswith(')'):
+            inner = s[1:-1]
+            colon_idx = inner.rfind(':')
+            if colon_idx > 0:
+                try:
+                    float(inner[colon_idx + 1:])
+                    s = inner[:colon_idx].strip()
+                except ValueError:
+                    pass
+        return s
+
+    def _infer_rating_from_tags(self, tags: list) -> str:
+        """태그 분포 기반 rating 추론 (와일드카드 단독 모드 전용).
+        danbooru_tag_counts_by_rating.json의 per-rating 빈도를 사용하여
+        Naive Bayes 방식으로 가장 높은 우도를 가진 rating을 반환.
+        """
+        import math
+
+        if not tags:
+            return 's'
+
+        tag_counts = self._get_danbooru_tag_counts()
+        totals = self._danbooru_rating_totals  # [g, s, q, e]
+        vocab_size = len(tag_counts)
+
+        # 로그 사전확률 (uniform — 편향 없이 시작)
+        log_scores = [0.0, 0.0, 0.0, 0.0]  # g, s, q, e
+
+        matched = 0
+        for tag in tags:
+            clean = self._strip_weight_syntax(tag)
+            if clean in _PERSON_TAGS or clean not in tag_counts:
+                continue
+            counts = tag_counts[clean]
+            matched += 1
+            for ri in range(4):
+                # Laplace smoothing: (count + 1) / (total + V)
+                prob = (counts[ri] + 1) / (totals[ri] + vocab_size)
+                log_scores[ri] += math.log(prob)
+
+        if matched < 3:
+            return 's'  # 데이터 부족 — 보수적 기본값
+
+        # 가장 높은 score의 rating 선택
+        max_score = max(log_scores)
+        rating_labels = ['g', 's', 'q', 'e']
+        best_ri = log_scores.index(max_score)
+        best_rating = rating_labels[best_ri]
+
+        print(f"[Danbooru Auto-Weight] inferred rating='{best_rating}' "
+              f"from {matched} tags (scores: "
+              f"g={log_scores[0]-max_score:.1f}, s={log_scores[1]-max_score:.1f}, "
+              f"q={log_scores[2]-max_score:.1f}, e={log_scores[3]-max_score:.1f})")
+        return best_rating
+
+    def _compress_implied_main_tags(self, main_tags: list) -> list:
+        """main_tags에서 단어 부분집합 관계인 태그를 제거.
+        예: 'pleated skirt'가 있으면 'skirt'는 함축되므로 제거.
+        Returns: [{'removed': str, 'by': str}, ...] 제거된 태그와 근거."""
+        entries = []
+        for tag in main_tags:
+            t = tag.strip()
+            if t and not t.startswith('#'):
+                entries.append((tag, set(t.split())))
+
+        if len(entries) < 2:
+            return []
+
+        to_remove = {}  # tag_a -> tag_b (superset)
+        for i, (tag_a, ws_a) in enumerate(entries):
+            for j, (tag_b, ws_b) in enumerate(entries):
+                if i != j and ws_a < ws_b:  # proper subset
+                    to_remove[tag_a] = tag_b
+                    break
+
+        if not to_remove:
+            return []
+
+        result = [{'removed': k, 'by': v} for k, v in sorted(to_remove.items())]
+        main_tags[:] = [t for t in main_tags if t not in to_remove]
+        print(f"[Implication] {len(result)}개 태그 압축: {[r['removed'] for r in result]}")
+        return result
+
+    def _apply_danbooru_auto_weight(self, main_tags: list, context: PromptContext, *, min_valid_count: int = 3):
+        """전역 IDF + Rating 조건부 보정 블렌딩, 전역 범위 정규화 (main_tags in-place 수정)
+
+        blended_idf = global_idf + α * (rating_idf - global_idf)
+        norm = (blended_idf - global_min) / (global_max - global_min)   # 전역 범위 [0,1]
+        weight = 1.0 + scale * (2*norm - 1)
+        """
+        import math
+
+        try:
+            tag_counts = self._get_danbooru_tag_counts()
+        except Exception as e:
+            print(f"⚠️ Danbooru Auto-Weight: 태그 데이터 로드 실패 — {e}")
+            return
+
+        settings = self._danbooru_weight_settings
+        mag = settings.get("magnitude", 3)
+        mag_params = self._DANBOORU_MAGNITUDE_TABLE.get(mag, self._DANBOORU_MAGNITUDE_TABLE[3])
+        scale = mag_params["scale"]
+        min_w = mag_params["min_weight"]
+        max_w = mag_params["max_weight"]
+        # 커스텀 오버라이드 적용
+        if settings.get("override_on"):
+            scale = settings.get("override_scale", scale)
+            min_w = settings.get("override_min", min_w)
+            max_w = settings.get("override_max", max_w)
+        invert = settings.get("invert_weight", False)
+        is_nai = context.settings.get('api_mode') == 'NAI'
+        alpha = settings.get("rating_blend", self._RATING_BLEND)
+
+        # Rating 조건부: 오버라이드 > source_row > 추론 > fallback
+        if settings.get("rating_override_on") and settings.get("rating_override") in self._RATING_INDEX:
+            rating = settings["rating_override"]
+        else:
+            _raw_rating = context.source_row.get('rating', None)
+            # NaN/None/NaT 등 pandas missing 타입 모두 처리
+            rating = str(_raw_rating).strip().lower() if _raw_rating is not None and _raw_rating == _raw_rating else None
+            if rating not in self._RATING_INDEX:
+                # 와일드카드 단독 모드: 태그에서 추론
+                if context.settings.get('wildcard_standalone', False):
+                    rating = self._infer_rating_from_tags(main_tags)
+                else:
+                    rating = 's'  # fallback
+        ri = self._RATING_INDEX[rating]
+        rating_total = max(self._danbooru_rating_totals[ri], 1)
+
+        # 실용 대역 클리핑 정규화 범위 (IDF 1~10)
+        n_low = self._danbooru_norm_low
+        n_high = self._danbooru_norm_high
+        n_range = n_high - n_low
+
+        global_idfs = self._danbooru_global_idfs
+
+        # 1단계: 각 태그의 블렌딩 IDF 계산
+        blended_values = []
+        valid_count = 0
+        for tag in main_tags:
+            clean = tag.strip()
+            if clean in _PERSON_TAGS or clean not in tag_counts:
+                blended_values.append(None)
+                continue
+            # 전역 IDF
+            g_idf = global_idfs.get(clean)
+            if g_idf is None:
+                blended_values.append(None)
+                continue
+            # Rating 조건부 IDF
+            r_count = tag_counts[clean][ri]
+            if r_count > 0:
+                r_idf = -math.log2(r_count / rating_total)
+                blended = g_idf + alpha * (r_idf - g_idf)
+            else:
+                # 해당 rating에서 미출현 → 전역 IDF만 사용
+                blended = g_idf
+            blended_values.append(blended)
+            valid_count += 1
+
+        if valid_count < min_valid_count:
+            print(f"[Danbooru Auto-Weight] skipped (valid tags={valid_count} < {min_valid_count})")
+            return
+
+        # 2단계: 전역 범위 정규화 → 가중치 계산 → 미세 섭동 → 래핑
+        import random
+        weighted_count = 0
+        for idx, tag in enumerate(main_tags):
+            bv = blended_values[idx]
+            if bv is None:
+                continue
+
+            norm = max(0.0, min(1.0, (bv - n_low) / n_range))
+            if invert:
+                norm = 1.0 - norm
+            weight = 1.0 + scale * (2 * norm - 1)
+            weight = max(min_w, min(max_w, weight))
+
+            if abs(weight - 1.0) < 0.01:
+                continue
+
+            # 미세 섭동: 85% 0~2%, 10% 2~5%, 4% 5~8%, 1% 8~10%
+            # 각 구간 내에서도 하한 쪽에 편향 (beta 분포 α=1, β=3)
+            r = random.random()
+            if r < 0.85:
+                jitter_mag = random.betavariate(1, 3) * 0.02
+            elif r < 0.95:
+                jitter_mag = 0.02 + random.betavariate(1, 3) * 0.03
+            elif r < 0.99:
+                jitter_mag = 0.05 + random.betavariate(1, 3) * 0.03
+            else:
+                jitter_mag = 0.08 + random.betavariate(1, 3) * 0.02
+            jitter = jitter_mag * random.choice((-1, 1))
+            weight = weight * (1.0 + jitter)
+            weight = max(min_w, min(max_w, weight))
+
+            clean = tag.strip()
+            if is_nai:
+                main_tags[idx] = f"{weight:.2f}::{clean} ::"
+            else:
+                main_tags[idx] = f"({clean}:{weight:.2f})"
+            weighted_count += 1
+
+        print(f"[Danbooru Auto-Weight] {weighted_count}/{valid_count} tags weighted "
+              f"(rating={rating}, mag={mag} [{mag_params['label']}], {min_w}~{max_w})")
+
+    def _run_e621_boost(self, context, input_tags: list, target_tags: list):
+        """e621 추천을 실행하여 target_tags에 결과를 추가한다."""
+        try:
+            if not hasattr(self, '_e621_recommend'):
+                import importlib.util
+                _e621_file = Path(__file__).resolve().parent.parent / "data" / "e621_boost_static.py"
+                _spec = importlib.util.spec_from_file_location("e621_boost_static", _e621_file)
+                _mod = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                self._e621_recommend = _mod.recommend_detailed
+            recommend_detailed = self._e621_recommend
+            boost_prompt = ", ".join(input_tags)
+            print(f"[e621 DEBUG] input tags ({len(input_tags)}): {boost_prompt[:200]}{'...' if len(boost_prompt) > 200 else ''}")
+            _mode = self._e621_settings.get("mode", "stable")
+            boost_results = recommend_detailed(boost_prompt, top_n=15, diversity_cap=3, mode=_mode)
+            print(f"[e621 DEBUG] results ({len(boost_results)}): {[(t, f'{s:.4f}', c) for t, s, c, src in boost_results]}")
+            if boost_results:
+                # 숨김 태그 필터링
+                _hidden = set(self._e621_settings.get("hidden_tags", []))
+                boost_tags = [tag.replace("_", " ") for tag, score, cat, src in boost_results
+                              if tag not in _PERSON_TAGS and tag not in _hidden]
+                # 가중치 래핑
+                weight = self._e621_settings.get("weight", 0.0)
+                if boost_tags and weight != 0:
+                    is_nai = context.settings.get('api_mode') == 'NAI'
+                    if is_nai:
+                        boost_tags[0] = f"{weight}::" + boost_tags[0]
+                        boost_tags[-1] = boost_tags[-1] + " ::"
+                    else:
+                        boost_tags[0] = "(" + boost_tags[0]
+                        boost_tags[-1] = boost_tags[-1] + f":{weight})"
+                target_tags.extend(boost_tags)
+                context.metadata['e621_boost_tags'] = [
+                    {"tag": tag, "score": score, "cat": cat, "src": src}
+                    for tag, score, cat, src in boost_results
+                ]
+                context.metadata['e621_debug_info'] = {
+                    'input_tags': input_tags,
+                    'results': [
+                        {"tag": tag, "score": score, "cat": cat, "src": src}
+                        for tag, score, cat, src in boost_results
+                    ],
+                }
+                main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+                if main_window and hasattr(main_window, 'main_prompt_highlighter'):
+                    main_window.main_prompt_highlighter.set_e621_tags(set(boost_tags))
+                print(f"🔥 e621 Auto-Boost: {len(boost_results)} tags added")
+        except ImportError:
+            print("⚠️ e621_boost_static not found — Auto-Boost skipped")
+        except Exception as e:
+            print(f"⚠️ e621 Auto-Boost error: {e}")
+
+    def _execute_e621_after_wildcard(self, context) -> 'PromptContext':
+        """after_wildcard hook: 와일드카드 단독 + e621 동시 사용 시에만 작동."""
+        if '_e621_source_tags' not in context.metadata:
+            return context
+        _e621_source = context.metadata.pop('_e621_source_tags')
+        _e621_input = list(context.prefix_tags) + _e621_source
+        self._run_e621_boost(context, _e621_input, context.main_tags)
+        self._update_debug_window(context.metadata)
+        return context
+
+    def _execute_danbooru_weight_after_wildcard(self, context) -> 'PromptContext':
+        """after_wildcard hook (priority 15): 와일드카드 단독 + Danbooru Auto-Weight 동시 사용 시
+        전개된 prefix_tags에 가중치를 in-place 적용. e621(priority 10) 이후에 실행.
+        또한, 조건부 프롬프트 등이 main_tags에 추가한 미처리 태그에도 가중치 적용."""
+        if '_danbooru_weight_deferred' not in context.metadata:
+            # deferred가 아니어도 main_tags 미처리 태그 처리는 수행
+            applied = context.metadata.get('_danbooru_weight_applied_tags')
+            if applied is not None and context.main_tags:
+                self._apply_weight_to_new_main_tags(context, applied)
+            return context
+        context.metadata.pop('_danbooru_weight_deferred')
+        if context.prefix_tags:
+            # __wildcard__ 전개 결과가 'tag1, tag2, tag3' 형태의 단일 문자열일 수 있음
+            # 개별 태그로 분리하여 in-place 교체
+            flat_tags = []
+            for tag in context.prefix_tags:
+                if ',' in tag:
+                    flat_tags.extend(t.strip() for t in tag.split(',') if t.strip())
+                else:
+                    flat_tags.append(tag)
+            context.prefix_tags[:] = flat_tags
+            print(f"[Danbooru Auto-Weight] after_wildcard: applying to {len(context.prefix_tags)} prefix_tags")
+            self._apply_danbooru_auto_weight(context.prefix_tags, context)
+        # main_tags 미처리 태그에도 가중치 적용
+        applied = context.metadata.get('_danbooru_weight_applied_tags')
+        if applied is not None and context.main_tags:
+            self._apply_weight_to_new_main_tags(context, applied)
+        return context
+
+    def _apply_weight_to_new_main_tags(self, context, applied_tags: set):
+        """main_tags에서 Auto-Weight 미적용 raw 태그를 찾아 가중치 적용.
+        이미 가중치 포맷, e621 그룹 래핑 태그는 스킵."""
+        # e621 부스트 태그 수집 — 그룹 래핑 간섭 방지
+        e621_tags = set()
+        for item in context.metadata.get('e621_boost_tags', []):
+            e621_tags.add(item['tag'].replace('_', ' '))
+
+        new_tags = []
+        in_e621_group = False
+        for i, tag in enumerate(context.main_tags):
+            clean = tag.strip()
+            # 이미 가중치 포맷이면 스킵
+            if _WEIGHT_NAI_DETECT.match(clean) or _WEIGHT_WEBUI_DETECT.match(clean):
+                continue
+            # e621 그룹 래핑 감지: '1.05::tag' (opening) ~ 'tag ::' (closing)
+            if clean.endswith('::'):
+                in_e621_group = False  # 그룹 종료
+                continue
+            if re.match(r'^[\d.]+::', clean):
+                in_e621_group = True   # 그룹 시작
+                continue
+            if in_e621_group:
+                continue               # 그룹 중간 태그
+            # e621 부스트 태그면 스킵 (가중치 0인 경우 래핑 없이 추가됨)
+            if clean in e621_tags:
+                continue
+            # 이미 post_processing에서 처리된 태그면 스킵
+            if clean in applied_tags:
+                continue
+            new_tags.append(i)
+        if not new_tags:
+            return
+        # 미처리 태그만 추출하여 가중치 적용
+        temp_tags = [context.main_tags[i] for i in new_tags]
+        print(f"[Danbooru Auto-Weight] after_wildcard: applying to {len(temp_tags)} new main_tags")
+        self._apply_danbooru_auto_weight(temp_tags, context, min_valid_count=1)
+        # 결과를 원래 위치에 반영
+        for j, idx in enumerate(new_tags):
+            context.main_tags[idx] = temp_tags[j]
+
+    def _update_debug_window(self, metadata: dict):
+        """디버그 윈도우가 열려있으면 새 데이터를 추가한다."""
+        try:
+            if self._debug_window is None or not self._debug_window.isVisible():
+                return
+        except RuntimeError:
+            self._debug_window = None
+            return
+
+        filter_log = metadata.get('filter_log', [])
+        source_info = metadata.get('debug_source_info', {})
+        original = metadata.get('original_tag_count', 0)
+        remaining = metadata.get('remaining_tag_count', 0)
+        e621_info = metadata.get('e621_debug_info')
+        impl_info = metadata.get('implication_compressed_tags')
+        self._debug_window.add_entry(source_info, filter_log, original, remaining, e621_info, impl_info)
+
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
         return {
             'target_pipeline': 'PromptProcessor',
             'hook_point': 'post_processing',
-            'priority': 10 
+            'priority': 10
         }
     
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
@@ -545,7 +1202,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # "remove_work_title"
             if not checkbox_options.get("remove_work_title"):
                 copyright = source_row.get("copyright")
-                if copyright:
+                if isinstance(copyright, str) and copyright:
                     if is_anima_mode:
                         # ANIMA: metadata에 저장 (나중에 위치 2에 배치)
                         context.metadata['anima_copyright'] = copyright
@@ -556,7 +1213,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # "remove_author"
             if not checkbox_options.get("remove_author"):
                 artist = source_row.get("artist")
-                if artist:
+                if isinstance(artist, str) and artist:
                     if is_anima_mode:
                         # ANIMA: metadata에 저장 (나중에 위치 1에 배치)
                         context.metadata['anima_artist'] = artist
@@ -567,7 +1224,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # "remove_character_name"
             if not checkbox_options.get("remove_character_name"):
                 character = source_row.get("character")
-                if character:
+                if isinstance(character, str) and character:
                     if is_anima_mode:
                         # ANIMA: metadata에 저장 (나중에 위치 3에 배치)
                         context.metadata['anima_character'] = character
@@ -580,152 +1237,71 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 자동숨김프롬프트 처리 (EZ Mode에서는 건너뛰기)
         auto_hide = options["auto_hide"]
-        temp_hide_prompt = []
 
-        if not skip_preprocessing:
-            # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
-            protected_keywords = []
-            for item in auto_hide:
-                if item.startswith('~'):
-                    # ~ 제거하고 보호 리스트에 추가
-                    protected_keywords.append(item[1:].strip())
-
-            # ~ 로 시작하는 아이템 제거 (auto_hide에서는 제외)
-            auto_hide = [item for item in auto_hide if not item.startswith('~')]
-        else:
+        if skip_preprocessing:
             print("[DEBUG] 🚫 전처리 옵션 및 Auto Hide 건너뛰기 (EZ Mode 즉시 생성)")
-            protected_keywords = []
             auto_hide = []
-        
-        # 원본 tag_conversion_map (key와 value를 바꿔서 사용할 것임)
-        original_tag_conversion_map = {
-            'v': 'peace sign', 'double v': 'double peace', '|_|': 'bar eyes',
-            '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
-            'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
+
+        # 3. Auto Hide + 필터 체크박스 통합 처리 (공유 헬퍼)
+        # e621 boost용 원본 태그 보존 (필터링 전 전체 맥락)
+        _e621_source_tags = list(main_tags)
+        original_count = len(main_tags)
+        filter_result = apply_tag_filters(
+            main_tags, removed_tags, checkbox_options, auto_hide,
+            filter_manager, track_clothing_regions=True,
+        )
+
+        # 의류 Region 추적 결과를 metadata에 기록
+        if filter_result.get('removed_clothes_by_region'):
+            context.metadata['removed_clothes_by_region'] = filter_result['removed_clothes_by_region']
+
+        # 디버그 윈도우용 데이터 수집
+        if filter_result.get('filter_log'):
+            context.metadata['filter_log'] = filter_result['filter_log']
+            context.metadata['original_tag_count'] = original_count
+            context.metadata['remaining_tag_count'] = len(main_tags)
+        context.metadata['debug_source_info'] = {
+            'character': source_row.get('character', ''),
+            'copyright': source_row.get('copyright', ''),
+            'artist': source_row.get('artist', ''),
+            'id': source_row.get('id', ''),
         }
-        
-        # key와 value를 바꾼 reversed map
-        tag_conversion_map = {v: k for k, v in original_tag_conversion_map.items()}
-        
-        # auto_hide에 있는 항목이 reversed map의 key와 매칭되면, 해당 value도 auto_hide에 추가
-        additional_auto_hide = []
-        for item in auto_hide:
-            if item in tag_conversion_map:
-                additional_auto_hide.append(tag_conversion_map[item])
-        
-        # 추가된 항목을 auto_hide에 병합 (중복 제거)
-        auto_hide = list(set(auto_hide + additional_auto_hide))
+        # ★ Tag implication compression — Auto-Weight 이전에 처리
+        if not skip_preprocessing and checkbox_options.get("tag_implication_compression"):
+            compressed = self._compress_implied_main_tags(main_tags)
+            if compressed:
+                context.metadata['implication_compressed_tags'] = compressed
 
-        # 직접 매칭되는 키워드 제거 (보호된 키워드는 제외)
-        for keyword in main_tags:
-            if keyword in auto_hide:
-                # 보호된 키워드인지 확인
-                is_protected = False
-                for protected in protected_keywords:
-                    if protected in keyword or keyword == protected:
-                        is_protected = True
-                        break
-                
-                if not is_protected:
-                    temp_hide_prompt.append(keyword)
-                    
-        for keyword in temp_hide_prompt:
-            main_tags.remove(keyword)
-            removed_tags.append(keyword)
-            
-        # 패턴 매칭 처리
-        to_remove = []
-        for item in auto_hide:
-            modified_item = item
-            if item.startswith("__") and item.endswith("__"):
-                modified_item = modified_item.replace("_", "")
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.startswith("_") and item.endswith("_"):
-                modified_item = modified_item.replace("_", " ")
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.startswith("_"):
-                modified_item = modified_item.replace("_", " ", 1)
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.endswith("_"):
-                modified_item = " " + modified_item.rstrip("_") + " "
-                to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
-                
-        # 보호된 키워드를 to_remove에서 제외
-        to_remove = list(set(to_remove))
-        if protected_keywords:
-            # 보호된 키워드와 매칭되는 항목을 to_remove에서 제거
-            protected_to_keep = []
-            for protected in protected_keywords:
-                for keyword in to_remove[:]:  # 복사본으로 순회
-                    if protected in keyword or keyword == protected:
-                        protected_to_keep.append(keyword)
-                        
-            # to_remove에서 보호된 키워드 제거
-            for protected_item in protected_to_keep:
-                if protected_item in to_remove:
-                    to_remove.remove(protected_item)
-                    
-            print(f"보호된 키워드: {', '.join(protected_to_keep) if protected_to_keep else '없음'}")
-        
-        # 조건에 맞는 키워드를 main_tags에서 제거
-        if to_remove:
-            for keyword in to_remove:
-                if keyword in main_tags:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-                    
-        print(f"Auto Hide로 제거된 태그: {', '.join(removed_tags) if removed_tags else '없음'}")
+        # Danbooru Auto-Weight (e621 boost 전에 적용)
+        _danbooru_weight_enabled = not skip_preprocessing and checkbox_options.get("danbooru_auto_weight")
+        if _danbooru_weight_enabled:
+            # 적용 전 raw 태그명 기록 (after_wildcard에서 미처리 태그 감지용)
+            pre_weight_tags = {tag.strip() for tag in main_tags}
+            self._apply_danbooru_auto_weight(main_tags, context)
+            context.metadata['_danbooru_weight_applied_tags'] = pre_weight_tags
+            _is_wildcard_standalone = context.settings.get('wildcard_standalone', False)
+            if _is_wildcard_standalone:
+                context.metadata['_danbooru_weight_deferred'] = True
 
-        # 3. 추가 전처리 옵션 (EZ Mode에서는 건너뛰기)
-        if not skip_preprocessing:
-            # "remove_character_features"
-            if checkbox_options.get("remove_character_features"):
-                characteristics = filter_manager.characteristic_list
-                temp = []
-                for keyword in main_tags:
-                    if keyword in characteristics:
-                        temp.append(keyword)
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
+        # e621 Auto-Boost
+        _e621_enabled = not skip_preprocessing and checkbox_options.get("e621_auto_boost")
+        _is_wildcard_standalone = context.settings.get('wildcard_standalone', False)
 
-            # "remove_clothes"
-            if checkbox_options.get("remove_clothes"):
-                clothes = filter_manager.clothes_list
-                temp = []
-                for keyword in main_tags:
-                    if keyword in clothes:
-                        temp.append(keyword)
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
+        if not _e621_enabled:
+            # 비활성 시 하이라이팅 클리어
+            main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
+            if main_window and hasattr(main_window, 'main_prompt_highlighter') and main_window.main_prompt_highlighter._e621_tags:
+                main_window.main_prompt_highlighter.set_e621_tags(set())
+        elif _is_wildcard_standalone:
+            # 와일드카드 단독 모드: after_wildcard hook에서 처리 (원본 태그 보존)
+            context.metadata['_e621_source_tags'] = list(_e621_source_tags)
+            print("[e621] 와일드카드 단독 모드 — after_wildcard에서 처리 예정")
+        else:
+            # 일반 모드: 여기서 즉시 처리
+            self._run_e621_boost(context, list(prefix_tags) + _e621_source_tags, main_tags)
 
-            # "remove_color"
-            if checkbox_options.get("remove_color"):
-                colors = filter_manager.color_list
-                temp = []
-                for keyword in main_tags:
-                    # 🔥 예외 패턴 체크: 색상과 무관한 태그는 필터링하지 않음
-                    if _is_color_exception(keyword):
-                        continue
-                    # 색상 키워드 매칭
-                    if any(color in keyword for color in colors):
-                        temp.append(keyword)
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
+        self._update_debug_window(context.metadata)
 
-            # "remove_location_and_background_color"
-            if checkbox_options.get("remove_location_and_background_color"):
-                locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
-                temp = []
-                for keyword in main_tags:
-                    if keyword in locations:
-                        temp.append(keyword)
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-        
         # 수정된 context를 다음 훅 또는 파이프라인으로 전달
         context.prefix_tags = prefix_tags
         context.postfix_tags = postfix_tags
@@ -739,122 +1315,16 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         if hasattr(self, 'context') and self.context:
             filter_manager = getattr(self.context, 'filter_data_manager', None)
 
-        # 메인 태그 파싱
-        main_tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
+        # 메인 태그 파싱 (<...> 블록 보존)
+        main_tags = split_tags_smart(prompt)
         removed_tags = []
 
         options = self.get_parameters()
         checkbox_options = options["preprocessing_options"]
-
-        # 3. Auto Hide 처리
         auto_hide = options["auto_hide"]
 
-        # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
-        protected_keywords = []
-        for item in auto_hide:
-            if item.startswith('~'):
-                protected_keywords.append(item[1:].strip())
-
-        # ~ 로 시작하는 아이템 제거
-        auto_hide = [item for item in auto_hide if not item.startswith('~')]
-
-        # 태그 변환 맵
-        original_tag_conversion_map = {
-            'v': 'peace sign', 'double v': 'double peace', '|_|': 'bar eyes',
-            '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
-            'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
-        }
-        tag_conversion_map = {v: k for k, v in original_tag_conversion_map.items()}
-
-        # auto_hide에 있는 항목이 reversed map의 key와 매칭되면, 해당 value도 추가
-        additional_auto_hide = []
-        for item in auto_hide:
-            if item in tag_conversion_map:
-                additional_auto_hide.append(tag_conversion_map[item])
-        auto_hide = list(set(auto_hide + additional_auto_hide))
-
-        # 직접 매칭되는 키워드 제거
-        temp_hide_prompt = []
-        for keyword in main_tags:
-            if keyword in auto_hide:
-                is_protected = any(protected in keyword or keyword == protected
-                                   for protected in protected_keywords)
-                if not is_protected:
-                    temp_hide_prompt.append(keyword)
-
-        for keyword in temp_hide_prompt:
-            main_tags.remove(keyword)
-            removed_tags.append(keyword)
-
-        # 패턴 매칭 처리
-        to_remove = []
-        for item in auto_hide:
-            modified_item = item
-            if item.startswith("__") and item.endswith("__"):
-                modified_item = modified_item.replace("_", "")
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.startswith("_") and item.endswith("_"):
-                modified_item = modified_item.replace("_", " ")
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.startswith("_"):
-                modified_item = modified_item.replace("_", " ", 1)
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.endswith("_"):
-                modified_item = " " + modified_item.rstrip("_") + " "
-                to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
-
-        # 보호된 키워드를 to_remove에서 제외
-        to_remove = list(set(to_remove))
-        if protected_keywords:
-            protected_to_keep = []
-            for protected in protected_keywords:
-                for keyword in to_remove[:]:
-                    if protected in keyword or keyword == protected:
-                        protected_to_keep.append(keyword)
-            for protected_item in protected_to_keep:
-                if protected_item in to_remove:
-                    to_remove.remove(protected_item)
-
-        # 조건에 맞는 키워드를 main_tags에서 제거
-        for keyword in to_remove:
-            if keyword in main_tags:
-                main_tags.remove(keyword)
-                removed_tags.append(keyword)
-
-        # 4. 추가 전처리 옵션 (filter_manager가 있을 때만)
-        if filter_manager:
-            # "remove_character_features"
-            if checkbox_options.get("remove_character_features"):
-                characteristics = filter_manager.characteristic_list
-                temp = [keyword for keyword in main_tags if keyword in characteristics]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-
-            # "remove_clothes"
-            if checkbox_options.get("remove_clothes"):
-                clothes = filter_manager.clothes_list
-                temp = [keyword for keyword in main_tags if keyword in clothes]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-
-            # "remove_color"
-            if checkbox_options.get("remove_color"):
-                colors = filter_manager.color_list
-                temp = [keyword for keyword in main_tags
-                        if not _is_color_exception(keyword) and any(color in keyword for color in colors)]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-
-            # "remove_location_and_background_color"
-            if checkbox_options.get("remove_location_and_background_color"):
-                locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
-                temp = [keyword for keyword in main_tags if keyword in locations]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
+        # Auto Hide + 필터 체크박스 통합 처리 (공유 헬퍼)
+        apply_tag_filters(main_tags, removed_tags, checkbox_options, auto_hide, filter_manager)
 
         # 최종 프롬프트 조합
         return ", ".join(main_tags)
@@ -891,8 +1361,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         prefix_tags = options["pre_prompt"]
         postfix_tags = options["post_prompt"]
 
-        # 메인 태그 파싱
-        main_tags = [tag.strip() for tag in prompt.split(',') if tag.strip()]
+        # 메인 태그 파싱 (<...> 블록 보존)
+        main_tags = split_tags_smart(prompt)
         removed_tags = []
 
         # 2. 자동 태그 제거 옵션 처리
@@ -901,130 +1371,24 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         # "remove_work_title" - 제거 옵션이 꺼져있으면 copyright 추가
         if not checkbox_options.get("remove_work_title"):
             copyright_val = source_row.get("copyright")
-            if copyright_val:
+            if isinstance(copyright_val, str) and copyright_val:
                 prefix_tags = [copyright_val] + prefix_tags
 
         # "remove_author" - 제거 옵션이 꺼져있으면 artist 추가
         if not checkbox_options.get("remove_author"):
             artist = source_row.get("artist")
-            if artist:
+            if isinstance(artist, str) and artist:
                 prefix_tags = [artist] + prefix_tags
 
         # "remove_character_name" - 제거 옵션이 꺼져있으면 character 추가
         if not checkbox_options.get("remove_character_name"):
             character = source_row.get("character")
-            if character:
+            if isinstance(character, str) and character:
                 prefix_tags = [character] + prefix_tags
 
-        # 3. Auto Hide 처리
+        # 3. Auto Hide + 필터 체크박스 통합 처리 (공유 헬퍼)
         auto_hide = options["auto_hide"]
-
-        # ~ 로 시작하는 아이템을 분리 (보호할 키워드들)
-        protected_keywords = []
-        for item in auto_hide:
-            if item.startswith('~'):
-                protected_keywords.append(item[1:].strip())
-
-        # ~ 로 시작하는 아이템 제거
-        auto_hide = [item for item in auto_hide if not item.startswith('~')]
-
-        # 태그 변환 맵
-        original_tag_conversion_map = {
-            'v': 'peace sign', 'double v': 'double peace', '|_|': 'bar eyes',
-            '\\||/': 'open \\m/', ':|': 'neutral face', ';|': 'neutral face',
-            'eyepatch bikini': 'square bikini', 'tachi-e': 'character image'
-        }
-        tag_conversion_map = {v: k for k, v in original_tag_conversion_map.items()}
-
-        # auto_hide에 있는 항목이 reversed map의 key와 매칭되면, 해당 value도 추가
-        additional_auto_hide = []
-        for item in auto_hide:
-            if item in tag_conversion_map:
-                additional_auto_hide.append(tag_conversion_map[item])
-        auto_hide = list(set(auto_hide + additional_auto_hide))
-
-        # 직접 매칭되는 키워드 제거
-        temp_hide_prompt = []
-        for keyword in main_tags:
-            if keyword in auto_hide:
-                is_protected = any(protected in keyword or keyword == protected
-                                   for protected in protected_keywords)
-                if not is_protected:
-                    temp_hide_prompt.append(keyword)
-
-        for keyword in temp_hide_prompt:
-            main_tags.remove(keyword)
-            removed_tags.append(keyword)
-
-        # 패턴 매칭 처리
-        to_remove = []
-        for item in auto_hide:
-            modified_item = item
-            if item.startswith("__") and item.endswith("__"):
-                modified_item = modified_item.replace("_", "")
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.startswith("_") and item.endswith("_"):
-                modified_item = modified_item.replace("_", " ")
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.startswith("_"):
-                modified_item = modified_item.replace("_", " ", 1)
-                to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-            elif item.endswith("_"):
-                modified_item = " " + modified_item.rstrip("_") + " "
-                to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
-
-        # 보호된 키워드를 to_remove에서 제외
-        to_remove = list(set(to_remove))
-        if protected_keywords:
-            protected_to_keep = []
-            for protected in protected_keywords:
-                for keyword in to_remove[:]:
-                    if protected in keyword or keyword == protected:
-                        protected_to_keep.append(keyword)
-            for protected_item in protected_to_keep:
-                if protected_item in to_remove:
-                    to_remove.remove(protected_item)
-
-        # 조건에 맞는 키워드를 main_tags에서 제거
-        for keyword in to_remove:
-            if keyword in main_tags:
-                main_tags.remove(keyword)
-                removed_tags.append(keyword)
-
-        # 4. 추가 전처리 옵션 (filter_manager가 있을 때만)
-        if filter_manager:
-            # "remove_character_features"
-            if checkbox_options.get("remove_character_features"):
-                characteristics = filter_manager.characteristic_list
-                temp = [keyword for keyword in main_tags if keyword in characteristics]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-
-            # "remove_clothes"
-            if checkbox_options.get("remove_clothes"):
-                clothes = filter_manager.clothes_list
-                temp = [keyword for keyword in main_tags if keyword in clothes]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-
-            # "remove_color"
-            if checkbox_options.get("remove_color"):
-                colors = filter_manager.color_list
-                temp = [keyword for keyword in main_tags
-                        if not _is_color_exception(keyword) and any(color in keyword for color in colors)]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
-
-            # "remove_location_and_background_color"
-            if checkbox_options.get("remove_location_and_background_color"):
-                locations = ['indoors', 'outdoors', 'airplane interior', 'airport', 'apartment', 'arena', 'armory', 'bar', 'barn', 'bathroom', 'bathtub', 'bedroom', 'bell tower', 'billiard room', 'book store', 'bowling alley', 'bunker', 'bus interior', 'butcher shop', 'cafe', 'cafeteria', 'car interior', 'casino', 'castle', 'catacomb', 'changing room', 'church', 'classroom', 'closet', 'construction site', 'convenience store', 'convention hall', 'court', 'dining room', 'drugstore', 'ferris wheel', 'flower shop', 'gym', 'hangar', 'hospital', 'hotel room', 'hotel', 'infirmary', 'izakaya', 'kitchen', 'laboratory', 'library', 'living room', 'locker room', 'mall', 'messy room', 'mosque', 'movie theater', 'museum', 'nightclub', 'office', 'onsen', 'ovservatory', 'phone booth', 'planetarium', 'pool', 'prison', 'refinery', 'restaurant', 'restroom', 'rural', 'salon', 'school', 'sex shop', 'shop', 'shower room', 'skating rink', 'snowboard shop', 'spacecraft interior', 'staff room', 'stage', 'supermarket', 'throne', 'train station', 'tunnel', 'airfield', 'alley', 'amphitheater', 'aqueduct', 'bamboo forest', 'beach', 'blizzard', 'bridge', 'bus stop', 'canal', 'canyon', 'carousel', 'cave', 'cliff', 'cockpit', 'conservatory', 'cross walk', 'desert', 'dust storm', 'flower field', 'forest', 'garden', 'gas staion', 'gazebo', 'geyser', 'glacier', 'graveyard', 'harbor', 'highway', 'hill', 'island', 'jungle', 'lake', 'market', 'meadow', 'nuclear powerplant', 'oasis', 'ocean bottom', 'ocean', 'pagoda', 'parking lot', 'playground', 'pond', 'poolside', 'railroad', 'rainforest', 'rice paddy', 'roller coster', 'rooftop', 'rope bridge', 'running track', 'savannah', 'shipyard', 'shirine', 'skyscraper', 'soccor field', 'space elevator', 'stair', 'starry sky', 'swamp', 'tidal flat', 'volcano', 'waterfall', 'waterpark', 'wheat field', 'zoo', 'white background', 'simple background', 'grey background', 'gradient background', 'blue background', 'black background', 'yellow background', 'pink background', 'red background', 'brown background', 'green background', 'purple background', 'orange background']
-                temp = [keyword for keyword in main_tags if keyword in locations]
-                for keyword in temp:
-                    main_tags.remove(keyword)
-                    removed_tags.append(keyword)
+        apply_tag_filters(main_tags, removed_tags, checkbox_options, auto_hide, filter_manager)
 
         # 최종 프롬프트 조합
         final_tags = prefix_tags + main_tags + postfix_tags
@@ -1040,9 +1404,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 최종 파라미터 딕셔너리 구성
         params = {
-            "pre_prompt": [tag.strip() for tag in self.pre_textedit.toPlainText().split(',') if tag.strip()],
-            "post_prompt": [tag.strip() for tag in self.post_textedit.toPlainText().split(',') if tag.strip()],
-            "auto_hide": [tag.strip() for tag in self.auto_hide_textedit.toPlainText().split(',') if tag.strip()],
+            "pre_prompt": split_tags_smart(self.pre_textedit.toPlainText()),
+            "post_prompt": split_tags_smart(self.post_textedit.toPlainText()),
+            "auto_hide": split_tags_smart(self.auto_hide_textedit.toPlainText()),
             "preprocessing_options": options
         }
         return params
@@ -1838,26 +2202,23 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if hasattr(main_window, 'negative_prompt_textedit'):
                 settings['negative'] = main_window.negative_prompt_textedit.toPlainText()
             
-            # 생성 파라미터
-            params = main_window.get_main_parameters() if hasattr(main_window, 'get_main_parameters') else {}
-            
+            # 생성 파라미터 — 위젯에서 직접 읽기 (get_main_parameters()는 시드 부작용 있음)
             mode = self.app_context.get_api_mode()
             if mode == "NAI":
-                # 직접 위젯에서 값 가져오기 (params가 비어있을 수 있음)
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
-                    settings['cfg_scale'] = params.get('cfg_scale', 5.0)
-                    
+                    settings['cfg_scale'] = 5.0
+
                 if hasattr(main_window, 'sampler_combo'):
                     settings['sampler'] = main_window.sampler_combo.currentText()
                 else:
-                    settings['sampler'] = params.get('sampler', 'k_euler')
-                    
+                    settings['sampler'] = 'k_euler'
+
                 if hasattr(main_window, 'steps_spinbox'):
                     settings['steps'] = main_window.steps_spinbox.value()
                 else:
-                    settings['steps'] = params.get('steps', 28)
+                    settings['steps'] = 28
                 # 체크박스들 - advanced_checkboxes 딕셔너리에서 가져오기
                 if hasattr(main_window, 'advanced_checkboxes'):
                     settings['SMEA'] = main_window.advanced_checkboxes.get("SMEA", QCheckBox()).isChecked()
@@ -1865,86 +2226,84 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     settings['VAR+'] = main_window.advanced_checkboxes.get("VAR+", QCheckBox()).isChecked()
                     settings['DECRISP'] = main_window.advanced_checkboxes.get("DECRISP", QCheckBox()).isChecked()
                 else:
-                    settings['SMEA'] = params.get('SMEA', False)
-                    settings['DYN'] = params.get('DYN', False)
-                    settings['VAR+'] = params.get('VAR+', False)
-                    settings['DECRISP'] = params.get('DECRISP', False)
+                    settings['SMEA'] = False
+                    settings['DYN'] = False
+                    settings['VAR+'] = False
+                    settings['DECRISP'] = False
             elif mode == "WEBUI":
-                # WEBUI도 NAI와 동일한 위젯 이름 사용하므로 직접 위젯에서 값 가져오기
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
-                    settings['cfg_scale'] = params.get('cfg_scale', 7.0)
-                    
+                    settings['cfg_scale'] = 7.0
+
                 if hasattr(main_window, 'sampler_combo'):
                     settings['sampler'] = main_window.sampler_combo.currentText()
                 else:
-                    settings['sampler'] = params.get('sampler_name', 'Euler')
-                
+                    settings['sampler'] = 'Euler'
+
                 # WEBUI에서는 scheduler도 저장해야 함
                 if hasattr(main_window, 'scheduler_combo'):
                     settings['scheduler'] = main_window.scheduler_combo.currentText()
                 else:
-                    settings['scheduler'] = params.get('scheduler', 'SGM Uniform')
-                    
+                    settings['scheduler'] = 'SGM Uniform'
+
                 if hasattr(main_window, 'steps_spinbox'):
                     settings['steps'] = main_window.steps_spinbox.value()
                 else:
-                    settings['steps'] = params.get('steps', 20)
-                
+                    settings['steps'] = 20
+
                 # WEBUI 전용 설정들
                 if hasattr(main_window, 'enable_hr_checkbox'):
                     settings['enable_hr'] = main_window.enable_hr_checkbox.isChecked()
                 else:
-                    settings['enable_hr'] = params.get('enable_hr', False)
-                    
+                    settings['enable_hr'] = False
+
                 if hasattr(main_window, 'hr_scale_spinbox'):
                     settings['hr_scale'] = main_window.hr_scale_spinbox.value()
                 else:
-                    settings['hr_scale'] = params.get('hr_scale', 1.5)
+                    settings['hr_scale'] = 1.5
                     
                 if hasattr(main_window, 'hr_upscaler_combo'):
                     settings['hr_upscaler'] = main_window.hr_upscaler_combo.currentText()
                 else:
-                    settings['hr_upscaler'] = params.get('hr_upscaler', 'Lanczos')
-                
+                    settings['hr_upscaler'] = 'Lanczos'
+
                 # denoising_strength도 저장
                 if hasattr(main_window, 'denoising_strength_slider'):
                     settings['denoising_strength'] = main_window.denoising_strength_slider.value() / 100.0
                 else:
-                    settings['denoising_strength'] = params.get('denoising_strength', 0.5)
+                    settings['denoising_strength'] = 0.5
             elif mode == "COMFYUI":
-                # ComfyUI도 NAI/WEBUI와 동일한 위젯 이름 사용
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
-                    settings['cfg_scale'] = params.get('cfg_scale', 7.0)
-                    
+                    settings['cfg_scale'] = 7.0
+
                 if hasattr(main_window, 'sampler_combo'):
                     settings['sampler'] = main_window.sampler_combo.currentText()
                 else:
-                    settings['sampler'] = params.get('sampler', 'euler')
-                
+                    settings['sampler'] = 'euler'
+
                 if hasattr(main_window, 'scheduler_combo'):
                     settings['scheduler'] = main_window.scheduler_combo.currentText()
                 else:
-                    settings['scheduler'] = params.get('scheduler', 'normal')
-                    
+                    settings['scheduler'] = 'normal'
+
                 if hasattr(main_window, 'steps_spinbox'):
                     settings['steps'] = main_window.steps_spinbox.value()
                 else:
-                    settings['steps'] = params.get('steps', 20)
-                
+                    settings['steps'] = 20
+
                 # ComfyUI 전용 설정
                 if hasattr(main_window, 'v_prediction_checkbox'):
                     settings['v_prediction'] = main_window.v_prediction_checkbox.isChecked()
                 else:
-                    settings['v_prediction'] = params.get('v_prediction', False)
-                    
+                    settings['v_prediction'] = False
+
                 if hasattr(main_window, 'zsnr_checkbox'):
                     settings['zsnr'] = main_window.zsnr_checkbox.isChecked()
                 else:
-                    settings['zsnr'] = params.get('zsnr', False)
+                    settings['zsnr'] = False
             
         except Exception as e:
             print(f"⚠️ 메인 UI 설정 수집 중 오류: {e}")
@@ -2448,3 +2807,827 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             import traceback
             print(f"❌ 랜덤 프리셋 로드 실패: {e}")
             traceback.print_exc()
+
+
+class _E621SettingsWindow(QWidget):
+    """e621 Auto-Boost 사용자 설정 윈도우 (비모달)"""
+    settings_changed = pyqtSignal(dict)
+
+    def __init__(self, settings: dict, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("e621 Auto-Boost 설정")
+        self.resize(500, 400)
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+            }}
+            QLineEdit, QTextEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px;
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+
+        # ── 가중치 섹션 ──
+        weight_label = QLabel("가중치 (0 = 비활성, 범위: -5.0 ~ 5.0)")
+        weight_label.setToolTip("e621 태그 묶음에 적용할 NovelAI 가중치\n예: 0.8 → 0.8::tag1, tag2, ..., tagN ::")
+        layout.addWidget(weight_label)
+
+        self._weight_edit = QLineEdit()
+        self._weight_edit.setPlaceholderText("예: 0.8")
+        self._weight_edit.setProperty("autocomplete_ignore", True)
+        validator = QDoubleValidator(-5.0, 5.0, 4, self)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self._weight_edit.setValidator(validator)
+
+        step_btn_style = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: #FFD1DC;
+                border: 1px solid #FFD1DC;
+                border-radius: 3px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """
+        weight_row = QHBoxLayout()
+        weight_row.setSpacing(get_scaled_size(4))
+        btn_l = QPushButton("<")
+        btn_l.setFixedSize(get_scaled_size(32), get_scaled_size(28))
+        btn_l.setStyleSheet(step_btn_style)
+        btn_r = QPushButton(">")
+        btn_r.setFixedSize(get_scaled_size(32), get_scaled_size(28))
+        btn_r.setStyleSheet(step_btn_style)
+        def _step_weight(delta):
+            try:
+                val = float(self._weight_edit.text().strip())
+            except ValueError:
+                val = 0.0
+            val = round(max(-5.0, min(5.0, val + delta)), 2)
+            self._weight_edit.setText(str(val))
+        btn_l.clicked.connect(lambda: _step_weight(-0.05))
+        btn_r.clicked.connect(lambda: _step_weight(0.05))
+        weight_row.addWidget(btn_l)
+        weight_row.addWidget(self._weight_edit, 1)
+        weight_row.addWidget(btn_r)
+        layout.addLayout(weight_row)
+
+        # ── 적용 모드 섹션 ──
+        mode_label = QLabel("적용 모드")
+        mode_label.setToolTip(
+            "stable: dedup 그룹에서 최고 score 1개만 선택 (결정적)\n"
+            "confused: 최소 1개 보장 + 나머지 score 비례 확률 추가 (다양성)"
+        )
+        layout.addWidget(mode_label)
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("stable — 안정 (그룹당 1개)", "stable")
+        self._mode_combo.addItem("confused — 다양성 (확률적 다중 선택)", "confused")
+        self._mode_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+        """)
+        layout.addWidget(self._mode_combo)
+
+        # ── 숨김 태그 섹션 ──
+        hidden_label = QLabel("숨김 태그 (쉼표로 구분, 추천에서 제외)")
+        hidden_label.setToolTip("예: chastity device, gaping anus, magic user")
+        layout.addWidget(hidden_label)
+
+        self._hidden_edit = QTextEdit()
+        self._hidden_edit.setMinimumHeight(200)
+        self._hidden_edit.setProperty("autocomplete_ignore", True)
+        self._hidden_edit.setPlaceholderText("예: chastity device, gaping anus, magic user")
+        layout.addWidget(self._hidden_edit)
+
+        # ── 저장/닫기 버튼 (3:1) ──
+        btn_row = QHBoxLayout()
+        self._save_btn = QPushButton("저장")
+        self._save_btn.clicked.connect(self._save)
+        close_btn = QPushButton("닫기")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self._save_btn, 3)
+        btn_row.addWidget(close_btn, 1)
+        layout.addLayout(btn_row)
+
+        self.load_settings(settings)
+
+    def load_settings(self, settings: dict):
+        """설정을 UI에 반영 (언더바→공백으로 표시)"""
+        self._weight_edit.setText(str(settings.get("weight", 0.0)))
+        # mode
+        mode = settings.get("mode", "stable")
+        idx = self._mode_combo.findData(mode)
+        self._mode_combo.setCurrentIndex(max(0, idx))
+        # hidden tags
+        hidden_tags = settings.get("hidden_tags", [])
+        display_tags = [tag.replace("_", " ") for tag in hidden_tags]
+        self._hidden_edit.setPlainText(", ".join(display_tags) if display_tags else "")
+
+    def _save(self):
+        """저장 버튼 클릭 시 — 1초간 피드백"""
+        self.settings_changed.emit(self._collect())
+        self._save_btn.setText("저장됨!")
+        self._save_btn.setEnabled(False)
+        QTimer.singleShot(1000, lambda: (
+            self._save_btn.setText("저장"),
+            self._save_btn.setEnabled(True),
+        ))
+
+    def _collect(self) -> dict:
+        try:
+            weight = float(self._weight_edit.text().strip())
+            weight = max(-5.0, min(5.0, weight))
+        except ValueError:
+            weight = 0.0
+        # 쉼표/개행 split + strip, 공백→언더스코어, 빈 문자열 제거
+        import re
+        raw = self._hidden_edit.toPlainText()
+        hidden_tags = []
+        for tag in re.split(r'[,\n]+', raw):
+            tag = tag.strip().replace(" ", "_")
+            if tag and tag not in hidden_tags:
+                hidden_tags.append(tag)
+        mode = self._mode_combo.currentData() or "stable"
+        return {"weight": weight, "hidden_tags": hidden_tags, "mode": mode}
+
+    def closeEvent(self, event):
+        """닫을 때 자동 저장"""
+        self.settings_changed.emit(self._collect())
+        super().closeEvent(event)
+
+
+class _DanbooruWeightSettingsWindow(QWidget):
+    """Danbooru Auto-Weight 사용자 설정 윈도우 (비모달, 실시간 미리보기)"""
+    settings_changed = pyqtSignal(dict)
+
+    # 레이팅별 샘플 프롬프트 (다양한 빈도 대역 포함)
+    _SAMPLE_CASES = {
+        "e": ("Explicit", [
+            "breasts", "blush", "open mouth", "navel", "nipples",
+            "nude", "sweat", "spread legs", "sex", "cowgirl position",
+            "girl on top", "bed", "pillow", "on back", "tongue out",
+            "saliva", "cum", "fellatio", "onsen", "steam",
+        ]),
+        "s": ("Sensitive", [
+            "long hair", "blue eyes", "smile", "looking at viewer",
+            "school uniform", "thighhighs", "hair ornament", "ponytail",
+            "heterochromia", "pleated skirt", "wind", "cherry blossoms",
+            "umbrella", "lantern", "rooftop", "starry sky",
+        ]),
+        "q": ("Questionable", [
+            "breasts", "cleavage", "navel", "thighs", "midriff",
+            "swimsuit", "bikini", "wet", "ass", "sideboob",
+            "underboob", "side-tie bikini bottom", "see-through",
+            "cameltoe", "garter straps", "maid",
+        ]),
+        "g": ("General", [
+            "sky", "cloud", "smile", "sitting", "standing",
+            "tree", "flower", "grass", "no humans", "scenery",
+            "building", "sunset", "rain", "snow", "mountain",
+            "river", "lamp", "ruins",
+        ]),
+    }
+
+    def __init__(self, settings: dict, parent=None, module=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Danbooru Auto-Weight 설정")
+        self.resize(960, 750)
+        self._module = module  # PromptEngineeringModule 참조 (데이터 공유용)
+        self._tag_data = None  # fallback lazy
+        self._global_idfs = None
+        self._rating_totals = None
+
+        fs = get_scaled_font_size
+        ss = get_scaled_size
+
+        tab_style = f"""
+            QTabWidget::pane {{
+                border: 1px solid {DARK_COLORS['border']};
+                background-color: {DARK_COLORS['bg_secondary']};
+            }}
+            QTabBar::tab {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                padding: 5px 14px;
+                font-size: {fs(19)}px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+                border-bottom: 2px solid #B2DFDB;
+            }}
+        """
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+                font-size: {fs(19)}px;
+            }}
+            QLabel {{
+                color: {DARK_COLORS['text_primary']};
+                font-size: {fs(19)}px;
+            }}
+            QLineEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 5px;
+                font-size: {fs(20)}px;
+            }}
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 6px 14px;
+                font-size: {fs(19)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+            {tab_style}
+        """)
+
+        hint_style = f"color: #FFFACD; font-size: {fs(18)}px; margin-bottom: 2px;"
+        mag_table = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE
+
+        # ── 메인 레이아웃: 좌측 설정 | 우측 미리보기 ──
+        root = QHBoxLayout(self)
+        root.setSpacing(ss(14))
+
+        # ━━━ 좌측: 설정 패널 ━━━
+        left = QVBoxLayout()
+        left.setSpacing(ss(8))
+
+        left.addWidget(QLabel("가중치 강도"))
+
+        # < [2단계 - 보통] > 컨트롤
+        mag_row = QHBoxLayout()
+        mag_row.setSpacing(ss(6))
+        step_btn_style = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: #B2DFDB;
+                border: 1px solid #B2DFDB;
+                border-radius: 4px;
+                font-size: {fs(24)}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """
+        self._mag_down = QPushButton("\u25C0")
+        self._mag_down.setFixedSize(ss(44), ss(44))
+        self._mag_down.setStyleSheet(step_btn_style)
+        self._mag_down.clicked.connect(lambda: self._step_magnitude(-1))
+        mag_row.addWidget(self._mag_down)
+
+        self._mag_label = QLabel("")
+        self._mag_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mag_label.setStyleSheet(f"""
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 4px;
+            padding: 8px;
+            font-size: {fs(22)}px;
+            font-weight: bold;
+        """)
+        mag_row.addWidget(self._mag_label, 1)
+
+        self._mag_up = QPushButton("\u25B6")
+        self._mag_up.setFixedSize(ss(44), ss(44))
+        self._mag_up.setStyleSheet(step_btn_style)
+        self._mag_up.clicked.connect(lambda: self._step_magnitude(1))
+        mag_row.addWidget(self._mag_up)
+        left.addLayout(mag_row)
+
+        # 현재 레벨 설명
+        self._mag_desc = QLabel("")
+        self._mag_desc.setStyleSheet(hint_style)
+        self._mag_desc.setWordWrap(True)
+        self._mag_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left.addWidget(self._mag_desc)
+
+        left.addSpacing(ss(8))
+
+        # ── 커스텀 오버라이드 (통합 체크박스 1개) ──
+        sep2 = QWidget()
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
+        left.addWidget(sep2)
+        left.addSpacing(ss(4))
+
+        self._override_cb = QCheckBox("커스텀 오버라이드")
+        self._override_cb.setStyleSheet(f"font-size: {fs(17)}px; color: {DARK_COLORS['text_secondary']};")
+        left.addWidget(self._override_cb)
+
+        # 오버라이드 컨테이너 (체크 시 활성화)
+        self._override_container = QWidget()
+        ov_layout = QVBoxLayout(self._override_container)
+        ov_layout.setContentsMargins(ss(8), ss(4), 0, 0)
+        ov_layout.setSpacing(ss(4))
+
+        override_edit_style = f"""
+            QLineEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 3px;
+                padding: 3px;
+                font-size: {fs(17)}px;
+            }}
+        """
+
+        def _make_param_row(parent_layout, label_text, placeholder, lo, hi, step, hint_text):
+            """라벨 + < edit > + hint"""
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(f"font-size: {fs(16)}px; color: {DARK_COLORS['text_secondary']};")
+            parent_layout.addWidget(lbl)
+            row = QHBoxLayout()
+            row.setSpacing(ss(4))
+            btn_l = QPushButton("<")
+            btn_l.setFixedSize(ss(28), ss(24))
+            btn_l.setStyleSheet(step_btn_style)
+            edit = QLineEdit()
+            edit.setPlaceholderText(placeholder)
+            edit.setProperty("autocomplete_ignore", True)
+            edit.setStyleSheet(override_edit_style)
+            vld = QDoubleValidator(lo, hi, 2, self)
+            vld.setNotation(QDoubleValidator.Notation.StandardNotation)
+            edit.setValidator(vld)
+            btn_r = QPushButton(">")
+            btn_r.setFixedSize(ss(28), ss(24))
+            btn_r.setStyleSheet(step_btn_style)
+            def _step(delta):
+                try:
+                    val = float(edit.text().strip())
+                except ValueError:
+                    val = float(placeholder)
+                edit.setText(str(round(max(lo, min(hi, val + delta)), 2)))
+            btn_l.clicked.connect(lambda: _step(-step))
+            btn_r.clicked.connect(lambda: _step(step))
+            row.addWidget(btn_l)
+            row.addWidget(edit, 1)
+            row.addWidget(btn_r)
+            parent_layout.addLayout(row)
+            hint_lbl = QLabel(hint_text)
+            hint_lbl.setStyleSheet(f"color: #FFFACD; font-size: {fs(15)}px;")
+            hint_lbl.setWordWrap(True)
+            parent_layout.addWidget(hint_lbl)
+            edit.textChanged.connect(lambda _: self._update_preview())
+            return edit
+
+        self._override_scale_edit = _make_param_row(
+            ov_layout, "스케일", "0.35", 0.0, 5.0, 0.05,
+            "weight = 1.0 ± scale. 실제 범위를 결정하는 핵심 값")
+        self._override_min_edit = _make_param_row(
+            ov_layout, "하한", "0.80", 0.0, 5.0, 0.05,
+            "흔한 태그의 최저 가중치 (권장: 0.4 ~ 1.0)")
+        self._override_max_edit = _make_param_row(
+            ov_layout, "상한", "1.35", 0.0, 10.0, 0.05,
+            "희귀 태그의 최고 가중치 (권장: 1.0 ~ 2.0)")
+
+        ov_layout.addSpacing(ss(4))
+
+        # Rating 블렌드
+        blend_lbl = QLabel("Rating 블렌드")
+        blend_lbl.setStyleSheet(f"font-size: {fs(16)}px; color: {DARK_COLORS['text_secondary']};")
+        ov_layout.addWidget(blend_lbl)
+        blend_row = QHBoxLayout()
+        blend_row.setSpacing(ss(4))
+        self._blend_down = QPushButton("<")
+        self._blend_down.setFixedSize(ss(28), ss(24))
+        self._blend_down.setStyleSheet(step_btn_style)
+        self._blend_down.clicked.connect(lambda: self._step_blend(-0.1))
+        self._blend_label = QLabel("")
+        self._blend_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._blend_label.setStyleSheet(f"""
+            background-color: {DARK_COLORS['bg_secondary']};
+            border: 1px solid {DARK_COLORS['border']};
+            border-radius: 3px; padding: 3px; font-size: {fs(17)}px;
+        """)
+        self._blend_up = QPushButton(">")
+        self._blend_up.setFixedSize(ss(28), ss(24))
+        self._blend_up.setStyleSheet(step_btn_style)
+        self._blend_up.clicked.connect(lambda: self._step_blend(0.1))
+        blend_row.addWidget(self._blend_down)
+        blend_row.addWidget(self._blend_label, 1)
+        blend_row.addWidget(self._blend_up)
+        ov_layout.addLayout(blend_row)
+        blend_hint = QLabel("0.0 = 전역만, 0.3 = 기본, 0.5+ = rating 강하게 반영")
+        blend_hint.setStyleSheet(f"color: #FFFACD; font-size: {fs(15)}px;")
+        blend_hint.setWordWrap(True)
+        ov_layout.addWidget(blend_hint)
+
+        left.addWidget(self._override_container)
+
+        # ── Rating 오버라이드 ──
+        left.addSpacing(ss(4))
+        sep_rating = QWidget()
+        sep_rating.setFixedHeight(1)
+        sep_rating.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
+        left.addWidget(sep_rating)
+        left.addSpacing(ss(4))
+
+        self._rating_override_cb = QCheckBox("Rating 오버라이드")
+        self._rating_override_cb.setStyleSheet(f"font-size: {fs(17)}px; color: {DARK_COLORS['text_secondary']};")
+        left.addWidget(self._rating_override_cb)
+
+        rating_hint = QLabel("IDF 보정에 사용할 rating을 강제 지정합니다.\n자동 판별(parquet/추론) 대신 선택한 rating 기준으로 가중치를 계산합니다.")
+        rating_hint.setStyleSheet(f"color: #FFFACD; font-size: {fs(15)}px;")
+        rating_hint.setWordWrap(True)
+        left.addWidget(rating_hint)
+
+        self._rating_override_container = QWidget()
+        ro_layout = QHBoxLayout(self._rating_override_container)
+        ro_layout.setContentsMargins(ss(8), ss(4), 0, 0)
+        ro_layout.setSpacing(ss(6))
+
+        self._rating_override_btns = {}
+        _rating_labels = [("g", "General"), ("s", "Sensitive"), ("q", "Questionable"), ("e", "Explicit")]
+        rating_btn_style_off = f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-size: {fs(16)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['bg_hover']};
+            }}
+        """
+        rating_btn_style_on = f"""
+            QPushButton {{
+                background-color: #2E7D32;
+                color: #FFFFFF;
+                border: 1px solid #4CAF50;
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-size: {fs(16)}px;
+                font-weight: bold;
+            }}
+        """
+        self._rating_btn_style_off = rating_btn_style_off
+        self._rating_btn_style_on = rating_btn_style_on
+
+        for code, label in _rating_labels:
+            btn = QPushButton(f"{label[0]}  ({code})")
+            btn.setCheckable(True)
+            btn.setStyleSheet(rating_btn_style_off)
+            btn.clicked.connect(lambda checked, c=code: self._on_rating_override_clicked(c))
+            ro_layout.addWidget(btn, 1)
+            self._rating_override_btns[code] = btn
+
+        left.addWidget(self._rating_override_container)
+        self._rating_override_container.setEnabled(False)
+        self._rating_override_cb.toggled.connect(self._rating_override_container.setEnabled)
+        self._rating_override_cb.toggled.connect(lambda _: self._update_preview())
+        self._selected_rating_override = 's'  # 기본 선택
+        self._rating_override_btns['s'].setChecked(True)
+        self._rating_override_btns['s'].setStyleSheet(rating_btn_style_on)
+
+        # 체크 OFF: 컨테이너 비활성, 체크 ON: 활성
+        self._override_container.setEnabled(False)
+        self._override_cb.toggled.connect(self._override_container.setEnabled)
+        self._override_cb.toggled.connect(lambda _: self._update_preview())
+
+        # 오버라이드 내 아무 슬라이더 조작 시 자동 체크 ON
+        for edit in [self._override_scale_edit, self._override_min_edit, self._override_max_edit]:
+            _orig = edit.focusInEvent
+            def _on_focus(event, _orig=_orig):
+                self._override_cb.setChecked(True)
+                _orig(event)
+            edit.focusInEvent = _on_focus
+
+        left.addStretch()
+
+        # 저장/닫기
+        btn_row = QHBoxLayout()
+        self._save_btn = QPushButton("저장")
+        self._save_btn.clicked.connect(self._save)
+        close_btn = QPushButton("닫기")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self._save_btn, 3)
+        btn_row.addWidget(close_btn, 1)
+        left.addLayout(btn_row)
+
+        root.addLayout(left, 2)
+
+        # ━━━ 구분선 ━━━
+        sep = QWidget()
+        sep.setFixedWidth(1)
+        sep.setStyleSheet(f"background-color: {DARK_COLORS['border']};")
+        root.addWidget(sep)
+
+        # ━━━ 우측: 탭 미리보기 패널 ━━━
+        right = QVBoxLayout()
+        right.setSpacing(ss(4))
+
+        self._tab_widget = QTabWidget()
+        self._preview_tabs = {}
+        preview_font_style = f"""
+            QTextEdit {{
+                background-color: {DARK_COLORS['bg_secondary']};
+                color: {DARK_COLORS['text_primary']};
+                border: none;
+                padding: 8px;
+                font-family: 'Consolas', 'D2Coding', monospace;
+                font-size: {fs(19)}px;
+                line-height: 1.4;
+            }}
+        """
+        for rating in ["e", "s", "q", "g"]:
+            label, _ = self._SAMPLE_CASES[rating]
+            te = QTextEdit()
+            te.setReadOnly(True)
+            te.setProperty("autocomplete_ignore", True)
+            te.setStyleSheet(preview_font_style)
+            self._preview_tabs[rating] = te
+            self._tab_widget.addTab(te, f"{label} ({rating})")
+        right.addWidget(self._tab_widget)
+
+        # 가중치 반전 체크박스
+        self._invert_cb = QCheckBox("가중치 반전 (고빈도 태그 강화, 저빈도 태그 약화)")
+        self._invert_cb.setStyleSheet(f"font-size: {fs(15)}px; color: {DARK_COLORS['text_secondary']}; spacing: {ss(6)}px;")
+        self._invert_cb.setChecked(settings.get("invert_weight", False))
+        self._invert_cb.toggled.connect(lambda _: self._update_preview())
+        right.addWidget(self._invert_cb)
+
+        root.addLayout(right, 4)
+
+        # 초기값 설정
+        self._magnitude = settings.get("magnitude", 3)
+        self._blend = settings.get("rating_blend", 0.3)
+        self._sync_override_edits()
+        # 저장된 오버라이드 복원
+        if settings.get("override_on"):
+            self._override_scale_edit.setText(str(settings.get("override_scale", 0.35)))
+            self._override_min_edit.setText(str(settings.get("override_min", 0.80)))
+            self._override_max_edit.setText(str(settings.get("override_max", 1.35)))
+            self._override_cb.setChecked(True)
+        # Rating 오버라이드 복원 (시그널 차단)
+        if settings.get("rating_override_on"):
+            self._rating_override_cb.blockSignals(True)
+            self._rating_override_cb.setChecked(True)
+            self._rating_override_cb.blockSignals(False)
+            self._rating_override_container.setEnabled(True)
+            override_rating = settings.get("rating_override", 's')
+            if override_rating in self._rating_override_btns:
+                self._set_rating_override_selection(override_rating)
+        self._update_mag_display()
+        self._update_blend_display()
+        self._update_preview()
+
+    def _ensure_tag_data(self):
+        """미리보기용 태그 데이터 — 모듈 캐시 공유, 없으면 자체 로드"""
+        if self._tag_data is not None:
+            return
+        # 모듈이 이미 로드한 데이터가 있으면 공유
+        if self._module and self._module._danbooru_tag_counts is not None:
+            self._tag_data = self._module._danbooru_tag_counts
+            self._global_idfs = self._module._danbooru_global_idfs
+            self._rating_totals = self._module._danbooru_rating_totals
+            return
+        # 모듈 데이터 없으면 자체 로드 (설정 윈도우 단독 오픈 시)
+        import math
+        path = Path(__file__).resolve().parent.parent / "data" / "danbooru_tag_counts_by_rating.json"
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            meta = data.pop("_meta")
+            self._rating_totals = meta["total_posts"]
+            self._tag_data = data
+            global_total = sum(self._rating_totals)
+            self._global_idfs = {}
+            for tag, counts in data.items():
+                gc = sum(counts)
+                if gc > 0:
+                    self._global_idfs[tag] = -math.log2(gc / global_total)
+        except Exception:
+            self._tag_data = {}
+            self._global_idfs = {}
+            self._rating_totals = [1, 1, 1, 1]
+
+    def _set_rating_override_selection(self, code: str):
+        """버튼 시각 상태만 갱신 — preview 호출 없음 (초기화/load용)"""
+        self._selected_rating_override = code
+        for c, btn in self._rating_override_btns.items():
+            if c == code:
+                btn.setChecked(True)
+                btn.setStyleSheet(self._rating_btn_style_on)
+            else:
+                btn.setChecked(False)
+                btn.setStyleSheet(self._rating_btn_style_off)
+
+    def _on_rating_override_clicked(self, code: str):
+        """Rating 오버라이드 버튼 클릭 — 라디오 동작 (하나만 선택)"""
+        if code not in self._rating_override_btns:
+            return
+        self._set_rating_override_selection(code)
+        self._update_preview()
+
+    def _step_magnitude(self, delta):
+        """magnitude 증감 — 오버라이드 해제 + edit을 프리셋 값으로 동기화"""
+        self._magnitude = max(1, min(10, self._magnitude + delta))
+        self._override_cb.setChecked(False)
+        self._sync_override_edits()
+        self._update_mag_display()
+        self._update_preview()
+
+    def _sync_override_edits(self):
+        """오버라이드 edit을 현재 magnitude 프리셋 값으로 동기화"""
+        params = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE.get(self._magnitude, {})
+        self._override_scale_edit.setText(str(params.get("scale", 0.35)))
+        self._override_min_edit.setText(str(params.get("min_weight", 0.80)))
+        self._override_max_edit.setText(str(params.get("max_weight", 1.35)))
+
+    def _step_blend(self, delta):
+        """rating blend 증감"""
+        self._blend = round(max(0.0, min(1.0, self._blend + delta)), 1)
+        self._update_blend_display()
+        self._update_preview()
+
+    def _update_blend_display(self):
+        """blend 라벨 갱신"""
+        self._blend_label.setText(f"\u03B1 = {self._blend:.1f}")
+        self._blend_down.setEnabled(self._blend > 0.0)
+        self._blend_up.setEnabled(self._blend < 1.0)
+
+    def _update_mag_display(self):
+        """magnitude 라벨/설명 갱신"""
+        mag = self._magnitude
+        params = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE.get(mag, {})
+        label = params.get("label", "?")
+        min_w = params.get("min_weight", 0)
+        max_w = params.get("max_weight", 0)
+        self._mag_label.setText(f"{mag}단계 — {label}")
+        self._mag_desc.setText(f"흔한 태그 {min_w} ~ 희귀 태그 {max_w}")
+        # 경계에서 버튼 비활성
+        self._mag_down.setEnabled(mag > 1)
+        self._mag_up.setEnabled(mag < 10)
+
+    def _calc_weight(self, tag, rating, scale, min_w, max_w, invert=False):
+        """단일 태그의 가중치 계산 — PromptEngineeringModule과 동일 공식"""
+        import math
+        if not self._global_idfs or tag not in self._global_idfs:
+            return None
+        g_idf = self._global_idfs[tag]
+        ri = PromptEngineeringModule._RATING_INDEX[rating]
+        r_total = max(self._rating_totals[ri], 1)
+        r_count = self._tag_data[tag][ri]
+        alpha = self._blend
+        n_low = PromptEngineeringModule._danbooru_norm_low_default
+        n_high = PromptEngineeringModule._danbooru_norm_high_default
+        if r_count > 0:
+            r_idf = -math.log2(r_count / r_total)
+            blended = g_idf + alpha * (r_idf - g_idf)
+        else:
+            blended = g_idf
+        norm = max(0.0, min(1.0, (blended - n_low) / (n_high - n_low)))
+        if invert:
+            norm = 1.0 - norm
+        weight = 1.0 + scale * (2 * norm - 1)
+        return max(min_w, min(max_w, weight))
+
+    def _update_preview(self):
+        """현재 설정으로 각 탭의 샘플 미리보기 갱신"""
+        self._ensure_tag_data()
+        params = PromptEngineeringModule._DANBOORU_MAGNITUDE_TABLE.get(self._magnitude, {})
+        scale = params.get("scale", 0.35)
+        min_w = params.get("min_weight", 0.8)
+        max_w = params.get("max_weight", 1.3)
+        # 오버라이드 적용
+        if self._override_cb.isChecked():
+            def _pf(edit, default):
+                try: return float(edit.text().strip())
+                except ValueError: return default
+            scale = _pf(self._override_scale_edit, scale)
+            min_w = _pf(self._override_min_edit, min_w)
+            max_w = _pf(self._override_max_edit, max_w)
+
+        # Rating 오버라이드: 모든 탭의 IDF 보정을 지정 rating 기준으로 계산
+        _rating_override_on = self._rating_override_cb.isChecked()
+        _rating_override = self._selected_rating_override
+        _invert = self._invert_cb.isChecked()
+
+        for tab_idx, (rating, te) in enumerate(self._preview_tabs.items()):
+            tab_label, tags = self._SAMPLE_CASES[rating]
+            calc_rating = _rating_override if _rating_override_on else rating
+            # 탭 제목에 오버라이드 표시
+            if _rating_override_on and calc_rating != rating:
+                override_label = self._SAMPLE_CASES[calc_rating][0]
+                self._tab_widget.setTabText(tab_idx, f"{tab_label} ({rating}) \u2190 {override_label}")
+            else:
+                self._tab_widget.setTabText(tab_idx, f"{tab_label} ({rating})")
+            results = []
+            for tag in tags:
+                w = self._calc_weight(tag, calc_rating, scale, min_w, max_w, invert=_invert)
+                if w is not None:
+                    results.append((tag, w))
+            results.sort(key=lambda x: x[1])
+
+            lines = []
+            max_bar = 12  # 최대 바 길이 (문자 수)
+            if results:
+                w_lo = min(w for _, w in results)
+                w_hi = max(w for _, w in results)
+                w_range = w_hi - w_lo if w_hi > w_lo else 1.0
+                for tag, w in results:
+                    bar_len = int((w - w_lo) / w_range * max_bar)
+                    bar = "\u2588" * bar_len
+                    lines.append(f"  {tag:25s} {w:.2f} {bar}")
+                lines.append("")
+                spread_line = f"  spread: {w_hi - w_lo:.2f}"
+                if _rating_override_on and calc_rating != rating:
+                    spread_line += f"  (IDF: {calc_rating} 기준)"
+                lines.append(spread_line)
+            te.setPlainText("\n".join(lines))
+
+    def _current_settings(self) -> dict:
+        s = {"magnitude": self._magnitude, "rating_blend": self._blend}
+        override_on = self._override_cb.isChecked()
+        s["override_on"] = override_on
+        if override_on:
+            def _pf(edit, default):
+                try: return float(edit.text().strip())
+                except ValueError: return default
+            s["override_scale"] = _pf(self._override_scale_edit, 0.35)
+            s["override_min"] = _pf(self._override_min_edit, 0.80)
+            s["override_max"] = _pf(self._override_max_edit, 1.35)
+        # Rating 오버라이드
+        s["rating_override_on"] = self._rating_override_cb.isChecked()
+        s["rating_override"] = self._selected_rating_override
+        # 가중치 반전
+        s["invert_weight"] = self._invert_cb.isChecked()
+        return s
+
+    def load_settings(self, settings: dict):
+        self._magnitude = settings.get("magnitude", 3)
+        self._blend = settings.get("rating_blend", 0.3)
+        # Rating 오버라이드 복원 (시그널 차단하여 중복 preview 방지)
+        self._rating_override_cb.blockSignals(True)
+        if settings.get("rating_override_on"):
+            self._rating_override_cb.setChecked(True)
+            override_rating = settings.get("rating_override", 's')
+            if override_rating in self._rating_override_btns:
+                self._set_rating_override_selection(override_rating)
+            else:
+                self._set_rating_override_selection('s')
+        else:
+            self._rating_override_cb.setChecked(False)
+        self._rating_override_cb.blockSignals(False)
+        self._rating_override_container.setEnabled(self._rating_override_cb.isChecked())
+        # 가중치 반전 복원
+        self._invert_cb.setChecked(settings.get("invert_weight", False))
+        self._update_mag_display()
+        self._update_blend_display()
+        self._update_preview()
+
+    def _save(self):
+        self.settings_changed.emit(self._current_settings())
+        self._save_btn.setText("저장됨!")
+        self._save_btn.setEnabled(False)
+        QTimer.singleShot(1000, lambda: (
+            self._save_btn.setText("저장"),
+            self._save_btn.setEnabled(True),
+        ))
+
+    def closeEvent(self, event):
+        self.settings_changed.emit(self._current_settings())
+        super().closeEvent(event)

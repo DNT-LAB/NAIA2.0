@@ -13,6 +13,64 @@ from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List
 import re
 
+# NAI: '1.05::tag ::' → 'tag'
+_WEIGHT_NAI_RE = re.compile(r'^([\d.]+)::(.+?)\s*::$')
+# WEBUI: '(tag:1.05)' or '(tag (example):0.70)' → 'tag' or 'tag (example)'
+# 마지막 ':숫자)' 패턴으로 분리 (태그 자체에 괄호 포함 가능)
+_WEIGHT_WEBUI_RE = re.compile(r'^\((.+):([\d.]+)\)$')
+
+
+def _is_pattern(tag: str) -> bool:
+    """auto_hide 스타일 패턴(__tag, tag__, __tag__)인지 판별."""
+    return tag.startswith("__") or tag.endswith("__")
+
+
+def _match_pattern_tag(pattern: str, raw_tag: str) -> bool:
+    """auto_hide 스타일 패턴 매칭. 패턴이 아니면 False 반환."""
+    if pattern.startswith("__") and pattern.endswith("__"):
+        # __tag__: 언더스코어 전부 제거 → 순수 서브스트링
+        keyword = pattern.strip("_")
+    elif pattern.startswith("__"):
+        # __tag: 선행 __ 제거 → 서브스트링
+        keyword = pattern.lstrip("_")
+    elif pattern.endswith("__"):
+        # tag__: 후행 __ 제거 → 서브스트링
+        keyword = pattern.rstrip("_")
+    else:
+        return False
+    return bool(keyword) and keyword in raw_tag
+
+
+def _strip_weight_format(tag: str) -> str:
+    """가중치 포맷에서 raw 태그명 추출. 세 가지 형식 지원:
+    - NAI:   '1.05::tag ::' → 'tag'
+    - WEBUI: '(tag:1.05)' → 'tag'
+    - WEBUI (괄호 포함 태그): '(tag (example):0.7)' → 'tag (example)'
+    - raw:   'tag' → 'tag'
+    """
+    tag = tag.strip()
+    m = _WEIGHT_NAI_RE.match(tag)
+    if m:
+        return m.group(2).strip()
+    m = _WEIGHT_WEBUI_RE.match(tag)
+    if m:
+        return m.group(1).strip()
+    return tag
+
+
+def _replace_tag_in_weight_format(weighted_tag: str, new_raw_tag: str) -> str:
+    """가중치 포맷을 유지하면서 태그명만 교체.
+    raw 태그(가중치 없음)이면 new_raw_tag 그대로 반환."""
+    weighted_tag = weighted_tag.strip()
+    m = _WEIGHT_NAI_RE.match(weighted_tag)
+    if m:
+        return f"{m.group(1)}::{new_raw_tag} ::"
+    m = _WEIGHT_WEBUI_RE.match(weighted_tag)
+    if m:
+        return f"({new_raw_tag}:{m.group(2)})"
+    return new_raw_tag
+
+
 class CommentHighlighter(QSyntaxHighlighter):
     """# 으로 시작해서 첫 번째 쉼표까지 회색 처리하는 구문 하이라이터"""
 
@@ -152,12 +210,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             "(full body):\"full body=upper body\",\n"
             "(sweat):sweat=sweat^sweatdrop^steam,\n"
             "(*1girl&s):main+=smiling,\n"
+            "(e):__shirts=,\n"
             "# 이 줄은 주석으로 무시됩니다\n\n"
             "구문 형식: (조건):실행문\n"
             "• 조건: tag (포함), ~tag (불포함), *tag (정확 일치), ~!tag (정확 불일치)\n"
             "• 등급: e, q, s, g (일치), ~e, ~q, ~s, ~g (불일치)\n"
             "• 논리 연산자: & (AND), | (OR)\n"
             "• 실행문: = (대체), += (리스트 추가), +: (추가)\n"
+            "• 패턴 대체: __tag=, (포함 삭제), tag__=, __tag__=, (Auto Hide 동일 문법)\n"
             "• 복수 태그: ^ 구분자 또는 \"쉼표, 구분\" (자동 리스트화)\n"
             "• 따옴표: 선택사항 (쉼표 포함 시 필수)\n"
             "• 주석: # 으로 시작하는 줄은 무시"
@@ -184,10 +244,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             "• 등급: e, q, s, g (일치), ~e, ~q, ~s, ~g (불일치)\n"
             "• 논리 연산자: & (AND), | (OR)\n"
             "• 실행문: = (대체), += (리스트 추가), +: (추가)\n"
+            "• 패턴 대체: __tag=, (포함 삭제), tag__=, __tag__=, (Auto Hide 동일)\n"
             "• 복수 태그: ^ 구분자 (예: nsfw^rating:explicit) 또는 \"쉼표, 구분\"\n"
             "• 따옴표: 선택사항 (쉼표 포함된 복수 태그 시에만 필수)\n"
             "• 주석: # 으로 시작하는 줄은 무시됩니다\n"
-            "• 예시: (e):prefix+=nsfw^rating:explicit → 등급 e면 두 태그를 prefix에 추가"
+            "• 예시: (e):__shirts=, → 등급 e면 shirts 포함 태그 전부 삭제"
         )
         help_text.setStyleSheet(label_style + f"font-size: {get_scaled_font_size(16)}px; color: #B0B0B0;")
         help_text.setWordWrap(True)
@@ -437,8 +498,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             elif char == ')':
                 paren_count -= 1
             
-            # 따옴표 처리
-            if char in ['"', "'"] and (i == 0 or rules_text[i-1] != '\\'):
+            # 따옴표 처리 (큰따옴표만 인용 구분자로 사용 - 작은따옴표는 태그 내 아포스트로피로 허용)
+            if char == '"' and (i == 0 or rules_text[i-1] != '\\'):
                 if not in_quotes:
                     in_quotes = True
                     quote_char = char
@@ -539,11 +600,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 # new_tag_part를 태그 리스트로 변환
                 new_tag_list = self._parse_tag_list(new_tag_part)
                 
+                desc = (f'Pattern "{old_tag}" — matched tags replaced with {new_tag_list}.'
+                        if _is_pattern(old_tag)
+                        else f'"{old_tag}" replaced with {new_tag_list}.')
                 return {
                     'type': 'replace',
                     'old_tag': old_tag,
                     'new_tag_list': new_tag_list,
-                    'description': f'"{old_tag}" replaced with {new_tag_list}.'
+                    'description': desc
                 }
         
         raise ValueError(f"Unknown action format: {action_text}")
@@ -728,17 +792,59 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                         return prefix_tags, main_tags, postfix_tags
                         
         elif action['type'] == 'replace':
-            # 대체 액션
+            # 대체 액션 — 가중치 포맷('1.05::tag ::' / '(tag:1.05)') 인식 매칭
             old_tag = action['old_tag']
             new_tag_list = action.get('new_tag_list', [action.get('new_tag', '')])
-            
-            # prefix -> main -> postfix 순서로 검색하여 첫 번째 일치 항목 대체
+
+            if _is_pattern(old_tag):
+                # 패턴 모드: __tag, tag__, __tag__ — 매칭되는 모든 태그를 일괄 처리
+                # 주의: __wildcard__ 확장 결과는 콤마 합쳐진 단일 문자열일 수 있음
+                #   예: "red hair, platform footwear, nun" (1개 요소)
+                #   이 경우 매칭 서브태그만 제거하고 나머지를 보존해야 함
+                for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
+                    for i in range(len(tag_list_ref) - 1, -1, -1):
+                        element = tag_list_ref[i]
+                        raw_element = _strip_weight_format(element)
+
+                        # 콤마 구분 복합 요소 처리 (__wildcard__ 전개 결과)
+                        if ',' in raw_element:
+                            sub_tags = [t.strip() for t in raw_element.split(',') if t.strip()]
+                            remaining = [t for t in sub_tags if not _match_pattern_tag(old_tag, t)]
+                            if len(remaining) < len(sub_tags):
+                                if remaining:
+                                    tag_list_ref[i] = ', '.join(remaining)
+                                else:
+                                    tag_list_ref.pop(i)
+                        elif _match_pattern_tag(old_tag, raw_element):
+                            if new_tag_list:
+                                # 치환: 가중치 포맷 승계 + 삽입
+                                weighted_new_list = list(new_tag_list)
+                                if weighted_new_list and raw_element != element.strip():
+                                    first_new = weighted_new_list[0].strip()
+                                    if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
+                                        weighted_new_list[0] = _replace_tag_in_weight_format(element, weighted_new_list[0])
+                                tag_list_ref.pop(i)
+                                for j, new_tag in enumerate(reversed(weighted_new_list)):
+                                    tag_list_ref.insert(i, new_tag)
+                            else:
+                                tag_list_ref.pop(i)
+                return prefix_tags, main_tags, postfix_tags
+
+            # 정확 일치 모드: prefix -> main -> postfix 순서로 첫 번째 일치 항목 대체
             for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
                 for i, tag in enumerate(tag_list_ref):
-                    if old_tag == tag:
+                    raw_tag = _strip_weight_format(tag)
+                    if old_tag == raw_tag:
+                        # 첫 번째 새 태그에 기존 가중치 포맷 유지
+                        # 단, 새 태그가 이미 가중치 포맷이면 사용자 의도 존중 — 승계하지 않음
+                        weighted_new_list = list(new_tag_list)
+                        if weighted_new_list and raw_tag != tag.strip():
+                            first_new = weighted_new_list[0].strip()
+                            if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
+                                weighted_new_list[0] = _replace_tag_in_weight_format(tag, weighted_new_list[0])
                         # 기존 태그를 제거하고 새 태그들을 그 자리에 삽입
                         tag_list_ref.pop(i)
-                        for j, new_tag in enumerate(reversed(new_tag_list)):
+                        for j, new_tag in enumerate(reversed(weighted_new_list)):
                             tag_list_ref.insert(i, new_tag)
                         return prefix_tags, main_tags, postfix_tags
         

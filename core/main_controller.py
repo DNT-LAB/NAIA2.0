@@ -203,6 +203,12 @@ class MainController:
             print("⚠️ generate_with_image_requested 시그널을 찾을 수 없습니다.")
         if hasattr(mw.image_window, 'send_to_inpaint_requested'):
             mw.image_window.send_to_inpaint_requested.connect(self.on_send_to_inpaint_requested)
+        if hasattr(mw.image_window, 'send_to_img2img_requested'):
+            mw.image_window.send_to_img2img_requested.connect(self.on_send_to_img2img_requested)
+        if hasattr(mw.image_window, 'instant_outpaint_requested'):
+            mw.image_window.instant_outpaint_requested.connect(self.on_instant_outpaint_requested)
+        if hasattr(mw.image_window, 'send_to_outpaint_requested'):
+            mw.image_window.send_to_outpaint_requested.connect(self.on_send_to_outpaint_requested)
 
         # 🆕 리모트 이벤트 저장 시그널 연결
         if hasattr(mw.image_window, 'save_to_remote_event_requested'):
@@ -458,6 +464,9 @@ class MainController:
         self.main_window.search_btn.setEnabled(True)
         self.main_window.search_btn.setText("검색")
         self.main_window.progress_label.setVisible(False)
+        self.main_window.search_mode_2411.setVisible(True)
+        self.main_window.search_mode_2509.setVisible(True)
+        self.main_window.search_mode_1109.setVisible(True)
         self.main_window.status_bar.showMessage(f"✅ 검색 완료! {total_count}개의 결과를 찾았습니다.", 5000)
 
         # [신규] 검색 결과 Parquet 파일로 저장
@@ -472,6 +481,9 @@ class MainController:
         self.main_window.search_btn.setEnabled(True)
         self.main_window.search_btn.setText("검색")
         self.main_window.progress_label.setVisible(False)
+        self.main_window.search_mode_2411.setVisible(True)
+        self.main_window.search_mode_2509.setVisible(True)
+        self.main_window.search_mode_1109.setVisible(True)
         self.main_window.status_bar.showMessage(f"❌ 검색 오류: {error_message}", 5000)
         
     # === 생성 관련 이벤트 핸들러 ===
@@ -706,9 +718,23 @@ class MainController:
             
     def on_send_to_inpaint_requested(self, history_item):
         """인페인트 전송 요청 처리"""
-        # 메인 윈도우에 위임
         if hasattr(self.main_window, 'on_send_to_inpaint_requested'):
             self.main_window.on_send_to_inpaint_requested(history_item)
+
+    def on_send_to_img2img_requested(self, history_item):
+        """img2img 전송 요청 처리"""
+        if hasattr(self.main_window, 'on_send_to_img2img_requested'):
+            self.main_window.on_send_to_img2img_requested(history_item)
+
+    def on_instant_outpaint_requested(self, history_item):
+        """즉시 아웃페인팅 요청 처리"""
+        if hasattr(self.main_window, 'on_instant_outpaint_requested'):
+            self.main_window.on_instant_outpaint_requested(history_item)
+
+    def on_send_to_outpaint_requested(self, history_item):
+        """아웃페인팅 전송 요청 처리"""
+        if hasattr(self.main_window, 'on_send_to_outpaint_requested'):
+            self.main_window.on_send_to_outpaint_requested(history_item)
 
     def on_save_to_remote_event_requested(self, history_item):
         """🆕 리모트 이벤트 저장 요청 처리"""

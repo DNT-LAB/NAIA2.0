@@ -304,6 +304,7 @@ class SettingsWidget(QWidget):
         self.filename_format_combo.addItem("시간_번호 (143052_00001.png)", "time_number")
         self.filename_format_combo.addItem("날짜_시간 (20250108_143052.png)", "datetime")
         self.filename_format_combo.addItem("프롬프트 (prompt.png)", "prompt")
+        self.filename_format_combo.addItem("와일드카드 (wildcard.png)", "wildcard")
         self.filename_format_combo.currentIndexChanged.connect(self._on_filename_format_changed)
 
         # 설명 레이블

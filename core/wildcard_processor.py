@@ -4,6 +4,39 @@ from typing import List
 from .prompt_context import PromptContext
 from .wildcard_manager import WildcardManager
 
+
+def split_tags_smart(text: str) -> list[str]:
+    """
+    콤마로 태그를 분리하되, <...> 블록 내부의 콤마는 보존합니다.
+
+    예시:
+        "a, <angry,shy|b|c>, d" -> ["a", "<angry,shy|b|c>", "d"]
+        "a, <lora:model:0.8>, b" -> ["a", "<lora:model:0.8>", "b"]
+        "a, b, c" -> ["a", "b", "c"]
+    """
+    if not text:
+        return []
+    result, current, depth = [], [], 0
+    for char in text:
+        if char == '<':
+            depth += 1
+            current.append(char)
+        elif char == '>':
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif char == ',' and depth == 0:
+            tag = ''.join(current).strip()
+            if tag:
+                result.append(tag)
+            current = []
+        else:
+            current.append(char)
+    tag = ''.join(current).strip()
+    if tag:
+        result.append(tag)
+    return result
+
+
 class WildcardProcessor:
     def __init__(self, wildcard_manager: WildcardManager):
         self.wildcard_manager = wildcard_manager
@@ -176,12 +209,22 @@ class WildcardProcessor:
 
         if tag.startswith('<') and tag.endswith('>'):
             wildcard_name = tag[1:-1]
-            
+
+            # Lora/모델 참조 태그 보호 (WEBUI/ComfyUI 모드)
+            _SKIP_PREFIXES = ('lora:', 'hypernet:', 'lyco:', 'embedding:')
+            if any(wildcard_name.lower().startswith(p) for p in _SKIP_PREFIXES):
+                return [tag]
+
             # 인라인 와일드카드 처리
             if '|' in wildcard_name:
                 options = wildcard_name.split('|')
                 chosen_option = random.choice(options).strip()
-                return self._expand_recursive(chosen_option, context, depth + 1)
+                # 선택된 옵션을 콤마로 분리하여 각 서브 태그를 개별 확장 (__name__ 등 지원)
+                sub_tags = [t.strip() for t in chosen_option.split(',') if t.strip()]
+                result = []
+                for sub_tag in sub_tags:
+                    result.extend(self._expand_recursive(sub_tag, context, depth + 1))
+                return result
 
             # 파일 기반 와일드카드 처리 - <태그명> 형태는 기존 로직 유지
             line = self._get_wildcard_line(wildcard_name, context)
@@ -255,21 +298,22 @@ class WildcardProcessor:
             print(f"경고: 와일드카드 '{wildcard_name}'을 찾을 수 없습니다.")
             return None
 
-        lines = self.wildcard_manager.wildcard_dict_tree.get(actual_wildcard_key)
-        if not lines:
+        # entries: [(weight, text), ...] 형식
+        entries = self.wildcard_manager.wildcard_dict_tree.get(actual_wildcard_key)
+        if not entries:
             print(f"경고: 와일드카드 '{actual_wildcard_key}'의 내용이 비어있습니다.")
             return None
 
         chosen_line = ""
-        total_lines = len(lines)
+        total_entries = len(entries)
 
         if is_sequential:
             # sequential_counters는 실제 키로 저장
             counter = context.sequential_counters.get(actual_wildcard_key, 0)
-            chosen_line = lines[counter % total_lines]
+            chosen_line = entries[counter % total_entries][1]  # text 부분
             context.sequential_counters[actual_wildcard_key] = counter + 1
             # [상태 관찰] 순차 와일드카드 상태 기록 (실제 키 사용)
-            context.wildcard_state[actual_wildcard_key] = {'current': counter % total_lines + 1, 'total': total_lines}
+            context.wildcard_state[actual_wildcard_key] = {'current': counter % total_entries + 1, 'total': total_entries}
 
         elif is_observer:
             # 🔧 [수정] Master/Slave 의존성 로직 개선 + Fuzzy Matching
@@ -279,27 +323,28 @@ class WildcardProcessor:
             if not actual_master_key:
                 print(f"경고: Master 와일드카드 '{master_name}'을 찾을 수 없습니다.")
                 # 기본값으로 첫 번째 항목 반환
-                chosen_line = lines[0]
+                chosen_line = entries[0][1]
                 slave_index = 0
                 completed_master_cycles = 0
             else:
                 master_counter = context.sequential_counters.get(actual_master_key, 0)
 
                 # Master 와일드카드의 길이를 가져와서 사이클 계산
-                master_lines = self.wildcard_manager.wildcard_dict_tree.get(actual_master_key, [])
-                master_total = len(master_lines) if master_lines else 1
+                master_entries = self.wildcard_manager.wildcard_dict_tree.get(actual_master_key, [])
+                master_total = len(master_entries) if master_entries else 1
 
                 # Master가 완전한 사이클을 몇 번 완료했는지 계산
-                completed_master_cycles = master_counter // master_total if master_counter > 0 else 0
+                # master_counter는 같은 프롬프트에서 이미 +1 된 post-increment 값이므로 -1 보정
+                completed_master_cycles = (master_counter - 1) // master_total if master_counter > 0 else 0
 
                 # Slave는 master의 완전한 사이클 완료 횟수에 따라 진행
-                slave_index = completed_master_cycles % total_lines
-                chosen_line = lines[slave_index]
+                slave_index = completed_master_cycles % total_entries
+                chosen_line = entries[slave_index][1]
 
             # [상태 관찰] 종속 와일드카드 상태 기록 (실제 키 사용)
             context.wildcard_state[actual_wildcard_key] = {
                 'current': slave_index + 1,
-                'total': total_lines,
+                'total': total_entries,
                 'master_cycles': completed_master_cycles,
                 'master_name': actual_master_key if actual_master_key else 'unknown'  # 실제 Master 키 기록
             }
@@ -310,8 +355,9 @@ class WildcardProcessor:
             # completed_slave_cycles = counter // total_lines로 계산
             context.sequential_counters[actual_wildcard_key] = completed_master_cycles
 
-        else: # 일반 무작위 모드
-            chosen_line = random.choice(lines)
+        else: # 일반 무작위 모드 — 가중치 기반 선택
+            weights = [w for w, _ in entries]
+            chosen_line = random.choices([t for _, t in entries], weights=weights, k=1)[0]
 
         context.wildcard_history.setdefault(actual_wildcard_key, []).append(chosen_line)
         return chosen_line

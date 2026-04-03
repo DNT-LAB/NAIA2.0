@@ -232,6 +232,32 @@ class ComfyUIParameterPanel(QFrame):
 
         grid.addLayout(self._create_slider_control("CFG Scale", self.cfg_spin, self.cfg_slider), 0, 1)
 
+        # --- (0,2) Rescale CFG (ANIMA 전용) ---
+        self.rescale_cfg_spin = self.disable_wheel_event(QDoubleSpinBox())
+        self.rescale_cfg_spin.setRange(0.0, 1.0)
+        self.rescale_cfg_spin.setSingleStep(0.01)
+        self.rescale_cfg_spin.setValue(0.70)
+        self.rescale_cfg_spin.setDecimals(2)
+
+        self.rescale_cfg_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rescale_cfg_slider.setRange(0, 100)
+        self.rescale_cfg_slider.setValue(70)
+
+        # 동기화
+        self.rescale_cfg_slider.valueChanged.connect(lambda v: self.rescale_cfg_spin.setValue(v / 100.0))
+        self.rescale_cfg_spin.valueChanged.connect(lambda v: self.rescale_cfg_slider.setValue(int(v * 100)))
+
+        self.rescale_cfg_layout = self._create_slider_control("Rescale CFG", self.rescale_cfg_spin, self.rescale_cfg_slider)
+        self.rescale_cfg_container = QWidget()
+        self.rescale_cfg_container.setLayout(self.rescale_cfg_layout)
+        grid.addWidget(self.rescale_cfg_container, 0, 2)
+
+        # 초기 숨김 (ANIMA 선택 시만 표시)
+        self.rescale_cfg_container.setVisible(False)
+
+        # 샘플링 모드 변경 시 Rescale CFG 가시성 제어
+        self.sampling_mode_group.buttonClicked.connect(self._on_sampling_mode_changed)
+
         # --- (1,0) Sampler ---
         sampler_layout = QVBoxLayout()
         sampler_lbl = QLabel("Sampler")
@@ -310,7 +336,7 @@ class ComfyUIParameterPanel(QFrame):
             sampling_mode = "eps"
             workflow_type = "checkpoint"
 
-        return {
+        result = {
             "model": self.model_combo.currentText(),
             "scheduler": self.schedule_combo.currentText(),
             "sampler": self.sampler_combo.currentText(),
@@ -319,6 +345,17 @@ class ComfyUIParameterPanel(QFrame):
             "sampling_mode": sampling_mode,
             "workflow_type": workflow_type
         }
+
+        # ANIMA 모드: Rescale CFG 값 추가
+        if workflow_type == "unet":
+            result["rescale_cfg"] = self.rescale_cfg_spin.value()
+
+        return result
+
+    def _on_sampling_mode_changed(self, button):
+        """샘플링 모드 변경 시 Rescale CFG 가시성 제어"""
+        is_anima = (button == self.anima_radio)
+        self.rescale_cfg_container.setVisible(is_anima)
 
     def set_params(self, params):
         """외부에서 파라미터 설정"""
@@ -357,3 +394,11 @@ class ComfyUIParameterPanel(QFrame):
                 self.anima_radio.setChecked(True)
             else:
                 self.eps_radio.setChecked(True)
+
+            # setChecked()는 buttonClicked 시그널을 발생시키지 않으므로 수동 가시성 업데이트
+            is_anima = (sampling_mode == "anima")
+            self.rescale_cfg_container.setVisible(is_anima)
+
+        # Rescale CFG 값 복원
+        if "rescale_cfg" in params:
+            self.rescale_cfg_spin.setValue(params["rescale_cfg"])

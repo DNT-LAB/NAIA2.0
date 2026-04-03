@@ -168,7 +168,7 @@ class NAIVibeTransferData:
 
     Attributes:
         reference_image_multiple: 인코딩된 이미지 리스트 (base64)
-        reference_strength_multiple: 이미지별 강도 리스트 (0.0 ~ 1.0)
+        reference_strength_multiple: 이미지별 강도 리스트 (-1.0 ~ 1.0)
         normalize: 강도 정규화 여부 (합이 1.0 초과 시 자동 정규화)
         reference_information_extracted_multiple: IE 값 리스트 (NAID3만)
 
@@ -202,8 +202,8 @@ class NAIVibeTransferData:
             )
 
         for strength in self.reference_strength_multiple:
-            if not (0.0 <= strength <= 1.0):
-                raise ValueError(f"Strength must be between 0.0 and 1.0, got {strength}")
+            if not (-1.0 <= strength <= 1.0):
+                raise ValueError(f"Strength must be between -1.0 and 1.0, got {strength}")
 
         if self.reference_information_extracted_multiple:
             if len(self.reference_information_extracted_multiple) != len(self.reference_image_multiple):

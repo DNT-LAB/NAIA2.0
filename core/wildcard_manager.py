@@ -1,7 +1,12 @@
 # core/wildcard_manager.py
 
 import os
+import re
 from pathlib import Path
+
+# 가중치 구문 패턴: "숫자:" 로 시작하되, "숫자::" (NAI 가중치)는 제외
+_WEIGHT_PATTERN = re.compile(r'^(\d+):(?!:)(.*)')
+_DEFAULT_WEIGHT = 100
 
 class WildcardManager:
     def __init__(self):
@@ -42,11 +47,23 @@ class WildcardManager:
                     
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            # 비어있지 않은 라인만 리스트에 추가
-                            lines = [line.strip() for line in f if line.strip()]
-                        
-                        if lines:
-                            self.wildcard_dict_tree[wildcard_name] = lines
+                            # 각 라인을 (weight, text) 튜플로 파싱
+                            entries = []
+                            for line in f:
+                                stripped = line.strip()
+                                if not stripped:
+                                    continue
+                                match = _WEIGHT_PATTERN.match(stripped)
+                                if match:
+                                    weight = int(match.group(1))
+                                    text = match.group(2).strip()
+                                    if text:  # 가중치 뒤 텍스트가 있는 경우만
+                                        entries.append((weight, text))
+                                else:
+                                    entries.append((_DEFAULT_WEIGHT, stripped))
+
+                        if entries:
+                            self.wildcard_dict_tree[wildcard_name] = entries
                         else:
                             try:
                                 print(f"⚠️ 와일드카드 파일이 비어있습니다: {file_path}")

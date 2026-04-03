@@ -1,50 +1,11 @@
 # CLAUDE.md — core/
 
-> **목적**: NAIA 2.0의 핵심 시스템 계층. AppContext, 컨트롤러, 파이프라인, API 브릿지 등 애플리케이션의 중추를 담당합니다.
+> NAIA 2.0의 핵심 시스템 계층. AppContext, 컨트롤러, 파이프라인, API 브릿지.
 
 ---
 
-## 목차
+## 디렉터리 구조 및 의존성
 
-1. [개요](#개요)
-2. [주요 파일 및 역할](#주요-파일-및-역할)
-3. [AppContext: 중앙 상태 관리자](#appcontext-중앙-상태-관리자)
-4. [컨트롤러 시스템](#컨트롤러-시스템)
-5. [프롬프트 파이프라인](#프롬프트-파이프라인)
-6. [API 서비스](#api-서비스)
-7. [데이터 매니저](#데이터-매니저)
-8. [실전 예제](#실전-예제)
-9. [개발 워크플로우](#개발-워크플로우)
-10. [문제 해결](#문제-해결)
-11. [체크리스트](#체크리스트)
-12. [참고 자료](#참고-자료)
-
----
-
-## 개요
-
-### core/ 디렉터리의 역할
-
-core/는 NAIA 2.0의 **핵심 시스템 계층**으로, 다음을 담당합니다:
-
-- 🎯 **중앙 상태 관리**: AppContext를 통한 공유 자원 관리
-- 🔄 **이벤트 버스**: 컴포넌트 간 느슨한 결합 통신
-- 🎨 **파이프라인 훅**: 모듈이 프롬프트 생성 과정에 개입
-- 🌐 **API 브릿지**: 다중 백엔드 (NAI/WEBUI/COMFYUI) 지원
-- 🧩 **컨트롤러**: UI/모듈/탭 생명주기 관리
-- 📊 **데이터 관리**: 태그, 와일드카드, 필터 등
-
-### 다른 디렉터리와의 관계
-
-```
-core/
-  ├── interfaces/를 통해 ← modules/, tabs/와 계약 정의
-  ├── ui/를 통해 → UI 컴포넌트 관리
-  ├── utils/를 통해 → 유틸리티 함수 사용
-  └── data/를 통해 → 데이터 파일 로드
-```
-
-**의존성 흐름**:
 ```
 NAIA_cold_v4.py (메인)
     ↓
@@ -58,2383 +19,358 @@ core/prompt_generation_controller.py
 core/generation_controller.py
 ```
 
-### 언제 core/를 수정하는가?
+**core/가 의존하는 것**: `interfaces/`, `ui/`, `utils/`, `data/`
+**core/를 의존하는 것**: `modules/`, `tabs/`, `NAIA_cold_v4.py`
 
-| 작업 | 수정 파일 |
-|------|----------|
-| **새 공유 서비스 추가** | `context.py` |
-| **새 이벤트 추가** | `context.py` (이벤트 이름만, 코드 변경 불필요) |
-| **파이프라인 단계 추가** | `prompt_processor.py` |
-| **새 API 백엔드 추가** | `api_service.py` |
-| **컨트롤러 동작 수정** | `*_controller.py` |
-| **와일드카드 로직 수정** | `wildcard_manager.py`, `wildcard_processor.py` |
+**상세 레퍼런스**:
+- [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)
+- [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
+- [상세 변경 로그](.claude/CHANGELOG_CLAUDE.md)
 
 ---
 
-## 주요 파일 및 역할
+## 주요 파일
 
-| 파일 | 크기 | 역할 | 주요 클래스/함수 |
-|------|------|------|-----------------|
-| **context.py** | 9.1K | 중앙 상태 관리, 이벤트 버스 | `AppContext` |
-| **api_service.py** | 74K | API 호출 (NAI/WEBUI/COMFYUI) | `APIService` |
-| **generation_controller.py** | 33K | 이미지 생성 워커, **시퀀스 생성** | `GenerationController`, `GenerationWorker` |
-| **sequence_parser.py** | 🆕 8.9K | 시퀀스 프롬프트 파싱 및 검증 | `SequenceParser` |
-| **generation_queue_manager.py** | 12K | 생성 큐 관리 (우선순위, 일시정지) | `GenerationQueueManager` |
-| **autocomplete_manager.py** | 68K | 태그 자동완성 | `AutocompleteManager` |
-| **comfyui_workflow_manager.py** | 30K | ComfyUI 워크플로우 관리 | `ComfyUIWorkflowManager` |
-| **middle_section_controller.py** | 19K | 모듈 로딩 및 관리 | `MiddleSectionController` |
-| **comfyui_service.py** | 16K | 🔧 ComfyUI 순수 HTTP 통신 (Thread-Safe) | `ComfyUIService` |
-| **wildcard_processor.py** | 14K | 와일드카드 치환 | `WildcardProcessor` |
-| **image_crud_controller.py** | 17K | 이미지 파일 CRUD 관리 | `ImageCrudController` |
-| **tab_controller.py** | 9.4K | 탭 로딩 및 관리 | `TabController` |
-| **main_controller.py** | 28K | 메인 컨트롤러 (검색/생성 통합) | `MainController` |
-| **search_engine.py** | 6.7K | 태그 검색 엔진 | `SearchEngine` |
-| **prompt_processor.py** | 6.4K | 프롬프트 파이프라인 | `PromptProcessor` |
-| **wildcard_manager.py** | 6.5K | 와일드카드 파일 로딩 | `WildcardManager` |
-| **webui_utils.py** | 5.9K | WebUI 유틸리티 | 헬퍼 함수들 |
-| **prompt_generation_controller.py** | 5.8K | 프롬프트 생성 컨트롤러 | `PromptGenerationController` |
-| **search_controller.py** | 4.5K | 검색 컨트롤러 | `SearchController` |
-| **mode_ware_manager.py** | 4.0K | 모드 인식 모듈 관리 | `ModeAwareModuleManager` |
-| **search_result_model.py** | 3.2K | 검색 결과 모델 | `SearchResultModel` |
-| **tag_data_manager.py** | 2.8K | 태그 데이터 관리 | `TagDataManager` |
-| **prompt_context.py** | 1.9K | 프롬프트 컨텍스트 데이터 클래스 | `PromptContext` |
-| **filter_data_manager.py** | 1.8K | 필터 데이터 관리 | `FilterDataManager` |
-| **secure_token_manager.py** | 1.7K | 토큰 암호화 저장 | `SecureTokenManager` |
-| **generation_request.py** | 5.0K | 생성 요청 데이터 클래스 | `GenerationRequest` |
-| **api_validator.py** | 9.2K | API 검증 | 검증 함수들 |
-| **comfyui_utils.py** | 11K | ComfyUI 유틸리티 | 헬퍼 함수들 |
+| 파일 | 역할 |
+|------|------|
+| **context.py** | 중앙 상태 관리, 이벤트 버스, 파이프라인 훅 레지스트리 |
+| **api_service.py** | API 호출 (NAI/WEBUI/COMFYUI), Auto-Outpainting |
+| **generation_controller.py** | QThread 이미지 생성 워커, 시퀀스 생성 |
+| **sequence_parser.py** | 시퀀스 프롬프트 파싱 (`:begin`, `:seq`, `:end`) |
+| **generation_queue_manager.py** | 생성 큐 (우선순위, 일시정지) |
+| **autocomplete_manager.py** | 태그 자동완성, NAI `::` 가중치 처리 |
+| **comfyui_workflow_manager.py** | ComfyUI 워크플로우 관리 |
+| **middle_section_controller.py** | 모듈 로딩, 아코디언 동작, 상태 영속성 |
+| **comfyui_service.py** | ComfyUI 순수 HTTP 통신 (WebSocket 제거됨) |
+| **wildcard_processor.py** | 와일드카드 치환 (랜덤/순차/종속) |
+| **image_crud_controller.py** | 이미지 파일 CRUD, 분류 시스템 |
+| **tab_controller.py** | 탭 로딩 및 관리 |
+| **prompt_processor.py** | 프롬프트 파이프라인 |
+| **wildcard_manager.py** | 와일드카드 파일 로딩, 가중치 파싱 |
+| **prompt_generation_controller.py** | 프롬프트 생성, side-effect 없는 생성 |
+| **prompt_context.py** | PromptContext 데이터 클래스 |
+| **mode_ware_manager.py** | 모드 인식 모듈 일괄 저장/로드 |
+| **ui_state_manager.py** | UI 레이아웃 상태 저장/복원 (창 크기, 스플리터, 모듈 접기 등) |
+| **generation_request.py** | GenerationRequest 데이터 클래스 |
+| **filter_data_manager.py** | 텍스트/JSON 태그 사전 로드, noise whitelist |
+| **tag_filter_helpers.py** | 공유 태그 필터링 (10라운드), 색상 예외 |
 
 ---
 
-## AppContext: 중앙 상태 관리자
+## AppContext (`context.py`)
 
-### 위치 및 역할
+중앙 허브. 공유 서비스, 이벤트 버스, 파이프라인 훅, API 모드 관리.
 
-**파일**: `core/context.py:20-191`
-
-`AppContext`는 NAIA 2.0의 **중앙 허브**로, 다음을 제공합니다:
-
-1. **공유 서비스 등록**: API, 데이터 매니저, 토큰 매니저 등
-2. **이벤트 버스**: subscribe/publish를 통한 컴포넌트 간 통신
-3. **파이프라인 훅 레지스트리**: 모듈이 프롬프트 생성 과정에 개입
-4. **API 모드 관리**: NAI/WEBUI/COMFYUI 전환
-5. **세션 관리**: 저장 경로, 현재 컨텍스트 등
-
-### 초기화
-
-`core/context.py:22-54`
+### 이벤트 버스
 
 ```python
-class AppContext:
-    def __init__(self, main_window, wildcard_manager, tag_data_manager):
-        # 핵심 참조
-        self.main_window = main_window
-        self.wildcard_manager = wildcard_manager
-        self.tag_data_manager = tag_data_manager
-
-        # 서비스
-        self.api_service = APIService(self)
-        self.comfyui_workflow_manager = ComfyUIWorkflowManager()
-        self.secure_token_manager = SecureTokenManager()
-        self.filter_data_manager = FilterDataManager()
-
-        # 🆕 이미지 파일 관리 (2025-01-08)
-        self.image_crud_controller = ImageCrudController(self)
-
-        # 모드 관리
-        self.current_api_mode = "NAI"
-        self.mode_swap_subscribers = []
-        self.mode_manager = ModeAwareModuleManager(self)
-
-        # 파이프라인 훅 레지스트리
-        self.pipeline_hooks = {}
-
-        # 이벤트 버스
-        self.subscribers = {}
-
-        # 세션 상태
-        self.current_source_row = None
-        self.current_prompt_context = None
-        self.session_save_path = Path("output") / datetime.now().strftime('%Y%m%d_%H%M%S')
+app_context.subscribe("event_name", callback)  # 구독
+app_context.publish("event_name", {"key": "value"})  # 발행
 ```
 
-### 이벤트 버스 사용법
+### 주요 이벤트
 
-#### 이벤트 구독
+| 이벤트 | 데이터 | 용도 |
+|--------|--------|------|
+| `api_mode_changed` | `{"old_mode": str, "new_mode": str}` | 모드 전환 |
+| `prompt_generated` | `PromptContext` | 프롬프트 생성 완료 |
+| `save_directory_changed` | `{"new_path": str}` | 저장 경로 변경 |
+| `image_counter_changed` | `{"new_counter": int}` | 카운터 변경 |
 
-`core/context.py:110-118`
+### 파이프라인 훅 등록
 
 ```python
-# 기본 사용법
-def my_callback(data: dict):
-    print(f"이벤트 수신: {data}")
+app_context.register_pipeline_hook(hook_info, module_instance)
+# hook_info: {'target_pipeline': 'PromptProcessor', 'hook_point': str, 'priority': int}
 
-app_context.subscribe("event_name", my_callback)
+app_context.get_pipeline_hooks('PromptProcessor', 'post_processing')
+# → [module_instance, ...] (우선순위순)
 ```
 
-**실제 예시** (모듈에서):
+### API 모드 변경
+
 ```python
-class MyModule(BaseMiddleModule):
-    def initialize_with_context(self, app_context):
-        self.app_context = app_context
-
-        # 모드 변경 이벤트 구독
-        app_context.subscribe("api_mode_changed", self._on_mode_changed)
-
-        # 프롬프트 생성 완료 이벤트 구독
-        app_context.subscribe("prompt_generated", self._on_prompt_generated)
-
-    def _on_mode_changed(self, data: dict):
-        old_mode = data["old_mode"]
-        new_mode = data["new_mode"]
-        print(f"모드 변경 감지: {old_mode} → {new_mode}")
-
-    def _on_prompt_generated(self, context):
-        final_prompt = context.final_prompt
-        print(f"생성된 프롬프트: {final_prompt[:100]}...")
+app_context.set_api_mode("WEBUI")  # "NAI", "WEBUI", "COMFYUI"
+app_context.get_api_mode()  # → str
 ```
 
-#### 이벤트 발행
-
-`core/context.py:120-129`
+### API Payload 저장 (디버깅용)
 
 ```python
-# 기본 사용법
-app_context.publish("event_name", {"key": "value"})
-```
-
-**실제 예시** (컨트롤러에서):
-```python
-# 프롬프트 생성 완료 알림
-self.app_context.publish("prompt_generated", context)
-
-# 저장 경로 변경 알림
-self.app_context.publish("save_directory_changed", {"new_path": str(new_path)})
-```
-
-### 주요 이벤트 목록
-
-| 이벤트 이름 | 발행자 | 데이터 구조 | 용도 |
-|------------|--------|------------|------|
-| `api_mode_changed` | `AppContext.set_api_mode()` | `{"old_mode": str, "new_mode": str}` | 모드 전환 알림 |
-| `prompt_generated` | `PromptGenerationController` | `PromptContext` | 프롬프트 생성 완료 |
-| `save_directory_changed` | `ImageCrudController.set_base_save_directory()` | `{"new_path": str}` | 저장 경로 변경 |
-| `image_counter_changed` | `ImageCrudController.increment_counter()` | `{"new_counter": int}` | 이미지 저장 카운터 변경 |
-| `hello_world_clicked` | 예시 | `{"message": str}` | 커스텀 이벤트 |
-
-### 파이프라인 훅 시스템
-
-#### 훅 등록
-
-`core/context.py:131-148`
-
-```python
-def register_pipeline_hook(self, hook_info: dict, module_instance):
-    """파이프라인 훅 레지스트리에 모듈 등록"""
-    pipeline_name = hook_info['target_pipeline']  # 예: 'PromptProcessor'
-    hook_point = hook_info['hook_point']  # 예: 'post_processing'
-    priority = hook_info.get('priority', 999)
-
-    # 우선순위순 정렬하여 저장
-    self.pipeline_hooks.setdefault(pipeline_name, {}).setdefault(hook_point, [])
-    self.pipeline_hooks[pipeline_name][hook_point].append((priority, module_instance))
-    self.pipeline_hooks[pipeline_name][hook_point].sort(key=lambda x: x[0])
-```
-
-**사용 예시** (모듈에서):
-```python
-class MyModule(BaseMiddleModule):
-    def get_pipeline_hook_info(self) -> dict:
-        return {
-            'target_pipeline': 'PromptProcessor',
-            'hook_point': 'post_processing',
-            'priority': 10  # 낮을수록 먼저 실행
-        }
-
-    def execute_pipeline_hook(self, context):
-        # 프롬프트 수정
-        context.main_tags.append("custom_tag")
-        return context
-```
-
-#### 훅 실행
-
-`core/context.py:150-154`
-
-```python
-def get_pipeline_hooks(self, pipeline_name: str, hook_point: str):
-    """특정 훅 포인트에 등록된 모듈 목록 반환 (우선순위순)"""
-    hooks = self.pipeline_hooks.get(pipeline_name, {}).get(hook_point, [])
-    return [module_instance for priority, module_instance in hooks]
-```
-
-### API 모드 관리
-
-#### 모드 변경
-
-`core/context.py:56-72`
-
-```python
-def set_api_mode(self, mode: str):
-    """API 모드 변경 및 구독자 알림"""
-    if mode in ["NAI", "WEBUI", "COMFYUI"] and mode != self.current_api_mode:
-        old_mode = self.current_api_mode
-        self.current_api_mode = mode
-
-        # 레거시 구독자 알림
-        for callback in self.mode_swap_subscribers:
-            callback(old_mode, mode)
-
-        # 이벤트 시스템 알림
-        self.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": mode})
-```
-
-**사용 예시**:
-```python
-# 모드 변경
-app_context.set_api_mode("WEBUI")
-
-# 현재 모드 확인
-current_mode = app_context.get_api_mode()  # "WEBUI"
-```
-
-### API Payload 안전 저장
-
-`core/context.py:161-191`
-
-```python
-def store_api_payload(self, payload: dict, api_type: str = "Unknown"):
-    """API 요청 데이터를 안전하게 저장 (디버깅용)"""
-    # Thread-safe 저장
-
-def get_api_payload(self) -> dict:
-    """저장된 API 요청 데이터 반환"""
+app_context.store_api_payload(payload, api_type="Unknown")
+app_context.get_api_payload()
 ```
 
 ---
 
-## 컨트롤러 시스템
-
-NAIA 2.0는 **컨트롤러 패턴**을 사용하여 각 영역의 생명주기를 관리합니다.
-
-### MiddleSectionController: 모듈 관리자
-
-**파일**: `core/middle_section_controller.py:16-200+`
-
-#### 역할
-
-- `modules/` 디렉터리 스캔 및 동적 로딩
-- 모듈 인스턴스 생성 및 UI 배치
-- AppContext 주입
-- 모드 변경 시 가시성 제어
-- 모듈 분리/복귀 기능
-- 🆕 **모듈 상태 추적** (펼침/접힘/분리/스크롤 위치)
-- 🆕 **아코디언 동작** (하나만 펼치기)
-- 🆕 **자동 스크롤** (모듈로 이동)
-- 🆕 **상태 영속성** (`save/module_states.json`)
-
-#### 초기화 및 로딩
-
-`core/middle_section_controller.py:22-37`
-
-```python
-class MiddleSectionController:
-    def __init__(self, modules_dir: str, app_context: AppContext, parent: QWidget = None):
-        self.modules_dir = modules_dir
-        self.app_context = app_context
-        self.module_classes = []
-        self.module_instances = []
-        self.detached_modules = {}  # 분리된 모듈 추적
-        self.module_boxes = {}  # CollapsibleBox 추적
-
-        # 🆕 모듈 상태 추적
-        self.module_states = {
-            'expanded': set(),      # 현재 펼쳐진 모듈들 (title)
-            'detached': set(),      # 현재 분리된 모듈들 (title)
-            'scroll_positions': {}  # {title: scroll_position}
-        }
-
-        # 🆕 아코디언 모드 (하나만 펼치기)
-        self.accordion_mode = True
-
-        # API 모드 변경 이벤트 구독
-        app_context.subscribe("api_mode_changed", self.on_api_mode_changed)
-```
-
-#### 모듈 로딩 프로세스
-
-`core/middle_section_controller.py:59-101`
-
-```python
-def load_modules(self):
-    """modules/*_module.py 파일 동적 로드"""
-    pattern = os.path.join(self.modules_dir, "*_module.py")
-    module_files = glob.glob(pattern)
-
-    for path in module_files:
-        name = Path(path).stem
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        # BaseMiddleModule 상속 클래스 찾기
-        for attr in dir(module):
-            obj = getattr(module, attr)
-            if isinstance(obj, type) and issubclass(obj, BaseMiddleModule):
-                self.module_classes.append(obj)
-```
-
-#### 컨텍스트 주입
-
-`core/middle_section_controller.py:103-143`
-
-```python
-def initialize_modules_with_context(self, app_context):
-    """모듈에 AppContext 주입 및 ModeAware 등록"""
-    for module_instance in self.module_instances:
-        module_instance.app_context = app_context
-
-        # ModeAwareModule 자동 등록
-        if isinstance(module_instance, ModeAwareModule):
-            app_context.mode_manager.register_module(module_instance)
-            module_instance.current_mode = app_context.get_api_mode()
-```
-
-#### 모드 변경 처리
-
-`core/middle_section_controller.py:39-57`
-
-```python
-def on_api_mode_changed(self, data: dict):
-    """API 모드 변경 시 모듈 가시성 업데이트"""
-    new_mode = data.get("new_mode")
-
-    for title, box in self.module_boxes.items():
-        module_instance = next((inst for inst in self.module_instances
-                                if inst.get_title() == title), None)
-        if module_instance:
-            is_compatible = module_instance.is_compatible_with_mode(new_mode)
-            box.setVisible(is_compatible)
-```
-
-#### 🆕 모듈 상태 추적 및 아코디언 동작
-
-`core/middle_section_controller.py:421-564`
-
-**주요 메서드**:
-
-```python
-# 모듈 토글 이벤트 처리
-def on_module_toggled(self, module_title: str, is_expanded: bool):
-    """모듈 펼침/접힘 상태 변경 이벤트"""
-    if is_expanded:
-        self.module_states['expanded'].add(module_title)
-
-        # 아코디언 모드: 다른 모듈 접기
-        if self.accordion_mode:
-            self._collapse_other_modules(module_title)
-
-        # 자동 스크롤
-        self._scroll_to_module(module_title)
-    else:
-        self.module_states['expanded'].discard(module_title)
-
-    self.save_module_states()
-
-# 아코디언 모드 설정
-def set_accordion_mode(self, enabled: bool):
-    """아코디언 모드 활성화/비활성화"""
-    self.accordion_mode = enabled
-
-# 상태 가져오기
-def get_module_states(self) -> dict:
-    """현재 모듈 상태 반환"""
-    return {
-        'expanded': list(self.module_states['expanded']),
-        'detached': list(self.module_states['detached']),
-        'scroll_positions': self.module_states['scroll_positions'].copy(),
-        'accordion_mode': self.accordion_mode
-    }
-
-# 상태 저장/로드
-def save_module_states(self):
-    """모듈 상태를 save/module_states.json에 저장"""
-
-def load_module_states(self):
-    """저장된 상태 로드 및 UI 복원"""
-```
-
-**아코디언 동작**:
-- 하나의 모듈이 펼쳐지면 다른 모듈들 자동으로 접힘
-- 분리된 모듈은 영향 받지 않음
-- `accordion_mode` 플래그로 제어 가능
-
-**자동 스크롤**:
-- 모듈 펼칠 때 해당 모듈로 자동 스크롤
-- 부모 QScrollArea 자동 탐색
-- 100ms 지연으로 UI 업데이트 대기
-
-**상태 파일 구조** (`save/module_states.json`):
-```json
-{
-  "expanded": ["👤 NAID4 캐릭터"],
-  "detached": [],
-  "scroll_positions": {
-    "👤 NAID4 캐릭터": 350,
-    "⚙️ 자동 생성": 0
-  },
-  "accordion_mode": true
-}
-```
-
-**사용 예시**:
-```python
-# 아코디언 모드 비활성화 (여러 모듈 동시 펼치기)
-controller.set_accordion_mode(False)
-
-# 현재 상태 확인
-states = controller.get_module_states()
-print(f"펼쳐진 모듈: {states['expanded']}")
-print(f"분리된 모듈: {states['detached']}")
-
-# 상태 수동 저장
-controller.save_module_states()
-```
-
-### TabController: 탭 관리자
-
-**파일**: `core/tab_controller.py:15-150+`
-
-#### 역할
-
-- `tabs/` 디렉터리 스캔 및 동적 로딩
-- 탭 인스턴스 생성 및 QTabWidget에 추가
-- core/closable 타입별 처리
-- 동적 탭 추가/제거
-- 닫기 버튼 관리
-
-#### 초기화
-
-`core/tab_controller.py:25-37`
-
-```python
-class TabController(QWidget):
-    tab_added = pyqtSignal(str, object)
-    tab_removed = pyqtSignal(str)
-
-    def __init__(self, tabs_dir: str, app_context: AppContext,
-                 tab_widget: QTabWidget, parent: QWidget = None):
-        self.tabs_dir = tabs_dir
-        self.app_context = app_context
-        self.tab_widget = tab_widget
-        self.module_classes = []
-        self.module_instances = {}
-        self.tab_index_map = {}
-```
-
-#### 탭 로딩 및 초기화
-
-`core/tab_controller.py:39-81`
-
-```python
-def initialize_tabs(self):
-    """탭 모듈 로드 및 UI 구성"""
-    self._load_tab_modules()
-
-    # order 순서로 정렬
-    sorted_classes = sorted(self.module_classes, key=lambda c: c().get_tab_order())
-
-    for cls in sorted_classes:
-        temp_instance = cls()
-
-        # core 타입만 시작 시 로드
-        if temp_instance.get_tab_type() != 'core':
-            continue
-
-        instance = cls()
-        instance.initialize_with_context(self.app_context)
-        widget = instance.create_widget(parent=self.tab_widget)
-
-        tab_index = self.tab_widget.addTab(widget, instance.get_tab_title())
-        self.module_instances[instance.tab_id] = instance
-        self.tab_index_map[instance.tab_id] = tab_index
-
-        # 닫기 버튼 추가 (closable 탭만)
-        if instance.can_close_tab():
-            self._add_close_button_to_tab(tab_index, instance.tab_id)
-```
-
-### SearchController: 검색 컨트롤러
-
-**파일**: `core/search_controller.py:8-149`
-
-#### 역할
-
-- 비동기 태그 검색 관리
-- 멀티프로세싱 기반 병렬 검색
-- 검색 진행률 추적
-- 검색 범위 제한 (max_129/max_149 모드)
-
-#### 주요 클래스
-
-**SearchWorker** - 백그라운드 검색 워커
-```python
-class SearchWorker(QObject):
-    progress_updated = pyqtSignal(int, int)  # (완료 수, 전체 수)
-    partial_result_ready = pyqtSignal(object)  # 부분 결과 (DataFrame)
-    search_finished = pyqtSignal(int)  # 총 결과 수
-    error_occurred = pyqtSignal(str)  # 에러 메시지
-
-    def __init__(self, search_params: dict, tags_dir: str = 'data/tags', max_file_index: int = None):
-        self.search_params = search_params
-        self.tags_dir = tags_dir
-        self.max_file_index = max_file_index  # None=전체, 129=max_129모드, 149=max_149모드
-```
-
-**SearchController** - 검색 컨트롤러
-```python
-class SearchController(QObject):
-    search_progress = pyqtSignal(int, int)
-    partial_search_result = pyqtSignal(object)
-    search_complete = pyqtSignal(int)
-    search_error = pyqtSignal(str)
-
-    def set_max_file_index(self, max_index: int = None):
-        """검색 파일 범위 설정 (None=전체, 129=max_129, 149=max_149)"""
-```
-
-#### 검색 범위 제한 기능 (2025-02-02 추가)
-
-**max_file_index 파라미터**로 검색할 파일 범위를 제한할 수 있습니다:
-
-| 모드 | max_file_index | 검색 파일 범위 | 파일 수 | 용도 |
-|------|----------------|----------------|---------|------|
-| **전체** | `None` | tags_00 ~ tags_149 | 150개 | 전체 데이터 검색 (최신) |
-| **max_149** | `149` | tags_00 ~ tags_149 | 150개 | 전체 데이터 검색 (명시적) |
-| **max_129** | `129` | tags_00 ~ tags_129 | 130개 | 이전 데이터셋 호환 |
-
-**사용 예시**:
-```python
-# SearchController 초기화
-search_controller = SearchController()
-
-# 전체 범위 검색 (기본값)
-search_controller.set_max_file_index(None)
-search_controller.start_search(search_params)
-
-# max_129 모드: 130개 파일만 검색 (빠른 검색)
-search_controller.set_max_file_index(129)
-search_controller.start_search(search_params)
-
-# max_149 모드: 150개 파일 전체 검색 (최신 데이터 포함)
-search_controller.set_max_file_index(149)
-search_controller.start_search(search_params)
-```
-
-**파일 필터링 로직** (`core/search_controller.py:29-48`):
-```python
-# 전체 파일 목록 가져오기
-all_files = [f for f in os.listdir(self.tags_dir) if f.endswith('.parquet') and f.startswith('tags_')]
-
-# max_file_index에 따라 파일 필터링
-if self.max_file_index is not None:
-    filtered_files = []
-    for f in all_files:
-        try:
-            file_index = int(f.split('_')[1].split('.')[0])  # tags_00.parquet -> 0
-            if file_index <= self.max_file_index:
-                filtered_files.append(f)
-        except (IndexError, ValueError):
-            continue
-    files_to_search = [os.path.join(self.tags_dir, f) for f in filtered_files]
-    print(f"🔍 검색 범위 제한: tags_00 ~ tags_{self.max_file_index:02d} ({len(files_to_search)}개 파일)")
-else:
-    files_to_search = [os.path.join(self.tags_dir, f) for f in all_files]
-    print(f"🔍 전체 범위 검색: {len(files_to_search)}개 파일")
-```
-
-**성능 비교**:
-- **max_129 모드**: 130개 파일 검색 → 약 13% 빠름
-- **max_149 모드**: 150개 파일 검색 → 최신 데이터 포함
-
-**실전 활용**:
-```python
-# UI에서 검색 모드 선택
-def on_search_mode_changed(self, mode_text: str):
-    if mode_text == "빠른 검색 (max_129)":
-        self.search_controller.set_max_file_index(129)
-    elif mode_text == "전체 검색 (max_149)":
-        self.search_controller.set_max_file_index(149)
-    else:
-        self.search_controller.set_max_file_index(None)
-```
-
-### PromptGenerationController: 프롬프트 생성 컨트롤러
-
-**파일**: `core/prompt_generation_controller.py:8-116`
-
-#### 역할
-
-- UI와 PromptProcessor 중재
-- PromptContext 생성 및 초기화
-- 파이프라인 실행
-- 결과 시그널 발행
-
-#### 주요 시그널
-
-```python
-class PromptGenerationController(QObject):
-    prompt_generated = pyqtSignal(str)  # 최종 프롬프트
-    generation_error = pyqtSignal(str)  # 에러 메시지
-    prompt_popped = pyqtSignal(int)  # 남은 프롬프트 수
-    resolution_detected = pyqtSignal(int, int)  # 자동 맞춤 해상도
-```
-
-#### PromptContext 생성
-
-`core/prompt_generation_controller.py:21-41`
-
-```python
-def _create_initial_context(self, source_row: pd.Series, settings: dict) -> PromptContext:
-    """PromptContext 생성 및 초기 태그 설정"""
-
-    # 기존 순차 카운터 보존
-    existing_sequential_counters = {}
-    existing_wildcard_state = {}
-    if self.app_context.current_prompt_context:
-        existing_sequential_counters = self.app_context.current_prompt_context.sequential_counters.copy()
-        existing_wildcard_state = self.app_context.current_prompt_context.wildcard_state.copy()
-
-    context = PromptContext(source_row=source_row, settings=settings)
-    context.sequential_counters = existing_sequential_counters
-    context.wildcard_state = existing_wildcard_state
-
-    # 초기 태그 설정
-    general_str = source_row.get('general', '')
-    if pd.notna(general_str) and isinstance(general_str, str):
-        context.main_tags = [tag.strip() for tag in general_str.split(',')]
-
-    return context
-```
-
-#### 프롬프트 생성 실행
-
-`core/prompt_generation_controller.py:85-115`
-
-```python
-def generate_next_prompt(self, search_results: SearchResultModel, settings: dict):
-    """다음 프롬프트 생성"""
-
-    # 와일드카드 단독 모드 확인
-    if settings.get('wildcard_standalone', False):
-        source_row = pd.Series({'general': None, ...}, name="wildcard_standalone")
-    else:
-        source_row = search_results.pop_random_row()
-
-    # AppContext에 저장
-    self.app_context.current_source_row = source_row
-    self.app_context.current_prompt_context = self._create_initial_context(source_row, settings)
-
-    # 파이프라인 실행
-    final_context = self.processor.process()
-
-    # 시그널 발행
-    if 'detected_resolution' in final_context.metadata:
-        width, height = final_context.metadata['detected_resolution']
-        self.resolution_detected.emit(width, height)
-
-    self.prompt_generated.emit(final_context.final_prompt)
-    self.app_context.publish("prompt_generated", final_context)
-```
-
-### GenerationController: 이미지 생성 컨트롤러
-
-**파일**: `core/generation_controller.py:1-400+`
-
-#### 역할
-
-- QThread 워커로 비동기 이미지 생성
-- API 호출 및 결과 후처리
-- 메타데이터 추출
-- 스레드 정리 및 메모리 관리
-- 🆕 **시퀀스 생성 지원** (`:begin`, `:seq`, `:end` 구문)
-
-#### QThread 워커 패턴
-
-`core/generation_controller.py:55-111`
-
-```python
-class GenerationWorker(QObject):
-    generation_started = pyqtSignal()
-    generation_progress = pyqtSignal(str)
-    generation_finished = pyqtSignal(dict)
-    generation_error = pyqtSignal(str)
-
-    def run_generation(self):
-        """별도 스레드에서 실행되는 생성 작업"""
-        try:
-            self.generation_started.emit()
-            self.generation_progress.emit("API 호출 중...")
-
-            # 시간이 오래 걸리는 API 호출
-            api_result = self.context.api_service.call_generation_api(self.params)
-
-            # 에러 확인
-            if api_result.get('status') == 'error':
-                self.generation_error.emit(api_result.get('message'))
-                return
-
-            # 후처리
-            processed_result = self._post_process(api_result)
-
-            # 메타데이터 추출
-            if processed_result.get('image'):
-                info_text = self._extract_info_from_image(processed_result['image'])
-                processed_result['info'] = info_text
-
-            self.generation_finished.emit(processed_result)
-
-        except Exception as e:
-            self.generation_error.emit(str(e))
-```
-
-#### 스레드 정리
-
-`core/generation_controller.py:12-53`
-
-```python
-def _force_cleanup_all_threads():
-    """모든 스레드 풀 및 연결 정리 (메모리 누수 방지)"""
-    # urllib3 연결 풀 정리
-    # requests 세션 정리
-    # Qt 스레드 풀 정리
-    # 가비지 컬렉션
-    # Qt 이벤트 루프 처리
-```
-
-**중요**: 모든 API 호출 후 반드시 `_force_cleanup_all_threads()` 호출!
-
-#### 임시 창 Virtual Module 훅 수동 실행
-
-**파일**: `core/generation_controller.py:375-411`
-
-임시 생성 창(Temporary Generation Window) 시스템에서는 AppContext 파이프라인을 우회하고 Virtual Module의 훅을 **수동으로 실행**합니다.
-
-**배경**: 임시 창은 메인 UI와 독립적으로 동작하며, 메인 UI 모듈의 훅을 실행하지 않고 자체 Virtual Module의 훅을 실행해야 합니다.
-
-**구현**:
-
-```python
-# 🆕 임시 창 프롬프트 엔지니어링 훅 수동 실행
-if 'temp_window_prompt_engineering_tab' in params:
-    prompt_eng_tab = params['temp_window_prompt_engineering_tab']
-    print(f"[TempWindow] 프롬프트 엔지니어링 훅 수동 실행 중...")
-
-    # PromptContext 생성
-    from core.prompt_context import PromptContext
-    import pandas as pd
-
-    source_row = self.context.current_source_row
-    if source_row is None:
-        source_row = pd.Series({'general': None}, name="temp_window")
-
-    # tags 파싱 (쉼표로 분리)
-    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
-
-    # PromptContext 초기화
-    temp_context = PromptContext(
-        source_row=source_row,
-        settings=params,
-        prefix_tags=[],
-        main_tags=input_tags,
-        postfix_tags=[]
-    )
-
-    # 수동 훅 실행
-    try:
-        modified_context = prompt_eng_tab.execute_manual_hook(temp_context)
-
-        # 수정된 태그를 다시 문자열로 결합
-        all_tags = modified_context.prefix_tags + modified_context.main_tags + modified_context.postfix_tags
-        params['input'] = ', '.join(all_tags)
-
-        print(f"✅ [TempWindow] 프롬프트 엔지니어링 적용 완료: '{params['input'][:50]}...'")
-    except Exception as e:
-        print(f"⚠️ [TempWindow] 프롬프트 엔지니어링 훅 실행 오류: {e}")
-```
-
-**실행 위치**: 와일드카드 확장 이후, API 호출 이전 (일반 파이프라인의 `post_processing` 훅 포인트와 동일한 위치)
-
-**⚠️ 중요: 이미지 생성 버튼에서는 적용 안 됨**
-
-**2025-01-20 변경**: 임시 창의 이미지 생성 버튼(`on_generate_clicked`)에서는 Virtual Module 훅을 실행하지 않습니다.
-
-- **이미지 생성 버튼**: 메인 프롬프트 내용만 사용 (선행/후행 고정 프롬프트 적용 안 됨)
-- **Random/Next Prompt 버튼**: 메인 UI의 `trigger_random_prompt()` 호출 (선행/후행 고정 프롬프트 적용됨)
-
-**파라미터 전달 방법** (현재 비활성화됨):
-
-```python
-# ui/temp_generation_window.py:278-283
-def on_generate_clicked(self):
-    params = self._collect_generation_params()
-
-    # ❌ 비활성화: 이미지 생성 버튼에서는 메인 프롬프트만 사용
-    # 선행/후행 고정 프롬프트는 Random/Next Prompt 버튼을 눌렀을 때만 적용됨
-    # if hasattr(self, 'prompt_engineering_tab'):
-    #     params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
-
-    self.generate_requested.emit(self.window_id, params)
-```
-
-**Virtual Module 구조**:
-
-- **파일**: `ui/virtual_prompt_engineering_tab.py`
-- **클래스**: `VirtualPromptEngineeringTab(QWidget)`
-- **메서드**: `execute_manual_hook(context: PromptContext) -> PromptContext`
-- **특징**: AppContext 파이프라인에 등록되지 않음, 메인 모듈 로직 복제
-
-**관련 패턴**:
-
-- **Virtual Module 패턴**: `ui/CLAUDE.md` → "임시 생성 창 시스템" 섹션
-- **Skip Flag 패턴**: `modules/CLAUDE.md` → "고급 패턴" → "Skip Flag 패턴"
-
-#### 와일드카드 단독 모드 (Wildcard Standalone Mode)
-
-**위치**: `core/generation_controller.py:384-399`
-
-**목적**: 임시 창에서 데이터베이스 태그 없이 와일드카드만으로 프롬프트를 생성할 수 있도록 지원합니다.
-
-**동작 원리**:
-
-임시 창에서 `wildcard_standalone` 파라미터가 `True`로 전달되면, `source_row`를 빈 데이터(`pd.Series` with all `None` values)로 생성하여 데이터베이스 태그가 프롬프트에 추가되지 않도록 합니다.
-
-**구현**:
-
-```python
-# core/generation_controller.py:384-399
-# source_row 준비 (와일드카드 단독 모드 지원)
-if params.get('wildcard_standalone', False):
-    # 와일드카드 단독 모드: 빈 데이터로 source_row 생성
-    empty_data = {
-        'general': None,
-        'character': None,
-        'copyright': None,
-        'artist': None,
-        'meta': None
-    }
-    source_row = pd.Series(empty_data, name="wildcard_standalone")
-    print(f"[TempWindow] 와일드카드 단독 모드: 빈 source_row 생성")
-else:
-    source_row = self.context.current_source_row
-    if source_row is None:
-        source_row = pd.Series({'general': None}, name="temp_window")
-```
-
-**파라미터 전달 방법**:
-
-임시 창에서 와일드카드 단독 모드 체크박스 상태를 파라미터에 포함:
-
-```python
-# ui/temp_generation_window.py:286-287
-def _collect_generation_params(self) -> dict:
-    params = {
-        'input': self.main_prompt_input.toPlainText(),
-        'negative_prompt': self.negative_prompt_input.toPlainText(),
-        # ...
-    }
-
-    # 와일드카드 단독 모드 플래그
-    if hasattr(self, 'wildcard_standalone_checkbox'):
-        params['wildcard_standalone'] = self.wildcard_standalone_checkbox.isChecked()
-
-    return params
-```
-
-**Random Prompt 처리**:
-
-임시 창의 Random/Next Prompt 버튼에서도 와일드카드 단독 모드를 지원합니다:
-
-```python
-# NAIA_cold_v4.py:547-562 (TempWindowManager.handle_random_prompt_request)
-# source_row 준비 (와일드카드 단독 모드 지원)
-if hasattr(temp_window, 'wildcard_standalone_checkbox') and temp_window.wildcard_standalone_checkbox.isChecked():
-    empty_data = {
-        'general': None,
-        'character': None,
-        'copyright': None,
-        'artist': None,
-        'meta': None
-    }
-    source_row = pd.Series(empty_data, name="wildcard_standalone")
-    print(f"[DEBUG] 와일드카드 단독 모드: 빈 source_row 생성")
-else:
-    source_row = self.app_context.current_source_row
-```
-
-**사용 시나리오**:
-
-1. **와일드카드만 사용**: 데이터베이스의 랜덤 태그 없이 와일드카드만으로 프롬프트 구성
-2. **프롬프트 엔지니어링 테스트**: Virtual Module의 프리픽스/포스트픽스/Auto Hide 기능만 테스트
-3. **커스텀 프롬프트 생성**: 사용자가 직접 입력한 태그만 사용
-
-**관련 문서**:
-
-- **UI 구현**: `ui/CLAUDE.md` → "임시 생성 창 시스템" → "TempGenerationWindow 추가 기능" → "2. 와일드카드 단독 모드"
-
-### ImageCrudController: 이미지 파일 관리 컨트롤러
-
-**파일**: `core/image_crud_controller.py:1-700+`
-
-#### 역할
-
-- 이미지 저장 로직 중앙화
-- Thread-safe 카운터 관리
-- 파일 중복 방지
-- 카운터 영속성 (app_settings.json) - **재시작 시 항상 1로 초기화**
-- 이벤트 기반 카운터 업데이트
-- 🆕 **파일명 형식 지원** (number_only, time_number, datetime)
-- 🆕 **프롬프트 기반 분류 시스템** (prompt_recognition)
-- 🆕 **타임스탬프 폴더 토글** (선택적 날짜_시간 폴더 사용)
-- 🆕 **2차 분류 시스템** (계층적 폴더 구조 지원)
-
-#### 주요 속성
-
-`core/image_crud_controller.py:26-67`
-
-```python
-class ImageCrudController:
-    def __init__(self, app_context):
-        self.app_context = app_context
-        self._save_counter: int = 1
-        self._base_save_path: Path = Path("output")
-        self._counter_lock = Lock()  # Thread-safe
-
-        # 🆕 파일명 형식: "number_only", "time_number", "datetime"
-        self._filename_format: str = "number_only"
-
-        # 🆕 분류 방법: "none", "prompt_recognition"
-        self._classification_method: str = "none"
-
-        # 🆕 분류 규칙: 쉼표로 구분된 조건 문자열
-        self._classification_rules: str = ""
-
-        # 🆕 타임스탬프 폴더 사용 여부
-        self._use_timestamp_folder: bool = True
-
-        # 🆕 2차 분류 설정
-        self._secondary_classification_enabled: bool = False
-        self._secondary_classification_method: str = "none"  # "none", "prompt_recognition"
-        self._secondary_classification_rules: dict = {}  # {primary_folder: secondary_rules_text}
-
-        # ✅ 카운터는 항상 1로 초기화 (재시작 시)
-        self._load_counter_from_settings()
-```
-
-#### 저장 경로 관리
-
-`core/image_crud_controller.py:68-103`
-
-```python
-def get_save_directory(self, classification_subfolder: Optional[str] = None) -> Path:
-    """
-    현재 저장에 사용될 최종 디렉토리 경로를 반환합니다.
-
-    타임스탬프 폴더 사용 여부에 따라:
-    - True: base_path / session_timestamp / [classification]
-    - False: base_path / [classification]
-
-    Parameters:
-        classification_subfolder (str, optional): 분류 하위 폴더명 (예: "1girl", "landscape")
-
-    Returns:
-        Path: 저장할 디렉토리 경로
-    """
-    # 타임스탬프 폴더 사용 여부에 따라 경로 결정
-    if self._use_timestamp_folder:
-        # 타임스탬프 폴더 사용: base_path/20250109_143520/[classification]
-        session_timestamp = self.app_context.session_timestamp
-        save_dir = self._base_save_path / session_timestamp
-
-        if classification_subfolder:
-            save_dir = save_dir / classification_subfolder
-    else:
-        # 타임스탬프 폴더 미사용: base_path/[classification]
-        save_dir = self._base_save_path
-
-        if classification_subfolder:
-            save_dir = save_dir / classification_subfolder
-
-    return save_dir
-```
-
-**경로 예시**:
-
-| 타임스탬프 폴더 | 분류 폴더 | 2차 분류 | 결과 경로 |
-|----------------|----------|---------|----------|
-| ✅ True | None | - | `output/20250109_143520/00001.png` |
-| ✅ True | "1girl" | None | `output/20250109_143520/1girl/00001.png` |
-| ✅ True | "1girl" | "solo" | `output/20250109_143520/1girl/solo/00001.png` |
-| ❌ False | None | - | `output/00001.png` |
-| ❌ False | "1girl" | None | `output/1girl/00001.png` |
-| ❌ False | "1girl" | "solo" | `output/1girl/solo/00001.png` |
-
-#### 파일 저장 (3-tuple 반환)
-
-`core/image_crud_controller.py:222-330`
-
-```python
-def save_image(self, image_bytes: bytes, as_webp: bool = False,
-               metadata: Optional[dict] = None,
-               classification_subfolder: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
-    """
-    이미지를 저장하고 3-tuple 반환
-    Returns: (success, filepath, error_message)
-    """
-    try:
-        # 저장 디렉토리 생성 (분류 폴더 포함)
-        save_dir = self.get_save_directory(classification_subfolder=classification_subfolder)
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        # 파일명 생성 (중복 방지)
-        filename = self.generate_filename(extension="webp" if as_webp else "png")
-        filepath = str(save_dir / filename)
-
-        # 이미지 저장 (메타데이터 포함)
-        # ...
-
-        # 카운터 증가 및 이벤트 발행
-        self.increment_counter()
-
-        return True, filepath, None
-    except Exception as e:
-        return False, None, str(e)
-```
-
-#### 카운터 관리
-
-`core/image_crud_controller.py:158-167`
-
-```python
-def increment_counter(self):
-    """카운터 증가 및 이벤트 발행"""
-    with self._counter_lock:
-        self._save_counter += 1
-        self._persist_counter()
-        self.app_context.publish("image_counter_changed", {
-            "new_counter": self._save_counter
-        })
-```
-
-#### 파일명 생성 (중복 방지)
-
-`core/image_crud_controller.py:122-152`
-
-```python
-def generate_filename(self, extension: str = "png", use_counter: bool = True) -> str:
-    """파일명 생성 (중복 시 카운터 자동 증가)"""
-    save_dir = self.get_save_directory()
-    if use_counter:
-        with self._counter_lock:
-            while True:
-                filename = f"{self._save_counter:05d}.{extension}"
-                if not (save_dir / filename).exists():
-                    break
-                print(f"⚠️ 파일 중복 방지: {filename} 건너뜀")
-                self._save_counter += 1
-    return filename
-```
-
-#### 프롬프트 기반 분류 시스템
-
-`core/image_crud_controller.py:407-678`
-
-ImageCrudController는 프롬프트를 기반으로 이미지를 자동 분류하는 시스템을 제공합니다.
-
-**분류 규칙 형식**:
-```
-*1girl,
-(*solo&*1girl),
-(landscape|scenery),
-nsfw
-```
-
-**규칙 구문**:
-- `*tag`: 퍼펙트 매칭 (쉼표로 분리된 태그 리스트에서 정확히 일치)
-- `tag`: 포함 검사 (부분 문자열 일치)
-- `&`: AND 연산자 (모두 만족)
-- `|`: OR 연산자 (하나라도 만족)
-- `()`: 그룹핑
-- `,`: 규칙 구분 (작성 순서대로 우선순위)
-
-**동작 방식**:
-```python
-def _classify_by_prompt(self, classification_info: dict) -> str:
-    """
-    프롬프트 규칙에 따라 분류 폴더명을 반환
-
-    1. classification_rules를 쉼표로 분리
-    2. 각 규칙을 순서대로 평가
-    3. 첫 번째 만족하는 규칙의 폴더명 반환
-    4. 모두 만족하지 않으면 "misc" 반환
-    """
-    tags = classification_info.get("tags", [])
-    rules = self._split_classification_rules(self._classification_rules)
-
-    for rule in rules:
-        if self._evaluate_classification_condition(rule, tags):
-            folder_name = self._condition_to_folder_name(rule)
-            return folder_name
-
-    return "misc"
-```
-
-**폴더명 변환 규칙**:
-- `&` → `_and_`
-- `|` → `_or_`
-- `*` → 제거
-- `()` → 제거
-- 공백 → `_`
-
-**예시**:
-```python
-규칙: "(*solo&*1girl)"  → 폴더명: "solo_and_1girl"
-규칙: "(landscape|scenery)" → 폴더명: "landscape_or_scenery"
-규칙: "*1girl" → 폴더명: "1girl"
-```
-
-#### 2차 분류 시스템 (계층적 폴더 구조)
-
-`core/image_crud_controller.py:776-813`
-
-2차 분류 시스템은 1차 분류된 폴더 내에 추가로 하위 분류를 적용합니다.
-
-**동작 방식**:
-1. 1차 분류 규칙을 평가하여 primary 폴더 결정
-2. 2차 분류가 활성화되어 있고, 해당 primary 폴더에 대한 2차 규칙이 있으면
-3. 2차 규칙을 평가하여 secondary 폴더 결정
-4. 최종 경로: `primary_folder/secondary_folder`
-
-**예시**:
-```
-1차 규칙: *solo, arm, (hold|phone), *standing, feet
-2차 규칙 (solo 폴더): *sitting, *standing, lying
-
-이미지 태그: ["solo", "1girl", "sitting", "indoors"]
-→ 1차 매칭: "solo" (퍼펙트 매칭)
-→ 2차 매칭: "sitting" (퍼펙트 매칭)
-→ 최종 경로: output/20250109_143520/solo/sitting/00001.png
-```
-
-**2차 분류 메서드**:
-```python
-def _apply_secondary_classification(self, secondary_rules_text: str, tags: List[str]) -> Optional[str]:
-    """
-    2차 분류 규칙을 적용하여 서브폴더명을 반환
-
-    Returns:
-        str or None: 2차 분류 서브폴더명, 또는 None (분류 실패 시 1차 폴더만 사용)
-    """
-```
-
-#### 설정 및 제어 메서드
-
-```python
-# 파일명 형식 설정
-controller.set_filename_format("time_number")  # "number_only", "time_number", "datetime"
-current_format = controller.get_filename_format()
-
-# 분류 방법 설정
-controller.set_classification_method("prompt_recognition")  # "none", "prompt_recognition"
-current_method = controller.get_classification_method()
-
-# 분류 규칙 설정
-controller.set_classification_rules("*1girl, (*solo&*1girl), nsfw")
-current_rules = controller.get_classification_rules()
-
-# 타임스탬프 폴더 사용 여부
-controller.set_use_timestamp_folder(False)  # True/False
-use_timestamp = controller.get_use_timestamp_folder()
-
-# 🆕 2차 분류 설정
-controller.set_secondary_classification_enabled(True)
-controller.set_secondary_classification_method("prompt_recognition")
-controller.set_secondary_classification_rules({
-    "solo": "*sitting, *standing, lying",
-    "1girl": "*uniform, *casual, *swimsuit"
-})
-```
-
-#### 사용 예시
-
-```python
-# ImageWindow에서
-success, filepath, error = self.app_context.image_crud_controller.save_image(
-    image_bytes=raw_bytes,
-    as_webp=True,
-    classification_subfolder="1girl"  # 분류 폴더 지정
-)
-
-if success:
-    print(f"✅ 저장 완료: {filepath}")
-else:
-    print(f"❌ 저장 실패: {error}")
-
-# 2차 분류가 활성화된 경우
-# classification_subfolder는 "primary/secondary" 형식으로 자동 생성됨
-# 예: "solo/sitting" → output/20250109_143520/solo/sitting/00001.png
-```
+## MiddleSectionController (`middle_section_controller.py`)
+
+`modules/*_module.py` 동적 로딩, 모듈 상태 추적, 아코디언 동작.
+
+**핵심 동작**:
+- `load_modules()`: `*_module.py` 패턴 스캔, `BaseMiddleModule` 상속 클래스 자동 로드
+- `initialize_modules_with_context()`: AppContext 주입, ModeAwareModule 자동 등록
+- `on_api_mode_changed()`: 호환성 플래그 기반 가시성 업데이트
+
+**모듈 상태 추적**:
+- `module_states`: expanded(펼침), detached(분리), scroll_positions
+- 아코디언 모드: 하나 펼치면 다른 모듈 자동 접힘 (분리된 모듈 제외)
+- 100ms 지연 자동 스크롤
+- 상태 파일: `save/module_states.json`
 
 ---
 
-## 생성 큐 시스템 (Generation Queue System)
+## TabController (`tab_controller.py`)
 
-**파일**:
-- `core/generation_request.py:1-135`
-- `core/generation_queue_manager.py:1-288`
-- `core/generation_controller.py:233-773`
+`tabs/*_tab.py` 동적 로딩. core 타입 탭만 시작 시 로드. closable 탭에 닫기 버튼 추가.
 
-### 개요
-
-생성 큐 시스템은 이미지 생성 중에도 추가 요청을 큐에 저장하고, 순차적으로 처리할 수 있게 합니다.
-
-**주요 특징**:
-- 🚀 **비동기 큐잉**: 생성 중에도 버튼 활성 상태 유지, 클릭 시 큐에 추가
-- 📊 **우선순위 지원**: 긴급 요청 (priority 100) vs 일반 요청 (priority 0)
-- 🔒 **스레드 안전**: `threading.Lock`을 사용한 동기화
-- ⏸️ **일시정지/재개**: 큐 처리를 일시적으로 중단 가능
-
-**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)
-- GenerationRequest 데이터 클래스
-- GenerationQueueManager API
-- GenerationController 통합
-- MainController UI 통합 (키보드 단축키, 컨텍스트 메뉴)
-- 큐 이벤트 시스템
-- 사용 시나리오
-- 문제 해결
+시그널: `tab_added(str, object)`, `tab_removed(str)`
 
 ---
 
-## 자동생성-큐 핸드오프 시스템
+## SearchController (`search_controller.py`)
 
-**참조**: `docs/AUTOGEN_QUEUE_HANDOFF_PLAN.md`
+멀티프로세싱 태그 검색. `max_file_index`로 검색 범위 제한 (None=전체, 129=130개, 149=150개).
 
-### 개요
-
-자동생성 모드와 수동 큐 시스템이 동시에 동작할 때, **큐 우선 처리** 원칙으로 핸드오프를 수행합니다.
-
-**핵심 원칙**:
-1. **큐가 비어있지 않으면** → 큐 우선 처리, 자동생성 대기
-2. **큐가 비면** → 자동생성 재개, 보류된 재시도 실행
-3. **UI 피드백** → 버튼 상태로 현재 상태 표시
-
-**조정 플래그**:
-- `queue_hold_auto_gen`: 큐가 있는 동안 자동생성 보류
-- `auto_retry_pending`: 큐 때문에 보류된 자동재시도
-
-**상세 레퍼런스**: [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
-- NAIA_cold_v4.py: 자동생성 트리거
-- GenerationController: 큐-자동생성 조정
-- 전체 흐름도
-- 검증 시나리오
-- 문제 해결
+시그널: `search_progress(int, int)`, `partial_search_result(object)`, `search_complete(int)`, `search_error(str)`
 
 ---
 
-## 프롬프트 파이프라인
+## PromptGenerationController (`prompt_generation_controller.py`)
 
-**파일**: `core/prompt_processor.py:7-144`
+UI와 PromptProcessor 중재. PromptContext 생성/초기화, 파이프라인 실행.
 
-### 파이프라인 실행 순서
+시그널: `prompt_generated(str)`, `generation_error(str)`, `prompt_popped(int)`, `resolution_detected(int, int)`
 
-`core/prompt_processor.py:14-33`
+**`generate_instant_source_silent()`**: side-effect 없는 프롬프트 생성. `app_context` 상태를 save/restore (finally 블록). 실패 시 `None` 반환.
 
-```python
-def process(self) -> PromptContext:
-    """프롬프트 파이프라인 실행"""
-    context = self.app_context.current_prompt_context
+---
 
-    # 단계별 실행
-    context = self._run_hooks('pre_processing', context)
-    context = self._step_2_fit_resolution(context)
-    context = self._run_hooks('post_processing', context)
-    context = self._step_3_expand_wildcards(context)
-    context = self._run_hooks('after_wildcard', context)
-    context = self._run_hooks('final_hookpoint', context)
-    context.final_prompt = self._step_final_format(context)
+## 프롬프트 파이프라인 (`prompt_processor.py`)
 
-    return context
-```
-
-**실행 순서**:
 ```
 1. pre_processing 훅       ← 모듈 개입
-2. 해상도 자동 맞춤         (내부 처리)
+2. 해상도 자동 맞춤         (내부)
 3. post_processing 훅      ← 모듈 개입
-4. 와일드카드 확장         (내부 처리)
+4. 와일드카드 확장           (내부)
 5. after_wildcard 훅       ← 모듈 개입
 6. final_hookpoint 훅      ← 모듈 개입
-7. 최종 포맷팅             (내부 처리)
+7. 최종 포맷팅              (내부: 인물 정렬, 인물 태그만 중복 제거, 괄호 이스케이프, 주석 포맷)
 ```
 
-### 훅 실행
+**와일드카드 라인 선택 모드** (`WildcardProcessor`):
 
-`core/prompt_processor.py:35-46`
+| 모드 | 구문 | 선택 방식 | 가중치 |
+|------|------|-----------|--------|
+| 랜덤 | `__name__`, `<name>` | `random.choices(weights=)` | 적용 |
+| 순차 | `__*name__` | `entries[counter % total][1]` | 무시 |
+| 종속 | `__$master:slave__` | `entries[slave_index][1]` | 무시 |
 
-```python
-def _run_hooks(self, hook_point: str, context: PromptContext) -> PromptContext:
-    """등록된 훅 순서대로 실행"""
-    hooks_to_run = self.app_context.get_pipeline_hooks(self.PIPELINE_NAME, hook_point)
+**⚠️ 전개 결과 형식 차이** (`wildcard_processor.py`):
 
-    for module_hook in hooks_to_run:
-        try:
-            context = module_hook.execute_pipeline_hook(context)
-        except Exception as e:
-            print(f"파이프라인 훅 실행 오류 ({module_hook.get_title()}): {e}")
+| 구문 | 반환 형식 | 예시 |
+|------|-----------|------|
+| `$wildcard` | 개별 태그 리스트 | `['tag1', 'tag2', 'tag3']` |
+| `__wildcard__` | 콤마 합쳐진 단일 문자열 | `['tag1, tag2, tag3']` |
 
-    return context
-```
-
-### 와일드카드 확장
-
-`core/prompt_processor.py:70-74`
-
-```python
-def _step_3_expand_wildcards(self, context: PromptContext) -> PromptContext:
-    """와일드카드를 실제 태그로 치환"""
-    context.prefix_tags = self.wildcard_processor.expand_tags(context.prefix_tags, context)
-    context.postfix_tags = self.wildcard_processor.expand_tags(context.postfix_tags, context)
-    return context
-```
-
-### 최종 포맷팅
-
-`core/prompt_processor.py:76-144`
-
-- 인물 태그 정렬 (boys → girls → others)
-- 태그 자동 변환 (`v` → `peace sign`)
-- 중복 제거
-- 주석 포맷팅 (`#...`)
+`__wildcard__`는 `_expand_recursive`에서 `''.join(result_parts)` 반환 (복합 패턴 `prefix__wc__suffix` 지원 목적). 개별 태그를 순회하는 downstream 훅에서는 콤마 split 필요.
 
 ---
 
-## API 서비스
+## GenerationController (`generation_controller.py`)
 
-**파일**: `core/api_service.py:18-600+`
+QThread 워커로 비동기 이미지 생성.
 
-### 다중 백엔드 지원
+### GenerationWorker
 
-#### API 호출 분기
+시그널: `generation_started()`, `generation_progress(str)`, `generation_finished(dict)`, `generation_error(str)`
 
-`core/api_service.py:69-155`
+**스레드 안전한 진행률**: `_progress_callback`은 `generation_progress.emit()`만 호출. UI 업데이트와 이벤트 발행은 메인 스레드 슬롯에서.
 
-```python
-def call_generation_api(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-    """API 모드에 따라 적절한 메서드 호출"""
+### 에러 처리 (`_on_generation_error`)
 
-    # 입력 정리: 주석 제거, 개행 제거
-    if 'input' in parameters:
-        original_prompt = parameters['input']
-        cleaned_tags = []
-        for tag in original_prompt.split(','):
-            processed_tag = tag.replace('\n', '').strip()
-            if processed_tag and not processed_tag.startswith('#'):
-                cleaned_tags.append(processed_tag)
-        parameters['input'] = ', '.join(cleaned_tags)
+| 요청 타입 | 파라미터 키 | 에러 이벤트 |
+|-----------|------------|------------|
+| Interactive Mode | `interactive_mode_request` | `generation_error` |
+| Turbo Sequence | `turbo_sequence_request` | `generation_error` |
+| Studio | `studio_request` | `generation_error_for_studio` |
+| Img2Img Batch | `img2img_batch_request` | 직접 콜백 |
+| 일반 (자동 생성) | - | 자동 재시도 |
 
-    # seed:, resolution: 파라미터 파싱
-    # ... (파라미터 처리 로직)
+**새 특수 요청 타입 추가 시**: 반드시 `_on_generation_error`에 핸들러 추가. 누락 시 요청자가 실패 알림 못 받아 잠금 상태.
 
-    api_mode = parameters.get('api_mode', 'NAI')
+### 캐릭터 프롬프트 캡처 우선순위
 
-    # 재시도 로직
-    for attempt in range(1, max_retries + 1):
-        try:
-            if api_mode == "NAI":
-                result = self._call_nai_api(parameters)
-            elif api_mode == "WEBUI":
-                result = self._call_webui_api(parameters)
-            elif api_mode == "COMFYUI":
-                result = self._call_comfyui_api(parameters)
+1. `params['sketchbook_character_prompts']` (Img2ImgWindow override, tuple->dict 변환)
+2. 메인 UI `CharacterModule.character_widgets` (active만)
 
-            if result and result.get('status') == 'success':
-                return result
-        except Exception as e:
-            last_exception = e
+### 임시 창 Virtual Module 훅
 
-    return {'status': 'error', 'message': str(last_exception)}
-```
+`temp_window_prompt_engineering_tab` 파라미터가 있으면 Virtual Module의 `execute_manual_hook()`을 수동 실행. 와일드카드 확장 이후, API 호출 이전.
 
-#### HTTP 스레드 정리
+**주의**: 이미지 생성 버튼에서는 Virtual Module 훅 미적용. Random/Next Prompt에서만 적용.
 
-`core/api_service.py:31-67`
+### 와일드카드 단독 모드
 
-```python
-def _cleanup_http_threads(self):
-    """HTTP 연결 스레드 정리 (메모리 누수 방지)"""
-    # urllib3 연결 풀 정리
-    # requests 세션 정리
-    # Qt 스레드 풀 정리
-    # 가비지 컬렉션
-```
-
-**중요**: 모든 API 메서드 마지막에 반드시 호출!
-
-### 캐릭터 위치 동적 좌표 처리 🆕
-
-**파일**: `core/api_service.py:424-452`
-
-**목적**: character_module에서 전달된 동적 위치 좌표를 NovelAI API의 `centers` 파라미터로 전달합니다.
-
-#### 배경
-
-NAID4 모델은 `v4_prompt.caption.char_captions`에서 각 캐릭터의 화면 위치를 지정할 수 있습니다:
-- `centers`: 배열 형태, 각 요소는 `{"x": float, "y": float}` (0.0~1.0 범위)
-- 기본값: `[{"x": 0.5, "y": 0.5}]` (화면 중앙)
-
-#### 구현
-
-```python
-# core/api_service.py:424-452
-if char_params and char_params.get("characters"):
-    characters = char_params["characters"]
-    ucs = char_params["uc"]
-    # 🆕 캐릭터 위치 좌표 가져오기 (없으면 빈 리스트)
-    character_positions = char_params.get("character_positions", [])
-
-    print(f"[DEBUG] character_positions: {character_positions}")
-
-    # 캐릭터 프롬프트를 v4_prompt에 추가
-    for i, prompt in enumerate(characters):
-        # 🆕 동적 좌표 사용 (위치가 지정되어 있으면 사용, 없으면 기본값 0.5)
-        if i < len(character_positions):
-            centers = [character_positions[i]]
-        else:
-            centers = [{"x": 0.5, "y": 0.5}]
-
-        api_parameters['v4_prompt']['caption']['char_captions'].append({
-            'char_caption': prompt,
-            'centers': centers  # 동적 좌표 적용
-        })
-        api_parameters['v4_negative_prompt']['caption']['char_captions'].append({
-            'char_caption': ucs[i] if i < len(ucs) else "",
-            'centers': centers  # negative도 동일 좌표 사용
-        })
-```
-
-#### 좌표 매핑
-
-`character_module.py`에서 생성되는 `character_positions` 파라미터 구조:
-
-```python
-# 예시: 2명의 캐릭터
-character_positions = [
-    {'x': 0.1, 'y': 0.1},  # 캐릭터 1: A1 위치 (좌상단)
-    {'x': 0.9, 'y': 0.9}   # 캐릭터 2: E5 위치 (우하단)
-]
-```
-
-**좌표 변환 규칙** (character_module.py에서):
-- **A-E (열)** → x: 0.1, 0.3, 0.5, 0.7, 0.9
-- **1-5 (행)** → y: 0.1, 0.3, 0.5, 0.7, 0.9
-
-| 위치 | x | y | 설명 |
-|------|---|---|------|
-| A1 | 0.1 | 0.1 | 좌상단 |
-| C3 | 0.5 | 0.5 | 중앙 (기본값) |
-| E5 | 0.9 | 0.9 | 우하단 |
-| B2 | 0.3 | 0.3 | 좌상단 근처 |
-| D4 | 0.7 | 0.7 | 우하단 근처 |
-
-#### Fallback 동작
-
-1. **위치 기능 비활성화 시**: `character_positions` 파라미터 자체가 전달되지 않음
-   → 모든 캐릭터에 `{"x": 0.5, "y": 0.5}` 기본값 사용
-
-2. **위치 개수 부족 시**: `character_positions` 배열 길이 < 캐릭터 개수
-   → 부족한 캐릭터는 `{"x": 0.5, "y": 0.5}` 기본값 사용
-
-3. **Sketchbook 모드**: 현재 Sketchbook은 위치 기능 미지원
-   → 항상 `{"x": 0.5, "y": 0.5}` 사용
-
-#### 디버깅
-
-**콘솔 출력 확인**:
-```
-[DEBUG] character_positions: [{'x': 0.1, 'y': 0.1}, {'x': 0.9, 'y': 0.9}]
-📍 캐릭터 위치 좌표: [{'x': 0.1, 'y': 0.1}, {'x': 0.9, 'y': 0.9}]
-```
-
-**문제 해결**:
-
-**Q: 좌표가 항상 0.5로 나와요**
-- **원인 1**: `character_module.py`의 `enable_position_checkbox`가 체크되지 않음
-- **원인 2**: `get_parameters()`에서 `character_positions` 생성 로직 누락
-- **해결**: 위치 체크박스 활성화 후 `get_parameters()` 반환값 확인
-
-**Q: API에서 좌표를 인식하지 못해요**
-- **원인**: `character_positions` 파라미터 형식 오류
-- **해결**: `{'x': float, 'y': float}` 딕셔너리 형태 확인, 리스트로 감싸기 (`[coord_dict]`)
-
-#### 관련 코드
-
-- **좌표 생성**: `modules/character_module.py:1329-1365` (`get_parameters()`)
-- **시각화**: `modules/character_module.py:1460-1510` (`_update_position_viewer()`)
-- **API 전달**: `core/api_service.py:424-452`
-- **좌표 검증 문서**: `docs/character_position_coordinate_verification.md`
+`params['wildcard_standalone'] == True` → 빈 `source_row` 생성하여 DB 태그 없이 와일드카드만 사용.
 
 ---
 
-## 데이터 매니저
+## ImageCrudController (`image_crud_controller.py`)
 
-### WildcardManager: 와일드카드 관리
+이미지 저장 중앙화, Thread-safe 카운터, 파일 중복 방지.
 
-**파일**: `core/wildcard_manager.py:6-150+`
+### 파일명 형식
 
-#### 역할
+`_filename_format`: `"number_only"`, `"time_number"`, `"datetime"`
 
-- `wildcards/` 디렉터리 스캔 및 로드
-- Instant Wildcard 관리
-- 리로드 콜백
+### 분류 시스템
 
-#### 와일드카드 로딩
+`_classification_method`: `"none"`, `"prompt_recognition"`
 
-`core/wildcard_manager.py:15-75`
+**분류 규칙 구문**:
+- `*tag`: 퍼펙트 매칭 (정확히 일치)
+- `tag`: 포함 검사
+- `&`: AND, `|`: OR, `()`: 그룹핑
+- 쉼표로 규칙 구분 (순서 = 우선순위)
+- 미매칭 시 `"misc"` 폴더
 
-```python
-def activate_wildcards(self):
-    """wildcards/ 디렉터리 재귀 탐색 및 로드"""
-    for root, dirs, files in os.walk(self.wildcards_dir):
-        for file in files:
-            if file.endswith('.txt'):
-                file_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_path, self.wildcards_dir)
-                wildcard_name = Path(relative_path).with_suffix('').as_posix()
+**폴더명 변환**: `&`→`_and_`, `|`→`_or_`, `*`/`()`/공백 제거 또는 `_`
 
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    lines = [line.strip() for line in f if line.strip()]
+### 경로 구조
 
-                if lines:
-                    self.wildcard_dict_tree[wildcard_name] = lines
-```
+| 타임스탬프 폴더 | 분류 | 2차 분류 | 경로 |
+|----------------|------|---------|------|
+| True | None | - | `output/20250109_143520/00001.png` |
+| True | "1girl" | "solo" | `output/20250109_143520/1girl/solo/00001.png` |
+| False | "1girl" | None | `output/1girl/00001.png` |
 
-**와일드카드 구조**:
-```
-wildcards/
-  ├── characters/
-  │   ├── outfit.txt  → 'characters/outfit'
-  │   └── pose.txt    → 'characters/pose'
-  └── effects/
-      └── weather.txt → 'effects/weather'
-```
+### save_image 반환값
 
-### TagDataManager: 태그 데이터 관리
+`(success: bool, filepath: Optional[str], error_message: Optional[str])`
 
-**파일**: `core/tag_data_manager.py:1-53`
+---
 
-#### 역할
+## API 서비스 (`api_service.py`)
 
-- 태그 딕셔너리 로딩 (general, artist, copyright, character)
-- 태그 검색 및 매칭
+### 다중 백엔드 분기
 
-### AutoCompleteManager: 태그 자동완성
+`call_generation_api()`: `api_mode`에 따라 `_call_nai_api`, `_call_webui_api`, `_call_comfyui_api` 분기. 입력 정리 (주석 제거, 개행 제거), 재시도 로직 포함.
 
-**파일**: `core/autocomplete_manager.py:92-1000+`
+### HTTP 스레드 정리
 
-#### 역할
+**모든 API 호출 후 반드시 `_cleanup_http_threads()` 호출**. urllib3 풀, requests 세션, Qt 스레드 풀, GC 정리.
 
-- 전역 이벤트 필터를 통한 QLineEdit/QTextEdit 자동완성
-- 태그 데이터베이스 기반 추천
-- 인스턴트 와일드카드 (`$key`) 자동완성
-- 한글 번역 기능 (`%한글텍스트`)
-- 아티스트 이미지 미리보기
+### Auto-Outpainting (`_single_pass_outpainting`)
 
-#### 핵심 메서드
+`type == 'auto_outpainting'` 인터셉트 → OutpaintWindow 데이터 있으면 직접 사용, 없으면 기본 캔버스 자동 생성 (가로→1:1, 세로→3:2) → 마스크 생성 → `type='inpaint'`로 재호출.
 
-**`_get_active_token_info(widget)`** - 현재 커서 위치의 토큰 정보 추출:
-```python
-# 반환값 예시
-{
-    'text': '0.7::pixel art',      # 원본 토큰
-    'stripped_text': 'pixel art',   # 검색에 사용될 텍스트
-    'prefix': '',                   # 괄호 접두사 (예: "(", "((")
-    'suffix': '',                   # 괄호 접미사 (예: ")", "))")
-    'start': 0,                     # 토큰 시작 위치
-    'end': 14,                      # 토큰 끝 위치
-    'weight_prefix': '0.7::',       # NAI 가중치 접두사
-    'weight_suffix': '',            # NAI 가중치 접미사
-    'is_weight_value': False        # 가중치 값 편집 중 여부
-}
-```
+### 캐릭터 위치 좌표
 
-**`_strip_brackets(keyword)`** - 괄호 분리 (쌍을 이루는 경우만):
-```python
-# 예시
-"(tag)"           → ("tag", "(", ")")      # 괄호 쌍 분리
-"blade (galaxist)" → ("blade (galaxist)", "", "")  # 내부 괄호 유지
-"((tag))"         → ("tag", "((", "))")    # 중첩 괄호 분리
-"-tag"            → ("tag", "-", "")       # 마이너스 접두사 분리
-```
+`character_positions` 파라미터를 `v4_prompt.caption.char_captions[].centers`로 전달.
 
-#### NAI 가중치 문법 처리 (🆕 2025-01-10)
+좌표 매핑: A-E→x:0.1-0.9, 1-5→y:0.1-0.9. Fallback: 기본값 `{"x": 0.5, "y": 0.5}`.
 
-NAI의 `::` 가중치 문법에 대한 특별 처리:
+---
 
-1. **가중치 값 편집 시 자동완성 무시**: `0.7::pixel art`에서 `0.7`을 편집할 때 자동완성이 트리거되지 않음
-2. **가중치 보존**: `0.7::art` 입력 후 `artist:xxx` 선택 시 → `0.7::artist:xxx` 유지
+## WildcardManager (`wildcard_manager.py`)
+
+### 가중치 구문
+
+`{정수}:텍스트` (`{정수}::` NAI 가중치는 제외). 정규식: `^(\d+):(?!:)(.*)`
 
 ```python
-# _get_active_token_info에서 가중치 값 감지
-if weight_suffix and weight_suffix.startswith('::'):
-    try:
-        float(stripped_token.strip())
-        is_weight_value = True  # 숫자면 가중치 값으로 판단
-    except ValueError:
-        pass
+"100: 0.68::artist:ciloranko ::"  → (100, "0.68::artist:ciloranko ::")
+"500:high_weight"                → (500, "high_weight")
+"plain text"                     → (100, "plain text")  # 기본 가중치
+"100::nai_hundred"               → (100, "100::nai_hundred")  # NAI 구문, 기본값
 ```
 
-#### 괄호 쌍 매칭 로직 (🆕 2025-01-10)
+**자료구조**: `wildcard_dict_tree[key] = list[tuple[int, str]]`
 
-입력 텍스트의 앞뒤 괄호가 **쌍을 이루는 경우에만** prefix/suffix로 분리:
+**소비자 영향**:
+- `WildcardProcessor`: 랜덤 모드 `random.choices(weights=)`, 순차/종속 `entries[index][1]`
+- `WildcardCombinationGenerator`: `[text for _, text in entries]`
+
+---
+
+## AutoCompleteManager (`autocomplete_manager.py`)
+
+전역 이벤트 필터 기반 QLineEdit/QTextEdit 자동완성.
+
+### `_get_active_token_info(widget)` 반환값
 
 ```python
-# 괄호 쌍 정의
-bracket_pairs = {'(': ')', '[': ']', '{': '}'}
-
-# 앞쪽 여는 괄호와 뒤쪽 닫는 괄호가 매칭되는지 확인
-# 예: "blade (galaxist)" - 앞에 여는 괄호 없음 → 뒤 괄호도 분리 안 함
-# 예: "(blade (galaxist))" - 앞 "("와 뒤 ")" 매칭 → 분리
+{'text': str, 'stripped_text': str, 'prefix': str, 'suffix': str,
+ 'start': int, 'end': int, 'weight_prefix': str, 'weight_suffix': str,
+ 'is_weight_value': bool}
 ```
 
-#### 자동완성 제외 설정
+### 핵심 동작
+
+- **NAI `::` 가중치 편집 시**: 자동완성 무시 (`is_weight_value=True`)
+- **가중치 보존**: `0.7::art` → `artist:xxx` 선택 시 `0.7::artist:xxx` 유지
+- **괄호 쌍 매칭**: 앞뒤 괄호가 쌍을 이루는 경우만 prefix/suffix로 분리
+- **엔터 시 토큰 갱신**: `active_token_info`를 엔터 시점에 다시 가져옴 (200ms 타이머 불일치 방지)
+- **팝업 외부 클릭**: 자동 닫기
+
+### 자동완성 제외
 
 ```python
-# 위젯 속성으로 제외
 widget.setProperty("autocomplete_ignore", True)
-
-# 위젯 이름으로 제외 (기본 제외 목록)
-ignored_widget_names = {
-    "search_input", "exclude_input", "negative_prompt",
-    "delay_input", "repeat_input", "timer_input", "count_input"
-}
-```
-
-#### 토큰 정보 갱신 시점 (🆕 2025-01-12)
-
-**중요**: `active_token_info`는 타이머(200ms) 후 `show_completions()`에서 저장되므로,
-엔터를 누를 때 실제 텍스트와 불일치할 수 있음.
-
-```python
-# handle_popup_navigation에서 엔터/탭 입력 시 토큰 정보 갱신
-if key in [Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab]:
-    # 엔터를 누르는 시점에 토큰 정보를 다시 가져옴
-    if self.current_widget:
-        fresh_token_info = self._get_active_token_info(self.current_widget)
-        if fresh_token_info:
-            self.active_token_info = fresh_token_info
-```
-
-#### 팝업 외부 클릭 시 자동 닫기 (🆕 2025-01-12)
-
-전역 이벤트 필터에서 모든 마우스 클릭을 감시하여, 팝업 외부 클릭 시 자동으로 닫힘:
-
-```python
-# eventFilter에서 팝업 외부 클릭 감지
-if event.type() == QEvent.Type.MouseButtonPress:
-    if self.popup and self.popup.isVisible():
-        if self._is_click_outside_popups(event):
-            self._hide_all_popups()
-
-# _is_click_outside_popups: popup, value_container, image_container 모두 체크
-```
-
-### ModeAwareModuleManager: 모드 인식 모듈 관리
-
-**파일**: `core/mode_ware_manager.py:7-82`
-
-#### 역할
-
-- ModeAware 모듈 등록/해제
-- 모드별 설정 일괄 저장/로드
-
-#### 설정 저장
-
-`core/mode_ware_manager.py:32-54`
-
-```python
-def save_all_current_mode(self):
-    """현재 모드 설정 일괄 저장"""
-    current_mode = self.app_context.get_api_mode()
-
-    for module in self.registered_modules:
-        if getattr(module, 'ignore_save_load', False):
-            continue
-
-        if module.is_compatible_with_mode(current_mode):
-            module.save_mode_settings(current_mode)
+# 기본 제외: "search_input", "exclude_input", "negative_prompt", "delay_input" 등
 ```
 
 ---
 
-## 실전 예제
+## 생성 큐 시스템
 
-### 예제 1: 새 공유 서비스 추가
+비동기 큐잉, 우선순위, 스레드 안전, 일시정지/재개.
 
-**시나리오**: 애플리케이션 전역에서 사용할 `ImageCacheService`를 추가하고 싶습니다.
+**상세 레퍼런스**: [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)
 
-**단계**:
+## 자동생성-큐 핸드오프
 
-1. **서비스 클래스 작성** (`core/image_cache_service.py`)
+큐가 비어있지 않으면 큐 우선, 비면 자동생성 재개. 플래그: `queue_hold_auto_gen`, `auto_retry_pending`.
 
-```python
-# core/image_cache_service.py
-from typing import Dict
-from PIL import Image
-
-class ImageCacheService:
-    def __init__(self):
-        self._cache: Dict[str, Image.Image] = {}
-        self._max_size = 100
-
-    def add(self, key: str, image: Image.Image):
-        """이미지 캐시에 추가"""
-        if len(self._cache) >= self._max_size:
-            # 가장 오래된 항목 제거
-            oldest_key = next(iter(self._cache))
-            del self._cache[oldest_key]
-        self._cache[key] = image
-
-    def get(self, key: str) -> Image.Image:
-        """캐시에서 이미지 반환"""
-        return self._cache.get(key)
-
-    def clear(self):
-        """캐시 클리어"""
-        self._cache.clear()
-```
-
-2. **AppContext에 등록** (`core/context.py`)
-
-```python
-# core/context.py
-from core.image_cache_service import ImageCacheService
-
-class AppContext:
-    def __init__(self, main_window, wildcard_manager, tag_data_manager):
-        # ... 기존 코드 ...
-
-        # 🆕 이미지 캐시 서비스 추가
-        self.image_cache_service = ImageCacheService()
-```
-
-3. **다른 컴포넌트에서 사용**
-
-```python
-# 모듈 또는 탭에서
-class MyModule(BaseMiddleModule):
-    def initialize_with_context(self, app_context):
-        self.app_context = app_context
-
-        # 이미지 캐시 서비스 사용
-        cached_image = app_context.image_cache_service.get("my_key")
-        if cached_image:
-            print("캐시 히트!")
-        else:
-            # 이미지 로드 후 캐시에 추가
-            new_image = Image.open("path/to/image.png")
-            app_context.image_cache_service.add("my_key", new_image)
-```
-
-### 예제 2: 커스텀 이벤트 생성 및 사용
-
-**시나리오**: 모듈 A가 데이터를 처리하면, 모듈 B가 자동으로 업데이트되어야 합니다.
-
-**모듈 A (발행자)**:
-
-```python
-class DataProcessorModule(BaseMiddleModule):
-    def initialize_with_context(self, app_context):
-        self.app_context = app_context
-
-    def process_data(self, data):
-        # 데이터 처리
-        result = self._do_heavy_processing(data)
-
-        # 이벤트 발행
-        self.app_context.publish("data_processed", {
-            "result": result,
-            "timestamp": datetime.now()
-        })
-```
-
-**모듈 B (구독자)**:
-
-```python
-class DataViewerModule(BaseMiddleModule):
-    def initialize_with_context(self, app_context):
-        self.app_context = app_context
-
-        # 이벤트 구독
-        app_context.subscribe("data_processed", self._on_data_processed)
-
-    def _on_data_processed(self, data: dict):
-        result = data["result"]
-        timestamp = data["timestamp"]
-
-        # UI 업데이트
-        self.label.setText(f"최신 데이터: {result} (처리 시간: {timestamp})")
-```
-
-### 예제 3: 파이프라인 훅으로 프롬프트 수정
-
-**시나리오**: 모든 프롬프트에 특정 품질 태그를 자동으로 추가하고 싶습니다.
-
-```python
-class QualityBoosterModule(BaseMiddleModule):
-    def __init__(self):
-        super().__init__()
-        self.NAI_compatibility = True
-        self.WEBUI_compatibility = True
-        self.COMFYUI_compatibility = False
-
-        self.enabled = True
-
-    def get_title(self) -> str:
-        return "🌟 Quality Booster"
-
-    def create_widget(self, parent):
-        widget = QWidget(parent)
-        layout = QVBoxLayout(widget)
-
-        self.checkbox = QCheckBox("자동 품질 태그 추가")
-        self.checkbox.setChecked(True)
-        self.checkbox.stateChanged.connect(self._on_checkbox_changed)
-
-        layout.addWidget(self.checkbox)
-
-        self.widget = widget
-        return widget
-
-    def _on_checkbox_changed(self, state):
-        self.enabled = (state == Qt.CheckState.Checked.value)
-
-    def get_pipeline_hook_info(self) -> dict:
-        return {
-            'target_pipeline': 'PromptProcessor',
-            'hook_point': 'post_processing',  # 와일드카드 확장 전에 실행
-            'priority': 5  # 다른 모듈보다 먼저 실행
-        }
-
-    def execute_pipeline_hook(self, context):
-        if not self.enabled:
-            return context
-
-        # 품질 태그 추가
-        quality_tags = ["masterpiece", "best quality", "highly detailed"]
-
-        # prefix_tags 앞에 추가
-        context.prefix_tags = quality_tags + context.prefix_tags
-
-        print(f"✅ Quality Booster: {len(quality_tags)}개 태그 추가")
-
-        return context
-```
+**상세 레퍼런스**: [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
 
 ---
 
-## 개발 워크플로우
+## UIStateManager (`ui_state_manager.py`)
 
-### 새 컨트롤러 추가
+프로그램 종료 시 UI 레이아웃을 `save/ui_state.json`에 저장하고, 시작 시 복원.
 
-1. **계획**
-   ```
-   [ ] 컨트롤러가 관리할 영역 정의
-   [ ] 필요한 시그널 정의
-   [ ] AppContext와의 상호작용 설계
-   ```
+**저장 항목**:
+- 창 위치/크기 (`saveGeometry`/`restoreGeometry`) + 최대화 상태
+- 좌/우 패널 스플리터 비율
+- 프롬프트 FixedBox 높이
+- 생성 파라미터 패널 펼침/접힘
+- 좌측 스크롤 위치
+- 모듈 접기/펼치기 상태 (`MiddleSectionController`에 위임 → `save/module_states.json`)
 
-2. **파일 생성** (`core/my_controller.py`)
-   ```python
-   from PyQt6.QtCore import QObject, pyqtSignal
-   from core.context import AppContext
-
-   class MyController(QObject):
-       data_loaded = pyqtSignal(dict)
-
-       def __init__(self, app_context: AppContext):
-           super().__init__()
-           self.app_context = app_context
-   ```
-
-3. **AppContext 통합**
-   - 필요 시 `AppContext`에 인스턴스 등록
-   - 이벤트 구독/발행
-
-4. **테스트**
-   ```
-   [ ] 독립 실행 테스트
-   [ ] 다른 컴포넌트와 통합 테스트
-   [ ] 메모리 누수 확인
-   ```
-
-### 파이프라인 단계 추가
-
-⚠️ **주의**: 파이프라인 변경은 모든 모듈에 영향을 미칩니다!
-
-1. **새 훅 포인트 정의** (`core/prompt_processor.py`)
-   ```python
-   def process(self):
-       context = self.app_context.current_prompt_context
-
-       context = self._run_hooks('pre_processing', context)
-       context = self._step_2_fit_resolution(context)
-       context = self._run_hooks('post_processing', context)
-
-       # 🆕 새 훅 포인트 추가
-       context = self._run_hooks('my_new_hook', context)
-
-       context = self._step_3_expand_wildcards(context)
-       # ...
-   ```
-
-2. **문서화**
-   - 최상위 `CLAUDE.md` 업데이트
-   - 훅 포인트 실행 순서 명시
-   - 예제 추가
-
-3. **기존 모듈 영향 확인**
-   - 모든 파이프라인 훅 사용 모듈 검토
-   - 충돌 가능성 확인
+**호출 시점**:
+- 저장: `MainWindow.closeEvent()` → `ui_state_manager.save_state(self)`
+- 복원: `MainWindow.__init__()` 말미 `QTimer.singleShot(150ms)` → `restore_state(self)`
 
 ---
 
-## 문제 해결
+## 주요 함정/주의사항
 
-### Q1: 이벤트가 전달되지 않아요
+### QObject::killTimer 방지 (크로스 스레드)
 
-**증상**:
-```python
-# 모듈 A에서
-app_context.publish("my_event", {"data": "value"})
+- Background thread에서 Qt 객체 접근 금지
+- UI 업데이트는 `pyqtSignal.emit()` → 메인 스레드 슬롯 (QTimer.singleShot 대신)
+- 진행률 콜백: 시그널 emit만. UI 업데이트/이벤트 발행은 메인 스레드에서
+- 워커가 필요한 UI 데이터: 스레드 시작 전 메인 스레드에서 캡처하여 전달
+- ComfyUI: WebSocket 제거됨, 순수 HTTP 폴링 사용
 
-# 모듈 B에서 (아무 일도 일어나지 않음)
-def _on_my_event(self, data):
-    print("이벤트 수신!")  # 출력되지 않음
-```
+### HTTP "Dummy" 스레드 누적 방지
 
-**원인**:
-1. 구독이 안 됨
-2. 이벤트 이름 오타
-3. 콜백 함수 시그니처 불일치
-4. `initialize_with_context()` 호출 전 구독 시도
+모든 API 호출 후 `_cleanup_http_threads()` 호출 필수. `requests.Session` 어댑터 풀 정리 포함.
 
-**해결**:
+### 이벤트 미전달 디버깅
 
-1. **구독 확인**:
-```python
-def initialize_with_context(self, app_context):
-    self.app_context = app_context
-
-    # ✅ 올바른 위치
-    app_context.subscribe("my_event", self._on_my_event)
-```
-
-2. **이벤트 이름 일치 확인**:
-```python
-# 발행
-app_context.publish("my_event", ...)  # ✅
-
-# 구독
-app_context.subscribe("my_event", ...)  # ✅
-app_context.subscribe("my_Event", ...)  # ❌ 대소문자 불일치
-```
-
-3. **콜백 시그니처 확인**:
-```python
-# 발행
-app_context.publish("my_event", {"key": "value"})
-
-# 구독 (올바름)
-def _on_my_event(self, data: dict):  # ✅ 1개 인자
-    print(data["key"])
-
-# 구독 (잘못됨)
-def _on_my_event(self):  # ❌ 인자 없음
-    pass
-```
-
-4. **디버깅**:
-```python
-# 발행 시
-print(f"[DEBUG] 이벤트 발행: my_event")
-app_context.publish("my_event", {"data": "value"})
-
-# 구독 시
-def _on_my_event(self, data):
-    print(f"[DEBUG] 이벤트 수신: {data}")
-```
-
-### Q2: 파이프라인 훅이 실행되지 않아요
-
-**증상**:
-```python
-def execute_pipeline_hook(self, context):
-    print("이 메시지가 출력되지 않음!")
-    # ...
-```
-
-**원인**:
-1. `get_pipeline_hook_info()` 미구현 또는 잘못된 반환
-2. 컨텍스트 반환 누락
-3. 모듈이 로드되지 않음
-4. `initialize_with_context()` 호출 전
-
-**해결**:
-
-1. **훅 정보 확인**:
-```python
-def get_pipeline_hook_info(self) -> dict:
-    return {
-        'target_pipeline': 'PromptProcessor',  # ✅ 정확한 이름
-        'hook_point': 'post_processing',  # ✅ 유효한 훅 포인트
-        'priority': 10  # ✅ 숫자
-    }
-```
-
-2. **컨텍스트 반환 필수**:
-```python
-def execute_pipeline_hook(self, context):
-    # 작업 수행
-    context.main_tags.append("my_tag")
-
-    # ✅ 반드시 context 반환
-    return context
-```
-
-3. **훅 등록 확인**:
-```python
-# MiddleSectionController에서 자동 등록됨
-# 수동 확인:
-hooks = app_context.get_pipeline_hooks('PromptProcessor', 'post_processing')
-print(f"등록된 훅: {[h.get_title() for h in hooks]}")
-```
-
-### Q3: 모드 변경 시 모듈이 숨겨지지 않아요
-
-**증상**:
-- NAI 전용 모듈이 WEBUI 모드에서도 보임
-
-**원인**:
-1. 호환성 플래그 설정 안 됨
-2. `widget` 참조 저장 안 됨
-
-**해결**:
-
-```python
-class MyModule(BaseMiddleModule):
-    def __init__(self):
-        super().__init__()
-
-        # ✅ 호환성 플래그 명시
-        self.NAI_compatibility = True
-        self.WEBUI_compatibility = False
-        self.COMFYUI_compatibility = False
-
-    def create_widget(self, parent):
-        widget = QWidget(parent)
-        # ... UI 구성 ...
-
-        # ✅ 위젯 참조 저장 (필수)
-        self.widget = widget
-        return widget
-```
-
-### Q4: HTTP "Dummy" 스레드가 계속 쌓여요
-
-**증상**:
-- 이미지 생성 후 스레드 개수 증가
-- 메모리 사용량 증가
-
-**원인**:
-- API 호출 후 스레드 정리 안 함
-
-**해결**:
-
-```python
-def my_api_call(self):
-    try:
-        with requests.Session() as session:
-            response = session.post(url, ...)
-            session.close()
-
-            # 어댑터 정리
-            if hasattr(session, 'adapters'):
-                for adapter in session.adapters.values():
-                    if hasattr(adapter, 'poolmanager'):
-                        adapter.poolmanager.clear()
-
-        # ✅ 필수: HTTP 스레드 정리
-        self._cleanup_http_threads()
-
-    except Exception as e:
-        print(f"API 호출 실패: {e}")
-```
-
-### Q5: AppContext에서 서비스를 찾을 수 없어요
-
-**증상**:
-```python
-AttributeError: 'AppContext' object has no attribute 'my_service'
-```
-
-**원인**:
-- 서비스가 `AppContext.__init__()`에 등록되지 않음
-
-**해결**:
-
-```python
-# core/context.py
-class AppContext:
-    def __init__(self, main_window, wildcard_manager, tag_data_manager):
-        # ... 기존 코드 ...
-
-        # ✅ 서비스 등록
-        self.my_service = MyService(self)
-```
-
-또는 동적 등록:
-
-```python
-# 어디서든
-app_context.my_service = MyService(app_context)
-```
-
-### Q6: ComfyUI 생성 시 QObject::killTimer 오류가 발생해요
-
-**증상**:
-```
-QObject::killTimer: Timers cannot be stopped from another thread
-QObject::~QObject: Timers cannot be stopped from another thread
-```
-
-**원인**:
-1. **Background thread에서 Qt UI 객체 직접 접근**
-   - ComfyUI 생성이 QThread에서 실행되는 동안 UI 업데이트 시도
-   - `progress_callback`에서 `status_bar.showMessage()` 직접 호출
-   - WebSocket 메시지 처리 중 UI 업데이트
-
-2. **WebSocket의 내부 타이머 충돌**
-   - WebSocket 라이브러리가 자체 타이머 생성
-   - Background thread에서 연결/해제 시 Qt 타이머와 충돌
-
-**해결 (2026-02-03 적용됨)**:
-
-**1. ComfyUIService에서 WebSocket 완전 제거** ([comfyui_service.py:1-157](comfyui_service.py#L1-L157)):
-```python
-# ❌ 이전 (WebSocket 사용)
-import json
-import websocket
-self.ws = None
-def connect_websocket(self): ...
-def wait_for_completion(self, prompt_id):
-    ws_connected = self.connect_websocket()
-    if ws_connected and self.ws:
-        message = self.ws.recv()
-        # ... WebSocket 메시지 처리 ...
-
-# ✅ 현재 (순수 HTTP 폴링)
-import uuid
-import requests
-def wait_for_completion(self, prompt_id):
-    """워크플로우 완료 대기 (순수 HTTP 폴링)"""
-    while time.time() - start_time < timeout:
-        # 0.5초마다 HTTP GET 요청으로 상태 확인
-        response = requests.get(f"{self.server_url}/history/{prompt_id}")
-        if response.status_code == 200:
-            history = response.json()
-            if status.get('status_str') == 'success':
-                return True
-        time.sleep(0.1)
-```
-
-**2. APIService에서 progress_callback을 Main Thread로 Defer** ([api_service.py:936](api_service.py#L936)):
-```python
-# ❌ 이전 (Background thread에서 직접 UI 접근)
-def progress_callback(current: int, total: int):
-    message = f"ComfyUI 생성 : {progress_percent}%..."
-    self.app_context.main_window.status_bar.showMessage(message)  # ❌ 크래시!
-
-# ✅ 현재 (Main thread로 defer)
-def progress_callback(current: int, total: int):
-    message = f"ComfyUI 생성 : {progress_percent}%..."
-    from PyQt6.QtCore import QTimer
-    QTimer.singleShot(0, lambda msg=message:
-        self.app_context.main_window.status_bar.showMessage(msg))  # ✅ 안전!
-```
-
-**3. 이벤트 구독자에서도 Main Thread로 Defer** ([ui/interactive_window.py:1510-1542](ui/interactive_window.py#L1510)):
-```python
-def _on_generation_progress(self, progress_data):
-    percent = progress_data.get("percent", 0)
-    # ✅ Main thread로 defer
-    QTimer.singleShot(0, lambda: self._update_progress_ui_safe(percent))
-
-def _update_progress_ui_safe(self, percent):
-    # 안전 - Main thread에서 실행됨
-    self.main_prompt_block.btn_generate.setText(f"🔄 생성 중... {percent}%")
-```
-
-**핵심 원칙**:
-- ✅ **Background thread에서 Qt 객체 접근 금지**
-- ✅ **UI 업데이트는 반드시 `QTimer.singleShot(0, lambda: ...)` 패턴 사용**
-- ✅ **WebSocket 같은 복잡한 비동기 라이브러리는 HTTP 폴링으로 대체**
-- ✅ **진행률 콜백은 데이터 준비만 하고, UI 업데이트는 main thread에서**
-
-**추가 참고**:
-- [generation_controller.py:14-55](generation_controller.py#L14) - QTimer 제거
-- [wildcard_status_module.py:151-180](wildcard_status_module.py#L151) - Thread-safe UI 업데이트
-- [hooker_view.py:965-986](hooker_view.py#L965) - 타이머 cleanup 패턴
-
----
-
-## 체크리스트
-
-### 새 컨트롤러 추가 시
-
-```
-[ ] AppContext 주입받음
-[ ] 필요한 시그널 정의
-[ ] 리소스 정리 메서드 구현 (cleanup 등)
-[ ] 메모리 누수 확인 (QThread deleteLater)
-[ ] 에러 처리 및 시그널 발행
-[ ] 문서화 (CLAUDE.md 업데이트)
-```
-
-### API 호출 추가/수정 시
-
-```
-[ ] 재시도 로직 포함 (최소 3회)
-[ ] 타임아웃 설정
-[ ] 에러 메시지 명확히
-[ ] HTTP 스레드 정리 (_cleanup_http_threads)
-[ ] 결과 딕셔너리에 'status' 포함
-[ ] API 키/토큰 하드코딩 금지 (SecureTokenManager 사용)
-```
-
-### 파이프라인 수정 시
-
-```
-[ ] 기존 훅 포인트 순서 유지
-[ ] 새 훅 포인트는 명확한 위치에 삽입
-[ ] 모든 훅에서 context 반환 확인
-[ ] 부작용 최소화 (context만 수정)
-[ ] 최상위 CLAUDE.md 업데이트
-[ ] 예제 추가
-```
-
-### 이벤트 추가 시
-
-```
-[ ] 이벤트 이름 명확히 (snake_case)
-[ ] 데이터 구조 문서화
-[ ] 발행 위치 명확히
-[ ] 예제 코드 작성
-[ ] 최상위 CLAUDE.md의 이벤트 목록에 추가
-```
-
----
-
-## 참고 자료
-
-### 관련 문서
-
-- **[최상위 CLAUDE.md](../CLAUDE.md)**: 전체 프로젝트 개요 및 빠른 시작
-- **[AGENTS.md](../AGENTS.md)**: AI 협업을 위한 상세 기술 레퍼런스
-- **[modules/CLAUDE.md](../modules/CLAUDE.md)**: 모듈 개발 가이드
-- **[tabs/CLAUDE.md](../tabs/CLAUDE.md)**: 탭 개발 가이드
-- **[interfaces/CLAUDE.md](../interfaces/CLAUDE.md)**: 계약 정의
-
-### 주요 의존성
-
-**core/가 의존하는 디렉터리**:
-- `interfaces/` - BaseMiddleModule, BaseTabModule, ModeAwareModule
-- `ui/` - collapsible, detached_window, theme, scaling_manager
-- `utils/` - token_calculator, image_info
-- `data/` - KR_tags.parquet, 딕셔너리 파일들
-
-**core/를 의존하는 디렉터리**:
-- `modules/` - AppContext, 컨트롤러 접근
-- `tabs/` - AppContext, 컨트롤러 접근
-- `NAIA_cold_v4.py` - 메인 진입점
-
-### 예제 코드 위치
-
-| 예제 | 파일 | 라인 |
-|------|------|------|
-| **AppContext 초기화** | `NAIA_cold_v4.py` | 200-250 |
-| **이벤트 구독** | `modules/character_module.py` | 50-70 |
-| **파이프라인 훅** | `modules/conditional_prompt_module.py` | 100-150 |
-| **QThread 워커** | `core/generation_controller.py` | 55-111 |
-| **API 호출** | `core/api_service.py` | 69-155 |
-| **ImageCrudController 사용** | `tabs/image_window.py` | 2272-2307 |
-| **카운터 이벤트 구독** | `tabs/setting_tabs.py` | 129-136, 588-618 |
-
-### 디버깅 팁
-
-1. **이벤트 추적**:
-```python
-# AppContext에 로깅 추가
-original_publish = app_context.publish
-def debug_publish(event_name, *args, **kwargs):
-    print(f"[EVENT] {event_name}: {args}, {kwargs}")
-    return original_publish(event_name, *args, **kwargs)
-app_context.publish = debug_publish
-```
-
-2. **훅 실행 추적**:
-```python
-# PromptProcessor에 로깅 추가
-def execute_pipeline_hook(self, context):
-    print(f"[HOOK] {self.get_title()} 실행 시작")
-    # ... 로직 ...
-    print(f"[HOOK] {self.get_title()} 실행 완료")
-    return context
-```
-
-3. **메모리 누수 확인**:
-```python
-import threading
-print(f"활성 스레드 수: {threading.active_count()}")
-print(f"스레드 목록: {[t.name for t in threading.enumerate()]}")
-```
-
----
-
-## 요약
-
-**core/의 핵심**:
-- ✅ **AppContext**가 모든 것의 중심
-- ✅ **컨트롤러**가 생명주기 관리
-  - 🆕 **MiddleSectionController**: 모듈 상태 추적, 아코디언 동작, 자동 스크롤
-- ✅ **이벤트 버스**로 느슨한 결합
-- ✅ **파이프라인 훅**으로 확장성 제공
-- ✅ **스레드 정리** 필수
-- 🆕 **상태 영속성**: 모듈 펼침/접힘 상태, 스크롤 위치 자동 저장
-
-**다음 단계**:
-1. [modules/CLAUDE.md](../modules/CLAUDE.md)에서 모듈 개발 학습
-2. [tabs/CLAUDE.md](../tabs/CLAUDE.md)에서 탭 개발 학습
-3. 실제 코드 예제 분석
-
-**막힐 때**:
-- AppContext 사용법 → 이 문서의 [AppContext 섹션](#appcontext-중앙-상태-관리자)
-- 파이프라인 훅 → 이 문서의 [프롬프트 파이프라인 섹션](#프롬프트-파이프라인)
-- 문제 해결 → 이 문서의 [문제 해결 섹션](#문제-해결)
-
----
-
-*문서 버전: 1.7*
-*최종 업데이트: 2025-01-18*
-*담당 영역: core/ 디렉터리*
-
-**변경사항**: [상세 변경 로그](.claude/CHANGELOG_CLAUDE.md) 참조
+1. `initialize_with_context()`에서 구독했는지 확인
+2. 이벤트 이름 대소문자 정확히 일치
+3. 콜백 시그니처: 인자 1개 (`data: dict`)

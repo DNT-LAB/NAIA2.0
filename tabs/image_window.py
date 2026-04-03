@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Any
@@ -9,14 +10,14 @@ import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
     QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox, QApplication,
-    QSpinBox, QRadioButton, QButtonGroup, QFrame
+    QSpinBox, QRadioButton, QButtonGroup, QFrame, QSlider
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeData, QUrl
 from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent, QDragEnterEvent, QDropEvent, QCursor
 from PyQt6.QtWidgets import QWidgetAction
 from PIL import Image, ImageQt
 from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from interfaces.base_tab_module import BaseTabModule
 from ui.img2img_popup import Img2ImgPopup
 from ui.metadata_viewer import MetadataViewerWindow
@@ -116,6 +117,168 @@ class AllImagesDownloader(QObject):
                 self.progress_updated.emit(i + 1, total_items, f"[오류] {e}")
 
         self.finished.emit(saved_count)
+
+
+class EnhanceSettingsDialog(QDialog):
+    """Enhance 설정 다이얼로그 — Upscale Amount, Strength, Magnitude 프리셋"""
+
+    def __init__(self, current_upscale: float, current_strength: float, current_noise: float = 0.0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Enhance Settings")
+        self.setModal(True)
+        self.setFixedWidth(get_scaled_size(340))
+
+        self._upscale = current_upscale
+        self._strength = current_strength
+        self._noise = current_noise
+
+        self._build_ui()
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {DARK_COLORS['bg_primary']};
+                color: {DARK_COLORS['text_primary']};
+            }}
+        """)
+
+    # ── UI 구성 ──────────────────────────────────────────────
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(get_scaled_size(10))
+
+        label_style = f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(13)}px; font-weight: bold;"
+
+        # ── Upscale Amount ──
+        layout.addWidget(self._make_label("Upscale Amount", label_style))
+
+        upscale_row = QHBoxLayout()
+        self._btn_1x = QPushButton("1x")
+        self._btn_15x = QPushButton("1.5x")
+        for btn, val in [(self._btn_1x, 1.0), (self._btn_15x, 1.5)]:
+            btn.setCheckable(True)
+            btn.setChecked(self._upscale == val)
+            btn.clicked.connect(lambda checked, v=val: self._set_upscale(v))
+            btn.setStyleSheet(self._toggle_style(self._upscale == val))
+            upscale_row.addWidget(btn)
+        layout.addLayout(upscale_row)
+
+        # ── Strength ──
+        strength_header = QHBoxLayout()
+        strength_header.addWidget(self._make_label("Strength", label_style))
+        self._strength_value_label = QLabel(f"{self._strength:.1f}")
+        self._strength_value_label.setStyleSheet(f"color: {DARK_COLORS['accent_purple_light']}; font-size: {get_scaled_font_size(13)}px; font-weight: bold;")
+        self._strength_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        strength_header.addWidget(self._strength_value_label)
+        layout.addLayout(strength_header)
+
+        self._strength_slider = QSlider(Qt.Orientation.Horizontal)
+        self._strength_slider.setRange(1, 9)
+        self._strength_slider.setValue(int(self._strength * 10))
+        self._strength_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._strength_slider.setTickInterval(1)
+        self._strength_slider.setStyleSheet(DARK_STYLES.get('compact_slider', ''))
+        self._strength_slider.valueChanged.connect(self._on_slider_changed)
+        layout.addWidget(self._strength_slider)
+
+        # ── Magnitude Presets ──
+        layout.addWidget(self._make_label("Magnitude Presets", label_style))
+
+        mag_row = QHBoxLayout()
+        presets = [(1, 0.2, 0.0), (2, 0.3, 0.0), (3, 0.4, 0.0), (4, 0.5, 0.0), (5, 0.7, 0.1)]
+        for num, strength, noise in presets:
+            btn = QPushButton(str(num))
+            btn.setFixedSize(get_scaled_size(42), get_scaled_size(32))
+            btn.setStyleSheet(self._magnitude_style())
+            btn.clicked.connect(lambda checked, s=strength, n=noise: self._apply_preset(s, n))
+            mag_row.addWidget(btn)
+        layout.addLayout(mag_row)
+
+        # ── OK / Cancel ──
+        btn_row = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_purple']};
+                color: white; border: none; border-radius: 4px;
+                padding: {get_scaled_size(6)}px {get_scaled_size(16)}px;
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['accent_purple_hover']}; }}
+        """)
+        ok_btn.clicked.connect(self.accept)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        cancel_btn.clicked.connect(self.reject)
+
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+    # ── 헬퍼 ────────────────────────────────────────────────
+    @staticmethod
+    def _make_label(text: str, style: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(style)
+        return lbl
+
+    def _toggle_style(self, selected: bool) -> str:
+        if selected:
+            return f"""
+                QPushButton {{
+                    background-color: {DARK_COLORS['accent_purple']};
+                    color: white; border: none; border-radius: 4px;
+                    padding: {get_scaled_size(6)}px {get_scaled_size(14)}px;
+                    font-size: {get_scaled_font_size(13)}px; font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: {DARK_COLORS['accent_purple_hover']}; }}
+            """
+        return f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_secondary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px; padding: {get_scaled_size(6)}px {get_scaled_size(14)}px;
+                font-size: {get_scaled_font_size(13)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; }}
+        """
+
+    @staticmethod
+    def _magnitude_style() -> str:
+        return f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px; font-size: {get_scaled_font_size(13)}px; font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_purple']};
+                color: white; border: 1px solid {DARK_COLORS['accent_purple']};
+            }}
+        """
+
+    # ── 슬롯 ────────────────────────────────────────────────
+    def _set_upscale(self, value: float):
+        self._upscale = value
+        self._btn_1x.setChecked(value == 1.0)
+        self._btn_15x.setChecked(value == 1.5)
+        self._btn_1x.setStyleSheet(self._toggle_style(value == 1.0))
+        self._btn_15x.setStyleSheet(self._toggle_style(value == 1.5))
+
+    def _on_slider_changed(self, val: int):
+        self._strength = val / 10.0
+        self._strength_value_label.setText(f"{self._strength:.1f}")
+
+    def _apply_preset(self, strength: float, noise: float = 0.0):
+        self._strength = strength
+        self._noise = noise
+        self._strength_slider.setValue(int(strength * 10))
+
+    # ── 결과 ────────────────────────────────────────────────
+    def get_settings(self) -> tuple:
+        """(upscale, strength, noise) 튜플 반환"""
+        return self._upscale, self._strength, self._noise
+
 
 # --- 1. ImageLabel 클래스: 오직 이미지 표시와 리사이징만 담당 ---
 class ImageLabel(QLabel):
@@ -510,22 +673,33 @@ class HistoryItemWidget(QWidget):
         reroll_action.triggered.connect(self.emit_reroll_prompt)
         menu.addAction(reroll_action)
 
-        # 🆕 큐 추가 메뉴
+        # 🆕 큐 추가 서브메뉴
         menu.addSeparator()
+        has_gen_params = hasattr(self.history_item, 'generation_params') and self.history_item.generation_params
 
-        enqueue_front_action = QAction("⬆️ 큐 앞에 추가", self)
-        enqueue_front_action.triggered.connect(self.enqueue_to_front)
-        # generation_params가 있는 경우에만 활성화
-        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
-            enqueue_front_action.setEnabled(False)
-        menu.addAction(enqueue_front_action)
+        enqueue_front_menu = QMenu("⬆️ 큐 앞에 추가", self)
+        enqueue_front_menu.setStyleSheet(menu_style)
+        front_original = QAction("원본 프롬프트 유지", self)
+        front_original.triggered.connect(lambda: self._enqueue_history_item(priority=100, use_current_ui=False))
+        front_current = QAction("현재 UI 프롬프트 반영", self)
+        front_current.triggered.connect(lambda: self._enqueue_history_item(priority=100, use_current_ui=True))
+        enqueue_front_menu.addAction(front_original)
+        enqueue_front_menu.addAction(front_current)
+        if not has_gen_params:
+            enqueue_front_menu.setEnabled(False)
+        menu.addMenu(enqueue_front_menu)
 
-        enqueue_back_action = QAction("⬇️ 큐 뒤에 추가", self)
-        enqueue_back_action.triggered.connect(self.enqueue_to_back)
-        # generation_params가 있는 경우에만 활성화
-        if not (hasattr(self.history_item, 'generation_params') and self.history_item.generation_params):
-            enqueue_back_action.setEnabled(False)
-        menu.addAction(enqueue_back_action)
+        enqueue_back_menu = QMenu("⬇️ 큐 뒤에 추가", self)
+        enqueue_back_menu.setStyleSheet(menu_style)
+        back_original = QAction("원본 프롬프트 유지", self)
+        back_original.triggered.connect(lambda: self._enqueue_history_item(priority=0, use_current_ui=False))
+        back_current = QAction("현재 UI 프롬프트 반영", self)
+        back_current.triggered.connect(lambda: self._enqueue_history_item(priority=0, use_current_ui=True))
+        enqueue_back_menu.addAction(back_original)
+        enqueue_back_menu.addAction(back_current)
+        if not has_gen_params:
+            enqueue_back_menu.setEnabled(False)
+        menu.addMenu(enqueue_back_menu)
 
         # 🆕 메타데이터 복원 메뉴 추가
         menu.addSeparator()
@@ -604,55 +778,70 @@ class HistoryItemWidget(QWidget):
         """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
         self.save_to_remote_event_requested.emit(self.history_item)
 
-    def enqueue_to_front(self):
-        """🆕 히스토리 아이템을 큐 앞에 추가 (우선순위 100)"""
-        self._enqueue_history_item(priority=100)
+    def _enqueue_history_item(self, priority: int = 0, use_current_ui: bool = False):
+        """히스토리 아이템을 생성 큐에 추가
 
-    def enqueue_to_back(self):
-        """🆕 히스토리 아이템을 큐 뒤에 추가 (우선순위 0)"""
-        self._enqueue_history_item(priority=0)
-
-    def _enqueue_history_item(self, priority: int = 0):
-        """🆕 히스토리 아이템을 생성 큐에 추가"""
+        Args:
+            priority: 0=일반(뒤), 100=긴급(앞)
+            use_current_ui: True면 현재 UI의 프롬프트/캐릭터 반영, False면 원본 유지
+        """
         try:
             if not self.app_context:
-                # print("❌ AppContext가 없습니다.")
                 return
 
-            # GenerationRequest 클래스 import
             from core.generation_request import GenerationRequest
+            import random
+            import pandas as pd
 
-            # 생성 파라미터 복사
-            params = self.history_item.generation_params.copy()
-
-            # [2] 랜덤 해상도 체크 - 직접 해상도 덮어쓰기
             main_window = self.app_context.main_window
+
+            if use_current_ui:
+                # 현재 UI 상태로 파라미터 수집 (해상도/모델 등은 원본 유지, 프롬프트/캐릭터만 갱신)
+                params = self.history_item.generation_params.copy()
+                current_params = main_window.get_main_parameters()
+                params['input'] = current_params.get('input', params.get('input', ''))
+                params['negative_prompt'] = current_params.get('negative_prompt', params.get('negative_prompt', ''))
+                # 캐릭터: 현재 UI 모듈에서 가져오기
+                char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                    char_params = char_module.get_parameters()
+                    if char_params and char_params.get("characters"):
+                        params['characters'] = char_params['characters']
+                        params['uc'] = char_params['uc']
+                        params['character_positions'] = char_params.get('character_positions', [])
+                    else:
+                        params.pop('characters', None)
+                        params.pop('uc', None)
+                        params.pop('character_positions', None)
+                else:
+                    params.pop('characters', None)
+                    params.pop('uc', None)
+                    params.pop('character_positions', None)
+                mode_label = "현재 UI"
+            else:
+                # 원본 파라미터 그대로 사용
+                params = self.history_item.generation_params.copy()
+                mode_label = "원본"
+
+            # 랜덤 해상도 체크
             if hasattr(main_window, 'random_resolution_checkbox') and main_window.random_resolution_checkbox:
                 if main_window.random_resolution_checkbox.isChecked():
-                    # 무작위 해상도 선택
-                    import random
                     random_index = random.randint(0, main_window.resolution_combo.count() - 1)
                     selected_value = main_window.resolution_combo.itemText(random_index)
                     width, height = map(int, selected_value.split(' x '))
                     params['width'] = width
                     params['height'] = height
-                    # print(f"✅ 랜덤 해상도 적용: {width}x{height}")
 
-            # [3] 시드 고정 체크 (체크되어 있지 않으면 무작위 시드 생성)
+            # 시드 고정 체크 (체크되어 있지 않으면 무작위 시드 생성)
             if hasattr(main_window, 'seed_fix_checkbox') and main_window.seed_fix_checkbox:
                 if not main_window.seed_fix_checkbox.isChecked():
-                    # 무작위 시드 생성 (0 ~ 9999999999 범위)
-                    import random
                     random_seed = random.randint(0, 9999999999)
                     params['seed'] = random_seed
                     params['extra_noise_seed'] = random_seed
-                    # print(f"✅ 무작위 시드 적용: {random_seed}")
 
             # source_row 가져오기 (없으면 빈 Series)
-            import pandas as pd
             source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') and self.history_item.source_row is not None else pd.Series()
 
-            # GenerationRequest 생성
             request = GenerationRequest(
                 params=params,
                 source_row=source_row,
@@ -660,27 +849,21 @@ class HistoryItemWidget(QWidget):
                 max_retries=0
             )
 
-            # 큐 매니저 가져오기
             queue_manager = self.app_context.generation_queue_manager
+            position_label = "앞" if priority > 0 else "뒤"
 
-            # 우선순위에 따라 큐에 추가
             if priority > 0:
-                request_id = queue_manager.enqueue_with_priority(request)
-                queue_size = queue_manager.get_queue_size()
-                # print(f"✅ 큐 앞에 추가됨: {request_id[:8]}... (우선순위: {priority}, 큐 크기: {queue_size})")
-                if hasattr(main_window, 'status_bar'):
-                    main_window.status_bar.showMessage(f"✅ 큐 앞에 추가됨 (대기 중: {queue_size})", 3000)
+                queue_manager.enqueue_with_priority(request)
             else:
-                request_id = queue_manager.enqueue_request(request)
-                queue_size = queue_manager.get_queue_size()
-                # print(f"✅ 큐 뒤에 추가됨: {request_id[:8]}... (큐 크기: {queue_size})")
-                if hasattr(main_window, 'status_bar'):
-                    main_window.status_bar.showMessage(f"✅ 큐 뒤에 추가됨 (대기 중: {queue_size})", 3000)
+                queue_manager.enqueue_request(request)
+
+            queue_size = queue_manager.get_queue_size()
+            if hasattr(main_window, 'status_bar'):
+                main_window.status_bar.showMessage(
+                    f"✅ 큐 {position_label}에 추가됨 [{mode_label}] (대기 중: {queue_size})", 3000
+                )
 
         except Exception as e:
-            # print(f"❌ 큐 추가 실패: {e}")
-            # import traceback
-            # traceback.print_exc()
             pass
 
     def show_comfyui_workflow(self):
@@ -862,36 +1045,38 @@ class HistoryItemWidget(QWidget):
             app_context = parent_widget.app_context
         
         # 현재 이미지를 QPixmap으로 변환
+        history_raw_bytes = self.history_item.raw_bytes
         pil_img = self.history_item.image
         buf = io.BytesIO()
         pil_img.save(buf, format='PNG')
         buf.seek(0)
         current_pixmap = QPixmap()
         current_pixmap.loadFromData(buf.getvalue())
-        
+
         # 진행 상황 다이얼로그 생성
         progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
         progress.setWindowTitle("NAI 업스케일")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setCancelButton(None)
         progress.show()
-        
+
         # Worker 클래스 정의 (메서드 내부에 정의)
         class UpscaleWorker(QObject):
             finished = pyqtSignal(dict)
-            
-            def __init__(self, api_service, pixmap):
+
+            def __init__(self, api_service, pixmap, raw_bytes=None):
                 super().__init__()
                 self.api_service = api_service
                 self.pixmap = pixmap
-            
+                self.raw_bytes = raw_bytes
+
             def run(self):
-                result = self.api_service.upscale_NAI(self.pixmap)
+                result = self.api_service.upscale_NAI(self.pixmap, raw_bytes=self.raw_bytes)
                 self.finished.emit(result)
-        
+
         # Worker 스레드 설정
         self.upscale_thread = QThread()
-        self.upscale_worker = UpscaleWorker(app_context.api_service, current_pixmap)
+        self.upscale_worker = UpscaleWorker(app_context.api_service, current_pixmap, history_raw_bytes)
         self.upscale_worker.moveToThread(self.upscale_thread)
         
         # 시그널 연결
@@ -1243,6 +1428,9 @@ class ImageWindow(QWidget):
     instant_generation_requested = pyqtSignal(object)
     load_prompt_to_main_ui = pyqtSignal(str)
     send_to_inpaint_requested = pyqtSignal(object)
+    send_to_img2img_requested = pyqtSignal(object)
+    instant_outpaint_requested = pyqtSignal(object)
+    send_to_outpaint_requested = pyqtSignal(object)
     save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, app_context, parent=None):
@@ -1262,6 +1450,11 @@ class ImageWindow(QWidget):
         self.current_history_item = None
         # 🆕 ComfyUI 워크플로우 캐시
         self.comfyui_workflow_cache: Dict[int, Dict] = {}
+
+        # Enhance 설정
+        self._enhance_upscale = 1.5    # 1.0 or 1.5
+        self._enhance_strength = 0.2   # 0.1 ~ 0.9
+        self._enhance_noise = 0.0      # 0.0 ~ 0.1
 
         self.init_ui()
         self.load_settings()
@@ -1363,6 +1556,23 @@ class ImageWindow(QWidget):
         self.open_folder_button.clicked.connect(self.open_folder)
         control_layout.addWidget(self.open_folder_button)
 
+        self.viewer_button = QPushButton("뷰어")
+        self.viewer_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_blue']};
+                color: white;
+                border: none;
+                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
+                font-size: {get_scaled_font_size(18)}px;
+                border-radius: {get_scaled_size(4)}px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_COLORS['accent_blue_hover']};
+            }}
+        """)
+        self.viewer_button.clicked.connect(self._open_image_viewer)
+        control_layout.addWidget(self.viewer_button)
+
         left_layout.addLayout(control_layout)
 
         # 수직 스플리터 생성
@@ -1403,6 +1613,11 @@ class ImageWindow(QWidget):
         info_panel_layout.setContentsMargins(0, 4, 0, 0)
         info_panel_layout.setSpacing(4)
         
+        # ── 생성 정보 타이틀 + Enhance 버튼 (한 줄) ──
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(get_scaled_size(4))
+
         info_title = QLabel("📝 생성 정보")
         info_title.setStyleSheet(f"""
             QLabel {{
@@ -1412,8 +1627,44 @@ class ImageWindow(QWidget):
                 padding: 2px 4px;
             }}
         """)
-        info_panel_layout.addWidget(info_title)
-        
+        title_row.addWidget(info_title)
+        title_row.addStretch()
+
+        btn_h = get_scaled_size(24)
+        self.enhance_button = QPushButton(f"✨Enhance x{self._enhance_upscale:g} | {self._enhance_strength:.1f}")
+        self.enhance_button.setFixedHeight(btn_h)
+        self.enhance_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['accent_purple']};
+                color: white; border: none; border-radius: {get_scaled_size(3)}px;
+                padding: 0px {get_scaled_size(8)}px;
+                font-size: {get_scaled_font_size(11)}px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['accent_purple_hover']}; }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+        self.enhance_button.setEnabled(False)
+        self.enhance_button.clicked.connect(self._execute_enhance)
+
+        self.enhance_settings_button = QPushButton("⚙️")
+        self.enhance_settings_button.setFixedSize(btn_h, btn_h)
+        self.enhance_settings_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px; font-size: {get_scaled_font_size(11)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; }}
+        """)
+        self.enhance_settings_button.clicked.connect(self._show_enhance_settings)
+
+        title_row.addWidget(self.enhance_button)
+        title_row.addWidget(self.enhance_settings_button)
+        info_panel_layout.addLayout(title_row)
+
         self.info_textbox = QTextEdit()
         self.info_textbox.setReadOnly(True)
         self.info_textbox.setStyleSheet(DARK_STYLES['compact_textedit'])
@@ -1424,7 +1675,7 @@ class ImageWindow(QWidget):
         image_info_splitter.addWidget(self.main_image_label)
         image_info_splitter.addWidget(self.info_panel)
         image_info_splitter.setStretchFactor(0, 50)
-        image_info_splitter.setStretchFactor(1, 1)
+        image_info_splitter.setStretchFactor(1, 3)
         
         # 왼쪽 패널 레이아웃에 수직 스플리터 추가
         left_layout.addWidget(image_info_splitter)
@@ -1462,11 +1713,18 @@ class ImageWindow(QWidget):
         self.main_image_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_image_label.customContextMenuRequested.connect(self.show_main_image_context_menu)
 
+        # Enhance 버튼 상태 — 모드 변경 시 업데이트
+        if self.app_context:
+            self.app_context.subscribe("api_mode_changed", lambda _: self._update_enhance_button_state())
+
     def save_settings(self):
         """체크박스 설정을 JSON 파일에 저장합니다."""
         settings = {
             "auto_save": self.auto_save_checkbox.isChecked(),
-            "save_as_webp": self.save_as_webp_checkbox.isChecked()
+            "save_as_webp": self.save_as_webp_checkbox.isChecked(),
+            "enhance_upscale": self._enhance_upscale,
+            "enhance_strength": self._enhance_strength,
+            "enhance_noise": self._enhance_noise,
         }
         
         settings_path = Path("save/image_window.json")
@@ -1493,9 +1751,15 @@ class ImageWindow(QWidget):
                 
                 self.auto_save_checkbox.setChecked(settings.get("auto_save", False))
                 self.save_as_webp_checkbox.setChecked(settings.get("save_as_webp", False))
-                
+
                 self.auto_save_checkbox.blockSignals(False)
                 self.save_as_webp_checkbox.blockSignals(False)
+
+                # Enhance 설정 복원
+                self._enhance_upscale = settings.get("enhance_upscale", 1.5)
+                self._enhance_strength = settings.get("enhance_strength", 0.2)
+                self._enhance_noise = settings.get("enhance_noise", 0.0)
+                self._update_enhance_button_text()
                 
             except Exception as e:
                 print(f"Failed to load image_window settings: {e}")
@@ -1600,14 +1864,33 @@ class ImageWindow(QWidget):
         menu.addAction(upscale_action)
 
         menu.addSeparator()
-        send_to_inpaint_action = QAction("🎨 Send to Inpaint", self)
-        send_to_inpaint_action.triggered.connect(self._emit_send_to_inpaint)
-        menu.addAction(send_to_inpaint_action)
+        nai_inpaint_menu = QMenu("🎨 NAI 인페인트 메뉴", menu)
+        nai_inpaint_menu.setStyleSheet(menu.styleSheet())
+
+        send_img2img = QAction("Send to img2img", nai_inpaint_menu)
+        send_img2img.triggered.connect(self._emit_send_to_img2img)
+        nai_inpaint_menu.addAction(send_img2img)
+
+        send_inpaint = QAction("Send to Inpaint", nai_inpaint_menu)
+        send_inpaint.triggered.connect(self._emit_send_to_inpaint)
+        nai_inpaint_menu.addAction(send_inpaint)
+
+        nai_inpaint_menu.addSeparator()
+
+        instant_outpaint = QAction("Instant Outpaint Request", nai_inpaint_menu)
+        instant_outpaint.triggered.connect(self._emit_instant_outpaint)
+        nai_inpaint_menu.addAction(instant_outpaint)
+
+        send_outpaint = QAction("Send to Outpainting", nai_inpaint_menu)
+        send_outpaint.triggered.connect(self._emit_send_to_outpaint)
+        nai_inpaint_menu.addAction(send_outpaint)
+
+        menu.addMenu(nai_inpaint_menu)
         
         # Add Send to Sketchbook action
         send_to_sketchbook_action = QAction("🖌️ Send to Sketchbook (NAI)", self)
         send_to_sketchbook_action.triggered.connect(self._send_to_sketchbook)
-        menu.addAction(send_to_sketchbook_action)
+        # menu.addAction(send_to_sketchbook_action)
         
         # Add Send to Character Reference action
         send_to_character_ref_action = QAction("📸 Send to Character Reference", self)
@@ -1630,10 +1913,25 @@ class ImageWindow(QWidget):
         # 기존의 save_current_image 메소드를 호출
         self.save_current_image()
     
+    def _emit_send_to_img2img(self):
+        """'Send to img2img' 요청 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.send_to_img2img_requested.emit(self.current_history_item)
+
     def _emit_send_to_inpaint(self):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
+
+    def _emit_instant_outpaint(self):
+        """'Instant Outpaint Request' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.instant_outpaint_requested.emit(self.current_history_item)
+
+    def _emit_send_to_outpaint(self):
+        """'Send to Outpainting' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.send_to_outpaint_requested.emit(self.current_history_item)
 
     def _emit_save_to_remote_event(self):
         """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
@@ -1683,13 +1981,31 @@ class ImageWindow(QWidget):
         popup = Img2ImgPopup(pil_image=pil_image, app_context=self.app_context, parent=main_window)
         
         # 팝업의 신호를 메인 윈도우의 슬롯에 연결
+        # history_item이 있으면 캐릭터 프롬프트 등 컨텍스트를 함께 전달
+        history_item = self.current_history_item if hasattr(self, 'current_history_item') else None
         if hasattr(main_window, 'activate_img2img_panel'):
-            popup.img2img_requested.connect(main_window.activate_img2img_panel)
+            if history_item and hasattr(main_window, 'img2img_window_manager'):
+                popup.img2img_requested.connect(
+                    lambda img, hi=history_item: main_window.img2img_window_manager.create_window(
+                        img, mode='img2img', history_item=hi
+                    )
+                )
+            else:
+                popup.img2img_requested.connect(main_window.activate_img2img_panel)
         if hasattr(main_window, 'activate_inpaint_mode'):
-            popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
+            if history_item and hasattr(main_window, 'img2img_window_manager'):
+                popup.inpaint_requested.connect(
+                    lambda img, hi=history_item: self._open_inpaint_with_history(
+                        main_window, img, hi
+                    )
+                )
+            else:
+                popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
-        
+        if hasattr(main_window, 'on_tag_interrogation_requested'):
+            popup.tag_interrogation_requested.connect(main_window.on_tag_interrogation_requested)
+
         # 팝업 위치 조정 및 실행
         cursor_pos = QCursor.pos()
         popup_rect = popup.geometry()
@@ -1707,6 +2023,20 @@ class ImageWindow(QWidget):
         popup.move(new_x, new_y)
         popup.exec()
     
+    def _open_inpaint_with_history(self, main_window, pil_image, history_item):
+        """history_item의 캐릭터 프롬프트를 유지하며 Inpaint 윈도우를 엽니다."""
+        from ui.inpaint_window import InpaintWindow
+        result = InpaintWindow.get_inpaint_data(pil_image, None, main_window)
+        if result:
+            mask_data = {
+                'full_mask_image': result.get('full_mask_image'),
+                'small_mask_image': result.get('small_mask_image'),
+            }
+            main_window.img2img_window_manager.create_window(
+                pil_image, mode='inpaint', mask_data=mask_data,
+                history_item=history_item
+            )
+
     def _send_to_sketchbook(self):
         """Send current image to Sketchbook with prompts for inpaint mode."""
         if not self.current_history_item:
@@ -2417,6 +2747,7 @@ class ImageWindow(QWidget):
         self.current_history_item = item # 현재 아이템 추적
         self.update_image(item.image)
         self.update_info(item.info_text) # 저장된 생성 정보로 업데이트
+        self._update_enhance_button_state()
 
     def _create_classification_info(self, item: HistoryItem) -> dict:
         """
@@ -2548,6 +2879,26 @@ class ImageWindow(QWidget):
         elif os.name == 'posix':
             subprocess.run(['xdg-open', folder])
 
+    def _open_image_viewer(self):
+        """NAIA 전체화면 이미지 뷰어 열기"""
+        from ui.image_viewer_window import NAIAImageViewer
+
+        if not hasattr(self, '_naia_viewer') or self._naia_viewer is None:
+            self._naia_viewer = NAIAImageViewer(self.app_context)
+            self._naia_viewer.closed.connect(self._on_viewer_closed)
+
+        # 현재 표시 중인 이미지 파일이 있으면 해당 파일부터 시작
+        start_file = None
+        if hasattr(self, 'current_history_item') and self.current_history_item:
+            if hasattr(self.current_history_item, 'filepath') and self.current_history_item.filepath:
+                start_file = self.current_history_item.filepath
+
+        self._naia_viewer.open_viewer(start_file=start_file)
+
+    def _on_viewer_closed(self):
+        """뷰어 닫힘 처리"""
+        pass
+
     def copy_image_to_clipboard(self, fmt='PNG'):
         from PyQt6.QtWidgets import QApplication
         import io
@@ -2607,6 +2958,155 @@ class ImageWindow(QWidget):
         
         msg.exec()
     
+    # ═══════════════════════════════════════════════════════════
+    #  Enhance (img2img 고해상도 보강)
+    # ═══════════════════════════════════════════════════════════
+
+    def _update_enhance_button_text(self):
+        """Enhance 버튼 라벨을 현재 설정에 맞게 갱신"""
+        if hasattr(self, 'enhance_button'):
+            self.enhance_button.setText(
+                f"✨Enhance x{self._enhance_upscale:g} | {self._enhance_strength:.1f}"
+            )
+
+    def _update_enhance_button_state(self):
+        """조건에 따라 Enhance 버튼 활성/비활성"""
+        if not hasattr(self, 'enhance_button'):
+            return
+        enabled = (
+            self.current_history_item is not None
+            and self.current_history_item.image is not None
+            and getattr(self.app_context, 'current_api_mode', '') == 'NAI'
+            and bool(getattr(self.current_history_item, 'generation_params', None))
+        )
+        self.enhance_button.setEnabled(enabled)
+
+    @staticmethod
+    def _round_to_64(value: float) -> int:
+        return math.ceil(value / 64) * 64
+
+    def _show_enhance_settings(self):
+        """Enhance 설정 다이얼로그 열기"""
+        dialog = EnhanceSettingsDialog(self._enhance_upscale, self._enhance_strength, self._enhance_noise, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._enhance_upscale, self._enhance_strength, self._enhance_noise = dialog.get_settings()
+            self._update_enhance_button_text()
+            self.save_settings()
+
+    def _execute_enhance(self):
+        """Enhance 실행 — img2img API 호출"""
+        from PyQt6.QtWidgets import QProgressDialog
+        import io, copy
+
+        item = self.current_history_item
+        if not item or not item.image:
+            self._show_styled_message_main("오류", "Enhance 할 이미지가 없습니다.", 'warning')
+            return
+        if getattr(self.app_context, 'current_api_mode', '') != 'NAI':
+            self._show_styled_message_main("오류", "Enhance는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
+            return
+        if not getattr(item, 'generation_params', None):
+            self._show_styled_message_main("오류", "생성 파라미터가 없는 이미지입니다.", 'warning')
+            return
+
+        # x1 Enhance는 동일 해상도 img2img → 생성 중이면 API 충돌 방지
+        if self._enhance_upscale == 1.0:
+            gen_ctrl = getattr(self.app_context, 'generation_controller', None)
+            if gen_ctrl and getattr(gen_ctrl, 'is_generating', False):
+                self._show_styled_message_main(
+                    "Enhance 대기", "이미지 생성 중에는 x1 Enhance를 사용할 수 없습니다.\n생성 완료 후 다시 시도해주세요.", 'warning')
+                return
+
+        # 이미지 → PNG bytes
+        buf = io.BytesIO()
+        item.image.save(buf, format='PNG')
+        image_bytes = buf.getvalue()
+
+        # 해상도 계산
+        orig_w, orig_h = item.image.size
+        if self._enhance_upscale == 1.5:
+            new_w = self._round_to_64(orig_w * 1.5)
+            new_h = self._round_to_64(orig_h * 1.5)
+        else:
+            new_w, new_h = orig_w, orig_h
+
+        # 파라미터 구성
+        params = copy.deepcopy(item.generation_params)
+        params['image_bytes'] = image_bytes
+        params['strength'] = self._enhance_strength
+        params['noise'] = self._enhance_noise
+        params['width'] = new_w
+        params['height'] = new_h
+        params['api_mode'] = 'NAI'
+        # inpaint 관련 키 제거 — 반드시 img2img로 실행
+        params.pop('type', None)
+        params.pop('mask_bytes', None)
+
+        # 진행 다이얼로그
+        progress = QProgressDialog("Enhance 처리 중...", None, 0, 0, self)
+        progress.setWindowTitle("Enhance")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+
+        self.enhance_button.setEnabled(False)
+
+        # Worker (inline)
+        class EnhanceWorker(QObject):
+            finished = pyqtSignal(dict)
+
+            def __init__(self, api_service, params):
+                super().__init__()
+                self.api_service = api_service
+                self.params = params
+
+            def run(self):
+                result = self.api_service.call_generation_api(self.params)
+                self.finished.emit(result)
+
+        self._enhance_thread = QThread()
+        self._enhance_worker = EnhanceWorker(self.app_context.api_service, params)
+        self._enhance_worker.moveToThread(self._enhance_thread)
+
+        self._enhance_thread.started.connect(self._enhance_worker.run)
+        self._enhance_worker.finished.connect(
+            lambda result: self._handle_enhance_result(result, progress, orig_w, orig_h, new_w, new_h)
+        )
+        self._enhance_worker.finished.connect(self._enhance_thread.quit)
+        self._enhance_worker.finished.connect(self._enhance_worker.deleteLater)
+        self._enhance_thread.finished.connect(self._enhance_thread.deleteLater)
+
+        self._enhance_thread.start()
+
+    def _handle_enhance_result(self, result: dict, progress, orig_w, orig_h, new_w, new_h):
+        """Enhance API 결과 처리"""
+        import io as _io
+        progress.close()
+        self._update_enhance_button_state()
+
+        if result.get('status') == 'success':
+            pil_image = result.get('image')
+            raw_bytes = result.get('raw_bytes')
+
+            if pil_image is None and raw_bytes:
+                pil_image = Image.open(_io.BytesIO(raw_bytes))
+            if pil_image is None:
+                self._show_styled_message_main("Enhance 실패", "결과 이미지를 처리할 수 없습니다.", 'critical')
+                return
+
+            info_text = self.current_history_item.info_text
+            info_text += (
+                f"\nEnhanced: x{self._enhance_upscale:g}, strength={self._enhance_strength:.1f}, noise={self._enhance_noise:.1f}"
+                f" ({new_w}x{new_h})"
+            )
+
+            source_row = getattr(self.current_history_item, 'source_row', None)
+            self.add_to_history(pil_image, raw_bytes, info_text, source_row)
+            print(f"✅ Enhance 성공: {orig_w}x{orig_h} → {new_w}x{new_h}")
+        else:
+            error_msg = result.get('message', '알 수 없는 오류')
+            self._show_styled_message_main("Enhance 실패", error_msg, 'critical')
+
     def upscale_current_image_nai(self):
         """메인 이미지를 NAI API를 사용하여 2배 업스케일합니다."""
         from PyQt6.QtWidgets import QProgressDialog
@@ -2620,36 +3120,38 @@ class ImageWindow(QWidget):
             return
         
         # 현재 이미지를 QPixmap으로 변환
+        history_raw_bytes = self.current_history_item.raw_bytes
         pil_img = self.current_history_item.image
         buf = io.BytesIO()
         pil_img.save(buf, format='PNG')
         buf.seek(0)
         current_pixmap = QPixmap()
         current_pixmap.loadFromData(buf.getvalue())
-        
+
         # 진행 상황 다이얼로그 생성
         progress = QProgressDialog("이미지 업스케일 중...", None, 0, 0, self)
         progress.setWindowTitle("NAI 업스케일")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setCancelButton(None)
         progress.show()
-        
+
         # Worker 클래스 정의 (메서드 내부에 정의)
         class UpscaleWorker(QObject):
             finished = pyqtSignal(dict)
-            
-            def __init__(self, api_service, pixmap):
+
+            def __init__(self, api_service, pixmap, raw_bytes=None):
                 super().__init__()
                 self.api_service = api_service
                 self.pixmap = pixmap
-            
+                self.raw_bytes = raw_bytes
+
             def run(self):
-                result = self.api_service.upscale_NAI(self.pixmap)
+                result = self.api_service.upscale_NAI(self.pixmap, raw_bytes=self.raw_bytes)
                 self.finished.emit(result)
-        
+
         # Worker 스레드 설정
         self.upscale_thread = QThread()
-        self.upscale_worker = UpscaleWorker(self.app_context.api_service, current_pixmap)
+        self.upscale_worker = UpscaleWorker(self.app_context.api_service, current_pixmap, history_raw_bytes)
         self.upscale_worker.moveToThread(self.upscale_thread)
         
         # 시그널 연결

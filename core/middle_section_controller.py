@@ -197,9 +197,10 @@ class MiddleSectionController:
                 # 4. EnhancedCollapsibleBox 생성 (분리 가능)
                 module_title = module_instance.get_title()
                 box = EnhancedCollapsibleBox(
-                    title=module_title, 
-                    parent=self.parent_widget, 
-                    detachable=True  # 모든 모듈을 분리 가능하게 설정
+                    title=module_title,
+                    parent=self.parent_widget,
+                    detachable=True,  # 모든 모듈을 분리 가능하게 설정
+                    start_expanded=getattr(module_instance, 'start_expanded', False)
                 )
                 
                 # 5. 모듈 분리 요청 시그널 연결
@@ -278,17 +279,9 @@ class MiddleSectionController:
             # 1. CollapsibleBox에서 위젯을 안전하게 분리
             print(f"   - CollapsibleBox에서 위젯 분리 중...")
             
-            # takeWidget()을 사용하여 위젯을 안전하게 제거
-            actual_widget = box.content_area.takeWidget()
-            
-            if actual_widget != content_widget:
-                print(f"⚠️ 예상과 다른 위젯: expected={content_widget}, actual={actual_widget}")
-                # 실제 위젯이 다르면 실제 위젯을 사용
-                content_widget = actual_widget
-            
-            if not content_widget:
-                print(f"❌ 모듈 '{module_title}': 추출된 위젯이 None입니다.")
-                return
+            # content_area는 순수 QWidget이므로 레이아웃에서 위젯을 분리
+            box._content_layout.removeWidget(content_widget)
+            content_widget.setParent(None)
             
             print(f"   - 추출된 위젯: {content_widget}")
             print(f"   - 추출된 위젯 크기: {content_widget.size()}")
@@ -340,7 +333,7 @@ class MiddleSectionController:
             try:
                 if content_widget:
                     print(f"   - 복원 시도: 위젯을 CollapsibleBox로 되돌림")
-                    box.content_area.setWidget(content_widget)
+                    box._content_layout.addWidget(content_widget)
                 box.set_detached_state(False)
             except Exception as restore_error:
                 print(f"   - 복원 실패: {restore_error}")
@@ -367,16 +360,17 @@ class MiddleSectionController:
             # CollapsibleBox 가져오기
             box = self.module_boxes[module_title]
             
-            # 기존 플레이스홀더 제거
-            old_placeholder = box.content_area.takeWidget()
-            if old_placeholder:
-                print(f"   - 플레이스홀더 제거: {old_placeholder}")
-                old_placeholder.deleteLater()
-            
+            # 기존 플레이스홀더 제거 (content_layout의 모든 위젯 정리)
+            while box._content_layout.count():
+                item = box._content_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    print(f"   - 플레이스홀더 제거: {widget}")
+                    widget.deleteLater()
+
             # 위젯을 박스로 복귀
             print(f"   - 위젯을 CollapsibleBox로 복귀: {content_widget}")
-            content_widget.setParent(box.content_area)
-            box.content_area.setWidget(content_widget)
+            box._content_layout.addWidget(content_widget)
             
             # 위젯 강제 표시
             content_widget.show()
@@ -475,9 +469,6 @@ class MiddleSectionController:
             if self.accordion_mode:
                 self._collapse_other_modules(module_title)
 
-            # 📜 자동 스크롤: 해당 모듈로 이동
-            self._scroll_to_module(module_title)
-
         else:
             # 접힌 모듈로 등록
             self.module_states['expanded'].discard(module_title)
@@ -513,8 +504,13 @@ class MiddleSectionController:
             print(f"⚠️ [SCROLL] '{module_title}': 부모 스크롤 영역을 찾을 수 없습니다.")
             return
 
-        # 박스의 Y 위치 계산
-        box_y = box.y()
+        # 박스의 Y 위치 계산 (스크롤 영역의 content widget 기준으로 매핑)
+        from PyQt6.QtCore import QPoint
+        scroll_content = scroll_area.widget()
+        if scroll_content:
+            box_y = box.mapTo(scroll_content, QPoint(0, 0)).y()
+        else:
+            box_y = box.y()
         print(f"📜 [SCROLL] '{module_title}'로 스크롤 이동: Y={box_y}")
 
         # 스크롤 이동 (QTimer로 지연 - UI 업데이트 대기)

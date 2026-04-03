@@ -8,7 +8,6 @@ red
 pink
 orange
 yellow
-golden
 gold
 light green
 green
@@ -36,5 +35,4 @@ diagonal-striped
 vertical-striped
 checkered
 dark
-pale
 silver

@@ -23,17 +23,18 @@ class WildcardCombinationGenerator:
             wildcard_name: Name of wildcard (e.g., "pose", "characters/outfit")
 
         Returns:
-            List of items in the wildcard, or empty list if not found
+            List of text items in the wildcard (weights excluded), or empty list if not found
         """
+        # entries: [(weight, text), ...] 형식
         # Try direct match first
         if wildcard_name in self.wildcard_manager.wildcard_dict_tree:
-            return self.wildcard_manager.wildcard_dict_tree[wildcard_name].copy()
+            return [text for _, text in self.wildcard_manager.wildcard_dict_tree[wildcard_name]]
 
         # Try fuzzy match (remove common prefixes/suffixes)
         # This handles cases like "test_emotions" matching "subfolder/test_emotions"
         for key in self.wildcard_manager.wildcard_dict_tree.keys():
             if wildcard_name in key or key.endswith(wildcard_name):
-                return self.wildcard_manager.wildcard_dict_tree[key].copy()
+                return [text for _, text in self.wildcard_manager.wildcard_dict_tree[key]]
 
         print(f"Warning: Wildcard '{wildcard_name}' not found")
         return []

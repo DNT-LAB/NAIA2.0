@@ -1349,6 +1349,9 @@ class InteractiveWindow(QMainWindow):
         if self.current_mode == "COMFYUI":
             params['sampling_mode'] = panel_params.get('sampling_mode', 'eps')
             params['workflow_type'] = panel_params.get('workflow_type', 'checkpoint')
+            # ANIMA 모드: Rescale CFG 전달
+            if 'rescale_cfg' in panel_params:
+                params['rescale_cfg'] = panel_params['rescale_cfg']
             print(f"🎨 ComfyUI 모드: sampling_mode={params['sampling_mode']}, workflow_type={params['workflow_type']}")
 
         # 12. GenerationRequest 객체 생성

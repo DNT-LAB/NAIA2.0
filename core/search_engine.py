@@ -4,6 +4,27 @@ from typing import Dict, List, Any, Optional
 
 class SearchEngine:
     """Parquet 파일에서 태그를 검색하는 로직을 수행하는 핵심 엔진"""
+    TAG_COLUMNS = ['copyright', 'character', 'artist', 'meta', 'general']
+
+    def _build_tags_string(self, df: pd.DataFrame) -> pd.Series:
+        """기존 시맨틱을 유지하며 tags_string 컬럼을 빠르게 생성.
+
+        - NaN/None만 제외
+        - 빈 문자열("")은 기존처럼 유지
+        """
+        if df.empty:
+            return pd.Series(index=df.index, dtype='object')
+
+        long_df = df[self.TAG_COLUMNS].reset_index().melt(
+            id_vars='index',
+            value_name='tag'
+        )
+        long_df = long_df[long_df['tag'].notna()]
+        if long_df.empty:
+            return pd.Series('', index=df.index, dtype='object')
+
+        long_df['tag'] = long_df['tag'].astype(str)
+        return long_df.groupby('index')['tag'].agg(','.join).reindex(df.index, fill_value='')
 
     def _parse_query(self, query: str) -> Dict[str, List[Any]]:
         query = query.strip().replace("_", " ")
@@ -43,9 +64,7 @@ class SearchEngine:
 
         # 필터링 전에 'tags_string' 컬럼이 없으면 생성
         if 'tags_string' not in df.columns:
-            df['tags_string'] = df[['copyright', 'character', 'artist', 'meta', 'general']].apply(
-                lambda x: ','.join(x.dropna().astype(str)), axis=1
-            )
+            df['tags_string'] = self._build_tags_string(df)
             
         # 1. Normal (AND) - 각 키워드가 모두 포함되어야 함
         if search_params['normal']:
@@ -136,9 +155,7 @@ class SearchEngine:
         # 검색어가 있을 때만 tags_string 생성 (성능 최적화)
         if search_params.get('query') or search_params.get('exclude_query'):
             # 성능 개선을 위해 모든 태그를 하나의 문자열 컬럼으로 결합
-            df['tags_string'] = df[['copyright', 'character', 'artist', 'meta', 'general']].apply(
-                lambda x: ','.join(x.dropna().astype(str)), axis=1
-            )
+            df['tags_string'] = self._build_tags_string(df)
             
             # 필터링 적용
             filtered_df = self._apply_filters(df, search_params['query'], search_params['exclude_query'])

@@ -1,6 +1,7 @@
 ﻿from core.context import AppContext
 from core.generation_request import GenerationRequest
 from core.sequence_parser import SequenceParser
+from core.wildcard_processor import split_tags_smart
 from PIL import Image
 import piexif
 import piexif.helper
@@ -73,6 +74,9 @@ class GenerationWorker(QObject):
         self.params = None
         self.source_row = None
         self._is_running = False  # 🆕 실행 상태 추적
+        self._pending_progress_data = None  # 🔧 스레드 안전한 진행률 데이터 전달용
+        self._main_prompt_text = ''  # 🔧 메인 스레드에서 캡처한 프롬프트 텍스트
+        self._character_prompts = []  # 🔧 메인 스레드에서 캡처한 캐릭터 프롬프트
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -85,9 +89,14 @@ class GenerationWorker(QObject):
         try:
             self.generation_started.emit()
             self.generation_progress.emit("API 호출 중...")
-            
+
+            # 🔧 FIX: 스레드 안전한 진행률 콜백 (시그널 emit은 Qt에서 크로스 스레드 안전)
+            def _progress_callback(message, current, total, percent):
+                self.generation_progress.emit(message)
+                self._pending_progress_data = {"current": current, "total": total, "percent": percent}
+
             # API 호출 (이 부분이 시간이 오래 걸림)
-            api_result = self.context.api_service.call_generation_api(self.params)
+            api_result = self.context.api_service.call_generation_api(self.params, progress_callback=_progress_callback)
             
             # 🔧 FIX: API 결과가 error 상태인 경우 에러로 처리
             if api_result.get('status') == 'error':
@@ -197,13 +206,8 @@ class GenerationWorker(QObject):
             
             result['generation_params'] = params_copy
             
-            # 🆕 main_prompt 수집 (UI에서 직접 가져와 \n\n 포함하여 보존)
-            main_prompt_raw = ""
-            try:
-                if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
-                    main_prompt_raw = self.context.main_window.main_prompt_textedit.toPlainText()
-            except Exception as e:
-                print(f"⚠️ main_prompt 수집 실패: {e}")
+            # 🔧 FIX: 메인 스레드에서 캡처한 텍스트 사용 (크로스 스레드 UI 접근 방지)
+            main_prompt_raw = getattr(self, '_main_prompt_text', '')
             
             # 프롬프트 컨텍스트 정보
             result['prompt_context'] = {
@@ -211,6 +215,7 @@ class GenerationWorker(QObject):
                 'processed_input': self.params.get('input', ''),  # 필요시 파이프라인 처리 후 값으로 교체
                 'negative_prompt': self.params.get('negative_prompt', ''),
                 'main_prompt': main_prompt_raw,  # 🆕 UI에서 가져온 원본 프롬프트 (\n\n 포함)
+                'character_prompts': getattr(self, '_character_prompts', []),
                 'source_tags': self.source_row.to_dict() if self.source_row is not None else {},
                 'wildcard_resolved': self.source_row is not None
             }
@@ -410,6 +415,20 @@ class GenerationController:
 
             # --- ComfyUI vs NAI/WEBUI 처리 분기 ---
             if api_mode == "COMFYUI":
+                # Studio 요청 시 ComfyUI 파라미터 디버그 로깅
+                if params.get('studio_request'):
+                    print(f"🎬 [Studio+ComfyUI] 파라미터 덤프:")
+                    print(f"   - prompt: {params.get('input', '')[:80]}...")
+                    print(f"   - negative: {params.get('negative_prompt', '')[:60]}...")
+                    print(f"   - model: {params.get('model')}")
+                    print(f"   - sampling_mode: {params.get('sampling_mode', 'NOT SET')}")
+                    print(f"   - workflow_type: {params.get('workflow_type', 'NOT SET')}")
+                    print(f"   - steps: {params.get('steps')}, cfg: {params.get('cfg_scale')}")
+                    print(f"   - sampler: {params.get('sampler')}, scheduler: {params.get('scheduler')}")
+                    print(f"   - resolution: {params.get('width')}x{params.get('height')}")
+                    print(f"   - seed: {params.get('seed')}")
+                    print(f"   - user_workflow active: {bool(self.workflow_manager.user_workflow)}")
+
                 # 🌉 ComfyUI: 브릿지 사용 (와일드카드 확장 → 워크플로우 생성)
                 if not self._prepare_comfyui_workflow_with_wildcards(params):
                     return  # 실패 시 조기 종료
@@ -454,8 +473,8 @@ class GenerationController:
                         if source_row is None:
                             source_row = pd.Series({'general': None}, name="temp_window")
 
-                    # tags 파싱 (쉼표로 분리)
-                    input_tags = [tag.strip() for tag in params['input'].split(',') if tag.strip()]
+                    # tags 파싱 (쉼표로 분리, <...> 블록 보존)
+                    input_tags = split_tags_smart(params['input'])
 
                     # PromptContext 초기화
                     temp_context = PromptContext(
@@ -494,6 +513,15 @@ class GenerationController:
         except Exception as e:
             self.context.main_window.status_bar.showMessage(f"❌ 생성 준비 오류: {e}")
             print(f"오류 발생: {e}")
+
+            # Studio 요청 실패 시 프레임 매니저에 알림
+            if overrides and overrides.get('studio_request'):
+                error_data = {
+                    "message": str(e),
+                    "studio_request": True,
+                    "studio_frame_index": overrides.get('studio_frame_index', 0)
+                }
+                self.context.publish("generation_error_for_studio", error_data)
 
     def _enqueue_current_request(self, overrides: dict = None, priority: int = 0):
         """
@@ -702,6 +730,44 @@ class GenerationController:
         # 파라미터 설정 및 스레드 시작
         self.current_generation_params = params  # 🆕 현재 생성 파라미터 저장
         self.generation_worker.set_generation_params(params, source_row)
+
+        # 🔧 FIX: 메인 스레드에서 main_prompt 텍스트 캡처 (워커에서 크로스 스레드 UI 접근 방지)
+        try:
+            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
+                self.generation_worker._main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+        except Exception:
+            pass
+
+        # 🔧 메인 스레드에서 캐릭터 프롬프트 캡처 (NAI 모드, 결과 메타데이터용)
+        try:
+            if params.get('api_mode') == 'NAI':
+                char_prompts = []
+                if params.get('sketchbook_character_prompts'):
+                    # Sketchbook/Img2ImgWindow 오버라이드 (tuple 또는 dict)
+                    for item in params['sketchbook_character_prompts']:
+                        if isinstance(item, tuple):
+                            char_prompts.append({'prompt': item[0], 'uc': item[1]})
+                        elif isinstance(item, dict):
+                            char_prompts.append(item)
+                elif params.get('characters'):
+                    # Saved Params (Enhance 등 재사용)
+                    p_ucs = params.get('uc', [])
+                    for i, p in enumerate(params['characters']):
+                        char_prompts.append({'prompt': p, 'uc': p_ucs[i] if i < len(p_ucs) else ''})
+                elif hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'middle_section_controller'):
+                    # 메인 UI CharacterModule (Late Binding)
+                    char_module = self.context.main_window.middle_section_controller.get_module_instance("CharacterModule")
+                    if char_module and hasattr(char_module, 'character_widgets'):
+                        for w in char_module.character_widgets:
+                            if w.active_checkbox.isChecked():
+                                char_prompts.append({
+                                    'prompt': w.prompt_textbox.toPlainText(),
+                                    'uc': w.uc_textbox.toPlainText(),
+                                })
+                self.generation_worker._character_prompts = char_prompts
+        except Exception:
+            pass
+
         self.generation_thread.start()
     
     def _on_generation_started(self):
@@ -716,8 +782,14 @@ class GenerationController:
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
     
     def _on_generation_progress(self, message: str):
-        """생성 진행 상황 업데이트 슬롯"""
+        """생성 진행 상황 업데이트 슬롯 (메인 스레드에서 실행)"""
         self.context.main_window.status_bar.showMessage(message)
+
+        # 🔧 메인 스레드에서 안전하게 generation_progress 이벤트 발행 (Interactive Mode 등)
+        if self.generation_worker and hasattr(self.generation_worker, '_pending_progress_data'):
+            data = self.generation_worker._pending_progress_data
+            if data:
+                self.context.publish("generation_progress", data)
     
     def _on_generation_finished(self, result: dict):
         """생성 완료 시 호출되는 슬롯"""
@@ -750,8 +822,45 @@ class GenerationController:
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
 
-        # 🆕 Interactive Mode 요청인 경우 전용 에러 이벤트 발행
+        # 특수 요청 에러 라우팅
         if self.current_generation_params:
+            # Event Preset 요청인 경우 전용 에러 이벤트 발행
+            is_event_preset = self.current_generation_params.get("event_preset_request", False)
+            if is_event_preset:
+                print(f"📋 Event Preset 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "event_preset_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
+            # Clothes Preset 요청인 경우 전용 에러 이벤트 발행
+            is_clothes_preset = self.current_generation_params.get("clothes_preset_request", False)
+            if is_clothes_preset:
+                print(f"👗 Clothes Preset 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "clothes_preset_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
+            # Character Viewer 요청인 경우 전용 에러 이벤트 발행
+            is_character_viewer = self.current_generation_params.get("character_viewer_request", False)
+            if is_character_viewer:
+                print(f"🔍 Character Viewer 에러 감지 - 전용 에러 이벤트 발행")
+                error_data = {
+                    "message": error_message,
+                    "character_viewer_request": True
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
+            # Interactive Mode 요청인 경우 전용 에러 이벤트 발행
             is_interactive_mode = self.current_generation_params.get("interactive_mode_request", False)
             if is_interactive_mode:
                 print(f"🎨 Interactive Mode 에러 감지 - 전용 에러 이벤트 발행")
@@ -783,6 +892,36 @@ class GenerationController:
                 # Turbo Sequence 요청은 자동 재시도 없이 종료
                 self.current_generation_params = None
                 return
+
+            # Studio 요청인 경우: 프레임 매니저에 실패 알림
+            is_studio_request = self.current_generation_params.get("studio_request", False)
+            if is_studio_request:
+                studio_frame_index = self.current_generation_params.get("studio_frame_index", 0)
+                print(f"🎬 Studio 에러 감지 - 프레임 #{studio_frame_index + 1} 실패 알림")
+                error_data = {
+                    "message": error_message,
+                    "studio_request": True,
+                    "studio_frame_index": studio_frame_index
+                }
+                self.context.publish("generation_error_for_studio", error_data)
+                self.current_generation_params = None
+                return
+
+            # Img2Img 요청 에러 처리
+            is_img2img_batch = self.current_generation_params.get("img2img_batch_request", False)
+            img2img_window_id = self.current_generation_params.get("img2img_batch_window_id")
+            if is_img2img_batch:
+                print(f"🔄 Img2Img Batch 에러 (window #{img2img_window_id}) - 배치 계속 진행")
+                main_window = self.context.main_window
+                if hasattr(main_window, 'img2img_window_manager'):
+                    main_window.img2img_window_manager.on_batch_generation_completed(img2img_window_id)
+                self.current_generation_params = None
+                return
+            elif img2img_window_id is not None:
+                # 단일 img2img 에러 → 버튼 복원 (이후 일반 에러 처리 계속)
+                main_window = self.context.main_window
+                if hasattr(main_window, 'img2img_window_manager'):
+                    main_window.img2img_window_manager.on_single_generation_completed(img2img_window_id)
 
         # 🆕 자동 생성 모드에서의 재시도 로직
         auto_generate_checkbox = self.context.main_window.generation_checkboxes.get("자동 생성")
@@ -978,15 +1117,22 @@ class GenerationController:
                 QTimer.singleShot(0, self._process_next_queue_request)
             else:
                 # 큐가 비면 자동생성 보류 해제
-                if self.queue_hold_auto_gen:
+                was_holding = self.queue_hold_auto_gen
+                if was_holding:
                     print("[QUEUE] 큐 비었음. 자동생성 보류 해제.")
                 self.queue_hold_auto_gen = False
 
-                # 보류 중인 자동 재시도 수행
+                # 보류 중인 자동 재시도 수행 (에러 후 재시도)
                 if self.auto_retry_pending:
                     self.auto_retry_pending = False
                     print("[AUTO] 보류된 자동 재시도 실행.")
                     QTimer.singleShot(0, self._retry_auto_generation)
+                elif was_holding:
+                    # 큐 처리 완료 후 자동생성 복귀: 자동생성이 켜져 있으면 재개
+                    auto_gen_cb = self.context.main_window.generation_checkboxes.get("자동 생성")
+                    if auto_gen_cb and auto_gen_cb.isChecked():
+                        print("[AUTO] 큐 처리 완료. 자동생성 복귀.")
+                        QTimer.singleShot(0, self.context.main_window._check_and_trigger_auto_generation)
 
             # UI 상태 업데이트
             self._update_button_with_queue_size()
@@ -1038,7 +1184,7 @@ class GenerationController:
             cleaned_tags = []
             processed_negative_prompt = negative_prompt  # 초기값
 
-            for tag in input_text.split(','):
+            for tag in split_tags_smart(input_text):
                 processed_tag = tag.replace('\n', '').strip()
 
                 # 주석 제거
@@ -1107,8 +1253,8 @@ class GenerationController:
             
             print("🔀 조건부 프롬프트 처리 시작...")
             
-            # 입력 문자열을 태그 리스트로 분해
-            input_tags = [tag.strip() for tag in input_text.split(',') if tag.strip()]
+            # 입력 문자열을 태그 리스트로 분해 (<...> 블록 보존)
+            input_tags = split_tags_smart(input_text)
             
             # prefix, main, postfix 구분 (간소화: 모두 main으로 처리)
             prefix_tags = []
@@ -1299,6 +1445,9 @@ class GenerationController:
                         params['seed'] = random.randint(0, 9999999999)
                         print(f"[SEQUENCE] 프롬프트 #{i+1}: NAI 랜덤 시드 생성 - {params['seed']}")
                     # WEBUI/COMFYUI는 고정 시드 사용 (base_params의 seed 유지)
+
+                # TODO: 시퀀스 생성에서도 cfg_scale:, cfg_rescale:, sampler:, scheduler: 인라인 파라미터 지원 예정
+                # 참고: api_service.py의 call_generation_api()에 구현된 파싱 로직 참조
 
                 # 프롬프트 설정 (메인 프롬프트를 각 시퀀스 프롬프트로 대체)
                 params['input'] = prompt

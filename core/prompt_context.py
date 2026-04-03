@@ -42,6 +42,8 @@ class PromptContext:
 
     def get_all_tags(self) -> List[str]:
         """현재 Prefix, Main, Postfix 태그를 모두 합친 리스트를 반환"""
-        self.prefix_tags.append("\n\n")
-        self.main_tags.append("\n\n")
+        if self.prefix_tags:
+            self.prefix_tags.append("\n\n")
+        if self.main_tags:
+            self.main_tags.append("\n\n")
         return self.prefix_tags + self.main_tags + self.postfix_tags

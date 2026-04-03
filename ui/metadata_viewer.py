@@ -129,7 +129,11 @@ class MetadataViewerWindow(QDialog):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
-        
+
+        # v4 캐릭터 데이터 사전 추출 (버튼 표시 판단에 필요)
+        if 'v4_prompt' in self.metadata and 'caption' in self.metadata.get('v4_prompt', {}):
+            self._extract_v4_characters()
+
         # 왼쪽: 이미지 미리보기
         left_panel = self.create_left_panel()
         
@@ -234,7 +238,14 @@ class MetadataViewerWindow(QDialog):
         settings_btn.setStyleSheet(self.dynamic_styles['primary_button'])
         settings_btn.clicked.connect(self._on_apply_settings)
         button_layout.addWidget(settings_btn)
-        
+
+        # 설정값 + 캐릭터 일괄 적용 버튼 (캐릭터 데이터가 있을 때만)
+        if self.metadata.get('characters') or self.metadata.get('char_captions'):
+            char_settings_btn = QPushButton("🎭 설정값 + 캐릭터 일괄 적용")
+            char_settings_btn.setStyleSheet(self.dynamic_styles['primary_button'])
+            char_settings_btn.clicked.connect(self._on_apply_settings_with_characters)
+            button_layout.addWidget(char_settings_btn)
+
         # img2img 전송 버튼
         img2img_btn = QPushButton("🖼️ img2img로 전송")
         img2img_btn.setStyleSheet(self.dynamic_styles['secondary_button'])
@@ -901,7 +912,37 @@ class MetadataViewerWindow(QDialog):
 
         self.apply_all_settings.emit(settings)
         # 적용 완료 메시지는 표시하지 않음
-        
+
+    def _on_apply_settings_with_characters(self):
+        """설정값 + 캐릭터 일괄 적용"""
+        settings = {
+            'prompt': self._get_prompt_text(),
+            'negative': self._get_negative_text()
+        }
+
+        if 'Software' in self.metadata:
+            settings['Software'] = self.metadata['Software']
+        if 'type' in self.metadata:
+            settings['type'] = self.metadata['type']
+
+        extracted_params = self._extract_all_parameters()
+        settings.update(extracted_params)
+
+        settings['width'] = self.pil_image.width
+        settings['height'] = self.pil_image.height
+
+        # 캐릭터 데이터 포함
+        characters = self.metadata.get('characters', [])
+        if not characters:
+            characters = self.metadata.get('char_captions', [])
+        characters_uc = self.metadata.get('characters_uc', [])
+
+        if characters:
+            settings['characters'] = characters
+            settings['characters_uc'] = characters_uc
+
+        self.apply_all_settings.emit(settings)
+
     def _on_send_img2img(self):
         """img2img로 전송"""
         self.send_to_img2img.emit(self.pil_image, self.metadata)
@@ -1042,28 +1083,32 @@ class MetadataViewerWindow(QDialog):
                 return
             
             # vibe 데이터 추출
-            vibe_data = {
-                'normalize_reference_strength_multiple': self.metadata.get('normalize_reference_strength_multiple'),
-                'reference_image_multiple': self.metadata.get('reference_image_multiple'),
-                'reference_strength_multiple': self.metadata.get('reference_strength_multiple'),
-                'reference_information_extracted_multiple': self.metadata.get('reference_information_extracted_multiple'),
-                'source_model': self._get_model_compatibility()  # Add the model info
-            }
-            
-            # _no_image 모드로 vibe frame 추가
             import hashlib
-            from pathlib import Path
-            
-            # 고유한 ID 생성
-            data_hash = hashlib.sha256(str(vibe_data).encode()).hexdigest()[:16]
-            
-            # no_image 파일 경로 생성 (실제 파일은 없음)
-            no_image_path = f"no_image_metadata_{data_hash}"
-            
-            # vibe module에 직접 프레임 추가
-            vibe_module._add_vibe_frame_from_metadata(no_image_path, vibe_data)
-            
-            QMessageBox.information(self, "성공", "Vibe Transfer 데이터가 복원되었습니다.")
+            ref_img_multiple = self.metadata.get('reference_image_multiple') or []
+            ref_str_multiple = self.metadata.get('reference_strength_multiple') or []
+            ref_ie_multiple  = self.metadata.get('reference_information_extracted_multiple') or []
+            source_model = self._get_model_compatibility()
+
+            if not ref_img_multiple:
+                QMessageBox.warning(self, "경고", "Metadata에 유효한 Vibe Transfer 데이터가 없습니다.")
+                return
+
+            # reference_image_multiple의 각 항목 = 독립적인 vibe 1개 → 프레임 1개씩 생성
+            added_count = 0
+            for i, encoding in enumerate(ref_img_multiple):
+                per_vibe_data = {
+                    'reference_image_multiple': [encoding],
+                    'reference_strength_multiple': [ref_str_multiple[i]] if i < len(ref_str_multiple) else [0.6],
+                    'reference_information_extracted_multiple': [ref_ie_multiple[i]] if i < len(ref_ie_multiple) else [],
+                    'source_model': source_model,
+                }
+                per_hash = hashlib.sha256(encoding.encode()).hexdigest()[:16]
+                no_image_path = f"no_image_metadata_{per_hash}"
+                frame = vibe_module._add_vibe_frame_from_metadata(no_image_path, per_vibe_data)
+                if frame:
+                    added_count += 1
+
+            QMessageBox.information(self, "성공", f"Vibe Transfer {added_count}개가 복원되었습니다.")
             
         except Exception as e:
             print(f"Error restoring vibe transfer: {e}")

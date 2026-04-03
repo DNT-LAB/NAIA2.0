@@ -4,6 +4,7 @@ from core.search_result_model import SearchResultModel
 from core.prompt_processor import PromptProcessor
 from core.context import AppContext
 from core.prompt_context import PromptContext
+from core.wildcard_processor import split_tags_smart
 
 class PromptGenerationController(QObject):
     """UI와 PromptProcessor를 중재하고 프롬프트 생성을 관리 (단순화됨)"""
@@ -37,7 +38,7 @@ class PromptGenerationController(QObject):
         
         general_str = source_row.get('general', '')
         if pd.notna(general_str) and isinstance(general_str, str):
-            context.main_tags = [tag.strip() for tag in general_str.split(',')]
+            context.main_tags = split_tags_smart(general_str)
         return context
 
     def _handle_processed_context(self, context):
@@ -47,6 +48,12 @@ class PromptGenerationController(QObject):
             if 'detected_resolution' in context.metadata:
                 width, height = context.metadata['detected_resolution']
                 self.resolution_detected.emit(width, height)
+            elif context.settings.get('auto_fit_resolution', False):
+                # 해상도 미감지 → 이전 사이클의 감지 플래그를 리셋
+                # (랜덤 해상도 등 후속 처리가 올바르게 작동하도록)
+                main_window = self.app_context.main_window
+                if hasattr(main_window, 'resolution_is_detected'):
+                    main_window.resolution_is_detected = False
             
             # 최종 프롬프트 시그널 발생
             self.prompt_generated.emit(context.final_prompt)
@@ -54,6 +61,29 @@ class PromptGenerationController(QObject):
             # ✅ 와일드카드 상태 뷰를 위한 이벤트 발행
             self.app_context.publish("prompt_generated", context)
         
+    def generate_instant_source_silent(self, instant_row: dict, settings: dict) -> str | None:
+        """태그를 프롬프트로 정제하여 반환 (시그널 미발행, app_context 상태 복원)"""
+        saved_source = self.app_context.current_source_row
+        saved_context = self.app_context.current_prompt_context
+        try:
+            processed = {}
+            for key, value in instant_row.items():
+                if isinstance(value, list):
+                    processed[key] = ', '.join(map(str, value))
+                else:
+                    processed[key] = value
+            series = pd.Series(processed)
+            self.app_context.current_source_row = series
+            self.app_context.current_prompt_context = self._create_initial_context(series, settings)
+            final_context = self.processor.process()
+            return final_context.final_prompt if final_context else None
+        except Exception as e:
+            print(f"[TagInterrogation] Silent generation error: {e}")
+            return None
+        finally:
+            self.app_context.current_source_row = saved_source
+            self.app_context.current_prompt_context = saved_context
+
     def generate_instant_source(self, instant_row: dict | pd.Series, settings: dict):
         """즉시 생성 요청을 처리합니다. (단순화)"""
         if isinstance(instant_row, dict):

@@ -1143,13 +1143,15 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
         popup = Img2ImgPopup(self.current_pil_image, self.app_context, main_window)
         
         # 시그널 연결 (MainWindow가 처리하도록)
-        if hasattr(main_window, 'send_to_img2img'):
-            popup.img2img_requested.connect(main_window.send_to_img2img)
-        if hasattr(main_window, 'send_to_inpaint'):
-            popup.inpaint_requested.connect(main_window.send_to_inpaint)
+        if hasattr(main_window, 'activate_img2img_panel'):
+            popup.img2img_requested.connect(main_window.activate_img2img_panel)
+        if hasattr(main_window, 'activate_inpaint_mode'):
+            popup.inpaint_requested.connect(main_window.activate_inpaint_mode)
         if hasattr(main_window, 'activate_vibe_transfer'):
             popup.import_vibe_transfer_requested.connect(main_window.activate_vibe_transfer)
-        
+        if hasattr(main_window, 'on_tag_interrogation_requested'):
+            popup.tag_interrogation_requested.connect(main_window.on_tag_interrogation_requested)
+
         # 팝업 위치 설정 (버튼 근처)
         button_pos = self.extract_info_button.mapToGlobal(self.extract_info_button.rect().center())
         popup.move(button_pos.x() - popup.width() // 2, button_pos.y())

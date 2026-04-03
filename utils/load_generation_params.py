@@ -202,6 +202,10 @@ class GenerationParamsManager:
             else:
                 settings["sampling_mode"] = "eps"  # 기본값
 
+            # ComfyUI Rescale CFG 값 수집
+            if hasattr(mw, 'comfyui_rescale_slider') and mw.comfyui_rescale_slider:
+                settings["comfyui_rescale_cfg"] = mw.comfyui_rescale_slider.value() / 100.0
+
             # WEBUI 전용 파라미터 수집
             if hasattr(mw, 'enable_hr_checkbox'):
                 settings["enable_hr"] = mw.enable_hr_checkbox.isChecked()
@@ -289,6 +293,7 @@ class GenerationParamsManager:
 
             # ComfyUI 샘플링 모드 (eps, v_prediction, anima)
             "sampling_mode": "eps",
+            "comfyui_rescale_cfg": 0.7,
             
             # 기타 체크박스들
             "random_resolution_checked": False,
@@ -447,6 +452,18 @@ class GenerationParamsManager:
                     mw.eps_radio.setChecked(True)  # 기본값
 
                 print(f"✅ ComfyUI 샘플링 모드 설정: {sampling_mode}")
+
+            # ComfyUI Rescale CFG 슬라이더 복원
+            if hasattr(mw, 'comfyui_rescale_slider') and mw.comfyui_rescale_slider:
+                rescale_value = float(settings.get("comfyui_rescale_cfg", 0.7))
+                mw.comfyui_rescale_slider.setValue(int(rescale_value * 100))
+
+            # Rescale CFG 가시성: setChecked는 buttonClicked을 발생시키지 않으므로 수동 처리
+            if hasattr(mw, 'comfyui_rescale_ui'):
+                is_comfyui = (mw.get_current_api_mode() == "COMFYUI") if hasattr(mw, 'get_current_api_mode') else False
+                is_anima = hasattr(mw, 'anima_radio') and mw.anima_radio.isChecked()
+                for w in mw.comfyui_rescale_ui:
+                    w.setVisible(is_comfyui and is_anima)
             
             print(f"✅ 생성 파라미터 UI 적용 완료")
             
@@ -814,10 +831,16 @@ class GenerationParamsManager:
                 for widget in mw.comfyui_option_widgets:
                     widget.setVisible(True)
 
+            # 3. ComfyUI Rescale CFG: ANIMA 선택 시만 표시
+            if hasattr(mw, 'comfyui_rescale_ui'):
+                is_anima = hasattr(mw, 'anima_radio') and mw.anima_radio.isChecked()
+                for w in mw.comfyui_rescale_ui:
+                    w.setVisible(is_anima)
+
             # 4. 라벨 텍스트 변경
             if hasattr(mw, 'option_section_label'):
                 mw.option_section_label.setText("🎨 ComfyUI 옵션:")
-            
+
             print("✅ UI가 ComfyUI 모드로 전환되었습니다.")
             
         except Exception as e:
@@ -827,12 +850,12 @@ class GenerationParamsManager:
         """UI를 NAI 모드로 전환"""
         try:
             mw = self.main_window
-            
+
             # 1. Hires Option 영역 숨기기
             if hasattr(mw, 'hires_option_widgets'):
                 for widget in mw.hires_option_widgets:
                     widget.setVisible(False)
-            
+
             # 2. NAID Option 영역 표시
             if hasattr(mw, 'naid_option_widgets'):
                 for widget in mw.naid_option_widgets:
@@ -840,11 +863,15 @@ class GenerationParamsManager:
             if hasattr(mw, 'nai_rescale_ui'):
                 for widget in mw.nai_rescale_ui:
                     widget.setVisible(True)
-            
+            # ComfyUI Rescale CFG 숨김
+            if hasattr(mw, 'comfyui_rescale_ui'):
+                for w in mw.comfyui_rescale_ui:
+                    w.setVisible(False)
+
             # 3. 라벨 텍스트 변경
             if hasattr(mw, 'option_section_label'):
                 mw.option_section_label.setText("NAID Option:")
-            
+
             # 4. NAI 고정 옵션들 복원
             if hasattr(mw, 'model_combo'):
                 nai_models = ["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"]
@@ -871,7 +898,7 @@ class GenerationParamsManager:
         """UI를 WEBUI 모드로 전환"""
         try:
             mw = self.main_window
-            
+
             # 1. NAID Option 영역 숨기기
             if hasattr(mw, 'naid_option_widgets'):
                 for widget in mw.naid_option_widgets:
@@ -879,16 +906,20 @@ class GenerationParamsManager:
             if hasattr(mw, 'nai_rescale_ui'):
                 for widget in mw.nai_rescale_ui:
                     widget.setVisible(False)
-            
+            # ComfyUI Rescale CFG 숨김
+            if hasattr(mw, 'comfyui_rescale_ui'):
+                for w in mw.comfyui_rescale_ui:
+                    w.setVisible(False)
+
             # 2. Hires Option 영역 표시
             if hasattr(mw, 'hires_option_widgets'):
                 for widget in mw.hires_option_widgets:
                     widget.setVisible(True)
-            
+
             # 3. 라벨 텍스트 변경
             if hasattr(mw, 'option_section_label'):
                 mw.option_section_label.setText("Hires Option:")
-            
+
             print("✅ UI가 WEBUI 모드로 전환되었습니다.")
             
         except Exception as e:
@@ -898,12 +929,12 @@ class GenerationParamsManager:
         """UI를 NAI 모드로 전환"""
         try:
             mw = self.main_window
-            
+
             # 1. Hires Option 영역 숨기기
             if hasattr(mw, 'hires_option_widgets'):
                 for widget in mw.hires_option_widgets:
                     widget.setVisible(False)
-            
+
             # 2. NAID Option 영역 표시
             if hasattr(mw, 'naid_option_widgets'):
                 for widget in mw.naid_option_widgets:
@@ -911,11 +942,15 @@ class GenerationParamsManager:
             if hasattr(mw, 'nai_rescale_ui'):
                 for widget in mw.nai_rescale_ui:
                     widget.setVisible(True)
-            
+            # ComfyUI Rescale CFG 숨김
+            if hasattr(mw, 'comfyui_rescale_ui'):
+                for w in mw.comfyui_rescale_ui:
+                    w.setVisible(False)
+
             # 3. 라벨 텍스트 변경
             if hasattr(mw, 'option_section_label'):
                 mw.option_section_label.setText("NAID Option:")
-            
+
             # 🔧 수정: NAI 고정 옵션들 복원 시 현재 선택값 보존
             if hasattr(mw, 'model_combo'):
                 current_model = mw.model_combo.currentText()

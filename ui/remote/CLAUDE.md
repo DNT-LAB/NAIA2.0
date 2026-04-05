@@ -56,6 +56,8 @@ self._init_preset_data()
 
 **썸네일**: `KeepAspectRatioByExpanding`으로 확대 후 중앙 크롭.
 
+**Parquet 내보내기**: `_on_event_export_parquet()` — 대기열 우선, 없으면 필터 결과 기준으로 source_row를 DataFrame으로 조립 → `save/custom_tags/`에 parquet 저장. 메인 윈도우 `불러오기`로 로드하여 자동 생성 파이프라인에서 재활용 가능.
+
 ### instant_wc_tab.py
 
 **클래스**: `InstantWcTabMixin`, `WildcardItemWidget`

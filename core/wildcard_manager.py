@@ -154,3 +154,75 @@ class WildcardManager:
         Returns: dict - 모든 와일드카드의 평면 딕셔너리
         """
         return self.instant_wildcard_dict.copy()
+
+    def get_file_path_for_key(self, wildcard_key: str) -> str:
+        """와일드카드 키로부터 실제 txt 파일 경로를 반환합니다."""
+        return os.path.join(self.wildcards_dir, wildcard_key.replace('/', os.sep) + '.txt')
+
+    def remove_line(self, wildcard_key: str, value: str) -> dict:
+        """
+        와일드카드 txt 파일에서 value에 해당하는 라인을 제거합니다.
+
+        Returns:
+            dict: {'success': bool, 'message': str, 'removed_line': str|None, 'match_type': str|None}
+        """
+        file_path = self.get_file_path_for_key(wildcard_key)
+
+        if not os.path.exists(file_path):
+            return {'success': False, 'message': f'파일을 찾을 수 없습니다: {file_path}',
+                    'removed_line': None, 'match_type': None}
+
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+        except Exception as e:
+            return {'success': False, 'message': f'파일 읽기 실패: {e}',
+                    'removed_line': None, 'match_type': None}
+
+        # 1차: 가중치 파싱 후 text 부분 정확 매치
+        target_index = -1
+        match_type = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            match = _WEIGHT_PATTERN.match(stripped)
+            text_part = match.group(2).strip() if match else stripped
+            if text_part == value:
+                target_index = i
+                match_type = 'exact'
+                break
+
+        # 2차 fallback: contains 검색
+        if target_index == -1:
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if value in stripped:
+                    target_index = i
+                    match_type = 'contains'
+                    break
+
+        if target_index == -1:
+            return {'success': False, 'message': f'"{value}"에 해당하는 라인을 찾을 수 없습니다.',
+                    'removed_line': None, 'match_type': None}
+
+        # 제거 후 유효 라인이 0개가 되는지 확인
+        removed_line = lines[target_index].strip()
+        remaining = [l for j, l in enumerate(lines) if j != target_index and l.strip()]
+        if not remaining:
+            return {'success': False, 'message': '마지막 라인은 제거할 수 없습니다 (파일이 비게 됩니다).',
+                    'removed_line': None, 'match_type': None}
+
+        # 라인 제거 후 저장
+        del lines[target_index]
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+        except Exception as e:
+            return {'success': False, 'message': f'파일 저장 실패: {e}',
+                    'removed_line': None, 'match_type': None}
+
+        return {'success': True, 'message': f'제거 완료: {removed_line}',
+                'removed_line': removed_line, 'match_type': match_type}

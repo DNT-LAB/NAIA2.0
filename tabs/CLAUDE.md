@@ -38,7 +38,7 @@ tabs/
 
 | 파일 | 타입 | 주요 기능 |
 |------|------|----------|
-| **image_window.py** | core | 이미지 뷰어, 히스토리, 큐 추가, Img2Img 윈도우 연동 |
+| **image_window.py** | core | 이미지 뷰어, 히스토리, 큐 추가, Img2Img 윈도우 연동, WC 관리 메뉴 |
 | **png_info_tab.py** | core | PNG/JPEG/WebP 메타데이터 파싱, Stealth PNG |
 | **setting_tabs.py** | core | 자동완성, 저장 경로, 분류 규칙, 모듈/탭 가시성, UI 스케일 |
 | **studio_tab.py** | core | 다중 프레임 그리드, 순차 생성, 프리셋 (상세: [studio/CLAUDE.md](studio/CLAUDE.md)) |

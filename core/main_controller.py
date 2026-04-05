@@ -209,6 +209,8 @@ class MainController:
             mw.image_window.instant_outpaint_requested.connect(self.on_instant_outpaint_requested)
         if hasattr(mw.image_window, 'send_to_outpaint_requested'):
             mw.image_window.send_to_outpaint_requested.connect(self.on_send_to_outpaint_requested)
+        if hasattr(mw.image_window, 'use_as_outpaint_base_requested'):
+            mw.image_window.use_as_outpaint_base_requested.connect(self.on_use_as_outpaint_base_requested)
 
         # 🆕 리모트 이벤트 저장 시그널 연결
         if hasattr(mw.image_window, 'save_to_remote_event_requested'):
@@ -735,6 +737,11 @@ class MainController:
         """아웃페인팅 전송 요청 처리"""
         if hasattr(self.main_window, 'on_send_to_outpaint_requested'):
             self.main_window.on_send_to_outpaint_requested(history_item)
+
+    def on_use_as_outpaint_base_requested(self, history_item):
+        """코믹 패널 아웃페인팅 베이스 요청 처리"""
+        if hasattr(self.main_window, 'on_use_as_outpaint_base_requested'):
+            self.main_window.on_use_as_outpaint_base_requested(history_item)
 
     def on_save_to_remote_event_requested(self, history_item):
         """🆕 리모트 이벤트 저장 요청 처리"""

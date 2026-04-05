@@ -226,7 +226,7 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
 
 ### 이벤트 탭
 
-`save/remote_events/` -- source_row 저장, 재생성 지원. Rating 필터 + 태그 검색 + 심층 검색. 대기열 시스템 (추가/비우기/순차 생성). 하트 기반 우선순위 정렬.
+`save/remote_events/` -- source_row 저장, 재생성 지원. Rating 필터 + 태그 검색 + 심층 검색. 대기열 시스템 (추가/비우기/순차 생성). 하트 기반 우선순위 정렬. **Parquet 내보내기**: 대기열/필터 결과를 `save/custom_tags/`에 parquet로 내보내서 메인 자동 생성 파이프라인에서 재활용.
 
 ---
 

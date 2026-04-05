@@ -77,6 +77,7 @@ class GenerationWorker(QObject):
         self._pending_progress_data = None  # 🔧 스레드 안전한 진행률 데이터 전달용
         self._main_prompt_text = ''  # 🔧 메인 스레드에서 캡처한 프롬프트 텍스트
         self._character_prompts = []  # 🔧 메인 스레드에서 캡처한 캐릭터 프롬프트
+        self._scoped_wildcard_history = {}  # 📌 메인 스레드에서 캡처한 scoped 와일드카드 히스토리
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -210,6 +211,7 @@ class GenerationWorker(QObject):
             main_prompt_raw = getattr(self, '_main_prompt_text', '')
             
             # 프롬프트 컨텍스트 정보
+            scoped_wh = getattr(self, '_scoped_wildcard_history', {})
             result['prompt_context'] = {
                 'original_input': self.params.get('input', ''),
                 'processed_input': self.params.get('input', ''),  # 필요시 파이프라인 처리 후 값으로 교체
@@ -217,7 +219,8 @@ class GenerationWorker(QObject):
                 'main_prompt': main_prompt_raw,  # 🆕 UI에서 가져온 원본 프롬프트 (\n\n 포함)
                 'character_prompts': getattr(self, '_character_prompts', []),
                 'source_tags': self.source_row.to_dict() if self.source_row is not None else {},
-                'wildcard_resolved': self.source_row is not None
+                'wildcard_resolved': self.source_row is not None,
+                'scoped_wildcard_history': scoped_wh  # 📌 scope에 등록된 와일드카드의 선택 결과
             }
             
             # API 메타데이터
@@ -767,6 +770,24 @@ class GenerationController:
                 self.generation_worker._character_prompts = char_prompts
         except Exception:
             pass
+
+        # 📌 메인 스레드에서 scoped wildcard history 캡처 (최대 1개)
+        # 안전장치: 재귀 와일드카드 등으로 최종 프롬프트에 없는 값은 skip
+        try:
+            ctx = self.context.current_prompt_context
+            scoped_key = self.context.scoped_wildcard
+            if ctx and ctx.wildcard_history and scoped_key and scoped_key in ctx.wildcard_history:
+                value = ctx.wildcard_history[scoped_key][-1]
+                final_prompt = params.get('input', '')
+                char_prompts_str = ' '.join(params.get('characters', []))
+                if value in final_prompt or value in char_prompts_str:
+                    self.generation_worker._scoped_wildcard_history = {scoped_key: value}
+                else:
+                    self.generation_worker._scoped_wildcard_history = {}
+            else:
+                self.generation_worker._scoped_wildcard_history = {}
+        except Exception:
+            self.generation_worker._scoped_wildcard_history = {}
 
         self.generation_thread.start()
     

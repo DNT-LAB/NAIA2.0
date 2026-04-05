@@ -306,6 +306,47 @@ class Img2ImgPanel(QFrame):
         self.update()
         print(f"🎨 Outpaint 설정 적용: {cw}x{ch}")
 
+    def set_image_with_mask(self, canvas_image: Image.Image, full_mask: Image.Image, small_mask: Image.Image):
+        """캔버스 이미지 + 마스크를 받아 인페인트 모드로 직접 설정합니다."""
+        self.mode = 'inpaint'
+        self.original_pil_image = canvas_image
+        self.full_mask_pil = full_mask
+        self.small_mask_pil = small_mask
+        self._mask_preset = True
+        self._outpaint_data = None
+
+        cw, ch = canvas_image.size
+        self.title_label.setText(f"Comic Panel → {cw}x{ch}")
+
+        # Strength 0.8, Noise 0.05 초기화
+        self.strength_slider.setValue(85)
+        self.noise_slider.setValue(5)
+
+        # 마스크 영역을 파란 오버레이로 표시 (프리뷰)
+        preview = canvas_image.convert("RGBA")
+        preview_array = np.array(preview)
+        mask_array = np.array(full_mask)
+        mask_indices = mask_array == 255
+        preview_array[mask_indices] = [100, 100, 255, 160]
+        preview_img = Image.fromarray(preview_array, 'RGBA')
+
+        q_image = ImageQt(preview_img)
+        self.background_pixmap = QPixmap.fromImage(q_image).scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # 픽셀 수 체크
+        total_pixels = cw * ch
+        self.resize_button.setVisible(total_pixels < 921600 or total_pixels > 1048576)
+        self.upscale_button.setVisible(True)
+
+        self._update_ui_for_mode()
+        self.update()
+        self.setVisible(True)
+        print(f"Comic Panel 인페인트 모드 설정: {cw}x{ch}")
+
     # [2단계] 모드에 따라 UI를 업데이트하는 헬퍼 메서드
     def _update_ui_for_mode(self):
         if self.mode == 'inpaint':

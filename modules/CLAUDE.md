@@ -30,7 +30,7 @@ modules/
 | **instant_wildcard_module.py** | 인스턴트 와일드카드 | JSON 저장/로드 |
 | **conditional_prompt_module.py** | 조건부 프롬프트 | 파이프라인 훅, 패턴 매칭(`__tag=,`) |
 | **e621_event_module.py** | E621 이벤트 태그 | Parquet, 즐겨찾기, 숨김/복원 |
-| **wildcard_status_module.py** | 와일드카드 상태 표시 | PromptContext 구독 |
+| **wildcard_status_module.py** | 와일드카드 상태 표시, 스코프 추적 | PromptContext 구독, 스코프 ComboBox, 오버라이드 |
 | **ollama_module.py** | 자연어→태그 변환 (Ollama LLM) | Lazy 초기화, e621 NSFW Boost |
 
 ---

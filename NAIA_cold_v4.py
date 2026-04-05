@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 164"
-        self.setWindowTitle(self.base_title + " - 260403")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 165"
+        self.setWindowTitle(self.base_title + " - 260405")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -6991,6 +6991,26 @@ class ModernMainWindow(QMainWindow):
             history_item=history_item,
             auto_generate=True
         )
+
+    def on_use_as_outpaint_base_requested(self, history_item):
+        """Comic Panel Setup → img2img_panel에 인페인트 모드로 전달"""
+        if not history_item or not hasattr(history_item, 'image'):
+            return
+        pil_image = history_item.image
+
+        from ui.comic_panel_window import ComicPanelWindow
+        result = ComicPanelWindow.get_comic_panel_data(pil_image, self)
+        if result is None:
+            return
+
+        self.img2img_panel.set_image_with_mask(
+            canvas_image=result["canvas_image"],
+            full_mask=result["full_mask_image"],
+            small_mask=result["small_mask_image"]
+        )
+        self.status_bar.showMessage(
+            f"Comic Panel: {result['canvas_width']}x{result['canvas_height']} - "
+            f"인페인트 모드 활성화", 5000)
 
     def on_img2img_window_generate(self, _window_id: int, params: dict):
         """독립 Img2Img 윈도우에서 생성 요청"""

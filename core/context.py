@@ -23,8 +23,10 @@ class AppContext:
     def __init__(self, main_window: 'ModernMainWindow', wildcard_manager: WildcardManager, tag_data_manager: 'TagDataManager'):
         from core.api_service import APIService
         
+        import weakref
         self.main_window = main_window
         self.wildcard_manager = wildcard_manager
+        self.wildcard_manager._app_context_ref = weakref.ref(self)  # WildcardProcessor에서 오버라이드 접근용 (weakref로 순환참조 방지)
         self.tag_data_manager = tag_data_manager
         self.middle_section_controller: Optional['MiddleSectionController'] = None
         self.api_service = APIService(self)
@@ -65,6 +67,11 @@ class AppContext:
         # API payload 안전 저장소
         self._last_api_payload = None
         self._payload_lock = False
+
+        # 🆕 와일드카드 scope 추적 (image history에 기록할 와일드카드 키, 최대 1개)
+        self.scoped_wildcard: str = ''
+        # 🔒 와일드카드 오버라이드 (고정값, {actual_key: value})
+        self.wildcard_override: dict = {}
 
         # 🆕 임시 생성 창 모드 플래그 (FR-2-1, FR-3-1)
         self.temp_window_mode = False  # 임시 창 생성 중인지 여부

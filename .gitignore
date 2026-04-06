@@ -6,6 +6,9 @@ __pycache__/
 # 특정 데이터 폴더 무시
 data/tags/
 
+# Cloudflared 바이너리
+utils/.cloudflared_bin/
+
 # 가상환경 폴더
 temp/
 save/

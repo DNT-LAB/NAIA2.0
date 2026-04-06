@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>NAIA Remote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <span class="logo">NAIA-REMOTE</span><span class="logo-sig">Provided by <b>CLAUDE</b></span>
+  <div class="header-right">
+    <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
+      <option value="NAI">NAI</option>
+      <option value="WEBUI">WEBUI</option>
+      <option value="COMFYUI">COMFYUI</option>
+    </select>
+    <div class="conn-badge">
+      <span id="connText">offline</span>
+      <span class="conn-dot" id="connDot"></span>
+    </div>
+  </div>
+</header>
+<div class="ui-lock" id="uiLock"><div class="ui-lock-spinner"></div></div>
+<div class="toast" id="toast"></div>
+
+<!-- API Config popup -->
+<div class="api-popup-overlay" id="apiPopupOverlay" onclick="if(event.target===this)closeApiPopup()">
+  <div class="api-popup">
+    <div class="api-popup-header">
+      <span class="api-popup-title">API Configuration</span>
+      <button class="history-close" onclick="closeApiPopup()">&times;</button>
+    </div>
+    <div class="api-popup-body">
+      <!-- NAI -->
+      <div class="api-row">
+        <div class="api-row-head">
+          <span class="api-mode-label">NAI</span>
+          <span class="api-status-dot" id="apiDotNai"></span>
+        </div>
+        <span class="api-nai-note" id="apiNaiStatus">Checking...</span>
+      </div>
+      <!-- WebUI -->
+      <div class="api-row">
+        <div class="api-row-head">
+          <span class="api-mode-label">WebUI</span>
+          <span class="api-status-dot" id="apiDotWebui"></span>
+        </div>
+        <div class="api-url-row">
+          <input class="api-url-input" id="apiWebuiUrl" placeholder="127.0.0.1:7860">
+          <button class="api-test-btn" id="apiWebuiTest" onclick="testApi('WEBUI')">Test</button>
+        </div>
+        <span class="api-status-text" id="apiWebuiStatus"></span>
+      </div>
+      <!-- ComfyUI -->
+      <div class="api-row">
+        <div class="api-row-head">
+          <span class="api-mode-label">ComfyUI</span>
+          <span class="api-status-dot" id="apiDotComfyui"></span>
+        </div>
+        <div class="api-url-row">
+          <input class="api-url-input" id="apiComfyuiUrl" placeholder="127.0.0.1:8188">
+          <button class="api-test-btn" id="apiComfyuiTest" onclick="testApi('COMFYUI')">Test</button>
+        </div>
+        <span class="api-status-text" id="apiComfyuiStatus"></span>
+      </div>
+      <div class="api-footer-note">
+        Local/LAN addresses only (127.0.0.1, 192.168.x.x).<br>
+        For tunnel/remote URLs, use NAIA's API Management tab.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Module floating panel (no overlay, no UI lock) -->
+<div class="module-popup" id="modulePopup">
+  <div class="module-popup-header">
+    <span class="module-popup-title" id="modulePopupTitle"></span>
+    <button class="history-close" onclick="closeModule()">&times;</button>
+  </div>
+  <div class="module-popup-body" id="modulePopupBody"></div>
+</div>
+
+<!-- Refine (Depth Search) floating panel -->
+<div class="refine-popup" id="refinePanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Refine</span>
+    <button class="history-close" onclick="closeRefine()">&times;</button>
+  </div>
+  <div class="refine-body"></div>
+</div>
+
+<main class="app-layout">
+
+<!-- Control panel: PC=left sidebar, Mobile=bottom panel -->
+<div class="control-panel">
+  <!-- Prompt drawer wrapper (mobile: slide-up, PC: always visible) -->
+  <div class="prompt-drawer" id="promptDrawer">
+    <div class="prompt-inner">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="prompt" onclick="switchTab('prompt')">Prompt</button>
+        <button class="tab-btn" data-tab="params" onclick="switchTab('params')">Params</button>
+        <button class="tab-btn" data-tab="negative" onclick="switchTab('negative')">Negative</button>
+      </div>
+      <div class="tab-content">
+        <div class="tab-page active" id="tabPrompt">
+          <span class="section-label">Prompt</span>
+          <textarea class="prompt-edit" id="promptEdit" placeholder="prompt..."></textarea>
+          <!-- Module bar -->
+          <div class="module-bar">
+            <button class="module-btn search-btn" data-module="search" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+            <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">Prompt Engineering</button>
+            <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation</button>
+            <button class="module-btn" data-module="character" onclick="openModule('character')">NAID4 Character</button>
+          </div>
+        </div>
+        <div class="tab-page" id="tabParams">
+          <span class="section-label">Parameters</span>
+          <div class="params-grid" id="paramsGrid">
+            <div class="param-row">
+              <span class="param-label">Model</span>
+              <select class="param-select" id="pModel" onchange="setParam('model',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Sampler</span>
+              <select class="param-select" id="pSampler" onchange="setParam('sampler',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Scheduler</span>
+              <select class="param-select" id="pScheduler" onchange="setParam('scheduler',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Resolution</span>
+              <select class="param-select" id="pResolution" onchange="setParam('resolution',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Steps</span>
+              <input class="param-input" id="pSteps" type="number" min="1" max="150" onchange="setParam('steps',this.value)">
+            </div>
+            <div class="param-row">
+              <span class="param-label">CFG Scale</span>
+              <input class="param-input" id="pCfgScale" type="number" step="0.1" min="1" max="10" onchange="setParam('cfg_scale',this.value)">
+            </div>
+            <!-- NAI only -->
+            <div class="param-row mode-nai">
+              <span class="param-label">CFG Rescale</span>
+              <input class="param-input" id="pCfgRescale" type="number" step="0.01" min="-0.25" max="1" onchange="setParam('cfg_rescale',this.value)">
+            </div>
+            <div class="param-row">
+              <span class="param-label">Seed</span>
+              <input class="param-input seed" id="pSeed" type="text" onchange="setParam('seed',this.value)">
+            </div>
+            <div class="param-flags" id="paramFlags"></div>
+            <!-- WEBUI HR controls -->
+            <div class="mode-webui" id="webuiParams" style="display:none">
+              <div class="param-row">
+                <span class="param-label">Hires-fix</span>
+                <input type="checkbox" class="param-check" id="pEnableHr" onchange="setParam('enable_hr',String(this.checked))">
+              </div>
+              <div class="param-row">
+                <span class="param-label">HR Scale</span>
+                <input class="param-input" id="pHrScale" type="number" step="0.1" min="1" max="4" onchange="setParam('hr_scale',this.value)">
+              </div>
+              <div class="param-row">
+                <span class="param-label">Upscaler</span>
+                <select class="param-select" id="pHrUpscaler" onchange="setParam('hr_upscaler',this.value)"></select>
+              </div>
+              <div class="param-row">
+                <span class="param-label">Denoise</span>
+                <input class="param-input" id="pDenoise" type="number" step="0.05" min="0" max="1" onchange="setParam('denoising_strength',this.value)">
+              </div>
+              <div class="param-row">
+                <span class="param-label">HR Steps</span>
+                <input class="param-input" id="pHiresSteps" type="number" min="0" max="150" onchange="setParam('hires_steps',this.value)">
+              </div>
+              <div class="param-row">
+                <span class="param-label">HR CFG</span>
+                <input class="param-input" id="pHrCfg" type="number" step="0.1" min="0" max="30" onchange="setParam('hr_cfg',this.value)">
+              </div>
+            </div>
+            <!-- ComfyUI controls -->
+            <div class="mode-comfyui" id="comfyuiParams" style="display:none">
+              <div class="param-flags" style="padding:7px 10px;background:var(--bg-deep)">
+                <span class="param-flag" data-key="sampling_mode" data-val="eps" id="flagEps" onclick="setSamplingMode('eps')">EPS</span>
+                <span class="param-flag" data-key="sampling_mode" data-val="v_prediction" id="flagVpred" onclick="setSamplingMode('v_prediction')">V-Pred</span>
+                <span class="param-flag" data-key="sampling_mode" data-val="anima" id="flagAnima" onclick="setSamplingMode('anima')">ANIMA</span>
+              </div>
+              <div class="param-row" id="comfyuiRescaleRow" style="display:none">
+                <span class="param-label">Rescale CFG</span>
+                <input class="param-input" id="pRescaleCfg" type="number" step="0.01" min="0" max="1" onchange="setParam('rescale_cfg',this.value)">
+              </div>
+            </div>
+          </div>
+          <div class="meta-row" id="metaRow" style="margin-top:8px"></div>
+        </div>
+        <div class="tab-page" id="tabNegative">
+          <span class="section-label">Negative Prompt</span>
+          <textarea class="prompt-edit neg" id="negEdit" placeholder="negative prompt..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toggle bar (mobile only) -->
+  <div class="prompt-toggle-bar" onclick="toggleDrawer()">
+    <span class="toggle-arrow" id="toggleArrow">&#9650;</span>
+    <span class="toggle-label" id="toggleLabel">Prompt / Params / Modules</span>
+    <span class="toggle-arrow" id="toggleArrow2">&#9650;</span>
+    <span class="prompt-new-dot hidden" id="promptNewDot"></span>
+  </div>
+
+  <!-- Bottom controls (options + resolution + buttons) -->
+  <div class="bottom-controls">
+    <div class="options-row">
+      <label class="opt-toggle">
+        <input type="checkbox" id="optPromptFixed" onchange="setOption('prompt_fixed', this.checked)">
+        <span class="opt-label">Prompt Fixed</span>
+      </label>
+      <label class="opt-toggle">
+        <input type="checkbox" id="optAutoGen" onchange="setOption('auto_generate', this.checked)">
+        <span class="opt-label">Auto Gen</span>
+      </label>
+      <label class="opt-toggle">
+        <input type="checkbox" id="optWcStandalone" onchange="setOption('wildcard_standalone', this.checked)">
+        <span class="opt-label">WC Solo</span>
+      </label>
+    </div>
+    <div class="quick-params">
+      <select class="param-select quick-select" id="qResolution" onchange="setParam('resolution',this.value)"></select>
+      <span class="quick-flag-btn" id="qRndRes" onclick="toggleQuickFlag(this,'random_resolution')">Rnd Res</span>
+      <span class="quick-flag-btn" id="qAutoRes" onclick="toggleQuickFlag(this,'auto_fit_resolution')">Auto Res</span>
+    </div>
+    <div class="ctrl-buttons">
+      <button class="ctrl-btn btn-rnd" id="btnRnd" onclick="send('random')"><span class="shortcut-hint">ALT + ENTER</span>Random</button>
+      <button class="ctrl-btn btn-gen" id="btnGen" onclick="send('generate')"><span class="shortcut-hint">CTRL + ENTER</span>Generate</button>
+    </div>
+  </div>
+</div>
+
+<!-- Viewer + History wrapper -->
+<div class="viewer-wrapper">
+  <div class="viewer">
+    <img id="preview" alt="">
+    <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
+    <div class="viewer-hist-actions" id="viewerHistActions">
+      <button class="viewer-hist-btn nav" onclick="navHistory(-1)">&#9664;</button>
+      <button class="viewer-hist-btn" onclick="saveCurrentHistoryItem()">Save</button>
+      <button class="viewer-hist-btn danger" onclick="deleteCurrentHistoryItem()">Delete</button>
+      <button class="viewer-hist-btn nav" onclick="navHistory(1)">&#9654;</button>
+    </div>
+  </div>
+  <div class="history-panel" id="historyPanel">
+    <div class="history-header">
+      <span class="history-title">History <span class="history-counter" id="histCounter"></span></span>
+      <button class="history-close" onclick="toggleHistory()">&times;</button>
+    </div>
+    <div class="history-grid" id="historyGrid"></div>
+    <div class="history-limit-section">
+      <div class="mod-section-label">Reached 200</div>
+      <select class="history-limit-select" id="histLimitAction">
+        <option value="never_mind">Never mind</option>
+        <option value="stop">Stop</option>
+        <option value="save_all_clear">Save-all-clear</option>
+      </select>
+    </div>
+    <div class="history-actions">
+      <button class="history-action-btn" onclick="saveAllHistory()">Save All</button>
+      <button class="history-action-btn danger" onclick="clearHistory()">Clear</button>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<!-- History toggle tab -->
+<button class="history-tab" id="historyTab" onclick="toggleHistory()">
+History
+</button>
+<div class="history-overlay" id="historyOverlay"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

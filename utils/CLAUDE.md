@@ -11,7 +11,8 @@ utils/
   ├── image_info.py           → 이미지 메타데이터 추출
   ├── token_calculator.py     → 프롬프트 토큰 계산 (CLIP 근사)
   ├── translator.py           → 한글 → 영어 번역
-  └── load_generation_params.py → 생성 파라미터 모드별 저장/로드
+  ├── load_generation_params.py → 생성 파라미터 모드별 저장/로드
+  └── cloudflared.py          → Cloudflared 터널 관리 (바이너리 다운로드 + Quick Tunnel)
 ```
 
 **설계 원칙**:
@@ -149,10 +150,54 @@ result = korean_to_english("웃는 소녀")  # "smiling girl" (소문자)
 
 ---
 
+## Cloudflared 터널 관리 (`cloudflared.py`)
+
+pycloudflared 대체 경량 구현. 바이너리 자동 다운로드 + Quick Tunnel 시작/종료.
+
+#### 주요 함수
+
+```python
+from utils.cloudflared import start_tunnel, stop_tunnel, stop_all, remove_binary
+
+# 터널 시작 (바이너리 없으면 자동 다운로드)
+info = start_tunnel(port=7243, on_progress=print, timeout=30.0)
+print(info.tunnel_url)   # https://xxx.trycloudflare.com
+print(info.metrics_url)  # http://127.0.0.1:xxxxx/metrics
+
+# 터널 종료
+stop_tunnel(7243)
+
+# 바이너리 삭제
+remove_binary()
+```
+
+#### 멀티플랫폼 지원
+
+Windows (amd64/x86), Linux (x86_64/i386/arm/arm64/aarch64), macOS (x86_64/arm64).
+macOS는 tgz 아카이브 — `tarfile`로 바이너리만 추출.
+
+#### 바이너리 저장 위치
+
+`utils/.cloudflared_bin/` — `.gitignore`에 추가 권장.
+
+#### 설계 결정
+
+- **readline 타임아웃**: daemon Thread + `Event.wait(timeout)` — `ThreadPoolExecutor` 대비 thread leak 방지
+- **atexit 관리**: 클로저 참조를 `_atexit_handlers` dict에 보관하여 동일 객체로 unregister 가능
+- **전체 타임아웃**: 30초 deadline, 라인별 5초 타임아웃. 프로세스 종료 감지 포함
+
+#### 주의사항
+
+- 네트워크 필요 (바이너리 다운로드 + Cloudflare 터널)
+- `start_tunnel()`은 블로킹 — 호출부에서 별도 스레드 사용 필수
+- `_running` dict로 포트별 중복 시작 방지 (동일 포트 재호출 시 기존 info 반환)
+
+---
+
 ## 다른 디렉터리와의 관계
 
 | 디렉터리 | 관계 |
 |----------|------|
-| `modules/`, `tabs/` | token_calculator, image_info, translator 호출 |
+| `modules/`, `tabs/` | token_calculator, image_info, translator, cloudflared 호출 |
 | `core/` | load_generation_params (MainWindow 통합) |
 | `interfaces/`, `ui/` | 독립 (utils는 이들에 의존하지 않음) |

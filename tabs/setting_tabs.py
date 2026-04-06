@@ -3,11 +3,12 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QLineEdit, QFileDialog, QGroupBox,
     QScrollArea, QMessageBox, QComboBox
 )
-from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt
+from PyQt6.QtGui import QIntValidator
 from PyQt6.QtWidgets import QTextEdit
 from interfaces.base_tab_module import BaseTabModule
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaling_manager
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size, get_scaling_manager
 from ui.scaling_settings_dialog import ScalingSettingsDialog
 import json
 import os
@@ -51,6 +52,11 @@ class SettingsTabModule(BaseTabModule):
         self.load_settings()
         if self.settings_widget:
             self.settings_widget.update_ui_from_settings()
+
+    def cleanup(self):
+        """앱 종료 시 cloudflared 터널 및 remote server 정리"""
+        if self.settings_widget:
+            self.settings_widget.cleanup_services()
     
     def load_settings(self):
         """설정 파일에서 설정 로드"""
@@ -120,11 +126,17 @@ class SettingsTabModule(BaseTabModule):
 
 class SettingsWidget(QWidget):
     """Settings UI 위젯"""
-    
+    _cf_progress = pyqtSignal(str)
+    _cf_success = pyqtSignal(str)
+    _cf_error = pyqtSignal(str)
+
     def __init__(self, app_context, settings_module: SettingsTabModule):
         super().__init__()
         self.app_context = app_context
         self.settings_module = settings_module
+        self._cf_progress.connect(self._on_cf_progress)
+        self._cf_success.connect(self._set_cloudflared_url)
+        self._cf_error.connect(self._on_cloudflared_error)
         self.init_ui()
 
         # ✅ ImageCrudController 이벤트 구독
@@ -165,6 +177,7 @@ class SettingsWidget(QWidget):
         scroll_layout.setSpacing(20)
         
         # 각 설정 섹션 추가
+        scroll_layout.addWidget(self._create_remote_section())
         scroll_layout.addWidget(self._create_autocomplete_section())
         scroll_layout.addWidget(self._create_save_directory_section())
         scroll_layout.addWidget(self._create_module_management_section())
@@ -226,6 +239,204 @@ class SettingsWidget(QWidget):
         
         return group_box, layout
     
+    def _create_remote_section(self) -> QWidget:
+        """Remote API 서버 설정 섹션"""
+        section, layout = self._create_section_frame("🌐 Web Session")
+
+        # 한 줄: 체크박스 + URL(서버 시작 시) + Copy + Port + Port입력
+        top_row = QHBoxLayout()
+        top_row.setSpacing(get_scaled_size(8))
+        self.web_session_checkbox = QCheckBox("Web Session 활성화")
+        self.web_session_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.web_session_checkbox.toggled.connect(self._on_web_session_toggled)
+        top_row.addWidget(self.web_session_checkbox)
+
+        self.remote_url_label = QLabel("")
+        self.remote_url_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; background: transparent;")
+        self.remote_url_label.setOpenExternalLinks(True)
+        top_row.addWidget(self.remote_url_label)
+
+        self.remote_copy_btn = QPushButton("Copy")
+        self.remote_copy_btn.setStyleSheet(DARK_STYLES['compact_button'])
+        self.remote_copy_btn.setFixedWidth(get_scaled_size(90))
+        self.remote_copy_btn.clicked.connect(self._copy_remote_url)
+        self.remote_copy_btn.setVisible(False)
+        top_row.addWidget(self.remote_copy_btn)
+
+        port_label = QLabel("Port:")
+        port_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: {DARK_COLORS['text_primary']}; background: transparent;")
+        top_row.addWidget(port_label)
+
+        self.remote_port_edit = QLineEdit("7243")
+        self.remote_port_edit.setFixedWidth(get_scaled_size(105))
+        self.remote_port_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
+        self.remote_port_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.remote_port_edit.setValidator(QIntValidator(1024, 65535))
+        self.remote_port_edit.setProperty("autocomplete_ignore", True)
+        top_row.addWidget(self.remote_port_edit)
+
+        top_row.addStretch()
+        layout.addLayout(top_row)
+
+        # Cloudflared: 체크박스 + URL + Copy 한 줄
+        cf_row = QHBoxLayout()
+        cf_row.setSpacing(get_scaled_size(8))
+        self.cloudflared_checkbox = QCheckBox("Cloudflared 연결")
+        self.cloudflared_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.cloudflared_checkbox.setEnabled(False)
+        self.cloudflared_checkbox.toggled.connect(self._on_cloudflared_toggled)
+        cf_row.addWidget(self.cloudflared_checkbox)
+
+        self.cloudflared_url_label = QLabel("")
+        self.cloudflared_url_label.setStyleSheet(f"""
+            QLabel {{
+                color: {DARK_COLORS['accent_blue']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 2px 0;
+                background: transparent;
+            }}
+        """)
+        self.cloudflared_url_label.setOpenExternalLinks(True)
+        self._cloudflared_tunnel_url = ""
+        cf_row.addWidget(self.cloudflared_url_label)
+
+        self.cloudflared_copy_btn = QPushButton("Copy")
+        self.cloudflared_copy_btn.setStyleSheet(DARK_STYLES['compact_button'])
+        self.cloudflared_copy_btn.setFixedWidth(get_scaled_size(90))
+        self.cloudflared_copy_btn.clicked.connect(self._copy_cloudflared_url)
+        self.cloudflared_copy_btn.setVisible(False)
+        cf_row.addWidget(self.cloudflared_copy_btn)
+
+        cf_row.addStretch()
+        layout.addLayout(cf_row)
+
+        return section
+
+    def _get_remote_port(self) -> int:
+        """포트 번호 반환"""
+        try:
+            return int(self.remote_port_edit.text().strip())
+        except ValueError:
+            return 7243
+
+    def _copy_remote_url(self):
+        """로컬 URL 클립보드 복사"""
+        import pyperclip
+        url = f"http://localhost:{self._get_remote_port()}"
+        pyperclip.copy(url)
+
+    def _copy_cloudflared_url(self):
+        """Cloudflared URL 클립보드 복사"""
+        import pyperclip
+        url = self._cloudflared_tunnel_url
+        if url:
+            pyperclip.copy(url)
+
+    def _on_web_session_toggled(self, checked: bool):
+        """Web Session 활성화/비활성화"""
+        if checked:
+            port = self._get_remote_port()
+            try:
+                from core.remote_api_server import start_remote_server
+                self.web_session_checkbox.setEnabled(False)
+                start_remote_server(self.app_context, port=port)
+                self.web_session_checkbox.setEnabled(True)
+                self.remote_port_edit.setEnabled(False)
+                url = f"http://localhost:{port}"
+                self.remote_url_label.setText(
+                    f'<a href="{url}" style="color: {DARK_COLORS["success"]}; '
+                    f'font-size: {get_scaled_font_size(16)}px;">{url}</a>'
+                )
+                self.remote_copy_btn.setVisible(True)
+                self.cloudflared_checkbox.setEnabled(True)
+            except Exception as e:
+                self.web_session_checkbox.setEnabled(True)
+                self.web_session_checkbox.setChecked(False)
+                self.remote_url_label.setText(
+                    f'<span style="color: {DARK_COLORS["error"]}; '
+                    f'font-size: {get_scaled_font_size(16)}px;">서버 시작 실패: {e}</span>'
+                )
+        else:
+            if self.cloudflared_checkbox.isChecked():
+                self.cloudflared_checkbox.setChecked(False)
+            self.cloudflared_checkbox.setEnabled(False)
+            try:
+                from core.remote_api_server import stop_remote_server
+                stop_remote_server()
+            except Exception:
+                pass
+            self.remote_port_edit.setEnabled(True)
+            self.remote_url_label.setText("")
+            self.remote_copy_btn.setVisible(False)
+
+    def _on_cloudflared_toggled(self, checked: bool):
+        """Cloudflared 터널 연결/해제"""
+        if checked:
+            self._start_cloudflared()
+        else:
+            self._stop_cloudflared()
+
+    def _on_cf_progress(self, msg: str):
+        """Cloudflared 진행 상태 표시 (UI 스레드)"""
+        self.cloudflared_url_label.setText(msg)
+
+    def _start_cloudflared(self):
+        """cloudflared 터널 시작"""
+        self.cloudflared_url_label.setText("Cloudflared 연결 중...")
+        import threading
+        threading.Thread(target=self._connect_cloudflared, daemon=True).start()
+
+    def _connect_cloudflared(self):
+        """별도 스레드에서 cloudflared 연결"""
+        try:
+            from utils.cloudflared import start_tunnel
+            port = self._get_remote_port()
+            info = start_tunnel(port, on_progress=self._cf_progress.emit)
+            self._cf_success.emit(info.tunnel_url)
+        except Exception as e:
+            self._cf_error.emit(str(e))
+
+    def _set_cloudflared_url(self, url: str):
+        """Cloudflared URL 표시"""
+        self._cloudflared_tunnel_url = url
+        self.cloudflared_url_label.setText(
+            f'<a href="{url}" style="color: {DARK_COLORS["accent_blue"]}; '
+            f'font-size: {get_scaled_font_size(16)}px; font-weight: bold;">{url}</a>'
+        )
+        self.cloudflared_copy_btn.setVisible(True)
+        print(f"🌐 Cloudflared tunnel: {url}")
+
+    def _on_cloudflared_error(self, error: str):
+        """Cloudflared 연결 실패"""
+        self.cloudflared_checkbox.setChecked(False)
+        self.cloudflared_url_label.setText(
+            f'<span style="color: {DARK_COLORS["error"]}; '
+            f'font-size: {get_scaled_font_size(16)}px;">Cloudflared 실패: {error}</span>'
+        )
+
+    def _stop_cloudflared(self):
+        """cloudflared 터널 종료"""
+        try:
+            from utils.cloudflared import stop_tunnel
+            stop_tunnel(self._get_remote_port())
+        except Exception:
+            pass
+        self._cloudflared_tunnel_url = ""
+        self.cloudflared_url_label.setText("")
+        self.cloudflared_copy_btn.setVisible(False)
+        print("🌐 Cloudflared tunnel stopped")
+
+    def cleanup_services(self):
+        """앱 종료 시 서비스 정리"""
+        if self.cloudflared_checkbox.isChecked():
+            self._stop_cloudflared()
+        if self.web_session_checkbox.isChecked():
+            try:
+                from core.remote_api_server import stop_remote_server
+                stop_remote_server()
+            except Exception:
+                pass
+
     def _create_autocomplete_section(self) -> QWidget:
         """자동완성 설정 섹션"""
         section, layout = self._create_section_frame("🔍 자동완성 설정")

@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 165"
-        self.setWindowTitle(self.base_title + " - 260405")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 166"
+        self.setWindowTitle(self.base_title + " - 260406")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2562,21 +2562,22 @@ class ModernMainWindow(QMainWindow):
                         else:
                             # ❌ 연결 실패 시에만 API 관리 창으로 이동
                             self.status_bar.showMessage(f"❌ WEBUI 연결 실패: {webui_url}", 5000)
-                            if not tab_was_open:
+                            if not tab_was_open and not self.app_context.stealth_mode:
                                 self.open_search_management()
-                            
-                            # 오류 메시지 표시
-                            from PyQt6.QtWidgets import QMessageBox
-                            QMessageBox.critical(
-                                self, 
-                                "WEBUI 연결 실패", 
-                                f"WebUI 서버에 연결할 수 없습니다.\n\n"
-                                f"확인할 사항:\n"
-                                f"• WebUI가 실행 중인지 확인\n"
-                                f"• 주소가 올바른지 확인: {webui_url}\n"
-                                f"• API 접근이 활성화되어 있는지 확인\n\n"
-                                f"API 관리 탭에서 올바른 주소를 입력해주세요."
-                            )
+
+                            # 오류 메시지 표시 (stealth_mode에서는 억제)
+                            if not self.app_context.stealth_mode:
+                                from PyQt6.QtWidgets import QMessageBox
+                                QMessageBox.critical(
+                                    self,
+                                    "WEBUI 연결 실패",
+                                    f"WebUI 서버에 연결할 수 없습니다.\n\n"
+                                    f"확인할 사항:\n"
+                                    f"• WebUI가 실행 중인지 확인\n"
+                                    f"• 주소가 올바른지 확인: {webui_url}\n"
+                                    f"• API 접근이 활성화되어 있는지 확인\n\n"
+                                    f"API 관리 탭에서 올바른 주소를 입력해주세요."
+                                )
                     else:
                         self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
                         self.open_search_management()
@@ -2690,21 +2691,22 @@ class ModernMainWindow(QMainWindow):
                         else:
                             # ❌ 연결 실패
                             self.status_bar.showMessage(f"❌ ComfyUI 연결 실패: {comfyui_url}", 5000)
-                            if not tab_was_open:
+                            if not tab_was_open and not self.app_context.stealth_mode:
                                 self.open_search_management()
-                            
-                            # 오류 메시지 표시
-                            from PyQt6.QtWidgets import QMessageBox
-                            QMessageBox.critical(
-                                self, 
-                                "ComfyUI 연결 실패", 
-                                f"ComfyUI 서버에 연결할 수 없습니다.\n\n"
-                                f"확인할 사항:\n"
-                                f"• ComfyUI가 실행 중인지 확인\n"
-                                f"• 주소가 올바른지 확인: {comfyui_url}\n"
-                                f"• 포트 번호가 정확한지 확인 (기본: 8188)\n\n"
-                                f"API 관리 탭에서 올바른 주소를 입력해주세요."
-                            )
+
+                            # 오류 메시지 표시 (stealth_mode에서는 억제)
+                            if not self.app_context.stealth_mode:
+                                from PyQt6.QtWidgets import QMessageBox
+                                QMessageBox.critical(
+                                    self,
+                                    "ComfyUI 연결 실패",
+                                    f"ComfyUI 서버에 연결할 수 없습니다.\n\n"
+                                    f"확인할 사항:\n"
+                                    f"• ComfyUI가 실행 중인지 확인\n"
+                                    f"• 주소가 올바른지 확인: {comfyui_url}\n"
+                                    f"• 포트 번호가 정확한지 확인 (기본: 8188)\n\n"
+                                    f"API 관리 탭에서 올바른 주소를 입력해주세요."
+                                )
                     else:
                         self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
                         self.open_search_management()
@@ -3055,6 +3057,9 @@ class ModernMainWindow(QMainWindow):
                 traceback.print_exc()
             
             self.status_bar.showMessage("🎉 생성 완료!")
+
+            # Remote API 서버에 결과 전달
+            self.app_context.publish("generation_result_available", result)
             
             # 자동화 모듈 처리 (안전하게)
             if self.automation_module:
@@ -5221,6 +5226,16 @@ class ModernMainWindow(QMainWindow):
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장
         try:
+            # Remote API 서버 + Cloudflared 종료
+            try:
+                from core.remote_api_server import stop_remote_server
+                stop_remote_server()
+                settings_tab = self.image_window.tab_controller.get_tab_instance('SettingsTabModule')
+                if settings_tab and settings_tab.settings_widget:
+                    settings_tab.settings_widget._stop_cloudflared()
+            except Exception:
+                pass
+
             # 🆕 생성 스레드 안전 종료 (가장 먼저 실행)
             if hasattr(self, 'generation_controller') and self.generation_controller:
                 try:

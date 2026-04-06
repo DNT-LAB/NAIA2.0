@@ -794,6 +794,7 @@ class GenerationController:
     def _on_generation_started(self):
         """생성 시작 시 호출되는 슬롯"""
         self.is_generating = True
+        self.context.publish("generation_started", {})
         # 🆕 버튼 비활성화 제거 - 큐에 추가할 수 있도록 활성 상태 유지
         # self.context.main_window.generate_button_main.setEnabled(False)
 

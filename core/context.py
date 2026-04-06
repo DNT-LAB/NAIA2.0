@@ -34,6 +34,7 @@ class AppContext:
 
         # 🆕 API 모드 관리
         self.current_api_mode = "NAI"  # 기본값은 NAI
+        self.stealth_mode = False  # True이면 QMessageBox 등 차단 UI 억제
         self.mode_swap_subscribers = []  # 모드 변경 구독자들
         
         # 🆕 모드 대응 모듈 매니저

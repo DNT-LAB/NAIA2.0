@@ -61,3 +61,5 @@ PyQt6-QScintilla
 googletrans
 tiktoken
 ultralytics
+fastapi
+uvicorn[standard]

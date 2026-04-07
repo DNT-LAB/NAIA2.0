@@ -2205,14 +2205,24 @@ class RemoteBridge(QObject):
             }
 
             # 히스토리 확장 데이터 (큐 추가 / reroll / 프롬프트 불러오기용)
-            import copy
+            # json round-trip으로 안전한 데이터만 보존 (Qt/PIL 객체 제거)
             source_row = result.get("source_row")
+            try:
+                safe_gen_params = json.loads(json.dumps(gen_params, default=str)) if gen_params else {}
+            except Exception:
+                safe_gen_params = {}
+            pc_raw = result.get("prompt_context", {})
+            safe_prompt_context = {}
+            if isinstance(pc_raw, dict):
+                for k in ("main_prompt", "final_prompt", "prefix_tags", "main_tags", "postfix_tags"):
+                    if k in pc_raw:
+                        safe_prompt_context[k] = pc_raw[k]
             hist_entry = {
                 "webp": webp_bytes,
                 "metadata": metadata,
-                "gen_params": copy.deepcopy(gen_params) if gen_params else {},
+                "gen_params": safe_gen_params,
                 "source_row": source_row.copy() if source_row is not None else None,
-                "prompt_context": copy.deepcopy(result.get("prompt_context", {})),
+                "prompt_context": safe_prompt_context,
             }
 
             # 항상 캐시 (클라이언트 없어도 다음 접속 시 전송 가능)

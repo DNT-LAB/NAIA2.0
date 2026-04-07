@@ -108,13 +108,22 @@
       <div class="tab-content">
         <div class="tab-page active" id="tabPrompt">
           <span class="section-label">Prompt</span>
-          <textarea class="prompt-edit" id="promptEdit" placeholder="prompt..."></textarea>
+          <div class="prompt-highlight-wrap">
+            <div class="prompt-highlight" id="promptHighlight"></div>
+            <textarea class="prompt-edit" id="promptEdit" placeholder="prompt..." onscroll="syncPromptHighlight()"></textarea>
+          </div>
+          <!-- Tag search bar (reserved for future: event/outfit/preset) -->
+          <div class="tag-search-bar" id="tagSearchBar" style="display:none">
+            <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
+            <div class="tag-search-results" id="tagSearchResults"></div>
+          </div>
           <!-- Module bar -->
           <div class="module-bar">
             <button class="module-btn search-btn" data-module="search" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
             <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">Prompt Engineering</button>
             <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation</button>
             <button class="module-btn" data-module="character" onclick="openModule('character')">NAID4 Character</button>
+            <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Conditional</button>
           </div>
         </div>
         <div class="tab-page" id="tabParams">
@@ -245,6 +254,8 @@
   <div class="viewer">
     <img id="preview" alt="">
     <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
+    <!-- Tag info hint -->
+    <div class="tag-tooltip" id="tagTooltip"></div>
     <div class="viewer-hist-actions" id="viewerHistActions">
       <button class="viewer-hist-btn nav" onclick="navHistory(-1)">&#9664;</button>
       <button class="viewer-hist-btn" onclick="saveCurrentHistoryItem()">Save</button>

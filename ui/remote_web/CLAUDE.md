@@ -8,7 +8,7 @@
 ui/remote_web/
 ├── index.html    # HTML 구조 (셸)
 ├── style.css     # CSS (모바일/PC 반응형, 768px 브레이크포인트)
-└── app.js        # JS (WebSocket, 파라미터 동기화, 히스토리, 모듈, 검색)
+└── app.js        # JS (WebSocket, 파라미터 동기화, 히스토리, 모듈, autocomplete)
 ```
 
 서버: `core/remote_api_server.py` (RemoteBridge, WebSocketManager, FastAPI 라우트)
@@ -60,6 +60,93 @@ body {
 
 ---
 
+## Autocomplete + Tag Tooltip 시스템
+
+### 아키텍처
+
+```
+textarea input → getActiveTokenInfo() → scheduleAutocomplete()
+  → WS autocomplete → 5단계 검색 (서버) → autocomplete_result
+  → renderAutocomplete() → tag-tooltip (클릭 가능)
+
+textarea click/keyup → checkTagHint() → WS tag_lookup
+  → _lookup_tag_info (서버) → tag_lookup_result
+  → onTagLookupResult() → tag-tooltip (info + related)
+```
+
+### `bindTagAssist(textarea)` — 범용 바인딩
+
+autocomplete + hint + keyboard nav + IME 가드를 어떤 textarea에든 바인딩.
+`acTarget`이 현재 활성 textarea를 추적.
+
+**적용 위치:**
+- `promptEdit` (init 시)
+- `renderPromptEngineering()` 후 `modPrePrompt`, `modPostPrompt`
+- `renderCharacter()` 후 character prompt textarea (`.mod-textarea:not(.mod-uc)`)
+- **제외**: conditional prompt, negative prompt, auto-hide
+
+### 데이터 소스 (`_kr_tags_raw`, ~17만 태그)
+
+| _src | 소스 | 우선순위 |
+|------|------|---------|
+| 0 | interactive JSON (16,698) | 최우선 (relations, desc, keywords_kr) |
+| 1 | KR_tags.parquet (~17K) | interactive에 없을 때 |
+| 2 | e621_KR_tags.parquet (~5.4K) | 위 둘에 없을 때 |
+| 3-10 | Filter lists (8개) | 그룹 소속만 |
+| 11-13 | artist/character/copyright dicts (~129K) | 이름+freq만 |
+
+### 카테고리 컬러 (`CAT_COLORS`)
+
+| _cat | 색상 | 용도 |
+|------|------|------|
+| artist | `#d4736a` | 아티스트 태그 |
+| character | `#6abf7b` | 캐릭터 태그 |
+| copyright | `#a87fd4` | 저작권/시리즈 |
+| e621 | `#d4c36a` | e621 전용 태그 |
+
+### Prefix 라우팅
+
+`artist:ciloranko` → artist cat만 검색, `character:hatsune` → character만 검색
+
+### NAI 구문 보존 (`swapToken`)
+
+선택 시 현재 토큰의 weight/bracket 구조 보존:
+- `0.7::tag` → `0.7::newTag`
+- `(tag:1.2)` → `(newTag:1.2)`
+
+### Related/Implies 태그 클릭
+
+related/implies 태그 클릭 → 현재 토큰 뒤에 `, {tag}` 삽입
+
+### WS 프로토콜
+
+| 방향 | type | 데이터 |
+|------|------|--------|
+| Client→Server | `autocomplete` | `{query}` |
+| Server→Client | `autocomplete_result` | `{query, results: [{tag, count, desc, group, cat}]}` |
+| Client→Server | `tag_lookup` | `{tag}` |
+| Server→Client | `tag_lookup_result` | `{tag, count, desc, group, subgroup, cat, implications?, related?}` |
+
+---
+
+## NAI 가중치 구문 하이라이트
+
+메인 프롬프트 전용. NAI 모드에서만 활성화.
+
+- `weight::content::` 파싱 → weight < 1.0 파란색, > 1.0 빨간색, `::` 녹색
+- 오버레이 패턴: `.prompt-highlight-wrap` > `.prompt-highlight` + `.prompt-edit`
+- `formatNaiHighlight()` — regex `(-?\d+(?:\.\d+)?)(::)([\s\S]*?)(::)` lazy 매칭
+- `syncPromptHighlight()` — 스크롤 동기화
+- NAI 모드 전환: `setNaiHighlightMode(mode)` (syncMode에서 호출)
+- NAI 모드에서 textarea `resize: none` (오버레이 정렬 보호)
+
+### 조건부 프롬프트 하이라이트
+
+- `#` 주석 라인 회색 음영 → `.cond-rules-wrap` 오버레이 패턴
+- `formatCondRules()` + `syncCondScroll()` 동기화
+
+---
+
 ## 모듈 원격 제어 시스템
 
 NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없음 (UI 잠금 없음)**.
@@ -79,35 +166,13 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 | `prompt_engineering` | `PromptEngineeringModule` | preset, pre/post prompt, auto-hide, 전처리 체크박스 15개 |
 | `automation` | `AutomationModule` | delay, random delay, repeat, 종료조건(radio 3개), start/stop |
 | `character` | `CharacterModule` | activate, reroll_on_generate, 캐릭터별 prompt/uc |
+| `conditional_prompt` | `PromptListModifierModule` | enable, rules (# 하이라이트), test, log |
 
 ### 새 모듈 추가 절차 (3단계)
 
-**1. 서버 (`core/remote_api_server.py`)**
-
-`_find_module()`의 `class_map`에 등록:
-```python
-class_map = {
-    "prompt_engineering": "PromptEngineeringModule",
-    "automation": "AutomationModule",
-    "character": "CharacterModule",
-    "new_id": "NewModuleClassName",  # 추가
-}
-```
-
-`_read_module_state()`에 분기 + 읽기 함수 추가.
-`_do_set_module()`에 분기 + 쓰기 함수 추가.
-
-**2. 웹 HTML (`index.html`)** — 모듈 바에 버튼 추가:
-```html
-<button class="module-btn" data-module="new_id" onclick="openModule('new_id')">New Module</button>
-```
-
-**3. 웹 JS (`app.js`)** — titles 맵 + onModuleState 분기 + render 함수:
-```javascript
-// openModule()의 titles에 추가
-// onModuleState()에 분기 추가
-function renderNewModule(m) { moduleBody.innerHTML = `...`; }
-```
+**1. 서버 (`core/remote_api_server.py`)** — `class_map` 등록 + read/set 함수
+**2. 웹 HTML (`index.html`)** — 모듈 바에 버튼 추가
+**3. 웹 JS (`app.js`)** — titles맵 + onModuleState 분기 + render 함수 + `bindTagAssist()` (필요 시)
 
 ### 위젯 타입별 패턴
 
@@ -119,83 +184,33 @@ function renderNewModule(m) { moduleBody.innerHTML = `...`; }
 | QSpinBox | `.value()` | `.setValue(int/float(v))` | `<input type="number" onchange="setModuleParam(...)">` |
 | QRadioButton | `.isChecked()` | `.setChecked(True)` | `<input type="radio" onchange="...">` |
 
-### 전처리 체크박스 (prompt_engineering)
-
-key에 `pp_` 접두사 → 서버에서 `option_key_map` 역참조.
-
-### 자동화 모듈 (automation)
-
-radio 변경 시 `lastAutoState` 캐시 + 즉시 re-render (서버 왕복 없이 조건부 필드 표시).
-
-### textarea XSS 방지
-
-`escHtml()` 함수로 모든 textarea 내용 escape. `</textarea>` 공격 방지.
-
 ---
 
 ## 검색 시스템
 
-### WS 프로토콜
-
-| 방향 | type | 데이터 |
-|------|------|--------|
-| Client→Server | `get_search_state` | (없음) |
-| Client→Server | `search` | `{query, exclude, rating_e/q/s/g}` |
-| Client→Server | `load_parquet` | `{filename}` |
-| Client→Server | `restore_snapshot` | (없음) |
-| Server→Client | `search_state` | `{count, query, exclude, ratings, parquets}` |
-| Server→Client | `search_progress` | `{completed, total}` |
-
-### 검색 패널 (module-bar의 녹색 버튼)
-
-- `Prompt: {count}` 버튼 → 플로팅 패널
-- Remaining count + Restore 버튼
-- Search Keyword / Exclude Keyword 입력
-- Rating 필터 (Explicit, NSFW, Sensitive, General)
-- Custom Parquets 목록 (save/custom_tags/ 폴더) → 클릭으로 로드
-- 검색 진행률 실시간 표시
-
-### 카운트 자동 갱신
-
-- `prompt_generated` 이벤트에 `remaining` 필드 포함
-- WS 연결 시 자동으로 `get_search_state` 요청
-
----
+- `Prompt: {count}` 녹색 버튼 → 플로팅 검색 패널
+- Search/Exclude Keyword, Rating 필터, Custom Parquets 로드, Restore
 
 ## 히스토리 시스템
 
-- 서버: `_image_history: list[(webp_bytes, metadata)]` 최대 200장 버퍼
-- 새로고침 시 전체 히스토리 복원 (WS 연결 시 순서대로 전송)
-- 히스토리 패널: 뷰어 오른쪽 inline (열면 뷰어가 줄어듦, 오버레이 없음)
-- 패널 열기 시 현재 이미지 자동 포커스 + Save/Delete 즉시 표시
-- `◀ Save Delete ▶` 플로팅 네비게이션
-- **Reached 200 액션**: Never mind (oldest 제거) / Stop (추가 중단) / Save-all-clear (zip 저장→클리어)
-- `historySaving` 플래그: save-all-clear 비동기 중 race condition 방지
-
-## UI 구조 (모바일)
-
-```
-[Header: NAIA-REMOTE  Provided by CLAUDE | NAI ▼ | CONNECTED ●]
-[Viewer (패딩 0, 라운드 없음) | History Panel (inline)]
-[▲ PROMPT / PARAMS / MODULES ▲  ← 열면 연보라+흰색 반전]
-[bottom-controls: 옵션 + 해상도 + 버튼 통합, gap 4px 균일]
-```
+- 서버: `_image_history` 200장 버퍼, JSZip zip 다운로드
+- 패널: 뷰어 오른쪽 inline, `◀ Save Delete ▶` 네비게이션
 
 ## 단축키
 
-- `Ctrl+Enter` → Generate (PC에서 버튼에 힌트 표시, 모바일 숨김)
-- `Alt+Enter` → Random
+- `Ctrl+Enter` → Generate, `Alt+Enter` → Random
 
 ## 주요 함정
 
-1. 모드 전환은 `toggle_search_mode()` 사용 (`set_api_mode()`만으론 토큰 전환 안됨)
-2. boolean 직렬화: JS `String(this.checked)` → Python `value == "true"` (소문자)
-3. `populateSelect`: 옵션 개수뿐 아니라 값도 비교
-4. `stealth_mode`: 원격 모드 전환 시 QMessageBox.critical 억제
-5. 모듈 인스턴스: `middle_section_controller.module_instances` (`.modules` 아님)
-6. `generation_worker`는 매 생성마다 재생성 → 직접 시그널 연결 불가, AppContext 이벤트 사용
-7. 하단 컨트롤은 `.bottom-controls` 하나로 통합 (분리하면 간격 불일치)
-8. 생성 결과 시 프롬프트 텍스트 덮어쓰기 금지 (사용자 주석/줄바꿈 보존)
-9. `btnGen.innerHTML` 사용 — `textContent`는 shortcut-hint span 파괴
-10. SMEA/DYN 토글: `disabled` 클래스 가드 필수 (NAID3 외 모드)
-11. Params 탭 flags → Quick flags 양방향 동기화 (`toggleFlag`에서 `qRndRes`/`qAutoRes` 토글)
+1. 모드 전환은 `toggle_search_mode()` 사용
+2. boolean 직렬화: JS `String(this.checked)` → Python `value == "true"`
+3. `stealth_mode`: 원격 depth action 시 QMessageBox 억제
+4. `generation_worker`는 매 생성마다 재생성 → 직접 시그널 연결 불가
+5. 생성 결과 시 프롬프트 텍스트 덮어쓰기 금지
+6. `btnGen.innerHTML` 사용 — `textContent`는 shortcut-hint span 파괴
+7. SMEA/DYN 토글: `disabled` 클래스 가드 필수
+8. Params → Quick flags 양방향 동기화
+9. 한글 IME: `compositionstart`/`compositionend` 이벤트 처리 필수
+10. relations 필드: str/list 혼재 → `isinstance` 가드 필수
+11. `bindTagAssist()`: 모듈 렌더링 후 호출 (innerHTML 교체로 리스너 자동 GC)
+12. `_fireModuleOninput(el)`: 동적 textarea의 oninput 핸들러 프로그래밍 실행

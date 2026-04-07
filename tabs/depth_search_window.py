@@ -782,7 +782,11 @@ class DepthSearchWindow(QWidget):
     # --- 검색 속도 최적화 ---
 
     def _show_msg(self, icon, title, text):
-        """밝은 배경의 QMessageBox 표시 (다크 테마 상속 방지)"""
+        """밝은 배경의 QMessageBox 표시 (다크 테마 상속 방지, 스텔스/원격 시 억제)"""
+        app_ctx = getattr(self.main_window, 'app_context', None) if self.main_window else None
+        if app_ctx and getattr(app_ctx, 'stealth_mode', False):
+            print(f"🌐 Stealth: depth_search 다이얼로그 억제 — {title}: {text}")
+            return
         msg = QMessageBox(icon, title, text, QMessageBox.StandardButton.Ok, self)
         msg.setStyleSheet("""
             QMessageBox { background-color: #F0F0F0; color: #1a1a1a; }

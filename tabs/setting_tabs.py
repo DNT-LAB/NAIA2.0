@@ -52,6 +52,16 @@ class SettingsTabModule(BaseTabModule):
         self.load_settings()
         if self.settings_widget:
             self.settings_widget.update_ui_from_settings()
+            if self.get_setting('web_session.auto_start', False):
+                QTimer.singleShot(5000, self._auto_start_web_session)
+
+    def _auto_start_web_session(self):
+        """자동 시작: Web Session 활성화 + 브라우저 오픈"""
+        if self.settings_widget and not self.settings_widget.web_session_checkbox.isChecked():
+            self.settings_widget.web_session_checkbox.setChecked(True)
+            port = self.settings_widget._get_remote_port()
+            import webbrowser
+            webbrowser.open(f"http://localhost:{port}")
 
     def cleanup(self):
         """앱 종료 시 cloudflared 터널 및 remote server 정리"""
@@ -90,6 +100,10 @@ class SettingsTabModule(BaseTabModule):
             },
             "module_visibility": {},
             "tab_visibility": {},
+            "web_session": {
+                "auto_start": False,
+                "port": 7243
+            },
             "ui": {
                 "theme": "dark",
                 "auto_save": True
@@ -251,6 +265,12 @@ class SettingsWidget(QWidget):
         self.web_session_checkbox.toggled.connect(self._on_web_session_toggled)
         top_row.addWidget(self.web_session_checkbox)
 
+        self.web_session_autostart = QCheckBox("자동 시작")
+        self.web_session_autostart.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.web_session_autostart.setToolTip("프로그램 실행 시 Web Session 자동 활성화")
+        self.web_session_autostart.toggled.connect(self._on_web_session_autostart_toggled)
+        top_row.addWidget(self.web_session_autostart)
+
         self.remote_url_label = QLabel("")
         self.remote_url_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; background: transparent;")
         self.remote_url_label.setOpenExternalLinks(True)
@@ -331,6 +351,12 @@ class SettingsWidget(QWidget):
         url = self._cloudflared_tunnel_url
         if url:
             pyperclip.copy(url)
+
+    def _on_web_session_autostart_toggled(self, checked: bool):
+        """자동 시작 설정 저장"""
+        self.settings_module.set_setting('web_session.auto_start', checked)
+        self.settings_module.set_setting('web_session.port', self._get_remote_port())
+        self.settings_module.save_settings()
 
     def _on_web_session_toggled(self, checked: bool):
         """Web Session 활성화/비활성화"""
@@ -1111,6 +1137,14 @@ class SettingsWidget(QWidget):
     
     def update_ui_from_settings(self):
         """저장된 설정으로 UI 업데이트"""
+        # Web Session 설정
+        self.remote_port_edit.setText(
+            str(self.settings_module.get_setting('web_session.port', 7243))
+        )
+        self.web_session_autostart.setChecked(
+            self.settings_module.get_setting('web_session.auto_start', False)
+        )
+
         # 자동완성 설정
         self.autocomplete_checkbox.setChecked(
             self.settings_module.get_setting('autocomplete.enabled', True)

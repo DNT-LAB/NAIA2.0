@@ -107,11 +107,16 @@ class RemoteBridge(QObject):
         self._prompt_debounce_timer: Optional[QTimer] = None
         self._params_debounce_timer: Optional[QTimer] = None
         self._auto_generate_pending = False  # prompt_generated 이벤트 기반 자동생성
+        self._prompt_source = "random"  # "random" | "generate" — prompt_generated 이벤트 소스 구분
         # 캐시: FastAPI 스레드에서 Qt 위젯 직접 접근 방지
         self._cached_prompts: dict = {}
         self._cached_params: dict = {}
         self._cached_options: dict = {}
         self._cached_api_status: dict = {}
+        # 태그 검색 인덱스 (ui/interactive/interactive 기반)
+        self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
+        self._kr_tags_lock = threading.Lock()
+        self._kr_tags_loaded = False
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -160,6 +165,7 @@ class RemoteBridge(QObject):
                 if negative:
                     mw.negative_prompt_textedit.setPlainText(negative)
                 self._syncing_prompt = False
+            self._prompt_source = "generate"
             gc.execute_generation_pipeline(priority=0)
             self._broadcast_json({"type": "status", "is_generating": True})
             print("🌐 Remote: 생성 트리거됨")
@@ -174,6 +180,7 @@ class RemoteBridge(QObject):
             if auto_gen and auto_gen.isChecked():
                 self._auto_generate_pending = True
 
+            self._prompt_source = "random"
             mw.trigger_random_prompt()
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
@@ -581,6 +588,7 @@ class RemoteBridge(QObject):
             "prompt_engineering": "PromptEngineeringModule",
             "automation": "AutomationModule",
             "character": "CharacterModule",
+            "conditional_prompt": "PromptListModifierModule",
         }
         target_class = class_map.get(module_id)
         if not target_class:
@@ -609,6 +617,8 @@ class RemoteBridge(QObject):
             return self._read_automation()
         elif module_id == "character":
             return self._read_character()
+        elif module_id == "conditional_prompt":
+            return self._read_conditional_prompt()
         return {}
 
     def _read_prompt_engineering(self) -> dict:
@@ -687,6 +697,22 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: character 상태 읽기 실패 — {e}")
             return {}
 
+    def _read_conditional_prompt(self) -> dict:
+        try:
+            m = self._find_module("conditional_prompt")
+            if not m:
+                return {}
+            return {
+                "type": "module_state",
+                "module_id": "conditional_prompt",
+                "enabled": m.enable_checkbox.isChecked() if hasattr(m, 'enable_checkbox') else False,
+                "rules": m.rules_textedit.toPlainText() if hasattr(m, 'rules_textedit') else "",
+                "log": m.log_textedit.toPlainText() if hasattr(m, 'log_textedit') else "",
+            }
+        except Exception as e:
+            print(f"🌐 Remote: conditional_prompt 상태 읽기 실패 — {e}")
+            return {}
+
     def _do_set_module(self, module_id: str, key: str, value: str):
         """웹에서 변경한 모듈 파라미터를 메인 앱에 반영"""
         if module_id == "prompt_engineering":
@@ -695,6 +721,8 @@ class RemoteBridge(QObject):
             self._set_automation(key, value)
         elif module_id == "character":
             self._set_character(key, value)
+        elif module_id == "conditional_prompt":
+            self._set_conditional_prompt(key, value)
 
     def _set_prompt_engineering(self, key: str, value: str):
         try:
@@ -754,10 +782,17 @@ class RemoteBridge(QObject):
                     m.notify_checkbox.setChecked(value == "true")
             elif key == "start":
                 m.start_automation()
+                self._broadcast_automation_state()
             elif key == "stop":
                 m.stop_automation()
+                self._broadcast_automation_state()
         except Exception as e:
             print(f"🌐 Remote: automation 설정 실패 — {key}={value}: {e}")
+
+    def _broadcast_automation_state(self):
+        state = self._read_automation()
+        if state:
+            self._broadcast_json(state)
 
     def _set_character(self, key: str, value: str):
         try:
@@ -784,6 +819,267 @@ class RemoteBridge(QObject):
                     m.character_widgets[idx].active_checkbox.setChecked(value == "true")
         except Exception as e:
             print(f"🌐 Remote: character 설정 실패 — {key}={value}: {e}")
+
+    def _set_conditional_prompt(self, key: str, value: str):
+        try:
+            m = self._find_module("conditional_prompt")
+            if not m:
+                return
+            if key == "enabled":
+                m.enable_checkbox.setChecked(value == "true")
+            elif key == "rules":
+                m.rules_textedit.setPlainText(value)
+            elif key == "test":
+                # test_rules()를 직접 호출 (test_button은 로컬 변수)
+                if hasattr(m, 'test_rules'):
+                    m.test_rules()
+                # 테스트 완료 후 로그 갱신 브로드캐스트
+                state = self._read_conditional_prompt()
+                if state:
+                    self._broadcast_json(state)
+        except Exception as e:
+            print(f"🌐 Remote: conditional_prompt 설정 실패 — {key}={value}: {e}")
+
+    # --- 한글 태그 (KR_tags) ---
+
+    def _load_kr_tags(self):
+        """ui/interactive/interactive (JSON) 로드 + 고속 인덱스 빌드 (최초 1회, 스레드 안전)"""
+        if self._kr_tags_loaded:
+            return
+        with self._kr_tags_lock:
+            if self._kr_tags_loaded:
+                return
+            import os
+            path = 'ui/interactive/interactive'
+            try:
+                if not os.path.exists(path):
+                    print(f"🌐 Remote: tag data not found at {path}")
+                    self._kr_tags_loaded = True
+                    return
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # --- Source 0: interactive (가장 풍부한 데이터) ---
+                raw = {}
+                for tag, info in data.items():
+                    kw_str = info.get('keywords_kr', '')
+                    raw[tag.lower()] = {
+                        **info,
+                        '_tag': tag,
+                        '_src': 0,
+                        '_kw_lower': kw_str.replace('<', '').replace('>', '').lower() if kw_str else '',
+                        '_desc_lower': info.get('description', '').lower(),
+                    }
+                src0 = len(raw)
+                # --- Source 1-2: KR_tags / e621 parquet fallback ---
+                pq_sources = [
+                    ('data/KR_tags.parquet', 1),
+                    ('data/e621_KR_tags.parquet', 2),
+                ]
+                pq_count = 0
+                for pq_path, src_key in pq_sources:
+                    if not os.path.exists(pq_path):
+                        continue
+                    try:
+                        import pandas as pd
+                        df = pd.read_parquet(pq_path, columns=['tag', 'count', 'category', 'desc', 'keywords'])
+                        for _, row in df.iterrows():
+                            tag_raw = str(row['tag']).replace('_', ' ')
+                            tag_lower = tag_raw.lower()
+                            if tag_lower in raw:
+                                continue
+                            kw_str = str(row.get('keywords', '') or '')
+                            entry = {
+                                '_tag': tag_raw, '_src': src_key,
+                                'freq': int(row.get('count', 0)),
+                                'description': str(row.get('desc', '') or ''),
+                                'group': str(row.get('category', '') or ''),
+                                'subgroup': '', 'keywords_kr': kw_str,
+                                '_kw_lower': kw_str.replace('<', '').replace('>', '').lower() if kw_str else '',
+                                '_desc_lower': str(row.get('desc', '') or '').lower(),
+                            }
+                            if src_key == 2:
+                                entry['_cat'] = 'e621'
+                            raw[tag_lower] = entry
+                            pq_count += 1
+                    except Exception as e:
+                        print(f"🌐 Remote: fallback {pq_path} 로드 실패 — {e}")
+                # --- Source 3-10: prompt engineering filter lists (그룹 소속만) ---
+                filter_sources = [
+                    ('data/characteristic_list.txt', 3, '특징'),
+                    ('data/clothes_list.txt', 4, '의상'),
+                    ('data/taglist/expression_tags.json', 5, '표정'),
+                    ('data/taglist/pose_action_tags.json', 6, '자세/행동'),
+                    ('data/taglist/location_tags.json', 7, '장소'),
+                    ('data/taglist/meta_tags.json', 8, '메타'),
+                    ('data/taglist/object_tags.json', 9, '물체'),
+                    ('data/color.txt', 10, '색상'),
+                ]
+                filter_count = 0
+                for fpath, src_key, group_name in filter_sources:
+                    if not os.path.exists(fpath):
+                        continue
+                    try:
+                        tags = []
+                        if fpath.endswith('.json'):
+                            with open(fpath, 'r', encoding='utf-8') as f:
+                                jdata = json.load(f)
+                            # JSON taglist 구조 파싱: tags/modifiers/groups/categories/uncategorized
+                            if isinstance(jdata, dict):
+                                collected = []
+                                for key in ('tags', 'modifiers', 'uncategorized'):
+                                    v = jdata.get(key, [])
+                                    if isinstance(v, list):
+                                        collected.extend(v)
+                                for key in ('groups', 'categories'):
+                                    v = jdata.get(key, {})
+                                    if isinstance(v, dict):
+                                        for sub_tags in v.values():
+                                            if isinstance(sub_tags, list):
+                                                collected.extend(sub_tags)
+                                tags = collected
+                            else:
+                                tags = jdata
+                        else:
+                            with open(fpath, 'r', encoding='utf-8') as f:
+                                tags = [line.strip() for line in f if line.strip()]
+                        for tag_raw in tags:
+                            tag_lower = tag_raw.lower().replace('_', ' ')
+                            if tag_lower in raw:
+                                continue
+                            raw[tag_lower] = {
+                                '_tag': tag_raw.replace('_', ' '), '_src': src_key,
+                                'freq': 0, 'description': '', 'group': group_name,
+                                'subgroup': '', 'keywords_kr': '',
+                                '_kw_lower': '', '_desc_lower': '',
+                            }
+                            filter_count += 1
+                    except Exception as e:
+                        print(f"🌐 Remote: filter {fpath} 로드 실패 — {e}")
+                # --- Source 11-13: artist / character / copyright dicts ---
+                dict_sources = [
+                    ('artist_dictionary', 'artist_dict', 11, 'artist'),
+                    ('danbooru_character', 'character_dict_count', 12, 'character'),
+                    ('result_dict_copyright', 'copyright_dict', 13, 'copyright'),
+                ]
+                dict_count = 0
+                for mod_name, var_name, src_key, cat in dict_sources:
+                    try:
+                        import importlib
+                        mod = importlib.import_module(mod_name)
+                        d = getattr(mod, var_name, {})
+                        for tag_raw, freq in d.items():
+                            tag_lower = tag_raw.lower()
+                            if tag_lower in raw:
+                                # 기존 엔트리에 cat만 보강
+                                if '_cat' not in raw[tag_lower]:
+                                    raw[tag_lower]['_cat'] = cat
+                                continue
+                            raw[tag_lower] = {
+                                '_tag': tag_raw, '_src': src_key, '_cat': cat,
+                                'freq': int(freq) if isinstance(freq, (int, float)) else 0,
+                                'description': '', 'group': cat,
+                                'subgroup': '', 'keywords_kr': '',
+                                '_kw_lower': '', '_desc_lower': '',
+                            }
+                            dict_count += 1
+                    except Exception as e:
+                        print(f"🌐 Remote: dict {mod_name} 로드 실패 — {e}")
+                self._kr_tags_raw = raw
+                print(f"🌐 Remote: tag index — {src0} interactive + {pq_count} parquet + {filter_count} filter + {dict_count} dict = {len(raw)} total")
+                self._kr_tags_loaded = True
+            except Exception as e:
+                self._kr_tags_loaded = True
+                print(f"🌐 Remote: tag index 로드 실패 — {e}")
+
+    def _search_kr_tags(self, query: str, limit: int = 20) -> list:
+        """5단계 우선순위 태그 검색: exact → starts_with → kr_keyword → contains → desc
+        prefix 라우팅: 'artist:x' → artist만, 'character:x' → character만"""
+        self._load_kr_tags()
+        if not self._kr_tags_raw:
+            return []
+        query = query.strip()
+        if not query:
+            return []
+        # prefix 라우팅
+        cat_filter = None
+        ql = query.lower()
+        for pfx in ('artist:', 'character:'):
+            if ql.startswith(pfx):
+                cat_filter = pfx[:-1]  # 'artist' or 'character'
+                ql = ql[len(pfx):]
+                break
+        if not ql:
+            return []
+        exact, starts, kr_kw, contains, desc_m = [], [], [], [], []
+        for tag_lower, info in self._kr_tags_raw.items():
+            cat = info.get('_cat', '')
+            if cat_filter and cat != cat_filter:
+                continue
+            tag = info['_tag']
+            freq = info.get('freq', 0)
+            d = info.get('description', '')
+            g = info.get('group', '')
+            entry = {"tag": tag, "count": freq, "desc": d, "group": g, "cat": cat}
+            # prefix 검색 시 tag_lower에서 prefix 제거하여 매칭
+            match_key = tag_lower
+            if cat_filter and match_key.startswith(cat_filter + ':'):
+                match_key = match_key[len(cat_filter) + 1:]
+            if match_key == ql:
+                exact.append(entry)
+                continue
+            if match_key.startswith(ql):
+                starts.append(entry)
+                continue
+            kw_lower = info.get('_kw_lower', '')
+            if kw_lower and ql in kw_lower:
+                kr_kw.append(entry)
+                continue
+            if ql in match_key:
+                contains.append(entry)
+                continue
+            if d and len(ql) >= 3 and ql in info.get('_desc_lower', ''):
+                desc_m.append(entry)
+        for grp in [exact, starts, kr_kw, contains, desc_m]:
+            grp.sort(key=lambda x: x['count'], reverse=True)
+        return (exact + starts + kr_kw + contains + desc_m)[:limit]
+
+    def _lookup_tag_info(self, tag: str) -> dict:
+        """정확한 태그명으로 상세 정보 + relations 조회"""
+        self._load_kr_tags()
+        if not self._kr_tags_raw:
+            return {}
+        tag_lower = tag.strip().lower()
+        info = self._kr_tags_raw.get(tag_lower)
+        if not info:
+            return {}
+        result = {
+            "tag": info['_tag'], "count": info.get('freq', 0),
+            "desc": info.get('description', ''),
+            "group": info.get('group', ''),
+            "subgroup": info.get('subgroup', ''),
+            "cat": info.get('_cat', ''),
+        }
+        rels = info.get('relations', {})
+        parents = rels.get('parent', [])
+        if isinstance(parents, str):
+            parents = [parents]
+        if parents:
+            result['implications'] = parents[:8]
+        siblings = rels.get('siblings', [])
+        if isinstance(siblings, str):
+            siblings = [siblings]
+        word_match = rels.get('word_match', [])
+        if isinstance(word_match, str):
+            word_match = [word_match]
+        related = []
+        seen = set(parents)
+        for t in siblings + word_match:
+            if t not in seen:
+                seen.add(t)
+                related.append(t)
+        if related:
+            result['related'] = related[:8]
+        return result
 
     # --- 검색 시스템 ---
 
@@ -887,7 +1183,13 @@ class RemoteBridge(QObject):
 
     def _find_depth_tab(self):
         """열려있는 DepthSearchWindow 인스턴스 반환"""
-        tc = getattr(self.app_context, 'tab_controller', None)
+        mw = getattr(self.app_context, 'main_window', None)
+        if not mw:
+            return None
+        iw = getattr(mw, 'image_window', None)
+        if not iw:
+            return None
+        tc = getattr(iw, 'tab_controller', None)
         if not tc:
             return None
         for tab in tc.module_instances.values():
@@ -902,6 +1204,24 @@ class RemoteBridge(QObject):
                 return {"type": "depth_state", "open": False}
             count = dw.current_model.get_count() if dw.current_model else 0
             original = dw.original_model.get_count() if dw.original_model else 0
+            # 레이팅 상태
+            ratings = {}
+            if hasattr(dw, 'd_rating_checkboxes'):
+                for k in ('e', 'q', 's', 'g'):
+                    cb = dw.d_rating_checkboxes.get(k)
+                    ratings[k] = cb.isChecked() if cb else True
+            # 숫자 필터 상태
+            filters = {}
+            for name in ('token_min', 'token_max', 'id_min', 'id_max', 'score_min'):
+                check = getattr(dw, f'{name}_check', None)
+                inp = getattr(dw, f'{name}_input', None)
+                if check and inp:
+                    filters[name] = {"enabled": check.isChecked(), "value": inp.text()}
+            # 캐릭터 필터
+            filters['rem_char'] = getattr(dw, 'rem_char_check', None) and dw.rem_char_check.isChecked()
+            filters['only_empty_char'] = getattr(dw, 'only_empty_char_check', None) and dw.only_empty_char_check.isChecked()
+            # 스테이징 상태
+            staging_count = len(dw.staged_items) if hasattr(dw, 'staged_items') else 0
             return {
                 "type": "depth_state",
                 "open": True,
@@ -909,6 +1229,9 @@ class RemoteBridge(QObject):
                 "original": original,
                 "query": dw.d_search_input.text() if hasattr(dw, 'd_search_input') else "",
                 "exclude": dw.d_exclude_input.text() if hasattr(dw, 'd_exclude_input') else "",
+                "ratings": ratings,
+                "filters": filters,
+                "staging_count": staging_count,
             }
         except Exception as e:
             print(f"🌐 Remote: depth 상태 읽기 실패 — {e}")
@@ -919,13 +1242,26 @@ class RemoteBridge(QObject):
             params = json.loads(params_json)
             action = params.get("action", "")
             mw = self.app_context.main_window
+            # 원격 호출 중 QMessageBox 억제
+            prev_stealth = getattr(self.app_context, 'stealth_mode', False)
+            self.app_context.stealth_mode = True
 
             if action == "open":
-                # 심층검색 탭 열기
+                # 심층검색 탭 열기 (이미 열려있으면 switch만 됨)
                 if mw and hasattr(mw, 'open_depth_search_tab'):
+                    # 검색 결과 없으면 열 수 없음 → 즉시 피드백
+                    if hasattr(mw, 'search_results') and mw.search_results.is_empty():
+                        self._broadcast_json({
+                            "type": "depth_state", "open": False,
+                            "error": "no_search_results"
+                        })
+                        return
                     mw.open_depth_search_tab()
-                    # 탭이 준비되면 상태 전송 (약간의 지연 필요)
-                    QTimer.singleShot(2000, lambda: self._broadcast_depth_state())
+                    # 이미 열려있으면 tab_added 미발생 → 직접 브로드캐스트
+                    # 새로 열리면 tab_added 시그널로 _on_tab_added에서 브로드캐스트
+                    dw = self._find_depth_tab()
+                    if dw:
+                        self._broadcast_depth_state()
                 return
 
             dw = self._find_depth_tab()
@@ -940,11 +1276,32 @@ class RemoteBridge(QObject):
                     dw.d_exclude_input.setText(params.get("exclude", ""))
                 # 레이팅 필터
                 ratings = params.get("ratings", {})
-                if hasattr(dw, 'rating_checkboxes'):
+                if hasattr(dw, 'd_rating_checkboxes'):
                     for k in ('e', 'q', 's', 'g'):
-                        cb = dw.rating_checkboxes.get(k)
+                        cb = dw.d_rating_checkboxes.get(k)
                         if cb:
                             cb.setChecked(ratings.get(k, True))
+                # 숫자 필터 (token, id, score)
+                filters = params.get("filters", {})
+                for name in ('token_min', 'token_max', 'id_min', 'id_max', 'score_min'):
+                    f = filters.get(name)
+                    if f is None:
+                        continue
+                    check = getattr(dw, f'{name}_check', None)
+                    inp = getattr(dw, f'{name}_input', None)
+                    if check:
+                        check.setChecked(f.get("enabled", False))
+                    if inp:
+                        inp.setText(str(f.get("value", "")))
+                # 캐릭터 필터
+                if 'rem_char' in filters:
+                    cb = getattr(dw, 'rem_char_check', None)
+                    if cb:
+                        cb.setChecked(bool(filters['rem_char']))
+                if 'only_empty_char' in filters:
+                    cb = getattr(dw, 'only_empty_char_check', None)
+                    if cb:
+                        cb.setChecked(bool(filters['only_empty_char']))
                 dw.apply_filters()
                 self._broadcast_depth_state()
 
@@ -964,8 +1321,40 @@ class RemoteBridge(QObject):
                 dw.restore_to_original()
                 self._broadcast_depth_state()
 
+            elif action == "stage":
+                # 현재 필터 결과를 스테이징에 추가
+                dw.add_to_staging()
+                self._broadcast_depth_state()
+
+            elif action == "merge_staging":
+                # 스테이징 아이템 병합
+                dw.merge_staging()
+                self._broadcast_depth_state()
+
+            elif action == "clear_staging":
+                dw.clear_staging()
+                self._broadcast_depth_state()
+
+            elif action == "export":
+                # 현재 뷰를 save/custom_tags/에 자동 저장
+                if not dw.current_model.is_empty():
+                    from datetime import datetime as _dt
+                    export_dir = Path("save/custom_tags")
+                    export_dir.mkdir(parents=True, exist_ok=True)
+                    fname = f"refine_{_dt.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+                    path = export_dir / fname
+                    dw.current_model.get_dataframe().to_parquet(str(path))
+                    print(f"🌐 Remote: depth export → {path}")
+                # 내보내기 후 검색 상태도 갱신 (parquet 목록 갱신)
+                search_state = self._read_search_state()
+                if search_state:
+                    self._broadcast_json(search_state)
+                self._broadcast_depth_state()
+
         except Exception as e:
             print(f"🌐 Remote: depth action 실패 — {e}")
+        finally:
+            self.app_context.stealth_mode = prev_stealth
 
     def _do_restore_snapshot(self):
         """메인 검색 결과를 스냅샷에서 복원"""
@@ -985,6 +1374,11 @@ class RemoteBridge(QObject):
                 self._broadcast_json(state)
         except Exception as e:
             print(f"🌐 Remote: 복원 실패 — {e}")
+
+    def _on_tab_added(self, tab_id: str, instance):
+        """TabController에서 탭 추가 시 호출 — depth tab이면 상태 브로드캐스트"""
+        if instance.__class__.__name__ == 'DepthSearchTabModule':
+            self._broadcast_depth_state()
 
     def _broadcast_depth_state(self):
         state = self._read_depth_state()
@@ -1011,7 +1405,9 @@ class RemoteBridge(QObject):
             mw = self.app_context.main_window
             remaining = mw.search_results.get_count() if mw and mw.search_results else 0
             if self._loop and self._ws_manager:
-                data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining}
+                source = self._prompt_source
+                self._prompt_source = "random"  # 리셋 (다음 메인 UI Random 대비)
+                data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining, "source": source}
                 asyncio.run_coroutine_threadsafe(
                     self._ws_manager.broadcast_json(data),
                     self._loop
@@ -1201,6 +1597,31 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_get_module.emit("__depth__")
                         elif cmd_type == "restore_snapshot":
                             bridge.request_restore_snapshot.emit()
+                        elif cmd_type == "tag_search":
+                            # 한글/영문 태그 검색 — 스레드 풀에서 실행 (초기 로드 블로킹 방지)
+                            query = cmd.get("query", "")
+                            results = await asyncio.to_thread(bridge._search_kr_tags, query, 20)
+                            await ws.send_text(json.dumps({
+                                "type": "tag_search_result",
+                                "query": query,
+                                "results": results,
+                            }))
+                        elif cmd_type == "autocomplete":
+                            # 프롬프트 자동완성 — 5단계 검색
+                            query = cmd.get("query", "")
+                            results = await asyncio.to_thread(bridge._search_kr_tags, query, 12)
+                            await ws.send_text(json.dumps({
+                                "type": "autocomplete_result",
+                                "query": query,
+                                "results": results,
+                            }))
+                        elif cmd_type == "tag_lookup":
+                            # 태그 상세 정보 조회
+                            tag = cmd.get("tag", "")
+                            info = await asyncio.to_thread(bridge._lookup_tag_info, tag)
+                            await ws.send_text(json.dumps({
+                                "type": "tag_lookup_result", **info,
+                            }))
                         elif cmd_type == "generate":
                             # 프롬프트 포함 생성 요청
                             bridge.request_generate.emit(
@@ -1239,6 +1660,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge = RemoteBridge(app_context)
     bridge.set_ws_manager(ws_manager)
     _bridge_instance = bridge
+    app_context.remote_bridge = bridge
 
     # 시그널 → Qt 메인 스레드 슬롯 연결
     bridge.request_generate.connect(bridge._do_generate, Qt.ConnectionType.QueuedConnection)
@@ -1261,6 +1683,19 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     if mw and hasattr(mw, 'search_controller'):
         mw.search_controller.search_progress.connect(bridge._on_search_progress)
         mw.search_controller.search_complete.connect(bridge._on_search_complete)
+
+    # 자동화 모듈 시그널 연결 (메인 UI에서 start/stop 시 웹 동기화)
+    auto_module = bridge._find_module("automation")
+    if auto_module and hasattr(auto_module, 'automation_controller'):
+        ac = auto_module.automation_controller
+        ac.automation_finished.connect(bridge._broadcast_automation_state)
+        ac.progress_updated.connect(bridge._broadcast_automation_state)
+
+    # TabController tab_added 시그널 연결 (심층검색 탭 생성 감지)
+    if mw and hasattr(mw, 'image_window') and mw.image_window:
+        tc = getattr(mw.image_window, 'tab_controller', None)
+        if tc:
+            tc.tab_added.connect(bridge._on_tab_added)
 
     # AppContext 이벤트 구독
     app_context.subscribe("generation_result_available", bridge.on_generation_result)
@@ -1325,6 +1760,9 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     # 캐시 초기화 (FastAPI 스레드에서 Qt 위젯 직접 접근 방지)
     bridge._update_cache_all()
 
+    # KR_tags 인덱스 백그라운드 로드 (첫 검색 지연 방지)
+    threading.Thread(target=bridge._load_kr_tags, daemon=True, name="KR-Tags-Loader").start()
+
     # FastAPI 앱 생성 + uvicorn 시작
     app = create_app(bridge, ws_manager)
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")
@@ -1354,6 +1792,7 @@ def stop_remote_server():
     if _bridge_instance:
         try:
             ctx = _bridge_instance.app_context
+            ctx.remote_bridge = None
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
@@ -1385,6 +1824,15 @@ def stop_remote_server():
                     getattr(widget, signal_name).disconnect(_bridge_instance._on_param_changed_slot)
                 except TypeError:
                     pass
+
+            # TabController tab_added 연결 해제
+            if mw and hasattr(mw, 'image_window') and mw.image_window:
+                tc = getattr(mw.image_window, 'tab_controller', None)
+                if tc:
+                    try:
+                        tc.tab_added.disconnect(_bridge_instance._on_tab_added)
+                    except TypeError:
+                        pass
 
             # 디바운스 타이머 정리
             if _bridge_instance._prompt_debounce_timer:

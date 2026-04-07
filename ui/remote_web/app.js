@@ -81,7 +81,7 @@ function connect() {
         const m = JSON.parse(e.data);
         if (m.type === 'image_meta') { pendingMeta = m; updateMeta(m); }
         else if (m.type === 'status') setGen(m.is_generating);
-        else if (m.type === 'prompt_generated') updatePromptOnly(m.prompt);
+        else if (m.type === 'prompt_generated') updatePromptOnly(m.prompt, m.source);
         else if (m.type === 'prompt_sync') syncPrompts(m);
         else if (m.type === 'options') syncOptions(m);
         else if (m.type === 'params') updateParams(m);
@@ -94,6 +94,9 @@ function connect() {
         else if (m.type === 'search_state') onSearchState(m);
         else if (m.type === 'search_progress') onSearchProgress(m);
         else if (m.type === 'depth_state') onDepthState(m);
+        else if (m.type === 'tag_search_result') onTagSearchResult(m);
+        else if (m.type === 'tag_lookup_result') onTagLookupResult(m);
+        else if (m.type === 'autocomplete_result') onAutocompleteResult(m);
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
       } catch(_) {}
@@ -120,16 +123,19 @@ function updateMeta(m) {
   updateMetaChips(m);
 }
 
-function updatePromptOnly(prompt) {
-  if (prompt) {
+function updatePromptOnly(prompt, source) {
+  if (!prompt) return;
+  // Generate 트리거 시에는 웹 프롬프트를 덮어쓰지 않음 (사용자 편집 보존)
+  if (source === 'random') {
     syncingPrompt = true;
     promptEdit.value = prompt;
     syncingPrompt = false;
-    // Random 완료 -> 버튼 복원
-    btnRnd.disabled = false;
+    updatePromptHighlight();
     // Show new-content dot if drawer is closed
     if (!drawerOpen) promptNewDot.classList.remove('hidden');
   }
+  // Random 완료 → 버튼 복원 (source 무관)
+  btnRnd.disabled = false;
 }
 
 // ---- Params ----
@@ -254,10 +260,12 @@ function syncPrompts(m) {
   if ('negative_prompt' in m) negEdit.value = m.negative_prompt;
   syncingPrompt = false;
   updateMetaChips(m);
+  updatePromptHighlight();
 }
 
 function onPromptEdit() {
   if (syncingPrompt) return;
+  updatePromptHighlight();
   if (promptSendTimer) clearTimeout(promptSendTimer);
   promptSendTimer = setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -268,6 +276,57 @@ function onPromptEdit() {
       }));
     }
   }, 500);
+}
+
+// ---- NAI weight syntax highlight (main prompt only) ----
+const promptHighlight = $('promptHighlight');
+const promptWrap = promptHighlight ? promptHighlight.parentElement : null;
+let currentMode = 'NAI';
+
+function formatNaiHighlight(text) {
+  if (!text) return '<br>';
+  let html = '';
+  let pos = 0;
+  const re = /(-?\d+(?:\.\d+)?)(::)([\s\S]*?)(::)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    html += escHtml(text.substring(pos, m.index));
+    const w = parseFloat(m[1]);
+    const cls = w < 1.0 ? 'nai-wt-blue' : w > 1.0 ? 'nai-wt-red' : '';
+    const mark = '<span class="nai-wt-mark">::</span>';
+    if (cls) {
+      html += `<span class="${cls}"><span class="nai-wt-open">${escHtml(m[1])}</span>${mark}${escHtml(m[3])}${mark}</span>`;
+    } else {
+      html += escHtml(m[1]) + mark + escHtml(m[3]) + mark;
+    }
+    pos = m.index + m[0].length;
+  }
+  html += escHtml(text.substring(pos));
+  return html + '<br>';
+}
+
+function updatePromptHighlight() {
+  if (!promptHighlight || currentMode !== 'NAI') return;
+  promptHighlight.innerHTML = formatNaiHighlight(promptEdit.value);
+}
+
+function syncPromptHighlight() {
+  if (promptHighlight) {
+    promptHighlight.scrollTop = promptEdit.scrollTop;
+    promptHighlight.scrollLeft = promptEdit.scrollLeft;
+  }
+}
+
+function setNaiHighlightMode(mode) {
+  currentMode = mode;
+  if (promptWrap) {
+    if (mode === 'NAI') {
+      promptWrap.classList.add('nai-hl');
+      updatePromptHighlight();
+    } else {
+      promptWrap.classList.remove('nai-hl');
+    }
+  }
 }
 
 // ---- History ----
@@ -566,6 +625,7 @@ function syncMode(mode) {
   modeSelect.value = mode;
   prevMode = mode;
   syncingMode = false;
+  setNaiHighlightMode(mode);
 }
 
 function setMode(mode) {
@@ -728,6 +788,7 @@ function openModule(moduleId) {
     prompt_engineering: 'Prompt Engineering',
     automation: 'Automation',
     character: 'NAID4 Character',
+    conditional_prompt: 'Conditional Prompt',
   };
   moduleTitle.textContent = titles[moduleId] || moduleId;
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -756,6 +817,7 @@ function onModuleState(m) {
   if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
   else if (m.module_id === 'automation') renderAutomation(m);
   else if (m.module_id === 'character') renderCharacter(m);
+  else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
 }
 
 function renderPromptEngineering(m) {
@@ -794,6 +856,11 @@ function renderPromptEngineering(m) {
       <div class="mod-checkbox-grid">${ppHtml}</div>
     </div>
   `;
+  // Bind autocomplete to pre/post prompt textareas
+  ['modPrePrompt', 'modPostPrompt'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) bindTagAssist(el);
+  });
 }
 
 function setModuleParam(moduleId, key, value) {
@@ -899,6 +966,83 @@ function renderCharacter(m) {
     </div>
     ${charsHtml}
   `;
+  // Bind autocomplete to character prompt textareas (not UC)
+  moduleBody.querySelectorAll('.mod-textarea:not(.mod-uc)').forEach(el => bindTagAssist(el));
+}
+
+// ---- Conditional Prompt module ----
+function formatCondLog(log) {
+  if (!log) return '<span style="color:var(--text-dim)">No log yet</span>';
+  return escHtml(log).split('\n').map(line => {
+    if (!line.trim()) return '';
+    if (line.includes('Condition Not Met') || line.includes('Error:'))
+      return `<div style="color:#888">${line}</div>`;
+    if (line.includes('Condition Met'))
+      return `<div style="color:#4CAF50">${line}</div>`;
+    if (line.startsWith('==='))
+      return `<div style="color:#fff;font-weight:bold">${line}</div>`;
+    return `<div>${line}</div>`;
+  }).join('');
+}
+
+function formatCondRules(text) {
+  if (!text) return '<br>';
+  return text.split('\n').map(line => {
+    const esc = escHtml(line) || ' ';
+    if (line.trimStart().startsWith('#'))
+      return `<div class="cond-line cond-comment">${esc}</div>`;
+    return `<div class="cond-line">${esc}</div>`;
+  }).join('') + '<br>';
+}
+function onCondRulesInput(el) {
+  const hl = document.getElementById('condRulesHighlight');
+  if (hl) hl.innerHTML = formatCondRules(el.value);
+  onModTextEdit('conditional_prompt', 'rules', el.value);
+}
+function syncCondScroll(el) {
+  const hl = document.getElementById('condRulesHighlight');
+  if (hl) { hl.scrollTop = el.scrollTop; hl.scrollLeft = el.scrollLeft; }
+}
+
+function renderConditionalPrompt(m) {
+  moduleBody.innerHTML = `
+    <div>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="setModuleParam('conditional_prompt','enabled',String(this.checked))">
+        <span class="mod-checkbox-label">Enable Conditional Prompt</span>
+      </label>
+    </div>
+    <div>
+      <div class="mod-section-label">Rules</div>
+      <div class="cond-rules-wrap">
+        <div class="cond-rules-highlight" id="condRulesHighlight">${formatCondRules(m.rules)}</div>
+        <textarea class="mod-textarea cond-rules-input" id="condRulesInput" placeholder="(condition):action&#10;# comment lines ignored" oninput="onCondRulesInput(this)" onscroll="syncCondScroll(this)">${escHtml(m.rules)}</textarea>
+      </div>
+    </div>
+    <div>
+      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')">
+        Syntax Guide <span class="mod-collapse-arrow">▶</span>
+      </div>
+      <div class="collapsed" style="font-size:10px;color:var(--text-dim);line-height:1.5;padding:6px 0">
+        <b>Condition:</b> tag, ~tag (NOT), *tag (exact), e|q|s|g (rating)<br>
+        <b>Logic:</b> &amp; (AND), | (OR), () grouping<br>
+        <b>Actions:</b><br>
+        &nbsp; tag=new_tag (replace)<br>
+        &nbsp; main+=tag (append to main)<br>
+        &nbsp; prefix+=tag / postfix+=tag<br>
+        &nbsp; ^ = multi-tag separator<br>
+        &nbsp; "quoted, tags" for comma values<br>
+        <b>Example:</b> (e):prefix+=nsfw^rating:explicit,
+      </div>
+    </div>
+    <div>
+      <button class="mod-action-btn mod-start" onclick="setModuleParam('conditional_prompt','test','1')">Test Rules</button>
+    </div>
+    <div>
+      <div class="mod-section-label">Execution Log</div>
+      <div class="mod-log-viewer" id="condLogViewer">${formatCondLog(m.log)}</div>
+    </div>
+  `;
 }
 
 // ---- Search system ----
@@ -944,7 +1088,7 @@ function renderSearch(m) {
         <div class="search-count-display">${m.count || 0}</div>
       </div>
       <div class="search-top-actions">
-        <button class="mod-action-btn mod-refine" onclick="openRefine()" style="display:none">Refine</button>
+        <button class="mod-action-btn mod-refine" onclick="openRefine()">Refine</button>
         <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()">Restore</button>
       </div>
     </div>
@@ -1009,12 +1153,10 @@ function openRefine() {
   refineOpen = true;
   refinePanel.classList.add('open');
   if (ws && ws.readyState === WebSocket.OPEN) {
+    // 먼저 현재 상태 요청 (이미 열려있을 수 있음)
+    ws.send(JSON.stringify({type: 'get_depth_state'}));
+    // 열려있지 않으면 open 요청 → 서버가 tab_added 시그널로 자동 브로드캐스트
     ws.send(JSON.stringify({type: 'depth_action', action: 'open'}));
-    // Request state after a delay (tab needs time to prepare)
-    setTimeout(() => {
-      if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({type: 'get_depth_state'}));
-    }, 2500);
   }
 }
 
@@ -1026,11 +1168,29 @@ function closeRefine() {
 function onDepthState(m) {
   if (!refineOpen) return;
   if (!m.open) {
+    const msg = m.error === 'no_search_results'
+      ? 'No search results loaded.<br><span style="font-size:10px">Run a search first</span>'
+      : 'Preparing data...';
     refinePanel.querySelector('.refine-body').innerHTML =
-      '<div style="text-align:center;color:var(--text-dim);padding:20px">Preparing data...</div>';
+      `<div style="text-align:center;color:var(--text-dim);padding:20px">${msg}</div>`;
     return;
   }
   const body = refinePanel.querySelector('.refine-body');
+  // 카운트만 업데이트 (입력 필드가 이미 있으면 리빌드 방지)
+  const existing = body.querySelector('#depthQuery');
+  if (existing) {
+    const counts = body.querySelectorAll('.search-count-display');
+    if (counts[0]) counts[0].textContent = m.count || 0;
+    if (counts[1]) counts[1].textContent = m.original || 0;
+    // 스테이징 카운트 갱신
+    const sc = body.querySelector('.depth-staging-count');
+    if (sc) sc.textContent = m.staging_count || 0;
+    return;
+  }
+  const r = m.ratings || {e:true,q:true,s:true,g:true};
+  const f = m.filters || {};
+  const ck = (name, def) => { const v = f[name]; return v ? v.enabled : def; };
+  const fv = (name, def) => { const v = f[name]; return v ? escHtml(v.value) : def; };
   body.innerHTML = `
     <div class="search-top-row">
       <div>
@@ -1050,28 +1210,430 @@ function onDepthState(m) {
       <div class="mod-section-label">Exclude Tags</div>
       <input class="mod-input" id="depthExclude" type="text" value="${escHtml(m.exclude)}" placeholder="exclude tags...">
     </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button class="mod-action-btn mod-start" style="flex:1" onclick="depthFilter()">Filter</button>
-      <button class="mod-action-btn mod-refine" style="flex:1" onclick="depthAction('promote')">Promote</button>
+    <div>
+      <div class="mod-section-label">Ratings</div>
+      <div class="mod-checkbox-grid">
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_e" ${r.e?'checked':''}><span class="mod-checkbox-label">E</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_q" ${r.q?'checked':''}><span class="mod-checkbox-label">Q</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_s" ${r.s?'checked':''}><span class="mod-checkbox-label">S</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_g" ${r.g?'checked':''}><span class="mod-checkbox-label">G</span></label>
+      </div>
+    </div>
+    <div class="mod-section-label" style="margin-top:4px">Numeric Filters</div>
+    <div class="depth-filter-grid">
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_min" ${ck('token_min',false)?'checked':''}><span class="mod-checkbox-label">Tokens ≥</span></label>
+      <input class="mod-input mod-input-sm" id="dfv_token_min" type="number" value="${fv('token_min','0')}">
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_max" ${ck('token_max',false)?'checked':''}><span class="mod-checkbox-label">Tokens ≤</span></label>
+      <input class="mod-input mod-input-sm" id="dfv_token_max" type="number" value="${fv('token_max','150')}">
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_id_min" ${ck('id_min',false)?'checked':''}><span class="mod-checkbox-label">ID ≥</span></label>
+      <input class="mod-input mod-input-sm" id="dfv_id_min" type="number" value="${fv('id_min','0')}">
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_id_max" ${ck('id_max',false)?'checked':''}><span class="mod-checkbox-label">ID ≤</span></label>
+      <input class="mod-input mod-input-sm" id="dfv_id_max" type="number" value="${fv('id_max','99999999')}">
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_score_min" ${ck('score_min',false)?'checked':''}><span class="mod-checkbox-label">Score ≥</span></label>
+      <input class="mod-input mod-input-sm" id="dfv_score_min" type="number" value="${fv('score_min','0')}">
+    </div>
+    <div class="mod-checkbox-grid" style="margin-top:4px">
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_rem_char" ${f.rem_char?'checked':''}><span class="mod-checkbox-label">Has Character</span></label>
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_only_empty_char" ${f.only_empty_char?'checked':''}><span class="mod-checkbox-label">No Character</span></label>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <button class="mod-action-btn mod-start" style="flex:1" onclick="depthFilter()">Filtered Search</button>
+      <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('restore')">Restore</button>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="mod-action-btn mod-start" style="flex:1;background:var(--accent)" onclick="depthAction('assign')">Assign to Main</button>
-      <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('restore')">Reset</button>
+      <button class="mod-action-btn mod-refine" style="flex:1" onclick="depthAction('promote')" title="Set current filtered results as the new baseline">Set as Baseline</button>
+    </div>
+    <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')" style="margin-top:6px">
+      Staging & Export <span class="mod-collapse-arrow">▶</span>
+    </div>
+    <div class="collapsed" style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="mod-action-btn" style="flex:1" onclick="depthAction('stage')">+ Stage Current</button>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">Staged: <span class="depth-staging-count">${m.staging_count||0}</span></span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="mod-action-btn" style="flex:1" onclick="depthAction('merge_staging')">Merge Staged</button>
+        <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('clear_staging')">Clear</button>
+      </div>
+      <button class="mod-action-btn" style="width:100%" onclick="depthAction('export')">Export to Custom Parquet</button>
     </div>
   `;
 }
 
 function depthFilter() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const query = (document.getElementById('depthQuery') || {}).value || '';
-  const exclude = (document.getElementById('depthExclude') || {}).value || '';
-  ws.send(JSON.stringify({type: 'depth_action', action: 'filter', query, exclude}));
+  const query = ($('depthQuery') || {}).value || '';
+  const exclude = ($('depthExclude') || {}).value || '';
+  const ratings = {};
+  for (const k of ['e','q','s','g']) {
+    const el = $('dr_' + k);
+    ratings[k] = el ? el.checked : true;
+  }
+  const filters = {};
+  for (const name of ['token_min','token_max','id_min','id_max','score_min']) {
+    const check = $('df_' + name);
+    const inp = $('dfv_' + name);
+    if (check && inp) filters[name] = {enabled: check.checked, value: inp.value};
+  }
+  filters.rem_char = ($('df_rem_char') || {}).checked || false;
+  filters.only_empty_char = ($('df_only_empty_char') || {}).checked || false;
+  ws.send(JSON.stringify({type: 'depth_action', action: 'filter', query, exclude, ratings, filters}));
 }
 
 function depthAction(action) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'depth_action', action}));
 }
+
+// ---- Tag search (KR/EN) ----
+const tagSearchInput = $('tagSearchInput');
+const tagSearchResults = $('tagSearchResults');
+let tagSearchTimer = null;
+
+let tagComposing = false;
+tagSearchInput.addEventListener('compositionstart', () => { tagComposing = true; });
+tagSearchInput.addEventListener('compositionend', () => {
+  tagComposing = false;
+  fireTagSearch();
+});
+tagSearchInput.addEventListener('input', () => {
+  if (!tagComposing) fireTagSearch();
+});
+function fireTagSearch() {
+  clearTimeout(tagSearchTimer);
+  const q = tagSearchInput.value.trim();
+  if (!q) { tagSearchResults.classList.remove('open'); return; }
+  tagSearchTimer = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'tag_search', query: q}));
+    }
+  }, 150);  // 150ms — 실시간 체감
+}
+
+// 외부 클릭 시 결과 닫기
+document.addEventListener('click', e => {
+  if (!e.target.closest('.tag-search-bar')) tagSearchResults.classList.remove('open');
+});
+
+function onTagSearchResult(m) {
+  // 입력이 이미 지워졌으면 (태그 삽입 후) 무시
+  if (!tagSearchInput.value.trim()) { tagSearchResults.classList.remove('open'); return; }
+  if (!m.results || !m.results.length) {
+    tagSearchResults.classList.remove('open');
+    return;
+  }
+  const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
+  tagSearchResults.innerHTML = m.results.map((r, i) =>
+    `<div class="tag-result-item" data-idx="${i}">
+      <span class="tag-result-tag">${escHtml(r.tag)}</span>
+      <span class="tag-result-desc">${escHtml(r.desc || r.group || '')}</span>
+      <span class="tag-result-count">${fmtCount(r.count)}</span>
+    </div>`
+  ).join('');
+  // data 속성 + addEventListener로 XSS 방지
+  tagSearchResults.querySelectorAll('.tag-result-item').forEach(el => {
+    const idx = +el.dataset.idx;
+    el.addEventListener('click', () => insertTag(m.results[idx].tag));
+  });
+  tagSearchResults.classList.add('open');
+}
+
+function insertTag(tag) {
+  const pe = promptEdit;
+  const cur = pe.value;
+  const start = pe.selectionStart != null ? pe.selectionStart : cur.length;
+  // 커서 앞 문자 기준으로 쉼표 구분 판단
+  const before = cur.substring(0, start);
+  const needSep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',') && before.trim().length > 0;
+  const sep = needSep ? ', ' : '';
+  pe.value = before + sep + tag + ', ' + cur.substring(start);
+  pe.focus();
+  const newPos = start + sep.length + tag.length + 2;
+  pe.selectionStart = pe.selectionEnd = newPos;
+  onPromptEdit();
+  clearTimeout(tagSearchTimer);
+  tagSearchInput.value = '';
+  tagSearchResults.classList.remove('open');
+}
+
+// ---- Tag tooltip + Autocomplete system ----
+const tagTooltip = $('tagTooltip');
+let lastLookupTag = '';
+let tagLookupTimer = null;
+// Autocomplete state
+let acMode = false;
+let acResults = [];
+let acSel = -1;
+let acTimer = null;
+let lastAcQuery = '';
+let acTarget = null; // active textarea for autocomplete/hint
+let acComposing = false; // IME composition guard
+
+const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
+const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a' };
+function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
+
+// Extract active token info at cursor (comma-delimited, NAI weight/bracket aware)
+function getActiveTokenInfo(textarea) {
+  const text = textarea.value;
+  const pos = textarea.selectionStart != null ? textarea.selectionStart : -1;
+  if (pos < 0 || text.length === 0) return null;
+  let start = text.lastIndexOf(',', pos - 1) + 1;
+  let end = text.indexOf(',', pos);
+  if (end === -1) end = text.length;
+  while (start < end && text[start] === ' ') start++;
+  let rawEnd = end;
+  while (rawEnd > start && text[rawEnd - 1] === ' ') rawEnd--;
+  const raw = text.substring(start, rawEnd);
+  if (!raw || raw.startsWith('#')) return null;
+  let stripped = raw;
+  stripped = stripped.replace(/^-?\(+/, '');
+  stripped = stripped.replace(/(?::[\d.]+)?\)+$/, '');
+  stripped = stripped.replace(/^\d+(?:\.\d+)?::/, '');
+  stripped = stripped.replace(/\s*::$/, '');
+  stripped = stripped.trim();
+  if (!stripped) return null;
+  return { raw, stripped, start, end: rawEnd };
+}
+
+function getTagAtCursor(textarea) {
+  const info = getActiveTokenInfo(textarea);
+  return info ? info.stripped : '';
+}
+
+// ---- Info mode (tag_lookup) ----
+function checkTagHint() {
+  if (acMode) return;
+  const target = acTarget || promptEdit;
+  const tag = getTagAtCursor(target);
+  if (tag === lastLookupTag) return;
+  lastLookupTag = tag;
+  if (!tag) { tagTooltip.classList.remove('open', 'ac-mode'); return; }
+  tagTooltip.classList.remove('open', 'ac-mode');
+  clearTimeout(tagLookupTimer);
+  tagLookupTimer = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({type: 'tag_lookup', tag}));
+  }, 200);
+}
+
+function onTagLookupResult(m) {
+  if (acMode) return;
+  if (!m.tag) { tagTooltip.classList.remove('open', 'ac-mode'); return; }
+  if (m.tag.toLowerCase() !== lastLookupTag.toLowerCase()) return;
+  const groupText = [m.group, m.subgroup].filter(Boolean).join(' / ');
+  let html = '<div class="tag-tooltip-main">' +
+    `<span class="tag-tooltip-tag"${catStyle(m.cat)}>${escHtml(m.tag)}</span>` +
+    `<span class="tag-tooltip-count">${fmtCount(m.count||0)}</span>` +
+    (groupText ? ` <span class="tag-tooltip-group">${escHtml(groupText)}</span>` : '') +
+    (m.desc ? `<span class="tag-tooltip-desc">${escHtml(m.desc)}</span>` : '') +
+    '</div>';
+  if (m.implications && m.implications.length) {
+    html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">implies</span>' +
+      m.implications.map(t => `<span class="tag-tooltip-extra-tag" data-insert="${escHtml(t)}">${escHtml(t)}</span>`).join('') + '</div>';
+  }
+  if (m.related && m.related.length) {
+    html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">related</span>' +
+      m.related.map(t => `<span class="tag-tooltip-extra-tag" data-insert="${escHtml(t)}">${escHtml(t)}</span>`).join('') + '</div>';
+  }
+  tagTooltip.innerHTML = html;
+  tagTooltip.classList.remove('ac-mode');
+  tagTooltip.classList.add('open');
+  // Click on related/implies tag → insert next to current token in active textarea
+  tagTooltip.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const target = acTarget || promptEdit;
+      const tag = el.dataset.insert;
+      const info = getActiveTokenInfo(target);
+      if (!info) return;
+      const text = target.value;
+      target.value = text.substring(0, info.end) + ', ' + tag + text.substring(info.end);
+      const newPos = info.end + 2 + tag.length;
+      target.selectionStart = target.selectionEnd = newPos;
+      target.focus();
+      if (target === promptEdit) onPromptEdit();
+      else _fireModuleOninput(target);
+      lastLookupTag = '';
+      checkTagHint();
+    });
+  });
+}
+
+// ---- Autocomplete mode ----
+function scheduleAutocomplete() {
+  const target = acTarget || promptEdit;
+  const info = getActiveTokenInfo(target);
+  if (!info || info.stripped.length < 2) {
+    hideAutocomplete();
+    checkTagHint();
+    return;
+  }
+  if (info.stripped === lastAcQuery) return;
+  lastAcQuery = info.stripped;
+  clearTimeout(acTimer);
+  clearTimeout(tagLookupTimer);
+  acTimer = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({type: 'autocomplete', query: info.stripped}));
+  }, 150);
+}
+
+function onAutocompleteResult(m) {
+  if (m.query !== lastAcQuery) return;
+  if (!m.results || !m.results.length) {
+    hideAutocomplete();
+    checkTagHint();
+    return;
+  }
+  acResults = m.results;
+  acSel = -1;
+  acMode = true;
+  renderAutocomplete();
+}
+
+function renderAutocomplete() {
+  let html = '<div class="tag-ac-list">';
+  acResults.forEach((r, i) => {
+    const sel = i === acSel ? ' selected' : '';
+    html += `<div class="tag-ac-item${sel}" data-idx="${i}">` +
+      `<span class="tag-ac-tag"${catStyle(r.cat)}>${escHtml(r.tag)}</span>` +
+      `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
+      `<span class="tag-ac-count">${fmtCount(r.count)}</span>` +
+      '</div>';
+  });
+  html += '</div>';
+  tagTooltip.innerHTML = html;
+  tagTooltip.classList.add('open', 'ac-mode');
+  tagTooltip.querySelectorAll('.tag-ac-item').forEach(el => {
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      selectAutocomplete(+el.dataset.idx);
+    });
+  });
+}
+
+function selectAutocomplete(idx) {
+  const r = acResults[idx];
+  if (!r) return;
+  const target = acTarget || promptEdit;
+  const info = getActiveTokenInfo(target);
+  if (!info) return;
+  // Preserve prefix (artist:, character:) if present in original token
+  let newTag = r.tag;
+  const rawLower = info.raw.toLowerCase();
+  for (const pfx of ['artist:', 'character:']) {
+    if (rawLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {
+      newTag = pfx + newTag;
+      break;
+    }
+  }
+  swapToken(target, info, newTag);
+  hideAutocomplete();
+  lastLookupTag = newTag;
+  if (ws && ws.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify({type: 'tag_lookup', tag: r.tag}));
+}
+
+function swapToken(textarea, tokenInfo, newTag) {
+  const text = textarea.value;
+  const raw = tokenInfo.raw;
+  const stripped = tokenInfo.stripped;
+  const rawLower = raw.toLowerCase();
+  const strippedLower = stripped.toLowerCase();
+  const idx = rawLower.indexOf(strippedLower);
+  let prefix = '', suffix = '';
+  if (idx >= 0) {
+    prefix = raw.substring(0, idx);
+    suffix = raw.substring(idx + stripped.length);
+  }
+  const replacement = prefix + newTag + suffix;
+  textarea.value = text.substring(0, tokenInfo.start) + replacement + text.substring(tokenInfo.end);
+  const newPos = tokenInfo.start + replacement.length;
+  textarea.selectionStart = textarea.selectionEnd = newPos;
+  textarea.focus();
+  if (textarea === promptEdit) onPromptEdit();
+  else _fireModuleOninput(textarea);
+}
+
+// Trigger the module oninput handler for non-main textareas
+function _fireModuleOninput(el) {
+  const handler = el.getAttribute('oninput');
+  if (handler) new Function('event', handler).call(el, {target: el});
+}
+
+function hideAutocomplete() {
+  acMode = false;
+  acResults = [];
+  acSel = -1;
+  lastAcQuery = '';
+  clearTimeout(acTimer);
+  tagTooltip.classList.remove('open', 'ac-mode');
+}
+
+// ---- Bind autocomplete/hint to a textarea ----
+function bindTagAssist(textarea) {
+  let composing = false;
+  textarea.addEventListener('compositionstart', () => { composing = true; });
+  textarea.addEventListener('compositionend', () => {
+    composing = false;
+    scheduleAutocomplete();
+  });
+  textarea.addEventListener('input', () => {
+    acTarget = textarea;
+    if (!composing) scheduleAutocomplete();
+  });
+  textarea.addEventListener('click', () => {
+    acTarget = textarea;
+    if (acMode) hideAutocomplete();
+    checkTagHint();
+  });
+  textarea.addEventListener('keyup', e => {
+    if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) {
+      if (acMode) hideAutocomplete();
+      checkTagHint();
+    }
+  });
+  textarea.addEventListener('focus', () => {
+    acTarget = textarea;
+    if (!acMode) checkTagHint();
+  });
+  textarea.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (document.activeElement !== textarea) {
+        hideAutocomplete();
+        tagTooltip.classList.remove('open', 'ac-mode');
+      }
+    }, 200);
+  });
+  textarea.addEventListener('keydown', e => {
+    if (!acMode || !acResults.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      acSel = Math.min(acSel + 1, acResults.length - 1);
+      renderAutocomplete();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      acSel = Math.max(acSel - 1, -1);
+      renderAutocomplete();
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && acSel >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectAutocomplete(acSel);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      hideAutocomplete();
+      checkTagHint();
+    }
+  });
+}
+
+// Bind main prompt textarea
+bindTagAssist(promptEdit);
+// Main prompt also syncs to server
+promptEdit.addEventListener('compositionend', () => { onPromptEdit(); });
+promptEdit.addEventListener('input', () => { onPromptEdit(); });
 
 // ---- Keyboard shortcuts ----
 document.addEventListener('keydown', e => {
@@ -1085,7 +1647,6 @@ document.addEventListener('keydown', e => {
 });
 
 // ---- Init ----
-promptEdit.addEventListener('input', onPromptEdit);
 negEdit.addEventListener('input', onPromptEdit);
 
 connect();

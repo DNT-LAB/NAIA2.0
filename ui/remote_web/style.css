@@ -273,6 +273,8 @@ header {
   padding: 4px 12px;
   padding-bottom: max(6px, env(safe-area-inset-bottom));
 }
+.bottom-controls.kb-open .options-row,
+.bottom-controls.kb-open .quick-params { display: none; }
 
 /* ---- Viewer wrapper ---- */
 .viewer-wrapper {
@@ -871,6 +873,25 @@ header {
   border-color: var(--success);
   color: #fff;
 }
+.module-btn.auto-active { border-color: #e8a84c; color: #e8a84c; }
+.module-btn.auto-active.active { border-color: var(--accent-glow); color: #fff; }
+.module-btn.char-active { border-color: #6abf7b; color: #6abf7b; }
+.module-btn.char-active.active { border-color: var(--accent-glow); color: #fff; }
+.module-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+  vertical-align: middle;
+  background: rgba(232,168,76,0.25);
+  color: #e8a84c;
+}
+.module-badge.hidden { display: none; }
+.module-badge.char { background: rgba(106,191,123,0.2); color: #6abf7b; }
+.module-btn.active .module-badge { background: rgba(255,255,255,0.2); color: #fff; }
 
 /* ---- Module floating panel ---- */
 .module-popup {
@@ -1204,14 +1225,16 @@ header {
 /* Tag info hint (inside viewer) */
 .tag-tooltip {
   display: none;
-  position: absolute;
-  bottom: 4px; left: 4px; right: 4px;
+  position: fixed;
+  top: 60px; left: 8px; right: 8px;
+  z-index: 200;
   padding: 6px 10px;
   font-size: 10px;
   line-height: 1.4;
   color: var(--text-dim);
-  background: rgba(20, 20, 26, 0.88);
-  border-radius: 6px;
+  background: rgba(20, 20, 26, 0.95);
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
   pointer-events: none;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -1416,9 +1439,9 @@ header {
   .viewer {
     padding: 2px;
   }
-  /* PC: tag tooltip at top-left of viewer */
+  /* PC: tag tooltip at top-left of viewer area */
   .tag-tooltip {
-    top: 10px; left: 10px; right: auto; bottom: auto;
+    top: 10px; left: 494px; right: auto;
     max-width: 440px;
     max-height: calc(100dvh - 80px);
     overflow-y: auto;

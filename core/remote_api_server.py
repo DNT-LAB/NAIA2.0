@@ -668,6 +668,8 @@ class RemoteBridge(QObject):
                 "notify": m.notify_checkbox.isChecked() if m.notify_checkbox else False,
                 "is_running": m.automation_controller.is_running if m.automation_controller else False,
                 "status": m.automation_count_label.text() if m.automation_count_label else "",
+                "repeat_info": m.repeat_info_label.text() if hasattr(m, 'repeat_info_label') and m.repeat_info_label else "",
+                "delay_info": m.delay_info_label.text() if hasattr(m, 'delay_info_label') and m.delay_info_label else "",
             }
         except Exception as e:
             print(f"🌐 Remote: automation 상태 읽기 실패 — {e}")
@@ -692,6 +694,7 @@ class RemoteBridge(QObject):
                 "activated": m.activate_checkbox.isChecked() if m.activate_checkbox else False,
                 "reroll_on_generate": m.reroll_on_generate_checkbox.isChecked() if m.reroll_on_generate_checkbox else False,
                 "characters": characters,
+                "active_count": sum(1 for w in m.character_widgets if w.active_checkbox.isChecked()),
             }
         except Exception as e:
             print(f"🌐 Remote: character 상태 읽기 실패 — {e}")
@@ -794,6 +797,11 @@ class RemoteBridge(QObject):
         if state:
             self._broadcast_json(state)
 
+    def _broadcast_character_state(self):
+        state = self._read_character()
+        if state:
+            self._broadcast_json(state)
+
     def _set_character(self, key: str, value: str):
         try:
             m = self._find_module("character")
@@ -817,6 +825,9 @@ class RemoteBridge(QObject):
                 idx = int(key.split("_")[-1])
                 if idx < len(m.character_widgets):
                     m.character_widgets[idx].active_checkbox.setChecked(value == "true")
+            # Broadcast badge update on activation/active toggle
+            if key == "activated" or key.startswith("char_active_"):
+                self._broadcast_character_state()
         except Exception as e:
             print(f"🌐 Remote: character 설정 실패 — {key}={value}: {e}")
 
@@ -1544,6 +1555,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 await ws.send_text(json.dumps(bridge._cached_params))
             if bridge._cached_api_status:
                 await ws.send_text(json.dumps(bridge._cached_api_status))
+            # Send module badge states (automation countdown, character count)
+            bridge.request_get_module.emit("automation")
+            bridge.request_get_module.emit("character")
 
             while True:
                 data = await ws.receive_text()

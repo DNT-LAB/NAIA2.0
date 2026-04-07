@@ -545,6 +545,29 @@ isPC.addEventListener('change', () => {
   }
 });
 
+// ---- Mobile keyboard detection ----
+// Hide bottom controls when virtual keyboard opens to maximize editing space
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  const bottomCtrl = document.querySelector('.bottom-controls');
+  const toggleBarEl = document.querySelector('.prompt-toggle-bar');
+  let fullHeight = vv.height;
+  // Update fullHeight when not focused (no keyboard)
+  vv.addEventListener('resize', () => {
+    if (isPC.matches) return;
+    const shrink = fullHeight - vv.height;
+    const kbOpen = shrink > 100; // >100px shrink = keyboard
+    if (kbOpen) {
+      bottomCtrl.classList.add('kb-open');
+      toggleBarEl.style.display = 'none';
+    } else {
+      fullHeight = vv.height; // recalibrate
+      bottomCtrl.classList.remove('kb-open');
+      toggleBarEl.style.display = '';
+    }
+  });
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
@@ -813,11 +836,64 @@ function updateModuleBtnState() {
 }
 
 function onModuleState(m) {
+  // Update status badges regardless of panel open state
+  if (m.module_id === 'automation') updateAutoBadge(m);
+  else if (m.module_id === 'character') updateCharBadge(m);
+
   if (m.module_id !== currentModuleId) return;
   if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
   else if (m.module_id === 'automation') renderAutomation(m);
   else if (m.module_id === 'character') renderCharacter(m);
   else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
+}
+
+// ---- Module button inline badges ----
+function updateAutoBadge(m) {
+  const btn = document.querySelector('.module-btn[data-module="automation"]');
+  const badge = document.getElementById('badgeAuto');
+  if (!badge || !btn) return;
+  const isRunning = m.is_running;
+
+  if (!isRunning) {
+    badge.classList.add('hidden');
+    btn.classList.remove('auto-active');
+    return;
+  }
+  btn.classList.add('auto-active');
+  badge.classList.remove('hidden');
+
+  const delayInfo = m.delay_info || '';
+  const repeatInfo = m.repeat_info || '';
+  const status = m.status || '';
+
+  // Priority: delay countdown > repeat > count/timer from status
+  if (delayInfo) {
+    const dMatch = delayInfo.match(/([\d.]+)\s*s/i) || delayInfo.match(/([\d.:]+)/);
+    badge.textContent = dMatch ? dMatch[1] : '…';
+  } else if (repeatInfo) {
+    const rMatch = repeatInfo.match(/(\d+\/\d+)/);
+    badge.textContent = rMatch ? rMatch[1] : '…';
+  } else {
+    const numMatch = status.match(/(\d+[:/]?\d*)/);
+    if (numMatch) badge.textContent = numMatch[1];
+    else badge.classList.add('hidden');
+  }
+}
+
+function updateCharBadge(m) {
+  const btn = document.querySelector('.module-btn[data-module="character"]');
+  const badge = document.getElementById('badgeChar');
+  if (!badge || !btn) return;
+  if (!m.activated) {
+    badge.classList.add('hidden');
+    btn.classList.remove('char-active');
+    return;
+  }
+  const count = m.active_count || 0;
+  btn.classList.add('char-active');
+  badge.classList.remove('hidden');
+  badge.classList.add('char');
+  badge.textContent = count;
 }
 
 function renderPromptEngineering(m) {

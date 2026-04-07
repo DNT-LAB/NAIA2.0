@@ -24,6 +24,7 @@
     </div>
   </div>
 </header>
+<div class="tag-tooltip" id="tagTooltip"></div>
 <div class="ui-lock" id="uiLock"><div class="ui-lock-spinner"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -121,8 +122,8 @@
           <div class="module-bar">
             <button class="module-btn search-btn" data-module="search" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
             <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">Prompt Engineering</button>
-            <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation</button>
-            <button class="module-btn" data-module="character" onclick="openModule('character')">NAID4 Character</button>
+            <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
+            <button class="module-btn" data-module="character" onclick="openModule('character')">NAID4 Character<span class="module-badge hidden" id="badgeChar"></span></button>
             <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Conditional</button>
           </div>
         </div>
@@ -254,8 +255,6 @@
   <div class="viewer">
     <img id="preview" alt="">
     <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
-    <!-- Tag info hint -->
-    <div class="tag-tooltip" id="tagTooltip"></div>
     <div class="viewer-hist-actions" id="viewerHistActions">
       <button class="viewer-hist-btn nav" onclick="navHistory(-1)">&#9664;</button>
       <button class="viewer-hist-btn" onclick="saveCurrentHistoryItem()">Save</button>

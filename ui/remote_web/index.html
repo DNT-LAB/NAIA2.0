@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
 
 <header>
   <span class="logo">NAIA-REMOTE</span><span class="logo-sig">Provided by <b>CLAUDE</b></span>
@@ -261,10 +262,10 @@
     <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
     <div class="viewer-hist-actions" id="viewerHistActions">
       <button class="viewer-hist-btn nav" onclick="navHistory(-1)">&#9664;</button>
-      <button class="viewer-hist-btn" onclick="saveCurrentHistoryItem()">Save</button>
-      <button class="viewer-hist-btn danger" onclick="deleteCurrentHistoryItem()">Delete</button>
+      <button class="viewer-hist-btn" onclick="toggleHistoryMenu(this)">Action</button>
       <button class="viewer-hist-btn nav" onclick="navHistory(1)">&#9654;</button>
     </div>
+    <div class="hist-action-menu" id="histActionMenu"></div>
   </div>
   <div class="history-panel" id="historyPanel">
     <div class="history-header">

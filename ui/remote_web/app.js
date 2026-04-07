@@ -5,6 +5,8 @@
 let ws, blobUrl = null, generating = false, drawerOpen = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let reconnTimer = null, genTimer = null, genStartTime = 0;
+const genDurations = [];  // last 5 generation durations (ms)
+let progressTimer = null;
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 
 // ---- History ----
@@ -99,6 +101,8 @@ function connect() {
         else if (m.type === 'autocomplete_result') onAutocompleteResult(m);
         else if (m.type === 'storage_list') onStorageList(m);
         else if (m.type === 'wildcard_manager') onWildcardManager(m);
+        else if (m.type === 'toast') showToast(m.message, m.level || 'success');
+        else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
       } catch(_) {}
@@ -489,6 +493,63 @@ function deleteCurrentHistoryItem() {
   updateHistCounter();
 }
 
+// ---- History Action Menu ----
+function toggleHistoryMenu(btn) {
+  const menu = $('histActionMenu');
+  if (menu.classList.contains('open')) { menu.classList.remove('open'); return; }
+  if (historyIdx < 0 || historyIdx >= imageHistory.length) return;
+  const entry = imageHistory[historyIdx];
+  const meta = entry.meta || {};
+  const hasGen = meta.has_gen_params;
+  const hasSrc = meta.has_source_row;
+  const hasPrompt = !!(meta.main_prompt || meta.prompt);
+
+  let items = '';
+  items += `<button class="hist-menu-item" onclick="saveCurrentHistoryItem();closeHistMenu()">Save</button>`;
+  items += `<button class="hist-menu-item${hasPrompt ? '' : ' disabled'}" onclick="histAction('load_prompt')">Load Prompt</button>`;
+  items += `<button class="hist-menu-item${hasSrc ? '' : ' disabled'}" onclick="histAction('reroll')">Reroll</button>`;
+  items += `<div class="hist-menu-sep"></div>`;
+  // TODO: enqueue 기능은 데스크톱 앱에서 직접 처리해야 함 — 추후 구현
+  items += `<div class="hist-menu-sep"></div>`;
+  items += `<button class="hist-menu-item danger" onclick="deleteCurrentHistoryItem();closeHistMenu()">Delete</button>`;
+
+  menu.innerHTML = items;
+  // position above the Action button
+  const rect = btn.getBoundingClientRect();
+  const viewer = btn.closest('.viewer');
+  const vRect = viewer.getBoundingClientRect();
+  menu.style.bottom = (vRect.bottom - rect.top + 4) + 'px';
+  menu.style.left = Math.max(4, rect.left - vRect.left - 60) + 'px';
+  menu.classList.add('open');
+}
+
+function closeHistMenu() {
+  $('histActionMenu').classList.remove('open');
+}
+
+function histAction(action, useCurrentUi) {
+  if (historyIdx < 0 || historyIdx >= imageHistory.length) return;
+  const cmd = { type: 'history_action', action, index: historyIdx };
+  if (useCurrentUi !== undefined) cmd.use_current_ui = useCurrentUi;
+  ws.send(JSON.stringify(cmd));
+  closeHistMenu();
+}
+
+function onLoadPrompt(prompt) {
+  if (!prompt) return;
+  promptEdit.value = prompt;
+  onPromptEdit();
+  showToast('Prompt loaded', 'success');
+}
+
+// close menu on outside click
+document.addEventListener('click', e => {
+  const menu = $('histActionMenu');
+  if (menu && menu.classList.contains('open') && !menu.contains(e.target) && !e.target.closest('.viewer-hist-btn')) {
+    menu.classList.remove('open');
+  }
+});
+
 async function saveAllHistory() {
   if (imageHistory.length === 0) return;
   const { default: JSZip } = await import('https://cdn.jsdelivr.net/npm/jszip@3/+esm');
@@ -602,9 +663,18 @@ function setGen(v) {
     genStartTime = Date.now();
     btnGen.classList.add('generating');
     startGenTimer();
+    startProgress();
   } else {
+    if (genStartTime > 0) {
+      const dur = Date.now() - genStartTime;
+      if (dur > 500) { // ignore sub-500ms (errors/cancels)
+        genDurations.push(dur);
+        if (genDurations.length > 5) genDurations.shift();
+      }
+    }
     btnGen.classList.remove('generating');
     stopGenTimer();
+    finishProgress();
     btnGen.innerHTML = '<span class="shortcut-hint">CTRL + ENTER</span>Generate';
   }
 }
@@ -619,6 +689,50 @@ function startGenTimer() {
 
 function stopGenTimer() {
   if (genTimer) { clearInterval(genTimer); genTimer = null; }
+}
+
+// ---- Generation Progress Bar ----
+function startProgress() {
+  const bar = $('genProgressBar');
+  const bar2 = $('genProgressBar2');
+  const wrap = $('genProgress');
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  bar.style.transition = 'none'; bar.style.width = '0%';
+  bar2.style.transition = 'none'; bar2.style.width = '0%';
+  void bar.offsetWidth;
+  bar.style.transition = 'width 0.3s linear';
+  bar2.style.transition = 'width 0.3s linear';
+  wrap.classList.add('active');
+
+  const estimated = genDurations.length > 0
+    ? genDurations.reduce((a, b) => a + b, 0) / genDurations.length
+    : 12000;
+
+  progressTimer = setInterval(() => {
+    const elapsed = Date.now() - genStartTime;
+    const pct = Math.min((elapsed / estimated) * 100, 100);
+    bar.style.width = pct + '%';
+    // overtime: 2nd bar (orange) starts from 0%
+    if (elapsed > estimated) {
+      const overPct = Math.min(((elapsed - estimated) / estimated) * 100, 100);
+      bar2.style.width = overPct + '%';
+    }
+  }, 50);
+}
+
+function finishProgress() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  const bar = $('genProgressBar');
+  const bar2 = $('genProgressBar2');
+  const wrap = $('genProgress');
+  bar.style.transition = 'width 0.2s ease-out';
+  bar2.style.transition = 'width 0.2s ease-out';
+  bar.style.width = '100%';
+  setTimeout(() => {
+    wrap.classList.remove('active');
+    bar.style.width = '0%';
+    bar2.style.width = '0%';
+  }, 400);
 }
 
 // ---- Options sync ----

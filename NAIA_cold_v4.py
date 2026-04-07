@@ -4868,6 +4868,7 @@ class ModernMainWindow(QMainWindow):
                 self.random_prompt_btn.setEnabled(True)
                 if hasattr(self, 'detached_random_btn'):
                     self.detached_random_btn.setEnabled(True)
+                self.status_bar.showMessage("⚠️ 검색 결과가 없습니다. 먼저 검색을 실행해 주세요.", 5000)
                 return
 
         # [수정] 수동 생성 시에는 자동 생성 플래그를 False로 설정
@@ -4970,6 +4971,7 @@ class ModernMainWindow(QMainWindow):
 
     def _restore_from_snapshot(self) -> bool:
         """스냅샷에서 search_results 복원. 성공 시 True."""
+        # 1차: 메모리 스냅샷에서 복원
         if self._search_results_snapshot is not None and not self._search_results_snapshot.empty:
             self.search_results.set_dataframe(self._search_results_snapshot.copy())
             count = self.search_results.get_count()
@@ -4978,6 +4980,47 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage(f"🔄 데이터셋 자동 복원 ({count:,}개)", 3000)
             print(f"🔄 search_results 자동 복원: {count}개 행")
             return True
+
+        # 2차: 임시 파일(naia_temp_rows.parquet)에서 복원
+        try:
+            import os
+            temp_path = os.path.join('data', 'naia_temp_rows.parquet')
+            if os.path.exists(temp_path):
+                import pandas as pd
+                temp_df = pd.read_parquet(temp_path)
+                if not temp_df.empty:
+                    self.search_results.set_dataframe(temp_df)
+                    self._search_results_snapshot = temp_df.copy()
+                    count = self.search_results.get_count()
+                    self.result_label1.setText(f"검색: {count:,}")
+                    self.result_label2.setText(f"남음: {count:,}")
+                    self.status_bar.showMessage(f"🔄 임시 파일에서 복원 ({count:,}개)", 3000)
+                    print(f"🔄 naia_temp_rows.parquet에서 복원: {count}개 행")
+                    return True
+        except Exception as e:
+            print(f"⚠️ 임시 파일 복원 실패: {e}")
+
+        # 3차 최종 Fallback: tags_129.parquet에서 rating=='s' 항목 로드
+        try:
+            import os, pandas as pd
+            fallback_path = os.path.join('data', 'tags', 'tags_129.parquet')
+            if os.path.exists(fallback_path):
+                fallback_df = pd.read_parquet(fallback_path)
+                if 'rating' in fallback_df.columns:
+                    fallback_df = fallback_df[fallback_df['rating'] == 's']
+                if not fallback_df.empty:
+                    fallback_df = fallback_df.reset_index(drop=True)
+                    self.search_results.set_dataframe(fallback_df)
+                    self._search_results_snapshot = fallback_df.copy()
+                    count = self.search_results.get_count()
+                    self.result_label1.setText(f"검색: {count:,}")
+                    self.result_label2.setText(f"남음: {count:,}")
+                    self.status_bar.showMessage(f"⚠️ 데이터 없음 — 기본 데이터셋 로드 (safe {count:,}개)", 5000)
+                    print(f"⚠️ Fallback: tags_129.parquet rating=='s' 로드: {count}개 행")
+                    return True
+        except Exception as e:
+            print(f"⚠️ Fallback 로드 실패: {e}")
+
         return False
 
     def load_generation_parameters(self):

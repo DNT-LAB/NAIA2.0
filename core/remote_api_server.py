@@ -29,6 +29,7 @@ class WebSocketManager:
 
     def __init__(self):
         self.active_connections: set[WebSocket] = set()
+        self._send_lock = asyncio.Lock()
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
@@ -41,26 +42,36 @@ class WebSocketManager:
 
     async def broadcast_image(self, webp_bytes: bytes, metadata: dict):
         """모든 클라이언트에 메타데이터(JSON) + 이미지(binary) 전송"""
-        meta_text = json.dumps({"type": "image_meta", **metadata})
-        dead = set()
-        for ws in list(self.active_connections):
+        async with self._send_lock:
             try:
-                await ws.send_text(meta_text)
-                await ws.send_bytes(webp_bytes)
-            except Exception:
-                dead.add(ws)
-        self.active_connections -= dead
+                meta_text = json.dumps({"type": "image_meta", **metadata})
+            except Exception as e:
+                print(f"🌐 broadcast_image JSON 직렬화 실패: {e}")
+                return
+            dead = set()
+            for ws in list(self.active_connections):
+                try:
+                    await ws.send_text(meta_text)
+                    await ws.send_bytes(webp_bytes)
+                except Exception:
+                    dead.add(ws)
+            self.active_connections -= dead
 
     async def broadcast_json(self, data: dict):
         """모든 클라이언트에 JSON 메시지 전송"""
-        text = json.dumps(data)
-        dead = set()
-        for ws in list(self.active_connections):
+        async with self._send_lock:
             try:
-                await ws.send_text(text)
-            except Exception:
-                dead.add(ws)
-        self.active_connections -= dead
+                text = json.dumps(data)
+            except Exception as e:
+                print(f"🌐 broadcast_json JSON 직렬화 실패: {e}")
+                return
+            dead = set()
+            for ws in list(self.active_connections):
+                try:
+                    await ws.send_text(text)
+                except Exception:
+                    dead.add(ws)
+            self.active_connections -= dead
 
 
 # ---------------------------------------------------------------------------

@@ -1000,7 +1000,8 @@ class RemoteBridge(QObject):
             elif key.startswith("ref_type_"):
                 idx = int(key.split("_")[-1])
                 if 0 <= idx < len(m.character_frames):
-                    m.character_frames[idx].ref_type_combo.setCurrentText(value)
+                    display_map = {"character&style": "Character & Style", "character": "Character", "style": "Style"}
+                    m.character_frames[idx].ref_type_combo.setCurrentText(display_map.get(value, value))
             elif key == "get_storage":
                 storage = self._scan_char_ref_storage()
                 self._broadcast_json(storage)

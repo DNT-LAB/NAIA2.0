@@ -1474,6 +1474,21 @@ function wcPromptNewFile() {
 }
 
 // ---- Image upload helper ----
+function pasteModuleImage(moduleId) {
+  navigator.clipboard.read().then(items => {
+    for (const item of items) {
+      const imageType = item.types.find(t => t.startsWith('image/'));
+      if (imageType) {
+        item.getType(imageType).then(blob => {
+          uploadModuleImage(moduleId, new File([blob], 'clipboard.png', {type: blob.type}));
+        });
+        return;
+      }
+    }
+    showToast('No image in clipboard', 'error');
+  }).catch(() => showToast('Clipboard access denied', 'error'));
+}
+
 function uploadModuleImage(moduleId, file) {
   if (!file || !file.type.startsWith('image/')) return;
   const body = document.getElementById('modulePopupBody');
@@ -1565,6 +1580,7 @@ function renderCharacterReference(m) {
   moduleBody.innerHTML = `
     <div class="mod-upload-bar">
       <button class="mod-btn-upload" onclick="document.getElementById('charRefFileInput').click()">Upload</button>
+      <button class="mod-btn-upload" onclick="pasteModuleImage('character_reference')">Paste</button>
       <input type="file" id="charRefFileInput" accept="image/*" style="display:none"
         onchange="uploadModuleImage('character_reference',this.files[0]);this.value=''">
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('character_reference')">Storage</button>
@@ -1622,6 +1638,7 @@ function renderVibeTransfer(m) {
   moduleBody.innerHTML = `
     <div class="mod-upload-bar">
       <button class="mod-btn-upload" onclick="document.getElementById('vibeFileInput').click()">Upload</button>
+      <button class="mod-btn-upload" onclick="pasteModuleImage('vibe_transfer')">Paste</button>
       <input type="file" id="vibeFileInput" accept="image/*" style="display:none"
         onchange="uploadModuleImage('vibe_transfer',this.files[0]);this.value=''">
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>

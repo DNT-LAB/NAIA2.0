@@ -2075,6 +2075,9 @@ class RemoteBridge(QObject):
     def on_prompt_generated(self, prompt_context):
         """프롬프트 생성 완료 시 WebSocket 전송 + 자동생성 트리거"""
         try:
+            # 프롬프트 생성으로 인한 textChanged → prompt_sync broadcast 억제
+            self._syncing_prompt = True
+            QTimer.singleShot(600, lambda: setattr(self, '_syncing_prompt', False))
             # 자동생성 대기 중이면 이미지 생성 트리거
             if self._auto_generate_pending:
                 self._auto_generate_pending = False

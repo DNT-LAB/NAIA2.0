@@ -332,13 +332,19 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
         """파이프라인 훅 실행"""
-        if not self.enable_checkbox or not self.enable_checkbox.isChecked():
-            return context
-        
+        # Shared Server Mode: 세션 오버라이드 우선
+        cond_override = getattr(self.app_context, 'session_cond_override', None) if hasattr(self, 'app_context') else None
+        if cond_override is not None:
+            if not cond_override.get("enabled"):
+                return context
+            rules_text = cond_override.get("rules", "").strip()
+        else:
+            if not self.enable_checkbox or not self.enable_checkbox.isChecked():
+                return context
+            rules_text = self.rules_textedit.toPlainText().strip()
+
         print("🔀 조건부 프롬프트 훅 실행...")
-        
-        # 규칙 텍스트 가져오기
-        rules_text = self.rules_textedit.toPlainText().strip()
+
         if not rules_text:
             return context
         

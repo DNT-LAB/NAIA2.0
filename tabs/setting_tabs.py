@@ -330,6 +330,35 @@ class SettingsWidget(QWidget):
         cf_row.addStretch()
         layout.addLayout(cf_row)
 
+        # Shared Server Mode
+        shared_row = QHBoxLayout()
+        shared_row.setSpacing(get_scaled_size(8))
+        self.shared_server_mode_checkbox = QCheckBox("Shared Server Mode")
+        self.shared_server_mode_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.shared_server_mode_checkbox.setToolTip(
+            "각 웹 클라이언트가 독립적인 P.Eng/파라미터를 가집니다.\n"
+            "Cloudflared 터널 사용 시 NAI 모드가 차단됩니다."
+        )
+        self.shared_server_mode_checkbox.toggled.connect(self._on_shared_server_mode_toggled)
+        shared_row.addWidget(self.shared_server_mode_checkbox)
+
+        self.shared_copy_peng = QCheckBox("Copy P.Eng")
+        self.shared_copy_peng.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.shared_copy_peng.setToolTip("새 세션에 데스크톱 P.Eng 설정을 복사")
+        self.shared_copy_peng.setEnabled(False)
+        self.shared_copy_peng.toggled.connect(lambda c: setattr(self.app_context, 'shared_copy_peng', c) if self.app_context else None)
+        shared_row.addWidget(self.shared_copy_peng)
+
+        self.shared_copy_cond = QCheckBox("Copy Cond")
+        self.shared_copy_cond.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.shared_copy_cond.setToolTip("새 세션에 데스크톱 Conditional Prompt를 복사")
+        self.shared_copy_cond.setEnabled(False)
+        self.shared_copy_cond.toggled.connect(lambda c: setattr(self.app_context, 'shared_copy_cond', c) if self.app_context else None)
+        shared_row.addWidget(self.shared_copy_cond)
+
+        shared_row.addStretch()
+        layout.addLayout(shared_row)
+
         return section
 
     def _get_remote_port(self) -> int:
@@ -357,6 +386,41 @@ class SettingsWidget(QWidget):
         self.settings_module.set_setting('web_session.auto_start', checked)
         self.settings_module.set_setting('web_session.port', self._get_remote_port())
         self.settings_module.save_settings()
+
+    def _on_shared_server_mode_toggled(self, checked: bool):
+        """Shared Server Mode 서버에 반영 (영속화 안 함 — 매 실행마다 수동 활성화)"""
+        if checked and hasattr(self, 'app_context') and self.app_context:
+            if self.app_context.get_api_mode() == "NAI":
+                self.shared_server_mode_checkbox.setChecked(False)
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Shared Server Mode",
+                    "NAI 모드에서는 Shared Server Mode를 활성화할 수 없습니다.\n"
+                    "먼저 WEBUI 또는 COMFYUI 모드로 전환해주세요.")
+                return
+        # Shared Mode ON: 자동 시작 비활성화, Copy 옵션 활성화
+        if checked:
+            self.web_session_autostart.setChecked(False)
+            self.web_session_autostart.setEnabled(False)
+            self.shared_copy_peng.setEnabled(True)
+            self.shared_copy_cond.setEnabled(True)
+        else:
+            self.web_session_autostart.setEnabled(True)
+            self.shared_copy_peng.setEnabled(False)
+            self.shared_copy_peng.setChecked(False)
+            self.shared_copy_cond.setEnabled(False)
+            self.shared_copy_cond.setChecked(False)
+        # app_context에 저장 (bridge 생성 전/후 모두 대응)
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.shared_server_mode = checked
+        # 실행 중인 서버에 즉시 반영 + 클라이언트에 broadcast
+        from core.remote_api_server import _bridge_instance
+        if _bridge_instance:
+            _bridge_instance.shared_server_mode = checked
+            _bridge_instance._broadcast_json({
+                "type": "session",
+                "session_id": "",
+                "shared_server_mode": checked,
+            })
 
     def _on_web_session_toggled(self, checked: bool):
         """Web Session 활성화/비활성화"""
@@ -1144,7 +1208,6 @@ class SettingsWidget(QWidget):
         self.web_session_autostart.setChecked(
             self.settings_module.get_setting('web_session.auto_start', False)
         )
-
         # 자동완성 설정
         self.autocomplete_checkbox.setChecked(
             self.settings_module.get_setting('autocomplete.enabled', True)

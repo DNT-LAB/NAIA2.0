@@ -1171,7 +1171,21 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         print("🔧 프롬프트 엔지니어링 훅 실행...")
 
-        options = self.get_parameters()
+        # Shared Server Mode: 세션 오버라이드 우선
+        session_override = getattr(self.app_context, 'session_p_eng_override', None) if hasattr(self, 'app_context') else None
+        if session_override is not None:
+            # 빈 dict → 전부 빈 값으로 (데스크톱 폴백 방지)
+            options = {
+                "pre_prompt": split_tags_smart(session_override.get("pre_prompt", "")),
+                "post_prompt": split_tags_smart(session_override.get("post_prompt", "")),
+                "auto_hide": split_tags_smart(session_override.get("auto_hide", "")),
+                "preprocessing_options": {},
+            }
+            # 전처리 옵션: 세션에 있으면 사용, 없으면 전부 OFF
+            if "preprocessing_options" in session_override:
+                options["preprocessing_options"] = session_override["preprocessing_options"]
+        else:
+            options = self.get_parameters()
 
         # 🆕 EZ Mode: 전처리 옵션 및 Auto Hide 건너뛰기 플래그 (선행/후행 프롬프트는 유지)
         skip_preprocessing = hasattr(self, 'app_context') and getattr(self.app_context, 'skip_prompt_engineering_auto_hide', False)

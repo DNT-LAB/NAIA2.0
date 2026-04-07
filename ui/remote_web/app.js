@@ -9,6 +9,7 @@ const genDurations = [];  // last 5 generation durations (ms)
 let progressTimer = null;
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
+let sessionId = null, sharedMode = false;
 
 // ---- History ----
 const HISTORY_MAX = 200;
@@ -104,6 +105,7 @@ function connect() {
         else if (m.type === 'wildcard_manager') onWildcardManager(m);
         else if (m.type === 'toast') showToast(m.message, m.level || 'success');
         else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
+        else if (m.type === 'session') onSession(m);
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
       } catch(_) {}
@@ -513,7 +515,7 @@ function toggleHistoryMenu(btn) {
   items += `<div class="hist-menu-sep"></div>`;
   // TODO: enqueue 기능은 데스크톱 앱에서 직접 처리해야 함 — 추후 구현
   items += `<div class="hist-menu-sep"></div>`;
-  items += `<button class="hist-menu-item danger" onclick="deleteCurrentHistoryItem();closeHistMenu()">Delete</button>`;
+  items += `<button class="hist-menu-item danger${sharedMode ? ' disabled' : ''}" onclick="deleteCurrentHistoryItem();closeHistMenu()">Delete</button>`;
 
   menu.innerHTML = items;
   // position above the Action button
@@ -542,6 +544,35 @@ function onLoadPrompt(prompt) {
   promptEdit.value = prompt;
   onPromptEdit();
   showToast('Prompt loaded', 'success');
+}
+
+function onSession(m) {
+  if (m.session_id) sessionId = m.session_id;
+  sharedMode = m.shared_server_mode || false;
+  const autoGenCb = optBoxes.auto_generate;
+  const naiOpt = modeSelect.querySelector('option[value="NAI"]');
+  const sharedDisabledModules = ['automation', 'wildcard', 'chunk'];
+  if (sharedMode) {
+    // Auto Gen 차단
+    if (autoGenCb) { autoGenCb.checked = false; autoGenCb.disabled = true; autoGenCb.parentElement.style.opacity = '0.4'; }
+    // NAI 비활성화
+    if (naiOpt) naiOpt.disabled = true;
+    // Automation / WC / Chunk 비활성화
+    sharedDisabledModules.forEach(mid => {
+      const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
+      if (btn) btn.classList.add('nai-only-disabled');
+    });
+    // 열려있는 차단 모듈 닫기
+    if (sharedDisabledModules.includes(currentModuleId)) closeModule();
+  } else {
+    // Shared Mode 해제 → 복원
+    if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.parentElement.style.opacity = ''; }
+    if (naiOpt) naiOpt.disabled = false;
+    sharedDisabledModules.forEach(mid => {
+      const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
+      if (btn) btn.classList.remove('nai-only-disabled');
+    });
+  }
 }
 
 // close menu on outside click
@@ -745,10 +776,21 @@ function syncOptions(m) {
     if (key in m) cb.checked = m[key];
   }
   syncingOptions = false;
+  // Prompt Fixed 상태에 따라 Random 버튼 차단
+  const pf = optBoxes.prompt_fixed;
+  if (pf) {
+    btnRnd.disabled = pf.checked;
+    btnRnd.style.opacity = pf.checked ? '0.4' : '';
+  }
 }
 
 function setOption(key, value) {
   if (syncingOptions) return;
+  // Prompt Fixed → Random 버튼 차단/해제
+  if (key === 'prompt_fixed') {
+    btnRnd.disabled = !!value;
+    btnRnd.style.opacity = value ? '0.4' : '';
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_option', key, value}));
   }
@@ -767,15 +809,23 @@ function syncMode(mode) {
   modeSelect.value = mode;
   prevMode = mode;
   syncingMode = false;
+  currentMode = mode;
   setNaiHighlightMode(mode);
-  // NAI 전용 모듈 버튼 비활성화
+  // NAI 전용 모듈 버튼 비활성화 (character, character_reference, vibe_transfer)
   const isNai = mode === 'NAI';
-  document.querySelectorAll('.module-btn[data-module="character_reference"], .module-btn[data-module="vibe_transfer"]').forEach(btn => {
-    btn.classList.toggle('nai-only-disabled', !isNai);
+  const naiOnlyModules = ['character', 'character_reference', 'vibe_transfer'];
+  naiOnlyModules.forEach(mid => {
+    const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
+    if (btn) btn.classList.toggle('nai-only-disabled', !isNai);
   });
   // 비NAI 모드에서 열려있는 NAI 전용 모듈 닫기
-  if (!isNai && (currentModuleId === 'character_reference' || currentModuleId === 'vibe_transfer')) {
+  if (!isNai && naiOnlyModules.includes(currentModuleId)) {
     closeModule();
+  }
+  // Shared Mode + Cloudflared: NAI 옵션 비활성화
+  if (sharedMode) {
+    const naiOpt = modeSelect.querySelector('option[value="NAI"]');
+    if (naiOpt) naiOpt.disabled = true;
   }
 }
 
@@ -926,8 +976,13 @@ const PP_OPTIONS = [
 
 function openModule(moduleId) {
   // NAI 전용 모듈 가드
-  if ((moduleId === 'character_reference' || moduleId === 'vibe_transfer') && modeSelect.value !== 'NAI') {
+  if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
+    return;
+  }
+  // Shared Mode: 데스크톱 전용 모듈 차단
+  if (sharedMode && ['automation', 'wildcard', 'chunk'].includes(moduleId)) {
+    showToast('This module is not available in Shared Server Mode', 'error');
     return;
   }
   // Toggle: same module clicked again → close
@@ -2289,12 +2344,12 @@ function scheduleAutocomplete() {
   acTimer = setTimeout(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const s = info.stripped;
-    if (s.startsWith('__')) {
-      // Wildcard autocomplete: __keyword → search wildcard names
+    if (!sharedMode && s.startsWith('__')) {
+      // Wildcard autocomplete: __keyword → search wildcard names (Shared Mode 차단)
       const q = s.replace(/^_+/, '').replace(/_+$/, '');
       if (q.length >= 1) ws.send(JSON.stringify({type: 'autocomplete_wildcard', query: q}));
-    } else if (s.startsWith('$') || (s.startsWith('@') && currentMode !== 'COMFYUI')) {
-      // Chunk trigger: open Chunk module panel (@ disabled in ComfyUI — ANIMA uses @artist)
+    } else if (!sharedMode && (s.startsWith('$') || (s.startsWith('@') && currentMode !== 'COMFYUI'))) {
+      // Chunk trigger: open Chunk module panel (Shared Mode / ComfyUI @ 차단)
       clearTimeout(acTimer);
       chunkTriggerInfo = info;
       openModule('chunk');

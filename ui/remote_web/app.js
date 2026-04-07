@@ -2290,10 +2290,10 @@ function scheduleAutocomplete() {
       // Wildcard autocomplete: __keyword → search wildcard names
       const q = s.replace(/^_+/, '').replace(/_+$/, '');
       if (q.length >= 1) ws.send(JSON.stringify({type: 'autocomplete_wildcard', query: q}));
-    } else if (s.startsWith('$') || s.startsWith('@')) {
-      // Chunk trigger: open Chunk module panel
+    } else if (s.startsWith('$') || (s.startsWith('@') && currentMode !== 'COMFYUI')) {
+      // Chunk trigger: open Chunk module panel (@ disabled in ComfyUI — ANIMA uses @artist)
       clearTimeout(acTimer);
-      chunkTriggerInfo = info;  // 삽입 위치 기억
+      chunkTriggerInfo = info;
       openModule('chunk');
       return;
     } else {

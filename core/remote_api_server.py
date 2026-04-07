@@ -99,6 +99,7 @@ class RemoteBridge(QObject):
     request_depth_action = pyqtSignal(str)          # depth search action JSON
     request_restore_snapshot = pyqtSignal()          # 메인 검색 결과 스냅샷 복원
     request_history_action = pyqtSignal(str)          # history action JSON (enqueue/reroll/load_prompt)
+    request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
     OPTION_KEYS = {
@@ -151,6 +152,17 @@ class RemoteBridge(QObject):
         self._cached_api_status = self.get_api_status()
 
     # --- 시그널 슬롯 래퍼 (lambda 대신 disconnect 가능) ---
+
+    def _do_refresh_cache(self):
+        """WS 연결 시 메인 스레드에서 캐시 갱신 + broadcast"""
+        self._update_cache_all()
+        if self._has_clients():
+            if self._cached_options:
+                self._broadcast_json(self._cached_options)
+            if self._cached_params:
+                self._broadcast_json(self._cached_params)
+            if self._cached_prompts:
+                self._broadcast_json(self._cached_prompts)
 
     def _on_option_toggled_slot(self, checked=None):
         """체크박스 toggled → 옵션 브로드캐스트"""
@@ -2357,6 +2369,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 await ws.send_text(json.dumps(bridge._cached_params))
             if bridge._cached_api_status:
                 await ws.send_text(json.dumps(bridge._cached_api_status))
+            # 메인 스레드에서 캐시 갱신 + broadcast (초기화 타이밍 이슈 방지)
+            bridge.request_refresh_cache.emit()
             # Send module badge states (automation countdown, character count)
             bridge.request_get_module.emit("automation")
             bridge.request_get_module.emit("character")
@@ -2506,6 +2520,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_depth_action.connect(bridge._do_depth_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_restore_snapshot.connect(bridge._do_restore_snapshot, Qt.ConnectionType.QueuedConnection)
     bridge.request_history_action.connect(bridge._handle_history_action, Qt.ConnectionType.QueuedConnection)
+    bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결
     mw = app_context.main_window

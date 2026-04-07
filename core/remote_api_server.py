@@ -1634,14 +1634,18 @@ class RemoteBridge(QObject):
         query = query.strip()
         if not query:
             return []
-        # prefix 라우팅
+        # prefix 라우팅 (@artist → artist: 변환 포함)
         cat_filter = None
         ql = query.lower()
-        for pfx in ('artist:', 'character:'):
-            if ql.startswith(pfx):
-                cat_filter = pfx[:-1]  # 'artist' or 'character'
-                ql = ql[len(pfx):]
-                break
+        if ql.startswith('@'):
+            cat_filter = 'artist'
+            ql = ql[1:]
+        else:
+            for pfx in ('artist:', 'character:'):
+                if ql.startswith(pfx):
+                    cat_filter = pfx[:-1]  # 'artist' or 'character'
+                    ql = ql[len(pfx):]
+                    break
         if not ql:
             return []
         exact, starts, kr_kw, contains, desc_m = [], [], [], [], []

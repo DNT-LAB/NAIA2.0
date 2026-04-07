@@ -2361,12 +2361,16 @@ function selectAutocomplete(idx) {
   if (modeSelect.value !== 'NAI') {
     newTag = newTag.replace(/\(/g, '\\(').replace(/\)/g, '\\)');
   }
-  // Preserve prefix (artist:, character:) if present in original token
+  // Preserve prefix (artist:, character:, @) if present in original token
   const rawLower = info.raw.toLowerCase();
-  for (const pfx of ['artist:', 'character:']) {
-    if (rawLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {
-      newTag = pfx + newTag;
-      break;
+  if (rawLower.startsWith('@') && !newTag.startsWith('@')) {
+    newTag = '@' + newTag;
+  } else {
+    for (const pfx of ['artist:', 'character:']) {
+      if (rawLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {
+        newTag = pfx + newTag;
+        break;
+      }
     }
   }
   swapToken(target, info, newTag);

@@ -1,0 +1,731 @@
+{
+  "version": 1,
+  "generated_at": "2026-04-07T09:19:00.970321+00:00",
+  "sources": {
+    "location_tags": "data/taglist/location_tags.json",
+    "tag_counts": "data/ezmode/output.json",
+    "location_catalog": "data/location_preset_catalog.json",
+    "effect_catalog": "data/location_state_effect_catalog.json"
+  },
+  "summary": {
+    "location_tag_total": 1934,
+    "used_tag_total": 309,
+    "covered_tag_total": 305,
+    "uncovered_tag_total": 1629,
+    "raw_coverage_pct": 15.77
+  },
+  "coverage_by_threshold": [
+    {
+      "min_count": 100,
+      "tag_total": 1043,
+      "covered_count": 291,
+      "coverage_pct": 27.9,
+      "weighted_coverage_pct": 95.34,
+      "expanded_covered_count": 292,
+      "expanded_coverage_pct": 28.0,
+      "expanded_weighted_coverage_pct": 95.4
+    },
+    {
+      "min_count": 500,
+      "tag_total": 581,
+      "covered_count": 279,
+      "coverage_pct": 48.02,
+      "weighted_coverage_pct": 96.2,
+      "expanded_covered_count": 280,
+      "expanded_coverage_pct": 48.19,
+      "expanded_weighted_coverage_pct": 96.26
+    },
+    {
+      "min_count": 1000,
+      "tag_total": 432,
+      "covered_count": 261,
+      "coverage_pct": 60.42,
+      "weighted_coverage_pct": 96.95,
+      "expanded_covered_count": 262,
+      "expanded_coverage_pct": 60.65,
+      "expanded_weighted_coverage_pct": 97.01
+    },
+    {
+      "min_count": 5000,
+      "tag_total": 206,
+      "covered_count": 202,
+      "coverage_pct": 98.06,
+      "weighted_coverage_pct": 99.75,
+      "expanded_covered_count": 203,
+      "expanded_coverage_pct": 98.54,
+      "expanded_weighted_coverage_pct": 99.82
+    },
+    {
+      "min_count": 10000,
+      "tag_total": 139,
+      "covered_count": 139,
+      "coverage_pct": 100.0,
+      "weighted_coverage_pct": 100.0,
+      "expanded_covered_count": 139,
+      "expanded_coverage_pct": 100.0,
+      "expanded_weighted_coverage_pct": 100.0
+    },
+    {
+      "min_count": 50000,
+      "tag_total": 41,
+      "covered_count": 41,
+      "coverage_pct": 100.0,
+      "weighted_coverage_pct": 100.0,
+      "expanded_covered_count": 41,
+      "expanded_coverage_pct": 100.0,
+      "expanded_weighted_coverage_pct": 100.0
+    },
+    {
+      "min_count": 100000,
+      "tag_total": 23,
+      "covered_count": 23,
+      "coverage_pct": 100.0,
+      "weighted_coverage_pct": 100.0,
+      "expanded_covered_count": 23,
+      "expanded_coverage_pct": 100.0,
+      "expanded_weighted_coverage_pct": 100.0
+    }
+  ],
+  "priority_buckets": {
+    "global_effect_candidates": {
+      "tag_count": 34,
+      "covered_count": 34,
+      "missing_count": 0,
+      "coverage_pct": 100.0,
+      "missing_tags": []
+    },
+    "structure_state_candidates": {
+      "tag_count": 31,
+      "covered_count": 30,
+      "missing_count": 1,
+      "coverage_pct": 96.77,
+      "missing_tags": [
+        {
+          "tag": "throne",
+          "count": 7156
+        }
+      ]
+    },
+    "place_anchor_candidates": {
+      "tag_count": 9,
+      "covered_count": 9,
+      "missing_count": 0,
+      "coverage_pct": 100.0,
+      "missing_tags": []
+    },
+    "broad_scene_descriptors": {
+      "tag_count": 7,
+      "covered_count": 7,
+      "missing_count": 0,
+      "coverage_pct": 100.0,
+      "missing_tags": []
+    }
+  },
+  "top_uncovered_tags": [
+    {
+      "tag": "kotatsu",
+      "count": 7824
+    },
+    {
+      "tag": "throne",
+      "count": 7156
+    },
+    {
+      "tag": "puddle",
+      "count": 6688
+    },
+    {
+      "tag": "lily pad",
+      "count": 5366
+    },
+    {
+      "tag": "daisy (flower)",
+      "count": 4391
+    },
+    {
+      "tag": "reflective floor",
+      "count": 4058
+    },
+    {
+      "tag": "town",
+      "count": 3888
+    },
+    {
+      "tag": "vending machine",
+      "count": 3715
+    },
+    {
+      "tag": "coral",
+      "count": 3519
+    },
+    {
+      "tag": "tree shade",
+      "count": 3476
+    },
+    {
+      "tag": "dust",
+      "count": 3466
+    },
+    {
+      "tag": "window shadow",
+      "count": 3389
+    },
+    {
+      "tag": "rubble",
+      "count": 3356
+    },
+    {
+      "tag": "shower (place)",
+      "count": 3240
+    },
+    {
+      "tag": "spring (season)",
+      "count": 3231
+    },
+    {
+      "tag": "traffic light",
+      "count": 3202
+    },
+    {
+      "tag": "pond",
+      "count": 3191
+    },
+    {
+      "tag": "faucet",
+      "count": 3182
+    },
+    {
+      "tag": "real world location",
+      "count": 3173
+    },
+    {
+      "tag": "wooden wall",
+      "count": 3150
+    },
+    {
+      "tag": "festival",
+      "count": 3138
+    },
+    {
+      "tag": "skyline",
+      "count": 3135
+    },
+    {
+      "tag": "neon lights",
+      "count": 3037
+    },
+    {
+      "tag": "park bench",
+      "count": 3024
+    },
+    {
+      "tag": "desk lamp",
+      "count": 3016
+    },
+    {
+      "tag": "wooden fence",
+      "count": 3016
+    },
+    {
+      "tag": "on swing",
+      "count": 2970
+    },
+    {
+      "tag": "overgrown",
+      "count": 2890
+    },
+    {
+      "tag": "starry sky background",
+      "count": 2884
+    },
+    {
+      "tag": "gym storeroom",
+      "count": 2882
+    },
+    {
+      "tag": "crosswalk",
+      "count": 2869
+    },
+    {
+      "tag": "in-universe location",
+      "count": 2864
+    },
+    {
+      "tag": "column",
+      "count": 2858
+    },
+    {
+      "tag": "gate",
+      "count": 2832
+    },
+    {
+      "tag": "air conditioner",
+      "count": 2778
+    },
+    {
+      "tag": "open window",
+      "count": 2773
+    },
+    {
+      "tag": "foliage",
+      "count": 2764
+    },
+    {
+      "tag": "3d background",
+      "count": 2731
+    },
+    {
+      "tag": "veranda",
+      "count": 2712
+    },
+    {
+      "tag": "stone floor",
+      "count": 2630
+    },
+    {
+      "tag": "shallow water",
+      "count": 2622
+    },
+    {
+      "tag": "pavement",
+      "count": 2620
+    },
+    {
+      "tag": "gym",
+      "count": 2594
+    },
+    {
+      "tag": "streamers",
+      "count": 2569
+    },
+    {
+      "tag": "tree stump",
+      "count": 2536
+    },
+    {
+      "tag": "tanabata",
+      "count": 2528
+    },
+    {
+      "tag": "stadium",
+      "count": 2526
+    },
+    {
+      "tag": "dust cloud",
+      "count": 2516
+    },
+    {
+      "tag": "pine tree",
+      "count": 2504
+    },
+    {
+      "tag": "colored shadow",
+      "count": 2501
+    },
+    {
+      "tag": "folding chair",
+      "count": 2484
+    },
+    {
+      "tag": "sunburst background",
+      "count": 2484
+    },
+    {
+      "tag": "drum set",
+      "count": 2459
+    },
+    {
+      "tag": "cockpit",
+      "count": 2453
+    },
+    {
+      "tag": "concert",
+      "count": 2432
+    },
+    {
+      "tag": "tent",
+      "count": 2396
+    },
+    {
+      "tag": "cactus",
+      "count": 2395
+    },
+    {
+      "tag": "fireflies",
+      "count": 2365
+    },
+    {
+      "tag": "christmas lights",
+      "count": 2353
+    },
+    {
+      "tag": "ferris wheel",
+      "count": 2321
+    },
+    {
+      "tag": "lounge chair",
+      "count": 2298
+    },
+    {
+      "tag": "sidewalk",
+      "count": 2282
+    },
+    {
+      "tag": "chest of drawers",
+      "count": 2173
+    },
+    {
+      "tag": "campfire",
+      "count": 2162
+    },
+    {
+      "tag": "stone lantern",
+      "count": 2153
+    },
+    {
+      "tag": "fountain",
+      "count": 2119
+    },
+    {
+      "tag": "round-bottom flask",
+      "count": 2109
+    },
+    {
+      "tag": "wooden chair",
+      "count": 2104
+    },
+    {
+      "tag": "summer festival",
+      "count": 2094
+    },
+    {
+      "tag": "traffic cone",
+      "count": 2082
+    },
+    {
+      "tag": "scarlet devil mansion",
+      "count": 2079
+    },
+    {
+      "tag": "lava",
+      "count": 2067
+    },
+    {
+      "tag": "stream",
+      "count": 2066
+    },
+    {
+      "tag": "hospital bed",
+      "count": 2061
+    },
+    {
+      "tag": "petals on liquid",
+      "count": 2004
+    },
+    {
+      "tag": "washing machine",
+      "count": 1939
+    },
+    {
+      "tag": "food stand",
+      "count": 1930
+    },
+    {
+      "tag": "brick floor",
+      "count": 1911
+    },
+    {
+      "tag": "clock tower",
+      "count": 1903
+    },
+    {
+      "tag": "gaming chair",
+      "count": 1851
+    },
+    {
+      "tag": "clear sky",
+      "count": 1821
+    },
+    {
+      "tag": "huge moon",
+      "count": 1797
+    },
+    {
+      "tag": "round table",
+      "count": 1786
+    },
+    {
+      "tag": "bus stop",
+      "count": 1776
+    },
+    {
+      "tag": "cracked wall",
+      "count": 1764
+    },
+    {
+      "tag": "pool of blood",
+      "count": 1757
+    },
+    {
+      "tag": "lattice",
+      "count": 1748
+    },
+    {
+      "tag": "zabuton",
+      "count": 1740
+    },
+    {
+      "tag": "sand sculpture",
+      "count": 1727
+    },
+    {
+      "tag": "hanging plant",
+      "count": 1700
+    },
+    {
+      "tag": "aurora",
+      "count": 1609
+    },
+    {
+      "tag": "galaxy",
+      "count": 1595
+    },
+    {
+      "tag": "lighthouse",
+      "count": 1581
+    },
+    {
+      "tag": "wading pool",
+      "count": 1565
+    },
+    {
+      "tag": "post-apocalypse",
+      "count": 1562
+    },
+    {
+      "tag": "bulletin board",
+      "count": 1556
+    },
+    {
+      "tag": "full-length mirror",
+      "count": 1542
+    },
+    {
+      "tag": "dirt",
+      "count": 1538
+    },
+    {
+      "tag": "stone stairs",
+      "count": 1524
+    },
+    {
+      "tag": "above clouds",
+      "count": 1509
+    },
+    {
+      "tag": "floating island",
+      "count": 1503
+    },
+    {
+      "tag": "messy room",
+      "count": 1499
+    },
+    {
+      "tag": "sauna",
+      "count": 1497
+    },
+    {
+      "tag": "hammock",
+      "count": 1478
+    },
+    {
+      "tag": "bean bag chair",
+      "count": 1476
+    },
+    {
+      "tag": "storefront",
+      "count": 1429
+    },
+    {
+      "tag": "windowsill",
+      "count": 1416
+    },
+    {
+      "tag": "hanging light",
+      "count": 1401
+    },
+    {
+      "tag": "tokyo (city)",
+      "count": 1400
+    },
+    {
+      "tag": "plant roots",
+      "count": 1391
+    },
+    {
+      "tag": "pier",
+      "count": 1381
+    },
+    {
+      "tag": "porch",
+      "count": 1360
+    },
+    {
+      "tag": "running track",
+      "count": 1360
+    },
+    {
+      "tag": "windmill",
+      "count": 1351
+    },
+    {
+      "tag": "sand castle",
+      "count": 1346
+    },
+    {
+      "tag": "nebula",
+      "count": 1342
+    },
+    {
+      "tag": "storm",
+      "count": 1339
+    },
+    {
+      "tag": "fern",
+      "count": 1338
+    },
+    {
+      "tag": "infirmary",
+      "count": 1333
+    },
+    {
+      "tag": "wheat field",
+      "count": 1330
+    },
+    {
+      "tag": "whiteboard",
+      "count": 1327
+    },
+    {
+      "tag": "toilet stall",
+      "count": 1313
+    },
+    {
+      "tag": "grave",
+      "count": 1306
+    },
+    {
+      "tag": "dotted background",
+      "count": 1304
+    },
+    {
+      "tag": "snowflake background",
+      "count": 1304
+    },
+    {
+      "tag": "dawn",
+      "count": 1300
+    },
+    {
+      "tag": "hospital",
+      "count": 1290
+    },
+    {
+      "tag": "cracked floor",
+      "count": 1286
+    },
+    {
+      "tag": "broken window",
+      "count": 1276
+    },
+    {
+      "tag": "flag background",
+      "count": 1262
+    },
+    {
+      "tag": "guard rail",
+      "count": 1254
+    },
+    {
+      "tag": "milky way",
+      "count": 1254
+    },
+    {
+      "tag": "united states",
+      "count": 1247
+    },
+    {
+      "tag": "cobblestone",
+      "count": 1241
+    },
+    {
+      "tag": "broken mirror",
+      "count": 1240
+    },
+    {
+      "tag": "clothesline",
+      "count": 1229
+    },
+    {
+      "tag": "canopy bed",
+      "count": 1223
+    },
+    {
+      "tag": "multiple torii",
+      "count": 1220
+    },
+    {
+      "tag": "menu board",
+      "count": 1217
+    },
+    {
+      "tag": "monochrome background",
+      "count": 1207
+    },
+    {
+      "tag": "cracked glass",
+      "count": 1195
+    },
+    {
+      "tag": "casino",
+      "count": 1185
+    },
+    {
+      "tag": "carousel",
+      "count": 1177
+    },
+    {
+      "tag": "mount fuji",
+      "count": 1167
+    },
+    {
+      "tag": "pagoda",
+      "count": 1166
+    },
+    {
+      "tag": "abandoned",
+      "count": 1161
+    },
+    {
+      "tag": "moon phases",
+      "count": 1161
+    },
+    {
+      "tag": "fitting room",
+      "count": 1159
+    },
+    {
+      "tag": "public restroom",
+      "count": 1158
+    },
+    {
+      "tag": "jungle",
+      "count": 1156
+    }
+  ],
+  "notes": [
+    "raw unique-tag coverage is low because location_tags.json mixes place anchors, structural props, sky/weather overlays, background FX, and long-tail decorative tags in one bucket",
+    "the current preset data covers the core place anchors and a subset of high-value structures/effects, but it still misses many global overlay tags",
+    "expanded coverage columns simulate adding the priority bucket candidates without changing the current catalogs"
+  ]
+}

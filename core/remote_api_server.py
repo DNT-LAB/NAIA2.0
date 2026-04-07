@@ -7,6 +7,8 @@ NAIA Remote API Server
 import io
 import json
 import asyncio
+import base64
+import time
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -589,6 +591,10 @@ class RemoteBridge(QObject):
             "automation": "AutomationModule",
             "character": "CharacterModule",
             "conditional_prompt": "PromptListModifierModule",
+            "character_reference": "CharacterReferenceModule",
+            "vibe_transfer": "VibeTransferModule",
+            "wildcard": "WildcardStatusModule",
+            "instant_wildcard": "InstantWildcardModule",
         }
         target_class = class_map.get(module_id)
         if not target_class:
@@ -619,6 +625,14 @@ class RemoteBridge(QObject):
             return self._read_character()
         elif module_id == "conditional_prompt":
             return self._read_conditional_prompt()
+        elif module_id == "character_reference":
+            return self._read_character_reference()
+        elif module_id == "vibe_transfer":
+            return self._read_vibe_transfer()
+        elif module_id == "wildcard":
+            return self._read_wildcard()
+        elif module_id == "chunk":
+            return self._read_chunk()
         return {}
 
     def _read_prompt_engineering(self) -> dict:
@@ -726,6 +740,12 @@ class RemoteBridge(QObject):
             self._set_character(key, value)
         elif module_id == "conditional_prompt":
             self._set_conditional_prompt(key, value)
+        elif module_id == "character_reference":
+            self._set_character_reference(key, value)
+        elif module_id == "vibe_transfer":
+            self._set_vibe_transfer(key, value)
+        elif module_id == "wildcard":
+            self._set_wildcard(key, value)
 
     def _set_prompt_engineering(self, key: str, value: str):
         try:
@@ -851,6 +871,577 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: conditional_prompt 설정 실패 — {key}={value}: {e}")
 
+    # --- Character Reference / Vibe Transfer (이미지 업로드 모듈) ---
+
+    def _generate_thumbnail_b64(self, pil_image, max_side=128) -> str:
+        """PIL 이미지를 작은 JPEG 썸네일 base64로 변환"""
+        from PIL import Image
+        thumb = pil_image.copy()
+        thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        if thumb.mode == 'RGBA':
+            thumb = thumb.convert('RGB')
+        buf = io.BytesIO()
+        thumb.save(buf, format="JPEG", quality=70)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    def _read_character_reference(self) -> dict:
+        try:
+            m = self._find_module("character_reference")
+            if not m:
+                return {}
+            frames = []
+            for i, f in enumerate(m.character_frames):
+                thumb = ""
+                try:
+                    if hasattr(f, 'image') and f.image:
+                        thumb = self._generate_thumbnail_b64(f.image)
+                except Exception:
+                    pass
+                frames.append({
+                    "index": i,
+                    "file_hash": f.file_hash,
+                    "file_name": f.file_name,
+                    "is_enabled": f.is_enabled,
+                    "reference_type": f.reference_type,
+                    "strength": f.strength,
+                    "fidelity": f.fidelity,
+                    "thumbnail": thumb,
+                })
+            # NAID4.5 호환 여부 확인
+            is_naid45 = False
+            try:
+                if hasattr(m, '_is_naid45_model'):
+                    is_naid45 = m._is_naid45_model()
+            except Exception:
+                pass
+            return {
+                "type": "module_state",
+                "module_id": "character_reference",
+                "is_naid45": is_naid45,
+                "frames": frames,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: character_reference 상태 읽기 실패 — {e}")
+            return {}
+
+    def _read_vibe_transfer(self) -> dict:
+        try:
+            m = self._find_module("vibe_transfer")
+            if not m:
+                return {}
+            frames = []
+            for i, f in enumerate(m.vibe_frames):
+                thumb = ""
+                try:
+                    if hasattr(f, 'image') and f.image and not f.is_no_image:
+                        thumb = self._generate_thumbnail_b64(f.image)
+                except Exception:
+                    pass
+                encoding_keys = list(f.vibe_encodings.keys()) if hasattr(f, 'vibe_encodings') else []
+                has_encoding = f.information_extracted in f.vibe_encodings if hasattr(f, 'vibe_encodings') else False
+                frames.append({
+                    "index": i,
+                    "file_hash": f.file_hash,
+                    "file_name": f.file_name,
+                    "is_enabled": f.is_enabled,
+                    "is_no_image": f.is_no_image,
+                    "reference_strength": f.reference_strength,
+                    "information_extracted": f.information_extracted,
+                    "has_encoding": has_encoding,
+                    "encoding_keys": [float(k) for k in encoding_keys],
+                    "thumbnail": thumb,
+                })
+            return {
+                "type": "module_state",
+                "module_id": "vibe_transfer",
+                "normalize": m.normalize_checkbox.isChecked() if hasattr(m, 'normalize_checkbox') else False,
+                "frame_count": len(m.vibe_frames),
+                "max_frames": 8,
+                "frames": frames,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: vibe_transfer 상태 읽기 실패 — {e}")
+            return {}
+
+    def _set_character_reference(self, key: str, value: str):
+        prev_stealth = getattr(self.app_context, 'stealth_mode', False)
+        self.app_context.stealth_mode = True
+        try:
+            m = self._find_module("character_reference")
+            if not m:
+                return
+            if key == "upload_image":
+                img_bytes = base64.b64decode(value)
+                temp_dir = Path("temp/remote_upload")
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_path = temp_dir / f"char_ref_{int(time.time() * 1000)}.png"
+                temp_path.write_bytes(img_bytes)
+                m._add_character_frame(str(temp_path))
+            elif key.startswith("remove_frame_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.character_frames):
+                    m._remove_frame(m.character_frames[idx])
+            elif key.startswith("enable_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.character_frames):
+                    enabling = (value == "true")
+                    m.character_frames[idx].enable_check.setChecked(enabling)
+                    # 상호 배타: Char Ref 활성 → Vibe 전부 비활성
+                    if enabling:
+                        self._disable_all_vibe_frames()
+            elif key.startswith("strength_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.character_frames):
+                    m.character_frames[idx].strength_slider.setValue(int(float(value) * 20))
+            elif key.startswith("fidelity_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.character_frames):
+                    m.character_frames[idx].fidelity_slider.setValue(int(float(value) * 20))
+            elif key.startswith("ref_type_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.character_frames):
+                    m.character_frames[idx].ref_type_combo.setCurrentText(value)
+            elif key == "get_storage":
+                storage = self._scan_char_ref_storage()
+                self._broadcast_json(storage)
+                return
+            elif key == "apply_storage":
+                file_hash = value
+                images_folder = Path("save/character_reference/images")
+                image_path = images_folder / f"{file_hash}.png"
+                if image_path.exists():
+                    m._on_apply_character_from_storage(file_hash, image_path.name, str(image_path))
+                    # Storage 적용은 자동 enable → Vibe 비활성
+                    self._disable_all_vibe_frames()
+            # 변경 후 상태 브로드캐스트
+            state = self._read_character_reference()
+            if state:
+                self._broadcast_json(state)
+        except Exception as e:
+            print(f"🌐 Remote: character_reference 설정 실패 — {key}{'(image)' if key == 'upload_image' else ''}: {e}")
+        finally:
+            self.app_context.stealth_mode = prev_stealth
+
+    def _set_vibe_transfer(self, key: str, value: str):
+        prev_stealth = getattr(self.app_context, 'stealth_mode', False)
+        self.app_context.stealth_mode = True
+        try:
+            m = self._find_module("vibe_transfer")
+            if not m:
+                return
+            if key == "upload_image":
+                img_bytes = base64.b64decode(value)
+                temp_dir = Path("temp/remote_upload")
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_path = temp_dir / f"vibe_{int(time.time() * 1000)}.png"
+                temp_path.write_bytes(img_bytes)
+                m._add_vibe_frame(str(temp_path))
+            elif key.startswith("remove_frame_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.vibe_frames):
+                    m._remove_frame(m.vibe_frames[idx])
+            elif key.startswith("enable_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.vibe_frames):
+                    enabling = (value == "true")
+                    m.vibe_frames[idx].enable_check.setChecked(enabling)
+                    # 상호 배타: Vibe 활성 → Char Ref 전부 비활성
+                    if enabling:
+                        self._disable_all_char_ref_frames()
+            elif key.startswith("ref_strength_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.vibe_frames):
+                    m.vibe_frames[idx].ref_strength_slider.setValue(int(float(value) * 100))
+            elif key.startswith("info_extracted_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.vibe_frames):
+                    m.vibe_frames[idx].info_extracted_slider.setValue(int(float(value) * 100))
+            elif key == "normalize":
+                if hasattr(m, 'normalize_checkbox'):
+                    m.normalize_checkbox.setChecked(value == "true")
+            elif key.startswith("encode_"):
+                idx = int(key.split("_")[-1])
+                if 0 <= idx < len(m.vibe_frames):
+                    frame = m.vibe_frames[idx]
+                    if not frame.is_no_image:
+                        m._on_encoding_requested(frame, frame.information_extracted)
+            elif key == "get_storage":
+                storage = self._scan_vibe_storage()
+                self._broadcast_json(storage)
+                return
+            elif key == "apply_storage":
+                # value = "model|file_hash|ie_value"
+                parts = value.split("|")
+                if len(parts) >= 3:
+                    model, file_hash, ie_str = parts[0], parts[1], parts[2]
+                    m._on_apply_vibe_from_storage(model, file_hash, "", float(ie_str))
+            # 변경 후 상태 브로드캐스트
+            state = self._read_vibe_transfer()
+            if state:
+                self._broadcast_json(state)
+        except Exception as e:
+            print(f"🌐 Remote: vibe_transfer 설정 실패 — {key}{'(image)' if key == 'upload_image' else ''}: {e}")
+        finally:
+            self.app_context.stealth_mode = prev_stealth
+
+    # ── Wildcard Module ──
+
+    def _read_wildcard(self) -> dict:
+        """와일드카드 모듈 상태 읽기"""
+        try:
+            m = self._find_module("wildcard")
+            if not m:
+                return {}
+            # 히스토리 엔트리
+            history = []
+            ctx = self.app_context.current_prompt_context
+            if ctx and ctx.wildcard_history:
+                for name, values in ctx.wildcard_history.items():
+                    history.append({"name": name, "value": values[-1]})
+            # 순차/종속 상태
+            state_lines = []
+            if ctx and ctx.wildcard_state:
+                for name, state in ctx.wildcard_state.items():
+                    state_lines.append({"name": name, "current": state['current'], "total": state['total']})
+            # 인스턴트 와일드카드 그룹 정보
+            instant_groups = []
+            iw_module = self._find_module("instant_wildcard")
+            if iw_module:
+                try:
+                    flat_dict, tree = iw_module.get_wildcards()
+                    for fname, items in tree.items():
+                        group_name = fname.replace('.json', '') if fname.endswith('.json') else fname
+                        keys = list(items.keys())
+                        instant_groups.append({"name": group_name, "count": len(keys), "keys": keys[:20]})
+                except Exception:
+                    pass
+            return {
+                "type": "module_state",
+                "module_id": "wildcard",
+                "history": history,
+                "state": state_lines,
+                "prompt_squeeze": getattr(self.app_context, 'prompt_squeeze_enabled', True),
+                "wildcard_count": len(self.app_context.wildcard_manager.wildcard_dict_tree),
+                "instant_groups": instant_groups,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 상태 읽기 실패: {e}")
+            return {}
+
+    def _set_wildcard(self, key: str, value: str):
+        """와일드카드 모듈 파라미터 설정"""
+        try:
+            m = self._find_module("wildcard")
+            if not m:
+                return
+            if key == "prompt_squeeze":
+                if hasattr(m, 'prompt_squeeze_checkbox') and m.prompt_squeeze_checkbox:
+                    m.prompt_squeeze_checkbox.setChecked(value == "true")
+            elif key == "reload":
+                m.reload_wildcards()
+                state = self._read_wildcard()
+                if state:
+                    self._broadcast_json(state)
+                return
+            elif key == "reset_sequential":
+                m.reset_sequential_wildcards()
+                state = self._read_wildcard()
+                if state:
+                    self._broadcast_json(state)
+                return
+            elif key == "open_manager":
+                m.open_wildcard_manager()
+                return
+            elif key == "get_file_tree":
+                tree = self._scan_wildcard_tree()
+                self._broadcast_json({"type": "wildcard_manager", "action": "file_tree", "tree": tree})
+                return
+            elif key == "read_file":
+                content = self._read_wildcard_file(value)
+                if content is not None:
+                    self._broadcast_json({"type": "wildcard_manager", "action": "file_content", "path": value, "content": content})
+                return
+            elif key == "save_file":
+                import json as _json
+                try:
+                    data = _json.loads(value)
+                except (ValueError, TypeError):
+                    print("🌐 Remote: wildcard save_file — 잘못된 JSON")
+                    return
+                self._save_wildcard_file(data.get("path", ""), data.get("content", ""))
+                return
+            elif key == "delete_file":
+                self._delete_wildcard_file(value)
+                return
+            elif key == "create_file":
+                self._create_wildcard_file(value)
+                return
+            elif key == "preview_wildcard":
+                result = self._preview_wildcard(value)
+                self._broadcast_json({"type": "wildcard_manager", "action": "preview_result", "name": value, "result": result})
+                return
+            # 일반 파라미터 변경 시 상태 브로드캐스트
+            state = self._read_wildcard()
+            if state:
+                self._broadcast_json(state)
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 설정 실패 — {key}: {e}")
+
+    def _scan_wildcard_tree(self) -> list:
+        """와일드카드 디렉토리 트리 스캔"""
+        from pathlib import Path
+        wm = self.app_context.wildcard_manager
+        base = Path(wm.wildcards_dir)
+        if not base.exists():
+            return []
+        tree = []
+        try:
+            for item in sorted(base.iterdir()):
+                if item.name.startswith('.'):
+                    continue
+                if item.is_dir():
+                    folder = {"name": item.name, "type": "folder", "files": []}
+                    for f in sorted(item.rglob("*.txt")):
+                        try:
+                            lines = len(f.read_text(encoding='utf-8').splitlines())
+                        except Exception:
+                            lines = 0
+                        rel = str(f.relative_to(base)).replace('\\', '/')
+                        folder["files"].append({"name": f.name, "path": rel, "lines": lines})
+                    if folder["files"]:
+                        tree.append(folder)
+                elif item.suffix == '.txt':
+                    try:
+                        lines = len(item.read_text(encoding='utf-8').splitlines())
+                    except Exception:
+                        lines = 0
+                    tree.append({"name": item.name, "type": "file", "path": item.name, "lines": lines})
+        except Exception as e:
+            print(f"🌐 Remote: wildcard tree 스캔 실패: {e}")
+        return tree
+
+    def _validate_wildcard_path(self, rel_path: str) -> 'Path | None':
+        """상대 경로를 검증하고 절대 경로 반환 (경로 탈출 방지)"""
+        from pathlib import Path
+        wm = self.app_context.wildcard_manager
+        base = Path(wm.wildcards_dir).resolve()
+        target = (base / rel_path).resolve()
+        if not str(target).startswith(str(base)):
+            print(f"🌐 Remote: 경로 탈출 시도 차단 — {rel_path}")
+            return None
+        return target
+
+    def _read_wildcard_file(self, rel_path: str) -> str | None:
+        """와일드카드 파일 읽기"""
+        target = self._validate_wildcard_path(rel_path)
+        if not target or not target.is_file() or target.suffix != '.txt':
+            return None
+        try:
+            return target.read_text(encoding='utf-8')
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 파일 읽기 실패 — {rel_path}: {e}")
+            return None
+
+    def _save_wildcard_file(self, rel_path: str, content: str):
+        """와일드카드 파일 저장 + 리로드"""
+        if not rel_path.endswith('.txt'):
+            return
+        target = self._validate_wildcard_path(rel_path)
+        if not target:
+            return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding='utf-8')
+            self.app_context.wildcard_manager.reload_wildcards()
+            # 트리 + 내용 갱신
+            tree = self._scan_wildcard_tree()
+            self._broadcast_json({"type": "wildcard_manager", "action": "file_tree", "tree": tree})
+            self._broadcast_json({"type": "wildcard_manager", "action": "file_content", "path": rel_path, "content": content})
+            self._broadcast_json({"type": "wildcard_manager", "action": "save_ok", "path": rel_path})
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 파일 저장 실패 — {rel_path}: {e}")
+
+    def _delete_wildcard_file(self, rel_path: str):
+        """와일드카드 파일 삭제 + 리로드"""
+        target = self._validate_wildcard_path(rel_path)
+        if not target or not target.is_file() or target.suffix != '.txt':
+            return
+        try:
+            target.unlink()
+            self.app_context.wildcard_manager.reload_wildcards()
+            tree = self._scan_wildcard_tree()
+            self._broadcast_json({"type": "wildcard_manager", "action": "file_tree", "tree": tree})
+            self._broadcast_json({"type": "wildcard_manager", "action": "file_deleted", "path": rel_path})
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 파일 삭제 실패 — {rel_path}: {e}")
+
+    def _create_wildcard_file(self, rel_path: str):
+        """빈 와일드카드 파일 생성"""
+        if not rel_path.endswith('.txt'):
+            rel_path += '.txt'
+        target = self._validate_wildcard_path(rel_path)
+        if not target:
+            return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                target.write_text('', encoding='utf-8')
+            self.app_context.wildcard_manager.reload_wildcards()
+            tree = self._scan_wildcard_tree()
+            self._broadcast_json({"type": "wildcard_manager", "action": "file_tree", "tree": tree})
+            self._broadcast_json({"type": "wildcard_manager", "action": "file_content", "path": rel_path.replace('\\', '/'), "content": ""})
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 파일 생성 실패 — {rel_path}: {e}")
+
+    def _preview_wildcard(self, name: str) -> str:
+        """와일드카드 확장 미리보기 (5회)"""
+        import random
+        wm = self.app_context.wildcard_manager
+        entries = list(wm.wildcard_dict_tree.get(name, []))  # 스냅샷
+        if not entries:
+            return f"Wildcard '{name}' not found"
+        weights = [w for w, _ in entries]
+        texts = [t for _, t in entries]
+        results = [random.choices(texts, weights=weights, k=1)[0] for _ in range(5)]
+        return '\n'.join(f"#{i+1}: {r}" for i, r in enumerate(results))
+
+    def _disable_all_vibe_frames(self):
+        """Vibe Transfer 전체 프레임 비활성 + 상태 브로드캐스트"""
+        try:
+            vm = self._find_module("vibe_transfer")
+            if not vm:
+                return
+            changed = False
+            for f in vm.vibe_frames:
+                if f.is_enabled:
+                    f.enable_check.setChecked(False)
+                    changed = True
+            if changed:
+                state = self._read_vibe_transfer()
+                if state:
+                    self._broadcast_json(state)
+        except Exception:
+            pass
+
+    def _disable_all_char_ref_frames(self):
+        """Character Reference 전체 프레임 비활성 + 상태 브로드캐스트"""
+        try:
+            cm = self._find_module("character_reference")
+            if not cm:
+                return
+            changed = False
+            for f in cm.character_frames:
+                if f.is_enabled:
+                    f.enable_check.setChecked(False)
+                    changed = True
+            if changed:
+                state = self._read_character_reference()
+                if state:
+                    self._broadcast_json(state)
+        except Exception:
+            pass
+
+    def _scan_char_ref_storage(self) -> dict:
+        """Character Reference Storage 스캔 → 썸네일 목록 반환"""
+        try:
+            from PIL import Image
+            items = []
+            images_folder = Path("save/character_reference/images")
+            metadata_folder = Path("save/character_reference/metadata")
+            if not images_folder.exists():
+                return {"type": "storage_list", "module_id": "character_reference", "items": []}
+            image_files = sorted(images_folder.glob("*.png"), key=lambda x: x.stat().st_mtime, reverse=True)
+            for img_file in image_files[:50]:  # 최대 50개
+                file_hash = img_file.stem
+                # 메타데이터 로드
+                char_name = ""
+                meta_path = metadata_folder / f"{file_hash}.json"
+                if meta_path.exists():
+                    try:
+                        with open(meta_path, 'r', encoding='utf-8') as f:
+                            meta = json.load(f)
+                        char_name = meta.get("character_name", "")
+                    except Exception:
+                        pass
+                # 썸네일
+                thumb = ""
+                try:
+                    pil = Image.open(img_file)
+                    thumb = self._generate_thumbnail_b64(pil)
+                except Exception:
+                    pass
+                items.append({
+                    "file_hash": file_hash,
+                    "file_name": img_file.name,
+                    "character_name": char_name,
+                    "thumbnail": thumb,
+                })
+            return {"type": "storage_list", "module_id": "character_reference", "items": items}
+        except Exception as e:
+            print(f"🌐 Remote: char_ref storage 스캔 실패 — {e}")
+            return {"type": "storage_list", "module_id": "character_reference", "items": []}
+
+    def _scan_vibe_storage(self) -> dict:
+        """Vibe Transfer Storage 스캔 → 모델별 썸네일 목록 반환"""
+        try:
+            from PIL import Image
+            models = {}
+            vibe_folder = Path("save/vibe_transfer")
+            if not vibe_folder.exists():
+                return {"type": "storage_list", "module_id": "vibe_transfer", "models": {}}
+            # 현재 모델 확인
+            current_model = ""
+            try:
+                m = self._find_module("vibe_transfer")
+                if m and hasattr(m, '_get_current_model'):
+                    current_model = m._get_current_model()
+            except Exception:
+                pass
+            for model_dir in sorted(vibe_folder.iterdir()):
+                if not model_dir.is_dir():
+                    continue
+                model_name = model_dir.name
+                items = []
+                images_folder = model_dir / "images"
+                for json_file in sorted(model_dir.glob("*.json"))[:50]:
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        if data.get("volatile", False):
+                            continue
+                        file_hash = data.get("file_hash", json_file.stem)
+                        file_name = data.get("file_name", "Unknown")
+                        encodings = data.get("encodings", {})
+                        encoding_keys = [float(k) for k in encodings.keys()]
+                        # 썸네일
+                        thumb = ""
+                        image_path = images_folder / f"{file_hash}.png"
+                        if image_path.exists():
+                            try:
+                                pil = Image.open(image_path)
+                                thumb = self._generate_thumbnail_b64(pil)
+                            except Exception:
+                                pass
+                        items.append({
+                            "file_hash": file_hash,
+                            "file_name": file_name,
+                            "encoding_keys": encoding_keys,
+                            "thumbnail": thumb,
+                        })
+                    except Exception:
+                        continue
+                if items:
+                    models[model_name] = items
+            return {
+                "type": "storage_list",
+                "module_id": "vibe_transfer",
+                "models": models,
+                "current_model": current_model,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: vibe storage 스캔 실패 — {e}")
+            return {"type": "storage_list", "module_id": "vibe_transfer", "models": {}}
+
     # --- 한글 태그 (KR_tags) ---
 
     def _load_kr_tags(self):
@@ -869,13 +1460,17 @@ class RemoteBridge(QObject):
                     return
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                # NAI 이스케이프 정규화 헬퍼
+                def _norm(s):
+                    return s.replace('\\(', '(').replace('\\)', ')') if s else s
                 # --- Source 0: interactive (가장 풍부한 데이터) ---
                 raw = {}
                 for tag, info in data.items():
                     kw_str = info.get('keywords_kr', '')
-                    raw[tag.lower()] = {
+                    tag_n = _norm(tag)
+                    raw[tag_n.lower()] = {
                         **info,
-                        '_tag': tag,
+                        '_tag': tag_n,
                         '_src': 0,
                         '_kw_lower': kw_str.replace('<', '').replace('>', '').lower() if kw_str else '',
                         '_desc_lower': info.get('description', '').lower(),
@@ -894,7 +1489,7 @@ class RemoteBridge(QObject):
                         import pandas as pd
                         df = pd.read_parquet(pq_path, columns=['tag', 'count', 'category', 'desc', 'keywords'])
                         for _, row in df.iterrows():
-                            tag_raw = str(row['tag']).replace('_', ' ')
+                            tag_raw = _norm(str(row['tag']).replace('_', ' '))
                             tag_lower = tag_raw.lower()
                             if tag_lower in raw:
                                 continue
@@ -954,11 +1549,12 @@ class RemoteBridge(QObject):
                             with open(fpath, 'r', encoding='utf-8') as f:
                                 tags = [line.strip() for line in f if line.strip()]
                         for tag_raw in tags:
-                            tag_lower = tag_raw.lower().replace('_', ' ')
+                            tag_n = _norm(tag_raw.replace('_', ' '))
+                            tag_lower = tag_n.lower()
                             if tag_lower in raw:
                                 continue
                             raw[tag_lower] = {
-                                '_tag': tag_raw.replace('_', ' '), '_src': src_key,
+                                '_tag': tag_n, '_src': src_key,
                                 'freq': 0, 'description': '', 'group': group_name,
                                 'subgroup': '', 'keywords_kr': '',
                                 '_kw_lower': '', '_desc_lower': '',
@@ -979,14 +1575,16 @@ class RemoteBridge(QObject):
                         mod = importlib.import_module(mod_name)
                         d = getattr(mod, var_name, {})
                         for tag_raw, freq in d.items():
-                            tag_lower = tag_raw.lower()
+                            # NAI 이스케이프 정규화: \( → (, \) → )
+                            tag_norm = tag_raw.replace('\\(', '(').replace('\\)', ')')
+                            tag_lower = tag_norm.lower()
                             if tag_lower in raw:
                                 # 기존 엔트리에 cat만 보강
                                 if '_cat' not in raw[tag_lower]:
                                     raw[tag_lower]['_cat'] = cat
                                 continue
                             raw[tag_lower] = {
-                                '_tag': tag_raw, '_src': src_key, '_cat': cat,
+                                '_tag': tag_norm, '_src': src_key, '_cat': cat,
                                 'freq': int(freq) if isinstance(freq, (int, float)) else 0,
                                 'description': '', 'group': cat,
                                 'subgroup': '', 'keywords_kr': '',
@@ -1053,6 +1651,55 @@ class RemoteBridge(QObject):
         for grp in [exact, starts, kr_kw, contains, desc_m]:
             grp.sort(key=lambda x: x['count'], reverse=True)
         return (exact + starts + kr_kw + contains + desc_m)[:limit]
+
+    def _search_wildcards(self, query: str, limit: int = 12) -> list:
+        """와일드카드 이름 검색 (__name__ 용)"""
+        try:
+            wm = self.app_context.wildcard_manager
+            q = query.lower().strip()
+            if not q:
+                return []
+            results = []
+            # 스냅샷으로 스레드 안전 순회
+            tree_snapshot = dict(wm.wildcard_dict_tree)
+            for key, entries in tree_snapshot.items():
+                kl = key.lower()
+                if q in kl:
+                    results.append({
+                        "tag": key,
+                        "count": len(entries),
+                        "desc": f"{len(entries)} entries",
+                        "group": "wildcard",
+                        "cat": "",
+                        "_wc_type": "wildcard",
+                    })
+            # exact/startswith 우선
+            exact = [r for r in results if r['tag'].lower() == q]
+            starts = [r for r in results if r['tag'].lower().startswith(q) and r not in exact]
+            rest = [r for r in results if r not in exact and r not in starts]
+            return (exact + starts + rest)[:limit]
+        except Exception as e:
+            print(f"🌐 Remote: wildcard 검색 실패: {e}")
+            return []
+
+    def _read_chunk(self) -> dict:
+        """Chunk 모듈: 인스턴트 와일드카드 트리 전체 반환"""
+        try:
+            iw_module = self._find_module("instant_wildcard")
+            if not iw_module:
+                return {"type": "module_state", "module_id": "chunk", "groups": []}
+            flat_dict, tree = iw_module.get_wildcards()
+            groups = []
+            for fname, items in tree.items():
+                group_name = fname.replace('.json', '') if fname.endswith('.json') else fname
+                group_items = []
+                for key, value in items.items():
+                    group_items.append({"key": key, "value": value})
+                groups.append({"name": group_name, "items": group_items})
+            return {"type": "module_state", "module_id": "chunk", "groups": groups}
+        except Exception as e:
+            print(f"🌐 Remote: chunk 읽기 실패: {e}")
+            return {"type": "module_state", "module_id": "chunk", "groups": []}
 
     def _lookup_tag_info(self, tag: str) -> dict:
         """정확한 태그명으로 상세 정보 + relations 조회"""
@@ -1423,6 +2070,15 @@ class RemoteBridge(QObject):
                     self._ws_manager.broadcast_json(data),
                     self._loop
                 )
+                # 와일드카드 모듈 상태 자동 갱신 (히스토리 있을 때만)
+                ctx = self.app_context.current_prompt_context
+                if ctx and (ctx.wildcard_history or ctx.wildcard_state):
+                    wc_state = self._read_wildcard()
+                    if wc_state:
+                        asyncio.run_coroutine_threadsafe(
+                            self._ws_manager.broadcast_json(wc_state),
+                            self._loop
+                        )
         except Exception as e:
             self._auto_generate_pending = False
             print(f"🌐 Remote: 프롬프트 전송 실패 — {e}")
@@ -1558,6 +2214,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             # Send module badge states (automation countdown, character count)
             bridge.request_get_module.emit("automation")
             bridge.request_get_module.emit("character")
+            bridge.request_get_module.emit("character_reference")
+            bridge.request_get_module.emit("vibe_transfer")
 
             while True:
                 data = await ws.receive_text()
@@ -1624,6 +2282,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             # 프롬프트 자동완성 — 5단계 검색
                             query = cmd.get("query", "")
                             results = await asyncio.to_thread(bridge._search_kr_tags, query, 12)
+                            await ws.send_text(json.dumps({
+                                "type": "autocomplete_result",
+                                "query": query,
+                                "results": results,
+                            }))
+                        elif cmd_type == "autocomplete_wildcard":
+                            query = cmd.get("query", "")
+                            results = await asyncio.to_thread(bridge._search_wildcards, query, 12)
                             await ws.send_text(json.dumps({
                                 "type": "autocomplete_result",
                                 "query": query,

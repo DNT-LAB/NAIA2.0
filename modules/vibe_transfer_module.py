@@ -1918,7 +1918,17 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             QMessageBox.information(self.widget, "Success", "Vibe encoding completed successfully")
         else:
             QMessageBox.critical(self.widget, "Error", message)
-            
+
+        # 원격 웹 세션에 인코딩 결과 브로드캐스트
+        try:
+            bridge = getattr(self.app_context, 'remote_bridge', None)
+            if bridge and hasattr(bridge, '_read_vibe_transfer'):
+                state = bridge._read_vibe_transfer()
+                if state:
+                    bridge._broadcast_json(state)
+        except Exception:
+            pass
+
     def _on_model_changed(self):
         """Handle model combo changes"""
         current_model = self._get_current_model()

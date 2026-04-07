@@ -196,7 +196,7 @@ class AppContext:
         """API payload를 안전하게 저장"""
         if self._payload_lock:
             return  # 이미 처리 중이면 무시
-        
+
         try:
             import copy
             self._payload_lock = True

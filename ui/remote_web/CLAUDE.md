@@ -167,6 +167,20 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 | `automation` | `AutomationModule` | delay, random delay, repeat, 종료조건(radio 3개), start/stop |
 | `character` | `CharacterModule` | activate, reroll_on_generate, 캐릭터별 prompt/uc |
 | `conditional_prompt` | `PromptListModifierModule` | enable, rules (# 하이라이트), test, log |
+| `character_reference` | `CharacterReferenceModule` | 이미지 업로드, Storage, Enable/RefType/Strength/Fidelity per frame, NAID4.5 전용 |
+| `vibe_transfer` | `VibeTransferModule` | 이미지 업로드, Storage(모델별 탭), Enable/RefStrength/InfoExtracted per frame, Encode(2 Anlas), Normalize |
+| `wildcard` | `WildcardStatusModule` | 히스토리, 순차 상태, prompt_squeeze, Manager(파일 브라우저/에디터/생성기) |
+| `chunk` | (InstantWildcardModule via _read_chunk) | 인스턴트 와일드카드 트리 브라우저 → 커서 삽입. `$`/`@` 트리거 |
+
+### 이미지 모듈 특수 패턴
+
+- **이미지 업로드**: JS `uploadModuleImage()` → FileReader → 클라이언트 리사이즈(max 2048px) → base64 → `set_module_param(id, 'upload_image', base64)` → 서버 temp 파일 저장 → `_add_*_frame()`
+- **Storage**: `set_module_param(id, 'get_storage', '')` → 서버 `_scan_*_storage()` → `storage_list` 메시지 → JS `onStorageList()` → 그리드 표시 → 클릭 시 `apply_storage`
+- **썸네일**: `_generate_thumbnail_b64()` — PIL 128px JPEG quality 70 → base64 (~3-8KB/장)
+- **슬라이더 디바운스**: `onModSlider()` — 300ms debounce로 WS 메시지 폭주 방지
+- **상호 배타**: NAI에서 Char Ref ↔ Vibe Transfer 동시 사용 불가. enable 시 반대쪽 전체 disable + 양쪽 브로드캐스트
+- **stealth_mode**: `_set_character_reference` / `_set_vibe_transfer` 전체를 `stealth_mode = True`로 감싸 QMessageBox 억제
+- **뱃지**: 활성 프레임 수 표시. Char Ref 보라(#a87fd4), Vibe 주황(#d4a06a)
 
 ### 새 모듈 추가 절차 (3단계)
 
@@ -200,11 +214,50 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 - `Ctrl+Enter` → Generate, `Alt+Enter` → Random
 
+### NAI 전용 모듈 모드 차단
+
+- `syncMode()`: 비NAI 모드에서 Char Ref/Vibe 버튼에 `nai-only-disabled` 클래스 (opacity 0.35 + pointer-events none)
+- `openModule()`: 비NAI 모드에서 클릭 시 toast 에러 + 차단
+- HTML 기본값: `nai-only-disabled` 클래스 적용 → `syncMode()`에서 NAI면 해제
+
+### 와일드카드 관리자 (WC → Browse Files)
+
+- 파일 트리 브라우저 (폴더 접이식) + 파일 에디터 (읽기/편집/저장/삭제)
+- Quick Add Entry (텍스트 추가) + 5회 랜덤 프리뷰
+- 새 파일 생성, 구문 가이드 (Normal/Sequential/Dependent)
+- 서버: `_scan_wildcard_tree()`, `_validate_wildcard_path()` (경로 탈출 방지), CRUD 함수
+- `.txt` 파일만 허용, `.is_file()` 검증
+
+### Chunk 모듈 (인스턴트 와일드카드 삽입)
+
+- `$` 또는 `@` 입력 시 자동 오픈 (트리거 위치 `chunkTriggerInfo` 기억)
+- 모듈 바 "Chunk" 버튼으로도 접근 가능
+- 아코디언 방식: 한 번에 하나의 그룹만 열림
+- 아이템 클릭 → 값 전체가 커서 위치에 삽입 (트리거 문자 교체 또는 `, ` 삽입)
+- `closeModule()` 시 `chunkTriggerInfo` 초기화
+
+### Autocomplete 와일드카드 검색
+
+- `__keyword` 입력 → `autocomplete_wildcard` WS 타입 → `_search_wildcards()` → `__name__` 형태로 삽입
+- wildcard 결과 청록색 (`#6ac4d4`), `__name__` prefix/suffix 표시
+
+### 태그 괄호 이스케이프 (모드별)
+
+- 모든 소스에서 `\(` → `(`, `\)` → `)` 정규화하여 중복 방지
+- autocomplete 삽입 시: NAI 모드 → 그대로, WEBUI/ComfyUI → `(` → `\(` 역변환
+
+### 조건부 프롬프트 `#` 주석
+
+- `formatCondRules()`: 콤마 구분 엔트리별 `#` 감지 (따옴표 내 콤마 무시)
+- `<span class="cond-comment">` 로 개별 엔트리 래핑
+
+---
+
 ## 주요 함정
 
 1. 모드 전환은 `toggle_search_mode()` 사용
 2. boolean 직렬화: JS `String(this.checked)` → Python `value == "true"`
-3. `stealth_mode`: 원격 depth action 시 QMessageBox 억제
+3. `stealth_mode`: 원격 depth action / character_reference / vibe_transfer 시 QMessageBox 억제
 4. `generation_worker`는 매 생성마다 재생성 → 직접 시그널 연결 불가
 5. 생성 결과 시 프롬프트 텍스트 덮어쓰기 금지
 6. `btnGen.innerHTML` 사용 — `textContent`는 shortcut-hint span 파괴
@@ -214,3 +267,7 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 10. relations 필드: str/list 혼재 → `isinstance` 가드 필수
 11. `bindTagAssist()`: 모듈 렌더링 후 호출 (innerHTML 교체로 리스너 자동 GC)
 12. `_fireModuleOninput(el)`: 동적 textarea의 oninput 핸들러 프로그래밍 실행
+13. `escHtml()`: `'`/`"` 포함 이스케이프 (onclick attribute 인젝션 방지)
+14. wildcard CRUD: `.txt` 전용 + `_validate_wildcard_path()` 경로 탈출 방지
+15. `chunkTriggerInfo`: 모듈 닫힐 때 반드시 null 초기화 (stale 삽입 방지)
+16. 태그 괄호 정규화: 모든 소스 `\(` → `(` 통일, 비NAI 삽입 시 역변환

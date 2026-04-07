@@ -3,7 +3,7 @@
    ============================================================ */
 
 let ws, blobUrl = null, generating = false, drawerOpen = false;
-const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let reconnTimer = null, genTimer = null, genStartTime = 0;
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 
@@ -97,6 +97,8 @@ function connect() {
         else if (m.type === 'tag_search_result') onTagSearchResult(m);
         else if (m.type === 'tag_lookup_result') onTagLookupResult(m);
         else if (m.type === 'autocomplete_result') onAutocompleteResult(m);
+        else if (m.type === 'storage_list') onStorageList(m);
+        else if (m.type === 'wildcard_manager') onWildcardManager(m);
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
       } catch(_) {}
@@ -649,6 +651,15 @@ function syncMode(mode) {
   prevMode = mode;
   syncingMode = false;
   setNaiHighlightMode(mode);
+  // NAI 전용 모듈 버튼 비활성화
+  const isNai = mode === 'NAI';
+  document.querySelectorAll('.module-btn[data-module="character_reference"], .module-btn[data-module="vibe_transfer"]').forEach(btn => {
+    btn.classList.toggle('nai-only-disabled', !isNai);
+  });
+  // 비NAI 모드에서 열려있는 NAI 전용 모듈 닫기
+  if (!isNai && (currentModuleId === 'character_reference' || currentModuleId === 'vibe_transfer')) {
+    closeModule();
+  }
 }
 
 function setMode(mode) {
@@ -797,6 +808,11 @@ const PP_OPTIONS = [
 ];
 
 function openModule(moduleId) {
+  // NAI 전용 모듈 가드
+  if ((moduleId === 'character_reference' || moduleId === 'vibe_transfer') && modeSelect.value !== 'NAI') {
+    showToast('This module is only available in NAI mode', 'error');
+    return;
+  }
   // Toggle: same module clicked again → close
   if (currentModuleId === moduleId && modulePopup.classList.contains('open')) {
     closeModule();
@@ -811,7 +827,11 @@ function openModule(moduleId) {
     prompt_engineering: 'Prompt Engineering',
     automation: 'Automation',
     character: 'NAID4 Character',
+    character_reference: 'Character Reference',
+    vibe_transfer: 'Vibe Transfer',
     conditional_prompt: 'Conditional Prompt',
+    wildcard: 'Wildcard',
+    chunk: 'Chunk',
   };
   moduleTitle.textContent = titles[moduleId] || moduleId;
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -826,6 +846,7 @@ function openModule(moduleId) {
 function closeModule() {
   modulePopup.classList.remove('open');
   currentModuleId = null;
+  chunkTriggerInfo = null;
   updateModuleBtnState();
 }
 
@@ -839,12 +860,18 @@ function onModuleState(m) {
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'character') updateCharBadge(m);
+  else if (m.module_id === 'character_reference') updateCharRefBadge(m);
+  else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
 
   if (m.module_id !== currentModuleId) return;
   if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
   else if (m.module_id === 'automation') renderAutomation(m);
   else if (m.module_id === 'character') renderCharacter(m);
   else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
+  else if (m.module_id === 'character_reference') renderCharacterReference(m);
+  else if (m.module_id === 'vibe_transfer') renderVibeTransfer(m);
+  else if (m.module_id === 'wildcard') renderWildcard(m);
+  else if (m.module_id === 'chunk') renderChunk(m);
 }
 
 // ---- Module button inline badges ----
@@ -894,6 +921,36 @@ function updateCharBadge(m) {
   badge.classList.remove('hidden');
   badge.classList.add('char');
   badge.textContent = count;
+}
+
+function updateCharRefBadge(m) {
+  const btn = document.querySelector('.module-btn[data-module="character_reference"]');
+  const badge = document.getElementById('badgeCharRef');
+  if (!badge || !btn) return;
+  const enabledCount = (m.frames || []).filter(f => f.is_enabled).length;
+  if (!enabledCount) {
+    badge.classList.add('hidden');
+    btn.classList.remove('charref-active');
+    return;
+  }
+  btn.classList.add('charref-active');
+  badge.classList.remove('hidden');
+  badge.textContent = enabledCount;
+}
+
+function updateVibeBadge(m) {
+  const btn = document.querySelector('.module-btn[data-module="vibe_transfer"]');
+  const badge = document.getElementById('badgeVibe');
+  if (!badge || !btn) return;
+  const enabledCount = (m.frames || []).filter(f => f.is_enabled).length;
+  if (!enabledCount) {
+    badge.classList.add('hidden');
+    btn.classList.remove('vibe-active');
+    return;
+  }
+  btn.classList.add('vibe-active');
+  badge.classList.remove('hidden');
+  badge.textContent = enabledCount;
 }
 
 function renderPromptEngineering(m) {
@@ -1064,10 +1121,27 @@ function formatCondLog(log) {
 function formatCondRules(text) {
   if (!text) return '<br>';
   return text.split('\n').map(line => {
-    const esc = escHtml(line) || ' ';
-    if (line.trimStart().startsWith('#'))
-      return `<div class="cond-line cond-comment">${esc}</div>`;
-    return `<div class="cond-line">${esc}</div>`;
+    if (!line) return '<div class="cond-line"> </div>';
+    // 콤마 구분 엔트리별 # 주석 하이라이트
+    let result = '';
+    let i = 0, inQuote = false;
+    let segStart = 0;
+    while (i <= line.length) {
+      if (i < line.length && line[i] === '"') inQuote = !inQuote;
+      if (i === line.length || (line[i] === ',' && !inQuote)) {
+        const seg = line.substring(segStart, i);
+        const comma = i < line.length ? ',' : '';
+        const esc = escHtml(seg);
+        if (seg.trimStart().startsWith('#')) {
+          result += `<span class="cond-comment">${esc}</span>${escHtml(comma)}`;
+        } else {
+          result += esc + escHtml(comma);
+        }
+        segStart = i + 1;
+      }
+      i++;
+    }
+    return `<div class="cond-line">${result || ' '}</div>`;
   }).join('') + '<br>';
 }
 function onCondRulesInput(el) {
@@ -1119,6 +1193,538 @@ function renderConditionalPrompt(m) {
       <div class="mod-log-viewer" id="condLogViewer">${formatCondLog(m.log)}</div>
     </div>
   `;
+}
+
+// ---- Wildcard Module ----
+function renderWildcard(m) {
+  // History
+  let historyHtml = '';
+  if (m.history && m.history.length) {
+    historyHtml = m.history.map(h => {
+      const n = escHtml(h.name), v = escHtml(h.value);
+      return `<div>▶ ${n}: ${v}</div>`;
+    }).join('');
+  } else {
+    historyHtml = '<div class="mod-empty">No wildcards used</div>';
+  }
+
+  // Sequential/Dependent state
+  let stateHtml = '';
+  if (m.state && m.state.length) {
+    stateHtml = m.state.map(s => `<div>▶ ${escHtml(s.name)}: ${s.current} / ${s.total}</div>`).join('');
+  } else {
+    stateHtml = '<div class="mod-empty">No active sequential wildcards</div>';
+  }
+
+  // Instant wildcard groups
+  let instantHtml = '';
+  if (m.instant_groups && m.instant_groups.length) {
+    instantHtml = m.instant_groups.map(g => {
+      const keys = (g.keys || []).map(k => escHtml(k)).join(', ');
+      const more = g.count > 20 ? ` <span style="color:var(--text-dim)">+${g.count - 20} more</span>` : '';
+      return `<div class="mod-wc-group">
+        <div class="mod-wc-group-header">$${escHtml(g.name)} <span style="color:var(--text-dim)">(${g.count})</span></div>
+        <div class="mod-wc-group-keys">${keys}${more}</div>
+      </div>`;
+    }).join('');
+  } else {
+    instantHtml = '<div class="mod-empty">No instant wildcards</div>';
+  }
+
+  moduleBody.innerHTML = `
+    <div class="mod-section">
+      <div class="mod-section-label">Used Wildcards</div>
+      <div class="mod-wc-history">${historyHtml}</div>
+    </div>
+    <div class="mod-section">
+      <div class="mod-section-label">Sequential / Dependent State</div>
+      <div class="mod-wc-state">${stateHtml}</div>
+    </div>
+    <div class="mod-section">
+      <div class="mod-section-label">Instant Wildcards</div>
+      <div class="mod-wc-instant">${instantHtml}</div>
+    </div>
+    <div class="mod-section">
+      <label class="mod-check-row">
+        <input type="checkbox" ${m.prompt_squeeze ? 'checked' : ''} onchange="setModuleParam('wildcard','prompt_squeeze',String(this.checked))">
+        <span style="font-size:12px">NovelAI 403 Prevention</span>
+      </label>
+    </div>
+    <div class="mod-section" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="mod-btn-sm" onclick="wcOpenBrowser()">Browse Files</button>
+      <button class="mod-btn-sm" onclick="setModuleParam('wildcard','reset_sequential','')">Reset Seq</button>
+      <button class="mod-btn-sm" onclick="setModuleParam('wildcard','reload','')">Reload</button>
+      <span style="color:var(--text-dim);font-size:11px;margin-left:auto">Loaded: ${m.wildcard_count || 0}</span>
+    </div>
+  `;
+}
+
+// ---- Chunk Module (instant wildcard tree browser) ----
+let chunkTriggerInfo = null;  // {raw, stripped, start, end} — 삽입 위치
+
+function renderChunk(m) {
+  const groups = m.groups || [];
+  if (!groups.length) {
+    moduleBody.innerHTML = '<div class="mod-empty">No instant wildcards found.<br>Add them via the desktop Instant Wildcard module.</div>';
+    return;
+  }
+  let html = '<div class="chunk-hint">Select an item to insert at cursor. Type <code>$</code> or <code>@</code> in prompt to trigger.</div>';
+  html += '<div class="chunk-tree">';
+  for (const g of groups) {
+    html += `<div class="chunk-group">`;
+    html += `<div class="chunk-group-name" onclick="chunkToggleGroup(this.parentElement)">📁 ${escHtml(g.name)} <span class="wc-count">(${g.items.length})</span></div>`;
+    html += '<div class="chunk-group-items">';
+    for (const item of g.items) {
+      const preview = item.value.length > 80 ? item.value.substring(0, 80) + '…' : item.value;
+      html += `<div class="chunk-item" onclick="chunkInsert(this)" data-value="${escHtml(item.value)}">`;
+      html += `<div class="chunk-item-key">${escHtml(item.key)}</div>`;
+      html += `<div class="chunk-item-preview">${escHtml(preview)}</div>`;
+      html += `</div>`;
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
+  moduleBody.innerHTML = html;
+}
+
+function chunkToggleGroup(groupEl) {
+  const wasOpen = groupEl.classList.contains('open');
+  // 다른 그룹 모두 닫기
+  groupEl.parentElement.querySelectorAll('.chunk-group.open').forEach(g => g.classList.remove('open'));
+  if (!wasOpen) groupEl.classList.add('open');
+}
+
+function chunkInsert(el) {
+  const value = el.dataset.value;
+  if (!value) return;
+  const target = acTarget || promptEdit;
+  if (chunkTriggerInfo) {
+    // $/@로 트리거된 경우 — 트리거 문자 교체
+    const text = target.value;
+    target.value = text.substring(0, chunkTriggerInfo.start) + value + text.substring(chunkTriggerInfo.end);
+    const newPos = chunkTriggerInfo.start + value.length;
+    target.selectionStart = target.selectionEnd = newPos;
+    chunkTriggerInfo = null;
+  } else {
+    // 모듈 버튼으로 열린 경우 — 커서 위치에 삽입
+    const pos = target.selectionStart != null ? target.selectionStart : target.value.length;
+    const text = target.value;
+    const before = text.substring(0, pos);
+    const after = text.substring(pos);
+    // 앞에 콤마+공백 필요 여부
+    const sep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',') ? ', ' : '';
+    target.value = before + sep + value + after;
+    const newPos = pos + sep.length + value.length;
+    target.selectionStart = target.selectionEnd = newPos;
+  }
+  target.focus();
+  if (target === promptEdit) onPromptEdit();
+  // 삽입 후 시각 피드백
+  el.style.background = 'var(--accent-glow)';
+  setTimeout(() => { el.style.background = ''; }, 300);
+}
+
+// ---- Wildcard Manager (file browser + editor + generator) ----
+let wcCurrentPath = '';
+let wcEditMode = false;
+
+function wcOpenBrowser() {
+  setModuleParam('wildcard', 'get_file_tree', '');
+}
+
+function onWildcardManager(m) {
+  if (m.action === 'file_tree') wcRenderTree(m.tree);
+  else if (m.action === 'file_content') wcRenderEditor(m.path, m.content);
+  else if (m.action === 'preview_result') wcShowPreview(m.name, m.result);
+  else if (m.action === 'save_ok') showToast('File saved', 'success');
+  else if (m.action === 'file_deleted') { showToast('File deleted', 'success'); wcCurrentPath = ''; }
+}
+
+function wcRenderTree(tree) {
+  let html = '<div class="mod-section" style="display:flex;gap:6px;margin-bottom:8px">'
+    + '<button class="mod-btn-sm" onclick="openModule(\'wildcard\')">← Back</button>'
+    + '<button class="mod-btn-sm" onclick="wcPromptNewFile()">+ New File</button>'
+    + '<button class="mod-btn-sm" onclick="setModuleParam(\'wildcard\',\'get_file_tree\',\'\')">Refresh</button>'
+    + '</div>';
+  html += '<div class="mod-wc-tree">';
+  if (!tree || !tree.length) {
+    html += '<div class="mod-empty">No wildcard files found</div>';
+  } else {
+    for (const item of tree) {
+      if (item.type === 'folder') {
+        html += `<div class="wc-folder"><div class="wc-folder-name" onclick="this.parentElement.classList.toggle('open')">📁 ${escHtml(item.name)} <span class="wc-count">(${item.files.length})</span></div>`;
+        html += '<div class="wc-folder-children">';
+        for (const f of item.files) {
+          html += `<div class="wc-file" onclick="setModuleParam('wildcard','read_file','${escHtml(f.path)}')">📄 ${escHtml(f.name)} <span class="wc-count">${f.lines}L</span></div>`;
+        }
+        html += '</div></div>';
+      } else {
+        html += `<div class="wc-file" onclick="setModuleParam('wildcard','read_file','${escHtml(item.path)}')">📄 ${escHtml(item.name)} <span class="wc-count">${item.lines}L</span></div>`;
+      }
+    }
+  }
+  html += '</div>';
+  // Generator guide
+  html += `<div class="mod-section" style="margin-top:10px">
+    <div class="mod-section-label">Wildcard Syntax Guide</div>
+    <div class="wc-syntax-guide">
+      <div><code>__name__</code> — Random pick from <code>name.txt</code></div>
+      <div><code>__*name__</code> — Sequential (ordered)</div>
+      <div><code>__*master__</code> + <code>__$master:slave__</code> — Dependent</div>
+      <div><code>200:text</code> — Weighted entry (default 100)</div>
+      <div><code>__folder/name__</code> — Subfolder path</div>
+    </div>
+  </div>`;
+  moduleBody.innerHTML = html;
+}
+
+function wcRenderEditor(path, content) {
+  wcCurrentPath = path;
+  wcEditMode = false;
+  const fname = path.split('/').pop();
+  const wcName = fname.replace('.txt', '');
+  moduleBody.innerHTML = `
+    <div class="mod-section" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="mod-btn-sm" onclick="setModuleParam('wildcard','get_file_tree','')">← Tree</button>
+      <span class="wc-file-path">${escHtml(path)}</span>
+      <span style="flex:1"></span>
+      <button class="mod-btn-sm" id="wcEditBtn" onclick="wcToggleEdit()">Edit</button>
+      <button class="mod-btn-sm mod-btn-danger" onclick="wcDeleteFile()">Delete</button>
+    </div>
+    <div class="mod-section">
+      <textarea class="wc-editor" id="wcEditor" readonly>${escHtml(content)}</textarea>
+    </div>
+    <div class="mod-section" id="wcEditActions" style="display:none;gap:6px;flex-wrap:wrap">
+      <button class="mod-btn-sm" style="background:#4CAF50;color:#fff" onclick="wcSaveFile()">Save</button>
+      <button class="mod-btn-sm" onclick="wcCancelEdit()">Cancel</button>
+    </div>
+    <div class="mod-section">
+      <div class="mod-section-label">Quick Add Entry</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="text" class="wc-add-input" id="wcAddText" placeholder="tag or prompt text">
+        <button class="mod-btn-sm" onclick="wcAddEntry()">Add</button>
+      </div>
+    </div>
+    <div class="mod-section">
+      <div class="mod-section-label">Preview <code>__${escHtml(wcName)}__</code></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="mod-btn-sm" onclick="setModuleParam('wildcard','preview_wildcard','${escHtml(wcName)}')">Roll ×5</button>
+        <div class="wc-preview" id="wcPreview"></div>
+      </div>
+    </div>
+  `;
+}
+
+function wcToggleEdit() {
+  const editor = document.getElementById('wcEditor');
+  const actions = document.getElementById('wcEditActions');
+  const btn = document.getElementById('wcEditBtn');
+  if (!editor) return;
+  wcEditMode = !wcEditMode;
+  editor.readOnly = !wcEditMode;
+  editor.classList.toggle('editing', wcEditMode);
+  actions.style.display = wcEditMode ? 'flex' : 'none';
+  btn.textContent = wcEditMode ? 'Cancel' : 'Edit';
+}
+
+function wcCancelEdit() {
+  // Reload file to discard changes
+  if (wcCurrentPath) setModuleParam('wildcard', 'read_file', wcCurrentPath);
+}
+
+function wcSaveFile() {
+  const editor = document.getElementById('wcEditor');
+  if (!editor || !wcCurrentPath) return;
+  setModuleParam('wildcard', 'save_file', JSON.stringify({path: wcCurrentPath, content: editor.value}));
+}
+
+function wcDeleteFile() {
+  if (!wcCurrentPath) return;
+  if (!confirm('Delete ' + wcCurrentPath + '?')) return;
+  setModuleParam('wildcard', 'delete_file', wcCurrentPath);
+  setModuleParam('wildcard', 'get_file_tree', '');
+}
+
+function wcAddEntry() {
+  const text = document.getElementById('wcAddText');
+  const editor = document.getElementById('wcEditor');
+  if (!text || !editor || !text.value.trim()) return;
+  const line = text.value.trim();
+  // Append to editor
+  const current = editor.value;
+  editor.value = current ? current + '\n' + line : line;
+  text.value = '';
+  // Auto-enable edit mode and save
+  if (!wcEditMode) {
+    wcEditMode = true;
+    editor.readOnly = false;
+    editor.classList.add('editing');
+    const actions = document.getElementById('wcEditActions');
+    if (actions) actions.style.display = 'flex';
+    const btn = document.getElementById('wcEditBtn');
+    if (btn) btn.textContent = 'Cancel';
+  }
+}
+
+function wcShowPreview(name, result) {
+  const el = document.getElementById('wcPreview');
+  if (el) el.innerHTML = escHtml(result).replace(/\n/g, '<br>');
+}
+
+function wcPromptNewFile() {
+  const name = prompt('New wildcard filename (e.g. "my_tags" or "folder/my_tags"):');
+  if (!name || !name.trim()) return;
+  setModuleParam('wildcard', 'create_file', name.trim());
+}
+
+// ---- Image upload helper ----
+function uploadModuleImage(moduleId, file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const body = document.getElementById('modulePopupBody');
+  if (body) {
+    const ind = document.createElement('div');
+    ind.className = 'mod-upload-indicator';
+    ind.textContent = 'Uploading...';
+    ind.id = 'uploadIndicator';
+    body.prepend(ind);
+  }
+  // Client-side resize to max 2048px to save bandwidth
+  const img = new Image();
+  const reader = new FileReader();
+  reader.onload = () => {
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      const MAX = 2048;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/png');
+      const b64 = dataUrl.split(',')[1];
+      setModuleParam(moduleId, 'upload_image', b64);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ---- Slider debounce for image modules ----
+let _sliderDebounce = {};
+function onModSlider(moduleId, key, value) {
+  const k = moduleId + '.' + key;
+  if (_sliderDebounce[k]) clearTimeout(_sliderDebounce[k]);
+  _sliderDebounce[k] = setTimeout(() => {
+    setModuleParam(moduleId, key, value);
+    delete _sliderDebounce[k];
+  }, 300);
+}
+
+// ---- Character Reference module ----
+let _storageView = null; // tracks which storage is open
+
+function renderCharacterReference(m) {
+  if (!m.is_naid45) {
+    moduleBody.innerHTML = '<div class="mod-notice">Character Reference requires NAID4.5F/C model</div>';
+    return;
+  }
+  const frames = (m.frames || []).map((f, i) => `
+    <div class="mod-ref-frame ${f.is_enabled ? '' : 'disabled'}">
+      <div class="mod-ref-header">
+        <img class="mod-ref-thumb" src="data:image/jpeg;base64,${f.thumbnail}" alt="${escHtml(f.file_name)}">
+        <div class="mod-ref-controls">
+          <div class="mod-ref-controls-row">
+            <label class="mod-checkbox-item">
+              <input type="checkbox" ${f.is_enabled ? 'checked' : ''}
+                onchange="setModuleParam('character_reference','enable_${i}',String(this.checked))">
+              <span class="mod-checkbox-label">Enable</span>
+            </label>
+            <select class="mod-select-sm"
+              onchange="setModuleParam('character_reference','ref_type_${i}',this.value)">
+              <option value="character&style" ${f.reference_type==='character&style'?'selected':''}>Char & Style</option>
+              <option value="character" ${f.reference_type==='character'?'selected':''}>Character</option>
+              <option value="style" ${f.reference_type==='style'?'selected':''}>Style</option>
+            </select>
+            <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('character_reference','remove_frame_${i}','')">Remove</button>
+          </div>
+          <div class="mod-slider-row">
+            <span class="mod-slider-label">Strength</span>
+            <input type="range" min="0" max="20" step="1" value="${Math.round(f.strength*20)}"
+              oninput="this.nextElementSibling.textContent=(this.value/20).toFixed(2);onModSlider('character_reference','strength_${i}',(this.value/20).toFixed(2))">
+            <span class="mod-slider-value">${f.strength.toFixed(2)}</span>
+          </div>
+          <div class="mod-slider-row">
+            <span class="mod-slider-label">Fidelity</span>
+            <input type="range" min="0" max="20" step="1" value="${Math.round(f.fidelity*20)}"
+              oninput="this.nextElementSibling.textContent=(this.value/20).toFixed(2);onModSlider('character_reference','fidelity_${i}',(this.value/20).toFixed(2))">
+            <span class="mod-slider-value">${f.fidelity.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  moduleBody.innerHTML = `
+    <div class="mod-upload-bar">
+      <button class="mod-btn-upload" onclick="document.getElementById('charRefFileInput').click()">Upload</button>
+      <input type="file" id="charRefFileInput" accept="image/*" style="display:none"
+        onchange="uploadModuleImage('character_reference',this.files[0]);this.value=''">
+      <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('character_reference')">Storage</button>
+    </div>
+    ${frames.length ? frames : '<div class="mod-empty">No character references loaded</div>'}
+  `;
+}
+
+// ---- Vibe Transfer module ----
+function renderVibeTransfer(m) {
+  const frames = (m.frames || []).map((f, i) => {
+    const thumbHtml = f.is_no_image
+      ? '<div class="mod-ref-noimage">No Image</div>'
+      : `<img class="mod-ref-thumb" src="data:image/jpeg;base64,${f.thumbnail}" alt="${escHtml(f.file_name)}">`;
+
+    const encHtml = f.is_no_image ? '' : `
+      <div class="mod-ref-encoding">
+        ${f.has_encoding
+          ? '<span class="mod-encode-status encoded">Encoded</span>'
+          : `<button class="mod-btn-sm mod-btn-encode" onclick="setModuleParam('vibe_transfer','encode_${i}','')">Encode (2 Anlas)</button>`}
+        ${f.encoding_keys.length ? `<span class="mod-encode-keys">IE: ${f.encoding_keys.map(k=>Number(k).toFixed(2)).join(', ')}</span>` : ''}
+      </div>`;
+
+    return `
+    <div class="mod-ref-frame ${f.is_enabled ? '' : 'disabled'}">
+      <div class="mod-ref-header">
+        ${thumbHtml}
+        <div class="mod-ref-controls">
+          <div class="mod-ref-controls-row">
+            <label class="mod-checkbox-item">
+              <input type="checkbox" ${f.is_enabled ? 'checked' : ''}
+                onchange="setModuleParam('vibe_transfer','enable_${i}',String(this.checked))">
+              <span class="mod-checkbox-label">Enable</span>
+            </label>
+            <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('vibe_transfer','remove_frame_${i}','')">Remove</button>
+          </div>
+          <div class="mod-slider-row">
+            <span class="mod-slider-label">Ref Strength</span>
+            <input type="range" min="-100" max="100" step="1" value="${Math.round(f.reference_strength*100)}"
+              oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','ref_strength_${i}',(this.value/100).toFixed(2))">
+            <span class="mod-slider-value">${f.reference_strength.toFixed(2)}</span>
+          </div>
+          <div class="mod-slider-row">
+            <span class="mod-slider-label">Info Extracted</span>
+            <input type="range" min="1" max="100" step="1" value="${Math.round(f.information_extracted*100)}"
+              oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','info_extracted_${i}',(this.value/100).toFixed(2))">
+            <span class="mod-slider-value">${f.information_extracted.toFixed(2)}</span>
+          </div>
+          ${encHtml}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  moduleBody.innerHTML = `
+    <div class="mod-upload-bar">
+      <button class="mod-btn-upload" onclick="document.getElementById('vibeFileInput').click()">Upload</button>
+      <input type="file" id="vibeFileInput" accept="image/*" style="display:none"
+        onchange="uploadModuleImage('vibe_transfer',this.files[0]);this.value=''">
+      <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>
+      <span class="mod-frame-count">${m.frame_count}/${m.max_frames}</span>
+    </div>
+    <label class="mod-checkbox-item" style="margin-bottom:8px">
+      <input type="checkbox" ${m.normalize ? 'checked' : ''}
+        onchange="setModuleParam('vibe_transfer','normalize',String(this.checked))">
+      <span class="mod-checkbox-label">Normalize reference strength</span>
+    </label>
+    ${frames.length ? frames : '<div class="mod-empty">No vibe transfers loaded</div>'}
+  `;
+}
+
+// ---- Storage view ----
+function requestStorage(moduleId) {
+  _storageView = moduleId;
+  setModuleParam(moduleId, 'get_storage', '');
+}
+
+function onStorageList(m) {
+  if (m.module_id === 'character_reference') renderCharRefStorage(m);
+  else if (m.module_id === 'vibe_transfer') renderVibeStorage(m);
+}
+
+function renderCharRefStorage(m) {
+  if (currentModuleId !== 'character_reference') return;
+  const items = (m.items || []).map(it => `
+    <div class="mod-storage-item" onclick="applyCharRefStorage('${escHtml(it.file_hash)}')" title="${escHtml(it.file_name)}">
+      <img class="mod-storage-thumb" src="data:image/jpeg;base64,${it.thumbnail}" alt="">
+      <span class="mod-storage-name">${escHtml(it.character_name || it.file_name)}</span>
+    </div>
+  `).join('');
+
+  moduleBody.innerHTML = `
+    <div class="mod-upload-bar">
+      <button class="mod-btn-upload" onclick="setModuleParam('character_reference','get_storage','');/* refresh */">Refresh</button>
+      <button class="mod-btn-sm" onclick="openModule('character_reference')">Back</button>
+    </div>
+    ${items.length
+      ? '<div class="mod-storage-grid">' + items + '</div>'
+      : '<div class="mod-empty">No saved references</div>'}
+  `;
+}
+
+function applyCharRefStorage(fileHash) {
+  setModuleParam('character_reference', 'apply_storage', fileHash);
+  // 적용 후 메인 뷰로 복귀
+  setTimeout(() => openModule('character_reference'), 500);
+}
+
+function renderVibeStorage(m) {
+  if (currentModuleId !== 'vibe_transfer') return;
+  const modelNames = Object.keys(m.models || {});
+  const currentModel = m.current_model || '';
+
+  // Build tabs
+  const tabBtns = modelNames.map(name =>
+    `<button class="mod-btn-sm mod-storage-tab ${name===currentModel?'active':''}" onclick="showVibeStorageTab(this,'${escHtml(name)}')">${escHtml(name)}</button>`
+  ).join('');
+
+  // Build tab contents
+  const tabContents = modelNames.map(name => {
+    const items = (m.models[name] || []).map(it => {
+      const ieKeys = (it.encoding_keys || []);
+      const defaultIe = ieKeys.length ? ieKeys[0] : 1.0;
+      return `
+        <div class="mod-storage-item" onclick="applyVibeStorage('${escHtml(name)}','${escHtml(it.file_hash)}',${defaultIe})" title="${escHtml(it.file_name)}">
+          <img class="mod-storage-thumb" src="data:image/jpeg;base64,${it.thumbnail}" alt="">
+          <span class="mod-storage-name">${escHtml(it.file_name)}</span>
+          ${ieKeys.length ? `<span class="mod-encode-keys">IE: ${ieKeys.map(k=>Number(k).toFixed(2)).join(', ')}</span>` : ''}
+        </div>`;
+    }).join('');
+    const vis = name === currentModel ? '' : 'style="display:none"';
+    return `<div class="mod-storage-grid mod-vibe-tab" data-model="${escHtml(name)}" ${vis}>${items || '<div class="mod-empty">Empty</div>'}</div>`;
+  }).join('');
+
+  moduleBody.innerHTML = `
+    <div class="mod-upload-bar">
+      <button class="mod-btn-upload" onclick="setModuleParam('vibe_transfer','get_storage','')">Refresh</button>
+      <button class="mod-btn-sm" onclick="openModule('vibe_transfer')">Back</button>
+    </div>
+    <div class="mod-storage-tabs">${tabBtns}</div>
+    ${tabContents || '<div class="mod-empty">No saved vibes</div>'}
+  `;
+}
+
+function showVibeStorageTab(btn, model) {
+  // Toggle tab buttons
+  btn.parentElement.querySelectorAll('.mod-storage-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Toggle content
+  moduleBody.querySelectorAll('.mod-vibe-tab').forEach(el => {
+    el.style.display = el.dataset.model === model ? '' : 'none';
+  });
+}
+
+function applyVibeStorage(model, fileHash, ieValue) {
+  setModuleParam('vibe_transfer', 'apply_storage', model + '|' + fileHash + '|' + ieValue);
 }
 
 // ---- Search system ----
@@ -1447,7 +2053,7 @@ let acTarget = null; // active textarea for autocomplete/hint
 let acComposing = false; // IME composition guard
 
 const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
-const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a' };
+const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4' };
 function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
 
 // Extract active token info at cursor (comma-delimited, NAI weight/bracket aware)
@@ -1551,13 +2157,29 @@ function scheduleAutocomplete() {
   clearTimeout(acTimer);
   clearTimeout(tagLookupTimer);
   acTimer = setTimeout(() => {
-    if (ws && ws.readyState === WebSocket.OPEN)
-      ws.send(JSON.stringify({type: 'autocomplete', query: info.stripped}));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const s = info.stripped;
+    if (s.startsWith('__')) {
+      // Wildcard autocomplete: __keyword → search wildcard names
+      const q = s.replace(/^_+/, '').replace(/_+$/, '');
+      if (q.length >= 1) ws.send(JSON.stringify({type: 'autocomplete_wildcard', query: q}));
+    } else if (s.startsWith('$') || s.startsWith('@')) {
+      // Chunk trigger: open Chunk module panel
+      clearTimeout(acTimer);
+      chunkTriggerInfo = info;  // 삽입 위치 기억
+      openModule('chunk');
+      return;
+    } else {
+      ws.send(JSON.stringify({type: 'autocomplete', query: s}));
+    }
   }, 150);
 }
 
 function onAutocompleteResult(m) {
-  if (m.query !== lastAcQuery) return;
+  // Accept results for wildcard queries too
+  const q = lastAcQuery;
+  const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
+  if (!matchesWc && m.query !== q) return;
   if (!m.results || !m.results.length) {
     hideAutocomplete();
     checkTagHint();
@@ -1573,10 +2195,14 @@ function renderAutocomplete() {
   let html = '<div class="tag-ac-list">';
   acResults.forEach((r, i) => {
     const sel = i === acSel ? ' selected' : '';
+    const wcType = r._wc_type;
+    const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
+    const prefix = wcType === 'wildcard' ? '__' : '';
+    const suffix = wcType === 'wildcard' ? '__' : '';
     html += `<div class="tag-ac-item${sel}" data-idx="${i}">` +
-      `<span class="tag-ac-tag"${catStyle(r.cat)}>${escHtml(r.tag)}</span>` +
+      `<span class="tag-ac-tag"${tagColor}>${escHtml(prefix + r.tag + suffix)}</span>` +
       `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
-      `<span class="tag-ac-count">${fmtCount(r.count)}</span>` +
+      `<span class="tag-ac-count">${wcType ? escHtml(r.desc || '') : fmtCount(r.count)}</span>` +
       '</div>';
   });
   html += '</div>';
@@ -1596,8 +2222,19 @@ function selectAutocomplete(idx) {
   const target = acTarget || promptEdit;
   const info = getActiveTokenInfo(target);
   if (!info) return;
-  // Preserve prefix (artist:, character:) if present in original token
   let newTag = r.tag;
+  // Wildcard result: wrap with __name__
+  if (r._wc_type === 'wildcard') {
+    newTag = '__' + r.tag + '__';
+    swapToken(target, info, newTag);
+    hideAutocomplete();
+    return;
+  }
+  // 비NAI 모드: () → \(\) 이스케이프 (A1111/ComfyUI 가중치 구문 충돌 방지)
+  if (modeSelect.value !== 'NAI') {
+    newTag = newTag.replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  }
+  // Preserve prefix (artist:, character:) if present in original token
   const rawLower = info.raw.toLowerCase();
   for (const pfx of ['artist:', 'character:']) {
     if (rawLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {

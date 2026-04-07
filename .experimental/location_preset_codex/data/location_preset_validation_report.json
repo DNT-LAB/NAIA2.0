@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "generated_at": "2026-04-07T09:18:54.070774+00:00",
+  "thresholds": {
+    "background_combo_min_support": 1,
+    "structure_inference_min_support": 5,
+    "ultra_sparse_structure_min_support": 1,
+    "dense_effect_min_support": 5,
+    "sparse_effect_min_support": 3,
+    "ultra_sparse_effect_min_support": 1,
+    "ultra_sparse_place_cutoff": 20,
+    "sparse_place_cutoff": 100
+  },
+  "coverage": {
+    "background_combo_total": 472,
+    "background_combo_validated": 472,
+    "background_combo_zero_count": 0,
+    "background_combo_min_count": 5,
+    "background_combo_median_count": 304.0,
+    "background_combo_max_count": 67244,
+    "group_total": 100,
+    "group_with_structure_states": 100,
+    "group_with_effect_states": 100,
+    "structure_state_total": 1486,
+    "effect_assignment_total": 1101
+  },
+  "missing": {
+    "structure_state_groups": [],
+    "effect_state_groups": []
+  }
+}

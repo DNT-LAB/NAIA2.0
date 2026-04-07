@@ -154,15 +154,13 @@ class RemoteBridge(QObject):
     # --- 시그널 슬롯 래퍼 (lambda 대신 disconnect 가능) ---
 
     def _do_refresh_cache(self):
-        """WS 연결 시 메인 스레드에서 캐시 갱신 + broadcast"""
+        """WS 연결 시 메인 스레드에서 캐시 갱신 + broadcast (프롬프트 제외 — 생성/랜덤 시에만 동기화)"""
         self._update_cache_all()
         if self._has_clients():
             if self._cached_options:
                 self._broadcast_json(self._cached_options)
             if self._cached_params:
                 self._broadcast_json(self._cached_params)
-            if self._cached_prompts:
-                self._broadcast_json(self._cached_prompts)
 
     def _on_option_toggled_slot(self, checked=None):
         """체크박스 toggled → 옵션 브로드캐스트"""

@@ -8,6 +8,7 @@ let reconnTimer = null, genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
 let progressTimer = null;
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
+let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 
 // ---- History ----
 const HISTORY_MAX = 200;
@@ -131,8 +132,9 @@ function updateMeta(m) {
 
 function updatePromptOnly(prompt, source) {
   if (!prompt) return;
-  // Generate 트리거 시에는 웹 프롬프트를 덮어쓰지 않음 (사용자 편집 보존)
-  if (source === 'random') {
+  // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
+  if (source === 'random' && awaitingMyRandom) {
+    awaitingMyRandom = false;
     syncingPrompt = true;
     promptEdit.value = prompt;
     syncingPrompt = false;
@@ -652,6 +654,7 @@ function send(cmd) {
   }
   if (cmd === 'random') {
     btnRnd.disabled = true;
+    awaitingMyRandom = true;
   }
   ws.send(cmd);
 }
@@ -2361,13 +2364,13 @@ function selectAutocomplete(idx) {
   if (modeSelect.value !== 'NAI') {
     newTag = newTag.replace(/\(/g, '\\(').replace(/\)/g, '\\)');
   }
-  // Preserve prefix (artist:, character:, @) if present in original token
-  const rawLower = info.raw.toLowerCase();
-  if (rawLower.startsWith('@') && !newTag.startsWith('@')) {
+  // Preserve prefix (artist:, character:, @) if present in token
+  const sLower = info.stripped.toLowerCase();
+  if (sLower.startsWith('@') && !newTag.startsWith('@')) {
     newTag = '@' + newTag;
   } else {
     for (const pfx of ['artist:', 'character:']) {
-      if (rawLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {
+      if (sLower.startsWith(pfx) && !newTag.toLowerCase().startsWith(pfx)) {
         newTag = pfx + newTag;
         break;
       }

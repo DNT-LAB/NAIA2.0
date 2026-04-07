@@ -444,12 +444,10 @@ class RemoteBridge(QObject):
         self._prompt_debounce_timer.start(500)
 
     def _broadcast_prompts(self):
-        """현재 프롬프트 캐시 갱신 + WS 클라이언트에 전송"""
+        """현재 프롬프트 캐시 갱신 (broadcast 없음 — 각 클라이언트가 독립 관리, 첫 접속 시에만 캐시 전송)"""
         data = self.get_current_prompts()
         if data:
             self._cached_prompts = data
-            if self._has_clients():
-                self._broadcast_json(data)
 
     # --- 생성 파라미터 동기화 ---
 
@@ -2075,9 +2073,6 @@ class RemoteBridge(QObject):
     def on_prompt_generated(self, prompt_context):
         """프롬프트 생성 완료 시 WebSocket 전송 + 자동생성 트리거"""
         try:
-            # 프롬프트 생성으로 인한 textChanged → prompt_sync broadcast 억제
-            self._syncing_prompt = True
-            QTimer.singleShot(600, lambda: setattr(self, '_syncing_prompt', False))
             # 자동생성 대기 중이면 이미지 생성 트리거
             if self._auto_generate_pending:
                 self._auto_generate_pending = False

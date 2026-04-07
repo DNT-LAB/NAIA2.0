@@ -1369,17 +1369,18 @@ header {
   word-wrap: break-word;
   overflow: auto;
   pointer-events: none;
-  color: transparent;
+  color: var(--text-primary);
+  background: var(--bg-deep);
   border: 1px solid transparent;
   border-radius: 8px;
 }
-.cond-line { color: transparent; }
-.cond-comment { background: rgba(255,255,255,0.06); border-radius: 2px; padding: 1px 0; }
+.cond-comment { color: #666; }
 .cond-rules-input {
   position: relative;
+  z-index: 1;
   background: transparent !important;
   caret-color: var(--text-primary);
-  color: var(--text-primary);
+  color: transparent !important;
   min-height: 140px;
   font-family: var(--font-mono);
   font-size: 11px;

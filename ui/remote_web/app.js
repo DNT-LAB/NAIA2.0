@@ -1298,30 +1298,26 @@ function chunkInsert(el) {
   const value = el.dataset.value;
   if (!value) return;
   const target = acTarget || promptEdit;
+  target.focus();
   if (chunkTriggerInfo) {
     // $/@로 트리거된 경우 — 트리거 문자 교체
-    const text = target.value;
-    target.value = text.substring(0, chunkTriggerInfo.start) + value + text.substring(chunkTriggerInfo.end);
-    const newPos = chunkTriggerInfo.start + value.length;
-    target.selectionStart = target.selectionEnd = newPos;
+    target.selectionStart = chunkTriggerInfo.start;
+    target.selectionEnd = chunkTriggerInfo.end;
+    document.execCommand('insertText', false, value);
     chunkTriggerInfo = null;
   } else {
     // 모듈 버튼으로 열린 경우 — 커서 위치에 삽입
     const pos = target.selectionStart != null ? target.selectionStart : target.value.length;
     const text = target.value;
     const before = text.substring(0, pos);
-    const after = text.substring(pos);
     // 앞에 콤마+공백 필요 여부
     const sep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',') ? ', ' : '';
-    target.value = before + sep + value + after;
-    const newPos = pos + sep.length + value.length;
-    target.selectionStart = target.selectionEnd = newPos;
+    target.selectionStart = target.selectionEnd = pos;
+    document.execCommand('insertText', false, sep + value);
   }
-  target.focus();
   if (target === promptEdit) onPromptEdit();
-  // 삽입 후 시각 피드백
-  el.style.background = 'var(--accent-glow)';
-  setTimeout(() => { el.style.background = ''; }, 300);
+  // 자동 닫기
+  closeModule();
 }
 
 // ---- Wildcard Manager (file browser + editor + generator) ----

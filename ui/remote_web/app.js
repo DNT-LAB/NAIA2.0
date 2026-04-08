@@ -19,6 +19,7 @@ function saveSharedSession() {
   if (!sharedMode) return;
   const data = {
     params: _collectCurrentParams(),
+    prompt: promptEdit.value,
     negative_prompt: negEdit.value,
     options: {},
     p_eng: _sharedPEng || null,
@@ -62,6 +63,7 @@ function _collectCurrentParams() {
 let _sharedPEng = null, _sharedCond = null;
 let _sharedParamsInit = false;  // Shared Mode: 초기 params 수신 완료 여부
 let _sharedOptionsInit = false;  // Shared Mode: 초기 options 수신 완료 여부
+let _restoreSessionTimeout = null;  // init_complete 미수신 시 안전망 타이머
 
 // ---- History ----
 const HISTORY_MAX = 200;
@@ -160,7 +162,10 @@ function connect() {
         else if (m.type === 'toast') showToast(m.message, m.level || 'success');
         else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
         else if (m.type === 'session') onSession(m);
-        else if (m.type === 'init_complete') { _restoringSession = false; }
+        else if (m.type === 'init_complete') {
+          _restoringSession = false;
+          if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
+        }
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
       } catch(_) {}
@@ -392,8 +397,20 @@ function setSamplingMode(mode) {
 
 // ---- Prompt sync ----
 
+let _sharedPromptsInit = false;  // Shared Mode: 초기 prompts sync 완료 여부
 function syncPrompts(m) {
   if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
+  // Shared Mode: 초기 1회만 서버 값 수용 (이후 broadcast는 세션별 프롬프트 보호)
+  if (sharedMode && _sharedPromptsInit) return;
+  if (sharedMode) {
+    _sharedPromptsInit = true;
+    // LocalStorage에 저장된 프롬프트가 있으면 서버값 대신 유지
+    const saved = loadSharedSession();
+    if (saved) {
+      if (saved.prompt != null) m.prompt = saved.prompt;
+      if (saved.negative_prompt != null) m.negative_prompt = saved.negative_prompt;
+    }
+  }
   syncingPrompt = true;
   if ('prompt' in m) promptEdit.value = m.prompt;
   if ('negative_prompt' in m) negEdit.value = m.negative_prompt;
@@ -694,16 +711,19 @@ function onSession(m) {
     });
     // 열려있는 차단 모듈 닫기
     if (sharedDisabledModules.includes(currentModuleId)) closeModule();
-    // 초기 params/options 수신 대기 (select 옵션 목록 채우기 위해)
+    // 초기 params/options/prompts 수신 대기 (select 옵션 목록 채우기 위해)
     _sharedParamsInit = false;
     _sharedOptionsInit = false;
+    _sharedPromptsInit = false;
     // LocalStorage에서 세션 복원 (재연결 시)
     _restoreSharedSession();
   } else {
     // Shared Mode 해제 → 복원
     _restoringSession = false;  // 복원 가드 해제 (Shared ON → OFF 전환 시)
+    if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
     _sharedParamsInit = false;
     _sharedOptionsInit = false;
+    _sharedPromptsInit = false;
     if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.parentElement.style.opacity = ''; }
     if (naiOpt) naiOpt.disabled = false;
     sharedDisabledModules.forEach(mid => {
@@ -735,12 +755,22 @@ function _restoreSharedSession() {
       btnRnd.style.opacity = optBoxes.prompt_fixed.checked ? '0.4' : '';
     }
   }
-  // 클라이언트 UI 복원: negative prompt
+  // 클라이언트 UI 복원: prompt + negative prompt
+  if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); }
   if (saved.negative_prompt != null) negEdit.value = saved.negative_prompt;
   // P.Eng / Cond 캐시 복원 (모듈 열 때 사용)
   _sharedPEng = saved.p_eng || null;
   _sharedCond = saved.cond || null;
   // 가드 해제는 서버의 init_complete 메시지 수신 시 (onmessage 핸들러)
+  // 안전망: init_complete 미수신 시 5초 후 강제 해제
+  if (_restoreSessionTimeout) clearTimeout(_restoreSessionTimeout);
+  _restoreSessionTimeout = setTimeout(() => {
+    if (_restoringSession) {
+      console.warn('init_complete timeout — forcing restore guard release');
+      _restoringSession = false;
+    }
+    _restoreSessionTimeout = null;
+  }, 5000);
 }
 
 // close menu on outside click
@@ -1323,6 +1353,19 @@ function updateVibeBadge(m) {
 }
 
 function renderPromptEngineering(m) {
+  // Shared Mode: _sharedPEng 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
+  if (sharedMode && _sharedPEng) {
+    if (_sharedPEng.pre_prompt != null) m.pre_prompt = _sharedPEng.pre_prompt;
+    if (_sharedPEng.post_prompt != null) m.post_prompt = _sharedPEng.post_prompt;
+    if (_sharedPEng.auto_hide != null) m.auto_hide = _sharedPEng.auto_hide;
+    if (_sharedPEng.preset != null) m.preset = _sharedPEng.preset;
+    if (_sharedPEng.preprocessing_options) {
+      if (!m.preprocessing) m.preprocessing = {};
+      for (const [k, v] of Object.entries(_sharedPEng.preprocessing_options)) {
+        m.preprocessing[k] = v;
+      }
+    }
+  }
   // Build preset options
   const presetOpts = (m.preset_options || [])
     .map(p => `<option value="${p}"${p === m.preset ? ' selected' : ''}>${p}</option>`).join('');
@@ -1544,6 +1587,11 @@ function syncCondScroll(el) {
 }
 
 function renderConditionalPrompt(m) {
+  // Shared Mode: _sharedCond 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
+  if (sharedMode && _sharedCond) {
+    if (_sharedCond.enabled != null) m.enabled = _sharedCond.enabled;
+    if (_sharedCond.rules != null) m.rules = _sharedCond.rules;
+  }
   moduleBody.innerHTML = `
     <div>
       <label class="mod-checkbox-item">

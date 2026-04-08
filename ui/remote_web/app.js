@@ -865,6 +865,11 @@ if (window.visualViewport) {
         modulePopupEl.style.bottom = 'auto';
         modulePopupEl.style.maxHeight = vv.height + 'px';
       }
+      // autocomplete/tag tooltip: viewport 상단에 고정 (키보드에 가려지지 않도록)
+      if (tagTooltip) {
+        tagTooltip.style.top = (vv.offsetTop + 4) + 'px';
+        tagTooltip.style.maxHeight = Math.min(vv.height * 0.4, 200) + 'px';
+      }
     } else {
       fullHeight = vv.height; // recalibrate
       bottomCtrl.classList.remove('kb-open');
@@ -874,6 +879,11 @@ if (window.visualViewport) {
         modulePopupEl.style.top = '';
         modulePopupEl.style.bottom = '';
         modulePopupEl.style.maxHeight = '';
+      }
+      // autocomplete/tag tooltip: 원래 CSS로 복원
+      if (tagTooltip) {
+        tagTooltip.style.top = '';
+        tagTooltip.style.maxHeight = '';
       }
     }
   });

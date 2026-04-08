@@ -207,8 +207,10 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 ## 히스토리 시스템
 
-- 서버: `_image_history` 200장 버퍼, JSZip zip 다운로드
-- 패널: 뷰어 오른쪽 inline, `◀ Save Delete ▶` 네비게이션
+- 서버: `_image_history` 200장 버퍼 (`threading.Lock` 보호), JSZip zip 다운로드
+- 패널: 뷰어 오른쪽 inline, `◀ Action ▶` 네비게이션 (Load Prompt / Reroll)
+- 각 항목에 `gen_params`, `source_row`, `prompt_context` 저장 (json round-trip 안전화)
+- Shared Mode: Delete 비활성
 
 ## 단축키
 
@@ -250,6 +252,68 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 - `formatCondRules()`: 콤마 구분 엔트리별 `#` 감지 (따옴표 내 콤마 무시)
 - `<span class="cond-comment">` 로 개별 엔트리 래핑
+
+---
+
+## Shared Server Mode (다중 사용자 독립 세션)
+
+Settings > Web Session > "Shared Server Mode" 체크 시 활성화. 비영속 (앱 재시작 시 OFF).
+
+### 세션 격리 대상
+
+| 항목 | 저장 위치 | 주입 시점 |
+|------|-----------|----------|
+| P.Engineering (pre/post/auto-hide/전처리) | `session["p_eng_override"]` | `_inject_session_overrides()` → `app_context.session_p_eng_override` |
+| Conditional Prompt (enabled/rules) | `session["cond_override"]` | `_inject_session_overrides()` → `app_context.session_cond_override` |
+| Negative Prompt | `session["negative_prompt"]` | `_do_generate` / `on_prompt_generated` |
+| 생성 파라미터 (해상도/스텝/CFG 등) | `session["params_override"]` | `execute_generation_pipeline(overrides=)` |
+| Prompt Fixed / WC Solo | `session["options"]` | `_get_session_settings_override()` → `trigger_random_prompt(settings_override=)` |
+
+### 1-time 초기화 패턴
+
+세션의 override가 `None`이면 최초 1회만 데스크톱에서 복사(Copy P.Eng/Cond 체크 시) 또는 빈 dict로 초기화. 이후 세션이 소유.
+
+### 차단 항목 (Shared Mode)
+
+| 항목 | 클라이언트 | 서버 |
+|------|-----------|------|
+| Auto Gen | checkbox disabled | `set_option("auto_generate")` 무시 |
+| NAI 모드 전환 | option disabled | `_do_set_mode("NAI")` 차단 |
+| Automation / Wildcard / Chunk / Search | 버튼 `nai-only-disabled` | 모듈 진입 차단 |
+| 검색 / Depth / Restore / Load Parquet | — | 서버 요청 무시 |
+| `__` / `$` / `@` autocomplete 트리거 | `scheduleAutocomplete` 가드 | — |
+| 히스토리 Delete | 버튼 disabled | — |
+
+### WS별 Pending Overrides
+
+`_do_random()` → `prompt_generated` → 자동생성 경로에서 비동기 간극 발생.
+`_pending_overrides: dict[ws, {"params", "negative", "settings_override"}]`로 WS별 격리.
+
+### Override Cleanup
+
+- `_on_generation_finished` / `_on_generation_error`: `session_p_eng_override` / `session_cond_override` = None
+- `_on_thread_finished`: 안전망 (cancel 시 위 콜백 누락 대비)
+- WS disconnect: `_current_request_ws` 무효화 + pending 제거 + `_auto_generate_pending` 해제
+
+### UI 미조작 원칙
+
+세션별 옵션(WC Solo 등)은 `settings_override` dict로 전달. **데스크톱 UI 체크박스를 임시 조작하지 않음**.
+
+---
+
+## 히스토리 액션
+
+`◀ Action ▶` 메뉴: Load Prompt / Reroll / (Enqueue 숨김)
+
+- **Load Prompt**: `prompt_context.main_prompt` → 클라이언트 프롬프트 갱신 (broadcast)
+- **Reroll**: `source_row` → `on_instant_generation_requested()` (세션 오버라이드 주입)
+- **`_image_history`**: `threading.Lock` 보호 (`_history_lock`)
+
+## 생성 Progress Bar
+
+- `startProgress()` / `finishProgress()`: 최근 5회 평균 기반 예측
+- 100% 초과 시 주황색 2nd bar (`genProgressBar2`)
+- interval/timeout 누적 방지: `_progressFinishTimeout` 추적
 
 ---
 

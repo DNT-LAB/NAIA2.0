@@ -254,6 +254,31 @@ class RemoteBridge(QObject):
         self.app_context.session_cond_override = session["cond_override"]
         return session.get("params_override")
 
+    def _apply_session_wc_solo(self) -> bool | None:
+        """Shared Mode: 세션의 WC Solo 값을 UI 체크박스에 임시 주입. 원래 값 반환 (복원용)."""
+        if not (self.shared_server_mode and self._current_request_ws and self._ws_manager):
+            return None
+        session = self._ws_manager.sessions.get(self._current_request_ws)
+        if not session:
+            return None
+        session_wc = session.get("options", {}).get("wildcard_standalone")
+        if session_wc is None:
+            return None
+        cb = self.app_context.main_window.generation_checkboxes.get("와일드카드 단독 모드")
+        if not cb:
+            return None
+        saved = cb.isChecked()
+        cb.setChecked(session_wc)
+        return saved
+
+    def _restore_wc_solo(self, saved: bool | None):
+        """_apply_session_wc_solo의 복원."""
+        if saved is None:
+            return
+        cb = self.app_context.main_window.generation_checkboxes.get("와일드카드 단독 모드")
+        if cb:
+            cb.setChecked(saved)
+
     def _get_session_negative(self) -> str | None:
         """Shared Mode: 현재 요청 세션의 negative prompt 반환."""
         if not (self.shared_server_mode and self._current_request_ws and self._ws_manager):
@@ -263,6 +288,7 @@ class RemoteBridge(QObject):
 
     def _do_generate(self, prompt: str, negative: str):
         """현재 UI 파라미터로 생성 트리거. prompt가 있으면 먼저 반영"""
+        wc_saved = None
         try:
             gc = self.app_context.main_window.generation_controller
             if gc.is_generating:
@@ -273,6 +299,7 @@ class RemoteBridge(QObject):
             # Shared Mode: 세션 오버라이드 주입
             session_overrides = self._inject_session_overrides()
             session_neg = self._get_session_negative()
+            wc_saved = self._apply_session_wc_solo()
             if session_neg is not None:
                 negative = session_neg
 
@@ -291,14 +318,18 @@ class RemoteBridge(QObject):
             print("🌐 Remote: 생성 트리거됨")
         except Exception as e:
             print(f"🌐 Remote: 생성 트리거 실패 — {e}")
+        finally:
+            self._restore_wc_solo(wc_saved)
 
     def _do_random(self):
         """랜덤 프롬프트 생성. auto_generate ON이면 prompt_generated 이벤트에서 자동 트리거"""
+        wc_saved = None
         try:
             requesting_ws = self._current_request_ws
             # Shared Mode: 세션 오버라이드 주입 (프롬프트 생성 파이프라인에 적용)
             params_override = self._inject_session_overrides()
             session_neg = self._get_session_negative()
+            wc_saved = self._apply_session_wc_solo()
             # WS별 pending 저장 (다른 클라이언트의 pending과 충돌 방지)
             if requesting_ws:
                 self._pending_overrides[requesting_ws] = {
@@ -317,6 +348,8 @@ class RemoteBridge(QObject):
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
             print(f"🌐 Remote: 랜덤 프롬프트 생성 실패 — {e}")
+        finally:
+            self._restore_wc_solo(wc_saved)
 
     # --- 옵션 동기화 (Qt 메인 스레드에서 실행) ---
 
@@ -2594,12 +2627,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             if bridge.shared_server_mode:
                                 if opt_key == "auto_generate":
                                     pass  # 차단
-                                elif opt_key == "prompt_fixed":
+                                elif opt_key in ("prompt_fixed", "wildcard_standalone"):
                                     # 세션별 저장
                                     session = ws_manager.sessions.get(ws)
                                     if session:
                                         opts = session.setdefault("options", {})
-                                        opts["prompt_fixed"] = bool(cmd.get("value"))
+                                        opts[opt_key] = bool(cmd.get("value"))
                                 else:
                                     bridge.request_set_option.emit(opt_key, cmd["value"])
                             else:

@@ -165,6 +165,10 @@ function connect() {
         else if (m.type === 'init_complete') {
           _restoringSession = false;
           if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
+          // 재연결 시 열려있는 모듈 자동 리프레시 (캐시 fallback 적용 위해)
+          if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({type: 'get_module_state', module_id: currentModuleId}));
+          }
         }
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
@@ -1353,18 +1357,29 @@ function updateVibeBadge(m) {
 }
 
 function renderPromptEngineering(m) {
-  // Shared Mode: _sharedPEng 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
-  if (sharedMode && _sharedPEng) {
-    if (_sharedPEng.pre_prompt != null) m.pre_prompt = _sharedPEng.pre_prompt;
-    if (_sharedPEng.post_prompt != null) m.post_prompt = _sharedPEng.post_prompt;
-    if (_sharedPEng.auto_hide != null) m.auto_hide = _sharedPEng.auto_hide;
-    if (_sharedPEng.preset != null) m.preset = _sharedPEng.preset;
-    if (_sharedPEng.preprocessing_options) {
-      if (!m.preprocessing) m.preprocessing = {};
-      for (const [k, v] of Object.entries(_sharedPEng.preprocessing_options)) {
-        m.preprocessing[k] = v;
+  if (sharedMode) {
+    if (_sharedPEng) {
+      // 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
+      if (_sharedPEng.pre_prompt != null) m.pre_prompt = _sharedPEng.pre_prompt;
+      if (_sharedPEng.post_prompt != null) m.post_prompt = _sharedPEng.post_prompt;
+      if (_sharedPEng.auto_hide != null) m.auto_hide = _sharedPEng.auto_hide;
+      if (_sharedPEng.preset != null) m.preset = _sharedPEng.preset;
+      if (_sharedPEng.preprocessing_options) {
+        if (!m.preprocessing) m.preprocessing = {};
+        for (const [k, v] of Object.entries(_sharedPEng.preprocessing_options)) {
+          m.preprocessing[k] = v;
+        }
       }
     }
+    // 렌더링된 최종 상태를 캐시에 전체 스냅샷 (편집 안 한 필드도 포함)
+    _sharedPEng = {
+      pre_prompt: m.pre_prompt || '',
+      post_prompt: m.post_prompt || '',
+      auto_hide: m.auto_hide || '',
+      preset: m.preset || '',
+      preprocessing_options: m.preprocessing ? {...m.preprocessing} : {},
+    };
+    saveSharedSession();
   }
   // Build preset options
   const presetOpts = (m.preset_options || [])
@@ -1587,10 +1602,15 @@ function syncCondScroll(el) {
 }
 
 function renderConditionalPrompt(m) {
-  // Shared Mode: _sharedCond 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
-  if (sharedMode && _sharedCond) {
-    if (_sharedCond.enabled != null) m.enabled = _sharedCond.enabled;
-    if (_sharedCond.rules != null) m.rules = _sharedCond.rules;
+  if (sharedMode) {
+    if (_sharedCond) {
+      // 캐시 우선 적용
+      if (_sharedCond.enabled != null) m.enabled = _sharedCond.enabled;
+      if (_sharedCond.rules != null) m.rules = _sharedCond.rules;
+    }
+    // 렌더링된 최종 상태를 캐시에 전체 스냅샷
+    _sharedCond = { enabled: !!m.enabled, rules: m.rules || '' };
+    saveSharedSession();
   }
   moduleBody.innerHTML = `
     <div>

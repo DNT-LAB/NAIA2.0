@@ -2600,7 +2600,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                     bridge._current_request_ws = ws
                     bridge.request_random.emit()
                 elif data == "sync":
-                    if bridge._cached_prompts:
+                    if not bridge.shared_server_mode and bridge._cached_prompts:
                         await ws.send_text(json.dumps(bridge._cached_prompts))
                     if bridge._cached_params:
                         await ws.send_text(json.dumps(bridge._cached_params))

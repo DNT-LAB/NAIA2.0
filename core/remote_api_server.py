@@ -2683,18 +2683,22 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                         po["preset"] = mval
                             else:
                                 bridge.request_set_module.emit(mid, mkey, mval)
-                        elif cmd_type == "get_search_state":
-                            bridge.request_get_module.emit("__search__")
-                        elif cmd_type == "search":
-                            bridge.request_search.emit(json.dumps(cmd))
-                        elif cmd_type == "load_parquet":
-                            bridge.request_load_parquet.emit(cmd.get("filename", ""))
-                        elif cmd_type == "depth_action":
-                            bridge.request_depth_action.emit(json.dumps(cmd))
-                        elif cmd_type == "get_depth_state":
-                            bridge.request_get_module.emit("__depth__")
-                        elif cmd_type == "restore_snapshot":
-                            bridge.request_restore_snapshot.emit()
+                        elif cmd_type in ("get_search_state", "search", "load_parquet",
+                                           "depth_action", "get_depth_state", "restore_snapshot"):
+                            if bridge.shared_server_mode:
+                                pass  # Shared Mode: 검색/Depth/Restore 차단
+                            elif cmd_type == "get_search_state":
+                                bridge.request_get_module.emit("__search__")
+                            elif cmd_type == "search":
+                                bridge.request_search.emit(json.dumps(cmd))
+                            elif cmd_type == "load_parquet":
+                                bridge.request_load_parquet.emit(cmd.get("filename", ""))
+                            elif cmd_type == "depth_action":
+                                bridge.request_depth_action.emit(json.dumps(cmd))
+                            elif cmd_type == "get_depth_state":
+                                bridge.request_get_module.emit("__depth__")
+                            elif cmd_type == "restore_snapshot":
+                                bridge.request_restore_snapshot.emit()
                         elif cmd_type == "tag_search":
                             # 한글/영문 태그 검색 — 스레드 풀에서 실행 (초기 로드 블로킹 방지)
                             query = cmd.get("query", "")

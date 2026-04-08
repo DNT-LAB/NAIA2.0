@@ -552,7 +552,7 @@ function onSession(m) {
   sharedMode = m.shared_server_mode || false;
   const autoGenCb = optBoxes.auto_generate;
   const naiOpt = modeSelect.querySelector('option[value="NAI"]');
-  const sharedDisabledModules = ['automation', 'wildcard', 'chunk'];
+  const sharedDisabledModules = ['automation', 'wildcard', 'chunk', 'search'];
   if (sharedMode) {
     // Auto Gen 차단
     if (autoGenCb) { autoGenCb.checked = false; autoGenCb.disabled = true; autoGenCb.parentElement.style.opacity = '0.4'; }
@@ -993,7 +993,7 @@ function openModule(moduleId) {
     return;
   }
   // Shared Mode: 데스크톱 전용 모듈 차단
-  if (sharedMode && ['automation', 'wildcard', 'chunk'].includes(moduleId)) {
+  if (sharedMode && ['automation', 'wildcard', 'chunk', 'search'].includes(moduleId)) {
     showToast('This module is not available in Shared Server Mode', 'error');
     return;
   }

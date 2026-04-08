@@ -8,6 +8,7 @@ import io
 import json
 import asyncio
 import base64
+import random
 import time
 import threading
 import uuid
@@ -294,6 +295,11 @@ class RemoteBridge(QObject):
             session_neg = self._get_session_negative()
             if session_neg is not None:
                 negative = session_neg
+
+            # 세션 overrides에 seed가 있지만 seed_fixed가 아니면 → 랜덤 시드로 교체
+            if session_overrides and "seed" in session_overrides:
+                if session_overrides.get("seed_fixed") != "true":
+                    session_overrides["seed"] = str(random.randint(0, 9999999999))
 
             # 웹에서 보낸 프롬프트가 있으면 즉시 반영 (디바운스 대기 없이)
             if prompt or negative:
@@ -2346,6 +2352,10 @@ class RemoteBridge(QObject):
                 pending = self._pending_overrides.pop(pending_ws, {}) if pending_ws else {}
                 pending_neg = pending.get("negative")
                 pending_params = pending.get("params")
+                # seed_fixed가 아닌 경우 → 랜덤 시드로 교체
+                if pending_params and "seed" in pending_params:
+                    if pending_params.get("seed_fixed") != "true":
+                        pending_params["seed"] = str(random.randint(0, 9999999999))
                 # Shared Mode: pending negative 반영
                 if pending_neg is not None:
                     self._syncing_prompt = True
@@ -2440,9 +2450,18 @@ class RemoteBridge(QObject):
                     params['input'] = current_params.get('input', params.get('input', ''))
                     params['negative_prompt'] = current_params.get('negative_prompt', params.get('negative_prompt', ''))
 
-                # 시드 랜덤화
-                mw = self.app_context.main_window
-                if hasattr(mw, 'seed_fix_checkbox') and mw.seed_fix_checkbox and not mw.seed_fix_checkbox.isChecked():
+                # 시드 랜덤화 (Shared Mode: 세션의 seed_fixed 우선 확인)
+                seed_fixed = False
+                if self.shared_server_mode and self._current_request_ws and self._ws_manager:
+                    session = self._ws_manager.sessions.get(self._current_request_ws)
+                    if session:
+                        so = session.get("params_override", {})
+                        seed_fixed = so.get("seed_fixed") == "true"
+                if not seed_fixed:
+                    mw = self.app_context.main_window
+                    if hasattr(mw, 'seed_fix_checkbox') and mw.seed_fix_checkbox:
+                        seed_fixed = mw.seed_fix_checkbox.isChecked()
+                if not seed_fixed:
                     random_seed = random.randint(0, 9999999999)
                     params['seed'] = random_seed
                     params['extra_noise_seed'] = random_seed

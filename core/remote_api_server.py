@@ -160,6 +160,8 @@ class RemoteBridge(QObject):
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
         self._kr_tags_lock = threading.Lock()
         self._kr_tags_loaded = False
+        # 캐릭터 분석 역인덱스: char_name_lower → (copyright_group, data_dict)
+        self._char_analysis: dict = {}
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -1813,6 +1815,30 @@ class RemoteBridge(QObject):
                 self._kr_tags_loaded = True
                 print(f"🌐 Remote: tag index 로드 실패 — {e}")
 
+    def _load_char_analysis(self):
+        """character_analysis.json → 역인덱스 구축 (char_name_lower → (copyright, data))"""
+        if self._char_analysis:
+            return
+        try:
+            analysis_path = Path(__file__).resolve().parent.parent / "data" / "character_analysis.json"
+            if not analysis_path.exists():
+                print("🌐 Remote: character_analysis.json 없음 — 캐릭터 상세 비활성")
+                return
+            with open(analysis_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            idx = {}
+            for group_key, chars in raw.items():
+                for char_name, data in chars.items():
+                    cl = char_name.lower()
+                    # 동명 캐릭터 → total_rows 높은 쪽 우선
+                    if cl in idx and idx[cl][1].get("total_rows", 0) >= data.get("total_rows", 0):
+                        continue
+                    idx[cl] = (group_key, data)
+            self._char_analysis = idx
+            print(f"🌐 Remote: character_analysis — {len(idx)} characters indexed")
+        except Exception as e:
+            print(f"🌐 Remote: character_analysis 로드 실패 — {e}")
+
     def _search_kr_tags(self, query: str, limit: int = 20) -> list:
         """5단계 우선순위 태그 검색: exact → starts_with → kr_keyword → contains → desc
         prefix 라우팅: 'artist:x' → artist만, 'character:x' → character만"""
@@ -1954,6 +1980,24 @@ class RemoteBridge(QObject):
                 related.append(t)
         if related:
             result['related'] = related[:8]
+        # 캐릭터 태그 → character_analysis 상세 정보 추가
+        if result.get('cat') == 'character' and self._char_analysis:
+            match = self._char_analysis.get(tag_lower)
+            if match:
+                gk, cdata = match
+                # breast_size: distribution 최빈값
+                bs_top = ""
+                bs_dist = cdata.get("breast_size", {}).get("distribution", [])
+                if bs_dist:
+                    top_entry = max(bs_dist, key=lambda x: x.get("pct", 0))
+                    bs_top = top_entry.get("tag", "")
+                result['character_details'] = {
+                    'copyright': gk,
+                    'personal_color': cdata.get('personal_color', []),
+                    'characteristics': cdata.get('characteristics', []),
+                    'breast_size_top': bs_top,
+                    'total_rows': cdata.get('total_rows', 0),
+                }
         return result
 
     # --- 검색 시스템 ---
@@ -2555,24 +2599,50 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 "session_id": session_id,
                 "shared_server_mode": bridge.shared_server_mode,
             }))
-            # 연결 시 히스토리 전체 전송 (새로고침 복원)
+            # 클라이언트 초기 메시지 수신 (onopen에서 get_search_state + client_state 전송)
+            # 히스토리 전송 전에 client_state를 받아 보유 수 확인
+            _client_history_count = 0
+            _pending_init_cmds = []  # client_state 외 초기 메시지 임시 보관
+            _HISTORY_INIT_MAX = 5
+            try:
+                # 최대 2개 초기 메시지 소비 (get_search_state, client_state)
+                for _ in range(2):
+                    init_data = await asyncio.wait_for(ws.receive_text(), timeout=3.0)
+                    if init_data.startswith("{"):
+                        init_cmd = json.loads(init_data)
+                        if init_cmd.get("type") == "client_state":
+                            _client_history_count = int(init_cmd.get("history_count", 0))
+                        else:
+                            _pending_init_cmds.append(init_cmd)
+            except (asyncio.TimeoutError, Exception):
+                pass  # 타임아웃 또는 오류 → 기본값 0으로 진행
+
+            # 히스토리 전송 (_send_lock으로 broadcast 인터리빙 방지)
             with bridge._history_lock:
-                history_snapshot = list(bridge._image_history)
-            for entry in history_snapshot:
-                hist_meta = entry["metadata"]
-                has_gen = bool(entry.get("gen_params"))
-                has_src = entry.get("source_row") is not None
-                main_prompt = ""
-                pc = entry.get("prompt_context")
-                if pc and isinstance(pc, dict):
-                    main_prompt = pc.get("main_prompt", "")
-                await ws.send_text(json.dumps({
-                    "type": "image_meta", **hist_meta,
-                    "has_gen_params": has_gen,
-                    "has_source_row": has_src,
-                    "main_prompt": main_prompt,
-                }))
-                await ws.send_bytes(entry["webp"])
+                total = len(bridge._image_history)
+                if _client_history_count < total:
+                    skip = max(_client_history_count, total - _HISTORY_INIT_MAX)
+                    send_entries = list(bridge._image_history[skip:])
+                else:
+                    send_entries = []
+            if send_entries:
+                async with ws_manager._send_lock:
+                    for entry in send_entries:
+                        hist_meta = entry["metadata"]
+                        has_gen = bool(entry.get("gen_params"))
+                        has_src = entry.get("source_row") is not None
+                        main_prompt = ""
+                        pc = entry.get("prompt_context")
+                        if pc and isinstance(pc, dict):
+                            main_prompt = pc.get("main_prompt", "")
+                        await ws.send_text(json.dumps({
+                            "type": "image_meta", **hist_meta,
+                            "has_gen_params": has_gen,
+                            "has_source_row": has_src,
+                            "main_prompt": main_prompt,
+                        }))
+                        await ws.send_bytes(entry["webp"])
+
             current_mode = bridge.app_context.get_api_mode()
             await ws.send_text(json.dumps({"type": "mode", "mode": current_mode}))
             if bridge._cached_options:
@@ -2583,6 +2653,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 await ws.send_text(json.dumps(bridge._cached_params))
             if bridge._cached_api_status:
                 await ws.send_text(json.dumps(bridge._cached_api_status))
+            # init_complete: 클라이언트에 초기화 완료 신호 (복원 가드 해제용)
+            await ws.send_text(json.dumps({"type": "init_complete"}))
             # 메인 스레드에서 캐시 갱신 + broadcast (초기화 타이밍 이슈 방지)
             bridge.request_refresh_cache.emit()
             # Send module badge states (automation countdown, character count)
@@ -2591,8 +2663,17 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             bridge.request_get_module.emit("character_reference")
             bridge.request_get_module.emit("vibe_transfer")
 
+            # 보류된 초기 메시지를 메인 루프에 재주입
+            # (get_search_state, restore_session 등 초기화 단계에서 소비된 비-client_state 메시지)
+            _replay_queue = list(_pending_init_cmds)
+
             while True:
-                data = await ws.receive_text()
+                # 보류된 초기 메시지가 있으면 먼저 처리
+                if _replay_queue:
+                    cmd = _replay_queue.pop(0)
+                    data = json.dumps(cmd)  # 아래 분기 재사용을 위해
+                else:
+                    data = await ws.receive_text()
                 if data == "generate":
                     bridge._current_request_ws = ws
                     bridge.request_generate.emit("", "")
@@ -2608,7 +2689,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                     try:
                         cmd = json.loads(data)
                         cmd_type = cmd.get("type")
-                        if cmd_type == "set_option":
+                        if cmd_type == "client_state":
+                            pass  # 초기화 단계에서 처리됨
+                        elif cmd_type == "set_option":
                             opt_key = cmd.get("key", "")
                             if bridge.shared_server_mode:
                                 if opt_key == "auto_generate":
@@ -2732,6 +2815,42 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             await ws.send_text(json.dumps({
                                 "type": "tag_lookup_result", **info,
                             }))
+                        elif cmd_type == "restore_session":
+                            # 클라이언트 LocalStorage → 서버 세션 복원 (재연결 시)
+                            if bridge.shared_server_mode:
+                                session = ws_manager.sessions.get(ws)
+                                if session:
+                                    # params
+                                    params = cmd.get("params")
+                                    if params and isinstance(params, dict):
+                                        session["params_override"] = {k: str(v) for k, v in params.items()}
+                                    # negative prompt
+                                    neg = cmd.get("negative_prompt")
+                                    if neg is not None:
+                                        session["negative_prompt"] = str(neg)
+                                    # options (prompt_fixed, wildcard_standalone)
+                                    opts = cmd.get("options")
+                                    if opts and isinstance(opts, dict):
+                                        session["options"] = {k: bool(v) for k, v in opts.items()}
+                                    # P.Eng override
+                                    p_eng = cmd.get("p_eng")
+                                    if p_eng and isinstance(p_eng, dict):
+                                        restored = {}
+                                        for k in ("pre_prompt", "post_prompt", "auto_hide", "preset"):
+                                            if k in p_eng:
+                                                restored[k] = str(p_eng[k])
+                                        pp = p_eng.get("preprocessing_options")
+                                        if pp and isinstance(pp, dict):
+                                            restored["preprocessing_options"] = {k: bool(v) for k, v in pp.items()}
+                                        session["p_eng_override"] = restored
+                                    # Cond override
+                                    cond = cmd.get("cond")
+                                    if cond and isinstance(cond, dict):
+                                        session["cond_override"] = {
+                                            "enabled": bool(cond.get("enabled", False)),
+                                            "rules": str(cond.get("rules", "")),
+                                        }
+                                    print(f"🌐 Session restored from client LocalStorage (session={session['id']})")
                         elif cmd_type == "history_action":
                             bridge._current_request_ws = ws
                             bridge.request_history_action.emit(json.dumps(cmd))
@@ -2881,8 +3000,11 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     if bridge.shared_server_mode:
         print(f"🌐 Remote: Shared Server Mode 활성 상태로 시작")
 
-    # KR_tags 인덱스 백그라운드 로드 (첫 검색 지연 방지)
-    threading.Thread(target=bridge._load_kr_tags, daemon=True, name="KR-Tags-Loader").start()
+    # KR_tags 인덱스 + character_analysis 백그라운드 로드 (첫 검색 지연 방지)
+    def _bg_load():
+        bridge._load_kr_tags()
+        bridge._load_char_analysis()
+    threading.Thread(target=_bg_load, daemon=True, name="KR-Tags-Loader").start()
 
     # FastAPI 앱 생성 + uvicorn 시작
     app = create_app(bridge, ws_manager)

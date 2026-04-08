@@ -10,6 +10,58 @@ let progressTimer = null;
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let sessionId = null, sharedMode = false;
+let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
+
+// ---- Shared Mode LocalStorage 세션 유지 ----
+const SHARED_STORAGE_KEY = 'naia_shared_session';
+
+function saveSharedSession() {
+  if (!sharedMode) return;
+  const data = {
+    params: _collectCurrentParams(),
+    negative_prompt: negEdit.value,
+    options: {},
+    p_eng: _sharedPEng || null,
+    cond: _sharedCond || null,
+  };
+  for (const [key, cb] of Object.entries(optBoxes)) {
+    if (key !== 'auto_generate') data.options[key] = cb.checked;
+  }
+  try { localStorage.setItem(SHARED_STORAGE_KEY, JSON.stringify(data)); } catch(_) {}
+}
+
+function loadSharedSession() {
+  try {
+    const raw = localStorage.getItem(SHARED_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(_) { return null; }
+}
+
+function clearSharedSession() {
+  try { localStorage.removeItem(SHARED_STORAGE_KEY); } catch(_) {}
+}
+
+function _collectCurrentParams() {
+  const p = {};
+  if (paramEls.resolution.value) p.resolution = paramEls.resolution.value;
+  if (paramEls.steps.value) p.steps = paramEls.steps.value;
+  if (paramEls.cfg_scale.value) p.cfg_scale = paramEls.cfg_scale.value;
+  if (paramEls.cfg_rescale.value) p.cfg_rescale = paramEls.cfg_rescale.value;
+  if (paramEls.seed.value) p.seed = paramEls.seed.value;
+  if (paramEls.sampler.value) p.sampler = paramEls.sampler.value;
+  if (paramEls.scheduler.value) p.scheduler = paramEls.scheduler.value;
+  if (paramEls.model.value) p.model = paramEls.model.value;
+  // flags
+  document.querySelectorAll('#paramFlags .param-flag').forEach(el => {
+    p[el.dataset.key] = String(el.classList.contains('on'));
+  });
+  return p;
+}
+
+// Shared Mode 세션별 P.Eng / Cond 캐시 (모듈 set 시 갱신)
+let _sharedPEng = null, _sharedCond = null;
+let _sharedParamsInit = false;  // Shared Mode: 초기 params 수신 완료 여부
+let _sharedOptionsInit = false;  // Shared Mode: 초기 options 수신 완료 여부
 
 // ---- History ----
 const HISTORY_MAX = 200;
@@ -66,6 +118,8 @@ function connect() {
   ws.onopen = () => {
     connDot.classList.add('on'); connText.textContent = 'connected';
     ws.send(JSON.stringify({type: 'get_search_state'}));
+    // 클라이언트가 이미 보유한 히스토리 수 전송 → 서버가 중복 전송 건너뜀
+    ws.send(JSON.stringify({type: 'client_state', history_count: imageHistory.length}));
   };
   ws.onclose = () => {
     connDot.classList.remove('on'); connText.textContent = 'reconnecting';
@@ -106,6 +160,7 @@ function connect() {
         else if (m.type === 'toast') showToast(m.message, m.level || 'success');
         else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
         else if (m.type === 'session') onSession(m);
+        else if (m.type === 'init_complete') { _restoringSession = false; }
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
       } catch(_) {}
@@ -162,6 +217,77 @@ function populateSelect(el, options, current) {
 }
 
 function updateParams(m) {
+  // Shared Mode 재연결 복원 중: 서버 초기값(데스크톱) 무시, params만 복원 적용
+  if (_restoringSession) {
+    const saved = loadSharedSession();
+    if (saved && saved.params) {
+      // select 옵션은 서버에서 채워야 하므로 populateSelect는 실행하되 값은 복원값 사용
+      syncingParams = true;
+      populateSelect(paramEls.model, m.options_model, saved.params.model || m.model);
+      populateSelect(paramEls.sampler, m.options_sampler, saved.params.sampler || m.sampler);
+      populateSelect(paramEls.scheduler, m.options_scheduler, saved.params.scheduler || m.scheduler);
+      populateSelect(paramEls.resolution, m.options_resolution, saved.params.resolution || m.resolution);
+      populateSelect(qResolution, m.options_resolution, saved.params.resolution || m.resolution);
+      if (saved.params.steps) paramEls.steps.value = saved.params.steps;
+      else if (m.steps !== undefined) paramEls.steps.value = m.steps;
+      if (saved.params.cfg_scale) paramEls.cfg_scale.value = saved.params.cfg_scale;
+      else if (m.cfg_scale !== undefined) paramEls.cfg_scale.value = m.cfg_scale;
+      if (saved.params.cfg_rescale) paramEls.cfg_rescale.value = saved.params.cfg_rescale;
+      else if (m.cfg_rescale !== undefined) paramEls.cfg_rescale.value = m.cfg_rescale;
+      if (saved.params.seed) paramEls.seed.value = saved.params.seed;
+      else if (m.seed !== undefined) paramEls.seed.value = m.seed;
+      if (m.steps_range) { paramEls.steps.min = m.steps_range[0]; paramEls.steps.max = m.steps_range[1]; }
+      // 모드별 표시/숨김은 서버 값 그대로
+      const mode = m.api_mode || '';
+      document.querySelectorAll('.mode-nai').forEach(el => el.style.display = mode === 'NAI' ? '' : 'none');
+      $('webuiParams').style.display = mode === 'WEBUI' ? '' : 'none';
+      $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
+      // flags는 저장값 우선 적용
+      const flags = [];
+      const naiFlagsEnabled = m.nai_flags_enabled || {};
+      if (mode === 'NAI') {
+        for (const key of ['SMEA', 'DYN', 'VAR+', 'DECRISP']) {
+          if (key in m) {
+            const savedVal = saved.params[key];
+            const on = savedVal !== undefined ? savedVal === 'true' : m[key];
+            flags.push({key, name: key, on, enabled: naiFlagsEnabled[key] !== false});
+          }
+        }
+      }
+      if ('seed_fixed' in m) { const sv = saved.params.seed_fixed; flags.push({key: 'seed_fixed', name: 'Seed Fix', on: sv !== undefined ? sv === 'true' : m.seed_fixed, enabled: true}); }
+      if ('random_resolution' in m) { const sv = saved.params.random_resolution; flags.push({key: 'random_resolution', name: 'Rnd Res', on: sv !== undefined ? sv === 'true' : m.random_resolution, enabled: true}); }
+      if ('auto_fit_resolution' in m) { const sv = saved.params.auto_fit_resolution; flags.push({key: 'auto_fit_resolution', name: 'Auto Res', on: sv !== undefined ? sv === 'true' : m.auto_fit_resolution, enabled: true}); }
+      paramFlags.innerHTML = flags.map(f =>
+        `<span class="param-flag${f.on ? ' on' : ''}${f.enabled ? '' : ' disabled'}" data-key="${f.key}" onclick="${f.enabled ? 'toggleFlag(this)' : ''}">${f.name}</span>`
+      ).join('');
+      if ('random_resolution' in m) { const sv = saved.params.random_resolution; qRndRes.classList.toggle('on', sv !== undefined ? sv === 'true' : m.random_resolution); }
+      if ('auto_fit_resolution' in m) { const sv = saved.params.auto_fit_resolution; qAutoRes.classList.toggle('on', sv !== undefined ? sv === 'true' : m.auto_fit_resolution); }
+      // WEBUI HR — 서버 값 그대로 (LocalStorage에 미저장)
+      if (mode === 'WEBUI') {
+        if ('enable_hr' in m) $('pEnableHr').checked = m.enable_hr;
+        if ('hr_scale' in m) $('pHrScale').value = m.hr_scale;
+        populateSelect($('pHrUpscaler'), m.options_hr_upscaler, m.hr_upscaler);
+        if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
+        if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
+        if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
+      }
+      // ComfyUI sampling mode — 서버 값 그대로
+      if (mode === 'COMFYUI') {
+        const sm = m.sampling_mode || 'eps';
+        $('flagEps').classList.toggle('on', sm === 'eps');
+        $('flagVpred').classList.toggle('on', sm === 'v_prediction');
+        $('flagAnima').classList.toggle('on', sm === 'anima');
+        $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
+        if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
+      }
+      syncingParams = false;
+      _sharedParamsInit = true;
+      return;
+    }
+  }
+  // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 params 보호)
+  if (sharedMode && _sharedParamsInit) return;
+  if (sharedMode) _sharedParamsInit = true;
   syncingParams = true;
   populateSelect(paramEls.model, m.options_model, m.model);
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
@@ -233,6 +359,7 @@ function setParam(key, value) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
   }
+  saveSharedSession();
 }
 
 function toggleFlag(el) {
@@ -266,6 +393,7 @@ function setSamplingMode(mode) {
 // ---- Prompt sync ----
 
 function syncPrompts(m) {
+  if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
   syncingPrompt = true;
   if ('prompt' in m) promptEdit.value = m.prompt;
   if ('negative_prompt' in m) negEdit.value = m.negative_prompt;
@@ -286,6 +414,7 @@ function onPromptEdit() {
         negative_prompt: negEdit.value,
       }));
     }
+    saveSharedSession();
   }, 500);
 }
 
@@ -565,15 +694,53 @@ function onSession(m) {
     });
     // 열려있는 차단 모듈 닫기
     if (sharedDisabledModules.includes(currentModuleId)) closeModule();
+    // 초기 params/options 수신 대기 (select 옵션 목록 채우기 위해)
+    _sharedParamsInit = false;
+    _sharedOptionsInit = false;
+    // LocalStorage에서 세션 복원 (재연결 시)
+    _restoreSharedSession();
   } else {
     // Shared Mode 해제 → 복원
+    _restoringSession = false;  // 복원 가드 해제 (Shared ON → OFF 전환 시)
+    _sharedParamsInit = false;
+    _sharedOptionsInit = false;
     if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.parentElement.style.opacity = ''; }
     if (naiOpt) naiOpt.disabled = false;
     sharedDisabledModules.forEach(mid => {
       const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
       if (btn) btn.classList.remove('nai-only-disabled');
     });
+    clearSharedSession();
   }
+}
+
+function _restoreSharedSession() {
+  const saved = loadSharedSession();
+  if (!saved) return;
+  // 서버 초기값(데스크톱 값) 무시 가드 ON
+  _restoringSession = true;
+  // 서버에 세션 복원 요청
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'restore_session', ...saved }));
+  }
+  // 클라이언트 UI 복원: options
+  if (saved.options) {
+    for (const [key, val] of Object.entries(saved.options)) {
+      const cb = optBoxes[key];
+      if (cb) cb.checked = val;
+    }
+    // Prompt Fixed → Random 버튼 차단
+    if (optBoxes.prompt_fixed) {
+      btnRnd.disabled = optBoxes.prompt_fixed.checked;
+      btnRnd.style.opacity = optBoxes.prompt_fixed.checked ? '0.4' : '';
+    }
+  }
+  // 클라이언트 UI 복원: negative prompt
+  if (saved.negative_prompt != null) negEdit.value = saved.negative_prompt;
+  // P.Eng / Cond 캐시 복원 (모듈 열 때 사용)
+  _sharedPEng = saved.p_eng || null;
+  _sharedCond = saved.cond || null;
+  // 가드 해제는 서버의 init_complete 메시지 수신 시 (onmessage 핸들러)
 }
 
 // close menu on outside click
@@ -650,6 +817,7 @@ if (window.visualViewport) {
   const toggleBarEl = document.querySelector('.prompt-toggle-bar');
   let fullHeight = vv.height;
   // Update fullHeight when not focused (no keyboard)
+  const modulePopupEl = document.querySelector('.module-popup');
   vv.addEventListener('resize', () => {
     if (isPC.matches) return;
     const shrink = fullHeight - vv.height;
@@ -657,10 +825,22 @@ if (window.visualViewport) {
     if (kbOpen) {
       bottomCtrl.classList.add('kb-open');
       toggleBarEl.style.display = 'none';
+      // 모듈 팝업: 키보드 위에 전체 표시 (top 기준으로 전환)
+      if (modulePopupEl) {
+        modulePopupEl.style.top = vv.offsetTop + 'px';
+        modulePopupEl.style.bottom = 'auto';
+        modulePopupEl.style.maxHeight = vv.height + 'px';
+      }
     } else {
       fullHeight = vv.height; // recalibrate
       bottomCtrl.classList.remove('kb-open');
       toggleBarEl.style.display = '';
+      // 모듈 팝업: 원래 CSS로 복원
+      if (modulePopupEl) {
+        modulePopupEl.style.top = '';
+        modulePopupEl.style.bottom = '';
+        modulePopupEl.style.maxHeight = '';
+      }
     }
   });
 }
@@ -783,6 +963,10 @@ function finishProgress() {
 
 // ---- Options sync ----
 function syncOptions(m) {
+  if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
+  // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 options 보호)
+  if (sharedMode && _sharedOptionsInit) return;
+  if (sharedMode) _sharedOptionsInit = true;
   syncingOptions = true;
   for (const [key, cb] of Object.entries(optBoxes)) {
     if (key in m) cb.checked = m[key];
@@ -806,6 +990,7 @@ function setOption(key, value) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_option', key, value}));
   }
+  saveSharedSession();
 }
 
 // ---- Mode sync ----
@@ -1183,6 +1368,26 @@ function renderPromptEngineering(m) {
 function setModuleParam(moduleId, key, value) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_module_param', module_id: moduleId, key, value}));
+  }
+  // Shared Mode: P.Eng/Cond 로컬 캐시 갱신
+  if (sharedMode) {
+    if (moduleId === 'prompt_engineering') {
+      if (!_sharedPEng) _sharedPEng = {};
+      if (key === 'pre_prompt' || key === 'post_prompt' || key === 'auto_hide') {
+        _sharedPEng[key] = value;
+      } else if (key.startsWith('pp_')) {
+        if (!_sharedPEng.preprocessing_options) _sharedPEng.preprocessing_options = {};
+        _sharedPEng.preprocessing_options[key.slice(3)] = (value === 'true');
+      } else if (key === 'preset') {
+        _sharedPEng.preset = value;
+      }
+      saveSharedSession();
+    } else if (moduleId === 'conditional_prompt') {
+      if (!_sharedCond) _sharedCond = {};
+      if (key === 'enabled') _sharedCond.enabled = (value === 'true');
+      else if (key === 'rules') _sharedCond.rules = value;
+      saveSharedSession();
+    }
   }
 }
 
@@ -2316,10 +2521,34 @@ function onTagLookupResult(m) {
     html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">related</span>' +
       m.related.map(t => `<span class="tag-tooltip-extra-tag" data-insert="${escHtml(t)}">${escHtml(t)}</span>`).join('') + '</div>';
   }
+  // 캐릭터 상세 정보 (character_analysis)
+  const cd = m.character_details;
+  if (cd) {
+    const fmtPct = p => p >= 10 ? Math.round(p) + '%' : p.toFixed(1) + '%';
+    const DISPLAY_MAX = 6;
+    const mkTag = (t, cls) => `<span class="tag-tooltip-extra-tag char-tag ${cls}" data-insert="${escHtml(t.tag)}">${escHtml(t.tag)} <small>${fmtPct(t.pct)}</small></span>`;
+    // copyright 라벨
+    let charTags = '';
+    if (cd.copyright) charTags += `<span class="char-copyright">${escHtml(cd.copyright)}</span>`;
+    // 분홍(personal_color) + 녹색(characteristics) + 연노랑(body) 한 줄로
+    if (cd.personal_color) charTags += cd.personal_color.slice(0, DISPLAY_MAX).map(t => mkTag(t, 'ct-pc')).join('');
+    if (cd.personal_color && cd.personal_color.length > DISPLAY_MAX) charTags += `<span class="char-more">+${cd.personal_color.length - DISPLAY_MAX}</span>`;
+    if (cd.characteristics) charTags += cd.characteristics.slice(0, DISPLAY_MAX).map(t => mkTag(t, 'ct-ch')).join('');
+    if (cd.characteristics && cd.characteristics.length > DISPLAY_MAX) charTags += `<span class="char-more">+${cd.characteristics.length - DISPLAY_MAX}</span>`;
+    if (cd.breast_size_top) charTags += `<span class="tag-tooltip-extra-tag char-tag ct-body" data-insert="${escHtml(cd.breast_size_top)}">${escHtml(cd.breast_size_top)}</span>`;
+    if (charTags) html += `<div class="tag-tooltip-extra char-details-row">${charTags}</div>`;
+    // Copy All: 특성 태그만 (캐릭터 이름 제외 — 이미 입력된 상태)
+    const allTags = [];
+    if (cd.personal_color) cd.personal_color.forEach(t => allTags.push(t.tag));
+    if (cd.breast_size_top) allTags.push(cd.breast_size_top);
+    if (cd.characteristics) cd.characteristics.forEach(t => allTags.push(t.tag));
+    html += `<div class="char-copy-row"><button class="char-copy-btn" data-tags="${escHtml(allTags.join(', '))}">\u{1F4CB} Copy All</button>` +
+      `<small class="char-sample-count">${cd.total_rows || 0} samples</small></div>`;
+  }
   tagTooltip.innerHTML = html;
   tagTooltip.classList.remove('ac-mode');
   tagTooltip.classList.add('open');
-  // Click on related/implies tag → insert next to current token in active textarea
+  // Click on related/implies/character tag → insert next to current token
   tagTooltip.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
     el.addEventListener('mousedown', e => {
       e.preventDefault();
@@ -2338,6 +2567,18 @@ function onTagLookupResult(m) {
       checkTagHint();
     });
   });
+  // Copy All 버튼 핸들러
+  const copyBtn = tagTooltip.querySelector('.char-copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('mousedown', e => {
+      e.preventDefault();
+      navigator.clipboard.writeText(copyBtn.dataset.tags).then(() => {
+        showToast('Copied to clipboard', 'success');
+      }).catch(() => {
+        showToast('Copy failed', 'error');
+      });
+    });
+  }
 }
 
 // ---- Autocomplete mode ----
@@ -2356,12 +2597,13 @@ function scheduleAutocomplete() {
   acTimer = setTimeout(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const s = info.stripped;
-    if (!sharedMode && s.startsWith('__')) {
-      // Wildcard autocomplete: __keyword → search wildcard names (Shared Mode 차단)
+    const allowTriggers = !sharedMode && target !== negEdit;
+    if (allowTriggers && s.startsWith('__')) {
+      // Wildcard autocomplete: __keyword → search wildcard names
       const q = s.replace(/^_+/, '').replace(/_+$/, '');
       if (q.length >= 1) ws.send(JSON.stringify({type: 'autocomplete_wildcard', query: q}));
-    } else if (!sharedMode && (s.startsWith('$') || (s.startsWith('@') && currentMode !== 'COMFYUI'))) {
-      // Chunk trigger: open Chunk module panel (Shared Mode / ComfyUI @ 차단)
+    } else if (allowTriggers && (s.startsWith('$') || (s.startsWith('@') && currentMode !== 'COMFYUI'))) {
+      // Chunk trigger: open Chunk module panel
       clearTimeout(acTimer);
       chunkTriggerInfo = info;
       openModule('chunk');
@@ -2543,8 +2785,9 @@ function bindTagAssist(textarea) {
   });
 }
 
-// Bind main prompt textarea
+// Bind main prompt + negative prompt textarea
 bindTagAssist(promptEdit);
+bindTagAssist(negEdit);
 // Main prompt also syncs to server
 promptEdit.addEventListener('compositionend', () => { onPromptEdit(); });
 promptEdit.addEventListener('input', () => { onPromptEdit(); });
@@ -2562,5 +2805,26 @@ document.addEventListener('keydown', e => {
 
 // ---- Init ----
 negEdit.addEventListener('input', onPromptEdit);
+
+// 모바일 헤더 자동 접힘 + 클릭 토글
+if (window.innerWidth < 768) {
+  const hdr = document.querySelector('header');
+  hdr.addEventListener('animationend', () => {
+    hdr.classList.add('collapsed');
+    document.body.classList.add('header-collapsed');
+  });
+  hdr.addEventListener('click', e => {
+    if (e.target.closest('select')) return;  // mode select 클릭은 무시
+    if (hdr.classList.contains('collapsed')) {
+      hdr.classList.remove('collapsed');
+      hdr.classList.add('expanded');
+      document.body.classList.remove('header-collapsed');
+    } else {
+      hdr.classList.remove('expanded');
+      hdr.classList.add('collapsed');
+      document.body.classList.add('header-collapsed');
+    }
+  });
+}
 
 connect();

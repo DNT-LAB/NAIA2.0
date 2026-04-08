@@ -255,35 +255,21 @@ class RemoteBridge(QObject):
         self.app_context.session_cond_override = session["cond_override"]
         return session.get("params_override")
 
-    def _apply_session_wc_solo(self) -> bool | None:
-        """Shared Mode: 세션의 WC Solo 값을 UI 체크박스에 임시 주입. 원래 값 반환 (복원용)."""
-        if not (self.shared_server_mode and self._current_request_ws and self._ws_manager):
+    def _get_session_settings_override(self, ws=None) -> dict | None:
+        """Shared Mode: 세션의 옵션 오버라이드를 settings dict로 반환 (UI 미변경)."""
+        target_ws = ws or self._current_request_ws
+        if not (self.shared_server_mode and target_ws and self._ws_manager):
             return None
-        session = self._ws_manager.sessions.get(self._current_request_ws)
+        session = self._ws_manager.sessions.get(target_ws)
         if not session:
             return None
-        session_wc = session.get("options", {}).get("wildcard_standalone")
-        if session_wc is None:
+        opts = session.get("options", {})
+        if not opts:
             return None
-        cb = self.app_context.main_window.generation_checkboxes.get("와일드카드 단독 모드")
-        if not cb:
-            return None
-        saved = cb.isChecked()
-        if saved != session_wc:
-            cb.blockSignals(True)
-            cb.setChecked(session_wc)
-            cb.blockSignals(False)
-        return saved
-
-    def _restore_wc_solo(self, saved: bool | None):
-        """_apply_session_wc_solo의 복원."""
-        if saved is None:
-            return
-        cb = self.app_context.main_window.generation_checkboxes.get("와일드카드 단독 모��")
-        if cb and cb.isChecked() != saved:
-            cb.blockSignals(True)
-            cb.setChecked(saved)
-            cb.blockSignals(False)
+        override = {}
+        if "wildcard_standalone" in opts:
+            override["wildcard_standalone"] = opts["wildcard_standalone"]
+        return override if override else None
 
     def _get_session_negative(self) -> str | None:
         """Shared Mode: 현재 요청 세션의 negative prompt 반환."""
@@ -294,7 +280,6 @@ class RemoteBridge(QObject):
 
     def _do_generate(self, prompt: str, negative: str):
         """현재 UI 파라미터로 생성 트리거. prompt가 있으면 먼저 반영"""
-        wc_saved = None
         try:
             gc = self.app_context.main_window.generation_controller
             if gc.is_generating:
@@ -305,7 +290,6 @@ class RemoteBridge(QObject):
             # Shared Mode: 세션 오버라이드 주입
             session_overrides = self._inject_session_overrides()
             session_neg = self._get_session_negative()
-            wc_saved = self._apply_session_wc_solo()
             if session_neg is not None:
                 negative = session_neg
 
@@ -324,23 +308,21 @@ class RemoteBridge(QObject):
             print("🌐 Remote: 생성 트리거됨")
         except Exception as e:
             print(f"🌐 Remote: 생성 트리거 실패 — {e}")
-        finally:
-            self._restore_wc_solo(wc_saved)
 
     def _do_random(self):
         """랜덤 프롬프트 생성. auto_generate ON이면 prompt_generated 이벤트에서 자동 트리거"""
-        wc_saved = None
         try:
             requesting_ws = self._current_request_ws
             # Shared Mode: 세션 오버라이드 주입 (프롬프트 생성 파이프라인에 적용)
             params_override = self._inject_session_overrides()
             session_neg = self._get_session_negative()
-            wc_saved = self._apply_session_wc_solo()
+            settings_override = self._get_session_settings_override()
             # WS별 pending 저장 (다른 클라이언트의 pending과 충돌 방지)
             if requesting_ws:
                 self._pending_overrides[requesting_ws] = {
                     "params": params_override,
                     "negative": session_neg,
+                    "settings_override": settings_override,
                 }
 
             mw = self.app_context.main_window
@@ -350,12 +332,10 @@ class RemoteBridge(QObject):
                 self._auto_generate_pending_ws = requesting_ws
 
             self._prompt_source = "random"
-            mw.trigger_random_prompt()
+            mw.trigger_random_prompt(settings_override=settings_override)
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
             print(f"🌐 Remote: 랜덤 프롬프트 생성 실패 — {e}")
-        finally:
-            self._restore_wc_solo(wc_saved)
 
     # --- 옵션 동기화 (Qt 메인 스레드에서 실행) ---
 
@@ -2299,19 +2279,11 @@ class RemoteBridge(QObject):
                     self._syncing_prompt = True
                     self.app_context.main_window.negative_prompt_textedit.setPlainText(pending_neg)
                     self._syncing_prompt = False
-                # Shared Mode: WC Solo 임시 주입 (execute_generation_pipeline이 UI 체크박스 읽음)
-                prev_ws = self._current_request_ws
-                self._current_request_ws = pending_ws
-                wc_saved = self._apply_session_wc_solo()
-                self._current_request_ws = prev_ws
                 gc = self.app_context.main_window.generation_controller
-                try:
-                    if not gc.is_generating:
-                        gc.execute_generation_pipeline(overrides=pending_params, priority=0)
-                        self._broadcast_json({"type": "status", "is_generating": True})
-                        print("🌐 Remote: 자동생성 트리거됨")
-                finally:
-                    self._restore_wc_solo(wc_saved)
+                if not gc.is_generating:
+                    gc.execute_generation_pipeline(overrides=pending_params, priority=0)
+                    self._broadcast_json({"type": "status", "is_generating": True})
+                    print("🌐 Remote: 자동생성 트리거됨")
 
             if not self._has_clients():
                 return

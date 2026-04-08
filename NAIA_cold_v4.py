@@ -4833,8 +4833,11 @@ class ModernMainWindow(QMainWindow):
         # 컨트롤러에 즉시 생성을 요청
         self.prompt_gen_controller.generate_instant_source(tags_dict, settings)
 
-    def trigger_random_prompt(self):
-        """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작"""
+    def trigger_random_prompt(self, settings_override: dict = None):
+        """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작
+        Args:
+            settings_override: UI 체크박스 대신 사용할 설정값 (Shared Mode 세션별 오버라이드)
+        """
         self.random_prompt_btn.setEnabled(False)
         # 분리된 버튼도 비활성화
         if hasattr(self, 'detached_random_btn'):
@@ -4860,6 +4863,8 @@ class ModernMainWindow(QMainWindow):
             'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
             'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
+        if settings_override:
+            settings.update(settings_override)
         self.app_context.publish("random_prompt_triggered")
 
         # 소진 시 스냅샷에서 자동 복원

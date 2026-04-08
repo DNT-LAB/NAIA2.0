@@ -8,9 +8,10 @@ from .theme import DARK_COLORS, DARK_STYLES
 
 class ResolutionManagerDialog(QDialog):
     """해상도 목록을 관리하는 전용 다이얼로그 위젯"""
-    def __init__(self, current_resolutions, parent=None):
+    def __init__(self, current_resolutions, default_resolutions, parent=None):
         super().__init__(parent)
         self.main_window = parent
+        self._default_resolutions = list(default_resolutions)
         self.setWindowTitle("랜덤 해상도 설정")
         self.setMinimumSize(450, 500)
         self.setStyleSheet(f"background-color: {DARK_COLORS['bg_primary']}; color: {DARK_COLORS['text_primary']};")
@@ -49,10 +50,19 @@ class ResolutionManagerDialog(QDialog):
         self.res_list_widget.setStyleSheet(DARK_STYLES['compact_textedit'])
         list_layout.addWidget(self.res_list_widget)
         
+        list_btn_layout = QVBoxLayout()
         remove_button = QPushButton("선택 항목 제거")
         remove_button.setStyleSheet(DARK_STYLES['secondary_button'])
         remove_button.clicked.connect(self.remove_selected_resolution)
-        list_layout.addWidget(remove_button)
+        list_btn_layout.addWidget(remove_button)
+        list_btn_layout.addStretch()
+
+        restore_button = QPushButton("초기 상태 복원")
+        restore_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        restore_button.clicked.connect(self.restore_default_resolutions)
+        list_btn_layout.addWidget(restore_button)
+
+        list_layout.addLayout(list_btn_layout)
         list_group.setLayout(list_layout)
         main_layout.addWidget(list_group)
 
@@ -150,6 +160,11 @@ class ResolutionManagerDialog(QDialog):
 
         except ValueError:
             QMessageBox.warning(self, "입력 오류", "너비와 높이에 유효한 숫자를 입력하세요.")
+
+    def restore_default_resolutions(self):
+        """목록을 기본 해상도로 복원"""
+        self.res_list_widget.clear()
+        self.res_list_widget.addItems(self._default_resolutions)
 
     def remove_selected_resolution(self):
         selected_items = self.res_list_widget.selectedItems()

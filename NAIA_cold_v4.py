@@ -858,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 167b"
+        self.base_title = "NAIA v2.0.0 Dev 167c"
         self.setWindowTitle(self.base_title + " - 260408")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -5417,7 +5417,11 @@ class ModernMainWindow(QMainWindow):
 
     def open_resolution_manager(self):
         """해상도 관리 다이얼로그를 열고, 결과를 반영합니다."""
-        dialog = ResolutionManagerDialog(self.resolutions, self)
+        default_resolutions = [
+            "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
+            "1088 x 960", "1152 x 896", "1216 x 832"
+        ]
+        dialog = ResolutionManagerDialog(self.resolutions, default_resolutions, self)
 
         # print(f"[DEBUG] 해상도 관리 다이얼로그 열림")
         dialog_result = dialog.exec()

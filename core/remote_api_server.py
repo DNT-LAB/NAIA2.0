@@ -59,6 +59,7 @@ class WebSocketManager:
             bridge._pending_overrides.pop(ws, None)
             if bridge._auto_generate_pending_ws is ws:
                 bridge._auto_generate_pending_ws = None
+                bridge._auto_generate_pending = False
         print(f"🌐 Remote client disconnected (session={sid}, total: {len(self.active_connections)})")
 
     async def broadcast_image(self, webp_bytes: bytes, metadata: dict):
@@ -2293,11 +2294,19 @@ class RemoteBridge(QObject):
                     self._syncing_prompt = True
                     self.app_context.main_window.negative_prompt_textedit.setPlainText(pending_neg)
                     self._syncing_prompt = False
+                # Shared Mode: WC Solo 임시 주입 (execute_generation_pipeline이 UI 체크박스 읽음)
+                prev_ws = self._current_request_ws
+                self._current_request_ws = pending_ws
+                wc_saved = self._apply_session_wc_solo()
+                self._current_request_ws = prev_ws
                 gc = self.app_context.main_window.generation_controller
-                if not gc.is_generating:
-                    gc.execute_generation_pipeline(overrides=pending_params, priority=0)
-                    self._broadcast_json({"type": "status", "is_generating": True})
-                    print("🌐 Remote: 자동생성 트리거됨")
+                try:
+                    if not gc.is_generating:
+                        gc.execute_generation_pipeline(overrides=pending_params, priority=0)
+                        self._broadcast_json({"type": "status", "is_generating": True})
+                        print("🌐 Remote: 자동생성 트리거됨")
+                finally:
+                    self._restore_wc_solo(wc_saved)
 
             if not self._has_clients():
                 return
@@ -2743,6 +2752,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "type": "tag_lookup_result", **info,
                             }))
                         elif cmd_type == "history_action":
+                            bridge._current_request_ws = ws
                             bridge.request_history_action.emit(json.dumps(cmd))
                         elif cmd_type == "generate":
                             # 프롬프트 포함 생성 요청

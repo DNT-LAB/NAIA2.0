@@ -269,16 +269,21 @@ class RemoteBridge(QObject):
         if not cb:
             return None
         saved = cb.isChecked()
-        cb.setChecked(session_wc)
+        if saved != session_wc:
+            cb.blockSignals(True)
+            cb.setChecked(session_wc)
+            cb.blockSignals(False)
         return saved
 
     def _restore_wc_solo(self, saved: bool | None):
         """_apply_session_wc_solo의 복원."""
         if saved is None:
             return
-        cb = self.app_context.main_window.generation_checkboxes.get("와일드카드 단독 모드")
-        if cb:
+        cb = self.app_context.main_window.generation_checkboxes.get("와일드카드 단독 모��")
+        if cb and cb.isChecked() != saved:
+            cb.blockSignals(True)
             cb.setChecked(saved)
+            cb.blockSignals(False)
 
     def _get_session_negative(self) -> str | None:
         """Shared Mode: 현재 요청 세션의 negative prompt 반환."""

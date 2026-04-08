@@ -1816,7 +1816,7 @@ class RemoteBridge(QObject):
                 print(f"🌐 Remote: tag index 로드 실패 — {e}")
 
     def _load_char_analysis(self):
-        """character_analysis.json → 역인덱스 구축 (char_name_lower → (copyright, data))"""
+        """character_analysis.json → 역인덱스 구축 + _kr_tags_raw 누락 캐릭터 보강"""
         if self._char_analysis:
             return
         try:
@@ -1827,15 +1827,43 @@ class RemoteBridge(QObject):
             with open(analysis_path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
             idx = {}
+            backfill_count = 0
+            alias_count = 0
             for group_key, chars in raw.items():
                 for char_name, data in chars.items():
                     cl = char_name.lower()
+                    total = data.get("total_rows", 0)
                     # 동명 캐릭터 → total_rows 높은 쪽 우선
-                    if cl in idx and idx[cl][1].get("total_rows", 0) >= data.get("total_rows", 0):
+                    if cl in idx and idx[cl][1].get("total_rows", 0) >= total:
                         continue
                     idx[cl] = (group_key, data)
+                    # _kr_tags_raw에 없는 캐릭터 → character로 역등록
+                    if self._kr_tags_raw and cl not in self._kr_tags_raw:
+                        self._kr_tags_raw[cl] = {
+                            '_tag': char_name, '_src': 14, '_cat': 'character',
+                            'freq': total, 'description': '',
+                            'group': 'character', 'subgroup': group_key,
+                            'keywords_kr': '', '_kw_lower': '', '_desc_lower': '',
+                        }
+                        backfill_count += 1
+                    # 괄호 포함 이름 → base name(괄호 제거)도 역인덱스에 등록
+                    if '(' in char_name:
+                        base = char_name.split('(')[0].strip().lower()
+                        if base and base != cl:
+                            if base not in idx or idx[base][1].get("total_rows", 0) < total:
+                                idx[base] = (group_key, data)
+                                alias_count += 1
+                                # base name도 _kr_tags_raw에 등록
+                                if self._kr_tags_raw and base not in self._kr_tags_raw:
+                                    self._kr_tags_raw[base] = {
+                                        '_tag': char_name.split('(')[0].strip(),
+                                        '_src': 14, '_cat': 'character',
+                                        'freq': total, 'description': '',
+                                        'group': 'character', 'subgroup': group_key,
+                                        'keywords_kr': '', '_kw_lower': '', '_desc_lower': '',
+                                    }
             self._char_analysis = idx
-            print(f"🌐 Remote: character_analysis — {len(idx)} characters indexed")
+            print(f"🌐 Remote: character_analysis — {len(idx)} indexed, {backfill_count} backfilled to tags, {alias_count} base-name aliases")
         except Exception as e:
             print(f"🌐 Remote: character_analysis 로드 실패 — {e}")
 

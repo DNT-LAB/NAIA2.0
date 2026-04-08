@@ -1131,6 +1131,12 @@ class GenerationController:
         # 🆕 안전장치: 지연 실행으로 이벤트 루프에서 안전하게 처리
         QTimer.singleShot(100, _safe_cleanup)
 
+        # Shared Server Mode 세션 오버라이드 안전망 (cancel 등으로 finished/error 콜백 누락 시)
+        if getattr(self.context, 'session_p_eng_override', None) is not None:
+            self.context.session_p_eng_override = None
+        if getattr(self.context, 'session_cond_override', None) is not None:
+            self.context.session_cond_override = None
+
         # 스레드 종료 시점에서만 is_generating을 False로 전환하고 다음 작업을 결정
         try:
             self.is_generating = False

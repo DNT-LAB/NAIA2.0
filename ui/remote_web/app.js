@@ -137,6 +137,7 @@ function updatePromptOnly(prompt, source) {
   // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
   if (source === 'random' && awaitingMyRandom) {
     awaitingMyRandom = false;
+    if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
     syncingPrompt = true;
     promptEdit.value = prompt;
     syncingPrompt = false;
@@ -686,6 +687,14 @@ function send(cmd) {
   if (cmd === 'random') {
     btnRnd.disabled = true;
     awaitingMyRandom = true;
+    // 타임아웃 안전망: 10초 내 응답 없으면 복원
+    if (window._randomTimeout) clearTimeout(window._randomTimeout);
+    window._randomTimeout = setTimeout(() => {
+      if (awaitingMyRandom) {
+        awaitingMyRandom = false;
+        btnRnd.disabled = false;
+      }
+    }, 10000);
   }
   ws.send(cmd);
 }
@@ -731,6 +740,7 @@ function startProgress() {
   const bar2 = $('genProgressBar2');
   const wrap = $('genProgress');
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  if (window._progressFinishTimeout) { clearTimeout(window._progressFinishTimeout); window._progressFinishTimeout = null; }
   bar.style.transition = 'none'; bar.style.width = '0%';
   bar2.style.transition = 'none'; bar2.style.width = '0%';
   void bar.offsetWidth;
@@ -756,13 +766,15 @@ function startProgress() {
 
 function finishProgress() {
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  if (window._progressFinishTimeout) { clearTimeout(window._progressFinishTimeout); window._progressFinishTimeout = null; }
   const bar = $('genProgressBar');
   const bar2 = $('genProgressBar2');
   const wrap = $('genProgress');
   bar.style.transition = 'width 0.2s ease-out';
   bar2.style.transition = 'width 0.2s ease-out';
   bar.style.width = '100%';
-  setTimeout(() => {
+  window._progressFinishTimeout = setTimeout(() => {
+    window._progressFinishTimeout = null;
     wrap.classList.remove('active');
     bar.style.width = '0%';
     bar2.style.width = '0%';

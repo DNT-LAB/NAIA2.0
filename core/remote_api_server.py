@@ -32,6 +32,7 @@ class WebSocketManager:
         self.active_connections: set[WebSocket] = set()
         self._send_lock = asyncio.Lock()
         self.sessions: dict[WebSocket, dict] = {}
+        self._bridge_ref = None  # RemoteBridge 역참조 (disconnect 시 pending 정리용)
 
     async def connect(self, ws: WebSocket) -> str:
         await ws.accept()
@@ -50,6 +51,14 @@ class WebSocketManager:
         self.active_connections.discard(ws)
         session = self.sessions.pop(ws, None)
         sid = session["id"] if session else "?"
+        # 연결 해제된 WS에 대한 bridge 참조 무효화
+        if self._bridge_ref:
+            bridge = self._bridge_ref
+            if bridge._current_request_ws is ws:
+                bridge._current_request_ws = None
+            bridge._pending_overrides.pop(ws, None)
+            if bridge._auto_generate_pending_ws is ws:
+                bridge._auto_generate_pending_ws = None
         print(f"🌐 Remote client disconnected (session={sid}, total: {len(self.active_connections)})")
 
     async def broadcast_image(self, webp_bytes: bytes, metadata: dict):
@@ -126,6 +135,7 @@ class RemoteBridge(QObject):
         self.latest_webp: Optional[bytes] = None
         self.latest_metadata: Optional[dict] = None
         self._image_history: list = []  # [{webp, metadata, gen_params, source_row, prompt_context}, ...] 최대 200장
+        self._history_lock = threading.Lock()  # _image_history 동시 접근 보호
         self._ws_manager: Optional[WebSocketManager] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._syncing_option = False
@@ -134,8 +144,8 @@ class RemoteBridge(QObject):
         self._prompt_debounce_timer: Optional[QTimer] = None
         self._params_debounce_timer: Optional[QTimer] = None
         self._auto_generate_pending = False  # prompt_generated 이벤트 기반 자동생성
-        self._pending_params_override = None  # Random→자동생성 시 세션 params_override
-        self._pending_negative = None  # Random→자동생성 시 세션 negative
+        self._pending_overrides: dict = {}  # {ws: {"params": ..., "negative": ...}} — WS별 pending
+        self._auto_generate_pending_ws = None  # 자동생성 요청한 WS 추적
         self._prompt_source = "random"  # "random" | "generate" — prompt_generated 이벤트 소스 구분
         # 캐시: FastAPI 스레드에서 Qt 위젯 직접 접근 방지
         self._cached_prompts: dict = {}
@@ -152,6 +162,7 @@ class RemoteBridge(QObject):
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
+        ws_manager._bridge_ref = self
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -284,14 +295,22 @@ class RemoteBridge(QObject):
     def _do_random(self):
         """랜덤 프롬프트 생성. auto_generate ON이면 prompt_generated 이벤트에서 자동 트리거"""
         try:
+            requesting_ws = self._current_request_ws
             # Shared Mode: 세션 오버라이드 주입 (프롬프트 생성 파이프라인에 적용)
-            self._pending_params_override = self._inject_session_overrides()
-            self._pending_negative = self._get_session_negative()
+            params_override = self._inject_session_overrides()
+            session_neg = self._get_session_negative()
+            # WS별 pending 저장 (다른 클라이언트의 pending과 충돌 방지)
+            if requesting_ws:
+                self._pending_overrides[requesting_ws] = {
+                    "params": params_override,
+                    "negative": session_neg,
+                }
 
             mw = self.app_context.main_window
             auto_gen = mw.generation_checkboxes.get("자동 생성")
             if auto_gen and auto_gen.isChecked():
                 self._auto_generate_pending = True
+                self._auto_generate_pending_ws = requesting_ws
 
             self._prompt_source = "random"
             mw.trigger_random_prompt()
@@ -2230,18 +2249,22 @@ class RemoteBridge(QObject):
             # 자동생성 대기 중이면 이미지 생성 트리거
             if self._auto_generate_pending:
                 self._auto_generate_pending = False
+                # WS별 pending에서 해당 클라이언트의 오버라이드 꺼내기
+                pending_ws = self._auto_generate_pending_ws
+                self._auto_generate_pending_ws = None
+                pending = self._pending_overrides.pop(pending_ws, {}) if pending_ws else {}
+                pending_neg = pending.get("negative")
+                pending_params = pending.get("params")
                 # Shared Mode: pending negative 반영
-                if self._pending_negative is not None:
+                if pending_neg is not None:
                     self._syncing_prompt = True
-                    self.app_context.main_window.negative_prompt_textedit.setPlainText(self._pending_negative)
+                    self.app_context.main_window.negative_prompt_textedit.setPlainText(pending_neg)
                     self._syncing_prompt = False
-                    self._pending_negative = None
                 gc = self.app_context.main_window.generation_controller
                 if not gc.is_generating:
-                    gc.execute_generation_pipeline(overrides=self._pending_params_override, priority=0)
+                    gc.execute_generation_pipeline(overrides=pending_params, priority=0)
                     self._broadcast_json({"type": "status", "is_generating": True})
                     print("🌐 Remote: 자동생성 트리거됨")
-                self._pending_params_override = None
 
             if not self._has_clients():
                 return
@@ -2267,6 +2290,7 @@ class RemoteBridge(QObject):
                         )
         except Exception as e:
             self._auto_generate_pending = False
+            self._auto_generate_pending_ws = None
             print(f"🌐 Remote: 프롬프트 전송 실패 — {e}")
 
     def _handle_history_action(self, action_json: str):
@@ -2276,11 +2300,11 @@ class RemoteBridge(QObject):
             action = cmd.get("action", "")
             index = cmd.get("index", -1)
 
-            if index < 0 or index >= len(self._image_history):
-                self._broadcast_json({"type": "toast", "message": "History item not found", "level": "error"})
-                return
-
-            entry = self._image_history[index]
+            with self._history_lock:
+                if index < 0 or index >= len(self._image_history):
+                    self._broadcast_json({"type": "toast", "message": "History item not found", "level": "error"})
+                    return
+                entry = self._image_history[index]
 
             if action == "load_prompt":
                 # 원본 프롬프트를 웹 UI에 로드
@@ -2413,9 +2437,10 @@ class RemoteBridge(QObject):
             # 항상 캐시 (클라이언트 없어도 다음 접속 시 전송 가능)
             self.latest_webp = webp_bytes
             self.latest_metadata = metadata
-            self._image_history.append(hist_entry)
-            if len(self._image_history) > 200:
-                self._image_history.pop(0)
+            with self._history_lock:
+                self._image_history.append(hist_entry)
+                if len(self._image_history) > 200:
+                    self._image_history.pop(0)
 
             if not self._has_clients():
                 return
@@ -2512,7 +2537,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 "shared_server_mode": bridge.shared_server_mode,
             }))
             # 연결 시 히스토리 전체 전송 (새로고침 복원)
-            for entry in bridge._image_history:
+            with bridge._history_lock:
+                history_snapshot = list(bridge._image_history)
+            for entry in history_snapshot:
                 hist_meta = entry["metadata"]
                 has_gen = bool(entry.get("gen_params"))
                 has_src = entry.get("source_row") is not None

@@ -44,6 +44,10 @@ class WebSocketManager:
             "p_eng_override": None,
             "negative_prompt": None,
             "params_override": None,
+            "tag_filter": None,
+            "tag_filter_pending": None,
+            "active_ratings": None,
+            "eligible_ids": None,
         }
         print(f"🌐 Remote client connected (session={session_id}, total: {len(self.active_connections)})")
         return session_id
@@ -55,12 +59,7 @@ class WebSocketManager:
         # 연결 해제된 WS에 대한 bridge 참조 무효화
         if self._bridge_ref:
             bridge = self._bridge_ref
-            if bridge._current_request_ws is ws:
-                bridge._current_request_ws = None
             bridge._pending_overrides.pop(ws, None)
-            if bridge._auto_generate_pending_ws is ws:
-                bridge._auto_generate_pending_ws = None
-                bridge._auto_generate_pending = False
         print(f"🌐 Remote client disconnected (session={sid}, total: {len(self.active_connections)})")
 
     async def broadcast_image(self, webp_bytes: bytes, metadata: dict):
@@ -96,6 +95,13 @@ class WebSocketManager:
                     dead.add(ws)
             self.active_connections -= dead
 
+    async def send_json_to(self, ws: WebSocket, data: dict):
+        """특정 클라이언트에만 JSON 전송."""
+        try:
+            await ws.send_text(json.dumps(data))
+        except Exception:
+            self.active_connections.discard(ws)
+
 
 # ---------------------------------------------------------------------------
 # Remote Bridge (Qt ↔ FastAPI 스레드 간 브릿지)
@@ -107,21 +113,21 @@ class RemoteBridge(QObject):
     - Qt 메인 스레드에서 emit → asyncio loop로 전달
     """
     # FastAPI → Qt 메인 스레드
-    request_generate = pyqtSignal(str, str)      # (prompt, negative) — 빈 문자열이면 현재 UI 사용
-    request_random = pyqtSignal()
+    request_generate = pyqtSignal()               # deque에서 pop
+    request_random = pyqtSignal()                  # deque에서 pop
     request_set_option = pyqtSignal(str, bool)   # (option_key, checked)
     request_set_prompt = pyqtSignal(str, str)     # (prompt, negative_prompt)
     request_set_mode = pyqtSignal(str)            # API 모드 변경 (NAI/WEBUI/COMFYUI)
     request_set_api_url = pyqtSignal(str, str)    # (mode, url) — WebUI/ComfyUI URL 설정
     request_test_api = pyqtSignal(str)            # mode — API 연결 테스트
     request_set_param = pyqtSignal(str, str)      # (key, value) — 생성 파라미터 변경
-    request_get_module = pyqtSignal(str)           # module_id — 모듈 상태 요청
+    request_get_module = pyqtSignal(object, str)    # (ws, module_id) — 모듈 상태 요청
     request_set_module = pyqtSignal(str, str, str) # (module_id, key, value) — 모듈 파라미터 변경
     request_search = pyqtSignal(str)               # search_params JSON
     request_load_parquet = pyqtSignal(str)          # filename
     request_depth_action = pyqtSignal(str)          # depth search action JSON
     request_restore_snapshot = pyqtSignal()          # 메인 검색 결과 스냅샷 복원
-    request_history_action = pyqtSignal(str)          # history action JSON (enqueue/reroll/load_prompt)
+    request_history_action = pyqtSignal(object, str)   # (ws, action_json)
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
@@ -145,10 +151,11 @@ class RemoteBridge(QObject):
         self._syncing_param = False
         self._prompt_debounce_timer: Optional[QTimer] = None
         self._params_debounce_timer: Optional[QTimer] = None
-        self._auto_generate_pending = False  # prompt_generated 이벤트 기반 자동생성
-        self._pending_overrides: dict = {}  # {ws: {"params": ..., "negative": ...}} — WS별 pending
-        self._auto_generate_pending_ws = None  # 자동생성 요청한 WS 추적
-        self._prompt_source = "random"  # "random" | "generate" — prompt_generated 이벤트 소스 구분
+        self._pending_overrides: dict = {}  # {ws: {"params": ..., "negative": ..., "source": ..., "auto_generate": bool}}
+        # Request queues: WS handler(asyncio)에서 준비 → Qt slot에서 소비. deque는 GIL 하 thread-safe.
+        from collections import deque
+        self._pending_random_requests: deque = deque()
+        self._pending_generate_requests: deque = deque()
         # 캐시: FastAPI 스레드에서 Qt 위젯 직접 접근 방지
         self._cached_prompts: dict = {}
         self._cached_params: dict = {}
@@ -156,13 +163,14 @@ class RemoteBridge(QObject):
         self._cached_api_status: dict = {}
         # Shared Server Mode: 클라이언트별 독립 P.Eng/Params/Negative
         self.shared_server_mode = False
-        self._current_request_ws: Optional[WebSocket] = None  # 현재 요청 처리 중인 WS
         # 태그 검색 인덱스 (ui/interactive/interactive 기반)
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
         self._kr_tags_lock = threading.Lock()
         self._kr_tags_loaded = False
         # 캐릭터 분석 역인덱스: char_name_lower → (copyright_group, data_dict)
         self._char_analysis: dict = {}
+        # Rating 필터: Web Remote GSQE 버튼 상태
+        self._active_ratings: set = {'q', 'e'}
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -173,6 +181,42 @@ class RemoteBridge(QObject):
 
     def _has_clients(self) -> bool:
         return bool(self._ws_manager and self._ws_manager.active_connections)
+
+    def _send_json_to(self, ws, data: dict):
+        """특정 WS 클라이언트에만 JSON 전송 (Qt 메인 스레드에서 호출)."""
+        if self._loop and self._ws_manager and ws:
+            import json as _json
+            asyncio.run_coroutine_threadsafe(
+                self._ws_manager.send_json_to(ws, data),
+                self._loop
+            )
+
+    def _recompute_eligible_ids(self, session: dict):
+        """세션의 active_ratings + tag_filter 기반으로 eligible ID 벡터 재계산."""
+        mw = self.app_context.main_window
+        snapshot = getattr(mw, '_search_results_snapshot', None)
+        if snapshot is None or snapshot.empty:
+            if mw.search_results:
+                snapshot = mw.search_results.get_dataframe()
+        if snapshot is None or snapshot.empty:
+            session["eligible_ids"] = None
+            return
+
+        mask = None
+        # Rating 필터
+        ratings = session.get("active_ratings")
+        if ratings and 'rating' in snapshot.columns:
+            mask = snapshot["rating"].isin(ratings)
+        # Tag filter 교집합
+        tag_filter = session.get("tag_filter")
+        if tag_filter and tag_filter.get("ids"):
+            id_mask = snapshot["id"].isin(tag_filter["ids"])
+            mask = (mask & id_mask) if mask is not None else id_mask
+
+        if mask is not None:
+            session["eligible_ids"] = set(snapshot.loc[mask, "id"].tolist())
+        else:
+            session["eligible_ids"] = set(snapshot["id"].tolist())
 
     def _is_cloudflared_active(self) -> bool:
         """Cloudflared 터널이 활성인지 확인"""
@@ -216,11 +260,11 @@ class RemoteBridge(QObject):
 
     # --- Qt 메인 스레드에서 실행되는 슬롯 ---
 
-    def _inject_session_overrides(self) -> dict | None:
-        """Shared Mode: 현재 요청 세션의 P.Eng/Cond 오버라이드를 app_context에 주입. params_override 반환."""
-        if not (self.shared_server_mode and self._current_request_ws and self._ws_manager):
+    def _inject_session_overrides(self, ws=None) -> dict | None:
+        """Shared Mode: 요청 세션의 P.Eng/Cond 오버라이드를 app_context에 주입. params_override 반환."""
+        if not (self.shared_server_mode and ws and self._ws_manager):
             return None
-        session = self._ws_manager.sessions.get(self._current_request_ws)
+        session = self._ws_manager.sessions.get(ws)
         if not session:
             return None
         # P.Eng: 세션 값 없으면 1회 초기화 (Copy → 데스크톱 복사, 아니면 빈 값)
@@ -260,10 +304,9 @@ class RemoteBridge(QObject):
 
     def _get_session_settings_override(self, ws=None) -> dict | None:
         """Shared Mode: 세션의 옵션 오버라이드를 settings dict로 반환 (UI 미변경)."""
-        target_ws = ws or self._current_request_ws
-        if not (self.shared_server_mode and target_ws and self._ws_manager):
+        if not (self.shared_server_mode and ws and self._ws_manager):
             return None
-        session = self._ws_manager.sessions.get(target_ws)
+        session = self._ws_manager.sessions.get(ws)
         if not session:
             return None
         opts = session.get("options", {})
@@ -274,35 +317,42 @@ class RemoteBridge(QObject):
             override["wildcard_standalone"] = opts["wildcard_standalone"]
         return override if override else None
 
-    def _get_session_negative(self) -> str | None:
-        """Shared Mode: 현재 요청 세션의 negative prompt 반환."""
-        if not (self.shared_server_mode and self._current_request_ws and self._ws_manager):
+    def _get_session_negative(self, ws=None) -> str | None:
+        """Shared Mode: 요청 세션의 negative prompt 반환."""
+        if not (self.shared_server_mode and ws and self._ws_manager):
             return None
-        session = self._ws_manager.sessions.get(self._current_request_ws)
+        session = self._ws_manager.sessions.get(ws)
         return session.get("negative_prompt") if session else None
 
-    def _do_generate(self, prompt: str, negative: str):
-        """현재 UI 파라미터로 생성 트리거. prompt가 있으면 먼저 반영"""
+    def _do_generate(self):
+        """Generate 요청 처리. deque에서 준비된 데이터를 pop하여 실행."""
+        if not self._pending_generate_requests:
+            return
+        req = self._pending_generate_requests.popleft()
         try:
+            ws = req.get("ws")
+            prompt = req.get("prompt", "")
+            negative = req.get("negative", "")
+
             gc = self.app_context.main_window.generation_controller
             if gc.is_generating:
                 print("🌐 Remote: 이미 생성 중 — 무시")
-                self._broadcast_json({"type": "status", "is_generating": True, "message": "already_generating"})
+                self._send_json_to(ws, {"type": "status", "is_generating": True, "message": "already_generating"})
                 return
 
-            # Shared Mode: 세션 오버라이드 주입
-            session_overrides = self._inject_session_overrides()
-            session_neg = self._get_session_negative()
+            # Shared Mode: 세션 오버라이드 주입 (Qt main thread에서 실행 — 위젯 접근 안전)
+            session_overrides = self._inject_session_overrides(ws)
+            session_neg = self._get_session_negative(ws)
             if session_neg is not None:
                 negative = session_neg
 
-            # 세션 overrides에 seed가 있지만 seed_fixed가 아니면 → 랜덤 시드로 교체
+            # seed_fixed가 아니면 → 랜덤 시드
             if session_overrides and "seed" in session_overrides:
                 if session_overrides.get("seed_fixed") != "true":
                     session_overrides["seed"] = str(random.randint(0, 9999999999))
 
-            # 웹에서 보낸 프롬프트가 있으면 즉시 반영 (디바운스 대기 없이)
-            if prompt or negative:
+            # Non-Shared: 웹 프롬프트를 UI에 반영
+            if (prompt or negative) and not self.shared_server_mode:
                 self._syncing_prompt = True
                 mw = self.app_context.main_window
                 if prompt:
@@ -310,40 +360,142 @@ class RemoteBridge(QObject):
                 if negative:
                     mw.negative_prompt_textedit.setPlainText(negative)
                 self._syncing_prompt = False
-            self._prompt_source = "generate"
+
+            # pending overrides에 source 기록 (on_prompt_generated에서 사용)
+            if ws is not None:
+                self._pending_overrides[ws] = {"source": "generate"}
+
             gc.execute_generation_pipeline(overrides=session_overrides, priority=0)
             self._broadcast_json({"type": "status", "is_generating": True})
             print("🌐 Remote: 생성 트리거됨")
         except Exception as e:
+            if ws is not None:
+                self._pending_overrides.pop(ws, None)
             print(f"🌐 Remote: 생성 트리거 실패 — {e}")
 
     def _do_random(self):
-        """랜덤 프롬프트 생성. auto_generate ON이면 prompt_generated 이벤트에서 자동 트리거"""
+        """Random 요청 처리. deque에서 준비된 데이터를 pop하여 실행."""
+        if not self._pending_random_requests:
+            return
+        req = self._pending_random_requests.popleft()
         try:
-            requesting_ws = self._current_request_ws
-            # Shared Mode: 세션 오버라이드 주입 (프롬프트 생성 파이프라인에 적용)
-            params_override = self._inject_session_overrides()
-            session_neg = self._get_session_negative()
-            settings_override = self._get_session_settings_override()
-            # WS별 pending 저장 (다른 클라이언트의 pending과 충돌 방지)
-            if requesting_ws:
-                self._pending_overrides[requesting_ws] = {
+            ws = req.get("ws")
+            source_row = req.get("source_row")  # shared mode: 미리 선택됨 / non-shared: None
+            active_ratings = req.get("active_ratings", set(self._active_ratings))
+
+            # Shared Mode: 세션 오버라이드 주입 (Qt main thread — 위젯 접근 안전)
+            params_override = self._inject_session_overrides(ws)
+            session_neg = self._get_session_negative(ws)
+            settings_override = self._get_session_settings_override(ws)
+
+            # WS별 pending 저장 (on_prompt_generated에서 auto-generate용)
+            mw = self.app_context.main_window
+            auto_gen = mw.generation_checkboxes.get("자동 생성")
+            if ws:
+                self._pending_overrides[ws] = {
                     "params": params_override,
                     "negative": session_neg,
                     "settings_override": settings_override,
+                    "source": "random",
+                    "auto_generate": bool(auto_gen and auto_gen.isChecked()),
                 }
 
-            mw = self.app_context.main_window
-            auto_gen = mw.generation_checkboxes.get("자동 생성")
-            if auto_gen and auto_gen.isChecked():
-                self._auto_generate_pending = True
-                self._auto_generate_pending_ws = requesting_ws
+            # Non-shared + tag filter: 아직 row를 안 뽑았으면 여기서 처리
+            if source_row is None and not self.shared_server_mode and ws and self._ws_manager:
+                session = self._ws_manager.sessions.get(ws)
+                tag_filter = session.get("tag_filter") if session else None
+                if tag_filter and tag_filter.get("ids"):
+                    source_row = self._pick_from_tag_filter(tag_filter, active_ratings)
+                    if source_row is None:
+                        self._send_json_to(ws, {"type": "toast",
+                                                "message": "Tag filter: no matching rows",
+                                                "level": "error"})
+                        return
 
-            self._prompt_source = "random"
-            mw.trigger_random_prompt(settings_override=settings_override)
+            mw.trigger_random_prompt(settings_override=settings_override,
+                                     active_ratings=active_ratings,
+                                     source_row_override=source_row)
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
+            if ws is not None:
+                self._pending_overrides.pop(ws, None)
             print(f"🌐 Remote: 랜덤 프롬프트 생성 실패 — {e}")
+
+    # --- Tag Filter / Session ID Vector ---
+
+    def _pick_from_session(self, ws) -> object:
+        """세션의 eligible_ids에서 랜덤 1개 row 반환. asyncio.to_thread에서 호출."""
+        if not self._ws_manager:
+            return None
+        session = self._ws_manager.sessions.get(ws)
+        if not session:
+            return None
+        eligible_ids = session.get("eligible_ids")
+        if eligible_ids is not None:
+            return self._pick_from_snapshot(set(), filter_ids=eligible_ids)
+        # eligible_ids 미계산 시 ratings 기반 fallback
+        ratings = session.get("active_ratings") or self._active_ratings
+        tag_filter = session.get("tag_filter")
+        filter_ids = tag_filter["ids"] if (tag_filter and tag_filter.get("ids")) else None
+        return self._pick_from_snapshot(ratings, filter_ids=filter_ids)
+
+    def _pick_from_snapshot(self, active_ratings: set, filter_ids: set = None):
+        """snapshot에서 rating + (선택적) ID 필터 적용하여 랜덤 1개 반환.
+        search_results를 pop하지 않으므로 shared mode에서 안전."""
+        mw = self.app_context.main_window
+        snapshot = getattr(mw, '_search_results_snapshot', None)
+        if snapshot is None or snapshot.empty:
+            snapshot = mw.search_results.get_dataframe()
+        if snapshot.empty:
+            return None
+
+        mask = snapshot["rating"].isin(active_ratings) if (active_ratings and 'rating' in snapshot.columns) else None
+        if filter_ids is not None:
+            id_mask = snapshot["id"].isin(filter_ids)
+            mask = (mask & id_mask) if mask is not None else id_mask
+        if mask is not None:
+            eligible = snapshot[mask]
+        else:
+            eligible = snapshot
+        if eligible.empty:
+            return None
+        return eligible.sample(n=1).iloc[0].copy()
+
+    def _pick_from_tag_filter(self, tag_filter: dict, active_ratings: set):
+        """snapshot에서 tag_filter에 매칭되는 row 중 rating 필터 적용하여 랜덤 1개 반환"""
+        return self._pick_from_snapshot(active_ratings, filter_ids=tag_filter["ids"])
+
+    def _do_tag_filter_search(self, tags: list):
+        """snapshot에서 태그 AND 검색, 매칭 ID를 반환"""
+        import pandas as pd
+        mw = self.app_context.main_window
+        snapshot = getattr(mw, '_search_results_snapshot', None)
+        if snapshot is None or snapshot.empty:
+            snapshot = mw.search_results.get_dataframe()
+        if snapshot.empty:
+            return {"type": "tag_filter_result", "count": 0, "tags": tags, "rating_counts": {r: 0 for r in 'gsqe'}}
+
+        mask = pd.Series(True, index=snapshot.index)
+        for tag in tags:
+            tag_clean = tag.strip().replace("_", " ")
+            mask &= snapshot["general"].str.contains(tag_clean, case=False, na=False, regex=False)
+
+        matched = snapshot[mask]
+        matched_ids = set(matched["id"].tolist())
+
+        rating_counts = {r: 0 for r in 'gsqe'}
+        if 'rating' in matched.columns:
+            vc = matched['rating'].value_counts()
+            for r in 'gsqe':
+                rating_counts[r] = int(vc.get(r, 0))
+
+        return {
+            "type": "tag_filter_result",
+            "count": len(matched_ids),
+            "tags": tags,
+            "rating_counts": rating_counts,
+            "_ids": matched_ids,  # 내부용, WS 응답에서 제거
+        }
 
     # --- 옵션 동기화 (Qt 메인 스레드에서 실행) ---
 
@@ -549,8 +701,10 @@ class RemoteBridge(QObject):
         try:
             self._syncing_prompt = True
             mw = self.app_context.main_window
-            mw.main_prompt_textedit.setPlainText(prompt)
-            mw.negative_prompt_textedit.setPlainText(negative)
+            if not self.shared_server_mode:
+                mw.main_prompt_textedit.setPlainText(prompt)
+                mw.negative_prompt_textedit.setPlainText(negative)
+            # Shared Mode: 데스크톱 UI에 쓰지 않음 (세션별 격리)
             self._syncing_prompt = False
         except Exception as e:
             self._syncing_prompt = False
@@ -769,27 +923,30 @@ class RemoteBridge(QObject):
                 return module
         return None
 
-    def _do_get_module(self, module_id: str):
-        """모듈 상태 읽기 → 브로드캐스트"""
+    def _do_get_module(self, ws, module_id: str):
+        """모듈 상태 읽기 → 요청 클라이언트에 unicast"""
         if module_id == "__search__":
             state = self._read_search_state()
         elif module_id == "__depth__":
             state = self._read_depth_state()
         else:
-            state = self._read_module_state(module_id)
+            state = self._read_module_state(module_id, ws=ws)
         if state:
-            self._broadcast_json(state)
+            if ws:
+                self._send_json_to(ws, state)
+            else:
+                self._broadcast_json(state)
 
-    def _read_module_state(self, module_id: str) -> dict:
+    def _read_module_state(self, module_id: str, ws=None) -> dict:
         """모듈 상태 딕셔너리 반환"""
         if module_id == "prompt_engineering":
-            return self._read_prompt_engineering(ws=self._current_request_ws)
+            return self._read_prompt_engineering(ws=ws)
         elif module_id == "automation":
             return self._read_automation()
         elif module_id == "character":
             return self._read_character()
         elif module_id == "conditional_prompt":
-            return self._read_conditional_prompt(ws=self._current_request_ws)
+            return self._read_conditional_prompt(ws=ws)
         elif module_id == "character_reference":
             return self._read_character_reference()
         elif module_id == "vibe_transfer":
@@ -2056,9 +2213,18 @@ class RemoteBridge(QObject):
             parquets = []
             if custom_dir.exists():
                 parquets = sorted([f.name for f in custom_dir.glob("*.parquet")])
+            # Rating별 카운트 breakdown
+            rating_counts = {}
+            filtered_count = count
+            if mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
+                rating_counts = mw.search_results.get_count_by_rating()
+                filtered_count = mw.search_results.get_filtered_count(self._active_ratings)
             return {
                 "type": "search_state",
-                "count": count,
+                "count": filtered_count,
+                "total_count": count,
+                "rating_counts": rating_counts,
+                "active_ratings": list(self._active_ratings),
                 "query": query,
                 "exclude": exclude,
                 "ratings": ratings,
@@ -2084,7 +2250,12 @@ class RemoteBridge(QObject):
                 for k in ('e', 'q', 's', 'g'):
                     cb = mw.rating_checkboxes.get(k)
                     if cb:
-                        cb.setChecked(params.get(f"rating_{k}", True))
+                        # Remote: 항상 전체 rating 포함 검색 (소비 시점에 GSQE로 필터)
+                        cb.setChecked(True)
+            # active_ratings 갱신: 클라이언트가 보낸 rating 상태 반영
+            self._active_ratings = set(
+                k for k in 'gsqe' if params.get(f"rating_{k}", True)
+            )
             # 검색 실행
             mw.trigger_search()
         except Exception as e:
@@ -2343,44 +2514,61 @@ class RemoteBridge(QObject):
     def on_prompt_generated(self, prompt_context):
         """프롬프트 생성 완료 시 WebSocket 전송 + 자동생성 트리거"""
         try:
-            # 자동생성 대기 중이면 이미지 생성 트리거
-            if self._auto_generate_pending:
-                self._auto_generate_pending = False
-                # WS별 pending에서 해당 클라이언트의 오버라이드 꺼내기
-                pending_ws = self._auto_generate_pending_ws
-                self._auto_generate_pending_ws = None
-                pending = self._pending_overrides.pop(pending_ws, {}) if pending_ws else {}
+            # _pending_overrides에서 auto_generate=True인 항목 찾아 소비
+            auto_ws = None
+            for ws_key, pending in list(self._pending_overrides.items()):
+                if pending.get("auto_generate"):
+                    auto_ws = ws_key
+                    break
+
+            source = "random"  # 기본값 (메인 UI에서 직접 트리거 시)
+            if auto_ws:
+                pending = self._pending_overrides.pop(auto_ws, {})
+                source = pending.get("source", "random")
                 pending_neg = pending.get("negative")
                 pending_params = pending.get("params")
                 # seed_fixed가 아닌 경우 → 랜덤 시드로 교체
                 if pending_params and "seed" in pending_params:
                     if pending_params.get("seed_fixed") != "true":
                         pending_params["seed"] = str(random.randint(0, 9999999999))
-                # Shared Mode: pending negative 반영
+                # pending negative 반영
                 if pending_neg is not None:
-                    self._syncing_prompt = True
-                    self.app_context.main_window.negative_prompt_textedit.setPlainText(pending_neg)
-                    self._syncing_prompt = False
+                    if not self.shared_server_mode:
+                        self._syncing_prompt = True
+                        self.app_context.main_window.negative_prompt_textedit.setPlainText(pending_neg)
+                        self._syncing_prompt = False
+                    if pending_params is None:
+                        pending_params = {}
+                    pending_params["negative_prompt"] = pending_neg
                 gc = self.app_context.main_window.generation_controller
                 if not gc.is_generating:
                     gc.execute_generation_pipeline(overrides=pending_params, priority=0)
                     self._broadcast_json({"type": "status", "is_generating": True})
                     print("🌐 Remote: 자동생성 트리거됨")
+            else:
+                # auto_generate 아닌 pending (generate 등) → source만 추출
+                for ws_key, pending in list(self._pending_overrides.items()):
+                    if pending.get("source"):
+                        source = pending.pop("source")
+                        if not pending:  # 빈 dict면 제거
+                            self._pending_overrides.pop(ws_key, None)
+                        break
 
             if not self._has_clients():
                 return
             prompt = prompt_context.final_prompt or ""
             mw = self.app_context.main_window
             remaining = mw.search_results.get_count() if mw and mw.search_results else 0
+            rating_counts = {}
+            if mw and mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
+                rating_counts = mw.search_results.get_count_by_rating()
             if self._loop and self._ws_manager:
-                source = self._prompt_source
-                self._prompt_source = "random"  # 리셋 (다음 메인 UI Random 대비)
-                data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining, "source": source}
+                data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining,
+                        "source": source, "rating_counts": rating_counts}
                 asyncio.run_coroutine_threadsafe(
                     self._ws_manager.broadcast_json(data),
                     self._loop
                 )
-                # 와일드카드 모듈 상태 자동 갱신 (히스토리 있을 때만)
                 ctx = self.app_context.current_prompt_context
                 if ctx and (ctx.wildcard_history or ctx.wildcard_state):
                     wc_state = self._read_wildcard()
@@ -2390,11 +2578,9 @@ class RemoteBridge(QObject):
                             self._loop
                         )
         except Exception as e:
-            self._auto_generate_pending = False
-            self._auto_generate_pending_ws = None
             print(f"🌐 Remote: 프롬프트 전송 실패 — {e}")
 
-    def _handle_history_action(self, action_json: str):
+    def _handle_history_action(self, ws, action_json: str):
         """히스토리 아이템에 대한 액션 처리 (메인 스레드에서 실행)"""
         try:
             cmd = json.loads(action_json)
@@ -2426,7 +2612,7 @@ class RemoteBridge(QObject):
                 if source_row is None:
                     self._broadcast_json({"type": "toast", "message": "No source data for reroll", "level": "error"})
                     return
-                self._inject_session_overrides()
+                self._inject_session_overrides(ws)
                 mw = self.app_context.main_window
                 mw.on_instant_generation_requested(source_row)
 
@@ -2452,8 +2638,8 @@ class RemoteBridge(QObject):
 
                 # 시드 랜덤화 (Shared Mode: 세션의 seed_fixed 우선 확인)
                 seed_fixed = False
-                if self.shared_server_mode and self._current_request_ws and self._ws_manager:
-                    session = self._ws_manager.sessions.get(self._current_request_ws)
+                if self.shared_server_mode and ws and self._ws_manager:
+                    session = self._ws_manager.sessions.get(ws)
                     if session:
                         so = session.get("params_override", {})
                         seed_fixed = so.get("seed_fixed") == "true"
@@ -2607,11 +2793,13 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
     @app.post("/api/generate")
     async def api_generate():
-        bridge.request_generate.emit("", "")
+        bridge._pending_generate_requests.append({"ws": None, "prompt": "", "negative": ""})
+        bridge.request_generate.emit()
         return {"status": "generation_requested"}
 
     @app.post("/api/random")
     async def api_random():
+        bridge._pending_random_requests.append({"ws": None, "source_row": None, "active_ratings": set(bridge._active_ratings)})
         bridge.request_random.emit()
         return {"status": "random_generation_requested"}
 
@@ -2705,10 +2893,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             # 메인 스레드에서 캐시 갱신 + broadcast (초기화 타이밍 이슈 방지)
             bridge.request_refresh_cache.emit()
             # Send module badge states (automation countdown, character count)
-            bridge.request_get_module.emit("automation")
-            bridge.request_get_module.emit("character")
-            bridge.request_get_module.emit("character_reference")
-            bridge.request_get_module.emit("vibe_transfer")
+            bridge.request_get_module.emit(None, "automation")
+            bridge.request_get_module.emit(None, "character")
+            bridge.request_get_module.emit(None, "character_reference")
+            bridge.request_get_module.emit(None, "vibe_transfer")
 
             # 보류된 초기 메시지를 메인 루프에 재주입
             # (get_search_state, restore_session 등 초기화 단계에서 소비된 비-client_state 메시지)
@@ -2722,10 +2910,18 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 else:
                     data = await ws.receive_text()
                 if data == "generate":
-                    bridge._current_request_ws = ws
-                    bridge.request_generate.emit("", "")
+                    bridge._pending_generate_requests.append({"ws": ws, "prompt": "", "negative": ""})
+                    bridge.request_generate.emit()
                 elif data == "random":
-                    bridge._current_request_ws = ws
+                    # Shared: eligible_ids에서 row 선택 (asyncio thread)
+                    if bridge.shared_server_mode:
+                        row = await asyncio.to_thread(bridge._pick_from_session, ws)
+                        if row is None:
+                            await ws.send_text(json.dumps({"type": "toast", "message": "No matching rows for current filter", "level": "error"}))
+                            continue
+                        bridge._pending_random_requests.append({"ws": ws, "source_row": row, "active_ratings": None})
+                    else:
+                        bridge._pending_random_requests.append({"ws": ws, "source_row": None, "active_ratings": set(bridge._active_ratings)})
                     bridge.request_random.emit()
                 elif data == "sync":
                     if not bridge.shared_server_mode and bridge._cached_prompts:
@@ -2738,6 +2934,19 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         cmd_type = cmd.get("type")
                         if cmd_type == "client_state":
                             pass  # 초기화 단계에서 처리됨
+                        elif cmd_type == "random":
+                            if bridge.shared_server_mode:
+                                row = await asyncio.to_thread(bridge._pick_from_session, ws)
+                                if row is None:
+                                    await ws.send_text(json.dumps({"type": "toast", "message": "No matching rows for current filter", "level": "error"}))
+                                    continue
+                                bridge._pending_random_requests.append({"ws": ws, "source_row": row, "active_ratings": None})
+                            else:
+                                ratings = cmd.get("ratings", [])
+                                valid = set(r for r in ratings if r in 'gsqe')
+                                active = valid if valid else set(bridge._active_ratings)
+                                bridge._pending_random_requests.append({"ws": ws, "source_row": None, "active_ratings": active})
+                            bridge.request_random.emit()
                         elif cmd_type == "set_option":
                             opt_key = cmd.get("key", "")
                             if bridge.shared_server_mode:
@@ -2784,8 +2993,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         elif cmd_type == "test_api":
                             bridge.request_test_api.emit(cmd.get("mode", ""))
                         elif cmd_type == "get_module_state":
-                            bridge._current_request_ws = ws
-                            bridge.request_get_module.emit(cmd.get("module_id", ""))
+                            bridge.request_get_module.emit(ws, cmd.get("module_id", ""))
                         elif cmd_type == "set_module_param":
                             mid = cmd.get("module_id", "")
                             mkey = cmd.get("key", "")
@@ -2818,7 +3026,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             if bridge.shared_server_mode:
                                 pass  # Shared Mode: 검색/Depth/Restore 차단
                             elif cmd_type == "get_search_state":
-                                bridge.request_get_module.emit("__search__")
+                                bridge.request_get_module.emit(None, "__search__")
                             elif cmd_type == "search":
                                 bridge.request_search.emit(json.dumps(cmd))
                             elif cmd_type == "load_parquet":
@@ -2826,15 +3034,97 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             elif cmd_type == "depth_action":
                                 bridge.request_depth_action.emit(json.dumps(cmd))
                             elif cmd_type == "get_depth_state":
-                                bridge.request_get_module.emit("__depth__")
+                                bridge.request_get_module.emit(None, "__depth__")
                             elif cmd_type == "restore_snapshot":
                                 bridge.request_restore_snapshot.emit()
+                        elif cmd_type == "set_active_ratings":
+                            ratings = cmd.get("ratings", [])
+                            new_ratings = set(r for r in ratings if r in 'gsqe')
+                            if not new_ratings:
+                                new_ratings = {'q', 'e'}  # 최소 1개 보장
+                            if bridge.shared_server_mode:
+                                session = ws_manager.sessions.get(ws)
+                                if session:
+                                    session["active_ratings"] = new_ratings
+                                    await asyncio.to_thread(bridge._recompute_eligible_ids, session)
+                            else:
+                                bridge._active_ratings = new_ratings
+                            # 즉시 카운트 계산하여 응답
+                            state = await asyncio.to_thread(bridge._read_search_state)
+                            rc = state.get("rating_counts", {})
+                            if bridge.shared_server_mode:
+                                count = sum(rc.get(r, 0) for r in new_ratings)
+                            else:
+                                count = state.get("count", 0)
+                            await ws.send_text(json.dumps({
+                                "type": "rating_update",
+                                "active_ratings": list(new_ratings),
+                                "count": count,
+                                "rating_counts": rc,
+                            }))
+                        elif cmd_type == "tag_filter_search":
+                            tags = cmd.get("tags", [])
+                            if tags:
+                                result = await asyncio.to_thread(bridge._do_tag_filter_search, tags)
+                                # pending에 저장 (Assign 전까지 Random에 미반영)
+                                session = ws_manager.sessions.get(ws)
+                                if session:
+                                    ids = result.pop("_ids", set())
+                                    session["tag_filter_pending"] = {
+                                        "tags": tags,
+                                        "ids": ids,
+                                        "count": result["count"],
+                                    }
+                                else:
+                                    result.pop("_ids", None)
+                                await ws.send_text(json.dumps(result))
+                            else:
+                                await ws.send_text(json.dumps({
+                                    "type": "tag_filter_result", "count": 0,
+                                    "tags": [], "rating_counts": {r: 0 for r in 'gsqe'},
+                                }))
+                        elif cmd_type == "tag_filter_assign":
+                            # pending → 확정: Random에서 사용
+                            session = ws_manager.sessions.get(ws)
+                            if session and session.get("tag_filter_pending"):
+                                session["tag_filter"] = session.pop("tag_filter_pending")
+                                await asyncio.to_thread(bridge._recompute_eligible_ids, session)
+                                tf = session["tag_filter"]
+                                await ws.send_text(json.dumps({
+                                    "type": "tag_filter_assigned",
+                                    "count": tf["count"],
+                                    "tags": tf["tags"],
+                                }))
+                            else:
+                                await ws.send_text(json.dumps({
+                                    "type": "toast",
+                                    "message": "No pending search to assign",
+                                    "level": "error",
+                                }))
+                        elif cmd_type == "tag_filter_clear":
+                            session = ws_manager.sessions.get(ws)
+                            if session:
+                                session["tag_filter"] = None
+                                session["tag_filter_pending"] = None
+                                await asyncio.to_thread(bridge._recompute_eligible_ids, session)
+                            await ws.send_text(json.dumps({
+                                "type": "tag_filter_result", "count": 0,
+                                "tags": [], "rating_counts": {r: 0 for r in 'gsqe'},
+                            }))
                         elif cmd_type == "tag_search":
                             # 한글/영문 태그 검색 — 스레드 풀에서 실행 (초기 로드 블로킹 방지)
                             query = cmd.get("query", "")
                             results = await asyncio.to_thread(bridge._search_kr_tags, query, 20)
                             await ws.send_text(json.dumps({
                                 "type": "tag_search_result",
+                                "query": query,
+                                "results": results,
+                            }))
+                        elif cmd_type == "tag_filter_ac":
+                            query = cmd.get("query", "")
+                            results = await asyncio.to_thread(bridge._search_kr_tags, query, 12)
+                            await ws.send_text(json.dumps({
+                                "type": "tag_filter_ac_result",
                                 "query": query,
                                 "results": results,
                             }))
@@ -2899,15 +3189,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                         }
                                     print(f"🌐 Session restored from client LocalStorage (session={session['id']})")
                         elif cmd_type == "history_action":
-                            bridge._current_request_ws = ws
-                            bridge.request_history_action.emit(json.dumps(cmd))
+                            bridge.request_history_action.emit(ws, json.dumps(cmd))
                         elif cmd_type == "generate":
-                            # 프롬프트 포함 생성 요청
-                            bridge._current_request_ws = ws
-                            bridge.request_generate.emit(
-                                cmd.get("prompt", ""),
-                                cmd.get("negative_prompt", "")
-                            )
+                            bridge._pending_generate_requests.append({
+                                "ws": ws,
+                                "prompt": cmd.get("prompt", ""),
+                                "negative": cmd.get("negative_prompt", ""),
+                            })
+                            bridge.request_generate.emit()
                     except Exception:
                         pass
         except WebSocketDisconnect:

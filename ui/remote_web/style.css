@@ -943,10 +943,43 @@ header {
 .module-bar {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
   padding-top: 8px;
   flex-shrink: 0;
+  align-items: center;
+  flex-wrap: wrap;
 }
+.module-prompt-btn {
+  padding: 6px 12px;
+  background: rgba(76,175,80,0.15);
+  border: 1px solid rgba(76,175,80,0.4);
+  border-radius: 6px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  color: var(--success);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.module-prompt-btn:hover { border-color: rgba(76,175,80,0.6); }
+.module-prompt-btn.active {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+.module-rating-bar {
+  display: flex; gap: 2px; align-items: center;
+}
+.rating-btn {
+  padding: 4px 9px; border: 1px solid var(--border-dim); border-radius: 4px;
+  background: transparent; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s; line-height: 1.2;
+}
+.rating-btn:hover { border-color: var(--text-dim); }
+.rating-btn.active[data-r="g"] { background: #2e7d32; color: #fff; border-color: #4CAF50; }
+.rating-btn.active[data-r="s"] { background: #1565C0; color: #fff; border-color: #2196F3; }
+.rating-btn.active[data-r="q"] { background: #e65100; color: #fff; border-color: #FF9800; }
+.rating-btn.active[data-r="e"] { background: #c62828; color: #fff; border-color: #F44336; }
 .module-btn {
   padding: 6px 12px;
   background: var(--bg-elevated);
@@ -963,16 +996,6 @@ header {
 .module-btn.active {
   background: var(--accent);
   border-color: var(--accent-glow);
-  color: #fff;
-}
-.module-btn.search-btn {
-  background: rgba(76,175,80,0.15);
-  border-color: rgba(76,175,80,0.4);
-  color: var(--success);
-}
-.module-btn.search-btn.active {
-  background: var(--success);
-  border-color: var(--success);
   color: #fff;
 }
 .module-btn.auto-active { border-color: #e8a84c; color: #e8a84c; }
@@ -1862,3 +1885,98 @@ header {
     background: var(--bg-surface);
   }
 }
+
+/* ---- Tag Filter popup ---- */
+.tag-filter-toggle {
+  font-size: 9px !important; padding: 4px 7px !important;
+  letter-spacing: 0.3px;
+}
+.tag-filter-toggle.active {
+  background: var(--accent-blue) !important; color: #fff !important;
+  border-color: var(--accent-blue) !important;
+}
+.tag-filter-toggle.assigned {
+  background: #e6a817 !important; color: #000 !important;
+  border-color: #c89315 !important;
+}
+.tag-filter-popup {
+  display: none;
+  position: fixed;
+  z-index: 162;
+  width: min(360px, 90vw);
+  max-height: 50dvh;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glow);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  flex-direction: column;
+  overflow: hidden;
+  bottom: 60px; left: 4vw;
+}
+.tag-filter-popup.open { display: flex; }
+@media (min-width: 768px) {
+  .tag-filter-popup {
+    top: 60px; left: 12px; bottom: auto;
+    width: 380px;
+    max-height: calc(100dvh - 240px);
+  }
+}
+.tag-filter-body {
+  flex: 1; overflow-y: auto;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.tag-filter-input-row {
+  display: flex; gap: 6px;
+}
+.tag-filter-input {
+  flex: 1; padding: 7px 10px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+  border-radius: 6px; color: var(--text-main);
+  font-family: var(--font-mono); font-size: 12px;
+  outline: none;
+}
+.tag-filter-input:focus { border-color: var(--accent-blue); }
+.tag-filter-ac {
+  max-height: 160px; overflow-y: auto;
+}
+.tag-filter-chips {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  min-height: 0;
+}
+.tag-filter-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 4px;
+  background: var(--bg-elevated); border: 1px solid var(--border-dim);
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-main);
+}
+.tag-filter-chip .chip-x {
+  cursor: pointer; color: var(--text-dim); font-size: 13px;
+  line-height: 1;
+}
+.tag-filter-chip .chip-x:hover { color: var(--error); }
+.tag-filter-actions {
+  display: flex; align-items: center; gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-dim);
+}
+.tag-filter-count {
+  flex: 1;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
+.tag-filter-btn-action {
+  padding: 5px 14px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: var(--bg-elevated); color: var(--text-main);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+}
+.tag-filter-btn-action.apply {
+  background: var(--accent-blue); border-color: var(--accent-blue); color: #fff;
+}
+.tag-filter-btn-action.apply:hover { filter: brightness(1.15); }
+.tag-filter-btn-action.assign {
+  background: var(--success, #4CAF50); border-color: var(--success, #4CAF50); color: #fff;
+}
+.tag-filter-btn-action.assign:hover { filter: brightness(1.15); }
+.tag-filter-btn-action.assign:disabled { opacity: 0.35; pointer-events: none; }
+.tag-filter-btn-action.clear:hover { border-color: var(--error); color: var(--error); }

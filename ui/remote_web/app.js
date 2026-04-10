@@ -24,6 +24,8 @@ function saveSharedSession() {
     options: {},
     p_eng: _sharedPEng || null,
     cond: _sharedCond || null,
+    ratings: Object.keys(ratingState).filter(k => ratingState[k]),
+    tag_filter: tagFilterTags.length ? tagFilterTags : null,
   };
   for (const [key, cb] of Object.entries(optBoxes)) {
     if (key !== 'auto_generate') data.options[key] = cb.checked;
@@ -152,11 +154,15 @@ function connect() {
         else if (m.type === 'api_test_result') onApiTestResult(m);
         else if (m.type === 'module_state') onModuleState(m);
         else if (m.type === 'search_state') onSearchState(m);
+        else if (m.type === 'rating_update') onRatingUpdate(m);
         else if (m.type === 'search_progress') onSearchProgress(m);
         else if (m.type === 'depth_state') onDepthState(m);
         else if (m.type === 'tag_search_result') onTagSearchResult(m);
         else if (m.type === 'tag_lookup_result') onTagLookupResult(m);
         else if (m.type === 'autocomplete_result') onAutocompleteResult(m);
+        else if (m.type === 'tag_filter_result') onTagFilterResult(m);
+        else if (m.type === 'tag_filter_assigned') onTagFilterAssigned(m);
+        else if (m.type === 'tag_filter_ac_result') onTagFilterAcResult(m);
         else if (m.type === 'storage_list') onStorageList(m);
         else if (m.type === 'wildcard_manager') onWildcardManager(m);
         else if (m.type === 'toast') showToast(m.message, m.level || 'success');
@@ -171,7 +177,11 @@ function connect() {
           }
         }
         // Update search count from prompt_generated
-        if (m.type === 'prompt_generated' && 'remaining' in m) updateSearchCount(m.remaining);
+        if (m.type === 'prompt_generated' && 'remaining' in m) {
+          if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
+          const filtered = _computeLocalFilteredCount();
+          updateSearchCount(filtered !== null ? filtered : m.remaining);
+        }
       } catch(_) {}
     }
   };
@@ -735,6 +745,15 @@ function onSession(m) {
       if (btn) btn.classList.remove('nai-only-disabled');
     });
     clearSharedSession();
+    // Tag filter 상태 리셋
+    tagFilterTags = [];
+    tagFilterActive = false;
+    renderTagFilterChips();
+    document.getElementById('tagFilterCount').textContent = '';
+    const tfToggle = document.getElementById('tagFilterToggle');
+    tfToggle.classList.remove('active');
+    tfToggle.classList.remove('assigned');
+    closeTagFilter();
   }
 }
 
@@ -758,10 +777,34 @@ function _restoreSharedSession() {
       btnRnd.disabled = optBoxes.prompt_fixed.checked;
       btnRnd.style.opacity = optBoxes.prompt_fixed.checked ? '0.4' : '';
     }
+    syncRatingBarVisibility();
   }
   // 클라이언트 UI 복원: prompt + negative prompt
   if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); }
   if (saved.negative_prompt != null) negEdit.value = saved.negative_prompt;
+  // Rating 복원
+  if (saved.ratings && Array.isArray(saved.ratings)) {
+    for (const k of ['g','s','q','e']) {
+      ratingState[k] = saved.ratings.includes(k);
+    }
+    syncRatingButtons();
+    // 서버 세션에 rating 저장
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const active = Object.keys(ratingState).filter(k => ratingState[k]);
+      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
+    }
+  }
+  // Tag filter 복원
+  if (saved.tag_filter && Array.isArray(saved.tag_filter) && saved.tag_filter.length) {
+    tagFilterTags = saved.tag_filter;
+    renderTagFilterChips();
+    // 서���에 재적용 (재���결 시 세션 ID 세트 재구축 → 즉시 Assign)
+    // search 완료 후 onTagFilterResult에서 자동 assign (flag 기반)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      _pendingTfAssignOnRestore = true;
+      ws.send(JSON.stringify({type: 'tag_filter_search', tags: tagFilterTags}));
+    }
+  }
   // P.Eng / Cond 캐시 복원 (모듈 열 때 사용)
   _sharedPEng = saved.p_eng || null;
   _sharedCond = saved.cond || null;
@@ -919,6 +962,12 @@ function send(cmd) {
         btnRnd.disabled = false;
       }
     }, 10000);
+    // Shared Mode: 개인 rating 선호를 함께 전송
+    if (sharedMode) {
+      const active = Object.keys(ratingState).filter(k => ratingState[k]);
+      ws.send(JSON.stringify({type: 'random', ratings: active}));
+      return;
+    }
   }
   ws.send(cmd);
 }
@@ -1022,6 +1071,14 @@ function syncOptions(m) {
     btnRnd.disabled = pf.checked;
     btnRnd.style.opacity = pf.checked ? '0.4' : '';
   }
+  syncRatingBarVisibility();
+}
+
+function syncRatingBarVisibility() {
+  const pf = optBoxes.prompt_fixed && optBoxes.prompt_fixed.checked;
+  const wc = optBoxes.wildcard_standalone && optBoxes.wildcard_standalone.checked;
+  const bar = document.querySelector('.module-rating-bar');
+  if (bar) bar.style.display = (pf || wc) ? 'none' : '';
 }
 
 function setOption(key, value) {
@@ -1030,6 +1087,9 @@ function setOption(key, value) {
   if (key === 'prompt_fixed') {
     btnRnd.disabled = !!value;
     btnRnd.style.opacity = value ? '0.4' : '';
+  }
+  if (key === 'prompt_fixed' || key === 'wildcard_standalone') {
+    syncRatingBarVisibility();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_option', key, value}));
@@ -1267,6 +1327,8 @@ function updateModuleBtnState() {
   document.querySelectorAll('.module-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.module === currentModuleId);
   });
+  const pb = document.querySelector('.module-prompt-btn');
+  if (pb) pb.classList.toggle('active', currentModuleId === 'search');
 }
 
 function onModuleState(m) {
@@ -2211,13 +2273,103 @@ function applyVibeStorage(model, fileHash, ieValue) {
 const searchCountEl = $('searchCount');
 let searchingActive = false;
 
+// Rating filter state (synced with module-bar GSQE buttons)
+let ratingState = {g: false, s: false, q: true, e: true};
+let _cachedRatingCounts = null; // {g:N, s:N, q:N, e:N} — 서버 search_state에서 캐시
+
+function _computeLocalFilteredCount() {
+  // Tag Filter active 시 tag filter 결과의 rating_counts 사용, 아니면 전체 검색 결과
+  const rc = (tagFilterActive && _tfRatingCounts) ? _tfRatingCounts : _cachedRatingCounts;
+  if (!rc || !Object.keys(rc).length) return null;
+  let count = 0;
+  for (const k of ['g','s','q','e']) {
+    if (ratingState[k]) count += (rc[k] || 0);
+  }
+  return count;
+}
+
+function toggleRating(r) {
+  ratingState[r] = !ratingState[r];
+  syncRatingButtons();
+  // If search module is open, sync its checkboxes too
+  if (currentModuleId === 'search') {
+    const cb = document.getElementById('sr_' + r);
+    if (cb) cb.checked = ratingState[r];
+  }
+  if (sharedMode) {
+    // 최소 1개 보장 (서버 set_active_ratings와 동일 정책)
+    const anyActive = Object.values(ratingState).some(v => v);
+    if (!anyActive) { ratingState.q = true; ratingState.e = true; syncRatingButtons(); }
+    // 로컬 즉시 반영
+    const localCount = _computeLocalFilteredCount();
+    if (localCount !== null) updateSearchCount(localCount);
+    // 서버 세션에 rating 저장 (응답으로 정확한 카운트 갱신)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const active = Object.keys(ratingState).filter(k => ratingState[k]);
+      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
+    }
+    saveSharedSession();
+    return;
+  }
+  // Send to server for instant count update
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const active = Object.keys(ratingState).filter(k => ratingState[k]);
+    ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
+  }
+}
+
+function onRatingUpdate(m) {
+  if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
+  if (sharedMode) {
+    // Shared Mode: 서버가 세션 기준 카운트를 보내줌
+    if (m.count != null) updateSearchCount(m.count);
+    return;
+  }
+  updateSearchCount(m.count || 0);
+  // Sync active_ratings
+  if (m.active_ratings) {
+    for (const k of ['g','s','q','e']) {
+      ratingState[k] = m.active_ratings.includes(k);
+    }
+    syncRatingButtons();
+  }
+}
+
+function syncRatingButtons() {
+  document.querySelectorAll('.rating-btn').forEach(btn => {
+    if (!btn.dataset.r) return; // Filter 버튼 등 data-r 없는 요소 스킵
+    btn.classList.toggle('active', !!ratingState[btn.dataset.r]);
+  });
+}
+
 function updateSearchCount(count) {
   searchCountEl.textContent = count;
 }
 
 function onSearchState(m) {
-  updateSearchCount(m.count || 0);
+  // rating_counts 캐시 (shared mode 로컬 카운트 계산용)
+  if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
+  if (sharedMode && _cachedRatingCounts) {
+    // Shared Mode: 개인 ratingState 기준으로 카운트 계산
+    updateSearchCount(_computeLocalFilteredCount());
+  } else {
+    updateSearchCount(m.count || 0);
+  }
   searchingActive = false;
+  // Shared Mode: 서버 전역 rating 무시 (개인 rating 보호)
+  if (!sharedMode) {
+    // Sync rating state from server (prefer active_ratings over legacy ratings)
+    if (m.active_ratings) {
+      for (const k of ['g','s','q','e']) {
+        ratingState[k] = m.active_ratings.includes(k);
+      }
+    } else if (m.ratings) {
+      for (const k of ['g','s','q','e']) {
+        if (k in m.ratings) ratingState[k] = !!m.ratings[k];
+      }
+    }
+  }
+  syncRatingButtons();
   if (currentModuleId === 'search') renderSearch(m);
 }
 
@@ -2229,12 +2381,11 @@ function onSearchProgress(m) {
 }
 
 function renderSearch(m) {
-  const ratings = m.ratings || {e: true, q: true, s: true, g: true};
   const ratingItems = [
     ['e', 'Explicit'], ['q', 'NSFW'], ['s', 'Sensitive'], ['g', 'General']
   ].map(([k, label]) =>
     `<label class="mod-checkbox-item">
-      <input type="checkbox" id="sr_${k}" ${ratings[k] ? 'checked' : ''}>
+      <input type="checkbox" id="sr_${k}" ${ratingState[k] ? 'checked' : ''}>
       <span class="mod-checkbox-label">${label}</span>
     </label>`
   ).join('');
@@ -2283,10 +2434,15 @@ function doSearch() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const query = (document.getElementById('searchQuery') || {}).value || '';
   const exclude = (document.getElementById('searchExclude') || {}).value || '';
-  const ratings = {};
+  // Sync rating state from search module checkboxes back to bar buttons
   for (const k of ['e','q','s','g']) {
     const el = document.getElementById('sr_' + k);
-    ratings['rating_' + k] = el ? el.checked : true;
+    if (el) ratingState[k] = el.checked;
+  }
+  syncRatingButtons();
+  const ratings = {};
+  for (const k of ['e','q','s','g']) {
+    ratings['rating_' + k] = ratingState[k];
   }
   searchingActive = true;
   ws.send(JSON.stringify({type: 'search', query, exclude, ...ratings}));
@@ -2902,6 +3058,222 @@ if (window.innerWidth < 768) {
       hdr.classList.add('collapsed');
       document.body.classList.add('header-collapsed');
     }
+  });
+}
+
+// ---- Tag Filter ----
+let tagFilterTags = [];
+let tagFilterActive = false;
+let _tfAcResults = [];
+let _tfAcSel = -1;
+let _tfAcTimer = null;
+let _pendingTfAssignOnRestore = false;
+let _tfRatingCounts = null; // tag filter 검색 결과의 rating별 카운트
+
+function toggleTagFilter() {
+  const popup = document.getElementById('tagFilterPopup');
+  if (popup.classList.contains('open')) {
+    closeTagFilter();
+  } else {
+    openTagFilter();
+  }
+}
+
+function openTagFilter() {
+  const popup = document.getElementById('tagFilterPopup');
+  popup.classList.add('open');
+  document.getElementById('tagFilterToggle').classList.add('active');
+  renderTagFilterChips();
+  document.getElementById('tagFilterInput').focus();
+}
+
+function closeTagFilter() {
+  const popup = document.getElementById('tagFilterPopup');
+  popup.classList.remove('open');
+  if (!tagFilterActive) {
+    document.getElementById('tagFilterToggle').classList.remove('active');
+  }
+  _clearTfAc();
+}
+
+function renderTagFilterChips() {
+  const el = document.getElementById('tagFilterChips');
+  if (!tagFilterTags.length) { el.innerHTML = ''; return; }
+  el.innerHTML = tagFilterTags.map((t, i) =>
+    `<span class="tag-filter-chip">${escHtml(t)}<span class="chip-x" onclick="removeTagFilterTag(${i})">&times;</span></span>`
+  ).join('');
+}
+
+function removeTagFilterTag(idx) {
+  tagFilterTags.splice(idx, 1);
+  renderTagFilterChips();
+  // 태그 변경 → 기존 Assign 무효화, 재검색 필요
+  tagFilterActive = false;
+  _tfRatingCounts = null;
+  document.getElementById('tagFilterAssignBtn').disabled = true;
+  document.getElementById('tagFilterCount').textContent = '';
+  document.getElementById('tagFilterToggle').classList.remove('assigned');
+  if (!tagFilterTags.length) {
+    clearTagFilter();
+  } else if (ws && ws.readyState === WebSocket.OPEN) {
+    // 서버 확정 상태도 해제 (stale filter 방지)
+    ws.send(JSON.stringify({type: 'tag_filter_clear'}));
+  }
+  saveSharedSession();
+}
+
+function applyTagFilter() {
+  if (!tagFilterTags.length) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({type: 'tag_filter_search', tags: tagFilterTags}));
+}
+
+function assignTagFilter() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({type: 'tag_filter_assign'}));
+  saveSharedSession();
+}
+
+function clearTagFilter() {
+  tagFilterTags = [];
+  tagFilterActive = false;
+  _tfRatingCounts = null;
+  renderTagFilterChips();
+  document.getElementById('tagFilterCount').textContent = '';
+  const toggleBtn = document.getElementById('tagFilterToggle');
+  toggleBtn.classList.remove('active');
+  toggleBtn.classList.remove('assigned');
+  document.getElementById('tagFilterAssignBtn').disabled = true;
+  // Prompt: 카운트를 전체 GSQE 기준으로 복원
+  const restored = _computeLocalFilteredCount();
+  if (restored !== null) updateSearchCount(restored);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'tag_filter_clear'}));
+  }
+  saveSharedSession();
+}
+
+function onTagFilterResult(m) {
+  const assignBtn = document.getElementById('tagFilterAssignBtn');
+  _tfRatingCounts = m.rating_counts || null;
+  if (m.count > 0) {
+    // Search 성공 → Assign 활성화 (아직 확정 아님)
+    document.getElementById('tagFilterCount').textContent = `${m.count.toLocaleString()} matched`;
+    assignBtn.disabled = false;
+    // 세션 복원 시 자동 assign (search 완료 후 안전하게)
+    if (_pendingTfAssignOnRestore) {
+      _pendingTfAssignOnRestore = false;
+      assignTagFilter();
+    }
+  } else {
+    _pendingTfAssignOnRestore = false;
+    document.getElementById('tagFilterCount').textContent = m.count === 0 && m.tags && m.tags.length ? 'No matches' : '';
+    assignBtn.disabled = true;
+  }
+}
+
+function onTagFilterAssigned(m) {
+  tagFilterActive = true;
+  const toggleBtn = document.getElementById('tagFilterToggle');
+  toggleBtn.classList.remove('active');
+  toggleBtn.classList.add('assigned');
+  document.getElementById('tagFilterCount').textContent = `${(m.count || 0).toLocaleString()} assigned`;
+  document.getElementById('tagFilterAssignBtn').disabled = true;
+  // Prompt: 카운트를 tag filter + GSQE 교집합으로 갱신
+  if (_tfRatingCounts) {
+    let filtered = 0;
+    for (const k of ['g','s','q','e']) {
+      if (ratingState[k]) filtered += (_tfRatingCounts[k] || 0);
+    }
+    updateSearchCount(filtered);
+  }
+  showToast(`Tag filter assigned: ${(m.count || 0).toLocaleString()} rows`, 'success');
+}
+
+function onTagFilterAcResult(m) {
+  if (!document.getElementById('tagFilterPopup').classList.contains('open')) return;
+  const input = document.getElementById('tagFilterInput');
+  if (!input || input.value.trim().length < 2) return;
+  _tfAcResults = m.results || [];
+  _tfAcSel = -1;
+  _renderTfAc();
+}
+
+// Tag filter autocomplete (reuse existing autocomplete endpoint)
+(function() {
+  const input = document.getElementById('tagFilterInput');
+  if (!input) return;
+
+  input.addEventListener('input', function() {
+    const q = this.value.trim();
+    if (q.length < 2) { _clearTfAc(); return; }
+    clearTimeout(_tfAcTimer);
+    _tfAcTimer = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({type: 'tag_filter_ac', query: q}));
+      }
+    }, 150);
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _tfAcSel = Math.min(_tfAcSel + 1, _tfAcResults.length - 1);
+      _renderTfAc();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _tfAcSel = Math.max(_tfAcSel - 1, -1);
+      _renderTfAc();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (_tfAcSel >= 0 && _tfAcResults[_tfAcSel]) {
+        _selectTfAc(_tfAcResults[_tfAcSel].tag);
+      } else if (this.value.trim()) {
+        _selectTfAc(this.value.trim());
+      }
+    } else if (e.key === 'Escape') {
+      _clearTfAc();
+    }
+  });
+})();
+
+function _selectTfAc(tag) {
+  const clean = tag.replace(/ /g, '_');
+  if (!tagFilterTags.includes(clean)) {
+    tagFilterTags.push(clean);
+    renderTagFilterChips();
+    saveSharedSession();
+  }
+  document.getElementById('tagFilterInput').value = '';
+  _clearTfAc();
+}
+
+function _clearTfAc() {
+  _tfAcResults = [];
+  _tfAcSel = -1;
+  document.getElementById('tagFilterAc').innerHTML = '';
+}
+
+function _renderTfAc() {
+  const el = document.getElementById('tagFilterAc');
+  if (!_tfAcResults.length) { el.innerHTML = ''; return; }
+  let html = '<div class="tag-ac-list">';
+  _tfAcResults.forEach((r, i) => {
+    const sel = i === _tfAcSel ? ' selected' : '';
+    const tagColor = catStyle(r.cat);
+    html += `<div class="tag-ac-item${sel}" data-idx="${i}">` +
+      `<span class="tag-ac-tag"${tagColor}>${escHtml(r.tag)}</span>` +
+      `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
+      `<span class="tag-ac-count">${fmtCount(r.count)}</span>` +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+  el.querySelectorAll('.tag-ac-item').forEach(item => {
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      _selectTfAc(_tfAcResults[+item.dataset.idx].tag);
+    });
   });
 }
 

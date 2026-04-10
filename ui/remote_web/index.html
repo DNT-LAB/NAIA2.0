@@ -95,6 +95,27 @@
   <div class="refine-body"></div>
 </div>
 
+<!-- Tag Filter floating panel -->
+<div class="tag-filter-popup" id="tagFilterPopup">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Tag Filter</span>
+    <button class="history-close" onclick="closeTagFilter()">&times;</button>
+  </div>
+  <div class="tag-filter-body">
+    <div class="tag-filter-input-row">
+      <input class="tag-filter-input" id="tagFilterInput" placeholder="danbooru tag..." autocomplete="off">
+    </div>
+    <div class="tag-filter-ac" id="tagFilterAc"></div>
+    <div class="tag-filter-chips" id="tagFilterChips"></div>
+    <div class="tag-filter-actions">
+      <span class="tag-filter-count" id="tagFilterCount"></span>
+      <button class="tag-filter-btn-action apply" onclick="applyTagFilter()">Search</button>
+      <button class="tag-filter-btn-action assign" id="tagFilterAssignBtn" onclick="assignTagFilter()" disabled>Assign</button>
+      <button class="tag-filter-btn-action clear" onclick="clearTagFilter()">Clear</button>
+    </div>
+  </div>
+</div>
+
 <main class="app-layout">
 
 <!-- Control panel: PC=left sidebar, Mobile=bottom panel -->
@@ -121,7 +142,14 @@
           </div>
           <!-- Module bar -->
           <div class="module-bar">
-            <button class="module-btn search-btn" data-module="search" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+            <button class="module-prompt-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+            <div class="module-rating-bar">
+              <button class="rating-btn" data-r="g" onclick="toggleRating('g')">G</button>
+              <button class="rating-btn" data-r="s" onclick="toggleRating('s')">S</button>
+              <button class="rating-btn active" data-r="q" onclick="toggleRating('q')">Q</button>
+              <button class="rating-btn active" data-r="e" onclick="toggleRating('e')">E</button>
+              <button class="rating-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Filter</button>
+            </div>
             <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
             <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
             <button class="module-btn" data-module="character" onclick="openModule('character')">Character<span class="module-badge hidden" id="badgeChar"></span></button>

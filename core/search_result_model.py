@@ -51,21 +51,42 @@ class SearchResultModel:
             return self.df.iloc[index].to_dict()
         return None
     
+    def get_count_by_rating(self) -> dict:
+        """Rating별 row 수 반환. {'g': N, 's': N, 'q': N, 'e': N}"""
+        if self.is_empty() or 'rating' not in self.df.columns:
+            return {r: 0 for r in 'gsqe'}
+        counts = self.df['rating'].value_counts()
+        return {r: int(counts.get(r, 0)) for r in 'gsqe'}
+
+    def get_filtered_count(self, active_ratings: set) -> int:
+        """활성 rating에 해당하는 row 수."""
+        if self.is_empty() or 'rating' not in self.df.columns:
+            return 0
+        return int(self.df['rating'].isin(active_ratings).sum())
+
     # [신규] 무작위 행을 추출하고 제거하는 메서드
-    def pop_random_row(self) -> Optional[pd.Series]:
+    def pop_random_row(self, active_ratings: set = None) -> Optional[pd.Series]:
         """
         데이터프레임에서 무작위로 행 하나를 선택하여 반환하고, 원본에서는 제거합니다.
+        active_ratings가 주어지면 해당 rating만 대상으로 추출합니다.
+        비활성 rating row는 삭제하지 않고 보존합니다.
         """
         if self.is_empty():
             return None
-        
-        # 무작위 인덱스 선택
-        random_index = self.df.index.to_series().sample(n=1).iloc[0]
-        
+
+        if active_ratings and 'rating' in self.df.columns:
+            mask = self.df['rating'].isin(active_ratings)
+            eligible = self.df[mask]
+            if eligible.empty:
+                return None
+            random_index = eligible.index.to_series().sample(n=1).iloc[0]
+        else:
+            random_index = self.df.index.to_series().sample(n=1).iloc[0]
+
         # 해당 행 데이터 추출 및 원본에서 삭제
         popped_row = self.df.loc[random_index].copy()
         self.df.drop(random_index, inplace=True)
-        
+
         return popped_row
 
     def deduplicate(self, subset: Optional[List[str]] = None):

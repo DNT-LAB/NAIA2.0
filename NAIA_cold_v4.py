@@ -4833,10 +4833,13 @@ class ModernMainWindow(QMainWindow):
         # 컨트롤러에 즉시 생성을 요청
         self.prompt_gen_controller.generate_instant_source(tags_dict, settings)
 
-    def trigger_random_prompt(self, settings_override: dict = None):
+    def trigger_random_prompt(self, settings_override: dict = None, active_ratings: set = None,
+                              source_row_override=None):
         """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작
         Args:
             settings_override: UI 체크박스 대신 사용할 설정값 (Shared Mode 세션별 오버라이드)
+            active_ratings: Rating 필터 (Remote GSQE 버튼 상태, None이면 전체)
+            source_row_override: 외부 주입 source_row (Remote tag filter). pop 없이 사용.
         """
         self.random_prompt_btn.setEnabled(False)
         # 분리된 버튼도 비활성화
@@ -4867,18 +4870,22 @@ class ModernMainWindow(QMainWindow):
             settings.update(settings_override)
         self.app_context.publish("random_prompt_triggered")
 
-        # 소진 시 스냅샷에서 자동 복원
-        if self.search_results.is_empty() and not settings.get('wildcard_standalone', False):
-            if not self._restore_from_snapshot():
-                self.random_prompt_btn.setEnabled(True)
-                if hasattr(self, 'detached_random_btn'):
-                    self.detached_random_btn.setEnabled(True)
-                self.status_bar.showMessage("⚠️ 검색 결과가 없습니다. 먼저 검색을 실행해 주세요.", 5000)
-                return
+        # Tag filter 경로: source_row가 이미 준비되어 있으면 snapshot 복원 불필요
+        if source_row_override is None:
+            # 소진 시 스냅샷에서 자동 복원
+            if self.search_results.is_empty() and not settings.get('wildcard_standalone', False):
+                if not self._restore_from_snapshot():
+                    self.random_prompt_btn.setEnabled(True)
+                    if hasattr(self, 'detached_random_btn'):
+                        self.detached_random_btn.setEnabled(True)
+                    self.status_bar.showMessage("⚠️ 검색 결과가 없습니다. 먼저 검색을 실행해 주세요.", 5000)
+                    return
 
         # [수정] 수동 생성 시에는 자동 생성 플래그를 False로 설정
         self.prompt_gen_controller.auto_generation_requested = False
-        self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
+        self.prompt_gen_controller.generate_next_prompt(self.search_results, settings,
+                                                         active_ratings=active_ratings,
+                                                         source_row_override=source_row_override)
 
     def _trigger_auto_image_generation(self):
         """자동 생성 모드에서 이미지 생성을 트리거합니다."""

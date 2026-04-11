@@ -343,7 +343,8 @@ class RemoteBridge(QObject):
             # Shared Mode: 세션 오버라이드 주입 (Qt main thread에서 실행 — 위젯 접근 안전)
             session_overrides = self._inject_session_overrides(ws)
             session_neg = self._get_session_negative(ws)
-            if session_neg is not None:
+            # Generate 요청의 negative가 비어있으면 세션 값을 fallback으로 사용
+            if not negative and session_neg is not None:
                 negative = session_neg
 
             # seed_fixed가 아니면 → 랜덤 시드
@@ -360,6 +361,20 @@ class RemoteBridge(QObject):
                 if negative:
                     mw.negative_prompt_textedit.setPlainText(negative)
                 self._syncing_prompt = False
+
+            # Shared Mode: 웹 사용자의 프롬프트를 overrides에 주입 (데스크톱 UI 미변경)
+            # session["params_override"] 참조를 직접 변경하면 이후 Random에도 오염되므로 복사
+            if self.shared_server_mode and (prompt or negative):
+                from core.wildcard_processor import split_tags_smart
+                prompt_overrides = {}
+                if prompt:
+                    prompt_overrides["input"] = ', '.join(split_tags_smart(prompt))
+                if negative:
+                    prompt_overrides["negative_prompt"] = ', '.join(split_tags_smart(negative))
+                if session_overrides is None:
+                    session_overrides = prompt_overrides
+                else:
+                    session_overrides = {**session_overrides, **prompt_overrides}
 
             # pending overrides에 source 기록 (on_prompt_generated에서 사용)
             if ws is not None:

@@ -1963,6 +1963,10 @@ header {
 .tag-filter-count {
   flex: 1;
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  transition: color 0.15s;
+}
+.tag-filter-count.has-result {
+  color: #f5e6a3;
 }
 .tag-filter-btn-action {
   padding: 5px 14px; border: 1px solid var(--border-dim); border-radius: 6px;

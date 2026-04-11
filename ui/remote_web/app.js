@@ -748,8 +748,11 @@ function onSession(m) {
     // Tag filter 상태 리셋
     tagFilterTags = [];
     tagFilterActive = false;
+    _tfRatingCounts = null;
     renderTagFilterChips();
-    document.getElementById('tagFilterCount').textContent = '';
+    const tfCount = document.getElementById('tagFilterCount');
+    tfCount.textContent = '';
+    tfCount.classList.remove('has-result');
     const tfToggle = document.getElementById('tagFilterToggle');
     tfToggle.classList.remove('active');
     tfToggle.classList.remove('assigned');
@@ -759,7 +762,15 @@ function onSession(m) {
 
 function _restoreSharedSession() {
   const saved = loadSharedSession();
-  if (!saved) return;
+  if (!saved) {
+    // 저장된 세션 없음 (최초 접속) — GSQE 기본값을 서버에 전송
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const active = Object.keys(ratingState).filter(k => ratingState[k]);
+      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
+    }
+    syncRatingButtons();
+    return;
+  }
   // 서버 초기값(데스크톱 값) 무시 가드 ON
   _restoringSession = true;
   // 서버에 세션 복원 요청
@@ -2274,7 +2285,7 @@ const searchCountEl = $('searchCount');
 let searchingActive = false;
 
 // Rating filter state (synced with module-bar GSQE buttons)
-let ratingState = {g: false, s: false, q: true, e: true};
+let ratingState = {g: true, s: true, q: true, e: true};
 let _cachedRatingCounts = null; // {g:N, s:N, q:N, e:N} — 서버 search_state에서 캐시
 
 function _computeLocalFilteredCount() {
@@ -2321,7 +2332,11 @@ function toggleRating(r) {
 function onRatingUpdate(m) {
   if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
   if (sharedMode) {
-    // Shared Mode: 서버가 세션 기준 카운트를 보내줌
+    // Tag filter active 시 로컬 계산 우선 (서버 count는 전체 풀 기준이라 tag_filter 미반영)
+    if (tagFilterActive && _tfRatingCounts) {
+      const localCount = _computeLocalFilteredCount();
+      if (localCount !== null) { updateSearchCount(localCount); return; }
+    }
     if (m.count != null) updateSearchCount(m.count);
     return;
   }
@@ -3111,7 +3126,9 @@ function removeTagFilterTag(idx) {
   tagFilterActive = false;
   _tfRatingCounts = null;
   document.getElementById('tagFilterAssignBtn').disabled = true;
-  document.getElementById('tagFilterCount').textContent = '';
+  const rfCountEl = document.getElementById('tagFilterCount');
+  rfCountEl.textContent = '';
+  rfCountEl.classList.remove('has-result');
   document.getElementById('tagFilterToggle').classList.remove('assigned');
   if (!tagFilterTags.length) {
     clearTagFilter();
@@ -3139,7 +3156,9 @@ function clearTagFilter() {
   tagFilterActive = false;
   _tfRatingCounts = null;
   renderTagFilterChips();
-  document.getElementById('tagFilterCount').textContent = '';
+  const countEl = document.getElementById('tagFilterCount');
+  countEl.textContent = '';
+  countEl.classList.remove('has-result');
   const toggleBtn = document.getElementById('tagFilterToggle');
   toggleBtn.classList.remove('active');
   toggleBtn.classList.remove('assigned');
@@ -3156,9 +3175,11 @@ function clearTagFilter() {
 function onTagFilterResult(m) {
   const assignBtn = document.getElementById('tagFilterAssignBtn');
   _tfRatingCounts = m.rating_counts || null;
+  const countEl = document.getElementById('tagFilterCount');
   if (m.count > 0) {
     // Search 성공 → Assign 활성화 (아직 확정 아님)
-    document.getElementById('tagFilterCount').textContent = `${m.count.toLocaleString()} matched`;
+    countEl.textContent = `${m.count.toLocaleString()} matched`;
+    countEl.classList.add('has-result');
     assignBtn.disabled = false;
     // 세션 복원 시 자동 assign (search 완료 후 안전하게)
     if (_pendingTfAssignOnRestore) {
@@ -3167,7 +3188,8 @@ function onTagFilterResult(m) {
     }
   } else {
     _pendingTfAssignOnRestore = false;
-    document.getElementById('tagFilterCount').textContent = m.count === 0 && m.tags && m.tags.length ? 'No matches' : '';
+    countEl.textContent = m.count === 0 && m.tags && m.tags.length ? 'No matches' : '';
+    countEl.classList.remove('has-result');
     assignBtn.disabled = true;
   }
 }
@@ -3177,7 +3199,9 @@ function onTagFilterAssigned(m) {
   const toggleBtn = document.getElementById('tagFilterToggle');
   toggleBtn.classList.remove('active');
   toggleBtn.classList.add('assigned');
-  document.getElementById('tagFilterCount').textContent = `${(m.count || 0).toLocaleString()} assigned`;
+  const countEl = document.getElementById('tagFilterCount');
+  countEl.textContent = `${(m.count || 0).toLocaleString()} assigned`;
+  countEl.classList.add('has-result');
   document.getElementById('tagFilterAssignBtn').disabled = true;
   // Prompt: 카운트를 tag filter + GSQE 교집합으로 갱신
   if (_tfRatingCounts) {

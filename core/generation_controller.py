@@ -735,8 +735,12 @@ class GenerationController:
         self.generation_worker.set_generation_params(params, source_row)
 
         # 🔧 FIX: 메인 스레드에서 main_prompt 텍스트 캡처 (워커에서 크로스 스레드 UI 접근 방지)
+        # Shared Mode remote: overrides로 주입된 프롬프트는 _raw_input에 원본 보존
         try:
-            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
+            raw_input = params.pop('_raw_input', None)
+            if raw_input is not None:
+                self.generation_worker._main_prompt_text = raw_input
+            elif hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
                 self.generation_worker._main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
         except Exception:
             pass

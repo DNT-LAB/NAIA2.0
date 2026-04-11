@@ -369,6 +369,7 @@ class RemoteBridge(QObject):
                 prompt_overrides = {}
                 if prompt:
                     prompt_overrides["input"] = ', '.join(split_tags_smart(prompt))
+                    prompt_overrides["_raw_input"] = prompt  # Load Prompt용 원본 보존
                 if negative:
                     prompt_overrides["negative_prompt"] = ', '.join(split_tags_smart(negative))
                 if session_overrides is None:

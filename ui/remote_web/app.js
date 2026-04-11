@@ -672,8 +672,6 @@ function toggleHistoryMenu(btn) {
   let items = '';
   items += `<button class="hist-menu-item" onclick="saveCurrentHistoryItem();closeHistMenu()">Save</button>`;
   items += `<button class="hist-menu-item${hasPrompt ? '' : ' disabled'}" onclick="histAction('load_prompt')">Load Prompt</button>`;
-  items += `<button class="hist-menu-item${hasSrc ? '' : ' disabled'}" onclick="histAction('reroll')">Reroll</button>`;
-  items += `<div class="hist-menu-sep"></div>`;
   // TODO: enqueue 기능은 데스크톱 앱에서 직접 처리해야 함 — 추후 구현
   items += `<div class="hist-menu-sep"></div>`;
   items += `<button class="hist-menu-item danger${sharedMode ? ' disabled' : ''}" onclick="deleteCurrentHistoryItem();closeHistMenu()">Delete</button>`;

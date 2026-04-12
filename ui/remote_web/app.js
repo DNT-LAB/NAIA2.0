@@ -946,8 +946,8 @@ if (window.visualViewport) {
     }
   });
 
-  // iOS Safari: position:fixed는 layout viewport 기준이므로
   // 키보드 열린 상태에서 브라우저 자동 스크롤 시 offsetTop 변화를 추적
+  // (position:fixed는 layout viewport 기준 — iOS/Android 공통)
   vv.addEventListener('scroll', () => {
     if (_kbOpen) _syncKbPositions();
   });

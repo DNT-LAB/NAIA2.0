@@ -902,26 +902,32 @@ if (window.visualViewport) {
   const bottomCtrl = document.querySelector('.bottom-controls');
   const toggleBarEl = document.querySelector('.prompt-toggle-bar');
   let fullHeight = vv.height;
+  let _kbOpen = false;
   // Update fullHeight when not focused (no keyboard)
   const modulePopupEl = document.querySelector('.module-popup');
+
+  function _syncKbPositions() {
+    // 모듈 팝업: 키보드 위에 전체 표시 (top 기준으로 전환)
+    if (modulePopupEl) {
+      modulePopupEl.style.top = vv.offsetTop + 'px';
+      modulePopupEl.style.bottom = 'auto';
+      modulePopupEl.style.maxHeight = vv.height + 'px';
+    }
+    // autocomplete/tag tooltip: viewport 상단에 고정 (키보드에 가려지지 않도록)
+    if (tagTooltip) {
+      tagTooltip.style.top = (vv.offsetTop + 4) + 'px';
+      tagTooltip.style.maxHeight = Math.min(vv.height * 0.4, 200) + 'px';
+    }
+  }
+
   vv.addEventListener('resize', () => {
     if (isPC.matches) return;
     const shrink = fullHeight - vv.height;
-    const kbOpen = shrink > 100; // >100px shrink = keyboard
-    if (kbOpen) {
+    _kbOpen = shrink > 100; // >100px shrink = keyboard
+    if (_kbOpen) {
       bottomCtrl.classList.add('kb-open');
       toggleBarEl.style.display = 'none';
-      // 모듈 팝업: 키보드 위에 전체 표시 (top 기준으로 전환)
-      if (modulePopupEl) {
-        modulePopupEl.style.top = vv.offsetTop + 'px';
-        modulePopupEl.style.bottom = 'auto';
-        modulePopupEl.style.maxHeight = vv.height + 'px';
-      }
-      // autocomplete/tag tooltip: viewport 상단에 고정 (키보드에 가려지지 않도록)
-      if (tagTooltip) {
-        tagTooltip.style.top = (vv.offsetTop + 4) + 'px';
-        tagTooltip.style.maxHeight = Math.min(vv.height * 0.4, 200) + 'px';
-      }
+      _syncKbPositions();
     } else {
       fullHeight = vv.height; // recalibrate
       bottomCtrl.classList.remove('kb-open');
@@ -938,6 +944,12 @@ if (window.visualViewport) {
         tagTooltip.style.maxHeight = '';
       }
     }
+  });
+
+  // iOS Safari: position:fixed는 layout viewport 기준이므로
+  // 키보드 열린 상태에서 브라우저 자동 스크롤 시 offsetTop 변화를 추적
+  vv.addEventListener('scroll', () => {
+    if (_kbOpen) _syncKbPositions();
   });
 }
 

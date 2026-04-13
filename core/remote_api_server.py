@@ -759,10 +759,14 @@ class RemoteBridge(QObject):
         self._prompt_debounce_timer.start(500)
 
     def _broadcast_prompts(self):
-        """현재 프롬프트 캐시 갱신 (broadcast 없음 — 각 클라이언트가 독립 관리, 첫 접속 시에만 캐시 전송)"""
+        """현재 프롬프트 캐시 갱신 + Non-Shared 모드에서 웹 클라이언트에 동기화"""
         data = self.get_current_prompts()
         if data:
             self._cached_prompts = data
+            # Non-Shared: 데스크톱 프롬프트 변경을 웹에 실시간 동기화
+            # Shared: 각 클라이언트가 독립 관리하므로 broadcast 안 함
+            if not self.shared_server_mode and self._has_clients():
+                self._broadcast_json(data)
 
     # --- 생성 파라미터 동기화 ---
 
@@ -2619,6 +2623,12 @@ class RemoteBridge(QObject):
                     main_prompt = entry.get("metadata", {}).get("prompt", "")
                 if main_prompt:
                     self._broadcast_json({"type": "load_prompt", "prompt": main_prompt})
+                    # Non-Shared: 데스크톱 UI에도 반영
+                    if not self.shared_server_mode:
+                        self._syncing_prompt = True
+                        mw = self.app_context.main_window
+                        mw.main_prompt_textedit.setPlainText(main_prompt)
+                        self._syncing_prompt = False
                 else:
                     self._broadcast_json({"type": "toast", "message": "No prompt data", "level": "error"})
 

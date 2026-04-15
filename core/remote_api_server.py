@@ -493,8 +493,13 @@ class RemoteBridge(QObject):
 
         mask = pd.Series(True, index=snapshot.index)
         for tag in tags:
-            tag_clean = tag.strip().replace("_", " ")
-            mask &= snapshot["general"].str.contains(tag_clean, case=False, na=False, regex=False)
+            raw = tag.strip()
+            negate = raw.startswith("-")
+            tag_clean = raw.lstrip("-").strip().replace("_", " ")
+            if not tag_clean:
+                continue
+            hit = snapshot["general"].str.contains(tag_clean, case=False, na=False, regex=False)
+            mask &= ~hit if negate else hit
 
         matched = snapshot[mask]
         matched_ids = set(matched["id"].tolist())

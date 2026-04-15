@@ -496,13 +496,13 @@ header {
 .history-close {
   width: 28px; height: 28px;
   display: flex; align-items: center; justify-content: center;
-  background: none; border: 1px solid var(--border-dim);
-  border-radius: 6px; color: var(--text-dim);
+  background: rgba(244,67,54,0.15); border: 1px solid rgba(244,67,54,0.35);
+  border-radius: 6px; color: #f44336;
   font-size: 14px; cursor: pointer;
   transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
 }
-.history-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.history-close:hover { background: rgba(244,67,54,0.35); color: #fff; }
 
 .history-grid {
   flex: 1;
@@ -1044,10 +1044,10 @@ header {
 .module-popup.open { display: flex; }
 @media (min-width: 768px) {
   .module-popup {
-    /* PC: left column area, below header, stop above module bar */
-    top: 60px; left: 12px; bottom: auto; right: auto;
-    width: 456px;
-    max-height: calc(100dvh - 240px);
+    /* PC: viewer 영역(우측)에 표시 — 프롬프트 패널을 가리지 않음 */
+    top: 12px; left: 492px; bottom: auto; right: auto;
+    width: min(420px, calc(100vw - 504px));
+    max-height: calc(100dvh - 24px);
   }
 }
 .module-popup-header {
@@ -1917,9 +1917,10 @@ header {
 .tag-filter-popup.open { display: flex; }
 @media (min-width: 768px) {
   .tag-filter-popup {
-    top: 60px; left: 12px; bottom: auto;
-    width: 380px;
-    max-height: calc(100dvh - 240px);
+    /* PC: viewer 영역(우측)에 표시 */
+    top: 12px; left: 492px; bottom: auto;
+    width: min(380px, calc(100vw - 504px));
+    max-height: calc(100dvh - 24px);
   }
 }
 .tag-filter-body {
@@ -1938,6 +1939,12 @@ header {
   outline: none;
 }
 .tag-filter-input:focus { border-color: var(--accent-blue); }
+.tag-filter-input-row.exclude .tag-filter-input {
+  border-color: rgba(244,67,54,0.3);
+}
+.tag-filter-input-row.exclude .tag-filter-input:focus {
+  border-color: #f44336;
+}
 .tag-filter-ac {
   max-height: 160px; overflow-y: auto;
 }
@@ -1956,6 +1963,10 @@ header {
   line-height: 1;
 }
 .tag-filter-chip .chip-x:hover { color: var(--error); }
+.tag-filter-chip.exclude {
+  background: rgba(244,67,54,0.12); border-color: rgba(244,67,54,0.3);
+  color: #f47066;
+}
 .tag-filter-actions {
   display: flex; align-items: center; gap: 8px;
   padding-top: 4px;

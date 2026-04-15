@@ -3088,6 +3088,7 @@ if (window.innerWidth < 768) {
 
 // ---- Tag Filter ----
 let tagFilterTags = [];
+let tagFilterExcludeTags = [];
 let tagFilterActive = false;
 let _tfAcResults = [];
 let _tfAcSel = -1;
@@ -3129,6 +3130,32 @@ function renderTagFilterChips() {
   ).join('');
 }
 
+function renderTagFilterExcludeChips() {
+  const el = document.getElementById('tagFilterExcludeChips');
+  if (!tagFilterExcludeTags.length) { el.innerHTML = ''; return; }
+  el.innerHTML = tagFilterExcludeTags.map((t, i) =>
+    `<span class="tag-filter-chip exclude">${escHtml(t)}<span class="chip-x" onclick="removeTagFilterExcludeTag(${i})">&times;</span></span>`
+  ).join('');
+}
+
+function removeTagFilterExcludeTag(idx) {
+  tagFilterExcludeTags.splice(idx, 1);
+  renderTagFilterExcludeChips();
+  tagFilterActive = false;
+  _tfRatingCounts = null;
+  document.getElementById('tagFilterAssignBtn').disabled = true;
+  const rfCountEl = document.getElementById('tagFilterCount');
+  rfCountEl.textContent = '';
+  rfCountEl.classList.remove('has-result');
+  document.getElementById('tagFilterToggle').classList.remove('assigned');
+  if (!tagFilterTags.length && !tagFilterExcludeTags.length) {
+    clearTagFilter();
+  } else if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'tag_filter_clear'}));
+  }
+  saveSharedSession();
+}
+
 function removeTagFilterTag(idx) {
   tagFilterTags.splice(idx, 1);
   renderTagFilterChips();
@@ -3150,9 +3177,10 @@ function removeTagFilterTag(idx) {
 }
 
 function applyTagFilter() {
-  if (!tagFilterTags.length) return;
+  if (!tagFilterTags.length && !tagFilterExcludeTags.length) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({type: 'tag_filter_search', tags: tagFilterTags}));
+  const combined = [...tagFilterTags, ...tagFilterExcludeTags.map(t => '-' + t)];
+  ws.send(JSON.stringify({type: 'tag_filter_search', tags: combined}));
 }
 
 function assignTagFilter() {
@@ -3163,9 +3191,11 @@ function assignTagFilter() {
 
 function clearTagFilter() {
   tagFilterTags = [];
+  tagFilterExcludeTags = [];
   tagFilterActive = false;
   _tfRatingCounts = null;
   renderTagFilterChips();
+  renderTagFilterExcludeChips();
   const countEl = document.getElementById('tagFilterCount');
   countEl.textContent = '';
   countEl.classList.remove('has-result');
@@ -3224,21 +3254,27 @@ function onTagFilterAssigned(m) {
   showToast(`Tag filter assigned: ${(m.count || 0).toLocaleString()} rows`, 'success');
 }
 
+let _tfAcTarget = 'include'; // 'include' | 'exclude'
+
 function onTagFilterAcResult(m) {
   if (!document.getElementById('tagFilterPopup').classList.contains('open')) return;
-  const input = document.getElementById('tagFilterInput');
+  const id = _tfAcTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
+  const input = document.getElementById(id);
   if (!input || input.value.trim().length < 2) return;
   _tfAcResults = m.results || [];
   _tfAcSel = -1;
   _renderTfAc();
 }
 
-// Tag filter autocomplete (reuse existing autocomplete endpoint)
-(function() {
-  const input = document.getElementById('tagFilterInput');
+// Tag filter autocomplete (shared for include & exclude inputs)
+function _bindTfAcInput(inputId, target) {
+  const input = document.getElementById(inputId);
   if (!input) return;
 
+  input.addEventListener('focus', function() { _tfAcTarget = target; });
+
   input.addEventListener('input', function() {
+    _tfAcTarget = target;
     const q = this.value.trim();
     if (q.length < 2) { _clearTfAc(); return; }
     clearTimeout(_tfAcTimer);
@@ -3269,16 +3305,27 @@ function onTagFilterAcResult(m) {
       _clearTfAc();
     }
   });
-})();
+}
+_bindTfAcInput('tagFilterInput', 'include');
+_bindTfAcInput('tagFilterExcludeInput', 'exclude');
 
 function _selectTfAc(tag) {
   const clean = tag.replace(/ /g, '_');
-  if (!tagFilterTags.includes(clean)) {
-    tagFilterTags.push(clean);
-    renderTagFilterChips();
-    saveSharedSession();
+  if (_tfAcTarget === 'exclude') {
+    if (!tagFilterExcludeTags.includes(clean)) {
+      tagFilterExcludeTags.push(clean);
+      renderTagFilterExcludeChips();
+      saveSharedSession();
+    }
+    document.getElementById('tagFilterExcludeInput').value = '';
+  } else {
+    if (!tagFilterTags.includes(clean)) {
+      tagFilterTags.push(clean);
+      renderTagFilterChips();
+      saveSharedSession();
+    }
+    document.getElementById('tagFilterInput').value = '';
   }
-  document.getElementById('tagFilterInput').value = '';
   _clearTfAc();
 }
 
@@ -3287,6 +3334,7 @@ function _clearTfAc() {
   _tfAcSel = -1;
   document.getElementById('tagFilterAc').innerHTML = '';
 }
+
 
 function _renderTfAc() {
   const el = document.getElementById('tagFilterAc');

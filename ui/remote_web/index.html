@@ -103,10 +103,14 @@
   </div>
   <div class="tag-filter-body">
     <div class="tag-filter-input-row">
-      <input class="tag-filter-input" id="tagFilterInput" placeholder="danbooru tag..." autocomplete="off">
+      <input class="tag-filter-input" id="tagFilterInput" placeholder="include tag..." autocomplete="off">
     </div>
     <div class="tag-filter-ac" id="tagFilterAc"></div>
     <div class="tag-filter-chips" id="tagFilterChips"></div>
+    <div class="tag-filter-input-row exclude">
+      <input class="tag-filter-input" id="tagFilterExcludeInput" placeholder="exclude tag..." autocomplete="off">
+    </div>
+    <div class="tag-filter-chips" id="tagFilterExcludeChips"></div>
     <div class="tag-filter-actions">
       <span class="tag-filter-count" id="tagFilterCount"></span>
       <button class="tag-filter-btn-action apply" onclick="applyTagFilter()">Search</button>

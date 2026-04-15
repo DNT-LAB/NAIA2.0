@@ -127,8 +127,7 @@ class RemoteBridge(QObject):
     request_load_parquet = pyqtSignal(str)          # filename
     request_depth_action = pyqtSignal(str)          # depth search action JSON
     request_restore_snapshot = pyqtSignal()          # 메인 검색 결과 스냅샷 복원
-    request_assign_tag_filter = pyqtSignal(set)     # tag filter IDs → search_results 교체
-    request_clear_tag_filter = pyqtSignal()         # tag filter 해제 → 원본 복원
+    request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
     request_history_action = pyqtSignal(object, str)   # (ws, action_json)
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
 
@@ -173,7 +172,9 @@ class RemoteBridge(QObject):
         self._char_analysis: dict = {}
         # Rating 필터: Web Remote GSQE 버튼 상태
         self._active_ratings: set = {'g', 's', 'q', 'e'}
-        # Tag filter assign/clear 중 _save_search_snapshot에서 reset 방지
+        # Tag filter IDs (Non-shared only — Shared는 session dict 사용)
+        self._active_tag_filter_ids: set | None = None
+        # 필터 적용 중 _save_search_snapshot에서 reset 방지
         self._skip_filter_reset: bool = False
         # Viewer: 디스크 이미지 스캔 캐시
         self._viewer_cache: list = []
@@ -2414,10 +2415,14 @@ class RemoteBridge(QObject):
             parquets = []
             if custom_dir.exists():
                 parquets = sorted([f.name for f in custom_dir.glob("*.parquet")])
-            # Rating별 카운트 breakdown
+            # Rating별 카운트 breakdown (master에서 — 필터 전 전체 기준)
             rating_counts = {}
             filtered_count = count
-            if mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
+            master = getattr(mw, '_master_filter_snapshot', None)
+            if master is not None and not master.empty and 'rating' in master.columns:
+                rating_counts = {r: int((master['rating'] == r).sum()) for r in 'gsqe'}
+                filtered_count = count  # 이미 하드 필터된 search_results의 count
+            elif mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
                 rating_counts = mw.search_results.get_count_by_rating()
                 filtered_count = mw.search_results.get_filtered_count(self._active_ratings)
             return {
@@ -2700,39 +2705,55 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: 복원 실패 — {e}")
 
-    def _do_assign_tag_filter(self, ids: set):
-        """Tag filter assign → search_results 교체 (depth search assign 방식)
-        원본 snapshot을 _pre_tag_filter_snapshot에 보존하여 clear 시 복원."""
+    def _compute_master_count(self, active_ratings: set) -> dict:
+        """master snapshot 기준으로 현재 필터 조합의 카운트 반환 (asyncio.to_thread용)"""
+        mw = self.app_context.main_window
+        master = getattr(mw, '_master_filter_snapshot', None)
+        if master is None or master.empty:
+            if mw and mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
+                rc = mw.search_results.get_count_by_rating()
+                return {"count": sum(rc.get(r, 0) for r in active_ratings), "rating_counts": rc}
+            return {"count": 0, "rating_counts": {}}
+        rc = {r: int((master['rating'] == r).sum()) for r in 'gsqe'} if 'rating' in master.columns else {}
+        source = master
+        tag_ids = self._active_tag_filter_ids
+        if tag_ids and 'id' in source.columns:
+            source = source[source['id'].isin(tag_ids)]
+        count = int(source['rating'].isin(active_ratings).sum()) if (active_ratings and 'rating' in source.columns) else len(source)
+        return {"count": count, "rating_counts": rc}
+
+    def _do_apply_filters(self):
+        """GSQE + Tag Filter를 master snapshot에서 재적용 (Non-shared only).
+        set_active_ratings / tag_filter_assign / tag_filter_clear 시 호출."""
+        if self.shared_server_mode:
+            return
         try:
             mw = self.app_context.main_window
             if not mw:
                 return
-            # 원본 snapshot 보존 (최초 1회 — 이후 재필터링 시 동일 원본 재사용)
-            pre = getattr(mw, '_pre_tag_filter_snapshot', None)
-            if pre is None:
-                snapshot = getattr(mw, '_search_results_snapshot', None)
-                if snapshot is not None and not snapshot.empty:
-                    pre = snapshot.copy()
-                else:
-                    pre = mw.search_results.get_dataframe().copy()
+            master = getattr(mw, '_master_filter_snapshot', None)
+            if master is None or master.empty:
+                return
 
-            # 원본에서 ID 필터링
-            if pre.empty or 'id' not in pre.columns:
-                return
-            filtered = pre[pre['id'].isin(ids)]
-            if filtered.empty:
-                return
+            filtered = master
+            # GSQE 필터
+            ratings = self._active_ratings
+            if ratings and ratings != {'g', 's', 'q', 'e'} and 'rating' in filtered.columns:
+                filtered = filtered[filtered['rating'].isin(ratings)]
+            # Tag Filter
+            tag_ids = self._active_tag_filter_ids
+            if tag_ids and 'id' in filtered.columns:
+                filtered = filtered[filtered['id'].isin(tag_ids)]
 
             from core.search_result_model import SearchResultModel
-            new_model = SearchResultModel(filtered)
-            mw.search_results = new_model
+            mw.search_results = SearchResultModel(filtered) if not filtered.empty else SearchResultModel()
             try:
                 self._skip_filter_reset = True
                 mw._save_search_snapshot()
             finally:
                 self._skip_filter_reset = False
-            mw._pre_tag_filter_snapshot = pre  # 원본 참조 재설정
-            count = new_model.get_count()
+
+            count = mw.search_results.get_count()
             if hasattr(mw, 'result_label1'):
                 mw.result_label1.setText(f"검색: {count}")
             if hasattr(mw, 'result_label2'):
@@ -2740,55 +2761,30 @@ class RemoteBridge(QObject):
             state = self._read_search_state()
             if state:
                 self._broadcast_json(state)
-            print(f"🌐 Remote: Tag filter assign → search_results 교체 ({count}행)")
         except Exception as e:
-            print(f"🌐 Remote: tag filter assign 실패 — {e}")
-
-    def _do_clear_tag_filter(self):
-        """Tag filter 해제 → 원본 snapshot 복원"""
-        try:
-            mw = self.app_context.main_window
-            if not mw:
-                return
-            pre = getattr(mw, '_pre_tag_filter_snapshot', None)
-            if pre is not None and not pre.empty:
-                from core.search_result_model import SearchResultModel
-                mw.search_results = SearchResultModel(pre)
-                try:
-                    self._skip_filter_reset = True
-                    mw._save_search_snapshot()
-                finally:
-                    self._skip_filter_reset = False
-                mw._pre_tag_filter_snapshot = None
-                count = mw.search_results.get_count()
-                if hasattr(mw, 'result_label1'):
-                    mw.result_label1.setText(f"검색: {count}")
-                if hasattr(mw, 'result_label2'):
-                    mw.result_label2.setText(f"남음: {count}")
-                print(f"🌐 Remote: Tag filter clear → 원본 복원 ({count}행)")
-            state = self._read_search_state()
-            if state:
-                self._broadcast_json(state)
-        except Exception as e:
-            print(f"🌐 Remote: tag filter clear 실패 — {e}")
+            print(f"🌐 Remote: 필터 적용 실패 — {e}")
 
     def _reset_remote_filters(self):
         """검색 데이터 교체 시 Remote Session 필터 전체 초기화 (Non-shared only).
-        _save_search_snapshot()에서 호출됨 (tag filter assign/clear 중에는 _skip_filter_reset으로 우회)."""
+        _save_search_snapshot()에서 호출됨 (필터 적용 중에는 _skip_filter_reset으로 우회)."""
         if self.shared_server_mode:
             return
         # GSQE 전체 활성화
         self._active_ratings = {'g', 's', 'q', 'e'}
         self.app_context.remote_active_ratings = None
-        # 모든 세션의 tag filter 초기화
+        # Tag filter 초기화
+        self._active_tag_filter_ids = None
         if self._ws_manager:
             for session in self._ws_manager.sessions.values():
                 session["tag_filter"] = None
                 session["tag_filter_pending"] = None
+        # Master snapshot 설정 (현재 search_results = 새로 유입된 비필터 데이터)
+        mw = self.app_context.main_window
+        if mw and mw.search_results and not mw.search_results.is_empty():
+            mw._master_filter_snapshot = mw.search_results.get_dataframe().copy()
         # Web 클라이언트에 filter_reset broadcast
         if not self._has_clients():
             return
-        mw = self.app_context.main_window
         count = mw.search_results.get_count() if mw and mw.search_results else 0
         rc = {}
         if mw and mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
@@ -3461,13 +3457,16 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             else:
                                 bridge._active_ratings = new_ratings
                                 bridge.app_context.remote_active_ratings = new_ratings
+                                bridge.request_apply_filters.emit()
                             # 즉시 카운트 계산하여 응답
-                            state = await asyncio.to_thread(bridge._read_search_state)
-                            rc = state.get("rating_counts", {})
                             if bridge.shared_server_mode:
+                                state = await asyncio.to_thread(bridge._read_search_state)
+                                rc = state.get("rating_counts", {})
                                 count = sum(rc.get(r, 0) for r in new_ratings)
                             else:
-                                count = state.get("count", 0)
+                                info = await asyncio.to_thread(bridge._compute_master_count, new_ratings)
+                                rc = info["rating_counts"]
+                                count = info["count"]
                             await ws.send_text(json.dumps({
                                 "type": "rating_update",
                                 "active_ratings": list(new_ratings),
@@ -3502,9 +3501,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 session["tag_filter"] = session.pop("tag_filter_pending")
                                 await asyncio.to_thread(bridge._recompute_eligible_ids, session)
                                 tf = session["tag_filter"]
-                                # Non-shared: search_results 교체 (depth search assign 방식)
+                                # Non-shared: master에서 GSQE + Tag Filter 재적용
                                 if not bridge.shared_server_mode:
-                                    bridge.request_assign_tag_filter.emit(tf.get("ids", set()))
+                                    bridge._active_tag_filter_ids = tf.get("ids")
+                                    bridge.request_apply_filters.emit()
                                 await ws.send_text(json.dumps({
                                     "type": "tag_filter_assigned",
                                     "count": tf["count"],
@@ -3522,9 +3522,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 session["tag_filter"] = None
                                 session["tag_filter_pending"] = None
                                 await asyncio.to_thread(bridge._recompute_eligible_ids, session)
-                            # Non-shared: 원본 snapshot 복원
+                            # Non-shared: tag filter 해제 + 재적용
                             if not bridge.shared_server_mode:
-                                bridge.request_clear_tag_filter.emit()
+                                bridge._active_tag_filter_ids = None
+                                bridge.request_apply_filters.emit()
                             await ws.send_text(json.dumps({
                                 "type": "tag_filter_result", "count": 0,
                                 "tags": [], "rating_counts": {r: 0 for r in 'gsqe'},
@@ -3664,8 +3665,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_load_parquet.connect(bridge._do_load_parquet, Qt.ConnectionType.QueuedConnection)
     bridge.request_depth_action.connect(bridge._do_depth_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_restore_snapshot.connect(bridge._do_restore_snapshot, Qt.ConnectionType.QueuedConnection)
-    bridge.request_assign_tag_filter.connect(bridge._do_assign_tag_filter, Qt.ConnectionType.QueuedConnection)
-    bridge.request_clear_tag_filter.connect(bridge._do_clear_tag_filter, Qt.ConnectionType.QueuedConnection)
+    bridge.request_apply_filters.connect(bridge._do_apply_filters, Qt.ConnectionType.QueuedConnection)
     bridge.request_history_action.connect(bridge._handle_history_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
 
@@ -3801,10 +3801,11 @@ def stop_remote_server():
             ctx = _bridge_instance.app_context
             ctx.remote_bridge = None
             ctx.remote_active_ratings = None
-            # Tag filter 원본 snapshot 정리
+            # Master snapshot + 필터 상태 정리
             mw_ref = ctx.main_window
-            if mw_ref and hasattr(mw_ref, '_pre_tag_filter_snapshot'):
-                mw_ref._pre_tag_filter_snapshot = None
+            if mw_ref:
+                if hasattr(mw_ref, '_master_filter_snapshot'):
+                    mw_ref._master_filter_snapshot = None
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제

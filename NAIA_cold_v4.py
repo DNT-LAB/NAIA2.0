@@ -4985,11 +4985,8 @@ class ModernMainWindow(QMainWindow):
         """현재 search_results의 원본 사본을 메모리에 저장"""
         if not self.search_results.is_empty():
             self._search_results_snapshot = self.search_results.get_dataframe().copy()
-            # Tag filter 원본 snapshot 무효화
-            if getattr(self, '_pre_tag_filter_snapshot', None) is not None:
-                self._pre_tag_filter_snapshot = None
             # Remote Session 필터 초기화 (검색/로드/depth assign/복원 시)
-            # Tag filter assign/clear 중에는 bridge._skip_filter_reset으로 우회
+            # 필터 적용 중에는 bridge._skip_filter_reset으로 우회
             bridge = getattr(self.app_context, 'remote_bridge', None)
             if bridge and not getattr(bridge, '_skip_filter_reset', False):
                 bridge._reset_remote_filters()

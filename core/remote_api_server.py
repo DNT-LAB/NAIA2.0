@@ -2710,10 +2710,16 @@ class RemoteBridge(QObject):
         mw = self.app_context.main_window
         master = getattr(mw, '_master_filter_snapshot', None)
         if master is None or master.empty:
-            if mw and mw.search_results and hasattr(mw.search_results, 'get_count_by_rating'):
-                rc = mw.search_results.get_count_by_rating()
-                return {"count": sum(rc.get(r, 0) for r in active_ratings), "rating_counts": rc}
-            return {"count": 0, "rating_counts": {}}
+            # Lazy init: 서버 시작 전에 검색이 완료된 경우
+            snapshot = getattr(mw, '_search_results_snapshot', None)
+            if snapshot is not None and not snapshot.empty:
+                master = snapshot.copy()
+                mw._master_filter_snapshot = master
+            elif mw and mw.search_results and not mw.search_results.is_empty():
+                master = mw.search_results.get_dataframe().copy()
+                mw._master_filter_snapshot = master
+            else:
+                return {"count": 0, "rating_counts": {}}
         rc = {r: int((master['rating'] == r).sum()) for r in 'gsqe'} if 'rating' in master.columns else {}
         source = master
         tag_ids = self._active_tag_filter_ids
@@ -2733,7 +2739,15 @@ class RemoteBridge(QObject):
                 return
             master = getattr(mw, '_master_filter_snapshot', None)
             if master is None or master.empty:
-                return
+                # Lazy init: 서버 시작 전에 검색이 완료된 경우
+                snapshot = getattr(mw, '_search_results_snapshot', None)
+                if snapshot is not None and not snapshot.empty:
+                    master = snapshot.copy()
+                elif mw.search_results and not mw.search_results.is_empty():
+                    master = mw.search_results.get_dataframe().copy()
+                if master is None or master.empty:
+                    return
+                mw._master_filter_snapshot = master
 
             filtered = master
             # GSQE 필터

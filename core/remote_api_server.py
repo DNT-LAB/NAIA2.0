@@ -2687,12 +2687,18 @@ class RemoteBridge(QObject):
             self.app_context.stealth_mode = prev_stealth
 
     def _do_restore_snapshot(self):
-        """메인 검색 결과를 스냅샷에서 복원"""
+        """메인 검색 결과를 복원 — master가 있으면 원본에서 복원 (필터 해제)"""
         try:
             mw = self.app_context.main_window
             if not mw:
                 return
-            if hasattr(mw, '_restore_from_snapshot'):
+            # Master snapshot 존재 → 필터 전 원본에서 복원 + 필터 초기화
+            master = getattr(mw, '_master_filter_snapshot', None)
+            if master is not None and not master.empty:
+                from core.search_result_model import SearchResultModel
+                mw.search_results = SearchResultModel(master)
+                mw._save_search_snapshot()  # → _reset_remote_filters → 필터 초기화 + master 재설정
+            elif hasattr(mw, '_restore_from_snapshot'):
                 mw._restore_from_snapshot()
             count = mw.search_results.get_count() if mw.search_results else 0
             if hasattr(mw, 'result_label1'):

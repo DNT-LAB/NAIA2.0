@@ -3019,6 +3019,13 @@ let lastAcQuery = '';
 let acTarget = null; // active textarea for autocomplete/hint
 let acComposing = false; // IME composition guard
 
+// PC에서 모듈 내 편집 시 tooltip을 왼쪽(프롬프트 영역)에 표시
+function _syncTooltipSide() {
+  if (!tagTooltip || window.innerWidth < 768) return;
+  const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
+  tagTooltip.classList.toggle('left-side', !!inModule);
+}
+
 const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
 const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4' };
 function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
@@ -3113,6 +3120,7 @@ function onTagLookupResult(m) {
   tagTooltip.innerHTML = html;
   tagTooltip.classList.remove('ac-mode');
   tagTooltip.classList.add('open');
+  _syncTooltipSide();
   // Click on related/implies/character tag → insert next to current token
   tagTooltip.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
     el.addEventListener('mousedown', e => {
@@ -3212,6 +3220,7 @@ function renderAutocomplete() {
   html += '</div>';
   tagTooltip.innerHTML = html;
   tagTooltip.classList.add('open', 'ac-mode');
+  _syncTooltipSide();
   tagTooltip.querySelectorAll('.tag-ac-item').forEach(el => {
     el.addEventListener('mousedown', e => {
       e.preventDefault();

@@ -2205,10 +2205,13 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
     border-radius: 8px;
   }
   .tag-tooltip.ac-mode { padding: 4px 0; }
-  /* PC: 모듈 내 편집 시 tooltip을 왼쪽 프롬프트 영역에 표시 */
+  /* PC: 모듈 내 편집 시 tooltip을 왼쪽 프롬프트 영역에 표시 (오른쪽 정렬) */
   .tag-tooltip.left-side {
-    left: 10px; right: auto;
-    max-width: 460px;
+    left: auto;
+    right: calc(100vw - 470px);
+    max-width: 450px;
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow: 6px 4px 24px rgba(0,0,0,0.55), 0 0 1px rgba(255,255,255,0.1);
   }
 
   /* PC: drawer fills remaining space */

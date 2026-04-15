@@ -142,7 +142,7 @@ class RemoteBridge(QObject):
         self.app_context = app_context
         self.latest_webp: Optional[bytes] = None
         self.latest_metadata: Optional[dict] = None
-        self._image_history: list = []  # [{webp, metadata, gen_params, source_row, prompt_context}, ...] 최대 200장
+        self._image_history: list = []  # [{webp, metadata, gen_params, source_row, prompt_context}, ...] 최대 5장 (초기 시딩용)
         self._history_lock = threading.Lock()  # _image_history 동시 접근 보호
         self._ws_manager: Optional[WebSocketManager] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -170,7 +170,11 @@ class RemoteBridge(QObject):
         # 캐릭터 분석 역인덱스: char_name_lower → (copyright_group, data_dict)
         self._char_analysis: dict = {}
         # Rating 필터: Web Remote GSQE 버튼 상태
-        self._active_ratings: set = {'q', 'e'}
+        self._active_ratings: set = {'g', 's', 'q', 'e'}
+        # Viewer: 디스크 이미지 스캔 캐시
+        self._viewer_cache: list = []
+        self._viewer_cache_time: float = 0
+        self._viewer_cache_dir: str = ""
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -523,6 +527,19 @@ class RemoteBridge(QObject):
     def _do_set_option(self, key: str, checked: bool):
         """웹에서 토글한 옵션을 메인 앱 체크박스에 반영"""
         try:
+            # auto_save: image_window 체크박스 (OPTION_KEYS 외)
+            if key == "auto_save":
+                mw = self.app_context.main_window
+                if hasattr(mw, 'image_window') and mw.image_window:
+                    iw = mw.image_window
+                    if hasattr(iw, 'auto_save_checkbox') and iw.auto_save_checkbox:
+                        if iw.auto_save_checkbox.isChecked() != checked:
+                            self._syncing_option = True
+                            iw.auto_save_checkbox.setChecked(checked)
+                            self._syncing_option = False
+                            print(f"🌐 Remote: 자동 저장 → {checked}")
+                return
+
             label = self.OPTION_KEYS.get(key)
             if not label:
                 return
@@ -697,11 +714,17 @@ class RemoteBridge(QObject):
         """현재 옵션 상태 반환"""
         try:
             mw = self.app_context.main_window
-            return {
+            opts = {
                 key: mw.generation_checkboxes[label].isChecked()
                 for key, label in self.OPTION_KEYS.items()
                 if label in mw.generation_checkboxes
             }
+            # auto_save: image_window의 체크박스
+            if hasattr(mw, 'image_window') and mw.image_window:
+                iw = mw.image_window
+                if hasattr(iw, 'auto_save_checkbox') and iw.auto_save_checkbox:
+                    opts["auto_save"] = iw.auto_save_checkbox.isChecked()
+            return opts
         except Exception:
             return {}
 
@@ -772,6 +795,151 @@ class RemoteBridge(QObject):
             # Shared: 각 클라이언트가 독립 관리하므로 broadcast 안 함
             if not self.shared_server_mode and self._has_clients():
                 self._broadcast_json(data)
+
+    # --- Viewer: 디스크 이미지 스캔/썸네일 ---
+
+    def _get_viewer_save_dir(self) -> 'Path':
+        """현재 세션 저장 폴더 반환"""
+        from pathlib import Path
+        return Path(self.app_context.image_crud_controller.get_save_directory())
+
+    def _scan_save_folder(self) -> list:
+        """저장 폴더 재귀 스캔 → mtime 내림차순 리스트. 2초 캐시."""
+        import os, time
+        from pathlib import Path
+        from datetime import datetime
+
+        save_dir = self._get_viewer_save_dir()
+        save_dir_str = str(save_dir)
+        now = time.time()
+
+        # 캐시 유효 (같은 디렉터리 + 2초 이내)
+        if (self._viewer_cache_dir == save_dir_str
+                and now - self._viewer_cache_time < 2.0
+                and self._viewer_cache):
+            return self._viewer_cache
+
+        if not save_dir.exists():
+            self._viewer_cache = []
+            self._viewer_cache_time = now
+            self._viewer_cache_dir = save_dir_str
+            return []
+
+        IMAGE_EXTS = {'.png', '.webp', '.jpg', '.jpeg'}
+        entries = []
+
+        def _scan_recursive(folder: Path):
+            try:
+                for entry in os.scandir(str(folder)):
+                    if entry.is_dir(follow_symlinks=False):
+                        # .thumbnails 폴더 제외
+                        if entry.name == '.thumbnails':
+                            continue
+                        _scan_recursive(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        ext = os.path.splitext(entry.name)[1].lower()
+                        if ext in IMAGE_EXTS:
+                            stat = entry.stat()
+                            rel = os.path.relpath(entry.path, save_dir_str).replace('\\', '/')
+                            entries.append({
+                                "rel_path": rel,
+                                "filename": entry.name,
+                                "size_bytes": stat.st_size,
+                                "mtime": stat.st_mtime,
+                                "mtime_iso": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                            })
+            except OSError:
+                pass
+
+        _scan_recursive(save_dir)
+        entries.sort(key=lambda e: e["mtime"], reverse=True)
+
+        self._viewer_cache = entries
+        self._viewer_cache_time = now
+        self._viewer_cache_dir = save_dir_str
+        return entries
+
+    def _invalidate_viewer_cache(self):
+        """viewer 캐시 무효화 (새 이미지 저장 시)"""
+        self._viewer_cache_time = 0
+
+    def _validate_viewer_path(self, rel_path: str) -> 'Path | None':
+        """상대 경로를 저장 폴더 기준으로 검증 (경로 탈출 방지)"""
+        from pathlib import Path
+        save_dir = self._get_viewer_save_dir().resolve()
+        target = (save_dir / rel_path).resolve()
+        if not str(target).startswith(str(save_dir)):
+            print(f"🌐 Viewer: 경로 탈출 시도 차단 — {rel_path}")
+            return None
+        if not target.is_file():
+            return None
+        IMAGE_EXTS = {'.png', '.webp', '.jpg', '.jpeg'}
+        if target.suffix.lower() not in IMAGE_EXTS:
+            return None
+        return target
+
+    def _get_or_create_thumbnail(self, abs_path: 'Path', max_side: int = 0) -> bytes:
+        """이미지 썸네일 반환 (디스크 캐시). max_side=0이면 원본의 절반. blocking."""
+        from pathlib import Path
+        from PIL import Image
+        import io
+
+        save_dir = self._get_viewer_save_dir()
+        rel = abs_path.relative_to(save_dir.resolve())
+        thumb_dir = save_dir / ".thumbnails" / rel.parent
+        thumb_path = thumb_dir / (rel.stem + ".thumb.webp")
+
+        # 캐시 유효성 확인 (원본 mtime vs 썸네일 mtime)
+        if thumb_path.exists():
+            orig_mtime = abs_path.stat().st_mtime
+            thumb_mtime = thumb_path.stat().st_mtime
+            if thumb_mtime >= orig_mtime:
+                return thumb_path.read_bytes()
+
+        # 썸네일 생성
+        try:
+            img = Image.open(str(abs_path))
+            # max_side=0: 원본의 절반 (최소 256px)
+            if max_side <= 0:
+                max_side = max(img.width, img.height) // 2
+                max_side = max(max_side, 256)
+            img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format='WEBP', quality=85, method=4)
+            thumb_bytes = buf.getvalue()
+
+            # 디스크 캐시 저장
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            thumb_path.write_bytes(thumb_bytes)
+            return thumb_bytes
+        except Exception as e:
+            print(f"🌐 Viewer: 썸네일 생성 실패 — {abs_path}: {e}")
+            return b''
+
+    def _on_image_saved(self, data: dict):
+        """image_saved 이벤트 핸들러 → viewer_new_image WS broadcast"""
+        self._invalidate_viewer_cache()
+        if not self._has_clients():
+            return
+        from pathlib import Path
+        filepath = data.get("filepath", "")
+        save_dir = data.get("save_dir", "")
+        if filepath and save_dir:
+            import os
+            from datetime import datetime
+            rel = os.path.relpath(filepath, save_dir).replace('\\', '/')
+            filename = os.path.basename(filepath)
+            try:
+                mtime = os.path.getmtime(filepath)
+                mtime_iso = datetime.fromtimestamp(mtime).isoformat()
+            except OSError:
+                mtime_iso = ""
+            self._broadcast_json({
+                "type": "viewer_new_image",
+                "rel_path": rel,
+                "filename": filename,
+                "mtime_iso": mtime_iso,
+            })
 
     # --- 생성 파라미터 동기화 ---
 
@@ -2766,7 +2934,7 @@ class RemoteBridge(QObject):
             self.latest_metadata = metadata
             with self._history_lock:
                 self._image_history.append(hist_entry)
-                if len(self._image_history) > 200:
+                if len(self._image_history) > 5:
                     self._image_history.pop(0)
 
             if not self._has_clients():
@@ -2854,6 +3022,109 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             media_type="image/webp",
             headers={"Content-Disposition": "attachment; filename=naia_latest.webp"}
         )
+
+    # --- Viewer REST API ---
+
+    @app.get("/api/viewer/list")
+    async def viewer_list(page: int = 0, per_page: int = 30):
+        entries = await asyncio.to_thread(bridge._scan_save_folder)
+        start = page * per_page
+        end = start + per_page
+        return {
+            "total": len(entries),
+            "page": page,
+            "per_page": per_page,
+            "images": entries[start:end],
+        }
+
+    @app.get("/api/viewer/thumb/{path:path}")
+    async def viewer_thumb(path: str, size: int = 0):
+        target = bridge._validate_viewer_path(path)
+        if not target:
+            return JSONResponse({"error": "not found"}, 404)
+        # size=0: 원본의 절반 (서버에서 자동 결정)
+        if size > 0:
+            size = min(max(size, 50), 1024)
+        thumb_bytes = await asyncio.to_thread(bridge._get_or_create_thumbnail, target, size)
+        if not thumb_bytes:
+            return JSONResponse({"error": "thumbnail failed"}, 500)
+        return Response(content=thumb_bytes, media_type="image/webp")
+
+    @app.get("/api/viewer/image/{path:path}")
+    async def viewer_image(path: str):
+        target = bridge._validate_viewer_path(path)
+        if not target:
+            return JSONResponse({"error": "not found"}, 404)
+        ext = target.suffix.lower()
+        media = {".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(ext, "image/png")
+        return FileResponse(str(target), media_type=media)
+
+    @app.get("/api/viewer/meta/{path:path}")
+    async def viewer_meta(path: str):
+        target = bridge._validate_viewer_path(path)
+        if not target:
+            return JSONResponse({"error": "not found"}, 404)
+
+        def _extract(img_path):
+            import json as _json
+            from PIL import Image as _Image
+
+            meta = None
+            # 1차: ImageMetadataExtractor (UnicodeEncodeError 대비 — cp949 콘솔)
+            try:
+                from utils.image_info import ImageMetadataExtractor
+                meta = ImageMetadataExtractor.extract_metadata(str(img_path))
+            except Exception:
+                pass
+
+            # 2차 fallback: Comment 필드 직접 파싱
+            if not meta or 'prompt' not in meta:
+                try:
+                    img = _Image.open(str(img_path))
+                    comment = img.info.get('Comment', '')
+                    if comment and comment.strip().startswith('{'):
+                        meta = _json.loads(comment)
+                except Exception:
+                    pass
+
+            if not meta:
+                return {}
+
+            result = {}
+            if 'prompt' in meta:
+                result['prompt'] = meta['prompt']
+            if 'uc' in meta:
+                result['negative'] = meta['uc']
+            elif 'negative' in meta:
+                result['negative'] = meta['negative']
+            # NAI v4 character captions
+            if 'characters' in meta:
+                result['characters'] = meta['characters']
+            elif 'v4_prompt' in meta:
+                # v4_prompt에서 직접 추출
+                try:
+                    v4 = meta['v4_prompt']
+                    if isinstance(v4, str):
+                        v4 = _json.loads(v4)
+                    captions = v4.get('caption', {}).get('char_captions', [])
+                    chars = [c.get('char_caption', '') for c in captions if c.get('char_caption')]
+                    if chars:
+                        result['characters'] = chars
+                except Exception:
+                    pass
+            # parameters (flat NAI JSON: steps/scale/seed at top level)
+            for k in ('steps', 'scale', 'seed', 'sampler', 'width', 'height'):
+                if k in meta:
+                    result[k] = meta[k]
+            # nested parameters dict (from _parse_nai_format path)
+            if 'parameters' in meta and isinstance(meta['parameters'], dict):
+                for k in ('steps', 'scale', 'seed', 'sampler', 'width', 'height'):
+                    if k in meta['parameters'] and k not in result:
+                        result[k] = meta['parameters'][k]
+            return result
+
+        data = await asyncio.to_thread(_extract, target)
+        return data
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
@@ -2981,8 +3252,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         elif cmd_type == "set_option":
                             opt_key = cmd.get("key", "")
                             if bridge.shared_server_mode:
-                                if opt_key == "auto_generate":
-                                    pass  # 차단
+                                if opt_key in ("auto_generate", "auto_save"):
+                                    pass  # 차단 (호스트 전역 설정)
                                 elif opt_key in ("prompt_fixed", "wildcard_standalone"):
                                     # 세션별 저장
                                     session = ws_manager.sessions.get(ws)
@@ -3303,6 +3574,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("generation_result_available", bridge.on_generation_result)
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
+    app_context.subscribe("image_saved", bridge._on_image_saved)
 
     # 메인 UI 위젯 연결
     mw = app_context.main_window
@@ -3319,6 +3591,13 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
         if cb:
             cb.toggled.connect(bridge._on_option_toggled_slot)
             _checkbox_connections.append((cb, "toggled"))
+
+    # auto_save 체크박스 → 웹 동기화
+    if hasattr(mw, 'image_window') and mw.image_window:
+        iw = mw.image_window
+        if hasattr(iw, 'auto_save_checkbox') and iw.auto_save_checkbox:
+            iw.auto_save_checkbox.toggled.connect(bridge._on_option_toggled_slot)
+            _checkbox_connections.append((iw.auto_save_checkbox, "toggled"))
 
     # 생성 파라미터 위젯 변경 → 웹 동기화 (메서드 참조로 disconnect 가능)
     _param_signal_sources.clear()
@@ -3406,7 +3685,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started"]:
+            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

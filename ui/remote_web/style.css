@@ -349,9 +349,65 @@ header {
   order: 1;
   flex: 1;
   display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.viewer-content {
+  flex: 1;
+  display: flex;
   flex-direction: row;
   min-height: 0;
   min-width: 0;
+}
+
+/* ---- Floating stats island ---- */
+.stats-island {
+  position: absolute;
+  top: 10px; right: 10px;
+  z-index: 15;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+.stats-pill {
+  pointer-events: auto;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(18,18,26,0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.stats-pill.save-toggle { cursor: pointer; transition: all 0.2s; }
+.stats-pill.save-toggle:hover { background: rgba(40,40,60,0.85); }
+.stats-pill.save-toggle.off {
+  color: #fff;
+  animation: save-off-pulse 2s ease-in-out infinite;
+}
+.stats-pill.save-toggle.off .stats-dot { background: #F44336; animation: none; }
+@keyframes save-off-pulse {
+  0%, 100% { border-color: rgba(244,67,54,0.15); }
+  50% { border-color: rgba(244,67,54,0.55); }
+}
+.stats-pill:empty { display: none; }
+.stats-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--success, #4CAF50);
+  margin-right: 4px;
+  vertical-align: middle;
+  animation: stats-dot-pulse 2s ease-in-out infinite;
+}
+@keyframes stats-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 /* ---- Image viewer ---- */
@@ -360,9 +416,9 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   min-height: 0;
   min-width: 0;
-  position: relative;
   overflow: hidden;
 }
 .viewer img {
@@ -371,6 +427,15 @@ header {
   opacity: 0; transition: opacity 0.35s ease;
 }
 .viewer img.show { opacity: 1; }
+.viewer-nav-actions {
+  display: none;
+  position: absolute;
+  bottom: 8px;
+  left: 50%; transform: translateX(-50%);
+  gap: 8px;
+  z-index: 16;
+}
+.viewer-nav-actions.visible { display: flex; }
 .viewer-hist-actions {
   display: none;
   position: absolute;
@@ -578,9 +643,272 @@ header {
 .history-action-btn:hover { background: var(--bg-card); color: var(--text-primary); }
 .history-action-btn.danger:hover { background: rgba(240,64,64,0.15); color: #f04040; border-color: rgba(240,64,64,0.3); }
 
-.history-overlay {
+/* ---- Viewer panel (replaces history) ---- */
+.viewer-panel {
+  width: 0;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border-left: none;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.viewer-panel.open {
+  width: 100%;
+}
+.viewer-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--border-dim);
+  flex-shrink: 0;
+}
+.viewer-panel-title {
+  flex: 1;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.viewer-panel-count {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.viewer-pop-btn {
+  width: 24px; height: 24px;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-dim);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.viewer-pop-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+.viewer-panel-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  align-content: start;
+}
+.viewer-panel-grid::-webkit-scrollbar { width: 3px; }
+.viewer-panel-grid::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+.viewer-thumb {
+  width: 100%;
+  aspect-ratio: 3/4;
+  border-radius: 5px;
+  object-fit: cover;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.viewer-thumb:hover { opacity: 1; }
+.viewer-thumb.active { opacity: 1; border: 2px solid var(--accent); box-shadow: 0 0 8px rgba(124,106,239,0.3); }
+.viewer-panel-loading {
+  text-align: center;
+  padding: 12px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ---- Viewer lightbox (popup mode) ---- */
+.viewer-lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0,0,0,0.92);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.viewer-lightbox.open { display: flex; }
+.viewer-lightbox img {
+  max-width: 95%; max-height: 95%;
+  object-fit: contain;
+}
+
+/* Viewer floating popup (fullscreen overlay, split layout on PC) */
+.viewer-popup-inner {
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+  background: var(--bg-primary);
+}
+.viewer-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-dim);
+  flex-shrink: 0;
+}
+.viewer-popup-header .viewer-panel-title { flex: 1; }
+.viewer-popup-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+/* Left: thumbnail grid */
+.viewer-popup-left {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  align-content: start;
+  border-right: 1px solid var(--border-dim);
+}
+.viewer-popup-left::-webkit-scrollbar { width: 4px; }
+.viewer-popup-left::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+.viewer-popup-left .viewer-thumb { aspect-ratio: auto; }
+/* Right: preview + prompt */
+.viewer-popup-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-width: 0;
+  background: var(--bg-deep);
+}
+.viewer-popup-right img.vp-preview {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.viewer-popup-right .prompt-float {
+  position: absolute;
+  bottom: 42px; left: 8px; right: 8px;
+  max-width: none;
+}
+.viewer-popup-right .prompt-float-toggle { display: flex; }
+
+/* ---- Prompt floating panel (reusable) ---- */
+.prompt-float {
+  position: absolute;
+  bottom: 42px; left: 10px; right: 10px;
+  z-index: 16;
   display: none;
 }
+.prompt-float.visible { display: block; }
+.prompt-float-content {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-height: min(50vh, 300px);
+  overflow-y: clip;
+  word-break: break-all;
+}
+.prompt-float-content.scrollable { overflow-y: auto; }
+.prompt-float-content::-webkit-scrollbar { width: 3px; }
+.prompt-float-content::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+.prompt-float-content .pf-label {
+  font-weight: 500;
+  color: var(--text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 6px;
+  display: block;
+}
+.prompt-float-content .pf-label:first-child { margin-top: 0; }
+.pf-island {
+  background: rgba(18,18,26,0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 5px;
+}
+.pf-island:last-child { margin-bottom: 0; }
+/* PC용 floating prompt toggle (모바일에서는 항상 숨김 — PC 미디어 쿼리에서 활성화) */
+.prompt-float-toggle {
+  position: absolute;
+  bottom: 8px; right: 10px;
+  z-index: 17;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(18,18,26,0.92);
+  backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+/* 모바일: .visible 추가해도 숨김 유지 (PC 미디어 쿼리에서만 표시) */
+.prompt-float-toggle.visible { display: none; }
+.prompt-float-toggle input { margin: 0; width: 12px; height: 12px; accent-color: var(--accent); }
+/* 모바일용 prompt toggle (viewer panel 하단, PC에서는 숨김) */
+.viewer-panel-prompt-toggle {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-dim);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.viewer-panel-prompt-toggle.visible { display: flex; }
+.viewer-panel-prompt-toggle input { margin: 0; width: 12px; height: 12px; accent-color: var(--accent); }
+
+/* ---- Viewer popup mode (?mode=viewer) — NOT USED, kept for compatibility ---- */
+body.viewer-mode .control-panel,
+body.viewer-mode .prompt-toggle-bar,
+body.viewer-mode .bottom-controls,
+body.viewer-mode header,
+body.viewer-mode .gen-progress,
+body.viewer-mode .history-tab,
+body.viewer-mode #viewerTab { display: none !important; }
+body.viewer-mode {
+  display: flex !important;
+  flex-direction: column;
+}
+body.viewer-mode .app-layout { display: contents; }
+body.viewer-mode .viewer-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+body.viewer-mode .viewer-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+body.viewer-mode .viewer { display: none; }
+body.viewer-mode .viewer-panel {
+  width: 100% !important;
+  flex: 1;
+  border-left: none !important;
+}
+body.viewer-mode .viewer-panel.open { width: 100% !important; }
+body.viewer-mode .viewer-panel-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  padding: 12px;
+  gap: 8px;
+}
+body.viewer-mode .viewer-pop-btn { display: none; }
+body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 
 /* ---- Prompt slide-up (mobile) ---- */
 .prompt-drawer {
@@ -1824,6 +2152,15 @@ header {
   .viewer {
     padding: 2px;
   }
+  /* PC: viewer panel 사이드바 복원 */
+  .viewer-panel.open { width: min(180px, 45vw); border-left: 1px solid var(--border-dim); }
+  .viewer-panel-grid { grid-template-columns: 1fr; }
+  .viewer-panel .viewer-thumb { aspect-ratio: auto; }
+  .viewer-pop-btn { display: flex; align-items: center; justify-content: center; }
+  /* PC: 모바일용 prompt toggle 숨김, PC용 floating toggle 활성화 */
+  .viewer-panel-prompt-toggle { display: none !important; }
+  .prompt-float-toggle.visible { display: flex; }
+  .prompt-float { left: auto; right: 10px; max-width: 420px; }
   /* PC: tag tooltip at top-left of viewer area */
   .tag-tooltip {
     top: 10px; left: 494px; right: auto;

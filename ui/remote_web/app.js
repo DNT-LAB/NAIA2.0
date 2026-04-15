@@ -185,6 +185,7 @@ function connect() {
         else if (m.type === 'tag_filter_ac_result') onTagFilterAcResult(m);
         else if (m.type === 'storage_list') onStorageList(m);
         else if (m.type === 'wildcard_manager') onWildcardManager(m);
+        else if (m.type === 'filter_reset') onFilterReset(m);
         else if (m.type === 'toast') showToast(m.message, m.level || 'success');
         else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
         else if (m.type === 'viewer_new_image') onViewerNewImage(m);
@@ -614,6 +615,7 @@ function onLightboxClick(e) {
 
 function onViewerNewImage(m) {
   if (!m.rel_path) return;
+  _latestImagePath = m.rel_path;
   viewerTotal++;
   if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
   viewerTab.classList.add('visible');
@@ -671,10 +673,13 @@ function openViewerPopup() {
           <div class="prompt-float" id="vpPromptFloat">
             <div class="prompt-float-content" id="vpPromptContent"></div>
           </div>
-          <label class="prompt-float-toggle">
-            <input type="checkbox" id="vpPromptCb" onchange="toggleVpPrompt(this.checked)">
-            <span>Prompt</span>
-          </label>
+          <div class="viewer-bottom-controls" style="display:flex">
+            <label class="prompt-float-toggle" style="display:flex">
+              <input type="checkbox" id="vpPromptCb" onchange="toggleVpPrompt(this.checked)">
+              <span>Prompt</span>
+            </label>
+            <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+          </div>
         </div>
       </div>
       <div class="viewer-panel-loading" id="vpLoading" style="display:none">Loading...</div>
@@ -775,6 +780,7 @@ function viewerThumbClick(relPath) {
     const img = $('viewerLightboxImg');
     if (lb && img) {
       img.src = '/api/viewer/image/' + encodeURI(relPath);
+      _latestImagePath = relPath;
       lb.classList.add('open');
     }
     return;
@@ -931,6 +937,36 @@ async function _loadPromptForFloat(relPath, floatId, contentId) {
     }
   } catch (e) {
     content.innerHTML = '<span class="pf-label">Failed to load</span>';
+  }
+}
+
+// ---- Download ----
+
+let _latestImagePath = '';  // 다운로드 가능한 최신 이미지 경로
+
+async function downloadImage() {
+  const path = _currentViewerPath || _latestImagePath;
+  if (!path) {
+    showToast('Download failed. Image not saved.', 'error');
+    return;
+  }
+  try {
+    const resp = await fetch('/api/viewer/image/' + encodeURI(path) + '?download=1');
+    if (!resp.ok) {
+      showToast('Download failed. Image not saved.', 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = path.split('/').pop() || 'image';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('Download failed. Image not saved.', 'error');
   }
 }
 
@@ -2582,6 +2618,31 @@ function toggleRating(r) {
     const active = Object.keys(ratingState).filter(k => ratingState[k]);
     ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
   }
+}
+
+function onFilterReset(m) {
+  // 서버에서 검색 데이터 교체 시 (새 검색/Parquet 로드/Depth Assign/복원)
+  // GSQE 전체 활성화
+  ratingState = {g: true, s: true, q: true, e: true};
+  syncRatingButtons();
+  // Tag filter 전체 초기화 (서버 전송 없이 — 이미 서버에서 처리됨)
+  tagFilterTags = [];
+  tagFilterExcludeTags = [];
+  tagFilterActive = false;
+  _tfRatingCounts = null;
+  _pendingTfAssignOnRestore = false;
+  renderTagFilterChips();
+  renderTagFilterExcludeChips();
+  const countEl = document.getElementById('tagFilterCount');
+  if (countEl) { countEl.textContent = ''; countEl.classList.remove('has-result'); }
+  const toggleBtn = document.getElementById('tagFilterToggle');
+  if (toggleBtn) { toggleBtn.classList.remove('active'); toggleBtn.classList.remove('assigned'); }
+  const assignBtn = document.getElementById('tagFilterAssignBtn');
+  if (assignBtn) assignBtn.disabled = true;
+  closeTagFilter();
+  // Count/Rating 갱신
+  if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
+  if (m.count != null) updateSearchCount(m.count);
 }
 
 function onRatingUpdate(m) {

@@ -858,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 169"
+        self.base_title = "NAIA v2.0.0 Dev 169b"
         self.setWindowTitle(self.base_title + " - 260415")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -3257,7 +3257,12 @@ class ModernMainWindow(QMainWindow):
                 # 프리셋 랜더마이저 신호 발행 (자동 생성 시 랜덤 프리셋 적용)
                 self.app_context.publish("random_prompt_triggered_preset_randomizer")
 
-                self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
+                # Remote Web Session GSQE 필터 동기화
+                # Tag filter는 search_results 자체에 반영 (depth search assign 방식)
+                remote_ratings = getattr(self.app_context, 'remote_active_ratings', None)
+                self.prompt_gen_controller.generate_next_prompt(
+                    self.search_results, settings,
+                    active_ratings=remote_ratings)
             elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():
                 self.auto_generation_in_progress = True
                 self.last_auto_generation_time = current_time
@@ -4980,6 +4985,14 @@ class ModernMainWindow(QMainWindow):
         """현재 search_results의 원본 사본을 메모리에 저장"""
         if not self.search_results.is_empty():
             self._search_results_snapshot = self.search_results.get_dataframe().copy()
+            # Tag filter 원본 snapshot 무효화
+            if getattr(self, '_pre_tag_filter_snapshot', None) is not None:
+                self._pre_tag_filter_snapshot = None
+            # Remote Session 필터 초기화 (검색/로드/depth assign/복원 시)
+            # Tag filter assign/clear 중에는 bridge._skip_filter_reset으로 우회
+            bridge = getattr(self.app_context, 'remote_bridge', None)
+            if bridge and not getattr(bridge, '_skip_filter_reset', False):
+                bridge._reset_remote_filters()
 
     def _restore_from_snapshot(self) -> bool:
         """스냅샷에서 search_results 복원. 성공 시 True."""

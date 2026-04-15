@@ -306,10 +306,13 @@
       <div class="prompt-float" id="promptFloat">
         <div class="prompt-float-content" id="promptFloatContent"></div>
       </div>
-      <label class="prompt-float-toggle" id="promptFloatToggle">
-        <input type="checkbox" id="promptFloatCb" onchange="togglePromptFloat(this.checked)">
-        <span>Prompt</span>
-      </label>
+      <div class="viewer-bottom-controls">
+        <label class="prompt-float-toggle" id="promptFloatToggle">
+          <input type="checkbox" id="promptFloatCb" onchange="togglePromptFloat(this.checked)">
+          <span>Prompt</span>
+        </label>
+        <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+      </div>
     </div>
     <div class="viewer-panel" id="viewerPanel">
       <div class="viewer-panel-header">
@@ -319,10 +322,13 @@
       </div>
       <div class="viewer-panel-grid" id="viewerGrid"></div>
       <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
-      <label class="viewer-panel-prompt-toggle" id="promptFloatToggleMobile">
-        <input type="checkbox" id="promptFloatCbMobile" onchange="togglePromptFloat(this.checked)">
-        <span>Prompt</span>
-      </label>
+      <div class="viewer-panel-bottom">
+        <label class="viewer-panel-prompt-toggle" id="promptFloatToggleMobile">
+          <input type="checkbox" id="promptFloatCbMobile" onchange="togglePromptFloat(this.checked)">
+          <span>Prompt</span>
+        </label>
+        <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+      </div>
     </div>
   </div>
 </div>

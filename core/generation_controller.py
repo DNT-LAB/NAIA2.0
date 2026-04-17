@@ -925,6 +925,20 @@ class GenerationController:
                 self.current_generation_params = None
                 return
 
+            # Character Asset 요청인 경우 전용 에러 이벤트 발행
+            is_character_asset_request = self.current_generation_params.get("character_asset_request", False)
+            if is_character_asset_request:
+                request_id = self.current_generation_params.get("character_asset_request_id")
+                print(f"🧷 Character Asset 에러 감지 - 전용 에러 이벤트 발행 (request_id: {request_id})")
+                error_data = {
+                    "message": error_message,
+                    "character_asset_request": True,
+                    "character_asset_request_id": request_id,
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
             # Studio 요청인 경우: 프레임 매니저에 실패 알림
             is_studio_request = self.current_generation_params.get("studio_request", False)
             if is_studio_request:

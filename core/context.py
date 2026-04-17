@@ -151,6 +151,18 @@ class AppContext:
         else:
             print(f"📬 이벤트 구독: '{event_name}' -> {callback.__name__}")
 
+    def unsubscribe(self, event_name: str, callback: Callable):
+        """지정된 이벤트에 대한 콜백 함수를 해제합니다."""
+        callbacks = self.subscribers.get(event_name)
+        if not callbacks:
+            return
+
+        while callback in callbacks:
+            callbacks.remove(callback)
+
+        if not callbacks:
+            self.subscribers.pop(event_name, None)
+
     def publish(self, event_name: str, *args, **kwargs):
         """지정된 이벤트의 모든 구독자에게 데이터를 전달하며 콜백을 실행합니다."""
         if event_name in self.subscribers:

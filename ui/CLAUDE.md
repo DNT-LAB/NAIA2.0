@@ -50,6 +50,8 @@ ui/detached_window.py (분리 창)
 | **tag_result_window.py** | 태그 분석 결과 윈도우 | `TagResultWindow` |
 | **outpaint_window.py** | 아웃페인팅 설정 | `OutpaintWindow` |
 | **image_viewer_window.py** | Honeyview 스타일 이미지 뷰어 | `NAIAImageViewer`, `ViewerBindingsDialog` |
+| **character_asset_generation_window.py** | 캐릭터 에셋 연속 생성/저장 | `CharacterAssetGenerationWindow`, `CharacterAssetResultCard` |
+| **character_asset_storage_window.py** | 저장된 에셋 스토리지 (C1 + 레퍼런스 인셋 적용) | `CharacterAssetStorageWindow`, `CharacterAssetStorageItem` |
 
 ---
 
@@ -175,6 +177,42 @@ self.prompt_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
 `OutpaintWindow` 주요 기능: 캔버스 크기 프리셋, 스케일/회전 슬라이더, 드래그 배치 (8px 그리드 스냅), 리사이즈 핸들, 마스크 자동 생성 (블렌딩 보더 8px), RGBA 회전.
 
 API: `_single_pass_outpainting()` → OutpaintWindow 데이터 사용 또는 기본 캔버스 자동 생성 (가로→1:1, 세로→3:2).
+
+---
+
+## 캐릭터 에셋 시스템
+
+### 생성 창 (`character_asset_generation_window.py`)
+
+CharacterModule "캐릭터 에셋 생성" 버튼 → hidden TempGenerationWindow 위에 모달리스 다이얼로그. 체크된 C1 캐릭터를 로드해 연속 생성하고 원하는 결과만 저장.
+
+**핵심 흐름**:
+1. `temp_window.build_c1_asset_generation_params(request_id, prompt, uc)` — 레퍼런스 프롬프트 스캐폴드(`ReferenceGenerationSpec.build_prompt()`) + C1 캐릭터만 포함, `wildcard_standalone=True`로 source_row 오염 방지
+2. `character_asset_request=True` + `character_asset_request_id=uuid` 플래그로 요청 식별
+3. 완료: `generation_completed_for_character_asset` 이벤트 구독 (payload는 `result` dict 전체 — `image`, `raw_bytes`, `generation_params`)
+4. 실패: `generation_error` 채널 + `character_asset_request` 플래그/id 매칭
+
+**수명주기**: `WA_DeleteOnClose=True`. `closeEvent`에서 `app_context.unsubscribe()` 호출 필수. 다이얼로그가 닫히면 부모 hidden temp window도 `destroyed` 연결로 함께 정리.
+
+### 스토리지 창 (`character_asset_storage_window.py`)
+
+`save/character_asset/images/`에 PNG만 저장 (메타데이터는 NAI Comment에서 런타임 복원).
+
+**저장**: `raw_bytes` 우선 사용 — NAI Comment 손실 방지. `image`만 있으면 PIL 재인코딩되어 메타데이터가 사라지므로 저장 경로에서는 raw_bytes가 내려오는지 확인.
+
+**복원 적용** (더블클릭):
+1. `ImageMetadataExtractor.extract_metadata()`로 캐릭터 프롬프트/UC 복구
+2. `CharacterModule.assign_c1(prompt, uc)` — C1 슬롯에 주입
+3. `MainWindow.apply_character_asset_reference_from_image_path()` — 저장 이미지를 레퍼런스 인셋 캔버스로 img2img 패널에 적용 (`utils/reference_inpaint_preprocess.prepare_reference_inpaint_canvas`)
+
+### Img2ImgPanel Comic Panel / 레퍼런스 인셋 모드
+
+`_comic_panel_mode` 플래그가 켜지면:
+- `strength=1.0`, `noise=0.0` 강제 (NovelAI 레퍼런스 인페인트 가이드 준수)
+- strength 슬라이더 비활성, noise 그룹 숨김
+- `get_generation_parameters()`도 1.0/0.0으로 오버라이드
+
+Comic Panel 버튼과 캐릭터 에셋 적용 모두 이 플래그를 공유합니다. 기본 인페인트 슬라이더 값을 바꾸려면 플래그 분기를 재검토해야 합니다.
 
 ---
 

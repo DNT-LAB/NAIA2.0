@@ -64,9 +64,12 @@ core/generation_controller.py
 ### 이벤트 버스
 
 ```python
-app_context.subscribe("event_name", callback)  # 구독
-app_context.publish("event_name", {"key": "value"})  # 발행
+app_context.subscribe("event_name", callback)      # 구독
+app_context.unsubscribe("event_name", callback)    # 구독 해제 (수명주기 짧은 창에서 필수)
+app_context.publish("event_name", {"key": "value"}) # 발행
 ```
+
+`unsubscribe`는 동일 콜백이 중복 등록된 경우 모두 제거합니다. 다이얼로그/창처럼 수명주기가 짧은 구독자는 `closeEvent`에서 반드시 해제해야 누수가 없습니다.
 
 ### 주요 이벤트
 
@@ -194,9 +197,15 @@ QThread 워커로 비동기 이미지 생성.
 |-----------|------------|------------|
 | Interactive Mode | `interactive_mode_request` | `generation_error` |
 | Turbo Sequence | `turbo_sequence_request` | `generation_error` |
+| Event Preset | `event_preset_request` | `generation_error` |
+| Clothes Preset | `clothes_preset_request` | `generation_error` |
+| Character Viewer | `character_viewer_request` | `generation_error` |
+| Character Asset | `character_asset_request` (+`character_asset_request_id`) | `generation_error` |
 | Studio | `studio_request` | `generation_error_for_studio` |
 | Img2Img Batch | `img2img_batch_request` | 직접 콜백 |
 | 일반 (자동 생성) | - | 자동 재시도 |
+
+**`generation_error` 이벤트 데이터**: 공통 `message` + 요청 타입 플래그(+식별자). 여러 구독자가 같은 채널을 공유하므로, 각 구독자는 자기 플래그(예: `character_asset_request`)와 id를 확인해 남의 요청을 무시해야 합니다.
 
 **새 특수 요청 타입 추가 시**: 반드시 `_on_generation_error`에 핸들러 추가. 누락 시 요청자가 실패 알림 못 받아 잠금 상태.
 

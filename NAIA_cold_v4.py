@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 169b"
-        self.setWindowTitle(self.base_title + " - 260415")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 170"
+        self.setWindowTitle(self.base_title + " - 260416")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2934,6 +2934,7 @@ class ModernMainWindow(QMainWindow):
                 is_assets_request = generation_params.get("assets_workshop_request", False)
                 is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
                 is_studio_request = generation_params.get("studio_request", False)
+                is_character_asset_request = generation_params.get("character_asset_request", False)
                 studio_frame_index = generation_params.get("studio_frame_index", 0)
                 
                 self.image_window.update_image(image_object)
@@ -2980,6 +2981,11 @@ class ModernMainWindow(QMainWindow):
                     print("🔍 Character Viewer 요청 감지 - 전용 이벤트 발행")
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_character_viewer", image_object)
+
+                if is_character_asset_request:
+                    print("🧷 Character Asset 요청 감지 - 전용 이벤트 발행")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_character_asset", result)
 
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:
@@ -7095,6 +7101,67 @@ class ModernMainWindow(QMainWindow):
         self.status_bar.showMessage(
             f"Comic Panel: {result['canvas_width']}x{result['canvas_height']} - "
             f"인페인트 모드 활성화", 5000)
+
+    def apply_comic_panel_from_image(self, pil_image: Image.Image):
+        """Open Comic Panel preprocessing for an arbitrary PIL image."""
+        if pil_image is None:
+            return
+
+        from ui.comic_panel_window import ComicPanelWindow
+        result = ComicPanelWindow.get_comic_panel_data(pil_image, self)
+        if result is None:
+            return
+
+        self.img2img_panel.set_image_with_mask(
+            canvas_image=result["canvas_image"],
+            full_mask=result["full_mask_image"],
+            small_mask=result["small_mask_image"]
+        )
+        self.status_bar.showMessage(
+            f"Comic Panel: {result['canvas_width']}x{result['canvas_height']} - "
+            "인페인트 모드 활성화", 5000)
+
+    def apply_comic_panel_from_image_path(self, image_path: str):
+        """Open Comic Panel preprocessing for an image stored on disk."""
+        try:
+            pil_image = Image.open(image_path)
+        except Exception as exc:
+            print(f"Failed to open comic panel source image: {exc}")
+            return
+
+        self.apply_comic_panel_from_image(pil_image)
+
+    def apply_character_asset_reference_from_image(self, pil_image: Image.Image):
+        """Apply a saved character asset as a reference-inset inpaint canvas without user confirmation."""
+        if pil_image is None:
+            return
+
+        try:
+            from utils.reference_inpaint_preprocess import prepare_reference_inpaint_canvas
+            result = prepare_reference_inpaint_canvas(pil_image)
+        except Exception as exc:
+            print(f"Failed to preprocess character asset reference image: {exc}")
+            return
+
+        self.img2img_panel.set_image_with_mask(
+            canvas_image=result.canvas_image,
+            full_mask=result.full_mask_image,
+            small_mask=result.small_mask_image,
+        )
+        self.status_bar.showMessage(
+            f"Character Asset Reference: {result.canvas_width}x{result.canvas_height} - 자동 인페인트 적용",
+            5000,
+        )
+
+    def apply_character_asset_reference_from_image_path(self, image_path: str):
+        """Apply a saved character asset from disk without opening the Comic Panel dialog."""
+        try:
+            pil_image = Image.open(image_path)
+        except Exception as exc:
+            print(f"Failed to open character asset reference image: {exc}")
+            return
+
+        self.apply_character_asset_reference_from_image(pil_image)
 
     def on_img2img_window_generate(self, _window_id: int, params: dict):
         """독립 Img2Img 윈도우에서 생성 요청"""

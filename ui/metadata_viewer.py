@@ -345,6 +345,37 @@ class MetadataViewerWindow(QDialog):
                 }}
             """)
             layout.addWidget(negative_edit, 1)  # stretch factor 1 for resize
+
+        comfy_summary = self._get_comfyui_summary_text()
+        if comfy_summary:
+            workflow_label = QLabel("🧩 ComfyUI 워크플로우")
+            workflow_label.setStyleSheet(f"""
+                font-size: {get_scaled_font_size(19)}px;
+                font-weight: bold;
+                color: {DARK_COLORS['text_primary']};
+                padding: 5px;
+                background-color: {DARK_COLORS['bg_secondary']};
+                border: 1px solid {DARK_COLORS['border']};
+                border-radius: 4px;
+            """)
+            layout.addWidget(workflow_label)
+
+            workflow_edit = QTextEdit()
+            workflow_edit.setPlainText(comfy_summary)
+            workflow_edit.setReadOnly(True)
+            workflow_edit.setMinimumHeight(120)
+            workflow_edit.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: {DARK_COLORS['bg_secondary']};
+                    color: {DARK_COLORS['text_primary']};
+                    border: 1px solid {DARK_COLORS['border']};
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: {get_scaled_font_size(16)}px;
+                    font-family: 'Consolas', 'Monaco', monospace;
+                }}
+            """)
+            layout.addWidget(workflow_edit, 1)
         
         # 캐릭터 프롬프트 (NAI v4)
         if self.metadata.get('characters') or self.metadata.get('char_captions'):
@@ -502,6 +533,31 @@ class MetadataViewerWindow(QDialog):
                 row += 1
         
         # 메타데이터 필드
+        displayed_keys = {key for key, _ in main_params}
+        displayed_keys.update({key for key, _ in additional_params})
+        displayed_keys.update({'width', 'height'})
+        remaining_params = [
+            key for key in extracted_params.keys()
+            if key not in displayed_keys
+        ]
+
+        if remaining_params:
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            separator.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {DARK_COLORS['border']};
+                    max-height: 1px;
+                    margin: 10px 0px;
+                }}
+            """)
+            scroll_layout.addWidget(separator, row, 0, 1, 2)
+            row += 1
+
+            for key in remaining_params:
+                self._add_parameter_row(scroll_layout, row, key.replace('_', ' ').title(), extracted_params[key])
+                row += 1
+
         meta_fields = ['Software', 'Source', 'Title', 'Description']
         has_meta = False
         for field in meta_fields:
@@ -659,6 +715,10 @@ class MetadataViewerWindow(QDialog):
                 else:
                     params[field] = self.metadata[field]
         
+        for field in ['workflow_nodes', 'workflow_type', 'clip_model', 'vae', 'batch_size', 'sampling_mode']:
+            if field in self.metadata and field not in params:
+                params[field] = self.metadata[field]
+
         return params
     
     def create_raw_tab(self) -> QWidget:
@@ -789,6 +849,46 @@ class MetadataViewerWindow(QDialog):
         
         return type_info.upper()
     
+    def _get_comfyui_summary_text(self) -> str:
+        """Return a compact workflow summary for ComfyUI metadata."""
+        if self.metadata.get('type') != 'comfyui':
+            return ""
+
+        params = self._extract_all_parameters()
+        lines = []
+
+        workflow_type = params.get('workflow_type')
+        if workflow_type:
+            lines.append(f"Workflow Type: {workflow_type}")
+
+        workflow_nodes = self.metadata.get('workflow_nodes')
+        if workflow_nodes:
+            lines.append(f"Detected Nodes: {workflow_nodes}")
+
+        for key, label in [
+            ('model', 'Model'),
+            ('clip_model', 'CLIP'),
+            ('vae', 'VAE'),
+            ('sampler', 'Sampler'),
+            ('noise_schedule', 'Scheduler'),
+            ('steps', 'Steps'),
+            ('scale', 'CFG Scale'),
+            ('cfg_rescale', 'CFG Rescale'),
+            ('seed', 'Seed'),
+            ('batch_size', 'Batch Size'),
+            ('sampling_mode', 'Sampling Mode'),
+        ]:
+            value = params.get(key)
+            if value is not None and value != '':
+                lines.append(f"{label}: {value}")
+
+        if 'workflow' in self.metadata:
+            lines.append("Workflow JSON: available")
+        if 'prompt_api' in self.metadata:
+            lines.append("Prompt API JSON: available")
+
+        return "\n".join(lines)
+
     def _extract_v4_characters(self):
         """NAI v4 형식에서 캐릭터 프롬프트 추출"""
         try:
@@ -900,6 +1000,9 @@ class MetadataViewerWindow(QDialog):
             settings['Software'] = self.metadata['Software']
         if 'type' in self.metadata:
             settings['type'] = self.metadata['type']
+        for key in ['workflow', 'workflow_api', 'prompt_api', 'workflow_type']:
+            if key in self.metadata:
+                settings[key] = self.metadata[key]
 
         # ✅ _extract_all_parameters() 활용하여 모든 파라미터 추출
         # (Comment, parameters, 직접 필드 등 모든 소스에서 추출)
@@ -924,6 +1027,9 @@ class MetadataViewerWindow(QDialog):
             settings['Software'] = self.metadata['Software']
         if 'type' in self.metadata:
             settings['type'] = self.metadata['type']
+        for key in ['workflow', 'workflow_api', 'prompt_api', 'workflow_type']:
+            if key in self.metadata:
+                settings[key] = self.metadata[key]
 
         extracted_params = self._extract_all_parameters()
         settings.update(extracted_params)

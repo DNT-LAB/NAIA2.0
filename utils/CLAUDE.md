@@ -8,11 +8,13 @@
 
 ```
 utils/
-  ├── image_info.py           → 이미지 메타데이터 추출
-  ├── token_calculator.py     → 프롬프트 토큰 계산 (CLIP 근사)
-  ├── translator.py           → 한글 → 영어 번역
-  ├── load_generation_params.py → 생성 파라미터 모드별 저장/로드
-  └── cloudflared.py          → Cloudflared 터널 관리 (바이너리 다운로드 + Quick Tunnel)
+  ├── image_info.py                    → 이미지 메타데이터 추출 (NAI/WebUI/ComfyUI)
+  ├── token_calculator.py              → 프롬프트 토큰 계산 (CLIP 근사)
+  ├── translator.py                    → 한글 → 영어 번역
+  ├── load_generation_params.py        → 생성 파라미터 모드별 저장/로드
+  ├── cloudflared.py                   → Cloudflared 터널 관리 (바이너리 다운로드 + Quick Tunnel)
+  ├── character_asset_storage.py       → 캐릭터 에셋 이미지 저장/로드
+  └── reference_inpaint_preprocess.py  → 레퍼런스 인셋 인페인트 캔버스/마스크 생성
 ```
 
 **설계 원칙**:
@@ -27,21 +29,33 @@ utils/
 
 ### ImageMetadataExtractor
 
-**지원 포맷**: NovelAI (Comment/Stealth PNG), WebUI (parameters/EXIF), 일반 JSON
+**지원 포맷**: NovelAI (Comment/Stealth PNG), WebUI (parameters/EXIF), ComfyUI (prompt API / workflow UI JSON), 일반 JSON
 
 #### 주요 메서드
 
 | 메서드 | 반환 | 설명 |
 |--------|------|------|
-| `has_metadata(image_path)` | `bool` | 메타데이터 존재 확인 (Comment → parameters → EXIF → Stealth 순) |
+| `has_metadata(image_path)` | `bool` | 메타데이터 존재 확인 (Comment → parameters → ComfyUI `prompt`/`workflow` → EXIF → Stealth 순) |
 | `extract_metadata(image_path)` | `Optional[Dict]` | 메타데이터 추출 |
-| `detect_software(metadata)` | `str` | `'nai'` / `'webui'` / `'unknown'` |
+| `detect_software(metadata)` | `str` | `'nai'` / `'webui'` / `'comfyui'` / `'unknown'` |
 
 #### 반환 구조
 
 **NovelAI**: `{'type': 'nai', 'prompt': ..., 'uc': ..., 'parameters': {steps, scale, seed, sampler, ...}, 'characters': [...], 'characters_uc': [...]}`
 
 **WebUI**: `{'type': 'webui', 'prompt': ..., 'negative': ..., 'parameters': {steps, sampler, cfg_scale, seed, size, model, ...}}`
+
+**ComfyUI**: `{'type': 'comfyui', 'prompt': ..., 'negative': ..., 'parameters': {steps, seed, cfg_scale, sampler, scheduler, denoising_strength, width, height, batch_size, model, clip_model, vae, cfg_rescale, sampling_mode, workflow_type, ...}, 'prompt_api': {...}, 'workflow': {...}, 'workflow_nodes': int}`
+
+#### ComfyUI 파서 동작
+
+두 저장 포맷 지원:
+- **prompt API 형식**: `{node_id: {class_type, inputs}}` — PNG `prompt` chunk에 저장
+- **workflow UI 형식**: `{nodes: [...], links: [...]}` — PNG `workflow` chunk에 저장. 내부적으로 `links`와 `widgets_values`를 prompt API 모양으로 변환
+
+메인 샘플러 탐색: `PreviewImage`/`SaveImage` → `VAEDecode` → `KSampler`/`SamplerCustom` 역추적. 실패 시 node id 오름차순 첫 샘플러 사용.
+
+업스트림 BFS(`_find_upstream_node`)로 로더 체인 추적: `CheckpointLoaderSimple` / `UNETLoader` / `CLIPLoader` / `VAELoader` / `RescaleCFG` / `ModelSamplingDiscrete`. 커스텀 노드/비표준 토폴로지는 누락될 수 있음.
 
 #### Stealth PNG
 
@@ -194,10 +208,86 @@ macOS는 tgz 아카이브 — `tarfile`로 바이너리만 추출.
 
 ---
 
+## 캐릭터 에셋 스토리지 (`character_asset_storage.py`)
+
+### 저장 레이아웃
+
+```
+save/character_asset/
+  ├── images/{sha256[:16]}.png    ← 유일한 영속 파일
+  └── metadata/                    ← 레거시 (신규 저장은 사용하지 않음)
+```
+
+메타데이터 sidecar JSON은 더 이상 쓰지 않습니다. 캐릭터 프롬프트/UC는 저장된 PNG의 **NAI Comment**를 `ImageMetadataExtractor`로 런타임 복구합니다.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `save_character_asset(raw_bytes=..., image=...)` | SHA-256 prefix로 파일명 생성, raw_bytes 우선 저장 |
+| `build_character_asset_metadata(file_hash, file_name, extracted_metadata, ...)` | 저장/복원 시 통일된 메타데이터 dict 구성 |
+| `load_character_asset_metadata(file_hash, image_path)` | 디스크 이미지에서 Comment 재추출 → metadata dict |
+| `ensure_character_asset_storage_dirs()` | 저장 폴더 생성 |
+
+### ⚠️ raw_bytes 계약
+
+`save_character_asset`은 가능한 한 `raw_bytes`로 저장합니다. `image`만 넘기면 PIL 재인코딩되어 **NAI Comment가 사라지고** 이후 복원 시 `character_prompt`가 공백이 됩니다. 호출부(예: `CharacterAssetGenerationWindow._save_selected_asset`)는 `result.get("raw_bytes") or result.get("image_bytes")`를 우선 전달해야 합니다.
+
+---
+
+## 레퍼런스 인페인트 전처리 (`reference_inpaint_preprocess.py`)
+
+NovelAI 공식 문서 기반 "레퍼런스 인셋" 인페인트 캔버스 생성기.
+
+### 데이터클래스
+
+| 클래스 | 용도 |
+|--------|------|
+| `ReferenceGenerationSpec` | 초기 레퍼런스 생성용 프롬프트 스캐폴드 (기본 768x1344, `1girl, solo, 1koma, ...`) |
+| `ReferenceInsetPreprocessSpec` | 캔버스 레이아웃/마스크 규칙 (1152x896, 16px bleed, 8px seam overlap) |
+| `ReferenceInsetPreprocessResult` | 결과 이미지 + 마스크 + 추천 파라미터 |
+| `PlacementBox` | 캔버스 위 레퍼런스 배치 좌표 |
+
+### 주요 함수
+
+```python
+from utils.reference_inpaint_preprocess import (
+    ReferenceGenerationSpec,
+    prepare_reference_inpaint_canvas,
+)
+
+# 1) 초기 레퍼런스 생성용 프롬프트
+prompt = ReferenceGenerationSpec().build_prompt()
+
+# 2) 생성된 레퍼런스 이미지를 캔버스에 배치 + 마스크 생성
+result = prepare_reference_inpaint_canvas(pil_image)
+# result.canvas_image, result.full_mask_image, result.small_mask_image
+# result.recommended_strength == 1.0, result.recommended_noise == 0.0
+```
+
+### 마스크 규칙
+
+- 레퍼런스 영역은 preserve(0), 외곽은 editable(255)
+- 오른쪽 seam에 `seam_overlap_px=8` editable 스트립 재개방 → 경계 블렌딩
+- 상하단 seam 코너에 `seam_corner_wrap_px=20` 타원형 editable lobe
+- 최종 마스크는 NAI용 1/8 축소 버전도 함께 반환 (`mask_downscale=8`)
+
+### strength/noise 권장값
+
+`recommended_strength=1.0`, `recommended_noise=0.0`.
+- NovelAI 레퍼런스 인페인트 가이드: strength=1 유지 권장
+- NovelAI 인페인트 UI는 noise 슬라이더 미노출 → 엔지니어링 기본값 0
+- Img2ImgPanel Comic Panel 모드의 강제 1.0/0.0 동작과 정합
+
+---
+
 ## 다른 디렉터리와의 관계
 
 | 디렉터리 | 관계 |
 |----------|------|
 | `modules/`, `tabs/` | token_calculator, image_info, translator, cloudflared 호출 |
 | `core/` | load_generation_params (MainWindow 통합) |
-| `interfaces/`, `ui/` | 독립 (utils는 이들에 의존하지 않음) |
+| `ui/` | character_asset_storage, reference_inpaint_preprocess 호출 (에셋 생성/스토리지 창, `NAIA_cold_v4.apply_character_asset_reference_from_image`) |
+| `interfaces/` | 독립 |
+
+**예외**: `character_asset_storage.py`는 `utils/image_info.py`의 `ImageMetadataExtractor`에 의존합니다 (원래 utils 내부는 독립이지만, 이 파일은 utils 내 조합만 사용). UI/컨트롤러 비의존 원칙은 유지됩니다.

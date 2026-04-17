@@ -731,6 +731,10 @@ class PngInfoTab(QWidget):
 Negative prompt: {uc}
 Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('scale', '')}, Seed: {params.get('seed', '')}, Size: {image.width}x{image.height}, Clip skip: 2, ENSD: 31337"""
 
+            # ComfyUI ?뺤떇
+            elif extracted_metadata.get('type') == 'comfyui':
+                geninfo = self.build_comfyui_generation_info(extracted_metadata, image)
+
         # 3. EXIF 데이터 확인 (기존 방식 유지)
         if not geninfo and "exif" in items:
             exif_data = items["exif"]
@@ -763,6 +767,53 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
             items.pop(field, None)
 
         return geninfo, items
+
+    def build_comfyui_generation_info(self, metadata, image):
+        """ComfyUI metadata瑜?PNG Info ?⑥떇怨?鍮꾩?媛깆쑝濡??곸깭??蹂?섑븯??"""
+        prompt = metadata.get('prompt', '')
+        negative = metadata.get('negative') or metadata.get('negative_prompt', '')
+        params = metadata.get('parameters', {}) or {}
+
+        lines = [prompt] if prompt else []
+        if negative:
+            lines.append(f"Negative prompt: {negative}")
+
+        ordered_fields = [
+            ('steps', 'Steps'),
+            ('sampler', 'Sampler'),
+            ('scheduler', 'Scheduler'),
+            ('cfg_scale', 'CFG scale'),
+            ('seed', 'Seed'),
+            ('width', 'Width'),
+            ('height', 'Height'),
+            ('batch_size', 'Batch size'),
+            ('model', 'Model'),
+            ('clip_model', 'CLIP model'),
+            ('vae', 'VAE'),
+            ('denoising_strength', 'Denoising strength'),
+            ('cfg_rescale', 'CFG rescale'),
+            ('workflow_type', 'Workflow type'),
+            ('sampling_mode', 'Sampling mode'),
+        ]
+
+        param_parts = []
+        width = params.get('width', getattr(image, 'width', ''))
+        height = params.get('height', getattr(image, 'height', ''))
+        if width and height:
+            param_parts.append(f"Size: {width}x{height}")
+
+        for key, label in ordered_fields:
+            if key in {'width', 'height'}:
+                continue
+            value = params.get(key)
+            if value is None or value == '':
+                continue
+            param_parts.append(f"{label}: {value}")
+
+        if param_parts:
+            lines.append(", ".join(param_parts))
+
+        return "\n".join(lines).strip()
 
     def display_raw_metadata(self, metadata, geninfo):
         """개선된 원본 메타데이터 표시"""
@@ -858,7 +909,7 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
             
             # 설정 파라미터들 파싱 (더 많은 패턴 지원)
             settings_patterns = [
-                r'(Steps|Sampler|CFG scale|Seed|Size|Model hash|Model|Denoising strength|Clip skip|ENSD|Hires upscale|Hires steps|Hires upscaler|Version):\s*([^,\n]+)',
+                r'(Steps|Sampler|Scheduler|CFG scale|CFG rescale|Seed|Size|Batch size|Workflow type|Sampling mode|Model hash|Model|CLIP model|VAE|Denoising strength|Clip skip|ENSD|Hires upscale|Hires steps|Hires upscaler|Version):\s*([^,\n]+)',
                 r'(Width|Height):\s*(\d+)',
             ]
             
@@ -932,6 +983,7 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
         
         # 파라미터별 그룹 생성
         groups = {
+            'ComfyUI': ['scheduler', 'cfg_rescale', 'workflow_type', 'sampling_mode', 'clip_model', 'vae', 'batch_size'],
             '프롬프트': ['prompt', 'negative_prompt'],
             '생성 설정': ['steps', 'sampler', 'cfg_scale', 'seed'],
             '이미지 설정': ['width', 'height', 'size'],

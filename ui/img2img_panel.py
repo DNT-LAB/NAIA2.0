@@ -30,6 +30,7 @@ class Img2ImgPanel(QFrame):
         self._mask_preset = False  # Flag to indicate if mask was preset from sketchbook
         self._mask_from_sketchbook = False  # Additional flag for sketchbook source
         self._outpaint_data = None  # OutpaintWindow에서 설정된 데이터
+        self._comic_panel_mode = False
         
         self.init_ui()
         self.setVisible(False)
@@ -98,8 +99,8 @@ class Img2ImgPanel(QFrame):
         """
 
         # Strength
-        strength_group = QWidget()
-        strength_hlayout = QHBoxLayout(strength_group)
+        self.strength_group = QWidget()
+        strength_hlayout = QHBoxLayout(self.strength_group)
         strength_hlayout.setContentsMargins(0, 0, 0, 0)
         strength_label = QLabel("Strength:")
         strength_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: white; background-color: transparent;")
@@ -113,11 +114,11 @@ class Img2ImgPanel(QFrame):
         strength_hlayout.addWidget(strength_label)
         strength_hlayout.addWidget(self.strength_slider)
         strength_hlayout.addWidget(self.strength_value_label)
-        controls_layout.addWidget(strength_group)
+        controls_layout.addWidget(self.strength_group)
 
         # Noise
-        noise_group = QWidget()
-        noise_hlayout = QHBoxLayout(noise_group)
+        self.noise_group = QWidget()
+        noise_hlayout = QHBoxLayout(self.noise_group)
         noise_hlayout.setContentsMargins(0, 0, 0, 0)
         noise_label = QLabel("Noise:")
         noise_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: white; background-color: transparent;")
@@ -131,7 +132,7 @@ class Img2ImgPanel(QFrame):
         noise_hlayout.addWidget(noise_label)
         noise_hlayout.addWidget(self.noise_slider)
         noise_hlayout.addWidget(self.noise_value_label)
-        controls_layout.addWidget(noise_group)
+        controls_layout.addWidget(self.noise_group)
 
         # Auto-Outpainting checkbox (img2img 모드에서 표시)
         self.auto_outpainting_checkbox = QCheckBox("Auto-Outpainting")
@@ -161,7 +162,7 @@ class Img2ImgPanel(QFrame):
         controls_layout.addWidget(self.auto_outpainting_checkbox)
         
         # Cropped image request checkbox (only visible in inpaint mode)
-        self.cropped_image_checkbox = QCheckBox("Get only mask area image (no exif)")
+        self.cropped_image_checkbox = QCheckBox("마스크 영역만 잘라서 저장")
         self.cropped_image_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 font-size: {get_scaled_font_size(16)}px;
@@ -314,13 +315,13 @@ class Img2ImgPanel(QFrame):
         self.small_mask_pil = small_mask
         self._mask_preset = True
         self._outpaint_data = None
+        self._comic_panel_mode = True
 
         cw, ch = canvas_image.size
         self.title_label.setText(f"Comic Panel → {cw}x{ch}")
 
-        # Strength 0.8, Noise 0.05 초기화
-        self.strength_slider.setValue(85)
-        self.noise_slider.setValue(5)
+        self.strength_slider.setValue(99)
+        self.noise_slider.setValue(0)
 
         # 마스크 영역을 파란 오버레이로 표시 (프리뷰)
         preview = canvas_image.convert("RGBA")
@@ -355,12 +356,23 @@ class Img2ImgPanel(QFrame):
             self.auto_outpainting_checkbox.setVisible(False)  # 인페인트 모드에서는 숨김
             self.auto_outpainting_checkbox.setChecked(False)
             self.cropped_image_checkbox.setVisible(True)  # Show cropped image checkbox in inpaint mode
+            if self._comic_panel_mode:
+                self.strength_slider.setValue(99)
+                self.strength_slider.setEnabled(False)
+                self.strength_value_label.setText("1.00")
+                self.noise_slider.setValue(0)
+                self.noise_group.setVisible(False)
+            else:
+                self.strength_slider.setEnabled(True)
+                self.noise_group.setVisible(True)
         else: # 'img2img'
             self.inpaint_button.setText("Inpaint Image")
             self.inpaint_button.setStyleSheet(DARK_STYLES['secondary_button'])
             self.auto_outpainting_checkbox.setVisible(True)  # img2img 모드에서 표시
             self.cropped_image_checkbox.setVisible(False)  # Hide cropped image checkbox in img2img mode
             self.cropped_image_checkbox.setChecked(False)  # Reset checkbox state
+            self.strength_slider.setEnabled(True)
+            self.noise_group.setVisible(True)
         # Outpaint 버튼: img2img 모드에서 항상 표시
         if hasattr(self, 'outpaint_button'):
             self.outpaint_button.setVisible(self.mode != 'inpaint')
@@ -404,6 +416,7 @@ class Img2ImgPanel(QFrame):
         self.full_mask_pil = None
         self.small_mask_pil = None
         self._outpaint_data = None  # 아웃페인트 데이터 초기화
+        self._comic_panel_mode = False
         self._update_ui_for_mode()
 
         # 64배수 리사이징 및 크롭 적용
@@ -557,6 +570,7 @@ class Img2ImgPanel(QFrame):
         self._mask_preset = False  # Reset preset flag
         self._mask_from_sketchbook = False  # Reset sketchbook flag
         self._outpaint_data = None  # Reset outpaint data
+        self._comic_panel_mode = False
 
         # 타이틀을 원래 상태로 복원
         self.title_label.setText("Image2Image & Inpaint")
@@ -576,8 +590,8 @@ class Img2ImgPanel(QFrame):
         self.original_pil_image.save(byte_arr, format='PNG')
         params = {
             "image_bytes": byte_arr.getvalue(),
-            "strength": self.strength_slider.value() / 100.0,
-            "noise": self.noise_slider.value() / 100.0,
+            "strength": 1.0 if self._comic_panel_mode else self.strength_slider.value() / 100.0,
+            "noise": 0.0 if self._comic_panel_mode else self.noise_slider.value() / 100.0,
             "width" : width,
             "height" : height
         }

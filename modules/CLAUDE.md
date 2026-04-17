@@ -22,7 +22,7 @@ modules/
 
 | 파일 | 주요 기능 | 특징 |
 |------|----------|------|
-| **character_module.py** | 캐릭터 검색, 5x5 위치 그리드 | ModeAware, 파이프라인 훅 |
+| **character_module.py** | 캐릭터 검색, 5x5 위치 그리드, 캐릭터 에셋 생성/스토리지 진입 | ModeAware, 파이프라인 훅 |
 | **character_reference_module.py** | Character Reference 관리 | NAI 전용 |
 | **vibe_transfer_module.py** | Vibe Transfer 이미지 | NAI 전용, 다중 이미지 |
 | **prompt_engineering_module.py** | 프롬프트 엔지니어링 | 태그 조작, 프리셋 랜덤화, Danbooru Auto-Weight(IDF), e621 Auto-Boost |

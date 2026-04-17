@@ -11,6 +11,29 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
+# Qt HiDPI 환경변수 — 반드시 PyQt 임포트 이전에 설정
+# 프로젝트의 자체 ScalingManager 가 Qt 위젯을 스케일하므로 Qt HiDPI 는 off 로 둔다.
+# 대신 QWebEngineView 는 아래에서 OS DPI 를 직접 조회해 setZoomFactor 로 맞춘다.
+os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
+os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
+os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "RoundPreferFloor")
+
+# Windows Per-Monitor DPI awareness — Qt 임포트 이전에 호출해야 OS 가 비트맵 스트레치 하지 않음
+if sys.platform == "win32":
+    import ctypes
+    try:
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (Win10 1703+)
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+    except (AttributeError, OSError):
+        try:
+            # PROCESS_PER_MONITOR_DPI_AWARE (Win8.1+)
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except (AttributeError, OSError):
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
 import json
 import pandas as pd
 import random
@@ -7225,52 +7248,97 @@ class ModernMainWindow(QMainWindow):
             # 약간의 지연을 주어 UI 렌더링 완료 후 업데이트
             QTimer.singleShot(50, self.update_splitter_stretch_factors)
 
-if __name__ == "__main__":
-    import webbrowser
-    import signal
+def _get_windows_dpi_scale():
+    """Windows OS 의 DPI 스케일 팩터를 Qt 독립적으로 조회 (100%→1.0, 150%→1.5).
 
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
+    프로젝트 자체 ScalingManager 는 Qt 위젯 기준 스케일이고 웹뷰에 전달되지 않으므로,
+    QWebEngineView 의 setZoomFactor 에 먹일 OS 수준 DPI 를 별도로 읽는다.
+    """
+    if sys.platform != "win32":
+        try:
+            from PyQt6.QtWidgets import QApplication as _QA
+            screen = _QA.instance().primaryScreen() if _QA.instance() else None
+            if screen:
+                return max(0.5, min(3.0, screen.logicalDotsPerInch() / 96.0))
+        except Exception:
+            pass
+        return 1.0
+    try:
+        import ctypes as _ct
+        scale_pct = _ct.windll.shcore.GetScaleFactorForDevice(0)
+        return max(0.5, min(3.0, scale_pct / 100.0))
+    except (AttributeError, OSError):
+        try:
+            import ctypes as _ct
+            return max(0.5, min(3.0, _ct.windll.user32.GetDpiForSystem() / 96.0))
+        except Exception:
+            return 1.0
+
+
+if __name__ == "__main__":
+    import signal
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
 
     setup_webengine()
     app = QApplication(sys.argv)
-    # 창이 없어도 이벤트 루프 유지
-    app.setQuitOnLastWindowClosed(False)
 
     loaded_fonts = load_custom_fonts()
-    if loaded_fonts:
-        default_font = QFont("Pretendard", 12)
-        try:
-            default_font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
-            default_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
-        except AttributeError:
-            pass
-        app.setFont(default_font)
-    else:
-        default_font = QFont("Segoe UI", 12)
-        try:
-            default_font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
-            default_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
-        except AttributeError:
-            pass
-        app.setFont(default_font)
+    default_font = QFont("Pretendard" if loaded_fonts else "Segoe UI", 12)
+    try:
+        default_font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
+        default_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    except AttributeError:
+        pass
+    app.setFont(default_font)
 
-    # 숨겨진 Qt 백엔드 생성
+    # 숨겨진 Qt 백엔드 (모든 위젯/컨트롤러/AppContext 포함, show 하지 않음)
     window = ModernMainWindow()
     window._show_multi_account_notification = lambda: None
 
-    # Remote API 서버 시작 + 브라우저 열기
+    # Remote API 서버 기동
     PORT = 7243
     from core.remote_api_server import start_remote_server
     start_remote_server(window.app_context, port=PORT)
 
     url = f"http://localhost:{PORT}"
     print(f"\n🌐 NAIA Web: {url}")
-    print(f"   터미널을 닫으면 종료됩니다.\n")
-    webbrowser.open(url)
 
-    # Ctrl+C 처리
+    # QApplication 위에 웹 UI 를 띄울 메인 창
+    web_window = QMainWindow()
+    web_window.setWindowTitle("NAIA Web")
+    web_view = QWebEngineView(web_window)
+    web_window.setCentralWidget(web_view)
+
+    # OS DPI 를 웹뷰 zoom 에 직접 반영 (Qt HiDPI off 상태이므로 수동 보정)
+    dpi_scale = _get_windows_dpi_scale()
+    print(f"🔎 QWebEngineView zoom factor: {dpi_scale:.2f} (OS DPI)")
+
+    # 초기 크기: 화면 가용 영역의 80% × 85%
+    screen_geo = app.primaryScreen().availableGeometry()
+    init_w = int(screen_geo.width() * 0.8)
+    init_h = int(screen_geo.height() * 0.85)
+    web_window.resize(init_w, init_h)
+    web_window.move(
+        screen_geo.x() + (screen_geo.width() - init_w) // 2,
+        screen_geo.y() + (screen_geo.height() - init_h) // 2,
+    )
+
+    web_view.load(QUrl(url))
+    web_window.show()
+
+    # show() 이전에 setZoomFactor 를 걸면 첫 레이아웃에 반영되지 않는다.
+    # Chromium 은 ResizeEvent 를 받을 때 zoom 을 재라스터라이즈하므로, 창을 1px 진동시켜
+    # 리레이아웃을 강제한다. (a) 최초 이벤트 루프 틱, (b) 페이지 로드 완료 시점 두 번 수행.
+    def _apply_zoom_and_force_relayout():
+        web_view.setZoomFactor(dpi_scale)
+        w, h = web_window.width(), web_window.height()
+        web_window.resize(w + 1, h)
+        web_window.resize(w, h)
+
+    QTimer.singleShot(0, _apply_zoom_and_force_relayout)
+    web_view.loadFinished.connect(lambda _ok: _apply_zoom_and_force_relayout())
+
+    # Ctrl+C 처리 (터미널에서 종료)
     signal.signal(signal.SIGINT, lambda *_: app.quit())
 
     sys.exit(app.exec())

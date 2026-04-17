@@ -3,6 +3,7 @@ import core.dll_fix  # Windows DLL 로드 문제 해결
 import sys
 import os
 import subprocess
+import threading
 
 # 과학 연산 라이브러리 스레드 제한 (메모리 누수 방지용)
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -7275,12 +7276,55 @@ def _get_windows_dpi_scale():
             return 1.0
 
 
+def _open_external_browser_when_ready(url: str, timeout: float = 30.0) -> None:
+    """Remote API 서버가 준비되면 기본 브라우저를 연다."""
+    def _worker():
+        import time
+        import urllib.request
+        import webbrowser
+
+        deadline = time.time() + timeout
+        ready = False
+
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"{url}/api/status", timeout=1.0) as response:
+                    if 200 <= getattr(response, "status", 200) < 500:
+                        ready = True
+                        break
+            except Exception:
+                time.sleep(0.5)
+
+        if not ready:
+            print(f"⚠️ 브라우저 자동 실행 전에 서버 준비를 확인하지 못했습니다. 직접 열어주세요: {url}")
+            return
+
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", url])
+            elif sys.platform == "win32":
+                os.startfile(url)
+            else:
+                webbrowser.open(url)
+            print(f"🌐 기본 브라우저에서 NAIA Web을 열었습니다: {url}")
+        except Exception as exc:
+            print(f"⚠️ 기본 브라우저를 자동으로 열지 못했습니다: {exc}")
+            print(f"   아래 주소를 직접 열어주세요: {url}")
+
+    threading.Thread(target=_worker, daemon=True, name="NAIA-Web-BrowserOpener").start()
+
+
 if __name__ == "__main__":
     import signal
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+    external_browser = "--external-browser" in sys.argv
+    if external_browser:
+        sys.argv = [arg for arg in sys.argv if arg != "--external-browser"]
 
     setup_webengine()
     app = QApplication(sys.argv)
+    if external_browser:
+        app.setQuitOnLastWindowClosed(False)
 
     loaded_fonts = load_custom_fonts()
     default_font = QFont("Pretendard" if loaded_fonts else "Segoe UI", 12)
@@ -7302,41 +7346,49 @@ if __name__ == "__main__":
 
     url = f"http://localhost:{PORT}"
     print(f"\n🌐 NAIA Web: {url}")
+    if external_browser:
+        print("🔗 기본 브라우저에서 NAIA Web을 여는 중입니다...")
+        print("💡 브라우저가 자동으로 열리지 않으면 위 주소를 직접 열어주세요.")
+        _open_external_browser_when_ready(url)
+    else:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-    # QApplication 위에 웹 UI 를 띄울 메인 창
-    web_window = QMainWindow()
-    web_window.setWindowTitle("NAIA Web")
-    web_view = QWebEngineView(web_window)
-    web_window.setCentralWidget(web_view)
+        # QApplication 위에 웹 UI 를 띄울 메인 창
+        web_window = QMainWindow()
+        web_window.setWindowTitle("NAIA Web")
+        web_view = QWebEngineView(web_window)
+        web_window.setCentralWidget(web_view)
 
-    # OS DPI 를 웹뷰 zoom 에 직접 반영 (Qt HiDPI off 상태이므로 수동 보정)
-    dpi_scale = _get_windows_dpi_scale()
-    print(f"🔎 QWebEngineView zoom factor: {dpi_scale:.2f} (OS DPI)")
+        # OS DPI 를 웹뷰 zoom 에 직접 반영 (Qt HiDPI off 상태이므로 수동 보정)
+        dpi_scale = _get_windows_dpi_scale()
+        print(f"🔎 QWebEngineView zoom factor: {dpi_scale:.2f} (OS DPI)")
 
-    # 초기 크기: 화면 가용 영역의 80% × 85%
-    screen_geo = app.primaryScreen().availableGeometry()
-    init_w = int(screen_geo.width() * 0.8)
-    init_h = int(screen_geo.height() * 0.85)
-    web_window.resize(init_w, init_h)
-    web_window.move(
-        screen_geo.x() + (screen_geo.width() - init_w) // 2,
-        screen_geo.y() + (screen_geo.height() - init_h) // 2,
-    )
+        # 초기 크기: 화면 가용 영역의 80% × 85%
+        screen_geo = app.primaryScreen().availableGeometry()
+        init_w = int(screen_geo.width() * 0.8)
+        init_h = int(screen_geo.height() * 0.85)
+        web_window.resize(init_w, init_h)
+        web_window.move(
+            screen_geo.x() + (screen_geo.width() - init_w) // 2,
+            screen_geo.y() + (screen_geo.height() - init_h) // 2,
+        )
 
-    web_view.load(QUrl(url))
-    web_window.show()
+        web_view.load(QUrl(url))
+        web_window.show()
 
-    # show() 이전에 setZoomFactor 를 걸면 첫 레이아웃에 반영되지 않는다.
-    # Chromium 은 ResizeEvent 를 받을 때 zoom 을 재라스터라이즈하므로, 창을 1px 진동시켜
-    # 리레이아웃을 강제한다. (a) 최초 이벤트 루프 틱, (b) 페이지 로드 완료 시점 두 번 수행.
-    def _apply_zoom_and_force_relayout():
-        web_view.setZoomFactor(dpi_scale)
-        w, h = web_window.width(), web_window.height()
-        web_window.resize(w + 1, h)
-        web_window.resize(w, h)
+        # show() 이전에 setZoomFactor 를 걸면 첫 레이아웃에 반영되지 않는다.
+        # Chromium 은 ResizeEvent 를 받을 때 zoom 을 재라스터라이즈하므로, 창을 1px 진동시켜
+        # 리레이아웃을 강제한다. (a) 최초 이벤트 루프 틱, (b) 페이지 로드 완료 시점 두 번 수행.
+        def _apply_zoom_and_force_relayout():
+            web_view.setZoomFactor(dpi_scale)
+            w, h = web_window.width(), web_window.height()
+            web_window.resize(w + 1, h)
+            web_window.resize(w, h)
 
-    QTimer.singleShot(0, _apply_zoom_and_force_relayout)
-    web_view.loadFinished.connect(lambda _ok: _apply_zoom_and_force_relayout())
+        QTimer.singleShot(0, _apply_zoom_and_force_relayout)
+        web_view.loadFinished.connect(lambda _ok: _apply_zoom_and_force_relayout())
+
+    app.aboutToQuit.connect(window.close)
 
     # Ctrl+C 처리 (터미널에서 종료)
     signal.signal(signal.SIGINT, lambda *_: app.quit())

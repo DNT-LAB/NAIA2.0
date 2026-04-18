@@ -22,6 +22,8 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
 
+from core import api_verification
+
 
 # ---------------------------------------------------------------------------
 # WebSocket Manager
@@ -161,7 +163,7 @@ class RemoteBridge(QObject):
         self._cached_prompts: dict = {}
         self._cached_params: dict = {}
         self._cached_options: dict = {}
-        self._cached_api_status: dict = {}
+        # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
         # Shared Server Mode: 클라이언트별 독립 P.Eng/Params/Negative
         self.shared_server_mode = False
         # 태그 검색 인덱스 (ui/interactive/interactive 기반)
@@ -180,6 +182,11 @@ class RemoteBridge(QObject):
         self._viewer_cache: list = []
         self._viewer_cache_time: float = 0
         self._viewer_cache_dir: str = ""
+        # NAI Anlas: 주기 + 생성 이벤트 기반 refresh. 웹 viewer 좌하단에 pill로 표시.
+        self._anlas_cache: Optional[dict] = None     # {"anlas": int, "opus": bool, "tier": str, "fetched_at": str}
+        self._anlas_timer: Optional[QTimer] = None
+        self._anlas_fetch_in_flight: bool = False
+        self._anlas_refresh_interval_ms: int = 5 * 60 * 1000  # 5분
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -228,7 +235,16 @@ class RemoteBridge(QObject):
             session["eligible_ids"] = set(snapshot["id"].tolist())
 
     def _is_cloudflared_active(self) -> bool:
-        """Cloudflared 터널이 활성인지 확인"""
+        """Cloudflared 터널이 활성인지 확인.
+
+        우선순위:
+          1) `app_context.cloudflared_active` 명시 플래그 (bool) — 가장 신뢰 가능
+          2) 탭 인스턴스에서 `cloudflared_checkbox` 탐색 (fallback, 탭 리팩토링에 취약)
+        둘 다 실패하면 False (보수적: 차단 대신 허용).
+        """
+        flag = getattr(self.app_context, "cloudflared_active", None)
+        if isinstance(flag, bool):
+            return flag
         try:
             mw = self.app_context.main_window
             if hasattr(mw, 'image_window') and hasattr(mw.image_window, 'tab_controller'):
@@ -239,14 +255,144 @@ class RemoteBridge(QObject):
             pass
         return False
 
+    # --- Setup 전용 유틸 (Phase 2 / Phase 3) ---
+
+    _SETUP_TIMESTAMP_FILE = "NAIA_api_timestamps.json"
+
+    def _ws_client_host(self, ws) -> str:
+        """WS 클라이언트 IP 안전 추출 (loopback 판정용)."""
+        try:
+            if ws is not None and getattr(ws, "client", None) is not None:
+                return (ws.client.host or "") if hasattr(ws.client, "host") else ""
+        except Exception:
+            pass
+        return ""
+
+    def _setup_gate(self, ws) -> tuple[bool, str]:
+        """Setup UI 활성 조건 3중 게이트 — 전부 통과해야 토큰/URL 설정 허용.
+
+        1) 클라이언트가 loopback 에서 접속 (LAN/외부 거부)
+        2) Shared Server Mode OFF
+        3) Cloudflared 터널 비활성
+        """
+        host = self._ws_client_host(ws)
+        if host not in ("127.0.0.1", "::1"):
+            return False, "초기 설정은 로컬(127.0.0.1) 접속에서만 가능합니다."
+        if self.shared_server_mode:
+            return False, "Shared Server Mode 활성 중 — 초기 설정이 차단됩니다."
+        if self._is_cloudflared_active():
+            return False, "Cloudflared 터널 활성 중 — 초기 설정이 차단됩니다."
+        return True, ""
+
+    def _is_setup_required(self) -> bool:
+        """NAI / WebUI / ComfyUI 셋 다 미설정이면 Setup UI 강제."""
+        stm = self.app_context.secure_token_manager
+        has_any = bool(
+            (stm.get_token("nai_token") or "").strip()
+            or (stm.get_token("webui_url") or "").strip()
+            or (stm.get_token("comfyui_url") or "").strip()
+        )
+        return not has_any
+
+    def _save_verify_timestamp(self, key: str):
+        """검증 성공 시 `NAIA_api_timestamps.json` 에 타임스탬프 기록 (데스크탑 UI와 공유)."""
+        try:
+            import os, json as _json
+            data = {}
+            if os.path.exists(self._SETUP_TIMESTAMP_FILE):
+                try:
+                    with open(self._SETUP_TIMESTAMP_FILE, "r", encoding="utf-8") as f:
+                        data = _json.load(f) or {}
+                except Exception:
+                    data = {}
+            data[f"{key}_last_verified"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(self._SETUP_TIMESTAMP_FILE, "w", encoding="utf-8") as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"🌐 Remote: 타임스탬프 저장 실패 — {e}")
+
+    def _load_verify_timestamps(self) -> dict:
+        """저장된 마지막 검증 타임스탬프 로드 (마스킹된 상태 표시용)."""
+        try:
+            import os, json as _json
+            if os.path.exists(self._SETUP_TIMESTAMP_FILE):
+                with open(self._SETUP_TIMESTAMP_FILE, "r", encoding="utf-8") as f:
+                    return _json.load(f) or {}
+        except Exception:
+            pass
+        return {}
+
+    # --- NAI Anlas (viewer 좌하단 pill) ---
+
+    def _anlas_payload(self) -> dict:
+        """현재 캐시를 WS 메시지로 직렬화."""
+        c = self._anlas_cache or {}
+        return {
+            "type": "anlas_update",
+            "available": bool(c),
+            "anlas": c.get("anlas", 0) if c else 0,
+            "fetched_at": c.get("fetched_at", "") if c else "",
+        }
+
+    def _refresh_anlas_async(self):
+        """NAI 토큰으로 Anlas 잔액 조회 — threading.Thread (Qt/asyncio 무관).
+
+        Opus 여부와 상관없이 `fixed + purchased` 숫자를 그대로 노출.
+        Opus 등급도 고해상도/특정 파라미터 조합에서 Anlas를 소모하므로 sentinel 처리 안 함.
+        """
+        if self._anlas_fetch_in_flight:
+            return
+        token = (self.app_context.secure_token_manager.get_token("nai_token") or "").strip()
+        if not token:
+            if self._anlas_cache is not None:
+                self._anlas_cache = None
+                self._broadcast_json(self._anlas_payload())
+            return
+
+        self._anlas_fetch_in_flight = True
+
+        def _worker():
+            try:
+                value = api_verification.fetch_nai_anlas(token)
+                if value is not None:
+                    self._anlas_cache = {
+                        "anlas": int(value),
+                        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    # Shared Mode 에서는 호스트 잔액이 타 사용자에게 노출되면 안 됨
+                    if self._has_clients() and not self.shared_server_mode:
+                        self._broadcast_json(self._anlas_payload())
+            except Exception as e:
+                print(f"🌐 Anlas fetch 실패 — {e}")
+            finally:
+                self._anlas_fetch_in_flight = False
+
+        threading.Thread(target=_worker, daemon=True, name="NAIA-Anlas-Fetch").start()
+
+    def _start_anlas_timer(self):
+        """5분 주기 Anlas refresh 타이머 (Qt 메인 스레드에서 호출)."""
+        if self._anlas_timer is None:
+            self._anlas_timer = QTimer()
+            self._anlas_timer.setInterval(self._anlas_refresh_interval_ms)
+            self._anlas_timer.timeout.connect(self._refresh_anlas_async)
+        if not self._anlas_timer.isActive():
+            self._anlas_timer.start()
+
+    def _stop_anlas_timer(self):
+        if self._anlas_timer and self._anlas_timer.isActive():
+            self._anlas_timer.stop()
+
     # --- 캐시 갱신 (Qt 메인 스레드에서 호출) ---
 
     def _update_cache_all(self):
-        """모든 캐시를 갱신 (서버 시작 시 + WS 연결 시)"""
+        """모든 캐시를 갱신 (서버 시작 시 + WS 연결 시).
+
+        api_status 는 per-ws 평가(setup_allowed 가 클라이언트 IP에 따라 다름)이므로
+        캐시하지 않고 WS 초기화 시점에 `get_api_status(ws=ws)` 로 직접 생성한다.
+        """
         self._cached_prompts = self.get_current_prompts()
         self._cached_params = self.get_generation_params()
         self._cached_options = {"type": "options", **self.get_options()}
-        self._cached_api_status = self.get_api_status()
 
     # --- 시그널 슬롯 래퍼 (lambda 대신 disconnect 가능) ---
 
@@ -653,16 +799,16 @@ class RemoteBridge(QObject):
         return any(stripped.startswith(p) for p in self._LOCAL_PATTERNS)
 
     def _do_set_api_url(self, mode: str, url: str):
-        """웹에서 입력한 API URL을 저장"""
+        """웹에서 입력한 API URL을 저장 (legacy 경로 — 신규 UI 는 verify_webui/verify_comfyui 사용).
+
+        Setup 모달 경로는 `_setup_gate()`(loopback 클라이언트)로 토큰 저장을 보호하므로
+        URL 자체의 LAN 체크는 과잉. Cloudflare 터널처럼 외부 주소를 쓰는 케이스를 지원.
+        """
         try:
             url = url.strip()
             if not url:
                 self._broadcast_json({"type": "api_config_result", "success": False,
                                       "message": "URL is empty"})
-                return
-            if not self._is_local_url(url):
-                self._broadcast_json({"type": "api_config_result", "success": False,
-                                      "message": "Only local/LAN addresses allowed here"})
                 return
 
             stm = self.app_context.secure_token_manager
@@ -687,20 +833,51 @@ class RemoteBridge(QObject):
                               "success": ok, "message": msg})
         self._broadcast_api_status()
 
-    def get_api_status(self) -> dict:
-        """각 모드의 설정 상태 반환"""
+    def get_api_status(self, ws=None) -> dict:
+        """각 모드의 설정 상태 + Setup 게이트 상태 반환.
+
+        `ws` 주어지면 해당 클라이언트 기준 `setup_allowed`/`setup_block_reason` 포함.
+        없으면 공통 필드만 (브로드캐스트 캐시용).
+        """
         stm = self.app_context.secure_token_manager
-        return {
+        timestamps = self._load_verify_timestamps()
+        nai_token = (stm.get_token("nai_token") or "").strip()
+        # 데스크탑 API 관리 창과 동일 마스킹 규칙: 앞 7자만 노출
+        nai_preview = nai_token[:7] if len(nai_token) >= 7 else nai_token
+        payload = {
             "type": "api_status",
-            "nai_configured": bool(stm.get_token("nai_token")),
+            "nai_configured": bool(nai_token),
+            "nai_token_preview": nai_preview,
             "webui_url": stm.get_token("webui_url") or "",
             "comfyui_url": stm.get_token("comfyui_url") or "",
+            "comfyui_default_model": stm.get_token("comfyui_default_model") or "",
+            "comfyui_sampling_mode": stm.get_token("comfyui_sampling_mode") or "",
+            "active_mode": self.app_context.get_api_mode() if hasattr(self.app_context, "get_api_mode") else "",
+            # Shared Server Mode 에서는 웹 사용자에게 Setup 모달을 강제하지 않음 (호스트 책임)
+            "setup_required": (not self.shared_server_mode) and self._is_setup_required(),
+            "last_verified": {
+                "nai": timestamps.get("nai_token_last_verified", ""),
+                "webui": timestamps.get("webui_url_last_verified", ""),
+                "comfyui": timestamps.get("comfyui_url_last_verified", ""),
+            },
         }
+        if ws is not None:
+            allowed, reason = self._setup_gate(ws)
+            payload["setup_allowed"] = allowed
+            payload["setup_block_reason"] = reason
+        return payload
 
     def _broadcast_api_status(self):
-        self._cached_api_status = self.get_api_status()
-        if self._has_clients():
-            self._broadcast_json(self._cached_api_status)
+        """api_status 를 per-client 송신 (`setup_allowed` 가 IP별로 다름)."""
+        if not self._has_clients():
+            return
+        common = self.get_api_status(ws=None)
+        for ws in list(self._ws_manager.active_connections):
+            payload = dict(common)
+            allowed, reason = self._setup_gate(ws)
+            payload["setup_allowed"] = allowed
+            payload["setup_block_reason"] = reason
+            self._send_json_to(ws, payload)
 
     def on_api_mode_changed(self, data: dict):
         """api_mode_changed 이벤트 → 웹 클라이언트에 브로드캐스트"""
@@ -709,6 +886,12 @@ class RemoteBridge(QObject):
         if new_mode == "NAI" and self.shared_server_mode:
             self.shared_server_mode = False
             print("🌐 Remote: NAI 모드 전환 — Shared Server Mode 자동 해제")
+        # NAI 모드 진입/이탈에 맞춰 Anlas 타이머 제어
+        if new_mode == "NAI":
+            self._start_anlas_timer()
+            self._refresh_anlas_async()
+        else:
+            self._stop_anlas_timer()
         if not self._has_clients():
             return
         self._broadcast_json({"type": "mode", "mode": new_mode})
@@ -997,17 +1180,17 @@ class RemoteBridge(QObject):
                     params["hires_steps"] = mw.hires_steps_spinbox.value()
                     params["hr_cfg"] = mw.hr_cfg_spinbox.value()
                     params["options_hr_upscaler"] = self._combo_items(mw.hr_upscaler_combo)
-            elif mode == "COMFYUI":
-                if hasattr(mw, 'eps_radio'):
-                    if mw.eps_radio.isChecked():
-                        params["sampling_mode"] = "eps"
-                    elif mw.v_pred_radio.isChecked():
-                        params["sampling_mode"] = "v_prediction"
-                    elif mw.anima_radio.isChecked():
-                        params["sampling_mode"] = "anima"
-                    else:
-                        params["sampling_mode"] = "eps"
-                    params["rescale_cfg"] = round(mw.comfyui_rescale_slider.value() / 100.0, 2)
+            # ComfyUI sampling_mode / rescale_cfg 는 mode 와 무관하게 항상 송신
+            # (데스크탑 우선권 보장 — 모드 전환 타이밍에 누락되지 않도록).
+            if hasattr(mw, 'eps_radio'):
+                if mw.eps_radio.isChecked():
+                    params["sampling_mode"] = "eps"
+                elif mw.v_pred_radio.isChecked():
+                    params["sampling_mode"] = "v_prediction"
+                elif mw.anima_radio.isChecked():
+                    params["sampling_mode"] = "anima"
+            if hasattr(mw, 'comfyui_rescale_slider'):
+                params["rescale_cfg"] = round(mw.comfyui_rescale_slider.value() / 100.0, 2)
             return params
         except Exception as e:
             print(f"🌐 Remote: 파라미터 읽기 실패 — {e}")
@@ -3007,6 +3190,12 @@ class RemoteBridge(QObject):
 
     def on_generation_result(self, result: dict):
         """생성 완료 시 PIL→WebP 변환 후 캐시 저장 + WebSocket broadcast"""
+        # NAI 모드에서 생성 끝나면 Anlas 잔액 갱신 (실제 사용량 반영)
+        try:
+            if hasattr(self.app_context, "get_api_mode") and self.app_context.get_api_mode() == "NAI":
+                self._refresh_anlas_async()
+        except Exception:
+            pass
         try:
             image = result.get("image")
             if image is None:
@@ -3313,8 +3502,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 await ws.send_text(json.dumps(bridge._cached_prompts))
             if bridge._cached_params:
                 await ws.send_text(json.dumps(bridge._cached_params))
-            if bridge._cached_api_status:
-                await ws.send_text(json.dumps(bridge._cached_api_status))
+            # api_status 는 per-ws 평가 (setup_allowed 가 클라이언트 IP에 따라 다름)
+            await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
+            # 캐시된 Anlas 있으면 바로 송신 (viewer pill 초기화)
+            # Shared Mode 에서는 호스트 잔액 노출 금지
+            if bridge._anlas_cache and not bridge.shared_server_mode:
+                await ws.send_text(json.dumps(bridge._anlas_payload()))
             # init_complete: 클라이언트에 초기화 완료 신호 (복원 가드 해제용)
             await ws.send_text(json.dumps({"type": "init_complete"}))
             # 메인 스레드에서 캐시 갱신 + broadcast (초기화 타이밍 이슈 방지)
@@ -3636,6 +3829,113 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "negative": cmd.get("negative_prompt", ""),
                             })
                             bridge.request_generate.emit()
+                        elif cmd_type == "probe_api":
+                            # 저장된 토큰/URL 로 실시간 연결 가능 여부 확인.
+                            # keyring 값 사용 — 웹으로 토큰이 노출되지 않음. 저장/타임스탬프 갱신 없음.
+                            # 3개 backend 병렬 ping (최악 NAI 10s).
+                            # Setup 게이트(loopback + !shared + !cloudflared) 적용 — LAN/터널 기기가
+                            # 호스트 자격증명으로 NAI /user/subscription 을 스팸 호출하지 못하도록.
+                            allowed, reason = bridge._setup_gate(ws)
+                            if not allowed:
+                                await ws.send_text(json.dumps({
+                                    "type": "setup_blocked",
+                                    "command": "probe_api",
+                                    "reason": reason,
+                                }))
+                                continue
+                            stm_p = bridge.app_context.secure_token_manager
+
+                            async def _probe(mode_key, token_key, fn):
+                                val = (stm_p.get_token(token_key) or "").strip()
+                                if not val:
+                                    return (mode_key, None)
+                                try:
+                                    r = await asyncio.to_thread(fn, val)
+                                    return (mode_key, bool(r.success))
+                                except Exception:
+                                    return (mode_key, False)
+
+                            pairs = await asyncio.gather(
+                                _probe("NAI",     "nai_token",    api_verification.verify_nai_token),
+                                _probe("WEBUI",   "webui_url",    api_verification.verify_webui_url),
+                                _probe("COMFYUI", "comfyui_url",  api_verification.verify_comfyui_url),
+                            )
+                            results = {k: v for k, v in pairs}
+                            await ws.send_text(json.dumps({
+                                "type": "probe_result", "results": results,
+                            }))
+
+                        elif cmd_type in ("verify_nai", "verify_webui", "verify_comfyui",
+                                          "clear_api"):
+                            # --- Setup 전용 명령 (Phase 2+3) ---
+                            allowed, reason = bridge._setup_gate(ws)
+                            if not allowed:
+                                await ws.send_text(json.dumps({
+                                    "type": "setup_blocked",
+                                    "command": cmd_type,
+                                    "reason": reason,
+                                }))
+                                continue
+
+                            stm = bridge.app_context.secure_token_manager
+
+                            if cmd_type == "verify_nai":
+                                token = (cmd.get("token") or "").strip()
+                                r = await asyncio.to_thread(api_verification.verify_nai_token, token)
+                                await ws.send_text(json.dumps({
+                                    "type": "verify_result", "mode": "NAI",
+                                    "success": r.success, "message": r.message,
+                                    "message_type": r.message_type, "extra": r.extra,
+                                }))
+                                if r.success:
+                                    stm.save_token("nai_token", r.value or token)
+                                    bridge._save_verify_timestamp("nai_token")
+                                    bridge._broadcast_api_status()
+                                    # 토큰이 바뀌었을 수 있으니 Anlas 즉시 갱신
+                                    bridge._refresh_anlas_async()
+
+                            elif cmd_type == "verify_webui":
+                                url = (cmd.get("url") or "").strip()
+                                r = await asyncio.to_thread(api_verification.verify_webui_url, url)
+                                await ws.send_text(json.dumps({
+                                    "type": "verify_result", "mode": "WEBUI",
+                                    "success": r.success, "message": r.message,
+                                    "message_type": r.message_type, "extra": r.extra,
+                                }))
+                                if r.success:
+                                    protocol = (r.extra or {}).get("protocol", "http")
+                                    stm.save_token("webui_url", f"{protocol}://{r.value}")
+                                    bridge._save_verify_timestamp("webui_url")
+                                    bridge._broadcast_api_status()
+
+                            elif cmd_type == "verify_comfyui":
+                                url = (cmd.get("url") or "").strip()
+                                r = await asyncio.to_thread(api_verification.verify_comfyui_url, url)
+                                await ws.send_text(json.dumps({
+                                    "type": "verify_result", "mode": "COMFYUI",
+                                    "success": r.success, "message": r.message,
+                                    "message_type": r.message_type, "extra": r.extra,
+                                }))
+                                if r.success:
+                                    protocol = (r.extra or {}).get("protocol", "http")
+                                    stm.save_token("comfyui_url", f"{protocol}://{r.value}")
+                                    bridge._save_verify_timestamp("comfyui_url")
+                                    bridge._broadcast_api_status()
+
+                            elif cmd_type == "clear_api":
+                                mode = (cmd.get("mode") or "").upper()
+                                if mode == "NAI":
+                                    stm.save_token("nai_token", "")
+                                    bridge._anlas_cache = None
+                                    if not bridge.shared_server_mode:
+                                        bridge._broadcast_json(bridge._anlas_payload())
+                                elif mode == "WEBUI":
+                                    stm.save_token("webui_url", "")
+                                elif mode == "COMFYUI":
+                                    stm.save_token("comfyui_url", "")
+                                    stm.save_token("comfyui_default_model", "")
+                                    stm.save_token("comfyui_sampling_mode", "")
+                                bridge._broadcast_api_status()
                     except Exception:
                         pass
         except WebSocketDisconnect:
@@ -3713,6 +4013,14 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("image_saved", bridge._on_image_saved)
+
+    # NAI 모드에서 시작된 경우 Anlas 타이머 부트 + 초기 fetch
+    try:
+        if hasattr(app_context, "get_api_mode") and app_context.get_api_mode() == "NAI":
+            bridge._start_anlas_timer()
+            bridge._refresh_anlas_async()
+    except Exception:
+        pass
 
     # 메인 UI 위젯 연결
     mw = app_context.main_window

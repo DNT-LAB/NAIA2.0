@@ -78,8 +78,7 @@ let pendingMeta = null; // meta arrives before blob
 const $ = id => document.getElementById(id);
 const preview      = $('preview');
 const emptyMsg     = $('emptyMsg');
-const connDot      = $('connDot');
-const connText     = $('connText');
+const setupLauncherBtn = $('setupLauncher');  // doubles as connection-status indicator
 const btnGen       = $('btnGen');
 const btnRnd       = $('btnRnd');
 const promptEdit   = $('promptEdit');
@@ -130,13 +129,15 @@ function connect() {
 
   ws.onopen = () => {
     _initDone = false;
-    connDot.classList.add('on'); connText.textContent = 'connected';
+    _initialProbeDone = false;
+    setLauncherConn(true);
     ws.send(JSON.stringify({type: 'get_search_state'}));
     // 클라이언트 상태 전송 (히스토리 수 0 — viewer는 REST로 로드)
     ws.send(JSON.stringify({type: 'client_state', history_count: 0}));
+    // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
   };
   ws.onclose = () => {
-    connDot.classList.remove('on'); connText.textContent = 'reconnecting';
+    setLauncherConn(false);
     reconnTimer = setTimeout(connect, 3000);
   };
   ws.onerror = () => ws.close();
@@ -170,8 +171,10 @@ function connect() {
         else if (m.type === 'mode') syncMode(m.mode);
         else if (m.type === 'mode_result') onModeResult(m);
         else if (m.type === 'api_status') updateApiStatus(m);
-        else if (m.type === 'api_config_result') onApiConfigResult(m);
-        else if (m.type === 'api_test_result') onApiTestResult(m);
+        else if (m.type === 'verify_result') onVerifyResult(m);
+        else if (m.type === 'setup_blocked') onSetupBlocked(m);
+        else if (m.type === 'probe_result') onProbeResult(m);
+        else if (m.type === 'anlas_update') onAnlasUpdate(m);
         else if (m.type === 'module_state') onModuleState(m);
         else if (m.type === 'search_state') onSearchState(m);
         else if (m.type === 'rating_update') onRatingUpdate(m);
@@ -319,9 +322,9 @@ function updateParams(m) {
         if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
         if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
       }
-      // ComfyUI sampling mode — 서버 값 그대로
-      if (mode === 'COMFYUI') {
-        const sm = m.sampling_mode || 'eps';
+      // ComfyUI sampling mode — 서버가 명시적으로 보낸 경우에만 적용 (EPS 기본값 리셋 방지)
+      if (mode === 'COMFYUI' && 'sampling_mode' in m) {
+        const sm = m.sampling_mode;
         $('flagEps').classList.toggle('on', sm === 'eps');
         $('flagVpred').classList.toggle('on', sm === 'v_prediction');
         $('flagAnima').classList.toggle('on', sm === 'anima');
@@ -385,9 +388,9 @@ function updateParams(m) {
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
   }
 
-  // ComfyUI sampling mode
-  if (mode === 'COMFYUI') {
-    const sm = m.sampling_mode || 'eps';
+  // ComfyUI sampling mode — 서버가 명시적으로 보낸 경우에만 적용 (EPS 기본값 리셋 방지)
+  if (mode === 'COMFYUI' && 'sampling_mode' in m) {
+    const sm = m.sampling_mode;
     $('flagEps').classList.toggle('on', sm === 'eps');
     $('flagVpred').classList.toggle('on', sm === 'v_prediction');
     $('flagAnima').classList.toggle('on', sm === 'anima');
@@ -1029,6 +1032,17 @@ function onSession(m) {
     if (autoGenCb) { autoGenCb.checked = false; autoGenCb.disabled = true; autoGenCb.parentElement.style.opacity = '0.4'; }
     // Auto Save 토글 차단 (호스트 전역 설정)
     if (statsSave) { statsSave.style.pointerEvents = 'none'; statsSave.style.opacity = '0.5'; }
+    // Shared Mode 에선 모드 콤보박스 전체 비활성화 (호스트가 사전 설정)
+    modeSelect.disabled = true;
+    // API Configuration 진입점 자체 숨김 — Setup/연동은 호스트 전용
+    if (setupLauncherBtn) setupLauncherBtn.style.display = 'none';
+    // 혹시 모달이 열려 있으면 강제로 닫기 (Shared 전환 중 상태)
+    if (setupOverlay && setupOverlay.classList.contains('open')) {
+      _setupForced = false;
+      setupOverlay.classList.remove('open');
+    }
+    // Anlas pill 숨김 — 호스트 잔액 노출 금지
+    if (anlasPill) anlasPill.classList.add('hidden');
     // NAI 비활성화
     if (naiOpt) naiOpt.disabled = true;
     // Automation / WC / Chunk 비활성화
@@ -1053,6 +1067,9 @@ function onSession(m) {
     _sharedPromptsInit = false;
     if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.parentElement.style.opacity = ''; }
     if (statsSave) { statsSave.style.pointerEvents = ''; statsSave.style.opacity = ''; }
+    modeSelect.disabled = false;
+    if (setupLauncherBtn) setupLauncherBtn.style.display = '';
+    // Anlas pill 은 서버가 다시 anlas_update 송신 시 자동으로 다시 표시됨
     if (naiOpt) naiOpt.disabled = false;
     sharedDisabledModules.forEach(mid => {
       const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
@@ -1467,87 +1484,302 @@ function showToast(msg, type, showConfigure) {
   }, showConfigure ? 4000 : 2500);
 }
 
-// ---- API Config popup ----
-const apiPopupOverlay = $('apiPopupOverlay');
-const apiWebuiUrl = $('apiWebuiUrl');
-const apiComfyuiUrl = $('apiComfyuiUrl');
-const apiDots = { NAI: $('apiDotNai'), WEBUI: $('apiDotWebui'), COMFYUI: $('apiDotComfyui') };
+// ---- Setup / Initial Configuration ----
+// Sits on top of WS `api_status` / `verify_result` / `comfyui_models` / `setup_blocked`.
+// When `setup_required` is true the modal is forced open and cannot be dismissed
+// until at least one backend is verified.
+const setupOverlay = $('apiPopupOverlay');
+const setupDialog = $('setupDialog');
+const setupCloseBtn = $('setupClose');
+const setupSubTitle = document.querySelector('.setup-sub');
+const _setupSubDefault = setupSubTitle ? setupSubTitle.textContent : '';
+const setupNavDots    = { NAI: $('setupDotNai'),   WEBUI: $('setupDotWebui'),   COMFYUI: $('setupDotComfyui') };
+const setupNavSubs    = { NAI: $('setupNavSubNai'), WEBUI: $('setupNavSubWebui'), COMFYUI: $('setupNavSubComfyui') };
+const setupMetaEls    = { NAI: $('setupMetaNai'),  WEBUI: $('setupMetaWebui'),  COMFYUI: $('setupMetaComfyui') };
+const setupResultEls  = { NAI: $('setupResultNai'), WEBUI: $('setupResultWebui'), COMFYUI: $('setupResultComfyui') };
+const setupVerifyBtns = { NAI: $('setupBtnVerifyNai'), WEBUI: $('setupBtnVerifyWebui'), COMFYUI: $('setupBtnVerifyComfyui') };
+let _setupForced = false;     // setup_required → true: close button hidden + backdrop ignored
+let _setupAllowed = true;     // setup_allowed: gate check on server
+let _apiStatusLast = null;
+let _initialProbeDone = false; // WS 세션당 1회만 초기 probe 실행
 
 function openApiPopup() {
-  apiPopupOverlay.classList.add('open');
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send('sync');
+  // Shared Mode 에서는 Setup/연동 원천 차단 (호스트 전용)
+  if (sharedMode) return;
+  setupOverlay.classList.add('open');
+  if (_apiStatusLast) applySetupGate(_apiStatusLast);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send('sync');
+    // probe 는 WS 첫 연결 때 1회만. 모달 재오픈 시엔 캐시된 dot 상태 유지.
+    // (VERIFY / DISCONNECT 로 상태가 바뀌면 onVerifyResult / updateApiStatus 가 자동 반영.)
+  }
+}
+
+// Live probe — keyring 값으로 실시간 ping. 저장 없음, 타임스탬프 영향 없음.
+// State: 'ok' | 'err' | 'probing' | null(미설정)
+const _probeState = { NAI: null, WEBUI: null, COMFYUI: null };
+
+function probeApi() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const last = _apiStatusLast || {};
+  _probeState.NAI     = last.nai_configured ? 'probing' : null;
+  _probeState.WEBUI   = (last.webui_url && last.webui_url.length)   ? 'probing' : null;
+  _probeState.COMFYUI = (last.comfyui_url && last.comfyui_url.length) ? 'probing' : null;
+  refreshDotsFromProbe();
+  ws.send(JSON.stringify({ type: 'probe_api' }));
+}
+
+function onProbeResult(m) {
+  const r = m.results || {};
+  ['NAI', 'WEBUI', 'COMFYUI'].forEach(k => {
+    if (r[k] === true)       _probeState[k] = 'ok';
+    else if (r[k] === false) _probeState[k] = 'err';
+    else                     _probeState[k] = null;  // not configured
+  });
+  refreshDotsFromProbe();
+}
+
+function refreshDotsFromProbe() {
+  const map = { NAI: setupNavDots.NAI, WEBUI: setupNavDots.WEBUI, COMFYUI: setupNavDots.COMFYUI };
+  Object.keys(map).forEach(k => {
+    const el = map[k];
+    if (!el) return;
+    const s = _probeState[k];
+    let cls = 'setup-nav-dot';
+    if (s === 'ok')       cls += ' ok';
+    else if (s === 'err') cls += ' err';
+    else if (s === 'probing') cls += ' warn';
+    el.className = cls;
+  });
 }
 
 function closeApiPopup() {
-  apiPopupOverlay.classList.remove('open');
-  saveUrlIfChanged('WEBUI', apiWebuiUrl);
-  saveUrlIfChanged('COMFYUI', apiComfyuiUrl);
+  if (_setupForced) {
+    showToast('Connect at least one backend first', 'error');
+    return;
+  }
+  setupOverlay.classList.remove('open');
 }
 
-function saveUrlIfChanged(mode, input) {
-  const val = input.value.trim();
-  const key = mode === 'WEBUI' ? '_lastWebuiUrl' : '_lastComfyuiUrl';
-  if (val && val !== (saveUrlIfChanged[key] || '')) {
-    saveUrlIfChanged[key] = val;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type: 'set_api_url', mode, url: val}));
+// Backdrop 클릭으로 모달 닫기 (단, setup_required 강제 모드에서는 무시)
+function onSetupBackdrop(event) {
+  if (event.target !== event.currentTarget) return;
+  if (_setupForced) return;
+  closeApiPopup();
+}
+
+function switchSetupTab(tab) {
+  document.querySelectorAll('.setup-nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === tab);
+  });
+  document.querySelectorAll('.setup-tab-pane').forEach(el => {
+    el.classList.toggle('active', el.dataset.pane === tab);
+  });
+}
+
+function toggleSetupReveal(id, btn) {
+  const el = $(id);
+  if (!el) return;
+  const hidden = el.type === 'password';
+  el.type = hidden ? 'text' : 'password';
+  btn.textContent = hidden ? '◈' : '◉';
+}
+
+function setSetupResult(mode, message, messageType) {
+  const el = setupResultEls[mode];
+  if (!el) return;
+  const cls = (messageType === 'info' || messageType === 'warning' || messageType === 'error') ? messageType : '';
+  el.className = 'setup-result ' + cls;
+  el.textContent = message || '';
+}
+
+function setSetupLoading(mode, loading) {
+  const btn = setupVerifyBtns[mode];
+  if (!btn) return;
+  btn.disabled = !!loading;
+  btn.textContent = loading ? 'VERIFYING…' : 'VERIFY & SAVE';
+}
+
+let _setupBlockReason = '';
+function _setupGateCheck() {
+  if (!_setupAllowed) {
+    showToast(_setupBlockReason || 'Setup blocked on this client', 'error');
+    return false;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  return true;
+}
+
+function verifyNai() {
+  if (!_setupGateCheck()) return;
+  const token = $('setupNaiToken').value.trim();
+  if (!token) { setSetupResult('NAI', 'Paste a token first', 'error'); return; }
+  setSetupLoading('NAI', true);
+  setSetupResult('NAI', '', '');
+  ws.send(JSON.stringify({ type: 'verify_nai', token }));
+}
+
+function verifyWebui() {
+  if (!_setupGateCheck()) return;
+  const url = $('setupWebuiUrl').value.trim();
+  if (!url) { setSetupResult('WEBUI', 'Enter a server URL first', 'error'); return; }
+  setSetupLoading('WEBUI', true);
+  setSetupResult('WEBUI', '', '');
+  ws.send(JSON.stringify({ type: 'verify_webui', url }));
+}
+
+function verifyComfyui() {
+  if (!_setupGateCheck()) return;
+  const url = $('setupComfyuiUrl').value.trim();
+  if (!url) { setSetupResult('COMFYUI', 'Enter a server URL first', 'error'); return; }
+  setSetupLoading('COMFYUI', true);
+  setSetupResult('COMFYUI', '', '');
+  ws.send(JSON.stringify({ type: 'verify_comfyui', url }));
+}
+
+function clearApi(mode) {
+  if (!_setupGateCheck()) return;
+  if (!confirm(`Disconnect ${mode}?`)) return;
+  ws.send(JSON.stringify({ type: 'clear_api', mode }));
+  setSetupResult(mode, 'Disconnected', '');
+  if (mode === 'NAI') $('setupNaiToken').value = '';
+  if (mode === 'WEBUI') $('setupWebuiUrl').value = '';
+  if (mode === 'COMFYUI') $('setupComfyuiUrl').value = '';
+}
+
+function onVerifyResult(m) {
+  const mode = m.mode;
+  setSetupLoading(mode, false);
+  setSetupResult(mode, m.message, m.message_type);
+  if (m.success && mode === 'NAI') {
+    // Don't leave the token visible after success
+    $('setupNaiToken').value = '';
+  }
+  // Reflect manual verify in the live dot (user just confirmed reachability)
+  _probeState[mode] = m.success ? 'ok' : 'err';
+  refreshDotsFromProbe();
+}
+
+function onSetupBlocked(m) {
+  // probe_api 는 모달 열리지 않아도 ws.onopen 에서 자동 실행되므로,
+  // 거부됐을 때 토스트를 띄우면 LAN 접속 사용자에게 불필요한 알림이 됨. 조용히 drop.
+  if (m.command === 'probe_api') return;
+  showToast(m.reason || 'Setup blocked on this client', 'error');
+}
+
+function applySetupGate(m) {
+  _setupAllowed = m.setup_allowed !== false;
+  _setupForced = !!m.setup_required;
+  _setupBlockReason = m.setup_block_reason || '';
+  setupDialog.classList.toggle('blocked', !_setupAllowed);
+  if (_setupForced) {
+    setupCloseBtn.classList.add('hidden');
+    setupOverlay.classList.add('open');
+  } else {
+    setupCloseBtn.classList.remove('hidden');
+  }
+  if (setupSubTitle) {
+    if (_setupAllowed) {
+      setupSubTitle.classList.remove('blocked');
+      setupSubTitle.textContent = _setupSubDefault;
+    } else {
+      setupSubTitle.classList.add('blocked');
+      setupSubTitle.textContent = _setupBlockReason || 'Setup disabled — loopback access required.';
     }
   }
+  // API launcher: violet pulse while no backend is connected
+  if (setupLauncherBtn) setupLauncherBtn.classList.toggle('needs-setup', _setupForced);
 }
 
-function testApi(mode) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const input = mode === 'WEBUI' ? apiWebuiUrl : apiComfyuiUrl;
-  const val = input.value.trim();
-  if (val) {
-    ws.send(JSON.stringify({type: 'set_api_url', mode, url: val}));
+// API launcher doubles as the connection indicator. Three states:
+//   online (success border) / offline (red border) / needs-setup (violet pulse)
+function setLauncherConn(on) {
+  if (!setupLauncherBtn) return;
+  setupLauncherBtn.classList.toggle('online', !!on);
+  setupLauncherBtn.classList.toggle('offline', !on);
+}
+
+// ---- NAI Anlas pill (viewer bottom-left) ----
+// Desktop fetches subscription every 5 min + on every NAI generation,
+// then broadcasts `anlas_update`. Web is read-only.
+// NOTE: Opus 등급도 Anlas 를 소모하므로 무제한/∞ 표시 안 함. 단순 숫자만.
+const anlasPill = $('anlasPill');
+const anlasValue = $('anlasValue');
+function onAnlasUpdate(m) {
+  if (!anlasPill || !anlasValue) return;
+  // Shared Mode 에서는 호스트 잔액을 절대 노출 안 함
+  if (sharedMode) { anlasPill.classList.add('hidden'); return; }
+  if (!m.available) {
+    anlasPill.classList.add('hidden');
+    return;
   }
-  const btn = mode === 'WEBUI' ? $('apiWebuiTest') : $('apiComfyuiTest');
-  btn.disabled = true;
-  btn.textContent = '...';
-  btn.classList.add('testing');
-  ws.send(JSON.stringify({type: 'test_api', mode}));
+  anlasPill.classList.remove('hidden');
+  const n = Number(m.anlas || 0);
+  anlasPill.classList.toggle('low', n > 0 && n < 100);
+  anlasValue.textContent = n.toLocaleString();
 }
 
 function updateApiStatus(m) {
-  const naiDot = apiDots.NAI;
-  const naiStatus = $('apiNaiStatus');
-  if (m.nai_configured) {
-    naiDot.className = 'api-status-dot ok';
-    naiStatus.textContent = 'Token configured';
-  } else {
-    naiDot.className = 'api-status-dot fail';
-    naiStatus.textContent = 'Token not set — configure in NAIA API Management tab';
-  }
-  if (m.webui_url) {
-    apiWebuiUrl.value = m.webui_url.replace(/^https?:\/\//, '');
-    saveUrlIfChanged._lastWebuiUrl = apiWebuiUrl.value;
-  }
-  if (m.comfyui_url) {
-    apiComfyuiUrl.value = m.comfyui_url.replace(/^https?:\/\//, '');
-    saveUrlIfChanged._lastComfyuiUrl = apiComfyuiUrl.value;
-  }
-}
+  _apiStatusLast = m;
+  const lv = m.last_verified || {};
 
-function onApiConfigResult(m) {
-  const statusEl = m.mode === 'WEBUI' ? $('apiWebuiStatus') : $('apiComfyuiStatus');
-  if (statusEl) {
-    statusEl.textContent = m.message;
-    statusEl.style.color = m.success ? 'var(--success)' : '#f04040';
-  }
-}
+  // Dots are driven by live `probe_api` (see probeApi/onProbeResult), not by stored state.
+  // Sub-labels reflect what's saved (token preview for NAI, host:port for WebUI/ComfyUI).
+  // Hard-truncate the sub-label to keep the nav column fixed-width even when tunnels give very long URLs.
+  const MAX_SUB = 18;
+  const trunc = (s) => (s && s.length > MAX_SUB) ? (s.slice(0, MAX_SUB) + '…') : s;
+  const subOf = (configured, preview) => {
+    if (!configured) return 'NOT SET';
+    if (!preview) return 'SAVED';
+    return trunc(preview);
+  };
 
-function onApiTestResult(m) {
-  const btn = m.mode === 'WEBUI' ? $('apiWebuiTest') : $('apiComfyuiTest');
-  const dot = apiDots[m.mode];
-  const statusEl = m.mode === 'WEBUI' ? $('apiWebuiStatus') : $('apiComfyuiStatus');
-  btn.disabled = false;
-  btn.textContent = 'Test';
-  btn.classList.remove('testing');
-  if (dot) dot.className = `api-status-dot ${m.success ? 'ok' : 'fail'}`;
-  if (statusEl) {
-    statusEl.textContent = m.message;
-    statusEl.style.color = m.success ? 'var(--success)' : '#f04040';
+  const hasNai   = !!m.nai_configured;
+  const hasWebui = !!(m.webui_url && m.webui_url.length);
+  const hasComfy = !!(m.comfyui_url && m.comfyui_url.length);
+
+  if (setupNavSubs.NAI)     setupNavSubs.NAI.textContent     = subOf(hasNai, m.nai_token_preview || '');
+  if (setupNavSubs.WEBUI)   setupNavSubs.WEBUI.textContent   = subOf(hasWebui, (m.webui_url || '').replace(/^https?:\/\//, ''));
+  if (setupNavSubs.COMFYUI) setupNavSubs.COMFYUI.textContent = subOf(hasComfy, (m.comfyui_url || '').replace(/^https?:\/\//, ''));
+
+  // If some mode went from configured→unconfigured (e.g. after clear_api),
+  // drop the stale probe result so the dot goes dim instead of staying green.
+  if (!hasNai   && _probeState.NAI     !== null) { _probeState.NAI     = null; refreshDotsFromProbe(); }
+  if (!hasWebui && _probeState.WEBUI   !== null) { _probeState.WEBUI   = null; refreshDotsFromProbe(); }
+  if (!hasComfy && _probeState.COMFYUI !== null) { _probeState.COMFYUI = null; refreshDotsFromProbe(); }
+
+  if (setupMetaEls.NAI)     setupMetaEls.NAI.textContent     = lv.nai     || '—';
+  if (setupMetaEls.WEBUI)   setupMetaEls.WEBUI.textContent   = lv.webui   || '—';
+  if (setupMetaEls.COMFYUI) setupMetaEls.COMFYUI.textContent = lv.comfyui || '—';
+
+  // Saved token preview — credentials never leave the server verbatim, just first 7 chars.
+  const naiPrevEl = $('setupMetaNaiPreview');
+  if (naiPrevEl) naiPrevEl.textContent = m.nai_token_preview ? (m.nai_token_preview + '…') : '—';
+  const naiInput = $('setupNaiToken');
+  if (naiInput) {
+    naiInput.placeholder = hasNai
+      ? (m.nai_token_preview ? 'Saved — paste new token to replace' : 'Saved — paste new token to replace')
+      : 'paste NovelAI token';
+  }
+
+  // Populate URL fields only if the user hasn't typed something new
+  const webuiUrlEl = $('setupWebuiUrl');
+  if (webuiUrlEl && document.activeElement !== webuiUrlEl && !webuiUrlEl.value) {
+    webuiUrlEl.value = (m.webui_url || '').replace(/^https?:\/\//, '');
+  }
+  const comfyUrlEl = $('setupComfyuiUrl');
+  if (comfyUrlEl && document.activeElement !== comfyUrlEl && !comfyUrlEl.value) {
+    comfyUrlEl.value = (m.comfyui_url || '').replace(/^https?:\/\//, '');
+  }
+
+  // ComfyUI model/sampling 은 Params 패널이 담당 (데스크탑 동기화). Setup 모달은 연결만 책임.
+
+  applySetupGate(m);
+
+  // 첫 api_status 수신 시 세션당 1회 probe (이전 setTimeout 타이밍 의존 제거)
+  if (!_initialProbeDone && ws && ws.readyState === WebSocket.OPEN) {
+    _initialProbeDone = true;
+    probeApi();
   }
 }
 

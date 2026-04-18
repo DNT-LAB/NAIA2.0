@@ -19,60 +19,90 @@
       <option value="WEBUI">WEBUI</option>
       <option value="COMFYUI">COMFYUI</option>
     </select>
-    <div class="conn-badge">
-      <span id="connText">offline</span>
-      <span class="conn-dot" id="connDot"></span>
-    </div>
+    <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
   </div>
 </header>
 <div class="tag-tooltip" id="tagTooltip"></div>
 <div class="ui-lock" id="uiLock"><div class="ui-lock-spinner"></div></div>
 <div class="toast" id="toast"></div>
 
-<!-- API Config popup -->
-<div class="api-popup-overlay" id="apiPopupOverlay" onclick="if(event.target===this)closeApiPopup()">
-  <div class="api-popup">
-    <div class="api-popup-header">
-      <span class="api-popup-title">API Configuration</span>
-      <button class="history-close" onclick="closeApiPopup()">&times;</button>
-    </div>
-    <div class="api-popup-body">
-      <!-- NAI -->
-      <div class="api-row">
-        <div class="api-row-head">
-          <span class="api-mode-label">NAI</span>
-          <span class="api-status-dot" id="apiDotNai"></span>
-        </div>
-        <span class="api-nai-note" id="apiNaiStatus">Checking...</span>
+<!-- Setup / API Configuration modal -->
+<div class="setup-overlay" id="apiPopupOverlay" onclick="onSetupBackdrop(event)">
+  <div class="setup-dialog" id="setupDialog" role="dialog" aria-labelledby="setupTitle">
+    <header class="setup-header">
+      <div class="setup-header-titles">
+        <h2 class="setup-title" id="setupTitle">API Configuration</h2>
+        <p class="setup-sub">Connect a generation backend — NovelAI / WebUI / ComfyUI</p>
       </div>
-      <!-- WebUI -->
-      <div class="api-row">
-        <div class="api-row-head">
-          <span class="api-mode-label">WebUI</span>
-          <span class="api-status-dot" id="apiDotWebui"></span>
+      <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="Close">&times;</button>
+    </header>
+    <div class="setup-body">
+      <nav class="setup-nav" role="tablist">
+        <button class="setup-nav-item active" data-tab="nai" onclick="switchSetupTab('nai')" role="tab">
+          <span class="setup-nav-num">01</span>
+          <span class="setup-nav-name">NOVELAI</span>
+          <span class="setup-nav-sub" id="setupNavSubNai">NOT SET</span>
+          <span class="setup-nav-dot" id="setupDotNai"></span>
+        </button>
+        <button class="setup-nav-item" data-tab="webui" onclick="switchSetupTab('webui')" role="tab">
+          <span class="setup-nav-num">02</span>
+          <span class="setup-nav-name">WEBUI</span>
+          <span class="setup-nav-sub" id="setupNavSubWebui">NOT SET</span>
+          <span class="setup-nav-dot" id="setupDotWebui"></span>
+        </button>
+        <button class="setup-nav-item" data-tab="comfyui" onclick="switchSetupTab('comfyui')" role="tab">
+          <span class="setup-nav-num">03</span>
+          <span class="setup-nav-name">COMFYUI</span>
+          <span class="setup-nav-sub" id="setupNavSubComfyui">NOT SET</span>
+          <span class="setup-nav-dot" id="setupDotComfyui"></span>
+        </button>
+      </nav>
+      <section class="setup-pane" role="tabpanel">
+        <!-- NAI -->
+        <div class="setup-tab-pane active" data-pane="nai">
+          <div class="setup-meta-line"><span>ENDPOINT</span><span class="setup-meta-val">api.novelai.net</span></div>
+          <div class="setup-meta-line"><span>SAVED TOKEN</span><span class="setup-meta-val" id="setupMetaNaiPreview">—</span></div>
+          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaNai">—</span></div>
+          <label class="setup-field-label" for="setupNaiToken">Persistent Token</label>
+          <div class="setup-input-row">
+            <input class="setup-input setup-input-mono" id="setupNaiToken" type="password"
+                   placeholder="paste NovelAI token" autocomplete="off" spellcheck="false">
+            <button class="setup-btn-eye" onclick="toggleSetupReveal('setupNaiToken', this)" type="button" title="Show / Hide">◉</button>
+          </div>
+          <div class="setup-actions">
+            <button class="setup-btn-primary" id="setupBtnVerifyNai" onclick="verifyNai()">VERIFY &amp; SAVE</button>
+            <button class="setup-btn-ghost" onclick="clearApi('NAI')">DISCONNECT</button>
+          </div>
+          <div class="setup-result" id="setupResultNai"></div>
         </div>
-        <div class="api-url-row">
-          <input class="api-url-input" id="apiWebuiUrl" placeholder="127.0.0.1:7860">
-          <button class="api-test-btn" id="apiWebuiTest" onclick="testApi('WEBUI')">Test</button>
+        <!-- WEBUI -->
+        <div class="setup-tab-pane" data-pane="webui">
+          <div class="setup-meta-line"><span>COMPAT</span><span class="setup-meta-val">AUTOMATIC1111 / sd-webui</span></div>
+          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaWebui">—</span></div>
+          <label class="setup-field-label" for="setupWebuiUrl">Server URL</label>
+          <input class="setup-input setup-input-mono" id="setupWebuiUrl" type="text"
+                 placeholder="127.0.0.1:7860" autocomplete="off" spellcheck="false">
+          <div class="setup-actions">
+            <button class="setup-btn-primary" id="setupBtnVerifyWebui" onclick="verifyWebui()">VERIFY &amp; SAVE</button>
+            <button class="setup-btn-ghost" onclick="clearApi('WEBUI')">DISCONNECT</button>
+          </div>
+          <div class="setup-result" id="setupResultWebui"></div>
         </div>
-        <span class="api-status-text" id="apiWebuiStatus"></span>
-      </div>
-      <!-- ComfyUI -->
-      <div class="api-row">
-        <div class="api-row-head">
-          <span class="api-mode-label">ComfyUI</span>
-          <span class="api-status-dot" id="apiDotComfyui"></span>
+        <!-- COMFYUI -->
+        <div class="setup-tab-pane" data-pane="comfyui">
+          <div class="setup-meta-line"><span>PROBE</span><span class="setup-meta-val">/system_stats · /object_info</span></div>
+          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaComfyui">—</span></div>
+          <label class="setup-field-label" for="setupComfyuiUrl">Server URL</label>
+          <input class="setup-input setup-input-mono" id="setupComfyuiUrl" type="text"
+                 placeholder="127.0.0.1:8188" autocomplete="off" spellcheck="false">
+          <div class="setup-actions">
+            <button class="setup-btn-primary" id="setupBtnVerifyComfyui" onclick="verifyComfyui()">VERIFY &amp; SAVE</button>
+            <button class="setup-btn-ghost" onclick="clearApi('COMFYUI')">DISCONNECT</button>
+          </div>
+          <div class="setup-result" id="setupResultComfyui"></div>
+          <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
         </div>
-        <div class="api-url-row">
-          <input class="api-url-input" id="apiComfyuiUrl" placeholder="127.0.0.1:8188">
-          <button class="api-test-btn" id="apiComfyuiTest" onclick="testApi('COMFYUI')">Test</button>
-        </div>
-        <span class="api-status-text" id="apiComfyuiStatus"></span>
-      </div>
-      <div class="api-footer-note">
-        Local/LAN addresses only (127.0.0.1, 192.168.x.x).<br>
-        For tunnel/remote URLs, use NAIA's API Management tab.
-      </div>
+      </section>
     </div>
   </div>
 </div>
@@ -297,6 +327,8 @@
         <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Click to toggle auto-save"><span class="stats-dot" id="statsSaveDot"></span>Save</span>
         <span class="stats-pill" id="statsGenCount" title="Total generations this session"></span>
       </div>
+      <!-- NAI Anlas (desktop polls every 5 min + on each generation) -->
+      <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
       <div class="viewer-nav-actions">
         <button class="viewer-hist-btn nav" onclick="navViewer(-1)">&#9664;</button>
         <button class="viewer-hist-btn" onclick="hideViewerNav()">Close</button>

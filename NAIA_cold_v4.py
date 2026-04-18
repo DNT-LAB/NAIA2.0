@@ -858,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 170b"
+        self.base_title = "NAIA v2.0.0 Dev 171"
         self.setWindowTitle(self.base_title + " - 260418")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -2935,7 +2935,6 @@ class ModernMainWindow(QMainWindow):
                 is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
                 is_studio_request = generation_params.get("studio_request", False)
                 is_character_asset_request = generation_params.get("character_asset_request", False)
-                is_variations_capture_request = generation_params.get("variations_capture_request", False)
                 studio_frame_index = generation_params.get("studio_frame_index", 0)
                 
                 self.image_window.update_image(image_object)
@@ -2987,11 +2986,6 @@ class ModernMainWindow(QMainWindow):
                     print("🧷 Character Asset 요청 감지 - 전용 이벤트 발행")
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_character_asset", result)
-
-                if is_variations_capture_request:
-                    print("🧵 Variations Capture 요청 감지 - 전용 이벤트 발행")
-                    if hasattr(self, 'app_context') and self.app_context:
-                        self.app_context.publish("generation_completed_for_variations", result)
 
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:

@@ -423,6 +423,10 @@ class SettingsWidget(QWidget):
                 "session_id": "",
                 "shared_server_mode": checked,
             })
+            # Shared OFF 전환 + NAI 모드면 Anlas 즉시 재송신 (pill 이 다시 뜨도록)
+            if not checked and hasattr(self, 'app_context') and self.app_context \
+                    and self.app_context.get_api_mode() == "NAI":
+                _bridge_instance._refresh_anlas_async()
 
     def _on_web_session_toggled(self, checked: bool):
         """Web Session 활성화/비활성화"""
@@ -463,6 +467,9 @@ class SettingsWidget(QWidget):
 
     def _on_cloudflared_toggled(self, checked: bool):
         """Cloudflared 터널 연결/해제"""
+        # Remote bridge 의 Setup 게이트가 참조하는 명시 플래그 (위젯 탐색 대체).
+        if self.app_context:
+            self.app_context.cloudflared_active = bool(checked)
         if checked:
             self._start_cloudflared()
         else:

@@ -548,14 +548,60 @@ class SettingsWidget(QWidget):
                     and self.app_context.get_api_mode() == "NAI":
                 _bridge_instance._refresh_anlas_async()
 
+    def _get_image_window_widget(self):
+        """RightView 내부의 실제 ImageWindow 위젯 반환."""
+        try:
+            mw = self.app_context.main_window
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            if tab_controller and hasattr(tab_controller, "get_tab_instance"):
+                image_viewer_module = tab_controller.get_tab_instance("ImageViewerModule")
+                if image_viewer_module:
+                    widget = getattr(image_viewer_module, "image_window_widget", None)
+                    if widget:
+                        return widget
+        except Exception:
+            pass
+        return None
+
+    def _force_web_session_autosave(self):
+        """Web Session 시작 전 Auto Save를 강제로 켠다."""
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            return
+
+        auto_save_checkbox = getattr(image_window, "auto_save_checkbox", None)
+        if auto_save_checkbox and not auto_save_checkbox.isChecked():
+            auto_save_checkbox.setChecked(True)
+            print("🌐 Web Session: Auto Save 강제 활성화")
+
+    def _force_web_session_hide_main_window(self):
+        """Web Session 시작 시 메인 데스크탑 창을 기본적으로 숨긴다."""
+        try:
+            main_window = getattr(self.app_context, "main_window", None)
+            if not main_window:
+                return
+
+            if hasattr(main_window, "set_web_session_window_visible"):
+                main_window.set_web_session_window_visible(False)
+            else:
+                main_window.hide()
+                if hasattr(main_window, "_publish_desktop_window_visibility"):
+                    main_window._publish_desktop_window_visibility()
+            print("🌐 Web Session: 데스크탑 창 기본 Hide 적용")
+        except Exception as e:
+            print(f"🌐 Web Session: 데스크탑 창 Hide 적용 실패 — {e}")
+
     def _on_web_session_toggled(self, checked: bool):
         """Web Session 활성화/비활성화"""
         if checked:
             port = self._get_remote_port()
             try:
                 from core.remote_api_server import start_remote_server
+                self._force_web_session_autosave()
                 self.web_session_checkbox.setEnabled(False)
                 start_remote_server(self.app_context, port=port)
+                self._force_web_session_hide_main_window()
                 self.web_session_checkbox.setEnabled(True)
                 self.remote_port_edit.setEnabled(False)
                 url = f"http://localhost:{port}"

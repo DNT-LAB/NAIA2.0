@@ -115,7 +115,10 @@
 <div class="module-popup" id="modulePopup">
   <div class="module-popup-header">
     <span class="module-popup-title" id="modulePopupTitle"></span>
-    <button class="history-close" onclick="closeModule()">&times;</button>
+    <div class="module-popup-actions">
+      <button class="module-popup-action-btn" id="modulePopupAction" style="display:none"></button>
+      <button class="history-close" onclick="closeModule()">&times;</button>
+    </div>
   </div>
   <div class="module-popup-body" id="modulePopupBody"></div>
 </div>
@@ -127,6 +130,47 @@
     <button class="history-close" onclick="closeRefine()">&times;</button>
   </div>
   <div class="refine-body"></div>
+</div>
+
+<!-- Prompt Engineering floating panels -->
+<div class="pe-popup" id="pePresetAddPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Add Preset</span>
+    <button class="history-close" onclick="closePePresetAddPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="pePresetManagePanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Manage Preset</span>
+    <button class="history-close" onclick="closePePresetManagePanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peE621Panel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">e621 Auto-Boost Settings</span>
+    <button class="history-close" onclick="closePeE621Panel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peDanbooruPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Danbooru Auto-Weight Settings</span>
+    <button class="history-close" onclick="closePeDanbooruPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peDebugPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Debug Snapshot</span>
+    <button class="history-close" onclick="closePeDebugPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
 </div>
 
 <!-- Tag Filter floating panel -->
@@ -328,7 +372,7 @@
       <img id="preview" alt="">
       <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
       <div class="stats-island" id="statsIsland">
-        <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Click to toggle auto-save"><span class="stats-dot" id="statsSaveDot"></span>Save</span>
+        <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Open auto-save settings"><span class="stats-dot" id="statsSaveDot"></span>Auto Save</span>
         <span class="stats-pill" id="statsGenCount" title="Total generations this session"></span>
       </div>
       <!-- NAI Anlas (desktop polls every 5 min + on each generation) -->
@@ -363,7 +407,10 @@
           <input type="checkbox" id="promptFloatCbMobile" onchange="togglePromptFloat(this.checked)">
           <span>Prompt</span>
         </label>
-        <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+        <div class="viewer-panel-actions">
+          <button class="viewer-download-btn viewer-download-all-btn" onclick="downloadAllImages()">Download All</button>
+          <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+        </div>
       </div>
     </div>
   </div>
@@ -373,13 +420,11 @@
 
 <!-- Viewer toggle tab -->
 <button class="history-tab" id="viewerTab" onclick="toggleViewerPanel()">
-Viewer
+  <span class="history-tab-label">Viewer</span>
 </button>
 
 <!-- Viewer lightbox / popup overlay -->
-<div class="viewer-lightbox" id="viewerLightbox" onclick="onLightboxClick(event)">
-  <img id="viewerLightboxImg" alt="">
-</div>
+<div class="viewer-lightbox" id="viewerLightbox" onclick="onLightboxClick(event)"></div>
 
 <script src="app.js"></script>
 </body>

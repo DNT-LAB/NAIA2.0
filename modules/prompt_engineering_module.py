@@ -10,6 +10,7 @@ from ui.modern_menu import setModernStyle
 from typing import Dict, Any, Optional
 from core.wildcard_processor import split_tags_smart
 from core.tag_filter_helpers import _is_color_exception, apply_tag_filters
+import copy
 import os, json, re
 from pathlib import Path
 
@@ -197,6 +198,14 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self._danbooru_weight_settings = self._load_danbooru_weight_settings()
         self._danbooru_tag_counts = None  # lazy-load cache
         self._danbooru_rating_totals = [1, 1, 1, 1]  # [g, s, q, e] — _get_danbooru_tag_counts()에서 설정
+        self._last_debug_payload = {
+            "source_info": {},
+            "filter_log": [],
+            "original_count": 0,
+            "remaining_count": 0,
+            "e621_info": None,
+            "implication_info": [],
+        }
 
         # 기존 설정 파일 경로 유지
         self.settings_file = os.path.join('save', 'PromptEngineeringModule.json')
@@ -1139,6 +1148,16 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
     def _update_debug_window(self, metadata: dict):
         """디버그 윈도우가 열려있으면 새 데이터를 추가한다."""
+        payload = {
+            "source_info": metadata.get('debug_source_info', {}),
+            "filter_log": metadata.get('filter_log', []),
+            "original_count": metadata.get('original_tag_count', 0),
+            "remaining_count": metadata.get('remaining_tag_count', 0),
+            "e621_info": metadata.get('e621_debug_info'),
+            "implication_info": metadata.get('implication_compressed_tags') or [],
+        }
+        self._last_debug_payload = copy.deepcopy(payload)
+
         try:
             if self._debug_window is None or not self._debug_window.isVisible():
                 return
@@ -1146,13 +1165,233 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self._debug_window = None
             return
 
-        filter_log = metadata.get('filter_log', [])
-        source_info = metadata.get('debug_source_info', {})
-        original = metadata.get('original_tag_count', 0)
-        remaining = metadata.get('remaining_tag_count', 0)
-        e621_info = metadata.get('e621_debug_info')
-        impl_info = metadata.get('implication_compressed_tags')
-        self._debug_window.add_entry(source_info, filter_log, original, remaining, e621_info, impl_info)
+        self._debug_window.add_entry(
+            payload["source_info"],
+            payload["filter_log"],
+            payload["original_count"],
+            payload["remaining_count"],
+            payload["e621_info"],
+            payload["implication_info"],
+        )
+
+    def get_debug_snapshot(self) -> Dict[str, Any]:
+        """웹/원격 UI에서 사용할 최근 디버그 스냅샷 반환."""
+        return copy.deepcopy(self._last_debug_payload)
+
+    @staticmethod
+    def _json_safe_debug_value(value):
+        """NumPy/Pandas 스칼라를 포함한 디버그 값을 JSON-safe primitive로 변환."""
+        if value is None or value != value:
+            return ""
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        if hasattr(value, "item"):
+            try:
+                return PromptEngineeringModule._json_safe_debug_value(value.item())
+            except Exception:
+                pass
+        return str(value)
+
+    @staticmethod
+    def sanitize_preset_name(preset_name: str) -> str:
+        """프리셋 파일명으로 안전한 이름만 남긴다."""
+        if not isinstance(preset_name, str):
+            return ""
+
+        sanitized = preset_name.strip()
+        for char in '<>:"/\\|?*':
+            sanitized = sanitized.replace(char, '')
+        return sanitized.strip()
+
+    def save_preset_noninteractive(self, preset_name: str) -> tuple[bool, str]:
+        """웹/원격용 비대화형 프리셋 저장."""
+        sanitized = self.sanitize_preset_name(preset_name)
+        if not sanitized:
+            return False, "프리셋 이름이 비어 있습니다."
+
+        self.save_current_preset(sanitized)
+        self.load_preset_list()
+
+        if self.preset_combo:
+            self.preset_combo.setCurrentText(sanitized)
+        else:
+            self.current_preset = sanitized
+            self.last_preset = sanitized
+            self.save_last_used_preset_info()
+
+        return True, sanitized
+
+    def delete_preset_noninteractive(self, preset_name: str) -> tuple[bool, str]:
+        """웹/원격용 비대화형 프리셋 삭제."""
+        sanitized = self.sanitize_preset_name(preset_name)
+        if not sanitized:
+            return False, "삭제할 프리셋 이름이 없습니다."
+        if sanitized == "default":
+            return False, "기본 프리셋은 삭제할 수 없습니다."
+        if sanitized == "*randomized":
+            return False, "랜덤 프리셋 모드는 삭제할 수 없습니다."
+
+        preset_file = self.get_preset_dir() / f"{sanitized}.json"
+        if not preset_file.exists():
+            return False, f"프리셋을 찾을 수 없습니다: {sanitized}"
+
+        preset_file.unlink()
+
+        if self.current_preset == sanitized:
+            fallback = "default" if "default" in self.preset_list else None
+            self.current_preset = "(프리셋 없음)"
+            self.last_preset = "(프리셋 없음)"
+            self.is_randomized_mode = False
+            self._hide_randomized_ui()
+            self.load_preset_list()
+
+            if fallback and self.preset_combo:
+                self.preset_combo.blockSignals(True)
+                self.preset_combo.setCurrentText(fallback)
+                self.preset_combo.blockSignals(False)
+                self.load_preset(fallback)
+                self.current_preset = fallback
+                self.last_preset = fallback
+                self.save_last_used_preset_info()
+            return True, sanitized
+
+        self.load_preset_list()
+        return True, sanitized
+
+    def _get_unique_preset_name(self, base_name: str) -> str:
+        """`recommend`, `recommend_1` 형식으로 사용 가능한 프리셋 이름 반환."""
+        sanitized = self.sanitize_preset_name(base_name)
+        if not sanitized:
+            sanitized = "preset"
+
+        preset_dir = self.get_preset_dir()
+        candidate = sanitized
+        suffix = 1
+        while (preset_dir / f"{candidate}.json").exists():
+            candidate = f"{sanitized}_{suffix}"
+            suffix += 1
+        return candidate
+
+    def _write_preset_data(self, preset_name: str, preset_data: Dict[str, Any]):
+        """지정한 프리셋 데이터를 파일로 저장."""
+        preset_dir = self.get_preset_dir()
+        preset_file = preset_dir / f"{preset_name}.json"
+
+        with open(preset_file, 'w', encoding='utf-8') as f:
+            json.dump(preset_data, f, ensure_ascii=False, indent=2)
+
+    def create_and_apply_recommended_preset(self) -> tuple[bool, str]:
+        """웹 GUI용 추천 프리셋 생성 후 즉시 적용."""
+        current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        if current_mode != "NAI":
+            return False, "추천 설정 적용은 현재 NAI 모드에서만 지원됩니다."
+
+        preset_name = self._get_unique_preset_name("recommend")
+        current_preset = self.current_preset
+        if current_preset and current_preset not in ("", "(프리셋 없음)", "*randomized"):
+            self.save_current_preset(current_preset)
+
+        module_settings = self.collect_current_settings()
+        module_settings.update({
+            "pre_prompt": (
+                "1.2::artist:kim eb ::, 0.7::artist:torino aqua ::, 0.6::artist:mikozin ::, "
+                "0.4::tianliang duohe fangdongye, ixy ::, 0.5::kedama milk ::, 0.7::artist:quasarcake ::, "
+                "0.7::artist:channel (caststation) ::, 0.6::artist:tab head ::, 0.5::artist:qiandaiyiyu ::, "
+                "0.5::artist:mika pikazo ::, 0.3::artist:wanke ::, 0.4::artist:freng ::, "
+                "0.25::artist:cutesexyrobutts ::"
+            ),
+            "post_prompt": (
+                "year 2025, year 2024, 1.2::3d ::, 1.2::blender (medium) ::, detailed eyes, silky skin, "
+                "detailed skin texture, masterpiece, best quality, very aesthetic, highres, best illustration, "
+                "novel illustration, -1.2::simple illustration ::, -1::artist collaboration ::, "
+                "-1::multiple views ::, -1::duplicate ::, -0.8::censored ::"
+            ),
+            "auto_hide_prompt": (
+                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, bad id, _logo, "
+                "bad twitter id, comic, __background__, ~blurry background, ~sky background, character doll, "
+                "stuffed animal, stuffed toy, speech bubble, cyclops, pov, 3d, glasses, mole, text focus, "
+                "thought bubble, watermark, web address, body writing, fake screenshot, facing away, |_|, "
+                "__piercing__, tattoo, _tattoo, _text, sound effects, greyscale, multiple views, __pubic hair__, "
+                "peeing, rabbit, __censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, "
+                "child on child, covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, "
+                "multiple boys, __measuring__, multiple views, big belly, curvy, doll joints, looking at viewer, "
+                "timestamp, battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, "
+                "on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, signature, "
+                "alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, armpit hair, "
+                "health bar, snapchat, facial mark, emoji, command spell, dark areolae, __piercing__, __bed__, "
+                "__pillow__, __sheet__, body markings, obese, __long tongue__, toddlercon, __name__, handprint, "
+                "__pasties__, mini person, __butt plug__, __eyepatch__, oppai loli, sex toy, loli, chibi, "
+                "chibi inset, makeup, mascara, large breasts, runny makeup, third eye, anal hair, __halo__, "
+                "__(style)__, __(cosplay)__, __freckles__, braces, gag, __joint__"
+            ),
+            "preprocessing_options": {
+                "remove_author": True,
+                "remove_work_title": True,
+                "remove_character_name": True,
+                "remove_character_features": True,
+                "remove_clothes": True,
+                "remove_color": False,
+                "remove_location_and_background_color": True,
+                "remove_expression": False,
+                "remove_pose_action": False,
+                "remove_meta_tags": True,
+                "remove_object_tags": True,
+                "remove_noise_tags": True,
+                "e621_auto_boost": False,
+                "danbooru_auto_weight": False,
+                "tag_implication_compression": True,
+            },
+        })
+
+        main_settings = self.collect_main_ui_settings()
+        main_settings.update({
+            "model": "NAID4.5F",
+            "sampler": "k_euler_ancestral",
+            "scheduler": "karras",
+            "resolution": "1024 x 1024",
+            "steps": 28,
+            "cfg_scale": 5.8,
+            "cfg_rescale": 0.28,
+            "negative": (
+                "text, logo, signature, watermark, too many watermarks, chili inset, "
+                "0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, "
+                "chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, missing finger, "
+                "extra digits, mutation, extra arms, extra legs, long neck, bad feet, very displeasing, "
+                "undetailed eyes, multiple views, negative space, blank page, variant set, large variant set, "
+                "4koma, 2koma, oekaki, halftone, screentone, artistic error, film grain, scan artifacts, "
+                "jpeg artifacts, chromatic aberration, dithering, disorganized colors, lowres, worst quality, "
+                "bad quality, cheesy, sloppiness, unfinished, Incomplete, ai-generated"
+            ),
+            "seed": "8097879955",
+            "seed_fixed": False,
+            "random_resolution": True,
+            "auto_fit_resolution": True,
+            "SMEA": False,
+            "DYN": False,
+            "VAR+": True,
+            "DECRISP": False,
+        })
+
+        preset_data = {
+            "module_settings": module_settings,
+            "main_settings": main_settings,
+            "api_mode": current_mode,
+        }
+        self._write_preset_data(preset_name, preset_data)
+        self.load_preset_list()
+
+        if self.preset_combo:
+            self.preset_combo.blockSignals(True)
+            self.preset_combo.setCurrentText(preset_name)
+            self.preset_combo.blockSignals(False)
+
+        self.is_randomized_mode = False
+        self._hide_randomized_ui()
+        self.load_preset(preset_name)
+        self.last_preset = self.current_preset
+        self.current_preset = preset_name
+        self.save_last_used_preset_info()
+        return True, preset_name
 
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
         return {
@@ -1275,10 +1514,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             context.metadata['original_tag_count'] = original_count
             context.metadata['remaining_tag_count'] = len(main_tags)
         context.metadata['debug_source_info'] = {
-            'character': source_row.get('character', ''),
-            'copyright': source_row.get('copyright', ''),
-            'artist': source_row.get('artist', ''),
-            'id': source_row.get('id', ''),
+            'character': self._json_safe_debug_value(source_row.get('character', '')),
+            'copyright': self._json_safe_debug_value(source_row.get('copyright', '')),
+            'artist': self._json_safe_debug_value(source_row.get('artist', '')),
+            'id': self._json_safe_debug_value(source_row.get('id', '')),
         }
         # ★ Tag implication compression — Auto-Weight 이전에 처리
         if not skip_preprocessing and checkbox_options.get("tag_implication_compression"):
@@ -2215,6 +2454,30 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             
             if hasattr(main_window, 'negative_prompt_textedit'):
                 settings['negative'] = main_window.negative_prompt_textedit.toPlainText()
+
+            if hasattr(main_window, 'model_combo'):
+                settings['model'] = main_window.model_combo.currentText()
+
+            if hasattr(main_window, 'scheduler_combo'):
+                settings['scheduler'] = main_window.scheduler_combo.currentText()
+
+            if hasattr(main_window, 'resolution_combo'):
+                settings['resolution'] = main_window.resolution_combo.currentText()
+
+            if hasattr(main_window, 'cfg_rescale_slider'):
+                settings['cfg_rescale'] = main_window.cfg_rescale_slider.value() / 100.0
+
+            if hasattr(main_window, 'seed_input'):
+                settings['seed'] = main_window.seed_input.text()
+
+            if hasattr(main_window, 'seed_fix_checkbox'):
+                settings['seed_fixed'] = main_window.seed_fix_checkbox.isChecked()
+
+            if hasattr(main_window, 'random_resolution_checkbox'):
+                settings['random_resolution'] = main_window.random_resolution_checkbox.isChecked()
+
+            if hasattr(main_window, 'auto_fit_resolution_checkbox'):
+                settings['auto_fit_resolution'] = main_window.auto_fit_resolution_checkbox.isChecked()
             
             # 생성 파라미터 — 위젯에서 직접 읽기 (get_main_parameters()는 시드 부작용 있음)
             mode = self.app_context.get_api_mode()
@@ -2353,6 +2616,44 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     print(f"      네거티브 프롬프트 적용 (길이: {len(settings['negative'])})")
                 else:
                     print(f"      ⚠️ negative_prompt_textedit 없음")
+
+            if 'model' in settings and hasattr(main_window, 'model_combo'):
+                index = main_window.model_combo.findText(settings['model'])
+                if index >= 0:
+                    main_window.model_combo.setCurrentIndex(index)
+                    print(f"      model: {settings['model']}")
+
+            if 'scheduler' in settings and hasattr(main_window, 'scheduler_combo'):
+                index = main_window.scheduler_combo.findText(settings['scheduler'])
+                if index >= 0:
+                    main_window.scheduler_combo.setCurrentIndex(index)
+                    print(f"      scheduler: {settings['scheduler']}")
+
+            if 'resolution' in settings and hasattr(main_window, 'resolution_combo'):
+                index = main_window.resolution_combo.findText(settings['resolution'])
+                if index >= 0:
+                    main_window.resolution_combo.setCurrentIndex(index)
+                    print(f"      resolution: {settings['resolution']}")
+
+            if 'cfg_rescale' in settings and hasattr(main_window, 'cfg_rescale_slider'):
+                main_window.cfg_rescale_slider.setValue(int(float(settings['cfg_rescale']) * 100))
+                print(f"      cfg_rescale: {settings['cfg_rescale']}")
+
+            if 'seed' in settings and hasattr(main_window, 'seed_input'):
+                main_window.seed_input.setText(str(settings['seed']))
+                print(f"      seed: {settings['seed']}")
+
+            if 'seed_fixed' in settings and hasattr(main_window, 'seed_fix_checkbox'):
+                main_window.seed_fix_checkbox.setChecked(bool(settings['seed_fixed']))
+                print(f"      seed_fixed: {settings['seed_fixed']}")
+
+            if 'random_resolution' in settings and hasattr(main_window, 'random_resolution_checkbox'):
+                main_window.random_resolution_checkbox.setChecked(bool(settings['random_resolution']))
+                print(f"      random_resolution: {settings['random_resolution']}")
+
+            if 'auto_fit_resolution' in settings and hasattr(main_window, 'auto_fit_resolution_checkbox'):
+                main_window.auto_fit_resolution_checkbox.setChecked(bool(settings['auto_fit_resolution']))
+                print(f"      auto_fit_resolution: {settings['auto_fit_resolution']}")
             
             mode = self.app_context.get_api_mode()
             

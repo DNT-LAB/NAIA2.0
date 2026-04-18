@@ -21,6 +21,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, JSONResponse
 
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
+from PyQt6.QtWidgets import QFileDialog
 
 from core import api_verification
 
@@ -133,6 +134,7 @@ class RemoteBridge(QObject):
     request_history_action = pyqtSignal(object, str)   # (ws, action_json)
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
+    request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
     OPTION_KEYS = {
@@ -290,6 +292,23 @@ class RemoteBridge(QObject):
         host = self._ws_client_host(ws)
         if host not in ("127.0.0.1", "::1"):
             return False, "데스크탑 창 제어는 로컬(127.0.0.1) 접속에서만 가능합니다."
+        return True, ""
+
+    def _save_directory_gate(self, ws) -> tuple[bool, str]:
+        """저장 디렉토리 변경은 로컬 호스트 단독 세션에서만 허용."""
+        host = self._ws_client_host(ws)
+        if host not in ("127.0.0.1", "::1"):
+            return False, "저장 디렉토리 변경은 로컬(127.0.0.1) 접속에서만 가능합니다."
+        if self.shared_server_mode:
+            return False, "Shared Server Mode 활성 중 — 저장 디렉토리 변경이 차단됩니다."
+        if self._is_cloudflared_active():
+            return False, "Cloudflared 터널 활성 중 — 저장 디렉토리 변경이 차단됩니다."
+        return True, ""
+
+    def _auto_save_settings_gate(self, ws) -> tuple[bool, str]:
+        """호스트 전역 auto-save 정책은 Shared Mode에서 원격 변경 차단."""
+        if self.shared_server_mode:
+            return False, "Shared Server Mode 활성 중 — Auto Save 정책 변경이 차단됩니다."
         return True, ""
 
     def _is_setup_required(self) -> bool:
@@ -688,15 +707,12 @@ class RemoteBridge(QObject):
         try:
             # auto_save: image_window 체크박스 (OPTION_KEYS 외)
             if key == "auto_save":
-                mw = self.app_context.main_window
-                if hasattr(mw, 'image_window') and mw.image_window:
-                    iw = mw.image_window
-                    if hasattr(iw, 'auto_save_checkbox') and iw.auto_save_checkbox:
-                        if iw.auto_save_checkbox.isChecked() != checked:
-                            self._syncing_option = True
-                            iw.auto_save_checkbox.setChecked(checked)
-                            self._syncing_option = False
-                            print(f"🌐 Remote: 자동 저장 → {checked}")
+                auto_save_checkbox = self._get_auto_save_checkbox()
+                if auto_save_checkbox and auto_save_checkbox.isChecked() != checked:
+                    self._syncing_option = True
+                    auto_save_checkbox.setChecked(checked)
+                    self._syncing_option = False
+                    print(f"🌐 Remote: 자동 저장 → {checked}")
                 return
 
             label = self.OPTION_KEYS.get(key)
@@ -950,10 +966,9 @@ class RemoteBridge(QObject):
                 if label in mw.generation_checkboxes
             }
             # auto_save: image_window의 체크박스
-            if hasattr(mw, 'image_window') and mw.image_window:
-                iw = mw.image_window
-                if hasattr(iw, 'auto_save_checkbox') and iw.auto_save_checkbox:
-                    opts["auto_save"] = iw.auto_save_checkbox.isChecked()
+            auto_save_checkbox = self._get_auto_save_checkbox()
+            if auto_save_checkbox:
+                opts["auto_save"] = auto_save_checkbox.isChecked()
             return opts
         except Exception:
             return {}
@@ -1029,9 +1044,24 @@ class RemoteBridge(QObject):
     # --- Viewer: 디스크 이미지 스캔/썸네일 ---
 
     def _get_viewer_save_dir(self) -> 'Path':
-        """현재 세션 저장 폴더 반환"""
+        """Viewer 기준 저장 루트 반환.
+
+        기본값은 현재 세션 저장 디렉토리다. timestamp 폴더를 사용하는 기본 동작에서는
+        이전 세션 이미지가 섞이면 안 되므로 `get_save_directory()`를 우선 사용한다.
+        타임스탬프 폴더를 쓰지 않는 구성에서만 base path를 그대로 사용한다.
+        """
         from pathlib import Path
-        return Path(self.app_context.image_crud_controller.get_save_directory())
+        image_crud = self.app_context.image_crud_controller
+        current_save_dir = Path(image_crud.get_save_directory())
+
+        if getattr(image_crud, "_use_timestamp_folder", True):
+            return current_save_dir
+
+        base_path = getattr(image_crud, "_base_save_path", None)
+        if base_path is not None:
+            return Path(base_path)
+
+        return current_save_dir
 
     def _scan_save_folder(self) -> list:
         """저장 폴더 재귀 스캔 → mtime 내림차순 리스트. 2초 캐시."""
@@ -1153,13 +1183,12 @@ class RemoteBridge(QObject):
         self._invalidate_viewer_cache()
         if not self._has_clients():
             return
-        from pathlib import Path
         filepath = data.get("filepath", "")
-        save_dir = data.get("save_dir", "")
-        if filepath and save_dir:
+        if filepath:
             import os
             from datetime import datetime
-            rel = os.path.relpath(filepath, save_dir).replace('\\', '/')
+            viewer_root = str(self._get_viewer_save_dir())
+            rel = os.path.relpath(filepath, viewer_root).replace('\\', '/')
             filename = os.path.basename(filepath)
             try:
                 mtime = os.path.getmtime(filepath)
@@ -1348,6 +1377,57 @@ class RemoteBridge(QObject):
                 return module
         return None
 
+    def _get_image_viewer_module(self):
+        """RightView 내부의 ImageViewerModule 인스턴스를 반환."""
+        try:
+            mw = self.app_context.main_window
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            if tab_controller and hasattr(tab_controller, "get_tab_instance"):
+                return tab_controller.get_tab_instance("ImageViewerModule")
+        except Exception:
+            pass
+        return None
+
+    def _get_image_window_widget(self):
+        """실제 ImageWindow 위젯을 반환."""
+        image_viewer_module = self._get_image_viewer_module()
+        if image_viewer_module:
+            widget = getattr(image_viewer_module, "image_window_widget", None)
+            if widget:
+                return widget
+
+        # 레거시 폴백: main_window.image_window가 직접 ImageWindow인 구조도 허용
+        try:
+            mw = self.app_context.main_window
+            legacy_widget = getattr(mw, "image_window", None)
+            if legacy_widget and hasattr(legacy_widget, "auto_save_checkbox"):
+                return legacy_widget
+        except Exception:
+            pass
+        return None
+
+    def _get_auto_save_checkbox(self):
+        image_window = self._get_image_window_widget()
+        if image_window:
+            return getattr(image_window, "auto_save_checkbox", None)
+        return None
+
+    def _get_save_as_webp_checkbox(self):
+        image_window = self._get_image_window_widget()
+        if image_window:
+            return getattr(image_window, "save_as_webp_checkbox", None)
+        return None
+
+    def _get_history_limit_widgets(self):
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            return None, None, None
+        enabled = getattr(image_window, "history_limit_enabled", None)
+        max_length = getattr(image_window, "max_history_length", None)
+        action_group = getattr(image_window, "memory_action_group", None)
+        return enabled, max_length, action_group
+
     def _do_get_module(self, ws, module_id: str):
         """모듈 상태 읽기 → 요청 클라이언트에 unicast"""
         if module_id == "__search__":
@@ -1366,6 +1446,8 @@ class RemoteBridge(QObject):
         """모듈 상태 딕셔너리 반환"""
         if module_id == "prompt_engineering":
             return self._read_prompt_engineering(ws=ws)
+        elif module_id == "auto_save":
+            return self._read_auto_save_settings()
         elif module_id == "automation":
             return self._read_automation()
         elif module_id == "character":
@@ -1376,11 +1458,132 @@ class RemoteBridge(QObject):
             return self._read_character_reference()
         elif module_id == "vibe_transfer":
             return self._read_vibe_transfer()
+        elif module_id == "save_directory":
+            return self._read_save_directory(ws=ws)
         elif module_id == "wildcard":
             return self._read_wildcard()
         elif module_id == "chunk":
             return self._read_chunk()
         return {}
+
+    def _read_save_directory(self, ws=None) -> dict:
+        try:
+            image_crud = getattr(self.app_context, "image_crud_controller", None)
+            if not image_crud:
+                return {}
+
+            base_path = getattr(image_crud, "_base_save_path", Path("output"))
+            use_timestamp = bool(image_crud.get_use_timestamp_folder())
+            current_save_dir = image_crud.get_save_directory()
+            payload = {
+                "type": "module_state",
+                "module_id": "save_directory",
+                "base_path": str(base_path),
+                "current_save_directory": str(current_save_dir),
+                "session_timestamp": getattr(self.app_context, "session_timestamp", ""),
+                "use_timestamp_folder": use_timestamp,
+                "save_counter": int(getattr(image_crud, "_save_counter", 1)),
+                "filename_format": image_crud.get_filename_format(),
+                "filename_format_options": [
+                    {"value": "number_only", "label": "번호만 (00001.png)"},
+                    {"value": "time_number", "label": "시간_번호 (143052_00001.png)"},
+                    {"value": "datetime", "label": "날짜_시간 (20250108_143052.png)"},
+                    {"value": "prompt", "label": "프롬프트 (prompt.png)"},
+                    {"value": "wildcard", "label": "와일드카드 (wildcard.png)"},
+                ],
+                "classification_method": image_crud.get_classification_method(),
+                "classification_method_options": [
+                    {"value": "none", "label": "분류 없음"},
+                    {"value": "prompt_recognition", "label": "프롬프트 인식"},
+                ],
+                "classification_rules": image_crud.get_classification_rules(),
+            }
+            if ws is not None:
+                control_allowed, control_reason = self._save_directory_gate(ws)
+                payload["control_allowed"] = control_allowed
+                payload["control_block_reason"] = control_reason
+                payload["browse_allowed"] = control_allowed
+                payload["browse_block_reason"] = control_reason
+            return payload
+        except Exception as e:
+            print(f"🌐 Remote: save_directory 상태 읽기 실패 — {e}")
+            return {}
+
+    def _broadcast_save_directory_state(self):
+        if not self._has_clients():
+            return
+        for ws in list(self._ws_manager.active_connections):
+            self._send_json_to(ws, self._read_save_directory(ws=ws))
+
+    def on_save_directory_changed(self, _data: dict):
+        self._broadcast_save_directory_state()
+
+    def _persist_base_save_directory_setting(self, new_path: str):
+        """데스크탑 Settings와 동일한 설정 파일에도 base_path를 반영."""
+        try:
+            mw = getattr(self.app_context, "main_window", None)
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            settings_tab = tab_controller.get_tab_instance("SettingsTabModule") if tab_controller else None
+            settings_widget = getattr(settings_tab, "settings_widget", None) if settings_tab else None
+
+            if settings_tab is not None:
+                settings_tab.set_setting('save_directory.base_path', new_path)
+            else:
+                settings_path = Path("app_settings.json")
+                settings_data = {}
+                if settings_path.exists():
+                    try:
+                        with open(settings_path, "r", encoding="utf-8") as f:
+                            settings_data = json.load(f) or {}
+                    except Exception:
+                        settings_data = {}
+                settings_data.setdefault("save_directory", {})["base_path"] = new_path
+                with open(settings_path, "w", encoding="utf-8") as f:
+                    json.dump(settings_data, f, indent=2, ensure_ascii=False)
+
+            if settings_widget is not None and hasattr(settings_widget, "save_path_edit"):
+                settings_widget.save_path_edit.blockSignals(True)
+                settings_widget.save_path_edit.setText(new_path)
+                settings_widget.save_path_edit.blockSignals(False)
+        except Exception as e:
+            print(f"🌐 Remote: save_directory 설정 영속화 실패 — {e}")
+
+    def _read_auto_save_settings(self) -> dict:
+        try:
+            auto_save_checkbox = self._get_auto_save_checkbox()
+            save_as_webp_checkbox = self._get_save_as_webp_checkbox()
+            history_limit_enabled, max_history_length, memory_action_group = self._get_history_limit_widgets()
+
+            memory_action = 1
+            if memory_action_group is not None and memory_action_group.checkedId() > 0:
+                memory_action = int(memory_action_group.checkedId())
+
+            return {
+                "type": "module_state",
+                "module_id": "auto_save",
+                "auto_save": bool(auto_save_checkbox and auto_save_checkbox.isChecked()),
+                "save_as_webp": bool(save_as_webp_checkbox and save_as_webp_checkbox.isChecked()),
+                "history_limit_enabled": bool(history_limit_enabled and history_limit_enabled.isChecked()),
+                "max_history_length": int(max_history_length.value()) if max_history_length else 2000,
+                "memory_action": memory_action,
+                "memory_action_options": [
+                    {"value": 1, "label": "[1] 1장씩 자동저장+정리"},
+                    {"value": 2, "label": "[2] 1장씩 저장없이 삭제"},
+                    {"value": 3, "label": "[3] 자동생성 중단"},
+                ],
+            }
+        except Exception as e:
+            print(f"🌐 Remote: auto_save 상태 읽기 실패 — {e}")
+            return {}
+
+    def _broadcast_auto_save_settings(self):
+        state = self._read_auto_save_settings()
+        if state and self._has_clients():
+            self._broadcast_json(state)
+
+    def _on_auto_save_settings_changed(self, *_args):
+        self._broadcast_auto_save_settings()
 
     def _read_prompt_engineering(self, ws=None) -> dict:
         try:
@@ -1420,6 +1623,11 @@ class RemoteBridge(QObject):
                     "post_prompt": override.get("post_prompt", ""),
                     "auto_hide": override.get("auto_hide", ""),
                     "preprocessing": pp,
+                    "e621_settings": {},
+                    "danbooru_settings": {},
+                    "debug_snapshot": {},
+                    "preset_can_save_current": False,
+                    "preset_can_delete": False,
                 }
 
             preprocessing = {}
@@ -1427,19 +1635,94 @@ class RemoteBridge(QObject):
                 key = m.option_key_map.get(label, label)
                 preprocessing[key] = cb.isChecked()
             presets = [m.preset_combo.itemText(i) for i in range(m.preset_combo.count())]
+            current_preset = m.preset_combo.currentText()
             return {
                 "type": "module_state",
                 "module_id": "prompt_engineering",
-                "preset": m.preset_combo.currentText(),
+                "preset": current_preset,
                 "preset_options": presets,
                 "pre_prompt": m.pre_textedit.toPlainText(),
                 "post_prompt": m.post_textedit.toPlainText(),
                 "auto_hide": m.auto_hide_textedit.toPlainText(),
                 "preprocessing": preprocessing,
+                "e621_settings": dict(getattr(m, "_e621_settings", {}) or {}),
+                "danbooru_settings": dict(getattr(m, "_danbooru_weight_settings", {}) or {}),
+                "debug_snapshot": m.get_debug_snapshot() if hasattr(m, "get_debug_snapshot") else {},
+                "preset_can_save_current": current_preset not in ("", "(프리셋 없음)", "*randomized"),
+                "preset_can_delete": current_preset not in ("", "(프리셋 없음)", "*randomized", "default"),
             }
         except Exception as e:
             print(f"🌐 Remote: 모듈 상태 읽기 실패 — {e}")
             return {}
+
+    def _broadcast_prompt_engineering_state(self):
+        state = self._read_prompt_engineering()
+        if state:
+            self._broadcast_json(state)
+
+    @staticmethod
+    def _coerce_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    def _sanitize_remote_e621_settings(self, raw_settings: dict, current_settings: dict) -> dict:
+        settings = dict(current_settings or {})
+
+        try:
+            weight = float(raw_settings.get("weight", settings.get("weight", 0.0)))
+        except (TypeError, ValueError):
+            weight = settings.get("weight", 0.0)
+        settings["weight"] = max(-5.0, min(5.0, weight))
+
+        mode = str(raw_settings.get("mode", settings.get("mode", "stable")) or "stable")
+        settings["mode"] = mode if mode in {"stable", "confused"} else "stable"
+
+        hidden_tags = raw_settings.get("hidden_tags", settings.get("hidden_tags", []))
+        if isinstance(hidden_tags, str):
+            hidden_tags = hidden_tags.replace("\n", ",").split(",")
+        if not isinstance(hidden_tags, list):
+            hidden_tags = []
+
+        normalized_hidden = []
+        for tag in hidden_tags:
+            clean = str(tag).strip().replace(" ", "_")
+            if clean and clean not in normalized_hidden:
+                normalized_hidden.append(clean)
+        settings["hidden_tags"] = normalized_hidden
+        return settings
+
+    def _sanitize_remote_danbooru_settings(self, raw_settings: dict, current_settings: dict) -> dict:
+        settings = dict(current_settings or {})
+
+        def _float_value(key: str, default: float, lo: float, hi: float) -> float:
+            try:
+                value = float(raw_settings.get(key, settings.get(key, default)))
+            except (TypeError, ValueError):
+                value = settings.get(key, default)
+            return max(lo, min(hi, value))
+
+        try:
+            magnitude = int(raw_settings.get("magnitude", settings.get("magnitude", 3)))
+        except (TypeError, ValueError):
+            magnitude = settings.get("magnitude", 3)
+        settings["magnitude"] = max(1, min(10, magnitude))
+        settings["rating_blend"] = round(_float_value("rating_blend", 0.3, 0.0, 1.0), 2)
+        settings["override_on"] = self._coerce_bool(raw_settings.get("override_on", settings.get("override_on", False)))
+        settings["override_scale"] = _float_value("override_scale", 0.35, 0.0, 5.0)
+        settings["override_min"] = _float_value("override_min", 0.80, 0.0, 5.0)
+        settings["override_max"] = _float_value("override_max", 1.35, 0.0, 10.0)
+        settings["rating_override_on"] = self._coerce_bool(
+            raw_settings.get("rating_override_on", settings.get("rating_override_on", False))
+        )
+        rating_override = str(raw_settings.get("rating_override", settings.get("rating_override", "s")) or "s")
+        settings["rating_override"] = rating_override if rating_override in {"g", "s", "q", "e"} else "s"
+        settings["invert_weight"] = self._coerce_bool(
+            raw_settings.get("invert_weight", settings.get("invert_weight", False))
+        )
+        return settings
 
     def _read_automation(self) -> dict:
         try:
@@ -1484,13 +1767,26 @@ class RemoteBridge(QObject):
                     "prompt": w.prompt_textbox.toPlainText(),
                     "uc": w.uc_textbox.toPlainText(),
                 })
+            processed_data = getattr(m, "modifiable_clone", None)
+            if not isinstance(processed_data, dict):
+                processed_data = getattr(m, "last_processed_data", {}) or {}
+            processed_characters = [str(v) for v in processed_data.get("characters", []) if v is not None]
+            processed_ucs = [str(v) for v in processed_data.get("uc", []) if v is not None]
             return {
                 "type": "module_state",
                 "module_id": "character",
                 "activated": m.activate_checkbox.isChecked() if m.activate_checkbox else False,
                 "reroll_on_generate": m.reroll_on_generate_checkbox.isChecked() if m.reroll_on_generate_checkbox else False,
                 "characters": characters,
+                "character_count": len(characters),
                 "active_count": sum(1 for w in m.character_widgets if w.active_checkbox.isChecked()),
+                "processed_characters": processed_characters,
+                "processed_ucs": processed_ucs,
+                "processed_preview_text": (
+                    m.processed_prompt_display.toPlainText()
+                    if hasattr(m, "processed_prompt_display") and m.processed_prompt_display
+                    else ""
+                ),
             }
         except Exception as e:
             print(f"🌐 Remote: character 상태 읽기 실패 — {e}")
@@ -1536,6 +1832,8 @@ class RemoteBridge(QObject):
         """웹에서 변경한 모듈 파라미터를 메인 앱에 반영"""
         if module_id == "prompt_engineering":
             self._set_prompt_engineering(key, value)
+        elif module_id == "auto_save":
+            self._set_auto_save_settings(key, value)
         elif module_id == "automation":
             self._set_automation(key, value)
         elif module_id == "character":
@@ -1546,8 +1844,107 @@ class RemoteBridge(QObject):
             self._set_character_reference(key, value)
         elif module_id == "vibe_transfer":
             self._set_vibe_transfer(key, value)
+        elif module_id == "save_directory":
+            self._set_save_directory(key, value)
         elif module_id == "wildcard":
             self._set_wildcard(key, value)
+
+    def _set_auto_save_settings(self, key: str, value: str):
+        try:
+            image_window = self._get_image_window_widget()
+            if not image_window:
+                return
+
+            if key == "save_as_webp":
+                checkbox = self._get_save_as_webp_checkbox()
+                if checkbox and checkbox.isChecked() != (value == "true"):
+                    checkbox.setChecked(value == "true")
+            elif key == "history_limit_enabled":
+                checkbox, _, _ = self._get_history_limit_widgets()
+                if checkbox and checkbox.isChecked() != (value == "true"):
+                    checkbox.setChecked(value == "true")
+            elif key == "max_history_length":
+                _, spinbox, _ = self._get_history_limit_widgets()
+                if spinbox:
+                    new_value = max(spinbox.minimum(), min(spinbox.maximum(), int(value)))
+                    if spinbox.value() != new_value:
+                        spinbox.setValue(new_value)
+                    else:
+                        image_window.save_memory_settings()
+            elif key == "memory_action":
+                _, _, action_group = self._get_history_limit_widgets()
+                if action_group:
+                    action_id = int(value)
+                    button = action_group.button(action_id)
+                    if button and not button.isChecked():
+                        button.setChecked(True)
+                    if hasattr(image_window, "save_memory_settings"):
+                        image_window.save_memory_settings()
+            else:
+                return
+
+            self._broadcast_auto_save_settings()
+        except Exception as e:
+            print(f"🌐 Remote: auto_save 설정 실패 — {key}={value}: {e}")
+            self._broadcast_json({"type": "toast", "message": f"Auto Save 설정 실패: {e}", "level": "error"})
+
+    def _set_save_directory(self, key: str, value: str):
+        try:
+            image_crud = getattr(self.app_context, "image_crud_controller", None)
+            if not image_crud:
+                return
+
+            if key == "base_path":
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": "기본 저장 경로는 Browse로만 변경할 수 있습니다.",
+                    "level": "error",
+                })
+                return
+            elif key == "use_timestamp_folder":
+                image_crud.set_use_timestamp_folder(value == "true")
+            elif key == "filename_format":
+                image_crud.set_filename_format(value)
+            elif key == "classification_method":
+                image_crud.set_classification_method(value)
+            elif key == "classification_rules":
+                image_crud.set_classification_rules(value)
+            else:
+                return
+
+            self._broadcast_save_directory_state()
+        except Exception as e:
+            print(f"🌐 Remote: save_directory 설정 실패 — {key}={value}: {e}")
+            self._broadcast_json({"type": "toast", "message": f"저장 디렉토리 설정 실패: {e}", "level": "error"})
+
+    def _do_browse_save_directory(self, ws):
+        try:
+            image_crud = getattr(self.app_context, "image_crud_controller", None)
+            if not image_crud:
+                return
+
+            current_path = str(getattr(image_crud, "_base_save_path", Path("output")))
+            new_path = QFileDialog.getExistingDirectory(None, "저장 디렉토리 선택", current_path)
+            if not new_path:
+                return
+
+            self._persist_base_save_directory_setting(new_path)
+            self.app_context.set_base_save_directory(new_path)
+            self._broadcast_save_directory_state()
+            if ws is not None:
+                self._send_json_to(ws, {
+                    "type": "toast",
+                    "message": f"저장 경로 변경: {new_path}",
+                    "level": "success",
+                })
+        except Exception as e:
+            print(f"🌐 Remote: save_directory 찾아보기 실패 — {e}")
+            if ws is not None:
+                self._send_json_to(ws, {
+                    "type": "toast",
+                    "message": f"저장 디렉토리 선택 실패: {e}",
+                    "level": "error",
+                })
 
     def _set_prompt_engineering(self, key: str, value: str):
         try:
@@ -1564,6 +1961,75 @@ class RemoteBridge(QObject):
                 idx = m.preset_combo.findText(value)
                 if idx >= 0:
                     m.preset_combo.setCurrentIndex(idx)
+                    self._broadcast_prompt_engineering_state()
+            elif key == "preset_save_current":
+                current_preset = m.preset_combo.currentText() if m.preset_combo else getattr(m, "current_preset", "")
+                if current_preset in ("", "(프리셋 없음)", "*randomized"):
+                    self._broadcast_json({"type": "toast", "message": "저장할 현재 프리셋이 없습니다.", "level": "error"})
+                    return
+                m.save_current_preset(current_preset)
+                m.current_preset = current_preset
+                m.last_preset = current_preset
+                m.save_last_used_preset_info()
+                self._broadcast_json({"type": "toast", "message": f"프리셋 저장: {current_preset}", "level": "success"})
+                self._broadcast_prompt_engineering_state()
+            elif key == "preset_create":
+                ok, result = m.save_preset_noninteractive(value)
+                if ok:
+                    self._broadcast_json({"type": "toast", "message": f"프리셋 저장: {result}", "level": "success"})
+                    self._broadcast_prompt_engineering_state()
+                else:
+                    self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+            elif key == "preset_apply_recommended":
+                if hasattr(self.app_context, "get_api_mode") and self.app_context.get_api_mode() != "NAI":
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.",
+                        "level": "error",
+                    })
+                    return
+                ok, result = m.create_and_apply_recommended_preset()
+                if ok:
+                    self._broadcast_json({"type": "toast", "message": f"추천 프리셋 적용: {result}", "level": "success"})
+                    self._broadcast_prompt_engineering_state()
+                else:
+                    self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+            elif key == "preset_delete":
+                target_name = value or (m.preset_combo.currentText() if m.preset_combo else getattr(m, "current_preset", ""))
+                ok, result = m.delete_preset_noninteractive(target_name)
+                if ok:
+                    self._broadcast_json({"type": "toast", "message": f"프리셋 삭제: {result}", "level": "success"})
+                    self._broadcast_prompt_engineering_state()
+                else:
+                    self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+            elif key == "e621_settings":
+                settings = self._sanitize_remote_e621_settings(
+                    json.loads(value or "{}"),
+                    getattr(m, "_e621_settings", {}),
+                )
+                m._on_e621_settings_changed(settings)
+                try:
+                    if getattr(m, "_e621_settings_window", None) is not None and m._e621_settings_window.isVisible():
+                        m._e621_settings_window.load_settings(settings)
+                except RuntimeError:
+                    m._e621_settings_window = None
+                self._broadcast_json({"type": "toast", "message": "e621 설정 저장됨", "level": "success"})
+                self._broadcast_prompt_engineering_state()
+            elif key == "danbooru_settings":
+                settings = self._sanitize_remote_danbooru_settings(
+                    json.loads(value or "{}"),
+                    getattr(m, "_danbooru_weight_settings", {}),
+                )
+                m._on_danbooru_weight_settings_changed(settings)
+                try:
+                    if getattr(m, "_danbooru_weight_settings_window", None) is not None and m._danbooru_weight_settings_window.isVisible():
+                        m._danbooru_weight_settings_window.load_settings(settings)
+                except RuntimeError:
+                    m._danbooru_weight_settings_window = None
+                self._broadcast_json({"type": "toast", "message": "Danbooru 설정 저장됨", "level": "success"})
+                self._broadcast_prompt_engineering_state()
+            elif key == "debug_refresh":
+                self._broadcast_prompt_engineering_state()
             elif key.startswith("pp_"):
                 # preprocessing option: pp_remove_author → remove_author
                 pp_key = key[3:]
@@ -1631,9 +2097,31 @@ class RemoteBridge(QObject):
                 return
             if key == "activated":
                 m.activate_checkbox.setChecked(value == "true")
+                if m.activate_checkbox and not m.activate_checkbox.isChecked():
+                    m.process_and_update_view()
+                self._broadcast_character_state()
             elif key == "reroll_on_generate":
                 if m.reroll_on_generate_checkbox:
                     m.reroll_on_generate_checkbox.setChecked(value == "true")
+                self._broadcast_character_state()
+            elif key == "add_character":
+                m.add_character_widget()
+                self._broadcast_character_state()
+            elif key == "preview_refresh":
+                m.process_and_update_view()
+                self._broadcast_character_state()
+            elif key.startswith("remove_character_"):
+                idx = int(key.split("_")[-1])
+                if len(m.character_widgets) <= 1:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "마지막 캐릭터 슬롯은 삭제할 수 없습니다.",
+                        "level": "error",
+                    })
+                    return
+                if 0 <= idx < len(m.character_widgets):
+                    m.remove_character_widget(m.character_widgets[idx])
+                    self._broadcast_character_state()
             elif key.startswith("char_prompt_"):
                 # char_prompt_0, char_prompt_1, ...
                 idx = int(key.split("_")[-1])
@@ -1648,7 +2136,7 @@ class RemoteBridge(QObject):
                 if idx < len(m.character_widgets):
                     m.character_widgets[idx].active_checkbox.setChecked(value == "true")
             # Broadcast badge update on activation/active toggle
-            if key == "activated" or key.startswith("char_active_"):
+            if key.startswith("char_active_"):
                 self._broadcast_character_state()
         except Exception as e:
             print(f"🌐 Remote: character 설정 실패 — {key}={value}: {e}")
@@ -3118,6 +3606,19 @@ class RemoteBridge(QObject):
                             self._ws_manager.broadcast_json(wc_state),
                             self._loop
                         )
+                if not self.shared_server_mode:
+                    pe_state = self._read_prompt_engineering()
+                    if pe_state:
+                        asyncio.run_coroutine_threadsafe(
+                            self._ws_manager.broadcast_json(pe_state),
+                            self._loop
+                        )
+                char_state = self._read_character()
+                if char_state:
+                    asyncio.run_coroutine_threadsafe(
+                        self._ws_manager.broadcast_json(char_state),
+                        self._loop
+                    )
         except Exception as e:
             print(f"🌐 Remote: 프롬프트 전송 실패 — {e}")
 
@@ -3390,6 +3891,49 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             "per_page": per_page,
             "images": entries[start:end],
         }
+
+    @app.get("/api/viewer/download-all")
+    async def viewer_download_all():
+        entries = await asyncio.to_thread(bridge._scan_save_folder)
+        if not entries:
+            return JSONResponse({"error": "viewer is empty"}, status_code=404)
+
+        from starlette.background import BackgroundTask
+
+        def _build_zip():
+            import os
+            import tempfile
+            import zipfile
+
+            tmp = tempfile.NamedTemporaryFile(prefix="naia_viewer_", suffix=".zip", delete=False)
+            tmp_path = Path(tmp.name)
+            tmp.close()
+
+            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+                for entry in entries:
+                    target = bridge._validate_viewer_path(entry.get("rel_path", ""))
+                    if not target:
+                        continue
+                    zf.write(str(target), arcname=entry["rel_path"])
+
+            return tmp_path
+
+        def _cleanup_temp_zip(path_str: str):
+            import os
+            try:
+                os.unlink(path_str)
+            except OSError:
+                pass
+
+        zip_path = await asyncio.to_thread(_build_zip)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"naia_viewer_{timestamp}.zip"
+        return FileResponse(
+            str(zip_path),
+            media_type="application/zip",
+            filename=filename,
+            background=BackgroundTask(_cleanup_temp_zip, str(zip_path)),
+        )
 
     @app.get("/api/viewer/thumb/{path:path}")
     async def viewer_thumb(path: str, size: int = 0):
@@ -3671,6 +4215,28 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             mid = cmd.get("module_id", "")
                             mkey = cmd.get("key", "")
                             mval = str(cmd.get("value", ""))
+                            if mid == "auto_save":
+                                allowed, reason = bridge._auto_save_settings_gate(ws)
+                                if not allowed:
+                                    await ws.send_text(json.dumps({
+                                        "type": "toast",
+                                        "message": reason,
+                                        "level": "error",
+                                    }))
+                                    continue
+                                bridge.request_set_module.emit(mid, mkey, mval)
+                                continue
+                            if mid == "save_directory":
+                                allowed, reason = bridge._save_directory_gate(ws)
+                                if not allowed:
+                                    await ws.send_text(json.dumps({
+                                        "type": "toast",
+                                        "message": reason,
+                                        "level": "error",
+                                    }))
+                                    continue
+                                bridge.request_set_module.emit(mid, mkey, mval)
+                                continue
                             # Shared Mode: P.Eng / Cond → 세션 dict에 저장
                             if bridge.shared_server_mode and mid == "conditional_prompt":
                                 session = ws_manager.sessions.get(ws)
@@ -3694,6 +4260,16 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                         po["preset"] = mval
                             else:
                                 bridge.request_set_module.emit(mid, mkey, mval)
+                        elif cmd_type == "browse_save_directory":
+                            allowed, reason = bridge._save_directory_gate(ws)
+                            if not allowed:
+                                await ws.send_text(json.dumps({
+                                    "type": "toast",
+                                    "message": reason,
+                                    "level": "error",
+                                }))
+                                continue
+                            bridge.request_browse_save_directory.emit(ws)
                         elif cmd_type in ("get_search_state", "search", "load_parquet",
                                            "depth_action", "get_depth_state", "restore_snapshot"):
                             if bridge.shared_server_mode:
@@ -4007,11 +4583,12 @@ _server_instance: Optional[uvicorn.Server] = None
 _bridge_instance: Optional[RemoteBridge] = None
 _checkbox_connections: list = []  # 체크박스 toggled 연결 추적
 _param_signal_sources: list = []  # 파라미터 위젯 시그널 연결 추적
+_bridge_signal_connections: list = []  # (obj, signal_name, callback) 추가 연결 추적
 
 
 def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     """Remote API 서버를 daemon thread로 시작."""
-    global _server_instance, _bridge_instance, _checkbox_connections, _param_signal_sources
+    global _server_instance, _bridge_instance, _checkbox_connections, _param_signal_sources, _bridge_signal_connections
 
     if _server_instance is not None:
         print("🌐 Remote: 서버가 이미 실행 중")
@@ -4042,6 +4619,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_history_action.connect(bridge._handle_history_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
+    bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결
     mw = app_context.main_window
@@ -4068,6 +4646,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("image_saved", bridge._on_image_saved)
     app_context.subscribe("desktop_window_visibility_changed", bridge.on_desktop_window_visibility_changed)
+    app_context.subscribe("save_directory_changed", bridge.on_save_directory_changed)
 
     # NAI 모드에서 시작된 경우 Anlas 타이머 부트 + 초기 fetch
     try:
@@ -4087,6 +4666,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
 
     # 체크박스 변경 → 웹 동기화 (메서드 참조로 disconnect 가능)
     _checkbox_connections = []
+    _bridge_signal_connections = []
     for key, label in RemoteBridge.OPTION_KEYS.items():
         cb = mw.generation_checkboxes.get(label)
         if cb:
@@ -4094,11 +4674,28 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
             _checkbox_connections.append((cb, "toggled"))
 
     # auto_save 체크박스 → 웹 동기화
-    if hasattr(mw, 'image_window') and mw.image_window:
-        iw = mw.image_window
-        if hasattr(iw, 'auto_save_checkbox') and iw.auto_save_checkbox:
-            iw.auto_save_checkbox.toggled.connect(bridge._on_option_toggled_slot)
-            _checkbox_connections.append((iw.auto_save_checkbox, "toggled"))
+    auto_save_checkbox = bridge._get_auto_save_checkbox()
+    if auto_save_checkbox:
+        auto_save_checkbox.toggled.connect(bridge._on_option_toggled_slot)
+        auto_save_checkbox.toggled.connect(bridge._on_auto_save_settings_changed)
+        _checkbox_connections.append((auto_save_checkbox, "toggled"))
+        _bridge_signal_connections.append((auto_save_checkbox, "toggled", bridge._on_auto_save_settings_changed))
+
+    save_as_webp_checkbox = bridge._get_save_as_webp_checkbox()
+    if save_as_webp_checkbox:
+        save_as_webp_checkbox.toggled.connect(bridge._on_auto_save_settings_changed)
+        _bridge_signal_connections.append((save_as_webp_checkbox, "toggled", bridge._on_auto_save_settings_changed))
+
+    history_limit_enabled, max_history_length, memory_action_group = bridge._get_history_limit_widgets()
+    if history_limit_enabled:
+        history_limit_enabled.toggled.connect(bridge._on_auto_save_settings_changed)
+        _bridge_signal_connections.append((history_limit_enabled, "toggled", bridge._on_auto_save_settings_changed))
+    if max_history_length:
+        max_history_length.valueChanged.connect(bridge._on_auto_save_settings_changed)
+        _bridge_signal_connections.append((max_history_length, "valueChanged", bridge._on_auto_save_settings_changed))
+    if memory_action_group:
+        memory_action_group.buttonClicked.connect(bridge._on_auto_save_settings_changed)
+        _bridge_signal_connections.append((memory_action_group, "buttonClicked", bridge._on_auto_save_settings_changed))
 
     # 생성 파라미터 위젯 변경 → 웹 동기화 (메서드 참조로 disconnect 가능)
     _param_signal_sources.clear()
@@ -4172,7 +4769,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
 
 def stop_remote_server():
     """서버 graceful shutdown + 이벤트/시그널 해제"""
-    global _server_instance, _bridge_instance, _checkbox_connections, _param_signal_sources
+    global _server_instance, _bridge_instance, _checkbox_connections, _param_signal_sources, _bridge_signal_connections
 
     if _server_instance:
         _server_instance.should_exit = True
@@ -4192,7 +4789,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed"]:
+            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "save_directory_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]
@@ -4211,6 +4808,12 @@ def stop_remote_server():
             for cb, signal_name in _checkbox_connections:
                 try:
                     getattr(cb, signal_name).disconnect(_bridge_instance._on_option_toggled_slot)
+                except TypeError:
+                    pass
+
+            for obj, signal_name, callback in _bridge_signal_connections:
+                try:
+                    getattr(obj, signal_name).disconnect(callback)
                 except TypeError:
                     pass
 
@@ -4242,3 +4845,4 @@ def stop_remote_server():
 
     _checkbox_connections = []
     _param_signal_sources = []
+    _bridge_signal_connections = []

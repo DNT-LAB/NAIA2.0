@@ -858,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 172b"
+        self.base_title = "NAIA v2.0.0 Dev 173"
         self.setWindowTitle(self.base_title + " - 260418")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -7332,6 +7332,25 @@ class ModernMainWindow(QMainWindow):
 
 if __name__ == "__main__":
     import argparse
+
+    def _should_start_hidden_for_web_session() -> bool:
+        """Web Session 자동 시작/CLI 실행이면 메인 창을 처음부터 숨김 시작."""
+        if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
+            return True
+
+        try:
+            settings_path = Path("app_settings.json")
+            if not settings_path.exists():
+                return False
+
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f) or {}
+
+            web_session = settings.get("web_session", {})
+            return bool(web_session.get("auto_start", False))
+        except Exception:
+            return False
+
     parser = argparse.ArgumentParser(description="NAIA 2.0")
     parser.add_argument(
         "--web-session",
@@ -7380,7 +7399,7 @@ if __name__ == "__main__":
 
     # 메인 윈도우 생성
     window = ModernMainWindow()
-    if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
+    if _should_start_hidden_for_web_session():
         window._publish_desktop_window_visibility()
     else:
         window.show()

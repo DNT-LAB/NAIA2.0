@@ -609,7 +609,8 @@ function prependViewerThumb(relPath) {
 function closeViewerLightbox() {
   const lb = $('viewerLightbox');
   lb.classList.remove('open');
-  lb.innerHTML = '<img id="viewerLightboxImg" alt="">';
+  _lightboxPromptVisible = false;
+  _resetViewerLightbox();
   _viewerPopupOpen = false;
 }
 
@@ -687,7 +688,8 @@ function openViewerPopup() {
               <input type="checkbox" id="vpPromptCb" onchange="toggleVpPrompt(this.checked)">
               <span>Prompt</span>
             </label>
-            <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+            <button class="viewer-download-btn viewer-download-all-btn" onclick="downloadAllImages()">Download All</button>
+            <button class="viewer-download-btn" onclick="downloadImage(_vpCurrentPath)">Download</button>
           </div>
         </div>
       </div>
@@ -761,7 +763,8 @@ function closeViewerPopup() {
   _viewerPopupOpen = false;
   const lb = $('viewerLightbox');
   lb.classList.remove('open');
-  lb.innerHTML = '<img id="viewerLightboxImg" alt="">';
+  _lightboxPromptVisible = false;
+  _resetViewerLightbox();
 }
 
 function navViewerPopup(dir) {
@@ -781,16 +784,63 @@ function navViewerPopup(dir) {
 let _viewerNavPaths = [];  // loaded rel_paths in viewer grid order
 let _viewerNavIdx = -1;
 let _currentViewerPath = '';  // 현재 표시 중인 viewer 이미지 경로
+let _lightboxPromptVisible = false;
+
+function _viewerLightboxBaseHtml() {
+  const promptBtnText = _lightboxPromptVisible ? 'Hide Prompt' : 'Show Prompt';
+  return `
+    <div class="viewer-lightbox-inner" onclick="event.stopPropagation()">
+      <img id="viewerLightboxImg" alt="">
+      <div class="prompt-float viewer-lightbox-prompt${_lightboxPromptVisible ? ' visible' : ''}" id="viewerLightboxPrompt">
+        <div class="prompt-float-content" id="viewerLightboxPromptContent"></div>
+      </div>
+      <div class="viewer-lightbox-controls">
+        <button class="viewer-lightbox-btn${_lightboxPromptVisible ? ' accent' : ''}" id="viewerLightboxPromptBtn" onclick="toggleLightboxPrompt()">${promptBtnText}</button>
+        <button class="viewer-lightbox-btn accent" onclick="downloadImage()">Download</button>
+        <button class="viewer-lightbox-btn danger" onclick="closeViewerLightbox()">Close</button>
+      </div>
+    </div>`;
+}
+
+function _resetViewerLightbox() {
+  const lb = $('viewerLightbox');
+  if (!lb) return;
+  lb.innerHTML = _viewerLightboxBaseHtml();
+}
+
+function _syncLightboxPromptUi() {
+  const prompt = $('viewerLightboxPrompt');
+  const btn = $('viewerLightboxPromptBtn');
+  if (prompt) prompt.classList.toggle('visible', _lightboxPromptVisible);
+  if (btn) {
+    btn.textContent = _lightboxPromptVisible ? 'Hide Prompt' : 'Show Prompt';
+    btn.classList.toggle('accent', _lightboxPromptVisible);
+  }
+}
+
+function toggleLightboxPrompt(forceVisible) {
+  _lightboxPromptVisible = typeof forceVisible === 'boolean' ? forceVisible : !_lightboxPromptVisible;
+  _syncLightboxPromptUi();
+  if (_lightboxPromptVisible && _currentViewerPath) {
+    _loadPromptForFloat(_currentViewerPath, 'viewerLightboxPrompt', 'viewerLightboxPromptContent');
+  }
+}
 
 function viewerThumbClick(relPath) {
   // 모바일: lightbox로 간단히 표시 (터치하면 닫힘)
   if (window.innerWidth < 768) {
     const lb = $('viewerLightbox');
+    _currentViewerPath = relPath;
+    _latestImagePath = relPath;
+    _resetViewerLightbox();
     const img = $('viewerLightboxImg');
     if (lb && img) {
       img.src = '/api/viewer/image/' + encodeURI(relPath);
-      _latestImagePath = relPath;
       lb.classList.add('open');
+      _syncLightboxPromptUi();
+      if (_lightboxPromptVisible) {
+        _loadPromptForFloat(relPath, 'viewerLightboxPrompt', 'viewerLightboxPromptContent');
+      }
     }
     return;
   }
@@ -953,8 +1003,8 @@ async function _loadPromptForFloat(relPath, floatId, contentId) {
 
 let _latestImagePath = '';  // 다운로드 가능한 최신 이미지 경로
 
-async function downloadImage() {
-  const path = _currentViewerPath || _latestImagePath;
+async function downloadImage(preferredPath = '') {
+  const path = preferredPath || _currentViewerPath || _latestImagePath;
   if (!path) {
     showToast('Download failed. Image not saved.', 'error');
     return;
@@ -979,14 +1029,109 @@ async function downloadImage() {
   }
 }
 
+async function downloadAllImages() {
+  try {
+    const resp = await fetch('/api/viewer/download-all');
+    if (!resp.ok) {
+      showToast('Download all failed. Viewer is empty.', 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'naia_viewer_images.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('Download all failed.', 'error');
+  }
+}
+
 // ---- Stats functions ----
 
 function toggleAutoSave() {
-  autoSaveEnabled = !autoSaveEnabled;
+  openModule('auto_save');
+}
+
+function setAutoSaveEnabled(enabled) {
+  autoSaveEnabled = !!enabled;
+  if (lastAutoSaveModuleState) lastAutoSaveModuleState.auto_save = autoSaveEnabled;
   _updateSaveUI();
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_option', key: 'auto_save', value: autoSaveEnabled}));
   }
+}
+
+function renderAutoSavePanel(state = lastAutoSaveModuleState) {
+  const panelState = state || {
+    auto_save: autoSaveEnabled,
+    save_as_webp: false,
+    history_limit_enabled: false,
+    max_history_length: 2000,
+    memory_action: 1,
+    memory_action_options: [
+      { value: 1, label: '[1] 1장씩 자동저장+정리' },
+      { value: 2, label: '[2] 1장씩 저장없이 삭제' },
+      { value: 3, label: '[3] 자동생성 중단' },
+    ],
+  };
+  lastAutoSaveModuleState = panelState;
+  const statusText = panelState.auto_save ? 'Enabled' : 'Disabled';
+  const desc = sharedMode
+    ? 'Shared Mode에서는 호스트의 Auto Save 설정을 따릅니다.'
+    : 'Web Session은 시작 시 Auto Save가 강제로 켜집니다. 필요하면 여기서만 변경할 수 있습니다.';
+  const actionOptions = (panelState.memory_action_options || []).map(opt =>
+    `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
+  ).join('');
+  moduleBody.innerHTML = `
+    <div class="mod-settings-panel">
+      <div class="mod-field">
+        <span class="mod-field-label">Current Status</span>
+        <div class="mod-status" style="text-align:left;min-height:0">${statusText}</div>
+      </div>
+      <div class="mod-field">
+        <span class="mod-field-label">Policy</span>
+        <div class="mod-status" style="text-align:left;line-height:1.6">${desc}</div>
+      </div>
+      <div class="mod-inline-row">
+        <button class="mod-action-btn ${panelState.auto_save ? 'mod-stop' : 'mod-start'}"
+                ${sharedMode ? 'disabled' : ''}
+                onclick="setAutoSaveEnabled(${panelState.auto_save ? 'false' : 'true'})">
+          ${panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save'}
+        </button>
+        <button class="mod-btn-secondary" onclick="openSaveDirectoryPanel()">
+          Save Directory Settings
+        </button>
+      </div>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" ${panelState.save_as_webp ? 'checked' : ''} ${sharedMode ? 'disabled' : ''}
+               onchange="onAutoSaveWebpChange(this.checked)">
+        <span class="mod-checkbox-label">WEBP로 저장</span>
+      </label>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" ${panelState.history_limit_enabled ? 'checked' : ''} ${sharedMode ? 'disabled' : ''}
+               onchange="onHistoryLimitToggle(this.checked)">
+        <span class="mod-checkbox-label">히스토리 큐 제한 활성화</span>
+      </label>
+      <label class="mod-field">
+        <span class="mod-field-label">Max History Length</span>
+        <input class="mod-input" type="number" min="100" max="10000" step="100"
+               value="${escHtml(String(panelState.max_history_length ?? 2000))}"
+               ${panelState.history_limit_enabled && !sharedMode ? '' : 'disabled'}
+               onchange="onHistoryLimitLengthChange(this.value)">
+      </label>
+      <label class="mod-field">
+        <span class="mod-field-label">On Limit Reached</span>
+        <select class="mod-select" ${panelState.history_limit_enabled && !sharedMode ? '' : 'disabled'}
+                onchange="onHistoryLimitActionChange(this.value)">
+          ${actionOptions}
+        </select>
+      </label>
+    </div>
+  `;
 }
 
 function _updateSaveUI() {
@@ -994,8 +1139,12 @@ function _updateSaveUI() {
   statsSave.classList.toggle('off', !autoSaveEnabled);
   // dot 뒤의 텍스트 노드만 교체 (dot span 유지)
   const dot = statsSave.querySelector('.stats-dot');
-  const text = autoSaveEnabled ? 'Save' : 'Save OFF';
+  const text = autoSaveEnabled ? 'Auto Save' : 'Auto Save OFF';
   if (dot) { dot.nextSibling.textContent = text; }
+  statsSave.title = autoSaveEnabled ? 'Open auto-save settings (enabled)' : 'Open auto-save settings (disabled)';
+  if (currentModuleId === 'auto_save' && modulePopup.classList.contains('open')) {
+    renderAutoSavePanel();
+  }
 }
 
 function updateGenStats() {
@@ -1237,6 +1386,7 @@ if (window.visualViewport) {
       modulePopupEl.style.bottom = 'auto';
       modulePopupEl.style.maxHeight = vv.height + 'px';
     }
+    relayoutFloatingPanels();
     // autocomplete/tag tooltip: viewport 상단에 고정 (키보드에 가려지지 않도록)
     if (tagTooltip) {
       tagTooltip.style.top = (vv.offsetTop + 4) + 'px';
@@ -1262,6 +1412,7 @@ if (window.visualViewport) {
         modulePopupEl.style.bottom = '';
         modulePopupEl.style.maxHeight = '';
       }
+      relayoutFloatingPanels();
       // autocomplete/tag tooltip: 원래 CSS로 복원
       if (tagTooltip) {
         tagTooltip.style.top = '';
@@ -1276,6 +1427,10 @@ if (window.visualViewport) {
     if (_kbOpen) _syncKbPositions();
   });
 }
+
+window.addEventListener('resize', () => {
+  relayoutFloatingPanels();
+});
 
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
@@ -1420,6 +1575,7 @@ function syncOptions(m) {
   // Auto-save 상태 동기화
   if ('auto_save' in m) {
     autoSaveEnabled = m.auto_save;
+    if (lastAutoSaveModuleState) lastAutoSaveModuleState.auto_save = m.auto_save;
     _updateSaveUI();
   }
 }
@@ -1478,6 +1634,7 @@ function syncMode(mode) {
     const naiOpt = modeSelect.querySelector('option[value="NAI"]');
     if (naiOpt) naiOpt.disabled = true;
   }
+  updateModuleHeaderAction(currentModuleId);
 }
 
 function setMode(mode) {
@@ -1818,8 +1975,11 @@ function updateApiStatus(m) {
 const modulePopup = $('modulePopup');
 const moduleTitle = $('modulePopupTitle');
 const moduleBody = $('modulePopupBody');
+const modulePopupAction = $('modulePopupAction');
 let currentModuleId = null;
 let moduleSendTimer = null;
+let lastAutoSaveModuleState = null;
+let lastSaveDirectoryState = null;
 
 // Preprocessing option definitions (key → display label)
 const PP_OPTIONS = [
@@ -1840,6 +2000,41 @@ const PP_OPTIONS = [
   ['tag_implication_compression', 'Tag Implication'],
 ];
 
+const PP_OPTION_TONES = {
+  remove_author: 'pe-tone-yellow',
+  remove_work_title: 'pe-tone-yellow',
+  remove_character_name: 'pe-tone-yellow',
+  e621_auto_boost: 'pe-tone-pink',
+  danbooru_auto_weight: 'pe-tone-teal',
+  tag_implication_compression: 'pe-tone-teal',
+};
+const DANBOORU_MAGNITUDE_TABLE = {
+  1:  { min_weight: 0.88, max_weight: 1.15, scale: 0.15, label: '약한' },
+  2:  { min_weight: 0.84, max_weight: 1.25, scale: 0.25, label: '중간' },
+  3:  { min_weight: 0.80, max_weight: 1.35, scale: 0.35, label: '추천' },
+  4:  { min_weight: 0.75, max_weight: 1.42, scale: 0.42, label: '강한' },
+  5:  { min_weight: 0.70, max_weight: 1.50, scale: 0.50, label: '최대' },
+  6:  { min_weight: 0.62, max_weight: 1.60, scale: 0.60, label: '최대+' },
+  7:  { min_weight: 0.55, max_weight: 1.70, scale: 0.70, label: '최대++' },
+  8:  { min_weight: 0.50, max_weight: 1.80, scale: 0.80, label: '극한' },
+  9:  { min_weight: 0.45, max_weight: 1.90, scale: 0.90, label: '극한+' },
+  10: { min_weight: 0.40, max_weight: 2.00, scale: 1.00, label: '극한++' },
+};
+let lastPromptEngineeringState = null;
+
+function updateModuleHeaderAction(moduleId) {
+  if (!modulePopupAction) return;
+  if (moduleId === 'prompt_engineering' && !sharedMode && modeSelect.value === 'NAI') {
+    modulePopupAction.textContent = '추천 설정 적용';
+    modulePopupAction.style.display = '';
+    modulePopupAction.onclick = applyRecommendedPromptPreset;
+    return;
+  }
+  modulePopupAction.style.display = 'none';
+  modulePopupAction.onclick = null;
+  modulePopupAction.textContent = '';
+}
+
 function openModule(moduleId) {
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
@@ -1856,11 +2051,16 @@ function openModule(moduleId) {
     closeModule();
     return;
   }
+  closeAuxiliaryPopups();
   currentModuleId = moduleId;
   modulePopup.classList.add('open');
+  relayoutFloatingPanels();
   updateModuleBtnState();
+  updateModuleHeaderAction(moduleId);
   moduleBody.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
   const titles = {
+    auto_save: 'Auto Save',
+    save_directory: 'Save Directory',
     search: 'Prompt Search',
     prompt_engineering: 'Prompt Engineering',
     automation: 'Automation',
@@ -1872,6 +2072,9 @@ function openModule(moduleId) {
     chunk: 'Chunk',
   };
   moduleTitle.textContent = titles[moduleId] || moduleId;
+  if (moduleId === 'auto_save' && lastAutoSaveModuleState) {
+    renderAutoSavePanel(lastAutoSaveModuleState);
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     if (moduleId === 'search') {
       ws.send(JSON.stringify({type: 'get_search_state'}));
@@ -1883,8 +2086,10 @@ function openModule(moduleId) {
 
 function closeModule() {
   modulePopup.classList.remove('open');
+  closeAuxiliaryPopups();
   currentModuleId = null;
   chunkTriggerInfo = null;
+  updateModuleHeaderAction(null);
   updateModuleBtnState();
 }
 
@@ -1896,22 +2101,297 @@ function updateModuleBtnState() {
   if (pb) pb.classList.toggle('active', currentModuleId === 'search');
 }
 
+const peE621Panel = $('peE621Panel');
+const pePresetAddPanel = $('pePresetAddPanel');
+const pePresetManagePanel = $('pePresetManagePanel');
+const peDanbooruPanel = $('peDanbooruPanel');
+const peDebugPanel = $('peDebugPanel');
+let peE621Open = false;
+let pePresetAddOpen = false;
+let pePresetManageOpen = false;
+let peDanbooruOpen = false;
+let peDebugOpen = false;
+
+function requestPromptEngineeringState() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'prompt_engineering'}));
+  }
+}
+
+function closeAllPePanels() {
+  closePeE621Panel();
+  closePePresetAddPanel();
+  closePePresetManagePanel();
+  closePeDanbooruPanel();
+  closePeDebugPanel();
+}
+
+function closeAuxiliaryPopups(exceptPanel = null) {
+  if (exceptPanel !== refinePanel && refineOpen) closeRefine();
+  if (exceptPanel !== pePresetAddPanel && pePresetAddOpen) closePePresetAddPanel();
+  if (exceptPanel !== pePresetManagePanel && pePresetManageOpen) closePePresetManagePanel();
+  if (exceptPanel !== peE621Panel && peE621Open) closePeE621Panel();
+  if (exceptPanel !== peDanbooruPanel && peDanbooruOpen) closePeDanbooruPanel();
+  if (exceptPanel !== peDebugPanel && peDebugOpen) closePeDebugPanel();
+
+  const tagFilterPopup = document.getElementById('tagFilterPopup');
+  if (exceptPanel !== tagFilterPopup && tagFilterPopup?.classList.contains('open')) {
+    closeTagFilter();
+  }
+}
+
+function openPePresetAddPanel() {
+  if (sharedMode) return;
+  if (pePresetAddOpen) { closePePresetAddPanel(); return; }
+  closeAuxiliaryPopups(pePresetAddPanel);
+  pePresetAddOpen = true;
+  pePresetAddPanel.classList.add('open');
+  positionFloatingPanel(pePresetAddPanel, modulePopup);
+  const body = pePresetAddPanel.querySelector('.pe-popup-body');
+  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
+  syncPromptEngineeringPopups();
+  requestPromptEngineeringState();
+}
+
+function closePePresetAddPanel() {
+  pePresetAddOpen = false;
+  pePresetAddPanel.classList.remove('open');
+}
+
+function openPePresetManagePanel() {
+  if (sharedMode) return;
+  if (pePresetManageOpen) { closePePresetManagePanel(); return; }
+  closeAuxiliaryPopups(pePresetManagePanel);
+  pePresetManageOpen = true;
+  pePresetManagePanel.classList.add('open');
+  positionFloatingPanel(pePresetManagePanel, modulePopup);
+  const body = pePresetManagePanel.querySelector('.pe-popup-body');
+  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
+  syncPromptEngineeringPopups();
+  requestPromptEngineeringState();
+}
+
+function closePePresetManagePanel() {
+  pePresetManageOpen = false;
+  pePresetManagePanel.classList.remove('open');
+}
+
+function openPeE621Panel() {
+  if (peE621Open) { closePeE621Panel(); return; }
+  closeAuxiliaryPopups(peE621Panel);
+  peE621Open = true;
+  peE621Panel.classList.add('open');
+  positionFloatingPanel(peE621Panel, modulePopup);
+  const body = peE621Panel.querySelector('.pe-popup-body');
+  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
+  syncPromptEngineeringPopups();
+  requestPromptEngineeringState();
+}
+
+function closePeE621Panel() {
+  peE621Open = false;
+  peE621Panel.classList.remove('open');
+}
+
+function openPeDanbooruPanel() {
+  if (peDanbooruOpen) { closePeDanbooruPanel(); return; }
+  closeAuxiliaryPopups(peDanbooruPanel);
+  peDanbooruOpen = true;
+  peDanbooruPanel.classList.add('open');
+  positionFloatingPanel(peDanbooruPanel, modulePopup);
+  const body = peDanbooruPanel.querySelector('.pe-popup-body');
+  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
+  syncPromptEngineeringPopups();
+  requestPromptEngineeringState();
+}
+
+function closePeDanbooruPanel() {
+  peDanbooruOpen = false;
+  peDanbooruPanel.classList.remove('open');
+}
+
+function openPeDebugPanel() {
+  if (peDebugOpen) { closePeDebugPanel(); return; }
+  closeAuxiliaryPopups(peDebugPanel);
+  peDebugOpen = true;
+  peDebugPanel.classList.add('open');
+  positionFloatingPanel(peDebugPanel, modulePopup);
+  const body = peDebugPanel.querySelector('.pe-popup-body');
+  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
+  syncPromptEngineeringPopups();
+  refreshPromptEngineeringDebug();
+}
+
+function closePeDebugPanel() {
+  peDebugOpen = false;
+  peDebugPanel.classList.remove('open');
+}
+
+function syncPromptEngineeringPopups() {
+  relayoutFloatingPanels();
+  if (!lastPromptEngineeringState) return;
+  if (pePresetAddOpen) renderPePresetAddPanel(lastPromptEngineeringState);
+  if (pePresetManageOpen) renderPePresetManagePanel(lastPromptEngineeringState);
+  if (peE621Open) renderPeE621Panel(lastPromptEngineeringState);
+  if (peDanbooruOpen) renderPeDanbooruPanel(lastPromptEngineeringState);
+  if (peDebugOpen) renderPeDebugPanel(lastPromptEngineeringState);
+}
+
 function onModuleState(m) {
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
+  else if (m.module_id === 'auto_save') lastAutoSaveModuleState = m;
   else if (m.module_id === 'character') updateCharBadge(m);
   else if (m.module_id === 'character_reference') updateCharRefBadge(m);
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
+  else if (m.module_id === 'save_directory') lastSaveDirectoryState = m;
+
+  if (m.module_id === 'prompt_engineering') {
+    lastPromptEngineeringState = m;
+    syncPromptEngineeringPopups();
+  }
 
   if (m.module_id !== currentModuleId) return;
-  if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
+  if (m.module_id === 'auto_save') renderAutoSavePanel(m);
+  else if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
   else if (m.module_id === 'automation') renderAutomation(m);
   else if (m.module_id === 'character') renderCharacter(m);
   else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
   else if (m.module_id === 'character_reference') renderCharacterReference(m);
   else if (m.module_id === 'vibe_transfer') renderVibeTransfer(m);
+  else if (m.module_id === 'save_directory') renderSaveDirectory(m);
   else if (m.module_id === 'wildcard') renderWildcard(m);
   else if (m.module_id === 'chunk') renderChunk(m);
+}
+
+function openSaveDirectoryPanel() {
+  openModule('save_directory');
+}
+
+function onAutoSaveWebpChange(checked) {
+  if (lastAutoSaveModuleState) lastAutoSaveModuleState.save_as_webp = !!checked;
+  setModuleParam('auto_save', 'save_as_webp', checked ? 'true' : 'false');
+}
+
+function onHistoryLimitToggle(checked) {
+  if (lastAutoSaveModuleState) {
+    lastAutoSaveModuleState.history_limit_enabled = !!checked;
+    renderAutoSavePanel(lastAutoSaveModuleState);
+  }
+  setModuleParam('auto_save', 'history_limit_enabled', checked ? 'true' : 'false');
+}
+
+function onHistoryLimitLengthChange(value) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    showToast('Valid history length required.', 'error');
+    return;
+  }
+  if (lastAutoSaveModuleState) lastAutoSaveModuleState.max_history_length = parsed;
+  setModuleParam('auto_save', 'max_history_length', String(parsed));
+}
+
+function onHistoryLimitActionChange(value) {
+  if (lastAutoSaveModuleState) lastAutoSaveModuleState.memory_action = parseInt(value, 10);
+  setModuleParam('auto_save', 'memory_action', value);
+}
+
+function browseSaveDirectory() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'browse_save_directory'}));
+  }
+}
+
+function onSaveDirectoryToggle(checked) {
+  if (lastSaveDirectoryState) {
+    lastSaveDirectoryState.use_timestamp_folder = !!checked;
+    renderSaveDirectory(lastSaveDirectoryState);
+  }
+  setModuleParam('save_directory', 'use_timestamp_folder', checked ? 'true' : 'false');
+}
+
+function onSaveDirectoryFilenameFormatChange(value) {
+  if (lastSaveDirectoryState) {
+    lastSaveDirectoryState.filename_format = value;
+  }
+  setModuleParam('save_directory', 'filename_format', value);
+}
+
+function onSaveDirectoryClassificationChange(value) {
+  if (lastSaveDirectoryState) {
+    lastSaveDirectoryState.classification_method = value;
+    renderSaveDirectory(lastSaveDirectoryState);
+  }
+  setModuleParam('save_directory', 'classification_method', value);
+}
+
+function renderSaveDirectory(m) {
+  lastSaveDirectoryState = m;
+  const controlAllowed = !!m.control_allowed;
+  const browseAllowed = !!m.browse_allowed;
+  const filenameOptions = (m.filename_format_options || []).map(opt =>
+    `<option value="${escHtml(opt.value)}" ${opt.value === m.filename_format ? 'selected' : ''}>${escHtml(opt.label)}</option>`
+  ).join('');
+  const classificationOptions = (m.classification_method_options || []).map(opt =>
+    `<option value="${escHtml(opt.value)}" ${opt.value === m.classification_method ? 'selected' : ''}>${escHtml(opt.label)}</option>`
+  ).join('');
+  const rulesVisible = m.classification_method === 'prompt_recognition';
+  const accessNotice = !controlAllowed
+    ? `<div class="mod-notice">${escHtml(m.control_block_reason || 'This setting is read-only on this client.')}</div>`
+    : '';
+  const browseNotice = !browseAllowed && m.browse_block_reason
+    ? `<div class="mod-debug-empty">${escHtml(m.browse_block_reason)}</div>`
+    : '';
+
+  moduleBody.innerHTML = `
+    <div class="mod-settings-panel">
+      <div class="mod-field">
+        <span class="mod-field-label">Current Save Directory</span>
+        <div class="mod-status" style="text-align:left;line-height:1.6;word-break:break-all">${escHtml(m.current_save_directory || '')}</div>
+      </div>
+      <div class="mod-field">
+        <span class="mod-field-label">Session Timestamp</span>
+        <div class="mod-status" style="text-align:left;min-height:0">${escHtml(m.session_timestamp || '—')}</div>
+      </div>
+      ${accessNotice}
+      <label class="mod-field">
+        <span class="mod-field-label">Base Save Path</span>
+        <input class="mod-input" id="saveDirBasePath" value="${escHtml(m.base_path || '')}" readonly disabled autocomplete="off" spellcheck="false">
+        <div class="mod-inline-row">
+          <button class="mod-btn-secondary" ${browseAllowed ? '' : 'disabled'} onclick="browseSaveDirectory()">Browse</button>
+        </div>
+        ${browseNotice}
+      </label>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" ${m.use_timestamp_folder ? 'checked' : ''} ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryToggle(this.checked)">
+        <span class="mod-checkbox-label">날짜_시간 폴더 사용 (${escHtml(m.session_timestamp || 'session')}/)</span>
+      </label>
+      <div class="mod-field">
+        <span class="mod-field-label">Current Counter</span>
+        <div class="mod-status" style="text-align:left;min-height:0">${escHtml(String(m.save_counter ?? 1))}</div>
+      </div>
+      <label class="mod-field">
+        <span class="mod-field-label">Filename Format</span>
+        <select class="mod-select" ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryFilenameFormatChange(this.value)">
+          ${filenameOptions}
+        </select>
+      </label>
+      <label class="mod-field">
+        <span class="mod-field-label">Classification Method</span>
+        <select class="mod-select" ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryClassificationChange(this.value)">
+          ${classificationOptions}
+        </select>
+      </label>
+      ${rulesVisible ? `
+        <label class="mod-field">
+          <span class="mod-field-label">Classification Rules</span>
+          <textarea class="mod-textarea mod-textarea-lg" ${controlAllowed ? '' : 'disabled'}
+                    placeholder="*1girl, (*solo&*1girl), (landscape|scenery)"
+                    oninput="onModTextEdit('save_directory','classification_rules',this.value)">${escHtml(m.classification_rules || '')}</textarea>
+        </label>
+      ` : ''}
+    </div>
+  `;
 }
 
 // ---- Module button inline badges ----
@@ -2018,24 +2498,51 @@ function renderPromptEngineering(m) {
     };
     saveSharedSession();
   }
-  // Build preset options
+  const canSaveCurrent = !!m.preset_can_save_current && !sharedMode;
+  const canDeleteCurrent = !!m.preset_can_delete && !sharedMode;
+
   const presetOpts = (m.preset_options || [])
     .map(p => `<option value="${p}"${p === m.preset ? ' selected' : ''}>${p}</option>`).join('');
 
-  // Build preprocessing checkboxes
   const pp = m.preprocessing || {};
   const ppHtml = PP_OPTIONS.map(([key, label]) =>
-    `<label class="mod-checkbox-item">
+    `<label class="mod-checkbox-item ${PP_OPTION_TONES[key] || ''}">
       <input type="checkbox" ${pp[key] ? 'checked' : ''} onchange="setModuleParam('prompt_engineering','pp_${key}',String(this.checked))">
       <span class="mod-checkbox-label">${label}</span>
     </label>`
   ).join('');
 
-  moduleBody.innerHTML = `
+  const presetControlHtml = sharedMode ? `
     <div>
       <div class="mod-section-label">Preset</div>
-      <select class="mod-select" id="modPreset" onchange="setModuleParam('prompt_engineering','preset',this.value)">${presetOpts}</select>
+      <select class="mod-select" id="modPreset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
     </div>
+  ` : `
+    <div>
+      <div class="mod-section-label">Quick Preset</div>
+      <div class="mod-preset-toolbar">
+        <select class="mod-select mod-preset-select" id="modPreset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
+        <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>
+        <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetManagePanel()">Manage</button>
+      </div>
+    </div>
+  `;
+
+  const advancedHtml = sharedMode ? '' : `
+    <div>
+      <div class="mod-section-label">Tools</div>
+      <div class="mod-inline-row">
+        <button class="mod-btn-secondary" onclick="openPeE621Panel()">e621 Auto-Boost Settings</button>
+        <button class="mod-btn-secondary" onclick="openPeDanbooruPanel()">Danbooru Auto-Weight Settings</button>
+      </div>
+      <div class="mod-inline-row">
+        <button class="mod-btn-secondary" onclick="openPeDebugPanel()">Debug Snapshot</button>
+      </div>
+    </div>
+  `;
+
+  moduleBody.innerHTML = `
+    ${presetControlHtml}
     <div>
       <div class="mod-section-label">Prefix Prompt</div>
       <textarea class="mod-textarea mod-textarea-lg" id="modPrePrompt" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value)">${escHtml(m.pre_prompt)}</textarea>
@@ -2052,12 +2559,449 @@ function renderPromptEngineering(m) {
       <div class="mod-section-label">Preprocessing Options</div>
       <div class="mod-checkbox-grid">${ppHtml}</div>
     </div>
+    ${advancedHtml}
   `;
   // Bind autocomplete to pre/post prompt textareas
   ['modPrePrompt', 'modPostPrompt'].forEach(id => {
     const el = document.getElementById(id);
     if (el) bindTagAssist(el);
   });
+}
+
+function renderPePresetAddPanel(m) {
+  const body = pePresetAddPanel.querySelector('.pe-popup-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="mod-section-label">Current Preset</div>
+    <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>
+    <label class="mod-field">
+      <span class="mod-field-label">New Preset Name</span>
+      <input class="mod-input" id="modPresetNewName" placeholder="new preset name" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" onclick="createPromptPreset()">Save As</button>
+      <button class="mod-btn-secondary" onclick="closePePresetAddPanel()">Close</button>
+    </div>
+  `;
+  const input = document.getElementById('modPresetNewName');
+  if (input) {
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        createPromptPreset();
+      }
+    });
+    requestAnimationFrame(() => input.focus());
+  }
+}
+
+function renderPePresetManagePanel(m) {
+  const body = pePresetManagePanel.querySelector('.pe-popup-body');
+  if (!body) return;
+  const canSaveCurrent = !!m.preset_can_save_current && !sharedMode;
+  const canDeleteCurrent = !!m.preset_can_delete && !sharedMode;
+  body.innerHTML = `
+    <div class="mod-section-label">Current Preset</div>
+    <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" ${canSaveCurrent ? '' : 'disabled'} onclick="saveCurrentPromptPreset()">Save Current</button>
+      <button class="mod-btn-danger" ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
+    </div>
+  `;
+}
+
+function renderPromptEngineeringDebug(snapshot) {
+  const sourceInfo = snapshot.source_info || {};
+  const filterLog = Array.isArray(snapshot.filter_log) ? snapshot.filter_log : [];
+  const implicationInfo = Array.isArray(snapshot.implication_info) ? snapshot.implication_info : [];
+  const e621Info = snapshot.e621_info || {};
+  const originalCount = Number(snapshot.original_count || 0);
+  const remainingCount = Number(snapshot.remaining_count || 0);
+  const hasDebugData = filterLog.length || implicationInfo.length || (e621Info.results || []).length || Object.values(sourceInfo).some(Boolean);
+
+  if (!hasDebugData) {
+    return '<div class="mod-debug-empty">No debug data yet. Generate a prompt once.</div>';
+  }
+
+  const sourceRows = Object.entries(sourceInfo)
+    .filter(([, value]) => value != null && String(value).trim() !== '')
+    .map(([key, value]) => `<div class="mod-debug-meta"><span>${escHtml(key)}</span><strong>${escHtml(String(value))}</strong></div>`)
+    .join('');
+
+  const filterRounds = filterLog.map(entry => {
+    const removed = Array.isArray(entry.removed) ? entry.removed : [];
+    const status = !entry.enabled ? 'OFF' : (removed.length ? `ON · ${removed.length} removed` : 'ON');
+    return `
+      <div class="mod-debug-round">
+        <div class="mod-debug-round-title">${escHtml(entry.name || 'Round')} <span>${status}</span></div>
+        ${removed.length ? `<pre class="mod-debug-block">${escHtml(removed.join(', '))}</pre>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  const implicationHtml = implicationInfo.length
+    ? `
+      <div class="mod-debug-round">
+        <div class="mod-debug-round-title">Tag Implication <span>${implicationInfo.length} removed</span></div>
+        <pre class="mod-debug-block">${escHtml(implicationInfo.map(item => `${item.removed} <- ${item.by}`).join('\n'))}</pre>
+      </div>
+    `
+    : '';
+
+  const e621Results = Array.isArray(e621Info.results) ? e621Info.results : [];
+  const e621Html = e621Results.length
+    ? `
+      <div class="mod-debug-round">
+        <div class="mod-debug-round-title">e621 Auto-Boost <span>${e621Results.length} suggested</span></div>
+        <pre class="mod-debug-block">${escHtml(`input: ${(e621Info.input_tags || []).join(', ')}`)}</pre>
+        <pre class="mod-debug-block">${escHtml(e621Results.map(item => `${item.tag} (${Number(item.score || 0).toFixed(4)}) [${item.cat || ''}] <- ${item.src || ''}`).join('\n'))}</pre>
+      </div>
+    `
+    : '';
+
+  return `
+    ${sourceRows ? `<div class="mod-debug-meta-grid">${sourceRows}</div>` : ''}
+    <div class="mod-debug-summary">Original ${originalCount} → Remaining ${remainingCount} · Removed ${Math.max(0, originalCount - remainingCount)}</div>
+    ${filterRounds}
+    ${implicationHtml}
+    ${e621Html}
+  `;
+}
+
+function renderPeE621Panel(m) {
+  const body = peE621Panel.querySelector('.pe-popup-body');
+  if (!body) return;
+  const e621 = m.e621_settings || {};
+  const e621Hidden = Array.isArray(e621.hidden_tags) ? e621.hidden_tags.join(', ') : '';
+  body.innerHTML = `
+    <div class="mod-section-label">Weight / Mode</div>
+    <div class="mod-inline-row">
+      <input class="mod-input" id="modE621Weight" type="number" min="-5" max="5" step="0.05" value="${escHtml(String(e621.weight ?? 0))}" placeholder="weight">
+      <select class="mod-select" id="modE621Mode">
+        <option value="stable"${e621.mode === 'stable' || !e621.mode ? ' selected' : ''}>stable</option>
+        <option value="confused"${e621.mode === 'confused' ? ' selected' : ''}>confused</option>
+      </select>
+    </div>
+    <div>
+      <div class="mod-section-label">Hidden Tags</div>
+      <textarea class="mod-textarea" id="modE621HiddenTags" placeholder="comma or newline separated tags">${escHtml(e621Hidden)}</textarea>
+    </div>
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" onclick="savePromptEngineeringE621Settings()">Save e621 Settings</button>
+    </div>
+  `;
+}
+
+function getDanbooruPreviewState(baseSettings = {}) {
+  const numberValue = (id, fallback) => {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    const parsed = parseFloat(el.value ?? '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const intValue = (id, fallback) => {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    const parsed = parseInt(el.value ?? '', 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const magnitude = Math.max(1, Math.min(10, intValue('modDanMagnitude', Number(baseSettings.magnitude ?? 3))));
+  const preset = DANBOORU_MAGNITUDE_TABLE[magnitude] || DANBOORU_MAGNITUDE_TABLE[3];
+  const overrideOn = !!document.getElementById('modDanOverrideOn')?.checked;
+  const ratingOverrideOn = !!document.getElementById('modDanRatingOverrideOn')?.checked;
+  const minWeight = overrideOn
+    ? numberValue('modDanOverrideMin', Number(baseSettings.override_min ?? preset.min_weight))
+    : preset.min_weight;
+  const maxWeight = overrideOn
+    ? numberValue('modDanOverrideMax', Number(baseSettings.override_max ?? preset.max_weight))
+    : preset.max_weight;
+  const scale = overrideOn
+    ? numberValue('modDanOverrideScale', Number(baseSettings.override_scale ?? preset.scale))
+    : preset.scale;
+  const blend = numberValue('modDanBlend', Number(baseSettings.rating_blend ?? 0.3));
+
+  return {
+    magnitude,
+    label: preset.label,
+    overrideOn,
+    ratingOverrideOn,
+    ratingOverride: document.getElementById('modDanRatingOverride')?.value || baseSettings.rating_override || 's',
+    invertWeight: !!document.getElementById('modDanInvertWeight')?.checked,
+    minWeight,
+    maxWeight,
+    scale,
+    blend,
+  };
+}
+
+function renderDanbooruVisualFeedback(state) {
+  const spread = Math.max(0, state.maxWeight - state.minWeight);
+  const chipTone = spread >= 0.9 ? 'danger' : spread >= 0.55 ? 'accent' : 'muted';
+  const samples = [
+    { label: 'Common', value: state.invertWeight ? state.maxWeight : state.minWeight, tone: state.invertWeight ? 'high' : 'low' },
+    { label: 'Neutral', value: 1.0, tone: 'mid' },
+    { label: 'Rare', value: state.invertWeight ? state.minWeight : state.maxWeight, tone: state.invertWeight ? 'low' : 'high' },
+  ];
+  const maxVisual = Math.max(2.0, state.maxWeight, state.minWeight, 1.0);
+  const ratingLabelMap = { g: 'General', s: 'Sensitive', q: 'Questionable', e: 'Explicit' };
+  const directionText = state.invertWeight ? 'High-frequency tags gain weight' : 'Rare tags gain weight';
+
+  const sampleRows = samples.map((item) => {
+    const pct = Math.max(6, Math.min(100, (item.value / maxVisual) * 100));
+    return `
+      <div class="mod-dan-sample-row">
+        <span class="mod-dan-sample-label">${item.label}</span>
+        <div class="mod-dan-sample-bar">
+          <span class="mod-dan-sample-fill ${item.tone}" style="width:${pct}%"></span>
+        </div>
+        <strong>${item.value.toFixed(2)}</strong>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="mod-dan-feedback-card">
+      <div class="mod-dan-feedback-head">
+        <div>
+          <div class="mod-dan-feedback-title">${state.magnitude}단계 · ${state.label}</div>
+          <div class="mod-dan-feedback-subtitle">${state.overrideOn ? 'Custom curve active' : 'Preset curve active'} · ${directionText}</div>
+        </div>
+        <span class="mod-dan-pill ${chipTone}">spread ${spread.toFixed(2)}</span>
+      </div>
+      <div class="mod-dan-pill-row">
+        <span class="mod-dan-pill muted">scale ${state.scale.toFixed(2)}</span>
+        <span class="mod-dan-pill muted">blend ${(state.blend * 100).toFixed(0)}%</span>
+        <span class="mod-dan-pill ${state.ratingOverrideOn ? 'accent' : 'muted'}">${state.ratingOverrideOn ? `IDF ${ratingLabelMap[state.ratingOverride] || state.ratingOverride}` : 'IDF auto'}</span>
+        <span class="mod-dan-pill ${state.invertWeight ? 'danger' : 'muted'}">${state.invertWeight ? 'inverted' : 'normal'}</span>
+      </div>
+      <div class="mod-dan-range-caption">Effective weight curve</div>
+      <div class="mod-dan-sample-list">${sampleRows}</div>
+    </div>
+  `;
+}
+
+function syncDanbooruFeedback(baseSettings = {}) {
+  const feedback = document.getElementById('modDanFeedback');
+  if (!feedback) return;
+  const state = getDanbooruPreviewState(baseSettings);
+  feedback.innerHTML = renderDanbooruVisualFeedback(state);
+
+  const overrideOn = !!document.getElementById('modDanOverrideOn')?.checked;
+  const ratingOverrideOn = !!document.getElementById('modDanRatingOverrideOn')?.checked;
+  ['modDanOverrideScale', 'modDanOverrideMin', 'modDanOverrideMax'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !overrideOn;
+  });
+  const ratingSelect = document.getElementById('modDanRatingOverride');
+  if (ratingSelect) ratingSelect.disabled = !ratingOverrideOn;
+}
+
+function bindDanbooruFeedback(baseSettings = {}) {
+  const ids = [
+    'modDanMagnitude',
+    'modDanBlend',
+    'modDanOverrideOn',
+    'modDanOverrideScale',
+    'modDanOverrideMin',
+    'modDanOverrideMax',
+    'modDanRatingOverrideOn',
+    'modDanRatingOverride',
+    'modDanInvertWeight',
+  ];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const eventName = el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input';
+    el.addEventListener(eventName, () => syncDanbooruFeedback(baseSettings));
+  });
+  syncDanbooruFeedback(baseSettings);
+}
+
+function renderPeDanbooruPanel(m) {
+  const body = peDanbooruPanel.querySelector('.pe-popup-body');
+  if (!body) return;
+  const danbooru = m.danbooru_settings || {};
+  body.innerHTML = `
+    <div id="modDanFeedback"></div>
+    <div class="mod-grid-2">
+      <label class="mod-field">
+        <span class="mod-field-label">Magnitude</span>
+        <input class="mod-input" id="modDanMagnitude" type="number" min="1" max="10" step="1" value="${escHtml(String(danbooru.magnitude ?? 3))}">
+      </label>
+      <label class="mod-field">
+        <span class="mod-field-label">Rating Blend</span>
+        <input class="mod-input" id="modDanBlend" type="number" min="0" max="1" step="0.1" value="${escHtml(String(danbooru.rating_blend ?? 0.3))}">
+      </label>
+    </div>
+    <label class="mod-checkbox-item">
+      <input type="checkbox" id="modDanOverrideOn" ${danbooru.override_on ? 'checked' : ''}>
+      <span class="mod-checkbox-label">Custom Override</span>
+    </label>
+    <div class="mod-grid-3">
+      <label class="mod-field">
+        <span class="mod-field-label">Scale</span>
+        <input class="mod-input" id="modDanOverrideScale" type="number" min="0" max="5" step="0.05" value="${escHtml(String(danbooru.override_scale ?? 0.35))}">
+      </label>
+      <label class="mod-field">
+        <span class="mod-field-label">Min</span>
+        <input class="mod-input" id="modDanOverrideMin" type="number" min="0" max="5" step="0.05" value="${escHtml(String(danbooru.override_min ?? 0.8))}">
+      </label>
+      <label class="mod-field">
+        <span class="mod-field-label">Max</span>
+        <input class="mod-input" id="modDanOverrideMax" type="number" min="0" max="10" step="0.05" value="${escHtml(String(danbooru.override_max ?? 1.35))}">
+      </label>
+    </div>
+    <label class="mod-checkbox-item">
+      <input type="checkbox" id="modDanRatingOverrideOn" ${danbooru.rating_override_on ? 'checked' : ''}>
+      <span class="mod-checkbox-label">Rating Override</span>
+    </label>
+    <div class="mod-inline-row">
+      <select class="mod-select" id="modDanRatingOverride">
+        <option value="g"${danbooru.rating_override === 'g' ? ' selected' : ''}>General</option>
+        <option value="s"${danbooru.rating_override === 's' || !danbooru.rating_override ? ' selected' : ''}>Sensitive</option>
+        <option value="q"${danbooru.rating_override === 'q' ? ' selected' : ''}>Questionable</option>
+        <option value="e"${danbooru.rating_override === 'e' ? ' selected' : ''}>Explicit</option>
+      </select>
+    </div>
+    <label class="mod-checkbox-item">
+      <input type="checkbox" id="modDanInvertWeight" ${danbooru.invert_weight ? 'checked' : ''}>
+      <span class="mod-checkbox-label">Invert Weight</span>
+    </label>
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" onclick="savePromptEngineeringDanbooruSettings()">Save Danbooru Settings</button>
+    </div>
+  `;
+  bindDanbooruFeedback(danbooru);
+}
+
+function renderPeDebugPanel(m) {
+  const body = peDebugPanel.querySelector('.pe-popup-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" onclick="refreshPromptEngineeringDebug()">Refresh Debug</button>
+    </div>
+    ${renderPromptEngineeringDebug(m.debug_snapshot || {})}
+  `;
+}
+
+function flushPromptEngineeringEdits() {
+  if (currentModuleId !== 'prompt_engineering') return;
+  const pre = document.getElementById('modPrePrompt');
+  const post = document.getElementById('modPostPrompt');
+  const autoHide = document.getElementById('modAutoHide');
+  if (pre) setModuleParam('prompt_engineering', 'pre_prompt', pre.value);
+  if (post) setModuleParam('prompt_engineering', 'post_prompt', post.value);
+  if (autoHide) setModuleParam('prompt_engineering', 'auto_hide', autoHide.value);
+}
+
+function flushMainPromptAndParams() {
+  if (promptSendTimer) {
+    clearTimeout(promptSendTimer);
+    promptSendTimer = null;
+  }
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'set_prompt',
+      prompt: promptEdit.value,
+      negative_prompt: negEdit.value,
+    }));
+    const params = _collectCurrentParams();
+    Object.entries(params).forEach(([key, value]) => {
+      ws.send(JSON.stringify({type: 'set_param', key, value}));
+    });
+  }
+  saveSharedSession();
+}
+
+function flushPromptPresetSaveState() {
+  flushPromptEngineeringEdits();
+  flushMainPromptAndParams();
+}
+
+function onPromptPresetChange(value) {
+  flushPromptPresetSaveState();
+  setModuleParam('prompt_engineering', 'preset', value);
+}
+
+function saveCurrentPromptPreset() {
+  flushPromptPresetSaveState();
+  setModuleParam('prompt_engineering', 'preset_save_current', 'true');
+}
+
+function createPromptPreset() {
+  const input = document.getElementById('modPresetNewName');
+  const name = input ? input.value.trim() : '';
+  if (!name) {
+    showToast('Preset name required', 'error');
+    return;
+  }
+  flushPromptPresetSaveState();
+  setModuleParam('prompt_engineering', 'preset_create', name);
+  if (input) input.value = '';
+  closePePresetAddPanel();
+}
+
+function applyRecommendedPromptPreset() {
+  if (sharedMode) return;
+  if (modeSelect.value !== 'NAI') {
+    showToast('추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.', 'error');
+    return;
+  }
+  if (!confirm('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?')) return;
+  setModuleParam('prompt_engineering', 'preset_apply_recommended', 'true');
+}
+
+function deleteCurrentPromptPreset() {
+  const preset = document.getElementById('modPreset')?.value || '';
+  if (!preset || preset === 'default' || preset === '*randomized') {
+    showToast('This preset cannot be deleted', 'error');
+    return;
+  }
+  if (!confirm(`Delete preset "${preset}"?`)) return;
+  setModuleParam('prompt_engineering', 'preset_delete', preset);
+  closePePresetManagePanel();
+}
+
+function savePromptEngineeringE621Settings() {
+  const hiddenRaw = document.getElementById('modE621HiddenTags')?.value || '';
+  const hiddenTags = hiddenRaw
+    .split(/[\n,]+/)
+    .map(tag => tag.trim())
+    .filter(Boolean);
+  const payload = {
+    weight: parseFloat(document.getElementById('modE621Weight')?.value || '0') || 0,
+    mode: document.getElementById('modE621Mode')?.value || 'stable',
+    hidden_tags: hiddenTags,
+  };
+  setModuleParam('prompt_engineering', 'e621_settings', JSON.stringify(payload));
+}
+
+function savePromptEngineeringDanbooruSettings() {
+  const numberValue = (id, fallback) => {
+    const parsed = parseFloat(document.getElementById(id)?.value ?? '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const intValue = (id, fallback) => {
+    const parsed = parseInt(document.getElementById(id)?.value ?? '', 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const payload = {
+    magnitude: intValue('modDanMagnitude', 3),
+    rating_blend: numberValue('modDanBlend', 0.3),
+    override_on: !!document.getElementById('modDanOverrideOn')?.checked,
+    override_scale: numberValue('modDanOverrideScale', 0.35),
+    override_min: numberValue('modDanOverrideMin', 0.8),
+    override_max: numberValue('modDanOverrideMax', 1.35),
+    rating_override_on: !!document.getElementById('modDanRatingOverrideOn')?.checked,
+    rating_override: document.getElementById('modDanRatingOverride')?.value || 's',
+    invert_weight: !!document.getElementById('modDanInvertWeight')?.checked,
+  };
+  setModuleParam('prompt_engineering', 'danbooru_settings', JSON.stringify(payload));
+}
+
+function refreshPromptEngineeringDebug() {
+  setModuleParam('prompt_engineering', 'debug_refresh', 'true');
 }
 
 function setModuleParam(moduleId, key, value) {
@@ -2089,6 +3033,37 @@ function setModuleParam(moduleId, key, value) {
 function onModTextEdit(moduleId, key, value) {
   if (moduleSendTimer) clearTimeout(moduleSendTimer);
   moduleSendTimer = setTimeout(() => setModuleParam(moduleId, key, value), 500);
+}
+
+function flushCharacterEdits() {
+  if (currentModuleId !== 'character') return;
+  if (moduleSendTimer) {
+    clearTimeout(moduleSendTimer);
+    moduleSendTimer = null;
+  }
+  const chars = document.querySelectorAll('[data-char-index]');
+  chars.forEach((block) => {
+    const idx = block.dataset.charIndex;
+    const prompt = block.querySelector('.mod-char-prompt');
+    const uc = block.querySelector('.mod-char-uc');
+    if (prompt) setModuleParam('character', `char_prompt_${idx}`, prompt.value);
+    if (uc) setModuleParam('character', `char_uc_${idx}`, uc.value);
+  });
+}
+
+function addCharacterSlot() {
+  flushCharacterEdits();
+  setModuleParam('character', 'add_character', 'true');
+}
+
+function removeCharacterSlot(index) {
+  flushCharacterEdits();
+  setModuleParam('character', `remove_character_${index}`, 'true');
+}
+
+function refreshCharacterPreview() {
+  flushCharacterEdits();
+  setModuleParam('character', 'preview_refresh', 'true');
 }
 
 // ---- Automation module ----
@@ -2156,17 +3131,20 @@ function renderAutomation(m) {
 function renderCharacter(m) {
   const chars = m.characters || [];
   const charsHtml = chars.map((c, i) => `
-    <div class="mod-char-block">
+    <div class="mod-char-block" data-char-index="${i}">
       <div class="mod-char-header">
         <label class="mod-checkbox-item" style="margin:0">
           <input type="checkbox" ${c.active ? 'checked' : ''} onchange="setModuleParam('character','char_active_${i}',String(this.checked))">
           <span class="mod-checkbox-label">C${c.id}</span>
         </label>
+        <button class="mod-btn-sm mod-btn-danger" ${chars.length > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${i})">Remove</button>
       </div>
-      <textarea class="mod-textarea" placeholder="character prompt..." oninput="onModTextEdit('character','char_prompt_${i}',this.value)">${escHtml(c.prompt)}</textarea>
-      <textarea class="mod-textarea mod-uc" placeholder="negative prompt (UC)..." oninput="onModTextEdit('character','char_uc_${i}',this.value)">${escHtml(c.uc)}</textarea>
+      <textarea class="mod-textarea mod-char-prompt" placeholder="character prompt..." oninput="onModTextEdit('character','char_prompt_${i}',this.value)">${escHtml(c.prompt)}</textarea>
+      <textarea class="mod-textarea mod-uc mod-char-uc" placeholder="negative prompt (UC)..." oninput="onModTextEdit('character','char_uc_${i}',this.value)">${escHtml(c.uc)}</textarea>
     </div>
   `).join('');
+  const previewText = m.processed_preview_text || '';
+  const previewEmpty = !previewText.trim();
 
   moduleBody.innerHTML = `
     <div>
@@ -2181,7 +3159,18 @@ function renderCharacter(m) {
         <span class="mod-checkbox-label">Process wildcards on Generate</span>
       </label>
     </div>
+    <div class="mod-char-actions">
+      <button class="mod-btn-sm" onclick="addCharacterSlot()">+ Add Character</button>
+      <button class="mod-btn-sm mod-btn-encode" onclick="refreshCharacterPreview()">Refresh Preview</button>
+      <span class="mod-char-meta">${m.active_count || 0} active / ${m.character_count || chars.length} slots</span>
+    </div>
     ${charsHtml}
+    <div class="mod-char-preview">
+      <div class="mod-section-label">Final Applied Character Prompt</div>
+      ${previewEmpty
+        ? '<div class="mod-empty">No preview yet. Use Refresh Preview to process wildcards and show the applied character prompts.</div>'
+        : `<pre class="mod-char-preview-text">${escHtml(previewText)}</pre>`}
+    </div>
   `;
   // Bind autocomplete to character prompt textareas (not UC)
   moduleBody.querySelectorAll('.mod-textarea:not(.mod-uc)').forEach(el => bindTagAssist(el));
@@ -3022,6 +4011,12 @@ function renderSearch(m) {
       <div class="search-parquet-list collapsed">${parquets}</div>
     </div>` : ''}
   `;
+
+  // Bind tag autocomplete to Prompt Search inputs.
+  ['searchQuery', 'searchExclude'].forEach(id => {
+    const el = moduleBody.querySelector(`#${id}`);
+    if (el) bindTagAssist(el, { excludeE621: true });
+  });
 }
 
 function doSearch() {
@@ -3060,10 +4055,87 @@ function restoreSnapshot() {
 const refinePanel = $('refinePanel');
 let refineOpen = false;
 
+function getFloatingPanelWidth(panel) {
+  if (panel === peDebugPanel) return 520;
+  if (panel === refinePanel) return 400;
+  return 420;
+}
+
+function positionFloatingPanel(panel, anchorEl = modulePopup) {
+  if (!panel || !panel.classList.contains('open')) return;
+
+  const vv = window.visualViewport;
+  const viewportTop = vv ? vv.offsetTop : 0;
+  const viewportLeft = vv ? vv.offsetLeft : 0;
+  const viewportWidth = vv ? vv.width : window.innerWidth;
+  const viewportHeight = vv ? vv.height : window.innerHeight;
+  const margin = isPC.matches ? 16 : 12;
+  const sideMargin = 12;
+  const minWidth = Math.min(320, Math.max(260, viewportWidth - sideMargin * 2));
+  const preferredWidth = Math.min(getFloatingPanelWidth(panel), viewportWidth - sideMargin * 2);
+
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+
+  if (!isPC.matches) {
+    const width = Math.max(minWidth, preferredWidth);
+    panel.style.left = `${viewportLeft + sideMargin}px`;
+    panel.style.top = `${viewportTop + sideMargin}px`;
+    panel.style.width = `${width}px`;
+    panel.style.maxWidth = `${viewportWidth - sideMargin * 2}px`;
+    panel.style.maxHeight = `${Math.max(220, viewportHeight - sideMargin * 2)}px`;
+    return;
+  }
+
+  const anchorRect = anchorEl && anchorEl.classList.contains('open')
+    ? anchorEl.getBoundingClientRect()
+    : null;
+  const fallbackWidth = Math.min(preferredWidth, viewportWidth - sideMargin * 2);
+
+  if (!anchorRect) {
+    panel.style.left = `${Math.max(viewportLeft + sideMargin, viewportLeft + viewportWidth - fallbackWidth - sideMargin)}px`;
+    panel.style.top = `${viewportTop + sideMargin}px`;
+    panel.style.width = `${fallbackWidth}px`;
+    panel.style.maxWidth = `${viewportWidth - sideMargin * 2}px`;
+    panel.style.maxHeight = `${Math.max(220, viewportHeight - sideMargin * 2)}px`;
+    return;
+  }
+
+  const availableRight = viewportLeft + viewportWidth - sideMargin - (anchorRect.right + margin);
+  const availableLeft = anchorRect.left - viewportLeft - sideMargin - margin;
+  let width = Math.min(preferredWidth, Math.max(minWidth, availableRight));
+  let left = anchorRect.right + margin;
+
+  if (availableRight < minWidth && availableLeft > availableRight) {
+    width = Math.min(preferredWidth, Math.max(minWidth, availableLeft));
+    left = Math.max(viewportLeft + sideMargin, anchorRect.left - margin - width);
+  } else {
+    left = Math.min(left, viewportLeft + viewportWidth - sideMargin - width);
+  }
+
+  const top = Math.max(viewportTop + sideMargin, anchorRect.top);
+  panel.style.left = `${left}px`;
+  panel.style.top = `${top}px`;
+  panel.style.width = `${width}px`;
+  panel.style.maxWidth = `${viewportWidth - sideMargin * 2}px`;
+  panel.style.maxHeight = `${Math.max(220, viewportHeight - (top - viewportTop) - sideMargin)}px`;
+}
+
+function relayoutFloatingPanels() {
+  positionFloatingPanel(refinePanel, modulePopup);
+  positionFloatingPanel(pePresetAddPanel, modulePopup);
+  positionFloatingPanel(pePresetManagePanel, modulePopup);
+  positionFloatingPanel(peE621Panel, modulePopup);
+  positionFloatingPanel(peDanbooruPanel, modulePopup);
+  positionFloatingPanel(peDebugPanel, modulePopup);
+}
+
 function openRefine() {
   if (refineOpen) { closeRefine(); return; }
+  closeAuxiliaryPopups(refinePanel);
   refineOpen = true;
   refinePanel.classList.add('open');
+  positionFloatingPanel(refinePanel, modulePopup);
   if (ws && ws.readyState === WebSocket.OPEN) {
     // 먼저 현재 상태 요청 (이미 열려있을 수 있음)
     ws.send(JSON.stringify({type: 'get_depth_state'}));
@@ -3455,12 +4527,14 @@ function onAutocompleteResult(m) {
   const q = lastAcQuery;
   const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
   if (!matchesWc && m.query !== q) return;
-  if (!m.results || !m.results.length) {
+  const target = acTarget || promptEdit;
+  const results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+  if (!results.length) {
     hideAutocomplete();
     checkTagHint();
     return;
   }
-  acResults = m.results;
+  acResults = results;
   acSel = -1;
   acMode = true;
   renderAutocomplete();
@@ -3566,7 +4640,8 @@ function hideAutocomplete() {
 }
 
 // ---- Bind autocomplete/hint to a textarea ----
-function bindTagAssist(textarea) {
+function bindTagAssist(textarea, options = {}) {
+  textarea._excludeE621Autocomplete = !!options.excludeE621;
   let composing = false;
   textarea.addEventListener('compositionstart', () => { composing = true; });
   textarea.addEventListener('compositionend', () => {
@@ -3685,6 +4760,7 @@ function toggleTagFilter() {
 
 function openTagFilter() {
   const popup = document.getElementById('tagFilterPopup');
+  closeAuxiliaryPopups(popup);
   popup.classList.add('open');
   document.getElementById('tagFilterToggle').classList.add('active');
   renderTagFilterChips();

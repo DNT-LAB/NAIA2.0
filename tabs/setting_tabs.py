@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QLineEdit, QFileDialog, QGroupBox,
     QScrollArea, QMessageBox, QComboBox
 )
-from PyQt6.QtCore import pyqtSignal, QTimer, Qt
+from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QIntValidator
 from PyQt6.QtWidgets import QTextEdit
 from interfaces.base_tab_module import BaseTabModule
@@ -12,8 +12,64 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size, get_scalin
 from ui.scaling_settings_dialog import ScalingSettingsDialog
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+class _WebSessionReadyWorker(QObject):
+    """로컬 Web Session 서버가 실제로 응답할 때까지 대기한다."""
+
+    ready = pyqtSignal(str, int)
+    timeout = pyqtSignal(str, int)
+    finished = pyqtSignal()
+
+    def __init__(
+        self,
+        url: str,
+        request_id: int,
+        timeout_seconds: float = 20.0,
+        poll_interval_seconds: float = 0.25,
+    ):
+        super().__init__()
+        self.url = url
+        self.request_id = request_id
+        self.timeout_seconds = timeout_seconds
+        self.poll_interval_seconds = poll_interval_seconds
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        deadline = time.monotonic() + self.timeout_seconds
+        request = Request(self.url, headers={"Cache-Control": "no-cache"})
+
+        try:
+            while not self._stop_requested and time.monotonic() < deadline:
+                try:
+                    with urlopen(request, timeout=1.0) as response:
+                        status_code = getattr(response, "status", response.getcode())
+                        if status_code < 500:
+                            self.ready.emit(self.url, self.request_id)
+                            return
+                except HTTPError as exc:
+                    if exc.code < 500:
+                        self.ready.emit(self.url, self.request_id)
+                        return
+                except URLError:
+                    pass
+                except Exception:
+                    pass
+
+                time.sleep(self.poll_interval_seconds)
+
+            if not self._stop_requested:
+                self.timeout.emit(self.url, self.request_id)
+        finally:
+            self.finished.emit()
 
 class SettingsTabModule(BaseTabModule):
     """Settings 탭을 관리하는 모듈"""
@@ -29,6 +85,9 @@ class SettingsTabModule(BaseTabModule):
         self.settings_widget = None
         self.settings_data = {}
         self.settings_file = "app_settings.json"
+        self._browser_wait_thread = None
+        self._browser_wait_worker = None
+        self._browser_wait_request_id = 0
         
     def get_tab_title(self) -> str:
         return "⚙️ Settings"
@@ -59,14 +118,75 @@ class SettingsTabModule(BaseTabModule):
 
     def _auto_start_web_session(self):
         """자동 시작: Web Session 활성화 + 브라우저 오픈"""
-        if self.settings_widget and not self.settings_widget.web_session_checkbox.isChecked():
+        if not self.settings_widget:
+            return
+
+        port = self.settings_widget._get_remote_port()
+        url = f"http://localhost:{port}"
+
+        if not self.settings_widget.web_session_checkbox.isChecked():
             self.settings_widget.web_session_checkbox.setChecked(True)
-            port = self.settings_widget._get_remote_port()
-            import webbrowser
-            webbrowser.open(f"http://localhost:{port}")
+
+        self._open_browser_when_ready(url)
+
+    def _open_browser_when_ready(self, url: str):
+        """서버가 실제로 응답한 뒤 기본 브라우저를 연다."""
+        self._stop_browser_wait()
+        self._browser_wait_request_id += 1
+        request_id = self._browser_wait_request_id
+
+        self._browser_wait_thread = QThread()
+        self._browser_wait_worker = _WebSessionReadyWorker(url, request_id=request_id)
+        self._browser_wait_worker.moveToThread(self._browser_wait_thread)
+
+        self._browser_wait_thread.started.connect(self._browser_wait_worker.run)
+        self._browser_wait_worker.ready.connect(self._on_browser_wait_ready)
+        self._browser_wait_worker.timeout.connect(self._on_browser_wait_timeout)
+        self._browser_wait_worker.finished.connect(self._browser_wait_thread.quit)
+        self._browser_wait_thread.finished.connect(self._browser_wait_worker.deleteLater)
+        self._browser_wait_thread.finished.connect(self._browser_wait_thread.deleteLater)
+        self._browser_wait_thread.finished.connect(self._clear_browser_wait_refs)
+        self._browser_wait_thread.start()
+
+    def _stop_browser_wait(self):
+        """진행 중인 브라우저 오픈 대기를 중단한다."""
+        worker = self._browser_wait_worker
+        thread = self._browser_wait_thread
+
+        if worker:
+            worker.stop()
+
+        if thread:
+            thread.quit()
+            thread.wait(1500)
+
+        self._browser_wait_worker = None
+        self._browser_wait_thread = None
+
+    def _clear_browser_wait_refs(self):
+        self._browser_wait_worker = None
+        self._browser_wait_thread = None
+
+    def _on_browser_wait_ready(self, url: str, request_id: int):
+        if request_id != self._browser_wait_request_id:
+            return
+        self._open_url_in_browser(url)
+
+    def _on_browser_wait_timeout(self, url: str, request_id: int):
+        if request_id != self._browser_wait_request_id:
+            return
+
+        print(f"🌐 Web Session readiness check timed out, opening browser anyway: {url}")
+        self._open_url_in_browser(url)
+
+    @staticmethod
+    def _open_url_in_browser(url: str):
+        import webbrowser
+        webbrowser.open(url)
 
     def cleanup(self):
         """앱 종료 시 cloudflared 터널 및 remote server 정리"""
+        self._stop_browser_wait()
         if self.settings_widget:
             self.settings_widget.cleanup_services()
     

@@ -16,6 +16,8 @@ let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let sessionId = null, sharedMode = false;
 let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
+let desktopWindowVisible = true;
+let desktopWindowControlAllowed = false;
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
@@ -79,6 +81,7 @@ const $ = id => document.getElementById(id);
 const preview      = $('preview');
 const emptyMsg     = $('emptyMsg');
 const setupLauncherBtn = $('setupLauncher');  // doubles as connection-status indicator
+const desktopToggleBtn = $('desktopToggleBtn');
 const btnGen       = $('btnGen');
 const btnRnd       = $('btnRnd');
 const promptEdit   = $('promptEdit');
@@ -138,6 +141,8 @@ function connect() {
   };
   ws.onclose = () => {
     setLauncherConn(false);
+    desktopWindowControlAllowed = false;
+    if (desktopToggleBtn) desktopToggleBtn.classList.add('hidden');
     reconnTimer = setTimeout(connect, 3000);
   };
   ws.onerror = () => ws.close();
@@ -193,6 +198,7 @@ function connect() {
         else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
         else if (m.type === 'viewer_new_image') onViewerNewImage(m);
         else if (m.type === 'session') onSession(m);
+        else if (m.type === 'desktop_window_state') onDesktopWindowState(m);
         else if (m.type === 'init_complete') {
           _restoringSession = false;
           _initDone = true;
@@ -1089,6 +1095,31 @@ function onSession(m) {
     tfToggle.classList.remove('assigned');
     closeTagFilter();
   }
+}
+
+function onDesktopWindowState(m) {
+  if (typeof m.visible === 'boolean') desktopWindowVisible = m.visible;
+  if (typeof m.control_allowed === 'boolean') desktopWindowControlAllowed = m.control_allowed;
+  if (!desktopToggleBtn) return;
+
+  if (!desktopWindowControlAllowed) {
+    desktopToggleBtn.classList.add('hidden');
+    return;
+  }
+
+  desktopToggleBtn.classList.remove('hidden');
+  desktopToggleBtn.classList.toggle('visible-state', desktopWindowVisible);
+  desktopToggleBtn.classList.toggle('hidden-state', !desktopWindowVisible);
+  desktopToggleBtn.textContent = desktopWindowVisible ? 'HIDE DESKTOP' : 'SHOW DESKTOP';
+  desktopToggleBtn.title = desktopWindowVisible ? 'Hide desktop app' : 'Show desktop app';
+}
+
+function toggleDesktopWindow() {
+  if (!desktopWindowControlAllowed || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    type: 'set_desktop_window_visibility',
+    visible: !desktopWindowVisible,
+  }));
 }
 
 function _restoreSharedSession() {

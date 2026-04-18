@@ -34,7 +34,11 @@
         <h2 class="setup-title" id="setupTitle">API Configuration</h2>
         <p class="setup-sub">Connect a generation backend — NovelAI / WebUI / ComfyUI</p>
       </div>
-      <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="Close">&times;</button>
+      <div class="setup-header-actions">
+        <button class="setup-desktop-toggle hidden" id="desktopToggleBtn"
+                onclick="toggleDesktopWindow()" title="Show desktop app">SHOW DESKTOP</button>
+        <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="Close">&times;</button>
+      </div>
     </header>
     <div class="setup-body">
       <nav class="setup-nav" role="tablist">

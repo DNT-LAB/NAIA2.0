@@ -132,6 +132,7 @@ class RemoteBridge(QObject):
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
     request_history_action = pyqtSignal(object, str)   # (ws, action_json)
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
+    request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
     OPTION_KEYS = {
@@ -282,6 +283,13 @@ class RemoteBridge(QObject):
             return False, "Shared Server Mode 활성 중 — 초기 설정이 차단됩니다."
         if self._is_cloudflared_active():
             return False, "Cloudflared 터널 활성 중 — 초기 설정이 차단됩니다."
+        return True, ""
+
+    def _desktop_window_gate(self, ws) -> tuple[bool, str]:
+        """데스크탑 창 제어는 로컬 loopback 클라이언트에만 허용."""
+        host = self._ws_client_host(ws)
+        if host not in ("127.0.0.1", "::1"):
+            return False, "데스크탑 창 제어는 로컬(127.0.0.1) 접속에서만 가능합니다."
         return True, ""
 
     def _is_setup_required(self) -> bool:
@@ -878,6 +886,40 @@ class RemoteBridge(QObject):
             payload["setup_allowed"] = allowed
             payload["setup_block_reason"] = reason
             self._send_json_to(ws, payload)
+
+    def get_desktop_window_state(self, ws=None) -> dict:
+        """메인 데스크탑 창 visibility + 제어 가능 여부."""
+        mw = getattr(self.app_context, "main_window", None)
+        payload = {
+            "type": "desktop_window_state",
+            "visible": bool(mw and mw.isVisible() and not mw.isHidden()),
+        }
+        if ws is not None:
+            allowed, reason = self._desktop_window_gate(ws)
+            payload["control_allowed"] = allowed
+            payload["control_block_reason"] = reason
+        return payload
+
+    def _broadcast_desktop_window_state(self):
+        if not self._has_clients():
+            return
+        self._broadcast_json(self.get_desktop_window_state())
+
+    def on_desktop_window_visibility_changed(self, _data: dict):
+        self._broadcast_desktop_window_state()
+
+    def _do_set_desktop_visibility(self, visible: bool):
+        mw = getattr(self.app_context, "main_window", None)
+        if not mw:
+            return
+        if hasattr(mw, "set_web_session_window_visible"):
+            mw.set_web_session_window_visible(bool(visible))
+        elif visible:
+            mw.show()
+            mw.raise_()
+            mw.activateWindow()
+        else:
+            mw.hide()
 
     def on_api_mode_changed(self, data: dict):
         """api_mode_changed 이벤트 → 웹 클라이언트에 브로드캐스트"""
@@ -3450,6 +3492,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 "session_id": session_id,
                 "shared_server_mode": bridge.shared_server_mode,
             }))
+            await ws.send_text(json.dumps(bridge.get_desktop_window_state(ws)))
             # 클라이언트 초기 메시지 수신 (onopen에서 get_search_state + client_state 전송)
             # 히스토리 전송 전에 client_state를 받아 보유 수 확인
             _client_history_count = 0
@@ -3595,6 +3638,16 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 )
                         elif cmd_type == "set_mode":
                             bridge.request_set_mode.emit(cmd.get("mode", ""))
+                        elif cmd_type == "set_desktop_window_visibility":
+                            allowed, reason = bridge._desktop_window_gate(ws)
+                            if not allowed:
+                                await ws.send_text(json.dumps({
+                                    "type": "toast",
+                                    "message": reason,
+                                    "level": "error",
+                                }))
+                                continue
+                            bridge.request_set_desktop_visibility.emit(bool(cmd.get("visible", False)))
                         elif cmd_type == "set_param":
                             v = cmd.get("value", "")
                             if bridge.shared_server_mode:
@@ -3988,6 +4041,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_apply_filters.connect(bridge._do_apply_filters, Qt.ConnectionType.QueuedConnection)
     bridge.request_history_action.connect(bridge._handle_history_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
+    bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결
     mw = app_context.main_window
@@ -4013,6 +4067,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("image_saved", bridge._on_image_saved)
+    app_context.subscribe("desktop_window_visibility_changed", bridge.on_desktop_window_visibility_changed)
 
     # NAI 모드에서 시작된 경우 Anlas 타이머 부트 + 초기 fetch
     try:
@@ -4137,7 +4192,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved"]:
+            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

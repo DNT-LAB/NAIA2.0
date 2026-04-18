@@ -37,7 +37,7 @@ from ui.resolution_manager_dialog import ResolutionManagerDialog
 from ui.remote_window import RemoteWindow
 from ui.translate_dialog import TranslateDialog
 from ui.interactive_window import InteractiveWindow
-from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
+from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor, QShowEvent, QHideEvent
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
@@ -858,7 +858,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 172"
+        self.base_title = "NAIA v2.0.0 Dev 172b"
         self.setWindowTitle(self.base_title + " - 260418")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -1000,6 +1000,34 @@ class ModernMainWindow(QMainWindow):
 
         # 🆕 멀티 NAI 계정 알림 (업데이트 확인 후)
         QTimer.singleShot(3000, self._show_multi_account_notification)  # 3초 후 시작
+
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        self._publish_desktop_window_visibility()
+
+    def hideEvent(self, event: QHideEvent):
+        super().hideEvent(event)
+        self._publish_desktop_window_visibility()
+
+    def _publish_desktop_window_visibility(self):
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.publish("desktop_window_visibility_changed", {
+                "visible": self.isVisible() and not self.isHidden()
+            })
+
+    def set_web_session_window_visible(self, visible: bool):
+        """Web Session 에서 메인 데스크탑 창 표시/숨김."""
+        if visible:
+            if self.isMinimized():
+                self.showNormal()
+            else:
+                self.show()
+            self.raise_()
+            self.activateWindow()
+        else:
+            self.hide()
+
+        self._publish_desktop_window_visibility()
 
     def apply_dynamic_styles(self):
         """동적 스타일시트 적용"""
@@ -7317,6 +7345,7 @@ if __name__ == "__main__":
     # 동기 실행되므로, app_context 속성으로는 타이밍이 맞지 않아 os.environ 으로 배관.
     if cli_args.web_session:
         os.environ["NAIA_CLI_WEB_SESSION"] = "1"
+        os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
 
     # 기존 환경 설정들...
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
@@ -7351,8 +7380,10 @@ if __name__ == "__main__":
 
     # 메인 윈도우 생성
     window = ModernMainWindow()
-
-    window.show()
+    if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
+        window._publish_desktop_window_visibility()
+    else:
+        window.show()
     sys.exit(app.exec())
 
 ## 생성형 AI 개발 가이드라인

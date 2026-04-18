@@ -42,11 +42,11 @@ core/generation_controller.py
 | **comfyui_workflow_manager.py** | ComfyUI 워크플로우 관리 |
 | **middle_section_controller.py** | 모듈 로딩, 아코디언 동작, 상태 영속성 |
 | **comfyui_service.py** | ComfyUI 순수 HTTP 통신 (WebSocket 제거됨) |
-| **wildcard_processor.py** | 와일드카드 치환 (랜덤/순차/종속) |
+| **wildcard_processor.py** | 와일드카드 치환 (랜덤/순차/종속), 오버라이드 지원 |
 | **image_crud_controller.py** | 이미지 파일 CRUD, 분류 시스템 |
 | **tab_controller.py** | 탭 로딩 및 관리 |
 | **prompt_processor.py** | 프롬프트 파이프라인 |
-| **wildcard_manager.py** | 와일드카드 파일 로딩, 가중치 파싱 |
+| **wildcard_manager.py** | 와일드카드 파일 로딩, 가중치 파싱, 라인 제거 |
 | **prompt_generation_controller.py** | 프롬프트 생성, side-effect 없는 생성 |
 | **prompt_context.py** | PromptContext 데이터 클래스 |
 | **mode_ware_manager.py** | 모드 인식 모듈 일괄 저장/로드 |
@@ -64,9 +64,12 @@ core/generation_controller.py
 ### 이벤트 버스
 
 ```python
-app_context.subscribe("event_name", callback)  # 구독
-app_context.publish("event_name", {"key": "value"})  # 발행
+app_context.subscribe("event_name", callback)      # 구독
+app_context.unsubscribe("event_name", callback)    # 구독 해제 (수명주기 짧은 창에서 필수)
+app_context.publish("event_name", {"key": "value"}) # 발행
 ```
+
+`unsubscribe`는 동일 콜백이 중복 등록된 경우 모두 제거합니다. 다이얼로그/창처럼 수명주기가 짧은 구독자는 `closeEvent`에서 반드시 해제해야 누수가 없습니다.
 
 ### 주요 이벤트
 
@@ -76,6 +79,7 @@ app_context.publish("event_name", {"key": "value"})  # 발행
 | `prompt_generated` | `PromptContext` | 프롬프트 생성 완료 |
 | `save_directory_changed` | `{"new_path": str}` | 저장 경로 변경 |
 | `image_counter_changed` | `{"new_counter": int}` | 카운터 변경 |
+| `scoped_wildcard_changed` | `{}` | 스코프 ComboBox 변경 |
 
 ### 파이프라인 훅 등록
 
@@ -193,9 +197,15 @@ QThread 워커로 비동기 이미지 생성.
 |-----------|------------|------------|
 | Interactive Mode | `interactive_mode_request` | `generation_error` |
 | Turbo Sequence | `turbo_sequence_request` | `generation_error` |
+| Event Preset | `event_preset_request` | `generation_error` |
+| Clothes Preset | `clothes_preset_request` | `generation_error` |
+| Character Viewer | `character_viewer_request` | `generation_error` |
+| Character Asset | `character_asset_request` (+`character_asset_request_id`) | `generation_error` |
 | Studio | `studio_request` | `generation_error_for_studio` |
 | Img2Img Batch | `img2img_batch_request` | 직접 콜백 |
 | 일반 (자동 생성) | - | 자동 재시도 |
+
+**`generation_error` 이벤트 데이터**: 공통 `message` + 요청 타입 플래그(+식별자). 여러 구독자가 같은 채널을 공유하므로, 각 구독자는 자기 플래그(예: `character_asset_request`)와 id를 확인해 남의 요청을 무시해야 합니다.
 
 **새 특수 요청 타입 추가 시**: 반드시 `_on_generation_error`에 핸들러 추가. 누락 시 요청자가 실패 알림 못 받아 잠금 상태.
 
@@ -292,6 +302,18 @@ QThread 워커로 비동기 이미지 생성.
 - `WildcardProcessor`: 랜덤 모드 `random.choices(weights=)`, 순차/종속 `entries[index][1]`
 - `WildcardCombinationGenerator`: `[text for _, text in entries]`
 
+### 라인 제거 (`remove_line`)
+
+`remove_line(key, value)` → txt 파일에서 value에 해당하는 라인 제거. 가중치 파싱 후 text 정확 매치 → fallback contains 검색. 마지막 라인 보호.
+
+### 오버라이드 (`wildcard_override`)
+
+`app_context.wildcard_override: dict` — `{actual_key: value}` 형태. `WildcardProcessor._get_wildcard_line()`의 일반 무작위 분기에서 오버라이드 값 우선 반환. 순차/종속은 영향 없음. `_app_context_ref`(weakref)로 접근.
+
+### 스코프 추적 (`scoped_wildcard`)
+
+`app_context.scoped_wildcard: str` — 스코프에 등록된 와일드카드 키 (최대 1개). 생성 시 해당 키의 선택값이 `HistoryItem.prompt_context['scoped_wildcard_history']`에 저장. ImageWindow에서 WC 관리 메뉴(복사/정제 추가/고정/제거) 제공.
+
 ---
 
 ## AutoCompleteManager (`autocomplete_manager.py`)
@@ -334,6 +356,24 @@ widget.setProperty("autocomplete_ignore", True)
 큐가 비어있지 않으면 큐 우선, 비면 자동생성 재개. 플래그: `queue_hold_auto_gen`, `auto_retry_pending`.
 
 **상세 레퍼런스**: [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
+
+## 검색 결과 스냅샷 자동 복원 (`NAIA_cold_v4.py`)
+
+`search_results` 소진 시 자동 생성 루프가 멈추지 않도록, 데이터 유입 시점에 메모리 스냅샷을 보관하고 소진 시 자동 복원.
+
+**변수**: `self._search_results_snapshot: Optional[pd.DataFrame]`
+
+**스냅샷 저장 시점** (`_save_search_snapshot()`):
+- 일반 검색 완료 (`on_search_complete`)
+- 불러오기 (`load_custom_parquet`)
+- 합치기 (`merge_custom_parquet`)
+- 심층검색 할당 (`on_depth_search_results_assigned`)
+
+**자동 복원 시점** (`_restore_from_snapshot()`):
+- `_check_and_trigger_auto_generation()`에서 `search_results.is_empty()` 감지 시
+- `trigger_random_prompt()`에서 수동 랜덤 생성 시 `is_empty()` 감지 시
+
+**휘발 조건**: 명시적 복원(`restore_search_results`) / 새 데이터 덮어쓰기 / 프로그램 종료
 
 ---
 

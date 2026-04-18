@@ -23,8 +23,10 @@ class AppContext:
     def __init__(self, main_window: 'ModernMainWindow', wildcard_manager: WildcardManager, tag_data_manager: 'TagDataManager'):
         from core.api_service import APIService
         
+        import weakref
         self.main_window = main_window
         self.wildcard_manager = wildcard_manager
+        self.wildcard_manager._app_context_ref = weakref.ref(self)  # WildcardProcessor에서 오버라이드 접근용 (weakref로 순환참조 방지)
         self.tag_data_manager = tag_data_manager
         self.middle_section_controller: Optional['MiddleSectionController'] = None
         self.api_service = APIService(self)
@@ -32,6 +34,7 @@ class AppContext:
 
         # 🆕 API 모드 관리
         self.current_api_mode = "NAI"  # 기본값은 NAI
+        self.stealth_mode = False  # True이면 QMessageBox 등 차단 UI 억제
         self.mode_swap_subscribers = []  # 모드 변경 구독자들
         
         # 🆕 모드 대응 모듈 매니저
@@ -65,6 +68,11 @@ class AppContext:
         # API payload 안전 저장소
         self._last_api_payload = None
         self._payload_lock = False
+
+        # 🆕 와일드카드 scope 추적 (image history에 기록할 와일드카드 키, 최대 1개)
+        self.scoped_wildcard: str = ''
+        # 🔒 와일드카드 오버라이드 (고정값, {actual_key: value})
+        self.wildcard_override: dict = {}
 
         # 🆕 임시 생성 창 모드 플래그 (FR-2-1, FR-3-1)
         self.temp_window_mode = False  # 임시 창 생성 중인지 여부
@@ -143,6 +151,18 @@ class AppContext:
         else:
             print(f"📬 이벤트 구독: '{event_name}' -> {callback.__name__}")
 
+    def unsubscribe(self, event_name: str, callback: Callable):
+        """지정된 이벤트에 대한 콜백 함수를 해제합니다."""
+        callbacks = self.subscribers.get(event_name)
+        if not callbacks:
+            return
+
+        while callback in callbacks:
+            callbacks.remove(callback)
+
+        if not callbacks:
+            self.subscribers.pop(event_name, None)
+
     def publish(self, event_name: str, *args, **kwargs):
         """지정된 이벤트의 모든 구독자에게 데이터를 전달하며 콜백을 실행합니다."""
         if event_name in self.subscribers:
@@ -188,7 +208,7 @@ class AppContext:
         """API payload를 안전하게 저장"""
         if self._payload_lock:
             return  # 이미 처리 중이면 무시
-        
+
         try:
             import copy
             self._payload_lock = True

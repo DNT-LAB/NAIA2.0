@@ -6,6 +6,8 @@
 모든 위젯은 메인 UI와 완전히 분리된 별도 인스턴스입니다.
 """
 
+import random
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QLineEdit, QCheckBox
@@ -648,7 +650,7 @@ class TempGenerationParamsWidget(QWidget):
         except Exception as e:
             print(f"[TempGenerationParamsWidget] 초기값 복사 중 오류: {e}")
 
-    def collect_parameters(self) -> dict:
+    def collect_parameters(self, roll_random_seed: bool = False) -> dict:
         """
         현재 UI 상태를 파라미터 딕셔너리로 수집
 
@@ -695,15 +697,30 @@ class TempGenerationParamsWidget(QWidget):
         # CFG Rescale (slider value / 100)
         params['cfg_rescale'] = self.cfg_rescale_slider.value() / 100.0
 
-        # Seed
-        try:
-            seed_value = int(self.seed_input.text())
-        except:
-            seed_value = 0
-        params['seed'] = seed_value
-
         # Seed Fix
         params['seed_fix'] = self.seed_fix_checkbox.isChecked()
+
+        # Seed
+        if params['seed_fix']:
+            try:
+                seed_value = int(self.seed_input.text())
+                if seed_value < 0:
+                    seed_value = 0
+            except Exception:
+                seed_value = 0
+                self.seed_input.setText("0")
+        else:
+            if roll_random_seed:
+                seed_value = random.randint(0, 9999999999)
+                self.seed_input.setText(str(seed_value))
+            else:
+                try:
+                    seed_value = int(self.seed_input.text())
+                    if seed_value < 0:
+                        seed_value = 0
+                except Exception:
+                    seed_value = 0
+        params['seed'] = seed_value
 
         # Auto Fit Resolution
         params['auto_fit_resolution'] = self.auto_fit_resolution_checkbox.isChecked()

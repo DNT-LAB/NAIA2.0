@@ -16,6 +16,7 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor
+from ui.character_asset_storage_window import CharacterAssetStorageWindow
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from danbooru_character import character_dict, character_dict_count
@@ -1062,6 +1063,9 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         # UI 위젯 인스턴스 변수
         self.activate_checkbox: QCheckBox = None
         self.reroll_on_generate_checkbox: QCheckBox = None
+        self.c1_asset_button: QPushButton = None
+        self.character_asset_storage_button: QPushButton = None
+        self.character_asset_storage_window = None
         self.processed_prompt_display: QTextEdit = None
         self.last_processed_data: dict = {'characters': [], 'uc': []}
         self.modifiable_clone: dict = {'characters': [], 'uc': []}
@@ -1168,10 +1172,27 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.reroll_button.setStyleSheet(DARK_STYLES['secondary_button'])
         self.reroll_button.setFixedWidth(200)
         self.reroll_button.clicked.connect(self.process_and_update_view)
+        self.c1_asset_button = QPushButton("캐릭터 에셋 생성")
+        self.c1_asset_button.setStyleSheet(DARK_STYLES['primary_button'])
+        self.c1_asset_button.setFixedWidth(220)
+        self.c1_asset_button.setToolTip("선택한 첫 번째 캐릭터로 에셋 창을 엽니다.")
+        self.c1_asset_button.clicked.connect(self.open_c1_asset_generation_window)
+        self.character_asset_storage_button = QPushButton("에셋 스토리지")
+        self.character_asset_storage_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.character_asset_storage_button.setFixedSize(get_scaled_size(150), get_scaled_size(54))
+        self.character_asset_storage_button.setToolTip("저장된 캐릭터 에셋 보관함을 엽니다.")
+        self.character_asset_storage_button.clicked.connect(self.open_character_asset_storage_window)
 
-        options_layout.addWidget(self.activate_checkbox, 0, 0, 1, 2)
-        options_layout.addWidget(self.reroll_on_generate_checkbox, 1, 0)
-        options_layout.addWidget(self.reroll_button, 1, 1)
+        action_row_widget = QWidget(options_frame)
+        action_row_layout = QHBoxLayout(action_row_widget)
+        action_row_layout.setContentsMargins(0, 0, 0, 0)
+        action_row_layout.setSpacing(get_scaled_size(8))
+        action_row_layout.addWidget(self.reroll_on_generate_checkbox)
+        action_row_layout.addWidget(self.reroll_button)
+        action_row_layout.addWidget(self.c1_asset_button)
+
+        options_layout.addWidget(self.activate_checkbox, 0, 0, 1, 3)
+        options_layout.addWidget(action_row_widget, 1, 0, 1, 3, Qt.AlignmentFlag.AlignLeft)
 
         # 🆕 캐릭터 위치 관리 UI
         self.enable_position_checkbox = QCheckBox("(2인이상체크) 캐릭터 포지션을 활성화 합니다")
@@ -1234,6 +1255,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
 
         options_layout.addWidget(self.enable_position_checkbox, 2, 0)
         options_layout.addWidget(position_control_widget, 2, 1)
+        options_layout.addWidget(self.character_asset_storage_button, 2, 2, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         main_layout.addWidget(options_frame)
 
@@ -1579,6 +1601,79 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
 
         if self.position_viewer:
             self.position_viewer.setPixmap(pixmap)
+
+    def open_c1_asset_generation_window(self):
+        """Open the C1 asset flow through a hidden temp window."""
+        parent_widget = self.widget if getattr(self, 'widget', None) else None
+
+        if not getattr(self, 'app_context', None) or not hasattr(self.app_context, 'main_window'):
+            QMessageBox.warning(parent_widget, "오류", "메인 윈도우 컨텍스트를 찾을 수 없습니다.")
+            return
+
+        if not self.character_widgets:
+            self.add_character_widget()
+
+        selected_widget = None
+        for widget in self.character_widgets:
+            if widget.active_checkbox.isChecked():
+                selected_widget = widget
+                break
+
+        if selected_widget is None:
+            for widget in self.character_widgets:
+                if widget.prompt_textbox.toPlainText().strip():
+                    selected_widget = widget
+                    break
+
+        if selected_widget is None or not selected_widget.prompt_textbox.toPlainText().strip():
+            QMessageBox.warning(parent_widget, "캐릭터 비어 있음", "체크된 캐릭터 프롬프트를 먼저 입력해주세요.")
+            return
+
+        main_window = self.app_context.main_window
+        if not hasattr(main_window, 'temp_window_manager'):
+            QMessageBox.warning(parent_widget, "오류", "TempWindowManager를 찾을 수 없습니다.")
+            return
+
+        temp_window = main_window.temp_window_manager.create_temp_window()
+
+        main_prompt = main_window.main_prompt_textedit.toPlainText() if hasattr(main_window, 'main_prompt_textedit') else ""
+        negative_prompt = main_window.negative_prompt_textedit.toPlainText() if hasattr(main_window, 'negative_prompt_textedit') else ""
+
+        temp_window.set_prompts(main_prompt, negative_prompt)
+        temp_window.set_initial_params(main_window)
+        temp_window.initialize_from_main_modules(main_window)
+
+        temp_window.open_character_asset_generation_window()
+
+        if temp_window.character_asset_window:
+            temp_window.character_asset_window.destroyed.connect(
+                lambda *_args, window=temp_window: window.close()
+            )
+
+        temp_window.hide()
+
+    def open_character_asset_storage_window(self):
+        """Open the dedicated character asset storage window."""
+        parent_widget = self.widget if getattr(self, 'widget', None) else None
+        owner_window = getattr(self.app_context, "main_window", None) if getattr(self, 'app_context', None) else None
+
+        if not getattr(self, 'app_context', None):
+            QMessageBox.warning(parent_widget, "오류", "앱 컨텍스트를 찾을 수 없습니다.")
+            return
+
+        if not self.character_asset_storage_window:
+            self.character_asset_storage_window = CharacterAssetStorageWindow(
+                self.app_context,
+                owner_window or parent_widget,
+            )
+            self.character_asset_storage_window.destroyed.connect(
+                lambda *_args: setattr(self, "character_asset_storage_window", None)
+            )
+
+        self.character_asset_storage_window.load_storage_items()
+        self.character_asset_storage_window.show()
+        self.character_asset_storage_window.raise_()
+        self.character_asset_storage_window.activateWindow()
 
     def assign_c1(self, character_prompt: str, character_uc: str):
         """

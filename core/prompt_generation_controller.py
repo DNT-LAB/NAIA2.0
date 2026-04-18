@@ -113,8 +113,12 @@ class PromptGenerationController(QObject):
         except Exception as e:
             self.generation_error.emit(f"프롬프트 생성 중 오류: {e}")
 
-    def generate_next_prompt(self, search_results: SearchResultModel, settings: dict):
-        """다음 프롬프트를 생성합니다. (단순화)"""
+    def generate_next_prompt(self, search_results: SearchResultModel, settings: dict,
+                             active_ratings: set = None, source_row_override: pd.Series = None):
+        """다음 프롬프트를 생성합니다. (단순화)
+        active_ratings: Rating 필터 (None이면 전체에서 추출)
+        source_row_override: 외부에서 직접 주입하는 source_row (tag filter 등). pop 없이 사용.
+        """
         if settings.get('wildcard_standalone', False):
             # 단독 모드일 경우, 비어있는 source_row를 새로 생성합니다.
             empty_data = {
@@ -126,9 +130,13 @@ class PromptGenerationController(QObject):
             }
             source_row = pd.Series(empty_data, name="wildcard_standalone")
             self.prompt_popped.emit(search_results.get_count()) # 남은 행 개수는 그대로 표시
+        elif source_row_override is not None:
+            # 외부 주입 (Remote tag filter): search_results에서 pop하지 않음
+            source_row = source_row_override
+            self.prompt_popped.emit(search_results.get_count())
         else:
             # 기존 로직: 검색 결과에서 프롬프트를 가져옵니다.
-            source_row = search_results.pop_random_row()
+            source_row = search_results.pop_random_row(active_ratings)
             if source_row is None:
                 self.generation_error.emit("처리할 프롬프트가 더 이상 없습니다.")
                 return

@@ -77,6 +77,7 @@ class GenerationWorker(QObject):
         self._pending_progress_data = None  # 🔧 스레드 안전한 진행률 데이터 전달용
         self._main_prompt_text = ''  # 🔧 메인 스레드에서 캡처한 프롬프트 텍스트
         self._character_prompts = []  # 🔧 메인 스레드에서 캡처한 캐릭터 프롬프트
+        self._scoped_wildcard_history = {}  # 📌 메인 스레드에서 캡처한 scoped 와일드카드 히스토리
         
     def set_generation_params(self, params: dict, source_row):
         """생성 파라미터와 소스 행을 설정합니다."""
@@ -210,6 +211,7 @@ class GenerationWorker(QObject):
             main_prompt_raw = getattr(self, '_main_prompt_text', '')
             
             # 프롬프트 컨텍스트 정보
+            scoped_wh = getattr(self, '_scoped_wildcard_history', {})
             result['prompt_context'] = {
                 'original_input': self.params.get('input', ''),
                 'processed_input': self.params.get('input', ''),  # 필요시 파이프라인 처리 후 값으로 교체
@@ -217,7 +219,8 @@ class GenerationWorker(QObject):
                 'main_prompt': main_prompt_raw,  # 🆕 UI에서 가져온 원본 프롬프트 (\n\n 포함)
                 'character_prompts': getattr(self, '_character_prompts', []),
                 'source_tags': self.source_row.to_dict() if self.source_row is not None else {},
-                'wildcard_resolved': self.source_row is not None
+                'wildcard_resolved': self.source_row is not None,
+                'scoped_wildcard_history': scoped_wh  # 📌 scope에 등록된 와일드카드의 선택 결과
             }
             
             # API 메타데이터
@@ -732,8 +735,12 @@ class GenerationController:
         self.generation_worker.set_generation_params(params, source_row)
 
         # 🔧 FIX: 메인 스레드에서 main_prompt 텍스트 캡처 (워커에서 크로스 스레드 UI 접근 방지)
+        # Shared Mode remote: overrides로 주입된 프롬프트는 _raw_input에 원본 보존
         try:
-            if hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
+            raw_input = params.pop('_raw_input', None)
+            if raw_input is not None:
+                self.generation_worker._main_prompt_text = raw_input
+            elif hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'main_prompt_textedit'):
                 self.generation_worker._main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
         except Exception:
             pass
@@ -768,11 +775,30 @@ class GenerationController:
         except Exception:
             pass
 
+        # 📌 메인 스레드에서 scoped wildcard history 캡처 (최대 1개)
+        # 안전장치: 재귀 와일드카드 등으로 최종 프롬프트에 없는 값은 skip
+        try:
+            ctx = self.context.current_prompt_context
+            scoped_key = self.context.scoped_wildcard
+            if ctx and ctx.wildcard_history and scoped_key and scoped_key in ctx.wildcard_history:
+                value = ctx.wildcard_history[scoped_key][-1]
+                final_prompt = params.get('input', '')
+                char_prompts_str = ' '.join(params.get('characters', []))
+                if value in final_prompt or value in char_prompts_str:
+                    self.generation_worker._scoped_wildcard_history = {scoped_key: value}
+                else:
+                    self.generation_worker._scoped_wildcard_history = {}
+            else:
+                self.generation_worker._scoped_wildcard_history = {}
+        except Exception:
+            self.generation_worker._scoped_wildcard_history = {}
+
         self.generation_thread.start()
     
     def _on_generation_started(self):
         """생성 시작 시 호출되는 슬롯"""
         self.is_generating = True
+        self.context.publish("generation_started", {})
         # 🆕 버튼 비활성화 제거 - 큐에 추가할 수 있도록 활성 상태 유지
         # self.context.main_window.generate_button_main.setEnabled(False)
 
@@ -797,6 +823,9 @@ class GenerationController:
         self.auto_retry_count = 0
         # 🆕 현재 생성 파라미터 정리
         self.current_generation_params = None
+        # Shared Server Mode 세션 오버라이드 정리
+        self.context.session_p_eng_override = None
+        self.context.session_cond_override = None
 
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         self.context.main_window.update_ui_with_result(result)
@@ -821,6 +850,9 @@ class GenerationController:
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
+        # Shared Server Mode 세션 오버라이드 정리
+        self.context.session_p_eng_override = None
+        self.context.session_cond_override = None
 
         # 특수 요청 에러 라우팅
         if self.current_generation_params:
@@ -892,6 +924,21 @@ class GenerationController:
                 # Turbo Sequence 요청은 자동 재시도 없이 종료
                 self.current_generation_params = None
                 return
+
+            # Character Asset 요청인 경우 전용 에러 이벤트 발행
+            is_character_asset_request = self.current_generation_params.get("character_asset_request", False)
+            if is_character_asset_request:
+                request_id = self.current_generation_params.get("character_asset_request_id")
+                print(f"🧷 Character Asset 에러 감지 - 전용 에러 이벤트 발행 (request_id: {request_id})")
+                error_data = {
+                    "message": error_message,
+                    "character_asset_request": True,
+                    "character_asset_request_id": request_id,
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
 
             # Studio 요청인 경우: 프레임 매니저에 실패 알림
             is_studio_request = self.current_generation_params.get("studio_request", False)
@@ -1102,6 +1149,12 @@ class GenerationController:
 
         # 🆕 안전장치: 지연 실행으로 이벤트 루프에서 안전하게 처리
         QTimer.singleShot(100, _safe_cleanup)
+
+        # Shared Server Mode 세션 오버라이드 안전망 (cancel 등으로 finished/error 콜백 누락 시)
+        if getattr(self.context, 'session_p_eng_override', None) is not None:
+            self.context.session_p_eng_override = None
+        if getattr(self.context, 'session_cond_override', None) is not None:
+            self.context.session_cond_override = None
 
         # 스레드 종료 시점에서만 is_generating을 False로 전환하고 다음 작업을 결정
         try:

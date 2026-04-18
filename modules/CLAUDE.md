@@ -22,7 +22,7 @@ modules/
 
 | 파일 | 주요 기능 | 특징 |
 |------|----------|------|
-| **character_module.py** | 캐릭터 검색, 5x5 위치 그리드 | ModeAware, 파이프라인 훅 |
+| **character_module.py** | 캐릭터 검색, 5x5 위치 그리드, 캐릭터 에셋 생성/스토리지 진입 | ModeAware, 파이프라인 훅 |
 | **character_reference_module.py** | Character Reference 관리 | NAI 전용 |
 | **vibe_transfer_module.py** | Vibe Transfer 이미지 | NAI 전용, 다중 이미지 |
 | **prompt_engineering_module.py** | 프롬프트 엔지니어링 | 태그 조작, 프리셋 랜덤화, Danbooru Auto-Weight(IDF), e621 Auto-Boost |
@@ -30,7 +30,7 @@ modules/
 | **instant_wildcard_module.py** | 인스턴트 와일드카드 | JSON 저장/로드 |
 | **conditional_prompt_module.py** | 조건부 프롬프트 | 파이프라인 훅, 패턴 매칭(`__tag=,`) |
 | **e621_event_module.py** | E621 이벤트 태그 | Parquet, 즐겨찾기, 숨김/복원 |
-| **wildcard_status_module.py** | 와일드카드 상태 표시 | PromptContext 구독 |
+| **wildcard_status_module.py** | 와일드카드 상태 표시, 스코프 추적 | PromptContext 구독, 스코프 ComboBox, 오버라이드 |
 | **ollama_module.py** | 자연어→태그 변환 (Ollama LLM) | Lazy 초기화, e621 NSFW Boost |
 
 ---

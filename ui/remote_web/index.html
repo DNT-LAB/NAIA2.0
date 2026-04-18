@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>NAIA Remote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
+
+<header>
+  <span class="logo">NAIA-REMOTE</span><span class="logo-sig">Provided by <b>CLAUDE</b></span>
+  <div class="header-right">
+    <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
+      <option value="NAI">NAI</option>
+      <option value="WEBUI">WEBUI</option>
+      <option value="COMFYUI">COMFYUI</option>
+    </select>
+    <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
+  </div>
+</header>
+<div class="tag-tooltip" id="tagTooltip"></div>
+<div class="ui-lock" id="uiLock"><div class="ui-lock-spinner"></div></div>
+<div class="toast" id="toast"></div>
+
+<!-- Setup / API Configuration modal -->
+<div class="setup-overlay" id="apiPopupOverlay" onclick="onSetupBackdrop(event)">
+  <div class="setup-dialog" id="setupDialog" role="dialog" aria-labelledby="setupTitle">
+    <header class="setup-header">
+      <div class="setup-header-titles">
+        <h2 class="setup-title" id="setupTitle">API Configuration</h2>
+        <p class="setup-sub">Connect a generation backend — NovelAI / WebUI / ComfyUI</p>
+      </div>
+      <div class="setup-header-actions">
+        <button class="setup-desktop-toggle hidden" id="desktopToggleBtn"
+                onclick="toggleDesktopWindow()" title="Show desktop app">SHOW DESKTOP</button>
+        <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="Close">&times;</button>
+      </div>
+    </header>
+    <div class="setup-body">
+      <nav class="setup-nav" role="tablist">
+        <button class="setup-nav-item active" data-tab="nai" onclick="switchSetupTab('nai')" role="tab">
+          <span class="setup-nav-num">01</span>
+          <span class="setup-nav-name">NOVELAI</span>
+          <span class="setup-nav-sub" id="setupNavSubNai">NOT SET</span>
+          <span class="setup-nav-dot" id="setupDotNai"></span>
+        </button>
+        <button class="setup-nav-item" data-tab="webui" onclick="switchSetupTab('webui')" role="tab">
+          <span class="setup-nav-num">02</span>
+          <span class="setup-nav-name">WEBUI</span>
+          <span class="setup-nav-sub" id="setupNavSubWebui">NOT SET</span>
+          <span class="setup-nav-dot" id="setupDotWebui"></span>
+        </button>
+        <button class="setup-nav-item" data-tab="comfyui" onclick="switchSetupTab('comfyui')" role="tab">
+          <span class="setup-nav-num">03</span>
+          <span class="setup-nav-name">COMFYUI</span>
+          <span class="setup-nav-sub" id="setupNavSubComfyui">NOT SET</span>
+          <span class="setup-nav-dot" id="setupDotComfyui"></span>
+        </button>
+      </nav>
+      <section class="setup-pane" role="tabpanel">
+        <!-- NAI -->
+        <div class="setup-tab-pane active" data-pane="nai">
+          <div class="setup-meta-line"><span>ENDPOINT</span><span class="setup-meta-val">api.novelai.net</span></div>
+          <div class="setup-meta-line"><span>SAVED TOKEN</span><span class="setup-meta-val" id="setupMetaNaiPreview">—</span></div>
+          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaNai">—</span></div>
+          <label class="setup-field-label" for="setupNaiToken">Persistent Token</label>
+          <div class="setup-input-row">
+            <input class="setup-input setup-input-mono" id="setupNaiToken" type="password"
+                   placeholder="paste NovelAI token" autocomplete="off" spellcheck="false">
+            <button class="setup-btn-eye" onclick="toggleSetupReveal('setupNaiToken', this)" type="button" title="Show / Hide">◉</button>
+          </div>
+          <div class="setup-actions">
+            <button class="setup-btn-primary" id="setupBtnVerifyNai" onclick="verifyNai()">VERIFY &amp; SAVE</button>
+            <button class="setup-btn-ghost" onclick="clearApi('NAI')">DISCONNECT</button>
+          </div>
+          <div class="setup-result" id="setupResultNai"></div>
+        </div>
+        <!-- WEBUI -->
+        <div class="setup-tab-pane" data-pane="webui">
+          <div class="setup-meta-line"><span>COMPAT</span><span class="setup-meta-val">AUTOMATIC1111 / sd-webui</span></div>
+          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaWebui">—</span></div>
+          <label class="setup-field-label" for="setupWebuiUrl">Server URL</label>
+          <input class="setup-input setup-input-mono" id="setupWebuiUrl" type="text"
+                 placeholder="127.0.0.1:7860" autocomplete="off" spellcheck="false">
+          <div class="setup-actions">
+            <button class="setup-btn-primary" id="setupBtnVerifyWebui" onclick="verifyWebui()">VERIFY &amp; SAVE</button>
+            <button class="setup-btn-ghost" onclick="clearApi('WEBUI')">DISCONNECT</button>
+          </div>
+          <div class="setup-result" id="setupResultWebui"></div>
+        </div>
+        <!-- COMFYUI -->
+        <div class="setup-tab-pane" data-pane="comfyui">
+          <div class="setup-meta-line"><span>PROBE</span><span class="setup-meta-val">/system_stats · /object_info</span></div>
+          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaComfyui">—</span></div>
+          <label class="setup-field-label" for="setupComfyuiUrl">Server URL</label>
+          <input class="setup-input setup-input-mono" id="setupComfyuiUrl" type="text"
+                 placeholder="127.0.0.1:8188" autocomplete="off" spellcheck="false">
+          <div class="setup-actions">
+            <button class="setup-btn-primary" id="setupBtnVerifyComfyui" onclick="verifyComfyui()">VERIFY &amp; SAVE</button>
+            <button class="setup-btn-ghost" onclick="clearApi('COMFYUI')">DISCONNECT</button>
+          </div>
+          <div class="setup-result" id="setupResultComfyui"></div>
+          <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
+        </div>
+        <div class="setup-cloudflared hidden" id="setupCloudflaredSection">
+          <div class="setup-cloudflared-head">
+            <span class="setup-cloudflared-title">Cloudflared Tunnel</span>
+            <span class="setup-cloudflared-status" id="setupCloudflaredStatus">Disconnected</span>
+          </div>
+          <div class="setup-cloudflared-actions">
+            <button class="setup-btn-primary setup-btn-cloudflared" id="setupCloudflaredConnect" onclick="setCloudflaredEnabled(true)">Cloudflared 연결</button>
+            <button class="setup-btn-ghost setup-btn-cloudflared" id="setupCloudflaredDisconnect" onclick="setCloudflaredEnabled(false)">연결 종료</button>
+          </div>
+          <div class="setup-cloudflared-linkrow">
+            <a class="setup-cloudflared-link hidden" id="setupCloudflaredLink" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <button class="setup-btn-ghost setup-btn-cloudflared hidden" id="setupCloudflaredCopy" onclick="copyCloudflaredUrl()">Copy</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- Module floating panel (no overlay, no UI lock) -->
+<div class="module-popup" id="modulePopup">
+  <div class="module-popup-header">
+    <span class="module-popup-title" id="modulePopupTitle"></span>
+    <div class="module-popup-actions">
+      <button class="module-popup-action-btn" id="modulePopupAction" style="display:none"></button>
+      <button class="history-close" onclick="closeModule()">&times;</button>
+    </div>
+  </div>
+  <div class="module-popup-body" id="modulePopupBody"></div>
+</div>
+
+<!-- Refine (Depth Search) floating panel -->
+<div class="refine-popup" id="refinePanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Refine</span>
+    <button class="history-close" onclick="closeRefine()">&times;</button>
+  </div>
+  <div class="refine-body"></div>
+</div>
+
+<!-- Prompt Engineering floating panels -->
+<div class="pe-popup" id="pePresetAddPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Add Preset</span>
+    <button class="history-close" onclick="closePePresetAddPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="pePresetManagePanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Manage Preset</span>
+    <button class="history-close" onclick="closePePresetManagePanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peE621Panel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">e621 Auto-Boost Settings</span>
+    <button class="history-close" onclick="closePeE621Panel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peDanbooruPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Danbooru Auto-Weight Settings</span>
+    <button class="history-close" onclick="closePeDanbooruPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peDebugPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Debug Snapshot</span>
+    <button class="history-close" onclick="closePeDebugPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<!-- Tag Filter floating panel -->
+<div class="tag-filter-popup" id="tagFilterPopup">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Tag Filter</span>
+    <button class="history-close" onclick="closeTagFilter()">&times;</button>
+  </div>
+  <div class="tag-filter-body">
+    <div class="tag-filter-input-row">
+      <input class="tag-filter-input" id="tagFilterInput" placeholder="include tag..." autocomplete="off">
+    </div>
+    <div class="tag-filter-ac" id="tagFilterAc"></div>
+    <div class="tag-filter-chips" id="tagFilterChips"></div>
+    <div class="tag-filter-input-row exclude">
+      <input class="tag-filter-input" id="tagFilterExcludeInput" placeholder="exclude tag..." autocomplete="off">
+    </div>
+    <div class="tag-filter-chips" id="tagFilterExcludeChips"></div>
+    <div class="tag-filter-actions">
+      <span class="tag-filter-count" id="tagFilterCount"></span>
+      <button class="tag-filter-btn-action apply" onclick="applyTagFilter()">Search</button>
+      <button class="tag-filter-btn-action assign" id="tagFilterAssignBtn" onclick="assignTagFilter()" disabled>Assign</button>
+      <button class="tag-filter-btn-action clear" onclick="clearTagFilter()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<main class="app-layout">
+
+<!-- Control panel: PC=left sidebar, Mobile=bottom panel -->
+<div class="control-panel">
+  <!-- Prompt drawer wrapper (mobile: slide-up, PC: always visible) -->
+  <div class="prompt-drawer" id="promptDrawer">
+    <div class="prompt-inner">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="prompt" onclick="switchTab('prompt')">Prompt</button>
+        <button class="tab-btn" data-tab="params" onclick="switchTab('params')">Params</button>
+        <button class="tab-btn" data-tab="negative" onclick="switchTab('negative')">Negative</button>
+      </div>
+      <div class="tab-content">
+        <div class="tab-page active" id="tabPrompt">
+          <span class="section-label">Prompt</span>
+          <div class="prompt-highlight-wrap">
+            <div class="prompt-highlight" id="promptHighlight"></div>
+            <textarea class="prompt-edit" id="promptEdit" placeholder="prompt..." onscroll="syncPromptHighlight()"></textarea>
+          </div>
+          <!-- Tag search bar (reserved for future: event/outfit/preset) -->
+          <div class="tag-search-bar" id="tagSearchBar" style="display:none">
+            <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
+            <div class="tag-search-results" id="tagSearchResults"></div>
+          </div>
+          <!-- Module bar -->
+          <div class="module-bar">
+            <button class="module-prompt-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+            <div class="module-rating-bar">
+              <button class="rating-btn active" data-r="g" onclick="toggleRating('g')">G</button>
+              <button class="rating-btn active" data-r="s" onclick="toggleRating('s')">S</button>
+              <button class="rating-btn active" data-r="q" onclick="toggleRating('q')">Q</button>
+              <button class="rating-btn active" data-r="e" onclick="toggleRating('e')">E</button>
+              <button class="rating-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Filter</button>
+            </div>
+            <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
+            <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
+            <button class="module-btn" data-module="character" onclick="openModule('character')">Character<span class="module-badge hidden" id="badgeChar"></span></button>
+            <button class="module-btn nai-only-disabled" data-module="character_reference" onclick="openModule('character_reference')">Char Ref<span class="module-badge hidden" id="badgeCharRef"></span></button>
+            <button class="module-btn nai-only-disabled" data-module="vibe_transfer" onclick="openModule('vibe_transfer')">Vibe<span class="module-badge hidden" id="badgeVibe"></span></button>
+            <button class="module-btn" data-module="wildcard" onclick="openModule('wildcard')">WC</button>
+            <button class="module-btn" data-module="chunk" onclick="openModule('chunk')">Chunk</button>
+            <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Cond</button>
+          </div>
+        </div>
+        <div class="tab-page" id="tabParams">
+          <span class="section-label">Parameters</span>
+          <div class="params-grid" id="paramsGrid">
+            <div class="param-row">
+              <span class="param-label">Model</span>
+              <select class="param-select" id="pModel" onchange="setParam('model',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Sampler</span>
+              <select class="param-select" id="pSampler" onchange="setParam('sampler',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Scheduler</span>
+              <select class="param-select" id="pScheduler" onchange="setParam('scheduler',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Resolution</span>
+              <select class="param-select" id="pResolution" onchange="setParam('resolution',this.value)"></select>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Steps</span>
+              <input class="param-input" id="pSteps" type="number" min="1" max="150" onchange="setParam('steps',this.value)">
+            </div>
+            <div class="param-row">
+              <span class="param-label">CFG Scale</span>
+              <input class="param-input" id="pCfgScale" type="number" step="0.1" min="1" max="10" onchange="setParam('cfg_scale',this.value)">
+            </div>
+            <!-- NAI only -->
+            <div class="param-row mode-nai">
+              <span class="param-label">CFG Rescale</span>
+              <input class="param-input" id="pCfgRescale" type="number" step="0.01" min="-0.25" max="1" onchange="setParam('cfg_rescale',this.value)">
+            </div>
+            <div class="param-row">
+              <span class="param-label">Seed</span>
+              <input class="param-input seed" id="pSeed" type="text" onchange="setParam('seed',this.value)">
+            </div>
+            <div class="param-flags" id="paramFlags"></div>
+            <!-- WEBUI HR controls -->
+            <div class="mode-webui" id="webuiParams" style="display:none">
+              <div class="param-row">
+                <span class="param-label">Hires-fix</span>
+                <input type="checkbox" class="param-check" id="pEnableHr" onchange="setParam('enable_hr',String(this.checked))">
+              </div>
+              <div class="param-row">
+                <span class="param-label">HR Scale</span>
+                <input class="param-input" id="pHrScale" type="number" step="0.1" min="1" max="4" onchange="setParam('hr_scale',this.value)">
+              </div>
+              <div class="param-row">
+                <span class="param-label">Upscaler</span>
+                <select class="param-select" id="pHrUpscaler" onchange="setParam('hr_upscaler',this.value)"></select>
+              </div>
+              <div class="param-row">
+                <span class="param-label">Denoise</span>
+                <input class="param-input" id="pDenoise" type="number" step="0.05" min="0" max="1" onchange="setParam('denoising_strength',this.value)">
+              </div>
+              <div class="param-row">
+                <span class="param-label">HR Steps</span>
+                <input class="param-input" id="pHiresSteps" type="number" min="0" max="150" onchange="setParam('hires_steps',this.value)">
+              </div>
+              <div class="param-row">
+                <span class="param-label">HR CFG</span>
+                <input class="param-input" id="pHrCfg" type="number" step="0.1" min="0" max="30" onchange="setParam('hr_cfg',this.value)">
+              </div>
+            </div>
+            <!-- ComfyUI controls -->
+            <div class="mode-comfyui" id="comfyuiParams" style="display:none">
+              <div class="param-flags" style="padding:7px 10px;background:var(--bg-deep)">
+                <span class="param-flag" data-key="sampling_mode" data-val="eps" id="flagEps" onclick="setSamplingMode('eps')">EPS</span>
+                <span class="param-flag" data-key="sampling_mode" data-val="v_prediction" id="flagVpred" onclick="setSamplingMode('v_prediction')">V-Pred</span>
+                <span class="param-flag" data-key="sampling_mode" data-val="anima" id="flagAnima" onclick="setSamplingMode('anima')">ANIMA</span>
+              </div>
+              <div class="param-row" id="comfyuiRescaleRow" style="display:none">
+                <span class="param-label">Rescale CFG</span>
+                <input class="param-input" id="pRescaleCfg" type="number" step="0.01" min="0" max="1" onchange="setParam('rescale_cfg',this.value)">
+              </div>
+            </div>
+          </div>
+          <div class="meta-row" id="metaRow" style="margin-top:8px"></div>
+        </div>
+        <div class="tab-page" id="tabNegative">
+          <span class="section-label">Negative Prompt</span>
+          <textarea class="prompt-edit neg" id="negEdit" placeholder="negative prompt..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toggle bar (mobile only) -->
+  <div class="prompt-toggle-bar" onclick="toggleDrawer()">
+    <span class="toggle-arrow" id="toggleArrow">&#9650;</span>
+    <span class="toggle-label" id="toggleLabel">Prompt / Params / Modules</span>
+    <span class="toggle-arrow" id="toggleArrow2">&#9650;</span>
+    <span class="prompt-new-dot hidden" id="promptNewDot"></span>
+  </div>
+
+  <!-- Bottom controls (options + resolution + buttons) -->
+  <div class="bottom-controls">
+    <div class="options-row">
+      <label class="opt-toggle">
+        <input type="checkbox" id="optPromptFixed" onchange="setOption('prompt_fixed', this.checked)">
+        <span class="opt-label">Prompt Fixed</span>
+      </label>
+      <label class="opt-toggle">
+        <input type="checkbox" id="optAutoGen" onchange="setOption('auto_generate', this.checked)">
+        <span class="opt-label">Auto Gen</span>
+      </label>
+      <label class="opt-toggle">
+        <input type="checkbox" id="optWcStandalone" onchange="setOption('wildcard_standalone', this.checked)">
+        <span class="opt-label">WC Solo</span>
+      </label>
+    </div>
+    <div class="quick-params">
+      <select class="param-select quick-select" id="qResolution" onchange="setParam('resolution',this.value)"></select>
+      <span class="quick-flag-btn" id="qRndRes" onclick="toggleQuickFlag(this,'random_resolution')">Rnd Res</span>
+      <span class="quick-flag-btn" id="qAutoRes" onclick="toggleQuickFlag(this,'auto_fit_resolution')">Auto Res</span>
+    </div>
+    <div class="ctrl-buttons">
+      <button class="ctrl-btn btn-rnd" id="btnRnd" onclick="send('random')"><span class="shortcut-hint">ALT + ENTER</span>Random</button>
+      <button class="ctrl-btn btn-gen" id="btnGen" onclick="send('generate')"><span class="shortcut-hint">CTRL + ENTER</span>Generate</button>
+    </div>
+  </div>
+</div>
+
+<!-- Viewer + History wrapper -->
+<div class="viewer-wrapper">
+  <div class="viewer-content">
+    <div class="viewer">
+      <img id="preview" alt="">
+      <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
+      <div class="stats-island" id="statsIsland">
+        <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Open auto-save settings"><span class="stats-dot" id="statsSaveDot"></span>Auto Save</span>
+        <span class="stats-pill" id="statsGenCount" title="Total generations this session"></span>
+      </div>
+      <!-- NAI Anlas (desktop polls every 5 min + on each generation) -->
+      <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
+      <div class="viewer-nav-actions">
+        <button class="viewer-hist-btn nav" onclick="navViewer(-1)">&#9664;</button>
+        <button class="viewer-hist-btn" onclick="hideViewerNav()">Close</button>
+        <button class="viewer-hist-btn nav" onclick="navViewer(1)">&#9654;</button>
+      </div>
+      <!-- Prompt floating panel (reusable: main viewer + popup viewer) -->
+      <div class="prompt-float" id="promptFloat">
+        <div class="prompt-float-content" id="promptFloatContent"></div>
+      </div>
+      <div class="viewer-bottom-controls">
+        <label class="prompt-float-toggle" id="promptFloatToggle">
+          <input type="checkbox" id="promptFloatCb" onchange="togglePromptFloat(this.checked)">
+          <span>Prompt</span>
+        </label>
+        <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+      </div>
+    </div>
+    <div class="viewer-panel" id="viewerPanel">
+      <div class="viewer-panel-header">
+        <span class="viewer-panel-title">Viewer <span class="viewer-panel-count" id="viewerCount"></span></span>
+        <button class="viewer-pop-btn" id="viewerPopBtn" onclick="openViewerPopup()" title="Open in popup window">&#8599;</button>
+        <button class="history-close" onclick="toggleViewerPanel()">&times;</button>
+      </div>
+      <div class="viewer-panel-grid" id="viewerGrid"></div>
+      <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
+      <div class="viewer-panel-bottom">
+        <label class="viewer-panel-prompt-toggle" id="promptFloatToggleMobile">
+          <input type="checkbox" id="promptFloatCbMobile" onchange="togglePromptFloat(this.checked)">
+          <span>Prompt</span>
+        </label>
+        <div class="viewer-panel-actions">
+          <button class="viewer-download-btn viewer-download-all-btn" onclick="downloadAllImages()">Download All</button>
+          <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<!-- Viewer toggle tab -->
+<button class="history-tab" id="viewerTab" onclick="toggleViewerPanel()">
+  <span class="history-tab-label">Viewer</span>
+</button>
+
+<!-- Viewer lightbox / popup overlay -->
+<div class="viewer-lightbox" id="viewerLightbox" onclick="onLightboxClick(event)"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

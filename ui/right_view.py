@@ -65,6 +65,7 @@ class RightView(QWidget):
     send_to_img2img_requested = pyqtSignal(object)
     instant_outpaint_requested = pyqtSignal(object)
     send_to_outpaint_requested = pyqtSignal(object)
+    use_as_outpaint_base_requested = pyqtSignal(object)
     save_to_remote_event_requested = pyqtSignal(object)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, app_context, parent=None):
@@ -102,6 +103,8 @@ class RightView(QWidget):
                 image_viewer_module.image_window_widget.instant_outpaint_requested.connect(self.instant_outpaint_requested)
             if hasattr(image_viewer_module.image_window_widget, 'send_to_outpaint_requested'):
                 image_viewer_module.image_window_widget.send_to_outpaint_requested.connect(self.send_to_outpaint_requested)
+            if hasattr(image_viewer_module.image_window_widget, 'use_as_outpaint_base_requested'):
+                image_viewer_module.image_window_widget.use_as_outpaint_base_requested.connect(self.use_as_outpaint_base_requested)
             if hasattr(image_viewer_module.image_window_widget, 'save_to_remote_event_requested'):
                 image_viewer_module.image_window_widget.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)
                 print("✅ ImageWindow의 save_to_remote_event_requested 시그널이 연결되었습니다.")

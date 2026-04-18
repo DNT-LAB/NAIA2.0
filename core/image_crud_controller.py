@@ -1046,6 +1046,13 @@ class ImageCrudController:
             # 4. 카운터 증가 (스레드 안전, 영속화, 이벤트 발행 자동 처리)
             self.increment_counter()
 
+            # 5. 저장 완료 이벤트 (Remote Viewer 등에서 활용)
+            self.app_context.publish("image_saved", {
+                "filepath": str(file_path),
+                "filename": filename,
+                "save_dir": str(save_dir),
+            })
+
             return True, str(file_path), None
 
         except PermissionError as e:

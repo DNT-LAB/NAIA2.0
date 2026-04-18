@@ -37,7 +37,7 @@ from ui.resolution_manager_dialog import ResolutionManagerDialog
 from ui.remote_window import RemoteWindow
 from ui.translate_dialog import TranslateDialog
 from ui.interactive_window import InteractiveWindow
-from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor
+from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor, QShowEvent, QHideEvent
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 163"
-        self.setWindowTitle(self.base_title + " - 260328")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 173"
+        self.setWindowTitle(self.base_title + " - 260418")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -894,6 +894,7 @@ class ModernMainWindow(QMainWindow):
 
         #  검색 결과를 저장할 변수 및 컨트롤러 초기화
         self.search_results = SearchResultModel()
+        self._search_results_snapshot = None  # 소진 시 자동 복원용 원본 사본
         self.search_controller = SearchController()
         # 검색 컨트롤러 시그널 연결은 MainController에서 처리됩니다
 
@@ -999,6 +1000,34 @@ class ModernMainWindow(QMainWindow):
 
         # 🆕 멀티 NAI 계정 알림 (업데이트 확인 후)
         QTimer.singleShot(3000, self._show_multi_account_notification)  # 3초 후 시작
+
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        self._publish_desktop_window_visibility()
+
+    def hideEvent(self, event: QHideEvent):
+        super().hideEvent(event)
+        self._publish_desktop_window_visibility()
+
+    def _publish_desktop_window_visibility(self):
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.publish("desktop_window_visibility_changed", {
+                "visible": self.isVisible() and not self.isHidden()
+            })
+
+    def set_web_session_window_visible(self, visible: bool):
+        """Web Session 에서 메인 데스크탑 창 표시/숨김."""
+        if visible:
+            if self.isMinimized():
+                self.showNormal()
+            else:
+                self.show()
+            self.raise_()
+            self.activateWindow()
+        else:
+            self.hide()
+
+        self._publish_desktop_window_visibility()
 
     def apply_dynamic_styles(self):
         """동적 스타일시트 적용"""
@@ -2561,21 +2590,22 @@ class ModernMainWindow(QMainWindow):
                         else:
                             # ❌ 연결 실패 시에만 API 관리 창으로 이동
                             self.status_bar.showMessage(f"❌ WEBUI 연결 실패: {webui_url}", 5000)
-                            if not tab_was_open:
+                            if not tab_was_open and not self.app_context.stealth_mode:
                                 self.open_search_management()
-                            
-                            # 오류 메시지 표시
-                            from PyQt6.QtWidgets import QMessageBox
-                            QMessageBox.critical(
-                                self, 
-                                "WEBUI 연결 실패", 
-                                f"WebUI 서버에 연결할 수 없습니다.\n\n"
-                                f"확인할 사항:\n"
-                                f"• WebUI가 실행 중인지 확인\n"
-                                f"• 주소가 올바른지 확인: {webui_url}\n"
-                                f"• API 접근이 활성화되어 있는지 확인\n\n"
-                                f"API 관리 탭에서 올바른 주소를 입력해주세요."
-                            )
+
+                            # 오류 메시지 표시 (stealth_mode에서는 억제)
+                            if not self.app_context.stealth_mode:
+                                from PyQt6.QtWidgets import QMessageBox
+                                QMessageBox.critical(
+                                    self,
+                                    "WEBUI 연결 실패",
+                                    f"WebUI 서버에 연결할 수 없습니다.\n\n"
+                                    f"확인할 사항:\n"
+                                    f"• WebUI가 실행 중인지 확인\n"
+                                    f"• 주소가 올바른지 확인: {webui_url}\n"
+                                    f"• API 접근이 활성화되어 있는지 확인\n\n"
+                                    f"API 관리 탭에서 올바른 주소를 입력해주세요."
+                                )
                     else:
                         self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
                         self.open_search_management()
@@ -2689,21 +2719,22 @@ class ModernMainWindow(QMainWindow):
                         else:
                             # ❌ 연결 실패
                             self.status_bar.showMessage(f"❌ ComfyUI 연결 실패: {comfyui_url}", 5000)
-                            if not tab_was_open:
+                            if not tab_was_open and not self.app_context.stealth_mode:
                                 self.open_search_management()
-                            
-                            # 오류 메시지 표시
-                            from PyQt6.QtWidgets import QMessageBox
-                            QMessageBox.critical(
-                                self, 
-                                "ComfyUI 연결 실패", 
-                                f"ComfyUI 서버에 연결할 수 없습니다.\n\n"
-                                f"확인할 사항:\n"
-                                f"• ComfyUI가 실행 중인지 확인\n"
-                                f"• 주소가 올바른지 확인: {comfyui_url}\n"
-                                f"• 포트 번호가 정확한지 확인 (기본: 8188)\n\n"
-                                f"API 관리 탭에서 올바른 주소를 입력해주세요."
-                            )
+
+                            # 오류 메시지 표시 (stealth_mode에서는 억제)
+                            if not self.app_context.stealth_mode:
+                                from PyQt6.QtWidgets import QMessageBox
+                                QMessageBox.critical(
+                                    self,
+                                    "ComfyUI 연결 실패",
+                                    f"ComfyUI 서버에 연결할 수 없습니다.\n\n"
+                                    f"확인할 사항:\n"
+                                    f"• ComfyUI가 실행 중인지 확인\n"
+                                    f"• 주소가 올바른지 확인: {comfyui_url}\n"
+                                    f"• 포트 번호가 정확한지 확인 (기본: 8188)\n\n"
+                                    f"API 관리 탭에서 올바른 주소를 입력해주세요."
+                                )
                     else:
                         self.status_bar.showMessage("⚠️ API 관리 기능을 사용할 수 없습니다.", 5000)
                         self.open_search_management()
@@ -2795,8 +2826,11 @@ class ModernMainWindow(QMainWindow):
             if self.seed_fix_checkbox.isChecked():
                 try:
                     seed_value = int(self.seed_input.text())
-                except ValueError:
-                    seed_value = -1
+                    if seed_value < 0:
+                        seed_value = 0
+                except (ValueError, TypeError):
+                    seed_value = 0
+                    self.seed_input.setText("0")
             else:
                 seed_value = random.randint(0, 9999999999)
                 self.seed_input.setText(str(seed_value))
@@ -2928,6 +2962,7 @@ class ModernMainWindow(QMainWindow):
                 is_assets_request = generation_params.get("assets_workshop_request", False)
                 is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
                 is_studio_request = generation_params.get("studio_request", False)
+                is_character_asset_request = generation_params.get("character_asset_request", False)
                 studio_frame_index = generation_params.get("studio_frame_index", 0)
                 
                 self.image_window.update_image(image_object)
@@ -2974,6 +3009,11 @@ class ModernMainWindow(QMainWindow):
                     print("🔍 Character Viewer 요청 감지 - 전용 이벤트 발행")
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_character_viewer", image_object)
+
+                if is_character_asset_request:
+                    print("🧷 Character Asset 요청 감지 - 전용 이벤트 발행")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_character_asset", result)
 
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:
@@ -3051,6 +3091,9 @@ class ModernMainWindow(QMainWindow):
                 traceback.print_exc()
             
             self.status_bar.showMessage("🎉 생성 완료!")
+
+            # Remote API 서버에 결과 전달
+            self.app_context.publish("generation_result_available", result)
             
             # 자동화 모듈 처리 (안전하게)
             if self.automation_module:
@@ -3191,11 +3234,15 @@ class ModernMainWindow(QMainWindow):
             if auto_generate_checkbox.isChecked() and not prompt_fixed_checkbox.isChecked():
                 # 검색 결과가 있는지 확인
                 if self.search_results.is_empty() and not self.generation_checkboxes["와일드카드 단독 모드"].isChecked():
-                    self.status_bar.showMessage("⚠️ 검색 결과가 없어 자동 생성을 중단합니다.")
-                    # 자동화 중단 (자동화가 활성화되어 있는 경우만)
-                    if self.automation_module and self.automation_module.automation_controller.is_running:
-                        self.automation_module.stop_automation()
-                    return
+                    # 스냅샷에서 자동 복원 시도
+                    if self._restore_from_snapshot():
+                        pass  # 복원 성공 → 아래 생성 로직으로 계속 진행
+                    else:
+                        self.status_bar.showMessage("⚠️ 검색 결과가 없어 자동 생성을 중단합니다.")
+                        # 자동화 중단 (자동화가 활성화되어 있는 경우만)
+                        if self.automation_module and self.automation_module.automation_controller.is_running:
+                            self.automation_module.stop_automation()
+                        return
                 
                 # [신규] 자동 생성 플래그 설정
                 self.auto_generation_in_progress = True
@@ -3244,7 +3291,12 @@ class ModernMainWindow(QMainWindow):
                 # 프리셋 랜더마이저 신호 발행 (자동 생성 시 랜덤 프리셋 적용)
                 self.app_context.publish("random_prompt_triggered_preset_randomizer")
 
-                self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
+                # Remote Web Session GSQE 필터 동기화
+                # Tag filter는 search_results 자체에 반영 (depth search assign 방식)
+                remote_ratings = getattr(self.app_context, 'remote_active_ratings', None)
+                self.prompt_gen_controller.generate_next_prompt(
+                    self.search_results, settings,
+                    active_ratings=remote_ratings)
             elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():
                 self.auto_generation_in_progress = True
                 self.last_auto_generation_time = current_time
@@ -3336,6 +3388,7 @@ class ModernMainWindow(QMainWindow):
 
         # [신규] 검색 결과 Parquet 파일로 저장
         if not self.search_results.is_empty():
+            self._save_search_snapshot()  # 소진 시 자동 복원용
             try:
                 self.search_results.get_dataframe().to_parquet('naia_temp_rows.parquet')
             except Exception as e:
@@ -3402,6 +3455,7 @@ class ModernMainWindow(QMainWindow):
 
     def restore_search_results(self):
         """'naia_temp_rows.parquet' 파일이 있으면 비동기로 로드합니다."""
+        self._search_results_snapshot = None  # 명시적 복원 시 스냅샷 휘발
         result_file = 'naia_temp_rows.parquet'
         if os.path.exists(result_file):
             self.search_results.set_dataframe(pd.DataFrame())
@@ -3481,7 +3535,8 @@ class ModernMainWindow(QMainWindow):
                 # 파일 불러오기
                 df = pd.read_parquet(file_path)
                 self.search_results.set_dataframe(df)
-                
+                self._save_search_snapshot()  # 소진 시 자동 복원용
+
                 row_count = len(df)
                 # UI 라벨 업데이트
                 self.result_label1.setText(f"검색: {row_count:,}")
@@ -3490,7 +3545,7 @@ class ModernMainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "오류", f"파일을 불러오는 중 오류가 발생했습니다:\n{str(e)}")
                 self.status_bar.showMessage(f"❌ 파일 불러오기 실패: {str(e)}", 5000)
-    
+
     def merge_custom_parquet(self):
         """사용자가 선택한 parquet 파일을 현재 결과에 합치기"""
         # custom_tags 폴더 확인 및 생성
@@ -3519,7 +3574,8 @@ class ModernMainWindow(QMainWindow):
                     merged_df = pd.concat([current_df, new_df], ignore_index=True)
                 
                 self.search_results.set_dataframe(merged_df)
-                
+                self._save_search_snapshot()  # 소진 시 자동 복원용
+
                 new_count = len(new_df)
                 total_count = len(merged_df)
                 # UI 라벨 업데이트
@@ -4783,6 +4839,7 @@ class ModernMainWindow(QMainWindow):
     def on_depth_search_results_assigned(self, new_search_result: SearchResultModel):
         """심층 검색 탭에서 할당된 결과를 메인 UI에 반영"""
         self.search_results = new_search_result
+        self._save_search_snapshot()  # 소진 시 자동 복원용
         count = self.search_results.get_count()
         self.result_label1.setText(f"검색: {count}")
         self.result_label2.setText(f"남음: {count}")
@@ -4815,8 +4872,14 @@ class ModernMainWindow(QMainWindow):
         # 컨트롤러에 즉시 생성을 요청
         self.prompt_gen_controller.generate_instant_source(tags_dict, settings)
 
-    def trigger_random_prompt(self):
-        """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작"""
+    def trigger_random_prompt(self, settings_override: dict = None, active_ratings: set = None,
+                              source_row_override=None):
+        """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작
+        Args:
+            settings_override: UI 체크박스 대신 사용할 설정값 (Shared Mode 세션별 오버라이드)
+            active_ratings: Rating 필터 (Remote GSQE 버튼 상태, None이면 전체)
+            source_row_override: 외부 주입 source_row (Remote tag filter). pop 없이 사용.
+        """
         self.random_prompt_btn.setEnabled(False)
         # 분리된 버튼도 비활성화
         if hasattr(self, 'detached_random_btn'):
@@ -4842,11 +4905,26 @@ class ModernMainWindow(QMainWindow):
             'api_mode': self.app_context.get_api_mode(),  # 🆕 ANIMA 모드 감지를 위해 추가
             'comfyui_sampling_mode': comfyui_sampling_mode  # 🔧 라디오 버튼에서 직접 읽기
         }
+        if settings_override:
+            settings.update(settings_override)
         self.app_context.publish("random_prompt_triggered")
+
+        # Tag filter 경로: source_row가 이미 준비되어 있으면 snapshot 복원 불필요
+        if source_row_override is None:
+            # 소진 시 스냅샷에서 자동 복원
+            if self.search_results.is_empty() and not settings.get('wildcard_standalone', False):
+                if not self._restore_from_snapshot():
+                    self.random_prompt_btn.setEnabled(True)
+                    if hasattr(self, 'detached_random_btn'):
+                        self.detached_random_btn.setEnabled(True)
+                    self.status_bar.showMessage("⚠️ 검색 결과가 없습니다. 먼저 검색을 실행해 주세요.", 5000)
+                    return
 
         # [수정] 수동 생성 시에는 자동 생성 플래그를 False로 설정
         self.prompt_gen_controller.auto_generation_requested = False
-        self.prompt_gen_controller.generate_next_prompt(self.search_results, settings)
+        self.prompt_gen_controller.generate_next_prompt(self.search_results, settings,
+                                                         active_ratings=active_ratings,
+                                                         source_row_override=source_row_override)
 
     def _trigger_auto_image_generation(self):
         """자동 생성 모드에서 이미지 생성을 트리거합니다."""
@@ -4935,6 +5013,71 @@ class ModernMainWindow(QMainWindow):
         # 분리된 버튼도 활성화
         if hasattr(self, 'detached_random_btn'):
             self.detached_random_btn.setEnabled(True)
+
+    # --- 검색 결과 스냅샷 (소진 시 자동 복원용) ---
+    def _save_search_snapshot(self):
+        """현재 search_results의 원본 사본을 메모리에 저장"""
+        if not self.search_results.is_empty():
+            self._search_results_snapshot = self.search_results.get_dataframe().copy()
+            # Remote Session 필터 초기화 (검색/로드/depth assign/복원 시)
+            # 필터 적용 중에는 bridge._skip_filter_reset으로 우회
+            bridge = getattr(self.app_context, 'remote_bridge', None)
+            if bridge and not getattr(bridge, '_skip_filter_reset', False):
+                bridge._reset_remote_filters()
+
+    def _restore_from_snapshot(self) -> bool:
+        """스냅샷에서 search_results 복원. 성공 시 True."""
+        # 1차: 메모리 스냅샷에서 복원
+        if self._search_results_snapshot is not None and not self._search_results_snapshot.empty:
+            self.search_results.set_dataframe(self._search_results_snapshot.copy())
+            count = self.search_results.get_count()
+            self.result_label1.setText(f"검색: {count:,}")
+            self.result_label2.setText(f"남음: {count:,}")
+            self.status_bar.showMessage(f"🔄 데이터셋 자동 복원 ({count:,}개)", 3000)
+            print(f"🔄 search_results 자동 복원: {count}개 행")
+            return True
+
+        # 2차: 임시 파일(naia_temp_rows.parquet)에서 복원
+        try:
+            import os
+            temp_path = os.path.join('data', 'naia_temp_rows.parquet')
+            if os.path.exists(temp_path):
+                import pandas as pd
+                temp_df = pd.read_parquet(temp_path)
+                if not temp_df.empty:
+                    self.search_results.set_dataframe(temp_df)
+                    self._search_results_snapshot = temp_df.copy()
+                    count = self.search_results.get_count()
+                    self.result_label1.setText(f"검색: {count:,}")
+                    self.result_label2.setText(f"남음: {count:,}")
+                    self.status_bar.showMessage(f"🔄 임시 파일에서 복원 ({count:,}개)", 3000)
+                    print(f"🔄 naia_temp_rows.parquet에서 복원: {count}개 행")
+                    return True
+        except Exception as e:
+            print(f"⚠️ 임시 파일 복원 실패: {e}")
+
+        # 3차 최종 Fallback: tags_129.parquet에서 rating=='s' 항목 로드
+        try:
+            import os, pandas as pd
+            fallback_path = os.path.join('data', 'tags', 'tags_129.parquet')
+            if os.path.exists(fallback_path):
+                fallback_df = pd.read_parquet(fallback_path)
+                if 'rating' in fallback_df.columns:
+                    fallback_df = fallback_df[fallback_df['rating'] == 's']
+                if not fallback_df.empty:
+                    fallback_df = fallback_df.reset_index(drop=True)
+                    self.search_results.set_dataframe(fallback_df)
+                    self._search_results_snapshot = fallback_df.copy()
+                    count = self.search_results.get_count()
+                    self.result_label1.setText(f"검색: {count:,}")
+                    self.result_label2.setText(f"남음: {count:,}")
+                    self.status_bar.showMessage(f"⚠️ 데이터 없음 — 기본 데이터셋 로드 (safe {count:,}개)", 5000)
+                    print(f"⚠️ Fallback: tags_129.parquet rating=='s' 로드: {count}개 행")
+                    return True
+        except Exception as e:
+            print(f"⚠️ Fallback 로드 실패: {e}")
+
+        return False
 
     def load_generation_parameters(self):
         # 기존 방식 대신 모드별 로드
@@ -5182,6 +5325,16 @@ class ModernMainWindow(QMainWindow):
     def closeEvent(self, event):
         # 프로그램 종료 시 현재 모드 설정 저장
         try:
+            # Remote API 서버 + Cloudflared 종료
+            try:
+                from core.remote_api_server import stop_remote_server
+                stop_remote_server()
+                settings_tab = self.image_window.tab_controller.get_tab_instance('SettingsTabModule')
+                if settings_tab and settings_tab.settings_widget:
+                    settings_tab.settings_widget._stop_cloudflared()
+            except Exception:
+                pass
+
             # 🆕 생성 스레드 안전 종료 (가장 먼저 실행)
             if hasattr(self, 'generation_controller') and self.generation_controller:
                 try:
@@ -5315,7 +5468,11 @@ class ModernMainWindow(QMainWindow):
 
     def open_resolution_manager(self):
         """해상도 관리 다이얼로그를 열고, 결과를 반영합니다."""
-        dialog = ResolutionManagerDialog(self.resolutions, self)
+        default_resolutions = [
+            "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
+            "1088 x 960", "1152 x 896", "1216 x 832"
+        ]
+        dialog = ResolutionManagerDialog(self.resolutions, default_resolutions, self)
 
         # print(f"[DEBUG] 해상도 관리 다이얼로그 열림")
         dialog_result = dialog.exec()
@@ -6953,6 +7110,87 @@ class ModernMainWindow(QMainWindow):
             auto_generate=True
         )
 
+    def on_use_as_outpaint_base_requested(self, history_item):
+        """Comic Panel Setup → img2img_panel에 인페인트 모드로 전달"""
+        if not history_item or not hasattr(history_item, 'image'):
+            return
+        pil_image = history_item.image
+
+        from ui.comic_panel_window import ComicPanelWindow
+        result = ComicPanelWindow.get_comic_panel_data(pil_image, self)
+        if result is None:
+            return
+
+        self.img2img_panel.set_image_with_mask(
+            canvas_image=result["canvas_image"],
+            full_mask=result["full_mask_image"],
+            small_mask=result["small_mask_image"]
+        )
+        self.status_bar.showMessage(
+            f"Comic Panel: {result['canvas_width']}x{result['canvas_height']} - "
+            f"인페인트 모드 활성화", 5000)
+
+    def apply_comic_panel_from_image(self, pil_image: Image.Image):
+        """Open Comic Panel preprocessing for an arbitrary PIL image."""
+        if pil_image is None:
+            return
+
+        from ui.comic_panel_window import ComicPanelWindow
+        result = ComicPanelWindow.get_comic_panel_data(pil_image, self)
+        if result is None:
+            return
+
+        self.img2img_panel.set_image_with_mask(
+            canvas_image=result["canvas_image"],
+            full_mask=result["full_mask_image"],
+            small_mask=result["small_mask_image"]
+        )
+        self.status_bar.showMessage(
+            f"Comic Panel: {result['canvas_width']}x{result['canvas_height']} - "
+            "인페인트 모드 활성화", 5000)
+
+    def apply_comic_panel_from_image_path(self, image_path: str):
+        """Open Comic Panel preprocessing for an image stored on disk."""
+        try:
+            pil_image = Image.open(image_path)
+        except Exception as exc:
+            print(f"Failed to open comic panel source image: {exc}")
+            return
+
+        self.apply_comic_panel_from_image(pil_image)
+
+    def apply_character_asset_reference_from_image(self, pil_image: Image.Image):
+        """Apply a saved character asset as a reference-inset inpaint canvas without user confirmation."""
+        if pil_image is None:
+            return
+
+        try:
+            from utils.reference_inpaint_preprocess import prepare_reference_inpaint_canvas
+            result = prepare_reference_inpaint_canvas(pil_image)
+        except Exception as exc:
+            print(f"Failed to preprocess character asset reference image: {exc}")
+            return
+
+        self.img2img_panel.set_image_with_mask(
+            canvas_image=result.canvas_image,
+            full_mask=result.full_mask_image,
+            small_mask=result.small_mask_image,
+        )
+        self.status_bar.showMessage(
+            f"Character Asset Reference: {result.canvas_width}x{result.canvas_height} - 자동 인페인트 적용",
+            5000,
+        )
+
+    def apply_character_asset_reference_from_image_path(self, image_path: str):
+        """Apply a saved character asset from disk without opening the Comic Panel dialog."""
+        try:
+            pil_image = Image.open(image_path)
+        except Exception as exc:
+            print(f"Failed to open character asset reference image: {exc}")
+            return
+
+        self.apply_character_asset_reference_from_image(pil_image)
+
     def on_img2img_window_generate(self, _window_id: int, params: dict):
         """독립 Img2Img 윈도우에서 생성 요청"""
         # 배치 반복 생성 셋업
@@ -7093,17 +7331,52 @@ class ModernMainWindow(QMainWindow):
             QTimer.singleShot(50, self.update_splitter_stretch_factors)
 
 if __name__ == "__main__":
+    import argparse
+
+    def _should_start_hidden_for_web_session() -> bool:
+        """Web Session 자동 시작/CLI 실행이면 메인 창을 처음부터 숨김 시작."""
+        if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
+            return True
+
+        try:
+            settings_path = Path("app_settings.json")
+            if not settings_path.exists():
+                return False
+
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f) or {}
+
+            web_session = settings.get("web_session", {})
+            return bool(web_session.get("auto_start", False))
+        except Exception:
+            return False
+
+    parser = argparse.ArgumentParser(description="NAIA 2.0")
+    parser.add_argument(
+        "--web-session",
+        action="store_true",
+        help="앱 기동 시 Web Session 을 자동 시작하고 시스템 브라우저를 연다.",
+    )
+    cli_args, _ = parser.parse_known_args()
+
+    # CLI --web-session 플래그를 환경변수로 전달.
+    # Settings 탭의 on_initialize() 가 ModernMainWindow.__init__ 내부(=AppContext 생성 전)에서
+    # 동기 실행되므로, app_context 속성으로는 타이밍이 맞지 않아 os.environ 으로 배관.
+    if cli_args.web_session:
+        os.environ["NAIA_CLI_WEB_SESSION"] = "1"
+        os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
+
     # 기존 환경 설정들...
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
-    
+
     setup_webengine()
     app = QApplication(sys.argv)
-    
+
     # 기존 DPI 및 폰트 설정들...
     loaded_fonts = load_custom_fonts()
-    
+
     # 기본 폰트 설정
     if loaded_fonts:
         default_font = QFont("Pretendard", 12)
@@ -7123,11 +7396,13 @@ if __name__ == "__main__":
             pass
         app.setFont(default_font)
         print("Pretendard 폰트를 찾을 수 없어 시스템 기본 폰트를 사용합니다.")
-    
+
     # 메인 윈도우 생성
     window = ModernMainWindow()
-
-    window.show()
+    if _should_start_hidden_for_web_session():
+        window._publish_desktop_window_visibility()
+    else:
+        window.show()
     sys.exit(app.exec())
 
 ## 생성형 AI 개발 가이드라인

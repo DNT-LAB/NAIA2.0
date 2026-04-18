@@ -2,9 +2,11 @@ import requests
 import zipfile
 import io, time, re, json
 import base64
+import math
 import numpy as np
 import gc
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 from typing import Dict, Any, TYPE_CHECKING, List
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QCoreApplication, QThreadPool
@@ -333,13 +335,18 @@ class APIService:
             if params.get('type') == 'inpaint':
                 model_name += "-inpainting"
 
+            # NAI 서버는 seed를 uint64로 파싱하므로 음수 방지
+            nai_seed = params.get('seed', 0)
+            if not isinstance(nai_seed, int) or nai_seed < 0:
+                nai_seed = 0
+
             # API가 요구하는 파라미터 구조 생성
             api_parameters = {
                 "width": params.get('width', 832),
                 "height": params.get('height', 1216),
                 "n_samples": 1,
-                "seed": params.get('seed', 0),
-                "extra_noise_seed": params.get('seed', 0),
+                "seed": nai_seed,
+                "extra_noise_seed": nai_seed,
                 "sampler": params.get('sampler', 'k_euler_ancestral'),
                 "steps": params.get('steps', 28),
                 "scale": params.get('cfg_scale', 5.0),
@@ -447,6 +454,12 @@ class APIService:
                         characters = list(nai_char_data.characters)
                         ucs = list(nai_char_data.uc)
                         character_positions = [pos.to_dict() for pos in nai_char_data.character_positions]
+
+                    elif params.get('character_asset_request') and params.get('characters'):
+                        char_source = "CharacterAsset"
+                        characters = params['characters']
+                        ucs = params.get('uc', [])
+                        character_positions = params.get('character_positions', [])
 
                     elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
                         # 3) Temporary Window — VirtualCharacterTab
@@ -1109,6 +1122,10 @@ class APIService:
                 # Ensure mask is in grayscale mode
                 if mask_image.mode != 'L':
                     mask_image = mask_image.convert('L')
+
+                if mask_image.size != generated_image.size:
+                    print(f"   ℹ️ Resizing mask from {mask_image.size} to {generated_image.size}")
+                    mask_image = mask_image.resize(generated_image.size, Image.NEAREST)
                 
                 # Find bounding box of the mask (white areas)
                 mask_array = np.array(mask_image)
@@ -1118,25 +1135,56 @@ class APIService:
                     # Get bounding box of the masked area
                     y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
                     x_min, x_max = white_pixels[1].min(), white_pixels[1].max()
-                    
-                    # Crop the generated image to the mask area
-                    cropped_image = generated_image.crop((x_min, y_min, x_max + 1, y_max + 1))
-                    print(f"   ✅ Cropped to mask area: {cropped_image.size}")
-                    
-                    # Replace the original image with cropped one
-                    result['image'] = cropped_image
-                    
-                    # Remove EXIF data by creating a new image
+
+                    # Compute an Enhance-friendly crop box: margin-trimmed,
+                    # 128-aligned(when possible), aspect-preserving, and sized so
+                    # an x1.5 Enhance lands near 1MP without aspect distortion.
+                    crop_box = self._compute_enhance_ready_crop_box(
+                        mask_bbox=(int(x_min), int(y_min), int(x_max), int(y_max)),
+                        image_size=generated_image.size,
+                    )
+                    cropped_image = generated_image.crop(crop_box)
+                    print(f"   ✅ Cropped to mask area: {cropped_image.size} "
+                          f"(mask bbox was {x_max - x_min + 1}x{y_max - y_min + 1})")
+
+                    # Strip EXIF by rebuilding pixels into a fresh image, then re-embed
+                    # NovelAI tEXt chunks so Enhance / PNG Info 등 downstream 인식 경로가 유지됨.
                     clean_image = Image.new(cropped_image.mode, cropped_image.size)
                     clean_image.putdata(list(cropped_image.getdata()))
-                    result['image'] = clean_image
-                    
-                    # Update image bytes for saving
+
+                    pnginfo = self._build_nai_pnginfo_for_cropped_image(generated_image, parameters)
+
                     buffer = io.BytesIO()
-                    clean_image.save(buffer, format='PNG')
-                    result['image_bytes'] = buffer.getvalue()
-                    
-                    print("   ✅ Cropped image extraction completed (EXIF removed)")
+                    if pnginfo is not None:
+                        clean_image.save(buffer, format='PNG', pnginfo=pnginfo)
+                    else:
+                        clean_image.save(buffer, format='PNG')
+                    cropped_bytes = buffer.getvalue()
+
+                    # 메모리상 PIL Image의 .info도 pnginfo를 반영해야 downstream 추출 경로
+                    # (generation_controller._extract_info_from_image 등)가 메타데이터를 인식한다.
+                    # 저장된 바이트에서 재오픈하여 tEXt 청크가 로드된 상태로 교체.
+                    final_image = Image.open(io.BytesIO(cropped_bytes))
+                    final_image.load()
+
+                    result['image'] = final_image
+                    result['image_bytes'] = cropped_bytes
+                    result['raw_bytes'] = cropped_bytes
+
+                    # 크롭 결과는 독립된 PNG이므로, 이후 히스토리/Enhance/재생성 경로가
+                    # 원본 인페인트 파라미터로 오염되지 않도록 parameters dict를 정리한다.
+                    # - width/height: 크롭된 실제 해상도로 갱신
+                    # - 일회성 인페인트 플래그 제거 (cropped_image_request / full_mask_pil /
+                    #   mask_bytes / type): 그대로 남기면 Enhance 재호출 시 오래된 마스크로
+                    #   재크롭되어 해상도/영역이 왜곡됨.
+                    cropped_w, cropped_h = final_image.size
+                    parameters['width'] = cropped_w
+                    parameters['height'] = cropped_h
+                    for stale_key in ('cropped_image_request', 'full_mask_pil', 'mask_bytes', 'type'):
+                        parameters.pop(stale_key, None)
+
+                    print(f"   ✅ Cropped image extraction completed "
+                          f"({cropped_w}x{cropped_h}, EXIF stripped, NAI tEXt preserved, inpaint flags cleared)")
                 else:
                     print("   ⚠️ No mask area found, returning original image")
             else:
@@ -1150,7 +1198,244 @@ class APIService:
             traceback.print_exc()
             # Return original result on error
             return result
-    
+
+    # Enhance-ready crop 상수:
+    # - CROP_MARGIN_PX: 마스크 bbox 안쪽으로 더 깎아낼 픽셀 (seam 에지 artifact 제거)
+    # - ENHANCE_TARGET_PIXELS: 최종 Enhance 결과가 도달할 목표 면적 (NAI 저가격 티어 상한)
+    # - ENHANCE_UPSCALE_FACTOR: Enhance의 x1.5 기본 배율. pre-upscale 목표 면적 역산에 사용.
+    # - CROP_PRIMARY_ALIGN: 128 — ceiling(W·1.5/64)·64 보정이 W/H에 비대칭으로 걸려
+    #   아스펙트가 뒤틀리는 것을 막기 위한 alignment. 128k × 1.5 = 192k = 64·3k 로
+    #   정확히 떨어지므로 업스케일 후 아스펙트가 완벽히 보존된다.
+    # - CROP_FALLBACK_ALIGN: 64 — 마스크가 너무 작아 128-align 불가할 때 폴백.
+    CROP_MARGIN_PX = 12
+    ENHANCE_TARGET_PIXELS = 1_048_576
+    ENHANCE_UPSCALE_FACTOR = 1.5
+    CROP_PRIMARY_ALIGN = 128
+    CROP_FALLBACK_ALIGN = 64
+
+    def _compute_enhance_ready_crop_box(
+        self,
+        mask_bbox: tuple,
+        image_size: tuple,
+    ) -> tuple:
+        """마스크 bbox를 Enhance 친화적 crop box로 변환.
+
+        단계:
+        1. 마스크 bbox를 `CROP_MARGIN_PX` 만큼 안쪽으로 트림 — inpaint seam 전이
+           픽셀이 crop 에지에 노출되지 않게 한다.
+        2. 트림된 bbox 안에 내접하는 128-align(W, H) 중, pre-upscale 목표 면적
+           `ENHANCE_TARGET_PIXELS / factor²` 에 가장 가깝고 bbox 아스펙트를 보존하는
+           치수를 선택한다.
+        3. 마스크 중심에 센터링하고 이미지 경계로 클램프한다. **픽셀 리샘플 없음.**
+
+        128-align를 쓰는 이유: Enhance의 `math.ceil(dim * 1.5 / 64) * 64` 는 올림이므로
+        W/H가 64-align 이지만 128-align가 아니면 올림 보정량이 W와 H에 서로 다르게
+        걸려 결과 아스펙트가 원본과 미세하게 달라진다. 128 배수는 × 1.5 결과가 정확히
+        64-align 이라 보정이 아예 발생하지 않는다.
+        """
+        x_min, y_min, x_max, y_max = mask_bbox
+        img_w, img_h = image_size
+        margin = self.CROP_MARGIN_PX
+
+        # 1. Margin 트림 (seam 에지 제거)
+        x0 = max(0, x_min + margin)
+        y0 = max(0, y_min + margin)
+        x1 = min(img_w - 1, x_max - margin)
+        y1 = min(img_h - 1, y_max - margin)
+        if x1 <= x0 or y1 <= y0:
+            # margin이 bbox를 붕괴시킨 경우 원본 bbox로 폴백
+            x0, y0, x1, y1 = x_min, y_min, x_max, y_max
+
+        bbox_w = x1 - x0 + 1
+        bbox_h = y1 - y0 + 1
+
+        # 2. Pre-upscale 목표 면적
+        target_area = self.ENHANCE_TARGET_PIXELS / (self.ENHANCE_UPSCALE_FACTOR ** 2)
+
+        # 3. 128-align 과 64-align 후보를 모두 계산하고 총 distortion이 작은 쪽을 선택.
+        #    - 128-align: upscale이 정확히 clean 하지만 grid가 거칠어 작은 bbox에서는
+        #      bbox aspect 보존이 어려움.
+        #    - 64-align: grid가 조밀해 bbox aspect에 더 가깝지만 x1.5 업스케일에서
+        #      ceiling 보정이 W/H에 비대칭으로 걸려 약간의 aspect shift 가능.
+        #    총 distortion = |crop_ar - bbox_ar| + |upscale_ar - crop_ar|
+        bbox_aspect = bbox_w / max(1, bbox_h)
+
+        candidates = []
+        if bbox_w >= self.CROP_PRIMARY_ALIGN and bbox_h >= self.CROP_PRIMARY_ALIGN:
+            candidates.append(self._find_aligned_crop_size(
+                bbox_w, bbox_h, target_area, self.CROP_PRIMARY_ALIGN))
+        candidates.append(self._find_aligned_crop_size(
+            bbox_w, bbox_h, target_area, self.CROP_FALLBACK_ALIGN))
+
+        best_crop = candidates[0]
+        best_total_distortion = float('inf')
+        for w, h in candidates:
+            crop_ar = w / max(1, h)
+            crop_ar_err = abs(crop_ar - bbox_aspect) / max(0.01, bbox_aspect)
+            up_w = math.ceil(w * self.ENHANCE_UPSCALE_FACTOR / 64) * 64
+            up_h = math.ceil(h * self.ENHANCE_UPSCALE_FACTOR / 64) * 64
+            up_ar = up_w / max(1, up_h)
+            up_ar_err = abs(up_ar - crop_ar) / max(0.01, crop_ar)
+            total = crop_ar_err + up_ar_err
+            # 동률/근소차에서는 primary (128-align, 먼저 추가된 쪽) 우선
+            if total < best_total_distortion - 1e-9:
+                best_total_distortion = total
+                best_crop = (w, h)
+
+        target_w, target_h = best_crop
+
+        # 4. 마스크 중심에 센터링 후 이미지 경계 클램프
+        mask_cx = (x_min + x_max + 1) // 2
+        mask_cy = (y_min + y_max + 1) // 2
+        crop_x = max(0, min(img_w - target_w, mask_cx - target_w // 2))
+        crop_y = max(0, min(img_h - target_h, mask_cy - target_h // 2))
+
+        return (crop_x, crop_y, crop_x + target_w, crop_y + target_h)
+
+    def _find_aligned_crop_size(
+        self,
+        bbox_w: int,
+        bbox_h: int,
+        target_area: float,
+        align: int,
+    ) -> tuple:
+        """bbox 안에 들어가는 align-배수 (W, H) 중 아스펙트 보존하며 target_area에
+        가장 가까운 치수를 선택.
+
+        전략: H를 `[align, max_h_aligned]` 전체에서 align 스텝 단위로 dense
+        enumeration, 각 H에 대해 ideal_w 주변 ±1 align 스텝 + 경계값을 W 후보로 시도.
+        각 (W, H) 에 대해
+            score = |area/target - 1|  +  2 × |(W/H) / aspect - 1|
+        를 계산하고 최소 score 조합을 선택. aspect 가중치를 면적보다 크게 두어
+        업스케일 후 stretching이 최소화되도록 한다.
+
+        H 후보를 전체 범위에서 enumerate하는 이유: tall/narrow bbox에서는 ideal_h가
+        max_h 바깥으로 clamp되면서 ±2 국소 탐색이 의미 있는 중간 후보를 놓친다.
+        align 스텝 기준 ~12개 이하의 후보라 exhaustive 탐색 비용도 무시 가능.
+        """
+        aspect = bbox_w / max(1, bbox_h)
+
+        max_w_aligned = max(align, (bbox_w // align) * align)
+        max_h_aligned = max(align, (bbox_h // align) * align)
+
+        # H 후보: align 배수의 전체 범위 [align, max_h_aligned].
+        # tall/narrow bbox (이상 h가 max_h로 clamp되는 경우)에서도 중간 h 값들을
+        # 놓치지 않으려면 dense enumeration이 필수.
+        h_candidates = list(range(align, max_h_aligned + align, align))
+        if not h_candidates:
+            h_candidates = [align]
+
+        best = None
+        best_score = float('inf')
+
+        for h in h_candidates:
+            if h > max_h_aligned or h < align:
+                continue
+
+            ideal_w = aspect * h
+            ideal_w_steps = max(1, round(ideal_w / align))
+            # W 후보: ideal 주변 ±1 + 경계값. dense enumeration은 과한 비용 없이
+            # align-반올림 오차를 흡수.
+            w_candidates = set()
+            for delta in (-1, 0, 1):
+                w_candidates.add(max(align, (ideal_w_steps + delta) * align))
+            w_candidates.add(align)
+            w_candidates.add(max_w_aligned)
+
+            for w in w_candidates:
+                w = min(w, max_w_aligned)
+                if w < align:
+                    continue
+
+                area = w * h
+                got_aspect = w / h
+                area_err = abs(area - target_area) / target_area
+                aspect_err = abs(got_aspect - aspect) / max(0.01, aspect)
+                score = area_err + 2.0 * aspect_err
+
+                if score < best_score:
+                    best_score = score
+                    best = (w, h)
+
+        if best is None:
+            best = (max_w_aligned, max_h_aligned)
+
+        return best
+
+    def _build_nai_pnginfo_for_cropped_image(
+        self,
+        source_image: Image.Image,
+        parameters: Dict[str, Any],
+    ) -> "PngInfo | None":
+        """크롭된 이미지에 NAI tEXt 청크를 재주입하기 위한 PngInfo를 구성.
+
+        1순위: 원본 생성 이미지의 `info` dict에 남아 있는 tEXt 청크를 그대로 복사.
+        2순위(폴백): Comment/Software가 비어 있으면 parameters로부터 최소한의 NAI 메타데이터를 합성.
+        `exif` 키는 의도적으로 제외하여 실제 EXIF는 붙지 않도록 한다.
+        """
+        try:
+            pnginfo = PngInfo()
+            source_info = getattr(source_image, 'info', {}) or {}
+
+            preserved_keys = (
+                "Title",
+                "Description",
+                "Software",
+                "Source",
+                "Comment",
+                "Generation time",
+                "Author",
+            )
+            added_any = False
+            for key in preserved_keys:
+                value = source_info.get(key)
+                if isinstance(value, bytes):
+                    value = value.decode('utf-8', errors='ignore')
+                if isinstance(value, str) and value:
+                    pnginfo.add_text(key, value)
+                    added_any = True
+
+            has_core_nai = bool(source_info.get("Software")) and bool(source_info.get("Comment"))
+            if not has_core_nai:
+                comment_payload: Dict[str, Any] = {
+                    "prompt": parameters.get('input', '') or '',
+                    "uc": parameters.get('negative_prompt', '') or '',
+                }
+                for src_key, dst_key in (
+                    ('steps', 'steps'),
+                    ('scale', 'scale'),
+                    ('seed', 'seed'),
+                    ('sampler', 'sampler'),
+                    ('noise_schedule', 'noise_schedule'),
+                    ('cfg_rescale', 'cfg_rescale'),
+                    ('sm', 'sm'),
+                    ('sm_dyn', 'sm_dyn'),
+                ):
+                    if src_key in parameters and parameters[src_key] is not None:
+                        comment_payload[dst_key] = parameters[src_key]
+
+                try:
+                    comment_json = json.dumps(comment_payload, ensure_ascii=False)
+                except Exception:
+                    comment_json = None
+
+                if not source_info.get("Software"):
+                    pnginfo.add_text("Software", "NovelAI")
+                    added_any = True
+                if not source_info.get("Description"):
+                    description_text = parameters.get('input', '') or ''
+                    if description_text:
+                        pnginfo.add_text("Description", description_text)
+                        added_any = True
+                if not source_info.get("Comment") and comment_json:
+                    pnginfo.add_text("Comment", comment_json)
+                    added_any = True
+
+            return pnginfo if added_any else None
+        except Exception as e:
+            print(f"⚠️ Cropped image PngInfo 구성 실패: {e}")
+            return None
+
     def _single_pass_outpainting(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         단일 패스 Auto-Outpainting을 수행합니다.

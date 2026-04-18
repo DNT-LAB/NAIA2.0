@@ -1,6 +1,5 @@
 import json
 import os
-import requests
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -11,6 +10,7 @@ from PyQt6.QtCore import QThread, Qt
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from core.api_validator import APIValidator
+from core import api_verification
 from core.context import AppContext
 from interfaces.base_tab_module import BaseTabModule
 
@@ -785,67 +785,14 @@ class APIManagementWindow(QWidget):
         self._on_comfyui_models_loaded(success, models, message)
 
     def _validate_comfyui_url_sync(self, url: str) -> tuple:
-        """🆕 ComfyUI URL 동기식 검증"""
-        try:
-            # URL 정규화
-            clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
-            protocols = [f"http://{clean_url}", f"https://{clean_url}"]
-
-            for base_url in protocols:
-                try:
-                    response = requests.get(f"{base_url}/system_stats", timeout=5)
-                    if response.status_code == 200:
-                        stats = response.json()
-                        device_info = stats.get('system', {})
-                        gpu_name = device_info.get('gpu_name', 'Unknown GPU')
-                        ram_total = device_info.get('ram_total', 0)
-
-                        ram_gb = ram_total / (1024**3) if ram_total > 0 else 0
-                        message = f"✅ ComfyUI 연결 성공!\nGPU: {gpu_name}\nRAM: {ram_gb:.1f}GB"
-                        return True, clean_url, message, "info"
-                except requests.exceptions.RequestException:
-                    continue
-
-            return False, url, f"❌ ComfyUI 연결 실패: '{url}' 주소를 확인하고 서버가 실행 중인지 확인해주세요.", "error"
-
-        except Exception as e:
-            return False, url, f"❌ ComfyUI 검증 중 오류 발생: {str(e)}", "error"
+        """ComfyUI URL 동기식 검증 — `core.api_verification` 위임."""
+        r = api_verification.verify_comfyui_url(url)
+        return r.success, (r.value if r.success else url), r.message, r.message_type
 
     def _fetch_comfyui_models_sync(self, url: str) -> tuple:
-        """🆕 ComfyUI 모델 목록 동기식 가져오기"""
-        try:
-            # URL 정규화
-            clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
-            normalized_url = f"http://{clean_url}"
-
-            response = requests.get(f"{normalized_url}/object_info", timeout=10)
-
-            if response.status_code == 200:
-                object_info = response.json()
-
-                # CheckpointLoaderSimple 노드에서 모델 목록 추출
-                checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-                input_info = checkpoint_loader.get('input', {})
-                required_info = input_info.get('required', {})
-                ckpt_name_info = required_info.get('ckpt_name', [])
-
-                if isinstance(ckpt_name_info, list) and len(ckpt_name_info) > 0:
-                    models = ckpt_name_info[0]  # 첫 번째 요소가 모델 리스트
-                    if isinstance(models, list) and len(models) > 0:
-                        return True, models, f"모델 {len(models)}개 발견"
-                    else:
-                        return False, [], "사용 가능한 모델이 없습니다."
-                else:
-                    return False, [], "모델 정보를 찾을 수 없습니다."
-            else:
-                return False, [], f"API 응답 오류 (HTTP {response.status_code})"
-
-        except requests.exceptions.Timeout:
-            return False, [], "모델 목록 로드 시간 초과"
-        except requests.exceptions.ConnectionError:
-            return False, [], "ComfyUI 서버 연결 실패"
-        except Exception as e:
-            return False, [], f"모델 목록 로드 실패: {str(e)}"
+        """ComfyUI 모델 목록 동기식 — `core.api_verification` 위임."""
+        r = api_verification.fetch_comfyui_models(url)
+        return r.success, r.extra.get("models", []), r.message
 
     # NAI 검증 완료 시 호출될 슬롯
     def _on_nai_validation_complete(self, success: bool, value: str, message: str, message_type: str):

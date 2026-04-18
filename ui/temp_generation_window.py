@@ -13,9 +13,11 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QCloseEvent
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from ui.character_asset_generation_window import CharacterAssetGenerationWindow
 from ui.temp_generation_params import TempGenerationParamsWidget
 from ui.virtual_character_tab import VirtualCharacterTab
 from ui.virtual_prompt_engineering_tab import VirtualPromptEngineeringTab
+from utils.reference_inpaint_preprocess import ReferenceGenerationSpec
 
 
 class TempGenerationWindow(QMainWindow):
@@ -40,6 +42,7 @@ class TempGenerationWindow(QMainWindow):
 
         self.window_id = window_id
         self.app_context = app_context
+        self.character_asset_window = None
 
         # 버튼 피드백 스타일 (LightGrey)
         self.FEEDBACK_STYLE = f"""
@@ -267,7 +270,7 @@ class TempGenerationWindow(QMainWindow):
         }
 
         # 파라미터 위젯에서 생성 파라미터 수집
-        generation_params = self.params_widget.collect_parameters()
+        generation_params = self.params_widget.collect_parameters(roll_random_seed=True)
         params.update(generation_params)
 
         # 🆕 Fix: reroll_on_generate가 True면 생성 시점에 와일드카드 처리 (UI 스레드에서)
@@ -481,6 +484,76 @@ class TempGenerationWindow(QMainWindow):
         # 시그널 발행: 외부에서 프롬프트를 생성하고 update_prompts()로 결과 전달
         self.random_prompt_requested.emit(self.window_id)
 
+    def open_character_asset_generation_window(self):
+        """Open or focus the C1 asset generation window."""
+        if self.character_asset_window is None:
+            owner_window = getattr(self.app_context, "main_window", None) or self
+            self.character_asset_window = CharacterAssetGenerationWindow(self.app_context, self, owner_window)
+            self.character_asset_window.destroyed.connect(self._on_character_asset_window_destroyed)
+
+        self.character_asset_window.show()
+        self.character_asset_window.raise_()
+        self.character_asset_window.activateWindow()
+
+    def _on_character_asset_window_destroyed(self, *_args):
+        """Clear the cached asset window reference when it closes."""
+        self.character_asset_window = None
+
+    def build_c1_asset_generation_params(
+        self,
+        request_id: str,
+        prompt_override: str = "",
+        uc_override: str = "",
+    ) -> dict:
+        """Build a temp-window generation request dedicated to C1 asset creation."""
+        if (prompt_override.strip() or uc_override.strip()) and hasattr(self, 'character_tab'):
+            if not getattr(self.character_tab, 'character_widgets', None):
+                self.character_tab.add_character_widget()
+
+            first_widget = self.character_tab.character_widgets[0]
+            first_widget.prompt_textbox.setPlainText(prompt_override.strip())
+            first_widget.uc_textbox.setPlainText(uc_override.strip())
+
+            self.character_tab.activate_checkbox.setChecked(True)
+            for index, widget in enumerate(self.character_tab.character_widgets):
+                widget.active_checkbox.setChecked(index == 0)
+
+        if hasattr(self, 'character_tab'):
+            self.character_tab.process_and_update_view()
+
+        character_params = self.character_tab.get_parameters() if hasattr(self, 'character_tab') else {}
+        characters = list((character_params or {}).get('characters') or [])
+        ucs = list((character_params or {}).get('uc') or [])
+
+        c1_prompt = characters[0].strip() if characters else prompt_override.strip()
+        c1_uc = ucs[0].strip() if ucs else uc_override.strip()
+        if not c1_prompt:
+            raise ValueError("C1 캐릭터 프롬프트가 비어 있습니다.")
+
+        spec = ReferenceGenerationSpec()
+        params = {
+            # Character asset generation intentionally ignores the temp/main prompt.
+            # Only the fixed reference-tag scaffold should remain before prompt-engineering.
+            'input': spec.build_prompt(),
+            'negative_prompt': self.negative_prompt_edit.toPlainText().strip(),
+        }
+        params.update(self.params_widget.collect_parameters(roll_random_seed=True))
+        params['width'] = spec.width
+        params['height'] = spec.height
+        params['random_resolution'] = False
+        params['characters'] = [c1_prompt]
+        params['uc'] = [c1_uc]
+        params['temp_window_prompt_engineering_tab'] = self.prompt_engineering_tab
+        params['character_asset_request'] = True
+        params['character_asset_request_id'] = request_id
+        params['character_asset_slot'] = 'C1'
+
+        # Asset generation must not inherit source-row tags such as random people count,
+        # artist/copyright, or other instant-generation prompt data.
+        params['wildcard_standalone'] = True
+
+        return params
+
     def update_prompts(self, main_prompt: str, negative_prompt: str):
         """
         🆕 FR-4: 외부에서 생성된 프롬프트를 임시 창에 반영
@@ -577,6 +650,8 @@ class TempGenerationWindow(QMainWindow):
 
         window_closing 시그널을 발행하여 TempWindowManager가 정리할 수 있도록 합니다.
         """
+        if self.character_asset_window is not None:
+            self.character_asset_window.close()
         print(f"🔄 [TempGenerationWindow] 창 #{self.window_id} 닫기 요청")
         self.window_closing.emit(self.window_id)
         event.accept()

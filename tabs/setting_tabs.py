@@ -3,16 +3,73 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QLineEdit, QFileDialog, QGroupBox,
     QScrollArea, QMessageBox, QComboBox
 )
-from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
+from PyQt6.QtGui import QIntValidator
 from PyQt6.QtWidgets import QTextEdit
 from interfaces.base_tab_module import BaseTabModule
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaling_manager
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size, get_scaling_manager
 from ui.scaling_settings_dialog import ScalingSettingsDialog
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+class _WebSessionReadyWorker(QObject):
+    """로컬 Web Session 서버가 실제로 응답할 때까지 대기한다."""
+
+    ready = pyqtSignal(str, int)
+    timeout = pyqtSignal(str, int)
+    finished = pyqtSignal()
+
+    def __init__(
+        self,
+        url: str,
+        request_id: int,
+        timeout_seconds: float = 20.0,
+        poll_interval_seconds: float = 0.25,
+    ):
+        super().__init__()
+        self.url = url
+        self.request_id = request_id
+        self.timeout_seconds = timeout_seconds
+        self.poll_interval_seconds = poll_interval_seconds
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        deadline = time.monotonic() + self.timeout_seconds
+        request = Request(self.url, headers={"Cache-Control": "no-cache"})
+
+        try:
+            while not self._stop_requested and time.monotonic() < deadline:
+                try:
+                    with urlopen(request, timeout=1.0) as response:
+                        status_code = getattr(response, "status", response.getcode())
+                        if status_code < 500:
+                            self.ready.emit(self.url, self.request_id)
+                            return
+                except HTTPError as exc:
+                    if exc.code < 500:
+                        self.ready.emit(self.url, self.request_id)
+                        return
+                except URLError:
+                    pass
+                except Exception:
+                    pass
+
+                time.sleep(self.poll_interval_seconds)
+
+            if not self._stop_requested:
+                self.timeout.emit(self.url, self.request_id)
+        finally:
+            self.finished.emit()
 
 class SettingsTabModule(BaseTabModule):
     """Settings 탭을 관리하는 모듈"""
@@ -28,6 +85,9 @@ class SettingsTabModule(BaseTabModule):
         self.settings_widget = None
         self.settings_data = {}
         self.settings_file = "app_settings.json"
+        self._browser_wait_thread = None
+        self._browser_wait_worker = None
+        self._browser_wait_request_id = 0
         
     def get_tab_title(self) -> str:
         return "⚙️ Settings"
@@ -51,6 +111,84 @@ class SettingsTabModule(BaseTabModule):
         self.load_settings()
         if self.settings_widget:
             self.settings_widget.update_ui_from_settings()
+            # CLI --web-session 플래그(환경변수 경유)가 있으면 설정값보다 우선해서 자동 시작
+            cli_force = os.environ.get('NAIA_CLI_WEB_SESSION') == '1'
+            if cli_force or self.get_setting('web_session.auto_start', False):
+                QTimer.singleShot(5000, self._auto_start_web_session)
+
+    def _auto_start_web_session(self):
+        """자동 시작: Web Session 활성화 + 브라우저 오픈"""
+        if not self.settings_widget:
+            return
+
+        port = self.settings_widget._get_remote_port()
+        url = f"http://localhost:{port}"
+
+        if not self.settings_widget.web_session_checkbox.isChecked():
+            self.settings_widget.web_session_checkbox.setChecked(True)
+
+        self._open_browser_when_ready(url)
+
+    def _open_browser_when_ready(self, url: str):
+        """서버가 실제로 응답한 뒤 기본 브라우저를 연다."""
+        self._stop_browser_wait()
+        self._browser_wait_request_id += 1
+        request_id = self._browser_wait_request_id
+
+        self._browser_wait_thread = QThread()
+        self._browser_wait_worker = _WebSessionReadyWorker(url, request_id=request_id)
+        self._browser_wait_worker.moveToThread(self._browser_wait_thread)
+
+        self._browser_wait_thread.started.connect(self._browser_wait_worker.run)
+        self._browser_wait_worker.ready.connect(self._on_browser_wait_ready)
+        self._browser_wait_worker.timeout.connect(self._on_browser_wait_timeout)
+        self._browser_wait_worker.finished.connect(self._browser_wait_thread.quit)
+        self._browser_wait_thread.finished.connect(self._browser_wait_worker.deleteLater)
+        self._browser_wait_thread.finished.connect(self._browser_wait_thread.deleteLater)
+        self._browser_wait_thread.finished.connect(self._clear_browser_wait_refs)
+        self._browser_wait_thread.start()
+
+    def _stop_browser_wait(self):
+        """진행 중인 브라우저 오픈 대기를 중단한다."""
+        worker = self._browser_wait_worker
+        thread = self._browser_wait_thread
+
+        if worker:
+            worker.stop()
+
+        if thread:
+            thread.quit()
+            thread.wait(1500)
+
+        self._browser_wait_worker = None
+        self._browser_wait_thread = None
+
+    def _clear_browser_wait_refs(self):
+        self._browser_wait_worker = None
+        self._browser_wait_thread = None
+
+    def _on_browser_wait_ready(self, url: str, request_id: int):
+        if request_id != self._browser_wait_request_id:
+            return
+        self._open_url_in_browser(url)
+
+    def _on_browser_wait_timeout(self, url: str, request_id: int):
+        if request_id != self._browser_wait_request_id:
+            return
+
+        print(f"🌐 Web Session readiness check timed out, opening browser anyway: {url}")
+        self._open_url_in_browser(url)
+
+    @staticmethod
+    def _open_url_in_browser(url: str):
+        import webbrowser
+        webbrowser.open(url)
+
+    def cleanup(self):
+        """앱 종료 시 cloudflared 터널 및 remote server 정리"""
+        self._stop_browser_wait()
+        if self.settings_widget:
+            self.settings_widget.cleanup_services()
     
     def load_settings(self):
         """설정 파일에서 설정 로드"""
@@ -84,6 +222,10 @@ class SettingsTabModule(BaseTabModule):
             },
             "module_visibility": {},
             "tab_visibility": {},
+            "web_session": {
+                "auto_start": False,
+                "port": 7243
+            },
             "ui": {
                 "theme": "dark",
                 "auto_save": True
@@ -120,11 +262,17 @@ class SettingsTabModule(BaseTabModule):
 
 class SettingsWidget(QWidget):
     """Settings UI 위젯"""
-    
+    _cf_progress = pyqtSignal(str)
+    _cf_success = pyqtSignal(str)
+    _cf_error = pyqtSignal(str)
+
     def __init__(self, app_context, settings_module: SettingsTabModule):
         super().__init__()
         self.app_context = app_context
         self.settings_module = settings_module
+        self._cf_progress.connect(self._on_cf_progress)
+        self._cf_success.connect(self._set_cloudflared_url)
+        self._cf_error.connect(self._on_cloudflared_error)
         self.init_ui()
 
         # ✅ ImageCrudController 이벤트 구독
@@ -165,6 +313,7 @@ class SettingsWidget(QWidget):
         scroll_layout.setSpacing(20)
         
         # 각 설정 섹션 추가
+        scroll_layout.addWidget(self._create_remote_section())
         scroll_layout.addWidget(self._create_autocomplete_section())
         scroll_layout.addWidget(self._create_save_directory_section())
         scroll_layout.addWidget(self._create_module_management_section())
@@ -226,6 +375,356 @@ class SettingsWidget(QWidget):
         
         return group_box, layout
     
+    def _create_remote_section(self) -> QWidget:
+        """Remote API 서버 설정 섹션"""
+        section, layout = self._create_section_frame("🌐 Web Session")
+
+        # 한 줄: 체크박스 + URL(서버 시작 시) + Copy + Port + Port입력
+        top_row = QHBoxLayout()
+        top_row.setSpacing(get_scaled_size(8))
+        self.web_session_checkbox = QCheckBox("Web Session 활성화")
+        self.web_session_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.web_session_checkbox.toggled.connect(self._on_web_session_toggled)
+        top_row.addWidget(self.web_session_checkbox)
+
+        self.web_session_autostart = QCheckBox("자동 시작")
+        self.web_session_autostart.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.web_session_autostart.setToolTip("프로그램 실행 시 Web Session 자동 활성화")
+        self.web_session_autostart.toggled.connect(self._on_web_session_autostart_toggled)
+        top_row.addWidget(self.web_session_autostart)
+
+        self.remote_url_label = QLabel("")
+        self.remote_url_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; background: transparent;")
+        self.remote_url_label.setOpenExternalLinks(True)
+        top_row.addWidget(self.remote_url_label)
+
+        self.remote_copy_btn = QPushButton("Copy")
+        self.remote_copy_btn.setStyleSheet(DARK_STYLES['compact_button'])
+        self.remote_copy_btn.setFixedWidth(get_scaled_size(90))
+        self.remote_copy_btn.clicked.connect(self._copy_remote_url)
+        self.remote_copy_btn.setVisible(False)
+        top_row.addWidget(self.remote_copy_btn)
+
+        port_label = QLabel("Port:")
+        port_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: {DARK_COLORS['text_primary']}; background: transparent;")
+        top_row.addWidget(port_label)
+
+        self.remote_port_edit = QLineEdit("7243")
+        self.remote_port_edit.setFixedWidth(get_scaled_size(105))
+        self.remote_port_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
+        self.remote_port_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.remote_port_edit.setValidator(QIntValidator(1024, 65535))
+        self.remote_port_edit.setProperty("autocomplete_ignore", True)
+        top_row.addWidget(self.remote_port_edit)
+
+        top_row.addStretch()
+        layout.addLayout(top_row)
+
+        # Cloudflared: 체크박스 + URL + Copy 한 줄
+        cf_row = QHBoxLayout()
+        cf_row.setSpacing(get_scaled_size(8))
+        self.cloudflared_checkbox = QCheckBox("Cloudflared 연결")
+        self.cloudflared_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.cloudflared_checkbox.setEnabled(False)
+        self.cloudflared_checkbox.toggled.connect(self._on_cloudflared_toggled)
+        cf_row.addWidget(self.cloudflared_checkbox)
+
+        self.cloudflared_url_label = QLabel("")
+        self.cloudflared_url_label.setStyleSheet(f"""
+            QLabel {{
+                color: {DARK_COLORS['accent_blue']};
+                font-size: {get_scaled_font_size(16)}px;
+                padding: 2px 0;
+                background: transparent;
+            }}
+        """)
+        self.cloudflared_url_label.setOpenExternalLinks(True)
+        self._cloudflared_tunnel_url = ""
+        cf_row.addWidget(self.cloudflared_url_label)
+
+        self.cloudflared_copy_btn = QPushButton("Copy")
+        self.cloudflared_copy_btn.setStyleSheet(DARK_STYLES['compact_button'])
+        self.cloudflared_copy_btn.setFixedWidth(get_scaled_size(90))
+        self.cloudflared_copy_btn.clicked.connect(self._copy_cloudflared_url)
+        self.cloudflared_copy_btn.setVisible(False)
+        cf_row.addWidget(self.cloudflared_copy_btn)
+
+        cf_row.addStretch()
+        layout.addLayout(cf_row)
+
+        # Shared Server Mode
+        shared_row = QHBoxLayout()
+        shared_row.setSpacing(get_scaled_size(8))
+        self.shared_server_mode_checkbox = QCheckBox("Shared Server Mode")
+        self.shared_server_mode_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.shared_server_mode_checkbox.setToolTip(
+            "각 웹 클라이언트가 독립적인 P.Eng/파라미터를 가집니다.\n"
+            "Cloudflared 터널 사용 시 NAI 모드가 차단됩니다."
+        )
+        self.shared_server_mode_checkbox.toggled.connect(self._on_shared_server_mode_toggled)
+        shared_row.addWidget(self.shared_server_mode_checkbox)
+
+        self.shared_copy_peng = QCheckBox("Copy P.Eng")
+        self.shared_copy_peng.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.shared_copy_peng.setToolTip("새 세션에 데스크톱 P.Eng 설정을 복사")
+        self.shared_copy_peng.setEnabled(False)
+        self.shared_copy_peng.toggled.connect(lambda c: setattr(self.app_context, 'shared_copy_peng', c) if self.app_context else None)
+        shared_row.addWidget(self.shared_copy_peng)
+
+        self.shared_copy_cond = QCheckBox("Copy Cond")
+        self.shared_copy_cond.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.shared_copy_cond.setToolTip("새 세션에 데스크톱 Conditional Prompt를 복사")
+        self.shared_copy_cond.setEnabled(False)
+        self.shared_copy_cond.toggled.connect(lambda c: setattr(self.app_context, 'shared_copy_cond', c) if self.app_context else None)
+        shared_row.addWidget(self.shared_copy_cond)
+
+        shared_row.addStretch()
+        layout.addLayout(shared_row)
+
+        return section
+
+    def _get_remote_port(self) -> int:
+        """포트 번호 반환"""
+        try:
+            return int(self.remote_port_edit.text().strip())
+        except ValueError:
+            return 7243
+
+    def _copy_remote_url(self):
+        """로컬 URL 클립보드 복사"""
+        import pyperclip
+        url = f"http://localhost:{self._get_remote_port()}"
+        pyperclip.copy(url)
+
+    def _copy_cloudflared_url(self):
+        """Cloudflared URL 클립보드 복사"""
+        import pyperclip
+        url = self._cloudflared_tunnel_url
+        if url:
+            pyperclip.copy(url)
+
+    def _publish_cloudflared_status(self, *, active: bool, url: str = "", status_text: str = ""):
+        """Cloudflared 상태를 AppContext 이벤트로 브로드캐스트."""
+        if not self.app_context:
+            return
+        self.app_context.cloudflared_active = bool(active)
+        self.app_context.cloudflared_tunnel_url = url or ""
+        self.app_context.cloudflared_status_text = status_text or ""
+        self.app_context.publish("cloudflared_status_changed", {
+            "active": bool(active),
+            "url": url or "",
+            "status_text": status_text or "",
+        })
+
+    def _on_web_session_autostart_toggled(self, checked: bool):
+        """자동 시작 설정 저장"""
+        self.settings_module.set_setting('web_session.auto_start', checked)
+        self.settings_module.set_setting('web_session.port', self._get_remote_port())
+        self.settings_module.save_settings()
+
+    def _on_shared_server_mode_toggled(self, checked: bool):
+        """Shared Server Mode 서버에 반영 (영속화 안 함 — 매 실행마다 수동 활성화)"""
+        if checked and hasattr(self, 'app_context') and self.app_context:
+            if self.app_context.get_api_mode() == "NAI":
+                self.shared_server_mode_checkbox.setChecked(False)
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Shared Server Mode",
+                    "NAI 모드에서는 Shared Server Mode를 활성화할 수 없습니다.\n"
+                    "먼저 WEBUI 또는 COMFYUI 모드로 전환해주세요.")
+                return
+        # Shared Mode ON: 자동 시작 비활성화, Copy 옵션 활성화
+        if checked:
+            self.web_session_autostart.setChecked(False)
+            self.web_session_autostart.setEnabled(False)
+            self.shared_copy_peng.setEnabled(True)
+            self.shared_copy_cond.setEnabled(True)
+        else:
+            self.web_session_autostart.setEnabled(True)
+            self.shared_copy_peng.setEnabled(False)
+            self.shared_copy_peng.setChecked(False)
+            self.shared_copy_cond.setEnabled(False)
+            self.shared_copy_cond.setChecked(False)
+        # app_context에 저장 (bridge 생성 전/후 모두 대응)
+        if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.shared_server_mode = checked
+        # 실행 중인 서버에 즉시 반영 + 클라이언트에 broadcast
+        from core.remote_api_server import _bridge_instance
+        if _bridge_instance:
+            _bridge_instance.shared_server_mode = checked
+            _bridge_instance._broadcast_json({
+                "type": "session",
+                "session_id": "",
+                "shared_server_mode": checked,
+            })
+            # Shared OFF 전환 + NAI 모드면 Anlas 즉시 재송신 (pill 이 다시 뜨도록)
+            if not checked and hasattr(self, 'app_context') and self.app_context \
+                    and self.app_context.get_api_mode() == "NAI":
+                _bridge_instance._refresh_anlas_async()
+
+    def _get_image_window_widget(self):
+        """RightView 내부의 실제 ImageWindow 위젯 반환."""
+        try:
+            mw = self.app_context.main_window
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            if tab_controller and hasattr(tab_controller, "get_tab_instance"):
+                image_viewer_module = tab_controller.get_tab_instance("ImageViewerModule")
+                if image_viewer_module:
+                    widget = getattr(image_viewer_module, "image_window_widget", None)
+                    if widget:
+                        return widget
+        except Exception:
+            pass
+        return None
+
+    def _force_web_session_autosave(self):
+        """Web Session 시작 전 Auto Save를 강제로 켠다."""
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            return
+
+        auto_save_checkbox = getattr(image_window, "auto_save_checkbox", None)
+        if auto_save_checkbox and not auto_save_checkbox.isChecked():
+            auto_save_checkbox.setChecked(True)
+            print("🌐 Web Session: Auto Save 강제 활성화")
+
+    def _force_web_session_hide_main_window(self):
+        """Web Session 시작 시 메인 데스크탑 창을 기본적으로 숨긴다."""
+        try:
+            main_window = getattr(self.app_context, "main_window", None)
+            if not main_window:
+                return
+
+            if hasattr(main_window, "set_web_session_window_visible"):
+                main_window.set_web_session_window_visible(False)
+            else:
+                main_window.hide()
+                if hasattr(main_window, "_publish_desktop_window_visibility"):
+                    main_window._publish_desktop_window_visibility()
+            print("🌐 Web Session: 데스크탑 창 기본 Hide 적용")
+        except Exception as e:
+            print(f"🌐 Web Session: 데스크탑 창 Hide 적용 실패 — {e}")
+
+    def _on_web_session_toggled(self, checked: bool):
+        """Web Session 활성화/비활성화"""
+        if checked:
+            port = self._get_remote_port()
+            try:
+                from core.remote_api_server import start_remote_server
+                self._force_web_session_autosave()
+                self.web_session_checkbox.setEnabled(False)
+                start_remote_server(self.app_context, port=port)
+                self._force_web_session_hide_main_window()
+                self.web_session_checkbox.setEnabled(True)
+                self.remote_port_edit.setEnabled(False)
+                url = f"http://localhost:{port}"
+                self.remote_url_label.setText(
+                    f'<a href="{url}" style="color: {DARK_COLORS["success"]}; '
+                    f'font-size: {get_scaled_font_size(16)}px;">{url}</a>'
+                )
+                self.remote_copy_btn.setVisible(True)
+                self.cloudflared_checkbox.setEnabled(True)
+            except Exception as e:
+                self.web_session_checkbox.setEnabled(True)
+                self.web_session_checkbox.setChecked(False)
+                self.remote_url_label.setText(
+                    f'<span style="color: {DARK_COLORS["error"]}; '
+                    f'font-size: {get_scaled_font_size(16)}px;">서버 시작 실패: {e}</span>'
+                )
+        else:
+            if self.cloudflared_checkbox.isChecked():
+                self.cloudflared_checkbox.setChecked(False)
+            self.cloudflared_checkbox.setEnabled(False)
+            try:
+                from core.remote_api_server import stop_remote_server
+                stop_remote_server()
+            except Exception:
+                pass
+            self.remote_port_edit.setEnabled(True)
+            self.remote_url_label.setText("")
+            self.remote_copy_btn.setVisible(False)
+
+    def _on_cloudflared_toggled(self, checked: bool):
+        """Cloudflared 터널 연결/해제"""
+        # Remote bridge 의 Setup 게이트가 참조하는 명시 플래그 (위젯 탐색 대체).
+        if checked:
+            self._publish_cloudflared_status(active=True, url="", status_text="Cloudflared 연결 중...")
+        else:
+            self._publish_cloudflared_status(active=False, url="", status_text="")
+        if checked:
+            self._start_cloudflared()
+        else:
+            self._stop_cloudflared()
+
+    def _on_cf_progress(self, msg: str):
+        """Cloudflared 진행 상태 표시 (UI 스레드)"""
+        self.cloudflared_url_label.setText(msg)
+        self._publish_cloudflared_status(
+            active=bool(self.cloudflared_checkbox.isChecked()),
+            url=self._cloudflared_tunnel_url,
+            status_text=msg,
+        )
+
+    def _start_cloudflared(self):
+        """cloudflared 터널 시작"""
+        self.cloudflared_url_label.setText("Cloudflared 연결 중...")
+        import threading
+        threading.Thread(target=self._connect_cloudflared, daemon=True).start()
+
+    def _connect_cloudflared(self):
+        """별도 스레드에서 cloudflared 연결"""
+        try:
+            from utils.cloudflared import start_tunnel
+            port = self._get_remote_port()
+            info = start_tunnel(port, on_progress=self._cf_progress.emit)
+            self._cf_success.emit(info.tunnel_url)
+        except Exception as e:
+            self._cf_error.emit(str(e))
+
+    def _set_cloudflared_url(self, url: str):
+        """Cloudflared URL 표시"""
+        self._cloudflared_tunnel_url = url
+        self.cloudflared_url_label.setText(
+            f'<a href="{url}" style="color: {DARK_COLORS["accent_blue"]}; '
+            f'font-size: {get_scaled_font_size(16)}px; font-weight: bold;">{url}</a>'
+        )
+        self.cloudflared_copy_btn.setVisible(True)
+        self._publish_cloudflared_status(active=True, url=url, status_text=url)
+        print(f"🌐 Cloudflared tunnel: {url}")
+
+    def _on_cloudflared_error(self, error: str):
+        """Cloudflared 연결 실패"""
+        self.cloudflared_checkbox.setChecked(False)
+        self.cloudflared_url_label.setText(
+            f'<span style="color: {DARK_COLORS["error"]}; '
+            f'font-size: {get_scaled_font_size(16)}px;">Cloudflared 실패: {error}</span>'
+        )
+        self._publish_cloudflared_status(active=False, url="", status_text=f"Cloudflared 실패: {error}")
+
+    def _stop_cloudflared(self):
+        """cloudflared 터널 종료"""
+        try:
+            from utils.cloudflared import stop_tunnel
+            stop_tunnel(self._get_remote_port())
+        except Exception:
+            pass
+        self._cloudflared_tunnel_url = ""
+        self.cloudflared_url_label.setText("")
+        self.cloudflared_copy_btn.setVisible(False)
+        self._publish_cloudflared_status(active=False, url="", status_text="")
+        print("🌐 Cloudflared tunnel stopped")
+
+    def cleanup_services(self):
+        """앱 종료 시 서비스 정리"""
+        if self.cloudflared_checkbox.isChecked():
+            self._stop_cloudflared()
+        if self.web_session_checkbox.isChecked():
+            try:
+                from core.remote_api_server import stop_remote_server
+                stop_remote_server()
+            except Exception:
+                pass
+
     def _create_autocomplete_section(self) -> QWidget:
         """자동완성 설정 섹션"""
         section, layout = self._create_section_frame("🔍 자동완성 설정")
@@ -900,6 +1399,13 @@ class SettingsWidget(QWidget):
     
     def update_ui_from_settings(self):
         """저장된 설정으로 UI 업데이트"""
+        # Web Session 설정
+        self.remote_port_edit.setText(
+            str(self.settings_module.get_setting('web_session.port', 7243))
+        )
+        self.web_session_autostart.setChecked(
+            self.settings_module.get_setting('web_session.auto_start', False)
+        )
         # 자동완성 설정
         self.autocomplete_checkbox.setChecked(
             self.settings_module.get_setting('autocomplete.enabled', True)

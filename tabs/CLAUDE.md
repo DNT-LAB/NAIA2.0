@@ -38,9 +38,9 @@ tabs/
 
 | 파일 | 타입 | 주요 기능 |
 |------|------|----------|
-| **image_window.py** | core | 이미지 뷰어, 히스토리, 큐 추가, Img2Img 윈도우 연동 |
-| **png_info_tab.py** | core | PNG/JPEG/WebP 메타데이터 파싱, Stealth PNG |
-| **setting_tabs.py** | core | 자동완성, 저장 경로, 분류 규칙, 모듈/탭 가시성, UI 스케일 |
+| **image_window.py** | core | 이미지 뷰어, 히스토리, 큐 추가, Img2Img 윈도우 연동, WC 관리 메뉴 |
+| **png_info_tab.py** | core | PNG/JPEG/WebP 메타데이터 파싱 (NAI/WebUI/ComfyUI), Stealth PNG, ComfyUI workflow/prompt_api 직렬화 |
+| **setting_tabs.py** | core | 자동완성, 저장 경로, 분류 규칙, 모듈/탭 가시성, UI 스케일, Web Session (Cloudflared 터널, `--web-session` CLI 플래그 자동 시작은 `os.environ['NAIA_CLI_WEB_SESSION']` 경유) |
 | **studio_tab.py** | core | 다중 프레임 그리드, 순차 생성, 프리셋 (상세: [studio/CLAUDE.md](studio/CLAUDE.md)) |
 | **turbo_event_sequence/** | core | 터보 이벤트 시퀀스 (상세: [turbo_event_sequence/CLAUDE.md](turbo_event_sequence/CLAUDE.md)) |
 | **assets_tab.py** | closable | rembg 통합, 배경 제거 |

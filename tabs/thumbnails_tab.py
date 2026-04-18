@@ -173,7 +173,7 @@ class ThumbnailsTabModule(BaseTabModule):
     """스타일 썸네일 뷰어 탭"""
 
     THUMBNAILS_PATH = Path("data/taglist/style_thumbnails.json")
-    META_TAGS_PATH = Path(".experimental/style_meta_tags.json")
+    META_TAGS_PATH = Path("data/taglist/style_meta_tags.json")
 
     def __init__(self):
         super().__init__()

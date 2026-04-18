@@ -307,7 +307,15 @@ class WildcardProcessor:
         chosen_line = ""
         total_entries = len(entries)
 
-        if is_sequential:
+        # 🔒 오버라이드 확인 (모든 모드 공통, 카운터 동결)
+        ctx_ref = getattr(self.wildcard_manager, '_app_context_ref', None)
+        ctx = ctx_ref() if ctx_ref else None
+        override_val = ctx.wildcard_override.get(actual_wildcard_key) if ctx else None
+
+        if override_val is not None:
+            chosen_line = override_val
+
+        elif is_sequential:
             # sequential_counters는 실제 키로 저장
             counter = context.sequential_counters.get(actual_wildcard_key, 0)
             chosen_line = entries[counter % total_entries][1]  # text 부분

@@ -1431,6 +1431,7 @@ class ImageWindow(QWidget):
     send_to_img2img_requested = pyqtSignal(object)
     instant_outpaint_requested = pyqtSignal(object)
     send_to_outpaint_requested = pyqtSignal(object)
+    use_as_outpaint_base_requested = pyqtSignal(object)
     save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
     def __init__(self, app_context, parent=None):
@@ -1661,6 +1662,45 @@ class ImageWindow(QWidget):
         """)
         self.enhance_settings_button.clicked.connect(self._show_enhance_settings)
 
+        # 📌 와일드카드 관리 메뉴 버튼 (스코프 모드에서만 표시)
+        self.wildcard_manage_button = QPushButton("📌 WC 관리")
+        self.wildcard_manage_button.setFixedHeight(btn_h)
+        self.wildcard_manage_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']};
+                border-radius: {get_scaled_size(3)}px;
+                padding: 0px {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(11)}px;
+            }}
+            QPushButton:hover {{ background-color: {DARK_COLORS['bg_hover']}; }}
+            QPushButton:disabled {{
+                background-color: {DARK_COLORS['bg_tertiary']};
+                color: {DARK_COLORS['text_disabled']};
+            }}
+        """)
+        self.wildcard_manage_button.setVisible(False)
+        self.wildcard_manage_button.setEnabled(False)
+        self.wildcard_manage_button.clicked.connect(self._show_wildcard_manage_menu)
+
+        # 🔒 WC 고정 해제 버튼 (오버라이드 활성 시에만 표시)
+        self.wc_unlock_button = QPushButton("🔓 WC고정 해제")
+        self.wc_unlock_button.setFixedHeight(btn_h)
+        self.wc_unlock_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_COLORS['error']};
+                color: white; border: none;
+                border-radius: {get_scaled_size(3)}px;
+                padding: 0px {get_scaled_size(6)}px;
+                font-size: {get_scaled_font_size(11)}px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #D32F2F; }}
+        """)
+        self.wc_unlock_button.setVisible(False)
+        self.wc_unlock_button.clicked.connect(self._release_wildcard_override)
+
+        title_row.addWidget(self.wc_unlock_button)
+        title_row.addWidget(self.wildcard_manage_button)
         title_row.addWidget(self.enhance_button)
         title_row.addWidget(self.enhance_settings_button)
         info_panel_layout.addLayout(title_row)
@@ -1716,6 +1756,7 @@ class ImageWindow(QWidget):
         # Enhance 버튼 상태 — 모드 변경 시 업데이트
         if self.app_context:
             self.app_context.subscribe("api_mode_changed", lambda _: self._update_enhance_button_state())
+            self.app_context.subscribe("scoped_wildcard_changed", lambda _: self._update_remove_wildcard_button_state())
 
     def save_settings(self):
         """체크박스 설정을 JSON 파일에 저장합니다."""
@@ -1885,6 +1926,12 @@ class ImageWindow(QWidget):
         send_outpaint.triggered.connect(self._emit_send_to_outpaint)
         nai_inpaint_menu.addAction(send_outpaint)
 
+        nai_inpaint_menu.addSeparator()
+
+        use_as_base = QAction("Use as outpainting base", nai_inpaint_menu)
+        use_as_base.triggered.connect(self._emit_use_as_outpaint_base)
+        nai_inpaint_menu.addAction(use_as_base)
+
         menu.addMenu(nai_inpaint_menu)
         
         # Add Send to Sketchbook action
@@ -1932,6 +1979,11 @@ class ImageWindow(QWidget):
         """'Send to Outpainting' 시그널을 발생시킵니다."""
         if self.current_history_item:
             self.send_to_outpaint_requested.emit(self.current_history_item)
+
+    def _emit_use_as_outpaint_base(self):
+        """'Use as outpainting base' 시그널을 발생시킵니다."""
+        if self.current_history_item:
+            self.use_as_outpaint_base_requested.emit(self.current_history_item)
 
     def _emit_save_to_remote_event(self):
         """🆕 '리모트에 이벤트 저장' 시그널을 발생시킵니다."""
@@ -2744,10 +2796,15 @@ class ImageWindow(QWidget):
 
     def display_history_item(self, item: HistoryItem):
         """[수정] 선택된 히스토리 아이템의 내용을 메인 뷰어에 표시"""
+        # WC 관리 메뉴가 열려있으면 닫기 (포커스 변경 시 stale 데이터 방지)
+        if getattr(self, '_wc_manage_menu', None):
+            self._wc_manage_menu.close()
+            self._wc_manage_menu = None
         self.current_history_item = item # 현재 아이템 추적
         self.update_image(item.image)
         self.update_info(item.info_text) # 저장된 생성 정보로 업데이트
         self._update_enhance_button_state()
+        self._update_remove_wildcard_button_state()
 
     def _create_classification_info(self, item: HistoryItem) -> dict:
         """
@@ -2980,6 +3037,185 @@ class ImageWindow(QWidget):
             and bool(getattr(self.current_history_item, 'generation_params', None))
         )
         self.enhance_button.setEnabled(enabled)
+
+    def _update_remove_wildcard_button_state(self):
+        """scoped_wildcard 설정에 따라 WC 관리 버튼 표시/숨김 + 활성화 + tooltip 갱신"""
+        if not hasattr(self, 'wildcard_manage_button'):
+            return
+        scope_active = bool(getattr(self.app_context, 'scoped_wildcard', ''))
+        has_override = bool(getattr(self.app_context, 'wildcard_override', {}))
+        self.wildcard_manage_button.setVisible(scope_active)
+        self.wc_unlock_button.setVisible(scope_active and has_override)
+        if not scope_active:
+            return
+        item = self.current_history_item
+        scoped_wh = {}
+        if item and isinstance(getattr(item, 'prompt_context', None), dict):
+            scoped_wh = item.prompt_context.get('scoped_wildcard_history', {})
+        has_data = bool(scoped_wh)
+        self.wildcard_manage_button.setEnabled(has_data)
+        if has_data:
+            details = '\n'.join(f'{k}: {v}' for k, v in scoped_wh.items())
+            self.wildcard_manage_button.setToolTip(f"스코프 와일드카드 관리:\n{details}")
+        else:
+            self.wildcard_manage_button.setToolTip("이 이미지에는 스코프 데이터가 없습니다")
+
+    def _show_wildcard_manage_menu(self):
+        """📌 WC 관리 버튼 클릭 시 컨텍스트 메뉴 표시 (메뉴 열림 시점의 데이터를 캡처)"""
+        item = self.current_history_item
+        if not item or not isinstance(getattr(item, 'prompt_context', None), dict):
+            return
+        scoped_wh = item.prompt_context.get('scoped_wildcard_history', {})
+        if not scoped_wh:
+            return
+
+        # 메뉴 열림 시점의 데이터를 캡처하여 클로저로 전달
+        captured_wh = dict(scoped_wh)
+        captured_item = item
+
+        self._wc_manage_menu = QMenu(self)
+        menu = self._wc_manage_menu
+
+        copy_action = menu.addAction("📋 복사")
+        copy_action.triggered.connect(lambda: self._copy_wildcard_value(captured_wh))
+
+        # 정제 와일드카드: 이미 존재하면 취소, 아니면 추가
+        in_curated = self._check_in_curated(captured_wh)
+        if in_curated:
+            curated_action = menu.addAction("↩ 정제 와일드카드에서 제거")
+            curated_action.triggered.connect(lambda: self._remove_from_curated_wildcard(captured_wh))
+        else:
+            curated_action = menu.addAction("📥 정제 와일드카드에 추가")
+            curated_action.triggered.connect(lambda: self._add_to_curated_wildcard(captured_wh))
+
+        lock_action = menu.addAction("🔒 이 값으로 고정 (retest)")
+        lock_action.triggered.connect(lambda: self._set_wildcard_override(captured_wh))
+
+        menu.addSeparator()
+
+        remove_action = menu.addAction("🗑 원본에서 제거")
+        remove_action.triggered.connect(lambda: self._execute_remove_wildcard_lines(captured_item, captured_wh))
+
+        menu.exec(self.wildcard_manage_button.mapToGlobal(
+            self.wildcard_manage_button.rect().bottomLeft()))
+        self._wc_manage_menu = None
+
+    def _get_curated_path(self, key: str) -> str:
+        """와일드카드 키에 대한 curated 파일 경로 반환"""
+        wm = self.app_context.wildcard_manager
+        return os.path.join(wm.wildcards_dir, key.replace('/', os.sep) + '_curated.txt')
+
+    def _check_in_curated(self, scoped_wh: dict) -> bool:
+        """scoped_wh의 모든 값이 curated 파일에 존재하는지 확인"""
+        for key, value in scoped_wh.items():
+            curated_path = self._get_curated_path(key)
+            if not os.path.exists(curated_path):
+                return False
+            with open(curated_path, 'r', encoding='utf-8', errors='ignore') as f:
+                existing = {line.strip() for line in f if line.strip()}
+            if value not in existing:
+                return False
+        return True
+
+    def _add_to_curated_wildcard(self, scoped_wh: dict):
+        """스코프 와일드카드 값을 curated 와일드카드 파일에 추가"""
+        wm = self.app_context.wildcard_manager
+        for key, value in scoped_wh.items():
+            curated_path = self._get_curated_path(key)
+            os.makedirs(os.path.dirname(curated_path), exist_ok=True)
+
+            with open(curated_path, 'a', encoding='utf-8') as f:
+                f.write(f"{value}\n")
+
+            curated_key = key + '_curated'
+            self._show_wc_toast(f"📥 {curated_key}에 추가: {value}")
+
+        wm.reload_wildcards()
+
+    def _remove_from_curated_wildcard(self, scoped_wh: dict):
+        """스코프 와일드카드 값을 curated 와일드카드 파일에서 제거"""
+        wm = self.app_context.wildcard_manager
+        for key, value in scoped_wh.items():
+            curated_path = self._get_curated_path(key)
+            if not os.path.exists(curated_path):
+                continue
+            with open(curated_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+            new_lines = [l for l in lines if l.strip() != value]
+            with open(curated_path, 'w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+
+            curated_key = key + '_curated'
+            self._show_wc_toast(f"↩ {curated_key}에서 제거: {value}")
+
+        wm.reload_wildcards()
+
+    def _show_wc_toast(self, message: str, duration_ms: int = 2000):
+        """WC 관리 버튼 위에 일시적 툴팁 표시"""
+        from PyQt6.QtWidgets import QToolTip
+        btn = self.wildcard_manage_button
+        pos = btn.mapToGlobal(btn.rect().topLeft())
+        pos.setY(pos.y() - 10)
+        QToolTip.showText(pos, message, btn)
+        QTimer.singleShot(duration_ms, lambda: QToolTip.hideText())
+
+    def _set_wildcard_override(self, scoped_wh: dict):
+        """스코프 와일드카드 값을 고정 (다음 생성부터 이 값만 사용)"""
+        self.app_context.wildcard_override.update(scoped_wh)
+        details = ', '.join(f'{k}: {v}' for k, v in scoped_wh.items())
+        self.wc_unlock_button.setVisible(True)
+        self.wc_unlock_button.setToolTip(f"고정 중: {details}")
+        self._show_wc_toast(f"🔒 WC 고정: {details}")
+
+    def _release_wildcard_override(self):
+        """와일드카드 고정 해제"""
+        self.app_context.wildcard_override.clear()
+        self.wc_unlock_button.setVisible(False)
+        self._show_wc_toast("🔓 WC 고정 해제")
+
+    def _copy_wildcard_value(self, scoped_wh: dict):
+        """Scope 와일드카드 값을 클립보드에 복사"""
+        text = ', '.join(scoped_wh.values())
+        QApplication.clipboard().setText(text)
+        self._show_wc_toast(f"📋 복사: {text}")
+
+    def _execute_remove_wildcard_lines(self, captured_item=None, captured_wh=None):
+        """Scope에 등록된 와일드카드 라인들을 txt 파일에서 제거"""
+        item = captured_item or self.current_history_item
+        scoped_wh = captured_wh
+        if scoped_wh is None:
+            if not item or not isinstance(getattr(item, 'prompt_context', None), dict):
+                return
+            scoped_wh = item.prompt_context.get('scoped_wildcard_history', {})
+        if not scoped_wh:
+            return
+
+        wm = self.app_context.wildcard_manager
+        results = []
+        any_success = False
+
+        for key, value in scoped_wh.items():
+            result = wm.remove_line(key, value)
+            results.append(f"{'OK' if result['success'] else 'FAIL'} [{key}] {result['message']}")
+            if result['success']:
+                any_success = True
+
+        for r in results:
+            print(f"  {r}")
+
+        if any_success:
+            try:
+                wm.reload_wildcards()
+            except Exception as e:
+                print(f"⚠️ 와일드카드 리로드 실패: {e}")
+            if isinstance(getattr(item, 'prompt_context', None), dict):
+                item.prompt_context['scoped_wildcard_history'] = {}
+            self._update_remove_wildcard_button_state()
+            self._show_wc_toast(
+                f"🗑 제거 완료 ({sum(1 for r in results if r.startswith('OK'))}/{len(results)}건)")
+        else:
+            self._show_wc_toast(
+                f"제거 실패: {results[0].split('] ')[1] if results else '알 수 없는 오류'}")
 
     @staticmethod
     def _round_to_64(value: float) -> int:

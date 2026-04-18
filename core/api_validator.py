@@ -1,185 +1,47 @@
-import requests
-from PyQt6.QtCore import QObject, pyqtSignal
+"""
+Qt 시그널 어댑터 — 순수 검증 로직은 `core/api_verification.py` 참조.
+
+이 모듈은 기존 데스크톱 API 관리 창(`tabs/api_management_window.py`)과
+호환성 유지를 위한 QObject 래퍼. 새 사용처는 `api_verification` 을 직접 import.
+"""
 from typing import List, Tuple
+from PyQt6.QtCore import QObject, pyqtSignal
+
+from core import api_verification as verify
+
 
 class APIValidator(QObject):
-    """API 검증을 백그라운드에서 실행하고 결과를 시그널로 보내는 워커"""
+    """API 검증을 백그라운드 스레드에서 실행하고 결과를 시그널로 보내는 워커."""
 
-    # 기존 시그널 정의: (성공여부, 저장할 값, 메시지, 메시지 타입)
+    # (성공여부, 저장할 값, 메시지, 메시지 타입)
     nai_validation_finished = pyqtSignal(bool, str, str, str)
     webui_validation_finished = pyqtSignal(bool, str, str, str)
-    
-    # 🆕 ComfyUI 관련 시그널 추가
-    comfyui_validation_finished = pyqtSignal(bool, str, str, str)  # success, value, message, message_type
-    comfyui_models_loaded = pyqtSignal(bool, list, str)  # success, models_list, message
+    comfyui_validation_finished = pyqtSignal(bool, str, str, str)
+    comfyui_models_loaded = pyqtSignal(bool, list, str)
 
     def run_nai_validation(self, token: str):
-        """(스레드에서 실행) NAI API 요청 및 검증 로직"""
-        result_message, result_type, success = "", "error", False
-        try:
-            response = requests.get(
-                "https://api.novelai.net/user/subscription",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            if data.get('perks', {}).get('unlimitedMaxPriority', False):
-                result_message, result_type, success = "✅ Opus 등급 구독이 확인되었습니다.", "info", True
-            else:
-                # Opus가 아닌 경우 trainingStepsLeft 체크
-                training_steps_left = data.get('trainingStepsLeft', {})
-                if training_steps_left:
-                    # fixedTrainingStepsLeft와 purchasedTrainingSteps의 합 계산
-                    fixed_steps = training_steps_left.get('fixedTrainingStepsLeft', 0)
-                    purchased_steps = training_steps_left.get('purchasedTrainingSteps', 0)
-                    total_steps = fixed_steps + purchased_steps
-                    
-                    if total_steps > 20:
-                        result_message = f"⚠️ Opus 구독 상태가 아닙니다. 유료 Anlas를 소진합니다. (보유: {total_steps} Anlas)"
-                        result_type, success = "warning", True
-                    else:
-                        result_message = f"⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다. (Anlas 부족: {total_steps})"
-                        result_type = "warning"
-                else:
-                    result_message, result_type = "⚠️ 유효한 토큰이나 Opus 등급 구독이 아닙니다.", "warning"
-        except requests.exceptions.HTTPError as e:
-            result_message = f"인증 실패 (HTTP {e.response.status_code}): 유효하지 않은 토큰일 수 있습니다." if e.response.status_code == 401 else f"HTTP 오류: {e.response.status_code}"
-        except requests.exceptions.RequestException as e:
-            result_message = f"네트워크 오류: API 서버에 연결할 수 없습니다. ({e})"
-        except Exception as e:
-            result_message = f"알 수 없는 오류: {e}"
-        
-        # 작업 완료 후 시그널 발생
-        self.nai_validation_finished.emit(success, token, result_message, result_type)
+        r = verify.verify_nai_token(token)
+        self.nai_validation_finished.emit(r.success, r.value or token, r.message, r.message_type)
 
     def run_webui_validation(self, url: str):
-        """(스레드에서 실행) WebUI 연결 테스트 로직"""
-        result_message, result_type, success, valid_url = "", "error", False, None
-        
-        clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
-        protocols = [f"https://{clean_url}", f"http://{clean_url}"]
-        
-        for base_url in protocols:
-            try:
-                res = requests.get(f"{base_url}/sdapi/v1/progress?skip_current_image=true", timeout=3)
-                if res.status_code == 200 and 'progress' in res.json():
-                    result_message, result_type, success, valid_url = "✅ WebUI 연결에 성공했습니다.", "info", True, clean_url
-                    break
-            except requests.exceptions.RequestException:
-                continue
-        
-        if not success:
-            result_message = f"❌ WebUI 연결 실패: '{url}' 주소를 확인해주세요."
-
-        # 작업 완료 후 시그널 발생
-        self.webui_validation_finished.emit(success, valid_url if success else url, result_message, result_type)
+        r = verify.verify_webui_url(url)
+        self.webui_validation_finished.emit(r.success, r.value if r.success else url,
+                                            r.message, r.message_type)
 
     def run_comfyui_validation(self, url: str):
-        """🆕 (스레드에서 실행) ComfyUI 연결 테스트 로직"""
-        result_message, result_type, success, valid_url = "", "error", False, None
-        
-        # URL 정규화
-        clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
-        protocols = [f"http://{clean_url}", f"https://{clean_url}"]  # ComfyUI는 일반적으로 http
-        
-        for base_url in protocols:
-            try:
-                # ComfyUI system_stats 엔드포인트 테스트
-                response = requests.get(f"{base_url}/system_stats", timeout=5)
-                if response.status_code == 200:
-                    stats = response.json()
-                    # 시스템 정보 확인
-                    device_info = stats.get('system', {})
-                    gpu_name = device_info.get('gpu_name', 'Unknown GPU')
-                    ram_total = device_info.get('ram_total', 0)
-                    
-                    ram_gb = ram_total / (1024**3) if ram_total > 0 else 0
-                    result_message = f"✅ ComfyUI 연결 성공!\nGPU: {gpu_name}\nRAM: {ram_gb:.1f}GB"
-                    result_type, success, valid_url = "info", True, clean_url
-                    break
-            except requests.exceptions.RequestException:
-                continue
-        
-        if not success:
-            result_message = f"❌ ComfyUI 연결 실패: '{url}' 주소를 확인하고 서버가 실행 중인지 확인해주세요."
-
-        # 작업 완료 후 시그널 발생
-        self.comfyui_validation_finished.emit(success, valid_url if success else url, result_message, result_type)
+        r = verify.verify_comfyui_url(url)
+        self.comfyui_validation_finished.emit(r.success, r.value if r.success else url,
+                                              r.message, r.message_type)
 
     def get_comfyui_models(self, url: str):
-        """🆕 (스레드에서 실행) ComfyUI 모델 목록 가져오기"""
-        try:
-            success, models, message = self._fetch_comfyui_models(url)
-            self.comfyui_models_loaded.emit(success, models, message)
-        except Exception as e:
-            self.comfyui_models_loaded.emit(False, [], f"모델 목록 로드 중 오류 발생: {str(e)}")
+        r = verify.fetch_comfyui_models(url)
+        self.comfyui_models_loaded.emit(r.success, r.extra.get("models", []), r.message)
 
-    def _fetch_comfyui_models(self, url: str) -> Tuple[bool, List[str], str]:
-        """🆕 ComfyUI 서버에서 사용 가능한 모델 목록을 가져옴 (CheckpointLoader + UNETLoader)"""
-        # URL 정규화
-        clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
-        normalized_url = f"http://{clean_url}"  # ComfyUI는 일반적으로 http
+    # --- 동기식 편의 메서드 (기존 호출처 호환) ---
 
-        try:
-            # ComfyUI object_info 엔드포인트에서 체크포인트 정보 가져오기
-            response = requests.get(f"{normalized_url}/object_info", timeout=10)
-
-            if response.status_code == 200:
-                object_info = response.json()
-                all_models = set()  # 중복 제거를 위한 set
-
-                # 1. CheckpointLoaderSimple 모델 수집
-                checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-                ckpt_input = checkpoint_loader.get('input', {}).get('required', {})
-                ckpt_info = ckpt_input.get('ckpt_name', [])
-
-                if isinstance(ckpt_info, list) and len(ckpt_info) > 0:
-                    checkpoint_models = ckpt_info[0]
-                    if isinstance(checkpoint_models, list):
-                        all_models.update(checkpoint_models)
-
-                # 2. UNETLoader 모델 수집
-                unet_loader = object_info.get('UNETLoader', {})
-                unet_input = unet_loader.get('input', {}).get('required', {})
-                unet_info = unet_input.get('unet_name', [])
-
-                if isinstance(unet_info, list) and len(unet_info) > 0:
-                    unet_models = unet_info[0]
-                    if isinstance(unet_models, list):
-                        all_models.update(unet_models)
-
-                # 3. 정렬하여 반환
-                if all_models:
-                    sorted_models = sorted(list(all_models))
-                    return True, sorted_models, f"모델 {len(sorted_models)}개 발견"
-                else:
-                    return False, [], "사용 가능한 모델이 없습니다."
-            else:
-                return False, [], f"API 응답 오류 (HTTP {response.status_code})"
-
-        except requests.exceptions.Timeout:
-            return False, [], "모델 목록 로드 시간 초과"
-        except requests.exceptions.ConnectionError:
-            return False, [], "ComfyUI 서버 연결 실패"
-        except Exception as e:
-            return False, [], f"모델 목록 로드 실패: {str(e)}"
-
-    # 🆕 동기식 메서드들 (다른 클래스에서 사용하기 위해)
     def test_comfyui_connection_sync(self, url: str) -> bool:
-        """동기식 ComfyUI 연결 테스트"""
-        try:
-            clean_url = url.replace('http://', '').replace('https://', '').rstrip('/')
-            normalized_url = f"http://{clean_url}"
-            response = requests.get(f"{normalized_url}/system_stats", timeout=5)
-            return response.status_code == 200
-        except:
-            return False
+        return verify.test_comfyui_connection(url)
 
     def get_comfyui_models_sync(self, url: str) -> List[str]:
-        """동기식 ComfyUI 모델 목록 가져오기"""
-        try:
-            success, models, _ = self._fetch_comfyui_models(url)
-            return models if success else []
-        except:
-            return []
+        r = verify.fetch_comfyui_models(url)
+        return r.extra.get("models", []) if r.success else []

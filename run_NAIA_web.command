@@ -1,7 +1,7 @@
 #!/bin/bash
-# NAIA 2.0 Mac Launcher
-# 더블클릭으로 실행 가능한 Mac용 런처 스크립트
-# Windows의 .bat 파일과 동일한 사용자 경험 제공
+# NAIA 2.0 Web Mode Mac Launcher
+# 더블클릭으로 실행 가능한 Mac용 런처 스크립트 (웹 UI 모드)
+# Windows의 run_NAIA_web.bat 과 동일한 사용자 경험 제공
 
 # ANSI 색상 코드 정의
 RED='\033[0;31m'
@@ -33,7 +33,7 @@ find_compatible_python() {
 }
 
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${PURPLE}║                              🎨 NAIA 2.0 Launcher                             ║${NC}"
+echo -e "${PURPLE}║                        🌐 NAIA 2.0 Web Launcher                               ║${NC}"
 echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -125,7 +125,7 @@ fi
 if [ ! -d "venv" ]; then
     echo -e "${YELLOW}   가상환경이 없습니다. 새로 생성합니다...${NC}"
     "$PYTHON_CMD" -m venv venv
-    
+
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✅ 가상환경 생성 완료${NC}"
     else
@@ -152,9 +152,9 @@ fi
 
 echo ""
 
-# requirements.txt 확인
+# requirements_mac.txt 확인
 if [ ! -f "requirements_mac.txt" ]; then
-    echo -e "${RED}❌ requirements.txt 파일이 없습니다.${NC}"
+    echo -e "${RED}❌ requirements_mac.txt 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
     read -p "엔터를 눌러 종료..."
     exit 1
@@ -179,7 +179,7 @@ else
     echo -e "${RED}❌ 라이브러리 설치 중 오류 발생${NC}"
     echo -e "${YELLOW}💡 해결 방법:${NC}"
     echo "   1. 인터넷 연결을 확인해주세요"
-    echo "   2. 터미널에서 'pip install -r requirements.txt' 명령을 직접 실행해보세요"
+    echo "   2. 터미널에서 'pip install -r requirements_mac.txt' 명령을 직접 실행해보세요"
     echo ""
     read -p "엔터를 눌러 종료..."
     exit 1
@@ -197,14 +197,15 @@ fi
 
 # NAIA 실행
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${PURPLE}║                            🚀 NAIA 2.0을 시작합니다!                           ║${NC}"
+echo -e "${PURPLE}║                   🚀 NAIA 2.0 Web Mode 를 시작합니다!                          ║${NC}"
 echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${CYAN}💡 터미널 창을 닫지 마세요. NAIA가 실행 중입니다...${NC}"
+echo -e "${CYAN}💡 기본 브라우저에서 localhost 웹 UI를 자동으로 엽니다.${NC}"
+echo -e "${CYAN}💡 터미널 창을 닫지 마세요. 백엔드가 함께 종료됩니다.${NC}"
 echo ""
 
 # Python 스크립트 실행
-python NAIA_cold_v4.py
+python NAIA_cold_v4.py --web-session
 
 # 실행 결과 확인
 EXIT_CODE=$?
@@ -213,9 +214,9 @@ echo ""
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
 
 if [ $EXIT_CODE -eq 0 ]; then
-    echo -e "${PURPLE}║                        🏁 NAIA 2.0이 정상 종료되었습니다                         ║${NC}"
+    echo -e "${PURPLE}║                     🏁 NAIA 2.0 Web 이 정상 종료되었습니다                       ║${NC}"
 else
-    echo -e "${PURPLE}║                     ⚠️  NAIA 2.0이 오류와 함께 종료되었습니다                     ║${NC}"
+    echo -e "${PURPLE}║                  ⚠️  NAIA 2.0 Web 이 오류와 함께 종료되었습니다                  ║${NC}"
     echo -e "${PURPLE}║                         종료 코드: $EXIT_CODE                                    ║${NC}"
 fi
 
@@ -228,6 +229,3 @@ deactivate
 # 사용자 입력 대기
 echo -e "${YELLOW}터미널을 닫으려면 엔터를 눌러주세요...${NC}"
 read
-
-# 터미널 창 닫기 (선택사항)
-# osascript -e 'tell application "Terminal" to quit'

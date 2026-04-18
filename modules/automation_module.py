@@ -576,6 +576,13 @@ class AutomationModule(BaseMiddleModule):
     def show_completion_notification(self):
         """자동화 완료 알림을 표시합니다 (비차단 방식)."""
         try:
+            # 리모트 클라이언트 연결 중이면 다이얼로그 억제
+            if hasattr(self, 'app_context') and getattr(self.app_context, 'remote_bridge', None):
+                bridge = self.app_context.remote_bridge
+                if hasattr(bridge, '_has_clients') and bridge._has_clients():
+                    print("🌐 Remote: 자동화 완료 알림 억제 (remote client connected)")
+                    return
+
             # 부모 윈도우 찾기
             parent = None
             if hasattr(self, 'context') and hasattr(self.context, 'main_window'):

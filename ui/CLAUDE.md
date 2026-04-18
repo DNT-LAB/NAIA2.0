@@ -50,6 +50,8 @@ ui/detached_window.py (분리 창)
 | **tag_result_window.py** | 태그 분석 결과 윈도우 | `TagResultWindow` |
 | **outpaint_window.py** | 아웃페인팅 설정 | `OutpaintWindow` |
 | **image_viewer_window.py** | Honeyview 스타일 이미지 뷰어 | `NAIAImageViewer`, `ViewerBindingsDialog` |
+| **character_asset_generation_window.py** | 캐릭터 에셋 연속 생성/저장 | `CharacterAssetGenerationWindow`, `CharacterAssetResultCard` |
+| **character_asset_storage_window.py** | 캐릭터/바리에이션 스토리지 (QMainWindow + QTabWidget) | `CharacterAssetStorageWindow`, `CharactersTab`, `VariationsTab`, `VariationGenerationWorker`, `_VariationEnhanceWorker` |
 
 ---
 
@@ -178,6 +180,82 @@ API: `_single_pass_outpainting()` → OutpaintWindow 데이터 사용 또는 기
 
 ---
 
+## 캐릭터 에셋 시스템
+
+### 저장 레이아웃 (172 갱신)
+
+```
+save/character_asset/
+  ├── characters/{character_id}/
+  │     ├── primary.png             ← 대표 이미지 (NAI Comment 보존)
+  │     └── variations/{hash}.png   ← 의상/자세 등 바리에이션
+  ├── images/                        ← legacy flat (자동 마이그레이션)
+  └── variations_defaults.json       ← Variations 탭 Main/Negative 기본값 영속화
+```
+
+`character_id` = primary `raw_bytes` SHA-256 prefix 16자. `migrate_legacy_flat_layout()`이 스토리지 창 init에서 idempotent하게 실행되어 기존 flat 레이아웃을 자동 그룹화합니다.
+
+### 생성 창 (`character_asset_generation_window.py`)
+
+CharacterModule "캐릭터 에셋 생성" 버튼 → hidden TempGenerationWindow 위에 모달리스 다이얼로그. 체크된 C1 캐릭터를 로드해 연속 생성하고 원하는 결과만 저장.
+
+**핵심 흐름**:
+1. `temp_window.build_c1_asset_generation_params(request_id, prompt, uc)` — 레퍼런스 프롬프트 스캐폴드(`ReferenceGenerationSpec.build_prompt()`) + C1 캐릭터만 포함, `wildcard_standalone=True`로 source_row 오염 방지
+2. `character_asset_request=True` + `character_asset_request_id=uuid` 플래그로 요청 식별
+3. 완료: `generation_completed_for_character_asset` 이벤트 구독 (payload는 `result` dict 전체 — `image`, `raw_bytes`, `generation_params`)
+4. 실패: `generation_error` 채널 + `character_asset_request` 플래그/id 매칭
+5. Save: `save_new_character(raw_bytes, image)` → `(character_id, primary_path)` 반환
+
+**수명주기**: `WA_DeleteOnClose=True`. `closeEvent`에서 `app_context.unsubscribe()` 호출 필수. 다이얼로그가 닫히면 부모 hidden temp window도 `destroyed` 연결로 함께 정리.
+
+### 스토리지 창 (`character_asset_storage_window.py`) — 172 전면 재설계
+
+`QMainWindow` + `QTabWidget` (Characters / Variations). 독립 창이며 메인 UI와 분리됩니다.
+
+**Characters 탭**: `[캐릭터 그리드 (좌, 2-col 280×400) | 확대 프리뷰 + 바리에이션 스트립 (우, 100×138 2-col)]`
+- 한 번 클릭 = 선택만 (C1 주입 없음 — 기존 더블클릭 자동 적용 제거)
+- 하단 액션 버튼 3개: "C1 프롬프트 적용" / "C1 + 레퍼런스 인셋" / "Variations 편집"
+- 우클릭 컨텍스트 메뉴: 동일 3개 + "캐릭터 삭제"
+- 바리에이션 타일 우클릭: "primary로 승격" (현 primary를 변형으로 보존) / "삭제"
+
+**Variations 탭**: 전용 파이프라인 (메인 img2img 패널 미공유)
+- 3-column: `[controls 540px | large preview stretch=1 | thumbnail strip 2-col]`
+- 컨트롤: Character Prompt (의상/악세서리/디테일 작성 유도) / Character UC / Main Prompt (자세/배경만) / 추가 Negative / 생성 횟수 / 계속 생성 체크
+- `VariationGenerationWorker(QThread)`: `app_context.api_service.call_generation_api(params)` 직접 호출. 메인 prompt_processor 파이프라인 우회
+- Prompt 조립: `PromptGenerationController.generate_instant_source_silent(tags, {'wildcard_standalone': True, ...})`로 pre/post fixed prompt + 훅 적용된 최종 문자열을 생성. `app_context.main_window.prompt_gen_controller` 경로 사용 (AppContext 속성이 아님)
+- Inpaint 고정: `type='inpaint'` + `image_bytes` (reference-inset 1152×896 canvas) + `mask_bytes` (NAI=small_mask, Web/Comfy=full_mask) + `sketchbook_character_prompts=[(character, uc)]`
+
+**Variations 결과 액션** (중앙 프리뷰 하단):
+- **Save**: 512×896 edit rect crop을 LANCZOS 1.5× 업스케일 → 768×1344, `_reencode_with_nai_meta`로 tEXt 이식 후 `save_character_variation` (빠른 경로, API 추가 호출 없음)
+- **✨ Save with Enhance**: NAI img2img 1.5× / strength 0.3 / noise 0.0 고정 프리셋 워커(`_VariationEnhanceWorker(QObject)`) 실행. `QProgressDialog` 모달리스 표시, 성공 시 enhanced raw_bytes 저장. NAI 모드 전용
+- **Discard**: 카드 폐기
+
+**이중 dispatch 가드**:
+- `_is_dispatching` 플래그: `_dispatch_next_generation` 진입 시 claim, `_on_worker_cleanup`/`_finalize_session` 에서 release
+- `_pending_count` 감소는 dispatch 진입 시점(up-front) — `_on_worker_finished` 예외로 카운터 손실 방지
+- Enhance 진행 중 Save/Discard/Save-with-Enhance 3버튼 모두 disable, `_enhance_worker` 플래그 가드
+
+**Variations 기본값 영속화**:
+- `save/character_asset/variations_defaults.json`: Main Prompt / 추가 Negative 마지막 값 저장
+- 기본값: Main="2koma, borderless panel", 추가 Negative="border" (NAI 2패널 reference-inset 트릭)
+- `_suppress_defaults_save` 플래그로 load 중 textChanged→save 루프 차단
+
+**C1 적용 경로** (Characters 탭 버튼 또는 컨텍스트 메뉴):
+1. `load_character_asset_metadata(character_id, primary_path)` → `ImageMetadataExtractor`가 NAI Comment에서 `characters[0]` 추출 (main prompt fallback 없음 — 172 수정)
+2. `CharacterModule.assign_c1(prompt, uc)` — C1 슬롯에 주입
+3. (C1 + 레퍼런스 인셋 경로만) `MainWindow.apply_character_asset_reference_from_image_path()` — 레퍼런스 인셋 캔버스로 img2img 패널에 적용
+
+### Img2ImgPanel Comic Panel / 레퍼런스 인셋 모드
+
+`_comic_panel_mode` 플래그가 켜지면:
+- `strength=1.0`, `noise=0.0` 강제 (NovelAI 레퍼런스 인페인트 가이드 준수)
+- strength 슬라이더 비활성, noise 그룹 숨김
+- `get_generation_parameters()`도 1.0/0.0으로 오버라이드
+
+Comic Panel 버튼과 "C1 + 레퍼런스 인셋" 적용이 이 플래그를 공유합니다. Variations 탭은 이 플래그를 쓰지 않고 전용 워커에서 직접 1.0/0.0을 세팅합니다.
+
+---
+
 ## 이미지 뷰어 (`image_viewer_window.py`)
 
 Honeyview 스타일 전체화면 이미지 뷰어. `tabs/image_window.py`의 `[뷰어]` 버튼에서 진입.
@@ -226,7 +304,7 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
 
 ### 이벤트 탭
 
-`save/remote_events/` -- source_row 저장, 재생성 지원. Rating 필터 + 태그 검색 + 심층 검색. 대기열 시스템 (추가/비우기/순차 생성). 하트 기반 우선순위 정렬.
+`save/remote_events/` -- source_row 저장, 재생성 지원. Rating 필터 + 태그 검색 + 심층 검색. 대기열 시스템 (추가/비우기/순차 생성). 하트 기반 우선순위 정렬. **Parquet 내보내기**: 대기열/필터 결과를 `save/custom_tags/`에 parquet로 내보내서 메인 자동 생성 파이프라인에서 재활용.
 
 ---
 

@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.theme import DARK_COLORS, DARK_STYLES
-from utils.character_asset_storage import save_character_asset
+from utils.character_asset_storage import save_new_character
 
 
 class CharacterAssetResultCard(QFrame):
@@ -535,7 +535,7 @@ class CharacterAssetGenerationWindow(QDialog):
         image = result.get("image")
 
         try:
-            image_path, _metadata = save_character_asset(
+            character_id, image_path = save_new_character(
                 raw_bytes=raw_bytes,
                 image=image,
             )
@@ -543,7 +543,7 @@ class CharacterAssetGenerationWindow(QDialog):
             QMessageBox.critical(self, "저장 실패", str(exc))
             return
 
-        self.status_label.setText(f"저장 완료: {image_path}")
+        self.status_label.setText(f"저장 완료: {character_id} ({image_path.name})")
         self._show_toast("에셋을 저장했습니다.", "green", duration_ms=2200)
 
     def _show_toast(self, message: str, color: str = "blue", duration_ms: int = 1600):

@@ -939,6 +939,7 @@ class GenerationController:
                 self.current_generation_params = None
                 return
 
+
             # Studio 요청인 경우: 프레임 매니저에 실패 알림
             is_studio_request = self.current_generation_params.get("studio_request", False)
             if is_studio_request:

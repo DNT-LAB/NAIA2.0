@@ -403,3 +403,189 @@ def _downscale_binary_mask(full_mask: Image.Image, factor: int) -> Image.Image:
     arr = np.array(small)
     arr = np.where(arr > 127, 255, 0).astype(np.uint8)
     return Image.fromarray(arr, mode="L")
+
+
+# ---------------------------------------------------------------------------
+# Narrow-mask variant for single-character variations (Character Asset tab)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VariationInpaintSpec:
+    """Reference-inset inpaint whose editable region is clamped to a single,
+    character-sized rectangle on the right-hand free area.
+
+    Why the reference-inset layout is preserved:
+    - NovelAI's inpaint uses the preserved pixels as context for the edit
+      area. That means we need a real reference image sitting on the canvas
+      (not white letterbox) or the model has no character features to trace.
+    - The classic ``ReferenceInsetPreprocessSpec`` (1152x896 with the 768x1344
+      reference anchored on the left) is the layout that actually ships the
+      character's silhouette/design into the model.
+
+    What changes vs. the classic spec:
+    - The editable area is not the whole right-hand side anymore. Only a
+      narrow vertical rectangle in the middle of the free area is opened for
+      edit — sized for one full-body figure. This prevents NovelAI from
+      populating the empty space with a second character, which is the failure
+      mode observed when letting the entire free area stay editable.
+
+    Geometry (defaults):
+    - canvas: 1152x896 (same as the classic spec)
+    - reference placement: identical to classic spec (left-anchored, small bleed)
+    - editable rect: x ∈ [576, 1088], y ∈ [0, 896] → 512x896
+      → aspect ratio exactly 4:7 = 768:1344, so the worker can resize the
+        whole rect to 768x1344 without any aspect warping and without
+        cropping off body parts (head / feet)
+      → 8-aligned for NAI's 1/8 mask
+      → sits right of the reference (free area 514..1152) so NAI traces the
+        preserved character but has the entire vertical canvas to compose
+      → reference occupies x ∈ [0, 514], so there is no overlap
+    - seam overlap (8 px) on the reference's right edge is preserved for
+      blending between the inset and the generated area.
+    """
+
+    # Mirror of ``ReferenceInsetPreprocessSpec`` — the reference sits on the
+    # left of this canvas, bleeding outward on three sides.
+    canvas_width: int = 1152
+    canvas_height: int = 896
+    background_rgb: tuple[int, int, int] = (255, 255, 255)
+    left_bleed_px: int = 16
+    top_bleed_px: int = 16
+    bottom_bleed_px: int = 16
+
+    reference_border_px: int = 0
+    reference_border_rgb: tuple[int, int, int] = (0, 0, 0)
+
+    # Soften the reference/edit boundary so the fused result doesn't look pasted.
+    seam_overlap_px: int = 8
+
+    # Editable rectangle: 512 × 896, exact 4:7 ratio so the worker can scale
+    # it to 768×1344 without aspect warp or cropping body parts.
+    edit_left: int = 576
+    edit_top: int = 0
+    edit_right: int = 1088
+    edit_bottom: int = 896
+
+    mask_downscale: int = 8
+
+    def recommended_inpaint_settings(self) -> dict[str, float]:
+        return {"strength": 1.0, "noise": 0.0}
+
+
+def prepare_variation_inpaint_canvas(
+    source_image: Image.Image,
+    spec: VariationInpaintSpec | None = None,
+) -> ReferenceInsetPreprocessResult:
+    """Produce a reference-inset canvas with a narrow editable rectangle.
+
+    The reference image is placed on the left exactly like
+    ``prepare_reference_inpaint_canvas`` so NovelAI's inpaint has the source
+    character's pixels to trace. Only a small rectangle on the right-hand
+    free area is opened for editing — the rest (reference + the free area's
+    top/bottom/right margins) stays preserved, which both traces character
+    features and keeps NovelAI from inventing a second figure.
+    """
+    spec = spec or VariationInpaintSpec()
+    reference = source_image.convert("RGB")
+
+    placement = _resolve_variation_reference_placement(reference.size, spec)
+    resized = reference.resize((placement.width, placement.height), Image.Resampling.LANCZOS)
+
+    canvas = Image.new("RGB", (spec.canvas_width, spec.canvas_height), spec.background_rgb)
+    canvas.paste(resized, (placement.x, placement.y))
+
+    if spec.reference_border_px > 0:
+        _draw_variation_reference_border(canvas, placement, spec)
+
+    full_mask = _build_variation_inpaint_mask(placement, spec)
+    small_mask = _downscale_binary_mask(full_mask, spec.mask_downscale)
+
+    recommended = spec.recommended_inpaint_settings()
+    return ReferenceInsetPreprocessResult(
+        canvas_image=canvas,
+        full_mask_image=full_mask,
+        small_mask_image=small_mask,
+        placement=placement,
+        canvas_width=spec.canvas_width,
+        canvas_height=spec.canvas_height,
+        recommended_strength=recommended["strength"],
+        recommended_noise=recommended["noise"],
+    )
+
+
+def _resolve_variation_reference_placement(
+    source_size: tuple[int, int],
+    spec: VariationInpaintSpec,
+) -> PlacementBox:
+    """Same anchoring rule as ``_resolve_reference_placement`` — scale the
+    reference to ``canvas_height + top_bleed + bottom_bleed`` and slide it
+    left by ``left_bleed_px`` so it bleeds beyond the canvas edges."""
+    src_w, src_h = source_size
+    target_h = spec.canvas_height + spec.top_bleed_px + spec.bottom_bleed_px
+    scale = target_h / max(1, src_h)
+    target_w = max(1, int(round(src_w * scale)))
+
+    x = -spec.left_bleed_px
+    y = -spec.top_bleed_px
+
+    visible_left = max(0, x)
+    visible_top = max(0, y)
+    visible_right = min(spec.canvas_width, x + target_w)
+    visible_bottom = min(spec.canvas_height, y + target_h)
+
+    return PlacementBox(
+        x=x,
+        y=y,
+        width=target_w,
+        height=target_h,
+        visible_left=visible_left,
+        visible_top=visible_top,
+        visible_right=visible_right,
+        visible_bottom=visible_bottom,
+    )
+
+
+def _draw_variation_reference_border(
+    canvas: Image.Image,
+    placement: PlacementBox,
+    spec: VariationInpaintSpec,
+) -> None:
+    if placement.visible_right <= placement.visible_left or placement.visible_bottom <= placement.visible_top:
+        return
+    draw = ImageDraw.Draw(canvas)
+    for offset in range(spec.reference_border_px):
+        draw.rectangle(
+            (
+                placement.visible_left + offset,
+                placement.visible_top + offset,
+                placement.visible_right - 1 - offset,
+                placement.visible_bottom - 1 - offset,
+            ),
+            outline=spec.reference_border_rgb,
+        )
+
+
+def _build_variation_inpaint_mask(
+    placement: PlacementBox,
+    spec: VariationInpaintSpec,
+) -> Image.Image:
+    """Preserve everything by default, open only the narrow edit rect and a
+    thin seam band on the reference's right edge."""
+    mask = np.zeros((spec.canvas_height, spec.canvas_width), dtype=np.uint8)
+
+    # Narrow editable rectangle.
+    ex1 = max(0, min(spec.canvas_width, spec.edit_left))
+    ex2 = max(ex1, min(spec.canvas_width, spec.edit_right))
+    ey1 = max(0, min(spec.canvas_height, spec.edit_top))
+    ey2 = max(ey1, min(spec.canvas_height, spec.edit_bottom))
+    mask[ey1:ey2, ex1:ex2] = 255
+
+    # Seam overlap — reopen a thin editable band on the reference's right edge
+    # so the generated area can fuse with the preserved silhouette.
+    seam = max(0, spec.seam_overlap_px)
+    if seam > 0 and placement.visible_right > placement.visible_left:
+        seam_left = max(placement.visible_left, placement.visible_right - seam)
+        mask[placement.visible_top:placement.visible_bottom, seam_left:placement.visible_right] = 255
+
+    return Image.fromarray(mask, mode="L")

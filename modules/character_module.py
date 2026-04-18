@@ -1065,7 +1065,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.reroll_on_generate_checkbox: QCheckBox = None
         self.c1_asset_button: QPushButton = None
         self.character_asset_storage_button: QPushButton = None
-        self.character_asset_storage_window: QDialog = None
+        self.character_asset_storage_window = None
         self.processed_prompt_display: QTextEdit = None
         self.last_processed_data: dict = {'characters': [], 'uc': []}
         self.modifiable_clone: dict = {'characters': [], 'uc': []}

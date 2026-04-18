@@ -31,7 +31,7 @@ class Img2ImgPanel(QFrame):
         self._mask_from_sketchbook = False  # Additional flag for sketchbook source
         self._outpaint_data = None  # OutpaintWindow에서 설정된 데이터
         self._comic_panel_mode = False
-        
+
         self.init_ui()
         self.setVisible(False)
 

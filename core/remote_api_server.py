@@ -9,6 +9,7 @@ import json
 import asyncio
 import base64
 import random
+import re
 import time
 import threading
 import uuid
@@ -135,6 +136,7 @@ class RemoteBridge(QObject):
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
+    request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
     OPTION_KEYS = {
@@ -258,6 +260,43 @@ class RemoteBridge(QObject):
             pass
         return False
 
+    def _get_settings_widget(self):
+        """SettingsWidget 인스턴스 반환."""
+        try:
+            mw = self.app_context.main_window
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            if tab_controller and hasattr(tab_controller, "get_tab_instance"):
+                settings_module = tab_controller.get_tab_instance("SettingsTabModule")
+                if settings_module:
+                    return getattr(settings_module, "settings_widget", None)
+        except Exception:
+            pass
+        return None
+
+    def _get_cloudflared_status(self) -> dict:
+        """현재 Cloudflared 상태 반환."""
+        settings_widget = self._get_settings_widget()
+        url = getattr(self.app_context, "cloudflared_tunnel_url", "") or ""
+        status_text = getattr(self.app_context, "cloudflared_status_text", "") or ""
+
+        if settings_widget is not None:
+            url = getattr(settings_widget, "_cloudflared_tunnel_url", "") or url
+            if not status_text:
+                label = getattr(settings_widget, "cloudflared_url_label", None)
+                if label:
+                    raw = label.text() or ""
+                    status_text = re.sub(r"<[^>]+>", "", raw.replace("<br>", "\n")).strip()
+
+        if url:
+            status_text = url
+
+        return {
+            "active": bool(self._is_cloudflared_active()),
+            "url": url,
+            "status_text": status_text,
+        }
+
     # --- Setup 전용 유틸 (Phase 2 / Phase 3) ---
 
     _SETUP_TIMESTAMP_FILE = "NAIA_api_timestamps.json"
@@ -292,6 +331,13 @@ class RemoteBridge(QObject):
         host = self._ws_client_host(ws)
         if host not in ("127.0.0.1", "::1"):
             return False, "데스크탑 창 제어는 로컬(127.0.0.1) 접속에서만 가능합니다."
+        return True, ""
+
+    def _cloudflared_gate(self, ws) -> tuple[bool, str]:
+        """Cloudflared 제어는 로컬 loopback 클라이언트에만 허용."""
+        host = self._ws_client_host(ws)
+        if host not in ("127.0.0.1", "::1"):
+            return False, "Cloudflared 제어는 로컬(127.0.0.1) 접속에서만 가능합니다."
         return True, ""
 
     def _save_directory_gate(self, ws) -> tuple[bool, str]:
@@ -885,10 +931,17 @@ class RemoteBridge(QObject):
                 "comfyui": timestamps.get("comfyui_url_last_verified", ""),
             },
         }
+        cloudflared = self._get_cloudflared_status()
+        payload["cloudflared_active"] = cloudflared["active"]
+        payload["cloudflared_url"] = cloudflared["url"]
+        payload["cloudflared_status_text"] = cloudflared["status_text"]
         if ws is not None:
             allowed, reason = self._setup_gate(ws)
             payload["setup_allowed"] = allowed
             payload["setup_block_reason"] = reason
+            cf_allowed, cf_reason = self._cloudflared_gate(ws)
+            payload["cloudflared_control_allowed"] = cf_allowed
+            payload["cloudflared_control_block_reason"] = cf_reason
         return payload
 
     def _broadcast_api_status(self):
@@ -901,6 +954,9 @@ class RemoteBridge(QObject):
             allowed, reason = self._setup_gate(ws)
             payload["setup_allowed"] = allowed
             payload["setup_block_reason"] = reason
+            cf_allowed, cf_reason = self._cloudflared_gate(ws)
+            payload["cloudflared_control_allowed"] = cf_allowed
+            payload["cloudflared_control_block_reason"] = cf_reason
             self._send_json_to(ws, payload)
 
     def get_desktop_window_state(self, ws=None) -> dict:
@@ -924,6 +980,9 @@ class RemoteBridge(QObject):
     def on_desktop_window_visibility_changed(self, _data: dict):
         self._broadcast_desktop_window_state()
 
+    def on_cloudflared_status_changed(self, _data: dict):
+        self._broadcast_api_status()
+
     def _do_set_desktop_visibility(self, visible: bool):
         mw = getattr(self.app_context, "main_window", None)
         if not mw:
@@ -936,6 +995,20 @@ class RemoteBridge(QObject):
             mw.activateWindow()
         else:
             mw.hide()
+
+    def _do_set_cloudflared_enabled(self, enabled: bool):
+        settings_widget = self._get_settings_widget()
+        if not settings_widget:
+            return
+
+        checkbox = getattr(settings_widget, "cloudflared_checkbox", None)
+        if not checkbox:
+            return
+
+        if checkbox.isChecked() != bool(enabled):
+            checkbox.setChecked(bool(enabled))
+        else:
+            self._broadcast_api_status()
 
     def on_api_mode_changed(self, data: dict):
         """api_mode_changed 이벤트 → 웹 클라이언트에 브로드캐스트"""
@@ -4495,15 +4568,23 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             }))
 
                         elif cmd_type in ("verify_nai", "verify_webui", "verify_comfyui",
-                                          "clear_api"):
+                                          "clear_api", "set_cloudflared_enabled"):
                             # --- Setup 전용 명령 (Phase 2+3) ---
-                            allowed, reason = bridge._setup_gate(ws)
+                            if cmd_type == "set_cloudflared_enabled":
+                                allowed, reason = bridge._cloudflared_gate(ws)
+                            else:
+                                allowed, reason = bridge._setup_gate(ws)
                             if not allowed:
-                                await ws.send_text(json.dumps({
-                                    "type": "setup_blocked",
+                                payload_type = "setup_blocked" if cmd_type != "set_cloudflared_enabled" else "toast"
+                                payload = {
+                                    "type": payload_type,
                                     "command": cmd_type,
                                     "reason": reason,
-                                }))
+                                }
+                                if payload_type == "toast":
+                                    payload["message"] = reason
+                                    payload["level"] = "error"
+                                await ws.send_text(json.dumps(payload))
                                 continue
 
                             stm = bridge.app_context.secure_token_manager
@@ -4565,6 +4646,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                     stm.save_token("comfyui_default_model", "")
                                     stm.save_token("comfyui_sampling_mode", "")
                                 bridge._broadcast_api_status()
+
+                            elif cmd_type == "set_cloudflared_enabled":
+                                bridge.request_set_cloudflared_enabled.emit(bool(cmd.get("enabled", False)))
                     except Exception:
                         pass
         except WebSocketDisconnect:
@@ -4620,6 +4704,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
     bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
+    bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결
     mw = app_context.main_window
@@ -4646,6 +4731,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("image_saved", bridge._on_image_saved)
     app_context.subscribe("desktop_window_visibility_changed", bridge.on_desktop_window_visibility_changed)
+    app_context.subscribe("cloudflared_status_changed", bridge.on_cloudflared_status_changed)
     app_context.subscribe("save_directory_changed", bridge.on_save_directory_changed)
 
     # NAI 모드에서 시작된 경우 Anlas 타이머 부트 + 초기 fetch
@@ -4789,7 +4875,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "save_directory_changed"]:
+            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

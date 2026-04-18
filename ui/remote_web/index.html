@@ -106,6 +106,20 @@
           <div class="setup-result" id="setupResultComfyui"></div>
           <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
         </div>
+        <div class="setup-cloudflared hidden" id="setupCloudflaredSection">
+          <div class="setup-cloudflared-head">
+            <span class="setup-cloudflared-title">Cloudflared Tunnel</span>
+            <span class="setup-cloudflared-status" id="setupCloudflaredStatus">Disconnected</span>
+          </div>
+          <div class="setup-cloudflared-actions">
+            <button class="setup-btn-primary setup-btn-cloudflared" id="setupCloudflaredConnect" onclick="setCloudflaredEnabled(true)">Cloudflared 연결</button>
+            <button class="setup-btn-ghost setup-btn-cloudflared" id="setupCloudflaredDisconnect" onclick="setCloudflaredEnabled(false)">연결 종료</button>
+          </div>
+          <div class="setup-cloudflared-linkrow">
+            <a class="setup-cloudflared-link hidden" id="setupCloudflaredLink" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <button class="setup-btn-ghost setup-btn-cloudflared hidden" id="setupCloudflaredCopy" onclick="copyCloudflaredUrl()">Copy</button>
+          </div>
+        </div>
       </section>
     </div>
   </div>

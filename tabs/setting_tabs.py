@@ -503,6 +503,19 @@ class SettingsWidget(QWidget):
         if url:
             pyperclip.copy(url)
 
+    def _publish_cloudflared_status(self, *, active: bool, url: str = "", status_text: str = ""):
+        """Cloudflared 상태를 AppContext 이벤트로 브로드캐스트."""
+        if not self.app_context:
+            return
+        self.app_context.cloudflared_active = bool(active)
+        self.app_context.cloudflared_tunnel_url = url or ""
+        self.app_context.cloudflared_status_text = status_text or ""
+        self.app_context.publish("cloudflared_status_changed", {
+            "active": bool(active),
+            "url": url or "",
+            "status_text": status_text or "",
+        })
+
     def _on_web_session_autostart_toggled(self, checked: bool):
         """자동 시작 설정 저장"""
         self.settings_module.set_setting('web_session.auto_start', checked)
@@ -634,8 +647,10 @@ class SettingsWidget(QWidget):
     def _on_cloudflared_toggled(self, checked: bool):
         """Cloudflared 터널 연결/해제"""
         # Remote bridge 의 Setup 게이트가 참조하는 명시 플래그 (위젯 탐색 대체).
-        if self.app_context:
-            self.app_context.cloudflared_active = bool(checked)
+        if checked:
+            self._publish_cloudflared_status(active=True, url="", status_text="Cloudflared 연결 중...")
+        else:
+            self._publish_cloudflared_status(active=False, url="", status_text="")
         if checked:
             self._start_cloudflared()
         else:
@@ -644,6 +659,11 @@ class SettingsWidget(QWidget):
     def _on_cf_progress(self, msg: str):
         """Cloudflared 진행 상태 표시 (UI 스레드)"""
         self.cloudflared_url_label.setText(msg)
+        self._publish_cloudflared_status(
+            active=bool(self.cloudflared_checkbox.isChecked()),
+            url=self._cloudflared_tunnel_url,
+            status_text=msg,
+        )
 
     def _start_cloudflared(self):
         """cloudflared 터널 시작"""
@@ -669,6 +689,7 @@ class SettingsWidget(QWidget):
             f'font-size: {get_scaled_font_size(16)}px; font-weight: bold;">{url}</a>'
         )
         self.cloudflared_copy_btn.setVisible(True)
+        self._publish_cloudflared_status(active=True, url=url, status_text=url)
         print(f"🌐 Cloudflared tunnel: {url}")
 
     def _on_cloudflared_error(self, error: str):
@@ -678,6 +699,7 @@ class SettingsWidget(QWidget):
             f'<span style="color: {DARK_COLORS["error"]}; '
             f'font-size: {get_scaled_font_size(16)}px;">Cloudflared 실패: {error}</span>'
         )
+        self._publish_cloudflared_status(active=False, url="", status_text=f"Cloudflared 실패: {error}")
 
     def _stop_cloudflared(self):
         """cloudflared 터널 종료"""
@@ -689,6 +711,7 @@ class SettingsWidget(QWidget):
         self._cloudflared_tunnel_url = ""
         self.cloudflared_url_label.setText("")
         self.cloudflared_copy_btn.setVisible(False)
+        self._publish_cloudflared_status(active=False, url="", status_text="")
         print("🌐 Cloudflared tunnel stopped")
 
     def cleanup_services(self):

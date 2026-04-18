@@ -1686,6 +1686,12 @@ const setupNavSubs    = { NAI: $('setupNavSubNai'), WEBUI: $('setupNavSubWebui')
 const setupMetaEls    = { NAI: $('setupMetaNai'),  WEBUI: $('setupMetaWebui'),  COMFYUI: $('setupMetaComfyui') };
 const setupResultEls  = { NAI: $('setupResultNai'), WEBUI: $('setupResultWebui'), COMFYUI: $('setupResultComfyui') };
 const setupVerifyBtns = { NAI: $('setupBtnVerifyNai'), WEBUI: $('setupBtnVerifyWebui'), COMFYUI: $('setupBtnVerifyComfyui') };
+const setupCloudflaredSection = $('setupCloudflaredSection');
+const setupCloudflaredStatus = $('setupCloudflaredStatus');
+const setupCloudflaredConnect = $('setupCloudflaredConnect');
+const setupCloudflaredDisconnect = $('setupCloudflaredDisconnect');
+const setupCloudflaredLink = $('setupCloudflaredLink');
+const setupCloudflaredCopy = $('setupCloudflaredCopy');
 let _setupForced = false;     // setup_required → true: close button hidden + backdrop ignored
 let _setupAllowed = true;     // setup_allowed: gate check on server
 let _apiStatusLast = null;
@@ -1855,6 +1861,50 @@ function onSetupBlocked(m) {
   showToast(m.reason || 'Setup blocked on this client', 'error');
 }
 
+function renderCloudflaredControls(m) {
+  if (!setupCloudflaredSection) return;
+  const allowed = m.cloudflared_control_allowed === true;
+  setupCloudflaredSection.classList.toggle('hidden', !allowed);
+  if (!allowed) return;
+
+  const active = !!m.cloudflared_active;
+  const url = m.cloudflared_url || '';
+  const status = m.cloudflared_status_text || (active ? 'Connected' : 'Disconnected');
+  const isBusy = active && !url;
+
+  if (setupCloudflaredStatus) setupCloudflaredStatus.textContent = status;
+  if (setupCloudflaredConnect) setupCloudflaredConnect.disabled = active;
+  if (setupCloudflaredDisconnect) setupCloudflaredDisconnect.disabled = !active && !isBusy;
+
+  if (setupCloudflaredLink) {
+    if (url) {
+      setupCloudflaredLink.classList.remove('hidden');
+      setupCloudflaredLink.href = url;
+      setupCloudflaredLink.textContent = url;
+    } else {
+      setupCloudflaredLink.classList.add('hidden');
+      setupCloudflaredLink.removeAttribute('href');
+      setupCloudflaredLink.textContent = '';
+    }
+  }
+  if (setupCloudflaredCopy) setupCloudflaredCopy.classList.toggle('hidden', !url);
+}
+
+function setCloudflaredEnabled(enabled) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'set_cloudflared_enabled', enabled: !!enabled }));
+}
+
+function copyCloudflaredUrl() {
+  const url = (_apiStatusLast && _apiStatusLast.cloudflared_url) || '';
+  if (!url) return;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Copied to clipboard', 'success');
+  }).catch(() => {
+    showToast('Copy failed', 'error');
+  });
+}
+
 function applySetupGate(m) {
   _setupAllowed = m.setup_allowed !== false;
   _setupForced = !!m.setup_required;
@@ -1963,6 +2013,7 @@ function updateApiStatus(m) {
   // ComfyUI model/sampling 은 Params 패널이 담당 (데스크탑 동기화). Setup 모달은 연결만 책임.
 
   applySetupGate(m);
+  renderCloudflaredControls(m);
 
   // 첫 api_status 수신 시 세션당 1회 probe (이전 setTimeout 타이밍 의존 제거)
   if (!_initialProbeDone && ws && ws.readyState === WebSocket.OPEN) {

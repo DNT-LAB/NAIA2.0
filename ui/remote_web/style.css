@@ -2958,6 +2958,14 @@ select.setup-input { cursor: pointer; }
   filter: brightness(1.1);
   box-shadow: 0 6px 18px rgba(124,106,239,0.35);
 }
+.setup-btn-primary.setup-btn-cloudflared {
+  background: linear-gradient(135deg, #5b35c8, #7a43d6);
+  box-shadow: 0 4px 14px rgba(91,53,200,0.34);
+}
+.setup-btn-primary.setup-btn-cloudflared:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 6px 18px rgba(91,53,200,0.42);
+}
 .setup-btn-primary:disabled {
   opacity: 0.5; cursor: wait;
   background: var(--bg-elevated); color: var(--text-muted);
@@ -2989,10 +2997,65 @@ select.setup-input { cursor: pointer; }
 .setup-result.warning { color: var(--generating-pulse);  border-color: rgba(232,168,76,0.35);  background: rgba(232,168,76,0.06); }
 .setup-result.error   { color: #f04040;                  border-color: rgba(240,64,64,0.35);   background: rgba(240,64,64,0.06); }
 
+.setup-cloudflared {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.setup-cloudflared-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.setup-cloudflared-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.setup-cloudflared-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  letter-spacing: 0.4px;
+}
+.setup-cloudflared-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.setup-cloudflared-linkrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.setup-cloudflared-link {
+  flex: 1 1 320px;
+  min-width: 0;
+  color: var(--accent-blue);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.setup-cloudflared-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
 .setup-sub.blocked { color: #f04040; }
 
-.setup-dialog.blocked .setup-btn-primary,
-.setup-dialog.blocked .setup-btn-ghost,
+.setup-dialog.blocked .setup-btn-primary:not(.setup-btn-cloudflared),
+.setup-dialog.blocked .setup-btn-ghost:not(.setup-btn-cloudflared),
 .setup-dialog.blocked .setup-input,
 .setup-dialog.blocked .setup-btn-eye {
   pointer-events: none; opacity: 0.35;

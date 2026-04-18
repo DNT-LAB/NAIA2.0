@@ -140,9 +140,9 @@ fi
 
 echo ""
 
-# NAIA_web.py 파일 확인
-if [ ! -f "NAIA_web.py" ]; then
-    echo -e "${RED}❌ NAIA_web.py 파일이 없습니다.${NC}"
+# NAIA_cold_v4.py 파일 확인
+if [ ! -f "NAIA_cold_v4.py" ]; then
+    echo -e "${RED}❌ NAIA_cold_v4.py 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
     read -p "엔터를 눌러 종료..."
     exit 1
@@ -157,7 +157,7 @@ echo -e "${CYAN}💡 터미널 창을 닫지 마세요. NAIA 가 실행 중입�
 echo ""
 
 # Python 스크립트 실행
-python NAIA_web.py
+python NAIA_cold_v4.py --web-session
 
 # 실행 결과 확인
 EXIT_CODE=$?

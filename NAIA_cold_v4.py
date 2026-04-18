@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 170"
-        self.setWindowTitle(self.base_title + " - 260416")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 170b"
+        self.setWindowTitle(self.base_title + " - 260418")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -2935,6 +2935,7 @@ class ModernMainWindow(QMainWindow):
                 is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
                 is_studio_request = generation_params.get("studio_request", False)
                 is_character_asset_request = generation_params.get("character_asset_request", False)
+                is_variations_capture_request = generation_params.get("variations_capture_request", False)
                 studio_frame_index = generation_params.get("studio_frame_index", 0)
                 
                 self.image_window.update_image(image_object)
@@ -2986,6 +2987,11 @@ class ModernMainWindow(QMainWindow):
                     print("🧷 Character Asset 요청 감지 - 전용 이벤트 발행")
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_character_asset", result)
+
+                if is_variations_capture_request:
+                    print("🧵 Variations Capture 요청 감지 - 전용 이벤트 발행")
+                    if hasattr(self, 'app_context') and self.app_context:
+                        self.app_context.publish("generation_completed_for_variations", result)
 
                 # Studio 요청인 경우 별도 이벤트 발행
                 if is_studio_request:
@@ -7303,17 +7309,32 @@ class ModernMainWindow(QMainWindow):
             QTimer.singleShot(50, self.update_splitter_stretch_factors)
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="NAIA 2.0")
+    parser.add_argument(
+        "--web-session",
+        action="store_true",
+        help="앱 기동 시 Web Session 을 자동 시작하고 시스템 브라우저를 연다.",
+    )
+    cli_args, _ = parser.parse_known_args()
+
+    # CLI --web-session 플래그를 환경변수로 전달.
+    # Settings 탭의 on_initialize() 가 ModernMainWindow.__init__ 내부(=AppContext 생성 전)에서
+    # 동기 실행되므로, app_context 속성으로는 타이밍이 맞지 않아 os.environ 으로 배관.
+    if cli_args.web_session:
+        os.environ["NAIA_CLI_WEB_SESSION"] = "1"
+
     # 기존 환경 설정들...
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
-    
+
     setup_webengine()
     app = QApplication(sys.argv)
-    
+
     # 기존 DPI 및 폰트 설정들...
     loaded_fonts = load_custom_fonts()
-    
+
     # 기본 폰트 설정
     if loaded_fonts:
         default_font = QFont("Pretendard", 12)
@@ -7333,7 +7354,7 @@ if __name__ == "__main__":
             pass
         app.setFont(default_font)
         print("Pretendard 폰트를 찾을 수 없어 시스템 기본 폰트를 사용합니다.")
-    
+
     # 메인 윈도우 생성
     window = ModernMainWindow()
 

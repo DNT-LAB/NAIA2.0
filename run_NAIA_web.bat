@@ -22,4 +22,4 @@ call venv\Scripts\activate.bat
 
 pip install -r requirements.txt
 
-python NAIA_web.py
+python NAIA_cold_v4.py --web-session

@@ -52,7 +52,9 @@ class SettingsTabModule(BaseTabModule):
         self.load_settings()
         if self.settings_widget:
             self.settings_widget.update_ui_from_settings()
-            if self.get_setting('web_session.auto_start', False):
+            # CLI --web-session 플래그(환경변수 경유)가 있으면 설정값보다 우선해서 자동 시작
+            cli_force = os.environ.get('NAIA_CLI_WEB_SESSION') == '1'
+            if cli_force or self.get_setting('web_session.auto_start', False):
                 QTimer.singleShot(5000, self._auto_start_web_session)
 
     def _auto_start_web_session(self):

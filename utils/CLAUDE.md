@@ -208,30 +208,48 @@ macOS는 tgz 아카이브 — `tarfile`로 바이너리만 추출.
 
 ---
 
-## 캐릭터 에셋 스토리지 (`character_asset_storage.py`)
+## 캐릭터 에셋 스토리지 (`character_asset_storage.py`) — 172 갱신
 
-### 저장 레이아웃
+### 저장 레이아웃 (그룹형)
 
 ```
 save/character_asset/
-  ├── images/{sha256[:16]}.png    ← 유일한 영속 파일
-  └── metadata/                    ← 레거시 (신규 저장은 사용하지 않음)
+  ├── characters/{character_id}/
+  │     ├── primary.png             ← 대표 이미지 (NAI Comment 보존)
+  │     └── variations/{hash}.png   ← 의상/자세 바리에이션
+  ├── images/                        ← legacy flat (자동 마이그레이션)
+  └── variations_defaults.json       ← Variations 탭 Main/Negative 기본값 (ui/ 저장)
 ```
 
-메타데이터 sidecar JSON은 더 이상 쓰지 않습니다. 캐릭터 프롬프트/UC는 저장된 PNG의 **NAI Comment**를 `ImageMetadataExtractor`로 런타임 복구합니다.
+`character_id` = primary `raw_bytes` SHA-256 prefix 16자. `migrate_legacy_flat_layout()`이 스토리지 창 init에서 idempotent하게 호출되어 기존 flat 레이아웃의 각 파일을 `characters/{hash}/primary.png`로 이동합니다.
 
-### 주요 함수
+캐릭터 프롬프트/UC는 저장된 PNG의 **NAI Comment**를 `ImageMetadataExtractor`로 런타임 복구합니다. Sidecar JSON 없음.
+
+### 주요 함수 (신 API)
 
 | 함수 | 설명 |
 |------|------|
-| `save_character_asset(raw_bytes=..., image=...)` | SHA-256 prefix로 파일명 생성, raw_bytes 우선 저장 |
-| `build_character_asset_metadata(file_hash, file_name, extracted_metadata, ...)` | 저장/복원 시 통일된 메타데이터 dict 구성 |
-| `load_character_asset_metadata(file_hash, image_path)` | 디스크 이미지에서 Comment 재추출 → metadata dict |
-| `ensure_character_asset_storage_dirs()` | 저장 폴더 생성 |
+| `list_characters()` | 모든 캐릭터 폴더 → `CharacterRecord(character_id, primary_path, variations_dir, variation_count, mtime)` 리스트, primary mtime desc 정렬 |
+| `list_character_variations(character_id)` | 해당 캐릭터의 variations 파일 리스트, mtime desc |
+| `save_new_character(raw_bytes=..., image=...)` | 신규 캐릭터 폴더 생성 + primary 저장 → `(character_id, primary_path)` 반환. 동일 해시 존재 시 기존 경로 반환 (idempotent) |
+| `save_character_variation(character_id, raw_bytes=..., image=...)` | `characters/{id}/variations/{hash}.png` 저장 → Path 반환 |
+| `delete_character(character_id)` | 캐릭터 폴더 전체 삭제 |
+| `delete_variation(variation_path)` | 바리에이션 파일 단일 삭제 |
+| `promote_variation_to_primary(character_id, variation_path)` | 현 primary를 variations로 내려 보존, variation을 primary로 승격 |
+| `migrate_legacy_flat_layout()` | `images/*.png` → `characters/{hash}/primary.png` 재배치 (idempotent) |
+| `load_character_asset_metadata(character_id, image_path)` | Comment 재추출 → metadata dict |
+| `build_character_asset_metadata(file_hash, file_name, extracted_metadata, ...)` | 통일 메타데이터 dict 구성 |
+| `save_character_asset(raw_bytes=..., image=...)` | ⚠️ **레거시 shim** — 새 호출부는 `save_new_character` 사용. 내부적으로 primary 저장으로 라우팅 |
 
 ### ⚠️ raw_bytes 계약
 
-`save_character_asset`은 가능한 한 `raw_bytes`로 저장합니다. `image`만 넘기면 PIL 재인코딩되어 **NAI Comment가 사라지고** 이후 복원 시 `character_prompt`가 공백이 됩니다. 호출부(예: `CharacterAssetGenerationWindow._save_selected_asset`)는 `result.get("raw_bytes") or result.get("image_bytes")`를 우선 전달해야 합니다.
+raw_bytes 우선 저장이 필수입니다. `image`만 넘기면 PIL 재인코딩되어 **NAI Comment가 사라지고** 이후 복원 시 `character_prompt`가 공백이 됩니다. 호출부는 `result.get("raw_bytes") or result.get("image_bytes")`를 우선 전달해야 합니다.
+
+### ⚠️ character_prompt fallback 제거 (172)
+
+`build_character_asset_metadata`는 이제 `extracted_metadata['characters'][0]`만 읽고 main prompt로 fallback하지 않습니다. NAI character block이 없는 이미지는 빈 문자열을 반환하며, 호출부는 empty-check로 "캐릭터 프롬프트를 복구할 수 없습니다" 경고를 띄웁니다.
+
+**이전 버그**: fallback이 메인 씬 프롬프트(포즈/의상/배경)를 `character_prompt`로 복사해 C1 / Variations Character Prompt 필드로 흘러들어갔습니다. Variations 파이프라인 전체가 오염되었습니다.
 
 ---
 
@@ -244,7 +262,8 @@ NovelAI 공식 문서 기반 "레퍼런스 인셋" 인페인트 캔버스 생성
 | 클래스 | 용도 |
 |--------|------|
 | `ReferenceGenerationSpec` | 초기 레퍼런스 생성용 프롬프트 스캐폴드 (기본 768x1344, `1girl, solo, 1koma, ...`) |
-| `ReferenceInsetPreprocessSpec` | 캔버스 레이아웃/마스크 규칙 (1152x896, 16px bleed, 8px seam overlap) |
+| `ReferenceInsetPreprocessSpec` | C1 + 레퍼런스 인셋 캔버스 규칙 (1152x896, 16px bleed, 8px seam overlap) — Characters 탭 "C1 + 레퍼런스 인셋" 버튼 경로 |
+| `VariationInpaintSpec` | **Variations 탭 전용 캔버스 규칙** (172 신규) — 1152×896 캔버스, 512×896 edit rect (4:7) 우측 배치, NAI character block 간섭 최소화 |
 | `ReferenceInsetPreprocessResult` | 결과 이미지 + 마스크 + 추천 파라미터 |
 | `PlacementBox` | 캔버스 위 레퍼런스 배치 좌표 |
 
@@ -253,17 +272,32 @@ NovelAI 공식 문서 기반 "레퍼런스 인셋" 인페인트 캔버스 생성
 ```python
 from utils.reference_inpaint_preprocess import (
     ReferenceGenerationSpec,
-    prepare_reference_inpaint_canvas,
+    prepare_reference_inpaint_canvas,      # C1 + 레퍼런스 인셋 경로
+    prepare_variation_inpaint_canvas,      # Variations 탭 전용 (172 신규)
 )
 
 # 1) 초기 레퍼런스 생성용 프롬프트
 prompt = ReferenceGenerationSpec().build_prompt()
 
-# 2) 생성된 레퍼런스 이미지를 캔버스에 배치 + 마스크 생성
+# 2-A) C1 + 레퍼런스 인셋 (Characters 탭 버튼)
 result = prepare_reference_inpaint_canvas(pil_image)
 # result.canvas_image, result.full_mask_image, result.small_mask_image
 # result.recommended_strength == 1.0, result.recommended_noise == 0.0
+
+# 2-B) Variations 탭 (의상/자세 교체 전용)
+result = prepare_variation_inpaint_canvas(pil_image)
+# 512×896 edit rect (4:7) × 1.5 = 768×1344 → Save/Enhance 후 portrait로 정확히 착지
 ```
+
+### VariationInpaintSpec vs ReferenceInsetPreprocessSpec
+
+| 항목 | ReferenceInsetPreprocessSpec (C1+인셋) | VariationInpaintSpec (Variations) |
+|------|----------------------------------------|----------------------------------|
+| 캔버스 | 1152×896 | 1152×896 |
+| Edit rect | 캔버스 전체 중 레퍼런스 제외 | 576-1088 / 0-896 (**512×896, 4:7**) |
+| 용도 | 캐릭터 identity를 유지하며 자유 생성 | 동일 캐릭터의 의상/자세 변경 |
+| 마스크 범위 | 넓음 | 우측 협소 (2패널 "2koma" 트릭) |
+| Save 산출물 | 메인 UI 히스토리 경로 | 512×896 crop → 768×1344 업스케일/Enhance |
 
 ### 마스크 규칙
 

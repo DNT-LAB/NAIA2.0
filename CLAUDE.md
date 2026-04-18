@@ -26,7 +26,9 @@ NAIA2.0/
 └── data/                       # Parquet 태그 DB, 텍스트 사전
 ```
 
-실행: `python NAIA_cold_v4.py`
+실행:
+- 데스크톱 모드: `python NAIA_cold_v4.py` (또는 `run_NAIA.bat` / `run_NAIA.command`)
+- 웹 세션 모드: `python NAIA_cold_v4.py --web-session` (또는 `run_NAIA_web.bat` / `run_NAIA_web.command`) — Qt 창 + 시스템 브라우저 동시. 5초 후 `http://localhost:7243` 자동 오픈. 내부 배관은 `os.environ['NAIA_CLI_WEB_SESSION']` 경유 (타이밍: `SettingsTabModule.on_initialize` 가 `ModernMainWindow.__init__` 내부에서 동기 실행되므로 env var 필요)
 
 ---
 

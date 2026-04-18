@@ -2,6 +2,16 @@
 
 브라우저에서 NAIA 2.0 원격 제어. FastAPI + WebSocket 실시간 통신.
 
+## 활성화
+
+세 가지 경로 — 모두 같은 `start_remote_server()` 진입:
+
+1. **CLI**: `python NAIA_cold_v4.py --web-session` (런처: `run_NAIA_web.bat` / `run_NAIA_web.command`) — 부팅 5초 후 서버 기동 + 기본 브라우저 자동 오픈
+2. **Settings 영속화**: `Settings > Web Session > 자동 시작` 체크 — `app_settings.json` 에 저장, 다음 실행부터 (1)과 동일 동작
+3. **수동**: `Settings > Web Session` 체크박스 토글
+
+CLI 플래그는 `os.environ['NAIA_CLI_WEB_SESSION']` 로 배관되어 `SettingsTabModule.on_initialize()` 가 읽음 (`__init__` 내부에서 동기 실행되어 `app_context` 속성 주입 타이밍이 맞지 않음).
+
 ## 파일 구조
 
 ```

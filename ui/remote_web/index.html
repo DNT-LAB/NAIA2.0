@@ -187,6 +187,14 @@
   <div class="pe-popup-body"></div>
 </div>
 
+<div class="pe-popup" id="chunkPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Chunk</span>
+    <button class="history-close" onclick="closeChunkPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
 <!-- Tag Filter floating panel -->
 <div class="tag-filter-popup" id="tagFilterPopup">
   <div class="module-popup-header">
@@ -252,7 +260,7 @@
             <button class="module-btn nai-only-disabled" data-module="character_reference" onclick="openModule('character_reference')">Char Ref<span class="module-badge hidden" id="badgeCharRef"></span></button>
             <button class="module-btn nai-only-disabled" data-module="vibe_transfer" onclick="openModule('vibe_transfer')">Vibe<span class="module-badge hidden" id="badgeVibe"></span></button>
             <button class="module-btn" data-module="wildcard" onclick="openModule('wildcard')">WC</button>
-            <button class="module-btn" data-module="chunk" onclick="openModule('chunk')">Chunk</button>
+            <button class="module-btn" data-module="chunk" onclick="openChunkPanel(null, true)">Chunk</button>
             <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Cond</button>
           </div>
         </div>

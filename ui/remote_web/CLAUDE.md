@@ -242,11 +242,11 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 ### Chunk 모듈 (인스턴트 와일드카드 삽입)
 
-- `$` 또는 `@` 입력 시 자동 오픈 (트리거 위치 `chunkTriggerInfo` 기억)
-- 모듈 바 "Chunk" 버튼으로도 접근 가능
+- `$` 입력 시 별도 floating panel 자동 오픈 (트리거 위치 `chunkTriggerInfo` 기억)
+- 모듈 바 "Chunk" 버튼으로도 별도 패널 접근 가능
 - 아코디언 방식: 한 번에 하나의 그룹만 열림
 - 아이템 클릭 → 값 전체가 커서 위치에 삽입 (트리거 문자 교체 또는 `, ` 삽입)
-- `closeModule()` 시 `chunkTriggerInfo` 초기화
+- 패널 종료 시 `chunkTriggerInfo` 초기화
 
 ### Autocomplete 와일드카드 검색
 

@@ -250,10 +250,15 @@ function updatePromptOnly(prompt, source) {
   if (source === 'random' && awaitingMyRandom) {
     awaitingMyRandom = false;
     if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
-    syncingPrompt = true;
-    promptEdit.value = prompt;
-    syncingPrompt = false;
-    updatePromptHighlight();
+    if (_isPromptFieldFocused() && prompt !== promptEdit.value) {
+      deferredPromptSync = { ...(deferredPromptSync || {}), prompt };
+    } else {
+      syncingPrompt = true;
+      promptEdit.value = prompt;
+      syncingPrompt = false;
+      updatePromptHighlight();
+      applyPromptHighlightState();
+    }
     // Show new-content dot if drawer is closed
     if (!drawerOpen) promptNewDot.classList.remove('hidden');
   }
@@ -514,12 +519,17 @@ function onPromptEdit() {
   }, 500);
 }
 
-// ---- NAI weight syntax highlight (main prompt only) ----
+// ---- Prompt syntax highlight (main prompt only) ----
 const promptHighlight = $('promptHighlight');
 const promptWrap = promptHighlight ? promptHighlight.parentElement : null;
 let currentMode = '';
 const ENABLE_PROMPT_HIGHLIGHT_PREVIEW = true;
 let promptHighlightState = 'disabled';
+const PROMPT_HIGHLIGHT_MODES = new Set(['NAI', 'WEBUI', 'COMFYUI']);
+
+function _supportsPromptHighlight(mode) {
+  return PROMPT_HIGHLIGHT_MODES.has(mode);
+}
 
 function formatNaiHighlight(text) {
   if (!text) return '<br>';
@@ -543,9 +553,98 @@ function formatNaiHighlight(text) {
   return html + '<br>';
 }
 
+function _matchWebPromptAngleToken(text, index) {
+  if (text[index] !== '<') return null;
+  const end = text.indexOf('>', index + 1);
+  if (end === -1) return null;
+  const token = text.substring(index, end + 1);
+  return /^<(?:lora|lyco|hypernet|embedding):[^>\n]+>$/.test(token) ? token : null;
+}
+
+function _formatWebPromptSegment(text, index = 0, closingChar = '', depth = 0) {
+  let html = '';
+  let i = index;
+  let explicitWeight = null;
+  while (i < text.length) {
+    const ch = text[i];
+
+    if (closingChar && ch === closingChar) {
+      return { html, index: i + 1, closed: true, explicitWeight };
+    }
+
+    if (ch === '\\' && i + 1 < text.length) {
+      html += `<span class="webui-escape">${escHtml(text.substring(i, i + 2))}</span>`;
+      i += 2;
+      continue;
+    }
+
+    const angleToken = _matchWebPromptAngleToken(text, i);
+    if (angleToken) {
+      html += `<span class="webui-angle">${escHtml(angleToken)}</span>`;
+      i += angleToken.length;
+      continue;
+    }
+
+    if (ch === '(' || ch === '[') {
+      const close = ch === '(' ? ')' : ']';
+      let tone = ch === '(' ? 'webui-up' : 'webui-down';
+      const depthClass = `webui-depth-${(depth % 3) + 1}`;
+      const inner = _formatWebPromptSegment(text, i + 1, close, depth + 1);
+      if (ch === '(' && inner.explicitWeight != null) {
+        tone = inner.explicitWeight < 1 ? 'webui-down' : inner.explicitWeight > 1 ? 'webui-up' : 'webui-neutral';
+      }
+      const openBracket = `<span class="webui-bracket ${tone}-bracket">${escHtml(ch)}</span>`;
+      if (inner.closed) {
+        const closeBracket = `<span class="webui-bracket ${tone}-bracket">${escHtml(close)}</span>`;
+        html += `<span class="webui-group ${tone} ${depthClass}">${openBracket}${inner.html}${closeBracket}</span>`;
+      } else {
+        html += `${openBracket}${inner.html}`;
+      }
+      i = inner.index;
+      continue;
+    }
+
+    if (closingChar === ')' && ch === ':') {
+      const weightMatch = text.slice(i).match(/^:\s*-?(?:\d+(?:\.\d+)?|\.\d+)(?=\))/);
+      if (weightMatch) {
+        const weightText = weightMatch[0];
+        const weightValue = parseFloat(weightText.slice(1));
+        explicitWeight = weightValue;
+        const tone = weightValue < 1 ? 'webui-weight-down' : weightValue > 1 ? 'webui-weight-up' : 'webui-weight-neutral';
+        html += `<span class="webui-weight ${tone}">${escHtml(weightText)}</span>`;
+        i += weightText.length;
+        continue;
+      }
+    }
+
+    if (!closingChar && (ch === ')' || ch === ']')) {
+      const tone = ch === ')' ? 'webui-up-bracket' : 'webui-down-bracket';
+      html += `<span class="webui-bracket ${tone}">${escHtml(ch)}</span>`;
+      i += 1;
+      continue;
+    }
+
+    html += escHtml(ch);
+    i += 1;
+  }
+
+  return { html, index: i, closed: false, explicitWeight };
+}
+
+function formatWebPromptHighlight(text) {
+  if (!text) return '<br>';
+  return _formatWebPromptSegment(text).html + '<br>';
+}
+
+function formatPromptHighlight(text, mode) {
+  if (mode === 'NAI') return formatNaiHighlight(text);
+  if (mode === 'WEBUI' || mode === 'COMFYUI') return formatWebPromptHighlight(text);
+  return escHtml(text || '') + '<br>';
+}
+
 function updatePromptHighlight() {
-  if (!promptHighlight || currentMode !== 'NAI') return;
-  promptHighlight.innerHTML = formatNaiHighlight(promptEdit.value);
+  if (!promptHighlight || !_supportsPromptHighlight(currentMode)) return;
+  promptHighlight.innerHTML = formatPromptHighlight(promptEdit.value, currentMode);
   if (promptHighlightState !== 'disabled') syncPromptHighlight();
 }
 
@@ -557,7 +656,7 @@ function syncPromptHighlight() {
 }
 
 function _getDesiredPromptHighlightState() {
-  if (!ENABLE_PROMPT_HIGHLIGHT_PREVIEW || !promptWrap || currentMode !== 'NAI') {
+  if (!ENABLE_PROMPT_HIGHLIGHT_PREVIEW || !promptWrap || !_supportsPromptHighlight(currentMode)) {
     return 'disabled';
   }
   return document.activeElement === promptEdit ? 'editing' : 'preview';
@@ -1211,8 +1310,12 @@ function updateGenStats() {
 
 function onLoadPrompt(prompt) {
   if (!prompt) return;
-  promptEdit.value = prompt;
-  onPromptEdit();
+  if (_isPromptFieldFocused() && prompt !== promptEdit.value) {
+    deferredPromptSync = { ...(deferredPromptSync || {}), prompt };
+  } else {
+    promptEdit.value = prompt;
+    onPromptEdit();
+  }
   showToast('Prompt loaded', 'success');
 }
 
@@ -2067,6 +2170,7 @@ const modulePopup = $('modulePopup');
 const moduleTitle = $('modulePopupTitle');
 const moduleBody = $('modulePopupBody');
 const modulePopupAction = $('modulePopupAction');
+const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
 let lastAutoSaveModuleState = null;
@@ -2186,7 +2290,8 @@ function closeModule() {
 
 function updateModuleBtnState() {
   document.querySelectorAll('.module-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.module === currentModuleId);
+    const isChunkBtn = btn.dataset.module === 'chunk';
+    btn.classList.toggle('active', isChunkBtn ? chunkOpen : btn.dataset.module === currentModuleId);
   });
   const pb = document.querySelector('.module-prompt-btn');
   if (pb) pb.classList.toggle('active', currentModuleId === 'search');
@@ -2197,6 +2302,8 @@ const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peDebugPanel = $('peDebugPanel');
+let chunkOpen = false;
+let chunkAnchorEl = null;
 let peE621Open = false;
 let pePresetAddOpen = false;
 let pePresetManageOpen = false;
@@ -2218,6 +2325,7 @@ function closeAllPePanels() {
 }
 
 function closeAuxiliaryPopups(exceptPanel = null) {
+  if (exceptPanel !== chunkPanel && chunkOpen) closeChunkPanel();
   if (exceptPanel !== refinePanel && refineOpen) closeRefine();
   if (exceptPanel !== pePresetAddPanel && pePresetAddOpen) closePePresetAddPanel();
   if (exceptPanel !== pePresetManagePanel && pePresetManageOpen) closePePresetManagePanel();
@@ -2341,6 +2449,9 @@ function onModuleState(m) {
     lastPromptEngineeringState = m;
     syncPromptEngineeringPopups();
   }
+  if (m.module_id === 'chunk' && chunkOpen) {
+    renderChunk(m);
+  }
 
   if (m.module_id !== currentModuleId) return;
   if (m.module_id === 'auto_save') renderAutoSavePanel(m);
@@ -2352,7 +2463,6 @@ function onModuleState(m) {
   else if (m.module_id === 'vibe_transfer') renderVibeTransfer(m);
   else if (m.module_id === 'save_directory') renderSaveDirectory(m);
   else if (m.module_id === 'wildcard') renderWildcard(m);
-  else if (m.module_id === 'chunk') renderChunk(m);
 }
 
 function openSaveDirectoryPanel() {
@@ -3436,13 +3546,55 @@ function renderWildcard(m) {
 // ---- Chunk Module (instant wildcard tree browser) ----
 let chunkTriggerInfo = null;  // {raw, stripped, start, end} — 삽입 위치
 
-function renderChunk(m) {
-  const groups = m.groups || [];
-  if (!groups.length) {
-    moduleBody.innerHTML = '<div class="mod-empty">No instant wildcards found.<br>Add them via the desktop Instant Wildcard module.</div>';
+function requestChunkState() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'chunk'}));
+  }
+}
+
+function getChunkAnchor(target = null) {
+  return target?.closest?.('.module-popup, .pe-popup, .refine-popup, .tag-filter-popup') || modulePopup;
+}
+
+function openChunkPanel(anchorEl = null, toggle = false) {
+  if (sharedMode) {
+    showToast('This module is not available in Shared Server Mode', 'error');
     return;
   }
-  let html = '<div class="chunk-hint">Select an item to insert at cursor. Type <code>$</code> or <code>@</code> in prompt to trigger.</div>';
+  if (toggle && chunkOpen) {
+    closeChunkPanel();
+    return;
+  }
+  chunkAnchorEl = anchorEl || chunkAnchorEl || modulePopup;
+  chunkOpen = true;
+  if (chunkPanel) {
+    chunkPanel.classList.add('open');
+    const body = chunkPanel.querySelector('.pe-popup-body');
+    if (body) {
+      body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
+    }
+    positionFloatingPanel(chunkPanel, chunkAnchorEl);
+  }
+  updateModuleBtnState();
+  requestChunkState();
+}
+
+function closeChunkPanel() {
+  chunkOpen = false;
+  chunkTriggerInfo = null;
+  if (chunkPanel) chunkPanel.classList.remove('open');
+  updateModuleBtnState();
+}
+
+function renderChunk(m) {
+  const chunkBody = chunkPanel ? chunkPanel.querySelector('.pe-popup-body') : null;
+  const renderTarget = (chunkOpen && chunkBody) ? chunkBody : moduleBody;
+  const groups = m.groups || [];
+  if (!groups.length) {
+    renderTarget.innerHTML = '<div class="mod-empty">No instant wildcards found.<br>Add them via the desktop Instant Wildcard module.</div>';
+    return;
+  }
+  let html = '<div class="chunk-hint">Select an item to insert at cursor. Type <code>$</code> in prompt to trigger.</div>';
   html += '<div class="chunk-tree">';
   for (const g of groups) {
     html += `<div class="chunk-group">`;
@@ -3458,7 +3610,8 @@ function renderChunk(m) {
     html += '</div></div>';
   }
   html += '</div>';
-  moduleBody.innerHTML = html;
+  renderTarget.innerHTML = html;
+  if (chunkOpen && chunkPanel) positionFloatingPanel(chunkPanel, chunkAnchorEl || modulePopup);
 }
 
 function chunkToggleGroup(groupEl) {
@@ -3472,26 +3625,34 @@ function chunkInsert(el) {
   const value = el.dataset.value;
   if (!value) return;
   const target = acTarget || promptEdit;
+  const text = target.value || '';
   target.focus();
+  let insertStart = 0;
+  let insertEnd = 0;
+  let insertText = '';
   if (chunkTriggerInfo) {
-    // $/@로 트리거된 경우 — 트리거 문자 교체
-    target.selectionStart = chunkTriggerInfo.start;
-    target.selectionEnd = chunkTriggerInfo.end;
-    document.execCommand('insertText', false, value);
+    // $로 트리거된 경우 — 트리거 토큰만 교체
+    insertStart = chunkTriggerInfo.start;
+    insertEnd = chunkTriggerInfo.end;
+    insertText = value;
     chunkTriggerInfo = null;
   } else {
     // 모듈 버튼으로 열린 경우 — 커서 위치에 삽입
-    const pos = target.selectionStart != null ? target.selectionStart : target.value.length;
-    const text = target.value;
+    const pos = target.selectionStart != null ? target.selectionStart : text.length;
     const before = text.substring(0, pos);
     // 앞에 콤마+공백 필요 여부
-    const sep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',') ? ', ' : '';
-    target.selectionStart = target.selectionEnd = pos;
-    document.execCommand('insertText', false, sep + value);
+    const sep = before.trim().length > 0 && !/,\s*$/.test(before) ? ', ' : '';
+    insertStart = pos;
+    insertEnd = pos;
+    insertText = sep + value;
   }
+  target.value = text.substring(0, insertStart) + insertText + text.substring(insertEnd);
+  const newPos = insertStart + insertText.length;
+  target.selectionStart = target.selectionEnd = newPos;
   if (target === promptEdit) onPromptEdit();
+  else _fireModuleOninput(target);
   // 자동 닫기
-  closeModule();
+  closeChunkPanel();
 }
 
 // ---- Wildcard Manager (file browser + editor + generator) ----
@@ -4214,6 +4375,7 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
 
 function relayoutFloatingPanels() {
   positionFloatingPanel(refinePanel, modulePopup);
+  positionFloatingPanel(chunkPanel, chunkAnchorEl || modulePopup);
   positionFloatingPanel(pePresetAddPanel, modulePopup);
   positionFloatingPanel(pePresetManagePanel, modulePopup);
   positionFloatingPanel(peE621Panel, modulePopup);
@@ -4464,9 +4626,9 @@ function getActiveTokenInfo(textarea) {
   let start = text.lastIndexOf(',', pos - 1) + 1;
   let end = text.indexOf(',', pos);
   if (end === -1) end = text.length;
-  while (start < end && text[start] === ' ') start++;
+  while (start < end && /\s/.test(text[start])) start++;
   let rawEnd = end;
-  while (rawEnd > start && text[rawEnd - 1] === ' ') rawEnd--;
+  while (rawEnd > start && /\s/.test(text[rawEnd - 1])) rawEnd--;
   const raw = text.substring(start, rawEnd);
   if (!raw || raw.startsWith('#')) return null;
   let stripped = raw;
@@ -4584,7 +4746,9 @@ function onTagLookupResult(m) {
 function scheduleAutocomplete() {
   const target = acTarget || promptEdit;
   const info = getActiveTokenInfo(target);
-  if (!info || info.stripped.length < 2) {
+  const allowTriggers = !sharedMode && target !== negEdit;
+  const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
+  if (!info || (!isChunkTrigger && info.stripped.length < 2)) {
     hideAutocomplete();
     checkTagHint();
     return;
@@ -4596,16 +4760,15 @@ function scheduleAutocomplete() {
   acTimer = setTimeout(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const s = info.stripped;
-    const allowTriggers = !sharedMode && target !== negEdit;
     if (allowTriggers && s.startsWith('__')) {
       // Wildcard autocomplete: __keyword → search wildcard names
       const q = s.replace(/^_+/, '').replace(/_+$/, '');
       if (q.length >= 1) ws.send(JSON.stringify({type: 'autocomplete_wildcard', query: q}));
-    } else if (allowTriggers && (s.startsWith('$') || (s.startsWith('@') && currentMode !== 'COMFYUI'))) {
-      // Chunk trigger: open Chunk module panel
+    } else if (allowTriggers && s.startsWith('$')) {
+      // Chunk trigger: open floating Chunk panel
       clearTimeout(acTimer);
       chunkTriggerInfo = info;
-      openModule('chunk');
+      openChunkPanel(getChunkAnchor(target));
       return;
     } else {
       ws.send(JSON.stringify({type: 'autocomplete', query: s}));

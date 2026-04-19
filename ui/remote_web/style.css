@@ -980,7 +980,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   transition: border-color 0.2s;
 }
 .prompt-edit:focus { border-color: var(--accent); }
-/* NAI weight highlight overlay */
+/* Prompt syntax highlight overlay */
 .prompt-highlight-wrap {
   position: relative;
   flex: 1;
@@ -1025,6 +1025,30 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 .nai-wt-mark { color: #5cb87a; }
 .nai-wt-blue { background: rgba(80,120,220,0.18); border-radius: 2px; }
 .nai-wt-red { background: rgba(220,80,80,0.18); border-radius: 2px; }
+.webui-group {
+  border-radius: 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.webui-group.webui-up.webui-depth-1 { background: rgba(220,80,80,0.16); }
+.webui-group.webui-up.webui-depth-2 { background: rgba(220,80,80,0.10); }
+.webui-group.webui-up.webui-depth-3 { background: rgba(220,80,80,0.06); }
+.webui-group.webui-neutral.webui-depth-1 { background: rgba(140,160,70,0.16); }
+.webui-group.webui-neutral.webui-depth-2 { background: rgba(140,160,70,0.10); }
+.webui-group.webui-neutral.webui-depth-3 { background: rgba(140,160,70,0.06); }
+.webui-group.webui-down.webui-depth-1 { background: rgba(80,120,220,0.16); }
+.webui-group.webui-down.webui-depth-2 { background: rgba(80,120,220,0.10); }
+.webui-group.webui-down.webui-depth-3 { background: rgba(80,120,220,0.06); }
+.webui-bracket { color: #e0d6c6; }
+.webui-up-bracket { color: #f1b2a9; }
+.webui-neutral-bracket { color: #d8dfb0; }
+.webui-down-bracket { color: #9db9f4; }
+.webui-weight { border-radius: 2px; }
+.webui-weight-up { color: #ffd3cc; background: rgba(220,80,80,0.18); }
+.webui-weight-down { color: #d1dbff; background: rgba(80,120,220,0.18); }
+.webui-weight-neutral { color: #d8dfb0; background: rgba(140,160,70,0.18); }
+.webui-angle { color: #cdb8ff; background: rgba(132,90,210,0.16); border-radius: 2px; }
+.webui-escape { color: #73c59a; }
 .prompt-edit.neg { color: var(--text-muted); font-size: 11px; }
 .prompt-edit::placeholder { color: var(--text-dim); font-style: italic; }
 
@@ -1984,6 +2008,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   flex-direction: column;
   gap: 10px;
 }
+#chunkPanel { width: min(460px, 94vw); }
 #peDebugPanel { width: min(520px, 94vw); }
 /* Depth filter 2-column grid (checkbox + input) */
 .depth-filter-grid {

@@ -991,11 +991,18 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   position: relative;
   z-index: 1;
 }
-.prompt-highlight-wrap.nai-hl .prompt-edit {
+.prompt-highlight-wrap.nai-preview .prompt-edit,
+.prompt-highlight-wrap.is-editing .prompt-edit {
   background: transparent !important;
   color: transparent !important;
-  caret-color: var(--text-primary);
+  -webkit-text-fill-color: transparent;
   resize: none;
+}
+.prompt-highlight-wrap.nai-preview .prompt-edit {
+  caret-color: transparent;
+}
+.prompt-highlight-wrap.is-editing .prompt-edit {
+  caret-color: var(--text-primary);
 }
 .prompt-highlight {
   display: none;
@@ -1012,9 +1019,10 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   overflow: auto;
   pointer-events: none;
 }
-.prompt-highlight-wrap.nai-hl .prompt-highlight { display: block; }
-.nai-wt-open { font-weight: 500; }
-.nai-wt-mark { color: #5cb87a; font-weight: 600; }
+.prompt-highlight-wrap.nai-preview .prompt-highlight,
+.prompt-highlight-wrap.is-editing .prompt-highlight { display: block; }
+.nai-wt-open { color: #f1dec8; }
+.nai-wt-mark { color: #5cb87a; }
 .nai-wt-blue { background: rgba(80,120,220,0.18); border-radius: 2px; }
 .nai-wt-red { background: rgba(220,80,80,0.18); border-radius: 2px; }
 .prompt-edit.neg { color: var(--text-muted); font-size: 11px; }

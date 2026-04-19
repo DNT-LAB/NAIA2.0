@@ -450,6 +450,29 @@ function setSamplingMode(mode) {
 // ---- Prompt sync ----
 
 let _sharedPromptsInit = false;  // Shared Mode: 초기 prompts sync 완료 여부
+let deferredPromptSync = null;
+
+function _isPromptFieldFocused() {
+  return document.activeElement === promptEdit || document.activeElement === negEdit;
+}
+
+function _applyPromptSync(m) {
+  syncingPrompt = true;
+  if ('prompt' in m && m.prompt !== promptEdit.value) promptEdit.value = m.prompt;
+  if ('negative_prompt' in m && m.negative_prompt !== negEdit.value) negEdit.value = m.negative_prompt;
+  syncingPrompt = false;
+  updateMetaChips(m);
+  updatePromptHighlight();
+  applyPromptHighlightState();
+}
+
+function flushDeferredPromptSync() {
+  if (!deferredPromptSync || _isPromptFieldFocused()) return;
+  const pending = deferredPromptSync;
+  deferredPromptSync = null;
+  _applyPromptSync(pending);
+}
+
 function syncPrompts(m) {
   if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
   // Shared Mode: 초기 1회만 서버 값 수용 (이후 broadcast는 세션별 프롬프트 보호)
@@ -463,12 +486,16 @@ function syncPrompts(m) {
       if (saved.negative_prompt != null) m.negative_prompt = saved.negative_prompt;
     }
   }
-  syncingPrompt = true;
-  if ('prompt' in m) promptEdit.value = m.prompt;
-  if ('negative_prompt' in m) negEdit.value = m.negative_prompt;
-  syncingPrompt = false;
-  updateMetaChips(m);
-  updatePromptHighlight();
+  const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
+  const negativeChanged = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
+
+  if (_isPromptFieldFocused() && (promptChanged || negativeChanged)) {
+    deferredPromptSync = { ...(deferredPromptSync || {}), ...m };
+    updateMetaChips(m);
+    return;
+  }
+
+  _applyPromptSync(m);
 }
 
 function onPromptEdit() {
@@ -490,7 +517,9 @@ function onPromptEdit() {
 // ---- NAI weight syntax highlight (main prompt only) ----
 const promptHighlight = $('promptHighlight');
 const promptWrap = promptHighlight ? promptHighlight.parentElement : null;
-let currentMode = 'NAI';
+let currentMode = '';
+const ENABLE_PROMPT_HIGHLIGHT_PREVIEW = true;
+let promptHighlightState = 'disabled';
 
 function formatNaiHighlight(text) {
   if (!text) return '<br>';
@@ -517,25 +546,36 @@ function formatNaiHighlight(text) {
 function updatePromptHighlight() {
   if (!promptHighlight || currentMode !== 'NAI') return;
   promptHighlight.innerHTML = formatNaiHighlight(promptEdit.value);
+  if (promptHighlightState !== 'disabled') syncPromptHighlight();
 }
 
 function syncPromptHighlight() {
-  if (promptHighlight) {
+  if (promptHighlight && promptHighlightState !== 'disabled') {
     promptHighlight.scrollTop = promptEdit.scrollTop;
     promptHighlight.scrollLeft = promptEdit.scrollLeft;
   }
 }
 
+function _getDesiredPromptHighlightState() {
+  if (!ENABLE_PROMPT_HIGHLIGHT_PREVIEW || !promptWrap || currentMode !== 'NAI') {
+    return 'disabled';
+  }
+  return document.activeElement === promptEdit ? 'editing' : 'preview';
+}
+
+function applyPromptHighlightState() {
+  if (!promptWrap) return;
+  promptHighlightState = _getDesiredPromptHighlightState();
+  promptWrap.classList.toggle('nai-preview', promptHighlightState === 'preview');
+  promptWrap.classList.toggle('is-editing', promptHighlightState === 'editing');
+  if (promptHighlightState === 'preview') {
+    updatePromptHighlight();
+  }
+}
+
 function setNaiHighlightMode(mode) {
   currentMode = mode;
-  if (promptWrap) {
-    if (mode === 'NAI') {
-      promptWrap.classList.add('nai-hl');
-      updatePromptHighlight();
-    } else {
-      promptWrap.classList.remove('nai-hl');
-    }
-  }
+  applyPromptHighlightState();
 }
 
 // ---- Viewer (disk-based image browser) ----
@@ -4752,8 +4792,15 @@ function bindTagAssist(textarea, options = {}) {
 bindTagAssist(promptEdit);
 bindTagAssist(negEdit);
 // Main prompt also syncs to server
+promptEdit.addEventListener('focus', () => { applyPromptHighlightState(); });
+promptEdit.addEventListener('blur', () => {
+  applyPromptHighlightState();
+  setTimeout(flushDeferredPromptSync, 0);
+});
+negEdit.addEventListener('blur', () => { setTimeout(flushDeferredPromptSync, 0); });
 promptEdit.addEventListener('compositionend', () => { onPromptEdit(); });
 promptEdit.addEventListener('input', () => { onPromptEdit(); });
+applyPromptHighlightState();
 
 // ---- Keyboard shortcuts ----
 document.addEventListener('keydown', e => {

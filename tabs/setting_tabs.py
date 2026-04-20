@@ -88,7 +88,6 @@ class SettingsTabModule(BaseTabModule):
         self._browser_wait_thread = None
         self._browser_wait_worker = None
         self._browser_wait_request_id = 0
-        self._browser_wait_hide_main_window = False
         
     def get_tab_title(self) -> str:
         return "⚙️ Settings"
@@ -132,16 +131,16 @@ class SettingsTabModule(BaseTabModule):
             # 이미 서버가 떠 있는 상태라면 브라우저만 다시 열어준다.
             self._open_browser_when_ready(url)
 
-    def _open_browser_when_ready(self, url: str, hide_main_window_on_ready: bool = False):
+    def _open_browser_when_ready(self, url: str):
         """서버가 실제로 응답한 뒤 기본 브라우저를 연다.
 
-        hide_main_window_on_ready=True 이면 브라우저가 열리는 시점에 메인 데스크탑
-        창을 숨긴다. 데스크탑 창이 먼저 사라지고 한참 뒤에야 브라우저가 뜨는 UX
-        깜빡임을 방지하기 위한 플래그.
+        데스크탑 창 가시성은 이 메서드가 관여하지 않는다. CLI 웹 모드는
+        기동 시 `_should_start_hidden_for_web_session()` 게이트로 창을 숨긴
+        상태로 시작하고, 데스크탑 모드에서 사용자가 토글로 Web Session 을
+        켠 경우에는 창이 그대로 유지된다.
         """
-        # _stop_browser_wait 이 request_id 를 bump 하고 hide 플래그를 초기화한다.
+        # _stop_browser_wait 이 request_id 를 bump 한다.
         self._stop_browser_wait()
-        self._browser_wait_hide_main_window = bool(hide_main_window_on_ready)
         request_id = self._browser_wait_request_id
 
         self._browser_wait_thread = QThread()
@@ -169,7 +168,6 @@ class SettingsTabModule(BaseTabModule):
 
         # 잔존 worker 의 ready/timeout emit 을 전부 무효화한다.
         self._browser_wait_request_id += 1
-        self._browser_wait_hide_main_window = False
 
         if worker:
             worker.stop()
@@ -197,7 +195,6 @@ class SettingsTabModule(BaseTabModule):
     def _on_browser_wait_ready(self, url: str, request_id: int):
         if request_id != self._browser_wait_request_id:
             return
-        self._maybe_hide_main_window_for_web_session()
         self._open_url_in_browser(url)
 
     def _on_browser_wait_timeout(self, url: str, request_id: int):
@@ -205,17 +202,7 @@ class SettingsTabModule(BaseTabModule):
             return
 
         print(f"🌐 Web Session readiness check timed out, opening browser anyway: {url}")
-        # 실패 경로에선 데스크탑 숨김을 생략해야 사용자가 상태를 확인할 수 있다.
-        self._browser_wait_hide_main_window = False
         self._open_url_in_browser(url)
-
-    def _maybe_hide_main_window_for_web_session(self):
-        """브라우저가 실제로 열리는 순간 메인 창을 숨긴다(플래그가 설정된 경우)."""
-        if not self._browser_wait_hide_main_window:
-            return
-        self._browser_wait_hide_main_window = False
-        if self.settings_widget:
-            self.settings_widget._hide_main_window_for_web_session()
 
     @staticmethod
     def _open_url_in_browser(url: str):
@@ -626,23 +613,6 @@ class SettingsWidget(QWidget):
             auto_save_checkbox.setChecked(True)
             print("🌐 Web Session: Auto Save 강제 활성화")
 
-    def _hide_main_window_for_web_session(self):
-        """Web Session 시작 시 메인 데스크탑 창을 기본적으로 숨긴다."""
-        try:
-            main_window = getattr(self.app_context, "main_window", None)
-            if not main_window:
-                return
-
-            if hasattr(main_window, "set_web_session_window_visible"):
-                main_window.set_web_session_window_visible(False)
-            else:
-                main_window.hide()
-                if hasattr(main_window, "_publish_desktop_window_visibility"):
-                    main_window._publish_desktop_window_visibility()
-            print("🌐 Web Session: 데스크탑 창 기본 Hide 적용")
-        except Exception as e:
-            print(f"🌐 Web Session: 데스크탑 창 Hide 적용 실패 — {e}")
-
     def _on_web_session_toggled(self, checked: bool):
         """Web Session 활성화/비활성화"""
         if checked:
@@ -661,12 +631,10 @@ class SettingsWidget(QWidget):
                 )
                 self.remote_copy_btn.setVisible(True)
                 self.cloudflared_checkbox.setEnabled(True)
-                # 서버가 실제로 응답한 뒤 브라우저를 열면서 동시에 데스크탑 창을
-                # 숨긴다. 즉시 hide 를 해버리면 데스크탑만 먼저 사라지고 브라우저가
-                # 한참 뒤에야 뜨는(혹은 수동 클릭이 필요한) UX 문제가 생긴다.
-                self.settings_module._open_browser_when_ready(
-                    url, hide_main_window_on_ready=True
-                )
+                # 서버가 실제로 응답하면 기본 브라우저를 연다. 데스크탑 창 가시성은
+                # 변경하지 않는다 — CLI 웹 모드에선 기동 단계에서 이미 숨겨져 있고,
+                # 데스크탑 모드에선 병렬로 쓰는 것이 사용자 의도.
+                self.settings_module._open_browser_when_ready(url)
             except Exception as e:
                 self.web_session_checkbox.setEnabled(True)
                 self.web_session_checkbox.setChecked(False)

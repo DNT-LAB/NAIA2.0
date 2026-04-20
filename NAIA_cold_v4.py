@@ -7339,8 +7339,8 @@ if __name__ == "__main__":
             return True
 
         try:
-            settings_path = Path("app_settings.json")
-            if not settings_path.exists():
+            settings_path = "app_settings.json"
+            if not os.path.exists(settings_path):
                 return False
 
             with open(settings_path, "r", encoding="utf-8") as f:

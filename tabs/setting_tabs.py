@@ -88,6 +88,7 @@ class SettingsTabModule(BaseTabModule):
         self._browser_wait_thread = None
         self._browser_wait_worker = None
         self._browser_wait_request_id = 0
+        self._browser_wait_hide_main_window = False
         
     def get_tab_title(self) -> str:
         return "⚙️ Settings"
@@ -125,14 +126,22 @@ class SettingsTabModule(BaseTabModule):
         url = f"http://localhost:{port}"
 
         if not self.settings_widget.web_session_checkbox.isChecked():
+            # 토글 핸들러가 서버 시작 + 준비 대기 + 브라우저 오픈을 모두 처리한다.
             self.settings_widget.web_session_checkbox.setChecked(True)
+        else:
+            # 이미 서버가 떠 있는 상태라면 브라우저만 다시 열어준다.
+            self._open_browser_when_ready(url)
 
-        self._open_browser_when_ready(url)
+    def _open_browser_when_ready(self, url: str, hide_main_window_on_ready: bool = False):
+        """서버가 실제로 응답한 뒤 기본 브라우저를 연다.
 
-    def _open_browser_when_ready(self, url: str):
-        """서버가 실제로 응답한 뒤 기본 브라우저를 연다."""
+        hide_main_window_on_ready=True 이면 브라우저가 열리는 시점에 메인 데스크탑
+        창을 숨긴다. 데스크탑 창이 먼저 사라지고 한참 뒤에야 브라우저가 뜨는 UX
+        깜빡임을 방지하기 위한 플래그.
+        """
+        # _stop_browser_wait 이 request_id 를 bump 하고 hide 플래그를 초기화한다.
         self._stop_browser_wait()
-        self._browser_wait_request_id += 1
+        self._browser_wait_hide_main_window = bool(hide_main_window_on_ready)
         request_id = self._browser_wait_request_id
 
         self._browser_wait_thread = QThread()
@@ -148,28 +157,47 @@ class SettingsTabModule(BaseTabModule):
         self._browser_wait_thread.finished.connect(self._clear_browser_wait_refs)
         self._browser_wait_thread.start()
 
-    def _stop_browser_wait(self):
-        """진행 중인 브라우저 오픈 대기를 중단한다."""
+    def _stop_browser_wait(self, block: bool = True):
+        """진행 중인 브라우저 오픈 대기를 중단한다.
+
+        block=False 면 thread.wait 없이 즉시 반환한다. 잔존 thread 는 자체
+        deleteLater 로 정리되고, 남은 ready/timeout emit 은 request_id 가드로
+        무시된다. OFF 토글처럼 UI 응답성이 중요한 경로에서 사용.
+        """
         worker = self._browser_wait_worker
         thread = self._browser_wait_thread
+
+        # 잔존 worker 의 ready/timeout emit 을 전부 무효화한다.
+        self._browser_wait_request_id += 1
+        self._browser_wait_hide_main_window = False
 
         if worker:
             worker.stop()
 
         if thread:
             thread.quit()
-            thread.wait(1500)
+            if block:
+                thread.wait(1500)
 
         self._browser_wait_worker = None
         self._browser_wait_thread = None
 
     def _clear_browser_wait_refs(self):
+        """자기 자신의 thread.finished 일 때만 refs 를 정리한다.
+
+        _stop_browser_wait(block=False) 이후 잔존 thread 의 finished 가 나중에
+        큐잉돼 새 thread/worker refs 를 null 로 덮어쓰는 사고를 방지한다.
+        """
+        sender = self.sender()
+        if sender is not None and sender is not self._browser_wait_thread:
+            return
         self._browser_wait_worker = None
         self._browser_wait_thread = None
 
     def _on_browser_wait_ready(self, url: str, request_id: int):
         if request_id != self._browser_wait_request_id:
             return
+        self._maybe_hide_main_window_for_web_session()
         self._open_url_in_browser(url)
 
     def _on_browser_wait_timeout(self, url: str, request_id: int):
@@ -177,7 +205,17 @@ class SettingsTabModule(BaseTabModule):
             return
 
         print(f"🌐 Web Session readiness check timed out, opening browser anyway: {url}")
+        # 실패 경로에선 데스크탑 숨김을 생략해야 사용자가 상태를 확인할 수 있다.
+        self._browser_wait_hide_main_window = False
         self._open_url_in_browser(url)
+
+    def _maybe_hide_main_window_for_web_session(self):
+        """브라우저가 실제로 열리는 순간 메인 창을 숨긴다(플래그가 설정된 경우)."""
+        if not self._browser_wait_hide_main_window:
+            return
+        self._browser_wait_hide_main_window = False
+        if self.settings_widget:
+            self.settings_widget._hide_main_window_for_web_session()
 
     @staticmethod
     def _open_url_in_browser(url: str):
@@ -588,7 +626,7 @@ class SettingsWidget(QWidget):
             auto_save_checkbox.setChecked(True)
             print("🌐 Web Session: Auto Save 강제 활성화")
 
-    def _force_web_session_hide_main_window(self):
+    def _hide_main_window_for_web_session(self):
         """Web Session 시작 시 메인 데스크탑 창을 기본적으로 숨긴다."""
         try:
             main_window = getattr(self.app_context, "main_window", None)
@@ -614,7 +652,6 @@ class SettingsWidget(QWidget):
                 self._force_web_session_autosave()
                 self.web_session_checkbox.setEnabled(False)
                 start_remote_server(self.app_context, port=port)
-                self._force_web_session_hide_main_window()
                 self.web_session_checkbox.setEnabled(True)
                 self.remote_port_edit.setEnabled(False)
                 url = f"http://localhost:{port}"
@@ -624,6 +661,12 @@ class SettingsWidget(QWidget):
                 )
                 self.remote_copy_btn.setVisible(True)
                 self.cloudflared_checkbox.setEnabled(True)
+                # 서버가 실제로 응답한 뒤 브라우저를 열면서 동시에 데스크탑 창을
+                # 숨긴다. 즉시 hide 를 해버리면 데스크탑만 먼저 사라지고 브라우저가
+                # 한참 뒤에야 뜨는(혹은 수동 클릭이 필요한) UX 문제가 생긴다.
+                self.settings_module._open_browser_when_ready(
+                    url, hide_main_window_on_ready=True
+                )
             except Exception as e:
                 self.web_session_checkbox.setEnabled(True)
                 self.web_session_checkbox.setChecked(False)
@@ -632,6 +675,10 @@ class SettingsWidget(QWidget):
                     f'font-size: {get_scaled_font_size(16)}px;">서버 시작 실패: {e}</span>'
                 )
         else:
+            # 진행 중인 ready-wait 를 먼저 취소한다. 그렇지 않으면 서버가 죽은
+            # 뒤 timeout 경로로 빠져 죽은 URL 로 브라우저를 열 수 있다. block=False
+            # 로 UI 스레드를 막지 않는다(잔존 thread 는 self-cleanup).
+            self.settings_module._stop_browser_wait(block=False)
             if self.cloudflared_checkbox.isChecked():
                 self.cloudflared_checkbox.setChecked(False)
             self.cloudflared_checkbox.setEnabled(False)

@@ -69,6 +69,10 @@ class RuleEditorWindow(QDialog):
         self._book: RuleBook = RuleBook()
         self._active_preset_name: Optional[str] = None
         self._current_rule_id: Optional[str] = None
+        self._dirty: bool = False
+        # 다이얼로그 없는 경로(테스트/자동화)에서의 기본 선택지.
+        # "apply"(저장 후 닫기) / "discard"(변경 버림) / "cancel"(중단).
+        self._auto_dirty_choice: Optional[str] = None
 
         self.setWindowTitle("조건부 프롬프트 편집기")
         self.setMinimumSize(get_scaled_size(1000), get_scaled_size(640))
@@ -179,6 +183,12 @@ class RuleEditorWindow(QDialog):
 
     def load_current_rules(self) -> None:
         """모듈의 rules_textedit → RuleBook 으로 복원."""
+        if not self._confirm_discard_if_dirty("현재 DSL 다시 불러오기"):
+            return
+        self._reload_from_module()
+
+    def _reload_from_module(self) -> None:
+        """dirty 체크 없이 모듈 DSL 을 읽어 _book 재구성."""
         text = ""
         if self.module is not None:
             rules_textedit = getattr(self.module, 'rules_textedit', None)
@@ -186,7 +196,9 @@ class RuleEditorWindow(QDialog):
                 text = rules_textedit.toPlainText() or ""
         self._book = parse_rulebook(text)
         # 엔진 옵션은 모듈 현재값에서 가져오기 (프리셋 로드 시 덮어써짐)
-        if hasattr(self.module, 'get_engine_options'):
+        if self.module is not None and hasattr(
+            self.module, 'get_engine_options'
+        ):
             opts = self.module.get_engine_options()
             self._book.max_passes = int(opts.get('max_passes', 1))
             self._book.stop_on_match = bool(opts.get('stop_on_match', False))
@@ -195,6 +207,7 @@ class RuleEditorWindow(QDialog):
         self._preset_panel.set_rulebook(self._book)
         self._rule_panel.set_rule(self._empty_rule())
         self._update_active_preset_label()
+        self._set_dirty(False)
 
     def _refresh_preset_list(self) -> None:
         self._preset_panel.set_presets(self._storage.list_all())
@@ -209,14 +222,6 @@ class RuleEditorWindow(QDialog):
                     return
         self._preset_panel.set_selected_rule(-1)
 
-    def _update_active_preset_label(self) -> None:
-        if self._active_preset_name:
-            self._active_preset_label.setText(
-                f"활성 프리셋: {self._active_preset_name}"
-            )
-        else:
-            self._active_preset_label.setText("활성 프리셋: (없음)")
-
     def _empty_rule(self) -> Rule:
         return Rule(
             kind="block",
@@ -229,6 +234,8 @@ class RuleEditorWindow(QDialog):
     # ------------------------------------------------------------------
 
     def _on_preset_load(self, name: str) -> None:
+        if not self._confirm_discard_if_dirty(f"프리셋 '{name}' 로드"):
+            return
         if not self._perform_load(name):
             QMessageBox.warning(
                 self, "프리셋 로드", f"프리셋을 찾을 수 없습니다: {name}"
@@ -247,16 +254,31 @@ class RuleEditorWindow(QDialog):
         self._preset_panel.set_rulebook(self._book)
         self._rule_panel.set_rule(self._empty_rule())
         self._update_active_preset_label()
+        self._set_dirty(False)
         return True
 
     def _on_preset_save(self, name: str) -> None:
-        if not name.strip():
-            name, ok = QInputDialog.getText(
-                self, "프리셋 저장", "새 프리셋 이름:"
+        # 번들 프리셋은 덮어쓸 수 없으므로 항상 새 이름을 받는다.
+        force_rename = self._preset_panel.is_selected_preset_bundled()
+        if force_rename or not name.strip():
+            prompt = (
+                "번들 프리셋은 덮어쓸 수 없습니다. 새 이름으로 저장:"
+                if force_rename
+                else "새 프리셋 이름:"
             )
-            if not ok or not name.strip():
+            new_name, ok = QInputDialog.getText(
+                self, "프리셋 저장", prompt, text=name
+            )
+            if not ok or not new_name.strip():
                 return
-            name = name.strip()
+            name = new_name.strip()
+            if force_rename and self._preset_panel.is_name_bundled(name):
+                QMessageBox.warning(
+                    self,
+                    "프리셋 저장",
+                    "번들과 동일한 이름은 사용할 수 없습니다.",
+                )
+                return
         ok, err = self._perform_save(name)
         if ok:
             QMessageBox.information(self, "저장 완료", f"'{name}' 저장됨.")
@@ -264,7 +286,15 @@ class RuleEditorWindow(QDialog):
             QMessageBox.critical(self, "저장 실패", err or "unknown")
 
     def _perform_save(self, name: str) -> tuple:
-        """다이얼로그 없는 저장 경로. (ok, error) 반환."""
+        """다이얼로그 없는 저장 경로. (ok, error) 반환.
+
+        번들 이름으로 저장 시도는 거부 (shadow 방지).
+        """
+        name = (name or "").strip()
+        if not name:
+            return False, "이름 누락"
+        if self._preset_panel.is_name_bundled(name):
+            return False, "번들과 동일한 이름은 사용할 수 없습니다."
         try:
             self._storage.save(name, self._book)
             self._active_preset_name = name
@@ -316,6 +346,7 @@ class RuleEditorWindow(QDialog):
                 self._book.rules[i] = updated
                 break
         self._refresh_rule_list_preserving_selection()
+        self._set_dirty(True)
 
     def _on_rule_add(self) -> None:
         new_rule = self._empty_rule()
@@ -326,6 +357,7 @@ class RuleEditorWindow(QDialog):
         self._current_rule_id = new_rule.id
         self._refresh_rule_list_preserving_selection()
         self._rule_panel.set_rule(new_rule)
+        self._set_dirty(True)
 
     def _on_rule_delete(self, idx: int) -> None:
         if not (0 <= idx < len(self._book.rules)):
@@ -335,10 +367,12 @@ class RuleEditorWindow(QDialog):
             self._current_rule_id = None
             self._rule_panel.set_rule(self._empty_rule())
         self._preset_panel.set_rulebook(self._book)
+        self._set_dirty(True)
 
     def _on_engine_options_changed(self, opts: dict) -> None:
         self._book.max_passes = int(opts.get('max_passes', 1))
         self._book.stop_on_match = bool(opts.get('stop_on_match', False))
+        self._set_dirty(True)
 
     # ------------------------------------------------------------------
     # Apply
@@ -372,14 +406,87 @@ class RuleEditorWindow(QDialog):
         if self._active_preset_name is not None:
             self.module._active_preset_name = self._active_preset_name
         self.rules_applied.emit(dsl)
+        self._set_dirty(False)
         return True
+
+    # ------------------------------------------------------------------
+    # Dirty 가드
+    # ------------------------------------------------------------------
+
+    def _set_dirty(self, flag: bool) -> None:
+        self._dirty = bool(flag)
+        self._update_active_preset_label()
+
+    def is_dirty(self) -> bool:
+        return self._dirty
+
+    def set_auto_dirty_choice(self, choice: Optional[str]) -> None:
+        """테스트/자동화용. "apply" / "discard" / "cancel" / None."""
+        self._auto_dirty_choice = choice
+
+    def _confirm_discard_if_dirty(self, context_label: str) -> bool:
+        """dirty 면 Apply/Discard/Cancel 묻고, 진행 가능 여부 반환.
+
+        반환 True = 계속 진행, False = 작업 취소.
+        """
+        if not self._dirty:
+            return True
+        choice = self._auto_dirty_choice or self._ask_dirty_choice(
+            context_label
+        )
+        if choice == "apply":
+            return self._perform_apply()
+        if choice == "discard":
+            self._set_dirty(False)
+            return True
+        return False
+
+    def _ask_dirty_choice(self, context_label: str) -> str:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("저장되지 않은 변경")
+        box.setText(
+            f"'{context_label}' 전에 편집 내용을 저장하시겠습니까?"
+        )
+        apply_btn = box.addButton(
+            "적용 후 계속", QMessageBox.ButtonRole.AcceptRole
+        )
+        discard_btn = box.addButton(
+            "변경 버림", QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel_btn = box.addButton(
+            "취소", QMessageBox.ButtonRole.RejectRole
+        )
+        box.setDefaultButton(cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is apply_btn:
+            return "apply"
+        if clicked is discard_btn:
+            return "discard"
+        return "cancel"
+
+    def _update_active_preset_label(self) -> None:
+        name = self._active_preset_name or "(없음)"
+        marker = " •" if self._dirty else ""
+        self._active_preset_label.setText(
+            f"활성 프리셋: {name}{marker}"
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def showEvent(self, event):
-        # 창이 열릴 때마다 모듈 DSL 재동기화
-        self.load_current_rules()
-        self._refresh_preset_list()
+        # 최초 열림 시에만 모듈 DSL 재동기화. 재사용 인스턴스는 사용자 편집을 보존.
+        if not getattr(self, "_initial_show_done", False):
+            self._reload_from_module()
+            self._refresh_preset_list()
+            self._initial_show_done = True
         super().showEvent(event)
+
+    def closeEvent(self, event):
+        if not self._confirm_discard_if_dirty("편집기 닫기"):
+            event.ignore()
+            return
+        super().closeEvent(event)

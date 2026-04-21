@@ -125,6 +125,15 @@ class PresetPanel(QWidget):
             return False
         return self._presets[idx].is_bundled
 
+    def is_name_bundled(self, name: str) -> bool:
+        """이름이 번들 프리셋과 겹치는지."""
+        if not name:
+            return False
+        needle = name.strip()
+        return any(
+            p.is_bundled and p.name == needle for p in self._presets
+        )
+
     # ------------------------------------------------------------------
     # UI 구성
     # ------------------------------------------------------------------

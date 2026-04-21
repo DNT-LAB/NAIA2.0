@@ -7,8 +7,8 @@ from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
-from ui.theme import get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size
+from ui.theme import DARK_COLORS, get_dynamic_styles
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List
 import re
@@ -18,6 +18,12 @@ _WEIGHT_NAI_RE = re.compile(r'^([\d.]+)::(.+?)\s*::$')
 # WEBUI: '(tag:1.05)' or '(tag (example):0.70)' → 'tag' or 'tag (example)'
 # 마지막 ':숫자)' 패턴으로 분리 (태그 자체에 괄호 포함 가능)
 _WEIGHT_WEBUI_RE = re.compile(r'^\((.+):([\d.]+)\)$')
+
+# rating(X, source=Y) 확장 문법 (Phase 1.1)
+# 예: rating(e, source=override)  / ~rating(s, source=row)  / rating(q)
+_RATING_FUNC_RE = re.compile(
+    r'^(~?)rating\s*\(\s*([eqsg])\s*(?:,\s*source\s*=\s*(auto|row|override|bayes)\s*)?\)$'
+)
 
 
 def _is_pattern(tag: str) -> bool:
@@ -169,24 +175,25 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """
 
         # 편집기 열기 버튼 (신규 GUI, v2.1 Phase 0)
+        # SDLC R-40 준수: DARK_COLORS 토큰만 사용 (하드코딩 색상 금지)
         editor_button = QPushButton("🔧 편집기 열기 (Preview)")
         editor_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: #2E7D32;
+                background-color: {DARK_COLORS['success']};
+                color: {DARK_COLORS['text_primary']};
                 border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
+                border-radius: {get_scaled_size(4)}px;
+                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
                 font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
                 font-weight: 600;
-                color: #FFFFFF;
                 font-size: {get_scaled_font_size(18)}px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: #1B5E20;
+                background-color: {DARK_COLORS['bg_hover']};
             }}
             QPushButton:pressed {{
-                background-color: #0D3F14;
+                background-color: {DARK_COLORS['bg_pressed']};
             }}
         """)
         editor_button.setToolTip(
@@ -411,68 +418,119 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         
         return modified_context
 
-    def _apply_rules(self, context: PromptContext, rules_text: str, logs: List[str]) -> PromptContext:
-        """규칙을 적용하여 프롬프트 리스트를 수정"""
-        # 규칙 파싱
+    def _apply_rules(self, context: PromptContext, rules_text: str, logs: List[str],
+                     *, max_passes: int = 1, stop_on_match: bool = False) -> PromptContext:
+        """규칙을 적용하여 프롬프트 리스트를 수정.
+
+        Args:
+            max_passes: 규칙 리스트를 최대 몇 번 반복 적용할지. 기본 1(단일 패스, 레거시 동작).
+                신규 모드 프리셋의 engine_options.max_passes로 지정. 고정점 혹은 진동 감지 시 조기 종료.
+            stop_on_match: 한 규칙이라도 매칭되면 현재 패스 중단. 기본 False.
+        """
+        # Phase 1.1: Skip 카운터 초기화 (타 모드 char/uc 건너뜀 집계용)
+        self._skip_counters = {}
+
         rules = self._parse_rules(rules_text)
-        
-        # 현재 태그 리스트 복사
         prefix_tags = context.prefix_tags.copy()
         main_tags = context.main_tags.copy()
         postfix_tags = context.postfix_tags.copy()
-        
-        # 규칙 실행 결과만 먼저 수집
-        rule_results = []
-        
-        # 각 규칙 적용
+
+        snapshot_history: List[int] = []
+        first_pass_results: List[Dict] = []
+        passes_run = 0
+
+        for pass_num in range(max(1, max_passes)):
+            prefix_tags, main_tags, postfix_tags, results, pass_matched = (
+                self._apply_rules_single_pass(
+                    rules, prefix_tags, main_tags, postfix_tags,
+                    stop_on_match=stop_on_match,
+                )
+            )
+            passes_run += 1
+            if pass_num == 0:
+                first_pass_results = results
+
+            if stop_on_match and pass_matched:
+                if max_passes > 1:
+                    logs.append(f"🛑 stop_on_match 발동 (pass {pass_num + 1})")
+                break
+
+            # 고정점 / 진동 감지 (snapshot queue 길이 3 → A↔B 진동 포함)
+            snap = hash((tuple(prefix_tags), tuple(main_tags), tuple(postfix_tags)))
+            if snap in snapshot_history[-3:]:
+                if pass_num > 0:
+                    logs.append(f"🔁 루프 고정점/진동 감지 (pass {pass_num + 1})")
+                break
+            snapshot_history.append(snap)
+
+            # 매칭 없으면 조기 종료 (더 반복할 이유 없음)
+            if not pass_matched:
+                break
+
+        # 첫 패스 상세 로그
+        self._log_rule_results(logs, first_pass_results)
+        if max_passes > 1:
+            logs.append(f"↻ 실행 패스: {passes_run} / max_passes={max_passes}")
+        logs.append("")
+
+        # Phase 1.1: 집계된 skip 로그 출력 (silent 금지 원칙)
+        self._flush_skip_logs(logs)
+
+        context.prefix_tags = prefix_tags
+        context.main_tags = main_tags
+        context.postfix_tags = postfix_tags
+
+        return context
+
+    def _apply_rules_single_pass(self, rules, prefix_tags, main_tags, postfix_tags,
+                                 *, stop_on_match: bool):
+        """단일 패스. 각 규칙을 순서대로 평가/실행하고 결과 리스트 반환."""
+        results: List[Dict] = []
+        matched = False
         for rule in rules:
             try:
                 condition = rule['condition']
                 action = rule['action']
-                
-                # 조건 확인
-                condition_met = self._check_condition(condition, prefix_tags, main_tags, postfix_tags)
-                
+                condition_met = self._check_condition(
+                    condition, prefix_tags, main_tags, postfix_tags
+                )
                 if condition_met:
-                    # 액션 실행
                     prefix_tags, main_tags, postfix_tags = self._execute_action(
                         action, prefix_tags, main_tags, postfix_tags
                     )
-                    rule_results.append({
+                    results.append({
                         'rule': rule['original'],
                         'met': True,
-                        'description': action['description']
+                        'description': action['description'],
                     })
+                    matched = True
+                    if stop_on_match:
+                        break
                 else:
-                    rule_results.append({
+                    results.append({
                         'rule': rule['original'],
                         'met': False,
-                        'description': None
+                        'description': None,
                     })
-                    
             except Exception as e:
-                rule_results.append({
+                results.append({
                     'rule': rule['original'],
                     'met': False,
-                    'description': f"Error: {str(e)}"
+                    'description': f"Error: {str(e)}",
                 })
-        
-        # 최상단에 규칙 실행 결과 추가
-        # logs.append("=== 규칙 실행 결과 ===")
-        for result in rule_results:
-            if result['met']:
-                logs.append(f"[Rule: {result['rule']}] -> Condition Met -> {result['description']}")
-            else:
-                error_msg = result['description'] if result['description'] and "Error:" in result['description'] else "Condition Not Met."
-                logs.append(f"[Rule: {result['rule']}] -> {error_msg}")
-        logs.append("")
+        return prefix_tags, main_tags, postfix_tags, results, matched
 
-        # 수정된 태그 리스트를 컨텍스트에 적용
-        context.prefix_tags = prefix_tags
-        context.main_tags = main_tags
-        context.postfix_tags = postfix_tags
-        
-        return context
+    def _log_rule_results(self, logs: List[str], results: List[Dict]):
+        """규칙 실행 결과를 로그에 기록."""
+        for result in results:
+            if result['met']:
+                logs.append(
+                    f"[Rule: {result['rule']}] -> Condition Met -> {result['description']}"
+                )
+            else:
+                desc = result['description']
+                error_msg = desc if desc and "Error:" in desc else "Condition Not Met."
+                logs.append(f"[Rule: {result['rule']}] -> {error_msg}")
 
     def _parse_tag_list(self, tag_text: str) -> List[str]:
         """태그 문자열을 리스트로 파싱 (^ 구분자 또는 쉼표 구분자 지원) - 따옴표 완전 제거"""
@@ -615,8 +673,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 # right_part를 태그 리스트로 변환
                 tag_list = self._parse_tag_list(right_part)
                 
-                # target_list+= 형태인지 확인
-                if left_part in ['prefix', 'main', 'postfix']:
+                # target_list+= 형태인지 확인 (Phase 1.1: char:N/uc:N/global_uc 확장)
+                if (left_part in ['prefix', 'main', 'postfix', 'global_uc']
+                        or self._is_char_uc_target(left_part)):
                     return {
                         'type': 'append_to_list',
                         'target_list': left_part,
@@ -631,12 +690,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                         'tag_list': tag_list,
                         'description': f'{tag_list} inserted after "{left_part}".'
                     }
-                    
+
         elif '+:' in action_text:
-            # 추가 액션
-            if action_text.startswith(('prefix+:', 'main+:', 'postfix+:')):
-                target_list, tag_part = action_text.split('+:', 1)
-                target_list = target_list.strip()
+            # 추가 액션 (Phase 1.1: char:N/uc:N/global_uc 확장)
+            left, _sep, rest = action_text.partition('+:')
+            left = left.strip()
+            if (left in ('prefix', 'main', 'postfix', 'global_uc')
+                    or self._is_char_uc_target(left)):
+                target_list = left
+                tag_part = rest
             else:
                 target_list = 'main'
                 tag_part = action_text.replace('+:', '', 1)
@@ -759,7 +821,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """단일 조건 평가"""
         condition = condition.strip()
 
-        # 등급 조건 처리
+        # Phase 1.1: rating(X, source=Y) 확장 문법 (기존 단순 rating보다 우선 매칭)
+        m = _RATING_FUNC_RE.match(condition)
+        if m:
+            negated = m.group(1) == '~'
+            rating_char = m.group(2)
+            source = m.group(3) or 'auto'
+            return self._check_rating_condition_v2(rating_char, source, negated=negated)
+
+        # 등급 조건 처리 (기존 동작 유지 — source='row' 고정)
         if condition in ['e', 'q', 's', 'g']:
             return self._check_rating_condition(condition, exact_match=True)
         elif condition in ['~e', '~q', '~s', '~g']:
@@ -792,49 +862,273 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             return result
     
     def _check_rating_condition(self, rating_char: str, exact_match: bool) -> bool:
-        """등급 조건을 확인"""
+        """등급 조건 체크 (레거시 호환 경로).
+
+        기존 동작 유지: source_row['rating']만 조회. 없으면 False.
+        신규 rating(x, source=y) 문법은 `_check_rating_condition_v2`를 직접 호출.
+        """
         if not hasattr(self, 'app_context') or not self.app_context:
             return False
-            
+
         current_source_row = self.app_context.current_source_row
         if current_source_row is None:
             return False
-            
+
         # source_row에서 rating 값 추출
         row_rating = current_source_row.get('rating', None)
         if row_rating is None:
             return False
-            
+
         # 등급 비교
         if exact_match:
             return row_rating == rating_char
         else:
             return row_rating != rating_char
 
+    # ====================================================================
+    # Phase 1.1 — DSL 엔진 확장 헬퍼
+    # ====================================================================
+
+    def _check_rating_condition_v2(self, rating_char: str, source: str,
+                                   *, negated: bool) -> bool:
+        """rating 조건 v2 — source ∈ {auto, row, override, bayes}.
+
+        - auto: override → row 순, 없으면 None (조건 실패)
+        - row: current_source_row['rating']만
+        - override: app_context.rating_override만
+        - bayes: Phase 1.1 미구현 → None
+        rating이 None이면 skip 카운터 증가 + False 반환.
+        """
+        row_rating = self._lookup_rating(source)
+        if row_rating is None:
+            self._record_skip(f"rating(source={source})", "rating 정보 없음")
+            return False
+        matched = (row_rating == rating_char)
+        return (not matched) if negated else matched
+
+    def _lookup_rating(self, source: str):
+        """source에 따라 현재 rating 조회."""
+        app_ctx = getattr(self, 'app_context', None)
+        if app_ctx is None:
+            return None
+
+        if source == 'override':
+            return getattr(app_ctx, 'rating_override', None)
+
+        if source == 'row':
+            row = getattr(app_ctx, 'current_source_row', None)
+            if row is None:
+                return None
+            try:
+                return row.get('rating', None)
+            except Exception:
+                return None
+
+        if source == 'bayes':
+            # Phase 1.1 미구현
+            return None
+
+        # source == 'auto': override → row → None
+        ov = getattr(app_ctx, 'rating_override', None)
+        if ov is not None:
+            return ov
+        row = getattr(app_ctx, 'current_source_row', None)
+        if row is not None:
+            try:
+                r = row.get('rating', None)
+                if r is not None:
+                    return r
+            except Exception:
+                pass
+        return None
+
+    def _get_character_module(self):
+        """CharacterModule 인스턴스를 안전하게 반환 (없으면 None)."""
+        app_ctx = getattr(self, 'app_context', None)
+        if app_ctx is None:
+            return None
+        controller = getattr(app_ctx, 'middle_section_controller', None)
+        if controller is None:
+            return None
+        try:
+            return controller.get_module_instance("CharacterModule")
+        except Exception:
+            return None
+
+    def _is_naid4_mode(self) -> bool:
+        """NAI + NAID4 모델 활성 여부."""
+        app_ctx = getattr(self, 'app_context', None)
+        if app_ctx is None:
+            return False
+        try:
+            if app_ctx.get_api_mode() != "NAI":
+                return False
+        except Exception:
+            return False
+        mw = getattr(app_ctx, 'main_window', None)
+        if mw is None:
+            return False
+        model_combo = getattr(mw, 'model_combo', None)
+        if model_combo is None:
+            return False
+        try:
+            return "NAID4" in model_combo.currentText()
+        except Exception:
+            return False
+
+    def _parse_char_uc_target(self, target):
+        """'char:N' / 'uc:N' / 'char:*' / 'uc:*' → (kind, index_or_star). 아니면 None.
+
+        index는 0-based int로 반환 (DSL은 1-based).
+        """
+        if not isinstance(target, str) or ':' not in target:
+            return None
+        kind, _, rest = target.partition(':')
+        if kind not in ('char', 'uc'):
+            return None
+        rest = rest.strip()
+        if rest == '*':
+            return (kind, '*')
+        try:
+            idx = int(rest)
+            if idx < 1:
+                return None
+            return (kind, idx - 1)
+        except ValueError:
+            return None
+
+    def _is_char_uc_target(self, target) -> bool:
+        return self._parse_char_uc_target(target) is not None
+
+    def _record_skip(self, target: str, reason: str):
+        """타겟 skip을 누적 (후에 _flush_skip_logs로 출력)."""
+        if not hasattr(self, '_skip_counters') or self._skip_counters is None:
+            self._skip_counters = {}
+        key = f"{target} ({reason})"
+        self._skip_counters[key] = self._skip_counters.get(key, 0) + 1
+
+    def _flush_skip_logs(self, logs: List[str]):
+        """누적된 skip을 집계하여 로그에 추가 (silent 금지)."""
+        counters = getattr(self, '_skip_counters', None)
+        if not counters:
+            return
+        for key, count in sorted(counters.items()):
+            logs.append(f"⚠ Skip: {key} - {count}건")
+        self._skip_counters = {}
+
+    def _write_char_uc_target(self, target: str, tag_list: List[str], *, op: str):
+        """char:N / uc:N / char:* / uc:* 타겟에 write.
+
+        op='append' → 기존 문자열에 ', '로 이어붙이기.
+        op='replace' → 전체 교체.
+        NAID4 아니거나 인덱스가 존재하지 않으면 skip 카운터 증가.
+        """
+        if not tag_list:
+            return
+
+        if not self._is_naid4_mode():
+            try:
+                mode_name = self.app_context.get_api_mode()
+            except Exception:
+                mode_name = "Unknown"
+            self._record_skip(target, f"{mode_name}/NAID4 아닌 모델은 char/uc 미지원")
+            return
+
+        parsed = self._parse_char_uc_target(target)
+        if parsed is None:
+            self._record_skip(target, "타겟 파싱 실패")
+            return
+        kind_str, idx = parsed  # 'char'|'uc', int or '*'
+
+        char_mod = self._get_character_module()
+        if char_mod is None:
+            self._record_skip(target, "CharacterModule 없음")
+            return
+
+        try:
+            clone = char_mod.get_character_modifiable_clone()
+        except AttributeError:
+            clone = getattr(char_mod, 'modifiable_clone', None)
+        if not isinstance(clone, dict):
+            self._record_skip(target, "modifiable_clone 접근 실패")
+            return
+
+        field = 'characters' if kind_str == 'char' else 'uc'
+        char_list = clone.setdefault(field, [])
+
+        if idx == '*':
+            if not char_list:
+                self._record_skip(target, "활성 캐릭터 0명")
+                return
+            indices = list(range(len(char_list)))
+        else:
+            if idx >= len(char_list):
+                self._record_skip(
+                    target,
+                    f"인덱스 {idx + 1} 존재 안함 (캐릭터 수 {len(char_list)})",
+                )
+                return
+            indices = [idx]
+
+        new_tags_str = ', '.join(str(t) for t in tag_list if t)
+        for i in indices:
+            current = char_list[i] if i < len(char_list) else ""
+            if op == 'append':
+                if current.strip():
+                    char_list[i] = f"{current}, {new_tags_str}"
+                else:
+                    char_list[i] = new_tags_str
+            elif op == 'replace':
+                char_list[i] = new_tags_str
+
+        clone[field] = char_list
+
+    def _write_global_uc_target(self, tag_list: List[str], *, op: str):
+        """global_uc 타겟 write. Phase 1.1에서는 저장 경로 미확정 → skip 집계만.
+
+        Phase 1.8(모드 토글 + 변환 도구) 혹은 별도 sub-phase에서 실제
+        Global UC 위젯/AppContext 경로 확정 후 구현.
+        """
+        if not tag_list:
+            return
+        self._record_skip("global_uc", "Phase 1.8에서 저장 경로 확정 예정")
+
     def _execute_action(self, action: Dict, prefix_tags: List[str], main_tags: List[str], postfix_tags: List[str]) -> tuple:
         """액션 실행 - 태그 리스트 처리 지원"""
         if action['type'] == 'append':
-            # 기존 추가 액션
+            # 기존 추가 액션 (Phase 1.1: char:N/uc:N/global_uc 분기 추가)
             target_list = action['target_list']
             tag_list = action.get('tag_list', [action.get('tag', '')])
-            
+
             if target_list == 'prefix':
                 prefix_tags.extend(tag_list)
             elif target_list == 'postfix':
                 postfix_tags.extend(tag_list)
-            else:  # main (기본값)
+            elif target_list == 'main':
                 main_tags.extend(tag_list)
-                
+            elif target_list == 'global_uc':
+                self._write_global_uc_target(tag_list, op='append')
+            elif self._is_char_uc_target(target_list):
+                self._write_char_uc_target(target_list, tag_list, op='append')
+            else:  # 미인식 시 main 기본
+                main_tags.extend(tag_list)
+
         elif action['type'] == 'append_to_list':
-            # 리스트별 추가 액션 (prefix+=, main+=, postfix+=)
+            # 리스트별 추가 액션 (prefix+=, main+=, postfix+=, Phase 1.1: +char:N/uc:N/global_uc)
             target_list = action['target_list']
             tag_list = action.get('tag_list', [])
-            
+
             if target_list == 'prefix':
                 prefix_tags.extend(tag_list)
             elif target_list == 'postfix':
                 postfix_tags.extend(tag_list)
-            else:  # main
+            elif target_list == 'main':
+                main_tags.extend(tag_list)
+            elif target_list == 'global_uc':
+                self._write_global_uc_target(tag_list, op='append')
+            elif self._is_char_uc_target(target_list):
+                self._write_char_uc_target(target_list, tag_list, op='append')
+            else:  # fallback
                 main_tags.extend(tag_list)
                 
         elif action['type'] == 'insert':
@@ -855,6 +1149,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             # 대체 액션 — 가중치 포맷('1.05::tag ::' / '(tag:1.05)') 인식 매칭
             old_tag = action['old_tag']
             new_tag_list = action.get('new_tag_list', [action.get('new_tag', '')])
+
+            # Phase 1.1: char:N/uc:N/global_uc 타겟이면 전체 교체 (old_tag 의미 없음)
+            if old_tag == 'global_uc':
+                self._write_global_uc_target(new_tag_list, op='replace')
+                return prefix_tags, main_tags, postfix_tags
+            if self._is_char_uc_target(old_tag):
+                self._write_char_uc_target(old_tag, new_tag_list, op='replace')
+                return prefix_tags, main_tags, postfix_tags
 
             if _is_pattern(old_tag):
                 # 패턴 모드: __tag, tag__, __tag__ — 매칭되는 모든 태그를 일괄 처리

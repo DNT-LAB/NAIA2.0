@@ -1390,6 +1390,22 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
             final_ucs = self.modifiable_clone.get('uc', [])
             self.update_processed_display(final_prompts, final_ucs)
 
+    def get_character_modifiable_clone(self) -> dict:
+        """외부 모듈(Conditional Prompt v2, Hooker 등)이 캐릭터 prompt/UC에
+        read/write 접근하는 공식 엔트리.
+
+        Returns:
+            {'characters': list[str], 'uc': list[str]} 원본 dict 참조.
+            수정 후에는 `hooker_update_prompt()`를 호출하여 UI를 동기화해야 함.
+            NAID4 모드가 아니거나 모듈이 비활성화되면 빈 구조 반환.
+        """
+        if not isinstance(self.modifiable_clone, dict):
+            return {'characters': [], 'uc': []}
+        # characters/uc 키 보장
+        self.modifiable_clone.setdefault('characters', [])
+        self.modifiable_clone.setdefault('uc', [])
+        return self.modifiable_clone
+
     def update_processed_display(self, prompts: List[str], ucs: List[str]):
         """처리된 프롬프트를 하단 텍스트 박스에 표시합니다."""
         display_text = []

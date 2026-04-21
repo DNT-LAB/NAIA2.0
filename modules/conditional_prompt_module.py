@@ -1498,6 +1498,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 action, prefix_tags, main_tags, postfix_tags
             )
 
+        # 모든 경로의 최종 반환 (append / append_to_list / insert-미매칭 fallthrough)
+        # Sub-phase 1.1b 리팩토링 회귀 수정: 이 라인 누락 시 None 반환 → 호출자 unpack 실패
+        return prefix_tags, main_tags, postfix_tags
+
     def _execute_replace_action(self, action: Dict, prefix_tags: List[str],
                                 main_tags: List[str], postfix_tags: List[str]) -> tuple:
         """replace 액션 실행 — SDLC R-50 준수를 위해 _execute_action에서 분리.

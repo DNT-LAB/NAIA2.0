@@ -10,7 +10,7 @@ from core.prompt_context import PromptContext
 from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.modern_menu import setModernStyle
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import re
 
 # NAI: '1.05::tag ::' → 'tag'
@@ -24,6 +24,13 @@ _WEIGHT_WEBUI_RE = re.compile(r'^\((.+):([\d.]+)\)$')
 _RATING_FUNC_RE = re.compile(
     r'^(~?)rating\s*\(\s*([eqsg])\s*(?:,\s*source\s*=\s*(auto|row|override|bayes)\s*)?\)$'
 )
+
+# 확장 조건자 (Phase 1.1b) — 블록-driven 문법, 파서 충돌 최소 설계
+# char_in(N, <tag_expr>) 에서 tag_expr 는 tag / *tag / ~tag / ~!tag 형식
+_CHAR_IN_RE = re.compile(r'^(~?)char_in\s*\(\s*(\d+)\s*,\s*(.+?)\s*\)$')
+_CHAR_ON_RE = re.compile(r'^(~?)char_on\s*\(\s*(\d+)\s*\)$')
+# 확장 액션 (Phase 1.1b) — char_set(N, state), char_replace(N, old, new)
+_FUNC_ACTION_RE = re.compile(r'^([a-z_]+)\s*\(\s*(.*)\s*\)$', re.DOTALL)
 
 
 def _is_pattern(tag: str) -> bool:
@@ -659,10 +666,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
     def _parse_action(self, action_text: str) -> Dict:
         """액션 텍스트를 파싱 - 복수 태그 및 따옴표 선택사항 지원"""
         action_text = action_text.strip()
-        
+
         # 외부 따옴표 제거 (있는 경우) - 더 정확한 방식
         action_text = self._remove_outer_quotes(action_text)
-        
+
+        # Phase 1.1b: 함수형 액션 (char_set, char_replace) 먼저 매칭
+        func_action = self._try_parse_func_action(action_text)
+        if func_action is not None:
+            return func_action
+
         if '+=' in action_text:
             # 삽입/추가 액션 처리
             parts = action_text.split('+=', 1)
@@ -673,8 +685,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 # right_part를 태그 리스트로 변환
                 tag_list = self._parse_tag_list(right_part)
                 
-                # target_list+= 형태인지 확인 (Phase 1.1: char:N/uc:N/global_uc 확장)
-                if (left_part in ['prefix', 'main', 'postfix', 'global_uc']
+                # target_list+= 형태인지 확인 (Phase 1.1+1.1b: char:N/uc:N/global_uc/neg 확장)
+                if (left_part in ['prefix', 'main', 'postfix', 'global_uc', 'neg']
                         or self._is_char_uc_target(left_part)):
                     return {
                         'type': 'append_to_list',
@@ -692,10 +704,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                     }
 
         elif '+:' in action_text:
-            # 추가 액션 (Phase 1.1: char:N/uc:N/global_uc 확장)
+            # 추가 액션 (Phase 1.1+1.1b: char:N/uc:N/global_uc/neg 확장)
             left, _sep, rest = action_text.partition('+:')
             left = left.strip()
-            if (left in ('prefix', 'main', 'postfix', 'global_uc')
+            if (left in ('prefix', 'main', 'postfix', 'global_uc', 'neg')
                     or self._is_char_uc_target(left)):
                 target_list = left
                 tag_part = rest
@@ -828,6 +840,27 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             rating_char = m.group(2)
             source = m.group(3) or 'auto'
             return self._check_rating_condition_v2(rating_char, source, negated=negated)
+
+        # Phase 1.1b: char_in(N, tag_expr) — 캐릭터 N 프롬프트 내부 태그 조건
+        m = _CHAR_IN_RE.match(condition)
+        if m:
+            negated = m.group(1) == '~'
+            try:
+                char_idx = int(m.group(2)) - 1
+            except ValueError:
+                return False
+            tag_expr = m.group(3).strip()
+            return self._check_char_in_condition(char_idx, tag_expr, negated=negated)
+
+        # Phase 1.1b: char_on(N) — 캐릭터 N 활성 상태
+        m = _CHAR_ON_RE.match(condition)
+        if m:
+            negated = m.group(1) == '~'
+            try:
+                char_idx = int(m.group(2)) - 1
+            except ValueError:
+                return False
+            return self._check_char_on_condition(char_idx, negated=negated)
 
         # 등급 조건 처리 (기존 동작 유지 — source='row' 고정)
         if condition in ['e', 'q', 's', 'g']:
@@ -1093,10 +1126,320 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             return
         self._record_skip("global_uc", "Phase 1.8에서 저장 경로 확정 예정")
 
+    # ====================================================================
+    # Phase 1.1b — 함수형 확장 (char_in/char_on 조건, char_set/char_replace
+    # 액션, neg 타겟)
+    # ====================================================================
+
+    def _try_parse_func_action(self, action_text: str) -> Optional[Dict]:
+        """함수형 액션 파싱. 인식 가능한 함수면 action dict 반환, 아니면 None.
+
+        형식: `func_name(arg1, arg2, ...)`
+        지원: char_set(N, enabled|disabled), char_replace(N, old, new)
+        """
+        m = _FUNC_ACTION_RE.match(action_text)
+        if not m:
+            return None
+        func_name = m.group(1)
+        args_str = m.group(2)
+        args = [a.strip() for a in args_str.split(',')] if args_str.strip() else []
+
+        if func_name == 'char_set':
+            if len(args) != 2:
+                raise ValueError(
+                    f"char_set 은 2개 인자 필요 (N, enabled|disabled): {action_text}"
+                )
+            try:
+                char_idx = int(args[0])
+            except ValueError:
+                raise ValueError(
+                    f"char_set: 첫 인자는 1-based 정수 인덱스: {args[0]}"
+                )
+            state = args[1].lower()
+            if state not in ('enabled', 'disabled'):
+                raise ValueError(
+                    f"char_set: 두번째 인자는 enabled|disabled: {state}"
+                )
+            return {
+                'type': 'func_char_set',
+                'char_index': char_idx - 1,
+                'state': state,
+                'description': f'Character {char_idx} set to {state}',
+            }
+
+        if func_name == 'char_replace':
+            if len(args) != 3:
+                raise ValueError(
+                    f"char_replace 은 3개 인자 필요 (N, old, new): {action_text}"
+                )
+            try:
+                char_idx = int(args[0])
+            except ValueError:
+                raise ValueError(
+                    f"char_replace: 첫 인자는 1-based 정수 인덱스: {args[0]}"
+                )
+            return {
+                'type': 'func_char_replace',
+                'char_index': char_idx - 1,
+                'old_tag': args[1],
+                'new_tag': args[2],
+                'description': f'Character {char_idx}: "{args[1]}" → "{args[2]}"',
+            }
+
+        # 인식 못 한 함수명 — 함수형 아님으로 반환, 기존 파싱으로 fallback
+        return None
+
+    def _get_character_tags(self, char_idx: int, *, field: str = 'characters') -> Optional[List[str]]:
+        """캐릭터 N의 프롬프트(field='characters') 또는 UC(field='uc')를
+        콤마 분리된 개별 태그 리스트로 반환. 실패 시 None."""
+        char_mod = self._get_character_module()
+        if char_mod is None:
+            return None
+        try:
+            clone = char_mod.get_character_modifiable_clone()
+        except AttributeError:
+            clone = getattr(char_mod, 'modifiable_clone', None)
+        if not isinstance(clone, dict):
+            return None
+        char_list = clone.get(field, [])
+        if char_idx < 0 or char_idx >= len(char_list):
+            return None
+        raw_str = char_list[char_idx]
+        if not isinstance(raw_str, str) or not raw_str.strip():
+            return []
+        return [t.strip() for t in raw_str.split(',') if t.strip()]
+
+    def _check_char_in_condition(self, char_idx: int, tag_expr: str,
+                                 *, negated: bool) -> bool:
+        """char_in(N, tag|*tag|~tag|~!tag) 조건 평가.
+
+        inner 접두사:
+          '*'   : 정확 토큰 일치
+          '~'   : 서브스트링 불포함
+          '~!'  : 정확 토큰 불일치
+          (없음): 서브스트링 포함
+        outer `~` (negated) 은 전체 결과 뒤집기.
+        """
+        char_tags = self._get_character_tags(char_idx, field='characters')
+        if char_tags is None:
+            self._record_skip(
+                f"char_in({char_idx + 1},...)",
+                "캐릭터 정보 없음",
+            )
+            return False
+
+        te = tag_expr.strip()
+        if te.startswith('~!'):
+            tag = te[2:].strip()
+            matched = tag not in char_tags
+        elif te.startswith('~'):
+            tag = te[1:].strip()
+            matched = not any(tag in element for element in char_tags)
+        elif te.startswith('*'):
+            tag = te[1:].strip()
+            matched = tag in char_tags
+        else:
+            matched = any(te in element for element in char_tags)
+
+        return (not matched) if negated else matched
+
+    def _check_char_on_condition(self, char_idx: int, *, negated: bool) -> bool:
+        """char_on(N) 조건 — 캐릭터 N의 active_checkbox 체크 상태."""
+        char_mod = self._get_character_module()
+        if char_mod is None:
+            self._record_skip(f"char_on({char_idx + 1})", "CharacterModule 없음")
+            return False
+        widgets = getattr(char_mod, 'character_widgets', None)
+        if widgets is None:
+            self._record_skip(f"char_on({char_idx + 1})", "character_widgets 없음")
+            return False
+        if char_idx < 0 or char_idx >= len(widgets):
+            self._record_skip(
+                f"char_on({char_idx + 1})",
+                f"인덱스 존재 안함 (총 {len(widgets)}명)",
+            )
+            return False
+        widget = widgets[char_idx]
+        checkbox = getattr(widget, 'active_checkbox', None)
+        if checkbox is None:
+            self._record_skip(f"char_on({char_idx + 1})", "active_checkbox 없음")
+            return False
+        try:
+            is_on = bool(checkbox.isChecked())
+        except Exception:
+            return False
+        return (not is_on) if negated else is_on
+
+    def _execute_char_set(self, char_idx: int, state: str):
+        """char_set(N, enabled|disabled) 실행 — 캐릭터 활성/비활성 토글."""
+        if not self._is_naid4_mode():
+            try:
+                mode_name = self.app_context.get_api_mode()
+            except Exception:
+                mode_name = "Unknown"
+            self._record_skip(
+                f"char_set({char_idx + 1},{state})",
+                f"{mode_name}/NAID4 아닌 모델은 char 토글 미지원",
+            )
+            return
+
+        char_mod = self._get_character_module()
+        if char_mod is None:
+            self._record_skip(
+                f"char_set({char_idx + 1},{state})", "CharacterModule 없음"
+            )
+            return
+
+        setter = getattr(char_mod, 'set_character_active', None)
+        if setter is None or not callable(setter):
+            self._record_skip(
+                f"char_set({char_idx + 1},{state})",
+                "set_character_active API 없음",
+            )
+            return
+
+        try:
+            ok = setter(char_idx, state == 'enabled')
+            if not ok:
+                self._record_skip(
+                    f"char_set({char_idx + 1},{state})",
+                    "인덱스 없음 또는 위젯 접근 실패",
+                )
+        except Exception as e:
+            self._record_skip(
+                f"char_set({char_idx + 1},{state})",
+                f"예외: {e}",
+            )
+
+    def _execute_char_replace(self, char_idx: int, old_tag: str, new_tag: str):
+        """char_replace(N, old, new) 실행 — 캐릭터 N prompt 내부 정확 토큰 치환.
+
+        가중치 포맷(NAI `1.05::tag ::`, WEBUI `(tag:1.05)`) 래핑은 보존.
+        매칭 없으면 skip 카운터만 증가.
+        """
+        if not self._is_naid4_mode():
+            try:
+                mode_name = self.app_context.get_api_mode()
+            except Exception:
+                mode_name = "Unknown"
+            self._record_skip(
+                f"char_replace({char_idx + 1},...)",
+                f"{mode_name}/NAID4 아닌 모델은 char 치환 미지원",
+            )
+            return
+
+        char_mod = self._get_character_module()
+        if char_mod is None:
+            self._record_skip(
+                f"char_replace({char_idx + 1},...)", "CharacterModule 없음"
+            )
+            return
+
+        try:
+            clone = char_mod.get_character_modifiable_clone()
+        except AttributeError:
+            clone = getattr(char_mod, 'modifiable_clone', None)
+        if not isinstance(clone, dict):
+            self._record_skip(
+                f"char_replace({char_idx + 1},...)",
+                "modifiable_clone 접근 실패",
+            )
+            return
+
+        char_list = clone.get('characters', [])
+        if char_idx < 0 or char_idx >= len(char_list):
+            self._record_skip(
+                f"char_replace({char_idx + 1},...)",
+                f"인덱스 존재 안함 (총 {len(char_list)}명)",
+            )
+            return
+
+        current = char_list[char_idx]
+        if not isinstance(current, str) or not current.strip():
+            self._record_skip(
+                f"char_replace({char_idx + 1},{old_tag},...)",
+                "프롬프트 비어있음",
+            )
+            return
+
+        old_tag_s = old_tag.strip()
+        new_tag_s = new_tag.strip()
+        tags = [t.strip() for t in current.split(',') if t.strip()]
+        replaced = 0
+        for i, t in enumerate(tags):
+            raw = _strip_weight_format(t)
+            if raw == old_tag_s:
+                if raw != t.strip():
+                    tags[i] = _replace_tag_in_weight_format(t, new_tag_s)
+                else:
+                    tags[i] = new_tag_s
+                replaced += 1
+
+        if replaced == 0:
+            self._record_skip(
+                f"char_replace({char_idx + 1},{old_tag_s},...)",
+                "매칭 태그 없음",
+            )
+            return
+
+        char_list[char_idx] = ', '.join(tags)
+        clone['characters'] = char_list
+
+    def _write_negative_target(self, tag_list: List[str], *, op: str):
+        """neg 타겟 write — non-D4 네거티브 프롬프트 위젯 직접 수정.
+
+        주의: 이 호출은 파이프라인 훅에서 실행되며, 훅이 워커 스레드인 경우
+        Qt 위젯 직접 접근이 스레드 안전성 이슈가 될 수 있음. Sub-phase 1.7
+        실증에서 시그널 경유로 전환 여부 재검토.
+        """
+        if not tag_list:
+            return
+        app_ctx = getattr(self, 'app_context', None)
+        if app_ctx is None:
+            self._record_skip("neg", "AppContext 없음")
+            return
+        mw = getattr(app_ctx, 'main_window', None)
+        if mw is None:
+            self._record_skip("neg", "MainWindow 없음")
+            return
+        widget = getattr(mw, 'negative_prompt_textedit', None)
+        if widget is None:
+            self._record_skip("neg", "negative_prompt_textedit 없음")
+            return
+        try:
+            current = widget.toPlainText()
+        except Exception as e:
+            self._record_skip("neg", f"위젯 read 실패: {e}")
+            return
+
+        new_joined = ', '.join(str(t) for t in tag_list if t)
+        if op == 'append':
+            new_text = f"{current}, {new_joined}" if current.strip() else new_joined
+        elif op == 'replace':
+            new_text = new_joined
+        else:
+            return
+
+        try:
+            widget.setPlainText(new_text)
+        except Exception as e:
+            self._record_skip("neg", f"위젯 write 실패: {e}")
+
     def _execute_action(self, action: Dict, prefix_tags: List[str], main_tags: List[str], postfix_tags: List[str]) -> tuple:
         """액션 실행 - 태그 리스트 처리 지원"""
+        # Phase 1.1b: 함수형 액션 (char_set, char_replace) 먼저 분기
+        if action['type'] == 'func_char_set':
+            self._execute_char_set(action['char_index'], action['state'])
+            return prefix_tags, main_tags, postfix_tags
+
+        if action['type'] == 'func_char_replace':
+            self._execute_char_replace(
+                action['char_index'], action['old_tag'], action['new_tag']
+            )
+            return prefix_tags, main_tags, postfix_tags
+
         if action['type'] == 'append':
-            # 기존 추가 액션 (Phase 1.1: char:N/uc:N/global_uc 분기 추가)
+            # 기존 추가 액션 (Phase 1.1+1.1b: char:N/uc:N/global_uc/neg 분기)
             target_list = action['target_list']
             tag_list = action.get('tag_list', [action.get('tag', '')])
 
@@ -1108,13 +1451,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 main_tags.extend(tag_list)
             elif target_list == 'global_uc':
                 self._write_global_uc_target(tag_list, op='append')
+            elif target_list == 'neg':
+                self._write_negative_target(tag_list, op='append')
             elif self._is_char_uc_target(target_list):
                 self._write_char_uc_target(target_list, tag_list, op='append')
             else:  # 미인식 시 main 기본
                 main_tags.extend(tag_list)
 
         elif action['type'] == 'append_to_list':
-            # 리스트별 추가 액션 (prefix+=, main+=, postfix+=, Phase 1.1: +char:N/uc:N/global_uc)
+            # 리스트별 추가 액션 (prefix+=/main+=/postfix+=, Phase 1.1+1.1b: char/uc/global_uc/neg)
             target_list = action['target_list']
             tag_list = action.get('tag_list', [])
 
@@ -1126,6 +1471,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 main_tags.extend(tag_list)
             elif target_list == 'global_uc':
                 self._write_global_uc_target(tag_list, op='append')
+            elif target_list == 'neg':
+                self._write_negative_target(tag_list, op='append')
             elif self._is_char_uc_target(target_list):
                 self._write_char_uc_target(target_list, tag_list, op='append')
             else:  # fallback
@@ -1146,71 +1493,96 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                         return prefix_tags, main_tags, postfix_tags
                         
         elif action['type'] == 'replace':
-            # 대체 액션 — 가중치 포맷('1.05::tag ::' / '(tag:1.05)') 인식 매칭
-            old_tag = action['old_tag']
-            new_tag_list = action.get('new_tag_list', [action.get('new_tag', '')])
+            # SDLC R-50: replace 분기는 길이가 커 _execute_replace_action 으로 분리
+            return self._execute_replace_action(
+                action, prefix_tags, main_tags, postfix_tags
+            )
 
-            # Phase 1.1: char:N/uc:N/global_uc 타겟이면 전체 교체 (old_tag 의미 없음)
-            if old_tag == 'global_uc':
-                self._write_global_uc_target(new_tag_list, op='replace')
-                return prefix_tags, main_tags, postfix_tags
-            if self._is_char_uc_target(old_tag):
-                self._write_char_uc_target(old_tag, new_tag_list, op='replace')
-                return prefix_tags, main_tags, postfix_tags
+    def _execute_replace_action(self, action: Dict, prefix_tags: List[str],
+                                main_tags: List[str], postfix_tags: List[str]) -> tuple:
+        """replace 액션 실행 — SDLC R-50 준수를 위해 _execute_action에서 분리.
 
-            if _is_pattern(old_tag):
-                # 패턴 모드: __tag, tag__, __tag__ — 매칭되는 모든 태그를 일괄 처리
-                # 주의: __wildcard__ 확장 결과는 콤마 합쳐진 단일 문자열일 수 있음
-                #   예: "red hair, platform footwear, nun" (1개 요소)
-                #   이 경우 매칭 서브태그만 제거하고 나머지를 보존해야 함
-                for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
-                    for i in range(len(tag_list_ref) - 1, -1, -1):
-                        element = tag_list_ref[i]
-                        raw_element = _strip_weight_format(element)
+        지원 old_tag:
+          - 'global_uc' / 'neg' / char:N / uc:N / char:* / uc:* → 전체 교체 위임
+          - __tag / tag__ / __tag__ → 패턴 매칭 일괄 치환/삭제
+          - 그 외 → 정확 일치 단일 치환 (prefix → main → postfix 순)
+        """
+        old_tag = action['old_tag']
+        new_tag_list = action.get('new_tag_list', [action.get('new_tag', '')])
 
-                        # 콤마 구분 복합 요소 처리 (__wildcard__ 전개 결과)
-                        if ',' in raw_element:
-                            sub_tags = [t.strip() for t in raw_element.split(',') if t.strip()]
-                            remaining = [t for t in sub_tags if not _match_pattern_tag(old_tag, t)]
-                            if len(remaining) < len(sub_tags):
-                                if remaining:
-                                    tag_list_ref[i] = ', '.join(remaining)
-                                else:
-                                    tag_list_ref.pop(i)
-                        elif _match_pattern_tag(old_tag, raw_element):
-                            if new_tag_list:
-                                # 치환: 가중치 포맷 승계 + 삽입
-                                weighted_new_list = list(new_tag_list)
-                                if weighted_new_list and raw_element != element.strip():
-                                    first_new = weighted_new_list[0].strip()
-                                    if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
-                                        weighted_new_list[0] = _replace_tag_in_weight_format(element, weighted_new_list[0])
-                                tag_list_ref.pop(i)
-                                for j, new_tag in enumerate(reversed(weighted_new_list)):
-                                    tag_list_ref.insert(i, new_tag)
-                            else:
-                                tag_list_ref.pop(i)
-                return prefix_tags, main_tags, postfix_tags
+        # Phase 1.1+1.1b: 특수 타겟은 전체 교체로 위임
+        if old_tag == 'global_uc':
+            self._write_global_uc_target(new_tag_list, op='replace')
+            return prefix_tags, main_tags, postfix_tags
+        if old_tag == 'neg':
+            self._write_negative_target(new_tag_list, op='replace')
+            return prefix_tags, main_tags, postfix_tags
+        if self._is_char_uc_target(old_tag):
+            self._write_char_uc_target(old_tag, new_tag_list, op='replace')
+            return prefix_tags, main_tags, postfix_tags
 
-            # 정확 일치 모드: prefix -> main -> postfix 순서로 첫 번째 일치 항목 대체
-            for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
-                for i, tag in enumerate(tag_list_ref):
-                    raw_tag = _strip_weight_format(tag)
-                    if old_tag == raw_tag:
-                        # 첫 번째 새 태그에 기존 가중치 포맷 유지
-                        # 단, 새 태그가 이미 가중치 포맷이면 사용자 의도 존중 — 승계하지 않음
-                        weighted_new_list = list(new_tag_list)
-                        if weighted_new_list and raw_tag != tag.strip():
-                            first_new = weighted_new_list[0].strip()
-                            if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
+        if _is_pattern(old_tag):
+            self._apply_pattern_replace(
+                old_tag, new_tag_list, prefix_tags, main_tags, postfix_tags
+            )
+            return prefix_tags, main_tags, postfix_tags
+
+        # 정확 일치 모드: prefix -> main -> postfix 순서로 첫 번째 일치 항목 대체
+        for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
+            for i, tag in enumerate(tag_list_ref):
+                raw_tag = _strip_weight_format(tag)
+                if old_tag == raw_tag:
+                    # 첫 번째 새 태그에 기존 가중치 포맷 유지
+                    # 단, 새 태그가 이미 가중치 포맷이면 사용자 의도 존중 — 승계하지 않음
+                    weighted_new_list = list(new_tag_list)
+                    if weighted_new_list and raw_tag != tag.strip():
+                        first_new = weighted_new_list[0].strip()
+                        if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
                                 weighted_new_list[0] = _replace_tag_in_weight_format(tag, weighted_new_list[0])
                         # 기존 태그를 제거하고 새 태그들을 그 자리에 삽입
                         tag_list_ref.pop(i)
                         for j, new_tag in enumerate(reversed(weighted_new_list)):
                             tag_list_ref.insert(i, new_tag)
                         return prefix_tags, main_tags, postfix_tags
-        
+
         return prefix_tags, main_tags, postfix_tags
+
+    def _apply_pattern_replace(self, old_tag: str, new_tag_list: List[str],
+                               prefix_tags: List[str], main_tags: List[str],
+                               postfix_tags: List[str]):
+        """패턴 대체 (`__tag`, `tag__`, `__tag__`) — 매칭되는 모든 태그 일괄 처리.
+
+        주의: `__wildcard__` 전개 결과는 콤마 합쳐진 단일 문자열일 수 있음
+              (예: "red hair, platform footwear, nun" — 1개 요소).
+              이 경우 매칭 서브태그만 제거하고 나머지를 보존.
+        """
+        for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
+            for i in range(len(tag_list_ref) - 1, -1, -1):
+                element = tag_list_ref[i]
+                raw_element = _strip_weight_format(element)
+
+                # 콤마 구분 복합 요소 처리 (__wildcard__ 전개 결과)
+                if ',' in raw_element:
+                    sub_tags = [t.strip() for t in raw_element.split(',') if t.strip()]
+                    remaining = [t for t in sub_tags if not _match_pattern_tag(old_tag, t)]
+                    if len(remaining) < len(sub_tags):
+                        if remaining:
+                            tag_list_ref[i] = ', '.join(remaining)
+                        else:
+                            tag_list_ref.pop(i)
+                elif _match_pattern_tag(old_tag, raw_element):
+                    if new_tag_list:
+                        # 치환: 가중치 포맷 승계 + 삽입
+                        weighted_new_list = list(new_tag_list)
+                        if weighted_new_list and raw_element != element.strip():
+                            first_new = weighted_new_list[0].strip()
+                            if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
+                                weighted_new_list[0] = _replace_tag_in_weight_format(element, weighted_new_list[0])
+                        tag_list_ref.pop(i)
+                        for j, new_tag in enumerate(reversed(weighted_new_list)):
+                            tag_list_ref.insert(i, new_tag)
+                    else:
+                        tag_list_ref.pop(i)
 
     def _update_log_display(self, logs: List[str]):
         """로그 디스플레이 업데이트 - HTML 스타일링 지원"""

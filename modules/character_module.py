@@ -1406,6 +1406,31 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         self.modifiable_clone.setdefault('uc', [])
         return self.modifiable_clone
 
+    def set_character_active(self, index: int, active: bool) -> bool:
+        """외부 모듈(Conditional Prompt v2 등)에서 캐릭터 N의 active_checkbox 제어.
+
+        Args:
+            index: 0-based 인덱스 (DSL의 1-based를 호출자가 변환 후 전달).
+            active: True=활성화, False=비활성화.
+
+        Returns:
+            True — 성공. False — 인덱스 없음, character_widgets 접근 실패,
+            또는 active_checkbox 위젯 없음.
+        """
+        if not isinstance(self.character_widgets, list):
+            return False
+        if index < 0 or index >= len(self.character_widgets):
+            return False
+        widget = self.character_widgets[index]
+        checkbox = getattr(widget, 'active_checkbox', None)
+        if checkbox is None:
+            return False
+        try:
+            checkbox.setChecked(active)
+            return True
+        except Exception:
+            return False
+
     def update_processed_display(self, prompts: List[str], ucs: List[str]):
         """처리된 프롬프트를 하단 텍스트 박스에 표시합니다."""
         display_text = []

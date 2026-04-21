@@ -152,11 +152,16 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         # Sub-phase 1.7 hotfix (P1): RuleBook/프리셋의 engine_options 를
         # 런타임 훅과 연결하기 위한 주입 포인트. 기본값은 레거시 호환.
-        # Phase 1.8 에서 프리셋 로드 경로가 `set_engine_options` 를 호출.
         self._engine_options = {
             'max_passes': 1,
             'stop_on_match': False,
         }
+
+        # Sub-phase 1.8: 편집기 모드 + 활성 프리셋 이름.
+        # legacy = 기존 QTextEdit 직접 편집, v2 = 외부 편집기 창/프리셋 기반.
+        # 기본값은 'legacy' — 기존 사용자 설정에 회귀 없이 작동.
+        self._editor_mode: str = "legacy"
+        self._active_preset_name: Optional[str] = None
 
     def set_engine_options(self, *, max_passes: int = 1,
                            stop_on_match: bool = False):
@@ -397,22 +402,136 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self._rule_editor_window.activateWindow()
 
     def collect_current_settings(self) -> Dict[str, Any]:
-        """현재 UI 상태를 딕셔너리로 수집"""
+        """현재 UI 상태를 딕셔너리로 수집.
+
+        Sub-phase 1.8: editor_mode / engine_options / active_preset 포함.
+        레거시 설정 파일(필드 없음)은 apply_settings 기본값으로 흡수.
+        """
         if not all([self.enable_checkbox, self.rules_textedit]):
             return {}
-        
+
         return {
             "enabled": self.enable_checkbox.isChecked(),
             "rules": self.rules_textedit.toPlainText(),
+            "editor_mode": self._editor_mode,
+            "engine_options": dict(self._engine_options),
+            "active_preset": self._active_preset_name,
         }
 
     def apply_settings(self, settings: Dict[str, Any]):
-        """설정을 UI에 적용"""
+        """설정을 UI에 적용 (Sub-phase 1.8: 모드/옵션/프리셋 필드 포함)."""
         if not all([self.enable_checkbox, self.rules_textedit]):
             return
-        
+
         self.enable_checkbox.setChecked(settings.get("enabled", False))
         self.rules_textedit.setText(settings.get("rules", ""))
+
+        # 1.8: editor_mode 복원 (기본 legacy → 기존 설정 파일도 안전)
+        mode = settings.get("editor_mode", "legacy")
+        self._editor_mode = mode if mode in ("legacy", "v2") else "legacy"
+
+        # 1.8: engine_options 복원 (없으면 기본 1/False)
+        opts = settings.get("engine_options") or {}
+        if isinstance(opts, dict):
+            self.set_engine_options(
+                max_passes=int(opts.get("max_passes", 1)),
+                stop_on_match=bool(opts.get("stop_on_match", False)),
+            )
+
+        # 1.8: 활성 프리셋 이름
+        self._active_preset_name = settings.get("active_preset") or None
+
+    # ====================================================================
+    # Sub-phase 1.8 — 모드 토글 + 프리셋 로드 + 레거시 변환 도구 API
+    # ====================================================================
+
+    def set_editor_mode(self, mode: str) -> None:
+        """편집기 모드 전환 ('legacy' | 'v2'). 잘못된 값은 무시."""
+        if mode in ("legacy", "v2"):
+            self._editor_mode = mode
+
+    def get_editor_mode(self) -> str:
+        return self._editor_mode
+
+    def get_active_preset_name(self) -> Optional[str]:
+        return self._active_preset_name
+
+    def load_preset_by_name(self, name: str, *, storage=None) -> bool:
+        """프리셋 로드 → rules_textedit + engine_options + active_preset 갱신.
+
+        `storage` 주입으로 테스트 격리 가능. 성공 시 True, 미존재 시 False.
+        Sub-phase 1.4 UI 에서 이 API 를 호출하여 프리셋을 적용한다.
+        """
+        from modules.conditional.preset_io import (
+            get_default_storage,
+            PresetStorage,
+        )
+        from modules.conditional.dsl_serializer import serialize_rulebook
+
+        st = storage if isinstance(storage, PresetStorage) else get_default_storage()
+        try:
+            book = st.load(name)
+        except FileNotFoundError:
+            return False
+
+        dsl = serialize_rulebook(book)
+        self.set_engine_options(
+            max_passes=book.max_passes,
+            stop_on_match=book.stop_on_match,
+        )
+        if self.rules_textedit is not None:
+            self.rules_textedit.setText(dsl)
+        self._active_preset_name = name
+        return True
+
+    def convert_legacy_to_preset(
+        self,
+        preset_name: str,
+        *,
+        description: str = "",
+        storage=None,
+    ) -> Dict[str, Any]:
+        """현재 rules_textedit 의 DSL 을 블록 프리셋으로 변환하여 저장.
+
+        반환: {
+            "saved": bool, "path": Optional[Path],
+            "total": int, "raw_count": int, "block_count": int, "error": Optional[str],
+        }
+        실패 시 saved=False + error. 성공 시 raw_count 로 파서 성공률 확인 가능.
+        """
+        from modules.conditional.dsl_parser import parse_rulebook
+        from modules.conditional.preset_io import (
+            get_default_storage,
+            PresetStorage,
+        )
+
+        result: Dict[str, Any] = {
+            "saved": False,
+            "path": None,
+            "total": 0,
+            "raw_count": 0,
+            "block_count": 0,
+            "error": None,
+        }
+
+        if self.rules_textedit is None:
+            result["error"] = "rules_textedit 미초기화"
+            return result
+
+        dsl = self.rules_textedit.toPlainText()
+        book = parse_rulebook(dsl)
+        result["total"] = len(book.rules)
+        result["raw_count"] = sum(1 for r in book.rules if r.kind == "raw")
+        result["block_count"] = result["total"] - result["raw_count"]
+
+        st = storage if isinstance(storage, PresetStorage) else get_default_storage()
+        try:
+            path = st.save(preset_name, book, description=description)
+            result["saved"] = True
+            result["path"] = path
+        except Exception as e:
+            result["error"] = str(e)
+        return result
 
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
         """파이프라인 훅 정보 반환"""

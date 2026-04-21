@@ -6,7 +6,7 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QFrame
+    QTextEdit, QFrame, QInputDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -121,6 +121,12 @@ class RuleEditorWindow(QDialog):
         refresh_button.clicked.connect(self.load_current_rules)
         button_row.addWidget(refresh_button)
 
+        # Sub-phase 1.8: 레거시 DSL → 블록 프리셋 변환
+        convert_button = QPushButton("📥 레거시 DSL → 프리셋 변환")
+        convert_button.setStyleSheet(dynamic_styles['secondary_button'])
+        convert_button.clicked.connect(self._on_convert_clicked)
+        button_row.addWidget(convert_button)
+
         button_row.addStretch()
 
         close_button = QPushButton("닫기")
@@ -129,6 +135,42 @@ class RuleEditorWindow(QDialog):
         button_row.addWidget(close_button)
 
         layout.addLayout(button_row)
+
+    def _on_convert_clicked(self):
+        """레거시 DSL(rules_textedit) 을 블록 프리셋으로 변환하여 저장."""
+        if self.module is None:
+            QMessageBox.warning(
+                self, "변환", "모듈 참조가 없습니다."
+            )
+            return
+
+        name, ok = QInputDialog.getText(
+            self,
+            "프리셋 이름",
+            "저장할 프리셋 이름을 입력하세요:",
+        )
+        if not ok or not name.strip():
+            return
+
+        result = self.module.convert_legacy_to_preset(name.strip())
+        if not result["saved"]:
+            QMessageBox.critical(
+                self, "변환 실패",
+                result.get("error") or "알 수 없는 오류",
+            )
+            return
+
+        info = (
+            f"프리셋 저장됨: {result['path']}\n"
+            f"총 {result['total']}개 규칙 / 블록 변환 {result['block_count']}개 / "
+            f"raw fallback {result['raw_count']}개"
+        )
+        if result['raw_count'] > 0:
+            info += (
+                "\n\n※ raw fallback 규칙은 블록 모델이 지원하지 않는 "
+                "레거시 문법이며 원문 그대로 보존됩니다."
+            )
+        QMessageBox.information(self, "변환 완료", info)
 
     def load_current_rules(self):
         """메인 모듈의 DSL 규칙 텍스트를 가져와 프리뷰에 표시."""

@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QFontMetrics, QTextOption
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -29,7 +30,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QSplitter,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -41,7 +42,7 @@ from modules.conditional.block_model import (
     make_tag_leaf,
 )
 from modules.conditional.dsl_parser import parse_rulebook
-from modules.conditional.dsl_serializer import serialize_rulebook
+from modules.conditional.dsl_serializer import serialize_rule, serialize_rulebook
 from modules.conditional.preset_io import (
     PresetStorage,
     get_default_storage,
@@ -81,8 +82,11 @@ class RuleEditorWindow(QDialog):
         self._auto_dirty_choice: Optional[str] = None
 
         self.setWindowTitle("조건부 프롬프트 편집기")
-        # 3-pane 구조 폭 고려해 최소 폭 확대.
-        self.setMinimumSize(get_scaled_size(1280), get_scaled_size(640))
+        # 5-pane 레이아웃: [프리셋(고정) | 규칙 목록(고정) | 조건(stretch) |
+        #                   액션 + DSL Viewer(stretch)]
+        # 175 5-pane hotfix: 조건/액션 영역 분리, 규칙 목록 너비 축소.
+        self.setMinimumSize(get_scaled_size(1600), get_scaled_size(960))
+        self.resize(get_scaled_size(1720), get_scaled_size(1020))
         self.setModal(False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setStyleSheet(
@@ -92,6 +96,7 @@ class RuleEditorWindow(QDialog):
         self._build_ui()
         self._connect_signals()
         self.load_current_rules()
+        self._bootstrap_default_preset()
         self._refresh_preset_list()
 
     # ------------------------------------------------------------------
@@ -108,31 +113,180 @@ class RuleEditorWindow(QDialog):
         root.addLayout(self._build_header_row())
         root.addWidget(self._build_intro_card())
 
-        # 3-pane: [프리셋 | 규칙 목록 | 조건/액션]
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
+        # 5-pane 고정 박스: [프리셋 | 규칙 목록 | 조건 | 액션(+DSL Viewer)]
+        # 좌 2개는 고정폭, 우 2개(조건/액션)는 stretch. RulePanel 은
+        # 모델 조율자로서 보존하되 표시하지 않고, 내부 뷰만 컬럼으로 reparent.
+        pane_row = QHBoxLayout()
+        pane_row.setSpacing(get_scaled_size(8))
+        pane_row.setContentsMargins(0, 0, 0, 0)
 
         self._preset_panel = PresetPanel()
-        splitter.addWidget(self._preset_panel)
+        self._preset_panel.setFixedWidth(get_scaled_size(340))
+        pane_row.addWidget(self._preset_panel)
 
         self._rule_list_panel = RuleListPanel()
-        splitter.addWidget(self._rule_list_panel)
+        self._rule_list_panel.setFixedWidth(get_scaled_size(400))
+        pane_row.addWidget(self._rule_list_panel)
 
-        self._rule_panel = RulePanel()
-        splitter.addWidget(self._rule_panel)
+        # RulePanel 은 모델/시그널 조율만 담당. 시각적으로는 숨기고 내부의
+        # _condition_view / _action_view / _raw_container 를 외부 컬럼으로
+        # reparent 한다. 부모는 대화상자로 지정해 lifecycle 을 묶는다.
+        self._rule_panel = RulePanel(parent=self)
 
-        # 기본 비율 2 : 3 : 5 (프리셋 : 규칙 목록 : 조건 편집)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        splitter.setStretchFactor(2, 5)
-        splitter.setSizes([
-            get_scaled_size(260),
-            get_scaled_size(360),
-            get_scaled_size(620),
-        ])
-        root.addWidget(splitter, stretch=1)
+        # 3열: 조건 편집. condition_view (block 모드) / raw_container (raw 모드)
+        # 둘 다 stretch=1 로 컬럼 높이를 채운다 — 동시에 둘 중 하나만 가시.
+        self._cond_pane = QWidget()
+        self._cond_pane.setObjectName("conditionPane")
+        self._cond_pane.setStyleSheet(self._pane_inherit_style())
+        cond_layout = QVBoxLayout(self._cond_pane)
+        cond_layout.setContentsMargins(0, 0, 0, 0)
+        cond_layout.setSpacing(get_scaled_size(6))
+        cond_layout.addWidget(self._rule_panel._condition_view, stretch=1)
+        cond_layout.addWidget(self._rule_panel._raw_container, stretch=1)
+        self._cond_pane.setMinimumWidth(get_scaled_size(380))
+        pane_row.addWidget(self._cond_pane, stretch=1)
+
+        # 4열: 액션 편집 + DSL Viewer 영역 (DSL Viewer 는 차기 작업에서 주입)
+        self._action_pane = QWidget()
+        self._action_pane.setObjectName("actionPane")
+        self._action_pane.setStyleSheet(self._pane_inherit_style())
+        action_layout = QVBoxLayout(self._action_pane)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(get_scaled_size(6))
+        # action_view 는 content 자연 높이 (stretch=0), 남는 수직 공간은
+        # DSL Viewer slot 이 흡수. 이전의 stretch=3 은 action 영역을 과도하게
+        # 늘려 내부에 큰 빈 공간을 만들던 버그를 일으켰다.
+        action_layout.addWidget(self._rule_panel._action_view)
+        # 5열 (컬럼 내 하단): DSL Viewer. 현재 선택된 규칙 하나만 직렬화해
+        # read-only 로 표시 — 블록 편집이 어떤 DSL 로 변환되는지 실시간 확인용.
+        # 전체 RuleBook 은 "모듈에 적용" 시에 기록되므로 여기서 보일 필요 없음.
+        self._dsl_viewer_slot = self._build_dsl_viewer()
+        action_layout.addWidget(self._dsl_viewer_slot, stretch=1)
+        self._action_pane.setMinimumWidth(get_scaled_size(380))
+        pane_row.addWidget(self._action_pane, stretch=1)
+
+        # RulePanel 자체는 표시하지 않음 (자식이 외부 컬럼으로 옮겨짐).
+        self._rule_panel.setVisible(False)
+
+        root.addLayout(pane_row, stretch=1)
 
         root.addLayout(self._build_button_row(dynamic_styles))
+
+    def _pane_inherit_style(self) -> str:
+        """reparent 된 sub-view (condition/action) 가 RulePanel 의 루트 스타일
+        상속을 잃지 않도록, 컬럼 컨테이너에 동등한 기본 텍스트/폰트 규칙을
+        부여.
+
+        176 UI hotfix:
+        이전 구현은 `QWidget` 전체에 background-color 를 뿌려서 condition/action
+        내부의 보조 row 컨테이너까지 모두 칠해 버렸다. 그 결과 `묶음 방식`,
+        `판단 기준`, `찾을 태그`, `적용 위치` 같은 줄이 카드 위에 또 다른
+        배경 띠를 가진 것처럼 보여 입력 필드 명도가 제각각인 것처럼 보였다.
+        배경은 pane 루트에만 적용하고, 하위 QLabel 만 기본 타이포를 상속한다.
+        """
+        return (
+            f"QWidget#conditionPane, QWidget#actionPane {{"
+            f"  background-color: {DARK_COLORS['bg_primary']};"
+            f"}}"
+            f"QWidget#conditionPane QLabel, QWidget#actionPane QLabel {{"
+            f"  border: none;"
+            f"  background: transparent;"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"}}"
+        )
+
+    def _build_dsl_viewer(self) -> QFrame:
+        """액션 pane 하단의 DSL 미리보기 프레임.
+
+        RulePanel 의 "고급 DSL 직접 편집" (raw editor) 과 시각적으로 일치하도록
+        동일한 입력 팔레트 (#161616 / #444444 / app 기본 폰트) 를 사용한다.
+        표시 내용은 현재 선택된 규칙의 `serialize_rule(rule)` 결과. 규칙 미선택
+        시에는 안내 문구를 대신 표시. 긴 줄은 어휘 경계(WidgetWidth) 기준으로
+        줄넘김 처리한다.
+        """
+        frame = QFrame()
+        frame.setObjectName("dslViewer")
+        frame.setStyleSheet(
+            f"QFrame#dslViewer {{"
+            f"  background-color: #2D2D2D;"
+            f"  border: 1px solid {DARK_COLORS['border_light']};"
+            f"  border-radius: {get_scaled_size(6)}px;"
+            f"}}"
+        )
+        frame.setMinimumHeight(get_scaled_size(140))
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(
+            get_scaled_size(10), get_scaled_size(10),
+            get_scaled_size(10), get_scaled_size(10),
+        )
+        layout.setSpacing(get_scaled_size(6))
+
+        header = QLabel("DSL 미리보기 (선택한 규칙)")
+        header.setStyleSheet(
+            f"QLabel {{"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  font-weight: bold;"
+            f"  border-left: {get_scaled_size(3)}px solid"
+            f"    {DARK_COLORS['accent_blue']};"
+            f"  padding: {get_scaled_size(2)}px {get_scaled_size(10)}px;"
+            f"  background: transparent;"
+            f"}}"
+        )
+        layout.addWidget(header)
+
+        self._dsl_viewer_edit = QTextEdit()
+        self._dsl_viewer_edit.setReadOnly(True)
+        self._dsl_viewer_edit.setAcceptRichText(False)
+        # 줄넘김: 윈도우 너비 기준 wrap. 긴 DSL 이 가로 스크롤 없이 읽힌다.
+        self._dsl_viewer_edit.setLineWrapMode(
+            QTextEdit.LineWrapMode.WidgetWidth
+        )
+        self._dsl_viewer_edit.setWordWrapMode(
+            QTextOption.WrapMode.WrapAnywhere
+        )
+        self._dsl_viewer_edit.setPlaceholderText(
+            "규칙을 선택하면 해당 규칙의 DSL 이 여기에 표시됩니다."
+        )
+        # raw 편집기와 동일한 팔레트/라운딩. 폰트는 앱 기본 (readability 우선,
+        # monospace 제거 — 한글/영문 혼재 시 기본 폰트가 더 안정).
+        self._dsl_viewer_edit.setStyleSheet(
+            f"QTextEdit {{"
+            f"  background-color: #161616;"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid #444444;"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
+            f"  font-size: {get_scaled_font_size(18)}px;"
+            f"  selection-background-color: {DARK_COLORS['accent_blue']};"
+            f"}}"
+        )
+        layout.addWidget(self._dsl_viewer_edit, stretch=1)
+        return frame
+
+    def _refresh_dsl_viewer(self) -> None:
+        """현재 선택된 규칙을 직렬화해 DSL Viewer 에 반영.
+
+        규칙 미선택 → placeholder. 활성 규칙이 있으면 `serialize_rule(rule)`
+        한 줄 (또는 raw kind 면 저장된 DSL 본문) 을 표시.
+        """
+        if not hasattr(self, "_dsl_viewer_edit"):
+            return
+        rule = None
+        if self._current_rule_id:
+            for r in self._book.rules:
+                if r.id == self._current_rule_id:
+                    rule = r
+                    break
+        if rule is None:
+            self._dsl_viewer_edit.setPlainText("")
+            return
+        try:
+            text = serialize_rule(rule)
+        except Exception as exc:  # 방어적 — 에디터 기동 유지 최우선
+            text = f"# DSL 직렬화 실패: {exc}"
+        self._dsl_viewer_edit.setPlainText(text or "")
 
     def _build_header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -175,11 +329,21 @@ class RuleEditorWindow(QDialog):
             "선택한 규칙 요약이 여기에 표시됩니다."
         )
         self._intro_summary_label.setWordWrap(True)
+        font_size_px = get_scaled_font_size(17)
         self._intro_summary_label.setStyleSheet(
             f"color: {DARK_COLORS['text_primary']};"
             f" font-weight: bold;"
-            f" font-size: {get_scaled_font_size(17)}px;"
+            f" font-size: {font_size_px}px;"
         )
+        self._intro_summary_label.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
+        # 2줄 고정 영역 — 내용 길이에 관계없이 높이 불변.
+        probe_font = QFont(self._intro_summary_label.font())
+        probe_font.setPixelSize(font_size_px)
+        probe_font.setBold(True)
+        line_h = QFontMetrics(probe_font).lineSpacing()
+        self._intro_summary_label.setFixedHeight(line_h * 2)
         layout.addWidget(self._intro_summary_label)
         return card
 
@@ -266,14 +430,52 @@ class RuleEditorWindow(QDialog):
         self._rule_panel.set_rule_position(None, len(self._book.rules))
         self._update_selected_rule_summary(None)
         self._update_active_preset_label()
+        self._refresh_dsl_viewer()
         self._set_dirty(False)
 
     def _refresh_preset_list(self) -> None:
         self._preset_panel.set_presets(self._storage.list_all())
 
+    def _bootstrap_default_preset(self) -> None:
+        """'Default' 프리셋이 없거나 비어있고 레거시 DSL 이 있으면 자동 생성.
+
+        175 hotfix: 사용자의 기존 레거시 DSL 을 신규 편집기 경로로 점진적
+        이행시키기 위한 마이그레이션 편의 기능. 파싱 실패하거나 결과가 빈
+        RuleBook 이면 아무것도 하지 않는다. 예외는 삼켜 편집기 기동을 막지
+        않는다.
+        """
+        try:
+            infos = self._storage.list_all()
+            existing = next(
+                (i for i in infos
+                 if i.name == "Default" and not i.is_bundled),
+                None,
+            )
+            if existing is not None and existing.rule_count > 0:
+                return
+            legacy_text = ""
+            if self.module is not None:
+                rules_textedit = getattr(self.module, 'rules_textedit', None)
+                if rules_textedit is not None:
+                    legacy_text = rules_textedit.toPlainText() or ""
+            if not legacy_text.strip():
+                return
+            book = parse_rulebook(legacy_text)
+            if not book.rules:
+                return
+            self._storage.save(
+                "Default",
+                book,
+                description="레거시 DSL 자동 변환 (초기 마이그레이션)",
+            )
+        except Exception:
+            # 부트스트랩 실패가 편집기 기동을 막아선 안 된다.
+            pass
+
     def _refresh_rule_list_preserving_selection(self) -> None:
         self._book.rules.sort(key=lambda r: r.priority)
         self._rule_list_panel.set_rulebook(self._book)
+        self._refresh_dsl_viewer()
         if self._current_rule_id:
             for i, r in enumerate(self._book.rules):
                 if r.id == self._current_rule_id:
@@ -319,6 +521,7 @@ class RuleEditorWindow(QDialog):
         self._rule_panel.set_rule_position(None, len(self._book.rules))
         self._update_selected_rule_summary(None)
         self._update_active_preset_label()
+        self._refresh_dsl_viewer()
         self._set_dirty(False)
         return True
 
@@ -404,6 +607,7 @@ class RuleEditorWindow(QDialog):
             self._rule_panel.set_rule(self._empty_rule())
             self._rule_panel.set_rule_position(None, len(self._book.rules))
             self._update_selected_rule_summary(None)
+        self._refresh_dsl_viewer()
 
     def _on_rule_panel_changed(self) -> None:
         if not self._current_rule_id:
@@ -596,7 +800,6 @@ class RuleEditorWindow(QDialog):
             else "선택한 규칙 요약이 여기에 표시됩니다."
         )
         self._intro_summary_label.setText(text)
-        self._rule_list_panel.set_rule_summary_text(text)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -606,6 +809,7 @@ class RuleEditorWindow(QDialog):
         # 최초 열림 시에만 모듈 DSL 재동기화. 재사용 인스턴스는 사용자 편집을 보존.
         if not getattr(self, "_initial_show_done", False):
             self._reload_from_module()
+            self._bootstrap_default_preset()
             self._refresh_preset_list()
             self._initial_show_done = True
         super().showEvent(event)

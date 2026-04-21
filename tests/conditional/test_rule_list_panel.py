@@ -258,22 +258,12 @@ class TestSetSelectedRule:
         assert p._rule_list.currentRow() == 1
         assert p._rule_list.item(1).isSelected() is True
         assert p._toggle_enabled_btn.text() == "선택 규칙 끄기"
-        assert p._rule_summary_label.text().startswith("2. ● [단일][추가]")
 
     def test_out_of_range_clears(self):
         p = RuleListPanel()
         p.set_rulebook(RuleBook(rules=[_rule(10)]))
         p.set_selected_rule(99)
         assert p._rule_list.selectedItems() == []
-        assert p._rule_summary_label.text() == "선택한 규칙 요약이 여기에 표시됩니다."
-
-    def test_set_rule_summary_text_api(self):
-        p = RuleListPanel()
-        p.set_rule_summary_text("custom summary")
-        assert p._rule_summary_label.text() == "custom summary"
-        # 빈 문자열은 기본 문구로 대체
-        p.set_rule_summary_text("")
-        assert p._rule_summary_label.text() == "선택한 규칙 요약이 여기에 표시됩니다."
 
     def test_get_selected_rule_index(self):
         p = RuleListPanel()

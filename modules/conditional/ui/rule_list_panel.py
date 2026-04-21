@@ -8,7 +8,6 @@ RulePanel 에서도 제거되어 내부 필드로만 관리된다.
     set_rulebook(Optional[RuleBook])
     set_selected_rule(int)
     get_selected_rule_index() -> int  # -1 = 선택 없음
-    set_rule_summary_text(str)
 
 시그널:
     rule_selected(int)                   # -1 = 선택 없음
@@ -60,14 +59,20 @@ class RuleListPanel(QWidget):
 
     def set_rulebook(self, book: Optional[RuleBook]) -> None:
         self._rulebook = book
-        self._rule_list.clear()
-        if book is None:
-            self._update_rule_button_state()
-            return
-        for idx, r in enumerate(book.sorted_rules(), start=1):
-            item = QListWidgetItem(self._rule_summary(r, idx))
-            item.setForeground(QColor(DARK_COLORS['text_primary']))
-            self._rule_list.addItem(item)
+        # 175: 프로그래밍적 리빌드 중 QListWidget.clear() 가 currentRowChanged(-1)
+        # 를 스퍼리어스하게 발행 → 상위 편집기가 선택 해제로 오해하여 RulePanel
+        # 을 empty 로 리셋하는 문제 방지. 리빌드 동안 시그널 차단.
+        self._rule_list.blockSignals(True)
+        try:
+            self._rule_list.clear()
+            if book is None:
+                return
+            for idx, r in enumerate(book.sorted_rules(), start=1):
+                item = QListWidgetItem(self._rule_summary(r, idx))
+                item.setForeground(QColor(DARK_COLORS['text_primary']))
+                self._rule_list.addItem(item)
+        finally:
+            self._rule_list.blockSignals(False)
         self._update_rule_button_state()
 
     def set_selected_rule(self, idx: int) -> None:
@@ -79,28 +84,14 @@ class RuleListPanel(QWidget):
                 item = self._rule_list.item(idx)
                 if item is not None:
                     item.setSelected(True)
-                if self._rulebook is not None:
-                    self._rule_summary_label.setText(
-                        self._rule_summary(
-                            self._rulebook.sorted_rules()[idx], idx + 1
-                        )
-                    )
             else:
                 self._rule_list.clearSelection()
-                self._rule_summary_label.setText(
-                    "선택한 규칙 요약이 여기에 표시됩니다."
-                )
         finally:
             self._rule_list.blockSignals(False)
         self._update_rule_button_state()
 
     def get_selected_rule_index(self) -> int:
         return int(self._rule_list.currentRow())
-
-    def set_rule_summary_text(self, text: str) -> None:
-        self._rule_summary_label.setText(
-            text or "선택한 규칙 요약이 여기에 표시됩니다."
-        )
 
     # ------------------------------------------------------------------
     # UI 구성
@@ -127,13 +118,6 @@ class RuleListPanel(QWidget):
         layout.setSpacing(get_scaled_size(4))
 
         layout.addWidget(self._section_label("규칙 목록"))
-        self._rule_summary_label = QLabel("선택한 규칙 요약이 여기에 표시됩니다.")
-        self._rule_summary_label.setWordWrap(True)
-        self._rule_summary_label.setStyleSheet(
-            f"color: {DARK_COLORS['text_secondary']};"
-            f" font-size: {get_scaled_font_size(16)}px;"
-        )
-        layout.addWidget(self._rule_summary_label)
 
         self._rule_list = QListWidget()
         self._rule_list.currentRowChanged.connect(
@@ -237,14 +221,6 @@ class RuleListPanel(QWidget):
 
     def _on_rule_row_changed(self, idx: int) -> None:
         self._update_rule_button_state()
-        if 0 <= idx < self._rule_list.count() and self._rulebook is not None:
-            self._rule_summary_label.setText(
-                self._rule_summary(self._rulebook.sorted_rules()[idx], idx + 1)
-            )
-        else:
-            self._rule_summary_label.setText(
-                "선택한 규칙 요약이 여기에 표시됩니다."
-            )
         self.rule_selected.emit(int(idx))
 
     def _on_rule_delete_clicked(self) -> None:

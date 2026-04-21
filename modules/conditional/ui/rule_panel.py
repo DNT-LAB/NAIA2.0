@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QScrollArea,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
@@ -65,6 +66,16 @@ _CHAR_STATE_ITEMS = (
     ("사용", "enabled"),
     ("사용 안 함", "disabled"),
 )
+
+# 175: 조건 영역 시각적 계층 — DARK_COLORS 의 bg_secondary/bg_tertiary 가
+# 동일한 #2B2B2B 로 매핑되어 레이어 구분이 사라지는 문제를 방지하기 위한
+# 로컬 팔레트. 루트(어둠) < 카드(보통) < 입력필드(가장 어둠)로 대비.
+_PANEL_BG = "#1E1E1E"         # rule_panel 루트 배경
+_CARD_BG = "#2D2D2D"          # 카드(액션 패널, 조건 편집기) 배경
+_INPUT_BG = "#161616"         # 입력 필드 배경 (진짜 어둡게)
+_CARD_BORDER = "#555555"      # 카드 테두리 (border_light 보다 약간 어둡게)
+_INPUT_BORDER = "#444444"     # 입력 테두리
+
 _VALID_KINDS = ("block", "raw")
 _VALID_ACTION_KINDS = (
     "append_list", "append", "replace", "char_set", "char_replace"
@@ -192,23 +203,46 @@ class RulePanel(QWidget):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
+        # 175 hotfix: 입력 스타일을 root stylesheet 에 포함시켜 cascade 방식으로
+        # 적용. QComboBox 네이티브 스타일 overlay 문제 회피 (individual setStyleSheet
+        # 은 Windows 에서 body 배경이 연해지는 증상).
         self.setStyleSheet(
+            f"RulePanel {{"
+            f"  background-color: {_PANEL_BG};"
+            f"}}"
             f"QWidget {{"
             f"  color: {DARK_COLORS['text_primary']}; "
             f"  font-size: {get_scaled_font_size(17)}px;"
             f"}}"
-            f"QLabel {{"
-            f"  border: none;"
-            f"  background: transparent;"
-            f"  font-size: {get_scaled_font_size(17)}px;"
-            f"}}"
-            f"QPushButton {{"
-            f"  font-size: {get_scaled_font_size(17)}px;"
-            f"  padding: {get_scaled_size(5)}px {get_scaled_size(10)}px;"
-            f"}}"
-            f"QCheckBox {{"
-            f"  font-size: {get_scaled_font_size(17)}px;"
-            f"}}"
+            + self._input_style()
+            + (
+                f"QLabel {{"
+                f"  border: none;"
+                f"  background: transparent;"
+                f"  font-size: {get_scaled_font_size(17)}px;"
+                f"}}"
+                f"QPushButton {{"
+                f"  background-color: {DARK_COLORS['bg_tertiary']};"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  border: 1px solid {_CARD_BORDER};"
+                f"  border-radius: {get_scaled_size(4)}px;"
+                f"  padding: {get_scaled_size(5)}px {get_scaled_size(12)}px;"
+                f"  font-size: {get_scaled_font_size(17)}px;"
+                f"}}"
+                f"QPushButton:hover {{"
+                f"  background-color: {DARK_COLORS['bg_hover']};"
+                f"  border-color: {DARK_COLORS['border_light']};"
+                f"}}"
+                f"QPushButton:pressed {{"
+                f"  background-color: {DARK_COLORS['bg_pressed']};"
+                f"}}"
+                f"QCheckBox {{"
+                f"  font-size: {get_scaled_font_size(17)}px;"
+                f"  spacing: {get_scaled_size(6)}px;"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  background: transparent;"
+                f"}}"
+            )
         )
         root = QVBoxLayout(self)
         root.setContentsMargins(
@@ -217,86 +251,145 @@ class RulePanel(QWidget):
         )
         root.setSpacing(get_scaled_size(8))
 
-        root.addWidget(self._build_summary_card())
+        # 요약 라벨은 편집기 상단 intro 로 이관됨 (175 hotfix). 여기서는
+        # get_summary_text() 호출부를 위해 내부 버퍼로만 유지.
+        self._summary_label = QLabel("")
+        self._summary_label.setVisible(False)
 
-        self._block_container = self._build_block_container()
-        root.addWidget(self._block_container)
+        # 175 5-pane: 조건/액션 을 각각 독립 뷰로 생성해 editor_window 가
+        # 별도 컬럼으로 reparent 할 수 있게 한다. 각 뷰는 자체 스크롤 영역을
+        # 소유하므로 묶음 조건의 child 가 많아져도 폼이 압축되지 않는다.
+        self._condition_view = self._build_condition_view()
+        self._action_view = self._build_action_view()
+
+        # 호환 래퍼: 기존 테스트가 `_block_container.isVisibleTo(p)` 로 블록/raw
+        # 토글을 확인하므로 유지. 표준 standalone 사용에서는 두 뷰가 이 래퍼
+        # 안에 stack 되고, editor_window 5-pane 분리에서는 두 뷰가 외부 컬럼
+        # 으로 reparent 되어 이 래퍼는 비어 있게 된다.
+        self._block_container = QWidget()
+        block_layout = QVBoxLayout(self._block_container)
+        block_layout.setContentsMargins(0, 0, 0, 0)
+        block_layout.setSpacing(get_scaled_size(10))
+        block_layout.addWidget(self._condition_view, stretch=1)
+        block_layout.addWidget(self._action_view, stretch=1)
+        root.addWidget(self._block_container, stretch=1)
 
         self._raw_container = self._build_raw_container()
         root.addWidget(self._raw_container)
 
-        root.addStretch()
-
-    def _build_summary_card(self) -> QWidget:
+    def _build_condition_view(self) -> QWidget:
         frame = QFrame()
-        frame.setStyleSheet(
-            f"QFrame {{"
-            f"  background-color: {DARK_COLORS['bg_secondary']};"
-            f"  border: 1px solid {DARK_COLORS['border_light']};"
-            f"  border-radius: {get_scaled_size(6)}px;"
-            f"}}"
-            f"QLabel {{ border: none; background: transparent; }}"
-        )
+        frame.setObjectName("conditionViewCard")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(
-            get_scaled_size(10), get_scaled_size(8),
-            get_scaled_size(10), get_scaled_size(8),
+            get_scaled_size(4), get_scaled_size(4),
+            get_scaled_size(4), get_scaled_size(4),
         )
-        layout.setSpacing(get_scaled_size(4))
-        title = QLabel("한 줄 요약")
-        title.setStyleSheet(
-            f"color: {DARK_COLORS['text_primary']};"
-            f" font-weight: bold;"
-            f" font-size: {get_scaled_font_size(16)}px;"
-        )
-        layout.addWidget(title)
-        self._summary_label = QLabel("")
-        self._summary_label.setWordWrap(True)
-        self._summary_label.setStyleSheet(
-            f"color: {DARK_COLORS['text_secondary']};"
-            f" font-size: {get_scaled_font_size(16)}px;"
-        )
-        layout.addWidget(self._summary_label)
-        return frame
-
-    def _build_block_container(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(get_scaled_size(6))
+        layout.addWidget(self._section_header("이 조건이 맞으면"))
 
-        layout.addWidget(QLabel("이 조건이 맞으면"))
+        scroll = self._build_scroll_area()
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(get_scaled_size(6))
         self._condition_editor = ConditionNodeEditor()
         self._condition_editor.changed.connect(self._emit_changed)
-        layout.addWidget(self._condition_editor)
+        content_layout.addWidget(self._condition_editor)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, stretch=1)
+        return frame
 
-        layout.addWidget(QLabel("이렇게 바꾸기"))
+    def _build_action_view(self) -> QWidget:
+        # 액션 폼은 고정된 몇 줄이므로 scroll 없이 content 자연 높이로 렌더.
+        # 조건 영역과 달리 사용자 정의 중첩이 없기 때문이다.
+        frame = QFrame()
+        frame.setObjectName("actionViewCard")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(
+            get_scaled_size(4), get_scaled_size(4),
+            get_scaled_size(4), get_scaled_size(4),
+        )
+        layout.setSpacing(get_scaled_size(6))
+        layout.addWidget(self._section_header("이렇게 바꾸기"))
         layout.addWidget(self._build_action_panel())
-        return w
+        layout.addStretch()
+        return frame
+
+    def _build_scroll_area(self) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+        )
+        return scroll
+
+    def _section_header(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet(
+            f"QLabel {{"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  font-size: {get_scaled_font_size(18)}px;"
+            f"  font-weight: bold;"
+            f"  border-left: {get_scaled_size(3)}px solid"
+            f"    {DARK_COLORS['accent_blue']};"
+            f"  padding: {get_scaled_size(2)}px {get_scaled_size(10)}px;"
+            f"  background: transparent;"
+            f"}}"
+        )
+        return label
 
     def _build_action_panel(self) -> QWidget:
         container = QFrame()
+        container.setObjectName("actionCard")
         container.setFrameShape(QFrame.Shape.StyledPanel)
+        # 175 hotfix: editor_window 에서 action_view 가 reparent 되면 RulePanel
+        # root stylesheet 의 input/label/checkbox 규칙 cascade 가 끊긴다. 카드
+        # 자체에 입력 스타일 및 레이블/체크박스 규칙을 포함시켜 독립적으로
+        # 렌더될 수 있게 한다.
         container.setStyleSheet(
-            f"QFrame {{"
-            f"  background-color: {DARK_COLORS['bg_secondary']};"
-            f"  border: 1px solid {DARK_COLORS['border']};"
-            f"  border-radius: {get_scaled_size(4)}px;"
+            f"QFrame#actionCard {{"
+            f"  background-color: {_CARD_BG};"
+            f"  border: 1px solid {_CARD_BORDER};"
+            f"  border-radius: {get_scaled_size(6)}px;"
             f"}}"
+            + self._input_style()
+            + (
+                f"QLabel {{"
+                f"  border: none;"
+                f"  background: transparent;"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  font-size: {get_scaled_font_size(17)}px;"
+                f"}}"
+                f"QCheckBox {{"
+                f"  font-size: {get_scaled_font_size(17)}px;"
+                f"  spacing: {get_scaled_size(6)}px;"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  background: transparent;"
+                f"}}"
+            )
         )
         layout = QVBoxLayout(container)
         layout.setContentsMargins(
-            get_scaled_size(6), get_scaled_size(6),
-            get_scaled_size(6), get_scaled_size(6),
+            get_scaled_size(10), get_scaled_size(10),
+            get_scaled_size(10), get_scaled_size(10),
         )
-        layout.setSpacing(get_scaled_size(4))
+        layout.setSpacing(get_scaled_size(8))
 
         top = QHBoxLayout()
         top.setSpacing(get_scaled_size(6))
         top.addWidget(QLabel("변경 방식:"))
         self._action_kind_combo = QComboBox()
         _add_combo_items(self._action_kind_combo, _ACTION_KIND_ITEMS)
-        self._action_kind_combo.setStyleSheet(self._input_style())
         self._action_kind_combo.currentTextChanged.connect(
             self._on_action_kind_changed
         )
@@ -322,7 +415,6 @@ class RulePanel(QWidget):
         row.addWidget(QLabel("적용 위치:"))
         self._target_kind_combo = QComboBox()
         _add_combo_items(self._target_kind_combo, _TARGET_ITEMS)
-        self._target_kind_combo.setStyleSheet(self._input_style())
         self._target_kind_combo.currentTextChanged.connect(
             self._on_target_kind_changed
         )
@@ -331,7 +423,6 @@ class RulePanel(QWidget):
         self._target_n_spin = QSpinBox()
         self._target_n_spin.setRange(1, 10)
         self._target_n_spin.setValue(1)
-        self._target_n_spin.setStyleSheet(self._input_style())
         self._target_n_spin.valueChanged.connect(self._emit_changed)
         row.addWidget(self._target_n_spin)
 
@@ -363,7 +454,6 @@ class RulePanel(QWidget):
         old_row.addWidget(QLabel("찾을 태그:"))
         self._replace_old_edit = QLineEdit()
         self._replace_old_edit.setPlaceholderText("예: __bad_tag__")
-        self._replace_old_edit.setStyleSheet(self._input_style())
         self._replace_old_edit.textChanged.connect(self._emit_changed)
         old_row.addWidget(self._replace_old_edit, 1)
         layout.addLayout(old_row)
@@ -387,14 +477,12 @@ class RulePanel(QWidget):
         top.addWidget(QLabel("대상 캐릭터"))
         self._func_char_index_spin = QSpinBox()
         self._func_char_index_spin.setRange(1, 10)
-        self._func_char_index_spin.setStyleSheet(self._input_style())
         self._func_char_index_spin.valueChanged.connect(self._emit_changed)
         top.addWidget(self._func_char_index_spin)
 
         top.addWidget(QLabel("상태:"))
         self._char_state_combo = QComboBox()
         _add_combo_items(self._char_state_combo, _CHAR_STATE_ITEMS)
-        self._char_state_combo.setStyleSheet(self._input_style())
         self._char_state_combo.currentTextChanged.connect(self._emit_changed)
         top.addWidget(self._char_state_combo)
         top.addStretch()
@@ -404,12 +492,10 @@ class RulePanel(QWidget):
         repl_row.setSpacing(get_scaled_size(6))
         repl_row.addWidget(QLabel("기존 태그:"))
         self._char_old_edit = QLineEdit()
-        self._char_old_edit.setStyleSheet(self._input_style())
         self._char_old_edit.textChanged.connect(self._emit_changed)
         repl_row.addWidget(self._char_old_edit, 1)
         repl_row.addWidget(QLabel("새 태그:"))
         self._char_new_edit = QLineEdit()
-        self._char_new_edit.setStyleSheet(self._input_style())
         self._char_new_edit.textChanged.connect(self._emit_changed)
         repl_row.addWidget(self._char_new_edit, 1)
         layout.addLayout(repl_row)
@@ -417,6 +503,19 @@ class RulePanel(QWidget):
 
     def _build_raw_container(self) -> QWidget:
         w = QWidget()
+        # 175 hotfix: editor_window 에서 raw_container 가 reparent 되어도 스타일
+        # 유지되도록 cascade root 를 여기에도 건다. (action_card 와 동일 이유)
+        w.setStyleSheet(
+            self._input_style()
+            + (
+                f"QLabel {{"
+                f"  border: none;"
+                f"  background: transparent;"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  font-size: {get_scaled_font_size(17)}px;"
+                f"}}"
+            )
+        )
         layout = QVBoxLayout(w)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(get_scaled_size(4))
@@ -424,7 +523,6 @@ class RulePanel(QWidget):
         self._raw_edit = QTextEdit()
         self._raw_edit.setAcceptRichText(False)
         self._raw_edit.setPlaceholderText("(cond):action")
-        self._raw_edit.setStyleSheet(self._input_style())
         self._raw_edit.textChanged.connect(self._emit_changed)
         self._raw_edit.setMinimumHeight(get_scaled_size(80))
         layout.addWidget(self._raw_edit)
@@ -512,7 +610,13 @@ class RulePanel(QWidget):
 
     def _update_visibility(self) -> None:
         is_block = self._rule_kind == "block"
+        # 175 5-pane: editor_window 가 _condition_view / _action_view 를
+        # 별도 컬럼으로 reparent 해도 토글이 동작하도록 두 뷰를 명시적으로
+        # 토글. `_block_container` 는 reparent 이후 비어있지만 tests 호환을
+        # 위해 가시성 플래그는 유지한다.
         self._block_container.setVisible(is_block)
+        self._condition_view.setVisible(is_block)
+        self._action_view.setVisible(is_block)
         self._raw_container.setVisible(not is_block)
         if not is_block:
             return
@@ -671,11 +775,39 @@ class RulePanel(QWidget):
         )
 
     def _input_style(self) -> str:
+        """condition_editor 와 동일 규약. 자세한 설명은 condition_editor 참조."""
+        base = (
+            f"  background-color: {_INPUT_BG};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid {_INPUT_BORDER};"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  selection-background-color: {DARK_COLORS['accent_blue']};"
+        )
         return (
-            f"background-color: {DARK_COLORS['bg_tertiary']};"
-            f" color: {DARK_COLORS['text_primary']};"
-            f" border: 1px solid {DARK_COLORS['border']};"
-            f" border-radius: {get_scaled_size(4)}px;"
-            f" padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
-            f" font-size: {get_scaled_font_size(17)}px;"
+            f"QLineEdit {{{base}}}"
+            f"QComboBox {{{base}}}"
+            f"QComboBox:hover {{ border-color: {DARK_COLORS['border_light']}; }}"
+            f"QComboBox::drop-down {{"
+            f"  subcontrol-origin: padding;"
+            f"  subcontrol-position: right center;"
+            f"  width: {get_scaled_size(20)}px;"
+            f"  border: none;"
+            f"  background: transparent;"
+            f"}}"
+            f"QComboBox QAbstractItemView {{"
+            f"  background-color: {_INPUT_BG};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid {_INPUT_BORDER};"
+            f"  selection-background-color: {DARK_COLORS['accent_blue']};"
+            f"  outline: 0;"
+            f"}}"
+            f"QSpinBox {{{base}}}"
+            f"QSpinBox::up-button, QSpinBox::down-button {{"
+            f"  background: transparent;"
+            f"  border: none;"
+            f"  width: {get_scaled_size(14)}px;"
+            f"}}"
+            f"QTextEdit {{{base}}}"
         )

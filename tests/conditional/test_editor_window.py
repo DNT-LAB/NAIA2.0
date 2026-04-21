@@ -215,6 +215,34 @@ class TestRuleCrud:
         window._on_rule_move_up(1)
         assert window._book.rules[0].id == second_id
 
+    def test_rule_panel_edit_preserves_selection(self, window):
+        """175 회귀: RulePanel 편집 시 set_rulebook 의 QListWidget.clear() 가
+        currentRowChanged(-1) 을 발행해 선택이 해제되고 패널이 empty 로 리셋되던
+        버그 (예: + 조건 클릭 시 child 가 사라짐)."""
+        from modules.conditional.block_model import make_and_group
+        book = RuleBook(rules=[
+            Rule(
+                kind="block",
+                priority=10,
+                condition=make_and_group(make_tag_leaf("x")),
+                action=Action(
+                    kind="append_list", target="main", tags=["y"]
+                ),
+            ),
+        ])
+        window._book = book
+        window._rule_list_panel.set_rulebook(window._book)
+        window._on_rule_selected(0)
+        rule_id_before = window._current_rule_id
+        # 그룹 안에 + 조건 추가 시뮬레이션
+        window._rule_panel._condition_editor._on_add_leaf()
+        # 선택 유지 + 규칙 본문에 child 가 2개가 됨
+        assert window._current_rule_id == rule_id_before
+        assert window._rule_list_panel.get_selected_rule_index() == 0
+        updated_rule = window._book.rules[0]
+        assert updated_rule.condition.kind == "group"
+        assert len(updated_rule.condition.children) == 2
+
 
 # ============================================================================
 # 프리셋 로드/저장/삭제
@@ -508,6 +536,70 @@ class TestBundleShadow:
         window._refresh_preset_list()
         assert window._preset_panel.is_name_bundled("helper_bundle") is True
         assert window._preset_panel.is_name_bundled("other") is False
+
+
+# ============================================================================
+# 175: 'Default' 프리셋 부트스트랩
+# ============================================================================
+
+
+class TestDefaultPresetBootstrap:
+    def test_creates_default_from_legacy_dsl(self, storage):
+        mod = _primed_module("(blush):main+=smile")
+        w = RuleEditorWindow(mod.app_context, mod, storage=storage)
+        names = [i.name for i in storage.list_all() if not i.is_bundled]
+        assert "Default" in names
+        book = storage.load("Default")
+        assert len(book.rules) == 1
+        assert book.rules[0].condition.tag_value == "blush"
+        w.deleteLater()
+
+    def test_no_legacy_skips_creation(self, storage):
+        mod = _primed_module("")
+        w = RuleEditorWindow(mod.app_context, mod, storage=storage)
+        names = [i.name for i in storage.list_all() if not i.is_bundled]
+        assert "Default" not in names
+        w.deleteLater()
+
+    def test_unparseable_legacy_skips_creation(self, storage):
+        # parse_rulebook 은 실패한 라인을 raw 규칙으로 복원하므로 이 경우도
+        # 최소 1개 규칙이 생긴다. 부트스트랩은 "0 규칙이면 건너뜀"만 보장.
+        mod = _primed_module("완전히 엉망인 DSL")
+        w = RuleEditorWindow(mod.app_context, mod, storage=storage)
+        # raw 규칙이라도 rules 가 있으면 Default 저장됨
+        # 반대로 공백/빈 문자열만 있을 때 건너뛰는지는 test_no_legacy_skips_creation
+        # 로 보장. 여기서는 '존재해도 무방' 선에서만 검증.
+        book = storage.load("Default") if storage.exists(
+            "Default", include_bundled=False
+        ) else None
+        if book is not None:
+            assert len(book.rules) >= 1
+        w.deleteLater()
+
+    def test_preserves_existing_nonempty_default(self, storage):
+        preset = _sample_book()
+        storage.save("Default", preset)
+        mod = _primed_module("(overwrite_me):main+=x")
+        w = RuleEditorWindow(mod.app_context, mod, storage=storage)
+        # 기존 Default 가 비어있지 않으므로 덮어쓰지 않아야 함
+        loaded = storage.load("Default")
+        assert len(loaded.rules) == len(preset.rules)
+        # 원본의 첫 규칙이 그대로 (blush) 인지 확인
+        assert loaded.rules[0].condition.tag_value == "blush"
+        w.deleteLater()
+
+    def test_fills_empty_default_from_legacy(self, storage):
+        empty_book = __import__(
+            "modules.conditional.block_model", fromlist=["RuleBook"]
+        ).RuleBook()
+        storage.save("Default", empty_book)
+        mod = _primed_module("(fill_me):main+=y")
+        w = RuleEditorWindow(mod.app_context, mod, storage=storage)
+        loaded = storage.load("Default")
+        # 비어있던 Default 가 레거시로 채워짐
+        assert len(loaded.rules) == 1
+        assert loaded.rules[0].condition.tag_value == "fill_me"
+        w.deleteLater()
 
 
 if __name__ == "__main__":

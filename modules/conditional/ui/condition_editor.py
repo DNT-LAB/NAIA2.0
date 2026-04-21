@@ -67,6 +67,15 @@ _LOGICAL_ITEMS = (
     ("모두 만족", "AND"),
     ("하나라도 만족", "OR"),
 )
+
+# 175: rule_panel 과 동기화된 로컬 팔레트. DARK_COLORS 의 bg_secondary/
+# bg_tertiary 가 동일하여 카드/입력 레이어가 평평해지는 문제를 회피한다.
+_CARD_BG = "#2D2D2D"          # 조건 카드 공통 배경
+_INPUT_BG = "#161616"          # 입력 필드 배경
+_CARD_BORDER = "#555555"
+_INPUT_BORDER = "#444444"
+
+
 def _add_combo_items(combo: QComboBox, items) -> None:
     for text, value in items:
         combo.addItem(text, userData=value)
@@ -149,9 +158,15 @@ class ConditionNodeEditor(QFrame):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
+        self.setObjectName("conditionCard")
         self.setFrameShape(QFrame.Shape.StyledPanel)
+        # 175 hotfix: 입력 스타일 (QComboBox/QLineEdit/QSpinBox) 을 root 에
+        # 한꺼번에 건다. individual widget.setStyleSheet 방식은 WindowsVista
+        # 네이티브 스타일이 QComboBox body 를 overlay 로 그려 배경이 연해지는
+        # 증상이 있어, 부모 stylesheet 로 cascade 시키는 쪽이 안정적.
         self.setStyleSheet(
             self._frame_style()
+            + self._input_style()
             + (
                 f"QLabel {{"
                 f"  border: none;"
@@ -159,20 +174,34 @@ class ConditionNodeEditor(QFrame):
                 f"  font-size: {get_scaled_font_size(17)}px;"
                 f"}}"
                 f"QPushButton {{"
+                f"  background-color: {DARK_COLORS['bg_tertiary']};"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  border: 1px solid {_CARD_BORDER};"
+                f"  border-radius: {get_scaled_size(4)}px;"
                 f"  font-size: {get_scaled_font_size(17)}px;"
-                f"  padding: {get_scaled_size(5)}px {get_scaled_size(9)}px;"
+                f"  padding: {get_scaled_size(5)}px {get_scaled_size(11)}px;"
+                f"}}"
+                f"QPushButton:hover {{"
+                f"  background-color: {DARK_COLORS['bg_hover']};"
+                f"  border-color: {DARK_COLORS['border_light']};"
+                f"}}"
+                f"QPushButton:pressed {{"
+                f"  background-color: {DARK_COLORS['bg_pressed']};"
                 f"}}"
                 f"QCheckBox {{"
                 f"  font-size: {get_scaled_font_size(17)}px;"
+                f"  spacing: {get_scaled_size(6)}px;"
+                f"  color: {DARK_COLORS['text_primary']};"
+                f"  background: transparent;"
                 f"}}"
             )
         )
         root = QVBoxLayout(self)
         root.setContentsMargins(
-            get_scaled_size(6), get_scaled_size(6),
-            get_scaled_size(6), get_scaled_size(6),
+            get_scaled_size(10), get_scaled_size(10),
+            get_scaled_size(10), get_scaled_size(10),
         )
-        root.setSpacing(get_scaled_size(4))
+        root.setSpacing(get_scaled_size(8))
 
         root.addLayout(self._build_header_row())
         self._leaf_container = self._build_leaf_container()
@@ -186,7 +215,6 @@ class ConditionNodeEditor(QFrame):
 
         self._kind_combo = QComboBox()
         _add_combo_items(self._kind_combo, _KIND_ITEMS)
-        self._kind_combo.setStyleSheet(self._input_style())
         self._kind_combo.currentTextChanged.connect(self._on_kind_changed)
         row.addWidget(QLabel("조건 형태:"))
         row.addWidget(self._kind_combo)
@@ -194,8 +222,21 @@ class ConditionNodeEditor(QFrame):
 
         if self._removable:
             delete_btn = QPushButton("🗑")
-            delete_btn.setFixedWidth(get_scaled_size(28))
+            delete_btn.setFixedWidth(get_scaled_size(32))
             delete_btn.setToolTip("이 조건 제거")
+            delete_btn.setStyleSheet(
+                f"QPushButton {{"
+                f"  background-color: transparent;"
+                f"  border: 1px solid {_CARD_BORDER};"
+                f"  border-radius: {get_scaled_size(4)}px;"
+                f"  padding: {get_scaled_size(4)}px;"
+                f"}}"
+                f"QPushButton:hover {{"
+                f"  background-color: {DARK_COLORS['error']};"
+                f"  border-color: {DARK_COLORS['error']};"
+                f"  color: white;"
+                f"}}"
+            )
             delete_btn.clicked.connect(
                 lambda: self.request_delete.emit(self)
             )
@@ -214,7 +255,6 @@ class ConditionNodeEditor(QFrame):
         top.addWidget(QLabel("판단 기준:"))
         self._leaf_kind_combo = QComboBox()
         _add_combo_items(self._leaf_kind_combo, _LEAF_KIND_ITEMS)
-        self._leaf_kind_combo.setStyleSheet(self._input_style())
         self._leaf_kind_combo.currentTextChanged.connect(
             self._on_leaf_kind_changed
         )
@@ -241,12 +281,10 @@ class ConditionNodeEditor(QFrame):
         row.addWidget(QLabel("찾을 태그:"))
         self._tag_value_edit = QLineEdit()
         self._tag_value_edit.setPlaceholderText("예: blue_hair")
-        self._tag_value_edit.setStyleSheet(self._input_style())
         self._tag_value_edit.textChanged.connect(self._emit_changed)
         row.addWidget(self._tag_value_edit, 1)
         self._tag_modifier_combo = QComboBox()
         _add_combo_items(self._tag_modifier_combo, _TAG_MOD_ITEMS)
-        self._tag_modifier_combo.setStyleSheet(self._input_style())
         self._tag_modifier_combo.currentTextChanged.connect(self._emit_changed)
         row.addWidget(self._tag_modifier_combo)
         return w
@@ -259,7 +297,6 @@ class ConditionNodeEditor(QFrame):
         row.addWidget(QLabel("등급:"))
         self._rating_value_combo = QComboBox()
         _add_combo_items(self._rating_value_combo, _RATING_VAL_ITEMS)
-        self._rating_value_combo.setStyleSheet(self._input_style())
         self._rating_value_combo.currentTextChanged.connect(self._emit_changed)
         row.addWidget(self._rating_value_combo)
         row.addWidget(QLabel("판단 기준:"))
@@ -267,7 +304,6 @@ class ConditionNodeEditor(QFrame):
         _add_combo_items(
             self._rating_source_combo, _RATING_SOURCE_ITEMS
         )
-        self._rating_source_combo.setStyleSheet(self._input_style())
         self._rating_source_combo.currentTextChanged.connect(self._emit_changed)
         row.addWidget(self._rating_source_combo)
         row.addStretch()
@@ -284,7 +320,6 @@ class ConditionNodeEditor(QFrame):
         idx_row.addWidget(QLabel("캐릭터 슬롯"))
         self._char_index_spin = QSpinBox()
         self._char_index_spin.setRange(1, 10)
-        self._char_index_spin.setStyleSheet(self._input_style())
         self._char_index_spin.valueChanged.connect(self._emit_changed)
         idx_row.addWidget(self._char_index_spin)
         idx_row.addStretch()
@@ -298,14 +333,12 @@ class ConditionNodeEditor(QFrame):
         tag_row.addWidget(QLabel("캐릭터 안 태그:"))
         self._char_tag_value_edit = QLineEdit()
         self._char_tag_value_edit.setPlaceholderText("예: smile")
-        self._char_tag_value_edit.setStyleSheet(self._input_style())
         self._char_tag_value_edit.textChanged.connect(self._emit_changed)
         tag_row.addWidget(self._char_tag_value_edit, 1)
         self._char_tag_modifier_combo = QComboBox()
         _add_combo_items(
             self._char_tag_modifier_combo, _TAG_MOD_ITEMS
         )
-        self._char_tag_modifier_combo.setStyleSheet(self._input_style())
         self._char_tag_modifier_combo.currentTextChanged.connect(
             self._emit_changed
         )
@@ -324,24 +357,52 @@ class ConditionNodeEditor(QFrame):
         top.addWidget(QLabel("묶음 방식:"))
         self._logical_combo = QComboBox()
         _add_combo_items(self._logical_combo, _LOGICAL_ITEMS)
-        self._logical_combo.setStyleSheet(self._input_style())
         self._logical_combo.currentTextChanged.connect(self._emit_changed)
         top.addWidget(self._logical_combo)
         top.addStretch()
+        primary_btn_style = (
+            f"QPushButton {{"
+            f"  background-color: {DARK_COLORS['accent_blue']};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: none;"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(5)}px {get_scaled_size(12)}px;"
+            f"  font-weight: 600;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {DARK_COLORS['accent_blue_hover']};"
+            f"}}"
+            f"QPushButton:pressed {{"
+            f"  background-color: #0D47A1;"
+            f"}}"
+        )
         add_leaf_btn = QPushButton("+ 조건")
+        add_leaf_btn.setStyleSheet(primary_btn_style)
         add_leaf_btn.clicked.connect(self._on_add_leaf)
         top.addWidget(add_leaf_btn)
         add_group_btn = QPushButton("+ 묶음")
+        add_group_btn.setStyleSheet(primary_btn_style)
         add_group_btn.clicked.connect(self._on_add_group)
         top.addWidget(add_group_btn)
         layout.addLayout(top)
 
         self._children_container = QWidget()
+        self._children_container.setObjectName("childrenBand")
+        # 중첩 자식 영역은 좌측 accent 바로 부모와 연결되어 있음을 시각화.
+        # objectName 으로 범위 한정 → 자식 위젯으로 스타일 전파 방지.
+        self._children_container.setStyleSheet(
+            f"QWidget#childrenBand {{"
+            f"  border-left: {get_scaled_size(3)}px solid"
+            f"    {DARK_COLORS['accent_blue']};"
+            f"  background: transparent;"
+            f"}}"
+        )
         self._children_layout = QVBoxLayout(self._children_container)
         self._children_layout.setContentsMargins(
-            get_scaled_size(12), 0, 0, 0
+            get_scaled_size(14), get_scaled_size(4),
+            0, get_scaled_size(4),
         )
-        self._children_layout.setSpacing(get_scaled_size(4))
+        self._children_layout.setSpacing(get_scaled_size(8))
         layout.addWidget(self._children_container)
         return container
 
@@ -477,20 +538,57 @@ class ConditionNodeEditor(QFrame):
     # ------------------------------------------------------------------
 
     def _frame_style(self) -> str:
+        # 176 UI hotfix:
+        # 중첩 child 카드만 더 밝게 칠하면 같은 입력 필드가 섹션마다 다른
+        # 명도 위에 올라가 보여 사용자가 "판단 기준/찾을 태그" 영역만 배경이
+        # 다르다고 느끼게 된다. 계층은 삭제 버튼/좌측 band/간격으로 표현하고,
+        # 카드 바탕은 전부 동일하게 유지한다.
         return (
-            f"QFrame {{"
-            f"  background-color: {DARK_COLORS['bg_secondary']};"
-            f"  border: 1px solid {DARK_COLORS['border']};"
-            f"  border-radius: {get_scaled_size(4)}px;"
+            f"QFrame#conditionCard {{"
+            f"  background-color: {_CARD_BG};"
+            f"  border: 1px solid {_CARD_BORDER};"
+            f"  border-radius: {get_scaled_size(6)}px;"
             f"}}"
         )
 
     def _input_style(self) -> str:
+        """QLineEdit / QComboBox / QSpinBox 공용 입력 스타일.
+
+        각 위젯에 attach 되면 해당 widget class 에 매칭되는 selector 만 적용.
+        QComboBox::drop-down 과 QComboBox QAbstractItemView 를 명시해 Windows
+        네이티브 그레이가 arrow 영역/팝업 리스트에 새어들지 않게 한다.
+        """
+        base = (
+            f"  background-color: {_INPUT_BG};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid {_INPUT_BORDER};"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  selection-background-color: {DARK_COLORS['accent_blue']};"
+        )
         return (
-            f"background-color: {DARK_COLORS['bg_tertiary']};"
-            f" color: {DARK_COLORS['text_primary']};"
-            f" border: 1px solid {DARK_COLORS['border']};"
-            f" border-radius: {get_scaled_size(4)}px;"
-            f" padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
-            f" font-size: {get_scaled_font_size(17)}px;"
+            f"QLineEdit {{{base}}}"
+            f"QComboBox {{{base}}}"
+            f"QComboBox:hover {{ border-color: {DARK_COLORS['border_light']}; }}"
+            f"QComboBox::drop-down {{"
+            f"  subcontrol-origin: padding;"
+            f"  subcontrol-position: right center;"
+            f"  width: {get_scaled_size(20)}px;"
+            f"  border: none;"
+            f"  background: transparent;"
+            f"}}"
+            f"QComboBox QAbstractItemView {{"
+            f"  background-color: {_INPUT_BG};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid {_INPUT_BORDER};"
+            f"  selection-background-color: {DARK_COLORS['accent_blue']};"
+            f"  outline: 0;"
+            f"}}"
+            f"QSpinBox {{{base}}}"
+            f"QSpinBox::up-button, QSpinBox::down-button {{"
+            f"  background: transparent;"
+            f"  border: none;"
+            f"  width: {get_scaled_size(14)}px;"
+            f"}}"
         )

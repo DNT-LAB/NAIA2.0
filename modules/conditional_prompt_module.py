@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
-    QCheckBox, QPushButton, QFrame, QScrollArea
+    QCheckBox, QPushButton, QFrame, QScrollArea,
+    QRadioButton, QButtonGroup,
 )
 from PyQt6.QtCore import Qt, QRegularExpression
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
@@ -163,6 +164,12 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self._editor_mode: str = "legacy"
         self._active_preset_name: Optional[str] = None
 
+        # 174 hotfix (FR-02 / FR-10 / FR-11b): legacy / v2 DSL 독립 저장소.
+        # rules_textedit = 레거시 DSL, _rules_v2_dsl = 편집기 소유 DSL.
+        # 편집기 오픈 시 _rules_v2_dsl 을 파싱, Apply 시 set_v2_dsl 로 저장.
+        # execute_pipeline_hook 이 활성 모드에 따라 한쪽만 읽는다.
+        self._rules_v2_dsl: str = ""
+
     def set_engine_options(self, *, max_passes: int = 1,
                            stop_on_match: bool = False):
         """블록 프리셋의 engine_options 를 런타임 훅에 주입.
@@ -239,6 +246,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         editor_button.clicked.connect(self._open_rule_editor)
         layout.addWidget(editor_button)
 
+        # 174 hotfix (FR-11b): 실행 경로 라디오 (레거시 DSL / 신규 편집기).
+        layout.addLayout(self._build_mode_row(label_style))
+
         # 활성화 체크박스
         self.enable_checkbox = QCheckBox("조건부 프롬프트 활성화")
         checkbox_style = f"""
@@ -271,6 +281,16 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         rules_label = QLabel("규칙 정의:")
         rules_label.setStyleSheet(label_style)
         layout.addWidget(rules_label)
+
+        # 174 hotfix: 모드 힌트 라벨 (라디오 상태를 가시화)
+        self._mode_hint_label = QLabel("")
+        self._mode_hint_label.setStyleSheet(
+            f"color: {DARK_COLORS['text_secondary']};"
+            f" font-size: {get_scaled_font_size(14)}px;"
+            f" padding: {get_scaled_size(2)}px 0px;"
+        )
+        self._mode_hint_label.setWordWrap(True)
+        layout.addWidget(self._mode_hint_label)
 
         self.rules_textedit = QTextEdit()
         self.rules_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
@@ -369,7 +389,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         # 위젯 참조 저장
         self.widget = widget
-        
+
+        # 174 hotfix: 모드 라디오/힌트/textedit 상태를 현재 _editor_mode 기준으로 초기화
+        self._sync_mode_ui()
+
         # 현재 모드에 따른 가시성 설정
         if hasattr(self, 'app_context') and self.app_context:
             current_mode = self.app_context.get_api_mode()
@@ -377,6 +400,54 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 self.update_visibility_for_mode(current_mode)
 
         return widget
+
+    def _build_mode_row(self, label_style: str) -> QHBoxLayout:
+        """실행 경로 라디오 (레거시 / 신규). 174 hotfix (FR-11b)."""
+        row = QHBoxLayout()
+        row.setSpacing(get_scaled_size(10))
+
+        caption = QLabel("실행 경로:")
+        caption.setStyleSheet(label_style)
+        row.addWidget(caption)
+
+        self._mode_group = QButtonGroup(self.widget if hasattr(self, 'widget') else None)
+        self._mode_legacy_radio = QRadioButton("레거시 DSL")
+        self._mode_v2_radio = QRadioButton("신규 편집기")
+
+        radio_style = (
+            f"QRadioButton {{"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  spacing: {get_scaled_size(6)}px;"
+            f"}}"
+            f"QRadioButton::indicator {{"
+            f"  width: {get_scaled_size(14)}px;"
+            f"  height: {get_scaled_size(14)}px;"
+            f"}}"
+        )
+        self._mode_legacy_radio.setStyleSheet(radio_style)
+        self._mode_v2_radio.setStyleSheet(radio_style)
+        self._mode_legacy_radio.setChecked(self._editor_mode != "v2")
+        self._mode_v2_radio.setChecked(self._editor_mode == "v2")
+        self._mode_group.addButton(self._mode_legacy_radio, 0)
+        self._mode_group.addButton(self._mode_v2_radio, 1)
+        self._mode_legacy_radio.toggled.connect(self._on_mode_radio_changed)
+        self._mode_v2_radio.toggled.connect(self._on_mode_radio_changed)
+
+        row.addWidget(self._mode_legacy_radio)
+        row.addWidget(self._mode_v2_radio)
+        row.addStretch()
+        return row
+
+    def _on_mode_radio_changed(self, checked: bool) -> None:
+        """라디오 토글 → _editor_mode 갱신 + UI 동기화."""
+        if not checked:
+            return  # toggled 는 양쪽 모두에서 emit → checked=True 한쪽만 처리
+        new_mode = "v2" if self._mode_v2_radio.isChecked() else "legacy"
+        if new_mode == self._editor_mode:
+            return
+        self._editor_mode = new_mode
+        self._sync_mode_ui()
 
     def _open_rule_editor(self):
         """새 규칙 편집기 창을 띄운다. 단일 인스턴스로 재사용."""
@@ -413,6 +484,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         return {
             "enabled": self.enable_checkbox.isChecked(),
             "rules": self.rules_textedit.toPlainText(),
+            "rules_v2": self._rules_v2_dsl,
             "editor_mode": self._editor_mode,
             "engine_options": dict(self._engine_options),
             "active_preset": self._active_preset_name,
@@ -426,9 +498,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self.enable_checkbox.setChecked(settings.get("enabled", False))
         self.rules_textedit.setText(settings.get("rules", ""))
 
+        # 174 hotfix: v2 DSL 복원 (기존 설정 파일에는 없음)
+        rules_v2 = settings.get("rules_v2", "")
+        self._rules_v2_dsl = rules_v2 if isinstance(rules_v2, str) else ""
+
         # 1.8: editor_mode 복원 (기본 legacy → 기존 설정 파일도 안전)
         mode = settings.get("editor_mode", "legacy")
         self._editor_mode = mode if mode in ("legacy", "v2") else "legacy"
+        self._sync_mode_ui()
 
         # 1.8: engine_options 복원 (없으면 기본 1/False)
         opts = settings.get("engine_options") or {}
@@ -446,21 +523,87 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
     # ====================================================================
 
     def set_editor_mode(self, mode: str) -> None:
-        """편집기 모드 전환 ('legacy' | 'v2'). 잘못된 값은 무시."""
+        """편집기 모드 전환 ('legacy' | 'v2'). 잘못된 값은 무시.
+
+        174 hotfix: 라디오 UI 가 존재하면 동기화. 이 메소드는 편집기/설정
+        로더에서도 호출되므로 UI 관련 작업은 _sync_mode_ui 로 위임.
+        """
         if mode in ("legacy", "v2"):
             self._editor_mode = mode
+            self._sync_mode_ui()
 
     def get_editor_mode(self) -> str:
         return self._editor_mode
+
+    def get_v2_dsl(self) -> str:
+        """편집기(v2) 전용 DSL 조회. 174 hotfix."""
+        return self._rules_v2_dsl
+
+    def set_v2_dsl(self, text: str) -> None:
+        """편집기(v2) 전용 DSL 기록. 레거시 rules_textedit 은 건드리지 않음."""
+        self._rules_v2_dsl = text or ""
+
+    def _active_rules_text(self) -> str:
+        """실행에 쓰일 DSL 을 현재 모드 기준으로 반환.
+
+        legacy → rules_textedit, v2 → _rules_v2_dsl. 174 hotfix 로 도입.
+        """
+        if self._editor_mode == "v2":
+            return (self._rules_v2_dsl or "").strip()
+        if self.rules_textedit is None:
+            return ""
+        return self.rules_textedit.toPlainText().strip()
+
+    def _sync_mode_ui(self) -> None:
+        """라디오 버튼과 rules_textedit 편집 가능 여부를 모드에 맞춰 동기화.
+
+        UI 가 아직 생성되지 않은 상태(테스트/로드 초기)에도 안전하도록 모든
+        위젯 접근을 getattr 가드로 방어.
+        """
+        is_v2 = self._editor_mode == "v2"
+
+        # 라디오 동기화 (블록 시그널로 콜백 루프 방지)
+        mode_legacy_radio = getattr(self, '_mode_legacy_radio', None)
+        mode_v2_radio = getattr(self, '_mode_v2_radio', None)
+        if mode_legacy_radio is not None and mode_v2_radio is not None:
+            mode_legacy_radio.blockSignals(True)
+            mode_v2_radio.blockSignals(True)
+            try:
+                mode_v2_radio.setChecked(is_v2)
+                mode_legacy_radio.setChecked(not is_v2)
+            finally:
+                mode_legacy_radio.blockSignals(False)
+                mode_v2_radio.blockSignals(False)
+
+        # rules_textedit 은 v2 모드에서 read-only (비활성화 아님 — 편집은 막되
+        # 기존 레거시 DSL 은 참고용으로 계속 보이도록).
+        # 테스트 더미 위젯이 setReadOnly 를 갖지 않을 수 있어 가드.
+        if self.rules_textedit is not None and hasattr(
+            self.rules_textedit, 'setReadOnly'
+        ):
+            self.rules_textedit.setReadOnly(is_v2)
+
+        # v2 활성 여부 힌트 라벨 (있으면)
+        hint = getattr(self, '_mode_hint_label', None)
+        if hint is not None:
+            if is_v2:
+                hint.setText(
+                    "⚙ 신규 편집기 모드 — 좌측 DSL 은 참조용. 편집기에서 수정 후 적용."
+                )
+            else:
+                hint.setText(
+                    "📝 레거시 모드 — 아래 DSL 이 실행에 쓰입니다."
+                )
 
     def get_active_preset_name(self) -> Optional[str]:
         return self._active_preset_name
 
     def load_preset_by_name(self, name: str, *, storage=None) -> bool:
-        """프리셋 로드 → rules_textedit + engine_options + active_preset 갱신.
+        """프리셋 로드 → v2 DSL + engine_options + active_preset 갱신.
 
+        174 hotfix: 프리셋은 v2 아티팩트이므로 `_rules_v2_dsl` 에 쓰고 모드를
+        'v2' 로 전환한다. 레거시 `rules_textedit` 은 건드리지 않는다.
         `storage` 주입으로 테스트 격리 가능. 성공 시 True, 미존재 시 False.
-        Sub-phase 1.4 UI 에서 이 API 를 호출하여 프리셋을 적용한다.
         """
         from modules.conditional.preset_io import (
             get_default_storage,
@@ -479,8 +622,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             max_passes=book.max_passes,
             stop_on_match=book.stop_on_match,
         )
-        if self.rules_textedit is not None:
-            self.rules_textedit.setText(dsl)
+        self.set_v2_dsl(dsl)
+        self.set_editor_mode("v2")
         self._active_preset_name = name
         return True
 
@@ -552,7 +695,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         else:
             if not self.enable_checkbox or not self.enable_checkbox.isChecked():
                 return context
-            rules_text = self.rules_textedit.toPlainText().strip()
+            # 174 hotfix (FR-02/10): 활성 모드가 'v2' 면 _rules_v2_dsl, 아니면 rules_textedit
+            rules_text = self._active_rules_text()
 
         print("🔀 조건부 프롬프트 훅 실행...")
 
@@ -1824,11 +1968,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """규칙 테스트 실행 - 실제 시뮬레이션"""
         if not self.rules_textedit:
             return
-        
-        # 규칙 확인
-        rules_text = self.rules_textedit.toPlainText().strip()
+
+        # 174 hotfix: 활성 모드 기준으로 DSL 선택
+        rules_text = self._active_rules_text()
         if not rules_text:
-            self.log_textedit.setText("규칙이 비어있습니다.")
+            mode_hint = (
+                " (편집기에서 규칙을 만들어 적용해 주세요)"
+                if self._editor_mode == "v2" else ""
+            )
+            self.log_textedit.setText(f"규칙이 비어있습니다.{mode_hint}")
             return
         
         # AppContext 확인
@@ -1962,8 +2110,16 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """생성 파라미터 반환"""
         if not self.enable_checkbox or not self.enable_checkbox.isChecked():
             return {}
-        
+
+        # 174 hotfix: 원격 / 쉐어 서버 파이프라인도 활성 모드의 DSL 을 그대로 받도록.
+        if self._editor_mode == "v2":
+            rules_out = self._rules_v2_dsl or ""
+        elif self.rules_textedit is not None:
+            rules_out = self.rules_textedit.toPlainText()
+        else:
+            rules_out = ""
+
         return {
             "enabled": True,
-            "rules": self.rules_textedit.toPlainText() if self.rules_textedit else ""
+            "rules": rules_out,
         }

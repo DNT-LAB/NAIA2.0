@@ -103,7 +103,8 @@ class TestInitialLoad:
         assert window._current_rule_id is None
 
     def test_parses_module_dsl(self, module, storage):
-        module.rules_textedit.setText(
+        # 174 hotfix: 편집기는 v2 저장소만 파싱. 레거시 rules_textedit 은 무시.
+        module.set_v2_dsl(
             "(blush):main+=smile,\n(nsfw):prefix+=quality"
         )
         w = RuleEditorWindow(module.app_context, module, storage=storage)
@@ -111,6 +112,13 @@ class TestInitialLoad:
         texts = [r.condition.tag_value for r in w._book.rules]
         assert "blush" in texts
         assert "nsfw" in texts
+        w.deleteLater()
+
+    def test_ignores_legacy_dsl_in_rules_textedit(self, module, storage):
+        """174 hotfix (FR-02): 레거시 DSL 은 자동 변환되지 않는다."""
+        module.rules_textedit.setText("(blush):main+=smile")
+        w = RuleEditorWindow(module.app_context, module, storage=storage)
+        assert len(w._book.rules) == 0
         w.deleteLater()
 
     def test_inherits_engine_options_from_module(self, module, storage):
@@ -242,8 +250,19 @@ class TestApply:
         window._book = _sample_book()
         ok = window._perform_apply()
         assert ok is True
-        assert "blush" in module.rules_textedit.toPlainText()
-        assert "nsfw" in module.rules_textedit.toPlainText()
+        # 174 hotfix: Apply 는 v2 저장소에만 쓴다. rules_textedit 은 불변.
+        assert "blush" in module.get_v2_dsl()
+        assert "nsfw" in module.get_v2_dsl()
+
+    def test_perform_apply_does_not_touch_legacy_textedit(
+        self, window, module
+    ):
+        """174 hotfix: Apply 는 레거시 DSL 을 덮어쓰지 않는다."""
+        module.rules_textedit.setText("(legacy):main+=keep_me")
+        window._book = _sample_book()
+        window._perform_apply()
+        assert "keep_me" in module.rules_textedit.toPlainText()
+        assert "blush" not in module.rules_textedit.toPlainText()
 
     def test_perform_apply_sets_engine_options(self, window, module):
         window._book = _sample_book()
@@ -288,14 +307,15 @@ class TestApply:
 
 class TestReload:
     def test_reload_reflects_module_dsl(self, window, module):
-        module.rules_textedit.setText("(a):main+=b")
+        # 174 hotfix: 편집기는 v2 저장소만 파싱.
+        module.set_v2_dsl("(a):main+=b")
         window.load_current_rules()
         assert len(window._book.rules) == 1
         assert window._book.rules[0].condition.tag_value == "a"
 
     def test_reload_with_raw_fallback(self, window, module):
         # existing_tag+= 는 블록 미지원 → raw
-        module.rules_textedit.setText("(a):existing_tag+=new")
+        module.set_v2_dsl("(a):existing_tag+=new")
         window.load_current_rules()
         assert len(window._book.rules) == 1
         assert window._book.rules[0].kind == "raw"
@@ -354,7 +374,7 @@ class TestDirtyGuard:
         window._on_rule_add()
         window.set_auto_dirty_choice("cancel")
         before_count = len(window._book.rules)
-        module.rules_textedit.setText("(changed):main+=x")
+        module.set_v2_dsl("(changed):main+=x")
         window.load_current_rules()
         # 취소 → 변경 유지 (reload 적용 안됨)
         assert len(window._book.rules) == before_count
@@ -364,7 +384,7 @@ class TestDirtyGuard:
         window._on_rule_add()
         assert window.is_dirty() is True
         window.set_auto_dirty_choice("discard")
-        module.rules_textedit.setText("(reloaded):main+=y")
+        module.set_v2_dsl("(reloaded):main+=y")
         window.load_current_rules()
         # discard 후 reload 됨
         assert len(window._book.rules) == 1

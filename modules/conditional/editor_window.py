@@ -188,12 +188,21 @@ class RuleEditorWindow(QDialog):
         self._reload_from_module()
 
     def _reload_from_module(self) -> None:
-        """dirty 체크 없이 모듈 DSL 을 읽어 _book 재구성."""
+        """dirty 체크 없이 모듈의 v2 DSL 을 읽어 _book 재구성.
+
+        174 hotfix (FR-02): 편집기는 _rules_v2_dsl(`get_v2_dsl`) 만 파싱한다.
+        레거시 DSL 은 자동 변환되지 않는다 — 사용자가 "레거시 → 신규 변환"
+        버튼을 명시적으로 누를 때만 import.
+        """
         text = ""
         if self.module is not None:
-            rules_textedit = getattr(self.module, 'rules_textedit', None)
-            if rules_textedit is not None:
-                text = rules_textedit.toPlainText() or ""
+            if hasattr(self.module, 'get_v2_dsl'):
+                text = self.module.get_v2_dsl() or ""
+            else:
+                # 하위 호환: 구버전 모듈은 rules_textedit 사용
+                rules_textedit = getattr(self.module, 'rules_textedit', None)
+                if rules_textedit is not None:
+                    text = rules_textedit.toPlainText() or ""
         self._book = parse_rulebook(text)
         # 엔진 옵션은 모듈 현재값에서 가져오기 (프리셋 로드 시 덮어써짐)
         if self.module is not None and hasattr(
@@ -389,13 +398,22 @@ class RuleEditorWindow(QDialog):
         )
 
     def _perform_apply(self) -> bool:
-        """다이얼로그 없는 적용 경로. 성공 시 True."""
+        """다이얼로그 없는 적용 경로. 성공 시 True.
+
+        174 hotfix (FR-10): DSL 은 모듈의 v2 저장소(`set_v2_dsl`)에 기록하고,
+        _editor_mode 를 'v2' 로 전환한다. 레거시 rules_textedit 은 건드리지
+        않아 사용자의 레거시 규칙이 유지된다. 구버전 모듈(v2 API 없음)에는
+        하위 호환으로 rules_textedit 에 쓴다.
+        """
         if self.module is None:
             return False
         dsl = serialize_rulebook(self._book)
-        rules_textedit = getattr(self.module, 'rules_textedit', None)
-        if rules_textedit is not None:
-            rules_textedit.setText(dsl)
+        if hasattr(self.module, 'set_v2_dsl'):
+            self.module.set_v2_dsl(dsl)
+        else:
+            rules_textedit = getattr(self.module, 'rules_textedit', None)
+            if rules_textedit is not None:
+                rules_textedit.setText(dsl)
         if hasattr(self.module, 'set_engine_options'):
             self.module.set_engine_options(
                 max_passes=self._book.max_passes,

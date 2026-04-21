@@ -150,6 +150,30 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # 새 편집기 창 (단일 인스턴스, lazy 생성)
         self._rule_editor_window = None
 
+        # Sub-phase 1.7 hotfix (P1): RuleBook/프리셋의 engine_options 를
+        # 런타임 훅과 연결하기 위한 주입 포인트. 기본값은 레거시 호환.
+        # Phase 1.8 에서 프리셋 로드 경로가 `set_engine_options` 를 호출.
+        self._engine_options = {
+            'max_passes': 1,
+            'stop_on_match': False,
+        }
+
+    def set_engine_options(self, *, max_passes: int = 1,
+                           stop_on_match: bool = False):
+        """블록 프리셋의 engine_options 를 런타임 훅에 주입.
+
+        Sub-phase 1.7 hotfix (외부 리뷰 P1): RuleBook.max_passes /
+        stop_on_match 가 저장만 되고 실행에 반영되지 않던 gap 해소.
+        """
+        self._engine_options = {
+            'max_passes': max(1, int(max_passes)),
+            'stop_on_match': bool(stop_on_match),
+        }
+
+    def get_engine_options(self) -> Dict[str, Any]:
+        """현재 엔진 옵션 조회 (프리셋 저장/편집기 표시용)."""
+        return dict(self._engine_options)
+
     def get_title(self) -> str:
         return "🔀 조건부 프롬프트"
 
@@ -417,12 +441,18 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             return context
         
         # 규칙 처리 및 로그 생성
+        # Sub-phase 1.7 hotfix (P1): engine_options 를 런타임에 반영
+        opts = self._engine_options or {}
         logs = []
-        modified_context = self._apply_rules(context, rules_text, logs)
-        
+        modified_context = self._apply_rules(
+            context, rules_text, logs,
+            max_passes=int(opts.get('max_passes', 1)),
+            stop_on_match=bool(opts.get('stop_on_match', False)),
+        )
+
         # 로그 UI 업데이트
         self._update_log_display(logs)
-        
+
         return modified_context
 
     def _apply_rules(self, context: PromptContext, rules_text: str, logs: List[str],
@@ -1093,7 +1123,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             if not char_list:
                 self._record_skip(target, "활성 캐릭터 0명")
                 return
-            indices = list(range(len(char_list)))
+            # Sub-phase 1.7 hotfix (P1): 활성 슬롯만 대상
+            indices = self._active_char_indices(char_mod, len(char_list))
+            if not indices:
+                self._record_skip(target, "활성 슬롯 0명 (char:*/uc:*)")
+                return
         else:
             if idx >= len(char_list):
                 self._record_skip(
@@ -1116,15 +1150,62 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         clone[field] = char_list
 
-    def _write_global_uc_target(self, tag_list: List[str], *, op: str):
-        """global_uc 타겟 write. Phase 1.1에서는 저장 경로 미확정 → skip 집계만.
+        # Sub-phase 1.7 hotfix (P2): modifiable_clone 변경 후 visible UI 동기화
+        self._trigger_hooker_refresh(char_mod)
 
-        Phase 1.8(모드 토글 + 변환 도구) 혹은 별도 sub-phase에서 실제
-        Global UC 위젯/AppContext 경로 확정 후 구현.
+    def _active_char_indices(self, char_mod, total: int) -> List[int]:
+        """활성(active_checkbox=True) 캐릭터 인덱스 목록.
+
+        `character_widgets` 가 없는 Mock/헤드리스 환경에서는 전체 인덱스를 반환
+        (테스트 호환). 프로덕션에서는 비활성 슬롯을 제외한다.
+        """
+        widgets = getattr(char_mod, 'character_widgets', None)
+        if widgets is None:
+            return list(range(total))
+        out = []
+        for i in range(total):
+            if i >= len(widgets):
+                continue
+            ck = getattr(widgets[i], 'active_checkbox', None)
+            if ck is None or not hasattr(ck, 'isChecked'):
+                out.append(i)
+                continue
+            try:
+                if ck.isChecked():
+                    out.append(i)
+            except Exception:
+                # isChecked 접근 실패 → 안전하게 제외
+                pass
+        return out
+
+    def _trigger_hooker_refresh(self, char_mod):
+        """CharacterModule 의 visible prompt 갱신 트리거. 없으면 조용히 skip.
+
+        Sub-phase 1.7 hotfix (P2): `get_character_modifiable_clone` 계약상
+        caller 는 mutation 후 `hooker_update_prompt()` 호출이 명시되어 있다.
+        UI 갱신 실패는 생성 파이프라인을 막지 않도록 예외 흡수.
+        """
+        fn = getattr(char_mod, 'hooker_update_prompt', None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                pass
+
+    def _write_global_uc_target(self, tag_list: List[str], *, op: str):
+        """global_uc 타겟 write — 런타임 저장 경로 미확정 → skip 집계.
+
+        NAIA 2.0 코어에는 'global UC' 개념의 표준 저장소가 아직 없다
+        (studio_tab 의 `global_negative` 는 생성 시점 로컬 합산 변수에 불과).
+        파서/직렬화기/SRS 는 문법 호환을 위해 `global_uc` 를 유지하되,
+        이 런타임은 skip 카운터로만 기록하여 사용자에게 가시적 무동작을 알린다.
+
+        향후 저장소가 결정되면 이 메서드에서 위젯/상태 경로를 연결한다
+        (외부 리뷰 2026-04-21 P2, 사용자 판단으로 런타임 stub 유지).
         """
         if not tag_list:
             return
-        self._record_skip("global_uc", "Phase 1.8에서 저장 경로 확정 예정")
+        self._record_skip("global_uc", "런타임 저장소 미확정 (문서 참조)")
 
     # ====================================================================
     # Phase 1.1b — 함수형 확장 (char_in/char_on 조건, char_set/char_replace
@@ -1384,6 +1465,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         char_list[char_idx] = ', '.join(tags)
         clone['characters'] = char_list
+
+        # Sub-phase 1.7 hotfix (P2): clone mutation 후 visible UI 동기화
+        self._trigger_hooker_refresh(char_mod)
 
     def _write_negative_target(self, tag_list: List[str], *, op: str):
         """neg 타겟 write — non-D4 네거티브 프롬프트 위젯 직접 수정.

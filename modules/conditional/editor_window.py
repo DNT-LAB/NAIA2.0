@@ -51,34 +51,7 @@ class RuleEditorWindow(QDialog):
         )
         layout.setSpacing(get_scaled_size(10))
 
-        # 헤더
-        header_label = QLabel("조건부 프롬프트 편집기")
-        header_label.setStyleSheet(
-            f"color: {DARK_COLORS['text_primary']};"
-            f" font-size: {get_scaled_font_size(22)}px;"
-            f" font-weight: bold;"
-        )
-        layout.addWidget(header_label)
-
-        # 서브 설명 (Phase 0 안내)
-        subtitle_label = QLabel(
-            "새 편집기 개발의 첫 단계입니다. 현재는 메인 모듈의 DSL 규칙을 읽기 전용으로 보여줍니다.\n"
-            "다음 단계에서 블록 기반 조건/액션 빌더 · 시뮬레이션 뷰 · 프리셋 시스템이 추가됩니다."
-        )
-        subtitle_label.setStyleSheet(
-            f"color: {DARK_COLORS['text_secondary']};"
-            f" font-size: {get_scaled_font_size(14)}px;"
-        )
-        subtitle_label.setWordWrap(True)
-        layout.addWidget(subtitle_label)
-
-        # 구분선
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet(
-            f"background-color: {DARK_COLORS['border']}; max-height: 1px;"
-        )
-        layout.addWidget(divider)
+        self._build_header_section(layout)
 
         # 현재 DSL 섹션
         rules_section_label = QLabel("현재 DSL 규칙 (읽기 전용)")
@@ -95,7 +68,37 @@ class RuleEditorWindow(QDialog):
         self.rules_preview.setStyleSheet(dynamic_styles['compact_textedit'])
         layout.addWidget(self.rules_preview, stretch=1)
 
-        # 상태 힌트
+        self._build_status_hint(layout)
+        self._build_button_row(layout, dynamic_styles)
+
+    def _build_header_section(self, layout):
+        header_label = QLabel("조건부 프롬프트 편집기")
+        header_label.setStyleSheet(
+            f"color: {DARK_COLORS['text_primary']};"
+            f" font-size: {get_scaled_font_size(22)}px;"
+            f" font-weight: bold;"
+        )
+        layout.addWidget(header_label)
+
+        subtitle_label = QLabel(
+            "새 편집기 개발의 첫 단계입니다. 현재는 메인 모듈의 DSL 규칙을 읽기 전용으로 보여줍니다.\n"
+            "다음 단계에서 블록 기반 조건/액션 빌더 · 시뮬레이션 뷰 · 프리셋 시스템이 추가됩니다."
+        )
+        subtitle_label.setStyleSheet(
+            f"color: {DARK_COLORS['text_secondary']};"
+            f" font-size: {get_scaled_font_size(14)}px;"
+        )
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(subtitle_label)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet(
+            f"background-color: {DARK_COLORS['border']}; max-height: 1px;"
+        )
+        layout.addWidget(divider)
+
+    def _build_status_hint(self, layout):
         status_label = QLabel(
             "다음 단계: 블록 기반 편집기 · DSL 확장(char:N, uc:N, 가중치 보존) · 시뮬레이션 diff · 프리셋"
         )
@@ -109,7 +112,7 @@ class RuleEditorWindow(QDialog):
         status_label.setWordWrap(True)
         layout.addWidget(status_label)
 
-        # 버튼 행
+    def _build_button_row(self, layout, dynamic_styles):
         button_row = QHBoxLayout()
         button_row.setSpacing(get_scaled_size(8))
 

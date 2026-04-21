@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "name": "Nsfw Auto Negative",
+  "description": "레이팅에 따라 네거티브 프롬프트에 아티팩트/저품질 방지 태그를 자동 주입.",
+  "created_at": "2026-04-21T00:00:00",
+  "engine_options": {
+    "max_passes": 1,
+    "stop_on_match": false
+  },
+  "rules": [
+    {
+      "id": "bundled-nsfw_auto_negative-01",
+      "name": "Explicit → NSFW 아티팩트 네거티브",
+      "enabled": true,
+      "priority": 10,
+      "kind": "block",
+      "condition": {
+        "kind": "leaf",
+        "leaf_kind": "rating",
+        "negated": false,
+        "tag_value": "",
+        "tag_modifier": "contains",
+        "rating_value": "e",
+        "rating_source": "auto",
+        "char_index": null,
+        "char_tag_value": "",
+        "char_tag_modifier": "contains",
+        "logical": null,
+        "children": []
+      },
+      "action": {
+        "kind": "append_list",
+        "target": "neg",
+        "preserve_weight": true,
+        "tags": [
+          "nsfw_artifacts",
+          "censored",
+          "bad_anatomy"
+        ],
+        "old_tag": "",
+        "new_tags": [],
+        "char_state": null,
+        "char_index": null,
+        "char_old_tag": "",
+        "char_new_tag": ""
+      },
+      "raw_dsl": null
+    },
+    {
+      "id": "bundled-nsfw_auto_negative-02",
+      "name": "Questionable → 저품질 네거티브",
+      "enabled": true,
+      "priority": 20,
+      "kind": "block",
+      "condition": {
+        "kind": "leaf",
+        "leaf_kind": "rating",
+        "negated": false,
+        "tag_value": "",
+        "tag_modifier": "contains",
+        "rating_value": "q",
+        "rating_source": "auto",
+        "char_index": null,
+        "char_tag_value": "",
+        "char_tag_modifier": "contains",
+        "logical": null,
+        "children": []
+      },
+      "action": {
+        "kind": "append_list",
+        "target": "neg",
+        "preserve_weight": true,
+        "tags": [
+          "low_quality",
+          "blurry"
+        ],
+        "old_tag": "",
+        "new_tags": [],
+        "char_state": null,
+        "char_index": null,
+        "char_old_tag": "",
+        "char_new_tag": ""
+      },
+      "raw_dsl": null
+    }
+  ]
+}

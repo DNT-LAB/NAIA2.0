@@ -101,6 +101,9 @@ class TestInitialLoad:
     def test_empty_module_dsl_produces_empty_book(self, window):
         assert len(window._book.rules) == 0
         assert window._current_rule_id is None
+        assert window._intro_summary_label.text() == (
+            "선택한 규칙 요약이 여기에 표시됩니다."
+        )
 
     def test_parses_module_dsl(self, module, storage):
         # 174 hotfix: 편집기는 v2 저장소만 파싱. 레거시 rules_textedit 은 무시.
@@ -137,15 +140,33 @@ class TestInitialLoad:
 class TestRuleCrud:
     def test_rule_selected_populates_panel(self, window):
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
+        window._rule_list_panel.set_rulebook(window._book)
         window._on_rule_selected(0)
         assert window._current_rule_id == window._book.rules[0].id
         shown = window._rule_panel.get_rule()
         assert shown.condition.tag_value == "blush"
+        assert "blush" in window._intro_summary_label.text()
+
+    def test_refresh_preserves_rule_selection_state(self, window):
+        window._book = _sample_book()
+        window._rule_list_panel.set_rulebook(window._book)
+        window._on_rule_selected(0)
+        window._refresh_rule_list_preserving_selection()
+        assert window._rule_list_panel._rule_list.currentRow() == 0
+        assert window._rule_list_panel._rule_list.item(0).isSelected() is True
+
+    def test_rule_toggle_updates_book_and_summary(self, window):
+        window._book = _sample_book()
+        window._rule_list_panel.set_rulebook(window._book)
+        window._on_rule_selected(0)
+        window._on_rule_enabled_toggle(0)
+        assert window._book.rules[0].enabled is False
+        assert window._rule_panel.is_rule_enabled() is False
+        assert "꺼져" in window._intro_summary_label.text()
 
     def test_rule_panel_edit_relays_to_book(self, window):
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
+        window._rule_list_panel.set_rulebook(window._book)
         window._on_rule_selected(0)
         # Rule 편집: action.tags 추가
         window._rule_panel._tags_chip.add_tag("happy")
@@ -156,39 +177,43 @@ class TestRuleCrud:
         )
         assert "happy" in (target_rule.action.tags or [])
 
-    def test_priority_change_triggers_resort(self, window):
+    def test_move_rule_down_triggers_resort(self, window):
+        # 3-pane 재설계: priority 는 UI 에서 직접 편집 불가. 이동 버튼으로 재정렬.
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
-        # 첫 rule 선택 후 priority 를 30 으로 높임 → 두 번째보다 뒤로
+        window._rule_list_panel.set_rulebook(window._book)
         window._on_rule_selected(0)
-        window._rule_panel._priority_spin.setValue(30)
-        # book 재정렬
+        first_id = window._book.rules[0].id
+        window._on_rule_move_down(0)
+        # 첫 규칙이 두 번째 위치로 이동 + priority 재번호
+        assert window._book.rules[1].id == first_id
         assert window._book.rules[0].priority <= window._book.rules[1].priority
 
     def test_rule_add(self, window):
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
+        window._rule_list_panel.set_rulebook(window._book)
         before = len(window._book.rules)
         window._on_rule_add()
         assert len(window._book.rules) == before + 1
-        # priority 는 기존 max + 10
-        assert window._book.rules[-1].priority >= 30
+        # 3-pane 재설계: _renumber_priorities 가 idx*10 으로 재번호
+        assert window._book.rules[-1].priority == (before + 1) * 10
+        assert window._book.rules[-1].name == ""
 
     def test_rule_delete(self, window):
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
+        window._rule_list_panel.set_rulebook(window._book)
         window._on_rule_selected(0)
         # delete idx=0
         window._on_rule_delete(0)
         assert len(window._book.rules) == 1
         assert window._current_rule_id is None
 
-    def test_engine_options_sync_to_book(self, window):
-        window._on_engine_options_changed(
-            {"max_passes": 7, "stop_on_match": True}
-        )
-        assert window._book.max_passes == 7
-        assert window._book.stop_on_match is True
+    def test_rule_move_up_reorders(self, window):
+        window._book = _sample_book()
+        window._rule_list_panel.set_rulebook(window._book)
+        window._on_rule_selected(1)
+        second_id = window._book.rules[1].id
+        window._on_rule_move_up(1)
+        assert window._book.rules[0].id == second_id
 
 
 # ============================================================================
@@ -312,6 +337,10 @@ class TestReload:
         window.load_current_rules()
         assert len(window._book.rules) == 1
         assert window._book.rules[0].condition.tag_value == "a"
+        assert "a" in window._intro_summary_label.text() or (
+            window._intro_summary_label.text()
+            == "선택한 규칙 요약이 여기에 표시됩니다."
+        )
 
     def test_reload_with_raw_fallback(self, window, module):
         # existing_tag+= 는 블록 미지원 → raw
@@ -336,19 +365,20 @@ class TestDirtyGuard:
 
     def test_rule_delete_sets_dirty(self, window):
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
+        window._rule_list_panel.set_rulebook(window._book)
         window._on_rule_delete(0)
         assert window.is_dirty() is True
 
-    def test_engine_options_change_sets_dirty(self, window):
-        window._on_engine_options_changed(
-            {"max_passes": 5, "stop_on_match": False}
-        )
+    def test_rule_move_up_sets_dirty(self, window):
+        window._book = _sample_book()
+        window._rule_list_panel.set_rulebook(window._book)
+        window._set_dirty(False)
+        window._on_rule_move_up(1)
         assert window.is_dirty() is True
 
     def test_rule_panel_change_sets_dirty(self, window):
         window._book = _sample_book()
-        window._preset_panel.set_rulebook(window._book)
+        window._rule_list_panel.set_rulebook(window._book)
         window._on_rule_selected(0)
         # clear dirty (selection 은 dirty 아님)
         window._set_dirty(False)
@@ -413,6 +443,17 @@ class TestDirtyGuard:
         window._on_rule_add()
         window.set_auto_dirty_choice("discard")
         assert window.close() is True
+
+    def test_close_with_dirty_discard_reloads_on_reopen(self, window, module):
+        window.show()
+        window._on_rule_add()
+        assert len(window._book.rules) >= 1
+        module.set_v2_dsl("(base):main+=kept")
+        window.set_auto_dirty_choice("discard")
+        assert window.close() is True
+        window.show()
+        assert len(window._book.rules) == 1
+        assert window._book.rules[0].condition.tag_value == "base"
 
     def test_preset_load_with_dirty_cancel(self, window, storage):
         storage.save("pcancel", _sample_book())

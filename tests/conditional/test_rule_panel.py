@@ -4,7 +4,7 @@
 - block/raw Rule 왕복
 - 5 action kind (append_list / append / replace / char_set / char_replace)
 - target fixed / char:N / uc:N / char:* / uc:*
-- priority / name / enabled / kind 필드 왕복
+- priority / hidden name / enabled / kind 필드 왕복
 - visibility 토글이 action kind / target kind 변화에 따라 정확
 - changed 시그널 (사용자 편집 시만)
 """
@@ -70,10 +70,26 @@ class TestMetaRoundtrip:
         p = RulePanel(Rule(priority=42))
         assert p.get_rule().priority == 42
 
-    def test_name_strip(self):
+    def test_hidden_name_roundtrip(self):
+        p = RulePanel(Rule(name="hidden-name"))
+        assert p.get_rule().name == "hidden-name"
+
+    def test_set_rule_enabled_updates_output(self):
         p = RulePanel()
-        p._name_edit.setText("  spaced  ")
-        assert p.get_rule().name == "spaced"
+        p.set_rule_enabled(False)
+        assert p.is_rule_enabled() is False
+        assert p.get_rule().enabled is False
+
+    def test_brief_label(self):
+        p = RulePanel(
+            Rule(
+                kind="block",
+                enabled=True,
+                condition=make_tag_leaf("blush"),
+                action=Action(kind="append_list", target="main", tags=["y"]),
+            )
+        )
+        assert p.get_brief_label() == "[단일][추가]"
 
 
 # ============================================================================
@@ -216,7 +232,7 @@ class TestRawKind:
     def test_switch_raw_to_block(self):
         p = RulePanel(Rule(kind="raw", raw_dsl="(x):y=z"))
         # block 으로 전환 → UI 상 block 기본값 (condition=tag leaf, action=append_list/main)
-        p._kind_combo.setCurrentText("block")
+        p._set_kind_value("block")
         r = p.get_rule()
         assert r.kind == "block"
         assert r.condition is not None
@@ -348,25 +364,13 @@ class TestChangedSignal:
         ))
         assert c.count == 0
 
-    def test_name_edit_emits(self):
-        p = RulePanel()
-        c = _Counter()
-        p.changed.connect(c)
-        p._name_edit.setText("hello")
-        assert c.count >= 1
-
-    def test_priority_change_emits(self):
-        p = RulePanel()
-        c = _Counter()
-        p.changed.connect(c)
-        p._priority_spin.setValue(50)
-        assert c.count >= 1
-
     def test_action_kind_emits(self):
         p = RulePanel()
         c = _Counter()
         p.changed.connect(c)
-        p._action_kind_combo.setCurrentText("replace")
+        p._action_kind_combo.setCurrentIndex(
+            p._action_kind_combo.findData("replace")
+        )
         assert c.count >= 1
 
     def test_chip_add_emits(self):

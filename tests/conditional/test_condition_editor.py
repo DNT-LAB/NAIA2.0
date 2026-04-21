@@ -226,7 +226,7 @@ class TestKindSwitch:
         e = ConditionNodeEditor(make_tag_leaf("x"))
         counter = _Counter()
         e.changed.connect(counter)
-        e._leaf_kind_combo.setCurrentText("rating")
+        e._set_leaf_kind_value("rating")
         # setCurrentText 는 값이 이전과 달라야 시그널 발행 → 실제 변경
         assert counter.count >= 1
 

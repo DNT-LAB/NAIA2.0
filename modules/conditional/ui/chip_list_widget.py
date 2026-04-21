@@ -166,7 +166,7 @@ class ChipListWidget(QWidget):
         label = QLabel(tag)
         label.setStyleSheet(
             f"color: {DARK_COLORS['text_primary']};"
-            f" font-size: {get_scaled_font_size(12)}px;"
+            f" font-size: {get_scaled_font_size(17)}px;"
         )
         layout.addWidget(label)
 
@@ -211,8 +211,8 @@ class ChipListWidget(QWidget):
             f"  background-color: transparent;"
             f"  color: {DARK_COLORS['text_secondary']};"
             f"  border: none;"
-            f"  font-size: {get_scaled_font_size(14)}px;"
-            f"}}"
+            f"  font-size: {get_scaled_font_size(19)}px;"
+        f"}}"
             f"QPushButton:hover {{"
             f"  color: {DARK_COLORS['text_primary']};"
             f"  background-color: {DARK_COLORS['bg_hover']};"
@@ -227,9 +227,9 @@ class ChipListWidget(QWidget):
             f"  color: {DARK_COLORS['text_primary']};"
             f"  border: 1px solid {DARK_COLORS['border']};"
             f"  border-radius: {get_scaled_size(4)}px;"
-            f"  padding: {get_scaled_size(4)}px {get_scaled_size(8)}px;"
-            f"  font-size: {get_scaled_font_size(12)}px;"
-            f"}}"
+            f"  padding: {get_scaled_size(6)}px {get_scaled_size(10)}px;"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+        f"}}"
             f"QLineEdit:focus {{"
             f"  border-color: {DARK_COLORS['accent_blue']};"
             f"}}"
@@ -242,8 +242,8 @@ class ChipListWidget(QWidget):
             f"  color: {DARK_COLORS['text_primary']};"
             f"  border: 1px solid {DARK_COLORS['border']};"
             f"  border-radius: {get_scaled_size(4)}px;"
-            f"  font-size: {get_scaled_font_size(14)}px;"
-            f"}}"
+            f"  font-size: {get_scaled_font_size(19)}px;"
+        f"}}"
             f"QPushButton:hover {{"
             f"  background-color: {DARK_COLORS['bg_hover']};"
             f"}}"

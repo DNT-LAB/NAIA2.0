@@ -1,12 +1,13 @@
-"""PresetPanel 테스트 (Sub-phase 1.4d).
+"""PresetPanel 테스트 (3-pane 재설계 후).
 
 검증:
-- set_presets / set_rulebook / set_selected_rule / engine_options 왕복
-- 시그널 발행: load / save / delete / rule_selected / rule_add / rule_delete /
-  engine_options_changed
-- 번들 프리셋 선택 시 delete 버튼 비활성
+- set_presets 시 번들/사용자 아이콘 + 툴팁
+- 시그널: preset_load_requested / preset_save_requested / preset_delete_requested
+- 번들 프리셋 선택 시 삭제 버튼 비활성, 삭제 시그널 억제
 - 더블클릭 → 로드 시그널
-- Rule 리스트 표시 (priority 정렬 + summary)
+- is_selected_preset_bundled / is_name_bundled / get_selected_preset_name
+
+규칙 목록 / 엔진 옵션은 RuleListPanel / (제거됨) 으로 분리되어 이 파일에서 다루지 않음.
 """
 
 from __future__ import annotations
@@ -26,12 +27,6 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
-from modules.conditional.block_model import (  # noqa: E402
-    Action,
-    Rule,
-    RuleBook,
-    make_tag_leaf,
-)
 from modules.conditional.preset_io import PresetInfo  # noqa: E402
 from modules.conditional.ui.preset_panel import PresetPanel  # noqa: E402
 
@@ -43,17 +38,6 @@ def _pi(name: str, *, bundled: bool = False, rule_count: int = 0):
         description=f"desc {name}",
         is_bundled=bundled,
         rule_count=rule_count,
-    )
-
-
-def _rule(priority: int, *, name: str = "", enabled: bool = True) -> Rule:
-    return Rule(
-        kind="block",
-        enabled=enabled,
-        priority=priority,
-        name=name,
-        condition=make_tag_leaf("x"),
-        action=Action(kind="append_list", target="main", tags=["y"]),
     )
 
 
@@ -94,6 +78,11 @@ class TestPresetList:
         p.set_presets([])
         assert p._preset_list.count() == 0
         assert p.get_selected_preset_name() is None
+
+
+# ============================================================================
+# 시그널
+# ============================================================================
 
 
 class TestPresetSignals:
@@ -163,162 +152,39 @@ class TestPresetSignals:
         p._preset_list.setCurrentRow(1)
         assert p._delete_btn.isEnabled()
 
-
-# ============================================================================
-# Rule 리스트
-# ============================================================================
-
-
-class TestRuleList:
-    def test_renders_rules_sorted_by_priority(self):
-        p = PresetPanel()
-        book = RuleBook(rules=[
-            _rule(30, name="c"),
-            _rule(10, name="a"),
-            _rule(20, name="b"),
-        ])
-        p.set_rulebook(book)
-        assert p._rule_list.count() == 3
-        # sorted_rules 로 정렬되므로 a/b/c 순
-        assert "a" in p._rule_list.item(0).text()
-        assert "b" in p._rule_list.item(1).text()
-        assert "c" in p._rule_list.item(2).text()
-
-    def test_summary_includes_priority_prefix(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[_rule(42, name="foo")]))
-        text = p._rule_list.item(0).text()
-        assert "[0042]" in text  # zero-padded
-
-    def test_summary_truncates_long_dsl(self):
-        long_tag = "x" * 200
-        r = Rule(
-            kind="block",
-            priority=0,
-            condition=make_tag_leaf(long_tag),
-            action=Action(kind="append_list", target="main", tags=["y"]),
-        )
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[r]))
-        text = p._rule_list.item(0).text()
-        assert "..." in text
-
-    def test_empty_rulebook(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook())
-        assert p._rule_list.count() == 0
-
-    def test_none_rulebook(self):
-        p = PresetPanel()
-        p.set_rulebook(None)
-        assert p._rule_list.count() == 0
-
-
-class TestRuleSignals:
-    def test_rule_selected_emits_index(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[_rule(10), _rule(20)]))
-        spy = _Spy()
-        p.rule_selected.connect(spy)
-        p._rule_list.setCurrentRow(1)
-        assert 1 in spy.calls
-
-    def test_rule_add_requested(self):
-        p = PresetPanel()
-        spy = _Spy()
-        p.rule_add_requested.connect(lambda: spy())
-        p.rule_add_requested.emit()
-        assert len(spy.calls) == 1
-
-    def test_rule_delete_requested(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[_rule(10), _rule(20)]))
-        p._rule_list.setCurrentRow(0)
-        spy = _Spy()
-        p.rule_delete_requested.connect(spy)
-        p._on_rule_delete_clicked()
-        assert spy.calls == [0]
-
-    def test_rule_delete_ignored_without_selection(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[_rule(10)]))
-        p._rule_list.clearSelection()
-        p._rule_list.setCurrentRow(-1)
-        spy = _Spy()
-        p.rule_delete_requested.connect(spy)
-        p._on_rule_delete_clicked()
-        assert spy.calls == []
+    def test_load_button_disabled_without_selection(self):
+        p = self._setup()
+        p._preset_list.clearSelection()
+        p._preset_list.setCurrentRow(-1)
+        assert not p._load_btn.isEnabled()
 
 
 # ============================================================================
-# Engine options
+# 번들 판별
 # ============================================================================
 
 
-class TestEngineOptions:
-    def test_defaults(self):
+class TestBundleHelpers:
+    def test_is_selected_preset_bundled(self):
         p = PresetPanel()
-        opts = p.get_engine_options()
-        assert opts == {"max_passes": 1, "stop_on_match": False}
+        p.set_presets([_pi("bundle", bundled=True), _pi("user", bundled=False)])
+        p._preset_list.setCurrentRow(0)
+        assert p.is_selected_preset_bundled() is True
+        p._preset_list.setCurrentRow(1)
+        assert p.is_selected_preset_bundled() is False
 
-    def test_set_and_get(self):
+    def test_is_name_bundled(self):
         p = PresetPanel()
-        p.set_engine_options({"max_passes": 5, "stop_on_match": True})
-        assert p.get_engine_options() == {
-            "max_passes": 5, "stop_on_match": True,
-        }
+        p.set_presets([_pi("bundle", bundled=True), _pi("user", bundled=False)])
+        assert p.is_name_bundled("bundle") is True
+        assert p.is_name_bundled("user") is False
+        assert p.is_name_bundled("nonexistent") is False
 
-    def test_set_clamps_min(self):
+    def test_is_name_bundled_empty(self):
         p = PresetPanel()
-        p.set_engine_options({"max_passes": 0, "stop_on_match": False})
-        assert p.get_engine_options()["max_passes"] == 1
-
-    def test_set_rulebook_syncs_options(self):
-        p = PresetPanel()
-        book = RuleBook(max_passes=7, stop_on_match=True)
-        p.set_rulebook(book)
-        assert p.get_engine_options() == {
-            "max_passes": 7, "stop_on_match": True,
-        }
-
-    def test_change_emits_signal(self):
-        p = PresetPanel()
-        spy = _Spy()
-        p.engine_options_changed.connect(spy)
-        p._max_passes_spin.setValue(3)
-        assert spy.calls  # dict 객체
-        last = spy.calls[-1]
-        assert last["max_passes"] == 3
-
-    def test_set_engine_options_is_silent(self):
-        p = PresetPanel()
-        spy = _Spy()
-        p.engine_options_changed.connect(spy)
-        p.set_engine_options({"max_passes": 2, "stop_on_match": True})
-        assert spy.calls == []
-
-
-# ============================================================================
-# set_selected_rule
-# ============================================================================
-
-
-class TestSetSelectedRule:
-    def test_programmatic_select_does_not_emit(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[_rule(10), _rule(20)]))
-        spy = _Spy()
-        p.rule_selected.connect(spy)
-        p.set_selected_rule(1)
-        # set_selected_rule 은 시그널 억제 (프로그램 호출)
-        assert spy.calls == []
-        assert p._rule_list.currentRow() == 1
-
-    def test_out_of_range_clears(self):
-        p = PresetPanel()
-        p.set_rulebook(RuleBook(rules=[_rule(10)]))
-        p.set_selected_rule(99)
-        assert p._rule_list.currentRow() == -1 or not p._rule_list.selectedItems()
+        p.set_presets([_pi("bundle", bundled=True)])
+        assert p.is_name_bundled("") is False
+        assert p.is_name_bundled(None) is False
 
 
 if __name__ == "__main__":

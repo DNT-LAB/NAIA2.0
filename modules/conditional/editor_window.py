@@ -1,15 +1,19 @@
-"""조건부 프롬프트 편집기 창 (Sub-phase 1.4e).
+"""조건부 프롬프트 편집기 창.
 
-2-pane 레이아웃:
-- 좌측(40%): PresetPanel — 프리셋 + 엔진 옵션 + 규칙 리스트
-- 우측(60%): RulePanel — 선택된 규칙 편집
+3-pane 레이아웃:
+- 좌측: PresetPanel — 프리셋 목록 + CRUD
+- 중앙: RuleListPanel — 규칙 목록 + 켜기끄기/추가/제거/이동 버튼
+- 우측: RulePanel — 선택된 규칙의 조건/액션 편집
 
 RuleBook 을 소유하며 사용자 편집을 조율한다. Apply 시 DSL 직렬화 후 모듈의
-`rules_textedit` 에 주입 + `set_engine_options` + 활성 프리셋 기록. 닫기 시
-반영 없음(기존 DSL 유지).
+v2 저장소(`set_v2_dsl`)에 기록 + `set_engine_options` + 활성 프리셋 이름 갱신.
 
-편집기는 열릴 때 모듈의 현재 DSL 을 `parse_rulebook` 로 복원한다. 파싱 실패
-규칙은 `Rule(kind="raw")` 로 보존되어 UI 에도 raw 모드로 표시.
+엔진 옵션(max_passes / stop_on_match)은 UI 에서 제거됨. 현 구현은 1회 반복만
+허용하므로 RuleBook 기본값(1 / False)을 그대로 쓴다. 프리셋 파일에 저장된
+엔진 옵션은 로드 시 여전히 RuleBook 필드에 보존된다.
+
+편집기는 열릴 때 모듈의 v2 DSL 을 `parse_rulebook` 로 복원한다. 파싱 실패
+규칙은 `Rule(kind="raw")` 로 보존되어 RulePanel 이 raw 편집기로 자동 스위치.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -42,13 +47,14 @@ from modules.conditional.preset_io import (
     get_default_storage,
 )
 from modules.conditional.ui.preset_panel import PresetPanel
+from modules.conditional.ui.rule_list_panel import RuleListPanel
 from modules.conditional.ui.rule_panel import RulePanel
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.theme import DARK_COLORS, get_dynamic_styles
 
 
 class RuleEditorWindow(QDialog):
-    """2-pane 블록 편집 창. 비모달 / 단일 인스턴스."""
+    """3-pane 블록 편집 창. 비모달 / 단일 인스턴스."""
 
     rules_applied = pyqtSignal(str)  # Apply 시 DSL 본문 송신 (옵저버 용)
 
@@ -75,7 +81,8 @@ class RuleEditorWindow(QDialog):
         self._auto_dirty_choice: Optional[str] = None
 
         self.setWindowTitle("조건부 프롬프트 편집기")
-        self.setMinimumSize(get_scaled_size(1000), get_scaled_size(640))
+        # 3-pane 구조 폭 고려해 최소 폭 확대.
+        self.setMinimumSize(get_scaled_size(1280), get_scaled_size(640))
         self.setModal(False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setStyleSheet(
@@ -99,21 +106,30 @@ class RuleEditorWindow(QDialog):
         root.setSpacing(get_scaled_size(8))
 
         root.addLayout(self._build_header_row())
+        root.addWidget(self._build_intro_card())
 
-        # 2-pane
+        # 3-pane: [프리셋 | 규칙 목록 | 조건/액션]
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
 
         self._preset_panel = PresetPanel()
         splitter.addWidget(self._preset_panel)
 
+        self._rule_list_panel = RuleListPanel()
+        splitter.addWidget(self._rule_list_panel)
+
         self._rule_panel = RulePanel()
         splitter.addWidget(self._rule_panel)
 
-        # 40/60 — stretch factor
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 6)
-        splitter.setSizes([get_scaled_size(400), get_scaled_size(600)])
+        # 기본 비율 2 : 3 : 5 (프리셋 : 규칙 목록 : 조건 편집)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(2, 5)
+        splitter.setSizes([
+            get_scaled_size(260),
+            get_scaled_size(360),
+            get_scaled_size(620),
+        ])
         root.addWidget(splitter, stretch=1)
 
         root.addLayout(self._build_button_row(dynamic_styles))
@@ -125,7 +141,7 @@ class RuleEditorWindow(QDialog):
         title = QLabel("🔀 조건부 프롬프트 편집기")
         title.setStyleSheet(
             f"color: {DARK_COLORS['text_primary']};"
-            f" font-size: {get_scaled_font_size(18)}px;"
+            f" font-size: {get_scaled_font_size(22)}px;"
             f" font-weight: bold;"
         )
         row.addWidget(title)
@@ -134,10 +150,38 @@ class RuleEditorWindow(QDialog):
         self._active_preset_label = QLabel("")
         self._active_preset_label.setStyleSheet(
             f"color: {DARK_COLORS['text_secondary']};"
-            f" font-size: {get_scaled_font_size(12)}px;"
+            f" font-size: {get_scaled_font_size(16)}px;"
         )
         row.addWidget(self._active_preset_label)
         return row
+
+    def _build_intro_card(self) -> QWidget:
+        card = QFrame()
+        card.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {DARK_COLORS['bg_secondary']};"
+            f"  border: 1px solid {DARK_COLORS['border_light']};"
+            f"  border-radius: {get_scaled_size(6)}px;"
+            f"}}"
+            f"QLabel {{ border: none; background: transparent; }}"
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(
+            get_scaled_size(10), get_scaled_size(8),
+            get_scaled_size(10), get_scaled_size(8),
+        )
+        layout.setSpacing(get_scaled_size(0))
+        self._intro_summary_label = QLabel(
+            "선택한 규칙 요약이 여기에 표시됩니다."
+        )
+        self._intro_summary_label.setWordWrap(True)
+        self._intro_summary_label.setStyleSheet(
+            f"color: {DARK_COLORS['text_primary']};"
+            f" font-weight: bold;"
+            f" font-size: {get_scaled_font_size(17)}px;"
+        )
+        layout.addWidget(self._intro_summary_label)
+        return card
 
     def _build_button_row(self, dynamic_styles) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -170,10 +214,14 @@ class RuleEditorWindow(QDialog):
         p.preset_load_requested.connect(self._on_preset_load)
         p.preset_save_requested.connect(self._on_preset_save)
         p.preset_delete_requested.connect(self._on_preset_delete)
-        p.rule_selected.connect(self._on_rule_selected)
-        p.rule_add_requested.connect(self._on_rule_add)
-        p.rule_delete_requested.connect(self._on_rule_delete)
-        p.engine_options_changed.connect(self._on_engine_options_changed)
+
+        r = self._rule_list_panel
+        r.rule_selected.connect(self._on_rule_selected)
+        r.rule_add_requested.connect(self._on_rule_add)
+        r.rule_delete_requested.connect(self._on_rule_delete)
+        r.rule_enabled_toggle_requested.connect(self._on_rule_enabled_toggle)
+        r.rule_move_up_requested.connect(self._on_rule_move_up)
+        r.rule_move_down_requested.connect(self._on_rule_move_down)
 
         self._rule_panel.changed.connect(self._on_rule_panel_changed)
 
@@ -213,8 +261,10 @@ class RuleEditorWindow(QDialog):
             self._book.stop_on_match = bool(opts.get('stop_on_match', False))
         self._book.rules.sort(key=lambda r: r.priority)
         self._current_rule_id = None
-        self._preset_panel.set_rulebook(self._book)
+        self._rule_list_panel.set_rulebook(self._book)
         self._rule_panel.set_rule(self._empty_rule())
+        self._rule_panel.set_rule_position(None, len(self._book.rules))
+        self._update_selected_rule_summary(None)
         self._update_active_preset_label()
         self._set_dirty(False)
 
@@ -223,13 +273,17 @@ class RuleEditorWindow(QDialog):
 
     def _refresh_rule_list_preserving_selection(self) -> None:
         self._book.rules.sort(key=lambda r: r.priority)
-        self._preset_panel.set_rulebook(self._book)
+        self._rule_list_panel.set_rulebook(self._book)
         if self._current_rule_id:
             for i, r in enumerate(self._book.rules):
                 if r.id == self._current_rule_id:
-                    self._preset_panel.set_selected_rule(i)
+                    self._rule_list_panel.set_selected_rule(i)
+                    self._rule_panel.set_rule_position(i, len(self._book.rules))
+                    self._update_selected_rule_summary(r)
                     return
-        self._preset_panel.set_selected_rule(-1)
+        self._rule_list_panel.set_selected_rule(-1)
+        self._rule_panel.set_rule_position(None, len(self._book.rules))
+        self._update_selected_rule_summary(None)
 
     def _empty_rule(self) -> Rule:
         return Rule(
@@ -260,8 +314,10 @@ class RuleEditorWindow(QDialog):
         self._book.rules.sort(key=lambda r: r.priority)
         self._active_preset_name = name
         self._current_rule_id = None
-        self._preset_panel.set_rulebook(self._book)
+        self._rule_list_panel.set_rulebook(self._book)
         self._rule_panel.set_rule(self._empty_rule())
+        self._rule_panel.set_rule_position(None, len(self._book.rules))
+        self._update_selected_rule_summary(None)
         self._update_active_preset_label()
         self._set_dirty(False)
         return True
@@ -341,9 +397,13 @@ class RuleEditorWindow(QDialog):
             rule = self._book.rules[idx]
             self._current_rule_id = rule.id
             self._rule_panel.set_rule(rule)
+            self._rule_panel.set_rule_position(idx, len(self._book.rules))
+            self._update_selected_rule_summary(rule)
         else:
             self._current_rule_id = None
             self._rule_panel.set_rule(self._empty_rule())
+            self._rule_panel.set_rule_position(None, len(self._book.rules))
+            self._update_selected_rule_summary(None)
 
     def _on_rule_panel_changed(self) -> None:
         if not self._current_rule_id:
@@ -355,33 +415,65 @@ class RuleEditorWindow(QDialog):
                 self._book.rules[i] = updated
                 break
         self._refresh_rule_list_preserving_selection()
+        self._update_selected_rule_summary(updated)
         self._set_dirty(True)
 
     def _on_rule_add(self) -> None:
         new_rule = self._empty_rule()
-        # 기존 최대 priority + 10 (맨 아래 배치)
-        max_p = max((r.priority for r in self._book.rules), default=0)
-        new_rule.priority = max_p + 10
         self._book.rules.append(new_rule)
+        self._renumber_priorities()
         self._current_rule_id = new_rule.id
         self._refresh_rule_list_preserving_selection()
         self._rule_panel.set_rule(new_rule)
+        self._update_selected_rule_summary(new_rule)
         self._set_dirty(True)
 
     def _on_rule_delete(self, idx: int) -> None:
         if not (0 <= idx < len(self._book.rules)):
             return
         removed = self._book.rules.pop(idx)
+        self._renumber_priorities()
         if removed.id == self._current_rule_id:
             self._current_rule_id = None
             self._rule_panel.set_rule(self._empty_rule())
-        self._preset_panel.set_rulebook(self._book)
+            self._rule_panel.set_rule_position(None, len(self._book.rules))
+        self._refresh_rule_list_preserving_selection()
         self._set_dirty(True)
 
-    def _on_engine_options_changed(self, opts: dict) -> None:
-        self._book.max_passes = int(opts.get('max_passes', 1))
-        self._book.stop_on_match = bool(opts.get('stop_on_match', False))
+    def _on_rule_enabled_toggle(self, idx: int) -> None:
+        if not (0 <= idx < len(self._book.rules)):
+            return
+        rule = self._book.rules[idx]
+        rule.enabled = not rule.enabled
+        if rule.id == self._current_rule_id:
+            self._rule_panel.set_rule_enabled(rule.enabled)
+        self._refresh_rule_list_preserving_selection()
         self._set_dirty(True)
+
+    def _on_rule_move_up(self, idx: int) -> None:
+        self._move_rule(idx, idx - 1)
+
+    def _on_rule_move_down(self, idx: int) -> None:
+        self._move_rule(idx, idx + 1)
+
+    def _move_rule(self, from_idx: int, to_idx: int) -> None:
+        if not (
+            0 <= from_idx < len(self._book.rules)
+            and 0 <= to_idx < len(self._book.rules)
+        ):
+            return
+        rule = self._book.rules.pop(from_idx)
+        self._book.rules.insert(to_idx, rule)
+        self._renumber_priorities()
+        self._current_rule_id = rule.id
+        self._refresh_rule_list_preserving_selection()
+        self._rule_panel.set_rule(rule)
+        self._update_selected_rule_summary(rule)
+        self._set_dirty(True)
+
+    def _renumber_priorities(self) -> None:
+        for idx, rule in enumerate(self._book.rules, start=1):
+            rule.priority = idx * 10
 
     # ------------------------------------------------------------------
     # Apply
@@ -455,9 +547,15 @@ class RuleEditorWindow(QDialog):
         if choice == "apply":
             return self._perform_apply()
         if choice == "discard":
-            self._set_dirty(False)
+            self._discard_local_changes()
             return True
         return False
+
+    def _discard_local_changes(self) -> None:
+        if self.module is not None:
+            self._reload_from_module()
+        else:
+            self._set_dirty(False)
 
     def _ask_dirty_choice(self, context_label: str) -> str:
         box = QMessageBox(self)
@@ -490,6 +588,15 @@ class RuleEditorWindow(QDialog):
         self._active_preset_label.setText(
             f"활성 프리셋: {name}{marker}"
         )
+
+    def _update_selected_rule_summary(self, rule: Optional[Rule]) -> None:
+        text = (
+            self._rule_panel.get_summary_text()
+            if rule is not None
+            else "선택한 규칙 요약이 여기에 표시됩니다."
+        )
+        self._intro_summary_label.setText(text)
+        self._rule_list_panel.set_rule_summary_text(text)
 
     # ------------------------------------------------------------------
     # Lifecycle

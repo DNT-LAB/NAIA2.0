@@ -127,12 +127,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # 호환성 설정
         self.NAI_compatibility = True
         self.WEBUI_compatibility = True
-        
+
         # UI 위젯 인스턴스 변수
         self.enable_checkbox = None
         self.rules_textedit = None
         self.log_textedit = None
         self.widget = None
+
+        # 새 편집기 창 (단일 인스턴스, lazy 생성)
+        self._rule_editor_window = None
 
     def get_title(self) -> str:
         return "🔀 조건부 프롬프트"
@@ -164,6 +167,34 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 font-weight: 500;
             }}
         """
+
+        # 편집기 열기 버튼 (신규 GUI, v2.1 Phase 0)
+        editor_button = QPushButton("🔧 편집기 열기 (Preview)")
+        editor_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #2E7D32;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-weight: 600;
+                color: #FFFFFF;
+                font-size: {get_scaled_font_size(18)}px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: #1B5E20;
+            }}
+            QPushButton:pressed {{
+                background-color: #0D3F14;
+            }}
+        """)
+        editor_button.setToolTip(
+            "블록 기반 조건부 규칙 편집기 창을 엽니다 (개발 중).\n"
+            "기존 규칙 정의 텍스트박스는 그대로 사용할 수 있습니다."
+        )
+        editor_button.clicked.connect(self._open_rule_editor)
+        layout.addWidget(editor_button)
 
         # 활성화 체크박스
         self.enable_checkbox = QCheckBox("조건부 프롬프트 활성화")
@@ -303,6 +334,29 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 self.update_visibility_for_mode(current_mode)
 
         return widget
+
+    def _open_rule_editor(self):
+        """새 규칙 편집기 창을 띄운다. 단일 인스턴스로 재사용."""
+        if self._rule_editor_window is None:
+            try:
+                from modules.conditional.editor_window import RuleEditorWindow
+            except ImportError as e:
+                print(f"❌ 편집기 창 모듈 로드 실패: {e}")
+                return
+
+            parent = None
+            if hasattr(self, 'app_context') and self.app_context is not None:
+                parent = getattr(self.app_context, 'main_window', None)
+
+            self._rule_editor_window = RuleEditorWindow(
+                app_context=getattr(self, 'app_context', None),
+                module=self,
+                parent=parent,
+            )
+
+        self._rule_editor_window.show()
+        self._rule_editor_window.raise_()
+        self._rule_editor_window.activateWindow()
 
     def collect_current_settings(self) -> Dict[str, Any]:
         """현재 UI 상태를 딕셔너리로 수집"""

@@ -175,6 +175,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # 매 hook 사이클 시작 시 fresh, generation_finished/error 에서 복원.
         # 설계: docs/CONDITIONAL_CHAR_ACTION_RESTORATION.md
         self._char_snapshot = None  # type: Optional[CharStateSnapshot]
+        # M1: initialize_with_context 가 중복 호출돼도 핸들러가 한 번만 등록되도록.
+        self._gen_event_subscribed: bool = False
 
     def set_engine_options(self, *, max_passes: int = 1,
                            stop_on_match: bool = False):
@@ -2126,6 +2128,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self.app_context = app_context
         # 179 SDLC P2: char 액션 변경을 generate 종료 후 복원하기 위해 이벤트 구독.
         # generation_finished + generation_error 둘 다 — 실패해도 복원 보장.
+        # M1 가드: 같은 인스턴스가 재초기화돼도 핸들러가 중복 등록되지 않게.
+        if self._gen_event_subscribed:
+            return
         try:
             app_context.subscribe(
                 "generation_finished", self._on_generate_done
@@ -2133,6 +2138,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             app_context.subscribe(
                 "generation_error", self._on_generate_done
             )
+            self._gen_event_subscribed = True
         except Exception as e:
             print(f"[Conditional] generate 이벤트 구독 실패: {e}")
 

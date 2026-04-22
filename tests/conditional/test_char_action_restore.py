@@ -424,6 +424,33 @@ def test_publish_finished_with_empty_snapshot():
     assert_true(mod._char_snapshot is None, "still None")
 
 
+def test_initialize_with_context_idempotent():
+    """M1: initialize_with_context 중복 호출에도 핸들러는 한 번만 등록."""
+    print("[test_initialize_with_context_idempotent]")
+    widgets = [MockCharacterWidget(active=True)]
+    cm = MockCharacterModule(widgets)
+    ctx = MockAppContext(cm)
+    mod = PromptListModifierModule()
+
+    mod.initialize_with_context(ctx)
+    mod.initialize_with_context(ctx)  # 중복
+    mod.initialize_with_context(ctx)  # 또 중복
+
+    n_finished = len(ctx._subscribers.get("generation_finished", []))
+    n_error = len(ctx._subscribers.get("generation_error", []))
+    assert_eq(n_finished, 1, "generation_finished subscribed exactly once")
+    assert_eq(n_error, 1, "generation_error subscribed exactly once")
+
+    # 중복 등록되지 않아 단일 복원만 발생
+    mod._apply_rules(make_context(), "():char_set(1, disabled)", [])
+    assert_eq(widgets[0].active_checkbox.isChecked(), False, "rule applied")
+    ctx.publish("generation_finished", {})
+    assert_eq(
+        widgets[0].active_checkbox.isChecked(), True,
+        "restored once (no double-restore from duplicate handlers)",
+    )
+
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -441,6 +468,7 @@ def main():
         test_leak_recovery_on_next_cycle,
         test_no_action_no_capture,
         test_publish_finished_with_empty_snapshot,
+        test_initialize_with_context_idempotent,
     ]
     failed = 0
     for t in tests:

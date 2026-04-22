@@ -177,6 +177,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self._char_snapshot = None  # type: Optional[CharStateSnapshot]
         # M1: initialize_with_context 가 중복 호출돼도 핸들러가 한 번만 등록되도록.
         self._gen_event_subscribed: bool = False
+        # 시뮬레이션 인스트루먼트: None 이 아니면 _apply_rules_single_pass 가
+        # 매칭된 규칙 원문(DSL 텍스트) 을 이 리스트에 append.
+        self._simulate_matches: Optional[List[str]] = None
+        # 시뮬 전/후 태그 스냅샷 (prefix/main/postfix) — _apply_rules 가
+        # _simulate_matches 활성 시 진입 직후 / 종료 직전에 채운다.
+        # diff 로 added_tags 를 계산하여 final_prompt 에서 강조하기 위함.
+        self._simulate_before_tags: Optional[Dict[str, List[str]]] = None
+        self._simulate_after_tags: Optional[Dict[str, List[str]]] = None
 
     def set_engine_options(self, *, max_passes: int = 1,
                            stop_on_match: bool = False):
@@ -755,6 +763,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         main_tags = context.main_tags.copy()
         postfix_tags = context.postfix_tags.copy()
 
+        # 시뮬 모드: 규칙 적용 전 태그 스냅샷 (after 는 루프 종료 후).
+        # final_prompt 하이라이트용 diff 계산에 사용.
+        if self._simulate_matches is not None:
+            self._simulate_before_tags = {
+                "prefix": list(prefix_tags),
+                "main": list(main_tags),
+                "postfix": list(postfix_tags),
+            }
+
         snapshot_history: List[int] = []
         first_pass_results: List[Dict] = []
         passes_run = 0
@@ -796,6 +813,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # Phase 1.1: 집계된 skip 로그 출력 (silent 금지 원칙)
         self._flush_skip_logs(logs)
 
+        # 시뮬 모드: 규칙 적용 후 최종 태그 스냅샷
+        if self._simulate_matches is not None:
+            self._simulate_after_tags = {
+                "prefix": list(prefix_tags),
+                "main": list(main_tags),
+                "postfix": list(postfix_tags),
+            }
+
         context.prefix_tags = prefix_tags
         context.main_tags = main_tags
         context.postfix_tags = postfix_tags
@@ -824,6 +849,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                         'description': action['description'],
                     })
                     matched = True
+                    # 시뮬레이션 인스트루먼트 — 매칭된 규칙 DSL 원문 기록.
+                    # 여러 패스에서 중복 매칭될 수 있으므로 set 은 호출측에서 적용.
+                    if self._simulate_matches is not None:
+                        self._simulate_matches.append(rule['original'])
                     if stop_on_match:
                         break
                 else:
@@ -1912,23 +1941,34 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             )
             return prefix_tags, main_tags, postfix_tags
 
-        # 정확 일치 모드: prefix -> main -> postfix 순서로 첫 번째 일치 항목 대체
+        # 정확 일치 모드: prefix -> main -> postfix 순서로 첫 번째 일치 항목 대체.
+        # 가중치 포맷 승계는 원본 태그가 래핑된 경우에만 적용하고, pop/insert 자체는
+        # plain / weighted 공통 경로로 실행되어야 한다 (이전 구현은 pop/insert 를
+        # weighted 가드 안에 두어 plain 태그 치환이 silent-no-op 이 되는 버그가 있었음).
         for tag_list_ref in [prefix_tags, main_tags, postfix_tags]:
             for i, tag in enumerate(tag_list_ref):
                 raw_tag = _strip_weight_format(tag)
                 if old_tag == raw_tag:
-                    # 첫 번째 새 태그에 기존 가중치 포맷 유지
-                    # 단, 새 태그가 이미 가중치 포맷이면 사용자 의도 존중 — 승계하지 않음
                     weighted_new_list = list(new_tag_list)
-                    if weighted_new_list and raw_tag != tag.strip():
+                    # 기존 태그가 가중치 래핑된 경우: 첫 새 태그에 포맷 승계.
+                    # 새 태그가 이미 가중치 포맷이면 사용자 의도 존중 — 승계하지 않음.
+                    was_weighted = raw_tag != tag.strip()
+                    if was_weighted and weighted_new_list:
                         first_new = weighted_new_list[0].strip()
-                        if not (_WEIGHT_NAI_RE.match(first_new) or _WEIGHT_WEBUI_RE.match(first_new)):
-                                weighted_new_list[0] = _replace_tag_in_weight_format(tag, weighted_new_list[0])
-                        # 기존 태그를 제거하고 새 태그들을 그 자리에 삽입
-                        tag_list_ref.pop(i)
-                        for j, new_tag in enumerate(reversed(weighted_new_list)):
-                            tag_list_ref.insert(i, new_tag)
-                        return prefix_tags, main_tags, postfix_tags
+                        if not (
+                            _WEIGHT_NAI_RE.match(first_new)
+                            or _WEIGHT_WEBUI_RE.match(first_new)
+                        ):
+                            weighted_new_list[0] = (
+                                _replace_tag_in_weight_format(
+                                    tag, weighted_new_list[0]
+                                )
+                            )
+                    # 기존 태그 제거 + 새 태그 역순 삽입 (plain / weighted 공통)
+                    tag_list_ref.pop(i)
+                    for new_tag in reversed(weighted_new_list):
+                        tag_list_ref.insert(i, new_tag)
+                    return prefix_tags, main_tags, postfix_tags
 
         return prefix_tags, main_tags, postfix_tags
 
@@ -2122,6 +2162,308 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         
         # 8. 로그 표시
         self._update_log_display(logs)
+
+    def simulate_for_preview(
+        self,
+        *,
+        rules_text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """편집기 미리보기용 시뮬레이션 — 실제 파이프라인 경유.
+
+        `test_rules()` 의 하드코딩 baseline (`prefix=["masterpiece","best quality"]`,
+        `postfix=[]`) 문제를 해결하기 위해 `PromptGenerationController.
+        generate_instant_source_silent()` 를 사용한다. 이는 전체 파이프라인
+        (pre_processing → wildcard 확장 → after_wildcard → final_hookpoint)
+        을 거쳐 다른 훅(아티스트/와일드카드/캐릭터 가중치 등) 이 정상 반영된
+        상태에서 conditional 훅이 동작한다.
+
+        편집기 DSL 은 `session_cond_override` 로 주입되어 현재 모듈 설정
+        (legacy/v2/enable 여부) 과 독립적으로 테스트 가능. unsaved edits 도
+        편집기가 serialize 하여 전달 가능.
+
+        매칭된 규칙은 `_simulate_matches` 리스트에 기록되어 반환. 캐릭터
+        슬롯/네거티브 위젯 mutation 은 본 메서드가 책임지고 복원한다.
+
+        Returns:
+            {
+                "ok": bool, "error": Optional[str],
+                "matched_rule_texts": List[str],  # 매칭된 규칙의 DSL 원문 (dedup 안 됨)
+                "matched_count": int,             # 고유 매칭 규칙 수
+                "final_prompt": Optional[str],
+                "sample": {rating, character, artist, general_preview},
+            }
+        """
+        result: Dict[str, Any] = {
+            "ok": False,
+            "error": None,
+            "matched_rule_texts": [],
+            "matched_count": 0,
+            "final_prompt": None,
+            "sample": None,
+        }
+
+        text = rules_text if rules_text is not None else self._active_rules_text()
+        text = (text or "").strip()
+        if not text:
+            result["error"] = "규칙이 비어있습니다."
+            return result
+
+        app_ctx = getattr(self, 'app_context', None)
+        if app_ctx is None:
+            result["error"] = "AppContext 없음"
+            return result
+
+        mw = getattr(app_ctx, 'main_window', None)
+        if mw is None:
+            result["error"] = "MainWindow 없음"
+            return result
+
+        controller = getattr(mw, 'prompt_gen_controller', None)
+        if controller is None or not hasattr(
+            controller, 'generate_instant_source_silent'
+        ):
+            result["error"] = "PromptGenerationController 없음"
+            return result
+
+        search_results = getattr(mw, 'search_results', None)
+        if not search_results or search_results.is_empty():
+            result["error"] = "검색 결과가 없습니다. 먼저 검색을 수행하세요."
+            return result
+
+        # session_cond_override 기존 값 보존 → finally 에서 원복
+        saved_override = getattr(app_ctx, 'session_cond_override', None)
+        saved_neg_text = self._capture_negative_text(mw)
+        snapshot_to_restore = None
+
+        try:
+            df = search_results.get_dataframe()
+            if df.empty:
+                result["error"] = "검색 결과 데이터프레임이 비어있습니다."
+                return result
+
+            random_index = df.index.to_series().sample(n=1).iloc[0]
+            sample_row = df.loc[random_index].copy()
+
+            # session_cond_override 주입 — conditional 훅이 이 DSL 사용.
+            # enable_checkbox / _editor_mode 무관하게 주입한 규칙으로만 실행.
+            app_ctx.session_cond_override = {
+                "enabled": True,
+                "rules": text,
+            }
+            # 시뮬 인스트루먼트 활성화 — 훅 내부에서 매칭 DSL 원문 누적 +
+            # 태그 전/후 스냅샷. before/after 는 _apply_rules 진입/종료 시 채움.
+            self._simulate_matches = []
+            self._simulate_before_tags = None
+            self._simulate_after_tags = None
+
+            # 실행 settings — 실제 생성 플로우와 최대한 유사하게 구성 가능하지만,
+            # 시뮬 목적으로는 최소 구성으로 충분 (하위 훅이 main_window 의
+            # 위젯 상태를 직접 조회하므로).
+            settings = {
+                'wildcard_standalone': False,
+                'auto_fit_resolution': False,
+                'test_mode': True,
+                'api_mode': (
+                    app_ctx.get_api_mode()
+                    if hasattr(app_ctx, 'get_api_mode') else 'NAI'
+                ),
+            }
+
+            instant_row = {k: v for k, v in sample_row.items()}
+
+            final_prompt = controller.generate_instant_source_silent(
+                instant_row, settings
+            )
+            # generate_instant_source_silent 는 app_context.current_source_row /
+            # prompt_context 는 복원하지만 _char_snapshot 은 건드리지 않음.
+            snapshot_to_restore = self._char_snapshot
+
+            matches = list(self._simulate_matches or [])
+            # added_tags 계산: conditional 이 prefix/main/postfix 에 추가한
+            # 신규 태그 집합. final_prompt substring 매칭 강조 용.
+            added_tags: set = set()
+            before_snap = self._simulate_before_tags or {}
+            after_snap = self._simulate_after_tags or {}
+            for key in ("prefix", "main", "postfix"):
+                b_set = set(before_snap.get(key) or [])
+                a_set = set(after_snap.get(key) or [])
+                added_tags |= (a_set - b_set)
+            added_tags_sorted = sorted(
+                (t for t in added_tags if t and t.strip()),
+                key=len, reverse=True,
+            )
+
+            # 네거티브 프롬프트 변경 — neg+=/neg= 액션 효과. restore 전에 캡처.
+            neg_after = self._capture_negative_text(mw)
+            neg_before = saved_neg_text
+            neg_changed = (
+                neg_before is not None
+                and neg_after is not None
+                and neg_before != neg_after
+            )
+
+            # 캐릭터 슬롯 변경 — char_set / char_replace / char:N+= / uc:N+=
+            # 액션 효과. snapshot.captured_indices 의 각 슬롯에 대해 before
+            # (snapshot) vs after (현재 widget/clone) diff.
+            char_changes = self._collect_char_changes(snapshot_to_restore)
+
+            result.update({
+                "ok": True,
+                "matched_rule_texts": matches,
+                "matched_count": len(set(matches)),
+                "final_prompt": final_prompt,
+                "added_tags": added_tags_sorted,
+                "neg_before": neg_before if neg_changed else None,
+                "neg_after": neg_after if neg_changed else None,
+                "char_changes": char_changes,
+                "sample": {
+                    "rating": sample_row.get('rating', None),
+                    "character": sample_row.get('character', None),
+                    "artist": sample_row.get('artist', None),
+                    "general_preview": str(
+                        sample_row.get('general', '')
+                    )[:200],
+                },
+            })
+        except Exception as e:
+            import traceback
+            result["error"] = f"{e}\n{traceback.format_exc()}"
+        finally:
+            # 인스트루먼트 해제
+            self._simulate_matches = None
+            self._simulate_before_tags = None
+            self._simulate_after_tags = None
+            # 캐릭터 슬롯 즉시 복원 (generate 이벤트 경로 미사용)
+            if snapshot_to_restore is not None and not snapshot_to_restore.is_empty():
+                try:
+                    snapshot_to_restore.restore()
+                except Exception:
+                    pass
+            self._char_snapshot = None
+            # 네거티브 위젯 원복 (neg+=/neg= 액션이 건드렸을 수 있음)
+            if saved_neg_text is not None:
+                self._restore_negative_text(mw, saved_neg_text)
+            # session_cond_override 원복
+            try:
+                app_ctx.session_cond_override = saved_override
+            except Exception:
+                pass
+
+        return result
+
+    def _collect_char_changes(
+        self, snapshot
+    ) -> List[Dict[str, Any]]:
+        """snapshot 이 캡처한 각 슬롯에 대해 현재 widget/clone 상태를 읽어
+        before(snapshot) vs after(현재) diff 를 리스트로 반환.
+
+        snapshot.restore() 직전 호출해야 "after" 가 실제 변경된 상태를 반영.
+        변경 없는 슬롯도 포함 가능하지만, 필터링하여 실제 diff 있는 것만 반환.
+        """
+        out: List[Dict[str, Any]] = []
+        if snapshot is None or snapshot.is_empty():
+            return out
+        char_mod = self._get_character_module()
+        if char_mod is None:
+            return out
+        widgets = getattr(char_mod, 'character_widgets', None) or []
+        clone = getattr(char_mod, 'modifiable_clone', None)
+        if isinstance(clone, dict):
+            chars_clone = clone.get('characters') or []
+            ucs_clone = clone.get('uc') or []
+        else:
+            chars_clone, ucs_clone = [], []
+
+        for idx in snapshot.captured_indices:
+            snap = snapshot.get_snapshot(idx)
+            if snap is None:
+                continue
+            cur = self._read_char_slot_state(
+                widgets, chars_clone, ucs_clone, idx
+            )
+            before = {
+                "active": snap.active,
+                "prompt": snap.prompt_text,
+                "uc": snap.uc_text,
+                "clone_prompt": snap.clone_prompt,
+                "clone_uc": snap.clone_uc,
+            }
+            # 하나라도 달라야 entry 포함 — capture 는 idempotent 라 "건드렸지만
+            # 실제 변화는 없는" 슬롯도 있을 수 있음.
+            if any(before[k] != cur[k] for k in before):
+                out.append({
+                    "index": idx + 1,  # 1-based (DSL 과 일치)
+                    "before": before,
+                    "after": cur,
+                })
+        return out
+
+    @staticmethod
+    def _read_char_slot_state(
+        widgets, chars_clone, ucs_clone, idx: int
+    ) -> Dict[str, Any]:
+        """지정 인덱스 슬롯의 현재 상태(active/prompt/uc + clone) 읽기."""
+        active = False
+        prompt = ""
+        uc = ""
+        if 0 <= idx < len(widgets):
+            w = widgets[idx]
+            try:
+                chk = getattr(w, 'active_checkbox', None)
+                if chk is not None:
+                    active = bool(chk.isChecked())
+            except Exception:
+                pass
+            try:
+                tb = getattr(w, 'prompt_textbox', None)
+                if tb is not None:
+                    prompt = tb.toPlainText()
+            except Exception:
+                pass
+            try:
+                tb = getattr(w, 'uc_textbox', None)
+                if tb is not None:
+                    uc = tb.toPlainText()
+            except Exception:
+                pass
+        return {
+            "active": active,
+            "prompt": prompt,
+            "uc": uc,
+            "clone_prompt": (
+                chars_clone[idx] if idx < len(chars_clone) else None
+            ),
+            "clone_uc": ucs_clone[idx] if idx < len(ucs_clone) else None,
+        }
+
+    @staticmethod
+    def _capture_negative_text(mw) -> Optional[str]:
+        """시뮬 전 negative_prompt_textedit 내용 캡처. None = 위젯 없음/실패."""
+        widget = getattr(mw, 'negative_prompt_textedit', None) if mw else None
+        if widget is None:
+            return None
+        try:
+            return widget.toPlainText()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _restore_negative_text(mw, text: str) -> None:
+        """시뮬 종료 후 negative_prompt_textedit 원복. blockSignals 로 시그널 차단."""
+        widget = getattr(mw, 'negative_prompt_textedit', None) if mw else None
+        if widget is None:
+            return
+        try:
+            widget.blockSignals(True)
+            if widget.toPlainText() != text:
+                widget.setPlainText(text)
+        except Exception:
+            pass
+        finally:
+            try:
+                widget.blockSignals(False)
+            except Exception:
+                pass
 
     def initialize_with_context(self, app_context):
         """AppContext 주입"""

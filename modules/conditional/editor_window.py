@@ -18,11 +18,13 @@ v2 저장소(`set_v2_dsl`)에 기록 + `set_engine_options` + 활성 프리셋 �
 
 from __future__ import annotations
 
-from typing import Optional
+import html as _html
+from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QTextOption
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -58,6 +60,10 @@ class RuleEditorWindow(QDialog):
     """3-pane 블록 편집 창. 비모달 / 단일 인스턴스."""
 
     rules_applied = pyqtSignal(str)  # Apply 시 DSL 본문 송신 (옵저버 용)
+
+    # DSL 미리보기 헤더 텍스트 — 시뮬레이션 모드 스왑에 사용 (C1)
+    _DSL_HEADER_TEXT_DEFAULT = "DSL 미리보기 (선택한 규칙)"
+    _DSL_HEADER_TEXT_SIMULATION = "🧪 시뮬레이션 결과 — 규칙 선택 시 원문 복귀"
 
     def __init__(
         self,
@@ -274,8 +280,10 @@ class RuleEditorWindow(QDialog):
         )
         layout.setSpacing(get_scaled_size(6))
 
-        header = QLabel("DSL 미리보기 (선택한 규칙)")
-        header.setStyleSheet(
+        # 헤더 참조 저장 — 시뮬 실행 시 "🧪 시뮬레이션 결과" 로 스왑,
+        # 규칙 선택/편집 시 `_refresh_dsl_viewer` 가 원문 모드로 복귀 (C1).
+        self._dsl_viewer_header = QLabel(self._DSL_HEADER_TEXT_DEFAULT)
+        self._dsl_viewer_header.setStyleSheet(
             f"QLabel {{"
             f"  color: {DARK_COLORS['text_primary']};"
             f"  font-size: {get_scaled_font_size(17)}px;"
@@ -286,7 +294,7 @@ class RuleEditorWindow(QDialog):
             f"  background: transparent;"
             f"}}"
         )
-        layout.addWidget(header)
+        layout.addWidget(self._dsl_viewer_header)
 
         self._dsl_viewer_edit = QTextEdit()
         self._dsl_viewer_edit.setReadOnly(True)
@@ -322,9 +330,14 @@ class RuleEditorWindow(QDialog):
 
         규칙 미선택 → placeholder. 활성 규칙이 있으면 `serialize_rule(rule)`
         한 줄 (또는 raw kind 면 저장된 DSL 본문) 을 표시.
+
+        C1: 시뮬레이션 모드에서 진입 시 헤더도 원문 모드로 복귀시켜
+        뷰어 콘텐츠와 라벨의 의미 일치 유지.
         """
         if not hasattr(self, "_dsl_viewer_edit"):
             return
+        if hasattr(self, "_dsl_viewer_header"):
+            self._dsl_viewer_header.setText(self._DSL_HEADER_TEXT_DEFAULT)
         rule = None
         if self._current_rule_id:
             for r in self._book.rules:
@@ -409,6 +422,19 @@ class RuleEditorWindow(QDialog):
         row.addWidget(reload_btn)
 
         row.addStretch()
+
+        # C3: 버튼 참조 저장 — 시뮬 실행 중 연속 클릭 방지 용.
+        self._sim_btn = QPushButton("🧪 시뮬레이션")
+        self._sim_btn.setStyleSheet(dynamic_styles['secondary_button'])
+        self._sim_btn.setToolTip(
+            "편집 중인 규칙을 랜덤 샘플 행에 적용한 결과를\n"
+            "실제 파이프라인(와일드카드/아티스트/캐릭터 포함)을 거쳐\n"
+            "DSL 미리보기 창에 표시합니다.\n"
+            "매칭된 규칙은 규칙 목록에서 연노랑 하이라이트 —\n"
+            "다른 규칙을 선택할 때까지 유지됩니다."
+        )
+        self._sim_btn.clicked.connect(self._on_simulate)
+        row.addWidget(self._sim_btn)
 
         apply_btn = QPushButton("✔ 모듈에 적용")
         apply_btn.setStyleSheet(dynamic_styles['primary_button'])
@@ -774,6 +800,404 @@ class RuleEditorWindow(QDialog):
         self.rules_applied.emit(dsl)
         self._set_dirty(False)
         return True
+
+    # ------------------------------------------------------------------
+    # 시뮬레이션
+    # ------------------------------------------------------------------
+
+    def _on_simulate(self) -> None:
+        """시뮬레이션 버튼 핸들러 — 현재 RuleBook 을 직렬화해 모듈에 위임.
+
+        결과:
+          1. 매칭된 규칙들 → RuleListPanel 에 연노랑 overlay (10초 자동 해제)
+          2. DSL 미리보기 창 → 간결 요약 (매칭 카운트 + 매칭 규칙 DSL 나열)
+
+        C3: 실 파이프라인 실행은 수백 ms 소요 가능 → 버튼 비활성 + Wait 커서로
+        연속 클릭 / UI freeze 체감 최소화.
+        """
+        sim_btn = getattr(self, '_sim_btn', None)
+        if sim_btn is not None:
+            sim_btn.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            if self.module is None or not hasattr(
+                self.module, 'simulate_for_preview'
+            ):
+                QMessageBox.warning(
+                    self, "시뮬레이션",
+                    "모듈 참조 없음 또는 지원하지 않는 버전입니다.",
+                )
+                return
+            try:
+                dsl = serialize_rulebook(self._book)
+            except Exception as exc:
+                QMessageBox.warning(
+                    self, "시뮬레이션",
+                    f"현재 규칙 직렬화 실패: {exc}",
+                )
+                return
+            try:
+                result = self.module.simulate_for_preview(rules_text=dsl)
+            except Exception as exc:
+                QMessageBox.critical(
+                    self, "시뮬레이션", f"시뮬 실행 오류: {exc}"
+                )
+                return
+
+            # 매칭된 DSL 텍스트 set → RuleBook 의 rule.id 집합으로 매핑
+            matched_texts = set(result.get("matched_rule_texts") or [])
+            matched_ids: set = set()
+            matched_rules: List = []  # DSL 미리보기 렌더 용
+            for r in self._book.rules:
+                if not r.enabled:
+                    continue
+                try:
+                    serialized = serialize_rule(r).strip()
+                except Exception:
+                    continue
+                if serialized in matched_texts:
+                    matched_ids.add(r.id)
+                    matched_rules.append((r, serialized))
+
+            # 규칙 목록 하이라이트 (10초 자동 해제, C2)
+            try:
+                self._rule_list_panel.set_highlighted_ids(matched_ids)
+            except Exception:
+                pass
+
+            # C1: DSL 뷰어 헤더를 시뮬 모드로 스왑. 규칙 선택 변경 시
+            # `_refresh_dsl_viewer` 가 원문 모드로 복귀.
+            if hasattr(self, "_dsl_viewer_header"):
+                self._dsl_viewer_header.setText(
+                    self._DSL_HEADER_TEXT_SIMULATION
+                )
+
+            self._render_simulation_to_viewer(result, matched_rules)
+        finally:
+            QApplication.restoreOverrideCursor()
+            if sim_btn is not None:
+                sim_btn.setEnabled(True)
+
+    def _render_simulation_to_viewer(
+        self,
+        result: Dict[str, Any],
+        matched_rules: List,
+    ) -> None:
+        """시뮬레이션 결과를 DSL 미리보기 창에 HTML 로 렌더.
+
+        QTextEdit 의 setHtml 을 사용하여 시각 계층(매칭 카운트 강조 / 발동
+        규칙 연노랑 배경 / 최종 프롬프트 보조 색상) 을 표현. 사용자 입력
+        (DSL, rating, character, final_prompt) 은 `html.escape` 로 처리한다.
+
+        규칙 선택/편집 시 `_refresh_dsl_viewer` 가 `setPlainText` 로 덮어
+        써서 원문 DSL 모드로 자연스럽게 복귀.
+        """
+        if not hasattr(self, "_dsl_viewer_edit"):
+            return
+
+        # 실패 케이스
+        if not result.get("ok"):
+            err = _html.escape(
+                str(result.get('error') or '알 수 없는 오류')
+            )
+            fs_title = get_scaled_font_size(20)
+            fs_body = get_scaled_font_size(17)
+            html_parts = [
+                f'<div style="font-size: {fs_title}px; font-weight: bold;'
+                f' color: #EF5350;">[시뮬레이션 실패]</div>',
+                f'<div style="font-size: {fs_body}px; color: #E0E0E0;'
+                f' margin-top: 4px;">{err}</div>',
+            ]
+            self._dsl_viewer_edit.setHtml("".join(html_parts))
+            # HR1: setHtml 후 스크롤 리셋 — Qt 가 이전 문서 길이 기반 위치를
+            # 유지해 사용자가 중간부터 보이는 현상 방지.
+            self._dsl_viewer_edit.verticalScrollBar().setValue(0)
+            return
+
+        sample = result.get("sample") or {}
+        total_rules = sum(1 for r in self._book.rules if r.enabled)
+        matched_count = len(matched_rules)
+
+        # 매칭 여부에 따라 카운트 색 — 있으면 앰버 강조, 없으면 회색
+        count_color = "#FFB74D" if matched_count > 0 else "#9E9E9E"
+
+        fs_header = get_scaled_font_size(22)
+        fs_count = get_scaled_font_size(26)
+        fs_section = get_scaled_font_size(19)
+        fs_body = get_scaled_font_size(18)
+        fs_meta = get_scaled_font_size(15)
+
+        parts: List[str] = []
+        # 최상위 헤더
+        parts.append(
+            f'<div style="font-size: {fs_header}px; font-weight: bold;'
+            f' color: #FFFFFF;">🧪 시뮬레이션 결과</div>'
+        )
+        # 매칭 카운트 — 가장 큰 시각 가중치
+        parts.append(
+            f'<div style="font-size: {fs_count}px; font-weight: bold;'
+            f' color: {count_color}; margin-top: 2px;">'
+            f'발동 {matched_count} <span style="color: #757575;">/'
+            f' 전체 {total_rules}개</span></div>'
+        )
+        # 샘플 정보 — 보조 정보이므로 작고 회색
+        rat = _html.escape(str(sample.get("rating") or "-"))
+        char = _html.escape(str(sample.get("character") or "-"))
+        parts.append(
+            f'<div style="font-size: {fs_meta}px; color: #9E9E9E;'
+            f' margin-top: 4px; margin-bottom: 10px;">'
+            f'샘플: rating={rat}  ·  character={char}</div>'
+        )
+
+        # 발동한 규칙 섹션
+        if matched_rules:
+            parts.append(
+                f'<div style="font-size: {fs_section}px; font-weight: bold;'
+                f' color: #FFFFFF; margin-top: 8px;">▸ 발동한 규칙</div>'
+            )
+            sorted_rules = self._book.sorted_rules()
+            for i, (r, dsl_line) in enumerate(matched_rules, start=1):
+                order = next(
+                    (idx + 1 for idx, rr in enumerate(sorted_rules)
+                     if rr.id == r.id),
+                    i,
+                )
+                dsl_safe = _html.escape(dsl_line)
+                parts.append(
+                    f'<div style="font-size: {fs_body}px;'
+                    f' margin-top: 3px; margin-left: 10px;">'
+                    f'<span style="color: #9E9E9E;">#{order}</span>'
+                    f'&nbsp;&nbsp;'
+                    f'<span style="background-color: #FFF59D;'
+                    f' color: #212121; font-weight: 600;">'
+                    f'&nbsp;{dsl_safe}&nbsp;</span></div>'
+                )
+        else:
+            parts.append(
+                f'<div style="font-size: {fs_body}px; color: #9E9E9E;'
+                f' margin-top: 8px;">발동한 규칙 없음 —'
+                f' 조건이 모두 불충족</div>'
+            )
+
+        # 네거티브 프롬프트 변경 (neg+= / neg= 액션 효과)
+        neg_before = result.get("neg_before")
+        neg_after = result.get("neg_after")
+        if neg_before is not None and neg_after is not None:
+            parts.append(
+                f'<div style="font-size: {fs_section}px; font-weight: bold;'
+                f' color: #FFFFFF; margin-top: 12px;">'
+                f'▸ 네거티브 프롬프트 변경</div>'
+            )
+            # 간단 diff — 문자열 비교
+            b_tags = [
+                t.strip() for t in (neg_before or "").split(",") if t.strip()
+            ]
+            a_tags = [
+                t.strip() for t in (neg_after or "").split(",") if t.strip()
+            ]
+            added_neg = [t for t in a_tags if t not in b_tags]
+            removed_neg = [t for t in b_tags if t not in a_tags]
+            diff_lines: List[str] = []
+            if added_neg:
+                tags_html = ", ".join(
+                    f'<span style="background-color: #FFF59D;'
+                    f' color: #212121; font-weight: 600;">'
+                    f'{_html.escape(t)}</span>' for t in added_neg
+                )
+                diff_lines.append(
+                    f'<div style="font-size: {fs_body}px; color: #B0B0B0;'
+                    f' margin-top: 2px; margin-left: 10px;">'
+                    f'추가: {tags_html}</div>'
+                )
+            if removed_neg:
+                tags_html = ", ".join(
+                    f'<span style="text-decoration: line-through;'
+                    f' color: #E57373;">'
+                    f'{_html.escape(t)}</span>' for t in removed_neg
+                )
+                diff_lines.append(
+                    f'<div style="font-size: {fs_body}px; color: #B0B0B0;'
+                    f' margin-top: 2px; margin-left: 10px;">'
+                    f'제거: {tags_html}</div>'
+                )
+            if not diff_lines:
+                # 태그 단위 diff 로는 감지 안 되는 전체 교체 케이스
+                diff_lines.append(
+                    f'<div style="font-size: {fs_body}px; color: #B0B0B0;'
+                    f' margin-top: 2px; margin-left: 10px;">'
+                    f'before: {_html.escape(neg_before or "(비어있음)")}</div>'
+                )
+                diff_lines.append(
+                    f'<div style="font-size: {fs_body}px; color: #B0B0B0;'
+                    f' margin-left: 10px;">'
+                    f'after : {_html.escape(neg_after or "(비어있음)")}</div>'
+                )
+            parts.extend(diff_lines)
+
+        # 캐릭터 슬롯 변경 (char_set / char_replace / char:N+= / uc:N+=)
+        char_changes = result.get("char_changes") or []
+        if char_changes:
+            parts.append(
+                f'<div style="font-size: {fs_section}px; font-weight: bold;'
+                f' color: #FFFFFF; margin-top: 12px;">'
+                f'▸ 캐릭터 슬롯 변경 ({len(char_changes)}개)</div>'
+            )
+            for ch in char_changes:
+                parts.append(self._render_char_change(ch, fs_body, fs_meta))
+
+        # 최종 프롬프트 — 발동 규칙이 추가한 태그(added_tags)는 연노랑 강조.
+        # 헤더에도 추가 개수 표시 (0이면 생략).
+        final_prompt = result.get("final_prompt")
+        added_tags = result.get("added_tags") or []
+        if final_prompt:
+            header_suffix = ""
+            if added_tags:
+                header_suffix = (
+                    f' <span style="font-size: {fs_meta}px; color: #FFB74D;'
+                    f' font-weight: normal;">'
+                    f'· {len(added_tags)}개 태그 추가</span>'
+                )
+            parts.append(
+                f'<div style="font-size: {fs_section}px; font-weight: bold;'
+                f' color: #FFFFFF; margin-top: 14px;">'
+                f'▸ 최종 프롬프트{header_suffix}</div>'
+            )
+            prompt_html = self._build_highlighted_prompt_html(
+                final_prompt, added_tags
+            )
+            parts.append(
+                f'<div style="font-size: {fs_body}px; color: #B0B0B0;'
+                f' margin-top: 3px; margin-left: 10px;'
+                f' white-space: pre-wrap;">{prompt_html}</div>'
+            )
+
+        self._dsl_viewer_edit.setHtml("".join(parts))
+        # HR1: 성공 경로에서도 스크롤 최상단으로 리셋. 헤더("시뮬레이션 결과")
+        # 부터 보이도록 보장 — 이전 긴 문서 잔재로 중간이 먼저 보이는 것 방지.
+        self._dsl_viewer_edit.verticalScrollBar().setValue(0)
+
+    def _render_char_change(
+        self, ch: Dict[str, Any], fs_body: int, fs_meta: int
+    ) -> str:
+        """단일 캐릭터 슬롯 변경 entry 렌더.
+
+        active 토글, prompt (widget), uc (widget), clone prompt/uc 각각에 대해
+        변경된 필드만 before → after 표시. widget/clone 둘 다 동일하게 변한
+        경우 widget 쪽만 표시해 중복 제거.
+        """
+        idx = ch.get("index", "?")
+        b = ch.get("before") or {}
+        a = ch.get("after") or {}
+        lines: List[str] = []
+        lines.append(
+            f'<div style="font-size: {fs_body}px; color: #E0E0E0;'
+            f' font-weight: 600; margin-top: 6px; margin-left: 10px;">'
+            f'#{idx}'
+            f'</div>'
+        )
+        # active 토글
+        if b.get("active") != a.get("active"):
+            b_on = "ON" if b.get("active") else "OFF"
+            a_on = "ON" if a.get("active") else "OFF"
+            color = "#FFB74D"  # 앰버 — 상태 변화 강조
+            lines.append(
+                f'<div style="font-size: {fs_meta}px;'
+                f' margin-left: 22px; color: #9E9E9E;">'
+                f'활성: <span style="color: {color};">'
+                f'{b_on} → {a_on}</span></div>'
+            )
+        # prompt (widget) — clone 변경도 여기로 반영되므로 clone_prompt 별도 출력 생략
+        if b.get("prompt") != a.get("prompt"):
+            lines.append(self._render_slot_diff_line(
+                "프롬프트", b.get("prompt"), a.get("prompt"), fs_meta,
+            ))
+        elif b.get("clone_prompt") != a.get("clone_prompt"):
+            # widget 은 같지만 clone 은 다른 경우 (hooker_refresh 누락 등)
+            lines.append(self._render_slot_diff_line(
+                "프롬프트(clone)", b.get("clone_prompt"),
+                a.get("clone_prompt"), fs_meta,
+            ))
+        # uc (widget)
+        if b.get("uc") != a.get("uc"):
+            lines.append(self._render_slot_diff_line(
+                "UC", b.get("uc"), a.get("uc"), fs_meta,
+            ))
+        elif b.get("clone_uc") != a.get("clone_uc"):
+            lines.append(self._render_slot_diff_line(
+                "UC(clone)", b.get("clone_uc"), a.get("clone_uc"), fs_meta,
+            ))
+        return "".join(lines)
+
+    def _render_slot_diff_line(
+        self,
+        label: str,
+        before_val,
+        after_val,
+        fs_meta: int,
+    ) -> str:
+        """단일 필드 before/after 2줄 렌더 — 긴 텍스트는 스크롤 허용."""
+        b_safe = _html.escape(str(before_val or "(비어있음)"))
+        a_safe = _html.escape(str(after_val or "(비어있음)"))
+        return (
+            f'<div style="font-size: {fs_meta}px; margin-left: 22px;'
+            f' color: #9E9E9E; white-space: pre-wrap;">'
+            f'{label} — before: <span style="color: #B0B0B0;">'
+            f'{b_safe}</span></div>'
+            f'<div style="font-size: {fs_meta}px; margin-left: 22px;'
+            f' color: #9E9E9E; white-space: pre-wrap;">'
+            f'&nbsp;&nbsp;&nbsp;&nbsp;{"&nbsp;" * len(label)}'
+            f'&nbsp;&nbsp;after: <span style="background-color: #FFF59D;'
+            f' color: #212121;">{a_safe}</span></div>'
+        )
+
+    def _build_highlighted_prompt_html(
+        self, prompt: str, tags_to_highlight: List[str]
+    ) -> str:
+        """final_prompt 에서 conditional 이 추가한 태그를 연노랑 배경으로 강조.
+
+        substring 매칭 — 가중치 wrap (`1.2::smile ::`) 안의 태그도 부분 강조됨.
+        긴 태그 우선 매칭으로 "smile" 가 "happy smile" 의 부분을 덮어쓰는 것을 방지.
+        매칭 영역끼리 겹치지 않게 used_ranges 로 필터링.
+        """
+        if not prompt:
+            return ""
+        valid = [t for t in (tags_to_highlight or []) if t and t.strip()]
+        if not valid:
+            return _html.escape(prompt)
+        # 모듈에서 이미 길이 내림차순이지만 방어적으로 재정렬.
+        valid = sorted(valid, key=len, reverse=True)
+
+        used_ranges: List = []  # List[Tuple[int, int]] — 점유된 구간
+        for tag in valid:
+            start = 0
+            tag_len = len(tag)
+            while start < len(prompt):
+                idx = prompt.find(tag, start)
+                if idx < 0:
+                    break
+                end = idx + tag_len
+                # 기존 범위와 겹치면 skip, 아니면 점유.
+                if any(s < end and idx < e for s, e in used_ranges):
+                    start = idx + 1
+                    continue
+                used_ranges.append((idx, end))
+                start = end
+        used_ranges.sort()
+
+        out: List[str] = []
+        pos = 0
+        for s, e in used_ranges:
+            if s > pos:
+                out.append(_html.escape(prompt[pos:s]))
+            seg = _html.escape(prompt[s:e])
+            out.append(
+                f'<span style="background-color: #FFF59D;'
+                f' color: #212121; font-weight: 600;">{seg}</span>'
+            )
+            pos = e
+        if pos < len(prompt):
+            out.append(_html.escape(prompt[pos:]))
+        return "".join(out)
 
     # ------------------------------------------------------------------
     # Dirty 가드

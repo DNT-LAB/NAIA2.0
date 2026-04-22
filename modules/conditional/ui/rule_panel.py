@@ -53,6 +53,7 @@ _ACTION_KIND_ITEMS = (
     ("문장 끝에 붙이기", "append"),
     ("태그 교체", "replace"),
     ("캐릭터 사용 여부", "char_set"),
+    ("캐릭터 태그 추가", "char_append"),
     ("캐릭터 태그 교체", "char_replace"),
 )
 _FIXED_TARGETS = ("prefix", "main", "postfix", "global_uc", "neg")
@@ -82,7 +83,8 @@ _INPUT_BORDER = "#444444"     # 입력 테두리
 
 _VALID_KINDS = ("block", "raw")
 _VALID_ACTION_KINDS = (
-    "append_list", "append", "replace", "char_set", "char_replace"
+    "append_list", "append", "replace",
+    "char_set", "char_replace", "char_append",
 )
 
 
@@ -200,6 +202,7 @@ class RulePanel(QWidget):
             "replace": "[교체]",
             "char_set": "[캐릭터]",
             "char_replace": "[캐릭터교체]",
+            "char_append": "[캐릭터추가]",
         }
         status = "[꺼짐] " if not rule.enabled else ""
         return (
@@ -418,38 +421,58 @@ class RulePanel(QWidget):
         return container
 
     def _build_target_row(self) -> QWidget:
+        """적용 위치 행 — 2-line 레이아웃.
+
+        Line 1 (상시): [레이블] [kind 콤보]
+        Line 2 (`_target_slot_row`, char/uc 타겟 전용): [레이블] [슬롯 콤보] [체크박스]
+
+        한 줄로 배치하면 한국어 레이블 폭 + slot combo min + 체크박스 폭 합이
+        액션 pane 최소 폭(380px)을 초과하여 텍스트가 잘린다. 2줄로 분리해
+        각 줄 내부에서 슬롯 콤보가 stretch 로 남는 공간을 흡수하도록 한다.
+        """
         w = QWidget()
-        row = QHBoxLayout(w)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(get_scaled_size(6))
-        row.addWidget(QLabel("적용 위치:"))
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(get_scaled_size(4))
+
+        # Line 1: 적용 위치 kind
+        r1 = QHBoxLayout()
+        r1.setContentsMargins(0, 0, 0, 0)
+        r1.setSpacing(get_scaled_size(6))
+        r1.addWidget(QLabel("적용 위치:"))
         self._target_kind_combo = QComboBox()
         _add_combo_items(self._target_kind_combo, _TARGET_ITEMS)
         self._target_kind_combo.wheelEvent = lambda e: e.ignore()
-        # global_uc 는 런타임 스텁(_write_global_uc_target 은 no-op)이므로
-        # 드롭다운에서는 숨긴다. 데이터 모델에는 남겨 legacy 프리셋 (target=
-        # "global_uc") 의 round-trip 호환성을 유지한다. 불러온 규칙은 현재
-        # 선택 텍스트로 "공용 UC" 가 여전히 보이지만, 새 규칙에서는 선택 불가.
+        # global_uc 는 런타임 스텁 → 드롭다운에서 숨김. legacy round-trip
+        # 호환성을 위해 데이터 모델에는 남겨둔다.
         _hide_idx = self._target_kind_combo.findData("global_uc")
         if _hide_idx >= 0:
             self._target_kind_combo.view().setRowHidden(_hide_idx, True)
         self._target_kind_combo.currentTextChanged.connect(
             self._on_target_kind_changed
         )
-        row.addWidget(self._target_kind_combo)
+        r1.addWidget(self._target_kind_combo, 1)  # stretch — pane 폭에 맞춤
+        outer.addLayout(r1)
 
-        # 캐릭터 슬롯 콤보 — 항목 자체가 1줄 미리보기 (예: "1: blue_hair")
+        # Line 2: 대상 슬롯 + 전체 모드 (char/uc 타겟 전용)
+        self._target_slot_row = QWidget()
+        r2 = QHBoxLayout(self._target_slot_row)
+        r2.setContentsMargins(0, 0, 0, 0)
+        r2.setSpacing(get_scaled_size(6))
+        r2.addWidget(QLabel("대상 슬롯:"))
+        # 캐릭터 슬롯 콤보 — 항목 자체가 1줄 미리보기 (예: "1: blue_hair").
+        # 드롭다운 열면 showPopup 이 view 폭을 자동 확장해 전체 텍스트 표시.
         self._target_n_spin = CharSlotComboBox(
             lambda: get_character_slots(self._app_context)
         )
         self._target_n_spin.setValue(1)
         self._target_n_spin.currentIndexChanged.connect(self._emit_changed)
-        row.addWidget(self._target_n_spin)
+        r2.addWidget(self._target_n_spin, 1)  # stretch — 남는 공간 흡수
 
-        self._target_wildcard_chk = QCheckBox("모든 활성 캐릭터")
+        self._target_wildcard_chk = QCheckBox("모든 활성 슬롯")
         self._target_wildcard_chk.stateChanged.connect(self._emit_changed)
-        row.addWidget(self._target_wildcard_chk)
-        row.addStretch()
+        r2.addWidget(self._target_wildcard_chk)
+        outer.addWidget(self._target_slot_row)
         return w
 
     def _build_tags_row(self) -> QWidget:
@@ -495,17 +518,21 @@ class RulePanel(QWidget):
         top = QHBoxLayout()
         top.setSpacing(get_scaled_size(6))
         top.addWidget(QLabel("대상 캐릭터"))
-        # 캐릭터 슬롯 콤보 — char_set/char_replace 의 대상 캐릭터 선택
+        # 캐릭터 슬롯 콤보 — char_set / char_replace / char_append 공통 대상.
         self._func_char_index_spin = CharSlotComboBox(
             lambda: get_character_slots(self._app_context)
         )
-        self._func_char_index_spin.setValue(1)  # _target_n_spin 과 일관성
+        self._func_char_index_spin.setValue(1)
         self._func_char_index_spin.currentIndexChanged.connect(
             self._emit_changed
         )
         top.addWidget(self._func_char_index_spin)
 
-        top.addWidget(QLabel("상태:"))
+        # 상태 레이블 + 콤보 — 이전 구현은 QLabel 참조를 저장하지 않아
+        # char_replace / char_append 모드에서도 "상태:" 가 계속 표시되는 버그.
+        # 이제 label 을 필드로 보관해 _update_visibility 에서 함께 숨김.
+        self._char_state_label = QLabel("상태:")
+        top.addWidget(self._char_state_label)
         self._char_state_combo = QComboBox()
         _add_combo_items(self._char_state_combo, _CHAR_STATE_ITEMS)
         self._char_state_combo.wheelEvent = lambda e: e.ignore()
@@ -514,13 +541,16 @@ class RulePanel(QWidget):
         top.addStretch()
         layout.addLayout(top)
 
+        # "기존/새 태그" 줄 — char_replace 전용. 라벨도 참조 저장.
         repl_row = QHBoxLayout()
         repl_row.setSpacing(get_scaled_size(6))
-        repl_row.addWidget(QLabel("기존 태그:"))
+        self._char_old_label = QLabel("기존 태그:")
+        repl_row.addWidget(self._char_old_label)
         self._char_old_edit = QLineEdit()
         self._char_old_edit.textChanged.connect(self._emit_changed)
         repl_row.addWidget(self._char_old_edit, 1)
-        repl_row.addWidget(QLabel("새 태그:"))
+        self._char_new_label = QLabel("새 태그:")
+        repl_row.addWidget(self._char_new_label)
         self._char_new_edit = QLineEdit()
         self._char_new_edit.textChanged.connect(self._emit_changed)
         repl_row.addWidget(self._char_new_edit, 1)
@@ -632,6 +662,9 @@ class RulePanel(QWidget):
             a.char_index = int(self._func_char_index_spin.value())
             a.char_old_tag = self._char_old_edit.text().strip()
             a.char_new_tag = self._char_new_edit.text().strip()
+        elif kind == "char_append":
+            a.char_index = int(self._func_char_index_spin.value())
+            a.tags = self._tags_chip.get_tags()
         return a
 
     def _update_visibility(self) -> None:
@@ -647,18 +680,28 @@ class RulePanel(QWidget):
         if not is_block:
             return
         ak = _combo_value(self._action_kind_combo, "append_list")
+        # 적용 위치(target_row) 는 일반 prefix/main/postfix 대상 액션에서만.
         self._target_row.setVisible(ak in ("append_list", "append"))
-        self._tags_row.setVisible(ak in ("append_list", "append"))
+        # 태그 리스트는 append/append_list + 신규 char_append 공용.
+        self._tags_row.setVisible(
+            ak in ("append_list", "append", "char_append")
+        )
         self._replace_row.setVisible(ak == "replace")
-        self._func_char_row.setVisible(ak in ("char_set", "char_replace"))
-        # target kind 에 따라 spinbox/wildcard 표시
+        # char 계열 3종은 대상 캐릭터 슬롯이 필요 → func_char_row 공유.
+        self._func_char_row.setVisible(
+            ak in ("char_set", "char_replace", "char_append")
+        )
+        # target kind 에 따라 slot row 표시 (prefix/main/postfix 모드 전용).
         tk = _combo_value(self._target_kind_combo, "main")
         allow_char = tk in _CHAR_TARGET_KINDS
-        self._target_n_spin.setVisible(allow_char)
-        self._target_wildcard_chk.setVisible(allow_char)
-        # char_set 은 old/new 숨김, char_replace 는 state 숨김
+        self._target_slot_row.setVisible(allow_char)
+        # 상태: char_set 전용 — 이전 버그(라벨 상시 표시) 수정.
+        self._char_state_label.setVisible(ak == "char_set")
         self._char_state_combo.setVisible(ak == "char_set")
+        # 기존/새 태그: char_replace 전용 — 라벨도 함께 숨김.
+        self._char_old_label.setVisible(ak == "char_replace")
         self._char_old_edit.setVisible(ak == "char_replace")
+        self._char_new_label.setVisible(ak == "char_replace")
         self._char_new_edit.setVisible(ak == "char_replace")
 
     def _on_action_kind_changed(self, _text: str) -> None:
@@ -775,6 +818,9 @@ class RulePanel(QWidget):
                 f"'{action.char_old_tag or ''}'를 "
                 f"'{action.char_new_tag or ''}'로 교체"
             )
+        if action.kind == "char_append":
+            tags = ", ".join(action.tags or []) or "(태그 없음)"
+            return f"캐릭터 {action.char_index or 1} 프롬프트에 {tags} 추가"
         return action.kind or "변경 없음"
 
     def _update_summary(self) -> None:

@@ -20,7 +20,7 @@ RulePanel 에서도 제거되어 내부 필드로만 관리된다.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Set
 
 from PyQt6.QtCore import Qt, QRect, QSize, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter
@@ -54,6 +54,7 @@ _ACTION_PALETTE = {
     "append":       ("#26A69A", "끝추가"),
     "replace":      ("#FF7043", "교체"),
     "char_set":     ("#EC407A", "캐릭터"),
+    "char_append":  ("#5C6BC0", "캐추가"),
     "char_replace": ("#AB47BC", "캐교체"),
     "raw":          ("#FF9800", "DSL"),
 }
@@ -65,12 +66,19 @@ class RuleItemDelegate(QStyledItemDelegate):
     아이템 데이터 (UserRole) 형식:
         {
             "enabled": bool,
+            "rule_id": str,
             "kind_color": "#RRGGBB", "kind_label": str,
             "action_color": "#RRGGBB", "action_label": str,
             "detail": str,
             "order": int,
         }
+
+    panel 을 옵션 인자로 받아 시뮬레이션 하이라이트 상태를 조회한다.
     """
+
+    def __init__(self, parent, panel=None):
+        super().__init__(parent)
+        self._panel = panel  # RuleListPanel; get_highlighted_ids() 조회용
 
     def sizeHint(self, option, index):
         return QSize(0, get_scaled_size(36))
@@ -88,11 +96,25 @@ class RuleItemDelegate(QStyledItemDelegate):
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         enabled = bool(data.get("enabled", True))
 
+        # 시뮬레이션 매칭 하이라이트 — 선택/호버 배경 위에 연노랑 overlay.
+        # panel 이 없거나 하이라이트 set 이 비었으면 no-op.
+        highlighted = False
+        if self._panel is not None:
+            rid = data.get("rule_id")
+            if rid and rid in self._panel.get_highlighted_ids():
+                highlighted = True
+
         # 선택/호버 배경 — 기본 QListWidget::item:selected 규칙을 대체
         if selected:
             painter.fillRect(option.rect, QColor(DARK_COLORS["accent_blue"]))
         elif hovered:
             painter.fillRect(option.rect, QColor(DARK_COLORS["bg_hover"]))
+
+        # 하이라이트 overlay — 선택 상태여도 시각적으로 구분되도록 alpha 혼합.
+        if highlighted:
+            overlay = QColor("#FFF59D")  # 연노랑 (Material Yellow 200)
+            overlay.setAlpha(110 if selected else 160)
+            painter.fillRect(option.rect, overlay)
 
         pad_x = get_scaled_size(10)
         pad_y = get_scaled_size(6)
@@ -230,6 +252,10 @@ class RuleListPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._rulebook: Optional[RuleBook] = None
+        # 시뮬레이션 매칭 하이라이트 — 규칙 id 집합. 델리게이트가 조회해서
+        # 연노랑 overlay 를 그린다. 사용자가 다른 규칙을 선택할 때 자동 해제
+        # (`_on_rule_row_changed` 에서 `clear_highlights()` 호출).
+        self._highlighted_ids: Set[str] = set()
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -305,27 +331,33 @@ class RuleListPanel(QWidget):
         self._rule_list = QListWidget()
         self._rule_list.setMouseTracking(True)
         self._rule_list.setUniformItemSizes(True)
-        self._rule_list.setItemDelegate(RuleItemDelegate(self._rule_list))
+        # 델리게이트에 panel 참조를 주입 — 시뮬레이션 매칭 id 집합 조회용.
+        self._rule_list.setItemDelegate(
+            RuleItemDelegate(self._rule_list, panel=self)
+        )
         self._rule_list.currentRowChanged.connect(
             self._on_rule_row_changed
         )
         layout.addWidget(self._rule_list, stretch=1)
 
-        # CRUD 버튼
+        # CRUD 버튼 — 각 버튼 stretch=1 로 row 전체 폭을 균등 분할.
+        # addStretch() 제거: 남는 공간을 trailing 빈 자리가 아니라 버튼이 흡수.
         crud_row = QHBoxLayout()
         crud_row.setSpacing(get_scaled_size(4))
         self._toggle_enabled_btn = QPushButton("켜기/끄기")
+        self._toggle_enabled_btn.setStyleSheet(self._toggle_btn_style())
         self._toggle_enabled_btn.clicked.connect(
             self._on_rule_toggle_enabled_clicked
         )
-        crud_row.addWidget(self._toggle_enabled_btn)
+        crud_row.addWidget(self._toggle_enabled_btn, 1)
         add_btn = QPushButton("+ 새 규칙")
         add_btn.clicked.connect(lambda: self.rule_add_requested.emit())
-        crud_row.addWidget(add_btn)
+        crud_row.addWidget(add_btn, 1)
         del_btn = QPushButton("− 선택 제거")
+        # H1: 파괴적 액션 시각 구분 — 평상시 중립, hover/pressed 시 빨간 강조.
+        del_btn.setStyleSheet(self._danger_btn_style())
         del_btn.clicked.connect(self._on_rule_delete_clicked)
-        crud_row.addWidget(del_btn)
-        crud_row.addStretch()
+        crud_row.addWidget(del_btn, 1)
         layout.addLayout(crud_row)
 
         # 이동 버튼
@@ -333,11 +365,10 @@ class RuleListPanel(QWidget):
         move_row.setSpacing(get_scaled_size(4))
         self._move_up_btn = QPushButton("↑ 위로")
         self._move_up_btn.clicked.connect(self._on_rule_move_up_clicked)
-        move_row.addWidget(self._move_up_btn)
+        move_row.addWidget(self._move_up_btn, 1)
         self._move_down_btn = QPushButton("↓ 아래로")
         self._move_down_btn.clicked.connect(self._on_rule_move_down_clicked)
-        move_row.addWidget(self._move_down_btn)
-        move_row.addStretch()
+        move_row.addWidget(self._move_down_btn, 1)
         layout.addLayout(move_row)
         return w
 
@@ -367,6 +398,7 @@ class RuleListPanel(QWidget):
             )
         return {
             "enabled": bool(rule.enabled),
+            "rule_id": rule.id,  # 시뮬 하이라이트 매칭 키
             "kind_color": k_color,
             "kind_label": k_label,
             "action_color": a_color,
@@ -374,6 +406,31 @@ class RuleListPanel(QWidget):
             "detail": self._rule_detail(rule),
             "order": int(order),
         }
+
+    # ------------------------------------------------------------------
+    # 시뮬레이션 하이라이트
+    # ------------------------------------------------------------------
+
+    def get_highlighted_ids(self) -> Set[str]:
+        """델리게이트가 paint 중 조회. 편집기가 직접 mutate 하지 않도록 copy."""
+        return set(self._highlighted_ids)
+
+    def set_highlighted_ids(self, ids) -> None:
+        """매칭된 규칙 id 집합 설정 → 델리게이트가 연노랑 overlay 로 렌더.
+
+        Persistent: 사용자가 다른 규칙을 선택하면 `_on_rule_row_changed` 가
+        `clear_highlights()` 를 호출하여 자동 해제. 타이머 없음.
+        """
+        self._highlighted_ids = set(ids) if ids else set()
+        viewport = self._rule_list.viewport()
+        if viewport is not None:
+            viewport.update()
+
+    def clear_highlights(self) -> None:
+        self._highlighted_ids = set()
+        viewport = self._rule_list.viewport()
+        if viewport is not None:
+            viewport.update()
 
     def _rule_badges(self, rule: Rule) -> str:
         if rule.kind == "raw":
@@ -389,6 +446,7 @@ class RuleListPanel(QWidget):
             "replace": "[교체]",
             "char_set": "[캐릭터]",
             "char_replace": "[캐릭터교체]",
+            "char_append": "[캐릭터추가]",
         }
         action = action_map.get(
             rule.action.kind if rule.action else "", "[규칙]"
@@ -430,6 +488,12 @@ class RuleListPanel(QWidget):
             self._toggle_enabled_btn.setText("켜기/끄기")
 
     def _on_rule_row_changed(self, idx: int) -> None:
+        # 사용자가 규칙을 선택/전환하면 시뮬 하이라이트 해제. 프로그래밍적
+        # 호출(set_selected_rule)은 blockSignals 로 이 핸들러가 발동하지 않으므로
+        # 편집기가 규칙 추가/삭제/이동 후에 복원하는 선택은 하이라이트를
+        # 보존한다.
+        if self._highlighted_ids:
+            self.clear_highlights()
         self._update_rule_button_state()
         self.rule_selected.emit(int(idx))
 
@@ -507,3 +571,51 @@ class RuleListPanel(QWidget):
             f" font-weight: bold;"
         )
         return label
+
+    def _danger_btn_style(self) -> str:
+        """파괴적 액션(선택 제거) — 평상시 중립, hover 시 빨간 강조.
+        실수로 누르는 것을 막기 위해 hover 에서만 경고 색상을 표출한다.
+        """
+        return (
+            f"QPushButton {{"
+            f"  background-color: {DARK_COLORS['bg_tertiary']};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid {DARK_COLORS['border']};"
+            f"  border-radius: {get_scaled_size(3)}px;"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  padding: {get_scaled_size(5)}px {get_scaled_size(10)}px;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {DARK_COLORS['error']};"
+            f"  color: #FFFFFF;"
+            f"  border-color: {DARK_COLORS['error']};"
+            f"}}"
+            f"QPushButton:pressed {{ background-color: #B71C1C; }}"
+            f"QPushButton:disabled {{"
+            f"  background-color: {DARK_COLORS['bg_tertiary']};"
+            f"  color: {DARK_COLORS['text_disabled']};"
+            f"}}"
+        )
+
+    def _toggle_btn_style(self) -> str:
+        """켜기/끄기 버튼 — 상태 전환 액션을 시각적으로 구분하는 앰버 계열.
+        + 새 규칙(추가) / − 선택 제거(파괴) 와 나란히 놓일 때 역할 구분.
+        비활성화 상태(disabled)에서도 기본 회색 팔레트로 자동 전환.
+        """
+        return (
+            f"QPushButton {{"
+            f"  background-color: #F57C00;"
+            f"  color: #FFFFFF;"
+            f"  border: none;"
+            f"  border-radius: {get_scaled_size(3)}px;"
+            f"  font-size: {get_scaled_font_size(17)}px;"
+            f"  font-weight: 600;"
+            f"  padding: {get_scaled_size(5)}px {get_scaled_size(10)}px;"
+            f"}}"
+            f"QPushButton:hover {{ background-color: #FB8C00; }}"
+            f"QPushButton:pressed {{ background-color: #E65100; }}"
+            f"QPushButton:disabled {{"
+            f"  background-color: {DARK_COLORS['bg_tertiary']};"
+            f"  color: {DARK_COLORS['text_disabled']};"
+            f"}}"
+        )

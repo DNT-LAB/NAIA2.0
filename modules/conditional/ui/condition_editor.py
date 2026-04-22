@@ -74,6 +74,23 @@ _CARD_BG = "#2D2D2D"          # 조건 카드 공통 배경
 _INPUT_BG = "#161616"          # 입력 필드 배경
 _CARD_BORDER = "#555555"
 _INPUT_BORDER = "#444444"
+# 조건 묶음 좌측 accent — 중첩 깊이마다 다른 색을 부여해 "내가 지금 어느 레벨
+# 안에 있는지" 를 좌측 바 색으로 즉시 읽어낼 수 있게 한다. 단일 색(파랑/연두)
+# 은 깊은 중첩에서 모든 바가 같은 색이 되어 계층 감이 사라짐. 색은 dark UI
+# 에서 선명하게 분리되는 Material 600~700 계열 + 원색 차이 큰 순으로 배치.
+_GROUP_ACCENT_PALETTE = (
+    "#689F38",  # depth 0 — Light Green 700 (연두)
+    "#FB8C00",  # depth 1 — Orange 600 (주황)
+    "#8E24AA",  # depth 2 — Purple 600 (보라)
+    "#00ACC1",  # depth 3 — Cyan 600 (시안)
+    "#C62828",  # depth 4 — Red 800 (빨강)
+)
+
+
+def _group_accent_for_depth(depth: int) -> str:
+    if depth < 0:
+        depth = 0
+    return _GROUP_ACCENT_PALETTE[depth % len(_GROUP_ACCENT_PALETTE)]
 
 
 def _add_combo_items(combo: QComboBox, items) -> None:
@@ -111,10 +128,14 @@ class ConditionNodeEditor(QFrame):
         parent: Optional[QWidget] = None,
         *,
         removable: bool = False,
+        depth: int = 0,
     ):
         super().__init__(parent)
         self._child_editors: List["ConditionNodeEditor"] = []
         self._removable = removable
+        # 내 children_container 에 적용될 accent 색을 고르기 위한 깊이.
+        # 루트=0, 중첩될수록 +1. `_build_group_container` 에서 참조.
+        self._depth = max(0, int(depth))
         self._build_ui()
         self.set_node(node or make_tag_leaf(""))
 
@@ -124,6 +145,10 @@ class ConditionNodeEditor(QFrame):
 
     def set_node(self, node: ConditionNode) -> None:
         """dataclass → UI 동기화. 시그널 일괄 차단 후 재개."""
+        # 루트 에디터는 editor_window 생명주기 동안 단일 인스턴스로 재사용되므로
+        # 이전 rule 에서 사용자가 접어둔 상태가 다음 rule 로 새면 안 된다. 새 rule
+        # 로드 시 항상 펼친 상태로 시작.
+        self._group_collapsed = False
         self._mute(True)
         try:
             kind = node.kind if node.kind in ("leaf", "group") else "leaf"
@@ -220,6 +245,27 @@ class ConditionNodeEditor(QFrame):
         row.addWidget(QLabel("조건 형태:"))
         row.addWidget(self._kind_combo)
         row.addStretch()
+
+        # 조건 묶음 접기/펼치기 — group kind 에서만 표시. 깊은 중첩을 리스트에서
+        # 일시적으로 축소해 세로 공간을 확보하기 위함. 휴지통과 동일 행에 배치.
+        self._group_collapsed: bool = False
+        self._collapse_btn = QPushButton("▼")
+        self._collapse_btn.setFixedWidth(get_scaled_size(32))
+        self._collapse_btn.setToolTip("자식 조건 접기/펼치기")
+        self._collapse_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background-color: transparent;"
+            f"  border: 1px solid {_CARD_BORDER};"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(4)}px;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {DARK_COLORS['bg_hover']};"
+            f"  border-color: {DARK_COLORS['border_light']};"
+            f"}}"
+        )
+        self._collapse_btn.clicked.connect(self._on_toggle_collapse)
+        row.addWidget(self._collapse_btn)
 
         if self._removable:
             delete_btn = QPushButton("🗑")
@@ -398,10 +444,13 @@ class ConditionNodeEditor(QFrame):
         self._children_container.setObjectName("childrenBand")
         # 중첩 자식 영역은 좌측 accent 바로 부모와 연결되어 있음을 시각화.
         # objectName 으로 범위 한정 → 자식 위젯으로 스타일 전파 방지.
+        # children_container 의 좌측 바는 "이 그룹에 속하는 바" — 자기 자신
+        # 의 depth 로 색상을 선택해야 루트(depth 0)가 팔레트[0]=연두, 다음
+        # 중첩(depth 1)이 [1]=주황 순으로 자연 전개된다.
         self._children_container.setStyleSheet(
             f"QWidget#childrenBand {{"
             f"  border-left: {get_scaled_size(3)}px solid"
-            f"    {DARK_COLORS['accent_blue']};"
+            f"    {_group_accent_for_depth(self._depth)};"
             f"  background: transparent;"
             f"}}"
         )
@@ -479,6 +528,8 @@ class ConditionNodeEditor(QFrame):
         is_leaf = _combo_value(self._kind_combo, "leaf") == "leaf"
         self._leaf_container.setVisible(is_leaf)
         self._group_container.setVisible(not is_leaf)
+        # 접기 버튼은 group 에서만 의미 — leaf 로 전환되면 숨기고 펼친 상태로 초기화.
+        self._collapse_btn.setVisible(not is_leaf)
         if is_leaf:
             lk = _combo_value(self._leaf_kind_combo, "tag")
             self._tag_params.setVisible(lk == "tag")
@@ -488,6 +539,22 @@ class ConditionNodeEditor(QFrame):
             # NOT 은 rating / char_on 에만 유효. tag / char_in 은
             # tag_modifier 에 부정형이 이미 있어 중복 → 숨김.
             self._negated_chk.setVisible(lk in ("rating", "char_on"))
+        else:
+            self._apply_collapse_state()
+
+    def _on_toggle_collapse(self) -> None:
+        self._group_collapsed = not self._group_collapsed
+        self._apply_collapse_state()
+
+    def _apply_collapse_state(self) -> None:
+        """접힘/펼침 상태를 자식 컨테이너 가시성과 버튼 글리프에 반영.
+
+        묶음 방식(AND/OR) 행과 `+ 조건 / + 묶음` 버튼은 유지하고 자식 목록만 접는다.
+        구조적 맥락은 남기면서 길어진 자식 리스트만 시야에서 제거하기 위함.
+        """
+        expanded = not self._group_collapsed
+        self._children_container.setVisible(expanded)
+        self._collapse_btn.setText("▼" if expanded else "▶")
 
     def _on_kind_changed(self, new_kind: str) -> None:
         self._update_visibility()
@@ -498,17 +565,31 @@ class ConditionNodeEditor(QFrame):
         self._emit_changed()
 
     def _on_add_leaf(self) -> None:
+        self._ensure_expanded_on_add()
         self._append_child(make_tag_leaf(""))
         self._emit_changed()
 
     def _on_add_group(self) -> None:
+        self._ensure_expanded_on_add()
         self._append_child(
             ConditionNode(kind="group", logical="AND", children=[])
         )
         self._emit_changed()
 
+    def _ensure_expanded_on_add(self) -> None:
+        """접힌 상태에서 자식 추가 시 시각 피드백이 사라지는 것을 방지.
+
+        사용자가 "+ 조건"/"+ 묶음" 을 눌렀는데 _children_container 가 여전히
+        hidden 이면 버튼이 먹통처럼 보인다. 추가 전에 강제로 펼친다.
+        """
+        if self._group_collapsed:
+            self._group_collapsed = False
+            self._apply_collapse_state()
+
     def _append_child(self, node: ConditionNode) -> None:
-        editor = ConditionNodeEditor(node, removable=True)
+        editor = ConditionNodeEditor(
+            node, removable=True, depth=self._depth + 1,
+        )
         editor.changed.connect(self._emit_changed)
         editor.request_delete.connect(self._on_child_delete_requested)
         self._child_editors.append(editor)

@@ -59,6 +59,10 @@ class CharStateSnapshot:
     def captured_indices(self) -> List[int]:
         return sorted(self._captured.keys())
 
+    def get_snapshot(self, index: int) -> Optional[CharSlotSnapshot]:
+        """캡처된 슬롯의 원본 상태 조회 (restore 전 diff 계산 용)."""
+        return self._captured.get(index)
+
     # ------------------------------------------------------------------
     # capture
     # ------------------------------------------------------------------

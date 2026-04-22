@@ -86,8 +86,10 @@ class CharSlotComboBox(QComboBox):
         self._get_slots = get_slots
         # 프로젝트 관례: 콤보는 휠 스크롤로 값 변경 차단.
         self.wheelEvent = lambda e: e.ignore()
-        # 슬롯 요약("3: blue_hair, smile  · 비활성") 이 너무 좁아 보이지 않게.
-        self.setMinimumWidth(get_scaled_size(220))
+        # 슬롯 요약 최소폭 — 선택된 항목은 좁을 수 있지만 드롭다운을 열면
+        # showPopup 이 view 폭을 자동 확장해 전체 텍스트가 표시된다.
+        # 220px 은 부모 row 에서 타 레이블/체크박스를 밀어내는 문제가 있어 축소.
+        self.setMinimumWidth(get_scaled_size(110))
         self.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToContentsOnFirstShow
         )

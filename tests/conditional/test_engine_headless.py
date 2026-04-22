@@ -265,6 +265,41 @@ def test_uc3_exact_replace_weight_preserve():
     )
 
 
+def test_uc3_exact_replace_plain_tag():
+    """회귀: plain (가중치 없는) 태그 교체. 이전 구현은 pop/insert 가
+    weighted 가드 안에 들어 있어 plain 태그가 silent-no-op 으로 남아있던 버그.
+    """
+    mod = make_module(MockAppContext())
+    ctx = make_context(main=['full body', 'blush', 'smile'])
+    logs = []
+    result = mod._apply_rules(
+        ctx, "(full body):full body=upper body", logs
+    )
+    check(
+        "UC-3g: 평범한 태그 교체 — full body → upper body 치환",
+        'upper body' in result.main_tags
+        and 'full body' not in result.main_tags,
+        f"main_tags={result.main_tags}",
+    )
+
+
+def test_uc3_exact_replace_plain_multi_new():
+    """회귀: plain 태그를 여러 새 태그로 교체 (순서 유지)."""
+    mod = make_module(MockAppContext())
+    ctx = make_context(main=['sweat', 'solo'])
+    logs = []
+    result = mod._apply_rules(
+        ctx, "():sweat=sweat^sweatdrop^steam", logs
+    )
+    # 기존 'sweat' 위치에 ['sweat', 'sweatdrop', 'steam'] 이 순서대로 삽입
+    expected_order = ['sweat', 'sweatdrop', 'steam', 'solo']
+    check(
+        "UC-3h: plain 태그 → 다중 새 태그 치환 시 순서 유지",
+        result.main_tags == expected_order,
+        f"main_tags={result.main_tags}",
+    )
+
+
 def test_rating_source_override():
     app_ctx = MockAppContext(rating_override='e', source_row=None)
     mod = make_module(app_ctx)
@@ -618,7 +653,9 @@ def main():
     section("UC-3: 레거시 호환 (기존 DSL 활용 패턴 보장)")
     for t in [test_uc3_legacy_simple_rating, test_uc3_legacy_and_matched,
               test_uc3_legacy_and_not_matched, test_uc3_legacy_or,
-              test_uc3_pattern_delete, test_uc3_exact_replace_weight_preserve]:
+              test_uc3_pattern_delete, test_uc3_exact_replace_weight_preserve,
+              test_uc3_exact_replace_plain_tag,
+              test_uc3_exact_replace_plain_multi_new]:
         run_one(t)
 
     section("Sub-phase 1.1: 엔진 확장 기본 (rating source / max_passes / skip)")

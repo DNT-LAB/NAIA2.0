@@ -24,7 +24,8 @@ LogicalOp = Literal["AND", "OR"]
 ConditionKind = Literal["leaf", "group"]
 LeafKind = Literal["tag", "rating", "char_in", "char_on"]
 ActionKind = Literal[
-    "append_list", "append", "replace", "char_set", "char_replace"
+    "append_list", "append", "replace", "char_set", "char_replace",
+    "char_append",
 ]
 RuleKind = Literal["block", "raw"]
 CharState = Literal["enabled", "disabled"]

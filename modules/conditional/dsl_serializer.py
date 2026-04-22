@@ -123,6 +123,12 @@ def serialize_action(action: Action) -> str:
             f"{action.char_old_tag}, {action.char_new_tag})"
         )
 
+    if k == "char_append":
+        # 레거시 호환 DSL 로 직렬화 (char:N+=tags). 런타임은 이미 이 문법을
+        # 처리하고 있으므로 신규 kind 추가로 인한 엔진 변경 불필요.
+        idx = action.char_index if action.char_index is not None else 1
+        return f"char:{idx}+={_join_tags(action.tags)}"
+
     raise ValueError(f"Unknown action kind: {k}")
 
 

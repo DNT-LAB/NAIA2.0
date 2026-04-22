@@ -235,6 +235,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         # 편집기 열기 버튼 (신규 GUI, v2.1 Phase 0)
         # SDLC R-40 준수: DARK_COLORS 토큰만 사용 (하드코딩 색상 금지)
+        # 174 hotfix: 실행 경로 라디오와 한 행 공유 (반반 분할) — 상단 공간 절약.
         editor_button = QPushButton("🔧 편집기 열기 (Preview)")
         editor_button.setStyleSheet(f"""
             QPushButton {{
@@ -242,11 +243,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 color: {DARK_COLORS['text_primary']};
                 border: none;
                 border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
+                padding: {get_scaled_size(8)}px {get_scaled_size(12)}px;
                 font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
                 font-weight: 600;
                 font-size: {get_scaled_font_size(18)}px;
-                text-align: left;
+                text-align: center;
             }}
             QPushButton:hover {{
                 background-color: {DARK_COLORS['bg_hover']};
@@ -260,10 +261,15 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             "기존 규칙 정의 텍스트박스는 그대로 사용할 수 있습니다."
         )
         editor_button.clicked.connect(self._open_rule_editor)
-        layout.addWidget(editor_button)
 
         # 174 hotfix (FR-11b): 실행 경로 라디오 (레거시 DSL / 신규 편집기).
-        layout.addLayout(self._build_mode_row(label_style))
+        # 편집기 버튼과 동일 행에 stretch=1/1 로 반반 분할.
+        # 좌측: 실행 경로 라디오 / 우측: 편집기 열기 버튼.
+        top_row = QHBoxLayout()
+        top_row.setSpacing(get_scaled_size(10))
+        top_row.addLayout(self._build_mode_row(label_style), 1)
+        top_row.addWidget(editor_button, 1)
+        layout.addLayout(top_row)
 
         # 활성화 체크박스
         self.enable_checkbox = QCheckBox("조건부 프롬프트 활성화")

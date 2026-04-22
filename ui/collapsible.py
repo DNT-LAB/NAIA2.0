@@ -26,9 +26,6 @@ class EnhancedCollapsibleBox(QWidget):
         self.is_detached = False
         self._start_expanded = start_expanded
 
-        # 174 hotfix: stylesheet 의 `QWidget#collapsibleBox` 셀렉터와 매칭시키기
-        # 위한 objectName. 이 이름이 없으면 border/bg 가 적용되지 않는다.
-        self.setObjectName("collapsibleBox")
         self.setStyleSheet(DARK_STYLES['collapsible_box'])
         self.init_ui()
 

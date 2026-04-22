@@ -97,13 +97,8 @@ def generate_dark_styles():
             }}
         """,
         
-        # 174 hotfix: 이전 구현은 `QWidget { border: 1px solid ... }` 와일드카드
-        # 셀렉터였다. Qt stylesheet 는 부모 widget 에 set 된 규칙이 descendant
-        # 트리에 cascade 되므로 collapsible box 내부의 모든 레이아웃 래퍼
-        # QWidget / QLabel / 중간 컨테이너에도 1px 테두리가 그려지는 UX 버그가
-        # 있었다. `QWidget#collapsibleBox` 로 스코프를 루트 박스에만 한정.
         'collapsible_box': f"""
-            QWidget#collapsibleBox {{
+            QWidget {{
                 background-color: {DARK_COLORS['bg_tertiary']};
                 border: 1px solid {DARK_COLORS['border']};
                 border-radius: {sizes['border_radius_large']}px;

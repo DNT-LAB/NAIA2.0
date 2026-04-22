@@ -31,9 +31,6 @@ class StoryBox(QWidget):
         self.is_collapsed = False
         self.child_boxes = {}
         self.items = {}
-        # 174 hotfix: collapsible_box 스타일은 이제 `QWidget#collapsibleBox`
-        # 셀렉터로 스코프. 루트 위젯에 동일 objectName 설정 필요.
-        self.setObjectName("collapsibleBox")
         self.setStyleSheet(DARK_STYLES['collapsible_box'])
         self.init_ui()
 

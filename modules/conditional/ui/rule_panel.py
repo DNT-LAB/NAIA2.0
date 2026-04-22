@@ -54,9 +54,9 @@ _ACTION_KIND_ITEMS = (
 _FIXED_TARGETS = ("prefix", "main", "postfix", "global_uc", "neg")
 _CHAR_TARGET_KINDS = ("char", "uc")
 _TARGET_ITEMS = (
-    ("프롬프트 앞", "prefix"),
+    ("선행고정 뒤", "prefix"),
     ("메인 프롬프트", "main"),
-    ("프롬프트 뒤", "postfix"),
+    ("후행고정 뒤", "postfix"),
     ("공용 UC", "global_uc"),
     ("네거티브", "neg"),
     ("캐릭터 프롬프트", "char"),
@@ -390,6 +390,7 @@ class RulePanel(QWidget):
         top.addWidget(QLabel("변경 방식:"))
         self._action_kind_combo = QComboBox()
         _add_combo_items(self._action_kind_combo, _ACTION_KIND_ITEMS)
+        self._action_kind_combo.wheelEvent = lambda e: e.ignore()
         self._action_kind_combo.currentTextChanged.connect(
             self._on_action_kind_changed
         )
@@ -415,6 +416,14 @@ class RulePanel(QWidget):
         row.addWidget(QLabel("적용 위치:"))
         self._target_kind_combo = QComboBox()
         _add_combo_items(self._target_kind_combo, _TARGET_ITEMS)
+        self._target_kind_combo.wheelEvent = lambda e: e.ignore()
+        # global_uc 는 런타임 스텁(_write_global_uc_target 은 no-op)이므로
+        # 드롭다운에서는 숨긴다. 데이터 모델에는 남겨 legacy 프리셋 (target=
+        # "global_uc") 의 round-trip 호환성을 유지한다. 불러온 규칙은 현재
+        # 선택 텍스트로 "공용 UC" 가 여전히 보이지만, 새 규칙에서는 선택 불가.
+        _hide_idx = self._target_kind_combo.findData("global_uc")
+        if _hide_idx >= 0:
+            self._target_kind_combo.view().setRowHidden(_hide_idx, True)
         self._target_kind_combo.currentTextChanged.connect(
             self._on_target_kind_changed
         )
@@ -423,6 +432,7 @@ class RulePanel(QWidget):
         self._target_n_spin = QSpinBox()
         self._target_n_spin.setRange(1, 10)
         self._target_n_spin.setValue(1)
+        self._target_n_spin.wheelEvent = lambda e: e.ignore()
         self._target_n_spin.valueChanged.connect(self._emit_changed)
         row.addWidget(self._target_n_spin)
 
@@ -477,12 +487,14 @@ class RulePanel(QWidget):
         top.addWidget(QLabel("대상 캐릭터"))
         self._func_char_index_spin = QSpinBox()
         self._func_char_index_spin.setRange(1, 10)
+        self._func_char_index_spin.wheelEvent = lambda e: e.ignore()
         self._func_char_index_spin.valueChanged.connect(self._emit_changed)
         top.addWidget(self._func_char_index_spin)
 
         top.addWidget(QLabel("상태:"))
         self._char_state_combo = QComboBox()
         _add_combo_items(self._char_state_combo, _CHAR_STATE_ITEMS)
+        self._char_state_combo.wheelEvent = lambda e: e.ignore()
         self._char_state_combo.currentTextChanged.connect(self._emit_changed)
         top.addWidget(self._char_state_combo)
         top.addStretch()
@@ -669,9 +681,9 @@ class RulePanel(QWidget):
 
     def _describe_target(self, target: str) -> str:
         mapping = {
-            "prefix": "프롬프트 앞",
+            "prefix": "선행고정 뒤",
             "main": "메인 프롬프트",
-            "postfix": "프롬프트 뒤",
+            "postfix": "후행고정 뒤",
             "global_uc": "공용 UC",
             "neg": "네거티브",
         }

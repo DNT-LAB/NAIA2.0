@@ -215,6 +215,7 @@ class ConditionNodeEditor(QFrame):
 
         self._kind_combo = QComboBox()
         _add_combo_items(self._kind_combo, _KIND_ITEMS)
+        self._kind_combo.wheelEvent = lambda e: e.ignore()
         self._kind_combo.currentTextChanged.connect(self._on_kind_changed)
         row.addWidget(QLabel("조건 형태:"))
         row.addWidget(self._kind_combo)
@@ -255,6 +256,7 @@ class ConditionNodeEditor(QFrame):
         top.addWidget(QLabel("판단 기준:"))
         self._leaf_kind_combo = QComboBox()
         _add_combo_items(self._leaf_kind_combo, _LEAF_KIND_ITEMS)
+        self._leaf_kind_combo.wheelEvent = lambda e: e.ignore()
         self._leaf_kind_combo.currentTextChanged.connect(
             self._on_leaf_kind_changed
         )
@@ -285,6 +287,7 @@ class ConditionNodeEditor(QFrame):
         row.addWidget(self._tag_value_edit, 1)
         self._tag_modifier_combo = QComboBox()
         _add_combo_items(self._tag_modifier_combo, _TAG_MOD_ITEMS)
+        self._tag_modifier_combo.wheelEvent = lambda e: e.ignore()
         self._tag_modifier_combo.currentTextChanged.connect(self._emit_changed)
         row.addWidget(self._tag_modifier_combo)
         return w
@@ -297,6 +300,7 @@ class ConditionNodeEditor(QFrame):
         row.addWidget(QLabel("등급:"))
         self._rating_value_combo = QComboBox()
         _add_combo_items(self._rating_value_combo, _RATING_VAL_ITEMS)
+        self._rating_value_combo.wheelEvent = lambda e: e.ignore()
         self._rating_value_combo.currentTextChanged.connect(self._emit_changed)
         row.addWidget(self._rating_value_combo)
         row.addWidget(QLabel("판단 기준:"))
@@ -304,6 +308,7 @@ class ConditionNodeEditor(QFrame):
         _add_combo_items(
             self._rating_source_combo, _RATING_SOURCE_ITEMS
         )
+        self._rating_source_combo.wheelEvent = lambda e: e.ignore()
         self._rating_source_combo.currentTextChanged.connect(self._emit_changed)
         row.addWidget(self._rating_source_combo)
         row.addStretch()
@@ -320,6 +325,7 @@ class ConditionNodeEditor(QFrame):
         idx_row.addWidget(QLabel("캐릭터 슬롯"))
         self._char_index_spin = QSpinBox()
         self._char_index_spin.setRange(1, 10)
+        self._char_index_spin.wheelEvent = lambda e: e.ignore()
         self._char_index_spin.valueChanged.connect(self._emit_changed)
         idx_row.addWidget(self._char_index_spin)
         idx_row.addStretch()
@@ -339,6 +345,7 @@ class ConditionNodeEditor(QFrame):
         _add_combo_items(
             self._char_tag_modifier_combo, _TAG_MOD_ITEMS
         )
+        self._char_tag_modifier_combo.wheelEvent = lambda e: e.ignore()
         self._char_tag_modifier_combo.currentTextChanged.connect(
             self._emit_changed
         )
@@ -357,6 +364,7 @@ class ConditionNodeEditor(QFrame):
         top.addWidget(QLabel("묶음 방식:"))
         self._logical_combo = QComboBox()
         _add_combo_items(self._logical_combo, _LOGICAL_ITEMS)
+        self._logical_combo.wheelEvent = lambda e: e.ignore()
         self._logical_combo.currentTextChanged.connect(self._emit_changed)
         top.addWidget(self._logical_combo)
         top.addStretch()
@@ -437,10 +445,15 @@ class ConditionNodeEditor(QFrame):
 
     def _read_leaf(self) -> ConditionNode:
         leaf_kind = _combo_value(self._leaf_kind_combo, "tag")
+        # NOT 체크박스는 rating / char_on 에만 노출되므로, 그 외 kind 에서는
+        # 숨겨진 상태의 체크값이 모델로 새어나가지 않게 False 로 고정.
+        negated_applicable = leaf_kind in ("rating", "char_on")
         n = ConditionNode(
             kind="leaf",
             leaf_kind=leaf_kind,
-            negated=self._negated_chk.isChecked(),
+            negated=(
+                self._negated_chk.isChecked() if negated_applicable else False
+            ),
         )
         if leaf_kind == "tag":
             n.tag_value = self._tag_value_edit.text().strip()
@@ -472,6 +485,9 @@ class ConditionNodeEditor(QFrame):
             self._rating_params.setVisible(lk == "rating")
             self._char_params.setVisible(lk in ("char_in", "char_on"))
             self._char_tag_row.setVisible(lk == "char_in")
+            # NOT 은 rating / char_on 에만 유효. tag / char_in 은
+            # tag_modifier 에 부정형이 이미 있어 중복 → 숨김.
+            self._negated_chk.setVisible(lk in ("rating", "char_on"))
 
     def _on_kind_changed(self, new_kind: str) -> None:
         self._update_visibility()

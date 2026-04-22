@@ -89,8 +89,58 @@ class RuleEditorWindow(QDialog):
         self.resize(get_scaled_size(1720), get_scaled_size(1020))
         self.setModal(False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        # 175 hotfix: QDialog 배경 규칙이 자식 QMessageBox/QInputDialog 까지
+        # cascade 되어 다크 배경 + 기본 검정 텍스트 충돌. 다이얼로그 전용
+        # 라벨/버튼/입력 스타일을 명시해 읽기 가능하게 한다.
         self.setStyleSheet(
             f"QDialog {{ background-color: {DARK_COLORS['bg_primary']}; }}"
+            f"QMessageBox {{"
+            f"  background-color: {DARK_COLORS['bg_secondary']};"
+            f"}}"
+            f"QMessageBox QLabel {{"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  background: transparent;"
+            f"  font-size: {get_scaled_font_size(16)}px;"
+            f"}}"
+            f"QMessageBox QPushButton, QInputDialog QPushButton {{"
+            f"  background-color: {DARK_COLORS['bg_tertiary']};"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid {DARK_COLORS['border_light']};"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(6)}px {get_scaled_size(14)}px;"
+            f"  min-width: {get_scaled_size(72)}px;"
+            f"  font-size: {get_scaled_font_size(15)}px;"
+            f"}}"
+            f"QMessageBox QPushButton:hover, QInputDialog QPushButton:hover {{"
+            f"  background-color: {DARK_COLORS['bg_hover']};"
+            f"}}"
+            f"QMessageBox QPushButton:pressed,"
+            f" QInputDialog QPushButton:pressed {{"
+            f"  background-color: {DARK_COLORS['bg_pressed']};"
+            f"}}"
+            f"QMessageBox QPushButton:default,"
+            f" QInputDialog QPushButton:default {{"
+            f"  background-color: {DARK_COLORS['accent_blue']};"
+            f"  color: white;"
+            f"  border-color: {DARK_COLORS['accent_blue']};"
+            f"}}"
+            f"QInputDialog {{"
+            f"  background-color: {DARK_COLORS['bg_secondary']};"
+            f"}}"
+            f"QInputDialog QLabel {{"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  background: transparent;"
+            f"  font-size: {get_scaled_font_size(16)}px;"
+            f"}}"
+            f"QInputDialog QLineEdit {{"
+            f"  background-color: #161616;"
+            f"  color: {DARK_COLORS['text_primary']};"
+            f"  border: 1px solid #444444;"
+            f"  border-radius: {get_scaled_size(4)}px;"
+            f"  padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
+            f"  font-size: {get_scaled_font_size(16)}px;"
+            f"  selection-background-color: {DARK_COLORS['accent_blue']};"
+            f"}}"
         )
 
         self._build_ui()
@@ -258,7 +308,7 @@ class RuleEditorWindow(QDialog):
             f"  border: 1px solid #444444;"
             f"  border-radius: {get_scaled_size(4)}px;"
             f"  padding: {get_scaled_size(6)}px {get_scaled_size(8)}px;"
-            f"  font-size: {get_scaled_font_size(18)}px;"
+            f"  font-size: {get_scaled_font_size(20)}px;"
             f"  selection-background-color: {DARK_COLORS['accent_blue']};"
             f"}}"
         )

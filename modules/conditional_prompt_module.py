@@ -1420,6 +1420,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         new_tags_str = ', '.join(str(t) for t in tag_list if t)
         for i in indices:
+            # 179 SDLC P4: clone 수정 전 슬롯 캡처 (idempotent).
+            # char:* 케이스에서는 활성 슬롯 모두 보존 → 복원도 일괄.
+            if self._char_snapshot is not None:
+                self._char_snapshot.capture(i)
             current = char_list[i] if i < len(char_list) else ""
             if op == 'append':
                 if current.strip():
@@ -1748,6 +1752,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 "매칭 태그 없음",
             )
             return
+
+        # 179 SDLC P3: 실 수정 직전 슬롯 캡처 (idempotent).
+        # _on_generate_done 이 modifiable_clone 도 원상복원.
+        if self._char_snapshot is not None:
+            self._char_snapshot.capture(char_idx)
 
         char_list[char_idx] = ', '.join(tags)
         clone['characters'] = char_list
@@ -2131,15 +2140,17 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """generate 완료/실패 핸들러 — 캐릭터 슬롯 변경분 일괄 복원.
 
         179 SDLC P2 (설계 §5.2.2): 모든 generate 종료 채널에서 호출됨.
-        request 타입 무관 — snapshot 이 비어 있으면 안전하게 no-op.
+        request 타입 무관 — snapshot 이 비어 있어도 None 으로 정리해 다음
+        사이클이 깨끗하게 시작되도록 한다.
         """
         snap = self._char_snapshot
-        if snap is None or snap.is_empty():
+        if snap is None:
             return
         try:
-            n = snap.restore()
-            if n > 0:
-                print(f"[Conditional] {n} 캐릭터 슬롯 원상복원")
+            if not snap.is_empty():
+                n = snap.restore()
+                if n > 0:
+                    print(f"[Conditional] {n} 캐릭터 슬롯 원상복원")
         except Exception as e:
             print(f"[Conditional] 슬롯 복원 실패: {e}")
         finally:

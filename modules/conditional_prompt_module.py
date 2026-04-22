@@ -8,6 +8,7 @@ from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
+from modules.conditional.runtime_snapshot import CharStateSnapshot
 from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.modern_menu import setModernStyle
@@ -169,6 +170,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # 편집기 오픈 시 _rules_v2_dsl 을 파싱, Apply 시 set_v2_dsl 로 저장.
         # execute_pipeline_hook 이 활성 모드에 따라 한쪽만 읽는다.
         self._rules_v2_dsl: str = ""
+
+        # 179 SDLC P2: char 계열 액션 적용 전 슬롯 상태 보존용 스냅샷.
+        # 매 hook 사이클 시작 시 fresh, generation_finished/error 에서 복원.
+        # 설계: docs/CONDITIONAL_CHAR_ACTION_RESTORATION.md
+        self._char_snapshot = None  # type: Optional[CharStateSnapshot]
 
     def set_engine_options(self, *, max_passes: int = 1,
                            stop_on_match: bool = False):
@@ -729,6 +735,18 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """
         # Phase 1.1: Skip 카운터 초기화 (타 모드 char/uc 건너뜀 집계용)
         self._skip_counters = {}
+
+        # 179 SDLC P2: 새 사이클 진입 — char snapshot fresh 시작.
+        # 이전 사이클의 generation_finished 가 누락된 경로(R1 fallback)에서
+        # snapshot 이 살아남았으면 여기서 강제 복원하여 누수 차단.
+        if self._char_snapshot is not None and not self._char_snapshot.is_empty():
+            try:
+                n = self._char_snapshot.restore()
+                if n > 0:
+                    print(f"[Conditional] 이전 사이클 누수 복원: {n} 슬롯")
+            except Exception as e:
+                print(f"[Conditional] 누수 복원 실패: {e}")
+        self._char_snapshot = CharStateSnapshot(self._get_character_module())
 
         rules = self._parse_rules(rules_text)
         prefix_tags = context.prefix_tags.copy()
@@ -1642,6 +1660,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             )
             return
 
+        # 179 SDLC P2: setter 호출 전 슬롯 상태 캡처 (idempotent).
+        # generation_finished 시점에 _on_generate_done 이 복원.
+        if self._char_snapshot is not None:
+            self._char_snapshot.capture(char_idx)
+
         try:
             ok = setter(char_idx, state == 'enabled')
             if not ok:
@@ -2092,6 +2115,35 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
     def initialize_with_context(self, app_context):
         """AppContext 주입"""
         self.app_context = app_context
+        # 179 SDLC P2: char 액션 변경을 generate 종료 후 복원하기 위해 이벤트 구독.
+        # generation_finished + generation_error 둘 다 — 실패해도 복원 보장.
+        try:
+            app_context.subscribe(
+                "generation_finished", self._on_generate_done
+            )
+            app_context.subscribe(
+                "generation_error", self._on_generate_done
+            )
+        except Exception as e:
+            print(f"[Conditional] generate 이벤트 구독 실패: {e}")
+
+    def _on_generate_done(self, _data):
+        """generate 완료/실패 핸들러 — 캐릭터 슬롯 변경분 일괄 복원.
+
+        179 SDLC P2 (설계 §5.2.2): 모든 generate 종료 채널에서 호출됨.
+        request 타입 무관 — snapshot 이 비어 있으면 안전하게 no-op.
+        """
+        snap = self._char_snapshot
+        if snap is None or snap.is_empty():
+            return
+        try:
+            n = snap.restore()
+            if n > 0:
+                print(f"[Conditional] {n} 캐릭터 슬롯 원상복원")
+        except Exception as e:
+            print(f"[Conditional] 슬롯 복원 실패: {e}")
+        finally:
+            self._char_snapshot = None
 
     def on_initialize(self):
         """모듈 초기화"""

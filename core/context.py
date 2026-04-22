@@ -31,6 +31,8 @@ class AppContext:
         self.middle_section_controller: Optional['MiddleSectionController'] = None
         self.api_service = APIService(self)
         self.comfyui_workflow_manager = ComfyUIWorkflowManager()
+        # [179.5] 매니저가 `comfyui_workflow_changed` 이벤트를 발행할 수 있게 AppContext 주입
+        self.comfyui_workflow_manager.set_app_context(self)
 
         # 🆕 API 모드 관리
         self.current_api_mode = "NAI"  # 기본값은 NAI

@@ -118,7 +118,14 @@ class ComfyUIParameterPanel(QFrame):
             }}
         """)
 
+        # [179.5] 모델 잠금 상태 — locked_unknown 워크플로우에서 치환/조회 차단
+        self._model_locked = False
+        self._model_original_items = []
+        self._gen_workflow_subscribed = False
+
         self._init_ui()
+        self._subscribe_workflow_changes()
+        self._refresh_initial_workflow_state()
 
     def disable_wheel_event(self, widget):
         """위젯의 마우스 휠 이벤트를 비활성화"""
@@ -319,6 +326,108 @@ class ComfyUIParameterPanel(QFrame):
         line.setFrameShadow(QFrame.Shadow.Sunken)
         line.setStyleSheet(f"background-color: {COMMON_STYLES['input_border']}; height: 1px;")
         layout.addWidget(line)
+
+    # ------------------------------------------------------------------
+    # [179.5] 커스텀 워크플로우 잠금 — comfyui_workflow_changed 이벤트 연동
+    # ------------------------------------------------------------------
+    def _subscribe_workflow_changes(self):
+        """AppContext의 comfyui_workflow_changed 이벤트를 구독 (idempotent)."""
+        if self._gen_workflow_subscribed:
+            return
+        if self.app_context is None or not hasattr(self.app_context, 'subscribe'):
+            return
+        try:
+            self.app_context.subscribe(
+                "comfyui_workflow_changed",
+                self._on_comfyui_workflow_changed,
+            )
+            self._gen_workflow_subscribed = True
+        except Exception as e:
+            print(f"⚠️ comfyui_workflow_changed 구독 실패: {e}")
+
+    def _refresh_initial_workflow_state(self):
+        """패널 생성 시점에 이미 사용자 워크플로우가 로드돼 있으면 잠금 상태를 동기화."""
+        if self.app_context is None:
+            return
+        mgr = getattr(self.app_context, 'comfyui_workflow_manager', None)
+        if mgr is None:
+            return
+        node_map = getattr(mgr, 'user_workflow_node_map', None) or {}
+        has_custom = getattr(mgr, 'user_workflow', None) is not None
+        self._on_comfyui_workflow_changed({
+            "has_custom": has_custom,
+            "model_compat": node_map.get("model_compat") if has_custom else None,
+            "locked_loader_class": node_map.get("locked_loader_class"),
+            "locked_model_display": node_map.get("locked_model_display"),
+        })
+
+    def _on_comfyui_workflow_changed(self, data):
+        """이벤트 핸들러 — model_compat 값에 따라 model_combo 잠금 토글."""
+        if not isinstance(data, dict):
+            return
+        if data.get("model_compat") == "locked_unknown":
+            self._apply_model_lock(
+                display=data.get("locked_model_display"),
+                loader_class=data.get("locked_loader_class"),
+            )
+        else:
+            self._release_model_lock()
+
+    def _apply_model_lock(self, display=None, loader_class=None):
+        """model_combo를 '[UNKNOWN]' 표시로 고정하고 편집/조회를 차단.
+
+        [H1] locked → locked 전환 시에도 display/loader_class 가 갱신되도록
+             early return 대신 '스냅샷은 최초 1회' + '표시는 매번 갱신' 구조.
+        [L1] setEditable 토글 대신 lineEdit().setReadOnly 로 — setEditable(True↔False)
+             반복은 내부 lineEdit 을 새로 만들어 validator/completer/eventFilter 를 잃게 됨.
+        """
+        display = display or "UNKNOWN"
+        loader_class = loader_class or "Custom Loader"
+
+        # 스냅샷은 최초 잠금 시에만 캡처 (locked → locked 전환에서 A 의 원본 보존)
+        if not self._model_locked:
+            self._model_original_items = [
+                self.model_combo.itemText(i) for i in range(self.model_combo.count())
+            ]
+
+        self.model_combo.blockSignals(True)
+        try:
+            line_edit = self.model_combo.lineEdit()
+            if line_edit is not None:
+                line_edit.setReadOnly(True)
+            self.model_combo.clear()
+            self.model_combo.addItem(f"[UNKNOWN] {display}")
+            self.model_combo.setCurrentIndex(0)
+        finally:
+            self.model_combo.blockSignals(False)
+        self.model_combo.setEnabled(False)
+        self.model_combo.setToolTip(
+            f"이 워크플로우는 커스텀 로더({loader_class})를 사용합니다.\n"
+            "체크포인트 변경 및 조회가 비활성화되어 있습니다.\n"
+            "기본 워크플로우로 되돌리면 다시 활성화됩니다."
+        )
+        self._model_locked = True
+
+    def _release_model_lock(self):
+        """잠금 해제 — 원래 콤보 항목을 복원하고 편집 가능 상태로 되돌림."""
+        if not self._model_locked:
+            return
+        self.model_combo.blockSignals(True)
+        try:
+            line_edit = self.model_combo.lineEdit()
+            if line_edit is not None:
+                line_edit.setReadOnly(False)
+            self.model_combo.clear()
+            if self._model_original_items:
+                self.model_combo.addItems(self._model_original_items)
+            if self.model_combo.count() > 0:
+                self.model_combo.setCurrentIndex(0)
+        finally:
+            self.model_combo.blockSignals(False)
+        self.model_combo.setEnabled(True)
+        self.model_combo.setToolTip("")
+        self._model_locked = False
+        self._model_original_items = []
 
     def get_params(self):
         """현재 설정된 파라미터 반환"""

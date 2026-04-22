@@ -2,12 +2,13 @@
 import json
 import copy
 import uuid
+import weakref
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 class ComfyUIWorkflowManager:
     """ComfyUI 워크플로우를 관리하고 파라미터를 치환하는 클래스"""
-    
+
     def __init__(self):
         self.base_workflow = self._load_base_workflow()
         self.anima_workflow = self._load_anima_workflow()  # ANIMA 워크플로우 추가
@@ -15,6 +16,34 @@ class ComfyUIWorkflowManager:
         self.user_workflow: Optional[Dict[str, Any]] = None
         self.user_workflow_ui: Optional[Dict[str, Any]] = None # [추가] UI 형식 워크플로우 저장
         self.user_workflow_node_map: Optional[Dict[str, str]] = None # 검증 후 생성된 노드 맵
+
+        # [179.5] 워크플로우 변경 이벤트 발행용 AppContext 참조 (weakref)
+        self._app_context_ref: Optional[weakref.ReferenceType] = None
+
+    def set_app_context(self, app_context) -> None:
+        """AppContext를 주입하여 워크플로우 변경 이벤트(`comfyui_workflow_changed`)를 발행할 수 있게 한다."""
+        self._app_context_ref = weakref.ref(app_context) if app_context is not None else None
+
+    def _publish_workflow_changed(self) -> None:
+        """현재 user_workflow 상태를 이벤트로 UI에 브로드캐스트."""
+        if self._app_context_ref is None:
+            return
+        app_context = self._app_context_ref()
+        if app_context is None or not hasattr(app_context, 'publish'):
+            return
+
+        node_map = self.user_workflow_node_map or {}
+        has_custom = self.user_workflow is not None
+        payload = {
+            "has_custom": has_custom,
+            "model_compat": node_map.get("model_compat") if has_custom else None,
+            "locked_loader_class": node_map.get("locked_loader_class"),
+            "locked_model_display": node_map.get("locked_model_display"),
+        }
+        try:
+            app_context.publish("comfyui_workflow_changed", payload)
+        except Exception as e:
+            print(f"⚠️ comfyui_workflow_changed 발행 실패: {e}")
 
         
     def _load_anima_workflow(self) -> Dict[str, Any]:
@@ -292,6 +321,7 @@ class ComfyUIWorkflowManager:
         self.user_workflow_ui = None
         self.user_workflow_node_map = None
         print("🔄 사용자 워크플로우가 초기화되었습니다. 기본 워크플로우를 사용합니다.")
+        self._publish_workflow_changed()
 
 
     def load_workflow_from_metadata(self, comfyui_metadata: Dict[str, Any]) -> bool:
@@ -327,9 +357,10 @@ class ComfyUIWorkflowManager:
                 self.user_workflow_ui = None # UI 형식 정보 없음
 
             self.user_workflow_node_map = node_map
-            
+
             print("✅ 사용자 워크플로우를 성공적으로 로드하고 검증했습니다.")
             print(f"   - 노드 맵: {node_map}")
+            self._publish_workflow_changed()
             return True
 
         except (json.JSONDecodeError, TypeError) as e:
@@ -359,10 +390,128 @@ class ComfyUIWorkflowManager:
         
         return cleaned_prompt
 
+    # 모델 파일 확장자 — terminal 로더에서 "모델명" 후보를 뽑을 때 사용
+    _MODEL_FILE_EXTS = ('.safetensors', '.ckpt', '.gguf', '.pt', '.bin', '.onnx')
+
+    def _trace_model_source_to_terminal(
+        self,
+        nodes_by_id: Dict[str, Any],
+        links_data: Optional[List],
+        start_node_id: str,
+        is_ui_format: bool,
+        max_depth: int = 64,
+    ) -> Optional[str]:
+        """
+        `start_node_id` (일반적으로 KSampler)에서 `model` 입력을 역추적하여
+        terminal 로더 노드 ID를 반환합니다.
+
+        Terminal 정의: 'model' 입력 슬롯이 없거나, 있어도 어느 노드에도
+        링크되어 있지 않은 노드. (즉, 모델 그래프의 시작점 — 체크포인트
+        로더, UNET 로더, 혹은 커스텀 로더)
+
+        중간에 놓인 패치 노드(SageAttention, TorchCompile, RescaleCFG 등)는
+        전부 통과하며, 그 과정에서 모델 스트림이 어디서 시작됐는지만 파악합니다.
+
+        순환/손상된 링크 방지:
+        - `visited` 집합으로 사이클 감지 → 사이클 직전 노드 반환
+        - `max_depth` 로 하드 가드
+        - dangling link(참조 노드 부재) 시 현재 노드를 terminal로 간주
+        """
+        if start_node_id not in nodes_by_id:
+            return None
+
+        links_by_id: Dict[Any, Any] = {}
+        if is_ui_format and links_data:
+            links_by_id = {link[0]: link for link in links_data if link and len(link) >= 2}
+
+        visited = set()
+        current_id = start_node_id
+        for _ in range(max_depth):
+            if current_id in visited:
+                # [M2] 순환 감지 — 현재 노드를 terminal 로 간주하면 커스텀 패치 노드가
+                # "로더" 로 잘못 표시될 수 있다. None 반환으로 호출부가 완전히 LOCKED
+                # 로 귀결하도록 한다 (정상 ComfyUI 워크플로우에는 순환이 없음).
+                return None
+            visited.add(current_id)
+
+            node = nodes_by_id.get(current_id)
+            if not node:
+                return None
+
+            source_id: Optional[str] = None
+            inputs = node.get("inputs")
+
+            if is_ui_format:
+                # UI 형식: inputs = [{"name": "model", "link": link_id}, ...]
+                if isinstance(inputs, list):
+                    model_slot = next(
+                        (s for s in inputs
+                         if isinstance(s, dict) and s.get("name") == "model"),
+                        None
+                    )
+                    if model_slot is not None:
+                        link_id = model_slot.get("link")
+                        if link_id is not None and link_id in links_by_id:
+                            link = links_by_id[link_id]
+                            # ComfyUI 링크: [id, src_node, src_slot, tgt_node, tgt_slot, type]
+                            if len(link) >= 2:
+                                source_id = str(link[1])
+            else:
+                # API 형식: inputs = {"model": [src_id, src_slot], ...}
+                if isinstance(inputs, dict):
+                    model_value = inputs.get("model")
+                    if isinstance(model_value, list) and len(model_value) >= 1:
+                        source_id = str(model_value[0])
+
+            if source_id is None:
+                return current_id  # model 입력 없음 → terminal
+            if source_id not in nodes_by_id:
+                return current_id  # dangling link → 현재를 terminal로 간주
+
+            current_id = source_id
+
+        # [M2] max_depth 초과 — 정상 워크플로우로 보기 어려우므로 LOCKED 귀결.
+        return None
+
+    def _extract_locked_model_display(
+        self,
+        terminal_node: Dict[str, Any],
+        is_ui_format: bool,
+    ) -> Optional[str]:
+        """
+        커스텀 로더 노드의 inputs / widgets_values 에서 모델 파일명을 뽑아
+        UI의 '[UNKNOWN] <파일명>' 표시용으로 반환합니다.
+
+        자동 치환 힌트로는 쓰지 않고, 순전히 사용자에게 "지금 이 워크플로우가
+        어떤 체크포인트를 쓰는지" 알려주는 정보 표시 용도.
+        """
+        def _is_model_file(value: Any) -> bool:
+            if not isinstance(value, str):
+                return False
+            lower = value.lower()
+            return any(lower.endswith(ext) for ext in self._MODEL_FILE_EXTS)
+
+        if is_ui_format:
+            widgets = terminal_node.get("widgets_values", [])
+            if isinstance(widgets, list):
+                for w in widgets:
+                    if _is_model_file(w):
+                        return w
+        else:
+            inputs = terminal_node.get("inputs", {})
+            if isinstance(inputs, dict):
+                for value in inputs.values():
+                    if _is_model_file(value):
+                        return value
+
+        return None
+
     def validate_and_map_workflow(self, workflow: Dict[str, Any]) -> tuple[bool, Dict[str, Any]]:
         """
         워크플로우의 필수 노드들을 class_type으로 찾아 ID를 매핑합니다.
         [수정] UI 형식('nodes' 리스트)과 API 형식(노드 딕셔너리)을 모두 처리하도록 개선되었습니다.
+        [179.5] 샘플러의 model 입력을 역추적해 terminal 로더를 식별하고,
+                표준이 아닌 로더는 'locked_unknown' 상태로 허용합니다.
         """
         nodes_by_id = {}
         links_data = None
@@ -427,38 +576,61 @@ class ComfyUIWorkflowManager:
                 found_sampler_nodes.append(node_id)
 
         # --- 3. 필수 노드 존재 여부 확인 ---
-        # 3-1. 모델 로더 확인 (CheckpointLoaderSimple 또는 UNETLoader 중 하나)
+        # 3-1. 프롬프트 인코더
+        if len(found_nodes["CLIPTextEncode"]) < 2:
+            return False, {"error": "CLIPTextEncode 노드가 2개 미만입니다 (Prompt/Negative)."}
+
+        # 3-2. 샘플러
+        if not found_sampler_nodes:
+            return False, {"error": f"필수 샘플러 노드({'/'.join(recognized_sampler_types)})를 찾을 수 없습니다."}
+
+        sampler_node_id = found_sampler_nodes[0]
+
+        # 3-3. 샘플러의 model 입력을 역추적해 terminal 로더 식별
+        #      표준 로더가 terminal 이면 NATIVE_* 로 등록하여 모델 치환 허용,
+        #      커스텀 로더 / 미인식 구조면 LOCKED_UNKNOWN 으로 import 는 허용하되
+        #      모델 치환은 호출부에서 잠그도록 알림.
         has_checkpoint_loader = bool(found_loader_nodes["CheckpointLoaderSimple"])
         has_unet_loader = bool(found_loader_nodes["UNETLoader"])
         has_clip_loader = bool(found_loader_nodes["CLIPLoader"])
 
-        if not has_checkpoint_loader and not (has_unet_loader and has_clip_loader):
-            return False, {"error": "CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader) 조합이 필요합니다."}
+        terminal_id = self._trace_model_source_to_terminal(
+            nodes_by_id, links_data, sampler_node_id, is_ui_format
+        )
+        terminal_node = nodes_by_id.get(terminal_id) if terminal_id else None
+        terminal_class: Optional[str] = None
+        if terminal_node:
+            terminal_class = terminal_node.get("type") or terminal_node.get("class_type")
 
-        # 3-2. 프롬프트 인코더 확인
-        if len(found_nodes["CLIPTextEncode"]) < 2:
-            return False, {"error": "CLIPTextEncode 노드가 2개 미만입니다 (Prompt/Negative)."}
-
-        # 3-3. 샘플러 확인
-        if not found_sampler_nodes:
-            return False, {"error": f"필수 샘플러 노드({'/'.join(recognized_sampler_types)})를 찾을 수 없습니다."}
-
-        # 3-4. 워크플로우 타입 판별 및 노드 맵 설정
-        if has_checkpoint_loader:
-            node_map["checkpoint_loader"] = found_loader_nodes["CheckpointLoaderSimple"][0]
+        if terminal_class == "CheckpointLoaderSimple":
+            node_map["model_compat"] = "native_checkpoint"
+            node_map["checkpoint_loader"] = terminal_id
             node_map["workflow_type"] = "checkpoint"
-        else:
-            node_map["unet_loader"] = found_loader_nodes["UNETLoader"][0]
+        elif terminal_class == "UNETLoader" and has_clip_loader:
+            node_map["model_compat"] = "native_unet"
+            node_map["unet_loader"] = terminal_id
             node_map["clip_loader"] = found_loader_nodes["CLIPLoader"][0]
             node_map["workflow_type"] = "unet"
-
-            # VAELoader도 ANIMA 워크플로우에서 필요
             if found_loader_nodes["VAELoader"]:
                 node_map["vae_loader"] = found_loader_nodes["VAELoader"][0]
-        
+        else:
+            # 커스텀 / 미인식 로더 — 모델 치환 잠금
+            node_map["model_compat"] = "locked_unknown"
+            node_map["workflow_type"] = "locked"
+            if terminal_id:
+                node_map["locked_loader_node_id"] = terminal_id
+            node_map["locked_loader_class"] = terminal_class or "Unknown"
+            if terminal_node:
+                display = self._extract_locked_model_display(terminal_node, is_ui_format)
+                if display:
+                    node_map["locked_model_display"] = display
+            # CLIP/VAE 로더가 별도로 있으면 기록(정보 표시용)
+            if has_clip_loader:
+                node_map["clip_loader"] = found_loader_nodes["CLIPLoader"][0]
+            if found_loader_nodes["VAELoader"]:
+                node_map["vae_loader"] = found_loader_nodes["VAELoader"][0]
+
         # --- 4. 샘플러에 연결된 프롬프트 노드 찾기 ---
-        # [핵심 수정] 발견된 첫 번째 샘플러를 기준으로 삼음
-        sampler_node_id = found_sampler_nodes[0]
         sampler_inputs = nodes_by_id[sampler_node_id]["inputs"]
         
         if is_ui_format:
@@ -572,10 +744,20 @@ class ComfyUIWorkflowManager:
             workflow_ui = None  # 기본 워크플로우는 UI 형식이 없음
 
         try:
-            # 1. 모델 설정 (워크플로우 타입에 따라 다르게 처리)
+            # 1. 모델 설정 (워크플로우 타입/호환성에 따라 다르게 처리)
             detected_workflow_type = node_map.get("workflow_type", "checkpoint")
+            model_compat = node_map.get("model_compat")
 
-            if detected_workflow_type == "checkpoint" and "checkpoint_loader" in node_map:
+            if model_compat == "locked_unknown":
+                # 커스텀 로더 체인 — 모델 치환을 명시적으로 스킵.
+                # 워크플로우가 가지고 있던 원본 모델/가중치 설정을 그대로 유지한다.
+                locked_display = node_map.get("locked_model_display") or "(unknown)"
+                locked_class = node_map.get("locked_loader_class") or "Unknown"
+                print(
+                    f"🔒 LOCKED 워크플로우: 커스텀 로더({locked_class}) 사용 — "
+                    f"모델 치환을 건너뜁니다. 원본 모델 유지: {locked_display}"
+                )
+            elif detected_workflow_type == "checkpoint" and "checkpoint_loader" in node_map:
                 # CheckpointLoaderSimple 사용
                 workflow[node_map["checkpoint_loader"]]["inputs"]["ckpt_name"] = params['model']
                 print(f"✅ CheckpointLoader 모델 설정: {params['model']}")
@@ -776,7 +958,9 @@ class ComfyUIWorkflowManager:
             "success": False,
             "required": [],
             "custom": [],
-            "error_message": ""
+            "error_message": "",
+            # [179.5] 모델 호환성 상태: None / "native_checkpoint" / "native_unet" / "locked_unknown"
+            "model_compat": None,
         }
         # [수정] KSampler 외 커스텀 샘플러 지원
         recognized_sampler_types = {"KSampler", "SamplerCustom"}
@@ -835,13 +1019,17 @@ class ComfyUIWorkflowManager:
                     result['custom'].append(class_type)
 
             # 3. 최종 유효성 검사
-            # 3-1. 로더 검증: CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader)
+            # 3-1. 로더 호환성 판정 — 표준 로더가 있으면 native, 아니면 locked_unknown.
+            #      커스텀 로더 체인도 import 는 허용하고, 모델 치환만 UI 측에서 잠근다.
             has_checkpoint = "CheckpointLoaderSimple" in found_loaders
             has_unet_clip = "UNETLoader" in found_loaders and "CLIPLoader" in found_loaders
 
-            if not has_checkpoint and not has_unet_clip:
-                result['required'].append(("FAIL", "CheckpointLoaderSimple or (UNETLoader + CLIPLoader)"))
-                result['success'] = False
+            if has_checkpoint:
+                result['model_compat'] = "native_checkpoint"
+            elif has_unet_clip:
+                result['model_compat'] = "native_unet"
+            else:
+                result['model_compat'] = "locked_unknown"
 
             # 3-2. SaveImage 또는 PreviewImage 둘 중 하나만 있으면 됨
             if "SaveImage" in found_required or "PreviewImage" in found_required:
@@ -864,8 +1052,25 @@ class ComfyUIWorkflowManager:
             # 나머지 필수 노드 검증
             for missing in missing_nodes:
                 result['required'].append(("FAIL", missing))
-            
+
             result['success'] = not bool(missing_nodes)
+
+            # [179.5] locked_unknown 이면 validate_and_map_workflow 로 한 번 더 돌려
+            # terminal 로더 클래스와 모델명을 추출해 팝업에 표시한다.
+            if result['model_compat'] == "locked_unknown":
+                try:
+                    source = workflow_str or prompt_str
+                    if source:
+                        parsed = json.loads(source)
+                        _ok, _nm = self.validate_and_map_workflow(parsed)
+                        if _ok:
+                            if _nm.get('locked_loader_class'):
+                                result['locked_loader_class'] = _nm.get('locked_loader_class')
+                            if _nm.get('locked_model_display'):
+                                result['locked_model_display'] = _nm.get('locked_model_display')
+                except Exception as _e:
+                    # 표시 정보 실패는 치명적이지 않음 — model_compat 만 유지
+                    print(f"ℹ️ locked 로더 세부 정보 추출 건너뜀: {_e}")
 
         except json.JSONDecodeError:
             result['error_message'] = "워크플로우 JSON 데이터가 손상되었습니다."

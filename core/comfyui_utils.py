@@ -6,7 +6,7 @@ import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QPushButton, QGroupBox, QTextEdit
+    QDialog, QVBoxLayout, QPushButton, QGroupBox, QTextEdit, QLabel
 )
 from ui.theme import DARK_COLORS, DARK_STYLES
 
@@ -227,7 +227,17 @@ class WorkflowValidationDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        
+
+        # [179.5] 모델 호환성 상태 라벨 (native_* / locked_unknown)
+        self.compat_label = QLabel()
+        self.compat_label.setWordWrap(True)
+        self.compat_label.setStyleSheet(
+            f"padding: 10px; border-radius: 6px; font-size: 13px; "
+            f"background-color: {DARK_COLORS['bg_secondary']}; "
+            f"color: {DARK_COLORS['text_primary']};"
+        )
+        layout.addWidget(self.compat_label)
+
         # 필수 노드 그룹
         required_group = QGroupBox("[필수 노드]")
         required_group.setStyleSheet("QGroupBox { font-weight: bold; font-size: 16px; }")
@@ -237,7 +247,7 @@ class WorkflowValidationDialog(QDialog):
         self.required_text_edit.setStyleSheet(DARK_STYLES['compact_textedit'])
         required_layout.addWidget(self.required_text_edit)
         required_group.setLayout(required_layout)
-        
+
         # 커스텀 노드 그룹
         custom_group = QGroupBox("[커스텀 노드]")
         custom_group.setStyleSheet("QGroupBox { font-weight: bold; font-size: 16px; }")
@@ -256,10 +266,41 @@ class WorkflowValidationDialog(QDialog):
         layout.addWidget(required_group)
         layout.addWidget(custom_group)
         layout.addWidget(close_button)
-        
+
         self.populate_data()
 
     def populate_data(self):
+        # [179.5] 모델 호환성 상태 표시
+        compat = self.result.get('model_compat')
+        if compat == "native_checkpoint":
+            self.compat_label.setText(
+                f"<b style='color:{DARK_COLORS['success']};'>✓ 표준 체크포인트 로더</b> "
+                "— CheckpointLoaderSimple. 모델 변경 가능."
+            )
+        elif compat == "native_unet":
+            self.compat_label.setText(
+                f"<b style='color:{DARK_COLORS['success']};'>✓ 표준 UNET 로더</b> "
+                "— UNETLoader + CLIPLoader. 모델 변경 가능."
+            )
+        elif compat == "locked_unknown":
+            loader = self.result.get('locked_loader_class') or "Custom Loader"
+            display = self.result.get('locked_model_display') or "(파일명 미검출)"
+            self.compat_label.setText(
+                f"<b style='color:{DARK_COLORS['warning']};'>🔒 커스텀 체크포인트 로더 — 모델 변경 잠금</b><br>"
+                f"<span style='color:{DARK_COLORS['text_secondary']};'>"
+                f"로더: {loader}<br>"
+                f"원본 모델: {display}<br>"
+                f"이 워크플로우의 프롬프트·시드·해상도·샘플러는 변경 가능하지만, "
+                f"체크포인트는 워크플로우 내장값을 유지합니다."
+                f"</span>"
+            )
+        else:
+            self.compat_label.setText(
+                f"<span style='color:{DARK_COLORS['text_secondary']};'>"
+                "모델 호환성 정보 없음"
+                "</span>"
+            )
+
         # 필수 노드 결과 표시
         required_text = ""
         for status, class_name in sorted(self.result['required']):

@@ -14,7 +14,6 @@ modules/conditional/
 ├── dsl_parser.py          # DSL text → RuleBook 파싱
 ├── dsl_serializer.py      # RuleBook / Rule → DSL text 직렬화
 ├── preset_io.py           # Preset JSON 저장/로드, 번들 프리셋 loader
-├── build_bundled_presets.py  # 번들 프리셋 빌드 스크립트 (개발용)
 ├── runtime_snapshot.py    # CharStateSnapshot (179 SDLC) — 복원 인프라
 ├── editor_window.py       # RuleEditorWindow (QDialog) — 편집기 5-pane 컨테이너
 └── ui/
@@ -297,7 +296,9 @@ input 위젯(QComboBox/QLineEdit/QSpinBox/QTextEdit)에 `setStyleSheet` 을 **�
 
 ### 번들 프리셋
 
-`data/conditional_presets/*.json` — 기본 제공 세트. `build_bundled_presets.py` 로 생성.
+현재 번들 프리셋은 없음 (174 에서 UC 샘플 5종 제거). `PresetStorage` 는
+`data/conditional_presets_bundled/` 가 비어 있어도 정상 동작 — 필요 시 이곳에
+read-only JSON 을 드롭하면 `list_all()` 이 자동 picks up.
 
 ### 호환성
 
@@ -314,7 +315,6 @@ tests/conditional/
 ├── test_dsl_parser.py             # DSL 파싱 세부
 ├── test_block_serializer.py       # 직렬화 왕복
 ├── test_preset_io.py              # 프리셋 JSON 호환성
-├── test_bundled_presets.py        # 번들 프리셋 파싱 검증
 ├── test_char_snapshot.py          # CharStateSnapshot 단위 (10/10)
 ├── test_char_action_restore.py    # 복원 통합 (11/11) — capture/restore 라운드트립
 ├── test_rule_panel.py             # UI — 왕복 / 시그널

@@ -38,6 +38,10 @@ from modules.conditional.block_model import (
     Rule,
     make_tag_leaf,
 )
+from modules.conditional.ui.char_slot_combo import (
+    CharSlotComboBox,
+    get_character_slots,
+)
 from modules.conditional.ui.chip_list_widget import ChipListWidget
 from modules.conditional.ui.condition_editor import ConditionNodeEditor
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -109,8 +113,13 @@ class RulePanel(QWidget):
         self,
         rule: Optional[Rule] = None,
         parent: Optional[QWidget] = None,
+        *,
+        app_context=None,
     ):
         super().__init__(parent)
+        # CharSlotComboBox 가 활성 슬롯 미리보기를 채울 때 사용. 없으면
+        # fallback (1~10) 으로 동작.
+        self._app_context = app_context
         # 숨김 필드 (UI 없이 roundtrip 만 유지)
         self._rule_kind: str = "block"
         self._rule_priority: int = 100
@@ -429,11 +438,12 @@ class RulePanel(QWidget):
         )
         row.addWidget(self._target_kind_combo)
 
-        self._target_n_spin = QSpinBox()
-        self._target_n_spin.setRange(1, 10)
+        # 캐릭터 슬롯 콤보 — 항목 자체가 1줄 미리보기 (예: "1: blue_hair")
+        self._target_n_spin = CharSlotComboBox(
+            lambda: get_character_slots(self._app_context)
+        )
         self._target_n_spin.setValue(1)
-        self._target_n_spin.wheelEvent = lambda e: e.ignore()
-        self._target_n_spin.valueChanged.connect(self._emit_changed)
+        self._target_n_spin.currentIndexChanged.connect(self._emit_changed)
         row.addWidget(self._target_n_spin)
 
         self._target_wildcard_chk = QCheckBox("모든 활성 캐릭터")
@@ -485,10 +495,14 @@ class RulePanel(QWidget):
         top = QHBoxLayout()
         top.setSpacing(get_scaled_size(6))
         top.addWidget(QLabel("대상 캐릭터"))
-        self._func_char_index_spin = QSpinBox()
-        self._func_char_index_spin.setRange(1, 10)
-        self._func_char_index_spin.wheelEvent = lambda e: e.ignore()
-        self._func_char_index_spin.valueChanged.connect(self._emit_changed)
+        # 캐릭터 슬롯 콤보 — char_set/char_replace 의 대상 캐릭터 선택
+        self._func_char_index_spin = CharSlotComboBox(
+            lambda: get_character_slots(self._app_context)
+        )
+        self._func_char_index_spin.setValue(1)  # _target_n_spin 과 일관성
+        self._func_char_index_spin.currentIndexChanged.connect(
+            self._emit_changed
+        )
         top.addWidget(self._func_char_index_spin)
 
         top.addWidget(QLabel("상태:"))

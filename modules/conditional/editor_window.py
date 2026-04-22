@@ -181,7 +181,9 @@ class RuleEditorWindow(QDialog):
         # RulePanel 은 모델/시그널 조율만 담당. 시각적으로는 숨기고 내부의
         # _condition_view / _action_view / _raw_container 를 외부 컬럼으로
         # reparent 한다. 부모는 대화상자로 지정해 lifecycle 을 묶는다.
-        self._rule_panel = RulePanel(parent=self)
+        self._rule_panel = RulePanel(
+            parent=self, app_context=self.app_context
+        )
 
         # 3열: 조건 편집. condition_view (block 모드) / raw_container (raw 모드)
         # 둘 다 stretch=1 로 컬럼 높이를 채운다 — 동시에 둘 중 하나만 가시.

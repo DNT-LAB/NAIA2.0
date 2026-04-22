@@ -83,13 +83,16 @@ class ConditionNode:
 ```python
 @dataclass
 class Action:
-    kind: Literal["append_list", "append", "replace", "char_set", "char_replace"]
+    kind: Literal["append_list", "append", "replace",
+                  "char_set", "char_replace", "char_append"]
     target: str = "main"  # prefix|main|postfix|char:N|uc:N|char:*|uc:*|neg|global_uc
     preserve_weight: bool = True
     # kind 별 필드: tags / old_tag / new_tags / char_index / char_state / char_old_tag / char_new_tag
 ```
 
 **주의**: `target="global_uc"` 는 런타임 스텁 (`_write_global_uc_target` no-op). 편집기 콤보에서는 숨김 처리 (legacy 프리셋 round-trip 만 보존).
+
+**`char_append` (174)**: "캐릭터 슬롯 N 프롬프트에 태그 추가" 의 편집기 전용 래퍼. `dsl_serializer` 가 레거시 DSL `char:N+=tags` 로 내보내므로 엔진 변경 없이 기존 `_write_char_uc_target` 경로 재사용. 슬롯 인덱스는 `action.char_index`, 태그는 `action.tags` 로 저장.
 
 ### `RuleBook`
 
@@ -129,6 +132,7 @@ class RuleBook:
 - **캐릭터 활성/비활성**: `char_set(N, enabled|disabled)`
 - **캐릭터 내부 태그 치환**: `char_replace(N, old, new)`
 - **캐릭터 슬롯 타겟**: `char:N+=tag` / `uc:N=new_uc` / `char:*+=tag` (모든 활성 슬롯)
+  - 편집기의 "캐릭터 태그 추가" (`Action.kind="char_append"`) 는 이 문법으로 직렬화
 
 ### 예
 
@@ -163,7 +167,19 @@ def get_pipeline_hook_info(self):
 
 **v2 DSL 저장소**: `_rules_v2_dsl: str` (활성 모드="v2"). 레거시는 `rules_textedit.toPlainText()`. `_active_rules_text()` 가 모드에 따라 한쪽 선택.
 
+**기본 실행 모드 (174 확정)**: `_editor_mode = "legacy"`. 신규 설치 / 설정 파일 미존재 / 미지정 값은 전부 legacy fallback. v2 로의 전환은 사용자가 명시적으로 라디오 토글하거나 편집기에서 "적용" 클릭 시(`set_editor_mode("v2")`) 또는 프리셋 로드 시 발생.
+
 **cond_override**: Shared Server Mode 에서 `app_context.session_cond_override` 가 세팅되면 enable_checkbox 무시하고 override 의 rules 사용.
+
+**NAID4 게이트 — 캐릭터 계열 액션의 모드 제한**:
+
+| 경로 | 게이트 | 비-NAID4 모드 동작 |
+|---|---|---|
+| `char_set` / `char_replace` / `char:N+=tags` / `uc:N=new` / `char:*` / `uc:*` | `_is_naid4_mode()` | silent skip + `_record_skip(target, "{mode}/NAID4 아닌 모델은 char ... 미지원")` |
+| `char_in` / `char_on` (조건) | **게이트 없음** | 모든 모드에서 widget 상태를 읽어 평가. 단순 read-only 이므로 안전. |
+| `prefix` / `main` / `postfix` / `neg` 액션 | **게이트 없음** | 모든 모드 |
+
+`_is_naid4_mode()` = `api_mode == "NAI"` **AND** `model_combo.currentText()` 에 `"NAID4"` 포함. NAI 모드여도 NAID4 이전 모델이면 캐릭터 액션 skip. 로그는 `⚠ Skip: {target} ({reason}) - N건` 형태로 `_flush_skip_logs()` 가 뿌림. Snapshot (`capture`) 호출도 NAID4 게이트 통과 후에만 발생 → 비-NAID4 에서는 stale 상태 누수 없음.
 
 ### skip 카운터
 
@@ -226,7 +242,8 @@ app_context.subscribe("generation_error", self._on_generate_done)
 1. `_execute_*` 메서드 내에서 widget/clone 수정 **직전** `self._char_snapshot.capture(char_idx)` 호출
 2. `char:*` 같이 다중 슬롯을 영향 주는 경우 루프 내에서 슬롯별 capture
 3. capture 는 idempotent 라 여러 번 호출해도 첫 상태만 보존
-4. 단위 테스트: `tests/conditional/test_char_action_restore.py` 에 capture/restore 라운드트립 추가
+4. **NAID4 게이트** — 신규 액션도 `_is_naid4_mode()` 로 먼저 분기, 실패 시 `_record_skip` 만 호출. 이 게이트 전에 capture 하지 말 것 (비-NAID4 에서 불필요한 스냅샷 남김)
+5. 로컬 회귀 테스트 추가 권장 (로컬 `tests/conditional/test_char_action_restore.py` 참고)
 
 ---
 
@@ -241,7 +258,14 @@ app_context.subscribe("generation_error", self._on_generate_done)
 
 **특이점**: `RulePanel` 은 모델/시그널 조율만. 시각적으로는 숨기고 내부 `_condition_view` / `_action_view` / `_raw_container` 를 외부 컬럼으로 **reparent**. reparent 된 자식에 `_input_style()` cascade 가 끊기므로 `_build_action_panel` 의 actionCard 와 `_build_raw_container` 는 **자체 stylesheet 에 _input_style() 을 명시 포함**.
 
-**DSL 미리보기**: 선택된 룰 하나만 `serialize_rule(rule)` 로 렌더. 고급 DSL 직접 편집과 같은 스타일(20px font, `#161616` 배경).
+**DSL 미리보기**: 선택된 룰 하나만 `serialize_rule(rule)` 로 렌더. 고급 DSL 직접 편집과 같은 스타일(20px font, `#161616` 배경). 시뮬레이션 활성 시 HTML 렌더로 전환(아래 "시뮬레이션" 참조).
+
+**시뮬레이션 (`_on_simulate`)**: 현재 RuleBook 을 `serialize_rulebook` → 모듈의 `simulate_for_preview` 에 주입 → `generate_instant_source_silent` 경유로 **실제 파이프라인 1회 실행** (side-effect 없음 — `app_context` save/restore). 결과:
+- 매치된 규칙 → `RuleListPanel.set_highlighted_ids(ids)` 로 연노랑 오버레이 persistent (다음 rule 선택 시 자동 해제).
+- DSL 미리보기 창을 HTML 재활용 — 매치 카운트, 매치 규칙 DSL 목록, 추가 태그, 캐릭터 슬롯 diff, 네거티브 diff, 최종 프롬프트(추가분 하이라이트).
+- 렌더 후 `verticalScrollBar().setValue(0)` 로 스크롤 상단 고정.
+
+**편집기 상단 헤더 행**: "🔧 편집기 열기" 버튼과 "실행 경로: 레거시 DSL / 신규 편집기" 라디오를 `top_row` 에 `stretch=1/1` 로 반반 배치 (좌: 라디오 / 우: 버튼). 상단 공간 절약.
 
 **더티 가드**: 편집 중인 내용 버려질 위험이 있는 동작(프리셋 로드/삭제/닫기 등) 전에 `_ask_dirty_choice` 모달. "적용 후 계속" / "변경 버림" / "취소" 3지선다.
 
@@ -268,6 +292,18 @@ app_context.subscribe("generation_error", self._on_generate_done)
 ### `ConditionNodeEditor` (`ui/condition_editor.py`) — 재귀 leaf/group 에디터
 
 모든 위젯을 **일괄 생성 후 visibility 토글**로 kind 전환. set_node/get_node 왕복이 안정적 (rebuild 없음). group 의 자식 editor 는 재귀 생성, 삭제 요청은 `request_delete` 시그널로 부모에 전달.
+
+**계층별 accent 팔레트 (174)**: `_GROUP_ACCENT_PALETTE = ("#689F38", "#FB8C00", "#8E24AA", "#00ACC1", "#C62828")` (연두/주황/보라/시안/빨강). `__init__(depth=0)` 파라미터로 자기 깊이 보관, `_append_child` 가 `depth=self._depth+1` 전달. `_children_container` 좌측 3px bar 색상이 `_group_accent_for_depth(self._depth)` 로 결정 → 루트=연두, 1단=주황, 2단=보라, 순환. 깊이 5 이상 `mod len(palette)`.
+
+**접기/펼치기 (174)**: group kind 에서만 `_collapse_btn` 이 헤더 행에 노출 (휴지통 왼쪽). `_children_container` 만 토글 (묶음 방식 행 / `+ 조건` / `+ 묶음` 버튼은 유지). `set_node` 진입 시 `_group_collapsed=False` 리셋 — 루트 에디터가 rule 간 재사용되므로 접힘 상태 leak 방지. 접힌 상태에서 `+ 조건`/`+ 묶음` 클릭 시 `_ensure_expanded_on_add` 가 자동 펼침으로 시각 피드백 보존.
+
+### `RulePanel` (`ui/rule_panel.py`) — 조건/액션 편집 조율
+
+시그널: `changed`. 공개 API: `set_rule(Rule) / get_rule() -> Rule / set_rule_position / get_brief_label`.
+
+**타겟 행 2-line 레이아웃 (174)**: char/uc 타겟 선택 시 한 줄에 모든 위젯(레이블 + kind combo + slot combo + 와일드카드 체크박스)을 넣으면 액션 pane 최소 폭(380px)을 초과해 한국어 레이블이 잘림. `_build_target_row` 가 두 줄로 분리 — Line1 (적용 위치 kind), Line2 (`_target_slot_row`, char/uc 전용: 대상 슬롯 combo + "모든 활성 슬롯" 체크박스).
+
+**액션 kind 별 표시 전환 (`_update_visibility`)**: "상태:"/"기존 태그:"/"새 태그:" 레이블 참조를 저장(`_char_state_label` / `_char_old_label` / `_char_new_label`) — 이전에는 label 이 visibility tracking 에서 누락돼 mode 전환 시 유령 레이블로 남는 버그가 있었음.
 
 ### `CharSlotComboBox` (`ui/char_slot_combo.py`) — 슬롯 미리보기 콤보
 
@@ -309,27 +345,23 @@ read-only JSON 을 드롭하면 `list_all()` 이 자동 picks up.
 
 ## 테스트
 
-```
-tests/conditional/
-├── test_engine_headless.py        # 엔진 단위 (26/26) — 룰 평가 / 액션 디스패치 / 파서
-├── test_dsl_parser.py             # DSL 파싱 세부
-├── test_block_serializer.py       # 직렬화 왕복
-├── test_preset_io.py              # 프리셋 JSON 호환성
-├── test_char_snapshot.py          # CharStateSnapshot 단위 (10/10)
-├── test_char_action_restore.py    # 복원 통합 (11/11) — capture/restore 라운드트립
-├── test_rule_panel.py             # UI — 왕복 / 시그널
-├── test_rule_list_panel.py        # UI — 델리게이트 / 선택 동기화
-├── test_condition_editor.py       # UI — 재귀 노드 편집
-├── test_preset_panel.py           # UI — 프리셋 목록
-├── test_editor_window.py          # UI — 5-pane 통합
-├── test_mode_toggle.py            # legacy ↔ v2 편집기 모드 전환
-├── test_chip_list_widget.py       # chip UI
-└── test_hotfix_17.py              # 과거 핫픽스 회귀
-```
+**174 정책 변경**: `tests/conditional/` 은 distribution 에 포함되지 않는 개발자 전용
+회귀망이므로 `.gitignore` 에 등록되어 **repo 에서 추적하지 않음**. 개발자 로컬에서만
+유지하며 신규 기능 / 버그 수정 시 회귀 스위트로 활용. 다른 기기에서 작업할 때는 복원 필요
+(백업 태그 `backup/pre-tests-removal` 혹은 직전 로컬 커밋).
 
-**실행**: `python tests/conditional/test_*.py` (직접 실행 패턴, pytest 아님)
+실행은 직접 호출 패턴 — `python tests/conditional/test_*.py` (pytest 아님).
 
 **Unicode 주의**: Windows 콘솔 기본 cp949 → 이모지/em-dash 가 포함된 print 는 `PYTHONIOENCODING=utf-8` 설정 필요.
+
+### 174 시점 커버 범위 (로컬 참고용)
+
+- 엔진 단위 (`test_engine_headless.py`): 28+ 시나리오 — UC-1~UC-6 / 조건 평가 / 액션 디스패치 / plain+weighted 태그 replace / char_append
+- DSL (`test_dsl_parser.py`, `test_block_serializer.py`): 파싱 / 직렬화 왕복 / char_append = `char:N+=tags` 직렬화 검증
+- 런타임 스냅샷 (`test_char_snapshot.py` 10/10, `test_char_action_restore.py` 11/11): capture idempotent / restore / R1 fallback / multi-slot
+- 모드 (`test_mode_toggle.py` 29/29): legacy/v2 라디오 동기화 / `_active_rules_text` 분기 / `execute_pipeline_hook` 모드 분기
+- UI (`test_rule_panel.py`, `test_rule_list_panel.py`, `test_condition_editor.py`, `test_editor_window.py`, `test_preset_panel.py`, `test_chip_list_widget.py`): 5-pane 통합 / delegate / 재귀 편집 / 시그널
+- 프리셋 / 호환성 (`test_preset_io.py` 40/40, `test_hotfix_17.py` 15/15)
 
 ---
 
@@ -366,6 +398,14 @@ QComboBox body 배경은 per-widget stylesheet 에서 Qt native style 이 overla
 ### 7. Snapshot 은 main thread 한정
 
 Qt 이벤트 루프 단일 스레드라 race 없음. 다만 generate API 호출은 QThread 워커라, generation_finished 이벤트는 signal 을 통해 main thread 로 마샬링됨. snapshot 조작은 전부 main thread.
+
+### 8. `_execute_replace_action` plain tag 교체 주의 (174 수정)
+
+초기 구현의 `pop/insert/return` 블록이 `if weighted_new_list and raw_tag != tag.strip():` 가드 안에 있었음. plain 태그 (no weight wrapping) 는 `raw_tag == tag.strip()` 이라 silent no-op 로 빠져나감 → 사용자가 `(cond):full body=upper body` 룰을 만들어도 아무것도 안 바뀌는 버그. 174 에서 `pop/insert/return` 을 weight 가드 밖으로 이동 → plain/weighted 공통 경로로 정상화. 기존 회귀 `test_uc3_exact_replace_weight_preserve` 는 weighted 경로만 커버했었음 (`test_uc3_exact_replace_plain_tag` / `test_uc3_exact_replace_plain_multi_new` 로 보강).
+
+### 9. NAID4 게이트 — 편집기에 사전 경고 없음
+
+사용자가 char/uc 액션을 WEBUI/COMFYUI 모드에서 실행하면 **runtime silent skip + 로그만** 발생. 편집기 UI 는 사전 경고하지 않음 (문법/저장 시점과 실행 시점 모드가 다를 수 있어 의도적). "왜 안 움직이지" 현상이 드물게 발생 가능 — 실행 로그 창의 `⚠ Skip: ...` 메시지가 일차 디버깅 단서.
 
 ---
 

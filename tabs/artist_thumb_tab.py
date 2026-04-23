@@ -3215,10 +3215,17 @@ class ArtistThumbModule(BaseTabModule):
             artist_list=artist_list,
             favorite_artists=self.favorite_artists,
             current_mode=self.current_mode,
-            parent=self.widget,
+            parent=None,  # 듀얼 모니터 z-order 분리: 메인 창과 독립적으로 떠있음
             title_suffix=window_title_suffix,
             app_context=self.app_context
         )
+        # 독립 창이지만 메인 종료 시 함께 닫히도록
+        # DeleteOnClose=True: 닫힐 때 Qt가 자동으로 aboutToQuit 연결까지 해제 → 누수 방지
+        self.gallery_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.gallery_window.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        _app = QApplication.instance()
+        if _app is not None:
+            _app.aboutToQuit.connect(self.gallery_window.close)
 
         # 시그널 연결
         self.gallery_window.favorite_toggled.connect(self._on_gallery_favorite_toggled)

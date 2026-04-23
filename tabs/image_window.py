@@ -1331,12 +1331,21 @@ class HistoryItemWidget(QWidget):
             if self.app_context and hasattr(self.app_context, 'main_window'):
                 parent_window = self.app_context.main_window
 
+            # parent=None: 듀얼 모니터 z-order 분리 (메인 창과 독립 top-level)
             self.metadata_viewer = MetadataViewerWindow(
                 self.history_item.image,
                 metadata,
                 self.app_context,
-                parent_window
+                None
             )
+            # 메인 종료 시 함께 닫히도록
+            # DeleteOnClose=True: 닫힐 때 Qt가 자동으로 aboutToQuit 연결까지 해제 → 누수 방지
+            # (class 기본 False를 여기서 덮어씀 — 이제 매번 새 인스턴스를 만드는 구조라 재사용 필요 없음)
+            self.metadata_viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            self.metadata_viewer.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+            _app = QApplication.instance()
+            if _app is not None:
+                _app.aboutToQuit.connect(self.metadata_viewer.close)
 
             # 3. 시그널 연결 (MainWindow에서 처리하도록)
             if parent_window:

@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox, QApplication
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 from PIL import Image
@@ -187,13 +187,30 @@ class Img2ImgPopup(QDialog):
             return
         
         # 메타데이터 뷰어 열기 (non-modal)
+        # parent=None: 듀얼 모니터 z-order 분리 (메인 창과 독립 top-level)
         self.viewer = MetadataViewerWindow(
-            self.pil_image, 
+            self.pil_image,
             self.metadata,
             self.app_context,
-            self.parent_widget
+            None
         )
-        
+        # 팝업이 self.accept()로 닫히면 self.viewer 참조가 사라져 GC되므로
+        # 수명이 긴 메인 창에 앵커를 걸어 살려둔다. 뷰어를 닫으면 자동 삭제.
+        self.viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.viewer.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        _app = QApplication.instance()
+        if _app is not None:
+            _app.aboutToQuit.connect(self.viewer.close)
+        if self.parent_widget is not None:
+            anchors = getattr(self.parent_widget, '_detached_metadata_viewers', None)
+            if anchors is None:
+                anchors = []
+                self.parent_widget._detached_metadata_viewers = anchors
+            anchors.append(self.viewer)
+            self.viewer.destroyed.connect(
+                lambda _obj=None, v=self.viewer, a=anchors: a.remove(v) if v in a else None
+            )
+
         # 시그널 연결 (MainWindow에서 처리하도록)
         if self.parent_widget:
             # 프롬프트 적용 시그널 연결

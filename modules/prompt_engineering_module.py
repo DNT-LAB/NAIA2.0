@@ -1686,20 +1686,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     
     def delayed_preset_initialization(self):
         """MainWindow 초기화 완료 후 프리셋 초기화"""
+        self.ensure_default_preset_exists()
+
         # 프리셋 목록 로드
         self.load_preset_list()
-        
+
         # 마지막 사용한 프리셋 정보 로드
         last_used = self.load_last_used_preset_info()
-        
-        preset_dir = self.get_preset_dir()
-        default_file = preset_dir / "default.json"
-        
-        # default 프리셋이 없으면 현재 UI 상태로 생성
-        if not default_file.exists():
-            # 현재 UI 상태를 default 프리셋으로 저장
-            self.save_current_preset("default")
-            print(f"📝 Default 프리셋을 현재 UI 상태로 생성했습니다.")
         
         # 사용할 프리셋 결정
         preset_to_load = None
@@ -1726,16 +1719,29 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.current_preset = preset_to_load
             self.last_preset = preset_to_load
     
-    def get_preset_dir(self) -> Path:
+    def get_preset_dir(self, mode: Optional[str] = None) -> Path:
         """현재 API 모드에 따른 프리셋 디렉토리 경로 반환"""
-        if not hasattr(self, 'app_context') or not self.app_context:
-            mode = "NAI"
+        if mode:
+            target_mode = mode
+        elif not hasattr(self, 'app_context') or not self.app_context:
+            target_mode = "NAI"
         else:
-            mode = self.app_context.get_api_mode() or "NAI"
-        
-        preset_dir = Path("save") / "presets" / mode
+            target_mode = self.app_context.get_api_mode() or "NAI"
+
+        preset_dir = Path("save") / "presets" / target_mode
         preset_dir.mkdir(parents=True, exist_ok=True)
         return preset_dir
+
+    def ensure_default_preset_exists(self, mode: Optional[str] = None):
+        """대상 모드의 default 프리셋이 없으면 모드별 기본 템플릿으로 생성"""
+        target_mode = mode or (self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI")
+        default_file = self.get_preset_dir(target_mode) / "default.json"
+
+        if default_file.exists():
+            return
+
+        self.create_default_preset(default_file, target_mode)
+        print(f"📝 {target_mode} default 프리셋 생성")
     
     def load_preset_list(self):
         """프리셋 목록을 로드하고 콤보박스에 설정"""
@@ -1779,11 +1785,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         self.preset_combo.blockSignals(False)
     
-    def create_default_preset(self, filepath: Path):
+    def create_default_preset(self, filepath: Path, mode: Optional[str] = None):
         """기본 프리셋 파일 생성"""
-        mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
-        
-        if mode == "NAI":
+        target_mode = mode or (self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI")
+
+        if target_mode == "NAI":
             default_data = {
                 "module_settings": {
                     "pre_prompt": "masterpiece, best quality",
@@ -1807,7 +1813,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     "steps": 28
                 }
             }
-        elif mode == "WEBUI":
+        elif target_mode == "WEBUI":
             default_data = {
                 "module_settings": {
                     "pre_prompt": "",
@@ -1851,18 +1857,23 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     "prompt": "",
                     "negative": "",
                     "workflow": "default"
-                }
+                },
+                "api_mode": target_mode
             }
-        
+
+        default_data["api_mode"] = target_mode
+
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(default_data, f, ensure_ascii=False, indent=2)
-    
-    def save_current_preset(self, preset_name: Optional[str] = None):
+
+    def save_current_preset(self, preset_name: Optional[str] = None, mode: Optional[str] = None):
         """현재 설정을 프리셋으로 저장"""
         if not preset_name:
             preset_name = self.current_preset
-        
-        preset_dir = self.get_preset_dir()
+
+        target_mode = mode or (self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI")
+
+        preset_dir = self.get_preset_dir(target_mode)
         preset_file = preset_dir / f"{preset_name}.json"
         
         # 기존 프리셋 파일에서 description 읽기
@@ -1879,15 +1890,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         module_settings = self.collect_current_settings()
         
         # 메인 UI 설정 수집
-        main_settings = self.collect_main_ui_settings()
-        
-        # 현재 API 모드 저장
-        current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
-        
+        main_settings = self.collect_main_ui_settings(target_mode)
+
         preset_data = {
             "module_settings": module_settings,
             "main_settings": main_settings,
-            "api_mode": current_mode  # 프리셋이 저장된 API 모드 기록
+            "api_mode": target_mode  # 프리셋이 저장된 API 모드 기록
         }
         
         # 기존 description이 있으면 유지
@@ -2402,22 +2410,34 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             # 콤보박스 업데이트
             self.load_preset_list()
     
+    def on_mode_changed(self, old_mode: str, new_mode: str):
+        """모드 전환 전에 이전 모드 프리셋을 올바른 위치에 저장하고 기본 ModeAware 흐름을 수행"""
+        if (
+            old_mode != new_mode and
+            self.current_preset and
+            self.current_preset not in ["(프리셋 없음)", "*randomized"]
+        ):
+            self.save_current_preset(mode=old_mode)
+            self.save_last_used_preset_info(mode=old_mode, preset_name=self.current_preset)
+
+        super().on_mode_changed(old_mode, new_mode)
+
     def on_api_mode_changed_preset(self, data: dict):
         """API 모드 변경 시 프리셋 처리"""
+        new_mode = data.get("new_mode") if isinstance(data, dict) else None
+
         # *randomized 모드인 경우 저장 건너뛰고 초기화
         if self.current_preset == "*randomized":
             print("🎲 *randomized 모드 해제: 랜덤 프리셋 목록 초기화")
             self._reset_randomized_state()
-        elif self.current_preset and self.current_preset != "(프리셋 없음)":
-            # 이전 모드의 현재 프리셋 저장 (일반 프리셋만)
-            self.save_current_preset()
-            self.save_last_used_preset_info()
+
+        self.ensure_default_preset_exists(new_mode)
 
         # 새 모드의 프리셋 목록 로드
         self.load_preset_list()
-        
+
         # 새 모드의 마지막 사용 프리셋 로드
-        last_used = self.load_last_used_preset_info()
+        last_used = self.load_last_used_preset_info(new_mode)
         
         preset_to_load = None
         if last_used and last_used in self.preset_list:
@@ -2435,7 +2455,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.current_preset = preset_to_load
             self.last_preset = preset_to_load
     
-    def collect_main_ui_settings(self) -> Dict[str, Any]:
+    def collect_main_ui_settings(self, mode: Optional[str] = None) -> Dict[str, Any]:
         """메인 UI 설정 수집 - app_context를 통해 접근"""
         settings = {}
         
@@ -2480,8 +2500,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 settings['auto_fit_resolution'] = main_window.auto_fit_resolution_checkbox.isChecked()
             
             # 생성 파라미터 — 위젯에서 직접 읽기 (get_main_parameters()는 시드 부작용 있음)
-            mode = self.app_context.get_api_mode()
-            if mode == "NAI":
+            target_mode = mode or self.app_context.get_api_mode()
+            if target_mode == "NAI":
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
@@ -2507,7 +2527,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     settings['DYN'] = False
                     settings['VAR+'] = False
                     settings['DECRISP'] = False
-            elif mode == "WEBUI":
+            elif target_mode == "WEBUI":
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
@@ -2550,7 +2570,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     settings['denoising_strength'] = main_window.denoising_strength_slider.value() / 100.0
                 else:
                     settings['denoising_strength'] = 0.5
-            elif mode == "COMFYUI":
+            elif target_mode == "COMFYUI":
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
                 else:
@@ -2827,18 +2847,19 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.save_current_preset()
             self.save_last_used_preset_info()
     
-    def save_last_used_preset_info(self):
+    def save_last_used_preset_info(self, mode: Optional[str] = None, preset_name: Optional[str] = None):
         """마지막 사용한 프리셋 정보 저장"""
-        if not self.current_preset or self.current_preset == "(프리셋 없음)":
+        target_preset = preset_name or self.current_preset
+        if not target_preset or target_preset == "(프리셋 없음)":
             return
-        
-        mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
-        
+
+        target_mode = mode or (self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI")
+
         last_used_file = Path("save") / "presets" / "last_used_preset.json"
         last_used_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         data = {
-            mode: self.current_preset
+            target_mode: target_preset
         }
         
         # 기존 데이터가 있으면 병합
@@ -2854,14 +2875,14 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         try:
             with open(last_used_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            print(f"💾 마지막 사용 프리셋 저장: {self.current_preset} ({mode})")
+            print(f"💾 마지막 사용 프리셋 저장: {target_preset} ({target_mode})")
         except Exception as e:
             print(f"⚠️ 마지막 사용 프리셋 정보 저장 실패: {e}")
-    
-    def load_last_used_preset_info(self) -> Optional[str]:
+
+    def load_last_used_preset_info(self, mode: Optional[str] = None) -> Optional[str]:
         """마지막 사용한 프리셋 정보 로드"""
-        mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
-        
+        target_mode = mode or (self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI")
+
         last_used_file = Path("save") / "presets" / "last_used_preset.json"
         
         if not last_used_file.exists():
@@ -2870,7 +2891,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         try:
             with open(last_used_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get(mode)
+                return data.get(target_mode)
         except Exception as e:
             print(f"⚠️ 마지막 사용 프리셋 정보 로드 실패: {e}")
             return None

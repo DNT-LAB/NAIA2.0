@@ -28,6 +28,9 @@ build/
 *.manifest
 *.spec
 
+# 조건부 편집기 v2 회귀 테스트 — 개발자 전용, distribution 에서 제외
+tests/conditional/
+
 # 단위 테스트 / 커버리지 보고서
 htmlcov/
 .tox/

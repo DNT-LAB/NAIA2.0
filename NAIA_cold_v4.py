@@ -858,8 +858,8 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 173"
-        self.setWindowTitle(self.base_title + " - 260418")  # 기존 형식 유지
+        self.base_title = "NAIA v2.0.0 Dev 175"
+        self.setWindowTitle(self.base_title + " - 260422")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
         self.scaling_manager = get_scaling_manager()
@@ -7339,8 +7339,8 @@ if __name__ == "__main__":
             return True
 
         try:
-            settings_path = Path("app_settings.json")
-            if not settings_path.exists():
+            settings_path = "app_settings.json"
+            if not os.path.exists(settings_path):
                 return False
 
             with open(settings_path, "r", encoding="utf-8") as f:

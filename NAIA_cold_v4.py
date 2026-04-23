@@ -2074,6 +2074,21 @@ class ModernMainWindow(QMainWindow):
         sampling_mode_layout.addWidget(self.eps_radio)
         sampling_mode_layout.addWidget(self.v_pred_radio)
         sampling_mode_layout.addWidget(self.anima_radio)
+
+        # ANIMA 가중치 입력 (ANIMA 선택 시만 표시)
+        self.anima_weight_edit = QLineEdit()
+        self.anima_weight_edit.setPlaceholderText("0.75")
+        self.anima_weight_edit.setFixedWidth(get_scaled_size(70))
+        self.anima_weight_edit.setToolTip(
+            "ANIMA 가중치 (기본 0.75)\n"
+            "· 0 또는 1 입력 → 가중치 없음 (블록 래핑 생략)\n"
+            "· 잘못된 값 → 기본값 0.75"
+        )
+        self.anima_weight_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
+        self.anima_weight_edit.setProperty("autocomplete_ignore", True)
+        self.anima_weight_edit.setVisible(False)
+        sampling_mode_layout.addWidget(self.anima_weight_edit)
+
         sampling_mode_layout.addStretch()
 
         self.sampling_mode_group.buttonClicked.connect(self._on_sampling_mode_changed)
@@ -2469,6 +2484,8 @@ class ModernMainWindow(QMainWindow):
                 w.setVisible(True)
             for w in self.comfyui_rescale_ui:
                 w.setVisible(False)
+            if hasattr(self, 'anima_weight_edit'):
+                self.anima_weight_edit.setVisible(False)
 
             # 🆕 임시 창 자동 종료 체크
             old_mode = self._previous_api_mode
@@ -2549,6 +2566,8 @@ class ModernMainWindow(QMainWindow):
                                 w.setVisible(False)
                             for w in self.comfyui_rescale_ui:
                                 w.setVisible(False)
+                            if hasattr(self, 'anima_weight_edit'):
+                                self.anima_weight_edit.setVisible(False)
 
                             self.status_bar.showMessage(f"✅ WEBUI 모드로 전환되었습니다. ({validated_url})", 5000)
 
@@ -2676,6 +2695,8 @@ class ModernMainWindow(QMainWindow):
                             is_anima = hasattr(self, 'anima_radio') and self.anima_radio.isChecked()
                             for w in self.comfyui_rescale_ui:
                                 w.setVisible(is_anima)
+                            if hasattr(self, 'anima_weight_edit'):
+                                self.anima_weight_edit.setVisible(is_anima)
 
                             self.status_bar.showMessage(f"✅ ComfyUI 모드로 전환되었습니다. ({comfyui_url})", 5000)
 
@@ -2910,6 +2931,12 @@ class ModernMainWindow(QMainWindow):
                     # ANIMA 모드: Rescale CFG 값 추가
                     if workflow_type == "unet" and hasattr(self, 'comfyui_rescale_slider'):
                         params["rescale_cfg"] = self.comfyui_rescale_slider.value() / 100.0
+
+                    # ANIMA 모드: 사용자 지정 가중치 (공란/잘못된 값 → prompt_processor 가 기본값 0.75 로 복원)
+                    if sampling_mode == "anima" and hasattr(self, 'anima_weight_edit'):
+                        raw = self.anima_weight_edit.text().strip()
+                        if raw:
+                            params["anima_weight"] = raw
 
                     # 디버그 정보
                     print(f"🎨 ComfyUI 파라미터 수집 완료:")
@@ -6202,12 +6229,14 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage("🔄 기본 워크플로우로 전환되었습니다.", 3000)
 
     def _on_sampling_mode_changed(self, button):
-        """ComfyUI 샘플링 모드 변경 시 Rescale CFG 가시성 제어"""
+        """ComfyUI 샘플링 모드 변경 시 Rescale CFG / ANIMA 가중치 입력 가시성 제어"""
         is_anima = (button == self.anima_radio)
         # ComfyUI 모드일 때만 Rescale CFG 표시/숨김 처리
         if self.get_current_api_mode() == "COMFYUI":
             for w in self.comfyui_rescale_ui:
                 w.setVisible(is_anima)
+            if hasattr(self, 'anima_weight_edit'):
+                self.anima_weight_edit.setVisible(is_anima)
 
     def on_generate_with_image_requested(self, tags_dict: dict):
         """WebView에서 추출된 태그로 프롬프트를 생성하고 바로 이미지 생성을 시작합니다."""

@@ -1,3 +1,4 @@
+import math
 import re
 import pandas as pd
 from typing import Dict, Any
@@ -55,6 +56,33 @@ def _find_weighted_indices(tags: list, start: int) -> set:
                 weighted.add(i)
 
     return weighted
+
+
+def _parse_anima_weight(raw) -> tuple[bool, float]:
+    """ANIMA 가중치 입력값 파싱.
+
+    Returns:
+        (skip_block, weight):
+            - skip_block=True → 괄호 래핑 자체를 생략 (가중치 없음)
+            - skip_block=False → weight 를 `:{weight})` 로 적용
+    규칙:
+        - None / 공란 → 기본값 0.75 사용
+        - 0 또는 1 → skip_block=True (래핑 생략)
+        - 잘못된 값 → 기본값 0.75 로 복원 (입력 무시)
+    """
+    DEFAULT = 0.75
+    if raw is None:
+        return (False, DEFAULT)
+    try:
+        value = float(str(raw).strip())
+    except (ValueError, TypeError):
+        return (False, DEFAULT)
+    if not math.isfinite(value):
+        # nan / inf / -inf → 잘못된 값으로 취급, 기본값 복원
+        return (False, DEFAULT)
+    if value == 0.0 or value == 1.0:
+        return (True, value)
+    return (False, value)
 
 
 def _escape_main_tags_parens(tags: list, weighted: set):
@@ -226,6 +254,15 @@ class PromptProcessor:
         is_comfyui = self.app_context.current_api_mode == 'COMFYUI'
 
         if is_comfyui and is_anima_mode:
+            # ANIMA 가중치 — 사용자 설정값 (없거나 잘못되면 0.75, 0/1 이면 래핑 생략)
+            # 우선순위: context.settings > main_window.anima_weight_edit (Interactive/Remote 폴백)
+            raw_anima_weight = context.settings.get('anima_weight')
+            if raw_anima_weight is None and hasattr(self.app_context, 'main_window'):
+                mw = self.app_context.main_window
+                if hasattr(mw, 'anima_weight_edit'):
+                    raw_anima_weight = mw.anima_weight_edit.text().strip() or None
+            anima_skip, anima_weight = _parse_anima_weight(raw_anima_weight)
+
             # ANIMA 모드: @ 태그 앞에 삽입
             at_index = None
             for i, tag in enumerate(context.prefix_tags):
@@ -250,11 +287,10 @@ class PromptProcessor:
                         # 괄호 이스케이프 처리
                         char_list = [c.replace("(", r"\(").replace(")", r"\)") for c in char_list]
 
-                        # 첫 원소에 "(" 붙이기
-                        char_list[0] = f"({char_list[0]}"
-
-                        # 마지막 원소에 ":0.8)" 붙이기
-                        char_list[-1] = f"{char_list[-1]}:0.7)"
+                        # 가중치 래핑 (anima_weight — 0/1 또는 잘못된 입력은 _parse_anima_weight 에서 처리)
+                        if not anima_skip:
+                            char_list[0] = f"({char_list[0]}"
+                            char_list[-1] = f"{char_list[-1]}:{anima_weight})"
 
                         # 다시 쉼표로 조인
                         character = ', '.join(char_list)
@@ -294,11 +330,10 @@ class PromptProcessor:
                         # 괄호 이스케이프 처리
                         char_list = [c.replace("(", r"\(").replace(")", r"\)") for c in char_list]
 
-                        # 첫 원소에 "(" 붙이기
-                        char_list[0] = f"({char_list[0]}"
-
-                        # 마지막 원소에 ":0.8)" 붙이기
-                        char_list[-1] = f"{char_list[-1]}:0.75)"
+                        # 가중치 래핑 (anima_weight — 0/1 또는 잘못된 입력은 _parse_anima_weight 에서 처리)
+                        if not anima_skip:
+                            char_list[0] = f"({char_list[0]}"
+                            char_list[-1] = f"{char_list[-1]}:{anima_weight})"
 
                         # 다시 쉼표로 조인
                         character = ', '.join(char_list)
@@ -317,10 +352,11 @@ class PromptProcessor:
                 context.prefix_tags = context.prefix_tags + anima_tags
                 print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
 
-            # 🆕 ANIMA 모드: main_tags에 가중치 적용 (0.75)
+            # 🆕 ANIMA 모드: main_tags에 가중치 적용 (사용자 지정, 기본 0.75)
             # 이미 가중치가 적용된 태그(Danbooru/e621)는 제외하고 비가중치 연속 구간만 래핑
             # weighted_indices는 4-0 단계에서 이미 계산됨 (이스케이프 후에도 유효)
-            if context.main_tags and first_non_hash < len(context.main_tags):
+            # anima_skip(0 또는 1)인 경우 래핑 자체를 생략
+            if context.main_tags and first_non_hash < len(context.main_tags) and not anima_skip:
                 # 비가중치 태그의 연속 구간(run) 찾기
                 runs = []
                 run_start = None
@@ -335,12 +371,14 @@ class PromptProcessor:
                 if run_start is not None:
                     runs.append((run_start, len(context.main_tags) - 1))
 
-                # 각 연속 구간을 개별 0.75 그룹으로 래핑
+                # 각 연속 구간을 개별 가중치 그룹으로 래핑
                 for start, end in runs:
                     context.main_tags[start] = f"({context.main_tags[start]}"
-                    context.main_tags[end] = f"{context.main_tags[end]}:0.75)"
+                    context.main_tags[end] = f"{context.main_tags[end]}:{anima_weight})"
 
-                print(f"🎨 ANIMA 모드: main_tags 가중치 0.75 적용 — {len(runs)}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
+                print(f"🎨 ANIMA 모드: main_tags 가중치 {anima_weight} 적용 — {len(runs)}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
+            elif context.main_tags and first_non_hash < len(context.main_tags) and anima_skip:
+                print(f"🎨 ANIMA 모드: main_tags 가중치 입력 {context.settings.get('anima_weight')} → 래핑 생략")
 
         else:
             # 기존 방식: 맨 앞에 삽입

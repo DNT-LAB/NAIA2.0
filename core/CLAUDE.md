@@ -80,6 +80,7 @@ app_context.publish("event_name", {"key": "value"}) # 발행
 | `save_directory_changed` | `{"new_path": str}` | 저장 경로 변경 |
 | `image_counter_changed` | `{"new_counter": int}` | 카운터 변경 |
 | `scoped_wildcard_changed` | `{}` | 스코프 ComboBox 변경 |
+| `comfyui_workflow_changed` | `{"has_custom": bool, "model_compat": str\|None, "locked_loader_class": str\|None, "locked_model_display": str\|None}` | ComfyUI 사용자 커스텀 워크플로우 로드/해제 시 UI 잠금 동기화 (175) |
 
 ### 파이프라인 훅 등록
 
@@ -280,6 +281,75 @@ QThread 워커로 비동기 이미지 생성.
 `character_positions` 파라미터를 `v4_prompt.caption.char_captions[].centers`로 전달.
 
 좌표 매핑: A-E→x:0.1-0.9, 1-5→y:0.1-0.9. Fallback: 기본값 `{"x": 0.5, "y": 0.5}`.
+
+---
+
+## ComfyUIWorkflowManager (`comfyui_workflow_manager.py`)
+
+ComfyUI API 워크플로우의 파싱/검증/파라미터 치환. 기본 워크플로우(base/anima) 내장 + 사용자 import 워크플로우 지원.
+
+### 모델 호환성 3-state (175)
+
+사용자가 import 한 워크플로우의 **체크포인트 로더가 표준인지** 판정하여 `node_map["model_compat"]` 에 기록:
+
+| 값 | 판정 기준 | apply_params 시 모델 치환 |
+|----|-----------|--------------------------|
+| `native_checkpoint` | terminal 로더가 `CheckpointLoaderSimple` | ✅ `ckpt_name` 교체 |
+| `native_unet` | terminal 로더가 `UNETLoader` + CLIPLoader 존재 | ✅ `unet_name` 교체 |
+| `locked_unknown` | 표준 로더 아님 (커스텀 — INT8/GGUF/NF4 등) | 🔒 skip, 워크플로우 원본값 유지 |
+
+### Sampler-centric 역추적
+
+KSampler/SamplerCustom 의 `model` 입력을 따라 **terminal 로더 노드를 식별**. 중간에 놓인 패치 노드(SageAttention, TorchCompile, RescaleCFG, ModelPatch 등)는 자동 pass-through.
+
+Helper: `_trace_model_source_to_terminal(nodes_by_id, links_data, start_id, is_ui_format)` — UI/API 두 포맷 모두 처리. 순환 / max_depth(64) 초과 / dangling link 시 `None` → 호출부가 LOCKED 귀결.
+
+Helper: `_extract_locked_model_display(terminal_node, is_ui_format)` — `.safetensors`/`.ckpt`/`.gguf`/`.pt`/`.bin`/`.onnx` 확장자 문자열을 inputs/widgets_values 에서 추출 (UI 표시용, 자동 치환 힌트 아님).
+
+### user_workflow_node_map 스키마
+
+```python
+{
+    "model_compat": "native_checkpoint" | "native_unet" | "locked_unknown",
+    "workflow_type": "checkpoint" | "unet" | "locked",  # apply_params 분기용 (하위 호환)
+
+    # native_checkpoint
+    "checkpoint_loader": "<node_id>",
+
+    # native_unet
+    "unet_loader": "<node_id>",
+    "clip_loader": "<node_id>",
+    "vae_loader": "<node_id>",          # optional
+
+    # locked_unknown
+    "locked_loader_node_id": "<node_id>",
+    "locked_loader_class":   "<class_type>",
+    "locked_model_display":  "<filename.safetensors>",
+
+    # 공통
+    "sampler":         "<ksampler_node_id>",
+    "positive_prompt": "<clip_text_encode_id>",
+    "negative_prompt": "<clip_text_encode_id>",
+    "latent_image":    "<empty_latent_id>",
+    "rescale_cfg":     "<node_id>",     # optional
+    "model_sampler":   "<node_id>",     # ModelSamplingDiscrete, optional
+    "ays_scheduler":   "<node_id>",     # optional
+}
+```
+
+### comfyui_workflow_changed 이벤트
+
+`load_workflow_from_metadata` 성공 / `clear_user_workflow` 시 AppContext 경유로 발행. ComfyUIParameterPanel이 구독해 `model_combo` 잠금/해제 토글. AppContext 주입은 `context.py:33-34` 에서 자동.
+
+### LOCKED 파이프라인 계약
+
+`apply_params_to_workflow` 에서 `model_compat == "locked_unknown"` 이면 **모델 치환을 명시적으로 skip**. 프롬프트/시드/해상도/샘플러/RescaleCFG 는 정상 치환. 중간 패치 노드의 설정(sage_attention, torch.compile mode 등)은 건드리지 않고 그대로 유지 — ComfyUI 서버에 해당 커스텀 노드 팩이 설치돼 있으면 그대로 실행됨.
+
+### Import 팝업 (WorkflowValidationDialog)
+
+`analyze_workflow_for_ui()` 는 `model_compat` 상태를 반환하며, locked 인 경우 `locked_loader_class` / `locked_model_display` 도 함께 제공. `core/comfyui_utils.py:WorkflowValidationDialog` 가 이를 받아 native/locked 분기로 상태 라벨을 표시.
+
+**회귀 안전망**: `tests/comfyui/test_workflow_compat.py` — 15 테스트 (native 2종 regression + ANIMA INT8 locked 전체 경로 + 순환/dangling/max_depth 견고성 + locked→locked 전환 시 payload 갱신).
 
 ---
 

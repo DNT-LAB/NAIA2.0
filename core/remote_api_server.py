@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response, JSONResponse
 
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
@@ -192,6 +192,9 @@ class RemoteBridge(QObject):
         self._anlas_timer: Optional[QTimer] = None
         self._anlas_fetch_in_flight: bool = False
         self._anlas_refresh_interval_ms: int = 5 * 60 * 1000  # 5분
+        # ComfyUI 전용 sync request matching: request_id → asyncio.Future
+        self._pending_comfyui_requests: dict = {}
+        self._comfyui_requests_lock = threading.Lock()
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -635,13 +638,45 @@ class RemoteBridge(QObject):
             # WS별 pending 저장 (on_prompt_generated에서 auto-generate용)
             mw = self.app_context.main_window
             auto_gen = mw.generation_checkboxes.get("자동 생성")
-            if ws:
+            auto_gen_checked = bool(auto_gen and auto_gen.isChecked())
+
+            # ComfyUI sync 요청 처리 — ws=None 이지만 request_id로 격리
+            comfyui_request_id = req.get("comfyui_request_id")
+            force_skip = bool(req.get("force_naia_skip_generate", False))
+            respect_autogen = bool(req.get("respect_naia_autogen", True))
+            comfyui_peng_override = req.get("peng_override")  # dict or None
+
+            if comfyui_request_id:
+                will_naia_generate = (
+                    auto_gen_checked and respect_autogen and not force_skip
+                )
+                override_key = ("comfyui", comfyui_request_id)
+                pending_entry = {
+                    "params": params_override,
+                    "negative": session_neg,
+                    "settings_override": settings_override,
+                    "source": "comfyui_random",
+                    "auto_generate": will_naia_generate,
+                    "comfyui_request_id": comfyui_request_id,
+                }
+
+                # P.Eng per-request override 주입
+                # NAIA 메인 UI 불변; prompt_engineering_module.py:1414 consumer가 이 dict 소비.
+                # 이미지 생성 경로는 generation_controller가 알아서 리셋하지만,
+                # force_skip=true + 자동생성 OFF 경로는 리셋 안 되므로 on_prompt_generated에서
+                # id 비교 후 능동 reset.
+                if comfyui_peng_override is not None and isinstance(comfyui_peng_override, dict):
+                    self.app_context.session_p_eng_override = comfyui_peng_override
+                    pending_entry["_peng_override_ref"] = comfyui_peng_override
+
+                self._pending_overrides[override_key] = pending_entry
+            elif ws:
                 self._pending_overrides[ws] = {
                     "params": params_override,
                     "negative": session_neg,
                     "settings_override": settings_override,
                     "source": "random",
-                    "auto_generate": bool(auto_gen and auto_gen.isChecked()),
+                    "auto_generate": auto_gen_checked,
                 }
 
             # Non-shared + tag filter: 아직 row를 안 뽑았으면 여기서 처리
@@ -3616,6 +3651,68 @@ class RemoteBridge(QObject):
     def on_prompt_generated(self, prompt_context):
         """프롬프트 생성 완료 시 WebSocket 전송 + 자동생성 트리거"""
         try:
+            # === ComfyUI sync 요청 응답 처리 (ws 기반 auto_ws 스캔보다 먼저) ===
+            comfyui_prompt = prompt_context.final_prompt or ""
+            comfyui_negative = ""
+            try:
+                comfyui_negative = self.app_context.main_window.negative_prompt_textedit.toPlainText()
+            except Exception:
+                pass
+            _mw_for_cf = self.app_context.main_window
+            comfyui_remaining = (
+                _mw_for_cf.search_results.get_count()
+                if _mw_for_cf and _mw_for_cf.search_results else 0
+            )
+
+            comfyui_keys = [
+                k for k in list(self._pending_overrides.keys())
+                if isinstance(k, tuple) and len(k) == 2 and k[0] == "comfyui"
+            ]
+            for ck in comfyui_keys:
+                cf_pending = self._pending_overrides.pop(ck, {})
+                cf_id = cf_pending.get("comfyui_request_id")
+                cf_will_generate = cf_pending.get("auto_generate", False)
+
+                # P.Eng override 능동 reset (id 비교, 다른 세션 값 훼손 방지)
+                # 이미지 생성 경로는 generation_controller가 리셋하지만,
+                # 프롬프트만 생성되는 경로(force_skip=true + 자동생성 OFF) 안전망.
+                _peng_ref = cf_pending.get("_peng_override_ref")
+                if _peng_ref is not None and self.app_context.session_p_eng_override is _peng_ref:
+                    self.app_context.session_p_eng_override = None
+
+                # NAIA 자체 generate 트리거 (auto_generate=True 인 경우)
+                if cf_will_generate:
+                    try:
+                        gc_cf = _mw_for_cf.generation_controller
+                        if not gc_cf.is_generating:
+                            gc_cf.execute_generation_pipeline(
+                                overrides=cf_pending.get("params"), priority=0,
+                            )
+                            self._broadcast_json({"type": "status", "is_generating": True})
+                    except Exception as e:
+                        print(f"🌐 ComfyUI: NAIA generate 실패 — {e}")
+
+                # Future 완료 (HTTP 응답 전송)
+                if cf_id:
+                    with self._comfyui_requests_lock:
+                        cf_future = self._pending_comfyui_requests.pop(cf_id, None)
+                    if cf_future is not None and self._loop is not None:
+                        cf_payload = {
+                            "request_id": cf_id,
+                            "prompt": comfyui_prompt,
+                            "negative_prompt": comfyui_negative,
+                            "naia_started_generation": cf_will_generate,
+                            "remaining": comfyui_remaining,
+                            "source": "comfyui_random",
+                        }
+                        # asyncio Future는 event loop 스레드에서 set 해야 안전
+                        self._loop.call_soon_threadsafe(
+                            lambda f=cf_future, p=cf_payload: (
+                                f.set_result(p) if not f.done() else None
+                            )
+                        )
+
+            # === 기존 ws 기반 auto_generate 처리 ===
             # _pending_overrides에서 auto_generate=True인 항목 찾아 소비
             auto_ws = None
             for ws_key, pending in list(self._pending_overrides.items()):
@@ -3929,6 +4026,81 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         bridge._pending_random_requests.append({"ws": None, "source_row": None, "active_ratings": set(bridge._active_ratings)})
         bridge.request_random.emit()
         return {"status": "random_generation_requested"}
+
+    @app.post("/api/comfyui/random")
+    async def api_comfyui_random(req: Request):
+        """ComfyUI 전용 sync 랜덤 프롬프트 요청.
+
+        Body (JSON, 선택):
+          - timeout: float (default 30) — 응답 대기 최대 시간(초)
+          - respect_naia_autogen: bool (default true) — NAIA "자동 생성" 체크 존중
+          - force_naia_skip_generate: bool (default false) — 강제로 NAIA generate 차단
+          - peng_override: dict (default null) — per-request P.Eng 오버라이드. NAIA 메인 UI 불변.
+              생략 시: 데스크톱 UI 사용
+              빈 dict {}: 전부 빈 값 (prefix/postfix/auto_hide 비우고 preprocessing 전부 OFF)
+              부분 dict: 명시 필드만 적용. 구조:
+                {
+                  "pre_prompt": str,
+                  "post_prompt": str,
+                  "auto_hide": str,
+                  "preprocessing_options": {key: bool, ...}  # remove_author, remove_clothes, ...
+                }
+
+        Response 200:
+          { request_id, prompt, negative_prompt, naia_started_generation, remaining, source }
+        Response 504: { "error": "timeout" }
+        """
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+        timeout = float(body.get("timeout", 30))
+        respect_autogen = bool(body.get("respect_naia_autogen", True))
+        force_skip = bool(body.get("force_naia_skip_generate", False))
+        peng_override = body.get("peng_override")
+        if peng_override is not None and not isinstance(peng_override, dict):
+            return JSONResponse({"error": "peng_override must be a dict"}, status_code=400)
+
+        request_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        with bridge._comfyui_requests_lock:
+            bridge._pending_comfyui_requests[request_id] = future
+
+        bridge._pending_random_requests.append({
+            "ws": None,
+            "source_row": None,
+            "active_ratings": set(bridge._active_ratings),
+            "comfyui_request_id": request_id,
+            "respect_naia_autogen": respect_autogen,
+            "force_naia_skip_generate": force_skip,
+            "peng_override": peng_override,
+        })
+        bridge.request_random.emit()
+
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            with bridge._comfyui_requests_lock:
+                bridge._pending_comfyui_requests.pop(request_id, None)
+            return JSONResponse({"error": "timeout"}, status_code=504)
+
+    @app.get("/api/comfyui/health")
+    async def api_comfyui_health():
+        try:
+            gc = bridge.app_context.main_window.generation_controller
+            return {
+                "ok": True,
+                "api_mode": bridge.app_context.get_api_mode(),
+                "is_generating": gc.is_generating,
+            }
+        except Exception as e:
+            return JSONResponse(
+                {"ok": False, "error": str(e)},
+                status_code=503,
+            )
 
     @app.get("/api/status")
     async def api_status():

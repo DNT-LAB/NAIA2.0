@@ -51,7 +51,7 @@ app_context.set_api_mode("NAI")                      # 모드 변경 (NAI/WEBUI/
 app_context.register_pipeline_hook(pipeline, hook_point, module, priority)
 ```
 
-주요 이벤트: `api_mode_changed`, `prompt_generated`, `save_directory_changed`
+주요 이벤트: `api_mode_changed`, `prompt_generated`, `save_directory_changed`, `comfyui_workflow_changed`
 
 ---
 

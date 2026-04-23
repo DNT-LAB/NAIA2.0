@@ -20,7 +20,8 @@ ui/
     ├── interactive                # 태그 통합 데이터셋 (25MB, 확장자 없음)
     ├── image_plane.py             # 이미지 표시 위젯 (중앙 배치)
     ├── floating_control_bar.py    # 하단 컨트롤 바 (생성/랜덤/설정)
-    ├── parameter_panel.py         # 생성 파라미터 패널
+    ├── parameter_panel.py         # 생성 파라미터 패널 (NAI/WebUI)
+    ├── comfyui_parameter_panel.py # ComfyUI 전용 파라미터 패널 + 커스텀 워크플로우 모델 잠금
     ├── person_settings_block.py   # 인원 수 / Rating 설정 (좌측)
     ├── quick_search_block.py      # 퀵 서치 (태그 추천, 좌측)
     ├── artist_tag_block.py        # 아티스트 태그 선택 (좌측)
@@ -146,6 +147,22 @@ PIL Image를 중앙에 비율 유지 표시. `clicked` 시그널 (TagViewer 접�
 **시그널**: `random_clicked`, `generate_clicked`, `random_generate_clicked`, `sidebar_toggled(bool)`, `float_pin_toggled(bool)`, `tags_clicked`
 
 ParameterPanel 통합 (모델, steps, cfg_scale, sampler, scheduler, cfg_rescale, VAR+).
+
+ComfyUI 모드에서는 `ComfyUIParameterPanel` 이 대신 올라갑니다.
+
+### ComfyUIParameterPanel (`comfyui_parameter_panel.py`)
+
+ComfyUI 전용 파라미터 패널. Model(QComboBox, 편집 가능) + Sampling Mode(EPS/V-Pred/ANIMA) + Steps/CFG/Rescale CFG/Sampler/Scheduler.
+
+**커스텀 워크플로우 모델 잠금 (175)**:
+- `AppContext.subscribe("comfyui_workflow_changed", ...)` 로 워크플로우 상태 감시
+- payload `model_compat == "locked_unknown"` → `_apply_model_lock(display, loader_class)` 호출
+  - `model_combo` 를 `"[UNKNOWN] <파일명>"` 한 항목만 남기고 `setEnabled(False)` + tooltip 으로 사유 안내
+  - lineEdit 은 **`setReadOnly(True)`** 로 차단 (`setEditable` 토글 금지 — 내부 lineEdit 재생성으로 validator/completer 소실)
+  - 스냅샷은 **최초 1회**만 캡처 (locked → locked 전환 시 원본 A 보존), 표시는 **매번 갱신**
+- `model_compat ∈ {native_checkpoint, native_unet, None}` → `_release_model_lock()` 로 스냅샷 복원 + 편집 가능 상태 회복
+
+구독 핸들러는 `_gen_workflow_subscribed` 플래그로 idempotent. 패널이 lazy 생성된 시점에 이미 워크플로우가 로드돼 있으면 `_refresh_initial_workflow_state()` 로 동기화.
 
 ### CharacterPromptBlock (`character_prompt_block.py`)
 

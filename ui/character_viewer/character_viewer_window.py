@@ -596,8 +596,7 @@ class CharacterViewerWindow(QMainWindow):
 
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setAcceptRichText(False)
-        self.prompt_edit.setReadOnly(True)
-        self.prompt_edit.setPlaceholderText("Character prompt (auto-generated)")
+        self.prompt_edit.setPlaceholderText("Character prompt (auto-generated, 캐릭터/옵션 변경 시 덮어씀)")
         self.prompt_edit.setMaximumHeight(get_scaled_size(120))
         self.prompt_edit.setStyleSheet(
             f"color: {DARK_COLORS['text_primary']}; "

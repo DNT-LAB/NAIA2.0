@@ -3692,6 +3692,40 @@ class RemoteBridge(QObject):
                     except Exception as e:
                         print(f"🌐 ComfyUI: NAIA generate 실패 — {e}")
 
+                # 추천 해상도 결정 — NAIA 표준 fallback chain 미러:
+                # 1) source_row 의 image_width/height (auto_fit_resolution 정책)
+                # 2) resolution_combo 에서 random pick (random_resolution 정책,
+                #    generation_controller.py:393-399 패턴; 단 setCurrentIndex 미호출 → UI 불변)
+                # combo 는 _load_resolutions 가 default 7개 항목을 항상 보장하므로
+                # 추가 hardcoded fallback 없음. ComfyUI 경로는 항상 random/auto 켠 효과.
+                # NAIA combo 텍스트 포맷: "1024 x 1024" (공백 포함)
+                cf_width, cf_height, cf_res_source = None, None, "unknown"
+                try:
+                    src_row = getattr(prompt_context, "source_row", None)
+                    if src_row is not None and "image_width" in src_row and "image_height" in src_row:
+                        try:
+                            w = int(src_row["image_width"])
+                            h = int(src_row["image_height"])
+                            if w > 0 and h > 0:
+                                cf_width, cf_height, cf_res_source = w, h, "detected"
+                        except (ValueError, TypeError):
+                            pass
+                    if cf_width is None:
+                        rc = getattr(_mw_for_cf, "resolution_combo", None)
+                        if rc is not None and rc.count() > 0:
+                            idx = random.randint(0, rc.count() - 1)
+                            text = rc.itemText(idx)
+                            try:
+                                # NAIA 표준 " x " 우선, 안전망으로 "x" 도 허용
+                                sep = " x " if " x " in text else "x"
+                                w_str, h_str = text.split(sep)
+                                w, h = int(w_str.strip()), int(h_str.strip())
+                                cf_width, cf_height, cf_res_source = w, h, "random"
+                            except Exception:
+                                pass
+                except Exception as e:
+                    print(f"🌐 ComfyUI: 해상도 결정 실패 — {e}")
+
                 # Future 완료 (HTTP 응답 전송)
                 if cf_id:
                     with self._comfyui_requests_lock:
@@ -3704,6 +3738,9 @@ class RemoteBridge(QObject):
                             "naia_started_generation": cf_will_generate,
                             "remaining": comfyui_remaining,
                             "source": "comfyui_random",
+                            "width": cf_width,
+                            "height": cf_height,
+                            "resolution_source": cf_res_source,
                         }
                         # asyncio Future는 event loop 스레드에서 set 해야 안전
                         self._loop.call_soon_threadsafe(

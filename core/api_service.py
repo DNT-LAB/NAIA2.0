@@ -387,7 +387,7 @@ class APIService:
                     api_parameters["mask"] = processed_mask
                     
                     api_parameters["add_original_image"] = True
-                    api_parameters["inpaintImg2ImgStrength"] = params.get('strength', 0.7)
+                    api_parameters["inpaintImg2ImgStrength"] = params.get('strength', 1.0)
                     api_parameters["noise"] = 0
                     api_parameters["deliberate_euler_ancestral_bug"] = False
                     api_parameters["controlnet_strength"] = 1

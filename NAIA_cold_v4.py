@@ -702,8 +702,10 @@ class Img2ImgWindowManager:
         self.main_window = main_window
         self.windows = {}  # {window_id: Img2ImgWindow}
         self._next_id = 1
-        self._last_strength = 50  # 0~99 (기본값 0.50)
-        self._last_noise = 0      # 0~99 (기본값 0.00)
+        # 모드별 마지막 strength/noise 슬라이더 값 기억 (세션 지속).
+        # inpaint 기본 99(=1.0 승격), img2img 기본 70(=0.7), auto_outpainting 은 outpaint 특성상 원본 보존을 위해 70 유지.
+        self._last_strength_by_mode = {'img2img': 70, 'inpaint': 99, 'auto_outpainting': 70}
+        self._last_noise_by_mode = {'img2img': 0, 'inpaint': 0, 'auto_outpainting': 0}
         self._batch_states = {}   # {window_id: {'total', 'current', 'params'}}
 
     def create_window(self, pil_image, mode='img2img',
@@ -728,9 +730,10 @@ class Img2ImgWindowManager:
         else:
             window.initialize_from_main_ui(self.main_window)
 
-        # 마지막 Strength/Noise 값 적용
-        window.strength_slider.setValue(self._last_strength)
-        window.noise_slider.setValue(self._last_noise)
+        # 마지막 Strength/Noise 값 적용 (모드별 세션 기억 → 웹 일치 기본값과 호환)
+        _wm = getattr(window, 'mode', 'img2img')
+        window.strength_slider.setValue(self._last_strength_by_mode.get(_wm, 70))
+        window.noise_slider.setValue(self._last_noise_by_mode.get(_wm, 0))
 
         self.windows[window_id] = window
         window.show()
@@ -744,9 +747,10 @@ class Img2ImgWindowManager:
     def _on_window_closing(self, window_id):
         if window_id in self.windows:
             window = self.windows[window_id]
-            # Strength/Noise 값 기억
-            self._last_strength = window.strength_slider.value()
-            self._last_noise = window.noise_slider.value()
+            # Strength/Noise 값 기억 (모드별 분리)
+            _wm = getattr(window, 'mode', 'img2img')
+            self._last_strength_by_mode[_wm] = window.strength_slider.value()
+            self._last_noise_by_mode[_wm] = window.noise_slider.value()
             self.windows.pop(window_id)
         self._batch_states.pop(window_id, None)
 

@@ -104,11 +104,13 @@ class Img2ImgPanel(QFrame):
         strength_hlayout.setContentsMargins(0, 0, 0, 0)
         strength_label = QLabel("Strength:")
         strength_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: white; background-color: transparent;")
-        self.strength_value_label = QLabel("0.50")
+        self.strength_value_label = QLabel("0.70")
         self.strength_value_label.setStyleSheet(f"font-size: {get_scaled_font_size(16)}px; color: #AAA; min-width: 40px; text-align: right; background-color: transparent;")
         self.strength_slider = QSlider(Qt.Orientation.Horizontal)
         self.strength_slider.setRange(1, 99)
-        self.strength_slider.setValue(50)
+        # 초기 모드가 'img2img' 이므로 i2i 기본값(0.7)로 시작.
+        # inpaint 모드로 전환되면 _update_ui_for_mode 가 1.0(슬라이더 99) 로 갱신.
+        self.strength_slider.setValue(70)
         self.strength_slider.setStyleSheet(slider_style) # [수정] 스타일 적용
         self.strength_slider.valueChanged.connect(self._update_strength_label)
         strength_hlayout.addWidget(strength_label)
@@ -350,6 +352,19 @@ class Img2ImgPanel(QFrame):
 
     # [2단계] 모드에 따라 UI를 업데이트하는 헬퍼 메서드
     def _update_ui_for_mode(self):
+        # 모드 전환 시 기본값 적용 (동일 모드 재진입에서는 사용자 값 보존).
+        # inpaint = 1.0 (슬라이더 99 → NAI 웹 일치 순수 inpaint)
+        # img2img = 0.7 (슬라이더 70)
+        _prev_mode = getattr(self, '_last_applied_mode', None)
+        if _prev_mode != self.mode and not self._comic_panel_mode:
+            if self.mode == 'inpaint':
+                self.strength_slider.setValue(99)
+                self.strength_value_label.setText("1.00")
+            else:
+                self.strength_slider.setValue(70)
+                self.strength_value_label.setText("0.70")
+        self._last_applied_mode = self.mode
+
         if self.mode == 'inpaint':
             self.inpaint_button.setText("Edit Mask")
             self.inpaint_button.setStyleSheet(DARK_STYLES['primary_button']) # 강조 색상으로 변경
@@ -378,8 +393,11 @@ class Img2ImgPanel(QFrame):
             self.outpaint_button.setVisible(self.mode != 'inpaint')
 
     def _update_strength_label(self, value):
-        """Strength 슬라이더 값 변경 시 라벨 업데이트"""
-        strength_value = value / 100.0
+        """Strength 슬라이더 값 변경 시 라벨 업데이트.
+
+        NAI 웹 일치: 슬라이더 최댓값(99)은 순수 inpaint (strength=1.0) 로 승격.
+        """
+        strength_value = 1.0 if value == 99 else value / 100.0
         self.strength_value_label.setText(f"{strength_value:.2f}")
     
     def _on_auto_outpainting_toggled(self, checked):
@@ -588,9 +606,12 @@ class Img2ImgPanel(QFrame):
         byte_arr = io.BytesIO()
         width, height = self.original_pil_image.size
         self.original_pil_image.save(byte_arr, format='PNG')
+        # NAI 웹 일치: 슬라이더 최댓값(99)은 순수 inpaint (strength=1.0) 로 승격.
+        _strength_raw = self.strength_slider.value()
+        _strength = 1.0 if _strength_raw == 99 else _strength_raw / 100.0
         params = {
             "image_bytes": byte_arr.getvalue(),
-            "strength": 1.0 if self._comic_panel_mode else self.strength_slider.value() / 100.0,
+            "strength": 1.0 if self._comic_panel_mode else _strength,
             "noise": 0.0 if self._comic_panel_mode else self.noise_slider.value() / 100.0,
             "width" : width,
             "height" : height

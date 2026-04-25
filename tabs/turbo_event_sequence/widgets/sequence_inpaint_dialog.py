@@ -58,7 +58,7 @@ class MaskEditWidget(QWidget):
 
         self.brush_size = 50
         self.brush_shape = 'Square'
-        self.strength = 0.7  # 🆕 Strength 기본값
+        self.strength = 1.0  # 🆕 Strength 기본값 (NAI 웹 일치: 순수 inpaint)
         self.last_paint_pos: QPointF = None
 
         self._init_ui()
@@ -1148,7 +1148,7 @@ class SequenceInpaintDialog(QDialog):
             mask_bytes.seek(0)
 
             # 🆕 Strength 값 가져오기 (mask_data에서)
-            strength = self._current_mask_data.get('strength', 0.7) if self._current_mask_data else 0.7
+            strength = self._current_mask_data.get('strength', 1.0) if self._current_mask_data else 1.0
 
             # override 파라미터 (SequenceGenerationWorker._request_inpaint_generation과 동일한 형식)
             override_params = {

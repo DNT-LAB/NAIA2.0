@@ -3177,3 +3177,45 @@ select.setup-input { cursor: pointer; }
   .setup-header-actions { gap: 8px; }
   .setup-desktop-toggle { padding: 7px 10px; font-size: 9.5px; }
 }
+
+/* ---- Viewer: "최신으로" 뱃지 (Q1-B: 과거 이미지 탐색 중 새 이미지 도착 시 노출) ---- */
+.viewer-latest-badge {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  z-index: 100;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(124, 106, 239, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition: opacity 220ms ease, transform 220ms ease, filter 180ms ease;
+}
+.viewer-latest-badge.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.viewer-latest-badge:hover { filter: brightness(1.12); }
+.viewer-latest-badge:active { transform: translateY(1px); }
+
+@media (max-width: 767px) {
+  .viewer-latest-badge {
+    top: auto;
+    bottom: 140px;
+    right: 50%;
+    transform: translate(50%, 8px);
+  }
+  .viewer-latest-badge.visible {
+    transform: translate(50%, 0);
+  }
+}

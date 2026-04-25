@@ -249,14 +249,16 @@ class Img2ImgWindow(QMainWindow):
         strength_row = QHBoxLayout()
         strength_label = QLabel("Strength:")
         strength_label.setStyleSheet(label_style)
-        self.strength_value_label = QLabel("0.50")
+        self.strength_value_label = QLabel("0.70")
         self.strength_value_label.setStyleSheet(value_style)
         self.strength_slider = QSlider(Qt.Orientation.Horizontal)
         self.strength_slider.setRange(1, 99)
-        self.strength_slider.setValue(50)
+        # 초기 모드는 'img2img' — i2i 기본값(0.7). 매니저가 mode-aware 복원으로 덮어씀.
+        self.strength_slider.setValue(70)
         self.strength_slider.setStyleSheet(slider_style)
+        # NAI 웹 일치: 슬라이더 최댓값(99)은 순수 inpaint (strength=1.0) 로 승격.
         self.strength_slider.valueChanged.connect(
-            lambda v: self.strength_value_label.setText(f"{v / 100.0:.2f}")
+            lambda v: self.strength_value_label.setText(f"{(1.0 if v == 99 else v / 100.0):.2f}")
         )
         strength_row.addWidget(strength_label)
         strength_row.addWidget(self.strength_slider)
@@ -829,10 +831,13 @@ class Img2ImgWindow(QMainWindow):
 
     def _collect_generation_params(self) -> dict:
         """현재 윈도우 상태에서 생성 파라미터 수집"""
+        # NAI 웹 일치: 슬라이더 최댓값(99)은 순수 inpaint (strength=1.0) 로 승격.
+        _strength_raw = self.strength_slider.value()
+        _strength = 1.0 if _strength_raw == 99 else _strength_raw / 100.0
         overrides = {
             'input': self.main_prompt_edit.toPlainText(),
             'negative_prompt': self.negative_prompt_edit.toPlainText(),
-            'strength': self.strength_slider.value() / 100.0,
+            'strength': _strength,
             'noise': self.noise_slider.value() / 100.0,
         }
 

@@ -951,7 +951,7 @@ class CustomEventDialog(QDialog):
                 app_context=self.app_context,
                 prompts=[prompt_data],
                 direction='horizontal',
-                strength=0.7,
+                strength=1.0,
                 negative_prompt='',
                 prev_images=prev_images,
                 start_index=index,

@@ -94,6 +94,7 @@ const promptEdit   = $('promptEdit');
 const negEdit      = $('negEdit');
 const metaRow      = $('metaRow');
 const promptTokenLabel = $('promptTokenLabel');
+const negativeTokenLabel = $('negativeTokenLabel');
 const paramFlags   = $('paramFlags');
 const paramEls = {
   model: $('pModel'), sampler: $('pSampler'), scheduler: $('pScheduler'),
@@ -263,6 +264,9 @@ let lastCharacterPromptText = '';
 let lastMainTokenCount = null;
 let lastMainTokenSourceText = '';
 let lastMainTokenMode = '';
+let lastNegativeTokenCount = null;
+let lastNegativeTokenSourceText = '';
+let lastNegativeTokenMode = '';
 
 function cleanPromptForTokenEstimate(text, mode) {
   let cleaned = (text || '')
@@ -295,20 +299,50 @@ function formatPromptTokenLabel(main, character, mode) {
   return `Estimated Tokens : ${main}`;
 }
 
-function updatePromptTokenEstimate() {
-  if (!promptTokenLabel) return;
+function formatNegativeTokenLabel(count) {
+  return `Estimated Tokens : ${count}`;
+}
+
+function updateNegativeTokenEstimate() {
+  if (!negativeTokenLabel) return;
   const mode = currentMode || modeSelect.value || 'NAI';
-  const hasExactMain = lastMainTokenCount !== null
-    && lastMainTokenSourceText === promptEdit.value
-    && lastMainTokenMode === mode;
-  const main = hasExactMain ? lastMainTokenCount : estimateTokenCount(promptEdit.value, mode);
-  const character = mode === 'NAI'
-    ? (lastCharacterTokenCount || estimateTokenCount(lastCharacterPromptText, mode))
-    : 0;
-  promptTokenLabel.textContent = formatPromptTokenLabel(main, character, mode);
+  const hasExactNegative = lastNegativeTokenCount !== null
+    && lastNegativeTokenSourceText === negEdit.value
+    && lastNegativeTokenMode === mode;
+  const negative = hasExactNegative ? lastNegativeTokenCount : estimateTokenCount(negEdit.value, mode);
+  negativeTokenLabel.textContent = formatNegativeTokenLabel(negative);
+}
+
+function updatePromptTokenEstimate() {
+  const mode = currentMode || modeSelect.value || 'NAI';
+  if (promptTokenLabel) {
+    const hasExactMain = lastMainTokenCount !== null
+      && lastMainTokenSourceText === promptEdit.value
+      && lastMainTokenMode === mode;
+    const main = hasExactMain ? lastMainTokenCount : estimateTokenCount(promptEdit.value, mode);
+    const character = mode === 'NAI'
+      ? (lastCharacterTokenCount || estimateTokenCount(lastCharacterPromptText, mode))
+      : 0;
+    promptTokenLabel.textContent = formatPromptTokenLabel(main, character, mode);
+  }
+  updateNegativeTokenEstimate();
+}
+
+function applyNegativeTokenPayload(m) {
+  if (!negativeTokenLabel) return;
+  if (Number.isFinite(Number(m.negative_token_count))) {
+    const mode = currentMode || modeSelect.value || 'NAI';
+    lastNegativeTokenCount = Number(m.negative_token_count);
+    lastNegativeTokenSourceText = typeof m.negative_prompt === 'string' ? m.negative_prompt : negEdit.value;
+    lastNegativeTokenMode = mode;
+    negativeTokenLabel.textContent = formatNegativeTokenLabel(lastNegativeTokenCount);
+    return;
+  }
+  updateNegativeTokenEstimate();
 }
 
 function applyPromptTokenPayload(m) {
+  applyNegativeTokenPayload(m);
   if (!promptTokenLabel) return;
   if (m.prompt_token_label) {
     promptTokenLabel.textContent = m.prompt_token_label;
@@ -626,6 +660,7 @@ function onPromptEdit() {
   if (syncingPrompt) return;
   _localPromptDirty = true;
   lastMainTokenCount = null;
+  lastNegativeTokenCount = null;
   updatePromptHighlight();
   updatePromptTokenEstimate();
   if (promptSendTimer) clearTimeout(promptSendTimer);
@@ -1647,7 +1682,10 @@ function _restoreSharedSession() {
   }
   // 클라이언트 UI 복원: prompt + negative prompt
   if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); updatePromptTokenEstimate(); }
-  if (saved.negative_prompt != null) negEdit.value = saved.negative_prompt;
+  if (saved.negative_prompt != null) {
+    negEdit.value = saved.negative_prompt;
+    updateNegativeTokenEstimate();
+  }
   // Rating 복원
   if (saved.ratings && Array.isArray(saved.ratings)) {
     for (const k of ['g','s','q','e']) {

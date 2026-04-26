@@ -1102,6 +1102,10 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 .prompt-highlight-wrap .prompt-edit:focus {
   border-color: transparent;
 }
+.prompt-plain-wrap .prompt-edit {
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+}
 .prompt-highlight-wrap.nai-preview .prompt-edit,
 .prompt-highlight-wrap.is-editing .prompt-edit {
   background: transparent !important;
@@ -1453,6 +1457,10 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   padding-top: 8px;
   flex-shrink: 1;
   min-height: 0;
+}
+.prompt-inner > .assistants-section {
+  padding: 8px 14px 10px;
+  border-top: 1px solid rgba(232,232,240,0.08);
 }
 .assistants-label {
   display: flex;

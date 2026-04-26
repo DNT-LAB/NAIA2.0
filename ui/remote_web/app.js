@@ -20,6 +20,9 @@ let sessionId = null, sharedMode = false;
 let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
 let desktopWindowVisible = true;
 let desktopWindowControlAllowed = false;
+const urlParams = new URLSearchParams(location.search);
+const isDesktopShell = urlParams.get('desktop_shell') === '1';
+if (isDesktopShell) document.body.classList.add('desktop-shell');
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
@@ -138,7 +141,11 @@ function connect() {
     setLauncherConn(true);
     ws.send(JSON.stringify({type: 'get_search_state'}));
     // 클라이언트 상태 전송 (히스토리 수 0 — viewer는 REST로 로드)
-    ws.send(JSON.stringify({type: 'client_state', history_count: 0}));
+    ws.send(JSON.stringify({
+      type: 'client_state',
+      history_count: 0,
+      desktop_shell: isDesktopShell,
+    }));
     // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
   };
   ws.onclose = () => {

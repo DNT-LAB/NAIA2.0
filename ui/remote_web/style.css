@@ -127,6 +127,17 @@ header {
   color: var(--text-primary);
   font-weight: 700;
 }
+body.desktop-shell .logo::after {
+  content: " SHELL";
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+body.desktop-shell .logo-sig {
+  display: none;
+}
 .header-right {
   display: flex; align-items: center; gap: 10px;
 }

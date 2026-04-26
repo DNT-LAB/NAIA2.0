@@ -1,9 +1,8 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QFrame, QApplication, QGraphicsDropShadowEffect,
-    QSizePolicy, QRubberBand
+    QWidget, QLabel, QFrame, QSizePolicy, QRubberBand
 )
 from PyQt6.QtCore import Qt, QPoint, QRect, QSize, QEvent, pyqtSignal
-from PyQt6.QtGui import QPixmap, QCursor, QColor, QPainter, QPen
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QPen
 
 from ui.theme import DARK_COLORS
 from ui.interactive.interactive_theme import COMMON_STYLES
@@ -129,21 +128,6 @@ class ImagePlane(QWidget):
         # layout.addWidget(self.content_frame) <--- 제거
 
 
-        # 그림자 초기화
-        self._toggle_shadow(True)
-
-    def _toggle_shadow(self, enable: bool):
-        """성능 최적화를 위해 드래그 중에만 그림자 비활성화"""
-        if enable:
-            shadow = QGraphicsDropShadowEffect(self)
-            shadow.setBlurRadius(20)
-            shadow.setXOffset(0)
-            shadow.setYOffset(4)
-            shadow.setColor(QColor(0, 0, 0, 100))
-            self.setGraphicsEffect(shadow)
-        else:
-            self.setGraphicsEffect(None)
-
     def resizeEvent(self, event):
         """수동 레이아웃 업데이트 (깜빡임 방지)"""
         m = self.resize_margin
@@ -211,9 +195,6 @@ class ImagePlane(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             # 클릭 판정을 위해 시작 위치 저장
             self._click_start_pos = event.globalPosition().toPoint()
-
-            # 성능 최적화: 조작 시작 시 그림자 제거
-            self._toggle_shadow(False)
 
             # 리사이즈 영역 클릭 확인
             edge = self._check_resize_area(event.pos())
@@ -293,8 +274,6 @@ class ImagePlane(QWidget):
         self._resize_edge = None
         self._click_start_pos = None
 
-        # 조작 종료 시 그림자 복구
-        self._toggle_shadow(True)
         super().mouseReleaseEvent(event)
 
     # === 헬퍼 메서드 ===

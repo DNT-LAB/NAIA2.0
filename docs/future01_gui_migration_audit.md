@@ -46,6 +46,13 @@ Implemented in this round:
 - Removed a duplicate prompt editor `setStyleSheet()` call during main UI initialization.
 - Removed an unreachable Comic Generator turbo branch and its hidden button setup.
 
+## Cleanup Round 3
+
+Implemented in this round:
+
+- Removed decorative `QGraphicsDropShadowEffect` usage from interactive draggable panels and image planes.
+- Removed stale commented shadow setup from the floating control bar.
+
 ## Follow-Up Audit Items
 
 - Map remaining core desktop tabs to the Web Shell information architecture.

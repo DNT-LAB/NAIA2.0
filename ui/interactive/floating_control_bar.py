@@ -224,14 +224,6 @@ class FloatingControlBar(QWidget):
             self.param_panel.show()
             self.param_panel.raise_()
         
-        # 그림자 효과
-        # from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        # shadow = QGraphicsDropShadowEffect(self)
-        # shadow.setBlurRadius(20)
-        # shadow.setColor(Qt.GlobalColor.black)
-        # shadow.setOffset(0, 4)
-        # self.container.setGraphicsEffect(shadow)
-
     def sizeHint(self):
         return self.container.sizeHint()
 

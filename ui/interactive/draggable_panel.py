@@ -27,11 +27,9 @@ Draggable Panel Wrapper (ui/interactive/draggable_panel.py)
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
-    QGraphicsDropShadowEffect, QApplication
+    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QApplication
 )
 from PyQt6.QtCore import Qt, QPoint, QEvent, QTimer, QObject, pyqtSignal
-from PyQt6.QtGui import QColor
 
 from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_size
@@ -188,10 +186,7 @@ class DragHandle(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             # Z-Order 업데이트
             FloatingPanelManager.instance().activate_panel(self.parent())
-            
-            # 성능 최적화: 그림자 끄기
-            self.parent()._toggle_shadow(False)
-            
+
             self._drag_start_pos = event.globalPosition().toPoint() - self.parent().pos()
             
             if self.clicked_to_toggle_enabled:
@@ -214,8 +209,6 @@ class DragHandle(QFrame):
 
         self._drag_start_pos = None
         self._initial_press_global_pos = None
-        # 성능 최적화: 그림자 켜기
-        self.parent()._toggle_shadow(True)
         event.accept()
 
     # mouseDoubleClickEvent 제거 (싱글 클릭이 토글하므로 중복 방지)
@@ -280,9 +273,6 @@ class DraggablePanel(QWidget):
             
         layout.addWidget(self.container)
         
-        # 그림자 효과 (초기 활성화)
-        self._toggle_shadow(True)
-        
         # 컨테이너 자체 이벤트 필터 (드래그 및 클릭 감지)
         self.container.installEventFilter(self)
 
@@ -318,18 +308,6 @@ class DraggablePanel(QWidget):
                 self.handle.set_arrow(True)
                 self.adjustSize()
             
-    def _toggle_shadow(self, enable: bool):
-        """드래그 성능 최적화를 위한 그림자 토글"""
-        if enable:
-            shadow = QGraphicsDropShadowEffect(self)
-            shadow.setBlurRadius(20)
-            shadow.setXOffset(0)
-            shadow.setYOffset(4)
-            shadow.setColor(QColor(0, 0, 0, 100))
-            self.setGraphicsEffect(shadow)
-        else:
-            self.setGraphicsEffect(None)
-
     def move_to_safe_position(self, pos: QPoint):
         """부모 위젯 영역 밖으로 완전히 나가지 않도록 좌표 보정"""
         parent = self.parent()
@@ -361,8 +339,6 @@ class DraggablePanel(QWidget):
         if obj == self.container:
             if event.type() == QEvent.Type.MouseButtonPress:
                 if event.button() == Qt.MouseButton.LeftButton:
-                    # 바디 드래그 시작 시 그림자 끄기
-                    self._toggle_shadow(False)
                     self._body_drag_start_pos = event.globalPosition().toPoint() - self.pos()
                     # 이벤트 수락하지 않고 흘려보냄 (필요 시 자식 처리 가능성 고려)
                     # 하지만 container면 자식이 아님.
@@ -375,8 +351,6 @@ class DraggablePanel(QWidget):
 
             elif event.type() == QEvent.Type.MouseButtonRelease:
                 self._body_drag_start_pos = None
-                # 바디 드래그 종료 시 그림자 켜기
-                self._toggle_shadow(True)
 
         return super().eventFilter(obj, event)
 

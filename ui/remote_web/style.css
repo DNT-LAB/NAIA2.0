@@ -1428,13 +1428,40 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 }
 
 /* ---- Module bar ---- */
-.module-bar {
+.assistants-section {
+  padding-top: 12px;
+  flex-shrink: 0;
+}
+.assistants-label {
   display: flex;
+  align-items: center;
   gap: 6px;
-  padding-top: 8px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.assistants-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid rgba(160,166,187,0.42);
+  border-radius: 50%;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1;
+}
+.module-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   flex-shrink: 0;
   align-items: center;
-  flex-wrap: wrap;
 }
 .module-prompt-btn {
   padding: 6px 12px;
@@ -1515,22 +1542,32 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 .rating-btn.active[data-r="q"] { background: #e65100; color: #fff; border-color: #FF9800; }
 .rating-btn.active[data-r="e"] { background: #c62828; color: #fff; border-color: #F44336; }
 .module-btn {
-  padding: 6px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-dim);
-  border-radius: 6px;
-  font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 7px 12px;
+  background: rgba(34,34,51,0.58);
+  border: 1px solid rgba(232,232,240,0.1);
+  border-radius: 8px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.2s;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
 }
-.module-btn:hover { border-color: var(--border-glow); color: var(--text-muted); }
+.module-btn:hover {
+  background: rgba(255,255,255,0.045);
+  border-color: rgba(232,232,240,0.2);
+  color: var(--text-primary);
+}
 .module-btn.active {
-  background: var(--accent);
-  border-color: var(--accent-glow);
-  color: #fff;
+  background: rgba(124,106,239,0.16);
+  border-color: rgba(157,139,255,0.42);
+  color: var(--accent-glow);
 }
 .module-btn.auto-active { border-color: #e8a84c; color: #e8a84c; }
 .module-btn.auto-active.active { border-color: var(--accent-glow); color: #fff; }

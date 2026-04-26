@@ -76,70 +76,43 @@ header {
   border-bottom: 1px solid var(--border-dim);
   flex-shrink: 0;
 }
-/* 모바일: 5초 후 헤더 자동 접힘 */
 @media (max-width: 767px) {
-  header {
-    overflow: hidden;
-    max-height: 60px;
-    animation: header-collapse 0.5s ease 5s forwards;
-    cursor: pointer;
+  .shell-toolbar {
+    min-height: 48px;
+    padding: 9px 10px;
+    gap: 8px;
   }
-  header.collapsed {
-    max-height: 6px;
-    padding: 3px 16px;
-    border-bottom-color: var(--accent-glow);
-    opacity: 0.5;
-    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+  .toolbar-left,
+  .toolbar-right {
+    gap: 6px;
   }
-  header.collapsed:active { opacity: 1; }
-  header.collapsed > * { visibility: hidden; }
-  header.expanded {
-    animation: none;
-    max-height: 60px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-dim);
-    opacity: 1;
-    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+  .shell-toolbar .prompt-quick-control {
+    max-width: 100%;
   }
-  header.expanded > * { visibility: visible; }
-  @keyframes header-collapse {
-    0%   { max-height: 60px; padding: 12px 16px; border-bottom-color: var(--border-dim); opacity: 1; }
-    100% { max-height: 6px; padding: 3px 16px; border-bottom-color: var(--accent-glow); opacity: 0.5; }
+  .shell-toolbar .anlas-pill {
+    display: none;
   }
-  /* 헤더 접힘 시 tooltip/toast 위치 조정 */
-  body.header-collapsed .tag-tooltip { top: 10px; }
-  body.header-collapsed .toast { top: 14px; }
+  .shell-toolbar .mode-api-combo {
+    height: 28px;
+  }
 }
-.logo {
-  font-size: 17px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
-  background: linear-gradient(135deg, var(--accent-glow), var(--accent-secondary));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-  user-select: none;
+.shell-toolbar {
+  min-height: 52px;
+  gap: 12px;
 }
-.logo-sig { user-select: none; }
-.logo-sig {
-  font-size: 11px; font-weight: 400;
-  color: var(--text-dim);
-  margin-left: 10px;
-  letter-spacing: 0.3px;
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
-.logo-sig b {
-  color: var(--text-primary);
-  font-weight: 700;
+.toolbar-left {
+  flex: 1;
 }
-body.desktop-shell .logo::after {
-  content: " SHELL";
-  color: var(--text-muted);
-  -webkit-text-fill-color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-body.desktop-shell .logo-sig {
-  display: none;
-}
-.header-right {
-  display: flex; align-items: center; gap: 10px;
+.toolbar-right {
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 .mode-api-combo {
   display: inline-flex;
@@ -1409,6 +1382,9 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   border-radius: 7px;
   background: rgba(76,175,80,0.1);
   flex-shrink: 0;
+}
+.shell-toolbar .prompt-quick-control {
+  height: 30px;
 }
 .prompt-quick-control .module-prompt-btn,
 .prompt-quick-control .quick-filter-btn {
@@ -2874,7 +2850,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 .tag-filter-btn-action.clear:hover { border-color: var(--error); color: var(--error); }
 
 /* ==========================================================================
-   Setup / API Configuration modal — matches NAIA-REMOTE aesthetic
+   Setup / API Configuration modal
    (rounded surfaces, violet accent, Outfit display + JetBrains Mono labels)
    ========================================================================== */
 
@@ -3310,6 +3286,17 @@ select.setup-input { cursor: pointer; }
   user-select: none;
 }
 .anlas-pill.hidden { display: none; }
+.shell-toolbar .anlas-pill {
+  position: static;
+  z-index: auto;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: rgba(18,18,26,0.78);
+  border-color: rgba(232,232,240,0.12);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 .anlas-label {
   color: var(--text-dim);
   font-size: 9px; font-weight: 500;

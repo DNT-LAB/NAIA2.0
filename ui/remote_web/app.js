@@ -5167,27 +5167,6 @@ document.addEventListener('keydown', e => {
 // ---- Init ----
 negEdit.addEventListener('input', onPromptEdit);
 
-// 모바일 헤더 자동 접힘 + 클릭 토글
-if (window.innerWidth < 768) {
-  const hdr = document.querySelector('header');
-  hdr.addEventListener('animationend', () => {
-    hdr.classList.add('collapsed');
-    document.body.classList.add('header-collapsed');
-  });
-  hdr.addEventListener('click', e => {
-    if (e.target.closest('select')) return;  // mode select 클릭은 무시
-    if (hdr.classList.contains('collapsed')) {
-      hdr.classList.remove('collapsed');
-      hdr.classList.add('expanded');
-      document.body.classList.remove('header-collapsed');
-    } else {
-      hdr.classList.remove('expanded');
-      hdr.classList.add('collapsed');
-      document.body.classList.add('header-collapsed');
-    }
-  });
-}
-
 // ---- Tag Filter ----
 let tagFilterTags = [];
 let tagFilterExcludeTags = [];

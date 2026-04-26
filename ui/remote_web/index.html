@@ -11,9 +11,15 @@
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
 
-<header>
-  <span class="logo">NAIA-REMOTE</span><span class="logo-sig">Provided by <b>CLAUDE</b></span>
-  <div class="header-right">
+<header class="shell-toolbar">
+  <div class="toolbar-left">
+    <div class="prompt-quick-control toolbar-prompt-control">
+      <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+      <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Quick</button>
+    </div>
+  </div>
+  <div class="toolbar-right">
+    <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
     <div class="mode-api-combo" id="modeApiCombo">
       <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
         <option value="NAI">NAI</option>
@@ -257,10 +263,6 @@
           </div>
           <!-- Module bar -->
           <div class="module-bar">
-            <div class="prompt-quick-control">
-              <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
-              <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Quick</button>
-            </div>
             <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
             <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
             <button class="module-btn" data-module="character" onclick="openModule('character')">Character<span class="module-badge hidden" id="badgeChar"></span></button>
@@ -404,8 +406,6 @@
         <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Open auto-save settings"><span class="stats-dot" id="statsSaveDot"></span>Auto Save</span>
         <span class="stats-pill" id="statsGenCount" title="Total generations this session"></span>
       </div>
-      <!-- NAI Anlas (desktop polls every 5 min + on each generation) -->
-      <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
       <div class="viewer-nav-actions">
         <button class="viewer-hist-btn nav" onclick="navViewer(-1)">&#9664;</button>
         <button class="viewer-hist-btn" onclick="hideViewerNav()">Close</button>

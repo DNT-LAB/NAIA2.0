@@ -69,14 +69,6 @@ def setup_webengine():
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     #os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "8888"
-    
-    # WebEngine 모듈 사전 로드
-    try:
-        from PyQt6.QtWebEngineWidgets import QWebEngineView
-        from PyQt6.QtWebEngineCore import QWebEngineProfile
-        print("✅ WebEngine 모듈 사전 로드 완료")
-    except ImportError:
-        print("❌ PyQt6-WebEngine이 설치되지 않았습니다")
 
 
 class ParquetLoader(QObject):

@@ -1333,22 +1333,23 @@ class SettingsWidget(QWidget):
             hasattr(self.app_context.main_window.image_window, 'tab_controller')):
             
             tab_controller = self.app_context.main_window.image_window.tab_controller
-            for tab_id, instance in tab_controller.module_instances.items():
-                # 숨길 수 있는 탭인지 확인
-                if instance.__class__.__name__ in HIDEABLE_TAB_MODULES:
-                    checkbox = QCheckBox(instance.get_tab_title())
-                    checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
-                    
-                    # 현재 가시성 상태 확인
-                    is_visible = self.settings_module.get_setting(f'tab_visibility.{tab_id}', True)
-                    checkbox.setChecked(is_visible)
-                    
-                    # 체크박스 토글 시 이벤트 연결
-                    checkbox.toggled.connect(
-                        lambda checked, tid=tab_id: self._on_tab_visibility_changed(tid, checked)
-                    )
-                    
-                    self.tab_layout.addWidget(checkbox)
+            for tab_id in HIDEABLE_TAB_MODULES:
+                if tab_id not in tab_controller.tab_index_map:
+                    continue
+
+                checkbox = QCheckBox(tab_controller.get_tab_title(tab_id))
+                checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+
+                # 현재 가시성 상태 확인
+                is_visible = self.settings_module.get_setting(f'tab_visibility.{tab_id}', True)
+                checkbox.setChecked(is_visible)
+
+                # 체크박스 토글 시 이벤트 연결
+                checkbox.toggled.connect(
+                    lambda checked, tid=tab_id: self._on_tab_visibility_changed(tid, checked)
+                )
+
+                self.tab_layout.addWidget(checkbox)
     
     def _on_module_visibility_changed(self, module_id: str, visible: bool):
         """모듈 가시성 변경"""

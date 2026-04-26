@@ -53,6 +53,16 @@ Implemented in this round:
 - Removed decorative `QGraphicsDropShadowEffect` usage from interactive draggable panels and image planes.
 - Removed stale commented shadow setup from the floating control bar.
 
+## Cleanup Round 4
+
+Implemented in this round:
+
+- Changed `TabController` startup discovery so heavy core tabs can be represented by lightweight placeholders and imported only when selected.
+- Deferred startup imports for Danbooru WebEngine, PNG Info, Thumb, Artists, Studio, and dynamic/closable tab modules.
+- Removed unconditional WebEngine module preloading from startup; WebEngine is now imported by web tabs only when needed.
+- Kept Image Viewer and Settings eager because generation display and Web Session autostart depend on them during startup.
+- Added regression tests for lazy core tab startup and dynamic tab import-on-request behavior.
+
 ## Follow-Up Audit Items
 
 - Map remaining core desktop tabs to the Web Shell information architecture.

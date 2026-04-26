@@ -86,44 +86,63 @@ class RightView(QWidget):
             parent=self
         )
         self.tab_controller.initialize_tabs()
-        
+        self.tab_controller.tab_added.connect(self._on_tab_added)
+
         # ✅ ImageViewerModule 인스턴스를 컨트롤러로부터 가져와 시그널 연결
         image_viewer_module = self.tab_controller.get_tab_instance('ImageViewerModule')
         if image_viewer_module:
-            # ImageViewerModule의 시그널을 RightView의 시그널에 다시 연결
-            if hasattr(image_viewer_module, 'instant_generation_requested'):
-                image_viewer_module.instant_generation_requested.connect(self.instant_generation_requested)
-            if hasattr(image_viewer_module, 'load_prompt_to_main_ui'):
-                image_viewer_module.load_prompt_to_main_ui.connect(self.load_prompt_to_main_ui)
-            if hasattr(image_viewer_module.image_window_widget, 'send_to_inpaint_requested'):
-                image_viewer_module.image_window_widget.send_to_inpaint_requested.connect(self.send_to_inpaint_requested)
-            if hasattr(image_viewer_module.image_window_widget, 'send_to_img2img_requested'):
-                image_viewer_module.image_window_widget.send_to_img2img_requested.connect(self.send_to_img2img_requested)
-            if hasattr(image_viewer_module.image_window_widget, 'instant_outpaint_requested'):
-                image_viewer_module.image_window_widget.instant_outpaint_requested.connect(self.instant_outpaint_requested)
-            if hasattr(image_viewer_module.image_window_widget, 'send_to_outpaint_requested'):
-                image_viewer_module.image_window_widget.send_to_outpaint_requested.connect(self.send_to_outpaint_requested)
-            if hasattr(image_viewer_module.image_window_widget, 'use_as_outpaint_base_requested'):
-                image_viewer_module.image_window_widget.use_as_outpaint_base_requested.connect(self.use_as_outpaint_base_requested)
-            if hasattr(image_viewer_module.image_window_widget, 'save_to_remote_event_requested'):
-                image_viewer_module.image_window_widget.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)
-                print("✅ ImageWindow의 save_to_remote_event_requested 시그널이 연결되었습니다.")
+            self._connect_tab_module('ImageViewerModule', image_viewer_module)
         else:
             print("⚠️ ImageViewerModule 인스턴스를 찾을 수 없어 시그널 연결에 실패했습니다.")
 
-        # Browser Tab
-        browser_module = self.tab_controller.get_tab_instance('BrowserTabModule')
-        if browser_module:
-            if hasattr(browser_module, 'instant_generation_requested'):
-                browser_module.instant_generation_requested.connect(self.instant_generation_requested)
+    def _on_tab_added(self, tab_id: str, module):
+        self._connect_tab_module(tab_id, module)
+
+    def _connect_tab_module(self, tab_id: str, module):
+        if tab_id == 'ImageViewerModule':
+            if getattr(module, '_right_view_connected', False):
+                return
+
+            if hasattr(module, 'instant_generation_requested'):
+                module.instant_generation_requested.connect(self.instant_generation_requested)
+            if hasattr(module, 'load_prompt_to_main_ui'):
+                module.load_prompt_to_main_ui.connect(self.load_prompt_to_main_ui)
+
+            image_widget = getattr(module, 'image_window_widget', None)
+            if image_widget:
+                if hasattr(image_widget, 'send_to_inpaint_requested'):
+                    image_widget.send_to_inpaint_requested.connect(self.send_to_inpaint_requested)
+                if hasattr(image_widget, 'send_to_img2img_requested'):
+                    image_widget.send_to_img2img_requested.connect(self.send_to_img2img_requested)
+                if hasattr(image_widget, 'instant_outpaint_requested'):
+                    image_widget.instant_outpaint_requested.connect(self.instant_outpaint_requested)
+                if hasattr(image_widget, 'send_to_outpaint_requested'):
+                    image_widget.send_to_outpaint_requested.connect(self.send_to_outpaint_requested)
+                if hasattr(image_widget, 'use_as_outpaint_base_requested'):
+                    image_widget.use_as_outpaint_base_requested.connect(self.use_as_outpaint_base_requested)
+                if hasattr(image_widget, 'save_to_remote_event_requested'):
+                    image_widget.save_to_remote_event_requested.connect(self.save_to_remote_event_requested)
+                    print("✅ ImageWindow의 save_to_remote_event_requested 시그널이 연결되었습니다.")
+
+            module._right_view_connected = True
+            return
+
+        if tab_id == 'BrowserTabModule':
+            if getattr(module, '_right_view_connected', False):
+                return
+
+            if hasattr(module, 'instant_generation_requested'):
+                module.instant_generation_requested.connect(self.instant_generation_requested)
                 print("✅ BrowserTabModule의 instant_generation_requested 시그널이 연결되었습니다.")
-            if hasattr(browser_module, 'generate_with_image_requested'):
-                browser_module.generate_with_image_requested.connect(self.generate_with_image_requested)
-        else:
-            print("⚠️ BrowserTabModule 인스턴스를 찾을 수 없어 시그널 연결에 실패했습니다.")
-        
+            if hasattr(module, 'generate_with_image_requested'):
+                module.generate_with_image_requested.connect(self.generate_with_image_requested)
+
+            module._right_view_connected = True
+
     def on_tab_changed(self, index: int):
         """탭이 변경될 때 호출되는 메서드"""
+        self.tab_controller.ensure_tab_loaded_by_index(index)
+
         # 현재 탭의 위젯 가져오기
         widget = self.tab_widget.widget(index)
         if not widget:

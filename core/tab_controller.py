@@ -5,12 +5,12 @@ import traceback
 from pathlib import Path
 from typing import Type, List, Dict, Optional
 
-from PyQt6.QtWidgets import QTabWidget, QWidget, QPushButton, QTabBar
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QTabWidget, QWidget, QPushButton, QTabBar, QVBoxLayout, QLabel
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from interfaces.base_tab_module import BaseTabModule
 from core.context import AppContext
-from ui.theme import DARK_STYLES
+from ui.theme import DARK_COLORS
 
 
 REMOVED_TAB_MODULES = {
@@ -23,6 +23,101 @@ REMOVED_TAB_FILES = {
     'hooker_view',
     'storyteller_tab',
     'assets_tab',
+}
+
+
+TAB_MODULE_SPECS = {
+    'ImageViewerModule': {
+        'file': 'image_window',
+        'title': '🖼️ 생성 결과',
+        'order': 1,
+        'tab_type': 'core',
+        'lazy': False,
+    },
+    'BrowserTabModule': {
+        'file': 'web_view',
+        'title': '📦 Danbooru',
+        'order': 2,
+        'tab_type': 'core',
+        'lazy': True,
+    },
+    'PngInfoTabModule': {
+        'file': 'png_info_tab',
+        'title': '📝 PNG Info',
+        'order': 3,
+        'tab_type': 'core',
+        'lazy': True,
+    },
+    'ThumbnailsTabModule': {
+        'file': 'thumbnails_tab',
+        'title': '🖼️ Thumb',
+        'order': 8,
+        'tab_type': 'core',
+        'lazy': True,
+    },
+    'ArtistThumbModule': {
+        'file': 'artist_thumb_tab',
+        'title': '🎨 Artists',
+        'order': 50,
+        'tab_type': 'core',
+        'lazy': True,
+    },
+    'StudioTab': {
+        'file': 'studio_tab',
+        'title': 'Studio',
+        'order': 60,
+        'tab_type': 'core',
+        'lazy': True,
+    },
+    'SettingsTabModule': {
+        'file': 'setting_tabs',
+        'title': '⚙️ Settings',
+        'order': 999,
+        'tab_type': 'core',
+        'lazy': False,
+    },
+    'APIManagementTabModule': {
+        'file': 'api_management_window',
+        'title': '⚙️ API 관리',
+        'order': 1000,
+        'tab_type': 'closable',
+        'lazy': True,
+    },
+    'DepthSearchTabModule': {
+        'file': 'depth_search_window',
+        'title': '🔬 심층 검색',
+        'order': 1000,
+        'tab_type': 'closable',
+        'lazy': True,
+    },
+    'Img2ImgTabModule': {
+        'file': 'img2img_tab',
+        'title': '🖼️ Img2Img',
+        'order': 1000,
+        'tab_type': 'closable',
+        'lazy': True,
+    },
+    'SimpleWebViewTabModule': {
+        'file': 'simple_web_view',
+        'title': '🌐 API 웹뷰',
+        'order': 1000,
+        'tab_type': 'dynamic',
+        'lazy': True,
+    },
+    'TurboEventSequenceTabModule': {
+        'file': 'turbo_event_sequence_tab',
+        'title': '🚀 Turbo Sequence',
+        'order': 1000,
+        'tab_type': 'closable',
+        'lazy': True,
+    },
+}
+
+
+STARTUP_SKIPPED_TAB_FILES = REMOVED_TAB_FILES | {
+    spec['file']
+    for spec in TAB_MODULE_SPECS.values()
+    if spec.get('lazy') or spec.get('tab_type') != 'core'
 }
 
 
@@ -45,7 +140,9 @@ class TabController(QWidget):
         self.module_classes: List[Type[BaseTabModule]] = []
         self.module_instances: Dict[str, BaseTabModule] = {}
         self.tab_index_map: Dict[str, int] = {}  # tab_id -> index 매핑
-        
+        self.lazy_tab_specs: Dict[str, dict] = {}
+        self._module_class_by_name: Dict[str, Type[BaseTabModule]] = {}
+
         if not os.path.exists(tabs_dir):
             os.makedirs(tabs_dir)
             print(f"📁 탭 모듈 디렉토리 생성: {tabs_dir}")
@@ -53,21 +150,40 @@ class TabController(QWidget):
     def initialize_tabs(self):
         """모든 탭 모듈을 로드하고 UI를 구성하는 메인 메서드"""
         self._load_tab_modules()
-        
-        # 모듈들을 order 순서대로 정렬
-        sorted_classes = sorted(self.module_classes, key=lambda c: c().get_tab_order())
 
-        for cls in sorted_classes:
+        startup_entries = []
+        for cls in self.module_classes:
             try:
-                if cls.__name__ in REMOVED_TAB_MODULES:
-                    print(f"  -> 제거된 탭 '{cls.__name__}'은 로드하지 않습니다.")
+                temp_instance = cls()
+                if temp_instance.get_tab_type() == 'core':
+                    startup_entries.append({
+                        'kind': 'class',
+                        'class': cls,
+                        'order': temp_instance.get_tab_order(),
+                    })
+                else:
+                    print(f"  -> 동적 탭 '{temp_instance.get_tab_title()}'은 시작 시 로드하지 않습니다.")
+            except Exception as e:
+                print(f"❌ 탭 '{cls.__name__}' 검사 중 오류 발생: {e}")
+                traceback.print_exc()
+
+        for class_name, spec in TAB_MODULE_SPECS.items():
+            if spec.get('tab_type') == 'core' and spec.get('lazy') and self._tab_file_exists(spec):
+                startup_entries.append({
+                    'kind': 'lazy',
+                    'class_name': class_name,
+                    'spec': spec,
+                    'order': spec['order'],
+                })
+
+        for entry in sorted(startup_entries, key=lambda item: item['order']):
+            try:
+                if entry['kind'] == 'lazy':
+                    self._add_lazy_tab(entry['class_name'], entry['spec'])
                     continue
 
                 # 1. 모듈 인스턴스 생성
-                temp_instance = cls()
-                if temp_instance.get_tab_type() != 'core':
-                    print(f"  -> 동적 탭 '{temp_instance.get_tab_title()}'은 시작 시 로드하지 않습니다.")
-                    continue
+                cls = entry['class']
                 instance = cls()
                 tab_id = instance.tab_id
 
@@ -95,7 +211,8 @@ class TabController(QWidget):
                 print(f"✅ 탭 '{instance.get_tab_title()}' UI 생성 및 초기화 완료.")
 
             except Exception as e:
-                print(f"❌ 탭 '{cls.__name__}' 생성 중 오류 발생: {e}")
+                class_name = entry.get('class_name') or entry.get('class', object).__name__
+                print(f"❌ 탭 '{class_name}' 생성 중 오류 발생: {e}")
                 traceback.print_exc()
 
     def _load_tab_modules(self):
@@ -106,24 +223,125 @@ class TabController(QWidget):
 
         for path in module_files:
             name = Path(path).stem
-            if name in REMOVED_TAB_FILES:
-                print(f"  -> 제거된 탭 파일 건너뜀: {name}.py")
+            if name in STARTUP_SKIPPED_TAB_FILES:
+                print(f"  -> 시작 시 탭 파일 import 건너뜀: {name}.py")
                 continue
 
             try:
-                spec = importlib.util.spec_from_file_location(name, path)
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    
-                    for attr in dir(module):
-                        obj = getattr(module, attr)
-                        if isinstance(obj, type) and issubclass(obj, BaseTabModule) and obj is not BaseTabModule:
-                            self.module_classes.append(obj)
-                            print(f"  -> 탭 모듈 클래스 발견: {obj.__name__}")
+                self._load_module_classes_from_path(name, path)
             except Exception as e:
                 print(f"❌ 탭 모듈 로드 실패 ({name}): {e}")
                 traceback.print_exc()
+
+    def _load_module_classes_from_path(self, name: str, path: str) -> List[Type[BaseTabModule]]:
+        loaded_classes = []
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            for attr in dir(module):
+                obj = getattr(module, attr)
+                if isinstance(obj, type) and issubclass(obj, BaseTabModule) and obj is not BaseTabModule:
+                    if obj.__name__ in REMOVED_TAB_MODULES:
+                        print(f"  -> 제거된 탭 클래스 건너뜀: {obj.__name__}")
+                        continue
+                    if obj.__name__ not in self._module_class_by_name:
+                        self.module_classes.append(obj)
+                        self._module_class_by_name[obj.__name__] = obj
+                        print(f"  -> 탭 모듈 클래스 발견: {obj.__name__}")
+                    loaded_classes.append(obj)
+        return loaded_classes
+
+    def _tab_file_exists(self, spec: dict) -> bool:
+        return os.path.exists(os.path.join(self.tabs_dir, f"{spec['file']}.py"))
+
+    def _add_lazy_tab(self, class_name: str, spec: dict):
+        if class_name in self.tab_index_map:
+            return
+
+        tab_id = class_name
+        placeholder = self._create_lazy_placeholder(spec['title'])
+        tab_index = self.tab_widget.addTab(placeholder, spec['title'])
+        self.tab_index_map[tab_id] = tab_index
+        self.lazy_tab_specs[tab_id] = spec
+        print(f"⏳ 탭 '{spec['title']}'은 선택 시 지연 로드됩니다.")
+
+    def _create_lazy_placeholder(self, title: str) -> QWidget:
+        placeholder = QWidget(self.tab_widget)
+        layout = QVBoxLayout(placeholder)
+        label = QLabel(f"{title}\n선택하면 로드됩니다.")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: 14px;")
+        layout.addWidget(label)
+        return placeholder
+
+    def _get_module_class(self, module_class_name: str) -> Optional[Type[BaseTabModule]]:
+        if module_class_name in self._module_class_by_name:
+            return self._module_class_by_name[module_class_name]
+
+        spec = TAB_MODULE_SPECS.get(module_class_name)
+        if not spec:
+            return None
+
+        path = os.path.join(self.tabs_dir, f"{spec['file']}.py")
+        if not os.path.exists(path):
+            return None
+
+        self._load_module_classes_from_path(spec['file'], path)
+        return self._module_class_by_name.get(module_class_name)
+
+    def ensure_tab_loaded_by_index(self, index: int) -> Optional[BaseTabModule]:
+        for tab_id, tab_index in list(self.tab_index_map.items()):
+            if tab_index == index:
+                return self.ensure_tab_loaded(tab_id)
+        return None
+
+    def ensure_tab_loaded(self, tab_id: str) -> Optional[BaseTabModule]:
+        if tab_id in self.module_instances:
+            return self.module_instances[tab_id]
+
+        spec = self.lazy_tab_specs.get(tab_id)
+        if not spec:
+            return None
+
+        TargetModuleClass = self._get_module_class(tab_id)
+        if not TargetModuleClass:
+            print(f"❌ 지연 탭 '{tab_id}' 클래스를 찾을 수 없습니다.")
+            return None
+
+        tab_index = self.tab_index_map[tab_id]
+        placeholder = self.tab_widget.widget(tab_index)
+        was_visible = self.tab_widget.isTabVisible(tab_index)
+
+        try:
+            instance = TargetModuleClass()
+            instance.initialize_with_context(self.app_context)
+            widget = instance.create_widget(self.tab_widget)
+
+            self.tab_widget.removeTab(tab_index)
+            self.tab_widget.insertTab(tab_index, widget, instance.get_tab_title())
+            self.tab_widget.setTabVisible(tab_index, was_visible)
+            if placeholder:
+                placeholder.deleteLater()
+
+            self.module_instances[tab_id] = instance
+            self.tab_index_map[tab_id] = tab_index
+            self.lazy_tab_specs.pop(tab_id, None)
+
+            if instance.can_close_tab():
+                self._add_close_button_to_tab(tab_index, tab_id)
+
+            instance.on_initialize()
+            self.tab_added.emit(tab_id, instance)
+            self.tab_widget.setCurrentIndex(tab_index)
+            print(f"✅ 지연 탭 '{instance.get_tab_title()}' 로드 완료.")
+            return instance
+
+        except Exception as e:
+            print(f"❌ 지연 탭 '{tab_id}' 생성 중 오류: {e}")
+            traceback.print_exc()
+            return None
 
     def _add_close_button_to_tab(self, tab_index: int, tab_id: str):
         """특정 탭에 닫기 버튼을 추가합니다."""
@@ -191,6 +409,18 @@ class TabController(QWidget):
     def get_tab_instance(self, tab_id: str) -> Optional[BaseTabModule]:
         """탭 ID로 탭 인스턴스를 반환합니다."""
         return self.module_instances.get(tab_id)
+
+    def get_tab_title(self, tab_id: str) -> str:
+        """로드 여부와 관계없이 탭 제목을 반환합니다."""
+        instance = self.module_instances.get(tab_id)
+        if instance:
+            return instance.get_tab_title()
+
+        spec = self.lazy_tab_specs.get(tab_id) or TAB_MODULE_SPECS.get(tab_id)
+        if spec:
+            return spec['title']
+
+        return tab_id
     
     def add_tab_by_name(self, module_class_name: str, **kwargs):
         """
@@ -209,7 +439,7 @@ class TabController(QWidget):
                 return
 
         # 2. 로드된 클래스 목록에서 해당 클래스 찾기
-        TargetModuleClass = next((cls for cls in self.module_classes if cls.__name__ == module_class_name), None)
+        TargetModuleClass = self._get_module_class(module_class_name)
 
         if not TargetModuleClass:
             print(f"❌ '{module_class_name}'에 해당하는 탭 모듈 클래스를 찾을 수 없습니다.")

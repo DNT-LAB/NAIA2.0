@@ -1401,6 +1401,43 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   border-color: var(--success);
   color: #fff;
 }
+.prompt-quick-control {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(92,184,122,0.42);
+  border-radius: 7px;
+  background: rgba(76,175,80,0.1);
+  flex-shrink: 0;
+}
+.prompt-quick-control .module-prompt-btn,
+.prompt-quick-control .quick-filter-btn {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  min-height: 30px;
+}
+.prompt-quick-control .module-prompt-btn {
+  padding: 6px 11px;
+}
+.prompt-quick-control .module-prompt-btn.active {
+  background: rgba(92,184,122,0.18);
+  color: #d8f5e0;
+}
+.quick-filter-btn {
+  padding: 6px 10px;
+  border-left: 1px solid rgba(92,184,122,0.28) !important;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+}
+.quick-filter-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.05);
+}
 .module-rating-bar {
   display: flex; gap: 2px; align-items: center;
 }
@@ -2706,6 +2743,20 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   background: #e6a817 !important; color: #000 !important;
   border-color: #c89315 !important;
 }
+.prompt-quick-control .quick-filter-btn {
+  padding: 6px 10px !important;
+  font-size: 10px !important;
+}
+.prompt-quick-control .tag-filter-toggle.active {
+  background: rgba(124,106,239,0.22) !important;
+  color: var(--accent-glow) !important;
+  border-color: rgba(92,184,122,0.28) !important;
+}
+.prompt-quick-control .tag-filter-toggle.assigned {
+  background: rgba(232,168,76,0.22) !important;
+  color: #f5e6a3 !important;
+  border-color: rgba(92,184,122,0.28) !important;
+}
 .tag-filter-popup {
   display: none;
   position: fixed;
@@ -2733,6 +2784,25 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   flex: 1; overflow-y: auto;
   padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px;
+}
+.tag-filter-rating-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.tag-filter-section-label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.tag-filter-rating-row .module-rating-bar {
+  gap: 4px;
 }
 .tag-filter-input-row {
   display: flex; gap: 6px;

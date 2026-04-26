@@ -1828,7 +1828,7 @@ function syncOptions(m) {
 function syncRatingBarVisibility() {
   const pf = optBoxes.prompt_fixed && optBoxes.prompt_fixed.checked;
   const wc = optBoxes.wildcard_standalone && optBoxes.wildcard_standalone.checked;
-  const bar = document.querySelector('.module-rating-bar');
+  const bar = document.querySelector('.tag-filter-rating-row');
   if (bar) bar.style.display = (pf || wc) ? 'none' : '';
 }
 

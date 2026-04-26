@@ -204,6 +204,15 @@
     <button class="history-close" onclick="closeTagFilter()">&times;</button>
   </div>
   <div class="tag-filter-body">
+    <div class="tag-filter-rating-row">
+      <span class="tag-filter-section-label">Rating</span>
+      <div class="module-rating-bar">
+        <button class="rating-btn active" data-r="g" onclick="toggleRating('g')">G</button>
+        <button class="rating-btn active" data-r="s" onclick="toggleRating('s')">S</button>
+        <button class="rating-btn active" data-r="q" onclick="toggleRating('q')">Q</button>
+        <button class="rating-btn active" data-r="e" onclick="toggleRating('e')">E</button>
+      </div>
+    </div>
     <div class="tag-filter-input-row">
       <input class="tag-filter-input" id="tagFilterInput" placeholder="include tag..." autocomplete="off">
     </div>
@@ -248,13 +257,9 @@
           </div>
           <!-- Module bar -->
           <div class="module-bar">
-            <button class="module-prompt-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
-            <div class="module-rating-bar">
-              <button class="rating-btn active" data-r="g" onclick="toggleRating('g')">G</button>
-              <button class="rating-btn active" data-r="s" onclick="toggleRating('s')">S</button>
-              <button class="rating-btn active" data-r="q" onclick="toggleRating('q')">Q</button>
-              <button class="rating-btn active" data-r="e" onclick="toggleRating('e')">E</button>
-              <button class="rating-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Filter</button>
+            <div class="prompt-quick-control">
+              <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+              <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Quick</button>
             </div>
             <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
             <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>

@@ -16,6 +16,8 @@ from typing import Any
 
 import pandas as pd
 
+from core.tag_search_index import TagSearchIndex
+
 # ---------------------------------------------------------------------------
 # 상수
 # ---------------------------------------------------------------------------
@@ -198,6 +200,7 @@ class TaxonomyEngine:
         self.group_display_map: dict[str, str] = {}
         self.subgroup_display_map: dict[str, str] = {}
         self.subcategory_display_map: dict[str, str] = {}
+        self._tag_search_index: TagSearchIndex | None = None
 
         self.taxonomy: pd.DataFrame = pd.DataFrame()
         self._base_taxonomy: pd.DataFrame = pd.DataFrame()
@@ -206,6 +209,10 @@ class TaxonomyEngine:
         # 인덱스 준비
         self._prepare_step3_indexes(assets)
         self._prepare_taxonomy_indexes(assets)
+        self._tag_search_index = TagSearchIndex.from_event_preset_assets(
+            assets,
+            taxonomy=self.taxonomy,
+        )
         self._base_taxonomy = self.taxonomy.copy()
         self._base_event_post_count_rank_map = dict(self.event_post_count_rank_map)
 
@@ -372,10 +379,19 @@ class TaxonomyEngine:
         """검색어 기반 이벤트 필터링."""
         if not query.strip():
             return self.taxonomy["event_tag"].tolist()
-        q = query.strip().lower()
+        if self._tag_search_index is not None:
+            matches = self._tag_search_index.search_tags(
+                query,
+                require_event=True,
+                limit=None,
+            )
+            if matches:
+                return matches
+
+        q = norm_text(query)
         return [
             tag for tag, blob in self.search_blob_map.items()
-            if q in blob or q in tag
+            if q in blob or q in norm_text(tag)
         ]
 
     def get_subgroups_sorted(self) -> list[dict]:

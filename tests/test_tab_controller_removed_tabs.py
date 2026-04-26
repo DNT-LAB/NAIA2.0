@@ -96,3 +96,50 @@ class Img2ImgTabModule(BaseTabModule):
 
     assert tab_widget.count() == 1
     assert "Img2ImgTabModule" in controller.module_instances
+
+
+def test_lazy_tab_load_is_not_reentrant_during_tab_replacement(tmp_path, qtbot):
+    web_view_file = tmp_path / "web_view.py"
+    web_view_file.write_text(
+        """
+from PyQt6.QtWidgets import QLabel
+from interfaces.base_tab_module import BaseTabModule
+
+class BrowserTabModule(BaseTabModule):
+    def get_tab_title(self):
+        return "Danbooru Test"
+
+    def create_widget(self, parent):
+        return QLabel("browser", parent)
+""",
+        encoding="utf-8",
+    )
+
+    png_info_file = tmp_path / "png_info_tab.py"
+    png_info_file.write_text(
+        """
+from PyQt6.QtWidgets import QLabel
+from interfaces.base_tab_module import BaseTabModule
+
+class PngInfoTabModule(BaseTabModule):
+    def get_tab_title(self):
+        return "PNG Info Test"
+
+    def create_widget(self, parent):
+        return QLabel("png", parent)
+""",
+        encoding="utf-8",
+    )
+
+    tab_widget = QTabWidget()
+    qtbot.addWidget(tab_widget)
+    controller = TabController(str(tmp_path), app_context=None, tab_widget=tab_widget)
+    qtbot.addWidget(controller)
+    controller.initialize_tabs()
+    tab_widget.currentChanged.connect(controller.ensure_tab_loaded_by_index)
+
+    controller.ensure_tab_loaded("BrowserTabModule")
+
+    assert tab_widget.count() == 2
+    assert [tab_widget.tabText(i) for i in range(tab_widget.count())].count("Danbooru Test") == 1
+    assert "BrowserTabModule" in controller.module_instances

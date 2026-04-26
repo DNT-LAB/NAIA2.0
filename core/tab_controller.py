@@ -141,6 +141,7 @@ class TabController(QWidget):
         self.module_instances: Dict[str, BaseTabModule] = {}
         self.tab_index_map: Dict[str, int] = {}  # tab_id -> index 매핑
         self.lazy_tab_specs: Dict[str, dict] = {}
+        self._loading_tab_ids: set[str] = set()
         self._module_class_by_name: Dict[str, Type[BaseTabModule]] = {}
 
         if not os.path.exists(tabs_dir):
@@ -301,27 +302,37 @@ class TabController(QWidget):
         if tab_id in self.module_instances:
             return self.module_instances[tab_id]
 
+        if tab_id in self._loading_tab_ids:
+            return None
+
         spec = self.lazy_tab_specs.get(tab_id)
         if not spec:
             return None
 
-        TargetModuleClass = self._get_module_class(tab_id)
-        if not TargetModuleClass:
-            print(f"❌ 지연 탭 '{tab_id}' 클래스를 찾을 수 없습니다.")
-            return None
-
-        tab_index = self.tab_index_map[tab_id]
-        placeholder = self.tab_widget.widget(tab_index)
-        was_visible = self.tab_widget.isTabVisible(tab_index)
+        self._loading_tab_ids.add(tab_id)
 
         try:
+            TargetModuleClass = self._get_module_class(tab_id)
+            if not TargetModuleClass:
+                print(f"❌ 지연 탭 '{tab_id}' 클래스를 찾을 수 없습니다.")
+                return None
+
+            tab_index = self.tab_index_map[tab_id]
+            placeholder = self.tab_widget.widget(tab_index)
+            was_visible = self.tab_widget.isTabVisible(tab_index)
+
             instance = TargetModuleClass()
             instance.initialize_with_context(self.app_context)
             widget = instance.create_widget(self.tab_widget)
 
-            self.tab_widget.removeTab(tab_index)
-            self.tab_widget.insertTab(tab_index, widget, instance.get_tab_title())
-            self.tab_widget.setTabVisible(tab_index, was_visible)
+            signals_were_blocked = self.tab_widget.blockSignals(True)
+            try:
+                self.tab_widget.removeTab(tab_index)
+                self.tab_widget.insertTab(tab_index, widget, instance.get_tab_title())
+                self.tab_widget.setTabVisible(tab_index, was_visible)
+            finally:
+                self.tab_widget.blockSignals(signals_were_blocked)
+
             if placeholder:
                 placeholder.deleteLater()
 
@@ -342,6 +353,8 @@ class TabController(QWidget):
             print(f"❌ 지연 탭 '{tab_id}' 생성 중 오류: {e}")
             traceback.print_exc()
             return None
+        finally:
+            self._loading_tab_ids.discard(tab_id)
 
     def _add_close_button_to_tab(self, tab_index: int, tab_id: str):
         """특정 탭에 닫기 버튼을 추가합니다."""

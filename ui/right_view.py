@@ -11,6 +11,7 @@ from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.detached_window import DetachedWindow
 from core.tab_controller import TabController
 from ui.scaling_manager import get_scaled_font_size
+from ui.gui_helpers import configure_dense_tab_widget, dark_menu_stylesheet
 
 class EnhancedTabWidget(QTabWidget):
     """우클릭 컨텍스트 메뉴가 있는 향상된 탭 위젯"""
@@ -34,16 +35,7 @@ class EnhancedTabWidget(QTabWidget):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px; padding: 5px;
-            }}
-            QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
-            QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
-        """)
+        menu.setStyleSheet(dark_menu_stylesheet())
         
         detach_action = QAction("🔗 외부 창에서 열기", self)
         detach_action.triggered.connect(lambda: self.tab_detach_requested.emit(tab_index))
@@ -153,6 +145,7 @@ class RightView(QWidget):
 
         self.tab_widget = EnhancedTabWidget()
         self.tab_widget.setStyleSheet(DARK_STYLES['dark_tabs'])
+        configure_dense_tab_widget(self.tab_widget)
         self.tab_widget.tab_detach_requested.connect(self.detach_tab)
         # 탭 변경 시그널 연결
         self.tab_widget.currentChanged.connect(self.on_tab_changed)

@@ -31,6 +31,11 @@ from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM, get_dynamic_styles
 from ui.scaling_manager import get_scaling_manager, get_scaled_font_size, get_scaled_size
 from ui.scaling_settings_dialog import ScalingSettingsDialog
 from ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
+from ui.gui_helpers import (
+    configure_dense_tab_widget,
+    create_flat_action_button,
+    dark_menu_stylesheet,
+)
 from ui.right_view import RightView
 from ui.temp_generation_window import TempGenerationWindow
 from ui.resolution_manager_dialog import ResolutionManagerDialog
@@ -1363,12 +1368,7 @@ class ModernMainWindow(QMainWindow):
         self.restore_btn.setStyleSheet(DARK_STYLES['secondary_button'])
 
         self.restore_menu = QMenu(self)
-        menu_style = f"""
-            QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
-            QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
-            QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
-        """
-        self.restore_menu.setStyleSheet(menu_style)
+        self.restore_menu.setStyleSheet(dark_menu_stylesheet())
 
         restore_search_action = QAction("🔄 검색결과 복원", self)
         restore_search_action.triggered.connect(self.restore_search_results)
@@ -1415,6 +1415,7 @@ class ModernMainWindow(QMainWindow):
 
         self.prompt_tabs = QTabWidget()
         self.prompt_tabs.setStyleSheet(DARK_STYLES['dark_tabs'])
+        configure_dense_tab_widget(self.prompt_tabs)
         self.prompt_tabs.setMinimumHeight(get_scaled_size(100))
 
         self.prompt_tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1500,32 +1501,16 @@ class ModernMainWindow(QMainWindow):
         corner_layout.setSpacing(get_scaled_size(2))
 
         # 확장 기능 버튼
-        self.extra_features_btn = QPushButton("🎨확장기능")
-        self.extra_features_btn.setFixedSize(get_scaled_size(95), get_scaled_size(55))
-        self.extra_features_btn.setToolTip("확장 기능")
-        self.extra_features_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(16)}px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                border-radius: 4px;
-            }}
-            QPushButton::menu-indicator {{
-                width: 0px;
-            }}
-        """)
+        self.extra_features_btn = create_flat_action_button(
+            "🎨확장기능",
+            "확장 기능",
+            width=95,
+            height=55,
+            font_size=16,
+        )
 
         self.extra_features_menu = QMenu(self)
-        self.extra_features_menu.setStyleSheet(f"""
-            QMenu {{ background-color: {DARK_COLORS['bg_tertiary']}; color: {DARK_COLORS['text_primary']}; border: 1px solid {DARK_COLORS['border']}; border-radius: 4px; padding: 5px; }}
-            QMenu::item {{ padding: 8px 20px; border-radius: 4px; }}
-            QMenu::item:selected {{ background-color: {DARK_COLORS['accent_blue']}; }}
-        """)
+        self.extra_features_menu.setStyleSheet(dark_menu_stylesheet())
 
         self.event_preset_action = QAction("📋 Event Preset", self)
         self.event_preset_action.triggered.connect(self._open_event_preset_window)
@@ -1555,61 +1540,22 @@ class ModernMainWindow(QMainWindow):
         corner_layout.addWidget(self.extra_features_btn)
 
         # 대기열 버튼
-        self.queue_btn = QPushButton("대기열")
-        self.queue_btn.setFixedSize(get_scaled_size(80), get_scaled_size(55))
-        self.queue_btn.setToolTip("생성 대기열 관리")
-        self.queue_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(14)}px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                border-radius: 4px;
-            }}
-        """)
+        self.queue_btn = create_flat_action_button(
+            "대기열",
+            "생성 대기열 관리",
+            width=80,
+            height=55,
+            font_size=14,
+        )
         self.queue_btn.clicked.connect(self.toggle_queue_window)
 
         # 임시 생성 창 버튼
-        self.prompt_tabs_temp_btn = QPushButton("📝")
-        self.prompt_tabs_temp_btn.setFixedSize(get_scaled_size(45), get_scaled_size(55))
-        self.prompt_tabs_temp_btn.setToolTip("임시 생성 창 열기")
-        self.prompt_tabs_temp_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(16)}px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                border-radius: 4px;
-            }}
-        """)
+        self.prompt_tabs_temp_btn = create_flat_action_button("📝", "임시 생성 창 열기")
         self.prompt_tabs_temp_btn.clicked.connect(self.create_temp_generation_window)
         corner_layout.addWidget(self.prompt_tabs_temp_btn)
 
         # detach 버튼
-        self.prompt_tabs_detach_btn = QPushButton("🔓")
-        self.prompt_tabs_detach_btn.setFixedSize(get_scaled_size(45), get_scaled_size(55))
-        self.prompt_tabs_detach_btn.setToolTip("외부 창으로 분리")
-        self.prompt_tabs_detach_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(16)}px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                border-radius: 4px;
-            }}
-        """)
+        self.prompt_tabs_detach_btn = create_flat_action_button("🔓", "외부 창으로 분리")
         self.prompt_tabs_detach_btn.clicked.connect(self.toggle_prompt_tabs_detach)
         corner_layout.addWidget(self.prompt_tabs_detach_btn)
 

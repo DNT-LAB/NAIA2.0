@@ -12,6 +12,20 @@ from interfaces.base_tab_module import BaseTabModule
 from core.context import AppContext
 from ui.theme import DARK_STYLES
 
+
+REMOVED_TAB_MODULES = {
+    'HookerTabModule',
+    'StorytellerTabModule',
+    'AssetsTabModule',
+}
+
+REMOVED_TAB_FILES = {
+    'hooker_view',
+    'storyteller_tab',
+    'assets_tab',
+}
+
+
 class TabController(QWidget):
     """
     RightView의 탭들을 동적으로 로드, 생성 및 관리하는 컨트롤러.
@@ -45,6 +59,10 @@ class TabController(QWidget):
 
         for cls in sorted_classes:
             try:
+                if cls.__name__ in REMOVED_TAB_MODULES:
+                    print(f"  -> 제거된 탭 '{cls.__name__}'은 로드하지 않습니다.")
+                    continue
+
                 # 1. 모듈 인스턴스 생성
                 temp_instance = cls()
                 if temp_instance.get_tab_type() != 'core':
@@ -88,6 +106,10 @@ class TabController(QWidget):
 
         for path in module_files:
             name = Path(path).stem
+            if name in REMOVED_TAB_FILES:
+                print(f"  -> 제거된 탭 파일 건너뜀: {name}.py")
+                continue
+
             try:
                 spec = importlib.util.spec_from_file_location(name, path)
                 if spec and spec.loader:
@@ -175,6 +197,10 @@ class TabController(QWidget):
         클래스 이름을 기반으로 탭을 동적으로 추가하고 활성화합니다.
         이미 탭이 열려있으면 해당 탭으로 전환합니다.
         """
+        if module_class_name in REMOVED_TAB_MODULES:
+            print(f"⚠️ 제거된 탭 '{module_class_name}'은 추가할 수 없습니다.")
+            return
+
         # 1. 이미 해당 모듈의 인스턴스가 있는지 확인
         for instance in self.module_instances.values():
             if instance.__class__.__name__ == module_class_name:

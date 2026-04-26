@@ -903,7 +903,7 @@ class StudioTab(BaseTabModule):
         else:
             width, height = 1024, 1024
 
-        # Prepare override parameters (like assets_tab pattern)
+        # Prepare override parameters for direct generation.
         override_params = {
             'input': full_prompt,
             'negative_prompt': full_negative,
@@ -941,7 +941,7 @@ class StudioTab(BaseTabModule):
         print(f"  Prompt: {full_prompt[:100]}...")
         print(f"  Negative: {full_negative[:50]}..." if full_negative else "  Negative: (none)")
 
-        # Call generation controller directly (like assets_tab pattern)
+        # Call generation controller directly.
         try:
             if hasattr(self.app_context, 'main_window'):
                 gen_controller = self.app_context.main_window.generation_controller

@@ -721,10 +721,9 @@ def get_module_description(dir_name):
         "interfaces": "🔌 추상 인터페이스 - 모듈 계약 정의 및 모드별 설정 자동화",
         "modules": "🧩 기능 모듈 - 자동화, 캐릭터 입력, 프롬프트 엔지니어링 등",
         "ui": "🎨 사용자 인터페이스 - 테마, 컴포넌트, 다이얼로그, 탭 뷰",
-        "hooker": "🔗 확장 훅 시스템 - 안전한 코드 실행기",
         "utils": "🛠️ 유틸리티 - 설정 로드 및 헬퍼 함수",
         "data": "📊 데이터 저장소 - Danbooru 태그, 번역 데이터, 설정 파일",
-        "tabs": "📑 탭 모듈 - 스토리텔러, 훅커 등 고급 기능 탭",
+        "tabs": "📑 탭 모듈 - 이미지 뷰어, 설정, Studio 등 우측 패널 기능",
         "wildcards": "🎲 와일드카드 데이터 - 동적 프롬프트 생성용 텍스트 파일"
     }
     return descriptions.get(dir_name, f"📁 {dir_name} - 프로젝트별 커스텀 모듈")

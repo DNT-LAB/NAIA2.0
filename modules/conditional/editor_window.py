@@ -1112,7 +1112,7 @@ class RuleEditorWindow(QDialog):
                 "프롬프트", b.get("prompt"), a.get("prompt"), fs_meta,
             ))
         elif b.get("clone_prompt") != a.get("clone_prompt"):
-            # widget 은 같지만 clone 은 다른 경우 (hooker_refresh 누락 등)
+            # widget 은 같지만 clone 은 다른 경우 (UI sync 누락 등)
             lines.append(self._render_slot_diff_line(
                 "프롬프트(clone)", b.get("clone_prompt"),
                 a.get("clone_prompt"), fs_meta,

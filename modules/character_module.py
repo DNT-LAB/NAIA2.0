@@ -1383,20 +1383,20 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
 
         return params
     
-    def hooker_update_prompt(self):
-        # ⬇️ Hooker에 의해 수정된 최종 결과를 UI에 업데이트하는 로직 추가
+    def sync_external_prompt_edits(self):
+        """외부 모듈이 수정한 캐릭터 prompt/UC 결과를 UI에 반영한다."""
         if self.modifiable_clone:
             final_prompts = self.modifiable_clone.get('characters', [])
             final_ucs = self.modifiable_clone.get('uc', [])
             self.update_processed_display(final_prompts, final_ucs)
 
     def get_character_modifiable_clone(self) -> dict:
-        """외부 모듈(Conditional Prompt v2, Hooker 등)이 캐릭터 prompt/UC에
+        """외부 모듈(Conditional Prompt v2 등)이 캐릭터 prompt/UC에
         read/write 접근하는 공식 엔트리.
 
         Returns:
             {'characters': list[str], 'uc': list[str]} 원본 dict 참조.
-            수정 후에는 `hooker_update_prompt()`를 호출하여 UI를 동기화해야 함.
+            수정 후에는 `sync_external_prompt_edits()`를 호출하여 UI를 동기화해야 함.
             NAID4 모드가 아니거나 모듈이 비활성화되면 빈 구조 반환.
         """
         if not isinstance(self.modifiable_clone, dict):

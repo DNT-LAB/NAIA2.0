@@ -40,13 +40,16 @@ tabs/
 |------|------|----------|
 | **image_window.py** | core | 이미지 뷰어, 히스토리, 큐 추가, Img2Img 윈도우 연동, WC 관리 메뉴 |
 | **png_info_tab.py** | core | PNG/JPEG/WebP 메타데이터 파싱 (NAI/WebUI/ComfyUI), Stealth PNG, ComfyUI workflow/prompt_api 직렬화 |
-| **setting_tabs.py** | core | 자동완성, 저장 경로, 분류 규칙, 모듈/탭 가시성, UI 스케일, Web Session (Cloudflared 터널, `--web-session` CLI 플래그 자동 시작은 `os.environ['NAIA_CLI_WEB_SESSION']` 경유) |
+| **setting_tabs.py** | core | 자동완성, 저장 경로, 분류 규칙, 모듈/탭 가시성, Web Session (Cloudflared 터널, `--web-session` CLI 플래그 자동 시작은 `os.environ['NAIA_CLI_WEB_SESSION']` 경유) |
 | **studio_tab.py** | core | 다중 프레임 그리드, 순차 생성, 프리셋 (상세: [studio/CLAUDE.md](studio/CLAUDE.md)) |
 | **turbo_event_sequence/** | core | 터보 이벤트 시퀀스 (상세: [turbo_event_sequence/CLAUDE.md](turbo_event_sequence/CLAUDE.md)) |
-| **assets_tab.py** | closable | rembg 통합, 배경 제거 |
 | **web_view.py** | closable | Danbooru 브라우저, 태그 추출 |
 | **artist_thumb_tab.py** | closable | 아티스트 갤러리 (4x2 그리드), 관심 작가 토글 |
 | **character_prompt_editor.py** | closable | 캐릭터별 프롬프트 관리 |
+
+### 제거된 탭
+
+future01 Web Shell 전환 준비로 `HookerTabModule`, `StorytellerTabModule`, `AssetsTabModule`은 로드 대상에서 제외되었습니다. `TabController`의 제거 차단 리스트는 오래된 설정 파일이나 외부 호출이 남아 있어도 해당 탭을 다시 열지 않도록 유지합니다.
 
 ### 관련 시스템 파일
 

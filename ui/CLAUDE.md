@@ -1,6 +1,6 @@
 # CLAUDE.md — ui/
 
-> **목적**: NAIA 2.0의 UI 시스템 가이드. 테마, 스케일링, 공용 위젯, RightView 탭 컨테이너를 다룹니다.
+> **목적**: NAIA 2.0의 UI 시스템 가이드. 테마, DPI 사이즈 헬퍼, 공용 위젯, RightView 탭 컨테이너를 다룹니다.
 
 **레퍼런스 문서**:
 - [NovelAI 메타데이터 필드](.claude/metadata_fields_CLAUDE.md)
@@ -19,7 +19,7 @@ ui/는 NAIA 2.0의 **시각적 표현 계층**을 담당합니다.
 NAIA_cold_v4.py (메인 윈도우)
     ↓
 ui/theme.py (색상 + 스타일)
-ui/scaling_manager.py (DPI 계산)
+ui/scaling_manager.py (DPI 사이즈 계산)
     ↓
 ui/collapsible.py (좌측 모듈 컨테이너)
 ui/right_view.py (우측 탭 컨테이너)
@@ -29,7 +29,7 @@ ui/detached_window.py (분리 창)
 
 **핵심 원칙**:
 1. 모든 위젯은 DARK_STYLES 사용 (색상 하드코딩 금지)
-2. `get_scaled_font_size()` / `get_scaled_size()` 필수
+2. `get_scaled_font_size()` / `get_scaled_size()` 기반의 정적 DPI 보정 사용
 3. UI 스레드에서 무거운 작업 금지 (QThread 사용)
 4. `QTextEdit.setAcceptRichText(False)` 필수
 
@@ -38,7 +38,7 @@ ui/detached_window.py (분리 창)
 | 파일 | 역할 | 주요 클래스/함수 |
 |------|------|-----------------|
 | **theme.py** | 테마 색상 및 스타일 | `DARK_COLORS`, `generate_dark_styles()`, `DARK_STYLES` |
-| **scaling_manager.py** | DPI 기반 UI 스케일링 | `ScalingManager`, `get_scaled_font_size()`, `get_scaled_size()` |
+| **scaling_manager.py** | DPI 기반 사이즈 계산 호환 레이어 | `ScalingManager`, `get_scaled_font_size()`, `get_scaled_size()` |
 | **collapsible.py** | 접을 수 있는 모듈 박스 | `EnhancedCollapsibleBox` |
 | **right_view.py** | 탭 컨테이너 및 브리징 | `RightView`, `EnhancedTabWidget` |
 | **detached_window.py** | 독립 분리 창 | `DetachedWindow` |

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QMenu
 from PyQt6.QtCore import QThread, QTimer, Qt
 from PyQt6.QtGui import QTextCursor, QAction, QShortcut, QKeySequence
 from PIL import Image
-from ui.theme import DARK_COLORS, get_dynamic_styles
+from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
 from core.search_result_model import SearchResultModel
 from utils.load_generation_params import GenerationParamsManager
@@ -26,137 +26,6 @@ class MainController:
             main_window: ModernMainWindow 인스턴스
         """
         self.main_window = main_window
-        
-    # === 스케일링 관련 메서드 ===
-    
-    def on_scaling_changed(self, new_scale):
-        """스케일링 변경 시 호출"""
-        self.main_window.apply_dynamic_styles()
-        # 메뉴바에 UI 설정 추가할 것이라면 여기서 업데이트
-        self.refresh_all_ui_elements()
-    
-    def refresh_all_ui_elements(self):
-        """모든 UI 요소 새로고침"""
-        try:
-            # DARK_STYLES를 새로 생성하여 최신 스케일링 적용
-            from ui import theme
-            theme.DARK_STYLES = theme.get_legacy_dark_styles()
-            
-            dynamic_styles = get_dynamic_styles()
-            
-            # 기존 위젯들의 스타일 업데이트
-            from PyQt6.QtWidgets import QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QTabWidget, QApplication
-            
-            # 애플리케이션 전체에서 위젯 검색 (더 포괄적)
-            app = QApplication.instance()
-            all_widgets = app.allWidgets() if app else []
-            
-            # QPushButton 업데이트 - 더 정확한 스타일 매칭
-            buttons_to_update = [w for w in all_widgets if isinstance(w, QPushButton)]
-            for widget in buttons_to_update:
-                current_style = widget.styleSheet()
-                
-                # Primary button 식별 (파란색 배경)
-                if ("#1976D2" in current_style or "accent_blue" in current_style or 
-                    "background-color: #1976D2" in current_style):
-                    widget.setStyleSheet(dynamic_styles.get('primary_button', ''))
-                
-                # Secondary button 식별 (회색 배경 + 테두리)
-                elif ("#2B2B2B" in current_style or "bg_tertiary" in current_style or
-                      "border: 1px solid" in current_style):
-                    widget.setStyleSheet(dynamic_styles.get('secondary_button', ''))
-                
-                # Compact button 식별 (작은 버튼들)
-                elif ("compact" in widget.objectName().lower() or 
-                      widget.text() in ["💾 설정 저장", "복원", "🔍 검색", "🎲 랜덤"]):
-                    widget.setStyleSheet(dynamic_styles.get('compact_button', ''))
-                
-                # 기본적으로 DARK_STYLES를 사용하는 버튼들은 모두 업데이트
-                elif current_style and len(current_style.strip()) > 50:  # 복잡한 스타일이 있는 경우
-                    # 버튼 타입을 추정하여 적절한 스타일 적용
-                    if "4CAF50" in current_style or "success" in current_style:
-                        # 성공/저장 버튼은 primary로 처리
-                        widget.setStyleSheet(dynamic_styles.get('primary_button', ''))
-                    elif widget.isCheckable():
-                        # 체크 가능한 버튼은 toggle_button으로 처리
-                        widget.setStyleSheet(dynamic_styles.get('toggle_button', ''))
-                    else:
-                        # 기타 복잡한 스타일의 버튼은 secondary로 처리
-                        widget.setStyleSheet(dynamic_styles.get('secondary_button', ''))
-            
-            # QLabel 업데이트 (전체 애플리케이션에서)
-            labels_to_update = [w for w in all_widgets if isinstance(w, QLabel)]
-            for widget in labels_to_update:
-                style = widget.styleSheet()
-                if 'label_style' in style or not style or 'font-size:' in style:
-                    widget.setStyleSheet(dynamic_styles.get('label_style', ''))
-            
-            # QLineEdit 업데이트 (전체 애플리케이션에서)
-            lineedits_to_update = [w for w in all_widgets if isinstance(w, QLineEdit)]
-            for widget in lineedits_to_update:
-                if widget.styleSheet():  # 기존 스타일이 있는 경우에만 업데이트
-                    widget.setStyleSheet(dynamic_styles.get('compact_lineedit', ''))
-                
-            # QTextEdit 업데이트 (전체 애플리케이션에서)
-            textedits_to_update = [w for w in all_widgets if isinstance(w, QTextEdit)]
-            for widget in textedits_to_update:
-                current_style = widget.styleSheet()
-                if current_style:  # 기존 스타일이 있는 경우에만 업데이트
-                    if "transparent" in current_style:
-                        widget.setStyleSheet(dynamic_styles.get('dark_text_edit', ''))
-                    else:
-                        widget.setStyleSheet(dynamic_styles.get('compact_textedit', ''))
-            
-            # QCheckBox 업데이트 (전체 애플리케이션에서)
-            checkboxes_to_update = [w for w in all_widgets if isinstance(w, QCheckBox)]
-            for widget in checkboxes_to_update:
-                widget.setStyleSheet(dynamic_styles.get('dark_checkbox', ''))
-            
-            # CollapsibleBox 업데이트 (전체 애플리케이션에서)
-            from ui.collapsible import EnhancedCollapsibleBox, CollapsibleBox
-            collapsible_widgets = [w for w in all_widgets if isinstance(w, (EnhancedCollapsibleBox, CollapsibleBox))]
-            for widget in collapsible_widgets:
-                widget.setStyleSheet(dynamic_styles.get('collapsible_box', ''))
-            
-            # Tab UI 업데이트 (전체 애플리케이션에서)
-            tab_widgets = [w for w in all_widgets if isinstance(w, QTabWidget)]
-            for widget in tab_widgets:
-                widget.setStyleSheet(dynamic_styles.get('dark_tabs', ''))
-            
-            # QComboBox 업데이트 (전체 애플리케이션에서)
-            from PyQt6.QtWidgets import QComboBox, QSpinBox, QDoubleSpinBox, QSlider
-            comboboxes_to_update = [w for w in all_widgets if isinstance(w, QComboBox)]
-            for widget in comboboxes_to_update:
-                if widget.styleSheet():  # 기존 스타일이 있는 경우에만 업데이트
-                    widget.setStyleSheet(dynamic_styles.get('compact_combobox', ''))
-            
-            # QSpinBox & QDoubleSpinBox 업데이트 (전체 애플리케이션에서)
-            spinboxes_to_update = [w for w in all_widgets if isinstance(w, (QSpinBox, QDoubleSpinBox))]
-            for widget in spinboxes_to_update:
-                if widget.styleSheet():
-                    widget.setStyleSheet(dynamic_styles.get('compact_spinbox', ''))
-            
-            # QSlider 업데이트 (전체 애플리케이션에서)
-            sliders_to_update = [w for w in all_widgets if isinstance(w, QSlider)]
-            for widget in sliders_to_update:
-                if widget.styleSheet():
-                    widget.setStyleSheet(dynamic_styles.get('compact_slider', ''))
-            
-            # 폰트 크기가 하드코딩된 위젯들 업데이트
-            if hasattr(self.main_window, 'progress_label'):
-                scaled_size = get_scaled_font_size(16)
-                self.main_window.progress_label.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-size: {scaled_size}px; margin-right: 10px;")
-                
-            if hasattr(self.main_window, 'result_label1'):
-                scaled_size = get_scaled_font_size(18)  
-                self.main_window.result_label1.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-family: 'Pretendard'; font-size: {scaled_size}px;")
-                
-            if hasattr(self.main_window, 'result_label2'):
-                scaled_size = get_scaled_font_size(18)
-                self.main_window.result_label2.setStyleSheet(f"color: {DARK_COLORS['text_secondary']}; font-family: 'Pretendard'; font-size: {scaled_size}px;")
-                
-        except Exception as e:
-            print(f"UI 요소 새로고침 중 오류: {e}")
     
     # === 신호 연결 메서드 ===
     

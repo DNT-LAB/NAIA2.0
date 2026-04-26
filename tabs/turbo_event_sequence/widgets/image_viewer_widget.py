@@ -2,7 +2,6 @@
 Image Viewer Widget
 
 생성된 이미지 표시 위젯
-Storyteller의 StableImageWidget 패턴 참조
 """
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy

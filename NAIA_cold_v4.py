@@ -28,8 +28,7 @@ from core.context import AppContext
 from core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM, get_dynamic_styles
-from ui.scaling_manager import get_scaling_manager, get_scaled_font_size, get_scaled_size
-from ui.scaling_settings_dialog import ScalingSettingsDialog
+from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
 from ui.right_view import RightView
 from ui.temp_generation_window import TempGenerationWindow
@@ -865,9 +864,6 @@ class ModernMainWindow(QMainWindow):
         self.base_title = "NAIA v2.0.0 Dev 175e"
         self.setWindowTitle(self.base_title + " - 260426")  # 기존 형식 유지
         
-        # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
-        self.scaling_manager = get_scaling_manager()
-        
         # 업데이트 확인 스레드 변수 추가
         self.update_checker_thread = None
         self.github_repo_owner = "DNT-LAB"    # GitHub 사용자명
@@ -928,7 +924,6 @@ class ModernMainWindow(QMainWindow):
 
         # MainController 초기화 (UI 초기화 전에 생성)
         self.controller = MainController(self)
-        self.scaling_manager.scaling_changed.connect(self.controller.on_scaling_changed)
 
         self.init_ui()
         
@@ -1047,17 +1042,11 @@ class ModernMainWindow(QMainWindow):
                 }}
             """
             self.setStyleSheet(main_style)
-            print(f"동적 UI 스케일링 적용됨 (스케일: {self.scaling_manager.get_scale_factor():.2f}x)")
+            print("동적 UI 스타일 적용됨")
         except Exception as e:
             print(f"동적 스타일 적용 실패: {e}")
             # 폴백: 기존 정적 스타일 사용
             self.setStyleSheet(CUSTOM["main"])
-    
-    def show_scaling_settings(self):
-        """UI 스케일링 설정 다이얼로그 표시"""
-        dialog = ScalingSettingsDialog(self)
-        dialog.scaling_changed.connect(self.controller.on_scaling_changed)
-        dialog.exec()
 
     # 자동완성 기능 사용 가능 여부를 확인하는 헬퍼 메서드
     def is_autocomplete_available(self) -> bool:
@@ -2990,7 +2979,6 @@ class ModernMainWindow(QMainWindow):
             try:
                 # 특수 요청 여부 확인
                 generation_params = result.get("generation_params", {})
-                is_assets_request = generation_params.get("assets_workshop_request", False)
                 is_artist_thumb_request = generation_params.get("artist_thumb_request", False)
                 is_studio_request = generation_params.get("studio_request", False)
                 is_character_asset_request = generation_params.get("character_asset_request", False)
@@ -3005,13 +2993,6 @@ class ModernMainWindow(QMainWindow):
                     # AppContext를 통해 이벤트 발행
                     if hasattr(self, 'app_context') and self.app_context:
                         self.app_context.publish("generation_completed_for_interactive", image_object)
-
-                # Assets Workshop 요청인 경우 별도 이벤트 발행
-                if is_assets_request:
-                    print("📦 Assets Workshop 요청 감지 - 전용 이벤트 발행")
-                    # AppContext를 통해 이벤트 발행
-                    if hasattr(self, 'app_context') and self.app_context:
-                        self.app_context.publish("generation_completed_for_assets", image_object)
 
                 # Artist Thumb 요청인 경우 별도 이벤트 발행
                 if is_artist_thumb_request:
@@ -3086,11 +3067,6 @@ class ModernMainWindow(QMainWindow):
                         # 단일 img2img 완료 → 버튼 복원
                         self.img2img_window_manager.on_single_generation_completed(img2img_window_id)
 
-                # Main Window → Assets 자동 전파 (추후 제거 가능)
-                # 📝 참고: 사용자 혼란 방지를 위해 필요시 아래 라인들을 주석처리하여 비활성화 가능
-                if not is_assets_request:
-                    self.image_window.update_assets_image(image_object)  # ← 이 라인을 주석처리하면 전파 차단
-                    
             except Exception as e:
                 print(f"❌ 이미지 업데이트 실패: {e}")
                 return
@@ -3172,7 +3148,6 @@ class ModernMainWindow(QMainWindow):
             try:
                 generation_params = result.get("generation_params", {})
                 is_special_request = (
-                    generation_params.get("assets_workshop_request", False) or
                     generation_params.get("artist_thumb_request", False) or
                     generation_params.get("studio_request", False) or
                     generation_params.get("interactive_mode_request", False) or
@@ -3303,7 +3278,7 @@ class ModernMainWindow(QMainWindow):
                 # 프롬프트 생성 컨트롤러에 자동 생성 플래그 설정
                 self.prompt_gen_controller.auto_generation_requested = True
 
-                #1009 변경사항 -> hooker와 호환되지 않는 NAI 캐릭터 프롬프트 처리 위치 변경
+                #1009 변경사항 -> NAI 캐릭터 프롬프트 처리 위치 변경
                 char_module = self.middle_section_controller.get_module_instance("CharacterModule")
                 if (char_module and 
                     hasattr(char_module, 'is_auto_mode_active') and 

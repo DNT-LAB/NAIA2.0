@@ -1473,7 +1473,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         clone[field] = char_list
 
         # Sub-phase 1.7 hotfix (P2): modifiable_clone 변경 후 visible UI 동기화
-        self._trigger_hooker_refresh(char_mod)
+        self._sync_character_prompt_display(char_mod)
 
     def _active_char_indices(self, char_mod, total: int) -> List[int]:
         """활성(active_checkbox=True) 캐릭터 인덱스 목록.
@@ -1500,14 +1500,14 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 pass
         return out
 
-    def _trigger_hooker_refresh(self, char_mod):
+    def _sync_character_prompt_display(self, char_mod):
         """CharacterModule 의 visible prompt 갱신 트리거. 없으면 조용히 skip.
 
         Sub-phase 1.7 hotfix (P2): `get_character_modifiable_clone` 계약상
-        caller 는 mutation 후 `hooker_update_prompt()` 호출이 명시되어 있다.
+        caller 는 mutation 후 `sync_external_prompt_edits()` 호출이 명시되어 있다.
         UI 갱신 실패는 생성 파이프라인을 막지 않도록 예외 흡수.
         """
-        fn = getattr(char_mod, 'hooker_update_prompt', None)
+        fn = getattr(char_mod, 'sync_external_prompt_edits', None)
         if callable(fn):
             try:
                 fn()
@@ -1799,7 +1799,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         clone['characters'] = char_list
 
         # Sub-phase 1.7 hotfix (P2): clone mutation 후 visible UI 동기화
-        self._trigger_hooker_refresh(char_mod)
+        self._sync_character_prompt_display(char_mod)
 
     def _write_negative_target(self, tag_list: List[str], *, op: str):
         """neg 타겟 write — non-D4 네거티브 프롬프트 위젯 직접 수정.

@@ -122,13 +122,6 @@ class RightView(QWidget):
         else:
             print("⚠️ BrowserTabModule 인스턴스를 찾을 수 없어 시그널 연결에 실패했습니다.")
         
-        # Assets Tab - 직접 generation_controller를 호출하므로 시그널 연결 불필요
-        assets_module = self.tab_controller.get_tab_instance('AssetsTabModule')
-        if assets_module:
-            print("✅ AssetsTabModule 인스턴스를 찾았습니다. (시그널 연결 없음)")
-        else:
-            print("⚠️ AssetsTabModule 인스턴스를 찾을 수 없습니다.")
-    
     def on_tab_changed(self, index: int):
         """탭이 변경될 때 호출되는 메서드"""
         # 현재 탭의 위젯 가져오기
@@ -351,12 +344,6 @@ class RightView(QWidget):
         if instance and hasattr(instance, 'image_window_widget'):
             instance.image_window_widget.add_to_history(image, raw_bytes, info, source_row, generation_result)
     
-    def update_assets_image(self, image):
-        """Assets 탭의 이미지 업데이트"""
-        assets_instance = self.tab_controller.get_tab_instance('AssetsTabModule')
-        if assets_instance and hasattr(assets_instance, 'widget'):
-            assets_instance.widget.update_generated_image(image)
-            
     # # === 동적 탭 생성을 위한 메서드들 ===
     # def add_api_management_tab(self):
     #     """API 관리 탭 추가 (TabController를 통해)"""

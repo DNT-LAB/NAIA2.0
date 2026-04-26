@@ -74,6 +74,14 @@ Implemented in this round:
 - Kept `ui/scaling_manager.py` only as a legacy fixed-size helper for existing PyQt widgets; it no longer represents a DPI compatibility layer.
 - Added a regression test to prevent reintroducing Qt DPI environment overrides or legacy high-DPI API calls in `NAIA_cold_v4.py`.
 
+## IA Round 1
+
+Implemented in this round:
+
+- Added `docs/gui_information_architecture.md` as the baseline Desktop GUI information architecture.
+- Documented the current Control Surface / Result Workspace model, state groups, action groups, renderer mapping, and mobile Remote implications.
+- Established that PyQt detach behavior, QSS tokens, fixed sizes, and DPI compatibility assumptions are renderer details, not core IA requirements.
+
 ## Follow-Up Audit Items
 
 - Map remaining core desktop tabs to the Web Shell information architecture.

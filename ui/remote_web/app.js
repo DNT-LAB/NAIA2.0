@@ -184,6 +184,7 @@ function connect() {
         if (m.type === 'image_meta') { pendingMeta = m; updateMeta(m); }
         else if (m.type === 'status') setGen(m.is_generating);
         else if (m.type === 'prompt_generated') updatePromptOnly(m);
+        else if (m.type === 'random_failed') onRandomFailed(m);
         else if (m.type === 'prompt_sync') syncPrompts(m);
         else if (m.type === 'prompt_tokens') applyPromptTokenPayload(m);
         else if (m.type === 'options') syncOptions(m);
@@ -372,6 +373,22 @@ function applyPromptTokenPayload(m) {
   updatePromptTokenEstimate();
 }
 
+function unlockRandomButton() {
+  awaitingMyRandom = false;
+  if (window._randomTimeout) {
+    clearTimeout(window._randomTimeout);
+    window._randomTimeout = null;
+  }
+  const fixed = !!(optBoxes.prompt_fixed && optBoxes.prompt_fixed.checked);
+  btnRnd.disabled = fixed;
+  btnRnd.style.opacity = fixed ? '0.4' : '';
+}
+
+function onRandomFailed(m) {
+  unlockRandomButton();
+  if (m && m.message) showToast(m.message, m.level || 'error', true);
+}
+
 function updatePromptOnly(messageOrPrompt, sourceArg) {
   const message = (typeof messageOrPrompt === 'object' && messageOrPrompt !== null)
     ? messageOrPrompt
@@ -381,8 +398,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   if (!prompt) return;
   // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
   if (source === 'random' && awaitingMyRandom) {
-    awaitingMyRandom = false;
-    if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
+    unlockRandomButton();
     let acceptedPrompt = false;
     if (_isPromptEditingActive() && prompt !== promptEdit.value) {
       // 편집 중: 사용자 입력을 보호. Random 결과를 다시 받으려면 Random 다시 누르면 됨.
@@ -401,7 +417,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     if (!drawerOpen) promptNewDot.classList.remove('hidden');
   }
   // Random 완료 → 버튼 복원 (source 무관)
-  btnRnd.disabled = false;
+  if (source === 'random') unlockRandomButton();
 }
 
 // ---- Params ----
@@ -1837,14 +1853,13 @@ function send(cmd) {
   if (cmd === 'random') {
     btnRnd.disabled = true;
     awaitingMyRandom = true;
-    // 타임아웃 안전망: 10초 내 응답 없으면 복원
+    // 타임아웃 안전망: 일반 응답은 0.2초 내외이므로 2초면 충분합니다.
     if (window._randomTimeout) clearTimeout(window._randomTimeout);
     window._randomTimeout = setTimeout(() => {
       if (awaitingMyRandom) {
-        awaitingMyRandom = false;
-        btnRnd.disabled = false;
+        unlockRandomButton();
       }
-    }, 10000);
+    }, 2000);
     // Shared Mode: 개인 rating 선호를 함께 전송
     if (sharedMode) {
       const active = Object.keys(ratingState).filter(k => ratingState[k]);

@@ -686,7 +686,7 @@ class RemoteBridge(QObject):
                 if tag_filter and tag_filter.get("ids"):
                     source_row = self._pick_from_tag_filter(tag_filter, active_ratings)
                     if source_row is None:
-                        self._send_json_to(ws, {"type": "toast",
+                        self._send_json_to(ws, {"type": "random_failed",
                                                 "message": "Tag filter: no matching rows",
                                                 "level": "error"})
                         return
@@ -698,6 +698,9 @@ class RemoteBridge(QObject):
         except Exception as e:
             if ws is not None:
                 self._pending_overrides.pop(ws, None)
+                self._send_json_to(ws, {"type": "random_failed",
+                                        "message": f"Random failed: {e}",
+                                        "level": "error"})
             print(f"🌐 Remote: 랜덤 프롬프트 생성 실패 — {e}")
 
     # --- Tag Filter / Session ID Vector ---
@@ -4496,7 +4499,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                     if bridge.shared_server_mode:
                         row = await asyncio.to_thread(bridge._pick_from_session, ws)
                         if row is None:
-                            await ws.send_text(json.dumps({"type": "toast", "message": "No matching rows for current filter", "level": "error"}))
+                            await ws.send_text(json.dumps({"type": "random_failed", "message": "No matching rows for current filter", "level": "error"}))
                             continue
                         bridge._pending_random_requests.append({"ws": ws, "source_row": row, "active_ratings": None})
                     else:
@@ -4517,7 +4520,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             if bridge.shared_server_mode:
                                 row = await asyncio.to_thread(bridge._pick_from_session, ws)
                                 if row is None:
-                                    await ws.send_text(json.dumps({"type": "toast", "message": "No matching rows for current filter", "level": "error"}))
+                                    await ws.send_text(json.dumps({"type": "random_failed", "message": "No matching rows for current filter", "level": "error"}))
                                     continue
                                 bridge._pending_random_requests.append({"ws": ws, "source_row": row, "active_ratings": None})
                             else:

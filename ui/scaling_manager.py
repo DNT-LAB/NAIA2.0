@@ -1,16 +1,16 @@
 """
-DPI size compatibility helpers.
+Legacy size helper compatibility.
 
-future01 removes user-configurable UI scaling. Existing widgets still call these
-helpers widely, so this module keeps the API stable while returning the original
-sizes unchanged.
+future01 removes user-configurable UI scaling and Qt DPI adjustment logic.
+Existing PyQt widgets still call these helpers widely, so this module keeps the
+API stable while returning the original sizes unchanged.
 """
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class ScalingManager(QObject):
-    """Compatibility shim for the removed scaling feature."""
+    """Compatibility shim for removed scaling controls."""
 
     scaling_changed = pyqtSignal(float)
 

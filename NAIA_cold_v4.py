@@ -7338,15 +7338,10 @@ if __name__ == "__main__":
         os.environ["NAIA_CLI_WEB_SESSION"] = "1"
         os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
 
-    # 기존 환경 설정들...
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "RoundPreferFloor"
-
     setup_webengine()
     app = QApplication(sys.argv)
 
-    # 기존 DPI 및 폰트 설정들...
+    # 폰트 설정
     loaded_fonts = load_custom_fonts()
 
     # 기본 폰트 설정

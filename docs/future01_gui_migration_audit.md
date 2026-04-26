@@ -63,6 +63,17 @@ Implemented in this round:
 - Kept Image Viewer and Settings eager because generation display and Web Session autostart depend on them during startup.
 - Added regression tests for lazy core tab startup and dynamic tab import-on-request behavior.
 
+## Cleanup Round 5
+
+Implemented in this round:
+
+- Removed forced Qt/Windows HiDPI environment overrides from desktop startup:
+  - `QT_AUTO_SCREEN_SCALE_FACTOR`
+  - `QT_ENABLE_HIGHDPI_SCALING`
+  - `QT_SCALE_FACTOR_ROUNDING_POLICY`
+- Kept `ui/scaling_manager.py` only as a legacy fixed-size helper for existing PyQt widgets; it no longer represents a DPI compatibility layer.
+- Added a regression test to prevent reintroducing Qt DPI environment overrides or legacy high-DPI API calls in `NAIA_cold_v4.py`.
+
 ## Follow-Up Audit Items
 
 - Map remaining core desktop tabs to the Web Shell information architecture.

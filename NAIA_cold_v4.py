@@ -7307,6 +7307,9 @@ if __name__ == "__main__":
 
     def _should_start_hidden_for_web_session() -> bool:
         """Web Session 자동 시작/CLI 실행이면 메인 창을 처음부터 숨김 시작."""
+        if os.environ.get("NAIA_CLI_DESKTOP") == "1":
+            return False
+
         if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
             return True
 
@@ -7327,12 +7330,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--web-session",
         action="store_true",
-        help="앱 기동 시 Web Session 을 자동 시작하고 시스템 브라우저를 연다.",
+        help="레거시 Web Session 을 자동 시작하고 시스템 브라우저를 연다.",
     )
     parser.add_argument(
         "--web-shell",
         action="store_true",
-        help="앱 기동 시 PyQt 백엔드를 숨기고 QWebEngine 기반 Desktop Web Shell 을 연다.",
+        help="QWebEngine 기반 Desktop Web Shell 을 연다. 기본 실행 모드입니다.",
+    )
+    parser.add_argument(
+        "--desktop",
+        action="store_true",
+        help="레거시 PyQt 데스크탑 UI 를 직접 표시한다.",
     )
     parser.add_argument(
         "--web-shell-port",
@@ -7341,16 +7349,24 @@ if __name__ == "__main__":
         help="Desktop Web Shell 이 사용할 로컬 Remote API 포트.",
     )
     cli_args, _ = parser.parse_known_args()
+    from core.web_shell_config import should_launch_web_shell_by_default
+
+    launch_web_shell = cli_args.web_shell or should_launch_web_shell_by_default(
+        desktop_requested=cli_args.desktop,
+        web_session_requested=cli_args.web_session,
+    )
 
     # CLI --web-session 플래그를 환경변수로 전달.
     # Settings 탭의 on_initialize() 가 ModernMainWindow.__init__ 내부(=AppContext 생성 전)에서
     # 동기 실행되므로, app_context 속성으로는 타이밍이 맞지 않아 os.environ 으로 배관.
-    if cli_args.web_shell:
+    if launch_web_shell:
         os.environ["NAIA_CLI_WEB_SHELL"] = "1"
         os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
     elif cli_args.web_session:
         os.environ["NAIA_CLI_WEB_SESSION"] = "1"
         os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
+    elif cli_args.desktop:
+        os.environ["NAIA_CLI_DESKTOP"] = "1"
 
     setup_webengine()
     app = QApplication(sys.argv)
@@ -7381,7 +7397,7 @@ if __name__ == "__main__":
     # 메인 윈도우 생성
     window = ModernMainWindow()
     web_shell_window = None
-    if cli_args.web_shell:
+    if launch_web_shell:
         from ui.web_wrapper import WebWrapperWindow
 
         web_shell_window = WebWrapperWindow(

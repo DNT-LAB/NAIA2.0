@@ -35,3 +35,12 @@ def build_web_shell_url(
     query = urlencode({"desktop_shell": "1"}) if embedded else ""
     suffix = f"?{query}" if query else ""
     return f"http://{clean_host}:{clean_port}/{suffix}"
+
+
+def should_launch_web_shell_by_default(
+    *,
+    desktop_requested: bool = False,
+    web_session_requested: bool = False,
+) -> bool:
+    """Return whether the main launcher should prefer the Desktop Web Shell."""
+    return not desktop_requested and not web_session_requested

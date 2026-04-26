@@ -78,6 +78,13 @@ Renderer-specific behavior must be handled in the web client through capability
 or query flags such as `desktop_shell=1`; state names, command names, and payload
 shape should stay aligned with `RemoteBridge`.
 
+As of the Web Shell launcher migration, plain `python NAIA_cold_v4.py` opens this
+QWebEngine Desktop Web Shell by default. Legacy escape hatches:
+
+- `python NAIA_cold_v4.py --desktop`: show the old PyQt desktop UI directly.
+- `python NAIA_cold_v4.py --web-session`: start the browser-based Remote
+  Session instead of the embedded QWebEngine shell.
+
 ## Source Ownership
 
 | Area | Current owner | Notes |

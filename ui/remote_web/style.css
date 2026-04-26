@@ -78,13 +78,19 @@ header {
 }
 @media (max-width: 767px) {
   .shell-toolbar {
-    min-height: 48px;
-    padding: 9px 10px;
+    padding: 10px;
     gap: 8px;
   }
-  .toolbar-left,
-  .toolbar-right {
-    gap: 6px;
+  .shell-brand-row,
+  .shell-status-row {
+    gap: 8px;
+  }
+  .shell-brand-title {
+    font-size: 15px;
+    letter-spacing: 1.8px;
+  }
+  .shell-brand-subtitle {
+    font-size: 8.5px;
   }
   .shell-toolbar .prompt-quick-control {
     max-width: 100%;
@@ -97,22 +103,72 @@ header {
   }
 }
 .shell-toolbar {
-  min-height: 52px;
-  gap: 12px;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 86px;
+  gap: 10px;
+  padding: 12px 14px 10px;
+  background:
+    radial-gradient(circle at 22% -20%, rgba(124,106,239,0.18), transparent 42%),
+    linear-gradient(180deg, #111622 0%, var(--bg-surface) 100%);
 }
-.toolbar-left,
-.toolbar-right {
+.shell-brand-row,
+.shell-status-row {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
-.toolbar-left {
-  flex: 1;
+.shell-brand-row {
+  justify-content: space-between;
 }
-.toolbar-right {
-  justify-content: flex-end;
-  flex-shrink: 0;
+.shell-status-row {
+  justify-content: space-between;
+}
+.shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.shell-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  color: var(--accent-glow);
+  background: rgba(124,106,239,0.12);
+  border: 1px solid rgba(157,139,255,0.24);
+  font-size: 19px;
+  line-height: 1;
+}
+.shell-brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.shell-brand-title {
+  color: var(--accent-glow);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 2.4px;
+  white-space: nowrap;
+  text-shadow: 0 0 16px rgba(157,139,255,0.25);
+}
+.shell-brand-subtitle {
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
 }
 .mode-api-combo {
   display: inline-flex;
@@ -1385,6 +1441,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 }
 .shell-toolbar .prompt-quick-control {
   height: 30px;
+  width: min(250px, 100%);
 }
 .prompt-quick-control .module-prompt-btn,
 .prompt-quick-control .quick-filter-btn {
@@ -1395,6 +1452,11 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 }
 .prompt-quick-control .module-prompt-btn {
   padding: 6px 11px;
+}
+.toolbar-prompt-control .module-prompt-btn {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
 }
 .prompt-quick-control .module-prompt-btn.active {
   background: rgba(92,184,122,0.18);

@@ -12,14 +12,14 @@
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
 
 <header class="shell-toolbar">
-  <div class="toolbar-left">
-    <div class="prompt-quick-control toolbar-prompt-control">
-      <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
-      <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Quick</button>
+  <div class="shell-brand-row">
+    <div class="shell-brand">
+      <span class="shell-brand-mark" aria-hidden="true">&#10022;</span>
+      <div class="shell-brand-copy">
+        <span class="shell-brand-title">NAIA2.1</span>
+        <span class="shell-brand-subtitle">Automation Tool</span>
+      </div>
     </div>
-  </div>
-  <div class="toolbar-right">
-    <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
     <div class="mode-api-combo" id="modeApiCombo">
       <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
         <option value="NAI">NAI</option>
@@ -28,6 +28,13 @@
       </select>
       <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
     </div>
+  </div>
+  <div class="shell-status-row">
+    <div class="prompt-quick-control toolbar-prompt-control">
+      <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
+      <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Quick</button>
+    </div>
+    <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
   </div>
 </header>
 <div class="tag-tooltip" id="tagTooltip"></div>

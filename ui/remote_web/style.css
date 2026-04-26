@@ -99,10 +99,10 @@ header {
   align-items: center;
   flex-direction: row;
   justify-content: flex-start;
-  min-height: 64px;
-  height: 64px;
-  gap: 12px;
-  padding: 10px 16px;
+  min-height: 58px;
+  height: 58px;
+  gap: 10px;
+  padding: 8px 14px;
   overflow: hidden;
   background:
     radial-gradient(circle at 22% -20%, rgba(124,106,239,0.18), transparent 42%),
@@ -111,7 +111,7 @@ header {
 .shell-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   flex: 0 0 auto;
   min-width: 0;
 }
@@ -119,14 +119,14 @@ header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--accent-glow);
   background: rgba(124,106,239,0.12);
   border: 1px solid rgba(157,139,255,0.24);
-  font-size: 19px;
+  font-size: 17px;
   line-height: 1;
 }
 .shell-brand-copy {
@@ -137,17 +137,17 @@ header {
 }
 .shell-brand-title {
   color: var(--accent-glow);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1;
-  letter-spacing: 2.4px;
+  letter-spacing: 1.8px;
   white-space: nowrap;
   text-shadow: 0 0 16px rgba(157,139,255,0.25);
 }
 .shell-brand-subtitle {
   color: var(--text-muted);
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: 0.4px;
@@ -156,7 +156,7 @@ header {
 .mode-api-combo {
   display: inline-flex;
   align-items: stretch;
-  height: 28px;
+  height: 27px;
   flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid rgba(232,232,240,0.28);
@@ -221,14 +221,16 @@ header {
   color: var(--text-dim);
 }
 .mode-api-combo .mode-select {
-  min-width: 86px;
+  width: 78px;
+  min-width: 78px;
+  max-width: 78px;
   height: 100%;
   border: 0;
   border-radius: 0;
   background-color: transparent;
-  background-position: right 8px center;
-  padding: 0 24px 0 11px;
-  font-size: 10.5px;
+  background-position: right 7px center;
+  padding: 0 20px 0 10px;
+  font-size: 10px;
   color: var(--text-primary);
 }
 .mode-api-combo .mode-select:focus {
@@ -1525,19 +1527,19 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   flex-shrink: 0;
 }
 .shell-toolbar .prompt-quick-control {
-  height: 30px;
-  width: clamp(180px, 16vw, 250px);
-  flex: 0 1 250px;
+  height: 28px;
+  width: 172px;
+  flex: 0 0 172px;
 }
 .prompt-quick-control .module-prompt-btn,
 .prompt-quick-control .quick-filter-btn {
   border: 0;
   border-radius: 0;
   background: transparent;
-  min-height: 30px;
+  min-height: 28px;
 }
 .prompt-quick-control .module-prompt-btn {
-  padding: 6px 11px;
+  padding: 5px 9px;
 }
 .toolbar-prompt-control .module-prompt-btn {
   flex: 1;
@@ -1549,11 +1551,11 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   color: #d8f5e0;
 }
 .quick-filter-btn {
-  padding: 6px 10px;
+  padding: 5px 9px;
   border-left: 1px solid rgba(92,184,122,0.28) !important;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.2px;
   cursor: pointer;
@@ -3390,15 +3392,15 @@ select.setup-input { cursor: pointer; }
   animation: setupLauncherBlink 2.4s ease-in-out infinite;
 }
 .mode-api-combo .setup-launcher {
-  min-width: 48px;
+  min-width: 44px;
   height: 100%;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-left: 1px solid rgba(232,232,240,0.24);
   border-radius: 0;
   background: rgba(255,255,255,0.045);
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 1px;
 }
@@ -3447,11 +3449,11 @@ select.setup-input { cursor: pointer; }
 .shell-toolbar .anlas-pill {
   position: static;
   z-index: auto;
-  height: 30px;
+  height: 28px;
   flex: 0 0 auto;
   margin-left: auto;
-  padding: 0 12px;
-  border-radius: 15px;
+  padding: 0 10px;
+  border-radius: 14px;
   background: rgba(18,18,26,0.78);
   border-color: rgba(232,232,240,0.12);
   backdrop-filter: none;
@@ -3463,12 +3465,12 @@ select.setup-input { cursor: pointer; }
 .anlas-label {
   color: var(--text-dim);
   font-size: 9px; font-weight: 500;
-  letter-spacing: 1.2px;
+  letter-spacing: 1px;
   text-transform: uppercase;
 }
 .anlas-value {
   color: var(--text-primary);
-  font-size: 11px; font-weight: 600;
+  font-size: 11px; font-weight: 700;
   letter-spacing: 0.4px;
 }
 .anlas-pill.low  .anlas-value { color: var(--generating-pulse); }

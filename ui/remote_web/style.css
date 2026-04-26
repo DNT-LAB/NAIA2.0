@@ -141,6 +141,34 @@ body.desktop-shell .logo-sig {
 .header-right {
   display: flex; align-items: center; gap: 10px;
 }
+.mode-api-combo {
+  display: inline-flex;
+  align-items: stretch;
+  height: 32px;
+  overflow: hidden;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: var(--bg-deep);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.015);
+  transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+}
+.mode-api-combo:hover,
+.mode-api-combo:focus-within {
+  border-color: var(--border-glow);
+}
+.mode-api-combo.online.has-connected-mode {
+  border-color: rgba(92,184,122,0.42);
+}
+.mode-api-combo.needs-setup {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(124,106,239,0.2);
+}
+.mode-api-combo.no-connected-mode {
+  opacity: 0.72;
+}
+.mode-api-combo.mode-unavailable.has-connected-mode {
+  border-color: rgba(232,168,76,0.42);
+}
 .conn-badge {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; color: var(--text-dim); letter-spacing: 0.5px;
@@ -174,6 +202,29 @@ body.desktop-shell .logo-sig {
 .mode-select:disabled { opacity: 0.4; cursor: not-allowed; }
 .mode-select option {
   background: var(--bg-surface);
+  color: var(--text-muted);
+}
+.mode-select option:disabled {
+  color: var(--text-dim);
+}
+.mode-api-combo .mode-select {
+  min-width: 104px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-position: right 10px center;
+  padding: 0 28px 0 12px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.mode-api-combo .mode-select:focus {
+  border-color: transparent;
+}
+.mode-api-combo .mode-select:disabled {
+  opacity: 0.55;
+}
+.mode-api-combo .mode-select.mode-unavailable {
   color: var(--text-muted);
 }
 
@@ -3133,6 +3184,37 @@ select.setup-input { cursor: pointer; }
   color: var(--accent-glow);
   border-color: var(--accent);
   animation: setupLauncherBlink 2.4s ease-in-out infinite;
+}
+.mode-api-combo .setup-launcher {
+  min-width: 56px;
+  height: 100%;
+  padding: 0 13px;
+  border: 0;
+  border-left: 1px solid var(--border-dim);
+  border-radius: 0;
+  background: rgba(92,184,122,0.12);
+  color: #d8f5e0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.mode-api-combo .setup-launcher:hover {
+  background: rgba(92,184,122,0.2);
+  border-left-color: rgba(92,184,122,0.55);
+  color: #f2fff5;
+}
+.mode-api-combo .setup-launcher.online {
+  border-left-color: rgba(92,184,122,0.55);
+}
+.mode-api-combo .setup-launcher.offline {
+  background: rgba(240,64,64,0.08);
+  border-left-color: rgba(240,64,64,0.35);
+  color: var(--text-muted);
+}
+.mode-api-combo .setup-launcher.needs-setup {
+  background: rgba(124,106,239,0.14);
+  color: var(--accent-glow);
+  border-left-color: rgba(124,106,239,0.5);
 }
 @keyframes setupLauncherBlink {
   0%, 100% { border-color: var(--accent); }

@@ -86,6 +86,7 @@ const $ = id => document.getElementById(id);
 const preview      = $('preview');
 const emptyMsg     = $('emptyMsg');
 const setupLauncherBtn = $('setupLauncher');  // doubles as connection-status indicator
+const modeApiCombo = $('modeApiCombo');
 const desktopToggleBtn = $('desktopToggleBtn');
 const btnGen       = $('btnGen');
 const btnRnd       = $('btnRnd');
@@ -150,6 +151,8 @@ function connect() {
   };
   ws.onclose = () => {
     setLauncherConn(false);
+    modeSwitching = false;
+    if (modeSelect) modeSelect.disabled = true;
     desktopWindowControlAllowed = false;
     if (desktopToggleBtn) desktopToggleBtn.classList.add('hidden');
     reconnTimer = setTimeout(connect, 3000);
@@ -1484,6 +1487,7 @@ function onSession(m) {
     tfToggle.classList.remove('assigned');
     closeTagFilter();
   }
+  updateModeSelectAvailability();
 }
 
 function onDesktopWindowState(m) {
@@ -1849,8 +1853,44 @@ const modeSelect = $('modeSelect');
 const uiLock = $('uiLock');
 const toastEl = $('toast');
 let syncingMode = false;
+let modeSwitching = false;
 let prevMode = modeSelect.value;
 let toastTimer = null;
+const API_MODES = ['NAI', 'WEBUI', 'COMFYUI'];
+
+function isModeConnected(mode) {
+  return _probeState && _probeState[mode] === 'ok';
+}
+
+function updateModeSelectAvailability() {
+  if (!modeSelect) return;
+  const anyConnected = API_MODES.some(mode => isModeConnected(mode));
+  API_MODES.forEach(mode => {
+    const opt = modeSelect.querySelector(`option[value="${mode}"]`);
+    if (!opt) return;
+    const connected = isModeConnected(mode);
+    const displayFallback = !anyConnected && mode === modeSelect.value;
+    opt.disabled = sharedMode ? opt.disabled : !(connected || displayFallback);
+    opt.dataset.connected = connected ? '1' : '0';
+  });
+
+  if (sharedMode) {
+    modeSelect.disabled = true;
+  } else {
+    modeSelect.disabled = modeSwitching || !anyConnected;
+  }
+
+  const currentConnected = isModeConnected(modeSelect.value);
+  modeSelect.classList.toggle('mode-unavailable', !currentConnected);
+  modeSelect.title = sharedMode
+    ? 'Shared Server Mode controls API mode'
+    : (anyConnected ? 'Only connected API modes are selectable' : 'No connected API session. Open API setup');
+  if (modeApiCombo) {
+    modeApiCombo.classList.toggle('has-connected-mode', anyConnected);
+    modeApiCombo.classList.toggle('no-connected-mode', !anyConnected);
+    modeApiCombo.classList.toggle('mode-unavailable', !currentConnected);
+  }
+}
 
 function syncMode(mode) {
   syncingMode = true;
@@ -1876,19 +1916,26 @@ function syncMode(mode) {
     if (naiOpt) naiOpt.disabled = true;
   }
   updateModuleHeaderAction(currentModuleId);
+  updateModeSelectAvailability();
 }
 
 function setMode(mode) {
   if (syncingMode) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!isModeConnected(mode)) {
+    syncMode(prevMode);
+    showToast(`${mode} API is not connected`, 'error', true);
+    return;
+  }
   uiLock.classList.add('active');
-  modeSelect.disabled = true;
+  modeSwitching = true;
+  updateModeSelectAvailability();
   ws.send(JSON.stringify({type: 'set_mode', mode}));
 }
 
 function onModeResult(m) {
   uiLock.classList.remove('active');
-  modeSelect.disabled = false;
+  modeSwitching = false;
   if (m.success) {
     prevMode = m.mode;
     syncMode(m.mode);
@@ -1897,6 +1944,7 @@ function onModeResult(m) {
     syncMode(prevMode);
     showToast(m.message || 'Mode change failed', 'error', true);
   }
+  updateModeSelectAvailability();
 }
 
 function showToast(msg, type, showConfigure) {
@@ -1953,6 +2001,7 @@ function openApiPopup() {
 // Live probe — keyring 값으로 실시간 ping. 저장 없음, 타임스탬프 영향 없음.
 // State: 'ok' | 'err' | 'probing' | null(미설정)
 const _probeState = { NAI: null, WEBUI: null, COMFYUI: null };
+updateModeSelectAvailability();
 
 function probeApi() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1986,6 +2035,7 @@ function refreshDotsFromProbe() {
     else if (s === 'probing') cls += ' warn';
     el.className = cls;
   });
+  updateModeSelectAvailability();
 }
 
 function closeApiPopup() {
@@ -2168,6 +2218,7 @@ function applySetupGate(m) {
   }
   // API launcher: violet pulse while no backend is connected
   if (setupLauncherBtn) setupLauncherBtn.classList.toggle('needs-setup', _setupForced);
+  if (modeApiCombo) modeApiCombo.classList.toggle('needs-setup', _setupForced);
 }
 
 // API launcher doubles as the connection indicator. Three states:
@@ -2176,6 +2227,10 @@ function setLauncherConn(on) {
   if (!setupLauncherBtn) return;
   setupLauncherBtn.classList.toggle('online', !!on);
   setupLauncherBtn.classList.toggle('offline', !on);
+  if (modeApiCombo) {
+    modeApiCombo.classList.toggle('online', !!on);
+    modeApiCombo.classList.toggle('offline', !on);
+  }
 }
 
 // ---- NAI Anlas pill (viewer bottom-left) ----

@@ -14,12 +14,14 @@
 <header>
   <span class="logo">NAIA-REMOTE</span><span class="logo-sig">Provided by <b>CLAUDE</b></span>
   <div class="header-right">
-    <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
-      <option value="NAI">NAI</option>
-      <option value="WEBUI">WEBUI</option>
-      <option value="COMFYUI">COMFYUI</option>
-    </select>
-    <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
+    <div class="mode-api-combo" id="modeApiCombo">
+      <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
+        <option value="NAI">NAI</option>
+        <option value="WEBUI">WEBUI</option>
+        <option value="COMFYUI">COMFYUI</option>
+      </select>
+      <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
+    </div>
   </div>
 </header>
 <div class="tag-tooltip" id="tagTooltip"></div>

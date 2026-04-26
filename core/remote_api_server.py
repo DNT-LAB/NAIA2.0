@@ -1093,6 +1093,59 @@ class RemoteBridge(QObject):
 
     # --- 프롬프트 동기화 (Qt 메인 스레드에서 실행) ---
 
+    def _get_character_prompt_for_tokens(self) -> str:
+        """데스크탑 토큰 라벨과 같은 기준으로 NAI 캐릭터 프롬프트를 읽는다."""
+        try:
+            if self.app_context.get_api_mode() != "NAI":
+                return ""
+            character_module = self._find_module("character")
+            if not character_module:
+                return ""
+            activate_checkbox = getattr(character_module, "activate_checkbox", None)
+            if activate_checkbox is not None and not activate_checkbox.isChecked():
+                return ""
+            processed_data = getattr(character_module, "modifiable_clone", None)
+            if not isinstance(processed_data, dict):
+                processed_data = getattr(character_module, "last_processed_data", {}) or {}
+            characters = processed_data.get("characters", [])
+            return " ".join(str(char) for char in characters if char)
+        except Exception as e:
+            print(f"🌐 Remote: 캐릭터 토큰 프롬프트 읽기 실패 — {e}")
+            return ""
+
+    def _build_prompt_token_payload(
+        self,
+        main_prompt: str,
+        negative_prompt: str = "",
+        mode: Optional[str] = None,
+    ) -> dict:
+        """Web Shell에 전달할 기존 NAIA 방식의 프롬프트 토큰 표시값을 만든다."""
+        try:
+            from utils.token_calculator import get_token_calculator
+
+            calculator = get_token_calculator()
+            if not calculator.available:
+                return {
+                    "prompt_token_label": "Estimated Tokens : N/A (tiktoken not available)",
+                    "prompt_token_counts": {"main": 0, "character": 0, "total": 0},
+                }
+            current_mode = mode or self.app_context.get_api_mode()
+            character_prompt = self._get_character_prompt_for_tokens() if current_mode == "NAI" else ""
+            token_counts = calculator.count_prompt_tokens(main_prompt or "", character_prompt, current_mode)
+            payload = {
+                "prompt_token_label": calculator.format_token_label(token_counts, current_mode),
+                "prompt_token_counts": token_counts,
+            }
+            if negative_prompt is not None:
+                payload["negative_token_count"] = calculator.count_tokens(
+                    negative_prompt or "",
+                    current_mode=current_mode,
+                )
+            return payload
+        except Exception as e:
+            print(f"🌐 Remote: 프롬프트 토큰 계산 실패 — {e}")
+            return {"prompt_token_label": "Estimated Tokens : Error"}
+
     def _do_set_prompt(self, prompt: str, negative: str):
         """웹에서 편집한 프롬프트를 메인 앱에 반영"""
         try:
@@ -1103,6 +1156,11 @@ class RemoteBridge(QObject):
                 mw.negative_prompt_textedit.setPlainText(negative)
             # Shared Mode: 데스크톱 UI에 쓰지 않음 (세션별 격리)
             self._syncing_prompt = False
+            if self._has_clients():
+                self._broadcast_json({
+                    "type": "prompt_tokens",
+                    **self._build_prompt_token_payload(prompt, negative),
+                })
         except Exception as e:
             self._syncing_prompt = False
             print(f"🌐 Remote: 프롬프트 설정 실패 — {e}")
@@ -1125,6 +1183,7 @@ class RemoteBridge(QObject):
                 "width": params.get("width", ""),
                 "height": params.get("height", ""),
                 "seed": params.get("seed", ""),
+                **self._build_prompt_token_payload(prompt, negative),
             }
         except Exception:
             return {}
@@ -1880,6 +1939,19 @@ class RemoteBridge(QObject):
                 processed_data = getattr(m, "last_processed_data", {}) or {}
             processed_characters = [str(v) for v in processed_data.get("characters", []) if v is not None]
             processed_ucs = [str(v) for v in processed_data.get("uc", []) if v is not None]
+            character_token_count = 0
+            try:
+                if m.activate_checkbox and m.activate_checkbox.isChecked() and processed_characters:
+                    from utils.token_calculator import get_token_calculator
+
+                    calculator = get_token_calculator()
+                    if calculator.available:
+                        character_token_count = calculator.count_tokens(
+                            " ".join(processed_characters),
+                            current_mode="NAI",
+                        )
+            except Exception:
+                character_token_count = 0
             return {
                 "type": "module_state",
                 "module_id": "character",
@@ -1890,6 +1962,7 @@ class RemoteBridge(QObject):
                 "active_count": sum(1 for w in m.character_widgets if w.active_checkbox.isChecked()),
                 "processed_characters": processed_characters,
                 "processed_ucs": processed_ucs,
+                "character_token_count": character_token_count,
                 "processed_preview_text": (
                     m.processed_prompt_display.toPlainText()
                     if hasattr(m, "processed_prompt_display") and m.processed_prompt_display
@@ -3801,6 +3874,7 @@ class RemoteBridge(QObject):
             if self._loop and self._ws_manager:
                 data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining,
                         "source": source, "rating_counts": rating_counts}
+                data.update(self._build_prompt_token_payload(prompt, None))
                 asyncio.run_coroutine_threadsafe(
                     self._ws_manager.broadcast_json(data),
                     self._loop

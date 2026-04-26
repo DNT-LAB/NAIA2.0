@@ -93,6 +93,7 @@ const btnRnd       = $('btnRnd');
 const promptEdit   = $('promptEdit');
 const negEdit      = $('negEdit');
 const metaRow      = $('metaRow');
+const promptTokenLabel = $('promptTokenLabel');
 const paramFlags   = $('paramFlags');
 const paramEls = {
   model: $('pModel'), sampler: $('pSampler'), scheduler: $('pScheduler'),
@@ -181,8 +182,9 @@ function connect() {
         const m = JSON.parse(e.data);
         if (m.type === 'image_meta') { pendingMeta = m; updateMeta(m); }
         else if (m.type === 'status') setGen(m.is_generating);
-        else if (m.type === 'prompt_generated') updatePromptOnly(m.prompt, m.source);
+        else if (m.type === 'prompt_generated') updatePromptOnly(m);
         else if (m.type === 'prompt_sync') syncPrompts(m);
+        else if (m.type === 'prompt_tokens') applyPromptTokenPayload(m);
         else if (m.type === 'options') syncOptions(m);
         else if (m.type === 'params') updateParams(m);
         else if (m.type === 'mode') syncMode(m.mode);
@@ -256,12 +258,98 @@ function updateMeta(m) {
   updateMetaChips(m);
 }
 
-function updatePromptOnly(prompt, source) {
+let lastCharacterTokenCount = 0;
+let lastCharacterPromptText = '';
+let lastMainTokenCount = null;
+let lastMainTokenSourceText = '';
+let lastMainTokenMode = '';
+
+function cleanPromptForTokenEstimate(text, mode) {
+  let cleaned = (text || '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part && !part.startsWith('#'))
+    .join(', ');
+  if (mode === 'NAI') {
+    cleaned = cleaned.replace(/-?\d+(?:\.\d+)?::/g, '').replace(/::/g, '');
+  } else if (mode === 'WEBUI' || mode === 'COMFYUI') {
+    cleaned = cleaned
+      .replace(/\\[()]/g, ' ')
+      .replace(/\(([^()]+?)(?::[+-]?\d*\.?\d+)?\)/g, '$1');
+  }
+  return cleaned.replace(/\s+/g, ' ').replace(/\s+,/g, ',').replace(/,+/g, ',').trim();
+}
+
+function estimateTokenCount(text, mode) {
+  const cleaned = cleanPromptForTokenEstimate(text, mode);
+  if (!cleaned) return 0;
+  const base = Math.ceil(cleaned.length / 5);
+  const correction = mode === 'NAI' ? 1.12 : 0.99;
+  return Math.max(1, Math.ceil(base * correction));
+}
+
+function formatPromptTokenLabel(main, character, mode) {
+  if (mode === 'NAI') {
+    return `Estimated Tokens : ${main + character} (Main ${main} + Character ${character})`;
+  }
+  return `Estimated Tokens : ${main}`;
+}
+
+function updatePromptTokenEstimate() {
+  if (!promptTokenLabel) return;
+  const mode = currentMode || modeSelect.value || 'NAI';
+  const hasExactMain = lastMainTokenCount !== null
+    && lastMainTokenSourceText === promptEdit.value
+    && lastMainTokenMode === mode;
+  const main = hasExactMain ? lastMainTokenCount : estimateTokenCount(promptEdit.value, mode);
+  const character = mode === 'NAI'
+    ? (lastCharacterTokenCount || estimateTokenCount(lastCharacterPromptText, mode))
+    : 0;
+  promptTokenLabel.textContent = formatPromptTokenLabel(main, character, mode);
+}
+
+function applyPromptTokenPayload(m) {
+  if (!promptTokenLabel) return;
+  if (m.prompt_token_label) {
+    promptTokenLabel.textContent = m.prompt_token_label;
+    if (m.prompt_token_counts) {
+      if (Number.isFinite(Number(m.prompt_token_counts.main))) {
+        lastMainTokenCount = Number(m.prompt_token_counts.main);
+        lastMainTokenSourceText = typeof m.prompt === 'string' ? m.prompt : promptEdit.value;
+        lastMainTokenMode = currentMode || modeSelect.value || 'NAI';
+      }
+      if (Number.isFinite(Number(m.prompt_token_counts.character))) {
+        lastCharacterTokenCount = Number(m.prompt_token_counts.character);
+      }
+    }
+    return;
+  }
+  if (m.prompt_token_counts) {
+    const counts = m.prompt_token_counts;
+    const main = Number(counts.main) || 0;
+    const character = Number(counts.character) || 0;
+    lastMainTokenCount = main;
+    lastMainTokenSourceText = typeof m.prompt === 'string' ? m.prompt : promptEdit.value;
+    lastMainTokenMode = currentMode || modeSelect.value || 'NAI';
+    lastCharacterTokenCount = character;
+    promptTokenLabel.textContent = formatPromptTokenLabel(main, character, currentMode || modeSelect.value || 'NAI');
+    return;
+  }
+  updatePromptTokenEstimate();
+}
+
+function updatePromptOnly(messageOrPrompt, sourceArg) {
+  const message = (typeof messageOrPrompt === 'object' && messageOrPrompt !== null)
+    ? messageOrPrompt
+    : {prompt: messageOrPrompt, source: sourceArg};
+  const prompt = message.prompt;
+  const source = message.source;
   if (!prompt) return;
   // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
   if (source === 'random' && awaitingMyRandom) {
     awaitingMyRandom = false;
     if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
+    let acceptedPrompt = false;
     if (_isPromptEditingActive() && prompt !== promptEdit.value) {
       // 편집 중: 사용자 입력을 보호. Random 결과를 다시 받으려면 Random 다시 누르면 됨.
       // (deferredPromptSync는 blur flush 경로 제거로 더 이상 쓰지 않음)
@@ -271,7 +359,10 @@ function updatePromptOnly(prompt, source) {
       syncingPrompt = false;
       updatePromptHighlight();
       applyPromptHighlightState();
+      acceptedPrompt = true;
     }
+    if (acceptedPrompt) applyPromptTokenPayload(message);
+    else updatePromptTokenEstimate();
     // Show new-content dot if drawer is closed
     if (!drawerOpen) promptNewDot.classList.remove('hidden');
   }
@@ -486,6 +577,7 @@ function _applyPromptSync(m) {
   if ('negative_prompt' in m && m.negative_prompt !== negEdit.value) negEdit.value = m.negative_prompt;
   syncingPrompt = false;
   updateMetaChips(m);
+  applyPromptTokenPayload(m);
   updatePromptHighlight();
   applyPromptHighlightState();
 }
@@ -505,9 +597,14 @@ function syncPrompts(m) {
     _sharedPromptsInit = true;
     // LocalStorage에 저장된 프롬프트가 있으면 서버값 대신 유지
     const saved = loadSharedSession();
+    let restoredPromptLocally = false;
     if (saved) {
-      if (saved.prompt != null) m.prompt = saved.prompt;
-      if (saved.negative_prompt != null) m.negative_prompt = saved.negative_prompt;
+      if (saved.prompt != null) { m.prompt = saved.prompt; restoredPromptLocally = true; }
+      if (saved.negative_prompt != null) { m.negative_prompt = saved.negative_prompt; restoredPromptLocally = true; }
+    }
+    if (restoredPromptLocally) {
+      delete m.prompt_token_label;
+      delete m.prompt_token_counts;
     }
   }
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
@@ -518,6 +615,7 @@ function syncPrompts(m) {
     // 사용자 편집이 flush되면 서버가 다시 브로드캐스트하여 자연스럽게 동기화됨.
     deferredPromptSync = null;
     updateMetaChips(m);
+    updatePromptTokenEstimate();
     return;
   }
 
@@ -527,7 +625,9 @@ function syncPrompts(m) {
 function onPromptEdit() {
   if (syncingPrompt) return;
   _localPromptDirty = true;
+  lastMainTokenCount = null;
   updatePromptHighlight();
+  updatePromptTokenEstimate();
   if (promptSendTimer) clearTimeout(promptSendTimer);
   promptSendTimer = setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1546,7 +1646,7 @@ function _restoreSharedSession() {
     syncRatingBarVisibility();
   }
   // 클라이언트 UI 복원: prompt + negative prompt
-  if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); }
+  if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); updatePromptTokenEstimate(); }
   if (saved.negative_prompt != null) negEdit.value = saved.negative_prompt;
   // Rating 복원
   if (saved.ratings && Array.isArray(saved.ratings)) {
@@ -1899,6 +1999,7 @@ function syncMode(mode) {
   syncingMode = false;
   currentMode = mode;
   setNaiHighlightMode(mode);
+  updatePromptTokenEstimate();
   // NAI 전용 모듈 버튼 비활성화 (character, character_reference, vibe_transfer)
   const isNai = mode === 'NAI';
   const naiOnlyModules = ['character', 'character_reference', 'vibe_transfer'];
@@ -2785,9 +2886,15 @@ function updateCharBadge(m) {
   const btn = document.querySelector('.module-btn[data-module="character"]');
   const badge = document.getElementById('badgeChar');
   if (!badge || !btn) return;
+  lastCharacterPromptText = (m.processed_characters || []).filter(Boolean).join(' ');
+  lastCharacterTokenCount = Number.isFinite(Number(m.character_token_count))
+    ? Number(m.character_token_count)
+    : estimateTokenCount(lastCharacterPromptText, currentMode || modeSelect.value || 'NAI');
   if (!m.activated) {
+    lastCharacterTokenCount = 0;
     badge.classList.add('hidden');
     btn.classList.remove('char-active');
+    updatePromptTokenEstimate();
     return;
   }
   const count = m.active_count || 0;
@@ -2795,6 +2902,7 @@ function updateCharBadge(m) {
   badge.classList.remove('hidden');
   badge.classList.add('char');
   badge.textContent = count;
+  updatePromptTokenEstimate();
 }
 
 function updateCharRefBadge(m) {
@@ -5152,6 +5260,7 @@ negEdit.addEventListener('blur', () => {
 promptEdit.addEventListener('compositionend', () => { onPromptEdit(); });
 promptEdit.addEventListener('input', () => { onPromptEdit(); });
 applyPromptHighlightState();
+updatePromptTokenEstimate();
 
 // ---- Keyboard shortcuts ----
 document.addEventListener('keydown', e => {

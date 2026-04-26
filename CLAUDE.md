@@ -38,7 +38,7 @@ NAIA2.0/
 2. **이벤트 기반 통신**: 직접 위젯 조작 금지. `app_context.publish()` / `subscribe()` 사용
 3. **파이프라인 훅**: 모듈이 프롬프트 생성에 개입하는 표준 방법 (`get_pipeline_hook_info()` + `execute_pipeline_hook()`)
 4. **UI 스레드 보호**: 네트워크/파일 IO → 반드시 QThread 분리
-5. **동적 스케일링**: 모든 크기에 `get_scaled_font_size()` / `get_scaled_size()` 사용. 하드코딩 금지
+5. **고정 DPI 호환 헬퍼**: 기존 PyQt 화면은 `get_scaled_font_size()` / `get_scaled_size()`를 유지하되, future01에서는 1.0 고정값으로 동작
 
 ---
 

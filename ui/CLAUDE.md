@@ -97,9 +97,9 @@ self.generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
 
 ---
 
-## 스케일링 시스템
+## DPI 사이즈 호환 레이어
 
-QHD(2560x1440)를 기준 해상도로, DPI 기반 자동 스케일링 제공. 범위 0.5~2.0.
+future01에서는 사용자 설정형 UI Scaling이 제거되었습니다. 기존 PyQt 위젯 코드와의 호환을 위해 `get_scaled_font_size()` / `get_scaled_size()` API는 유지하지만, 항상 1.0 고정값을 반환합니다.
 
 ```python
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -107,8 +107,6 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 label.setStyleSheet(f"font-size: {get_scaled_font_size(21)}px;")
 layout.setContentsMargins(get_scaled_size(12), get_scaled_size(12), get_scaled_size(12), get_scaled_size(12))
 ```
-
-**설정 파일**: `save/ui_scaling_settings.json`
 
 ---
 
@@ -310,6 +308,6 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
 
 ## 의존성
 
-**ui/가 의존**: `data/KR_tags.parquet`, `save/ui_scaling_settings.json`
+**ui/가 의존**: `data/KR_tags.parquet`
 
 **ui/를 의존**: `modules/`, `tabs/`, `core/`, `NAIA_cold_v4.py`

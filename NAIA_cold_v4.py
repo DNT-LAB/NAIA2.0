@@ -27,7 +27,7 @@ from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
 from core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
-from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM, get_dynamic_styles
+from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
 from ui.right_view import RightView
@@ -1029,24 +1029,12 @@ class ModernMainWindow(QMainWindow):
         self._publish_desktop_window_visibility()
 
     def apply_dynamic_styles(self):
-        """동적 스타일시트 적용"""
+        """기본 윈도우 스타일 적용"""
         try:
-            dynamic_styles = get_dynamic_styles()
-            # 메인 윈도우 스타일 적용 (CUSTOM["main"] 대신 동적 스타일 사용)
-            main_style = f"""
-                QMainWindow {{
-                    background-color: {DARK_COLORS['bg_primary']};
-                    color: {DARK_COLORS['text_primary']};
-                    font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
-                    font-size: {get_scaled_font_size(14)}px;
-                }}
-            """
-            self.setStyleSheet(main_style)
-            print("동적 UI 스타일 적용됨")
-        except Exception as e:
-            print(f"동적 스타일 적용 실패: {e}")
-            # 폴백: 기존 정적 스타일 사용
             self.setStyleSheet(CUSTOM["main"])
+            print("기본 UI 스타일 적용됨")
+        except Exception as e:
+            print(f"기본 스타일 적용 실패: {e}")
 
     # 자동완성 기능 사용 가능 여부를 확인하는 헬퍼 메서드
     def is_autocomplete_available(self) -> bool:
@@ -1428,7 +1416,6 @@ class ModernMainWindow(QMainWindow):
         main_prompt_layout.addWidget(self.main_prompt_textedit)
         self.main_prompt_textedit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.main_prompt_textedit.customContextMenuRequested.connect(self.show_prompt_context_menu)
-        self.main_prompt_textedit.setStyleSheet(DARK_STYLES['compact_textedit'])
 
         self.main_prompt_highlighter = PromptHighlighter(self.main_prompt_textedit.document())
 
@@ -2288,13 +2275,6 @@ class ModernMainWindow(QMainWindow):
 
         layout.addStretch()
 
-        # TODO: Comic Generator 장기 개발 — 연속 이미지 생성 (t2i/inpaint 선택 가능)
-        story_btn = QPushButton("🎬 연속 이미지 생성")
-        story_btn.setStyleSheet(DARK_STYLES['primary_button'])
-        story_btn.setFixedHeight(40)
-        story_btn.clicked.connect(lambda: self._on_turbo_mode_selected(dialog, 'comic'))
-        # layout.addWidget(story_btn)
-
         # 연속 이미지 생성 (Inpaint 전용)
         inpaint_btn = QPushButton("🎬 연속 이미지 생성 (Inpaint)")
         inpaint_btn.setStyleSheet(DARK_STYLES['primary_button'])
@@ -2314,15 +2294,7 @@ class ModernMainWindow(QMainWindow):
         """터보 모드 선택됨"""
         dialog.accept()
 
-        if mode == 'comic':
-            # ComicGeneratorTabModule 동적 탭 생성
-            if self.image_window and hasattr(self.image_window, 'tab_controller'):
-                self.image_window.tab_controller.add_tab_by_name(
-                    'ComicGeneratorTabModule',
-                    main_window=self
-                )
-                self.status_bar.showMessage("📖 Comic Generator 탭이 생성되었습니다.")
-        elif mode == 'inpaint':
+        if mode == 'inpaint':
             # TurboEventSequenceTabModule 동적 탭 생성
             if self.image_window and hasattr(self.image_window, 'tab_controller'):
                 self.image_window.tab_controller.add_tab_by_name(

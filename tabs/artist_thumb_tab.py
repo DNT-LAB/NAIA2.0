@@ -1921,9 +1921,9 @@ class ArtistThumbModule(BaseTabModule):
     
     def _create_prompt_panel(self) -> QWidget:
         """왼쪽 서브패널: 썸네일 + 프롬프트 입력"""
-        # 썸네일 이미지 (3:3.8 비율로 동적 스케일링 적용)
+        # 썸네일 이미지 (3:3.8 비율)
         # 3:3.8 비율 = 너비:높이 = 1:1.267
-        thumbnail_width = get_scaled_size(350)  # 동적 스케일링 적용
+        thumbnail_width = get_scaled_size(350)
         thumbnail_height = int(thumbnail_width * 3.8 / 3.0)
 
         # 패널 너비를 썸네일 너비 + 패딩으로 설정
@@ -1965,7 +1965,7 @@ class ArtistThumbModule(BaseTabModule):
                 padding: {get_scaled_size(4)}px;
             }}
         """)
-        # 동적 스케일링된 크기로 설정
+        # 호환 헬퍼 기반 크기로 설정
         self.thumbnail_label.setFixedSize(thumbnail_width, thumbnail_height)
         self.thumbnail_label.setScaledContents(False)
         self._show_default_thumbnail()
@@ -2162,9 +2162,8 @@ class ArtistThumbModule(BaseTabModule):
                         "아티스트\n썸네일")
         painter.end()
 
-        # 동적 스케일링된 썸네일 크기로 스케일링
+        # 호환 헬퍼 기반 썸네일 크기로 스케일링
         if hasattr(self, 'thumbnail_label'):
-            # 동적 스케일링 적용
             padding = get_scaled_size(4) * 2  # 양쪽 패딩
             thumbnail_width = get_scaled_size(350)
             target_width = thumbnail_width - padding
@@ -2771,7 +2770,7 @@ class ArtistThumbModule(BaseTabModule):
                     else:
                         cropped_pixmap = pixmap
 
-                    # 동적 스케일링된 썸네일 크기 사용
+                    # 호환 헬퍼 기반 썸네일 크기 사용
                     padding = get_scaled_size(4) * 2  # 양쪽 패딩
                     thumbnail_width = get_scaled_size(350)
                     target_width = thumbnail_width - padding

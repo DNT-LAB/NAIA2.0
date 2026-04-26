@@ -43,13 +43,13 @@ button.setStyleSheet(f"""
 button.setObjectName("myButton")
 ```
 
-### 3. 동적 스타일 강제 갱신
+### 3. 캐시된 스타일 재사용
 ```python
 from ui.theme import get_dynamic_styles
 
-# 최신 스케일 반영된 스타일 가져오기
-latest_styles = get_dynamic_styles()
-button.setStyleSheet(latest_styles['primary_button'])
+# future01에서는 호환 API 이름만 유지하며, 고정 스타일 딕셔너리를 반환합니다.
+styles = get_dynamic_styles()
+button.setStyleSheet(styles['primary_button'])
 ```
 
 ---
@@ -63,32 +63,16 @@ print(font_size)  # 항상 21 (스케일 안 됨)
 ```
 
 **원인**:
-1. ScalingManager 초기화 안 됨
-2. 사용자가 자동 스케일링 비활성화
-3. 스케일 팩터 범위 제한 (0.5~2.0)
+future01에서 사용자 설정형 UI Scaling은 제거되었습니다. `ui.scaling_manager`는 기존 import를 보호하는 1.0 고정 호환 레이어입니다.
 
 **해결**:
 
-### 1. ScalingManager 상태 확인
+### 1. 고정 배율 확인
 ```python
 from ui.scaling_manager import get_scaling_manager
 
 manager = get_scaling_manager()
 print(f"현재 스케일: {manager.get_scale_factor()}")
-print(f"자동 스케일링: {manager.is_auto_scaling_enabled()}")
-print(f"사용자 스케일: {manager.get_user_scale_factor()}")
-```
-
-### 2. 강제 재계산
-```python
-manager.refresh_scaling()
-```
-
-### 3. 수동 스케일 설정
-```python
-# 1.5배로 강제
-manager.set_auto_scaling_enabled(False)
-manager.set_user_scale_factor(1.5)
 ```
 
 ---
@@ -252,18 +236,13 @@ print(widget.parent().styleSheet())
 # 계산된 스타일 확인 (Qt Designer 없이는 어려움)
 ```
 
-### 스케일링 디버깅
+### DPI 호환 헬퍼 확인
 
 ```python
 from ui.scaling_manager import get_scaling_manager
 
 manager = get_scaling_manager()
 print(f"현재 스케일: {manager.get_scale_factor()}")
-print(f"자동 스케일링: {manager.is_auto_scaling_enabled()}")
-print(f"사용자 스케일: {manager.get_user_scale_factor()}")
-
-# 스케일 변경 감지
-manager.scaling_changed.connect(lambda scale: print(f"스케일 변경: {scale}"))
 ```
 
 ### 레이아웃 디버깅

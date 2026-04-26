@@ -1,7 +1,11 @@
 """
-동적 UI 테마 시스템
-스케일링 매니저를 활용한 반응형 UI 지원
+Cached UI theme definitions.
+
+future01 removed user-configurable scaling, so the old dynamic theme API now
+returns fixed, cached QSS dictionaries for compatibility.
 """
+
+from functools import lru_cache
 
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
@@ -35,8 +39,9 @@ DARK_COLORS = {
 }
 
 
+@lru_cache(maxsize=1)
 def generate_dark_styles():
-    """현재 스케일링 팩터에 맞는 동적 스타일시트 생성"""
+    """Return cached dark styles."""
     
     # 기본 폰트 크기 정의 (QHD 기준)
     BASE_FONT_SIZES = {
@@ -551,23 +556,22 @@ def generate_dark_styles():
 
 
 def get_dynamic_styles():
-    """현재 스케일링에 맞는 동적 스타일 생성"""
+    """Return cached dark styles for legacy callers."""
     return generate_dark_styles()
 
 
 def get_legacy_dark_styles():
-    """하위 호환성을 위한 동적 DARK_STYLES 생성"""
+    """Return cached dark styles for legacy callers."""
     return generate_dark_styles()
 
 
-# 하위 호환성을 위한 동적 DARK_STYLES
-# 스케일링 매니저는 항상 사용 가능하므로 간단히 호출
+# 하위 호환성을 위한 DARK_STYLES
 DARK_STYLES = get_legacy_dark_styles()
 
 
-# 커스텀 스타일 딕셔너리 (동적 스케일링 적용)
+@lru_cache(maxsize=1)
 def get_custom_styles():
-    """커스텀 스타일 딕셔너리 생성 (동적 스케일링 적용)"""
+    """Return cached custom styles."""
     fonts = {
         'main': get_scaled_font_size(21),
         'status': get_scaled_font_size(18),
@@ -719,12 +723,12 @@ def get_custom_styles():
 
 
 # 하위 호환성을 위한 CUSTOM 딕셔너리
-# 스케일링 매니저는 항상 사용 가능하므로 간단히 호출
 CUSTOM = get_custom_styles()
 
 
 # === Dark Theme MessageBox Helpers ===
 
+@lru_cache(maxsize=1)
 def get_message_box_stylesheet() -> str:
     """Get dark theme stylesheet for QMessageBox"""
     return f"""

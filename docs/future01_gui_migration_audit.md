@@ -37,6 +37,15 @@ Implemented in this round:
 
 The `sketchbook_character_prompts` generation parameter remains because it is also used by non-Assets flows such as character asset variation and img2img/inpaint overrides.
 
+## Cleanup Round 2
+
+Implemented in this round:
+
+- Cached `ui.theme` style dictionaries and message-box QSS so repeated `get_dynamic_styles()` calls no longer rebuild large strings.
+- Simplified main-window style initialization to use the cached base style instead of constructing a per-startup dynamic QSS block.
+- Removed a duplicate prompt editor `setStyleSheet()` call during main UI initialization.
+- Removed an unreachable Comic Generator turbo branch and its hidden button setup.
+
 ## Follow-Up Audit Items
 
 - Map remaining core desktop tabs to the Web Shell information architecture.

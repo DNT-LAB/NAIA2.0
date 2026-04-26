@@ -2427,6 +2427,7 @@ const modulePopupAction = $('modulePopupAction');
 const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
+let pendingModuleEdit = null;
 let lastAutoSaveModuleState = null;
 let lastSaveDirectoryState = null;
 
@@ -2500,6 +2501,7 @@ function openModule(moduleId) {
     closeModule();
     return;
   }
+  flushPendingModuleEdit(currentModuleId);
   closeAuxiliaryPopups();
   currentModuleId = moduleId;
   modulePopup.classList.add('open');
@@ -2534,6 +2536,7 @@ function openModule(moduleId) {
 }
 
 function closeModule() {
+  flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   closeAuxiliaryPopups();
   currentModuleId = null;
@@ -2997,7 +3000,7 @@ function renderPromptEngineering(m) {
   const pp = m.preprocessing || {};
   const ppHtml = PP_OPTIONS.map(([key, label]) =>
     `<label class="mod-checkbox-item ${PP_OPTION_TONES[key] || ''}">
-      <input type="checkbox" ${pp[key] ? 'checked' : ''} onchange="setModuleParam('prompt_engineering','pp_${key}',String(this.checked))">
+      <input type="checkbox" ${pp[key] ? 'checked' : ''} oninput="setPromptEngineeringOption('${key}', this.checked)">
       <span class="mod-checkbox-label">${label}</span>
     </label>`
   ).join('');
@@ -3379,12 +3382,13 @@ function renderPeDebugPanel(m) {
 
 function flushPromptEngineeringEdits() {
   if (currentModuleId !== 'prompt_engineering') return;
+  flushPendingModuleEdit('prompt_engineering');
   const pre = document.getElementById('modPrePrompt');
   const post = document.getElementById('modPostPrompt');
   const autoHide = document.getElementById('modAutoHide');
-  if (pre) setModuleParam('prompt_engineering', 'pre_prompt', pre.value);
-  if (post) setModuleParam('prompt_engineering', 'post_prompt', post.value);
-  if (autoHide) setModuleParam('prompt_engineering', 'auto_hide', autoHide.value);
+  if (pre) setModuleParam('prompt_engineering', 'pre_prompt', pre.value, {skipPendingFlush: true});
+  if (post) setModuleParam('prompt_engineering', 'post_prompt', post.value, {skipPendingFlush: true});
+  if (autoHide) setModuleParam('prompt_engineering', 'auto_hide', autoHide.value, {skipPendingFlush: true});
 }
 
 function flushMainPromptAndParams() {
@@ -3497,7 +3501,28 @@ function refreshPromptEngineeringDebug() {
   setModuleParam('prompt_engineering', 'debug_refresh', 'true');
 }
 
-function setModuleParam(moduleId, key, value) {
+function flushPendingModuleEdit(moduleId = null) {
+  if (!pendingModuleEdit) return;
+  if (moduleId && pendingModuleEdit.moduleId !== moduleId) return;
+  if (moduleSendTimer) {
+    clearTimeout(moduleSendTimer);
+    moduleSendTimer = null;
+  }
+  const pending = pendingModuleEdit;
+  pendingModuleEdit = null;
+  setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true});
+}
+
+function setPromptEngineeringOption(key, checked) {
+  if (lastPromptEngineeringState) {
+    if (!lastPromptEngineeringState.preprocessing) lastPromptEngineeringState.preprocessing = {};
+    lastPromptEngineeringState.preprocessing[key] = !!checked;
+  }
+  setModuleParam('prompt_engineering', `pp_${key}`, checked ? 'true' : 'false');
+}
+
+function setModuleParam(moduleId, key, value, options = {}) {
+  if (!options.skipPendingFlush) flushPendingModuleEdit(moduleId);
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_module_param', module_id: moduleId, key, value}));
   }
@@ -3525,7 +3550,13 @@ function setModuleParam(moduleId, key, value) {
 
 function onModTextEdit(moduleId, key, value) {
   if (moduleSendTimer) clearTimeout(moduleSendTimer);
-  moduleSendTimer = setTimeout(() => setModuleParam(moduleId, key, value), 500);
+  pendingModuleEdit = {moduleId, key, value};
+  moduleSendTimer = setTimeout(() => {
+    const pending = pendingModuleEdit;
+    pendingModuleEdit = null;
+    moduleSendTimer = null;
+    if (pending) setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true});
+  }, 500);
 }
 
 function flushCharacterEdits() {
@@ -3534,6 +3565,7 @@ function flushCharacterEdits() {
     clearTimeout(moduleSendTimer);
     moduleSendTimer = null;
   }
+  pendingModuleEdit = null;
   const chars = document.querySelectorAll('[data-char-index]');
   chars.forEach((block) => {
     const idx = block.dataset.charIndex;
@@ -3585,7 +3617,7 @@ function renderAutomation(m) {
       <div style="display:flex;gap:8px;align-items:center">
         <input class="mod-input" type="text" value="${m.delay || '0'}" onchange="setModuleParam('automation','delay',this.value)" style="flex:1">
         <label class="mod-checkbox-item" style="margin:0">
-          <input type="checkbox" ${m.random_delay ? 'checked' : ''} onchange="setModuleParam('automation','random_delay',String(this.checked))">
+          <input type="checkbox" ${m.random_delay ? 'checked' : ''} oninput="setModuleParam('automation','random_delay',String(this.checked))">
           <span class="mod-checkbox-label">Random ±50%</span>
         </label>
       </div>
@@ -3608,7 +3640,7 @@ function renderAutomation(m) {
     </div>` : ''}
     <div>
       <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.notify ? 'checked' : ''} onchange="setModuleParam('automation','notify',String(this.checked))">
+        <input type="checkbox" ${m.notify ? 'checked' : ''} oninput="setModuleParam('automation','notify',String(this.checked))">
         <span class="mod-checkbox-label">Notify on completion</span>
       </label>
     </div>
@@ -3627,7 +3659,7 @@ function renderCharacter(m) {
     <div class="mod-char-block" data-char-index="${i}">
       <div class="mod-char-header">
         <label class="mod-checkbox-item" style="margin:0">
-          <input type="checkbox" ${c.active ? 'checked' : ''} onchange="setModuleParam('character','char_active_${i}',String(this.checked))">
+          <input type="checkbox" ${c.active ? 'checked' : ''} oninput="setModuleParam('character','char_active_${i}',String(this.checked))">
           <span class="mod-checkbox-label">C${c.id}</span>
         </label>
         <button class="mod-btn-sm mod-btn-danger" ${chars.length > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${i})">Remove</button>
@@ -3642,13 +3674,13 @@ function renderCharacter(m) {
   moduleBody.innerHTML = `
     <div>
       <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.activated ? 'checked' : ''} onchange="setModuleParam('character','activated',String(this.checked))">
+        <input type="checkbox" ${m.activated ? 'checked' : ''} oninput="setModuleParam('character','activated',String(this.checked))">
         <span class="mod-checkbox-label">Enable Character Prompts (NAID4+)</span>
       </label>
     </div>
     <div>
       <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.reroll_on_generate ? 'checked' : ''} onchange="setModuleParam('character','reroll_on_generate',String(this.checked))">
+        <input type="checkbox" ${m.reroll_on_generate ? 'checked' : ''} oninput="setModuleParam('character','reroll_on_generate',String(this.checked))">
         <span class="mod-checkbox-label">Process wildcards on Generate</span>
       </label>
     </div>
@@ -3734,7 +3766,7 @@ function renderConditionalPrompt(m) {
   moduleBody.innerHTML = `
     <div>
       <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="setModuleParam('conditional_prompt','enabled',String(this.checked))">
+        <input type="checkbox" ${m.enabled ? 'checked' : ''} oninput="setModuleParam('conditional_prompt','enabled',String(this.checked))">
         <span class="mod-checkbox-label">Enable Conditional Prompt</span>
       </label>
     </div>
@@ -3822,7 +3854,7 @@ function renderWildcard(m) {
     </div>
     <div class="mod-section">
       <label class="mod-check-row">
-        <input type="checkbox" ${m.prompt_squeeze ? 'checked' : ''} onchange="setModuleParam('wildcard','prompt_squeeze',String(this.checked))">
+        <input type="checkbox" ${m.prompt_squeeze ? 'checked' : ''} oninput="setModuleParam('wildcard','prompt_squeeze',String(this.checked))">
         <span style="font-size:12px">NovelAI 403 Prevention</span>
       </label>
     </div>
@@ -4176,7 +4208,7 @@ function renderCharacterReference(m) {
           <div class="mod-ref-controls-row">
             <label class="mod-checkbox-item">
               <input type="checkbox" ${f.is_enabled ? 'checked' : ''}
-                onchange="setModuleParam('character_reference','enable_${i}',String(this.checked))">
+                oninput="setModuleParam('character_reference','enable_${i}',String(this.checked))">
               <span class="mod-checkbox-label">Enable</span>
             </label>
             <select class="mod-select-sm"
@@ -4239,7 +4271,7 @@ function renderVibeTransfer(m) {
           <div class="mod-ref-controls-row">
             <label class="mod-checkbox-item">
               <input type="checkbox" ${f.is_enabled ? 'checked' : ''}
-                onchange="setModuleParam('vibe_transfer','enable_${i}',String(this.checked))">
+                oninput="setModuleParam('vibe_transfer','enable_${i}',String(this.checked))">
               <span class="mod-checkbox-label">Enable</span>
             </label>
             <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('vibe_transfer','remove_frame_${i}','')">Remove</button>
@@ -4273,7 +4305,7 @@ function renderVibeTransfer(m) {
     </div>
     <label class="mod-checkbox-item" style="margin-bottom:8px">
       <input type="checkbox" ${m.normalize ? 'checked' : ''}
-        onchange="setModuleParam('vibe_transfer','normalize',String(this.checked))">
+        oninput="setModuleParam('vibe_transfer','normalize',String(this.checked))">
       <span class="mod-checkbox-label">Normalize reference strength</span>
     </label>
     ${frames.length ? frames : '<div class="mod-empty">No vibe transfers loaded</div>'}

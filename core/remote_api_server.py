@@ -2220,6 +2220,7 @@ class RemoteBridge(QObject):
                         cb = m.preprocessing_checkboxes.get(label)
                         if cb:
                             cb.setChecked(value == "true")
+                            self._broadcast_prompt_engineering_state()
                         break
         except Exception as e:
             print(f"🌐 Remote: 모듈 설정 실패 — {key}={value}: {e}")
@@ -2229,34 +2230,46 @@ class RemoteBridge(QObject):
             m = self._find_module("automation")
             if not m:
                 return
+            should_broadcast = False
             if key == "delay":
                 m.delay_input.setText(value)
+                should_broadcast = True
             elif key == "random_delay":
                 m.random_delay_checkbox.setChecked(value == "true")
+                should_broadcast = True
             elif key == "repeat":
                 m.repeat_input.setText(value)
+                should_broadcast = True
             elif key == "auto_type":
                 v = int(value)
                 if v == 0 and m.unlimited_radio:
                     m.unlimited_radio.setChecked(True)
+                    should_broadcast = True
                 elif v == 1 and m.timer_radio:
                     m.timer_radio.setChecked(True)
+                    should_broadcast = True
                 elif v == 2 and m.count_radio:
                     m.count_radio.setChecked(True)
+                    should_broadcast = True
             elif key == "timer_minutes":
                 if m.timer_input:
                     m.timer_input.setText(value)
+                    should_broadcast = True
             elif key == "count_limit":
                 if m.count_input:
                     m.count_input.setText(value)
+                    should_broadcast = True
             elif key == "notify":
                 if m.notify_checkbox:
                     m.notify_checkbox.setChecked(value == "true")
+                    should_broadcast = True
             elif key == "start":
                 m.start_automation()
-                self._broadcast_automation_state()
+                should_broadcast = True
             elif key == "stop":
                 m.stop_automation()
+                should_broadcast = True
+            if should_broadcast:
                 self._broadcast_automation_state()
         except Exception as e:
             print(f"🌐 Remote: automation 설정 실패 — {key}={value}: {e}")
@@ -2329,6 +2342,9 @@ class RemoteBridge(QObject):
                 return
             if key == "enabled":
                 m.enable_checkbox.setChecked(value == "true")
+                state = self._read_conditional_prompt()
+                if state:
+                    self._broadcast_json(state)
             elif key == "rules":
                 m.rules_textedit.setPlainText(value)
             elif key == "test":

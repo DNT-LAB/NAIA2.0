@@ -78,31 +78,31 @@ header {
 }
 @media (max-width: 767px) {
   .shell-toolbar {
-    padding: 10px;
-    gap: 8px;
+    padding: 6px 8px;
+    gap: 7px;
   }
   .shell-brand-title {
-    font-size: 15px;
-    letter-spacing: 1.8px;
+    font-size: 14px;
+    letter-spacing: 1.4px;
   }
   .shell-brand-subtitle {
-    font-size: 8.5px;
+    font-size: 7.5px;
   }
   .shell-toolbar .prompt-quick-control {
     max-width: 100%;
   }
   .shell-toolbar .mode-api-combo {
-    height: 28px;
+    height: 25px;
   }
 }
 .shell-toolbar {
   align-items: center;
   flex-direction: row;
   justify-content: flex-start;
-  min-height: 58px;
-  height: 58px;
-  gap: 10px;
-  padding: 8px 14px;
+  min-height: 50px;
+  height: 50px;
+  gap: 9px;
+  padding: 6px 12px;
   overflow: hidden;
   background:
     radial-gradient(circle at 22% -20%, rgba(124,106,239,0.18), transparent 42%),
@@ -111,23 +111,8 @@ header {
 .shell-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
   flex: 0 0 auto;
   min-width: 0;
-}
-.shell-brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-  border-radius: 7px;
-  color: var(--accent-glow);
-  background: rgba(124,106,239,0.12);
-  border: 1px solid rgba(157,139,255,0.24);
-  font-size: 17px;
-  line-height: 1;
 }
 .shell-brand-copy {
   display: flex;
@@ -137,17 +122,17 @@ header {
 }
 .shell-brand-title {
   color: var(--accent-glow);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1;
-  letter-spacing: 1.8px;
+  letter-spacing: 1.55px;
   white-space: nowrap;
   text-shadow: 0 0 16px rgba(157,139,255,0.25);
 }
 .shell-brand-subtitle {
   color: var(--text-muted);
   font-family: var(--font-display);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: 0.4px;
@@ -156,11 +141,11 @@ header {
 .mode-api-combo {
   display: inline-flex;
   align-items: stretch;
-  height: 27px;
+  height: 25px;
   flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid rgba(232,232,240,0.28);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--bg-deep);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
   transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
@@ -221,16 +206,16 @@ header {
   color: var(--text-dim);
 }
 .mode-api-combo .mode-select {
-  width: 78px;
-  min-width: 78px;
-  max-width: 78px;
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
   height: 100%;
   border: 0;
   border-radius: 0;
   background-color: transparent;
-  background-position: right 7px center;
-  padding: 0 20px 0 10px;
-  font-size: 10px;
+  background-position: right 6px center;
+  padding: 0 18px 0 9px;
+  font-size: 9.5px;
   color: var(--text-primary);
 }
 .mode-api-combo .mode-select:focus {
@@ -1025,16 +1010,16 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   flex: 1;
-  min-height: 42px;
-  padding: 10px 0;
+  min-height: 36px;
+  padding: 8px 0;
   background: transparent;
   border: none;
   border-right: 1px solid rgba(255,255,255,0.045);
   border-bottom: 2px solid transparent;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
-  letter-spacing: 0.8px; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.65px; text-transform: uppercase;
   color: var(--text-dim); cursor: pointer;
   transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
@@ -1052,7 +1037,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   background: rgba(124,106,239,0.08);
 }
 .tab-icon {
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
   opacity: 0.9;
 }
@@ -1527,19 +1512,19 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   flex-shrink: 0;
 }
 .shell-toolbar .prompt-quick-control {
-  height: 28px;
-  width: 172px;
-  flex: 0 0 172px;
+  height: 25px;
+  width: 160px;
+  flex: 0 0 160px;
 }
 .prompt-quick-control .module-prompt-btn,
 .prompt-quick-control .quick-filter-btn {
   border: 0;
   border-radius: 0;
   background: transparent;
-  min-height: 28px;
+  min-height: 25px;
 }
 .prompt-quick-control .module-prompt-btn {
-  padding: 5px 9px;
+  padding: 4px 8px;
 }
 .toolbar-prompt-control .module-prompt-btn {
   flex: 1;
@@ -1551,11 +1536,11 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   color: #d8f5e0;
 }
 .quick-filter-btn {
-  padding: 5px 9px;
+  padding: 4px 8px;
   border-left: 1px solid rgba(92,184,122,0.28) !important;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.2px;
   cursor: pointer;
@@ -2880,8 +2865,8 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   border-color: #c89315 !important;
 }
 .prompt-quick-control .quick-filter-btn {
-  padding: 6px 10px !important;
-  font-size: 10px !important;
+  padding: 4px 8px !important;
+  font-size: 9px !important;
 }
 .prompt-quick-control .tag-filter-toggle.active {
   background: rgba(124,106,239,0.22) !important;
@@ -3392,15 +3377,15 @@ select.setup-input { cursor: pointer; }
   animation: setupLauncherBlink 2.4s ease-in-out infinite;
 }
 .mode-api-combo .setup-launcher {
-  min-width: 44px;
+  min-width: 40px;
   height: 100%;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 0;
   border-left: 1px solid rgba(232,232,240,0.24);
   border-radius: 0;
   background: rgba(255,255,255,0.045);
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 1px;
 }
@@ -3449,11 +3434,11 @@ select.setup-input { cursor: pointer; }
 .shell-toolbar .anlas-pill {
   position: static;
   z-index: auto;
-  height: 28px;
+  height: 25px;
   flex: 0 0 auto;
   margin-left: auto;
-  padding: 0 10px;
-  border-radius: 14px;
+  padding: 0 9px;
+  border-radius: 13px;
   background: rgba(18,18,26,0.78);
   border-color: rgba(232,232,240,0.12);
   backdrop-filter: none;
@@ -3464,57 +3449,50 @@ select.setup-input { cursor: pointer; }
 }
 .anlas-label {
   color: var(--text-dim);
-  font-size: 9px; font-weight: 500;
-  letter-spacing: 1px;
+  font-size: 8px; font-weight: 500;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
 }
 .anlas-value {
   color: var(--text-primary);
-  font-size: 11px; font-weight: 700;
+  font-size: 10.5px; font-weight: 700;
   letter-spacing: 0.4px;
 }
 .anlas-pill.low  .anlas-value { color: var(--generating-pulse); }
 
 @media (max-width: 767px) {
   .shell-toolbar {
-    height: 56px;
-    min-height: 56px;
-    gap: 8px;
-    padding: 8px 10px;
+    height: 50px;
+    min-height: 50px;
+    gap: 7px;
+    padding: 6px 8px;
     flex-wrap: nowrap;
   }
-  .shell-brand {
-    gap: 7px;
-  }
-  .shell-brand-mark {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    font-size: 17px;
-  }
   .shell-brand-title {
-    font-size: 15px;
-    letter-spacing: 1.7px;
+    font-size: 14px;
+    letter-spacing: 1.4px;
   }
   .shell-brand-subtitle {
-    font-size: 8px;
+    font-size: 7.5px;
   }
   .shell-toolbar .prompt-quick-control {
-    width: clamp(168px, 34vw, 260px);
-    flex: 0 1 260px;
+    width: 150px;
+    flex: 0 0 150px;
   }
   .shell-toolbar .anlas-pill {
-    height: 28px;
-    padding: 0 10px;
+    height: 25px;
+    padding: 0 8px;
   }
   .mode-api-combo .mode-select {
-    min-width: 74px;
-    padding-left: 9px;
-    padding-right: 22px;
+    width: 68px;
+    min-width: 68px;
+    max-width: 68px;
+    padding-left: 8px;
+    padding-right: 18px;
   }
   .mode-api-combo .setup-launcher {
-    min-width: 44px;
-    padding: 0 8px;
+    min-width: 38px;
+    padding: 0 6px;
   }
 }
 
@@ -3524,7 +3502,8 @@ select.setup-input { cursor: pointer; }
     display: none;
   }
   .shell-toolbar .prompt-quick-control {
-    width: clamp(142px, 36vw, 210px);
+    width: 136px;
+    flex-basis: 136px;
   }
 }
 

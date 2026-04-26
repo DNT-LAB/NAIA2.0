@@ -47,6 +47,37 @@ ModernMainWindow
          └─ Settings
 ```
 
+## Web Shell Renderer
+
+The first Desktop Web Shell path is:
+
+```text
+QApplication
+├─ ModernMainWindow hidden backend
+│  ├─ AppContext
+│  ├─ Prompt / generation controllers
+│  └─ RemoteBridge signal slots
+└─ WebWrapperWindow
+   └─ QWebEngineView
+      └─ http://127.0.0.1:<port>/?desktop_shell=1
+         ├─ ui/remote_web/index.html
+         ├─ ui/remote_web/style.css
+         └─ ui/remote_web/app.js
+```
+
+This intentionally reuses the Remote Web Session protocol instead of creating a
+second QWebChannel-only bridge. The FastAPI/WebSocket layer in
+`core/remote_api_server.py` remains the shared contract for:
+
+- desktop-local QWebEngine rendering,
+- browser-based Remote Session,
+- mobile Remote Session,
+- Cloudflared shared sessions.
+
+Renderer-specific behavior must be handled in the web client through capability
+or query flags such as `desktop_shell=1`; state names, command names, and payload
+shape should stay aligned with `RemoteBridge`.
+
 ## Source Ownership
 
 | Area | Current owner | Notes |

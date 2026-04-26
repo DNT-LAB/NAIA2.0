@@ -7329,12 +7329,26 @@ if __name__ == "__main__":
         action="store_true",
         help="앱 기동 시 Web Session 을 자동 시작하고 시스템 브라우저를 연다.",
     )
+    parser.add_argument(
+        "--web-shell",
+        action="store_true",
+        help="앱 기동 시 PyQt 백엔드를 숨기고 QWebEngine 기반 Desktop Web Shell 을 연다.",
+    )
+    parser.add_argument(
+        "--web-shell-port",
+        type=int,
+        default=7243,
+        help="Desktop Web Shell 이 사용할 로컬 Remote API 포트.",
+    )
     cli_args, _ = parser.parse_known_args()
 
     # CLI --web-session 플래그를 환경변수로 전달.
     # Settings 탭의 on_initialize() 가 ModernMainWindow.__init__ 내부(=AppContext 생성 전)에서
     # 동기 실행되므로, app_context 속성으로는 타이밍이 맞지 않아 os.environ 으로 배관.
-    if cli_args.web_session:
+    if cli_args.web_shell:
+        os.environ["NAIA_CLI_WEB_SHELL"] = "1"
+        os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
+    elif cli_args.web_session:
         os.environ["NAIA_CLI_WEB_SESSION"] = "1"
         os.environ["NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW"] = "1"
 
@@ -7366,7 +7380,17 @@ if __name__ == "__main__":
 
     # 메인 윈도우 생성
     window = ModernMainWindow()
-    if _should_start_hidden_for_web_session():
+    web_shell_window = None
+    if cli_args.web_shell:
+        from ui.web_wrapper import WebWrapperWindow
+
+        web_shell_window = WebWrapperWindow(
+            window.app_context,
+            port=cli_args.web_shell_port,
+        )
+        web_shell_window.show()
+        window._publish_desktop_window_visibility()
+    elif _should_start_hidden_for_web_session():
         window._publish_desktop_window_visibility()
     else:
         window.show()

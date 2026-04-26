@@ -1010,16 +1010,16 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   flex: 1;
-  min-height: 36px;
-  padding: 8px 0;
+  min-height: 24px;
+  padding: 3px 0;
   background: transparent;
   border: none;
   border-right: 1px solid rgba(255,255,255,0.045);
   border-bottom: 2px solid transparent;
-  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
-  letter-spacing: 0.65px; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.55px; text-transform: uppercase;
   color: var(--text-dim); cursor: pointer;
   transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
@@ -1037,7 +1037,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   background: rgba(124,106,239,0.08);
 }
 .tab-icon {
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1;
   opacity: 0.9;
 }
@@ -1046,7 +1046,7 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 .tab-content {
   height: 45dvh;
   overflow-y: auto;
-  padding: 10px 14px;
+  padding: 8px 14px 10px;
 }
 .tab-page { display: none; }
 .tab-page.active { display: flex; flex-direction: column; height: 100%; }
@@ -1450,17 +1450,18 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 
 /* ---- Module bar ---- */
 .assistants-section {
-  padding-top: 12px;
-  flex-shrink: 0;
+  padding-top: 8px;
+  flex-shrink: 1;
+  min-height: 0;
 }
 .assistants-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 5px;
+  margin-bottom: 5px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.8px;
   text-transform: uppercase;
@@ -1469,20 +1470,26 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
   border: 1px solid rgba(160,166,187,0.42);
   border-radius: 50%;
   color: var(--text-dim);
-  font-size: 9px;
+  font-size: 8px;
   line-height: 1;
 }
 .module-bar {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 5px;
+  flex-shrink: 1;
   align-items: center;
+  align-content: start;
+  max-height: 82px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 .module-prompt-btn {
   padding: 6px 12px;
@@ -1567,13 +1574,13 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 7px 12px;
+  gap: 4px;
+  min-height: 24px;
+  padding: 3px 8px;
   background: rgba(34,34,51,0.58);
   border: 1px solid rgba(232,232,240,0.1);
-  border-radius: 8px;
-  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  border-radius: 6px;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.2s;
@@ -1602,10 +1609,10 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 .module-btn.nai-only-disabled { opacity: 0.35; pointer-events: none; }
 .module-badge {
   display: inline-block;
-  margin-left: 5px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 9px;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 8px;
   font-weight: 600;
   letter-spacing: 0;
   vertical-align: middle;

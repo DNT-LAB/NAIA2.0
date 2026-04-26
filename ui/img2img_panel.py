@@ -616,6 +616,11 @@ class Img2ImgPanel(QFrame):
             "width" : width,
             "height" : height
         }
+        # Comic Panel / 레퍼런스 인셋 모드: 파이프라인의 reference_inset 자동 주입 모듈 트리거.
+        # ReferenceInsetAutoInjectModule (modules/reference_inset_module.py) 가 이 플래그를
+        # PromptContext.settings 에서 읽어 'reference inset' 태그를 첫 person 태그 직후에 삽입.
+        if self._comic_panel_mode:
+            params["reference_inset_tag_required"] = True
 
         # Inpaint 모드일 경우 마스크 추가
         if self.mode == 'inpaint':

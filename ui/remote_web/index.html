@@ -11,15 +11,36 @@
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
 
-<header>
-  <span class="logo">NAIA-REMOTE</span><span class="logo-sig">Provided by <b>CLAUDE</b></span>
-  <div class="header-right">
-    <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
-      <option value="NAI">NAI</option>
-      <option value="WEBUI">WEBUI</option>
-      <option value="COMFYUI">COMFYUI</option>
-    </select>
-    <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API</button>
+<header class="app-topbar">
+  <div class="top-title-row">
+    <div class="top-title"><span class="top-disclosure">&#9654;</span> 프롬프트 검색 / 필터링</div>
+    <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
+  </div>
+  <div class="top-search-row">
+    <label class="top-field">
+      <span>검색</span>
+      <input id="searchQueryTop" type="text" placeholder="검색 키워드">
+    </label>
+    <label class="top-field">
+      <span>제외</span>
+      <input id="searchExcludeTop" type="text" placeholder="제외 키워드">
+    </label>
+    <div class="top-counts">
+      <button class="top-count-pill" onclick="openModule('search')">검색: <span id="searchTotalCount">0</span></button>
+      <button class="top-count-pill primary" onclick="openModule('search')">남음: <span id="searchCount">0</span></button>
+    </div>
+  </div>
+  <div class="top-filter-row">
+    <div class="module-rating-bar">
+      <button class="rating-btn active" data-r="g" onclick="toggleRating('g')">G</button>
+      <button class="rating-btn active" data-r="s" onclick="toggleRating('s')">S</button>
+      <button class="rating-btn active" data-r="q" onclick="toggleRating('q')">Q</button>
+      <button class="rating-btn active" data-r="e" onclick="toggleRating('e')">E</button>
+      <button class="rating-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Filter</button>
+    </div>
+    <button class="top-search-btn" onclick="doSearch()">검색</button>
+    <button class="top-action-btn" onclick="restoreSnapshot()">복원</button>
+    <button class="top-action-btn" onclick="openRefine()">심층검색</button>
   </div>
 </header>
 <div class="tag-tooltip" id="tagTooltip"></div>
@@ -244,24 +265,16 @@
             <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
             <div class="tag-search-results" id="tagSearchResults"></div>
           </div>
-          <!-- Module bar -->
-          <div class="module-bar">
-            <button class="module-prompt-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
-            <div class="module-rating-bar">
-              <button class="rating-btn active" data-r="g" onclick="toggleRating('g')">G</button>
-              <button class="rating-btn active" data-r="s" onclick="toggleRating('s')">S</button>
-              <button class="rating-btn active" data-r="q" onclick="toggleRating('q')">Q</button>
-              <button class="rating-btn active" data-r="e" onclick="toggleRating('e')">E</button>
-              <button class="rating-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Filter</button>
-            </div>
-            <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
-            <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
-            <button class="module-btn" data-module="character" onclick="openModule('character')">Character<span class="module-badge hidden" id="badgeChar"></span></button>
-            <button class="module-btn nai-only-disabled" data-module="character_reference" onclick="openModule('character_reference')">Char Ref<span class="module-badge hidden" id="badgeCharRef"></span></button>
-            <button class="module-btn nai-only-disabled" data-module="vibe_transfer" onclick="openModule('vibe_transfer')">Vibe<span class="module-badge hidden" id="badgeVibe"></span></button>
-            <button class="module-btn" data-module="wildcard" onclick="openModule('wildcard')">WC</button>
-            <button class="module-btn" data-module="chunk" onclick="openChunkPanel(null, true)">Chunk</button>
-            <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Cond</button>
+          <!-- Module stack -->
+          <div class="module-bar module-stack">
+            <button class="module-btn module-panel-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#128295;</span><span class="module-title">프롬프트 엔지니어링/자동화/프리셋</span></button>
+            <button class="module-btn module-panel-btn" data-module="automation" onclick="openModule('automation')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#9881;</span><span class="module-title">자동화 설정</span><span class="module-badge hidden" id="badgeAuto"></span></button>
+            <button class="module-btn module-panel-btn" data-module="character" onclick="openModule('character')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#128100;</span><span class="module-title">NAID4 캐릭터</span><span class="module-badge hidden" id="badgeChar"></span></button>
+            <button class="module-btn module-panel-btn" data-module="wildcard" onclick="openModule('wildcard')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#127922;</span><span class="module-title">와일드카드 모듈</span></button>
+            <button class="module-btn module-panel-btn nai-only-disabled" data-module="character_reference" onclick="openModule('character_reference')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#128248;</span><span class="module-title">Character Reference</span><span class="module-badge hidden" id="badgeCharRef"></span></button>
+            <button class="module-btn module-panel-btn nai-only-disabled" data-module="vibe_transfer" onclick="openModule('vibe_transfer')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#10024;</span><span class="module-title">Vibe Transfer</span><span class="module-badge hidden" id="badgeVibe"></span></button>
+            <button class="module-btn module-panel-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')"><span class="module-chevron">&#9654;</span><span class="module-icon">&#128257;</span><span class="module-title">조건부 프롬프트</span></button>
+            <button class="module-btn module-panel-btn" data-module="chunk" onclick="openChunkPanel(null, true)"><span class="module-chevron">&#9654;</span><span class="module-icon">&#9638;</span><span class="module-title">Chunk</span></button>
           </div>
         </div>
         <div class="tab-page" id="tabParams">
@@ -361,6 +374,15 @@
 
   <!-- Bottom controls (options + resolution + buttons) -->
   <div class="bottom-controls">
+    <div class="api-compact-row">
+      <span class="api-compact-label">API</span>
+      <select class="mode-select" id="modeSelect" onchange="setMode(this.value)">
+        <option value="NAI">NAI</option>
+        <option value="WEBUI">WEBUI</option>
+        <option value="COMFYUI">COMFYUI</option>
+      </select>
+      <button class="setup-launcher" id="setupLauncher" onclick="openApiPopup()" title="API Configuration">API 관리</button>
+    </div>
     <div class="options-row">
       <label class="opt-toggle">
         <input type="checkbox" id="optPromptFixed" onchange="setOption('prompt_fixed', this.checked)">
@@ -397,8 +419,6 @@
         <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Open auto-save settings"><span class="stats-dot" id="statsSaveDot"></span>Auto Save</span>
         <span class="stats-pill" id="statsGenCount" title="Total generations this session"></span>
       </div>
-      <!-- NAI Anlas (desktop polls every 5 min + on each generation) -->
-      <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
       <div class="viewer-nav-actions">
         <button class="viewer-hist-btn nav" onclick="navViewer(-1)">&#9664;</button>
         <button class="viewer-hist-btn" onclick="hideViewerNav()">Close</button>

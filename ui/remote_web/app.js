@@ -2391,8 +2391,9 @@ function updateModuleBtnState() {
     const isChunkBtn = btn.dataset.module === 'chunk';
     btn.classList.toggle('active', isChunkBtn ? chunkOpen : btn.dataset.module === currentModuleId);
   });
-  const pb = document.querySelector('.module-prompt-btn');
-  if (pb) pb.classList.toggle('active', currentModuleId === 'search');
+  document.querySelectorAll('.top-count-pill').forEach(btn => {
+    btn.classList.toggle('active', currentModuleId === 'search');
+  });
 }
 
 const peE621Panel = $('peE621Panel');
@@ -4206,7 +4207,12 @@ function applyVibeStorage(model, fileHash, ieValue) {
 
 // ---- Search system ----
 const searchCountEl = $('searchCount');
+const searchTotalCountEl = $('searchTotalCount');
+const searchQueryTop = $('searchQueryTop');
+const searchExcludeTop = $('searchExcludeTop');
 let searchingActive = false;
+let currentSearchTotal = 0;
+let currentSearchRemaining = 0;
 
 // Rating filter state (synced with module-bar GSQE buttons)
 let ratingState = {g: true, s: true, q: true, e: true};
@@ -4307,7 +4313,18 @@ function syncRatingButtons() {
 }
 
 function updateSearchCount(count) {
-  searchCountEl.textContent = count;
+  currentSearchRemaining = Number(count || 0);
+  if (searchCountEl) searchCountEl.textContent = currentSearchRemaining.toLocaleString();
+}
+
+function updateSearchTotalCount(count) {
+  currentSearchTotal = Number(count || 0);
+  if (searchTotalCountEl) searchTotalCountEl.textContent = currentSearchTotal.toLocaleString();
+}
+
+function syncTopSearchFields(query = '', exclude = '') {
+  if (searchQueryTop && document.activeElement !== searchQueryTop) searchQueryTop.value = query || '';
+  if (searchExcludeTop && document.activeElement !== searchExcludeTop) searchExcludeTop.value = exclude || '';
 }
 
 function onSearchState(m) {
@@ -4319,6 +4336,8 @@ function onSearchState(m) {
   } else {
     updateSearchCount(m.count || 0);
   }
+  updateSearchTotalCount(m.total_count || m.count || 0);
+  syncTopSearchFields(m.query, m.exclude);
   searchingActive = false;
   // Shared Mode: 서버 전역 rating 무시 (개인 rating 보호)
   if (!sharedMode) {
@@ -4382,7 +4401,7 @@ function renderSearch(m) {
       <div class="mod-checkbox-grid">${ratingItems}</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="mod-action-btn mod-start" onclick="doSearch()" ${searchingActive ? 'disabled' : ''}>Search</button>
+        <button class="mod-action-btn mod-start" onclick="doSearch('module')" ${searchingActive ? 'disabled' : ''}>Search</button>
       <span class="search-progress" style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)"></span>
     </div>
     ${parquets.length ? `<div>
@@ -4400,10 +4419,17 @@ function renderSearch(m) {
   });
 }
 
-function doSearch() {
+function doSearch(source = 'top') {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const query = (document.getElementById('searchQuery') || {}).value || '';
-  const exclude = (document.getElementById('searchExclude') || {}).value || '';
+  const moduleQuery = document.getElementById('searchQuery');
+  const moduleExclude = document.getElementById('searchExclude');
+  const useModule = source === 'module';
+  const query = ((useModule ? moduleQuery : searchQueryTop) || moduleQuery || searchQueryTop || {}).value || '';
+  const exclude = ((useModule ? moduleExclude : searchExcludeTop) || moduleExclude || searchExcludeTop || {}).value || '';
+  if (moduleQuery && !useModule) moduleQuery.value = query;
+  if (moduleExclude && !useModule) moduleExclude.value = exclude;
+  if (searchQueryTop && useModule) searchQueryTop.value = query;
+  if (searchExcludeTop && useModule) searchExcludeTop.value = exclude;
   // Sync rating state from search module checkboxes back to bar buttons
   for (const k of ['e','q','s','g']) {
     const el = document.getElementById('sr_' + k);
@@ -4420,6 +4446,19 @@ function doSearch() {
   if (prog) prog.textContent = 'Starting...';
   const btn = moduleBody.querySelector('.mod-start');
   if (btn) btn.disabled = true;
+}
+
+function bindTopSearchInputs() {
+  [searchQueryTop, searchExcludeTop].forEach(el => {
+    if (!el) return;
+    bindTagAssist(el, { excludeE621: true });
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doSearch('top');
+      }
+    });
+  });
 }
 
 function loadParquet(filename) {
@@ -5112,27 +5151,6 @@ document.addEventListener('keydown', e => {
 // ---- Init ----
 negEdit.addEventListener('input', onPromptEdit);
 
-// 모바일 헤더 자동 접힘 + 클릭 토글
-if (window.innerWidth < 768) {
-  const hdr = document.querySelector('header');
-  hdr.addEventListener('animationend', () => {
-    hdr.classList.add('collapsed');
-    document.body.classList.add('header-collapsed');
-  });
-  hdr.addEventListener('click', e => {
-    if (e.target.closest('select')) return;  // mode select 클릭은 무시
-    if (hdr.classList.contains('collapsed')) {
-      hdr.classList.remove('collapsed');
-      hdr.classList.add('expanded');
-      document.body.classList.remove('header-collapsed');
-    } else {
-      hdr.classList.remove('expanded');
-      hdr.classList.add('collapsed');
-      document.body.classList.add('header-collapsed');
-    }
-  });
-}
-
 // ---- Tag Filter ----
 let tagFilterTags = [];
 let tagFilterExcludeTags = [];
@@ -5407,4 +5425,5 @@ function _renderTfAc() {
   });
 }
 
+bindTopSearchInputs();
 connect();

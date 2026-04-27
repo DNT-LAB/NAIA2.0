@@ -49,6 +49,7 @@ let searchPanelControl = null;
 let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
 let promptEngineeringPopupRenderers = null;
+let promptEngineeringPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -1570,34 +1571,23 @@ let currentModuleId = null;
 let moduleSendTimer = null;
 let pendingModuleEdit = null;
 
-// Preprocessing option definitions (key → display label)
-const PP_OPTIONS = [
-  ['remove_author', 'Remove Artist'],
-  ['remove_work_title', 'Remove Work Title'],
-  ['remove_character_name', 'Remove Character Name'],
-  ['remove_character_features', 'Remove Char Features'],
-  ['remove_clothes', 'Remove Clothing'],
-  ['remove_color', 'Remove Color Tags'],
-  ['remove_location_and_background_color', 'Remove Location/BG'],
-  ['remove_expression', 'Remove Expression'],
-  ['remove_pose_action', 'Remove Pose/Action'],
-  ['remove_meta_tags', 'Remove Meta Tags'],
-  ['remove_object_tags', 'Remove Object Tags'],
-  ['remove_noise_tags', 'Remove Low-freq Tags'],
-  ['e621_auto_boost', 'e621 Auto-Boost'],
-  ['danbooru_auto_weight', 'Danbooru Auto-Weight'],
-  ['tag_implication_compression', 'Tag Implication'],
-];
-
-const PP_OPTION_TONES = {
-  remove_author: 'pe-tone-yellow',
-  remove_work_title: 'pe-tone-yellow',
-  remove_character_name: 'pe-tone-yellow',
-  e621_auto_boost: 'pe-tone-pink',
-  danbooru_auto_weight: 'pe-tone-teal',
-  tag_implication_compression: 'pe-tone-teal',
-};
 let lastPromptEngineeringState = null;
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs')
+  .then(({createPromptEngineeringPanel}) => {
+    promptEngineeringPanelControl = createPromptEngineeringPanel({
+      document,
+      moduleBody,
+      escHtml,
+      getSharedMode: () => sharedMode,
+      getSharedPromptEngineering: () => _sharedPEng,
+      setSharedPromptEngineering: value => { _sharedPEng = value; },
+      saveSharedSession,
+      bindTagAssist,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Prompt Engineering panel module', error);
+  });
 
 function updateModuleHeaderAction(moduleId) {
   if (!modulePopupAction) return;
@@ -1925,129 +1915,8 @@ function updateVibeBadge(m) {
   if (moduleBadges) moduleBadges.updateVibe(m);
 }
 
-// prompt_engineering 모듈의 편집 가능한 textarea 목록 (focus 보존 대상)
-const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
-
-function _capturePromptEngineeringFocus() {
-  const active = document.activeElement;
-  if (!active || !PE_EDITABLE_IDS.includes(active.id)) return null;
-  return {
-    id: active.id,
-    value: active.value,
-    selectionStart: active.selectionStart,
-    selectionEnd: active.selectionEnd,
-    scrollTop: active.scrollTop,
-  };
-}
-
-function _restorePromptEngineeringFocus(snap) {
-  if (!snap) return;
-  const el = document.getElementById(snap.id);
-  if (!el) return;
-  // 편집 중이던 로컬 값 + 커서/스크롤 복원. 서버 broadcast가 현재 편집값과 다른 값을 보내더라도
-  // 사용자 로컬 편집을 우선 (debounce flush 후 서버에 반영됨).
-  el.value = snap.value;
-  el.scrollTop = snap.scrollTop;
-  try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
-  try { el.setSelectionRange(snap.selectionStart, snap.selectionEnd); } catch (e) {}
-}
-
 function renderPromptEngineering(m) {
-  const _peFocusSnap = _capturePromptEngineeringFocus();
-  if (sharedMode) {
-    if (_sharedPEng) {
-      // 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
-      if (_sharedPEng.pre_prompt != null) m.pre_prompt = _sharedPEng.pre_prompt;
-      if (_sharedPEng.post_prompt != null) m.post_prompt = _sharedPEng.post_prompt;
-      if (_sharedPEng.auto_hide != null) m.auto_hide = _sharedPEng.auto_hide;
-      if (_sharedPEng.preset != null) m.preset = _sharedPEng.preset;
-      if (_sharedPEng.preprocessing_options) {
-        if (!m.preprocessing) m.preprocessing = {};
-        for (const [k, v] of Object.entries(_sharedPEng.preprocessing_options)) {
-          m.preprocessing[k] = v;
-        }
-      }
-    }
-    // 렌더링된 최종 상태를 캐시에 전체 스냅샷 (편집 안 한 필드도 포함)
-    _sharedPEng = {
-      pre_prompt: m.pre_prompt || '',
-      post_prompt: m.post_prompt || '',
-      auto_hide: m.auto_hide || '',
-      preset: m.preset || '',
-      preprocessing_options: m.preprocessing ? {...m.preprocessing} : {},
-    };
-    saveSharedSession();
-  }
-  const canSaveCurrent = !!m.preset_can_save_current && !sharedMode;
-  const canDeleteCurrent = !!m.preset_can_delete && !sharedMode;
-
-  const presetOpts = (m.preset_options || [])
-    .map(p => `<option value="${p}"${p === m.preset ? ' selected' : ''}>${p}</option>`).join('');
-
-  const pp = m.preprocessing || {};
-  const ppHtml = PP_OPTIONS.map(([key, label]) =>
-    `<label class="mod-checkbox-item ${PP_OPTION_TONES[key] || ''}">
-      <input type="checkbox" ${pp[key] ? 'checked' : ''} oninput="setPromptEngineeringOption('${key}', this.checked)">
-      <span class="mod-checkbox-label">${label}</span>
-    </label>`
-  ).join('');
-
-  const presetControlHtml = sharedMode ? `
-    <div>
-      <div class="mod-section-label">Preset</div>
-      <select class="mod-select" id="modPreset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
-    </div>
-  ` : `
-    <div>
-      <div class="mod-section-label">Quick Preset</div>
-      <div class="mod-preset-toolbar">
-        <select class="mod-select mod-preset-select" id="modPreset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
-        <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>
-        <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetManagePanel()">Manage</button>
-      </div>
-    </div>
-  `;
-
-  const advancedHtml = sharedMode ? '' : `
-    <div>
-      <div class="mod-section-label">Tools</div>
-      <div class="mod-inline-row">
-        <button class="mod-btn-secondary" onclick="openPeE621Panel()">e621 Auto-Boost Settings</button>
-        <button class="mod-btn-secondary" onclick="openPeDanbooruPanel()">Danbooru Auto-Weight Settings</button>
-      </div>
-      <div class="mod-inline-row">
-        <button class="mod-btn-secondary" onclick="openPeDebugPanel()">Debug Snapshot</button>
-      </div>
-    </div>
-  `;
-
-  moduleBody.innerHTML = `
-    ${presetControlHtml}
-    <div>
-      <div class="mod-section-label">Prefix Prompt</div>
-      <textarea class="mod-textarea mod-textarea-lg" id="modPrePrompt" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value)">${escHtml(m.pre_prompt)}</textarea>
-    </div>
-    <div>
-      <div class="mod-section-label">Postfix Prompt</div>
-      <textarea class="mod-textarea mod-textarea-lg" id="modPostPrompt" placeholder="postfix tags..." oninput="onModTextEdit('prompt_engineering','post_prompt',this.value)">${escHtml(m.post_prompt)}</textarea>
-    </div>
-    <div>
-      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')">Auto-Hide (Filter) <span class="mod-collapse-arrow">▶</span></div>
-      <textarea class="mod-textarea collapsed" id="modAutoHide" placeholder="tags to filter out..." oninput="onModTextEdit('prompt_engineering','auto_hide',this.value)">${escHtml(m.auto_hide)}</textarea>
-    </div>
-    <div>
-      <div class="mod-section-label">Preprocessing Options</div>
-      <div class="mod-checkbox-grid">${ppHtml}</div>
-    </div>
-    ${advancedHtml}
-  `;
-  // Bind autocomplete to pre/post prompt textareas
-  ['modPrePrompt', 'modPostPrompt'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) bindTagAssist(el);
-  });
-  // 재빌드 이전에 편집 중이던 필드 복원 (focus + value + selection)
-  _restorePromptEngineeringFocus(_peFocusSnap);
+  if (promptEngineeringPanelControl) promptEngineeringPanelControl.render(m);
 }
 
 function renderPePresetAddPanel(m) {
@@ -3082,6 +2951,7 @@ Promise.all([
   chunkPanelReady,
   danbooruFeedbackReady,
   promptEngineeringPopupRenderersReady,
+  promptEngineeringPanelReady,
 ])
   .then(() => {
     initHistoryRail();

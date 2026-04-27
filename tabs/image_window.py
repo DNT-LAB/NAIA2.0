@@ -10,9 +10,9 @@ import pandas as pd
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTextEdit, QSplitter, QPushButton,
     QHBoxLayout, QCheckBox, QScrollArea, QMenu, QDialog, QFileDialog, QMessageBox, QApplication,
-    QSpinBox, QRadioButton, QButtonGroup, QFrame, QSlider
+    QSpinBox, QRadioButton, QButtonGroup, QFrame, QSlider, QSplitterHandle
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeData, QUrl
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeData, QUrl, QEvent, QPointF
 from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent, QDragEnterEvent, QDropEvent, QCursor
 from PyQt6.QtWidgets import QWidgetAction
 from PIL import Image, ImageQt
@@ -375,6 +375,127 @@ class ImageLabel(QLabel):
             Qt.TransformationMode.SmoothTransformation
         )
         self.setPixmap(scaled_pixmap)
+
+
+class ReleaseGuardSplitterHandle(QSplitterHandle):
+    """QSplitterHandle release 이벤트 유실 시 드래그 상태를 정리합니다."""
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self._drag_guard_active = False
+        self._release_guard_timer = QTimer(self)
+        self._release_guard_timer.setInterval(80)
+        self._release_guard_timer.timeout.connect(self._finish_if_button_released)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._start_drag_guard()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        try:
+            super().mouseReleaseEvent(event)
+        finally:
+            self._stop_drag_guard()
+
+    def eventFilter(self, obj, event):
+        if self._drag_guard_active:
+            event_type = event.type()
+            if event_type == QEvent.Type.MouseButtonRelease:
+                if obj is not self and getattr(event, "button", lambda: None)() == Qt.MouseButton.LeftButton:
+                    self._force_release(event)
+                return False
+            if event_type in (
+                QEvent.Type.ApplicationDeactivate,
+                QEvent.Type.WindowDeactivate,
+                QEvent.Type.FocusOut,
+            ):
+                self._force_release()
+        return super().eventFilter(obj, event)
+
+    def _start_drag_guard(self):
+        if self._drag_guard_active:
+            return
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+        self._drag_guard_active = True
+        self._release_guard_timer.start()
+
+    def _stop_drag_guard(self):
+        if not self._drag_guard_active:
+            return
+
+        self._drag_guard_active = False
+        self._release_guard_timer.stop()
+
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                app.removeEventFilter(self)
+            except RuntimeError:
+                pass
+            self._restore_splitter_override_cursor()
+
+        if QWidget.mouseGrabber() is self:
+            self.releaseMouse()
+        self.unsetCursor()
+
+    def _force_release(self, event=None):
+        if not self._drag_guard_active:
+            return
+
+        self._send_synthetic_release(event)
+        self._stop_drag_guard()
+
+    def _finish_if_button_released(self):
+        if not self._drag_guard_active:
+            return
+        if not (QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+            self._force_release()
+
+    def _send_synthetic_release(self, event=None):
+        try:
+            if event is not None and hasattr(event, "globalPosition"):
+                global_pos = event.globalPosition()
+            else:
+                global_pos = QPointF(QCursor.pos())
+
+            local_pos = QPointF(self.mapFromGlobal(global_pos.toPoint()))
+            release_event = QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                local_pos,
+                global_pos,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            super().mouseReleaseEvent(release_event)
+        except RuntimeError:
+            pass
+
+    @staticmethod
+    def _restore_splitter_override_cursor():
+        splitter_cursor_shapes = {
+            Qt.CursorShape.SizeVerCursor,
+            Qt.CursorShape.SizeHorCursor,
+            Qt.CursorShape.SplitVCursor,
+            Qt.CursorShape.SplitHCursor,
+        }
+
+        for _ in range(4):
+            override_cursor = QApplication.overrideCursor()
+            if override_cursor is None or override_cursor.shape() not in splitter_cursor_shapes:
+                break
+            QApplication.restoreOverrideCursor()
+
+
+class ReleaseGuardSplitter(QSplitter):
+    def createHandle(self):
+        return ReleaseGuardSplitterHandle(self.orientation(), self)
+
 
 @dataclass
 class HistoryItem:
@@ -1569,18 +1690,19 @@ class ImageWindow(QWidget):
         left_layout.addLayout(control_layout)
 
         # 수직 스플리터 생성
-        image_info_splitter = QSplitter(Qt.Orientation.Vertical)
-        image_info_splitter.setStyleSheet("""
-            QSplitter::handle {
+        image_info_splitter = ReleaseGuardSplitter(Qt.Orientation.Vertical)
+        image_info_splitter.setHandleWidth(get_scaled_size(8))
+        image_info_splitter.setStyleSheet(f"""
+            QSplitter::handle:vertical {{
                 background-color: #555555;
                 border: 1px solid #777777;
-                height: 1px;
-                margin: 0px 1px;
-                border-radius: 1px;
-            }
-            QSplitter::handle:hover {
+                height: {get_scaled_size(6)}px;
+                margin: {get_scaled_size(1)}px 0px;
+                border-radius: {get_scaled_size(2)}px;
+            }}
+            QSplitter::handle:vertical:hover {{
                 background-color: #666666;
-            }
+            }}
         """)
 
         # 3-2-a. 이미지 표시 영역

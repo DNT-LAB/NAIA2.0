@@ -20,6 +20,7 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QFileDialog
@@ -4127,6 +4128,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     app = FastAPI(title="NAIA Remote")
 
     web_dir = Path(__file__).parent.parent / "ui" / "remote_web"
+    js_dir = web_dir / "js"
+    if js_dir.exists():
+        app.mount("/js", StaticFiles(directory=str(js_dir)), name="remote_js")
 
     @app.get("/")
     async def index():

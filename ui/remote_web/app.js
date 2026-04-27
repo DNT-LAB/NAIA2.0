@@ -26,10 +26,34 @@ if (isDesktopShell) document.body.classList.add('desktop-shell');
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
-const QUICK_FILTER_STORAGE_KEY = 'naia_quick_filter_options';
+let quickFilter = null;
+const quickFilterReady = import('./js/features/quickFilter.mjs')
+  .then(({createQuickFilterController}) => {
+    quickFilter = createQuickFilterController({
+      document,
+      localStorage,
+      WebSocket,
+      getWs: () => ws,
+      getRatingState: () => ratingState,
+      syncRatingButtons,
+      computeLocalFilteredCount: _computeLocalFilteredCount,
+      updateSearchCount,
+      saveSharedSession,
+      closeAuxiliaryPopups,
+      escHtml,
+      catStyle,
+      fmtCount,
+      showToast,
+    });
+    quickFilter.bindInputs();
+  })
+  .catch(error => {
+    console.error('Failed to initialize Quick Filter module', error);
+  });
 
 function saveSharedSession() {
   if (!sharedMode) return;
+  const quickState = quickFilter ? quickFilter.getSharedSessionState() : {};
   const data = {
     params: _collectCurrentParams(),
     prompt: promptEdit.value,
@@ -38,9 +62,9 @@ function saveSharedSession() {
     p_eng: _sharedPEng || null,
     cond: _sharedCond || null,
     ratings: Object.keys(ratingState).filter(k => ratingState[k]),
-    tag_filter: tagFilterTags.length ? [...tagFilterTags] : null,
-    tag_filter_exclude: tagFilterExcludeTags.length ? [...tagFilterExcludeTags] : null,
-    tag_filter_active: tagFilterActive,
+    tag_filter: quickState.tag_filter || null,
+    tag_filter_exclude: quickState.tag_filter_exclude || null,
+    tag_filter_active: !!quickState.tag_filter_active,
   };
   for (const [key, cb] of Object.entries(optBoxes)) {
     if (key !== 'auto_generate') data.options[key] = cb.checked;
@@ -333,7 +357,7 @@ function connect() {
             if (d.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
           }).catch(() => {});
           if (!sharedMode) {
-            restoreQuickFilterPreferences();
+            if (quickFilter) quickFilter.restorePreferences();
           }
         }
         // Update search count from prompt_generated
@@ -1681,21 +1705,7 @@ function onSession(m) {
       if (btn) btn.classList.remove('nai-only-disabled');
     });
     clearSharedSession();
-    // Tag filter 상태 리셋
-    tagFilterTags = [];
-    tagFilterExcludeTags = [];
-    tagFilterActive = false;
-    _tfRatingCounts = null;
-    renderTagFilterChips();
-    renderTagFilterExcludeChips();
-    const tfCount = document.getElementById('tagFilterCount');
-    tfCount.textContent = '';
-    tfCount.classList.remove('has-result');
-    const tfToggle = document.getElementById('tagFilterToggle');
-    tfToggle.classList.remove('active');
-    tfToggle.classList.remove('assigned');
-    closeTagFilter();
-    restoreQuickFilterPreferences();
+    if (quickFilter) quickFilter.reset({restoreSaved: true});
   }
   updateModeSelectAvailability();
 }
@@ -1774,21 +1784,7 @@ function _restoreSharedSession() {
     }
   }
   // Tag filter 복원
-  const savedIncludeTags = _normalQuickTags(saved.tag_filter);
-  const savedExcludeTags = _normalQuickTags(saved.tag_filter_exclude);
-  if (savedIncludeTags.length || savedExcludeTags.length) {
-    tagFilterTags = savedIncludeTags;
-    tagFilterExcludeTags = savedExcludeTags;
-    renderTagFilterChips();
-    renderTagFilterExcludeChips();
-    updateQuickFilterHighlight();
-    // 서���에 재적용 (재���결 시 세션 ID 세트 재구축 → 즉시 Assign)
-    // search 완료 후 onTagFilterResult에서 자동 assign (flag 기반)
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      _pendingTfAssignOnRestore = saved.tag_filter_active !== false;
-      ws.send(JSON.stringify({type: 'tag_filter_search', tags: _quickFilterPayload()}));
-    }
-  }
+  if (quickFilter) quickFilter.restoreSharedState(saved);
   // P.Eng / Cond 캐시 복원 (모듈 열 때 사용)
   _sharedPEng = saved.p_eng || null;
   _sharedCond = saved.cond || null;
@@ -4526,7 +4522,8 @@ let _cachedRatingCounts = null; // {g:N, s:N, q:N, e:N} — 서버 search_state�
 
 function _computeLocalFilteredCount() {
   // Tag Filter active 시 tag filter 결과의 rating_counts 사용, 아니면 전체 검색 결과
-  const rc = (tagFilterActive && _tfRatingCounts) ? _tfRatingCounts : _cachedRatingCounts;
+  const quickRatingCounts = quickFilter ? quickFilter.getRatingCounts() : null;
+  const rc = (quickFilter && quickFilter.isActive() && quickRatingCounts) ? quickRatingCounts : _cachedRatingCounts;
   if (!rc || !Object.keys(rc).length) return null;
   let count = 0;
   for (const k of ['g','s','q','e']) {
@@ -4555,7 +4552,7 @@ function toggleRating(r) {
       const active = Object.keys(ratingState).filter(k => ratingState[k]);
       ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
     }
-    saveQuickFilterPreferences();
+    if (quickFilter) quickFilter.savePreferences();
     return;
   }
   // Send to server for instant count update
@@ -4563,7 +4560,7 @@ function toggleRating(r) {
     const active = Object.keys(ratingState).filter(k => ratingState[k]);
     ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
   }
-  saveQuickFilterPreferences();
+  if (quickFilter) quickFilter.savePreferences();
 }
 
 function onFilterReset(m) {
@@ -4572,27 +4569,14 @@ function onFilterReset(m) {
   ratingState = {g: true, s: true, q: true, e: true};
   syncRatingButtons();
   // Tag filter 전체 초기화 (서버 전송 없이 — 이미 서버에서 처리됨)
-  tagFilterTags = [];
-  tagFilterExcludeTags = [];
-  tagFilterActive = false;
-  _tfRatingCounts = null;
-  _pendingTfAssignOnRestore = false;
-  renderTagFilterChips();
-  renderTagFilterExcludeChips();
-  const countEl = document.getElementById('tagFilterCount');
-  if (countEl) { countEl.textContent = ''; countEl.classList.remove('has-result'); }
-  const toggleBtn = document.getElementById('tagFilterToggle');
-  if (toggleBtn) { toggleBtn.classList.remove('active'); toggleBtn.classList.remove('assigned'); }
-  const assignBtn = document.getElementById('tagFilterAssignBtn');
-  if (assignBtn) assignBtn.disabled = true;
-  closeTagFilter();
+  if (quickFilter) quickFilter.reset({persist: false});
   // Count/Rating 갱신
   if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
   if (m.count != null) updateSearchCount(m.count);
   if (!sharedMode) {
-    restoreQuickFilterPreferences();
+    if (quickFilter) quickFilter.restorePreferences();
   } else {
-    updateQuickFilterHighlight();
+    if (quickFilter) quickFilter.updateHighlight();
   }
 }
 
@@ -4600,7 +4584,7 @@ function onRatingUpdate(m) {
   if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
   if (sharedMode) {
     // Tag filter active 시 로컬 계산 우선 (서버 count는 전체 풀 기준이라 tag_filter 미반영)
-    if (tagFilterActive && _tfRatingCounts) {
+    if (quickFilter && quickFilter.isActive() && quickFilter.getRatingCounts()) {
       const localCount = _computeLocalFilteredCount();
       if (localCount !== null) { updateSearchCount(localCount); return; }
     }
@@ -4615,7 +4599,7 @@ function onRatingUpdate(m) {
     }
     syncRatingButtons();
   }
-  updateQuickFilterHighlight();
+  if (quickFilter) quickFilter.updateHighlight();
 }
 
 function syncRatingButtons() {
@@ -4623,7 +4607,7 @@ function syncRatingButtons() {
     if (!btn.dataset.r) return; // Filter 버튼 등 data-r 없는 요소 스킵
     btn.classList.toggle('active', !!ratingState[btn.dataset.r]);
   });
-  updateQuickFilterHighlight();
+  if (quickFilter) quickFilter.updateHighlight();
 }
 
 function updateSearchCount(count) {
@@ -4653,7 +4637,7 @@ function onSearchState(m) {
       }
     }
   }
-  const savedQuick = !sharedMode ? loadQuickFilterPreferences() : null;
+  const savedQuick = (!sharedMode && quickFilter) ? quickFilter.loadPreferences() : null;
   if (savedQuick) {
     // localStorage rating preference wins over server defaults after reconnect/search refresh.
     for (const k of ['g', 's', 'q', 'e']) {
@@ -4739,7 +4723,7 @@ function doSearch() {
     if (el) ratingState[k] = el.checked;
   }
   syncRatingButtons();
-  saveQuickFilterPreferences();
+  if (quickFilter) quickFilter.savePreferences();
   const ratings = {};
   for (const k of ['e','q','s','g']) {
     ratings['rating_' + k] = ratingState[k];
@@ -5444,422 +5428,21 @@ document.addEventListener('keydown', e => {
 negEdit.addEventListener('input', onPromptEdit);
 
 // ---- Tag Filter ----
-let tagFilterTags = [];
-let tagFilterExcludeTags = [];
-let tagFilterActive = false;
-let _tfAcResults = [];
-let _tfAcSel = -1;
-let _tfAcTimer = null;
-let _pendingTfAssignOnRestore = false;
-let _tfRatingCounts = null; // tag filter 검색 결과의 rating별 카운트
-
-function _normalQuickRatings(value) {
-  const allowed = ['g', 's', 'q', 'e'];
-  if (!Array.isArray(value)) return allowed;
-  const picked = allowed.filter(k => value.includes(k));
-  return picked.length ? picked : allowed;
-}
-
-function _normalQuickTags(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const out = [];
-  value.forEach(v => {
-    const tag = String(v || '').trim().replace(/^-+/, '').replace(/ /g, '_');
-    if (!tag || seen.has(tag)) return;
-    seen.add(tag);
-    out.push(tag);
-  });
-  return out;
-}
-
-function _collectQuickFilterPreferences() {
-  return {
-    ratings: Object.keys(ratingState).filter(k => ratingState[k]),
-    tag_filter: [...tagFilterTags],
-    tag_filter_exclude: [...tagFilterExcludeTags],
-    tag_filter_active: tagFilterActive,
-  };
-}
-
-function _normalQuickFilterPreferences(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const include = _normalQuickTags(raw.tag_filter || raw.include || raw.include_tags);
-  const exclude = _normalQuickTags(raw.tag_filter_exclude || raw.exclude || raw.exclude_tags);
-  return {
-    ratings: _normalQuickRatings(raw.ratings),
-    tag_filter: include,
-    tag_filter_exclude: exclude,
-    tag_filter_active: !!raw.tag_filter_active && (include.length > 0 || exclude.length > 0),
-  };
-}
-
-function _quickFilterPayload() {
-  return [...tagFilterTags, ...tagFilterExcludeTags.map(t => '-' + t)];
-}
-
-function _hasCustomQuickFilter(pref) {
-  const data = pref || _collectQuickFilterPreferences();
-  const ratings = _normalQuickRatings(data.ratings);
-  const allRatings = ratings.length === 4 && ['g', 's', 'q', 'e'].every(k => ratings.includes(k));
-  return !allRatings
-    || (data.tag_filter && data.tag_filter.length > 0)
-    || (data.tag_filter_exclude && data.tag_filter_exclude.length > 0)
-    || !!data.tag_filter_active;
-}
-
-function updateQuickFilterHighlight() {
-  const toggleBtn = document.getElementById('tagFilterToggle');
-  if (!toggleBtn) return;
-  const control = toggleBtn.closest('.prompt-quick-control');
-  const highlighted = _hasCustomQuickFilter();
-  if (control) control.classList.toggle('quick-filter-memory', highlighted);
-  toggleBtn.title = highlighted
-    ? 'Quick filter settings are saved'
-    : 'Open quick filter';
-}
-
-function saveQuickFilterPreferences() {
-  const data = _collectQuickFilterPreferences();
-  try {
-    if (_hasCustomQuickFilter(data)) {
-      localStorage.setItem(QUICK_FILTER_STORAGE_KEY, JSON.stringify(data));
-    } else {
-      localStorage.removeItem(QUICK_FILTER_STORAGE_KEY);
-    }
-  } catch(_) {}
-  updateQuickFilterHighlight();
-  saveSharedSession();
-}
-
-function loadQuickFilterPreferences() {
-  try {
-    const raw = localStorage.getItem(QUICK_FILTER_STORAGE_KEY);
-    return raw ? _normalQuickFilterPreferences(JSON.parse(raw)) : null;
-  } catch(_) {
-    return null;
-  }
-}
-
-function applyQuickFilterPreferences(saved, opts = {}) {
-  const pref = _normalQuickFilterPreferences(saved);
-  if (!pref) {
-    updateQuickFilterHighlight();
-    return false;
-  }
-
-  for (const k of ['g', 's', 'q', 'e']) {
-    ratingState[k] = pref.ratings.includes(k);
-  }
-  tagFilterTags = [...pref.tag_filter];
-  tagFilterExcludeTags = [...pref.tag_filter_exclude];
-  tagFilterActive = pref.tag_filter_active;
-  _tfRatingCounts = null;
-  renderTagFilterChips();
-  renderTagFilterExcludeChips();
-  syncRatingButtons();
-  const localCount = _computeLocalFilteredCount();
-  if (localCount !== null) updateSearchCount(localCount);
-
-  const countEl = document.getElementById('tagFilterCount');
-  if (countEl) {
-    countEl.textContent = '';
-    countEl.classList.remove('has-result');
-  }
-  const assignBtn = document.getElementById('tagFilterAssignBtn');
-  if (assignBtn) assignBtn.disabled = true;
-  const toggleBtn = document.getElementById('tagFilterToggle');
-  if (toggleBtn) {
-    toggleBtn.classList.remove('active');
-    toggleBtn.classList.toggle('assigned', tagFilterActive);
-  }
-  updateQuickFilterHighlight();
-
-  const shouldSend = opts.send !== false;
-  if (shouldSend && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'set_active_ratings', ratings: pref.ratings}));
-    const payload = _quickFilterPayload();
-    if (payload.length) {
-      _pendingTfAssignOnRestore = tagFilterActive;
-      ws.send(JSON.stringify({type: 'tag_filter_search', tags: payload}));
-    }
-  }
-  return true;
-}
-
-function restoreQuickFilterPreferences(opts = {}) {
-  const saved = loadQuickFilterPreferences();
-  if (!saved) {
-    updateQuickFilterHighlight();
-    return false;
-  }
-  return applyQuickFilterPreferences(saved, opts);
-}
-
-function toggleTagFilter() {
-  const popup = document.getElementById('tagFilterPopup');
-  if (popup.classList.contains('open')) {
-    closeTagFilter();
-  } else {
-    openTagFilter();
-  }
-}
-
-function openTagFilter() {
-  const popup = document.getElementById('tagFilterPopup');
-  closeAuxiliaryPopups(popup);
-  popup.classList.add('open');
-  document.getElementById('tagFilterToggle').classList.add('active');
-  renderTagFilterChips();
-  document.getElementById('tagFilterInput').focus();
-}
-
-function closeTagFilter() {
-  const popup = document.getElementById('tagFilterPopup');
-  popup.classList.remove('open');
-  if (!tagFilterActive) {
-    document.getElementById('tagFilterToggle').classList.remove('active');
-  }
-  _clearTfAc();
-}
-
-function renderTagFilterChips() {
-  const el = document.getElementById('tagFilterChips');
-  if (!tagFilterTags.length) { el.innerHTML = ''; return; }
-  el.innerHTML = tagFilterTags.map((t, i) =>
-    `<span class="tag-filter-chip">${escHtml(t)}<span class="chip-x" onclick="removeTagFilterTag(${i})">&times;</span></span>`
-  ).join('');
-}
-
-function renderTagFilterExcludeChips() {
-  const el = document.getElementById('tagFilterExcludeChips');
-  if (!tagFilterExcludeTags.length) { el.innerHTML = ''; return; }
-  el.innerHTML = tagFilterExcludeTags.map((t, i) =>
-    `<span class="tag-filter-chip exclude">${escHtml(t)}<span class="chip-x" onclick="removeTagFilterExcludeTag(${i})">&times;</span></span>`
-  ).join('');
-}
-
-function removeTagFilterExcludeTag(idx) {
-  tagFilterExcludeTags.splice(idx, 1);
-  renderTagFilterExcludeChips();
-  tagFilterActive = false;
-  _tfRatingCounts = null;
-  document.getElementById('tagFilterAssignBtn').disabled = true;
-  const rfCountEl = document.getElementById('tagFilterCount');
-  rfCountEl.textContent = '';
-  rfCountEl.classList.remove('has-result');
-  document.getElementById('tagFilterToggle').classList.remove('assigned');
-  if (!tagFilterTags.length && !tagFilterExcludeTags.length) {
-    clearTagFilter();
-  } else if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'tag_filter_clear'}));
-  }
-  saveQuickFilterPreferences();
-}
-
-function removeTagFilterTag(idx) {
-  tagFilterTags.splice(idx, 1);
-  renderTagFilterChips();
-  // 태그 변경 → 기존 Assign 무효화, 재검색 필요
-  tagFilterActive = false;
-  _tfRatingCounts = null;
-  document.getElementById('tagFilterAssignBtn').disabled = true;
-  const rfCountEl = document.getElementById('tagFilterCount');
-  rfCountEl.textContent = '';
-  rfCountEl.classList.remove('has-result');
-  document.getElementById('tagFilterToggle').classList.remove('assigned');
-  if (!tagFilterTags.length && !tagFilterExcludeTags.length) {
-    clearTagFilter();
-  } else if (ws && ws.readyState === WebSocket.OPEN) {
-    // 서버 확정 상태도 해제 (stale filter 방지)
-    ws.send(JSON.stringify({type: 'tag_filter_clear'}));
-  }
-  saveQuickFilterPreferences();
-}
-
-function applyTagFilter() {
-  if (!tagFilterTags.length && !tagFilterExcludeTags.length) return;
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  saveQuickFilterPreferences();
-  ws.send(JSON.stringify({type: 'tag_filter_search', tags: _quickFilterPayload()}));
-}
-
-function assignTagFilter() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({type: 'tag_filter_assign'}));
-}
-
-function clearTagFilter() {
-  tagFilterTags = [];
-  tagFilterExcludeTags = [];
-  tagFilterActive = false;
-  _tfRatingCounts = null;
-  renderTagFilterChips();
-  renderTagFilterExcludeChips();
-  const countEl = document.getElementById('tagFilterCount');
-  countEl.textContent = '';
-  countEl.classList.remove('has-result');
-  const toggleBtn = document.getElementById('tagFilterToggle');
-  toggleBtn.classList.remove('active');
-  toggleBtn.classList.remove('assigned');
-  document.getElementById('tagFilterAssignBtn').disabled = true;
-  // Prompt: 카운트를 전체 GSQE 기준으로 복원
-  const restored = _computeLocalFilteredCount();
-  if (restored !== null) updateSearchCount(restored);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'tag_filter_clear'}));
-  }
-  saveQuickFilterPreferences();
-}
-
-function onTagFilterResult(m) {
-  const assignBtn = document.getElementById('tagFilterAssignBtn');
-  _tfRatingCounts = m.rating_counts || null;
-  const countEl = document.getElementById('tagFilterCount');
-  if (m.count > 0) {
-    // Search 성공 → Assign 활성화 (아직 확정 아님)
-    countEl.textContent = `${m.count.toLocaleString()} matched`;
-    countEl.classList.add('has-result');
-    assignBtn.disabled = false;
-    // 세션 복원 시 자동 assign (search 완료 후 안전하게)
-    if (_pendingTfAssignOnRestore) {
-      _pendingTfAssignOnRestore = false;
-      assignTagFilter();
-    }
-  } else {
-    _pendingTfAssignOnRestore = false;
-    countEl.textContent = m.count === 0 && m.tags && m.tags.length ? 'No matches' : '';
-    countEl.classList.remove('has-result');
-    assignBtn.disabled = true;
-  }
-}
-
-function onTagFilterAssigned(m) {
-  tagFilterActive = true;
-  const toggleBtn = document.getElementById('tagFilterToggle');
-  toggleBtn.classList.remove('active');
-  toggleBtn.classList.add('assigned');
-  const countEl = document.getElementById('tagFilterCount');
-  countEl.textContent = `${(m.count || 0).toLocaleString()} assigned`;
-  countEl.classList.add('has-result');
-  document.getElementById('tagFilterAssignBtn').disabled = true;
-  saveQuickFilterPreferences();
-  // Prompt: 카운트를 tag filter + GSQE 교집합으로 갱신
-  if (_tfRatingCounts) {
-    let filtered = 0;
-    for (const k of ['g','s','q','e']) {
-      if (ratingState[k]) filtered += (_tfRatingCounts[k] || 0);
-    }
-    updateSearchCount(filtered);
-  }
-  showToast(`Tag filter assigned: ${(m.count || 0).toLocaleString()} rows`, 'success');
-}
-
-let _tfAcTarget = 'include'; // 'include' | 'exclude'
-
-function onTagFilterAcResult(m) {
-  if (!document.getElementById('tagFilterPopup').classList.contains('open')) return;
-  const id = _tfAcTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
-  const input = document.getElementById(id);
-  if (!input || input.value.trim().length < 2) return;
-  _tfAcResults = m.results || [];
-  _tfAcSel = -1;
-  _renderTfAc();
-}
-
-// Tag filter autocomplete (shared for include & exclude inputs)
-function _bindTfAcInput(inputId, target) {
-  const input = document.getElementById(inputId);
-  if (!input) return;
-
-  input.addEventListener('focus', function() { _tfAcTarget = target; });
-
-  input.addEventListener('input', function() {
-    _tfAcTarget = target;
-    const q = this.value.trim();
-    if (q.length < 2) { _clearTfAc(); return; }
-    clearTimeout(_tfAcTimer);
-    _tfAcTimer = setTimeout(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({type: 'tag_filter_ac', query: q}));
-      }
-    }, 150);
-  });
-
-  input.addEventListener('keydown', function(e) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      _tfAcSel = Math.min(_tfAcSel + 1, _tfAcResults.length - 1);
-      _renderTfAc();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      _tfAcSel = Math.max(_tfAcSel - 1, -1);
-      _renderTfAc();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (_tfAcSel >= 0 && _tfAcResults[_tfAcSel]) {
-        _selectTfAc(_tfAcResults[_tfAcSel].tag);
-      } else if (this.value.trim()) {
-        _selectTfAc(this.value.trim());
-      }
-    } else if (e.key === 'Escape') {
-      _clearTfAc();
-    }
-  });
-}
-_bindTfAcInput('tagFilterInput', 'include');
-_bindTfAcInput('tagFilterExcludeInput', 'exclude');
-
-function _selectTfAc(tag) {
-  const clean = tag.replace(/ /g, '_');
-  if (_tfAcTarget === 'exclude') {
-    if (!tagFilterExcludeTags.includes(clean)) {
-      tagFilterExcludeTags.push(clean);
-      renderTagFilterExcludeChips();
-      saveQuickFilterPreferences();
-    }
-    document.getElementById('tagFilterExcludeInput').value = '';
-  } else {
-    if (!tagFilterTags.includes(clean)) {
-      tagFilterTags.push(clean);
-      renderTagFilterChips();
-      saveQuickFilterPreferences();
-    }
-    document.getElementById('tagFilterInput').value = '';
-  }
-  _clearTfAc();
-}
-
-function _clearTfAc() {
-  _tfAcResults = [];
-  _tfAcSel = -1;
-  document.getElementById('tagFilterAc').innerHTML = '';
-}
-
-
-function _renderTfAc() {
-  const el = document.getElementById('tagFilterAc');
-  if (!_tfAcResults.length) { el.innerHTML = ''; return; }
-  let html = '<div class="tag-ac-list">';
-  _tfAcResults.forEach((r, i) => {
-    const sel = i === _tfAcSel ? ' selected' : '';
-    const tagColor = catStyle(r.cat);
-    html += `<div class="tag-ac-item${sel}" data-idx="${i}">` +
-      `<span class="tag-ac-tag"${tagColor}>${escHtml(r.tag)}</span>` +
-      `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
-      `<span class="tag-ac-count">${fmtCount(r.count)}</span>` +
-      '</div>';
-  });
-  html += '</div>';
-  el.innerHTML = html;
-  el.querySelectorAll('.tag-ac-item').forEach(item => {
-    item.addEventListener('mousedown', e => {
-      e.preventDefault();
-      _selectTfAc(_tfAcResults[+item.dataset.idx].tag);
-    });
-  });
-}
-
-initHistoryRail();
-initResultInfoResizer();
-connect();
+function toggleTagFilter() { if (quickFilter) quickFilter.toggle(); }
+function openTagFilter() { if (quickFilter) quickFilter.open(); }
+function closeTagFilter() { if (quickFilter) quickFilter.close(); }
+function renderTagFilterChips() { /* rendered by quickFilter controller */ }
+function renderTagFilterExcludeChips() { /* rendered by quickFilter controller */ }
+function removeTagFilterExcludeTag(idx) { if (quickFilter) quickFilter.removeExcludeTag(idx); }
+function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag(idx); }
+function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
+function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
+function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
+function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
+function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
+function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
+quickFilterReady.finally(() => {
+  initHistoryRail();
+  initResultInfoResizer();
+  connect();
+});

@@ -3,6 +3,7 @@ export function createMobileViewportController({
   document,
   isPC,
   relayoutFloatingPanels,
+  positionTagTooltip = () => {},
   getTagTooltip,
 }) {
   let keyboardOpen = false;
@@ -21,6 +22,7 @@ export function createMobileViewportController({
         modulePopup.style.maxHeight = visualViewport.height + 'px';
       }
       relayoutFloatingPanels();
+      positionTagTooltip();
       const tagTooltip = getTagTooltip();
       if (tagTooltip) {
         tagTooltip.style.top = (visualViewport.offsetTop + 4) + 'px';
@@ -46,6 +48,7 @@ export function createMobileViewportController({
           modulePopup.style.maxHeight = '';
         }
         relayoutFloatingPanels();
+        positionTagTooltip();
         const tagTooltip = getTagTooltip();
         if (tagTooltip) {
           tagTooltip.style.top = '';
@@ -61,6 +64,7 @@ export function createMobileViewportController({
 
   window.addEventListener('resize', () => {
     relayoutFloatingPanels();
+    positionTagTooltip();
   });
 
   function isKeyboardOpen() {

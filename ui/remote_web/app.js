@@ -394,6 +394,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
       document,
       isPC,
       relayoutFloatingPanels,
+      positionTagTooltip,
       getTagTooltip: () => tagTooltip,
     });
   })
@@ -2475,6 +2476,51 @@ function _syncTooltipSide() {
   tagTooltip.classList.toggle('left-side', !!inModule);
 }
 
+function positionTagTooltip() {
+  if (!tagTooltip || window.innerWidth < 768) {
+    tagTooltip?.style.removeProperty('--tag-tooltip-top');
+    tagTooltip?.style.removeProperty('--tag-tooltip-left');
+    tagTooltip?.style.removeProperty('--tag-tooltip-max-width');
+    tagTooltip?.style.removeProperty('--tag-tooltip-max-height');
+    return;
+  }
+
+  const viewerWrapper = document.querySelector('.viewer-wrapper');
+  const tabBar = document.querySelector('.right-tab-bar');
+  const viewerRect = viewerWrapper?.getBoundingClientRect();
+  const tabRect = tabBar?.getBoundingClientRect();
+  const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+  const viewportTop = window.visualViewport ? window.visualViewport.offsetTop : 0;
+  const safeGap = 10;
+  const sideGap = 22;
+  const safeTop = tabRect
+    ? tabRect.bottom + safeGap
+    : viewportTop + 44;
+  const top = Math.max(viewportTop + safeGap, safeTop);
+  const maxHeight = Math.max(180, viewportHeight - (top - viewportTop) - safeGap);
+
+  tagTooltip.style.setProperty('--tag-tooltip-top', `${Math.round(top)}px`);
+  tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(maxHeight)}px`);
+
+  if (tagTooltip.classList.contains('left-side')) {
+    tagTooltip.style.removeProperty('--tag-tooltip-left');
+    tagTooltip.style.removeProperty('--tag-tooltip-max-width');
+    return;
+  }
+
+  const left = viewerRect
+    ? Math.min(viewerRect.left + sideGap, viewportWidth - 320 - safeGap)
+    : 494;
+  const availableWidth = viewerRect
+    ? viewerRect.right - left - sideGap
+    : viewportWidth - left - safeGap;
+  const maxWidth = Math.max(320, Math.min(680, availableWidth));
+
+  tagTooltip.style.setProperty('--tag-tooltip-left', `${Math.round(Math.max(safeGap, left))}px`);
+  tagTooltip.style.setProperty('--tag-tooltip-max-width', `${Math.round(maxWidth)}px`);
+}
+
 const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
 const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4' };
 function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
@@ -2570,6 +2616,7 @@ function onTagLookupResult(m) {
   tagTooltip.classList.remove('ac-mode');
   tagTooltip.classList.add('open');
   _syncTooltipSide();
+  positionTagTooltip();
   // Click on related/implies/character tag → insert next to current token
   tagTooltip.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
     el.addEventListener('mousedown', e => {
@@ -2673,6 +2720,7 @@ function renderAutocomplete() {
   tagTooltip.innerHTML = html;
   tagTooltip.classList.add('open', 'ac-mode');
   _syncTooltipSide();
+  positionTagTooltip();
   tagTooltip.querySelectorAll('.tag-ac-item').forEach(el => {
     el.addEventListener('mousedown', e => {
       e.preventDefault();

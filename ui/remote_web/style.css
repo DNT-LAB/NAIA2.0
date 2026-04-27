@@ -3124,9 +3124,11 @@ body.resizing-result-info {
   .prompt-float { left: auto; right: 10px; max-width: 420px; }
   /* PC: tag tooltip at top-left of viewer area */
   .tag-tooltip {
-    top: 10px; left: 494px; right: auto;
-    max-width: 440px;
-    max-height: calc(100dvh - 80px);
+    top: var(--tag-tooltip-top, 44px);
+    left: var(--tag-tooltip-left, 494px);
+    right: auto;
+    max-width: var(--tag-tooltip-max-width, 440px);
+    max-height: var(--tag-tooltip-max-height, calc(100dvh - 112px));
     overflow-y: auto;
     padding: 8px 14px;
     font-size: 11px;

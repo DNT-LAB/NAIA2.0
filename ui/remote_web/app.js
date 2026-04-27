@@ -38,6 +38,7 @@ let automationPanel = null;
 let characterPanel = null;
 let conditionalPromptPanel = null;
 let wildcardPanel = null;
+let wildcardManagerPanel = null;
 let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
@@ -270,6 +271,19 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
+  });
+const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs')
+  .then(({createWildcardManagerPanel}) => {
+    wildcardManagerPanel = createWildcardManagerPanel({
+      document,
+      moduleBody,
+      escHtml,
+      setModuleParam,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize wildcard manager panel module', error);
   });
 const chunkPanelReady = import('./js/features/chunkPanel.mjs')
   .then(({createChunkPanel}) => {
@@ -2876,156 +2890,48 @@ function isChunkOpen() {
 }
 
 // ---- Wildcard Manager (file browser + editor + generator) ----
-let wcCurrentPath = '';
-let wcEditMode = false;
-
 function wcOpenBrowser() {
-  setModuleParam('wildcard', 'get_file_tree', '');
+  if (wildcardManagerPanel) wildcardManagerPanel.openBrowser();
 }
 
 function onWildcardManager(m) {
-  if (m.action === 'file_tree') wcRenderTree(m.tree);
-  else if (m.action === 'file_content') wcRenderEditor(m.path, m.content);
-  else if (m.action === 'preview_result') wcShowPreview(m.name, m.result);
-  else if (m.action === 'save_ok') showToast('File saved', 'success');
-  else if (m.action === 'file_deleted') { showToast('File deleted', 'success'); wcCurrentPath = ''; }
+  if (wildcardManagerPanel) wildcardManagerPanel.onMessage(m);
 }
 
 function wcRenderTree(tree) {
-  let html = '<div class="mod-section" style="display:flex;gap:6px;margin-bottom:8px">'
-    + '<button class="mod-btn-sm" onclick="openModule(\'wildcard\')">← Back</button>'
-    + '<button class="mod-btn-sm" onclick="wcPromptNewFile()">+ New File</button>'
-    + '<button class="mod-btn-sm" onclick="setModuleParam(\'wildcard\',\'get_file_tree\',\'\')">Refresh</button>'
-    + '</div>';
-  html += '<div class="mod-wc-tree">';
-  if (!tree || !tree.length) {
-    html += '<div class="mod-empty">No wildcard files found</div>';
-  } else {
-    for (const item of tree) {
-      if (item.type === 'folder') {
-        html += `<div class="wc-folder"><div class="wc-folder-name" onclick="this.parentElement.classList.toggle('open')">📁 ${escHtml(item.name)} <span class="wc-count">(${item.files.length})</span></div>`;
-        html += '<div class="wc-folder-children">';
-        for (const f of item.files) {
-          html += `<div class="wc-file" onclick="setModuleParam('wildcard','read_file','${escHtml(f.path)}')">📄 ${escHtml(f.name)} <span class="wc-count">${f.lines}L</span></div>`;
-        }
-        html += '</div></div>';
-      } else {
-        html += `<div class="wc-file" onclick="setModuleParam('wildcard','read_file','${escHtml(item.path)}')">📄 ${escHtml(item.name)} <span class="wc-count">${item.lines}L</span></div>`;
-      }
-    }
-  }
-  html += '</div>';
-  // Generator guide
-  html += `<div class="mod-section" style="margin-top:10px">
-    <div class="mod-section-label">Wildcard Syntax Guide</div>
-    <div class="wc-syntax-guide">
-      <div><code>__name__</code> — Random pick from <code>name.txt</code></div>
-      <div><code>__*name__</code> — Sequential (ordered)</div>
-      <div><code>__*master__</code> + <code>__$master:slave__</code> — Dependent</div>
-      <div><code>200:text</code> — Weighted entry (default 100)</div>
-      <div><code>__folder/name__</code> — Subfolder path</div>
-    </div>
-  </div>`;
-  moduleBody.innerHTML = html;
+  if (wildcardManagerPanel) wildcardManagerPanel.renderTree(tree);
 }
 
 function wcRenderEditor(path, content) {
-  wcCurrentPath = path;
-  wcEditMode = false;
-  const fname = path.split('/').pop();
-  const wcName = fname.replace('.txt', '');
-  moduleBody.innerHTML = `
-    <div class="mod-section" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <button class="mod-btn-sm" onclick="setModuleParam('wildcard','get_file_tree','')">← Tree</button>
-      <span class="wc-file-path">${escHtml(path)}</span>
-      <span style="flex:1"></span>
-      <button class="mod-btn-sm" id="wcEditBtn" onclick="wcToggleEdit()">Edit</button>
-      <button class="mod-btn-sm mod-btn-danger" onclick="wcDeleteFile()">Delete</button>
-    </div>
-    <div class="mod-section">
-      <textarea class="wc-editor" id="wcEditor" readonly>${escHtml(content)}</textarea>
-    </div>
-    <div class="mod-section" id="wcEditActions" style="display:none;gap:6px;flex-wrap:wrap">
-      <button class="mod-btn-sm" style="background:#4CAF50;color:#fff" onclick="wcSaveFile()">Save</button>
-      <button class="mod-btn-sm" onclick="wcCancelEdit()">Cancel</button>
-    </div>
-    <div class="mod-section">
-      <div class="mod-section-label">Quick Add Entry</div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input type="text" class="wc-add-input" id="wcAddText" placeholder="tag or prompt text">
-        <button class="mod-btn-sm" onclick="wcAddEntry()">Add</button>
-      </div>
-    </div>
-    <div class="mod-section">
-      <div class="mod-section-label">Preview <code>__${escHtml(wcName)}__</code></div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="mod-btn-sm" onclick="setModuleParam('wildcard','preview_wildcard','${escHtml(wcName)}')">Roll ×5</button>
-        <div class="wc-preview" id="wcPreview"></div>
-      </div>
-    </div>
-  `;
+  if (wildcardManagerPanel) wildcardManagerPanel.renderEditor(path, content);
 }
 
 function wcToggleEdit() {
-  const editor = document.getElementById('wcEditor');
-  const actions = document.getElementById('wcEditActions');
-  const btn = document.getElementById('wcEditBtn');
-  if (!editor) return;
-  wcEditMode = !wcEditMode;
-  editor.readOnly = !wcEditMode;
-  editor.classList.toggle('editing', wcEditMode);
-  actions.style.display = wcEditMode ? 'flex' : 'none';
-  btn.textContent = wcEditMode ? 'Cancel' : 'Edit';
+  if (wildcardManagerPanel) wildcardManagerPanel.toggleEdit();
 }
 
 function wcCancelEdit() {
-  // Reload file to discard changes
-  if (wcCurrentPath) setModuleParam('wildcard', 'read_file', wcCurrentPath);
+  if (wildcardManagerPanel) wildcardManagerPanel.cancelEdit();
 }
 
 function wcSaveFile() {
-  const editor = document.getElementById('wcEditor');
-  if (!editor || !wcCurrentPath) return;
-  setModuleParam('wildcard', 'save_file', JSON.stringify({path: wcCurrentPath, content: editor.value}));
+  if (wildcardManagerPanel) wildcardManagerPanel.saveFile();
 }
 
 function wcDeleteFile() {
-  if (!wcCurrentPath) return;
-  if (!confirm('Delete ' + wcCurrentPath + '?')) return;
-  setModuleParam('wildcard', 'delete_file', wcCurrentPath);
-  setModuleParam('wildcard', 'get_file_tree', '');
+  if (wildcardManagerPanel) wildcardManagerPanel.deleteFile();
 }
 
 function wcAddEntry() {
-  const text = document.getElementById('wcAddText');
-  const editor = document.getElementById('wcEditor');
-  if (!text || !editor || !text.value.trim()) return;
-  const line = text.value.trim();
-  // Append to editor
-  const current = editor.value;
-  editor.value = current ? current + '\n' + line : line;
-  text.value = '';
-  // Auto-enable edit mode and save
-  if (!wcEditMode) {
-    wcEditMode = true;
-    editor.readOnly = false;
-    editor.classList.add('editing');
-    const actions = document.getElementById('wcEditActions');
-    if (actions) actions.style.display = 'flex';
-    const btn = document.getElementById('wcEditBtn');
-    if (btn) btn.textContent = 'Cancel';
-  }
+  if (wildcardManagerPanel) wildcardManagerPanel.addEntry();
 }
 
 function wcShowPreview(name, result) {
-  const el = document.getElementById('wcPreview');
-  if (el) el.innerHTML = escHtml(result).replace(/\n/g, '<br>');
+  if (wildcardManagerPanel) wildcardManagerPanel.showPreview(name, result);
 }
 
 function wcPromptNewFile() {
-  const name = prompt('New wildcard filename (e.g. "my_tags" or "folder/my_tags"):');
-  if (!name || !name.trim()) return;
-  setModuleParam('wildcard', 'create_file', name.trim());
+  if (wildcardManagerPanel) wildcardManagerPanel.promptNewFile();
 }
 
 // ---- Image upload helper ----
@@ -4243,6 +4149,7 @@ Promise.all([
   characterPanelReady,
   conditionalPromptPanelReady,
   wildcardPanelReady,
+  wildcardManagerPanelReady,
   chunkPanelReady,
 ])
   .then(() => {

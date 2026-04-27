@@ -317,7 +317,7 @@ header {
   flex-shrink: 0;
   display: flex;
   align-items: stretch;
-  min-height: 36px;
+  min-height: 30px;
   background: linear-gradient(180deg, rgba(34,34,34,0.96), rgba(27,27,27,0.98));
   border-bottom: 1px solid rgba(255,255,255,0.08);
   overflow-x: auto;
@@ -330,18 +330,18 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 0 15px;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 11px;
   background: rgba(36,36,36,0.7);
   border: 0;
   border-left: 1px solid rgba(255,255,255,0.055);
   border-right: 1px solid rgba(0,0,0,0.42);
-  border-bottom: 2px solid transparent;
-  color: rgba(215,215,222,0.72);
+  border-bottom: 1px solid transparent;
+  color: rgba(210,210,218,0.66);
   font-family: var(--font-main);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   letter-spacing: 0;
   white-space: nowrap;
   cursor: pointer;
@@ -368,10 +368,10 @@ header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
   font-family: var(--font-main);
-  font-size: 13px;
+  font-size: 10px;
   line-height: 1;
   color: rgba(225,225,232,0.74);
   background: transparent;
@@ -446,17 +446,17 @@ header {
 }
 @media (max-width: 767px) {
   .right-tab-bar {
-    min-height: 32px;
+    min-height: 28px;
   }
   .right-tab-btn {
-    min-height: 32px;
-    padding: 0 10px;
-    font-size: 11px;
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 10px;
   }
   .right-tab-icon {
-    width: 14px;
-    height: 14px;
-    font-size: 8px;
+    width: 12px;
+    height: 12px;
+    font-size: 9px;
   }
   .right-tab-btn:not([data-right-tab="result"]):not([data-right-tab="settings"]) {
     display: none;

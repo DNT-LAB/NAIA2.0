@@ -7370,6 +7370,8 @@ if __name__ == "__main__":
 
     setup_webengine()
     app = QApplication(sys.argv)
+    from ui.combobox_popup_guard import install_combobox_popup_guard
+    install_combobox_popup_guard(app)
 
     # 폰트 설정
     loaded_fonts = load_custom_fonts()

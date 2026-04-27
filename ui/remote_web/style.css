@@ -1041,6 +1041,25 @@ header {
   transition: background 0.2s;
 }
 .viewer-folder-btn:hover { background: rgba(160,160,175,0.7); }
+.viewer-panel-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+  padding: 8px;
+  border-top: 1px solid var(--border-dim);
+  flex-shrink: 0;
+}
+.viewer-panel-bottom .viewer-folder-btn {
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-muted);
+}
+.viewer-panel-bottom .viewer-folder-btn:hover {
+  background: rgba(255,255,255,0.09);
+  color: var(--text-primary);
+}
 
 /* ---- Prompt slide-up (mobile) ---- */
 .prompt-drawer {

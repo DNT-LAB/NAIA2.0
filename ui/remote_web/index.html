@@ -450,9 +450,6 @@
             <button class="viewer-hist-btn" onclick="hideViewerNav()">Close</button>
             <button class="viewer-hist-btn nav" onclick="navViewer(1)">&#9654;</button>
           </div>
-          <div class="viewer-bottom-controls">
-            <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
-          </div>
         </div>
         <section class="result-info-panel" id="resultInfoPanel" aria-label="Generation info">
           <div class="result-info-header">
@@ -470,6 +467,9 @@
         </div>
         <div class="viewer-panel-grid" id="viewerGrid"></div>
         <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
+        <div class="viewer-panel-bottom">
+          <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
+        </div>
       </aside>
     </div>
   </div>

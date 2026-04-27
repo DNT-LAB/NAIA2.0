@@ -17,8 +17,6 @@ let _localPromptDirty = false;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let sessionId = null, sharedMode = false;
 let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
-let desktopWindowVisible = true;
-let desktopWindowControlAllowed = false;
 const urlParams = new URLSearchParams(location.search);
 const isDesktopShell = urlParams.get('desktop_shell') === '1';
 if (isDesktopShell) document.body.classList.add('desktop-shell');
@@ -34,6 +32,7 @@ let promptHighlighter = null;
 let moduleBadges = null;
 let cloudflaredControls = null;
 let generationProgress = null;
+let desktopWindowControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -154,6 +153,17 @@ const generationProgressReady = import('./js/features/generationProgress.mjs')
   .catch(error => {
     console.error('Failed to initialize generation progress module', error);
   });
+const desktopWindowControlReady = import('./js/features/desktopWindowControl.mjs')
+  .then(({createDesktopWindowControl}) => {
+    desktopWindowControl = createDesktopWindowControl({
+      document,
+      getWs: () => ws,
+      WebSocket,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize desktop window control module', error);
+  });
 
 function saveSharedSession() {
   if (!sharedMode) return;
@@ -218,7 +228,6 @@ const preview      = $('preview');
 const emptyMsg     = $('emptyMsg');
 const setupLauncherBtn = $('setupLauncher');  // doubles as connection-status indicator
 const modeApiCombo = $('modeApiCombo');
-const desktopToggleBtn = $('desktopToggleBtn');
 const btnGen       = $('btnGen');
 const btnRnd       = $('btnRnd');
 const promptEdit   = $('promptEdit');
@@ -369,8 +378,7 @@ function connect() {
     setLauncherConn(false);
     modeSwitching = false;
     if (modeSelect) modeSelect.disabled = true;
-    desktopWindowControlAllowed = false;
-    if (desktopToggleBtn) desktopToggleBtn.classList.add('hidden');
+    if (desktopWindowControl) desktopWindowControl.disable();
     reconnTimer = setTimeout(connect, 3000);
   };
   ws.onerror = () => ws.close();
@@ -1058,28 +1066,11 @@ function onSession(m) {
 }
 
 function onDesktopWindowState(m) {
-  if (typeof m.visible === 'boolean') desktopWindowVisible = m.visible;
-  if (typeof m.control_allowed === 'boolean') desktopWindowControlAllowed = m.control_allowed;
-  if (!desktopToggleBtn) return;
-
-  if (!desktopWindowControlAllowed) {
-    desktopToggleBtn.classList.add('hidden');
-    return;
-  }
-
-  desktopToggleBtn.classList.remove('hidden');
-  desktopToggleBtn.classList.toggle('visible-state', desktopWindowVisible);
-  desktopToggleBtn.classList.toggle('hidden-state', !desktopWindowVisible);
-  desktopToggleBtn.textContent = desktopWindowVisible ? 'HIDE DESKTOP' : 'SHOW DESKTOP';
-  desktopToggleBtn.title = desktopWindowVisible ? 'Hide desktop app' : 'Show desktop app';
+  if (desktopWindowControl) desktopWindowControl.onState(m);
 }
 
 function toggleDesktopWindow() {
-  if (!desktopWindowControlAllowed || !ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({
-    type: 'set_desktop_window_visibility',
-    visible: !desktopWindowVisible,
-  }));
+  if (desktopWindowControl) desktopWindowControl.toggle();
 }
 
 function _restoreSharedSession() {
@@ -4653,6 +4644,7 @@ Promise.all([
   moduleBadgesReady,
   cloudflaredControlsReady,
   generationProgressReady,
+  desktopWindowControlReady,
 ])
   .then(() => {
     initHistoryRail();

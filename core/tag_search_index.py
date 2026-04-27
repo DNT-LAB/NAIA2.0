@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -90,6 +92,8 @@ class TagSearchIndex:
         self._blob_by_tag: dict[str, str] = {
             tag: self._make_blob(entry) for tag, entry in self._entries.items()
         }
+        self._sorted_tags = tuple(sorted(self._entries))
+        self._term_to_tags = self._build_candidate_index()
 
     @classmethod
     def from_event_preset_assets(
@@ -320,7 +324,11 @@ class TagSearchIndex:
         q_tokens = [tok for tok in q.split() if tok]
 
         results: list[TagSearchResult] = []
-        for tag, entry in self._entries.items():
+        candidate_tags = self._candidate_tags(q, q_tokens, limit=limit)
+        tag_iterable = candidate_tags if candidate_tags is not None else self._entries.keys()
+
+        for tag in tag_iterable:
+            entry = self._entries[tag]
             if require_event is True and not entry.is_event:
                 continue
             if require_event is False and entry.is_event:
@@ -345,6 +353,80 @@ class TagSearchIndex:
 
     def search_tags(self, query: str, **kwargs: Any) -> list[str]:
         return [result.tag for result in self.search(query, **kwargs)]
+
+    def _build_candidate_index(self) -> dict[str, frozenset[str]]:
+        term_to_tags: dict[str, set[str]] = defaultdict(set)
+
+        for tag, entry in self._entries.items():
+            blob = self._blob_by_tag[tag]
+            for token in set(blob.split()):
+                if not token:
+                    continue
+                term_to_tags[token].add(tag)
+
+            for keyword in entry.keywords:
+                term = _norm(keyword)
+                if not term:
+                    continue
+                term_to_tags[term].add(tag)
+
+        return {term: frozenset(tags) for term, tags in term_to_tags.items()}
+
+    def _candidate_tags(
+        self,
+        query: str,
+        query_tokens: list[str],
+        *,
+        limit: int | None,
+    ) -> set[str] | None:
+        candidates: set[str] = set()
+
+        if query in self._entries:
+            candidates.add(query)
+
+        start = bisect_left(self._sorted_tags, query)
+        for tag in self._sorted_tags[start:]:
+            if not tag.startswith(query):
+                break
+            candidates.add(tag)
+
+        if len(query) >= 2:
+            candidates.update(tag for tag in self._sorted_tags if query in tag)
+
+        token_sets = [self._term_to_tags.get(token) for token in query_tokens]
+        if token_sets and all(token_sets):
+            ordered_sets = sorted(token_sets, key=len)
+            token_candidates = set(ordered_sets[0])
+            for tags in ordered_sets[1:]:
+                token_candidates.intersection_update(tags)
+                if not token_candidates:
+                    break
+            candidates.update(token_candidates)
+
+        term_matches = self._term_to_tags.get(query)
+        if term_matches:
+            candidates.update(term_matches)
+
+        if self._should_scan_terms(query) and not self._has_enough_candidates(candidates, limit):
+            for term, tags in self._term_to_tags.items():
+                if term != query and query in term:
+                    candidates.update(tags)
+
+        return candidates or None
+
+    @staticmethod
+    def _has_enough_candidates(candidates: set[str], limit: int | None) -> bool:
+        if limit is None:
+            return False
+        return len(candidates) >= max(limit * 3, 32)
+
+    @staticmethod
+    def _should_scan_terms(query: str) -> bool:
+        if len(query) < 2:
+            return False
+        if any(ord(ch) > 127 for ch in query):
+            return True
+        return len(query) >= 3
 
     def _make_blob(self, entry: TagSearchEntry) -> str:
         parts = [

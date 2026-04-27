@@ -1,6 +1,6 @@
 import pandas as pd
 
-from core.tag_search_index import TagSearchIndex
+from core.tag_search_index import TagSearchEntry, TagSearchIndex
 
 
 def test_tag_search_index_matches_korean_event_keywords(tmp_path):
@@ -121,3 +121,34 @@ def test_tag_search_index_builds_from_remote_raw_records():
     assert index.search_tags("앉기")[:1] == ["sitting"]
     assert index.search_tags("miku", cats={"character"}) == ["hatsune miku"]
     assert index.search_tags("miku", cats={"artist"}) == []
+
+
+def test_tag_search_index_uses_candidate_index_for_keyword_queries(monkeypatch):
+    entries = [
+        TagSearchEntry(tag=f"noise tag {idx}", search_blob="unrelated filler")
+        for idx in range(1000)
+    ]
+    entries.append(
+        TagSearchEntry(
+            tag="striped shirt",
+            freq=200,
+            source="KR_tags",
+            desc="줄무늬가 있는 셔츠.",
+            keywords=("줄무늬", "줄무늬 셔츠"),
+            search_blob="striped shirt 줄무늬 줄무늬 셔츠",
+        )
+    )
+    index = TagSearchIndex(entries)
+
+    calls = 0
+    original_score = TagSearchIndex._score
+
+    def counting_score(*args):
+        nonlocal calls
+        calls += 1
+        return original_score(*args)
+
+    monkeypatch.setattr(TagSearchIndex, "_score", staticmethod(counting_score))
+
+    assert index.search_tags("줄무늬")[:1] == ["striped shirt"]
+    assert calls < 20

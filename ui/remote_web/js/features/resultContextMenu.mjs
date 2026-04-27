@@ -320,6 +320,8 @@ export function createResultContextMenu({
       source: asset.source ?? context.source,
       path: asset.path ?? context.path,
       filePath: asset.file_path ?? context.filePath,
+      label: asset.label ?? context.label,
+      metadataUrl: asset.metadata_url ?? asset.metadataUrl,
       imageSrc: asset.image_url ?? asset.imageUrl ?? context.imageSrc,
       hasImage: Boolean(asset.has_image ?? asset.hasImage ?? context.hasImage),
       hasMetadata: Boolean(asset.has_metadata ?? asset.hasMetadata ?? context.hasMetadata),

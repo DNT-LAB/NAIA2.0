@@ -299,10 +299,16 @@ export function createMetadataViewer({
       paramsEl.innerHTML = '<span class="metadata-empty">No generation parameters</span>';
       return;
     }
-    paramsEl.innerHTML = paramRows.map(field => `
-      <div class="metadata-param-key">${escHtml(field.label)}</div>
-      <div class="metadata-param-value ${typeof field.value === 'boolean' ? 'boolean' : ''}">${escHtml(formatParamValue(field.value))}</div>
-    `).join('');
+    paramsEl.innerHTML = paramRows.map(field => {
+      const valueText = formatParamValue(field.value);
+      const classes = ['metadata-param-value'];
+      if (typeof field.value === 'boolean') classes.push('boolean');
+      if (valueText.length > 80 || valueText.includes('\n')) classes.push('long');
+      return `
+        <div class="metadata-param-key">${escHtml(field.label)}</div>
+        <div class="${classes.join(' ')}">${escHtml(valueText)}</div>
+      `;
+    }).join('');
   }
 
   function renderRaw(data) {

@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
@@ -951,6 +952,13 @@ class RemoteBridge(QObject):
 
         filepath = str(getattr(item, "filepath", "") or "") if item else ""
         has_file = bool(filepath and Path(filepath).is_file())
+        rel_path = ""
+        if has_file:
+            try:
+                rel_path = Path(filepath).resolve().relative_to(self._get_viewer_save_dir().resolve()).as_posix()
+            except Exception:
+                rel_path = ""
+        encoded_rel_path = quote(rel_path, safe="/") if rel_path else ""
         has_generation_params = bool(generation_params)
         has_source_row = self._source_row_available(source_row)
         has_prompt = bool(
@@ -960,23 +968,24 @@ class RemoteBridge(QObject):
         )
         mode = self._current_api_mode()
         has_image = has_item_image or has_latest_image
+        has_metadata = bool(metadata_payload or rel_path)
 
         return {
-            "id": "current",
-            "source": "current",
-            "path": "",
+            "id": f"saved:{rel_path}" if rel_path else "current",
+            "source": "saved" if rel_path else "current",
+            "path": rel_path,
             "file_path": filepath if has_file else "",
-            "label": "Current Result",
-            "image_url": "/api/latest-image" if has_latest_image else "",
-            "metadata_url": "/api/result/metadata",
+            "label": Path(filepath).name if rel_path else "Current Result",
+            "image_url": ("/api/viewer/image/" + encoded_rel_path) if rel_path else ("/api/latest-image" if has_latest_image else ""),
+            "metadata_url": ("/api/viewer/meta?path=" + quote(rel_path, safe="") + "&full=1") if rel_path else "/api/result/metadata",
             "has_image": has_image,
-            "has_metadata": bool(metadata_payload),
+            "has_metadata": has_metadata,
             "capabilities": {
                 "load_prompt": bool(has_prompt),
                 "reroll": bool(has_source_row),
                 "queue": bool(has_generation_params),
                 "restore_params": bool(has_generation_params),
-                "metadata": bool(metadata_payload),
+                "metadata": has_metadata,
                 "paste_image": True,
                 "open_file": has_file,
                 "save_image": bool(has_item_image and not has_file),

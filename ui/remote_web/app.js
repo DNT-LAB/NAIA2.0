@@ -1360,6 +1360,24 @@ async function requestContextImageAction(context, action) {
   }
 }
 
+async function loadMetadataFromContextImage(context = {}) {
+  const imageUrl = context.imageSrc || '';
+  if (!imageUrl) {
+    metadataViewer.loadCurrent({silent: false});
+    return;
+  }
+  const label = context.label || context.path || context.filePath || 'Result Image';
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    await metadataViewer.loadImageBlob(blob, label, {imageUrl});
+  } catch (error) {
+    console.error('Context metadata image extraction failed', error);
+    showToast(error.message || 'Failed to load metadata', 'error');
+  }
+}
+
 function showMetadataInTab(context = {}) {
   if (!metadataViewer) {
     showToast('Metadata viewer is not ready', 'error');
@@ -1367,6 +1385,8 @@ function showMetadataInTab(context = {}) {
   }
   if (context.path) {
     metadataViewer.loadSaved(context.path, {silent: false});
+  } else if (context.hasImage && context.imageSrc) {
+    loadMetadataFromContextImage(context);
   } else if (context.source === 'current') {
     metadataViewer.loadCurrent({silent: false});
   } else {

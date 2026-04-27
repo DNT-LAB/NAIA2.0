@@ -889,29 +889,33 @@ header {
   min-height: 0;
   display: grid;
   align-content: start;
+  align-items: start;
   gap: 8px 10px;
-  grid-template-columns: minmax(110px, 0.8fr) minmax(140px, 1fr);
+  grid-template-columns: minmax(92px, max-content) minmax(0, 1fr);
   padding: 14px;
   overflow: auto;
 }
 .metadata-param-key {
-  align-self: center;
+  align-self: start;
   justify-self: end;
   max-width: 100%;
+  margin-top: 4px;
   padding: 3px 8px;
   border: 1px solid rgba(255, 255, 255, 0.045);
   border-radius: 10px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.25;
   text-align: right;
   overflow-wrap: anywhere;
 }
 .metadata-param-value {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   min-height: 34px;
-  display: flex;
-  align-items: center;
+  display: block;
   padding: 6px 9px;
   border: 1px solid var(--border-dim);
   border-radius: 4px;
@@ -919,11 +923,19 @@ header {
   color: var(--text-primary);
   font-size: 12px;
   line-height: 1.35;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .metadata-param-value.boolean {
+  display: flex;
+  align-items: center;
   justify-content: flex-start;
   color: var(--accent-blue);
+}
+.metadata-param-value.long {
+  max-height: 118px;
+  overflow: auto;
 }
 .metadata-param-grid > .metadata-empty {
   grid-column: 1 / -1;
@@ -984,7 +996,7 @@ header {
     max-height: 44vh;
   }
   .metadata-param-grid {
-    grid-template-columns: minmax(92px, 0.8fr) minmax(120px, 1fr);
+    grid-template-columns: minmax(82px, max-content) minmax(0, 1fr);
     padding: 10px;
   }
 }

@@ -4015,126 +4015,8 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: 프롬프트 전송 실패 — {e}")
 
-    def _handle_history_action(self, ws, action_json: str):
-        """히스토리 아이템에 대한 액션 처리 (메인 스레드에서 실행)"""
-        try:
-            cmd = json.loads(action_json)
-            action = cmd.get("action", "")
-            history_id = cmd.get("history_id")
-            index = cmd.get("index", -1)
-
-            with self._history_lock:
-                entry = None
-                if history_id is not None:
-                    for candidate in self._image_history:
-                        if candidate.get("history_id") == history_id:
-                            entry = candidate
-                            break
-                elif 0 <= index < len(self._image_history):
-                    entry = self._image_history[index]
-
-                if entry is None:
-                    self._broadcast_json({"type": "toast", "message": "History item not found", "level": "error"})
-                    return
-
-            if action == "load_prompt":
-                # 원본 프롬프트를 웹 UI에 로드
-                main_prompt = ""
-                pc = entry.get("prompt_context")
-                if pc and isinstance(pc, dict):
-                    main_prompt = pc.get("main_prompt", "")
-                if not main_prompt:
-                    main_prompt = entry.get("metadata", {}).get("prompt", "")
-                if main_prompt:
-                    self._broadcast_json({"type": "load_prompt", "prompt": main_prompt})
-                    # Non-Shared: 데스크톱 UI에도 반영
-                    if not self.shared_server_mode:
-                        self._syncing_prompt = True
-                        mw = self.app_context.main_window
-                        mw.main_prompt_textedit.setPlainText(main_prompt)
-                        self._syncing_prompt = False
-                else:
-                    self._broadcast_json({"type": "toast", "message": "No prompt data", "level": "error"})
-
-            elif action == "reroll":
-                # source_row로 다시개봉 — 데스크톱 on_instant_generation_requested 패턴 재사용
-                source_row = entry.get("source_row")
-                if source_row is None:
-                    self._broadcast_json({"type": "toast", "message": "No source data for reroll", "level": "error"})
-                    return
-                self._inject_session_overrides(ws)
-                mw = self.app_context.main_window
-                mw.on_instant_generation_requested(source_row)
-
-            elif action in ("enqueue_front", "enqueue_back"):
-                import random
-                import pandas as pd
-                from core.generation_request import GenerationRequest
-
-                gen_params = entry.get("gen_params")
-                if not gen_params:
-                    self._broadcast_json({"type": "toast", "message": "No generation params", "level": "error"})
-                    return
-
-                params = gen_params.copy()
-                use_current_ui = cmd.get("use_current_ui", False)
-
-                if use_current_ui:
-                    # 현재 UI 프롬프트 반영
-                    mw = self.app_context.main_window
-                    current_params = mw.get_main_parameters()
-                    params['input'] = current_params.get('input', params.get('input', ''))
-                    params['negative_prompt'] = current_params.get('negative_prompt', params.get('negative_prompt', ''))
-
-                # 시드 랜덤화 (Shared Mode: 세션의 seed_fixed 우선 확인)
-                seed_fixed = False
-                if self.shared_server_mode and ws and self._ws_manager:
-                    session = self._ws_manager.sessions.get(ws)
-                    if session:
-                        so = session.get("params_override", {})
-                        seed_fixed = so.get("seed_fixed") == "true"
-                if not seed_fixed:
-                    mw = self.app_context.main_window
-                    if hasattr(mw, 'seed_fix_checkbox') and mw.seed_fix_checkbox:
-                        seed_fixed = mw.seed_fix_checkbox.isChecked()
-                if not seed_fixed:
-                    random_seed = random.randint(0, 9999999999)
-                    params['seed'] = random_seed
-                    params['extra_noise_seed'] = random_seed
-
-                source_row = entry.get("source_row")
-                if source_row is None:
-                    source_row = pd.Series()
-
-                priority = 100 if action == "enqueue_front" else 0
-                request = GenerationRequest(
-                    params=params,
-                    source_row=source_row,
-                    priority=priority,
-                    max_retries=0
-                )
-
-                queue_manager = self.app_context.generation_queue_manager
-                if priority > 0:
-                    queue_manager.enqueue_with_priority(request)
-                else:
-                    queue_manager.enqueue_request(request)
-
-                queue_size = queue_manager.get_queue_size()
-                pos = "front" if priority > 0 else "back"
-                mode = "current UI" if use_current_ui else "original"
-                self._broadcast_json({
-                    "type": "toast",
-                    "message": f"Queued ({pos}, {mode}) — {queue_size} pending",
-                    "level": "success"
-                })
-
-        except Exception as e:
-            print(f"🌐 Remote: history_action 실패 — {e}")
-            self._broadcast_json({"type": "toast", "message": f"History action failed: {e}", "level": "error"})
-
     def on_generation_result(self, result: dict):
-        """생성 완료 시 PIL→WebP 변환 후 캐시 저장 + WebSocket broadcast"""
+        """생성 완료 시 PIL→WebP 변환 후 WebSocket broadcast"""
         # NAI 모드에서 생성 끝나면 Anlas 잔액 갱신 (실제 사용량 반영)
         try:
             if hasattr(self.app_context, "get_api_mode") and self.app_context.get_api_mode() == "NAI":
@@ -4156,6 +4038,7 @@ class RemoteBridge(QObject):
                 "height": image.height,
                 "size_kb": len(webp_bytes) // 1024,
                 "timestamp": datetime.now().isoformat(),
+                "has_gen_params": bool(gen_params),
                 "prompt": gen_params.get("input", ""),
                 "negative_prompt": gen_params.get("negative_prompt", ""),
                 "seed": gen_params.get("seed", ""),
@@ -4165,60 +4048,35 @@ class RemoteBridge(QObject):
                 "model": gen_params.get("model", ""),
             }
 
-            # 히스토리 확장 데이터 (큐 추가 / reroll / 프롬프트 불러오기용)
-            # json round-trip으로 안전한 데이터만 보존 (Qt/PIL 객체 제거)
-            source_row = result.get("source_row")
-            try:
-                safe_gen_params = json.loads(json.dumps(gen_params, default=str)) if gen_params else {}
-            except Exception:
-                safe_gen_params = {}
-            pc_raw = result.get("prompt_context", {})
-            safe_prompt_context = {}
-            if isinstance(pc_raw, dict):
-                for k in ("main_prompt", "final_prompt", "prefix_tags", "main_tags", "postfix_tags"):
-                    if k in pc_raw:
-                        safe_prompt_context[k] = pc_raw[k]
-            with self._history_lock:
-                history_id = self._history_next_id
-                self._history_next_id += 1
-
-            hist_entry = {
-                "history_id": history_id,
-                "webp": webp_bytes,
-                "metadata": metadata,
-                "gen_params": safe_gen_params,
-                "source_row": source_row.copy() if source_row is not None else None,
-                "prompt_context": safe_prompt_context,
-            }
-
-            # 항상 캐시 (클라이언트 없어도 다음 접속 시 전송 가능)
+            # /api/latest-image 호환을 위해 최신 이미지만 보존한다.
             self.latest_webp = webp_bytes
-            self.latest_metadata = metadata
-            with self._history_lock:
-                self._image_history.append(hist_entry)
-                if len(self._image_history) > 5:
-                    self._image_history.pop(0)
 
             if not self._has_clients():
                 return
 
             self._broadcast_json({"type": "status", "is_generating": False})
 
-            # 확장 메타: 큐/reroll/load_prompt 가용 여부 + 원본 프롬프트
-            extended_meta = dict(metadata)
-            extended_meta["history_id"] = history_id
-            extended_meta["has_gen_params"] = bool(gen_params)
-            extended_meta["has_source_row"] = source_row is not None
-            pc = result.get("prompt_context", {})
-            extended_meta["main_prompt"] = pc.get("main_prompt", "") if isinstance(pc, dict) else ""
-
             if self._loop and self._ws_manager:
                 asyncio.run_coroutine_threadsafe(
-                    self._ws_manager.broadcast_image(webp_bytes, extended_meta),
+                    self._ws_manager.broadcast_image(webp_bytes, metadata),
                     self._loop
                 )
         except Exception as e:
             print(f"🌐 Remote: 이미지 변환/broadcast 실패 — {e}")
+
+    def on_result_enhance_completed(self, success: bool = False, message: str = ""):
+        """ImageWindow Enhance 완료 상태를 Web Result 버튼에 반영."""
+        self._remote_enhance_in_flight = False
+        payload = {
+            "type": "result_enhance_state",
+            "running": False,
+            "success": bool(success),
+        }
+        if message:
+            payload["message"] = str(message)
+        self._broadcast_json(payload)
+        if not success and message:
+            self._broadcast_json({"type": "toast", "message": str(message), "level": "error"})
 
     def _broadcast_json(self, data: dict):
         if self._loop and self._ws_manager:
@@ -4577,9 +4435,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                     try:
                         cmd = json.loads(data)
                         cmd_type = cmd.get("type")
-                        if cmd_type == "client_state":
-                            pass  # 초기화 단계에서 처리됨
-                        elif cmd_type == "random":
+                        if cmd_type == "random":
                             if bridge.shared_server_mode:
                                 row = await asyncio.to_thread(bridge._pick_from_session, ws)
                                 if row is None:
@@ -4887,8 +4743,6 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                             "rules": str(cond.get("rules", "")),
                                         }
                                     print(f"🌐 Session restored from client LocalStorage (session={session['id']})")
-                        elif cmd_type == "history_action":
-                            bridge.request_history_action.emit(ws, json.dumps(cmd))
                         elif cmd_type == "generate":
                             bridge._pending_generate_requests.append({
                                 "ws": ws,
@@ -4896,6 +4750,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "negative": cmd.get("negative_prompt", ""),
                             })
                             bridge.request_generate.emit()
+                        elif cmd_type == "result_enhance":
+                            bridge.request_result_enhance.emit(ws)
                         elif cmd_type == "probe_api":
                             # 저장된 토큰/URL 로 실시간 연결 가능 여부 확인.
                             # keyring 값 사용 — 웹으로 토큰이 노출되지 않음. 저장/타임스탬프 갱신 없음.
@@ -5065,10 +4921,10 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_depth_action.connect(bridge._do_depth_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_restore_snapshot.connect(bridge._do_restore_snapshot, Qt.ConnectionType.QueuedConnection)
     bridge.request_apply_filters.connect(bridge._do_apply_filters, Qt.ConnectionType.QueuedConnection)
-    bridge.request_history_action.connect(bridge._handle_history_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
     bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
+    bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결
@@ -5092,6 +4948,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
 
     # AppContext 이벤트 구독
     app_context.subscribe("generation_result_available", bridge.on_generation_result)
+    app_context.subscribe("result_enhance_completed", bridge.on_result_enhance_completed)
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("image_saved", bridge._on_image_saved)
@@ -5240,7 +5097,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed"]:
+            for event_name in ["generation_result_available", "result_enhance_completed", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

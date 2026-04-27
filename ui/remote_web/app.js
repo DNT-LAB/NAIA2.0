@@ -34,6 +34,7 @@ let cloudflaredControls = null;
 let generationProgress = null;
 let desktopWindowControl = null;
 let promptDrawerControl = null;
+let autoSavePanel = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -177,6 +178,24 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs')
+  .then(({createAutoSavePanel}) => {
+    autoSavePanel = createAutoSavePanel({
+      document,
+      getWs: () => ws,
+      WebSocket,
+      getSharedMode: () => sharedMode,
+      getCurrentModuleId: () => currentModuleId,
+      isModulePopupOpen: () => modulePopup.classList.contains('open'),
+      escHtml,
+      openModule,
+      setModuleParam,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize auto save panel module', error);
+  });
 
 function saveSharedSession() {
   if (!sharedMode) return;
@@ -261,7 +280,6 @@ let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
-let autoSaveEnabled  = true;
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -887,98 +905,19 @@ function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 // ---- Stats functions ----
 
 function toggleAutoSave() {
-  openModule('auto_save');
+  if (autoSavePanel) autoSavePanel.open();
 }
 
 function setAutoSaveEnabled(enabled) {
-  autoSaveEnabled = !!enabled;
-  if (lastAutoSaveModuleState) lastAutoSaveModuleState.auto_save = autoSaveEnabled;
-  _updateSaveUI();
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'set_option', key: 'auto_save', value: autoSaveEnabled}));
-  }
+  if (autoSavePanel) autoSavePanel.setEnabled(enabled);
 }
 
-function renderAutoSavePanel(state = lastAutoSaveModuleState) {
-  const panelState = state || {
-    auto_save: autoSaveEnabled,
-    save_as_webp: false,
-    history_limit_enabled: false,
-    max_history_length: 2000,
-    memory_action: 1,
-    memory_action_options: [
-      { value: 1, label: '[1] 1장씩 자동저장+정리' },
-      { value: 2, label: '[2] 1장씩 저장없이 삭제' },
-      { value: 3, label: '[3] 자동생성 중단' },
-    ],
-  };
-  lastAutoSaveModuleState = panelState;
-  const statusText = panelState.auto_save ? 'Enabled' : 'Disabled';
-  const desc = sharedMode
-    ? 'Shared Mode에서는 호스트의 Auto Save 설정을 따릅니다.'
-    : 'Web Session은 시작 시 Auto Save가 강제로 켜집니다. 필요하면 여기서만 변경할 수 있습니다.';
-  const actionOptions = (panelState.memory_action_options || []).map(opt =>
-    `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
-  ).join('');
-  moduleBody.innerHTML = `
-    <div class="mod-settings-panel">
-      <div class="mod-field">
-        <span class="mod-field-label">Current Status</span>
-        <div class="mod-status" style="text-align:left;min-height:0">${statusText}</div>
-      </div>
-      <div class="mod-field">
-        <span class="mod-field-label">Policy</span>
-        <div class="mod-status" style="text-align:left;line-height:1.6">${desc}</div>
-      </div>
-      <div class="mod-inline-row">
-        <button class="mod-action-btn ${panelState.auto_save ? 'mod-stop' : 'mod-start'}"
-                ${sharedMode ? 'disabled' : ''}
-                onclick="setAutoSaveEnabled(${panelState.auto_save ? 'false' : 'true'})">
-          ${panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save'}
-        </button>
-        <button class="mod-btn-secondary" onclick="openSaveDirectoryPanel()">
-          Save Directory Settings
-        </button>
-      </div>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" ${panelState.save_as_webp ? 'checked' : ''} ${sharedMode ? 'disabled' : ''}
-               onchange="onAutoSaveWebpChange(this.checked)">
-        <span class="mod-checkbox-label">WEBP로 저장</span>
-      </label>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" ${panelState.history_limit_enabled ? 'checked' : ''} ${sharedMode ? 'disabled' : ''}
-               onchange="onHistoryLimitToggle(this.checked)">
-        <span class="mod-checkbox-label">히스토리 큐 제한 활성화</span>
-      </label>
-      <label class="mod-field">
-        <span class="mod-field-label">Max History Length</span>
-        <input class="mod-input" type="number" min="100" max="10000" step="100"
-               value="${escHtml(String(panelState.max_history_length ?? 2000))}"
-               ${panelState.history_limit_enabled && !sharedMode ? '' : 'disabled'}
-               onchange="onHistoryLimitLengthChange(this.value)">
-      </label>
-      <label class="mod-field">
-        <span class="mod-field-label">On Limit Reached</span>
-        <select class="mod-select" ${panelState.history_limit_enabled && !sharedMode ? '' : 'disabled'}
-                onchange="onHistoryLimitActionChange(this.value)">
-          ${actionOptions}
-        </select>
-      </label>
-    </div>
-  `;
+function renderAutoSavePanel(state) {
+  if (autoSavePanel) autoSavePanel.render(state);
 }
 
 function _updateSaveUI() {
-  if (!statsSave) return;
-  statsSave.classList.toggle('off', !autoSaveEnabled);
-  // dot 뒤의 텍스트 노드만 교체 (dot span 유지)
-  const dot = statsSave.querySelector('.stats-dot');
-  const text = autoSaveEnabled ? 'Auto Save' : 'Auto Save OFF';
-  if (dot) { dot.nextSibling.textContent = text; }
-  statsSave.title = autoSaveEnabled ? 'Open auto-save settings (enabled)' : 'Open auto-save settings (disabled)';
-  if (currentModuleId === 'auto_save' && modulePopup.classList.contains('open')) {
-    renderAutoSavePanel();
-  }
+  if (autoSavePanel) autoSavePanel.updateSaveUi();
 }
 
 function updateGenStats() {
@@ -1319,9 +1258,7 @@ function syncOptions(m) {
   syncRatingBarVisibility();
   // Auto-save 상태 동기화
   if ('auto_save' in m) {
-    autoSaveEnabled = m.auto_save;
-    if (lastAutoSaveModuleState) lastAutoSaveModuleState.auto_save = m.auto_save;
-    _updateSaveUI();
+    if (autoSavePanel) autoSavePanel.syncEnabled(m.auto_save);
   }
 }
 
@@ -1790,7 +1727,6 @@ const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
 let pendingModuleEdit = null;
-let lastAutoSaveModuleState = null;
 let lastSaveDirectoryState = null;
 
 // Preprocessing option definitions (key → display label)
@@ -1885,8 +1821,8 @@ function openModule(moduleId) {
     chunk: 'Chunk',
   };
   moduleTitle.textContent = titles[moduleId] || moduleId;
-  if (moduleId === 'auto_save' && lastAutoSaveModuleState) {
-    renderAutoSavePanel(lastAutoSaveModuleState);
+  if (moduleId === 'auto_save' && autoSavePanel) {
+    autoSavePanel.renderCached();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     if (moduleId === 'search') {
@@ -2058,7 +1994,7 @@ function syncPromptEngineeringPopups() {
 function onModuleState(m) {
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
-  else if (m.module_id === 'auto_save') lastAutoSaveModuleState = m;
+  else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);
   else if (m.module_id === 'character') updateCharBadge(m);
   else if (m.module_id === 'character_reference') updateCharRefBadge(m);
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
@@ -2089,31 +2025,19 @@ function openSaveDirectoryPanel() {
 }
 
 function onAutoSaveWebpChange(checked) {
-  if (lastAutoSaveModuleState) lastAutoSaveModuleState.save_as_webp = !!checked;
-  setModuleParam('auto_save', 'save_as_webp', checked ? 'true' : 'false');
+  if (autoSavePanel) autoSavePanel.onWebpChange(checked);
 }
 
 function onHistoryLimitToggle(checked) {
-  if (lastAutoSaveModuleState) {
-    lastAutoSaveModuleState.history_limit_enabled = !!checked;
-    renderAutoSavePanel(lastAutoSaveModuleState);
-  }
-  setModuleParam('auto_save', 'history_limit_enabled', checked ? 'true' : 'false');
+  if (autoSavePanel) autoSavePanel.onHistoryLimitToggle(checked);
 }
 
 function onHistoryLimitLengthChange(value) {
-  const parsed = parseInt(value, 10);
-  if (!Number.isFinite(parsed)) {
-    showToast('Valid history length required.', 'error');
-    return;
-  }
-  if (lastAutoSaveModuleState) lastAutoSaveModuleState.max_history_length = parsed;
-  setModuleParam('auto_save', 'max_history_length', String(parsed));
+  if (autoSavePanel) autoSavePanel.onHistoryLimitLengthChange(value);
 }
 
 function onHistoryLimitActionChange(value) {
-  if (lastAutoSaveModuleState) lastAutoSaveModuleState.memory_action = parseInt(value, 10);
-  setModuleParam('auto_save', 'memory_action', value);
+  if (autoSavePanel) autoSavePanel.onHistoryLimitActionChange(value);
 }
 
 function browseSaveDirectory() {
@@ -4633,6 +4557,7 @@ Promise.all([
   generationProgressReady,
   desktopWindowControlReady,
   promptDrawerReady,
+  autoSavePanelReady,
 ])
   .then(() => {
     initHistoryRail();

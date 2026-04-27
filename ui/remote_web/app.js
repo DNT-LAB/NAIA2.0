@@ -162,6 +162,8 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
       fetch,
       escHtml,
       showToast,
+      onApplyPrompt: applyMetadataPrompt,
+      onApplySettings: applyMetadataSettings,
     });
   })
   .catch(error => {
@@ -180,8 +182,13 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs')
           showToast('Metadata viewer is not ready', 'error');
           return;
         }
-        metadataViewer.displayPayload(payload.metadataPayload, {label: payload.label});
-        switchRightTab('pngInfo');
+        metadataViewer.displayPayload(payload.metadataPayload, {
+          label: payload.label,
+          imageUrl: payload.imageUrl,
+          revokeImageUrl: payload.revokeImageUrl,
+        });
+        switchRightTab('pngInfo', {skipMetadataRefresh: true});
+        return true;
       },
     });
     imageActionPopup.bind();
@@ -218,6 +225,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
         if (resultImageInput) resultImageInput.pasteFromClipboard();
         else showToast('Image input is not ready', 'error');
       },
+      onShowMetadata: showMetadataInTab,
     });
     resultContextMenu.bind();
   })
@@ -1128,9 +1136,9 @@ function setNaiHighlightMode(mode) {
 
 // ---- Right panel top-level tabs ----
 
-function switchRightTab(tabName) {
+function switchRightTab(tabName, options = {}) {
   if (rightTabs) rightTabs.switchTo(tabName);
-  if (tabName === 'pngInfo' && metadataViewer) metadataViewer.refresh();
+  if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
 }
 
 // ---- Result history (disk-based image browser) ----
@@ -1150,6 +1158,118 @@ function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupP
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
+function showMetadataInTab(context = {}) {
+  if (!metadataViewer) {
+    showToast('Metadata viewer is not ready', 'error');
+    return false;
+  }
+  if (context.path) {
+    metadataViewer.loadSaved(context.path, {silent: false});
+  } else if (context.source === 'current') {
+    metadataViewer.loadCurrent({silent: false});
+  } else {
+    return false;
+  }
+  switchRightTab('pngInfo', {skipMetadataRefresh: true});
+  return true;
+}
+
+function applyMetadataPrompt(payload) {
+  if (!payload) return;
+  if (promptEdit && payload.prompt != null) promptEdit.value = payload.prompt || '';
+  if (negEdit && payload.negative != null) negEdit.value = payload.negative || '';
+  if (promptSendTimer) {
+    clearTimeout(promptSendTimer);
+    promptSendTimer = null;
+  }
+  _localPromptDirty = false;
+  updatePromptHighlight();
+  updatePromptTokenEstimate();
+  updateNegativeTokenEstimate();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'set_prompt',
+      prompt: promptEdit.value,
+      negative_prompt: negEdit.value,
+    }));
+  }
+  saveSharedSession();
+  showToast('Prompt applied from metadata', 'success');
+}
+
+function ensureSelectValue(selectEl, value) {
+  if (!selectEl || selectEl.tagName !== 'SELECT') return;
+  const text = String(value);
+  const exists = Array.from(selectEl.options || []).some(option => option.value === text);
+  if (!exists) {
+    const option = document.createElement('option');
+    option.value = text;
+    option.textContent = text;
+    selectEl.appendChild(option);
+  }
+}
+
+function applyMetadataParamValue(key, value) {
+  if (value === undefined || value === null || value === '') return false;
+  const text = String(value);
+  const target = paramEls ? paramEls[key] : null;
+  if (target) {
+    ensureSelectValue(target, text);
+    target.value = text;
+  }
+  if (key === 'resolution' && qResolution) {
+    ensureSelectValue(qResolution, text);
+    qResolution.value = text;
+  }
+  setParam(key, text);
+  return true;
+}
+
+function normalizeMetadataBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = String(value ?? '').trim().toLowerCase();
+  return !['', '0', 'false', 'none', 'null', 'undefined'].includes(text);
+}
+
+function applyMetadataFlag(key, value) {
+  if (value === undefined || value === null || value === '') return false;
+  const enabled = normalizeMetadataBoolean(value);
+  const flag = paramFlags ? paramFlags.querySelector(`[data-key="${CSS.escape(key)}"]`) : null;
+  if (flag) flag.classList.toggle('on', enabled);
+  setParam(key, String(enabled));
+  return true;
+}
+
+function applyMetadataSettings(payload) {
+  const params = payload && payload.params ? payload.params : {};
+  let applied = 0;
+  [
+    ['resolution', params.resolution],
+    ['steps', params.steps],
+    ['cfg_scale', params.cfg_scale],
+    ['cfg_rescale', params.cfg_rescale],
+    ['seed', params.seed],
+    ['sampler', params.sampler],
+    ['scheduler', params.scheduler],
+    ['model', params.model],
+  ].forEach(([key, value]) => {
+    if (applyMetadataParamValue(key, value)) applied += 1;
+  });
+  [
+    ['SMEA', params.sm],
+    ['DYN', params.sm_dyn],
+    ['VAR+', params['VAR+']],
+  ].forEach(([key, value]) => {
+    if (applyMetadataFlag(key, value)) applied += 1;
+  });
+  if (applied > 0) {
+    saveSharedSession();
+    showToast('Settings applied from metadata', 'success');
+  } else {
+    showToast('No applicable settings in metadata', 'error');
+  }
+}
 // ---- Stats functions ----
 
 function toggleAutoSave() {

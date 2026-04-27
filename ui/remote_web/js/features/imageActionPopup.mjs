@@ -13,9 +13,9 @@ export function createImageActionPopup({
   let root = null;
   let activePayload = null;
 
-  function close() {
+  function close({releaseImageUrl = true} = {}) {
     if (!root) return;
-    if (activePayload && typeof activePayload.revokeImageUrl === 'function') {
+    if (releaseImageUrl && activePayload && typeof activePayload.revokeImageUrl === 'function') {
       activePayload.revokeImageUrl();
     }
     root.remove();
@@ -59,8 +59,8 @@ export function createImageActionPopup({
         if (action === 'close') {
           close();
         } else if (action === 'metadata') {
-          onMetadata(activePayload);
-          close();
+          const handled = onMetadata(activePayload);
+          close({releaseImageUrl: !handled});
         } else if (action === 'img2img') {
           runOptional(onImg2Img, 'Img2Img');
         } else if (action === 'inpaint') {

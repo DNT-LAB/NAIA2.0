@@ -361,11 +361,13 @@
         <div class="assistants-label">Tools &amp; Assistants <span class="assistants-info">i</span></div>
         <div class="module-bar">
           <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
+          <button class="module-btn" data-module="e621_event" onclick="openModule('e621_event')">E621</button>
           <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
           <button class="module-btn" data-module="character" onclick="openModule('character')">Character<span class="module-badge hidden" id="badgeChar"></span></button>
           <button class="module-btn nai-only-disabled" data-module="character_reference" onclick="openModule('character_reference')">Char Ref<span class="module-badge hidden" id="badgeCharRef"></span></button>
           <button class="module-btn nai-only-disabled" data-module="vibe_transfer" onclick="openModule('vibe_transfer')">Vibe<span class="module-badge hidden" id="badgeVibe"></span></button>
           <button class="module-btn" data-module="wildcard" onclick="openModule('wildcard')">WC</button>
+          <button class="module-btn" data-module="instant_wildcard" onclick="openModule('instant_wildcard')">I.WC</button>
           <button class="module-btn" data-module="chunk" onclick="openChunkPanel(null, true)">Chunk</button>
           <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Cond</button>
         </div>
@@ -495,21 +497,39 @@
         </div>
       </header>
       <div class="metadata-layout">
-        <section class="metadata-section metadata-summary-section">
-          <div class="metadata-section-title">Summary</div>
-          <div class="metadata-summary-grid" id="metadataSummary"></div>
+        <section class="metadata-section metadata-preview-section">
+          <div class="metadata-image-stage">
+            <img id="metadataPreview" alt="">
+            <span id="metadataPreviewEmpty" class="metadata-empty">No image selected</span>
+          </div>
+          <div class="metadata-image-info" id="metadataImageInfo"></div>
+          <div class="metadata-model-info" id="metadataModelInfo"></div>
+          <div class="metadata-actions">
+            <button type="button" class="metadata-action-btn" id="metadataApplyPromptBtn">📝 프롬프트/네거티브 적용</button>
+            <button type="button" class="metadata-action-btn primary" id="metadataApplySettingsBtn">⚙️ 설정값 일괄 적용</button>
+            <button type="button" class="metadata-action-btn primary" id="metadataApplyCharacterSettingsBtn">🎭 설정값 + 캐릭터 일괄 적용</button>
+            <button type="button" class="metadata-action-btn" id="metadataSendImg2ImgBtn">🖼 img2img로 전송</button>
+          </div>
         </section>
         <section class="metadata-section metadata-prompt-section">
-          <div class="metadata-section-title">Prompt</div>
+          <div class="metadata-section-title">📝 Prompt</div>
           <pre class="metadata-text-block" id="metadataPrompt"></pre>
+          <div class="metadata-section-title">🚫 Negative Prompt</div>
+          <pre class="metadata-text-block metadata-negative-block" id="metadataNegative"></pre>
+          <div class="metadata-section-title" id="metadataCharactersTitle">🎭 Character Prompt (NAI v4)</div>
+          <pre class="metadata-text-block metadata-character-block" id="metadataCharacters"></pre>
         </section>
-        <section class="metadata-section metadata-negative-section">
-          <div class="metadata-section-title">Negative</div>
-          <pre class="metadata-text-block" id="metadataNegative"></pre>
-        </section>
-        <section class="metadata-section metadata-raw-section">
-          <div class="metadata-section-title">Raw</div>
-          <pre class="metadata-raw-block" id="metadataRaw"></pre>
+        <section class="metadata-section metadata-detail-section">
+          <div class="metadata-detail-tabs" role="tablist">
+            <button type="button" class="metadata-detail-tab active" data-metadata-detail-tab="params">⚙️ 파라미터</button>
+            <button type="button" class="metadata-detail-tab" data-metadata-detail-tab="raw">📄 원본 데이터</button>
+          </div>
+          <div class="metadata-detail-pane active" data-metadata-detail-pane="params">
+            <div class="metadata-param-grid" id="metadataParams"></div>
+          </div>
+          <div class="metadata-detail-pane" data-metadata-detail-pane="raw">
+            <pre class="metadata-raw-block" id="metadataRaw"></pre>
+          </div>
         </section>
       </div>
     </div>

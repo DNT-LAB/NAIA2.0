@@ -28,6 +28,7 @@ let resultHistory = null;
 let resultEnhance = null;
 let resultContextMenu = null;
 let resultImageInput = null;
+let imageActionPopup = null;
 let metadataViewer = null;
 let promptHighlighter = null;
 let moduleBadges = null;
@@ -166,18 +167,37 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
   .catch(error => {
     console.error('Failed to initialize metadata viewer module', error);
   });
+const imageActionPopupReady = import('./js/features/imageActionPopup.mjs')
+  .then(({createImageActionPopup}) => {
+    imageActionPopup = createImageActionPopup({
+      document,
+      window,
+      escHtml,
+      showToast,
+      getMode: () => currentMode || modeSelect.value || 'NAI',
+      onMetadata: payload => {
+        if (!metadataViewer || typeof metadataViewer.displayPayload !== 'function') {
+          showToast('Metadata viewer is not ready', 'error');
+          return;
+        }
+        metadataViewer.displayPayload(payload.metadataPayload, {label: payload.label});
+        switchRightTab('pngInfo');
+      },
+    });
+    imageActionPopup.bind();
+  })
+  .catch(error => {
+    console.error('Failed to initialize image action popup module', error);
+  });
 const resultImageInputReady = import('./js/features/resultImageInput.mjs')
   .then(({createResultImageInput}) => {
     resultImageInput = createResultImageInput({
       document,
       window,
-      preview,
-      emptyMsg,
-      getMetadataViewer: () => metadataViewer,
-      showMetadataTab: () => switchRightTab('pngInfo'),
-      onExternalImageDisplayed: () => {
-        if (resultEnhance) resultEnhance.clearCurrentMeta();
-        if (resultHistory) resultHistory.hideNav();
+      fetch,
+      showImageActionPopup: payload => {
+        if (imageActionPopup) imageActionPopup.open(payload);
+        else showToast('Image action popup is not ready', 'error');
       },
       showToast,
     });
@@ -3088,6 +3108,7 @@ Promise.all([
   resultHistoryReady,
   resultEnhanceReady,
   metadataViewerReady,
+  imageActionPopupReady,
   resultImageInputReady,
   resultContextMenuReady,
   promptHighlighterReady,

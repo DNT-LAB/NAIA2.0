@@ -1171,6 +1171,124 @@ body.resizing-result-info {
   white-space: pre-wrap;
 }
 
+.image-action-popup-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2550;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+.image-action-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.58);
+}
+.image-action-popup {
+  position: relative;
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #242424;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.52);
+}
+.image-action-title {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+}
+.image-action-preview {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 220px;
+  max-height: min(512px, calc(100vh - 320px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #202020;
+}
+.image-action-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.image-action-meta {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.image-action-buttons {
+  display: grid;
+  gap: 8px;
+}
+.image-action-btn {
+  min-height: 40px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 5px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.image-action-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.08);
+}
+.image-action-btn.primary {
+  background: #2878d8;
+  border-color: #2f8beb;
+  color: #fff;
+}
+.image-action-btn.metadata {
+  background: #2d5016;
+  border-color: #4a7c28;
+  color: #a8e6cf;
+}
+.image-action-btn.danbooru {
+  background: #5c3d00;
+  border-color: #8c6e14;
+  color: #ffd580;
+}
+.image-action-btn.vibe {
+  background: #3a2f5f;
+  border-color: #5a4a8f;
+  color: #c8b8ff;
+}
+.image-action-btn:disabled {
+  opacity: 0.44;
+  cursor: default;
+}
+
+@media (max-width: 767px) {
+  .image-action-popup {
+    width: min(100%, 520px);
+    padding: 12px;
+  }
+  .image-action-title {
+    font-size: 15px;
+  }
+  .image-action-preview {
+    min-height: 180px;
+    max-height: 42vh;
+  }
+  .image-action-btn {
+    min-height: 38px;
+    font-size: 14px;
+  }
+}
+
 .history-counter {
   display: block;
   font-weight: 400;

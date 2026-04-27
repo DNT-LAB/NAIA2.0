@@ -1,11 +1,8 @@
 export function createResultImageInput({
   document,
   window,
-  preview,
-  emptyMsg,
-  getMetadataViewer = () => null,
-  showMetadataTab = () => {},
-  onExternalImageDisplayed = () => {},
+  fetch: fetchFn = window.fetch.bind(window),
+  showImageActionPopup = () => {},
   showToast = () => {},
   navigatorRef = window.navigator,
   URLRef = window.URL,
@@ -40,16 +37,31 @@ export function createResultImageInput({
     return types.some(type => type.startsWith('image/'));
   }
 
-  function showBlobInPreview(blob) {
-    if (!preview || !isImageBlob(blob)) return;
+  function createImageUrl(blob) {
+    if (!isImageBlob(blob)) return '';
     if (localPreviewUrl) URLRef.revokeObjectURL(localPreviewUrl);
     localPreviewUrl = URLRef.createObjectURL(blob);
-    preview.src = localPreviewUrl;
-    preview.dataset.source = 'input';
-    preview.dataset.path = '';
-    preview.classList.add('show');
-    if (emptyMsg) emptyMsg.style.display = 'none';
-    onExternalImageDisplayed();
+    return localPreviewUrl;
+  }
+
+  function revokeImageUrl(imageUrl) {
+    if (!imageUrl || imageUrl !== localPreviewUrl) return;
+    URLRef.revokeObjectURL(localPreviewUrl);
+    localPreviewUrl = null;
+  }
+
+  async function extractMetadata(blob, label) {
+    const response = await fetchFn('/api/metadata/extract?label=' + encodeURIComponent(label || 'Input Image'), {
+      method: 'POST',
+      headers: {'Content-Type': blob.type || 'application/octet-stream'},
+      body: blob,
+    });
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
   }
 
   async function handleImageBlob(blob, label = 'Input Image') {
@@ -57,14 +69,28 @@ export function createResultImageInput({
       showToast('Image file required', 'error');
       return;
     }
-    showBlobInPreview(blob);
-    const metadataViewer = getMetadataViewer();
-    if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {
-      showToast('Metadata viewer is not ready', 'error');
-      return;
+    const imageUrl = createImageUrl(blob);
+    let metadataPayload = {
+      source: 'input',
+      label,
+      summary: {},
+      raw: {},
+      has_metadata: false,
+    };
+    try {
+      metadataPayload = await extractMetadata(blob, label);
+    } catch (error) {
+      console.error('Input image metadata extraction failed', error);
+      showToast('Metadata check failed', 'error');
     }
-    await metadataViewer.loadImageBlob(blob, label, {silent: false});
-    showMetadataTab();
+    showImageActionPopup({
+      blob,
+      imageUrl,
+      label,
+      metadataPayload,
+      hasMetadata: Boolean(metadataPayload && metadataPayload.has_metadata),
+      revokeImageUrl: () => revokeImageUrl(imageUrl),
+    });
   }
 
   async function readImageFromClipboard() {

@@ -76,6 +76,11 @@ export function createMetadataViewer({
   }
 
   function buildRequest(source) {
+    if (source.kind === 'payload' && source.payload) {
+      return {
+        payload: source.payload,
+      };
+    }
     if (source.kind === 'saved' && source.path) {
       return {
         url: '/api/viewer/meta/' + encodeURI(source.path) + '?full=1',
@@ -118,6 +123,11 @@ export function createMetadataViewer({
 
     try {
       const request = buildRequest(source);
+      if (request.payload) {
+        if (requestId !== requestSerial) return;
+        render(request.payload);
+        return;
+      }
       const response = await fetch(request.url, request.init);
       if (!response.ok) {
         const error = new Error(`HTTP ${response.status}`);
@@ -165,6 +175,18 @@ export function createMetadataViewer({
     return loadSource({kind: 'input', path: '', label, blob}, options);
   }
 
+  function displayPayload(data, options = {}) {
+    if (!data) return Promise.resolve();
+    const payload = {...data};
+    if (options.label) payload.label = options.label;
+    return loadSource({
+      kind: 'payload',
+      path: '',
+      label: payload.label || 'Input Image',
+      payload,
+    }, {silent: true});
+  }
+
   function refresh() {
     return loadSource(currentSource, {silent: false});
   }
@@ -176,6 +198,7 @@ export function createMetadataViewer({
     loadCurrent,
     loadSaved,
     loadImageBlob,
+    displayPayload,
     refresh,
   };
 }

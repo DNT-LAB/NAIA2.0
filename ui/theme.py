@@ -394,24 +394,13 @@ def generate_dark_styles():
                 selection-color: {DARK_COLORS['text_primary']};
                 font-size: {fonts['combobox']}px;
                 padding: {sizes['padding_small']}px;
-                outline: 0;
-                show-decoration-selected: 0;
             }}
             QComboBox QAbstractItemView::item {{
                 padding: {sizes['padding_small']}px {sizes['padding_large']}px;
                 border: none;
-                background-color: transparent;
             }}
             QComboBox QAbstractItemView::item:hover {{
                 background-color: {DARK_COLORS['bg_hover']};
-            }}
-            QComboBox QAbstractItemView::item:selected {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: {DARK_COLORS['text_primary']};
-            }}
-            QComboBox QAbstractItemView::item:selected:hover {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: {DARK_COLORS['text_primary']};
             }}
         """,
         

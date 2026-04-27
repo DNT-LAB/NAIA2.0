@@ -32,6 +32,7 @@ let rightTabs = null;
 let resultInfoResizer = null;
 let resultHistory = null;
 let promptHighlighter = null;
+let moduleBadges = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -111,6 +112,20 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
+  });
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
+  .then(({createModuleBadges}) => {
+    moduleBadges = createModuleBadges({
+      document,
+      getMode: () => currentMode || modeSelect.value || 'NAI',
+      estimateTokenCount,
+      setCharacterPromptText: value => { lastCharacterPromptText = value; },
+      setCharacterTokenCount: value => { lastCharacterTokenCount = value; },
+      updatePromptTokenEstimate,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize module badges module', error);
   });
 
 function saveSharedSession() {
@@ -2272,88 +2287,19 @@ function renderSaveDirectory(m) {
 
 // ---- Module button inline badges ----
 function updateAutoBadge(m) {
-  const btn = document.querySelector('.module-btn[data-module="automation"]');
-  const badge = document.getElementById('badgeAuto');
-  if (!badge || !btn) return;
-  const isRunning = m.is_running;
-
-  if (!isRunning) {
-    badge.classList.add('hidden');
-    btn.classList.remove('auto-active');
-    return;
-  }
-  btn.classList.add('auto-active');
-  badge.classList.remove('hidden');
-
-  const delayInfo = m.delay_info || '';
-  const repeatInfo = m.repeat_info || '';
-  const status = m.status || '';
-
-  // Priority: delay countdown > repeat > count/timer from status
-  if (delayInfo) {
-    const dMatch = delayInfo.match(/([\d.]+)\s*s/i) || delayInfo.match(/([\d.:]+)/);
-    badge.textContent = dMatch ? dMatch[1] : '…';
-  } else if (repeatInfo) {
-    const rMatch = repeatInfo.match(/(\d+\/\d+)/);
-    badge.textContent = rMatch ? rMatch[1] : '…';
-  } else {
-    const numMatch = status.match(/(\d+[:/]?\d*)/);
-    if (numMatch) badge.textContent = numMatch[1];
-    else badge.classList.add('hidden');
-  }
+  if (moduleBadges) moduleBadges.updateAuto(m);
 }
 
 function updateCharBadge(m) {
-  const btn = document.querySelector('.module-btn[data-module="character"]');
-  const badge = document.getElementById('badgeChar');
-  if (!badge || !btn) return;
-  lastCharacterPromptText = (m.processed_characters || []).filter(Boolean).join(' ');
-  lastCharacterTokenCount = Number.isFinite(Number(m.character_token_count))
-    ? Number(m.character_token_count)
-    : estimateTokenCount(lastCharacterPromptText, currentMode || modeSelect.value || 'NAI');
-  if (!m.activated) {
-    lastCharacterTokenCount = 0;
-    badge.classList.add('hidden');
-    btn.classList.remove('char-active');
-    updatePromptTokenEstimate();
-    return;
-  }
-  const count = m.active_count || 0;
-  btn.classList.add('char-active');
-  badge.classList.remove('hidden');
-  badge.classList.add('char');
-  badge.textContent = count;
-  updatePromptTokenEstimate();
+  if (moduleBadges) moduleBadges.updateCharacter(m);
 }
 
 function updateCharRefBadge(m) {
-  const btn = document.querySelector('.module-btn[data-module="character_reference"]');
-  const badge = document.getElementById('badgeCharRef');
-  if (!badge || !btn) return;
-  const enabledCount = (m.frames || []).filter(f => f.is_enabled).length;
-  if (!enabledCount) {
-    badge.classList.add('hidden');
-    btn.classList.remove('charref-active');
-    return;
-  }
-  btn.classList.add('charref-active');
-  badge.classList.remove('hidden');
-  badge.textContent = enabledCount;
+  if (moduleBadges) moduleBadges.updateCharacterReference(m);
 }
 
 function updateVibeBadge(m) {
-  const btn = document.querySelector('.module-btn[data-module="vibe_transfer"]');
-  const badge = document.getElementById('badgeVibe');
-  if (!badge || !btn) return;
-  const enabledCount = (m.frames || []).filter(f => f.is_enabled).length;
-  if (!enabledCount) {
-    badge.classList.add('hidden');
-    btn.classList.remove('vibe-active');
-    return;
-  }
-  btn.classList.add('vibe-active');
-  badge.classList.remove('hidden');
-  badge.textContent = enabledCount;
+  if (moduleBadges) moduleBadges.updateVibe(m);
 }
 
 // prompt_engineering 모듈의 편집 가능한 textarea 목록 (focus 보존 대상)
@@ -4746,7 +4692,7 @@ function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
-Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady, resultHistoryReady, promptHighlighterReady])
+Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady, resultHistoryReady, promptHighlighterReady, moduleBadgesReady])
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();

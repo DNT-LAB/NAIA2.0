@@ -35,6 +35,7 @@ let generationProgress = null;
 let desktopWindowControl = null;
 let promptDrawerControl = null;
 let autoSavePanel = null;
+let saveDirectoryPanel = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -195,6 +196,20 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize auto save panel module', error);
+  });
+const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs')
+  .then(({createSaveDirectoryPanel}) => {
+    saveDirectoryPanel = createSaveDirectoryPanel({
+      document,
+      getWs: () => ws,
+      WebSocket,
+      escHtml,
+      openModule,
+      setModuleParam,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize save directory panel module', error);
   });
 
 function saveSharedSession() {
@@ -1727,7 +1742,6 @@ const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
 let pendingModuleEdit = null;
-let lastSaveDirectoryState = null;
 
 // Preprocessing option definitions (key → display label)
 const PP_OPTIONS = [
@@ -1998,7 +2012,7 @@ function onModuleState(m) {
   else if (m.module_id === 'character') updateCharBadge(m);
   else if (m.module_id === 'character_reference') updateCharRefBadge(m);
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
-  else if (m.module_id === 'save_directory') lastSaveDirectoryState = m;
+  else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);
 
   if (m.module_id === 'prompt_engineering') {
     lastPromptEngineeringState = m;
@@ -2021,7 +2035,7 @@ function onModuleState(m) {
 }
 
 function openSaveDirectoryPanel() {
-  openModule('save_directory');
+  if (saveDirectoryPanel) saveDirectoryPanel.open();
 }
 
 function onAutoSaveWebpChange(checked) {
@@ -2041,101 +2055,23 @@ function onHistoryLimitActionChange(value) {
 }
 
 function browseSaveDirectory() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'browse_save_directory'}));
-  }
+  if (saveDirectoryPanel) saveDirectoryPanel.browse();
 }
 
 function onSaveDirectoryToggle(checked) {
-  if (lastSaveDirectoryState) {
-    lastSaveDirectoryState.use_timestamp_folder = !!checked;
-    renderSaveDirectory(lastSaveDirectoryState);
-  }
-  setModuleParam('save_directory', 'use_timestamp_folder', checked ? 'true' : 'false');
+  if (saveDirectoryPanel) saveDirectoryPanel.onTimestampToggle(checked);
 }
 
 function onSaveDirectoryFilenameFormatChange(value) {
-  if (lastSaveDirectoryState) {
-    lastSaveDirectoryState.filename_format = value;
-  }
-  setModuleParam('save_directory', 'filename_format', value);
+  if (saveDirectoryPanel) saveDirectoryPanel.onFilenameFormatChange(value);
 }
 
 function onSaveDirectoryClassificationChange(value) {
-  if (lastSaveDirectoryState) {
-    lastSaveDirectoryState.classification_method = value;
-    renderSaveDirectory(lastSaveDirectoryState);
-  }
-  setModuleParam('save_directory', 'classification_method', value);
+  if (saveDirectoryPanel) saveDirectoryPanel.onClassificationChange(value);
 }
 
 function renderSaveDirectory(m) {
-  lastSaveDirectoryState = m;
-  const controlAllowed = !!m.control_allowed;
-  const browseAllowed = !!m.browse_allowed;
-  const filenameOptions = (m.filename_format_options || []).map(opt =>
-    `<option value="${escHtml(opt.value)}" ${opt.value === m.filename_format ? 'selected' : ''}>${escHtml(opt.label)}</option>`
-  ).join('');
-  const classificationOptions = (m.classification_method_options || []).map(opt =>
-    `<option value="${escHtml(opt.value)}" ${opt.value === m.classification_method ? 'selected' : ''}>${escHtml(opt.label)}</option>`
-  ).join('');
-  const rulesVisible = m.classification_method === 'prompt_recognition';
-  const accessNotice = !controlAllowed
-    ? `<div class="mod-notice">${escHtml(m.control_block_reason || 'This setting is read-only on this client.')}</div>`
-    : '';
-  const browseNotice = !browseAllowed && m.browse_block_reason
-    ? `<div class="mod-debug-empty">${escHtml(m.browse_block_reason)}</div>`
-    : '';
-
-  moduleBody.innerHTML = `
-    <div class="mod-settings-panel">
-      <div class="mod-field">
-        <span class="mod-field-label">Current Save Directory</span>
-        <div class="mod-status" style="text-align:left;line-height:1.6;word-break:break-all">${escHtml(m.current_save_directory || '')}</div>
-      </div>
-      <div class="mod-field">
-        <span class="mod-field-label">Session Timestamp</span>
-        <div class="mod-status" style="text-align:left;min-height:0">${escHtml(m.session_timestamp || '—')}</div>
-      </div>
-      ${accessNotice}
-      <label class="mod-field">
-        <span class="mod-field-label">Base Save Path</span>
-        <input class="mod-input" id="saveDirBasePath" value="${escHtml(m.base_path || '')}" readonly disabled autocomplete="off" spellcheck="false">
-        <div class="mod-inline-row">
-          <button class="mod-btn-secondary" ${browseAllowed ? '' : 'disabled'} onclick="browseSaveDirectory()">Browse</button>
-        </div>
-        ${browseNotice}
-      </label>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.use_timestamp_folder ? 'checked' : ''} ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryToggle(this.checked)">
-        <span class="mod-checkbox-label">날짜_시간 폴더 사용 (${escHtml(m.session_timestamp || 'session')}/)</span>
-      </label>
-      <div class="mod-field">
-        <span class="mod-field-label">Current Counter</span>
-        <div class="mod-status" style="text-align:left;min-height:0">${escHtml(String(m.save_counter ?? 1))}</div>
-      </div>
-      <label class="mod-field">
-        <span class="mod-field-label">Filename Format</span>
-        <select class="mod-select" ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryFilenameFormatChange(this.value)">
-          ${filenameOptions}
-        </select>
-      </label>
-      <label class="mod-field">
-        <span class="mod-field-label">Classification Method</span>
-        <select class="mod-select" ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryClassificationChange(this.value)">
-          ${classificationOptions}
-        </select>
-      </label>
-      ${rulesVisible ? `
-        <label class="mod-field">
-          <span class="mod-field-label">Classification Rules</span>
-          <textarea class="mod-textarea mod-textarea-lg" ${controlAllowed ? '' : 'disabled'}
-                    placeholder="*1girl, (*solo&*1girl), (landscape|scenery)"
-                    oninput="onModTextEdit('save_directory','classification_rules',this.value)">${escHtml(m.classification_rules || '')}</textarea>
-        </label>
-      ` : ''}
-    </div>
-  `;
+  if (saveDirectoryPanel) saveDirectoryPanel.render(m);
 }
 
 // ---- Module button inline badges ----
@@ -4558,6 +4494,7 @@ Promise.all([
   desktopWindowControlReady,
   promptDrawerReady,
   autoSavePanelReady,
+  saveDirectoryPanelReady,
 ])
   .then(() => {
     initHistoryRail();

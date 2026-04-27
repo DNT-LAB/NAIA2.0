@@ -2,7 +2,7 @@
    NAIA Remote — client-side logic
    ============================================================ */
 
-let ws, blobUrl = null, generating = false, drawerOpen = false;
+let ws, blobUrl = null, generating = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let reconnTimer = null, genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
@@ -33,6 +33,7 @@ let moduleBadges = null;
 let cloudflaredControls = null;
 let generationProgress = null;
 let desktopWindowControl = null;
+let promptDrawerControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -164,6 +165,18 @@ const desktopWindowControlReady = import('./js/features/desktopWindowControl.mjs
   .catch(error => {
     console.error('Failed to initialize desktop window control module', error);
   });
+const promptDrawerReady = import('./js/features/promptDrawer.mjs')
+  .then(({createPromptDrawer}) => {
+    promptDrawerControl = createPromptDrawer({
+      document,
+      getWs: () => ws,
+      WebSocket,
+      mediaQuery: isPC,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize prompt drawer module', error);
+  });
 
 function saveSharedSession() {
   if (!sharedMode) return;
@@ -249,12 +262,6 @@ const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
 let autoSaveEnabled  = true;
-const promptDrawer = $('promptDrawer');
-const toggleArrow  = $('toggleArrow');
-const toggleArrow2 = $('toggleArrow2');
-const toggleLabel  = $('toggleLabel');
-const promptNewDot = $('promptNewDot');
-const toggleBar    = document.querySelector('.prompt-toggle-bar');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -565,7 +572,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     if (acceptedPrompt) applyPromptTokenPayload(message);
     else updatePromptTokenEstimate();
     // Show new-content dot if drawer is closed
-    if (!drawerOpen) promptNewDot.classList.remove('hidden');
+    if (promptDrawerControl) promptDrawerControl.showNewContentDot();
   }
   // Random 완료 → 버튼 복원 (source 무관)
   if (source === 'random') unlockRandomButton();
@@ -1143,26 +1150,8 @@ function _restoreSharedSession() {
 const isPC = window.matchMedia('(min-width: 768px)');
 
 function toggleDrawer() {
-  if (isPC.matches) return;
-  drawerOpen = !drawerOpen;
-  promptDrawer.classList.toggle('open', drawerOpen);
-  toggleBar.classList.toggle('open', drawerOpen);
-  toggleArrow.classList.toggle('open', drawerOpen);
-  toggleArrow2.classList.toggle('open', drawerOpen);
-  toggleArrow.innerHTML = drawerOpen ? '&#9660;' : '&#9650;';
-  toggleArrow2.innerHTML = drawerOpen ? '&#9660;' : '&#9650;';
-  if (drawerOpen) {
-    promptNewDot.classList.add('hidden');
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send('sync');
-  }
+  if (promptDrawerControl) promptDrawerControl.toggle();
 }
-
-isPC.addEventListener('change', () => {
-  if (isPC.matches) {
-    promptDrawer.classList.remove('open');
-    drawerOpen = false;
-  }
-});
 
 // ---- Mobile keyboard detection ----
 // Hide bottom controls when virtual keyboard opens to maximize editing space
@@ -1229,9 +1218,7 @@ window.addEventListener('resize', () => {
 });
 
 function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
-  $('tab' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
+  if (promptDrawerControl) promptDrawerControl.switchTab(name);
 }
 
 // ---- Controls ----
@@ -4645,6 +4632,7 @@ Promise.all([
   cloudflaredControlsReady,
   generationProgressReady,
   desktopWindowControlReady,
+  promptDrawerReady,
 ])
   .then(() => {
     initHistoryRail();

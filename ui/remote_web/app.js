@@ -110,6 +110,8 @@ const viewerPanel    = $('viewerPanel');
 const viewerGrid     = $('viewerGrid');
 const viewerCountEl  = $('viewerCount');
 const viewerLoading  = $('viewerLoading');
+const rightTabButtons = Array.from(document.querySelectorAll('.right-tab-btn'));
+const rightTabPanes   = Array.from(document.querySelectorAll('.right-tab-pane'));
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
 let autoSaveEnabled  = true;
@@ -850,6 +852,25 @@ function applyPromptHighlightState() {
 function setNaiHighlightMode(mode) {
   currentMode = mode;
   applyPromptHighlightState();
+}
+
+// ---- Right panel top-level tabs ----
+
+function switchRightTab(tabName) {
+  rightTabButtons.forEach(btn => {
+    const active = btn.dataset.rightTab === tabName;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  rightTabPanes.forEach(pane => {
+    pane.classList.toggle('active', pane.dataset.rightPane === tabName);
+  });
+
+  const isResult = tabName === 'result';
+  if (viewerTab) viewerTab.style.display = isResult ? '' : 'none';
+  if (!isResult && typeof hideViewerNav === 'function') {
+    hideViewerNav();
+  }
 }
 
 // ---- Viewer (disk-based image browser) ----

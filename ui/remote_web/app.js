@@ -30,6 +30,7 @@ let createWsMessageDispatcher = null;
 let quickFilter = null;
 let rightTabs = null;
 let resultInfoResizer = null;
+let resultHistory = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -81,6 +82,23 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
+  });
+const resultHistoryReady = import('./js/features/resultHistory.mjs')
+  .then(({createResultHistoryController}) => {
+    resultHistory = createResultHistoryController({
+      document,
+      window,
+      localStorage,
+      fetch: window.fetch.bind(window),
+      preview,
+      emptyMsg,
+      resultInfoContent,
+      escHtml,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize result history module', error);
   });
 
 function saveSharedSession() {
@@ -164,12 +182,6 @@ const qResolution = $('qResolution');
 const qRndRes = $('qRndRes');
 const qAutoRes = $('qAutoRes');
 let syncingParams = false;
-const viewerTab      = $('viewerTab');
-const viewerPanel    = $('viewerPanel');
-const viewerRailToggle = $('viewerRailToggle');
-const viewerGrid     = $('viewerGrid');
-const viewerCountEl  = $('viewerCount');
-const viewerLoading  = $('viewerLoading');
 const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
@@ -180,43 +192,16 @@ const toggleArrow2 = $('toggleArrow2');
 const toggleLabel  = $('toggleLabel');
 const promptNewDot = $('promptNewDot');
 const toggleBar    = document.querySelector('.prompt-toggle-bar');
-// Result history state
-let viewerPage = 0;
-let viewerTotal = 0;
-let viewerLoadingMore = false;
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
   wildcard_standalone: $('optWcStandalone'),
 };
 
-// ---- Result history rail collapse ----
-const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
-
-function setHistoryRailCollapsed(collapsed, persist = true) {
-  if (!viewerPanel) return;
-  viewerPanel.classList.toggle('collapsed', collapsed);
-  if (viewerRailToggle) {
-    viewerRailToggle.textContent = collapsed ? '‹' : '›';
-    viewerRailToggle.title = collapsed ? 'Expand history' : 'Collapse history';
-    viewerRailToggle.setAttribute('aria-label', collapsed ? 'Expand history' : 'Collapse history');
-    viewerRailToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-  }
-  if (persist) {
-    try { localStorage.setItem(HISTORY_RAIL_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (_) {}
-  }
-}
-
-function toggleHistoryRail() {
-  setHistoryRailCollapsed(!viewerPanel.classList.contains('collapsed'));
-}
-
-function initHistoryRail() {
-  if (!viewerPanel) return;
-  let collapsed = false;
-  try { collapsed = localStorage.getItem(HISTORY_RAIL_COLLAPSED_KEY) === '1'; } catch (_) {}
-  setHistoryRailCollapsed(collapsed, false);
-}
+// ---- Result history wrappers ----
+function setHistoryRailCollapsed(collapsed, persist = true) { if (resultHistory) resultHistory.setRailCollapsed(collapsed, persist); }
+function toggleHistoryRail() { if (resultHistory) resultHistory.toggleRail(); }
+function initHistoryRail() { if (resultHistory) resultHistory.init(); }
 
 function initResultInfoResizer() {
   if (resultInfoResizer) resultInfoResizer.init();
@@ -250,12 +235,7 @@ function onInitComplete() {
   if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'get_module_state', module_id: currentModuleId}));
   }
-  // Result history rail: 저장 이미지가 있으면 썸네일 목록을 즉시 준비합니다.
-  fetch('/api/viewer/list?page=0&per_page=1').then(r => r.json()).then(d => {
-    viewerTotal = d.total;
-    if (viewerCountEl) viewerCountEl.textContent = d.total;
-    if (d.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
-  }).catch(() => {});
+  if (resultHistory) resultHistory.prepareInitialHistory();
   if (!sharedMode) {
     if (quickFilter) quickFilter.restorePreferences();
   }
@@ -968,527 +948,20 @@ function switchRightTab(tabName) {
 }
 
 // ---- Result history (disk-based image browser) ----
-
-function initViewer() {
-  viewerPage = 0;
-  viewerTotal = 0;
-  viewerGrid.innerHTML = '';
-  loadViewerPage(0);
-}
-
-function _hasViewerThumb(relPath) {
-  if (!viewerGrid || !relPath) return false;
-  return !!viewerGrid.querySelector(`.viewer-thumb[data-path="${CSS.escape(relPath)}"]`);
-}
-
-async function loadViewerPage(page) {
-  if (viewerLoadingMore) return;
-  viewerLoadingMore = true;
-  viewerLoading.style.display = '';
-  try {
-    const resp = await fetch(`/api/viewer/list?page=${page}&per_page=30`);
-    const data = await resp.json();
-    viewerTotal = data.total;
-    if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
-    if (viewerTab) viewerTab.classList.toggle('visible', viewerTotal > 0);
-    // Dedup: 서버는 offset 기반 페이지네이션이라 생성 중 새 이미지가 들어오면 경계가 어긋나
-    // 이미 로드된 항목이 다시 올 수 있음. DOM에 존재하는 rel_path는 skip.
-    for (const entry of data.images) {
-      if (_hasViewerThumb(entry.rel_path)) continue;
-      appendViewerThumb(entry.rel_path);
-    }
-    viewerPage = page + 1;
-  } catch (e) {
-    console.error('Viewer load failed:', e);
-  }
-  viewerLoadingMore = false;
-  viewerLoading.style.display = 'none';
-}
-
-function appendViewerThumb(relPath) {
-  const img = document.createElement('img');
-  img.className = 'viewer-thumb';
-  img.loading = 'lazy';
-  img.dataset.path = relPath;
-  img.src = '/api/viewer/thumb/' + encodeURI(relPath);
-  img.onclick = () => viewerThumbClick(relPath);
-  viewerGrid.appendChild(img);
-}
-
-function prependViewerThumb(relPath) {
-  const img = document.createElement('img');
-  img.className = 'viewer-thumb';
-  img.loading = 'lazy';
-  img.dataset.path = relPath;
-  img.src = '/api/viewer/thumb/' + encodeURI(relPath);
-  img.onclick = () => viewerThumbClick(relPath);
-  viewerGrid.prepend(img);
-}
-
-function closeViewerLightbox() {
-  const lb = $('viewerLightbox');
-  lb.classList.remove('open');
-  _lightboxPromptVisible = false;
-  _resetViewerLightbox();
-  _viewerPopupOpen = false;
-}
-
-function onLightboxClick(e) {
-  // popup mode: 바깥 클릭은 닫기 (inner에서 stopPropagation)
-  if (_viewerPopupOpen) {
-    closeViewerPopup();
-  } else {
-    closeViewerLightbox();
-  }
-}
-
-function onViewerNewImage(m) {
-  if (!m.rel_path) return;
-  _latestImagePath = m.rel_path;
-  viewerTotal++;
-  if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
-  if (viewerTab) viewerTab.classList.add('visible');
-  // Prepend to grid if viewer is initialized (중복 방지)
-  const alreadyInGrid = _hasViewerThumb(m.rel_path);
-  const didPrepend = !alreadyInGrid && !!viewerGrid;
-  if (didPrepend) {
-    prependViewerThumb(m.rel_path);
-  }
-  if (_viewerNavIdx < 0 || !_currentViewerPath || _currentViewerPath === m.rel_path) {
-    _loadResultInfo(m.rel_path);
-  }
-  // Viewer nav 활성 상태이고 실제로 DOM에 prepend된 경우에만 스냅샷 동기화
-  // (중복 WS 메시지로 DOM은 그대로인데 스냅샷만 밀리면 active 하이라이트가 어긋남)
-  if (didPrepend && _viewerNavIdx >= 0 && _viewerNavPaths.length > 0
-      && !_viewerNavPaths.includes(m.rel_path)) {
-    _viewerNavPaths.unshift(m.rel_path);
-    if (_viewerNavIdx === 0) {
-      // 최신을 보고 있었음 → 새 이미지로 자동 포커스 이동 (Q1-B)
-      _showViewerImage(m.rel_path);
-    } else {
-      // 과거 이미지를 탐색 중 → 인덱스를 한 칸 밀어서 같은 이미지를 유지 + "최신으로" 뱃지 표시
-      _viewerNavIdx += 1;
-      _viewerPendingNewCount += 1;
-      _showLatestViewerBadge();
-      // 활성 thumb 하이라이트 재정렬 (prepend로 DOM 인덱스가 밀림)
-      const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
-      thumbs.forEach((t, i) => t.classList.toggle('active', i === _viewerNavIdx));
-    }
-  }
-  // Popup grid에도 반영
-  if (_viewerPopupOpen) {
-    const vpGrid = $('vpGrid');
-    if (vpGrid && !vpGrid.querySelector(`.viewer-thumb[data-path="${CSS.escape(m.rel_path)}"]`)) {
-      const img = document.createElement('img');
-      img.className = 'viewer-thumb';
-      img.loading = 'lazy';
-      img.dataset.path = m.rel_path;
-      img.src = '/api/viewer/thumb/' + encodeURI(m.rel_path);
-      img.onclick = () => _vpSelectImage(m.rel_path, img);
-      vpGrid.prepend(img);
-    }
-    const cnt = $('vpCount');
-    if (cnt) cnt.textContent = viewerTotal;
-  }
-}
-
-// ---- "최신으로" 뱃지 (Viewer nav 활성 상태에서 과거 이미지 탐색 중 새 이미지 도착 시 노출) ----
-let _viewerPendingNewCount = 0;
-
-function _ensureLatestViewerBadge() {
-  let el = document.getElementById('viewerLatestBadge');
-  if (el) return el;
-  el = document.createElement('button');
-  el.id = 'viewerLatestBadge';
-  el.className = 'viewer-latest-badge';
-  el.type = 'button';
-  el.onclick = jumpToLatestViewerImage;
-  document.body.appendChild(el);
-  return el;
-}
-
-function _showLatestViewerBadge() {
-  const el = _ensureLatestViewerBadge();
-  const n = _viewerPendingNewCount;
-  el.textContent = n > 1 ? `↓ 최신으로 (+${n})` : '↓ 최신으로';
-  el.classList.add('visible');
-}
-
-function _hideLatestViewerBadge() {
-  _viewerPendingNewCount = 0;
-  const el = document.getElementById('viewerLatestBadge');
-  if (el) el.classList.remove('visible');
-}
-
-function jumpToLatestViewerImage() {
-  if (_viewerNavPaths.length === 0) { _hideLatestViewerBadge(); return; }
-  _viewerNavIdx = 0;
-  _showViewerImage(_viewerNavPaths[0]);
-  _hideLatestViewerBadge();
-}
-
-// Infinite scroll
-if (viewerGrid) {
-  viewerGrid.addEventListener('scroll', () => {
-    if (viewerLoadingMore) return;
-    const { scrollTop, scrollHeight, clientHeight } = viewerGrid;
-    if (scrollTop + clientHeight >= scrollHeight - 80) {
-      const loadedCount = viewerGrid.children.length;
-      if (loadedCount < viewerTotal) {
-        loadViewerPage(viewerPage);
-      }
-    }
-  });
-}
-
-// ---- Viewer popup (floating overlay on current page) ----
-let _viewerPopupOpen = false;
-
-function openViewerPopup() {
-  _viewerPopupOpen = true;
-  const lb = $('viewerLightbox');
-  lb.innerHTML = `
-    <div class="viewer-popup-inner" onclick="event.stopPropagation()">
-      <div class="viewer-popup-header">
-        <span class="viewer-panel-title">History <span id="vpCount">${viewerTotal}</span></span>
-        <button class="history-close" onclick="closeViewerPopup()">&times;</button>
-      </div>
-      <div class="viewer-popup-body">
-        <div class="viewer-popup-left" id="vpGrid"></div>
-        <div class="viewer-popup-right" id="vpRight">
-          <img class="vp-preview" id="vpPreview" alt="">
-          <div class="prompt-float" id="vpPromptFloat">
-            <div class="prompt-float-content" id="vpPromptContent"></div>
-          </div>
-          <div class="viewer-bottom-controls" style="display:flex">
-            <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
-          </div>
-        </div>
-      </div>
-      <div class="viewer-panel-loading" id="vpLoading" style="display:none">Loading...</div>
-    </div>`;
-  lb.classList.add('open');
-  _vpPage = 0;
-  loadViewerPopupPage(0);
-  $('vpGrid').addEventListener('scroll', _vpScroll);
-}
-
-let _vpPage = 0;
-let _vpLoading = false;
-let _vpCurrentPath = '';
-
-async function loadViewerPopupPage(page) {
-  if (_vpLoading) return;
-  _vpLoading = true;
-  const loading = $('vpLoading');
-  if (loading) loading.style.display = '';
-  try {
-    const resp = await fetch(`/api/viewer/list?page=${page}&per_page=30`);
-    const data = await resp.json();
-    const grid = $('vpGrid');
-    // Dedup: offset 페이지네이션이 생성 중 새 이미지로 경계 밀림 → DOM에 있는 항목 skip
-    for (const entry of data.images) {
-      if (grid.querySelector(`.viewer-thumb[data-path="${CSS.escape(entry.rel_path)}"]`)) continue;
-      const img = document.createElement('img');
-      img.className = 'viewer-thumb';
-      img.loading = 'lazy';
-      img.dataset.path = entry.rel_path;
-      img.src = '/api/viewer/thumb/' + encodeURI(entry.rel_path);
-      img.onclick = () => _vpSelectImage(entry.rel_path, img);
-      grid.appendChild(img);
-    }
-    _vpPage = page + 1;
-    viewerTotal = data.total;
-    const cnt = $('vpCount');
-    if (cnt) cnt.textContent = data.total;
-  } catch(e) {}
-  _vpLoading = false;
-  if (loading) loading.style.display = 'none';
-}
-
-function _vpSelectImage(relPath, thumbEl) {
-  _vpCurrentPath = relPath;
-  const prev = $('vpPreview');
-  if (prev) prev.src = '/api/viewer/image/' + encodeURI(relPath);
-  // Highlight
-  const grid = $('vpGrid');
-  if (grid) grid.querySelectorAll('.viewer-thumb').forEach(t => t.classList.remove('active'));
-  if (thumbEl) thumbEl.classList.add('active');
-  // Auto-load prompt if checkbox is checked
-  const cb = $('vpPromptCb');
-  if (cb && cb.checked) _loadPromptForFloat(relPath, 'vpPromptFloat', 'vpPromptContent');
-}
-
-function toggleVpPrompt(checked) {
-  const pf = $('vpPromptFloat');
-  if (pf) pf.classList.toggle('visible', checked);
-  if (checked && _vpCurrentPath) _loadPromptForFloat(_vpCurrentPath, 'vpPromptFloat', 'vpPromptContent');
-}
-
-function _vpScroll() {
-  const grid = $('vpGrid');
-  if (!grid || _vpLoading) return;
-  if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 100) {
-    if (grid.children.length < viewerTotal) loadViewerPopupPage(_vpPage);
-  }
-}
-
-function closeViewerPopup() {
-  _viewerPopupOpen = false;
-  const lb = $('viewerLightbox');
-  lb.classList.remove('open');
-  _lightboxPromptVisible = false;
-  _resetViewerLightbox();
-}
-
-function navViewerPopup(dir) {
-  const grid = $('vpGrid');
-  if (!grid) return;
-  const thumbs = [...grid.querySelectorAll('.viewer-thumb')];
-  if (thumbs.length === 0) return;
-  let idx = thumbs.findIndex(t => t.classList.contains('active'));
-  const next = idx + dir;
-  if (next >= 0 && next < thumbs.length) {
-    _vpSelectImage(thumbs[next].dataset.path, thumbs[next]);
-    thumbs[next].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-}
-
-// ---- Viewer navigation (< Action >) ----
-let _viewerNavPaths = [];  // loaded rel_paths in viewer grid order
-let _viewerNavIdx = -1;
-let _currentViewerPath = '';  // 현재 표시 중인 viewer 이미지 경로
-let _lightboxPromptVisible = false;
-
-function _viewerLightboxBaseHtml() {
-  const promptBtnText = _lightboxPromptVisible ? 'Hide Prompt' : 'Show Prompt';
-  return `
-    <div class="viewer-lightbox-inner" onclick="event.stopPropagation()">
-      <img id="viewerLightboxImg" alt="">
-      <div class="prompt-float viewer-lightbox-prompt${_lightboxPromptVisible ? ' visible' : ''}" id="viewerLightboxPrompt">
-        <div class="prompt-float-content" id="viewerLightboxPromptContent"></div>
-      </div>
-      <div class="viewer-lightbox-controls">
-        <button class="viewer-lightbox-btn${_lightboxPromptVisible ? ' accent' : ''}" id="viewerLightboxPromptBtn" onclick="toggleLightboxPrompt()">${promptBtnText}</button>
-        <button class="viewer-lightbox-btn danger" onclick="closeViewerLightbox()">Close</button>
-      </div>
-    </div>`;
-}
-
-function _resetViewerLightbox() {
-  const lb = $('viewerLightbox');
-  if (!lb) return;
-  lb.innerHTML = _viewerLightboxBaseHtml();
-}
-
-function _syncLightboxPromptUi() {
-  const prompt = $('viewerLightboxPrompt');
-  const btn = $('viewerLightboxPromptBtn');
-  if (prompt) prompt.classList.toggle('visible', _lightboxPromptVisible);
-  if (btn) {
-    btn.textContent = _lightboxPromptVisible ? 'Hide Prompt' : 'Show Prompt';
-    btn.classList.toggle('accent', _lightboxPromptVisible);
-  }
-}
-
-function toggleLightboxPrompt(forceVisible) {
-  _lightboxPromptVisible = typeof forceVisible === 'boolean' ? forceVisible : !_lightboxPromptVisible;
-  _syncLightboxPromptUi();
-  if (_lightboxPromptVisible && _currentViewerPath) {
-    _loadPromptForFloat(_currentViewerPath, 'viewerLightboxPrompt', 'viewerLightboxPromptContent');
-  }
-}
-
-function viewerThumbClick(relPath) {
-  // 모바일: lightbox로 간단히 표시 (터치하면 닫힘)
-  if (window.innerWidth < 768) {
-    const lb = $('viewerLightbox');
-    _currentViewerPath = relPath;
-    _latestImagePath = relPath;
-    _resetViewerLightbox();
-    const img = $('viewerLightboxImg');
-    if (lb && img) {
-      img.src = '/api/viewer/image/' + encodeURI(relPath);
-      lb.classList.add('open');
-      _syncLightboxPromptUi();
-      if (_lightboxPromptVisible) {
-        _loadPromptForFloat(relPath, 'viewerLightboxPrompt', 'viewerLightboxPromptContent');
-      }
-    }
-    return;
-  }
-  // PC: 메인 뷰어 + 네비게이션
-  _viewerNavPaths = [];
-  const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
-  thumbs.forEach(t => {
-    // data-path 우선, 없으면 src에서 추출 (구버전 fallback)
-    const p = t.dataset.path;
-    if (p) {
-      _viewerNavPaths.push(p);
-    } else {
-      const src = t.getAttribute('src') || '';
-      const match = src.match(/\/api\/viewer\/thumb\/(.+)$/);
-      if (match) _viewerNavPaths.push(decodeURI(match[1]));
-    }
-  });
-  _viewerNavIdx = _viewerNavPaths.indexOf(relPath);
-  if (_viewerNavIdx < 0) {
-    _viewerNavPaths = [relPath];
-    _viewerNavIdx = 0;
-  }
-  // 새 스냅샷 기준이므로 "최신으로" 뱃지 리셋
-  _hideLatestViewerBadge();
-  _showViewerImage(relPath);
-}
-
-function _showViewerImage(relPath) {
-  _currentViewerPath = relPath;
-  preview.src = '/api/viewer/image/' + encodeURI(relPath);
-  preview.classList.add('show');
-  emptyMsg.style.display = 'none';
-  _loadResultInfo(relPath);
-  // Highlight active thumb
-  const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
-  thumbs.forEach((t, i) => t.classList.toggle('active', i === _viewerNavIdx));
-}
-
-function navViewer(dir) {
-  const next = _viewerNavIdx + dir;
-  if (next >= 0 && next < _viewerNavPaths.length) {
-    _viewerNavIdx = next;
-    _showViewerImage(_viewerNavPaths[_viewerNavIdx]);
-    // 최신으로 복귀 → 뱃지 숨김
-    if (_viewerNavIdx === 0) _hideLatestViewerBadge();
-  }
-}
-
-function hideViewerNav() {
-  _viewerNavIdx = -1;
-  _currentViewerPath = '';
-  viewerGrid.querySelectorAll('.viewer-thumb.active').forEach(t => t.classList.remove('active'));
-  _hideLatestViewerBadge();
-}
-
-// ---- Keyboard navigation (Arrow Up/Down) ----
-document.addEventListener('keydown', e => {
-  // 텍스트 입력 중이면 무시
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-
-  // Popup 모드 키보드 네비게이션
-  if (_viewerPopupOpen) {
-    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      e.preventDefault(); navViewerPopup(-1);
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      e.preventDefault(); navViewerPopup(1);
-    } else if (e.key === 'Escape') {
-      closeViewerPopup();
-    }
-    return;
-  }
-
-  if (_viewerNavIdx < 0 || _viewerNavPaths.length === 0) return;
-
-  if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-    e.preventDefault();
-    navViewer(-1);
-  } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-    e.preventDefault();
-    navViewer(1);
-  } else if (e.key === 'Escape') {
-    hideViewerNav();
-  }
-});
-
-let _promptFloatCache = {};  // relPath → html
-let _promptFloatCacheKeys = [];
-const _PROMPT_CACHE_MAX = 80;
-
-function _rememberPromptMetaHtml(relPath, html) {
-  _promptFloatCache[relPath] = html;
-  _promptFloatCacheKeys = _promptFloatCacheKeys.filter(k => k !== relPath);
-  _promptFloatCacheKeys.push(relPath);
-  while (_promptFloatCacheKeys.length > _PROMPT_CACHE_MAX) {
-    delete _promptFloatCache[_promptFloatCacheKeys.shift()];
-  }
-}
-
-async function _getPromptMetaHtml(relPath) {
-  if (_promptFloatCache[relPath]) return _promptFloatCache[relPath];
-
-  const resp = await fetch('/api/viewer/meta/' + encodeURI(relPath));
-  const meta = await resp.json();
-  let html = '';
-  if (meta.prompt) {
-    html += '<div class="pf-island"><span class="pf-label">Prompt</span>' + escHtml(meta.prompt) + '</div>';
-  }
-  if (meta.characters && meta.characters.length) {
-    for (let i = 0; i < meta.characters.length; i++) {
-      html += `<div class="pf-island"><span class="pf-label">Character ${i + 1}</span>` + escHtml(meta.characters[i]) + '</div>';
-    }
-  }
-  if (!html) html = '<div class="pf-island"><span class="pf-label">No metadata</span></div>';
-  _rememberPromptMetaHtml(relPath, html);
-  return html;
-}
-
-async function _loadResultInfo(relPath) {
-  if (!resultInfoContent || !relPath) return;
-  resultInfoContent.innerHTML = '<span class="result-info-empty">loading metadata...</span>';
-  try {
-    resultInfoContent.innerHTML = await _getPromptMetaHtml(relPath);
-  } catch (e) {
-    resultInfoContent.innerHTML = '<span class="result-info-empty">metadata unavailable</span>';
-  }
-}
-
-async function _loadPromptForFloat(relPath, floatId, contentId) {
-  const pf = $(floatId);
-  const content = $(contentId);
-  if (!pf || !content) return;
-
-  // Cache check
-  if (_promptFloatCache[relPath]) {
-    content.innerHTML = _promptFloatCache[relPath];
-    requestAnimationFrame(() => {
-      content.classList.toggle('scrollable', content.scrollHeight > content.clientHeight);
-    });
-    pf.classList.add('visible');
-    return;
-  }
-
-  content.innerHTML = '<span class="pf-label">Loading...</span>';
-  pf.classList.add('visible');
-
-  try {
-    const html = await _getPromptMetaHtml(relPath);
-    content.innerHTML = html;
-    // 넘칠 때만 스크롤 활성화
-    requestAnimationFrame(() => {
-      content.classList.toggle('scrollable', content.scrollHeight > content.clientHeight);
-    });
-  } catch (e) {
-    content.innerHTML = '<span class="pf-label">Failed to load</span>';
-  }
-}
-
-// ---- Result folder ----
-
-let _latestImagePath = '';  // 다운로드 가능한 최신 이미지 경로
-
-async function openResultFolder() {
-  try {
-    const resp = await fetch('/api/viewer/open-folder', { method: 'POST' });
-    if (!resp.ok) {
-      showToast('Open folder failed.', 'error');
-      return;
-    }
-    showToast('Opened result folder.', 'success');
-  } catch (e) {
-    showToast('Open folder failed.', 'error');
-  }
-}
-
+function initViewer() { if (resultHistory) resultHistory.initViewer(); }
+function closeViewerLightbox() { if (resultHistory) resultHistory.closeLightbox(); }
+function onLightboxClick(event) { if (resultHistory) resultHistory.onLightboxClick(event); }
+function onViewerNewImage(message) { if (resultHistory) resultHistory.onNewImage(message); }
+function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }
+function openViewerPopup() { if (resultHistory) resultHistory.openPopup(); }
+function closeViewerPopup() { if (resultHistory) resultHistory.closePopup(); }
+function navViewerPopup(direction) { if (resultHistory) resultHistory.navPopup(direction); }
+function toggleLightboxPrompt(forceVisible) { if (resultHistory) resultHistory.toggleLightboxPrompt(forceVisible); }
+function viewerThumbClick(relPath) { if (resultHistory) resultHistory.thumbClick(relPath); }
+function navViewer(direction) { if (resultHistory) resultHistory.navViewer(direction); }
+function hideViewerNav() { if (resultHistory) resultHistory.hideNav(); }
+function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupPrompt(checked); }
+function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 // ---- Stats functions ----
 
 function toggleAutoSave() {
@@ -5408,7 +4881,7 @@ function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
-Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady])
+Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady, resultHistoryReady])
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();

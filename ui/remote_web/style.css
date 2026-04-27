@@ -3257,9 +3257,11 @@ body.resizing-result-info {
   margin-left: 4px;
 }
 .tag-tooltip-desc {
-  color: var(--text-dim);
+  color: var(--text-primary);
   display: block;
   margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.55;
 }
 /* Future sections: implications, related */
 .tag-tooltip-extra {
@@ -3333,9 +3335,9 @@ body.resizing-result-info {
 }
 .tag-chip-info-desc {
   margin-top: 5px;
-  color: var(--text-dim);
-  font-size: 11px;
-  line-height: 1.45;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.55;
 }
 /* Character details in tag tooltip */
 .char-details-row {

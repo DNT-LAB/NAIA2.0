@@ -339,6 +339,7 @@ export function createMetadataViewer({
     const prompt = getPrompt(payload);
     const negative = getNegative(payload);
     const characters = renderCharacters(payload);
+    const charactersUc = getCharacterNegatives(payload);
     const {rows, canonical} = buildParams(payload);
     if (titleEl) titleEl.textContent = label;
     const imageUrl = renderPreview(payload, source);
@@ -356,6 +357,7 @@ export function createMetadataViewer({
       negative,
       params: canonical,
       characters,
+      charactersUc,
     };
     updateActionButtons();
     setStatus(payload.has_metadata === false ? 'No metadata' : 'Loaded', payload.has_metadata === false ? 'muted' : 'ok');

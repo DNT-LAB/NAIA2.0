@@ -2711,6 +2711,31 @@ class RemoteBridge(QObject):
                 if m.reroll_on_generate_checkbox:
                     m.reroll_on_generate_checkbox.setChecked(value == "true")
                 self._broadcast_character_state()
+            elif key == "bulk_characters":
+                payload = json.loads(value or "{}")
+                characters = payload.get("characters", [])
+                characters_uc = payload.get("characters_uc", [])
+                if not isinstance(characters, list):
+                    characters = []
+                if not isinstance(characters_uc, list):
+                    characters_uc = []
+                target_count = max(1, len(characters))
+                while len(m.character_widgets) < target_count:
+                    m.add_character_widget()
+                for idx, widget in enumerate(m.character_widgets):
+                    has_character = idx < len(characters) and bool(str(characters[idx]).strip())
+                    widget.active_checkbox.setChecked(has_character)
+                    if idx < len(characters):
+                        widget.prompt_textbox.setPlainText(str(characters[idx] or ""))
+                        uc_text = str(characters_uc[idx] or "") if idx < len(characters_uc) else ""
+                        widget.uc_textbox.setPlainText(uc_text)
+                if m.activate_checkbox:
+                    m.activate_checkbox.setChecked(any(
+                        bool(str(character).strip()) for character in characters
+                    ))
+                if hasattr(m, "process_and_update_view"):
+                    m.process_and_update_view()
+                self._broadcast_character_state()
             elif key == "add_character":
                 m.add_character_widget()
                 self._broadcast_character_state()

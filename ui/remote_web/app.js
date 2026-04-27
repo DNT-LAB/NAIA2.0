@@ -164,6 +164,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
       showToast,
       onApplyPrompt: applyMetadataPrompt,
       onApplySettings: applyMetadataSettings,
+      onApplyCharacterSettings: applyMetadataCharacterSettings,
       onSendImg2Img: payload => requestMetadataImageAction(payload, 'img2img'),
     });
   })
@@ -1292,7 +1293,7 @@ function applyMetadataFlag(key, value) {
   return true;
 }
 
-function applyMetadataSettings(payload) {
+function applyMetadataSettings(payload, options = {}) {
   const params = payload && payload.params ? payload.params : {};
   let applied = 0;
   [
@@ -1316,10 +1317,37 @@ function applyMetadataSettings(payload) {
   });
   if (applied > 0) {
     saveSharedSession();
-    showToast('Settings applied from metadata', 'success');
-  } else {
+    if (!options.silent) showToast('Settings applied from metadata', 'success');
+  } else if (!options.silent) {
     showToast('No applicable settings in metadata', 'error');
   }
+  return applied;
+}
+
+function applyMetadataCharacterSettings(payload) {
+  if ((currentMode || modeSelect.value) !== 'NAI') {
+    showToast('Character prompts are only available in NAI mode', 'error');
+    return;
+  }
+  const characters = Array.isArray(payload?.characters) ? payload.characters : [];
+  const charactersUc = Array.isArray(payload?.charactersUc) ? payload.charactersUc : [];
+  const validCharacters = characters
+    .map(character => String(character ?? '').trim())
+    .filter(Boolean);
+  if (!validCharacters.length) {
+    showToast('No character prompts in metadata', 'error');
+    return;
+  }
+  applyMetadataSettings(payload, {silent: true});
+  if (currentModuleId !== 'character') {
+    openModule('character');
+  }
+  setModuleParam('character', 'bulk_characters', JSON.stringify({
+    characters,
+    characters_uc: charactersUc,
+  }));
+  saveSharedSession();
+  showToast(`Applied ${validCharacters.length} character prompts from metadata`, 'success');
 }
 // ---- Stats functions ----
 

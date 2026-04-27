@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 import pandas as pd
 
 from core.tag_axis_registry import TagAxisRegistry, normalize_tag
+from core.tag_knowledge import has_hangul
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +80,59 @@ class TagSearchResult:
     entry: TagSearchEntry
 
 
+def _entry_has_hangul(entry: TagSearchEntry) -> bool:
+    return (
+        has_hangul(entry.category)
+        or has_hangul(entry.desc)
+        or any(has_hangul(keyword) for keyword in entry.keywords)
+    )
+
+
+def _should_replace_duplicate(entry: TagSearchEntry, previous: TagSearchEntry) -> bool:
+    if entry.is_event != previous.is_event:
+        return entry.is_event
+
+    entry_has_hangul = _entry_has_hangul(entry)
+    previous_has_hangul = _entry_has_hangul(previous)
+    if entry_has_hangul != previous_has_hangul:
+        return entry_has_hangul
+
+    if entry.freq != previous.freq:
+        return entry.freq > previous.freq
+
+    if entry.desc and not previous.desc:
+        return True
+    return bool(entry.keywords and not previous.keywords)
+
+
+def _deduped_entry(
+    tag: str,
+    preferred: TagSearchEntry,
+    other: TagSearchEntry | None = None,
+) -> TagSearchEntry:
+    other = other or preferred
+    keywords = tuple(dict.fromkeys(tuple(preferred.keywords) + tuple(other.keywords)))
+    search_blob = " ".join(
+        part for part in (preferred.search_blob, other.search_blob) if part
+    )
+
+    return TagSearchEntry(
+        tag=tag,
+        freq=max(int(preferred.freq or 0), int(other.freq or 0)),
+        axis=preferred.axis if preferred.axis != "uncategorized" else other.axis,
+        source=preferred.source or other.source,
+        cat=preferred.cat or other.cat,
+        is_event=preferred.is_event or other.is_event,
+        is_expression=preferred.is_expression or other.is_expression,
+        is_clothing=preferred.is_clothing or other.is_clothing,
+        is_color=preferred.is_color or other.is_color,
+        category=preferred.category or other.category,
+        desc=preferred.desc or other.desc,
+        keywords=keywords,
+        search_blob=_norm(search_blob),
+    )
+
+
 class TagSearchIndex:
     """Small shared lexical tag search index.
 
@@ -99,22 +153,13 @@ class TagSearchIndex:
             if not tag:
                 continue
             previous = dedup.get(tag)
-            if previous is None or entry.freq > previous.freq or (entry.is_event and not previous.is_event):
-                dedup[tag] = TagSearchEntry(
-                    tag=tag,
-                    freq=int(entry.freq or 0),
-                    axis=entry.axis,
-                    source=entry.source,
-                    cat=entry.cat,
-                    is_event=entry.is_event,
-                    is_expression=entry.is_expression,
-                    is_clothing=entry.is_clothing,
-                    is_color=entry.is_color,
-                    category=entry.category,
-                    desc=entry.desc,
-                    keywords=tuple(entry.keywords),
-                    search_blob=_norm(entry.search_blob),
-                )
+            if previous is None:
+                dedup[tag] = _deduped_entry(tag, entry)
+                continue
+            if _should_replace_duplicate(entry, previous):
+                dedup[tag] = _deduped_entry(tag, entry, previous)
+            else:
+                dedup[tag] = _deduped_entry(tag, previous, entry)
 
         self._entries = dedup
         self._blob_by_tag: dict[str, str] = {

@@ -123,6 +123,33 @@ def test_tag_search_index_builds_from_remote_raw_records():
     assert index.search_tags("miku", cats={"artist"}) == []
 
 
+def test_tag_search_index_prefers_korean_metadata_for_normalized_duplicates():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="3_3",
+                freq=112,
+                category="Expression_Action",
+                desc="Eyes that appear as kissy lips or a number three.",
+                search_blob="3_3 Eyes that appear as kissy lips or a number three.",
+            ),
+            TagSearchEntry(
+                tag="3 3",
+                freq=0,
+                category="표정/행동",
+                desc="입술 모양이나 숫자 3처럼 보이는 눈.",
+                keywords=("찡그린 눈",),
+                search_blob="3 3 입술 모양 찡그린 눈",
+            ),
+        ]
+    )
+
+    entry = index._entries["3 3"]
+    assert entry.freq == 112
+    assert entry.desc == "입술 모양이나 숫자 3처럼 보이는 눈."
+    assert index.search_tags("찡그린") == ["3 3"]
+
+
 def test_tag_search_index_uses_candidate_index_for_keyword_queries(monkeypatch):
     entries = [
         TagSearchEntry(tag=f"noise tag {idx}", search_blob="unrelated filler")

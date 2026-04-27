@@ -461,11 +461,10 @@
           <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
         </div>
       </div>
-      <div class="viewer-panel" id="viewerPanel">
+      <aside class="viewer-panel open" id="viewerPanel" aria-label="Result history">
         <div class="viewer-panel-header">
-          <span class="viewer-panel-title">Viewer <span class="viewer-panel-count" id="viewerCount"></span></span>
-          <button class="viewer-pop-btn" id="viewerPopBtn" onclick="openViewerPopup()" title="Open in popup window">&#8599;</button>
-          <button class="history-close" onclick="toggleViewerPanel()">&times;</button>
+          <span class="viewer-panel-title">History <span class="viewer-panel-count" id="viewerCount"></span></span>
+          <button class="viewer-pop-btn" id="viewerPopBtn" onclick="openViewerPopup()" title="Open history browser">&#8599;</button>
         </div>
         <div class="viewer-panel-grid" id="viewerGrid"></div>
         <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
@@ -479,7 +478,7 @@
             <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
           </div>
         </div>
-      </div>
+      </aside>
     </div>
   </div>
 
@@ -528,11 +527,6 @@
 </div>
 
 </main>
-
-<!-- Viewer toggle tab -->
-<button class="history-tab" id="viewerTab" onclick="toggleViewerPanel()">
-  <span class="history-tab-label">Viewer</span>
-</button>
 
 <!-- Viewer lightbox / popup overlay -->
 <div class="viewer-lightbox" id="viewerLightbox" onclick="onLightboxClick(event)"></div>

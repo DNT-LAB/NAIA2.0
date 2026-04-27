@@ -597,48 +597,6 @@ header {
   font-family: var(--font-mono); letter-spacing: 1px;
 }
 
-/* ---- History side panel ---- */
-.history-tab {
-  position: fixed;
-  right: 0; top: 50%;
-  transform: translateY(-50%);
-  z-index: 20;
-  width: 44px;
-  height: 152px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(18,18,26,0.96);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-right: none;
-  border-radius: 22px 0 0 22px;
-  box-shadow: 0 10px 24px rgba(0,0,0,0.28);
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: all 0.25s, box-shadow 0.2s;
-  opacity: 0; pointer-events: none;
-}
-.history-tab.visible { opacity: 1; pointer-events: auto; }
-.history-tab:hover {
-  background: rgba(28,28,40,0.98);
-  box-shadow: 0 14px 28px rgba(0,0,0,0.34);
-}
-.history-tab-label {
-  display: block;
-  transform: rotate(-90deg);
-  transform-origin: center;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.history-tab:hover .history-tab-label { color: var(--text-primary); }
 .history-counter {
   display: block;
   font-weight: 400;
@@ -759,7 +717,7 @@ header {
 .history-action-btn:hover { background: var(--bg-card); color: var(--text-primary); }
 .history-action-btn.danger:hover { background: rgba(240,64,64,0.15); color: #f04040; border-color: rgba(240,64,64,0.3); }
 
-/* ---- Viewer panel (replaces history) ---- */
+/* ---- Result history rail ---- */
 .viewer-panel {
   width: 0;
   overflow: hidden;
@@ -832,6 +790,12 @@ header {
   padding: 12px;
   font-family: var(--font-mono); font-size: 10px;
   color: var(--text-dim);
+}
+
+@media (max-width: 767px) {
+  .viewer-panel {
+    display: none;
+  }
 }
 
 /* ---- Viewer lightbox (popup mode) ---- */
@@ -1084,45 +1048,6 @@ header {
   background: rgba(124,106,239,0.22) !important;
   color: #f2eeff;
 }
-
-/* ---- Viewer popup mode (?mode=viewer) — NOT USED, kept for compatibility ---- */
-body.viewer-mode .control-panel,
-body.viewer-mode .prompt-toggle-bar,
-body.viewer-mode .bottom-controls,
-body.viewer-mode header,
-body.viewer-mode .gen-progress,
-body.viewer-mode .right-tab-bar,
-body.viewer-mode .history-tab,
-body.viewer-mode #viewerTab { display: none !important; }
-body.viewer-mode {
-  display: flex !important;
-  flex-direction: column;
-}
-body.viewer-mode .app-layout { display: contents; }
-body.viewer-mode .viewer-wrapper {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-body.viewer-mode .viewer-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-body.viewer-mode .viewer { display: none; }
-body.viewer-mode .viewer-panel {
-  width: 100% !important;
-  flex: 1;
-  border-left: none !important;
-}
-body.viewer-mode .viewer-panel.open { width: 100% !important; }
-body.viewer-mode .viewer-panel-grid {
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  padding: 12px;
-  gap: 8px;
-}
-body.viewer-mode .viewer-pop-btn { display: none; }
-body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
 
 /* ---- Prompt slide-up (mobile) ---- */
 .prompt-drawer {
@@ -2923,8 +2848,13 @@ body.viewer-mode .viewer-thumb { aspect-ratio: 1; }
   .viewer {
     padding: 2px;
   }
-  /* PC: viewer panel 사이드바 복원 */
-  .viewer-panel.open { width: min(180px, 45vw); border-left: 1px solid var(--border-dim); }
+  /* PC: Result history rail is always visible, matching the desktop NAIA result layout. */
+  .viewer-panel,
+  .viewer-panel.open {
+    display: flex;
+    width: 136px;
+    border-left: 1px solid var(--border-dim);
+  }
   .viewer-panel-grid { grid-template-columns: 1fr; }
   .viewer-panel .viewer-thumb { aspect-ratio: auto; }
   .viewer-pop-btn { display: flex; align-items: center; justify-content: center; }

@@ -1566,23 +1566,6 @@ class ImageWindow(QWidget):
         self.open_folder_button.clicked.connect(self.open_folder)
         control_layout.addWidget(self.open_folder_button)
 
-        self.viewer_button = QPushButton("뷰어")
-        self.viewer_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: white;
-                border: none;
-                padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
-                font-size: {get_scaled_font_size(18)}px;
-                border-radius: {get_scaled_size(4)}px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['accent_blue_hover']};
-            }}
-        """)
-        self.viewer_button.clicked.connect(self._open_image_viewer)
-        control_layout.addWidget(self.viewer_button)
-
         left_layout.addLayout(control_layout)
 
         # 수직 스플리터 생성
@@ -2855,26 +2838,6 @@ class ImageWindow(QWidget):
             os.startfile(folder)
         elif os.name == 'posix':
             subprocess.run(['xdg-open', folder])
-
-    def _open_image_viewer(self):
-        """NAIA 전체화면 이미지 뷰어 열기"""
-        from ui.image_viewer_window import NAIAImageViewer
-
-        if not hasattr(self, '_naia_viewer') or self._naia_viewer is None:
-            self._naia_viewer = NAIAImageViewer(self.app_context)
-            self._naia_viewer.closed.connect(self._on_viewer_closed)
-
-        # 현재 표시 중인 이미지 파일이 있으면 해당 파일부터 시작
-        start_file = None
-        if hasattr(self, 'current_history_item') and self.current_history_item:
-            if hasattr(self.current_history_item, 'filepath') and self.current_history_item.filepath:
-                start_file = self.current_history_item.filepath
-
-        self._naia_viewer.open_viewer(start_file=start_file)
-
-    def _on_viewer_closed(self):
-        """뷰어 닫힘 처리"""
-        pass
 
     def copy_image_to_clipboard(self, fmt='PNG'):
         from PyQt6.QtWidgets import QApplication

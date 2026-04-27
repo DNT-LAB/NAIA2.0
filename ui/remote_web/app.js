@@ -79,7 +79,7 @@ let _sharedParamsInit = false;  // Shared Mode: 초기 params 수신 완료 여�
 let _sharedOptionsInit = false;  // Shared Mode: 초기 options 수신 완료 여부
 let _restoreSessionTimeout = null;  // init_complete 미수신 시 안전망 타이머
 
-// ---- Viewer (replaces History) ----
+// ---- Result history rail ----
 let pendingMeta = null; // meta arrives before blob
 
 const $ = id => document.getElementById(id);
@@ -121,8 +121,8 @@ const toggleArrow2 = $('toggleArrow2');
 const toggleLabel  = $('toggleLabel');
 const promptNewDot = $('promptNewDot');
 const toggleBar    = document.querySelector('.prompt-toggle-bar');
-// Viewer state
-let viewerOpen = false;
+// Result history state
+let viewerOpen = true;
 let viewerPage = 0;
 let viewerTotal = 0;
 let viewerLoadingMore = false;
@@ -225,11 +225,11 @@ function connect() {
           if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({type: 'get_module_state', module_id: currentModuleId}));
           }
-          // Viewer tab: 저장 이미지 존재 시 탭 표시
+          // Result history rail: 저장 이미지가 있으면 썸네일 목록을 즉시 준비합니다.
           fetch('/api/viewer/list?page=0&per_page=1').then(r => r.json()).then(d => {
-            if (d.total > 0) viewerTab.classList.add('visible');
             viewerTotal = d.total;
             if (viewerCountEl) viewerCountEl.textContent = d.total;
+            if (d.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
           }).catch(() => {});
         }
         // Update search count from prompt_generated
@@ -867,33 +867,12 @@ function switchRightTab(tabName) {
   });
 
   const isResult = tabName === 'result';
-  if (viewerTab) viewerTab.style.display = isResult ? '' : 'none';
   if (!isResult && typeof hideViewerNav === 'function') {
     hideViewerNav();
   }
 }
 
-// ---- Viewer (disk-based image browser) ----
-
-function toggleViewerPanel() {
-  viewerOpen = !viewerOpen;
-  viewerPanel.classList.toggle('open', viewerOpen);
-  viewerTab.style.opacity = viewerOpen ? '0' : '';
-  viewerTab.style.pointerEvents = viewerOpen ? 'none' : '';
-  if (viewerOpen && viewerGrid.children.length === 0) {
-    initViewer();
-  }
-  if (!viewerOpen) {
-    // Viewer 닫힘 → nav/prompt 정리
-    hideViewerNav();
-    const pf = $('promptFloat');
-    if (pf) pf.classList.remove('visible');
-    const cb = $('promptFloatCb');
-    if (cb) cb.checked = false;
-    const cbM = $('promptFloatCbMobile');
-    if (cbM) cbM.checked = false;
-  }
-}
+// ---- Result history (disk-based image browser) ----
 
 function initViewer() {
   viewerPage = 0;
@@ -916,7 +895,7 @@ async function loadViewerPage(page) {
     const data = await resp.json();
     viewerTotal = data.total;
     if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
-    viewerTab.classList.toggle('visible', viewerTotal > 0);
+    if (viewerTab) viewerTab.classList.toggle('visible', viewerTotal > 0);
     // Dedup: 서버는 offset 기반 페이지네이션이라 생성 중 새 이미지가 들어오면 경계가 어긋나
     // 이미 로드된 항목이 다시 올 수 있음. DOM에 존재하는 rel_path는 skip.
     for (const entry of data.images) {
@@ -973,7 +952,7 @@ function onViewerNewImage(m) {
   _latestImagePath = m.rel_path;
   viewerTotal++;
   if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
-  viewerTab.classList.add('visible');
+  if (viewerTab) viewerTab.classList.add('visible');
   // Prepend to grid if viewer is initialized (중복 방지)
   const alreadyInGrid = _hasViewerThumb(m.rel_path);
   const didPrepend = !alreadyInGrid && (viewerGrid.children.length > 0 || viewerOpen);
@@ -1073,7 +1052,7 @@ function openViewerPopup() {
   lb.innerHTML = `
     <div class="viewer-popup-inner" onclick="event.stopPropagation()">
       <div class="viewer-popup-header">
-        <span class="viewer-panel-title">Viewer <span id="vpCount">${viewerTotal}</span></span>
+        <span class="viewer-panel-title">History <span id="vpCount">${viewerTotal}</span></span>
         <button class="history-close" onclick="closeViewerPopup()">&times;</button>
       </div>
       <div class="viewer-popup-body">

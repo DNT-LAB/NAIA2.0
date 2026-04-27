@@ -828,6 +828,34 @@ class RemoteBridge(QObject):
             "has_metadata": bool(extracted or gen_params or prompt_context or api_metadata),
         }
 
+    def _build_input_metadata_payload(self, image, image_bytes: bytes, label: str = "Input Image", mime_type: str = "") -> dict:
+        extracted = {}
+        try:
+            from utils.image_info import ImageMetadataExtractor
+            extracted = ImageMetadataExtractor.extract_metadata(image) or {}
+        except Exception as e:
+            print(f"🌐 Remote: 입력 이미지 메타데이터 추출 실패 — {e}")
+
+        summary = self._metadata_summary_from(extracted, {}, image, image_bytes)
+        raw = {
+            "image": {
+                "width": getattr(image, "width", None),
+                "height": getattr(image, "height", None),
+                "mode": getattr(image, "mode", None),
+                "format": getattr(image, "format", None),
+                "mime_type": mime_type,
+                "size_kb": len(image_bytes) // 1024 if image_bytes else None,
+            },
+            "extracted_metadata": self._metadata_json_safe(extracted),
+        }
+        return {
+            "source": "input",
+            "label": label or "Input Image",
+            "summary": self._metadata_json_safe(summary),
+            "raw": raw,
+            "has_metadata": bool(extracted),
+        }
+
     def _do_random(self):
         """Random 요청 처리. deque에서 준비된 데이터를 pop하여 실행."""
         if not self._pending_random_requests:
@@ -4387,6 +4415,29 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         if bridge.latest_metadata_payload is None:
             return JSONResponse({"error": "No image generated yet"}, status_code=404)
         return bridge.latest_metadata_payload
+
+    @app.post("/api/metadata/extract")
+    async def api_metadata_extract(req: Request):
+        image_bytes = await req.body()
+        if not image_bytes:
+            return JSONResponse({"error": "No image data"}, status_code=400)
+        max_bytes = 64 * 1024 * 1024
+        if len(image_bytes) > max_bytes:
+            return JSONResponse({"error": "Image is too large"}, status_code=413)
+
+        label = (req.query_params.get("label") or "Input Image")[:120]
+        mime_type = req.headers.get("content-type", "")
+
+        def _extract():
+            from PIL import Image
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                img.load()
+                return bridge._build_input_metadata_payload(img, image_bytes, label, mime_type)
+
+        try:
+            return await asyncio.to_thread(_extract)
+        except Exception as e:
+            return JSONResponse({"error": f"Invalid image: {e}"}, status_code=400)
 
     # --- Viewer REST API ---
 

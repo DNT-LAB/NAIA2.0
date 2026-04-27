@@ -1,4 +1,5 @@
 const ACTION_METADATA = 'show_metadata';
+const ACTION_PASTE_IMAGE = 'paste_image';
 
 const MAIN_IMAGE_MENU = [
   {label: '프롬프트 불러오기'},
@@ -7,7 +8,7 @@ const MAIN_IMAGE_MENU = [
   {label: '생성 설정 복원'},
   {label: '전체 메타데이터 보기', action: ACTION_METADATA},
   {type: 'separator'},
-  {label: '이미지 붙여넣기'},
+  {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
   {type: 'separator'},
   {label: '파일 위치 열기'},
   {label: '이미지 저장'},
@@ -67,6 +68,7 @@ export function createResultContextMenu({
   fetch: fetchFn = window.fetch.bind(window),
   showToast = () => {},
   escHtml = defaultEscHtml,
+  onPasteImage = () => {},
 }) {
   let menu = null;
   let metadataModal = null;
@@ -92,7 +94,10 @@ export function createResultContextMenu({
       return '<div class="result-context-separator"></div>';
     }
     const danger = item.danger ? ' danger' : '';
-    const enabled = item.action === ACTION_METADATA && (!item.requiresPath || context.path || context.source === 'current');
+    const enabled = Boolean(
+      item.alwaysEnabled
+      || (item.action === ACTION_METADATA && context.hasMetadata && (!item.requiresPath || context.path || context.source === 'current'))
+    );
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
     const childHtml = item.children
@@ -127,6 +132,8 @@ export function createResultContextMenu({
         close();
         if (action === ACTION_METADATA) {
           showMetadata(context);
+        } else if (action === ACTION_PASTE_IMAGE) {
+          onPasteImage();
         }
       });
     });
@@ -163,9 +170,15 @@ export function createResultContextMenu({
   function getImagePlanePath(target) {
     const sourceImage = target.closest('#preview, #viewerLightboxImg, #vpPreview');
     if (sourceImage && sourceImage.getAttribute('src')) {
+      if (sourceImage.dataset && sourceImage.dataset.source === 'saved' && sourceImage.dataset.path) {
+        return sourceImage.dataset.path;
+      }
       return extractViewerPathFromSrc(sourceImage.getAttribute('src'));
     }
     const preview = document.getElementById('preview');
+    if (preview && preview.dataset && preview.dataset.source === 'saved' && preview.dataset.path) {
+      return preview.dataset.path;
+    }
     return preview ? extractViewerPathFromSrc(preview.getAttribute('src')) : '';
   }
 
@@ -245,7 +258,7 @@ export function createResultContextMenu({
     const thumb = target.closest('.viewer-thumb');
     if (thumb) {
       event.preventDefault();
-      open('thumbnail', event.clientX, event.clientY, {path: thumb.dataset.path || ''});
+      open('thumbnail', event.clientX, event.clientY, {path: thumb.dataset.path || '', hasImage: true, hasMetadata: true});
       return;
     }
 
@@ -255,10 +268,18 @@ export function createResultContextMenu({
 
     const preview = document.getElementById('preview');
     const imagePlaneTarget = target.closest('#preview, #viewerLightboxImg, .vp-preview, .viewer');
-    if (imagePlaneTarget && isPreviewVisible(preview)) {
+    if (imagePlaneTarget) {
       event.preventDefault();
+      const hasImage = isPreviewVisible(preview);
       const path = getImagePlanePath(target);
-      open('image-plane', event.clientX, event.clientY, {path, source: path ? 'saved' : 'current'});
+      const previewSource = preview && preview.dataset ? preview.dataset.source : '';
+      const source = hasImage ? (path ? 'saved' : (previewSource === 'input' ? 'input' : 'current')) : 'empty';
+      open('image-plane', event.clientX, event.clientY, {
+        path,
+        source,
+        hasImage,
+        hasMetadata: hasImage && source !== 'input',
+      });
     }
   }
 

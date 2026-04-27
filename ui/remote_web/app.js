@@ -27,6 +27,7 @@ let resultInfoResizer = null;
 let resultHistory = null;
 let resultEnhance = null;
 let resultContextMenu = null;
+let resultImageInput = null;
 let metadataViewer = null;
 let promptHighlighter = null;
 let moduleBadges = null;
@@ -165,6 +166,26 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
   .catch(error => {
     console.error('Failed to initialize metadata viewer module', error);
   });
+const resultImageInputReady = import('./js/features/resultImageInput.mjs')
+  .then(({createResultImageInput}) => {
+    resultImageInput = createResultImageInput({
+      document,
+      window,
+      preview,
+      emptyMsg,
+      getMetadataViewer: () => metadataViewer,
+      showMetadataTab: () => switchRightTab('pngInfo'),
+      onExternalImageDisplayed: () => {
+        if (resultEnhance) resultEnhance.clearCurrentMeta();
+        if (resultHistory) resultHistory.hideNav();
+      },
+      showToast,
+    });
+    resultImageInput.bind();
+  })
+  .catch(error => {
+    console.error('Failed to initialize result image input module', error);
+  });
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
@@ -173,6 +194,10 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       fetch,
       showToast,
       escHtml,
+      onPasteImage: () => {
+        if (resultImageInput) resultImageInput.pasteFromClipboard();
+        else showToast('Image input is not ready', 'error');
+      },
     });
     resultContextMenu.bind();
   })
@@ -599,6 +624,8 @@ function handleWsBlob(data) {
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = url;
   preview.src = url;
+  preview.dataset.source = 'current';
+  preview.dataset.path = '';
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
   setGen(false);
@@ -3061,6 +3088,7 @@ Promise.all([
   resultHistoryReady,
   resultEnhanceReady,
   metadataViewerReady,
+  resultImageInputReady,
   resultContextMenuReady,
   promptHighlighterReady,
   tokenDisplayReady,

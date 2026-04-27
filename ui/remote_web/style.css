@@ -857,6 +857,11 @@ header {
   opacity: 0; transition: opacity 0.35s ease;
 }
 .viewer img.show { opacity: 1; }
+.viewer.drag-over {
+  outline: 2px solid rgba(124,106,239,0.72);
+  outline-offset: -5px;
+  background: rgba(124,106,239,0.08);
+}
 /* History Action Menu */
 .hist-action-menu {
   display: none;

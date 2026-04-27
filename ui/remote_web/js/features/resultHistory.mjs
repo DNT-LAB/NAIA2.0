@@ -277,6 +277,8 @@ export function createResultHistoryController({
     currentViewerPath = relPath;
     onDiskImageSelected(relPath);
     preview.src = '/api/viewer/image/' + encodeURI(relPath);
+    preview.dataset.source = 'saved';
+    preview.dataset.path = relPath;
     preview.classList.add('show');
     emptyMsg.style.display = 'none';
     loadResultInfo(relPath);

@@ -75,6 +75,36 @@ export function createMetadataViewer({
     setStatus(data && data.has_metadata === false ? 'No metadata' : 'Loaded', data && data.has_metadata === false ? 'muted' : 'ok');
   }
 
+  function buildRequest(source) {
+    if (source.kind === 'saved' && source.path) {
+      return {
+        url: '/api/viewer/meta/' + encodeURI(source.path) + '?full=1',
+        init: {},
+      };
+    }
+    if (source.kind === 'input' && source.blob) {
+      const label = encodeURIComponent(source.label || 'Input Image');
+      return {
+        url: '/api/metadata/extract?label=' + label,
+        init: {
+          method: 'POST',
+          headers: {'Content-Type': source.blob.type || 'application/octet-stream'},
+          body: source.blob,
+        },
+      };
+    }
+    return {
+      url: '/api/result/metadata',
+      init: {},
+    };
+  }
+
+  function unavailableMessage(source) {
+    if (source.kind === 'saved') return 'Metadata unavailable';
+    if (source.kind === 'input') return 'Input image metadata unavailable';
+    return 'No current result metadata';
+  }
+
   async function loadSource(source = currentSource, options = {}) {
     const requestId = ++requestSerial;
     loading = true;
@@ -83,21 +113,22 @@ export function createMetadataViewer({
     if (!options.silent) setStatus('Loading...', 'busy');
 
     try {
-      const url = source.kind === 'saved' && source.path
-        ? '/api/viewer/meta/' + encodeURI(source.path) + '?full=1'
-        : '/api/result/metadata';
-      const response = await fetch(url);
+      const request = buildRequest(source);
+      const response = await fetch(request.url, request.init);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       if (requestId !== requestSerial) return;
       if (source.kind === 'saved' && source.path && data && typeof data === 'object') {
         data.label = source.path;
         data.source = 'saved';
+      } else if (source.kind === 'input' && data && typeof data === 'object') {
+        data.label = source.label || data.label || 'Input Image';
+        data.source = 'input';
       }
       render(data);
     } catch (error) {
       if (requestId !== requestSerial) return;
-      renderEmpty(source.kind === 'saved' ? 'Metadata unavailable' : 'No current result metadata');
+      renderEmpty(unavailableMessage(source));
       setStatus('Unavailable', 'error');
       if (!options.silent && showToast) showToast('Failed to load metadata', 'error');
     } finally {
@@ -117,6 +148,11 @@ export function createMetadataViewer({
     return loadSource({kind: 'saved', path}, options);
   }
 
+  function loadImageBlob(blob, label = 'Input Image', options = {}) {
+    if (!blob) return Promise.resolve();
+    return loadSource({kind: 'input', path: '', label, blob}, options);
+  }
+
   function refresh() {
     return loadSource(currentSource, {silent: false});
   }
@@ -127,6 +163,7 @@ export function createMetadataViewer({
   return {
     loadCurrent,
     loadSaved,
+    loadImageBlob,
     refresh,
   };
 }

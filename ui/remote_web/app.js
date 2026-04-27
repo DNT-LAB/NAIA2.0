@@ -107,6 +107,7 @@ const qAutoRes = $('qAutoRes');
 let syncingParams = false;
 const viewerTab      = $('viewerTab');
 const viewerPanel    = $('viewerPanel');
+const viewerRailToggle = $('viewerRailToggle');
 const viewerGrid     = $('viewerGrid');
 const viewerCountEl  = $('viewerCount');
 const viewerLoading  = $('viewerLoading');
@@ -126,7 +127,6 @@ const toggleLabel  = $('toggleLabel');
 const promptNewDot = $('promptNewDot');
 const toggleBar    = document.querySelector('.prompt-toggle-bar');
 // Result history state
-let viewerOpen = true;
 let viewerPage = 0;
 let viewerTotal = 0;
 let viewerLoadingMore = false;
@@ -135,6 +135,34 @@ const optBoxes = {
   auto_generate: $('optAutoGen'),
   wildcard_standalone: $('optWcStandalone'),
 };
+
+// ---- Result history rail collapse ----
+const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
+
+function setHistoryRailCollapsed(collapsed, persist = true) {
+  if (!viewerPanel) return;
+  viewerPanel.classList.toggle('collapsed', collapsed);
+  if (viewerRailToggle) {
+    viewerRailToggle.textContent = collapsed ? '‹' : '›';
+    viewerRailToggle.title = collapsed ? 'Expand history' : 'Collapse history';
+    viewerRailToggle.setAttribute('aria-label', collapsed ? 'Expand history' : 'Collapse history');
+    viewerRailToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+  if (persist) {
+    try { localStorage.setItem(HISTORY_RAIL_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (_) {}
+  }
+}
+
+function toggleHistoryRail() {
+  setHistoryRailCollapsed(!viewerPanel.classList.contains('collapsed'));
+}
+
+function initHistoryRail() {
+  if (!viewerPanel) return;
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(HISTORY_RAIL_COLLAPSED_KEY) === '1'; } catch (_) {}
+  setHistoryRailCollapsed(collapsed, false);
+}
 
 // ---- Result info resizer ----
 const RESULT_INFO_HEIGHT_KEY = 'naia_result_info_height';
@@ -1025,7 +1053,7 @@ function onViewerNewImage(m) {
   if (viewerTab) viewerTab.classList.add('visible');
   // Prepend to grid if viewer is initialized (중복 방지)
   const alreadyInGrid = _hasViewerThumb(m.rel_path);
-  const didPrepend = !alreadyInGrid && (viewerGrid.children.length > 0 || viewerOpen);
+  const didPrepend = !alreadyInGrid && !!viewerGrid;
   if (didPrepend) {
     prependViewerThumb(m.rel_path);
   }
@@ -5657,5 +5685,6 @@ function _renderTfAc() {
   });
 }
 
+initHistoryRail();
 initResultInfoResizer();
 connect();

@@ -460,9 +460,11 @@
           <span class="stats-pill save-toggle" id="statsSave" onclick="toggleAutoSave()" title="Open auto-save settings"><span class="stats-dot" id="statsSaveDot"></span>Auto Save</span>
         </div>
         <div class="viewer-panel-header">
+          <button class="viewer-rail-toggle" id="viewerRailToggle" onclick="toggleHistoryRail()" title="Collapse history" aria-label="Collapse history" aria-expanded="true">›</button>
           <span class="viewer-panel-title">History <span class="viewer-panel-count" id="viewerCount"></span></span>
           <button class="viewer-pop-btn" id="viewerPopBtn" onclick="openViewerPopup()" title="Open history browser">&#8599;</button>
         </div>
+        <div class="viewer-panel-collapsed-label">History</div>
         <div class="viewer-panel-grid" id="viewerGrid"></div>
         <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
         <div class="viewer-panel-bottom">

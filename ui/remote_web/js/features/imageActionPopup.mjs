@@ -27,11 +27,12 @@ export function createImageActionPopup({
     return escHtml(String(value ?? ''));
   }
 
-  function actionButton({action, label, tone = '', disabled = false}) {
+  function actionButton({action, label, icon = '', tone = '', disabled = false}) {
     const disabledAttr = disabled ? ' disabled aria-disabled="true"' : '';
+    const iconHtml = icon ? `<span class="image-action-btn-icon">${escapeText(icon)}</span>` : '';
     return `
       <button type="button" class="image-action-btn ${tone}" data-action="${escapeText(action)}"${disabledAttr}>
-        ${escapeText(label)}
+        ${iconHtml}<span>${escapeText(label)}</span>
       </button>`;
   }
 
@@ -95,18 +96,23 @@ export function createImageActionPopup({
     root.innerHTML = `
       <div class="image-action-backdrop"></div>
       <section class="image-action-popup" role="dialog" aria-modal="true" aria-label="Detected image actions">
-        <div class="image-action-title">이미지가 감지되었습니다. 수행할 작업을 선택하세요.</div>
+        <header class="image-action-header">
+          <div>
+            <div class="image-action-kicker">Detected Image</div>
+            <div class="image-action-title">이미지가 감지되었습니다.</div>
+          </div>
+          <button type="button" class="image-action-close" data-action="close" aria-label="Close">×</button>
+        </header>
         <div class="image-action-preview">
           <img src="${escapeText(payload.imageUrl)}" alt="">
+          ${sizeText ? `<div class="image-action-meta">${escapeText(sizeText)}</div>` : ''}
         </div>
-        ${sizeText ? `<div class="image-action-meta">${escapeText(sizeText)}</div>` : ''}
         <div class="image-action-buttons">
-          ${actionButton({action: 'img2img', label: 'Img2Img 탭으로 이미지 전송', tone: 'primary'})}
-          ${actionButton({action: 'inpaint', label: 'Inpaint 탭으로 이미지 전송'})}
-          ${hasMetadata ? actionButton({action: 'metadata', label: '📄 메타데이터 읽기', tone: 'metadata'}) : ''}
-          ${actionButton({action: 'danbooru', label: '🏷️ Danbooru 태그 분석', tone: 'danbooru'})}
-          ${showVibe ? actionButton({action: 'vibe', label: '📦 Import Vibe Transfer', tone: 'vibe'}) : ''}
-          ${actionButton({action: 'close', label: '닫기'})}
+          ${actionButton({action: 'img2img', icon: '↗', label: 'Img2Img 전송', tone: 'primary'})}
+          ${actionButton({action: 'inpaint', icon: '✎', label: 'Inpaint 전송'})}
+          ${hasMetadata ? actionButton({action: 'metadata', icon: '▤', label: '메타데이터', tone: 'metadata'}) : ''}
+          ${actionButton({action: 'danbooru', icon: '#', label: 'Danbooru 분석', tone: 'danbooru'})}
+          ${showVibe ? actionButton({action: 'vibe', icon: '◇', label: 'Vibe Transfer', tone: 'vibe'}) : ''}
         </div>
       </section>`;
     document.body.appendChild(root);

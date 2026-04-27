@@ -784,6 +784,22 @@ header {
 .viewer-panel.open {
   width: 100%;
 }
+.viewer-panel-save-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 0;
+  flex-shrink: 0;
+}
+.viewer-panel-save-row .stats-pill {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(18,18,26,0.82);
+}
 .viewer-panel-header {
   display: flex;
   align-items: center;

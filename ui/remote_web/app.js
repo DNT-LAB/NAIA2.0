@@ -164,6 +164,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
       showToast,
       onApplyPrompt: applyMetadataPrompt,
       onApplySettings: applyMetadataSettings,
+      onSendImg2Img: payload => requestMetadataImageAction(payload, 'img2img'),
     });
   })
   .catch(error => {
@@ -1184,6 +1185,27 @@ async function requestPopupImageAction(payload, action) {
   } catch (error) {
     console.error('Image action request failed', error);
     showToast(error.message || 'Image action failed', 'error');
+  }
+}
+
+async function requestMetadataImageAction(payload, action) {
+  const label = payload?.label || payload?.source?.label || payload?.source?.path || 'Metadata Image';
+  let blob = payload?.blob || null;
+  try {
+    if (!blob) {
+      const imageUrl = payload?.imageUrl || '';
+      if (!imageUrl) {
+        showToast('Metadata image is unavailable', 'error');
+        return;
+      }
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      blob = await response.blob();
+    }
+    await requestPopupImageAction({blob, label}, action);
+  } catch (error) {
+    console.error('Metadata image action failed', error);
+    showToast(error.message || 'Metadata image action failed', 'error');
   }
 }
 

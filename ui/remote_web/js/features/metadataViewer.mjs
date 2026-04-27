@@ -271,6 +271,7 @@ export function createMetadataViewer({
       const modelInfo = getModelInfo(data);
       modelInfoEl.textContent = modelInfo ? `🤖 모델: ${modelInfo}` : '';
     }
+    return imageUrl;
   }
 
   function renderPromptBlock(el, value, emptyText) {
@@ -318,12 +319,13 @@ export function createMetadataViewer({
     const hasPrompt = hasPayload && (currentActionPayload.prompt || currentActionPayload.negative);
     const hasParams = hasPayload && Object.keys(currentActionPayload.params || {}).length > 0;
     const hasCharacters = hasPayload && (currentActionPayload.characters || []).length > 0;
+    const hasImageActionSource = hasPayload && (currentActionPayload.blob || currentActionPayload.imageUrl);
     if (applyCharacterSettingsBtn) applyCharacterSettingsBtn.style.display = hasCharacters ? '' : 'none';
     [
       [applyPromptBtn, typeof onApplyPrompt === 'function' && hasPrompt],
       [applySettingsBtn, typeof onApplySettings === 'function' && hasParams],
       [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters],
-      [sendImg2ImgBtn, typeof onSendImg2Img === 'function' && hasPayload],
+      [sendImg2ImgBtn, typeof onSendImg2Img === 'function' && hasImageActionSource],
     ].forEach(([button, enabled]) => {
       if (!button) return;
       button.disabled = !enabled;
@@ -339,7 +341,7 @@ export function createMetadataViewer({
     const characters = renderCharacters(payload);
     const {rows, canonical} = buildParams(payload);
     if (titleEl) titleEl.textContent = label;
-    renderPreview(payload, source);
+    const imageUrl = renderPreview(payload, source);
     renderPromptBlock(promptEl, prompt, 'No prompt metadata');
     renderPromptBlock(negativeEl, negative, 'No negative metadata');
     renderParams(rows);
@@ -347,6 +349,9 @@ export function createMetadataViewer({
     currentActionPayload = {
       data: payload,
       source,
+      label,
+      blob: source.blob || null,
+      imageUrl,
       prompt,
       negative,
       params: canonical,

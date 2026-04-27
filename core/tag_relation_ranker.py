@@ -87,6 +87,7 @@ _BROAD_SIBLING_SUBGROUPS = {
     "image_composition",
     "instruments",
     "metatags",
+    "patterns",
     "pose",
     "posture",
     "sex_acts",
@@ -290,9 +291,16 @@ class TagRelationRanker:
         )
         same_axis = bool(source_axis != "uncategorized" and source_axis == candidate_axis)
 
-        if source == "word_match" and not (overlap or same_subgroup):
+        if source == "word_match" and not overlap:
             return 0.0
         if source == "word_match" and self._has_only_generic_overlap(overlap):
+            return 0.0
+        if (
+            source == "word_match"
+            and not same_subgroup
+            and len(overlap) < 2
+            and _is_broad_sibling_area(source_group, source_subgroup)
+        ):
             return 0.0
         if source == "children" and not (same_group or same_axis):
             return 0.0

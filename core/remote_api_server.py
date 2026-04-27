@@ -3211,6 +3211,7 @@ class RemoteBridge(QObject):
                     ('data/e621_KR_tags.parquet', 2),
                 ]
                 pq_count = 0
+                pq_backfill_count = 0
                 for pq_path, src_key in pq_sources:
                     if not os.path.exists(pq_path):
                         continue
@@ -3220,17 +3221,30 @@ class RemoteBridge(QObject):
                         for _, row in df.iterrows():
                             tag_raw = _norm(str(row['tag']).replace('_', ' '))
                             tag_lower = tag_raw.lower()
-                            if tag_lower in raw:
-                                continue
                             kw_str = str(row.get('keywords', '') or '')
+                            desc_str = str(row.get('desc', '') or '')
+                            if tag_lower in raw:
+                                existing = raw[tag_lower]
+                                updated = False
+                                if not str(existing.get('description') or '').strip() and desc_str.strip():
+                                    existing['description'] = desc_str
+                                    existing['_desc_lower'] = desc_str.lower()
+                                    updated = True
+                                if not str(existing.get('keywords_kr') or '').strip() and kw_str.strip():
+                                    existing['keywords_kr'] = kw_str
+                                    existing['_kw_lower'] = kw_str.replace('<', '').replace('>', '').lower()
+                                    updated = True
+                                if updated:
+                                    pq_backfill_count += 1
+                                continue
                             entry = {
                                 '_tag': tag_raw, '_src': src_key,
                                 'freq': int(row.get('count', 0)),
-                                'description': str(row.get('desc', '') or ''),
+                                'description': desc_str,
                                 'group': str(row.get('category', '') or ''),
                                 'subgroup': '', 'keywords_kr': kw_str,
                                 '_kw_lower': kw_str.replace('<', '').replace('>', '').lower() if kw_str else '',
-                                '_desc_lower': str(row.get('desc', '') or '').lower(),
+                                '_desc_lower': desc_str.lower(),
                             }
                             if src_key == 2:
                                 entry['_cat'] = 'e621'
@@ -3330,7 +3344,7 @@ class RemoteBridge(QObject):
                     self._tag_search_index = None
                     self._tag_relation_ranker = None
                     print(f"🌐 Remote: shared tag index build failed — {e}")
-                print(f"🌐 Remote: tag index — {src0} interactive + {pq_count} parquet + {filter_count} filter + {dict_count} dict = {len(raw)} total")
+                print(f"🌐 Remote: tag index — {src0} interactive + {pq_count} parquet + {pq_backfill_count} backfill + {filter_count} filter + {dict_count} dict = {len(raw)} total")
                 self._kr_tags_loaded = True
             except Exception as e:
                 self._kr_tags_loaded = True

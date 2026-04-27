@@ -250,3 +250,83 @@ def test_relation_ranker_filters_cross_axis_children_but_keeps_same_group_childr
     assert ranker.rank_related("hetero", records["hetero"], limit=8) == []
     assert ranker.rank_related("scar", records["scar"], limit=8) == ["scar on face"]
     assert ranker.rank_related("sweat", records["sweat"], limit=8) == ["sweatdrop"]
+
+
+def test_relation_ranker_requires_meaningful_overlap_for_word_match():
+    records = {
+        "black skirt": {
+            "_tag": "black skirt",
+            "freq": 100000,
+            "group": "Clothing_Wear",
+            "subgroup": "attire",
+            "relations": {
+                "word_match": [
+                    "pleated skirt",
+                    "black dress",
+                    "black jacket",
+                    "black shirt",
+                ],
+            },
+        },
+        "pleated skirt": {
+            "_tag": "pleated skirt",
+            "freq": 90000,
+            "group": "Clothing_Wear",
+            "subgroup": "attire",
+        },
+        "black dress": {
+            "_tag": "black dress",
+            "freq": 80000,
+            "group": "Clothing_Wear",
+            "subgroup": "attire",
+        },
+        "black jacket": {
+            "_tag": "black jacket",
+            "freq": 70000,
+            "group": "Clothing_Wear",
+            "subgroup": "attire",
+        },
+        "black shirt": {
+            "_tag": "black shirt",
+            "freq": 60000,
+            "group": "Clothing_Wear",
+            "subgroup": "attire",
+        },
+    }
+
+    related = TagRelationRanker(records).rank_related("black skirt", records["black skirt"], limit=8)
+
+    assert related == ["pleated skirt"]
+
+
+def test_relation_ranker_suppresses_single_token_word_match_from_broad_areas():
+    records = {
+        "plaid skirt": {
+            "_tag": "plaid skirt",
+            "freq": 52180,
+            "group": "Clothing_Wear",
+            "subgroup": "patterns",
+            "relations": {
+                "parent": "skirt",
+                "word_match": [
+                    "pleated skirt",
+                    "black skirt",
+                    "red skirt",
+                    "skirt lift",
+                ],
+            },
+        },
+        "skirt": {"_tag": "skirt", "group": "Clothing_Wear", "subgroup": "attire"},
+        "pleated skirt": {"_tag": "pleated skirt", "group": "Clothing_Wear", "subgroup": "attire"},
+        "black skirt": {"_tag": "black skirt", "group": "Clothing_Wear", "subgroup": "attire"},
+        "red skirt": {"_tag": "red skirt", "group": "Clothing_Wear", "subgroup": "attire"},
+        "skirt lift": {
+            "_tag": "skirt lift",
+            "group": "Expression_Action",
+            "subgroup": "clothing_action",
+        },
+    }
+
+    related = TagRelationRanker(records).rank_related("plaid skirt", records["plaid skirt"], limit=8)
+
+    assert related == []

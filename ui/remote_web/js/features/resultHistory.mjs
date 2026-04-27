@@ -11,6 +11,7 @@ export function createResultHistoryController({
   resultInfoContent,
   escHtml,
   showToast,
+  onDiskImageSelected = () => {},
 }) {
   const getEl = id => document.getElementById(id);
   const viewerTab = getEl('viewerTab');
@@ -274,6 +275,7 @@ export function createResultHistoryController({
 
   function showImage(relPath) {
     currentViewerPath = relPath;
+    onDiskImageSelected(relPath);
     preview.src = '/api/viewer/image/' + encodeURI(relPath);
     preview.classList.add('show');
     emptyMsg.style.display = 'none';
@@ -288,6 +290,7 @@ export function createResultHistoryController({
       const lb = getEl('viewerLightbox');
       currentViewerPath = relPath;
       latestImagePath = relPath;
+      onDiskImageSelected(relPath);
       resetLightbox();
       const img = getEl('viewerLightboxImg');
       if (lb && img) {

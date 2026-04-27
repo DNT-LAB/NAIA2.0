@@ -4038,6 +4038,7 @@ class RemoteBridge(QObject):
                 "height": image.height,
                 "size_kb": len(webp_bytes) // 1024,
                 "timestamp": datetime.now().isoformat(),
+                "can_enhance": bool(gen_params),
                 "prompt": gen_params.get("input", ""),
                 "negative_prompt": gen_params.get("negative_prompt", ""),
                 "seed": gen_params.get("seed", ""),

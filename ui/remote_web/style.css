@@ -788,6 +788,34 @@ body.resizing-result-info {
   text-transform: uppercase;
   color: var(--text-muted);
 }
+.result-enhance-btn {
+  height: 22px;
+  min-width: 76px;
+  padding: 0 9px;
+  border: 1px solid rgba(157,139,255,0.42);
+  border-radius: 5px;
+  background: rgba(157,139,255,0.13);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+.result-enhance-btn:hover:not(:disabled) {
+  border-color: rgba(185,174,255,0.72);
+  background: rgba(157,139,255,0.22);
+}
+.result-enhance-btn:disabled {
+  border-color: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-dim);
+  cursor: default;
+}
+.result-enhance-btn.running {
+  color: var(--accent);
+}
 .result-info-content {
   flex: 1;
   overflow-y: auto;

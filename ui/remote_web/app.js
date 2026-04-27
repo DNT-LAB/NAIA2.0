@@ -25,6 +25,7 @@ let quickFilter = null;
 let rightTabs = null;
 let resultInfoResizer = null;
 let resultHistory = null;
+let resultEnhance = null;
 let resultContextMenu = null;
 let promptHighlighter = null;
 let moduleBadges = null;
@@ -628,6 +629,7 @@ const wsMessageHandlers = {
   options: syncOptions,
   params: updateParams,
   mode: m => syncMode(m.mode),
+  result_enhance_state: m => { if (resultEnhance) resultEnhance.setRunning(!!m.running); },
   mode_result: onModeResult,
   api_status: updateApiStatus,
   verify_result: onVerifyResult,
@@ -710,6 +712,7 @@ function updateMetaChips(m) {
 function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
   updateMetaChips(m);
+  if (resultEnhance) resultEnhance.setCurrentMeta(m);
 }
 
 function cleanPromptForTokenEstimate(text, mode) {
@@ -1088,6 +1091,7 @@ function navViewer(direction) { if (resultHistory) resultHistory.navViewer(direc
 function hideViewerNav() { if (resultHistory) resultHistory.hideNav(); }
 function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupPrompt(checked); }
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
+function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 // ---- Stats functions ----
 
 function toggleAutoSave() {
@@ -1451,6 +1455,7 @@ function syncMode(mode) {
   }
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
+  if (resultEnhance) resultEnhance.update();
 }
 
 function setMode(mode) {
@@ -2941,6 +2946,7 @@ Promise.all([
   customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,
+  resultEnhanceReady,
   resultContextMenuReady,
   promptHighlighterReady,
   tokenDisplayReady,

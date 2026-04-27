@@ -3311,7 +3311,7 @@ class ImageWindow(QWidget):
 
         self._enhance_thread.started.connect(self._enhance_worker.run)
         self._enhance_worker.finished.connect(
-            lambda result: self._handle_enhance_result(result, progress, orig_w, orig_h, new_w, new_h)
+            lambda result: self._handle_enhance_result(result, progress, orig_w, orig_h, new_w, new_h, item, params)
         )
         self._enhance_worker.finished.connect(self._enhance_thread.quit)
         self._enhance_worker.finished.connect(self._enhance_worker.deleteLater)
@@ -3319,34 +3319,82 @@ class ImageWindow(QWidget):
 
         self._enhance_thread.start()
 
-    def _handle_enhance_result(self, result: dict, progress, orig_w, orig_h, new_w, new_h):
+    def _handle_enhance_result(self, result: dict, progress, orig_w, orig_h, new_w, new_h, source_item=None, generation_params=None):
         """Enhance API 결과 처리"""
         import io as _io
-        progress.close()
-        self._update_enhance_button_state()
+        import copy as _copy
+        import time as _time
 
-        if result.get('status') == 'success':
-            pil_image = result.get('image')
-            raw_bytes = result.get('raw_bytes')
+        success = False
+        completion_message = ""
+        try:
+            progress.close()
+            self._update_enhance_button_state()
 
-            if pil_image is None and raw_bytes:
-                pil_image = Image.open(_io.BytesIO(raw_bytes))
-            if pil_image is None:
-                self._show_styled_message_main("Enhance 실패", "결과 이미지를 처리할 수 없습니다.", 'critical')
-                return
+            if result.get('status') == 'success':
+                pil_image = result.get('image')
+                raw_bytes = result.get('raw_bytes')
 
-            info_text = self.current_history_item.info_text
-            info_text += (
-                f"\nEnhanced: x{self._enhance_upscale:g}, strength={self._enhance_strength:.1f}, noise={self._enhance_noise:.1f}"
-                f" ({new_w}x{new_h})"
-            )
+                if pil_image is None and raw_bytes:
+                    pil_image = Image.open(_io.BytesIO(raw_bytes))
+                if pil_image is None:
+                    completion_message = "결과 이미지를 처리할 수 없습니다."
+                    self._show_styled_message_main("Enhance 실패", completion_message, 'critical')
+                    return
+                if raw_bytes is None:
+                    buf = _io.BytesIO()
+                    pil_image.save(buf, format='PNG')
+                    raw_bytes = buf.getvalue()
 
-            source_row = getattr(self.current_history_item, 'source_row', None)
-            self.add_to_history(pil_image, raw_bytes, info_text, source_row)
-            print(f"✅ Enhance 성공: {orig_w}x{orig_h} → {new_w}x{new_h}")
-        else:
-            error_msg = result.get('message', '알 수 없는 오류')
-            self._show_styled_message_main("Enhance 실패", error_msg, 'critical')
+                source_item = source_item or self.current_history_item
+                info_text = getattr(source_item, 'info_text', '') or ''
+                info_text += (
+                    f"\nEnhanced: x{self._enhance_upscale:g}, strength={self._enhance_strength:.1f}, noise={self._enhance_noise:.1f}"
+                    f" ({new_w}x{new_h})"
+                )
+
+                source_row = getattr(source_item, 'source_row', None)
+                enhanced_params = _copy.deepcopy(generation_params or getattr(source_item, 'generation_params', {}) or {})
+                enhanced_params.pop('image_bytes', None)
+                enhanced_params['width'] = new_w
+                enhanced_params['height'] = new_h
+                enhanced_params['strength'] = self._enhance_strength
+                enhanced_params['noise'] = self._enhance_noise
+                enhanced_params['api_mode'] = 'NAI'
+
+                api_metadata = _copy.deepcopy(getattr(source_item, 'api_metadata', {}) or {})
+                api_metadata.update({
+                    'enhanced': True,
+                    'enhance_upscale': self._enhance_upscale,
+                    'enhance_strength': self._enhance_strength,
+                    'enhance_noise': self._enhance_noise,
+                    'source_size': (orig_w, orig_h),
+                    'result_size': (new_w, new_h),
+                })
+                generation_result = {
+                    'image': pil_image,
+                    'raw_bytes': raw_bytes,
+                    'info': info_text,
+                    'source_row': source_row,
+                    'generation_params': enhanced_params,
+                    'prompt_context': _copy.deepcopy(getattr(source_item, 'prompt_context', {}) or {}),
+                    'api_metadata': api_metadata,
+                    'creation_timestamp': _time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'backend_type': 'NAI',
+                }
+
+                self.add_to_history(pil_image, raw_bytes, info_text, source_row, generation_result=generation_result)
+                if self.app_context:
+                    self.app_context.publish("generation_result_available", generation_result)
+                success = True
+                completion_message = "Enhance complete"
+                print(f"✅ Enhance 성공: {orig_w}x{orig_h} → {new_w}x{new_h}")
+            else:
+                completion_message = result.get('message', '알 수 없는 오류')
+                self._show_styled_message_main("Enhance 실패", completion_message, 'critical')
+        finally:
+            if self.app_context:
+                self.app_context.publish("result_enhance_completed", success, completion_message)
 
     def upscale_current_image_nai(self):
         """메인 이미지를 NAI API를 사용하여 2배 업스케일합니다."""

@@ -53,6 +53,29 @@ _COLOR_TOKENS = {
     "yellow",
 }
 
+_GENERIC_RELATION_TOKENS = {
+    "boy",
+    "boys",
+    "cosplay",
+    "everyone",
+    "female",
+    "focus",
+    "girl",
+    "girls",
+    "human",
+    "humans",
+    "male",
+    "many",
+    "multiple",
+    "other",
+    "others",
+    "person",
+    "solo",
+    "too",
+    "view",
+    "views",
+}
+
 _BROAD_SIBLING_SUBGROUPS = {
     "accessories",
     "activity",
@@ -135,6 +158,10 @@ def _is_broad_sibling_area(group: str, subgroup: str) -> bool:
         return True
     group_l = str(group or "").lower()
     return "composition_meta" in group_l and subgroup_l in {"", "metatags", "symbols", "text"}
+
+
+def _is_count_relation_area(group: str, subgroup: str) -> bool:
+    return str(group or "").lower() == "composition_meta" and str(subgroup or "").lower() == "count"
 
 
 @dataclass(frozen=True)
@@ -265,10 +292,27 @@ class TagRelationRanker:
 
         if source == "word_match" and not (overlap or same_subgroup):
             return 0.0
+        if source == "word_match" and self._has_only_generic_overlap(overlap):
+            return 0.0
+        if source == "children" and not (same_group or same_axis):
+            return 0.0
+        if source == "children" and not (overlap or same_axis):
+            return 0.0
+        if source == "siblings" and (
+            _is_count_relation_area(source_group, source_subgroup)
+            or _is_count_relation_area(candidate_group, candidate_subgroup)
+        ):
+            return 0.0
         if (
             source == "siblings"
             and not overlap
             and _is_broad_sibling_area(source_group, source_subgroup)
+        ):
+            return 0.0
+        if (
+            source == "siblings"
+            and _is_broad_sibling_area(source_group, source_subgroup)
+            and self._has_only_generic_overlap(overlap)
         ):
             return 0.0
 
@@ -297,6 +341,13 @@ class TagRelationRanker:
             return 0.0
 
         return score
+
+    def _has_only_generic_overlap(self, overlap: set[str]) -> bool:
+        if not overlap:
+            return False
+        if any(len(token) <= 1 for token in overlap):
+            return True
+        return overlap <= _GENERIC_RELATION_TOKENS
 
     def _is_valid_parent(self, child: str, parent: str) -> bool:
         if not parent or parent == child:

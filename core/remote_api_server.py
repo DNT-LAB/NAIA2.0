@@ -3595,7 +3595,7 @@ class RemoteBridge(QObject):
             return []
         if self._tag_search_index is not None:
             cats = {cat_filter} if cat_filter else None
-            matches = self._tag_search_index.search(ql, limit=limit, cats=cats)
+            matches = self._tag_search_index.search_autocomplete(ql, limit=limit, cats=cats)
             return [
                 {
                     "tag": result.tag,

@@ -152,3 +152,54 @@ def test_tag_search_index_uses_candidate_index_for_keyword_queries(monkeypatch):
 
     assert index.search_tags("줄무늬")[:1] == ["striped shirt"]
     assert calls < 20
+
+
+def test_tag_search_entrypoints_split_fast_and_semantic_recall():
+    entries = [
+        TagSearchEntry(
+            tag=f"large breasts variant {idx}",
+            freq=100 - idx,
+            search_blob=f"large breasts variant {idx}",
+        )
+        for idx in range(40)
+    ]
+    entries.append(
+        TagSearchEntry(
+            tag="medium support meme",
+            freq=500,
+            desc="A meme referencing [[large_breasts]] support.",
+            search_blob="A meme referencing [[large_breasts]] support.",
+        )
+    )
+    index = TagSearchIndex(entries)
+
+    fast_tags = index.search_tags("large breasts", limit=5)
+    semantic_tags = [result.tag for result in index.search_semantic("large breasts", limit=None)]
+
+    assert "medium support meme" not in fast_tags
+    assert "medium support meme" in semantic_tags
+
+
+def test_event_semantic_entrypoint_requires_event_by_default():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="sitting",
+                freq=100,
+                is_event=True,
+                keywords=("앉기",),
+                search_blob="sitting 앉기",
+            ),
+            TagSearchEntry(
+                tag="cafe",
+                freq=200,
+                is_event=False,
+                keywords=("카페",),
+                search_blob="cafe 카페",
+            ),
+        ]
+    )
+
+    assert index.search_tags("카페") == ["cafe"]
+    assert index.search_event_semantic("카페") == []
+    assert [result.tag for result in index.search_event_semantic("앉기")] == ["sitting"]

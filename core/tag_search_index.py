@@ -62,6 +62,10 @@ class TagSearchIndex:
     - Exact, prefix, token, and substring ranking.
     - Korean lookup through KR_tags category/desc/keywords.
     - Event Preset metadata through tag_category + taxonomy search_blob.
+
+    Public entrypoints intentionally map to product use-cases. Web autocomplete
+    should stay fast and literal-heavy, while event/state semantic search should
+    preserve recall from descriptions and Korean keywords.
     """
 
     def __init__(self, entries: Iterable[TagSearchEntry]):
@@ -318,13 +322,123 @@ class TagSearchIndex:
         sources: set[str] | None = None,
         cats: set[str] | None = None,
     ) -> list[TagSearchResult]:
+        """Compatibility entrypoint for existing fast autocomplete callers."""
+        return self.search_autocomplete(
+            query,
+            limit=limit,
+            axes=axes,
+            require_event=require_event,
+            sources=sources,
+            cats=cats,
+        )
+
+    def search_autocomplete(
+        self,
+        query: str,
+        *,
+        limit: int | None = 50,
+        axes: set[str] | None = None,
+        require_event: bool | None = None,
+        sources: set[str] | None = None,
+        cats: set[str] | None = None,
+    ) -> list[TagSearchResult]:
+        """Fast, literal-heavy lookup for Web Remote autocomplete/search chips."""
+        return self._search(
+            query,
+            limit=limit,
+            axes=axes,
+            require_event=require_event,
+            sources=sources,
+            cats=cats,
+            force_term_scan=False,
+        )
+
+    def search_tag_filter(
+        self,
+        query: str,
+        *,
+        limit: int | None = 50,
+        axes: set[str] | None = None,
+        require_event: bool | None = None,
+        sources: set[str] | None = None,
+        cats: set[str] | None = None,
+    ) -> list[TagSearchResult]:
+        """Fast lookup for tag filter assignment UI."""
+        return self._search(
+            query,
+            limit=limit,
+            axes=axes,
+            require_event=require_event,
+            sources=sources,
+            cats=cats,
+            force_term_scan=False,
+        )
+
+    def search_semantic(
+        self,
+        query: str,
+        *,
+        limit: int | None = 50,
+        axes: set[str] | None = None,
+        require_event: bool | None = None,
+        sources: set[str] | None = None,
+        cats: set[str] | None = None,
+    ) -> list[TagSearchResult]:
+        """Recall-oriented search for Korean descriptions/keywords."""
+        return self._search(
+            query,
+            limit=limit,
+            axes=axes,
+            require_event=require_event,
+            sources=sources,
+            cats=cats,
+            force_term_scan=True,
+        )
+
+    def search_event_semantic(
+        self,
+        query: str,
+        *,
+        limit: int | None = 50,
+        axes: set[str] | None = None,
+        require_event: bool | None = True,
+        sources: set[str] | None = None,
+        cats: set[str] | None = None,
+    ) -> list[TagSearchResult]:
+        """Recall-oriented event/state lookup with event filtering by default."""
+        return self._search(
+            query,
+            limit=limit,
+            axes=axes,
+            require_event=require_event,
+            sources=sources,
+            cats=cats,
+            force_term_scan=True,
+        )
+
+    def _search(
+        self,
+        query: str,
+        *,
+        limit: int | None,
+        axes: set[str] | None,
+        require_event: bool | None,
+        sources: set[str] | None,
+        cats: set[str] | None,
+        force_term_scan: bool,
+    ) -> list[TagSearchResult]:
         q = _norm(query)
         if not q:
             return []
         q_tokens = [tok for tok in q.split() if tok]
 
         results: list[TagSearchResult] = []
-        candidate_tags = self._candidate_tags(q, q_tokens, limit=limit)
+        candidate_tags = self._candidate_tags(
+            q,
+            q_tokens,
+            limit=limit,
+            force_term_scan=force_term_scan,
+        )
         tag_iterable = candidate_tags if candidate_tags is not None else self._entries.keys()
 
         for tag in tag_iterable:
@@ -378,6 +492,7 @@ class TagSearchIndex:
         query_tokens: list[str],
         *,
         limit: int | None,
+        force_term_scan: bool = False,
     ) -> set[str] | None:
         candidates: set[str] = set()
 
@@ -407,10 +522,14 @@ class TagSearchIndex:
         if term_matches:
             candidates.update(term_matches)
 
-        if self._should_scan_terms(query) and not self._has_enough_candidates(candidates, limit):
+        should_scan_terms = force_term_scan or not self._has_enough_candidates(candidates, limit)
+        if self._should_scan_terms(query) and should_scan_terms:
             for term, tags in self._term_to_tags.items():
                 if term != query and query in term:
                     candidates.update(tags)
+
+        if force_term_scan:
+            candidates.update(tag for tag, blob in self._blob_by_tag.items() if query in blob)
 
         return candidates or None
 

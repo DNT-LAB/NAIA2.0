@@ -140,6 +140,7 @@ class RemoteBridge(QObject):
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
+    request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
@@ -706,6 +707,55 @@ class RemoteBridge(QObject):
             message = f"Enhance request failed: {e}"
             self._send_result_enhance_error(ws, message)
             print(f"🌐 Remote: Enhance 트리거 실패 — {e}")
+
+    def _do_image_action(self, action: str, image_bytes: bytes, label: str = ""):
+        """Remote image action popup에서 전달된 이미지를 데스크탑 동작으로 라우팅."""
+        action = (action or "").strip().lower()
+        labels = {
+            "img2img": "Img2Img",
+            "inpaint": "Inpaint",
+            "danbooru": "Danbooru tag analysis",
+            "vibe": "Vibe Transfer",
+        }
+        if action not in labels:
+            self._broadcast_json({"type": "toast", "message": "Unsupported image action", "level": "error"})
+            return
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(image_bytes)) as opened:
+                pil_image = opened.convert("RGBA").copy()
+
+            main_window = getattr(self.app_context, "main_window", None)
+            if not main_window:
+                raise RuntimeError("Main window is not ready")
+
+            if action == "img2img":
+                handler = getattr(main_window, "activate_img2img_panel", None)
+            elif action == "inpaint":
+                handler = getattr(main_window, "activate_inpaint_mode", None)
+            elif action == "danbooru":
+                handler = getattr(main_window, "on_tag_interrogation_requested", None)
+            else:
+                handler = getattr(main_window, "activate_vibe_transfer", None)
+
+            if not callable(handler):
+                raise RuntimeError(f"{labels[action]} action is not available")
+
+            handler(pil_image)
+            if action == "vibe":
+                state = self._read_vibe_transfer()
+                if state:
+                    self._broadcast_json(state)
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"{labels[action]} action requested",
+                "level": "success",
+            })
+            print(f"🌐 Remote: image action requested — {action} ({label or 'Input Image'})")
+        except Exception as e:
+            message = f"{labels.get(action, 'Image')} action failed: {e}"
+            self._broadcast_json({"type": "toast", "message": message, "level": "error"})
+            print(f"🌐 Remote: image action failed — {action}: {e}")
 
     def _metadata_json_safe(self, value):
         """메타데이터 응답에 싣기 어려운 객체/바이트를 안전하게 축약."""
@@ -4523,6 +4573,21 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": "No image generated yet"}, status_code=404)
         return bridge.latest_metadata_payload
 
+    @app.post("/api/image-action/{action}")
+    async def api_image_action(action: str, req: Request):
+        action = (action or "").strip().lower()
+        if action not in {"img2img", "inpaint", "danbooru", "vibe"}:
+            return JSONResponse({"error": "Unsupported action"}, status_code=400)
+        image_bytes = await req.body()
+        if not image_bytes:
+            return JSONResponse({"error": "No image data"}, status_code=400)
+        max_bytes = 64 * 1024 * 1024
+        if len(image_bytes) > max_bytes:
+            return JSONResponse({"error": "Image is too large"}, status_code=413)
+        label = (req.query_params.get("label") or "Input Image")[:120]
+        bridge.request_image_action.emit(action, image_bytes, label)
+        return {"ok": True, "action": action}
+
     @app.get("/api/result/asset/current")
     async def api_current_result_asset():
         asset = await asyncio.to_thread(bridge._build_current_result_asset_payload)
@@ -5267,6 +5332,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
     bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
+    bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결

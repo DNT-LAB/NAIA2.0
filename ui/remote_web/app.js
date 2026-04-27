@@ -177,6 +177,10 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs')
       escHtml,
       showToast,
       getMode: () => currentMode || modeSelect.value || 'NAI',
+      onImg2Img: payload => requestPopupImageAction(payload, 'img2img'),
+      onInpaint: payload => requestPopupImageAction(payload, 'inpaint'),
+      onDanbooru: payload => requestPopupImageAction(payload, 'danbooru'),
+      onVibeTransfer: payload => requestPopupImageAction(payload, 'vibe'),
       onMetadata: payload => {
         if (!metadataViewer || typeof metadataViewer.displayPayload !== 'function') {
           showToast('Metadata viewer is not ready', 'error');
@@ -1158,6 +1162,31 @@ function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupP
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
+async function requestPopupImageAction(payload, action) {
+  if (!payload || !payload.blob) {
+    showToast('Image data is unavailable', 'error');
+    return;
+  }
+  try {
+    const label = encodeURIComponent(payload.label || 'Input Image');
+    const response = await fetch(`/api/image-action/${encodeURIComponent(action)}?label=${label}`, {
+      method: 'POST',
+      headers: {'Content-Type': payload.blob.type || 'application/octet-stream'},
+      body: payload.blob,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
+      openModule('vibe_transfer');
+    }
+  } catch (error) {
+    console.error('Image action request failed', error);
+    showToast(error.message || 'Image action failed', 'error');
+  }
+}
+
 function showMetadataInTab(context = {}) {
   if (!metadataViewer) {
     showToast('Metadata viewer is not ready', 'error');

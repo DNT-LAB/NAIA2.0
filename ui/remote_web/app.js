@@ -34,6 +34,7 @@ let promptDrawerControl = null;
 let autoSavePanel = null;
 let saveDirectoryPanel = null;
 let sessionGenerationStats = null;
+let automationPanel = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -217,6 +218,16 @@ const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats
   })
   .catch(error => {
     console.error('Failed to initialize session generation stats module', error);
+  });
+const automationPanelReady = import('./js/features/automationPanel.mjs')
+  .then(({createAutomationPanel}) => {
+    automationPanel = createAutomationPanel({
+      document,
+      setModuleParam,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize automation panel module', error);
   });
 
 function saveSharedSession() {
@@ -2732,64 +2743,12 @@ function refreshCharacterPreview() {
 }
 
 // ---- Automation module ----
-let lastAutoState = null;
 function onAutoTypeChange(val) {
-  setModuleParam('automation', 'auto_type', val);
-  if (lastAutoState) {
-    lastAutoState.auto_type = parseInt(val);
-    renderAutomation(lastAutoState);
-  }
+  if (automationPanel) automationPanel.onTypeChange(val);
 }
-function renderAutomation(m) {
-  lastAutoState = m;
-  const typeLabels = ['Unlimited', 'Timer', 'Count'];
-  const typeRadios = typeLabels.map((label, i) =>
-    `<label class="mod-checkbox-item">
-      <input type="radio" name="autoType" value="${i}" ${m.auto_type === i ? 'checked' : ''} onchange="onAutoTypeChange(this.value)">
-      <span class="mod-checkbox-label">${label}</span>
-    </label>`
-  ).join('');
 
-  const isRunning = m.is_running;
-  moduleBody.innerHTML = `
-    <div>
-      <div class="mod-section-label">Delay (seconds)</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input class="mod-input" type="text" value="${m.delay || '0'}" onchange="setModuleParam('automation','delay',this.value)" style="flex:1">
-        <label class="mod-checkbox-item" style="margin:0">
-          <input type="checkbox" ${m.random_delay ? 'checked' : ''} oninput="setModuleParam('automation','random_delay',String(this.checked))">
-          <span class="mod-checkbox-label">Random ±50%</span>
-        </label>
-      </div>
-    </div>
-    <div>
-      <div class="mod-section-label">Repeat Count</div>
-      <input class="mod-input" type="text" value="${m.repeat || '1'}" onchange="setModuleParam('automation','repeat',this.value)">
-    </div>
-    <div>
-      <div class="mod-section-label">Termination</div>
-      <div class="mod-checkbox-grid" style="grid-template-columns:1fr 1fr 1fr">${typeRadios}</div>
-    </div>
-    ${m.auto_type === 1 ? `<div>
-      <div class="mod-section-label">Timer (minutes)</div>
-      <input class="mod-input" type="text" value="${m.timer_minutes || '30'}" onchange="setModuleParam('automation','timer_minutes',this.value)">
-    </div>` : ''}
-    ${m.auto_type === 2 ? `<div>
-      <div class="mod-section-label">Count Limit</div>
-      <input class="mod-input" type="text" value="${m.count_limit || '100'}" onchange="setModuleParam('automation','count_limit',this.value)">
-    </div>` : ''}
-    <div>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.notify ? 'checked' : ''} oninput="setModuleParam('automation','notify',String(this.checked))">
-        <span class="mod-checkbox-label">Notify on completion</span>
-      </label>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="mod-action-btn mod-start" ${isRunning ? 'disabled' : ''} onclick="setModuleParam('automation','start','1')">Start</button>
-      <button class="mod-action-btn mod-stop" ${!isRunning ? 'disabled' : ''} onclick="setModuleParam('automation','stop','1')">Stop</button>
-    </div>
-    <div class="mod-status">${m.status || ''}</div>
-  `;
+function renderAutomation(m) {
+  if (automationPanel) automationPanel.render(m);
 }
 
 // ---- Character module ----
@@ -4483,6 +4442,7 @@ Promise.all([
   autoSavePanelReady,
   saveDirectoryPanelReady,
   sessionGenerationStatsReady,
+  automationPanelReady,
 ])
   .then(() => {
     initHistoryRail();

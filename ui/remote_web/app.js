@@ -42,6 +42,7 @@ let wildcardManagerPanel = null;
 let imageModulePanels = null;
 let refinePanelControl = null;
 let tagSearchController = null;
+let mobileViewportControl = null;
 let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
@@ -334,6 +335,19 @@ const tagSearchReady = import('./js/features/tagSearch.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize tag search module', error);
+  });
+const mobileViewportReady = import('./js/features/mobileViewport.mjs')
+  .then(({createMobileViewportController}) => {
+    mobileViewportControl = createMobileViewportController({
+      window,
+      document,
+      isPC,
+      relayoutFloatingPanels,
+      getTagTooltip: () => tagTooltip,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize mobile viewport module', error);
   });
 const chunkPanelReady = import('./js/features/chunkPanel.mjs')
   .then(({createChunkPanel}) => {
@@ -1233,70 +1247,6 @@ const isPC = window.matchMedia('(min-width: 768px)');
 function toggleDrawer() {
   if (promptDrawerControl) promptDrawerControl.toggle();
 }
-
-// ---- Mobile keyboard detection ----
-// Hide bottom controls when virtual keyboard opens to maximize editing space
-if (window.visualViewport) {
-  const vv = window.visualViewport;
-  const bottomCtrl = document.querySelector('.bottom-controls');
-  const toggleBarEl = document.querySelector('.prompt-toggle-bar');
-  let fullHeight = vv.height;
-  let _kbOpen = false;
-  // Update fullHeight when not focused (no keyboard)
-  const modulePopupEl = document.querySelector('.module-popup');
-
-  function _syncKbPositions() {
-    // 모듈 팝업: 키보드 위에 전체 표시 (top 기준으로 전환)
-    if (modulePopupEl) {
-      modulePopupEl.style.top = vv.offsetTop + 'px';
-      modulePopupEl.style.bottom = 'auto';
-      modulePopupEl.style.maxHeight = vv.height + 'px';
-    }
-    relayoutFloatingPanels();
-    // autocomplete/tag tooltip: viewport 상단에 고정 (키보드에 가려지지 않도록)
-    if (tagTooltip) {
-      tagTooltip.style.top = (vv.offsetTop + 4) + 'px';
-      tagTooltip.style.maxHeight = Math.min(vv.height * 0.4, 200) + 'px';
-    }
-  }
-
-  vv.addEventListener('resize', () => {
-    if (isPC.matches) return;
-    const shrink = fullHeight - vv.height;
-    _kbOpen = shrink > 100; // >100px shrink = keyboard
-    if (_kbOpen) {
-      bottomCtrl.classList.add('kb-open');
-      toggleBarEl.style.display = 'none';
-      _syncKbPositions();
-    } else {
-      fullHeight = vv.height; // recalibrate
-      bottomCtrl.classList.remove('kb-open');
-      toggleBarEl.style.display = '';
-      // 모듈 팝업: 원래 CSS로 복원
-      if (modulePopupEl) {
-        modulePopupEl.style.top = '';
-        modulePopupEl.style.bottom = '';
-        modulePopupEl.style.maxHeight = '';
-      }
-      relayoutFloatingPanels();
-      // autocomplete/tag tooltip: 원래 CSS로 복원
-      if (tagTooltip) {
-        tagTooltip.style.top = '';
-        tagTooltip.style.maxHeight = '';
-      }
-    }
-  });
-
-  // 키보드 열린 상태에서 브라우저 자동 스크롤 시 offsetTop 변화를 추적
-  // (position:fixed는 layout viewport 기준 — iOS/Android 공통)
-  vv.addEventListener('scroll', () => {
-    if (_kbOpen) _syncKbPositions();
-  });
-}
-
-window.addEventListener('resize', () => {
-  relayoutFloatingPanels();
-});
 
 function switchTab(name) {
   if (promptDrawerControl) promptDrawerControl.switchTab(name);
@@ -3812,6 +3762,7 @@ Promise.all([
   imageModulePanelsReady,
   refinePanelReady,
   tagSearchReady,
+  mobileViewportReady,
   chunkPanelReady,
 ])
   .then(() => {

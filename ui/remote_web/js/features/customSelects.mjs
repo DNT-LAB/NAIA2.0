@@ -66,8 +66,8 @@ export function createCustomSelectController({ document, window }) {
       else openSelect(state);
     };
     const onButtonKeydown = event => handleButtonKeydown(state, event);
-    const onSelectChange = () => syncState(state);
-    const optionObserver = new MutationObserver(() => syncState(state));
+    const onSelectChange = () => syncState(state, { refreshMenu: true });
+    const optionObserver = new MutationObserver(() => syncState(state, { refreshMenu: true }));
     optionObserver.observe(select, {
       childList: true,
       subtree: true,
@@ -88,7 +88,7 @@ export function createCustomSelectController({ document, window }) {
     syncState(state);
   }
 
-  function syncState(state) {
+  function syncState(state, { refreshMenu = false } = {}) {
     const { select, wrapper, button, label } = state;
     if (!document.documentElement.contains(select)) {
       destroyState(state);
@@ -101,8 +101,10 @@ export function createCustomSelectController({ document, window }) {
     wrapper.classList.toggle('is-disabled', select.disabled);
     button.setAttribute('aria-expanded', openState?.select === select ? 'true' : 'false');
 
-    if (openState?.select === select) {
+    if (openState?.select === select && refreshMenu) {
       renderMenu(state);
+      positionMenu(state);
+    } else if (openState?.select === select) {
       positionMenu(state);
     }
   }
@@ -247,6 +249,30 @@ export function createCustomSelectController({ document, window }) {
     Array.from(states).forEach(syncState);
   }
 
+  function mutationNeedsScan(mutations) {
+    return mutations.some(mutation => {
+      if (isCustomSelectNode(mutation.target)) return false;
+
+      const addedOrRemovedNodes = [
+        ...Array.from(mutation.addedNodes || []),
+        ...Array.from(mutation.removedNodes || []),
+      ];
+      return addedOrRemovedNodes.some(nodeContainsSelectable);
+    });
+  }
+
+  function nodeContainsSelectable(node) {
+    if (isCustomSelectNode(node)) return false;
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    if (node.matches?.(SELECTOR)) return true;
+    return !!node.querySelector?.(SELECTOR);
+  }
+
+  function isCustomSelectNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    return !!node.closest?.('.custom-select, .custom-select-menu');
+  }
+
   function onDocumentPointerDown(event) {
     if (!openState) return;
     const { wrapper, menu } = openState;
@@ -260,7 +286,9 @@ export function createCustomSelectController({ document, window }) {
 
   function start() {
     scan();
-    observer = new MutationObserver(() => scan());
+    observer = new MutationObserver(mutations => {
+      if (mutationNeedsScan(mutations)) scan();
+    });
     observer.observe(document.body, { childList: true, subtree: true });
     syncTimer = window.setInterval(scan, 750);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);

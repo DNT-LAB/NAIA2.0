@@ -88,3 +88,36 @@ def test_tag_search_index_matches_korean_event_keywords(tmp_path):
     assert index.search_tags("카페", require_event=True) == []
     assert index.search_tags("zzzz", require_event=True) == []
 
+
+def test_tag_search_index_builds_from_remote_raw_records():
+    index = TagSearchIndex.from_raw_tag_records(
+        {
+            "sitting": {
+                "_tag": "sitting",
+                "freq": 100,
+                "description": "의자나 바닥 등에 엉덩이를 대고 앉아있음.",
+                "group": "Expression_Action",
+                "subgroup": "posture",
+                "keywords_kr": "<앉기>, 앉은 자세",
+            },
+            "hatsune miku": {
+                "_tag": "hatsune miku",
+                "_cat": "character",
+                "freq": 200,
+                "group": "character",
+                "subgroup": "vocaloid",
+                "keywords_kr": "하츠네 미쿠",
+            },
+            "mika pikazo": {
+                "_tag": "mika pikazo",
+                "_cat": "artist",
+                "freq": 50,
+                "group": "artist",
+                "keywords_kr": "미카 피카조",
+            },
+        }
+    )
+
+    assert index.search_tags("앉기")[:1] == ["sitting"]
+    assert index.search_tags("miku", cats={"character"}) == ["hatsune miku"]
+    assert index.search_tags("miku", cats={"artist"}) == []

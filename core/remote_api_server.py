@@ -26,6 +26,8 @@ from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QFileDialog
 
 from core import api_verification
+from core.tag_relation_ranker import TagRelationRanker
+from core.tag_search_index import TagSearchIndex
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +154,7 @@ class RemoteBridge(QObject):
         self.latest_webp: Optional[bytes] = None
         self.latest_metadata: Optional[dict] = None
         self._image_history: list = []  # [{webp, metadata, gen_params, source_row, prompt_context}, ...] 최대 5장 (초기 시딩용)
+        self._history_next_id: int = 1
         self._history_lock = threading.Lock()  # _image_history 동시 접근 보호
         self._ws_manager: Optional[WebSocketManager] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -174,6 +177,8 @@ class RemoteBridge(QObject):
         self.shared_server_mode = False
         # 태그 검색 인덱스 (ui/interactive/interactive 기반)
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
+        self._tag_search_index: Optional[TagSearchIndex] = None
+        self._tag_relation_ranker: Optional[TagRelationRanker] = None
         self._kr_tags_lock = threading.Lock()
         self._kr_tags_loaded = False
         # 캐릭터 분석 역인덱스: char_name_lower → (copyright_group, data_dict)
@@ -3088,6 +3093,13 @@ class RemoteBridge(QObject):
                     except Exception as e:
                         print(f"🌐 Remote: dict {mod_name} 로드 실패 — {e}")
                 self._kr_tags_raw = raw
+                try:
+                    self._tag_search_index = TagSearchIndex.from_raw_tag_records(raw)
+                    self._tag_relation_ranker = TagRelationRanker(raw)
+                except Exception as e:
+                    self._tag_search_index = None
+                    self._tag_relation_ranker = None
+                    print(f"🌐 Remote: shared tag index build failed — {e}")
                 print(f"🌐 Remote: tag index — {src0} interactive + {pq_count} parquet + {filter_count} filter + {dict_count} dict = {len(raw)} total")
                 self._kr_tags_loaded = True
             except Exception as e:
@@ -3169,6 +3181,20 @@ class RemoteBridge(QObject):
                     break
         if not ql:
             return []
+        if self._tag_search_index is not None:
+            cats = {cat_filter} if cat_filter else None
+            matches = self._tag_search_index.search(ql, limit=limit, cats=cats)
+            return [
+                {
+                    "tag": result.tag,
+                    "count": result.entry.freq,
+                    "desc": result.entry.desc,
+                    "group": result.entry.category,
+                    "cat": result.entry.cat,
+                }
+                for result in matches
+            ]
+
         exact, starts, kr_kw, contains, desc_m = [], [], [], [], []
         for tag_lower, info in self._kr_tags_raw.items():
             cat = info.get('_cat', '')
@@ -3273,18 +3299,21 @@ class RemoteBridge(QObject):
             parents = [parents]
         if parents:
             result['implications'] = parents[:8]
-        siblings = rels.get('siblings', [])
-        if isinstance(siblings, str):
-            siblings = [siblings]
-        word_match = rels.get('word_match', [])
-        if isinstance(word_match, str):
-            word_match = [word_match]
-        related = []
-        seen = set(parents)
-        for t in siblings + word_match:
-            if t not in seen:
-                seen.add(t)
-                related.append(t)
+        if self._tag_relation_ranker is not None:
+            related = self._tag_relation_ranker.rank_related(tag_lower, info, limit=8)
+        else:
+            siblings = rels.get('siblings', [])
+            if isinstance(siblings, str):
+                siblings = [siblings]
+            word_match = rels.get('word_match', [])
+            if isinstance(word_match, str):
+                word_match = [word_match]
+            related = []
+            seen = set(parents)
+            for t in siblings + word_match:
+                if t not in seen:
+                    seen.add(t)
+                    related.append(t)
         if related:
             result['related'] = related[:8]
         # 캐릭터 태그 → character_analysis 상세 정보 추가
@@ -3928,13 +3957,22 @@ class RemoteBridge(QObject):
         try:
             cmd = json.loads(action_json)
             action = cmd.get("action", "")
+            history_id = cmd.get("history_id")
             index = cmd.get("index", -1)
 
             with self._history_lock:
-                if index < 0 or index >= len(self._image_history):
+                entry = None
+                if history_id is not None:
+                    for candidate in self._image_history:
+                        if candidate.get("history_id") == history_id:
+                            entry = candidate
+                            break
+                elif 0 <= index < len(self._image_history):
+                    entry = self._image_history[index]
+
+                if entry is None:
                     self._broadcast_json({"type": "toast", "message": "History item not found", "level": "error"})
                     return
-                entry = self._image_history[index]
 
             if action == "load_prompt":
                 # 원본 프롬프트를 웹 UI에 로드
@@ -4077,7 +4115,12 @@ class RemoteBridge(QObject):
                 for k in ("main_prompt", "final_prompt", "prefix_tags", "main_tags", "postfix_tags"):
                     if k in pc_raw:
                         safe_prompt_context[k] = pc_raw[k]
+            with self._history_lock:
+                history_id = self._history_next_id
+                self._history_next_id += 1
+
             hist_entry = {
+                "history_id": history_id,
                 "webp": webp_bytes,
                 "metadata": metadata,
                 "gen_params": safe_gen_params,
@@ -4100,6 +4143,7 @@ class RemoteBridge(QObject):
 
             # 확장 메타: 큐/reroll/load_prompt 가용 여부 + 원본 프롬프트
             extended_meta = dict(metadata)
+            extended_meta["history_id"] = history_id
             extended_meta["has_gen_params"] = bool(gen_params)
             extended_meta["has_source_row"] = source_row is not None
             pc = result.get("prompt_context", {})
@@ -4433,6 +4477,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             main_prompt = pc.get("main_prompt", "")
                         await ws.send_text(json.dumps({
                             "type": "image_meta", **hist_meta,
+                            "history_id": entry.get("history_id"),
                             "has_gen_params": has_gen,
                             "has_source_row": has_src,
                             "main_prompt": main_prompt,

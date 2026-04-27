@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -35,6 +35,7 @@ class TagSearchEntry:
     freq: int = 0
     axis: str = "uncategorized"
     source: str = ""
+    cat: str = ""
     is_event: bool = False
     is_expression: bool = False
     is_clothing: bool = False
@@ -74,6 +75,7 @@ class TagSearchIndex:
                     freq=int(entry.freq or 0),
                     axis=entry.axis,
                     source=entry.source,
+                    cat=entry.cat,
                     is_event=entry.is_event,
                     is_expression=entry.is_expression,
                     is_clothing=entry.is_clothing,
@@ -166,6 +168,7 @@ class TagSearchIndex:
                         freq=freq_by_tag.get(tag, int(tax.get("post_count", 0) or 0)),
                         axis=registry.axis_for(tag),
                         source=str(item.get("source", "")),
+                        cat="",
                         is_event=bool(item.get("is_event", False)),
                         is_expression=bool(item.get("is_expression", False)),
                         is_clothing=bool(item.get("is_clothing", False)),
@@ -188,6 +191,7 @@ class TagSearchIndex:
                     freq=int(kr.get("count", 0) or 0),
                     axis=registry.axis_for(tag),
                     source="KR_tags",
+                    cat="",
                     category=str(kr.get("category", "") or ""),
                     desc=str(kr.get("desc", "") or ""),
                     keywords=tuple(_split_keywords(kr.get("keywords", ""))),
@@ -198,6 +202,62 @@ class TagSearchIndex:
                             kr.get("category", ""),
                             kr.get("desc", ""),
                             kr.get("keywords", ""),
+                        ]
+                        if part
+                    ),
+                )
+            )
+
+        return cls(entries)
+
+    @classmethod
+    def from_raw_tag_records(
+        cls,
+        records: Mapping[str, Mapping[str, Any]],
+    ) -> "TagSearchIndex":
+        """Build an index from Remote/Web tag records.
+
+        The remote server already merges `ui/interactive/interactive`, KR_tags,
+        e621, and artist/character dictionaries into `_kr_tags_raw`. This helper
+        lets Web Remote use the same search scorer as Event Preset without
+        requiring Event Preset assets.
+        """
+        registry = TagAxisRegistry()
+        entries: list[TagSearchEntry] = []
+
+        for raw_info in records.values():
+            tag = normalize_tag(str(raw_info.get("_tag", "") or raw_info.get("tag", "")))
+            if not tag:
+                continue
+
+            group = str(raw_info.get("group", "") or "")
+            subgroup = str(raw_info.get("subgroup", "") or "")
+            cat = str(raw_info.get("_cat", "") or "")
+            desc = str(raw_info.get("description", "") or raw_info.get("desc", "") or "")
+            keywords = tuple(
+                _split_keywords(raw_info.get("keywords_kr", ""))
+                + _split_keywords(raw_info.get("keywords", ""))
+            )
+
+            entries.append(
+                TagSearchEntry(
+                    tag=tag,
+                    freq=int(raw_info.get("freq", raw_info.get("count", 0)) or 0),
+                    axis=registry.axis_for(tag),
+                    source=str(raw_info.get("_src", "") or raw_info.get("source", "")),
+                    cat=cat,
+                    category=group,
+                    desc=desc,
+                    keywords=keywords,
+                    search_blob=" ".join(
+                        str(part)
+                        for part in [
+                            tag,
+                            group,
+                            subgroup,
+                            cat,
+                            desc,
+                            " ".join(keywords),
                         ]
                         if part
                     ),
@@ -252,6 +312,7 @@ class TagSearchIndex:
         axes: set[str] | None = None,
         require_event: bool | None = None,
         sources: set[str] | None = None,
+        cats: set[str] | None = None,
     ) -> list[TagSearchResult]:
         q = _norm(query)
         if not q:
@@ -267,6 +328,8 @@ class TagSearchIndex:
             if axes is not None and entry.axis not in axes:
                 continue
             if sources is not None and entry.source not in sources:
+                continue
+            if cats is not None and entry.cat not in cats:
                 continue
 
             blob = self._blob_by_tag[tag]

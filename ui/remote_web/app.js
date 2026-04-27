@@ -40,6 +40,7 @@ let conditionalPromptPanel = null;
 let wildcardPanel = null;
 let wildcardManagerPanel = null;
 let imageModulePanels = null;
+let refinePanelControl = null;
 let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
@@ -300,6 +301,22 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
+  });
+const refinePanelReady = import('./js/features/refinePanel.mjs')
+  .then(({createRefinePanel}) => {
+    refinePanelControl = createRefinePanel({
+      document,
+      panel: refinePanel,
+      modulePopup,
+      escHtml,
+      getWs: () => ws,
+      WebSocket,
+      closeAuxiliaryPopups,
+      positionFloatingPanel,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize refine panel module', error);
   });
 const chunkPanelReady = import('./js/features/chunkPanel.mjs')
   .then(({createChunkPanel}) => {
@@ -1986,7 +2003,7 @@ function closeAllPePanels() {
 
 function closeAuxiliaryPopups(exceptPanel = null) {
   if (exceptPanel !== chunkPanel && isChunkOpen()) closeChunkPanel();
-  if (exceptPanel !== refinePanel && refineOpen) closeRefine();
+  if (exceptPanel !== refinePanel && refinePanelControl && refinePanelControl.isOpen()) closeRefine();
   if (exceptPanel !== pePresetAddPanel && pePresetAddOpen) closePePresetAddPanel();
   if (exceptPanel !== pePresetManagePanel && pePresetManageOpen) closePePresetManagePanel();
   if (exceptPanel !== peE621Panel && peE621Open) closePeE621Panel();
@@ -3239,7 +3256,6 @@ function restoreSnapshot() {
 
 // ---- Refine (Depth Search) panel ----
 const refinePanel = $('refinePanel');
-let refineOpen = false;
 
 function getFloatingPanelWidth(panel) {
   if (panel === peDebugPanel) return 520;
@@ -3318,143 +3334,23 @@ function relayoutFloatingPanels() {
 }
 
 function openRefine() {
-  if (refineOpen) { closeRefine(); return; }
-  closeAuxiliaryPopups(refinePanel);
-  refineOpen = true;
-  refinePanel.classList.add('open');
-  positionFloatingPanel(refinePanel, modulePopup);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    // 먼저 현재 상태 요청 (이미 열려있을 수 있음)
-    ws.send(JSON.stringify({type: 'get_depth_state'}));
-    // 열려있지 않으면 open 요청 → 서버가 tab_added 시그널로 자동 브로드캐스트
-    ws.send(JSON.stringify({type: 'depth_action', action: 'open'}));
-  }
+  if (refinePanelControl) refinePanelControl.open();
 }
 
 function closeRefine() {
-  refineOpen = false;
-  refinePanel.classList.remove('open');
+  if (refinePanelControl) refinePanelControl.close();
 }
 
 function onDepthState(m) {
-  if (!refineOpen) return;
-  if (!m.open) {
-    const msg = m.error === 'no_search_results'
-      ? 'No search results loaded.<br><span style="font-size:10px">Run a search first</span>'
-      : 'Preparing data...';
-    refinePanel.querySelector('.refine-body').innerHTML =
-      `<div style="text-align:center;color:var(--text-dim);padding:20px">${msg}</div>`;
-    return;
-  }
-  const body = refinePanel.querySelector('.refine-body');
-  // 카운트만 업데이트 (입력 필드가 이미 있으면 리빌드 방지)
-  const existing = body.querySelector('#depthQuery');
-  if (existing) {
-    const counts = body.querySelectorAll('.search-count-display');
-    if (counts[0]) counts[0].textContent = m.count || 0;
-    if (counts[1]) counts[1].textContent = m.original || 0;
-    // 스테이징 카운트 갱신
-    const sc = body.querySelector('.depth-staging-count');
-    if (sc) sc.textContent = m.staging_count || 0;
-    return;
-  }
-  const r = m.ratings || {e:true,q:true,s:true,g:true};
-  const f = m.filters || {};
-  const ck = (name, def) => { const v = f[name]; return v ? v.enabled : def; };
-  const fv = (name, def) => { const v = f[name]; return v ? escHtml(v.value) : def; };
-  body.innerHTML = `
-    <div class="search-top-row">
-      <div>
-        <div class="mod-section-label">Filtered</div>
-        <div class="search-count-display" style="font-size:18px">${m.count || 0}</div>
-      </div>
-      <div>
-        <div class="mod-section-label">Original</div>
-        <div class="search-count-display" style="font-size:18px;color:var(--text-muted)">${m.original || 0}</div>
-      </div>
-    </div>
-    <div>
-      <div class="mod-section-label">Filter Tags</div>
-      <input class="mod-input" id="depthQuery" type="text" value="${escHtml(m.query)}" placeholder="filter tags...">
-    </div>
-    <div>
-      <div class="mod-section-label">Exclude Tags</div>
-      <input class="mod-input" id="depthExclude" type="text" value="${escHtml(m.exclude)}" placeholder="exclude tags...">
-    </div>
-    <div>
-      <div class="mod-section-label">Ratings</div>
-      <div class="mod-checkbox-grid">
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_e" ${r.e?'checked':''}><span class="mod-checkbox-label">E</span></label>
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_q" ${r.q?'checked':''}><span class="mod-checkbox-label">Q</span></label>
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_s" ${r.s?'checked':''}><span class="mod-checkbox-label">S</span></label>
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_g" ${r.g?'checked':''}><span class="mod-checkbox-label">G</span></label>
-      </div>
-    </div>
-    <div class="mod-section-label" style="margin-top:4px">Numeric Filters</div>
-    <div class="depth-filter-grid">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_min" ${ck('token_min',false)?'checked':''}><span class="mod-checkbox-label">Tokens ≥</span></label>
-      <input class="mod-input mod-input-sm" id="dfv_token_min" type="number" value="${fv('token_min','0')}">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_max" ${ck('token_max',false)?'checked':''}><span class="mod-checkbox-label">Tokens ≤</span></label>
-      <input class="mod-input mod-input-sm" id="dfv_token_max" type="number" value="${fv('token_max','150')}">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_id_min" ${ck('id_min',false)?'checked':''}><span class="mod-checkbox-label">ID ≥</span></label>
-      <input class="mod-input mod-input-sm" id="dfv_id_min" type="number" value="${fv('id_min','0')}">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_id_max" ${ck('id_max',false)?'checked':''}><span class="mod-checkbox-label">ID ≤</span></label>
-      <input class="mod-input mod-input-sm" id="dfv_id_max" type="number" value="${fv('id_max','99999999')}">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_score_min" ${ck('score_min',false)?'checked':''}><span class="mod-checkbox-label">Score ≥</span></label>
-      <input class="mod-input mod-input-sm" id="dfv_score_min" type="number" value="${fv('score_min','0')}">
-    </div>
-    <div class="mod-checkbox-grid" style="margin-top:4px">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_rem_char" ${f.rem_char?'checked':''}><span class="mod-checkbox-label">Has Character</span></label>
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_only_empty_char" ${f.only_empty_char?'checked':''}><span class="mod-checkbox-label">No Character</span></label>
-    </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-      <button class="mod-action-btn mod-start" style="flex:1" onclick="depthFilter()">Filtered Search</button>
-      <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('restore')">Restore</button>
-    </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button class="mod-action-btn mod-start" style="flex:1;background:var(--accent)" onclick="depthAction('assign')">Assign to Main</button>
-      <button class="mod-action-btn mod-refine" style="flex:1" onclick="depthAction('promote')" title="Set current filtered results as the new baseline">Set as Baseline</button>
-    </div>
-    <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')" style="margin-top:6px">
-      Staging & Export <span class="mod-collapse-arrow">▶</span>
-    </div>
-    <div class="collapsed" style="display:flex;flex-direction:column;gap:6px">
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="mod-action-btn" style="flex:1" onclick="depthAction('stage')">+ Stage Current</button>
-        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">Staged: <span class="depth-staging-count">${m.staging_count||0}</span></span>
-      </div>
-      <div style="display:flex;gap:6px">
-        <button class="mod-action-btn" style="flex:1" onclick="depthAction('merge_staging')">Merge Staged</button>
-        <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('clear_staging')">Clear</button>
-      </div>
-      <button class="mod-action-btn" style="width:100%" onclick="depthAction('export')">Export to Custom Parquet</button>
-    </div>
-  `;
+  if (refinePanelControl) refinePanelControl.onDepthState(m);
 }
 
 function depthFilter() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const query = ($('depthQuery') || {}).value || '';
-  const exclude = ($('depthExclude') || {}).value || '';
-  const ratings = {};
-  for (const k of ['e','q','s','g']) {
-    const el = $('dr_' + k);
-    ratings[k] = el ? el.checked : true;
-  }
-  const filters = {};
-  for (const name of ['token_min','token_max','id_min','id_max','score_min']) {
-    const check = $('df_' + name);
-    const inp = $('dfv_' + name);
-    if (check && inp) filters[name] = {enabled: check.checked, value: inp.value};
-  }
-  filters.rem_char = ($('df_rem_char') || {}).checked || false;
-  filters.only_empty_char = ($('df_only_empty_char') || {}).checked || false;
-  ws.send(JSON.stringify({type: 'depth_action', action: 'filter', query, exclude, ratings, filters}));
+  if (refinePanelControl) refinePanelControl.depthFilter();
 }
 
 function depthAction(action) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({type: 'depth_action', action}));
+  if (refinePanelControl) refinePanelControl.depthAction(action);
 }
 
 // ---- Tag search (KR/EN) ----
@@ -3953,6 +3849,7 @@ Promise.all([
   wildcardPanelReady,
   wildcardManagerPanelReady,
   imageModulePanelsReady,
+  refinePanelReady,
   chunkPanelReady,
 ])
   .then(() => {

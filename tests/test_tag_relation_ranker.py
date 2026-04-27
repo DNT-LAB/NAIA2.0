@@ -73,3 +73,63 @@ def test_relation_ranker_prefers_children_before_broad_siblings():
     related = TagRelationRanker(records).rank_related("pantyhose", records["pantyhose"], limit=4)
 
     assert related[:2] == ["fishnet pantyhose", "panties under pantyhose"]
+
+
+def test_relation_ranker_validates_parent_implications():
+    records = {
+        "panties under pantyhose": {
+            "_tag": "panties under pantyhose",
+            "relations": {"parent": "pantyhose"},
+        },
+        "pantyhose": {"_tag": "pantyhose"},
+        "open arms": {"_tag": "open arms", "relations": {"parent": "pen"}},
+        "pen": {"_tag": "pen"},
+        "brazil": {"_tag": "brazil", "relations": {"parent": "bra"}},
+        "no bra": {"_tag": "no bra", "relations": {"parent": "bra"}},
+        "bra": {"_tag": "bra"},
+        "lungmen dollar": {"_tag": "lungmen dollar", "relations": {"parent": "doll"}},
+        "doll": {"_tag": "doll"},
+    }
+    ranker = TagRelationRanker(records)
+
+    assert ranker.valid_implications("panties under pantyhose", records["panties under pantyhose"]) == ["pantyhose"]
+    assert ranker.valid_implications("no bra", records["no bra"]) == ["bra"]
+    assert ranker.valid_implications("open arms", records["open arms"]) == []
+    assert ranker.valid_implications("brazil", records["brazil"]) == []
+    assert ranker.valid_implications("lungmen dollar", records["lungmen dollar"]) == []
+
+
+def test_relation_ranker_suppresses_broad_siblings_for_wide_subgroups():
+    records = {
+        "torn swimsuit": {
+            "_tag": "torn swimsuit",
+            "freq": 701,
+            "group": "Clothing_Wear",
+            "subgroup": "attire",
+            "relations": {
+                "parent": "swimsuit",
+                "siblings": ["one-piece swimsuit", "shirt", "skirt", "dress"],
+            },
+        },
+        "swimsuit": {"_tag": "swimsuit", "group": "Clothing_Wear", "subgroup": "attire"},
+        "one-piece swimsuit": {"_tag": "one-piece swimsuit", "freq": 10000, "group": "Clothing_Wear", "subgroup": "attire"},
+        "shirt": {"_tag": "shirt", "freq": 100000, "group": "Clothing_Wear", "subgroup": "attire"},
+        "skirt": {"_tag": "skirt", "freq": 90000, "group": "Clothing_Wear", "subgroup": "attire"},
+        "dress": {"_tag": "dress", "freq": 80000, "group": "Clothing_Wear", "subgroup": "attire"},
+        "confused": {
+            "_tag": "confused",
+            "freq": 1845,
+            "group": "Expression_Action",
+            "subgroup": "expression",
+            "relations": {"siblings": ["blush", "smile"]},
+        },
+        "blush": {"_tag": "blush", "freq": 300000, "group": "Expression_Action", "subgroup": "expression"},
+        "smile": {"_tag": "smile", "freq": 200000, "group": "Expression_Action", "subgroup": "expression"},
+    }
+    ranker = TagRelationRanker(records)
+
+    clothing_related = ranker.rank_related("torn swimsuit", records["torn swimsuit"], limit=8)
+    assert clothing_related == ["one-piece swimsuit"]
+
+    expression_related = ranker.rank_related("confused", records["confused"], limit=8)
+    assert expression_related == ["blush", "smile"]

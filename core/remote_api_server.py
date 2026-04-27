@@ -3376,6 +3376,8 @@ class RemoteBridge(QObject):
         parents = rels.get('parent', [])
         if isinstance(parents, str):
             parents = [parents]
+        if self._tag_relation_ranker is not None:
+            parents = self._tag_relation_ranker.valid_implications(tag_lower, info, limit=8)
         if parents:
             result['implications'] = parents[:8]
         if self._tag_relation_ranker is not None:

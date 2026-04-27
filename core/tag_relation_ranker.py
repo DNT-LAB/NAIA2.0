@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -14,10 +15,14 @@ _STOP_TOKENS = {
     "by",
     "for",
     "from",
+    "first",
+    "high",
     "in",
     "into",
+    "low",
     "of",
     "on",
+    "open",
     "or",
     "over",
     "the",
@@ -48,6 +53,30 @@ _COLOR_TOKENS = {
     "yellow",
 }
 
+_BROAD_SIBLING_SUBGROUPS = {
+    "accessories",
+    "activity",
+    "attire",
+    "clothing_action",
+    "effects",
+    "etc",
+    "gesture",
+    "image_composition",
+    "instruments",
+    "metatags",
+    "pose",
+    "posture",
+    "sex_acts",
+    "sexual_positions",
+    "symbols",
+    "text",
+    "tools",
+    "verbs_and_gerunds",
+    "weapons",
+}
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
 
 def _as_list(value: Any) -> list[str]:
     if not value:
@@ -65,6 +94,10 @@ def _core_tokens(tag: str) -> set[str]:
         for token in normalize_tag(tag).split()
         if token and token not in _STOP_TOKENS and token not in _COLOR_TOKENS
     }
+
+
+def _relation_tokens(tag: str) -> set[str]:
+    return {token for token in _TOKEN_RE.findall(normalize_tag(tag)) if token}
 
 
 def _axis_from_info(tag: str, info: Mapping[str, Any] | None, registry: TagAxisRegistry) -> str:
@@ -94,6 +127,14 @@ def _axis_from_info(tag: str, info: Mapping[str, Any] | None, registry: TagAxisR
     if "body" in text or "characteristic" in text or "특징" in text:
         return "characteristic"
     return axis
+
+
+def _is_broad_sibling_area(group: str, subgroup: str) -> bool:
+    subgroup_l = str(subgroup or "").lower()
+    if subgroup_l in _BROAD_SIBLING_SUBGROUPS:
+        return True
+    group_l = str(group or "").lower()
+    return "composition_meta" in group_l and subgroup_l in {"", "metatags", "symbols", "text"}
 
 
 @dataclass(frozen=True)
@@ -134,7 +175,7 @@ class TagRelationRanker:
     ) -> list[RankedRelation]:
         normalized = normalize_tag(tag)
         relations = info.get("relations", {}) or {}
-        parents = set(normalize_tag(t) for t in _as_list(relations.get("parent")))
+        parents = set(self.valid_implications(normalized, info))
         source_group = str(info.get("group", "") or "")
         source_subgroup = str(info.get("subgroup", "") or "")
         source_axis = _axis_from_info(normalized, info, self._registry)
@@ -178,6 +219,28 @@ class TagRelationRanker:
         )
         return results[:limit]
 
+    def valid_implications(
+        self,
+        tag: str,
+        info: Mapping[str, Any],
+        *,
+        limit: int = 8,
+    ) -> list[str]:
+        normalized = normalize_tag(tag)
+        relations = info.get("relations", {}) or {}
+        valid: list[str] = []
+        seen: set[str] = set()
+        for raw_parent in _as_list(relations.get("parent")):
+            parent = normalize_tag(raw_parent)
+            if parent in seen:
+                continue
+            if self._is_valid_parent(normalized, parent):
+                seen.add(parent)
+                valid.append(parent)
+            if len(valid) >= limit:
+                break
+        return valid
+
     def _score_candidate(
         self,
         candidate: str,
@@ -202,6 +265,12 @@ class TagRelationRanker:
 
         if source == "word_match" and not (overlap or same_subgroup):
             return 0.0
+        if (
+            source == "siblings"
+            and not overlap
+            and _is_broad_sibling_area(source_group, source_subgroup)
+        ):
+            return 0.0
 
         score = {
             "children": 320.0,
@@ -224,7 +293,25 @@ class TagRelationRanker:
         if source == "word_match" and not same_axis and len(overlap) < 2:
             score -= 80
 
+        if source == "word_match" and score < 100:
+            return 0.0
+
         return score
+
+    def _is_valid_parent(self, child: str, parent: str) -> bool:
+        if not parent or parent == child:
+            return False
+        if parent not in self._records:
+            return False
+        if len(parent) == 1 and parent.isalpha():
+            return False
+
+        parent_tokens = _relation_tokens(parent)
+        child_tokens = _relation_tokens(child)
+        if not parent_tokens:
+            return parent in child
+
+        return parent_tokens.issubset(child_tokens)
 
 
 def build_ranked_related_tags(

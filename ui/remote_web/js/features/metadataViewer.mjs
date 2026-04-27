@@ -105,6 +105,10 @@ export function createMetadataViewer({
     return 'No current result metadata';
   }
 
+  function isExpectedEmptyCurrent(source, error) {
+    return source.kind === 'current' && error && error.status === 404;
+  }
+
   async function loadSource(source = currentSource, options = {}) {
     const requestId = ++requestSerial;
     loading = true;
@@ -115,7 +119,11 @@ export function createMetadataViewer({
     try {
       const request = buildRequest(source);
       const response = await fetch(request.url, request.init);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
       const data = await response.json();
       if (requestId !== requestSerial) return;
       if (source.kind === 'saved' && source.path && data && typeof data === 'object') {
@@ -129,8 +137,12 @@ export function createMetadataViewer({
     } catch (error) {
       if (requestId !== requestSerial) return;
       renderEmpty(unavailableMessage(source));
-      setStatus('Unavailable', 'error');
-      if (!options.silent && showToast) showToast('Failed to load metadata', 'error');
+      if (isExpectedEmptyCurrent(source, error)) {
+        setStatus('Idle', 'muted');
+      } else {
+        setStatus('Unavailable', 'error');
+        if (!options.silent && showToast) showToast('Failed to load metadata', 'error');
+      }
     } finally {
       if (requestId === requestSerial) {
         loading = false;

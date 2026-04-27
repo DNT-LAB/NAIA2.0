@@ -28,6 +28,7 @@ if (isDesktopShell) document.body.classList.add('desktop-shell');
 const SHARED_STORAGE_KEY = 'naia_shared_session';
 let createWsMessageDispatcher = null;
 let quickFilter = null;
+let rightTabs = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -58,6 +59,16 @@ const quickFilterReady = import('./js/features/quickFilter.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Quick Filter module', error);
+  });
+const rightTabsReady = import('./js/features/rightTabs.mjs')
+  .then(({createRightTabsController}) => {
+    rightTabs = createRightTabsController({
+      document,
+      onLeaveResult: hideViewerNav,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize right tabs module', error);
   });
 
 function saveSharedSession() {
@@ -151,8 +162,6 @@ const resultMain = document.querySelector('.result-main');
 const resultInfoPanel = $('resultInfoPanel');
 const resultInfoContent = $('resultInfoContent');
 const resultInfoResize = $('resultInfoResize');
-const rightTabButtons = Array.from(document.querySelectorAll('.right-tab-btn'));
-const rightTabPanes   = Array.from(document.querySelectorAll('.right-tab-pane'));
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
 let autoSaveEnabled  = true;
@@ -1008,19 +1017,7 @@ function setNaiHighlightMode(mode) {
 // ---- Right panel top-level tabs ----
 
 function switchRightTab(tabName) {
-  rightTabButtons.forEach(btn => {
-    const active = btn.dataset.rightTab === tabName;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-selected', active ? 'true' : 'false');
-  });
-  rightTabPanes.forEach(pane => {
-    pane.classList.toggle('active', pane.dataset.rightPane === tabName);
-  });
-
-  const isResult = tabName === 'result';
-  if (!isResult && typeof hideViewerNav === 'function') {
-    hideViewerNav();
-  }
+  if (rightTabs) rightTabs.switchTo(tabName);
 }
 
 // ---- Result history (disk-based image browser) ----
@@ -5464,7 +5461,7 @@ function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
-Promise.all([quickFilterReady, wsDispatcherReady])
+Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady])
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();

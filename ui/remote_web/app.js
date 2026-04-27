@@ -27,6 +27,7 @@ let resultInfoResizer = null;
 let resultHistory = null;
 let resultEnhance = null;
 let resultContextMenu = null;
+let metadataViewer = null;
 let promptHighlighter = null;
 let moduleBadges = null;
 let cloudflaredControls = null;
@@ -130,8 +131,9 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
       resultInfoContent,
       escHtml,
       showToast,
-      onDiskImageSelected: () => {
+      onDiskImageSelected: relPath => {
         if (resultEnhance) resultEnhance.clearCurrentMeta();
+        if (metadataViewer) metadataViewer.loadSaved(relPath, {silent: true});
       },
     });
   })
@@ -150,6 +152,18 @@ const resultEnhanceReady = import('./js/features/resultEnhance.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize result enhance module', error);
+  });
+const metadataViewerReady = import('./js/features/metadataViewer.mjs')
+  .then(({createMetadataViewer}) => {
+    metadataViewer = createMetadataViewer({
+      document,
+      fetch,
+      escHtml,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize metadata viewer module', error);
   });
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
   .then(({createResultContextMenu}) => {
@@ -707,6 +721,7 @@ function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
   updateMetaChips(m);
   if (resultEnhance) resultEnhance.setCurrentMeta(m);
+  if (metadataViewer) metadataViewer.loadCurrent({silent: true});
 }
 
 function cleanPromptForTokenEstimate(text, mode) {
@@ -1068,6 +1083,7 @@ function setNaiHighlightMode(mode) {
 
 function switchRightTab(tabName) {
   if (rightTabs) rightTabs.switchTo(tabName);
+  if (tabName === 'pngInfo' && metadataViewer) metadataViewer.refresh();
 }
 
 // ---- Result history (disk-based image browser) ----
@@ -1086,6 +1102,7 @@ function hideViewerNav() { if (resultHistory) resultHistory.hideNav(); }
 function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupPrompt(checked); }
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
+function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
 // ---- Stats functions ----
 
 function toggleAutoSave() {
@@ -2941,6 +2958,7 @@ Promise.all([
   resultInfoResizerReady,
   resultHistoryReady,
   resultEnhanceReady,
+  metadataViewerReady,
   resultContextMenuReady,
   promptHighlighterReady,
   tokenDisplayReady,

@@ -483,10 +483,35 @@
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabPngInfo" data-right-pane="pngInfo" role="tabpanel">
-    <div class="right-tab-placeholder">
-      <div class="placeholder-kicker">TODO</div>
-      <h2>Metadata</h2>
-      <p>PNG Info와 Metadata Viewer의 중복 책임을 정리한 뒤 Remote API로 연결할 자리입니다.</p>
+    <div class="metadata-viewer">
+      <header class="metadata-toolbar">
+        <div>
+          <div class="metadata-kicker">Metadata</div>
+          <h2 id="metadataTitle">Metadata Viewer</h2>
+        </div>
+        <div class="metadata-toolbar-actions">
+          <span class="metadata-status" id="metadataStatus"></span>
+          <button class="metadata-refresh-btn" id="metadataRefreshBtn" onclick="refreshMetadataViewer()">Refresh</button>
+        </div>
+      </header>
+      <div class="metadata-layout">
+        <section class="metadata-section metadata-summary-section">
+          <div class="metadata-section-title">Summary</div>
+          <div class="metadata-summary-grid" id="metadataSummary"></div>
+        </section>
+        <section class="metadata-section metadata-prompt-section">
+          <div class="metadata-section-title">Prompt</div>
+          <pre class="metadata-text-block" id="metadataPrompt"></pre>
+        </section>
+        <section class="metadata-section metadata-negative-section">
+          <div class="metadata-section-title">Negative</div>
+          <pre class="metadata-text-block" id="metadataNegative"></pre>
+        </section>
+        <section class="metadata-section metadata-raw-section">
+          <div class="metadata-section-title">Raw</div>
+          <pre class="metadata-raw-block" id="metadataRaw"></pre>
+        </section>
+      </div>
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabThumb" data-right-pane="thumb" role="tabpanel">

@@ -152,6 +152,7 @@ class RemoteBridge(QObject):
         super().__init__()
         self.app_context = app_context
         self.latest_webp: Optional[bytes] = None
+        self.latest_metadata_payload: Optional[dict] = None
         self._ws_manager: Optional[WebSocketManager] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._syncing_option = False
@@ -704,6 +705,128 @@ class RemoteBridge(QObject):
             message = f"Enhance request failed: {e}"
             self._send_result_enhance_error(ws, message)
             print(f"🌐 Remote: Enhance 트리거 실패 — {e}")
+
+    def _metadata_json_safe(self, value):
+        """메타데이터 응답에 싣기 어려운 객체/바이트를 안전하게 축약."""
+        if isinstance(value, bytes):
+            return f"<bytes {len(value)}>"
+        if isinstance(value, dict):
+            cleaned = {}
+            for key, item in value.items():
+                key_text = str(key)
+                key_lower = key_text.lower()
+                if any(marker in key_lower for marker in ("token", "secret", "password", "authorization", "api_key")):
+                    cleaned[key_text] = "<redacted>"
+                    continue
+                if key_text in {"image_bytes", "mask_bytes", "raw_bytes"}:
+                    cleaned[key_text] = f"<bytes {len(item)}>" if isinstance(item, bytes) else "<binary>"
+                    continue
+                cleaned[key_text] = self._metadata_json_safe(item)
+            return cleaned
+        if isinstance(value, (list, tuple, set)):
+            return [self._metadata_json_safe(item) for item in value]
+        try:
+            json.dumps(value)
+            return value
+        except Exception:
+            return str(value)
+
+    def _metadata_summary_from(self, meta: dict, gen_params: dict, image, webp_bytes: bytes) -> dict:
+        summary = {
+            "width": getattr(image, "width", ""),
+            "height": getattr(image, "height", ""),
+            "mode": getattr(image, "mode", ""),
+            "size_kb": len(webp_bytes) // 1024 if webp_bytes else "",
+        }
+        if not isinstance(meta, dict):
+            meta = {}
+        if not isinstance(gen_params, dict):
+            gen_params = {}
+
+        prompt = meta.get("prompt") or gen_params.get("input") or gen_params.get("_raw_input") or ""
+        negative = (
+            meta.get("uc")
+            or meta.get("negative")
+            or meta.get("negative_prompt")
+            or gen_params.get("negative_prompt")
+            or ""
+        )
+        if prompt:
+            summary["prompt"] = prompt
+        if negative:
+            summary["negative"] = negative
+
+        if "characters" in meta:
+            summary["characters"] = meta["characters"]
+        elif "v4_prompt" in meta:
+            try:
+                v4_prompt = meta["v4_prompt"]
+                if isinstance(v4_prompt, str):
+                    v4_prompt = json.loads(v4_prompt)
+                captions = v4_prompt.get("caption", {}).get("char_captions", [])
+                chars = [caption.get("char_caption", "") for caption in captions if caption.get("char_caption")]
+                if chars:
+                    summary["characters"] = chars
+            except Exception:
+                pass
+
+        param_source = meta.get("parameters") if isinstance(meta.get("parameters"), dict) else {}
+        for key, aliases in {
+            "seed": ("seed",),
+            "steps": ("steps",),
+            "sampler": ("sampler", "sampler_name"),
+            "cfg_scale": ("cfg_scale", "scale", "cfg"),
+            "model": ("model",),
+        }.items():
+            value = ""
+            for alias in aliases:
+                if alias in gen_params:
+                    value = gen_params.get(alias)
+                    break
+                if alias in meta:
+                    value = meta.get(alias)
+                    break
+                if alias in param_source:
+                    value = param_source.get(alias)
+                    break
+            if value not in ("", None):
+                summary[key] = value
+        return summary
+
+    def _build_result_metadata_payload(self, image, result: dict, webp_bytes: bytes) -> dict:
+        gen_params = result.get("generation_params", {}) or {}
+        prompt_context = result.get("prompt_context", {}) or {}
+        api_metadata = result.get("api_metadata", {}) or {}
+        extracted = {}
+        try:
+            from utils.image_info import ImageMetadataExtractor
+            extracted = ImageMetadataExtractor.extract_metadata(image) or {}
+        except Exception as e:
+            print(f"🌐 Remote: 최신 이미지 메타데이터 추출 실패 — {e}")
+
+        summary = self._metadata_summary_from(extracted, gen_params, image, webp_bytes)
+        raw = {
+            "image": {
+                "width": getattr(image, "width", None),
+                "height": getattr(image, "height", None),
+                "mode": getattr(image, "mode", None),
+                "format": getattr(image, "format", None),
+                "size_kb": len(webp_bytes) // 1024 if webp_bytes else None,
+            },
+            "extracted_metadata": self._metadata_json_safe(extracted),
+            "generation_params": self._metadata_json_safe(gen_params),
+            "prompt_context": self._metadata_json_safe(prompt_context),
+            "api_metadata": self._metadata_json_safe(api_metadata),
+            "creation_timestamp": result.get("creation_timestamp", ""),
+            "backend_type": result.get("backend_type", ""),
+        }
+        return {
+            "source": "current",
+            "label": "Current Result",
+            "summary": self._metadata_json_safe(summary),
+            "raw": raw,
+            "has_metadata": bool(extracted or gen_params or prompt_context or api_metadata),
+        }
 
     def _do_random(self):
         """Random 요청 처리. deque에서 준비된 데이터를 pop하여 실행."""
@@ -4068,6 +4191,7 @@ class RemoteBridge(QObject):
 
             # /api/latest-image 호환을 위해 최신 이미지만 보존한다.
             self.latest_webp = webp_bytes
+            self.latest_metadata_payload = self._build_result_metadata_payload(image, result, webp_bytes)
 
             if not self._has_clients():
                 return
@@ -4239,6 +4363,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             media_type="image/webp",
             headers={"Content-Disposition": "attachment; filename=naia_latest.webp"}
         )
+
+    @app.get("/api/result/metadata")
+    async def api_result_metadata():
+        if bridge.latest_metadata_payload is None:
+            return JSONResponse({"error": "No image generated yet"}, status_code=404)
+        return bridge.latest_metadata_payload
 
     # --- Viewer REST API ---
 

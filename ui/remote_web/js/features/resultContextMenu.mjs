@@ -5,7 +5,7 @@ const MAIN_IMAGE_MENU = [
   {label: '프롬프트 다시개봉'},
   {type: 'separator'},
   {label: '생성 설정 복원'},
-  {label: '전체 메타데이터 보기', action: ACTION_METADATA, requiresPath: true},
+  {label: '전체 메타데이터 보기', action: ACTION_METADATA},
   {type: 'separator'},
   {label: '이미지 붙여넣기'},
   {type: 'separator'},
@@ -92,7 +92,7 @@ export function createResultContextMenu({
       return '<div class="result-context-separator"></div>';
     }
     const danger = item.danger ? ' danger' : '';
-    const enabled = item.action === ACTION_METADATA && (!item.requiresPath || context.path);
+    const enabled = item.action === ACTION_METADATA && (!item.requiresPath || context.path || context.source === 'current');
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
     const childHtml = item.children
@@ -126,7 +126,7 @@ export function createResultContextMenu({
         const action = button.dataset.action;
         close();
         if (action === ACTION_METADATA) {
-          showMetadata(context.path);
+          showMetadata(context);
         }
       });
     });
@@ -169,16 +169,21 @@ export function createResultContextMenu({
     return preview ? extractViewerPathFromSrc(preview.getAttribute('src')) : '';
   }
 
-  async function showMetadata(path) {
-    if (!path) {
-      showToast('No saved image is selected', 'error');
+  async function showMetadata(context) {
+    const path = context && context.path ? context.path : '';
+    const useCurrent = !path && context && context.source === 'current';
+    if (!path && !useCurrent) {
+      showToast('No image is selected', 'error');
       return;
     }
     try {
-      const response = await fetchFn('/api/viewer/meta/' + encodeURI(path) + '?full=1');
+      const url = path
+        ? '/api/viewer/meta/' + encodeURI(path) + '?full=1'
+        : '/api/result/metadata';
+      const response = await fetchFn(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      openMetadataModal(path, data);
+      openMetadataModal(path || 'Current Result', data);
     } catch (error) {
       console.error('Failed to load image metadata', error);
       showToast('Failed to load metadata', 'error');
@@ -189,8 +194,10 @@ export function createResultContextMenu({
     closeMetadataModal();
     const raw = data && typeof data === 'object' && 'raw' in data ? data.raw : data;
     const summary = data && typeof data === 'object' && 'summary' in data ? data.summary : {};
-    const hasRaw = raw && typeof raw === 'object' && Object.keys(raw).length > 0;
-    const rawText = hasRaw ? JSON.stringify(raw, null, 2) : '메타데이터가 없습니다.';
+    const hasRaw = raw && (typeof raw !== 'object' || Object.keys(raw).length > 0);
+    const rawText = hasRaw
+      ? (typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2))
+      : '메타데이터가 없습니다.';
     const summaryRows = summary && typeof summary === 'object'
       ? Object.entries(summary).map(([key, value]) => `
         <div class="result-metadata-row">
@@ -250,7 +257,8 @@ export function createResultContextMenu({
     const imagePlaneTarget = target.closest('#preview, #viewerLightboxImg, .vp-preview, .viewer');
     if (imagePlaneTarget && isPreviewVisible(preview)) {
       event.preventDefault();
-      open('image-plane', event.clientX, event.clientY, {path: getImagePlanePath(target)});
+      const path = getImagePlanePath(target);
+      open('image-plane', event.clientX, event.clientY, {path, source: path ? 'saved' : 'current'});
     }
   }
 

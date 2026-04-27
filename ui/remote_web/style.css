@@ -1635,6 +1635,12 @@ body.resizing-result-info {
   border-radius: 7px;
   background: rgba(76,175,80,0.1);
   flex-shrink: 0;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+.prompt-quick-control.quick-filter-memory {
+  border-color: rgba(232,168,76,0.82);
+  background: rgba(232,168,76,0.12);
+  box-shadow: 0 0 0 1px rgba(232,168,76,0.16), 0 0 12px rgba(232,168,76,0.12);
 }
 .shell-toolbar .prompt-quick-control {
   height: 25px;
@@ -1673,6 +1679,15 @@ body.resizing-result-info {
 .quick-filter-btn:hover {
   color: var(--text-primary);
   background: rgba(255,255,255,0.05);
+}
+.prompt-quick-control.quick-filter-memory .quick-filter-btn {
+  border-left-color: rgba(232,168,76,0.48) !important;
+  color: #f3d27d;
+  background: rgba(232,168,76,0.08);
+}
+.prompt-quick-control.quick-filter-memory .quick-filter-btn:hover {
+  color: #ffe2a0;
+  background: rgba(232,168,76,0.15);
 }
 .module-rating-bar {
   display: flex; gap: 2px; align-items: center;

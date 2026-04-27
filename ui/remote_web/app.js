@@ -26,6 +26,7 @@ if (isDesktopShell) document.body.classList.add('desktop-shell');
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
+const QUICK_FILTER_STORAGE_KEY = 'naia_quick_filter_options';
 
 function saveSharedSession() {
   if (!sharedMode) return;
@@ -37,7 +38,9 @@ function saveSharedSession() {
     p_eng: _sharedPEng || null,
     cond: _sharedCond || null,
     ratings: Object.keys(ratingState).filter(k => ratingState[k]),
-    tag_filter: tagFilterTags.length ? tagFilterTags : null,
+    tag_filter: tagFilterTags.length ? [...tagFilterTags] : null,
+    tag_filter_exclude: tagFilterExcludeTags.length ? [...tagFilterExcludeTags] : null,
+    tag_filter_active: tagFilterActive,
   };
   for (const [key, cb] of Object.entries(optBoxes)) {
     if (key !== 'auto_generate') data.options[key] = cb.checked;
@@ -329,6 +332,9 @@ function connect() {
             if (viewerCountEl) viewerCountEl.textContent = d.total;
             if (d.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
           }).catch(() => {});
+          if (!sharedMode) {
+            restoreQuickFilterPreferences();
+          }
         }
         // Update search count from prompt_generated
         if (m.type === 'prompt_generated' && 'remaining' in m) {
@@ -1677,9 +1683,11 @@ function onSession(m) {
     clearSharedSession();
     // Tag filter 상태 리셋
     tagFilterTags = [];
+    tagFilterExcludeTags = [];
     tagFilterActive = false;
     _tfRatingCounts = null;
     renderTagFilterChips();
+    renderTagFilterExcludeChips();
     const tfCount = document.getElementById('tagFilterCount');
     tfCount.textContent = '';
     tfCount.classList.remove('has-result');
@@ -1687,6 +1695,7 @@ function onSession(m) {
     tfToggle.classList.remove('active');
     tfToggle.classList.remove('assigned');
     closeTagFilter();
+    restoreQuickFilterPreferences();
   }
   updateModeSelectAvailability();
 }
@@ -1765,14 +1774,19 @@ function _restoreSharedSession() {
     }
   }
   // Tag filter 복원
-  if (saved.tag_filter && Array.isArray(saved.tag_filter) && saved.tag_filter.length) {
-    tagFilterTags = saved.tag_filter;
+  const savedIncludeTags = _normalQuickTags(saved.tag_filter);
+  const savedExcludeTags = _normalQuickTags(saved.tag_filter_exclude);
+  if (savedIncludeTags.length || savedExcludeTags.length) {
+    tagFilterTags = savedIncludeTags;
+    tagFilterExcludeTags = savedExcludeTags;
     renderTagFilterChips();
+    renderTagFilterExcludeChips();
+    updateQuickFilterHighlight();
     // 서���에 재적용 (재���결 시 세션 ID 세트 재구축 → 즉시 Assign)
     // search 완료 후 onTagFilterResult에서 자동 assign (flag 기반)
     if (ws && ws.readyState === WebSocket.OPEN) {
-      _pendingTfAssignOnRestore = true;
-      ws.send(JSON.stringify({type: 'tag_filter_search', tags: tagFilterTags}));
+      _pendingTfAssignOnRestore = saved.tag_filter_active !== false;
+      ws.send(JSON.stringify({type: 'tag_filter_search', tags: _quickFilterPayload()}));
     }
   }
   // P.Eng / Cond 캐시 복원 (모듈 열 때 사용)
@@ -4541,7 +4555,7 @@ function toggleRating(r) {
       const active = Object.keys(ratingState).filter(k => ratingState[k]);
       ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
     }
-    saveSharedSession();
+    saveQuickFilterPreferences();
     return;
   }
   // Send to server for instant count update
@@ -4549,6 +4563,7 @@ function toggleRating(r) {
     const active = Object.keys(ratingState).filter(k => ratingState[k]);
     ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
   }
+  saveQuickFilterPreferences();
 }
 
 function onFilterReset(m) {
@@ -4574,6 +4589,11 @@ function onFilterReset(m) {
   // Count/Rating 갱신
   if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
   if (m.count != null) updateSearchCount(m.count);
+  if (!sharedMode) {
+    restoreQuickFilterPreferences();
+  } else {
+    updateQuickFilterHighlight();
+  }
 }
 
 function onRatingUpdate(m) {
@@ -4595,6 +4615,7 @@ function onRatingUpdate(m) {
     }
     syncRatingButtons();
   }
+  updateQuickFilterHighlight();
 }
 
 function syncRatingButtons() {
@@ -4602,6 +4623,7 @@ function syncRatingButtons() {
     if (!btn.dataset.r) return; // Filter 버튼 등 data-r 없는 요소 스킵
     btn.classList.toggle('active', !!ratingState[btn.dataset.r]);
   });
+  updateQuickFilterHighlight();
 }
 
 function updateSearchCount(count) {
@@ -4631,7 +4653,16 @@ function onSearchState(m) {
       }
     }
   }
-  syncRatingButtons();
+  const savedQuick = !sharedMode ? loadQuickFilterPreferences() : null;
+  if (savedQuick) {
+    // localStorage rating preference wins over server defaults after reconnect/search refresh.
+    for (const k of ['g', 's', 'q', 'e']) {
+      ratingState[k] = savedQuick.ratings.includes(k);
+    }
+    syncRatingButtons();
+  } else {
+    syncRatingButtons();
+  }
   if (currentModuleId === 'search') renderSearch(m);
 }
 
@@ -4708,6 +4739,7 @@ function doSearch() {
     if (el) ratingState[k] = el.checked;
   }
   syncRatingButtons();
+  saveQuickFilterPreferences();
   const ratings = {};
   for (const k of ['e','q','s','g']) {
     ratings['rating_' + k] = ratingState[k];
@@ -5421,6 +5453,149 @@ let _tfAcTimer = null;
 let _pendingTfAssignOnRestore = false;
 let _tfRatingCounts = null; // tag filter 검색 결과의 rating별 카운트
 
+function _normalQuickRatings(value) {
+  const allowed = ['g', 's', 'q', 'e'];
+  if (!Array.isArray(value)) return allowed;
+  const picked = allowed.filter(k => value.includes(k));
+  return picked.length ? picked : allowed;
+}
+
+function _normalQuickTags(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  value.forEach(v => {
+    const tag = String(v || '').trim().replace(/^-+/, '').replace(/ /g, '_');
+    if (!tag || seen.has(tag)) return;
+    seen.add(tag);
+    out.push(tag);
+  });
+  return out;
+}
+
+function _collectQuickFilterPreferences() {
+  return {
+    ratings: Object.keys(ratingState).filter(k => ratingState[k]),
+    tag_filter: [...tagFilterTags],
+    tag_filter_exclude: [...tagFilterExcludeTags],
+    tag_filter_active: tagFilterActive,
+  };
+}
+
+function _normalQuickFilterPreferences(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const include = _normalQuickTags(raw.tag_filter || raw.include || raw.include_tags);
+  const exclude = _normalQuickTags(raw.tag_filter_exclude || raw.exclude || raw.exclude_tags);
+  return {
+    ratings: _normalQuickRatings(raw.ratings),
+    tag_filter: include,
+    tag_filter_exclude: exclude,
+    tag_filter_active: !!raw.tag_filter_active && (include.length > 0 || exclude.length > 0),
+  };
+}
+
+function _quickFilterPayload() {
+  return [...tagFilterTags, ...tagFilterExcludeTags.map(t => '-' + t)];
+}
+
+function _hasCustomQuickFilter(pref) {
+  const data = pref || _collectQuickFilterPreferences();
+  const ratings = _normalQuickRatings(data.ratings);
+  const allRatings = ratings.length === 4 && ['g', 's', 'q', 'e'].every(k => ratings.includes(k));
+  return !allRatings
+    || (data.tag_filter && data.tag_filter.length > 0)
+    || (data.tag_filter_exclude && data.tag_filter_exclude.length > 0)
+    || !!data.tag_filter_active;
+}
+
+function updateQuickFilterHighlight() {
+  const toggleBtn = document.getElementById('tagFilterToggle');
+  if (!toggleBtn) return;
+  const control = toggleBtn.closest('.prompt-quick-control');
+  const highlighted = _hasCustomQuickFilter();
+  if (control) control.classList.toggle('quick-filter-memory', highlighted);
+  toggleBtn.title = highlighted
+    ? 'Quick filter settings are saved'
+    : 'Open quick filter';
+}
+
+function saveQuickFilterPreferences() {
+  const data = _collectQuickFilterPreferences();
+  try {
+    if (_hasCustomQuickFilter(data)) {
+      localStorage.setItem(QUICK_FILTER_STORAGE_KEY, JSON.stringify(data));
+    } else {
+      localStorage.removeItem(QUICK_FILTER_STORAGE_KEY);
+    }
+  } catch(_) {}
+  updateQuickFilterHighlight();
+  saveSharedSession();
+}
+
+function loadQuickFilterPreferences() {
+  try {
+    const raw = localStorage.getItem(QUICK_FILTER_STORAGE_KEY);
+    return raw ? _normalQuickFilterPreferences(JSON.parse(raw)) : null;
+  } catch(_) {
+    return null;
+  }
+}
+
+function applyQuickFilterPreferences(saved, opts = {}) {
+  const pref = _normalQuickFilterPreferences(saved);
+  if (!pref) {
+    updateQuickFilterHighlight();
+    return false;
+  }
+
+  for (const k of ['g', 's', 'q', 'e']) {
+    ratingState[k] = pref.ratings.includes(k);
+  }
+  tagFilterTags = [...pref.tag_filter];
+  tagFilterExcludeTags = [...pref.tag_filter_exclude];
+  tagFilterActive = pref.tag_filter_active;
+  _tfRatingCounts = null;
+  renderTagFilterChips();
+  renderTagFilterExcludeChips();
+  syncRatingButtons();
+  const localCount = _computeLocalFilteredCount();
+  if (localCount !== null) updateSearchCount(localCount);
+
+  const countEl = document.getElementById('tagFilterCount');
+  if (countEl) {
+    countEl.textContent = '';
+    countEl.classList.remove('has-result');
+  }
+  const assignBtn = document.getElementById('tagFilterAssignBtn');
+  if (assignBtn) assignBtn.disabled = true;
+  const toggleBtn = document.getElementById('tagFilterToggle');
+  if (toggleBtn) {
+    toggleBtn.classList.remove('active');
+    toggleBtn.classList.toggle('assigned', tagFilterActive);
+  }
+  updateQuickFilterHighlight();
+
+  const shouldSend = opts.send !== false;
+  if (shouldSend && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'set_active_ratings', ratings: pref.ratings}));
+    const payload = _quickFilterPayload();
+    if (payload.length) {
+      _pendingTfAssignOnRestore = tagFilterActive;
+      ws.send(JSON.stringify({type: 'tag_filter_search', tags: payload}));
+    }
+  }
+  return true;
+}
+
+function restoreQuickFilterPreferences(opts = {}) {
+  const saved = loadQuickFilterPreferences();
+  if (!saved) {
+    updateQuickFilterHighlight();
+    return false;
+  }
+  return applyQuickFilterPreferences(saved, opts);
+}
+
 function toggleTagFilter() {
   const popup = document.getElementById('tagFilterPopup');
   if (popup.classList.contains('open')) {
@@ -5479,7 +5654,7 @@ function removeTagFilterExcludeTag(idx) {
   } else if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'tag_filter_clear'}));
   }
-  saveSharedSession();
+  saveQuickFilterPreferences();
 }
 
 function removeTagFilterTag(idx) {
@@ -5493,26 +5668,25 @@ function removeTagFilterTag(idx) {
   rfCountEl.textContent = '';
   rfCountEl.classList.remove('has-result');
   document.getElementById('tagFilterToggle').classList.remove('assigned');
-  if (!tagFilterTags.length) {
+  if (!tagFilterTags.length && !tagFilterExcludeTags.length) {
     clearTagFilter();
   } else if (ws && ws.readyState === WebSocket.OPEN) {
     // 서버 확정 상태도 해제 (stale filter 방지)
     ws.send(JSON.stringify({type: 'tag_filter_clear'}));
   }
-  saveSharedSession();
+  saveQuickFilterPreferences();
 }
 
 function applyTagFilter() {
   if (!tagFilterTags.length && !tagFilterExcludeTags.length) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const combined = [...tagFilterTags, ...tagFilterExcludeTags.map(t => '-' + t)];
-  ws.send(JSON.stringify({type: 'tag_filter_search', tags: combined}));
+  saveQuickFilterPreferences();
+  ws.send(JSON.stringify({type: 'tag_filter_search', tags: _quickFilterPayload()}));
 }
 
 function assignTagFilter() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({type: 'tag_filter_assign'}));
-  saveSharedSession();
 }
 
 function clearTagFilter() {
@@ -5535,7 +5709,7 @@ function clearTagFilter() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'tag_filter_clear'}));
   }
-  saveSharedSession();
+  saveQuickFilterPreferences();
 }
 
 function onTagFilterResult(m) {
@@ -5569,6 +5743,7 @@ function onTagFilterAssigned(m) {
   countEl.textContent = `${(m.count || 0).toLocaleString()} assigned`;
   countEl.classList.add('has-result');
   document.getElementById('tagFilterAssignBtn').disabled = true;
+  saveQuickFilterPreferences();
   // Prompt: 카운트를 tag filter + GSQE 교집합으로 갱신
   if (_tfRatingCounts) {
     let filtered = 0;
@@ -5641,14 +5816,14 @@ function _selectTfAc(tag) {
     if (!tagFilterExcludeTags.includes(clean)) {
       tagFilterExcludeTags.push(clean);
       renderTagFilterExcludeChips();
-      saveSharedSession();
+      saveQuickFilterPreferences();
     }
     document.getElementById('tagFilterExcludeInput').value = '';
   } else {
     if (!tagFilterTags.includes(clean)) {
       tagFilterTags.push(clean);
       renderTagFilterChips();
-      saveSharedSession();
+      saveQuickFilterPreferences();
     }
     document.getElementById('tagFilterInput').value = '';
   }

@@ -31,6 +31,7 @@ let quickFilter = null;
 let rightTabs = null;
 let resultInfoResizer = null;
 let resultHistory = null;
+let promptHighlighter = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -99,6 +100,17 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize result history module', error);
+  });
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
+  .then(({createPromptHighlighter}) => {
+    promptHighlighter = createPromptHighlighter({
+      document,
+      promptEdit,
+      escHtml,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize prompt highlighter module', error);
   });
 
 function saveSharedSession() {
@@ -784,161 +796,14 @@ function onPromptEdit() {
 }
 
 // ---- Prompt syntax highlight (main prompt only) ----
-const promptHighlight = $('promptHighlight');
-const promptWrap = promptHighlight ? promptHighlight.parentElement : null;
 let currentMode = '';
-const ENABLE_PROMPT_HIGHLIGHT_PREVIEW = true;
-let promptHighlightState = 'disabled';
-const PROMPT_HIGHLIGHT_MODES = new Set(['NAI', 'WEBUI', 'COMFYUI']);
-
-function _supportsPromptHighlight(mode) {
-  return PROMPT_HIGHLIGHT_MODES.has(mode);
-}
-
-function formatNaiHighlight(text) {
-  if (!text) return '<br>';
-  let html = '';
-  let pos = 0;
-  const re = /(-?\d+(?:\.\d+)?)(::)([\s\S]*?)(::)/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    html += escHtml(text.substring(pos, m.index));
-    const w = parseFloat(m[1]);
-    const cls = w < 1.0 ? 'nai-wt-blue' : w > 1.0 ? 'nai-wt-red' : '';
-    const mark = '<span class="nai-wt-mark">::</span>';
-    if (cls) {
-      html += `<span class="${cls}"><span class="nai-wt-open">${escHtml(m[1])}</span>${mark}${escHtml(m[3])}${mark}</span>`;
-    } else {
-      html += escHtml(m[1]) + mark + escHtml(m[3]) + mark;
-    }
-    pos = m.index + m[0].length;
-  }
-  html += escHtml(text.substring(pos));
-  return html + '<br>';
-}
-
-function _matchWebPromptAngleToken(text, index) {
-  if (text[index] !== '<') return null;
-  const end = text.indexOf('>', index + 1);
-  if (end === -1) return null;
-  const token = text.substring(index, end + 1);
-  return /^<(?:lora|lyco|hypernet|embedding):[^>\n]+>$/.test(token) ? token : null;
-}
-
-function _formatWebPromptSegment(text, index = 0, closingChar = '', depth = 0) {
-  let html = '';
-  let i = index;
-  let explicitWeight = null;
-  while (i < text.length) {
-    const ch = text[i];
-
-    if (closingChar && ch === closingChar) {
-      return { html, index: i + 1, closed: true, explicitWeight };
-    }
-
-    if (ch === '\\' && i + 1 < text.length) {
-      html += `<span class="webui-escape">${escHtml(text.substring(i, i + 2))}</span>`;
-      i += 2;
-      continue;
-    }
-
-    const angleToken = _matchWebPromptAngleToken(text, i);
-    if (angleToken) {
-      html += `<span class="webui-angle">${escHtml(angleToken)}</span>`;
-      i += angleToken.length;
-      continue;
-    }
-
-    if (ch === '(' || ch === '[') {
-      const close = ch === '(' ? ')' : ']';
-      let tone = ch === '(' ? 'webui-up' : 'webui-down';
-      const depthClass = `webui-depth-${(depth % 3) + 1}`;
-      const inner = _formatWebPromptSegment(text, i + 1, close, depth + 1);
-      if (ch === '(' && inner.explicitWeight != null) {
-        tone = inner.explicitWeight < 1 ? 'webui-down' : inner.explicitWeight > 1 ? 'webui-up' : 'webui-neutral';
-      }
-      const openBracket = `<span class="webui-bracket ${tone}-bracket">${escHtml(ch)}</span>`;
-      if (inner.closed) {
-        const closeBracket = `<span class="webui-bracket ${tone}-bracket">${escHtml(close)}</span>`;
-        html += `<span class="webui-group ${tone} ${depthClass}">${openBracket}${inner.html}${closeBracket}</span>`;
-      } else {
-        html += `${openBracket}${inner.html}`;
-      }
-      i = inner.index;
-      continue;
-    }
-
-    if (closingChar === ')' && ch === ':') {
-      const weightMatch = text.slice(i).match(/^:\s*-?(?:\d+(?:\.\d+)?|\.\d+)(?=\))/);
-      if (weightMatch) {
-        const weightText = weightMatch[0];
-        const weightValue = parseFloat(weightText.slice(1));
-        explicitWeight = weightValue;
-        const tone = weightValue < 1 ? 'webui-weight-down' : weightValue > 1 ? 'webui-weight-up' : 'webui-weight-neutral';
-        html += `<span class="webui-weight ${tone}">${escHtml(weightText)}</span>`;
-        i += weightText.length;
-        continue;
-      }
-    }
-
-    if (!closingChar && (ch === ')' || ch === ']')) {
-      const tone = ch === ')' ? 'webui-up-bracket' : 'webui-down-bracket';
-      html += `<span class="webui-bracket ${tone}">${escHtml(ch)}</span>`;
-      i += 1;
-      continue;
-    }
-
-    html += escHtml(ch);
-    i += 1;
-  }
-
-  return { html, index: i, closed: false, explicitWeight };
-}
-
-function formatWebPromptHighlight(text) {
-  if (!text) return '<br>';
-  return _formatWebPromptSegment(text).html + '<br>';
-}
-
-function formatPromptHighlight(text, mode) {
-  if (mode === 'NAI') return formatNaiHighlight(text);
-  if (mode === 'WEBUI' || mode === 'COMFYUI') return formatWebPromptHighlight(text);
-  return escHtml(text || '') + '<br>';
-}
-
-function updatePromptHighlight() {
-  if (!promptHighlight || !_supportsPromptHighlight(currentMode)) return;
-  promptHighlight.innerHTML = formatPromptHighlight(promptEdit.value, currentMode);
-  if (promptHighlightState !== 'disabled') syncPromptHighlight();
-}
-
-function syncPromptHighlight() {
-  if (promptHighlight && promptHighlightState !== 'disabled') {
-    promptHighlight.scrollTop = promptEdit.scrollTop;
-    promptHighlight.scrollLeft = promptEdit.scrollLeft;
-  }
-}
-
-function _getDesiredPromptHighlightState() {
-  if (!ENABLE_PROMPT_HIGHLIGHT_PREVIEW || !promptWrap || !_supportsPromptHighlight(currentMode)) {
-    return 'disabled';
-  }
-  return document.activeElement === promptEdit ? 'editing' : 'preview';
-}
-
-function applyPromptHighlightState() {
-  if (!promptWrap) return;
-  promptHighlightState = _getDesiredPromptHighlightState();
-  promptWrap.classList.toggle('nai-preview', promptHighlightState === 'preview');
-  promptWrap.classList.toggle('is-editing', promptHighlightState === 'editing');
-  if (promptHighlightState === 'preview') {
-    updatePromptHighlight();
-  }
-}
+function updatePromptHighlight() { if (promptHighlighter) promptHighlighter.update(); }
+function syncPromptHighlight() { if (promptHighlighter) promptHighlighter.syncScroll(); }
+function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.applyState(); }
 
 function setNaiHighlightMode(mode) {
   currentMode = mode;
-  applyPromptHighlightState();
+  if (promptHighlighter) promptHighlighter.setMode(mode);
 }
 
 // ---- Right panel top-level tabs ----
@@ -4881,7 +4746,7 @@ function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
-Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady, resultHistoryReady])
+Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady, resultHistoryReady, promptHighlighterReady])
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();

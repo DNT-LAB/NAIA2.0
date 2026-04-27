@@ -50,6 +50,7 @@ let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
 let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
+let promptEngineeringActions = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -1588,6 +1589,25 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs')
+  .then(({createPromptEngineeringActions}) => {
+    promptEngineeringActions = createPromptEngineeringActions({
+      document,
+      getSharedMode: () => sharedMode,
+      getMode: () => modeSelect.value,
+      showToast,
+      confirmDialog: message => confirm(message),
+      flushPromptEngineeringEdits,
+      flushMainPromptAndParams,
+      setModuleParam,
+      closePresetAddPanel: closePePresetAddPanel,
+      closePresetManagePanel: closePePresetManagePanel,
+      getLastPromptEngineeringState: () => lastPromptEngineeringState,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Prompt Engineering actions module', error);
+  });
 
 function updateModuleHeaderAction(moduleId) {
   if (!modulePopupAction) return;
@@ -1991,93 +2011,39 @@ function flushMainPromptAndParams() {
 }
 
 function flushPromptPresetSaveState() {
-  flushPromptEngineeringEdits();
-  flushMainPromptAndParams();
+  if (promptEngineeringActions) promptEngineeringActions.flushPresetSaveState();
 }
 
 function onPromptPresetChange(value) {
-  flushPromptPresetSaveState();
-  setModuleParam('prompt_engineering', 'preset', value);
+  if (promptEngineeringActions) promptEngineeringActions.onPresetChange(value);
 }
 
 function saveCurrentPromptPreset() {
-  flushPromptPresetSaveState();
-  setModuleParam('prompt_engineering', 'preset_save_current', 'true');
+  if (promptEngineeringActions) promptEngineeringActions.saveCurrentPreset();
 }
 
 function createPromptPreset() {
-  const input = document.getElementById('modPresetNewName');
-  const name = input ? input.value.trim() : '';
-  if (!name) {
-    showToast('Preset name required', 'error');
-    return;
-  }
-  flushPromptPresetSaveState();
-  setModuleParam('prompt_engineering', 'preset_create', name);
-  if (input) input.value = '';
-  closePePresetAddPanel();
+  if (promptEngineeringActions) promptEngineeringActions.createPreset();
 }
 
 function applyRecommendedPromptPreset() {
-  if (sharedMode) return;
-  if (modeSelect.value !== 'NAI') {
-    showToast('추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.', 'error');
-    return;
-  }
-  if (!confirm('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?')) return;
-  setModuleParam('prompt_engineering', 'preset_apply_recommended', 'true');
+  if (promptEngineeringActions) promptEngineeringActions.applyRecommendedPreset();
 }
 
 function deleteCurrentPromptPreset() {
-  const preset = document.getElementById('modPreset')?.value || '';
-  if (!preset || preset === 'default' || preset === '*randomized') {
-    showToast('This preset cannot be deleted', 'error');
-    return;
-  }
-  if (!confirm(`Delete preset "${preset}"?`)) return;
-  setModuleParam('prompt_engineering', 'preset_delete', preset);
-  closePePresetManagePanel();
+  if (promptEngineeringActions) promptEngineeringActions.deleteCurrentPreset();
 }
 
 function savePromptEngineeringE621Settings() {
-  const hiddenRaw = document.getElementById('modE621HiddenTags')?.value || '';
-  const hiddenTags = hiddenRaw
-    .split(/[\n,]+/)
-    .map(tag => tag.trim())
-    .filter(Boolean);
-  const payload = {
-    weight: parseFloat(document.getElementById('modE621Weight')?.value || '0') || 0,
-    mode: document.getElementById('modE621Mode')?.value || 'stable',
-    hidden_tags: hiddenTags,
-  };
-  setModuleParam('prompt_engineering', 'e621_settings', JSON.stringify(payload));
+  if (promptEngineeringActions) promptEngineeringActions.saveE621Settings();
 }
 
 function savePromptEngineeringDanbooruSettings() {
-  const numberValue = (id, fallback) => {
-    const parsed = parseFloat(document.getElementById(id)?.value ?? '');
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-  const intValue = (id, fallback) => {
-    const parsed = parseInt(document.getElementById(id)?.value ?? '', 10);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-  const payload = {
-    magnitude: intValue('modDanMagnitude', 3),
-    rating_blend: numberValue('modDanBlend', 0.3),
-    override_on: !!document.getElementById('modDanOverrideOn')?.checked,
-    override_scale: numberValue('modDanOverrideScale', 0.35),
-    override_min: numberValue('modDanOverrideMin', 0.8),
-    override_max: numberValue('modDanOverrideMax', 1.35),
-    rating_override_on: !!document.getElementById('modDanRatingOverrideOn')?.checked,
-    rating_override: document.getElementById('modDanRatingOverride')?.value || 's',
-    invert_weight: !!document.getElementById('modDanInvertWeight')?.checked,
-  };
-  setModuleParam('prompt_engineering', 'danbooru_settings', JSON.stringify(payload));
+  if (promptEngineeringActions) promptEngineeringActions.saveDanbooruSettings();
 }
 
 function refreshPromptEngineeringDebug() {
-  setModuleParam('prompt_engineering', 'debug_refresh', 'true');
+  if (promptEngineeringActions) promptEngineeringActions.refreshDebug();
 }
 
 function flushPendingModuleEdit(moduleId = null) {
@@ -2093,11 +2059,7 @@ function flushPendingModuleEdit(moduleId = null) {
 }
 
 function setPromptEngineeringOption(key, checked) {
-  if (lastPromptEngineeringState) {
-    if (!lastPromptEngineeringState.preprocessing) lastPromptEngineeringState.preprocessing = {};
-    lastPromptEngineeringState.preprocessing[key] = !!checked;
-  }
-  setModuleParam('prompt_engineering', `pp_${key}`, checked ? 'true' : 'false');
+  if (promptEngineeringActions) promptEngineeringActions.setOption(key, checked);
 }
 
 function setModuleParam(moduleId, key, value, options = {}) {
@@ -2952,6 +2914,7 @@ Promise.all([
   danbooruFeedbackReady,
   promptEngineeringPopupRenderersReady,
   promptEngineeringPanelReady,
+  promptEngineeringActionsReady,
 ])
   .then(() => {
     initHistoryRail();

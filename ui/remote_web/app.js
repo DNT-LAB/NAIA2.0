@@ -1322,9 +1322,6 @@ function _showViewerImage(relPath) {
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
   _loadResultInfo(relPath);
-  // Show nav
-  const actions = document.querySelector('.viewer-nav-actions');
-  if (actions) actions.classList.add('visible');
   // Highlight active thumb
   const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
   thumbs.forEach((t, i) => t.classList.toggle('active', i === _viewerNavIdx));
@@ -1343,8 +1340,6 @@ function navViewer(dir) {
 function hideViewerNav() {
   _viewerNavIdx = -1;
   _currentViewerPath = '';
-  const actions = document.querySelector('.viewer-nav-actions');
-  if (actions) actions.classList.remove('visible');
   viewerGrid.querySelectorAll('.viewer-thumb.active').forEach(t => t.classList.remove('active'));
   _hideLatestViewerBadge();
 }

@@ -529,41 +529,6 @@ header {
   opacity: 0; transition: opacity 0.35s ease;
 }
 .viewer img.show { opacity: 1; }
-.viewer-nav-actions {
-  display: none;
-  position: absolute;
-  bottom: 8px;
-  left: 50%; transform: translateX(-50%);
-  gap: 8px;
-  z-index: 16;
-}
-.viewer-nav-actions.visible { display: flex; }
-.viewer-hist-actions {
-  display: none;
-  position: absolute;
-  bottom: 16px;
-  left: 50%; transform: translateX(-50%);
-  gap: 8px;
-  z-index: 10;
-}
-.viewer-hist-actions.visible { display: flex; }
-.viewer-hist-btn {
-  padding: 8px 24px;
-  background: rgba(18,18,26,0.85);
-  border: 1px solid var(--border-dim);
-  border-radius: 6px;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  -webkit-tap-highlight-color: transparent;
-}
-.viewer-hist-btn:hover { background: rgba(34,34,51,0.9); color: var(--text-primary); }
-.viewer-hist-btn.nav { padding: 8px 14px; font-size: 12px; }
-.viewer-hist-btn.danger:hover { background: rgba(140,30,30,0.7); color: #f5d0d0; }
-
 /* History Action Menu */
 .hist-action-menu {
   display: none;

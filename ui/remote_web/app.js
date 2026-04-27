@@ -25,6 +25,7 @@ let quickFilter = null;
 let rightTabs = null;
 let resultInfoResizer = null;
 let resultHistory = null;
+let resultContextMenu = null;
 let promptHighlighter = null;
 let moduleBadges = null;
 let cloudflaredControls = null;
@@ -132,6 +133,17 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize result history module', error);
+  });
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
+  .then(({createResultContextMenu}) => {
+    resultContextMenu = createResultContextMenu({
+      document,
+      window,
+    });
+    resultContextMenu.bind();
+  })
+  .catch(error => {
+    console.error('Failed to initialize result context menu module', error);
   });
 const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
   .then(({createPromptHighlighter}) => {
@@ -2914,6 +2926,7 @@ Promise.all([
   customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,
+  resultContextMenuReady,
   promptHighlighterReady,
   tokenDisplayReady,
   moduleBadgesReady,

@@ -26,7 +26,16 @@ if (isDesktopShell) document.body.classList.add('desktop-shell');
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
+let createWsMessageDispatcher = null;
 let quickFilter = null;
+const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
+  .then(module => {
+    createWsMessageDispatcher = module.createWsMessageDispatcher;
+  })
+  .catch(error => {
+    console.error('Failed to initialize WebSocket dispatcher module', error);
+    throw error;
+  });
 const quickFilterReady = import('./js/features/quickFilter.mjs')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
@@ -259,6 +268,94 @@ function initResultInfoResizer() {
 
 // ---- WebSocket ----
 
+function handleWsBlob(data) {
+  // Live preview: blob → 메인 뷰어에 즉시 표시
+  const url = URL.createObjectURL(data);
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = url;
+  preview.src = url;
+  preview.classList.add('show');
+  emptyMsg.style.display = 'none';
+  pendingMeta = null;
+  setGen(false);
+  // Stats update — init_complete 이후의 blob만 카운트 (초기 시딩 제외)
+  if (_initDone) {
+    sessionGenTotal++;
+    sessionGenTimestamps.push(Date.now());
+    updateGenStats();
+  }
+}
+
+function onInitComplete() {
+  _restoringSession = false;
+  _initDone = true;
+  if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
+  // 재연결 시 열려있는 모듈 자동 리프레시 (캐시 fallback 적용 위해)
+  if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: currentModuleId}));
+  }
+  // Result history rail: 저장 이미지가 있으면 썸네일 목록을 즉시 준비합니다.
+  fetch('/api/viewer/list?page=0&per_page=1').then(r => r.json()).then(d => {
+    viewerTotal = d.total;
+    if (viewerCountEl) viewerCountEl.textContent = d.total;
+    if (d.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
+  }).catch(() => {});
+  if (!sharedMode) {
+    if (quickFilter) quickFilter.restorePreferences();
+  }
+}
+
+function afterWsJsonMessage(m) {
+  // Update search count from prompt_generated
+  if (m.type === 'prompt_generated' && 'remaining' in m) {
+    if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
+    const filtered = _computeLocalFilteredCount();
+    updateSearchCount(filtered !== null ? filtered : m.remaining);
+  }
+}
+
+function onWsMessageError(error) {
+  console.warn('Failed to handle WebSocket message', error);
+}
+
+const wsMessageHandlers = {
+  image_meta: m => { pendingMeta = m; updateMeta(m); },
+  status: m => setGen(m.is_generating),
+  prompt_generated: updatePromptOnly,
+  random_failed: onRandomFailed,
+  prompt_sync: syncPrompts,
+  prompt_tokens: applyPromptTokenPayload,
+  options: syncOptions,
+  params: updateParams,
+  mode: m => syncMode(m.mode),
+  mode_result: onModeResult,
+  api_status: updateApiStatus,
+  verify_result: onVerifyResult,
+  setup_blocked: onSetupBlocked,
+  probe_result: onProbeResult,
+  anlas_update: onAnlasUpdate,
+  module_state: onModuleState,
+  search_state: onSearchState,
+  rating_update: onRatingUpdate,
+  search_progress: onSearchProgress,
+  depth_state: onDepthState,
+  tag_search_result: onTagSearchResult,
+  tag_lookup_result: onTagLookupResult,
+  autocomplete_result: onAutocompleteResult,
+  tag_filter_result: onTagFilterResult,
+  tag_filter_assigned: onTagFilterAssigned,
+  tag_filter_ac_result: onTagFilterAcResult,
+  storage_list: onStorageList,
+  wildcard_manager: onWildcardManager,
+  filter_reset: onFilterReset,
+  toast: m => showToast(m.message, m.level || 'success'),
+  load_prompt: m => onLoadPrompt(m.prompt),
+  viewer_new_image: onViewerNewImage,
+  session: onSession,
+  desktop_window_state: onDesktopWindowState,
+  init_complete: onInitComplete,
+};
+
 function connect() {
   if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -288,87 +385,13 @@ function connect() {
   };
   ws.onerror = () => ws.close();
 
-  ws.onmessage = e => {
-    if (e.data instanceof Blob) {
-      // Live preview: blob → 메인 뷰어에 즉시 표시
-      const url = URL.createObjectURL(e.data);
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-      blobUrl = url;
-      preview.src = url;
-      preview.classList.add('show');
-      emptyMsg.style.display = 'none';
-      pendingMeta = null;
-      setGen(false);
-      // Stats update — init_complete 이후의 blob만 카운트 (초기 시딩 제외)
-      if (_initDone) {
-        sessionGenTotal++;
-        sessionGenTimestamps.push(Date.now());
-        updateGenStats();
-      }
-    } else {
-      try {
-        const m = JSON.parse(e.data);
-        if (m.type === 'image_meta') { pendingMeta = m; updateMeta(m); }
-        else if (m.type === 'status') setGen(m.is_generating);
-        else if (m.type === 'prompt_generated') updatePromptOnly(m);
-        else if (m.type === 'random_failed') onRandomFailed(m);
-        else if (m.type === 'prompt_sync') syncPrompts(m);
-        else if (m.type === 'prompt_tokens') applyPromptTokenPayload(m);
-        else if (m.type === 'options') syncOptions(m);
-        else if (m.type === 'params') updateParams(m);
-        else if (m.type === 'mode') syncMode(m.mode);
-        else if (m.type === 'mode_result') onModeResult(m);
-        else if (m.type === 'api_status') updateApiStatus(m);
-        else if (m.type === 'verify_result') onVerifyResult(m);
-        else if (m.type === 'setup_blocked') onSetupBlocked(m);
-        else if (m.type === 'probe_result') onProbeResult(m);
-        else if (m.type === 'anlas_update') onAnlasUpdate(m);
-        else if (m.type === 'module_state') onModuleState(m);
-        else if (m.type === 'search_state') onSearchState(m);
-        else if (m.type === 'rating_update') onRatingUpdate(m);
-        else if (m.type === 'search_progress') onSearchProgress(m);
-        else if (m.type === 'depth_state') onDepthState(m);
-        else if (m.type === 'tag_search_result') onTagSearchResult(m);
-        else if (m.type === 'tag_lookup_result') onTagLookupResult(m);
-        else if (m.type === 'autocomplete_result') onAutocompleteResult(m);
-        else if (m.type === 'tag_filter_result') onTagFilterResult(m);
-        else if (m.type === 'tag_filter_assigned') onTagFilterAssigned(m);
-        else if (m.type === 'tag_filter_ac_result') onTagFilterAcResult(m);
-        else if (m.type === 'storage_list') onStorageList(m);
-        else if (m.type === 'wildcard_manager') onWildcardManager(m);
-        else if (m.type === 'filter_reset') onFilterReset(m);
-        else if (m.type === 'toast') showToast(m.message, m.level || 'success');
-        else if (m.type === 'load_prompt') onLoadPrompt(m.prompt);
-        else if (m.type === 'viewer_new_image') onViewerNewImage(m);
-        else if (m.type === 'session') onSession(m);
-        else if (m.type === 'desktop_window_state') onDesktopWindowState(m);
-        else if (m.type === 'init_complete') {
-          _restoringSession = false;
-          _initDone = true;
-          if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
-          // 재연결 시 열려있는 모듈 자동 리프레시 (캐시 fallback 적용 위해)
-          if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({type: 'get_module_state', module_id: currentModuleId}));
-          }
-          // Result history rail: 저장 이미지가 있으면 썸네일 목록을 즉시 준비합니다.
-          fetch('/api/viewer/list?page=0&per_page=1').then(r => r.json()).then(d => {
-            viewerTotal = d.total;
-            if (viewerCountEl) viewerCountEl.textContent = d.total;
-            if (d.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
-          }).catch(() => {});
-          if (!sharedMode) {
-            if (quickFilter) quickFilter.restorePreferences();
-          }
-        }
-        // Update search count from prompt_generated
-        if (m.type === 'prompt_generated' && 'remaining' in m) {
-          if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
-          const filtered = _computeLocalFilteredCount();
-          updateSearchCount(filtered !== null ? filtered : m.remaining);
-        }
-      } catch(_) {}
-    }
-  };
+  ws.onmessage = createWsMessageDispatcher({
+    BlobClass: Blob,
+    onBlob: handleWsBlob,
+    handlers: wsMessageHandlers,
+    afterJson: afterWsJsonMessage,
+    onError: onWsMessageError,
+  });
 }
 
 // ---- Meta / Prompt display ----
@@ -5441,8 +5464,12 @@ function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
-quickFilterReady.finally(() => {
-  initHistoryRail();
-  initResultInfoResizer();
-  connect();
-});
+Promise.all([quickFilterReady, wsDispatcherReady])
+  .then(() => {
+    initHistoryRail();
+    initResultInfoResizer();
+    connect();
+  })
+  .catch(error => {
+    console.error('Failed to initialize remote shell', error);
+  });

@@ -2503,6 +2503,7 @@ function insertTag(tag) {
 const tagTooltip = $('tagTooltip');
 let lastLookupTag = '';
 let tagLookupTimer = null;
+let tagChipInfoTooltip = null;
 // Autocomplete state
 let acMode = false;
 let acResults = [];
@@ -2568,6 +2569,99 @@ const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toF
 const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4' };
 function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
 
+function extraTagInfoFor(infoMap, tag) {
+  if (!infoMap || !tag) return null;
+  const key = String(tag);
+  return infoMap[key] || infoMap[key.toLowerCase()] || null;
+}
+
+function renderTooltipExtraTag(tag, infoMap, extraClass = '') {
+  const tagText = String(tag || '');
+  const info = extraTagInfoFor(infoMap, tagText);
+  const desc = info?.desc || '';
+  const groupText = info ? [info.group, info.subgroup].filter(Boolean).join(' / ') : '';
+  const countValue = Number(info?.count || 0);
+  const countText = countValue > 0 ? fmtCount(countValue) : '';
+  const classes = ['tag-tooltip-extra-tag'];
+  if (extraClass) classes.push(extraClass);
+  if (desc) classes.push('has-hover-info');
+  const attrs = [
+    `class="${classes.join(' ')}"`,
+    `data-insert="${escHtml(tagText)}"`,
+  ];
+  if (desc) {
+    attrs.push(`data-tooltip-title="${escHtml(info.tag || tagText)}"`);
+    attrs.push(`data-tooltip-desc="${escHtml(desc)}"`);
+    if (groupText) attrs.push(`data-tooltip-group="${escHtml(groupText)}"`);
+    if (countText) attrs.push(`data-tooltip-count="${escHtml(countText)}"`);
+    if (info.cat) attrs.push(`data-tooltip-cat="${escHtml(info.cat)}"`);
+  }
+  return `<span ${attrs.join(' ')}>${escHtml(tagText)}</span>`;
+}
+
+function ensureTagChipInfoTooltip() {
+  if (!tagChipInfoTooltip) {
+    tagChipInfoTooltip = document.createElement('div');
+    tagChipInfoTooltip.className = 'tag-chip-info-tooltip';
+    document.body.appendChild(tagChipInfoTooltip);
+  }
+  return tagChipInfoTooltip;
+}
+
+function hideTagChipInfoTooltip() {
+  if (tagChipInfoTooltip) tagChipInfoTooltip.classList.remove('open');
+}
+
+function positionTagChipInfoTooltip(anchor) {
+  if (!tagChipInfoTooltip || !tagChipInfoTooltip.classList.contains('open')) return;
+  const rect = anchor.getBoundingClientRect();
+  const viewport = window.visualViewport || {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetLeft: 0,
+    offsetTop: 0,
+  };
+  const margin = 8;
+  const gap = 7;
+  const maxWidth = Math.max(180, Math.min(280, viewport.width - margin * 2));
+  tagChipInfoTooltip.style.maxWidth = `${Math.round(maxWidth)}px`;
+  const tipRect = tagChipInfoTooltip.getBoundingClientRect();
+  const minLeft = viewport.offsetLeft + margin;
+  const maxLeft = viewport.offsetLeft + viewport.width - tipRect.width - margin;
+  let left = Math.max(minLeft, Math.min(rect.left, maxLeft));
+  let top = rect.bottom + gap;
+  const bottomLimit = viewport.offsetTop + viewport.height - margin;
+  if (top + tipRect.height > bottomLimit) top = rect.top - tipRect.height - gap;
+  top = Math.max(viewport.offsetTop + margin, top);
+  tagChipInfoTooltip.style.left = `${Math.round(left)}px`;
+  tagChipInfoTooltip.style.top = `${Math.round(top)}px`;
+}
+
+function showTagChipInfoTooltip(anchor) {
+  const desc = anchor.dataset.tooltipDesc || '';
+  if (!desc) {
+    hideTagChipInfoTooltip();
+    return;
+  }
+  const title = anchor.dataset.tooltipTitle || anchor.dataset.insert || '';
+  const meta = [anchor.dataset.tooltipCount, anchor.dataset.tooltipGroup].filter(Boolean).join(' · ');
+  const tooltip = ensureTagChipInfoTooltip();
+  tooltip.innerHTML =
+    `<div class="tag-chip-info-title">${escHtml(title)}</div>` +
+    (meta ? `<div class="tag-chip-info-meta">${escHtml(meta)}</div>` : '') +
+    `<div class="tag-chip-info-desc">${escHtml(desc)}</div>`;
+  tooltip.classList.add('open');
+  positionTagChipInfoTooltip(anchor);
+}
+
+function bindTagChipInfoHover(root) {
+  root.querySelectorAll('.tag-tooltip-extra-tag[data-tooltip-desc]').forEach(el => {
+    el.addEventListener('mouseenter', () => showTagChipInfoTooltip(el));
+    el.addEventListener('mousemove', () => positionTagChipInfoTooltip(el));
+    el.addEventListener('mouseleave', hideTagChipInfoTooltip);
+  });
+}
+
 // Extract active token info at cursor (comma-delimited, NAI weight/bracket aware)
 function getActiveTokenInfo(textarea) {
   const text = textarea.value;
@@ -2603,7 +2697,8 @@ function checkTagHint() {
   const tag = getTagAtCursor(target);
   if (tag === lastLookupTag) return;
   lastLookupTag = tag;
-  if (!tag) { tagTooltip.classList.remove('open', 'ac-mode'); return; }
+  if (!tag) { hideTagChipInfoTooltip(); tagTooltip.classList.remove('open', 'ac-mode'); return; }
+  hideTagChipInfoTooltip();
   tagTooltip.classList.remove('open', 'ac-mode');
   clearTimeout(tagLookupTimer);
   tagLookupTimer = setTimeout(() => {
@@ -2614,9 +2709,11 @@ function checkTagHint() {
 
 function onTagLookupResult(m) {
   if (acMode) return;
+  hideTagChipInfoTooltip();
   if (!m.tag) { tagTooltip.classList.remove('open', 'ac-mode'); return; }
   if (m.tag.toLowerCase() !== lastLookupTag.toLowerCase()) return;
   const groupText = [m.group, m.subgroup].filter(Boolean).join(' / ');
+  const extraTagInfo = m.extra_tag_info || {};
   let html = '<div class="tag-tooltip-main">' +
     `<span class="tag-tooltip-tag"${catStyle(m.cat)}>${escHtml(m.tag)}</span>` +
     `<span class="tag-tooltip-count">${fmtCount(m.count||0)}</span>` +
@@ -2625,11 +2722,11 @@ function onTagLookupResult(m) {
     '</div>';
   if (m.implications && m.implications.length) {
     html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">implies</span>' +
-      m.implications.map(t => `<span class="tag-tooltip-extra-tag" data-insert="${escHtml(t)}">${escHtml(t)}</span>`).join('') + '</div>';
+      m.implications.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
   }
   if (m.related && m.related.length) {
     html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">related</span>' +
-      m.related.map(t => `<span class="tag-tooltip-extra-tag" data-insert="${escHtml(t)}">${escHtml(t)}</span>`).join('') + '</div>';
+      m.related.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
   }
   // 캐릭터 상세 정보 (character_analysis)
   const cd = m.character_details;
@@ -2660,10 +2757,12 @@ function onTagLookupResult(m) {
   tagTooltip.classList.add('open');
   _syncTooltipSide();
   positionTagTooltip();
+  bindTagChipInfoHover(tagTooltip);
   // Click on related/implies/character tag → insert next to current token
   tagTooltip.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
     el.addEventListener('mousedown', e => {
       e.preventDefault();
+      hideTagChipInfoTooltip();
       const target = acTarget || promptEdit;
       const tag = el.dataset.insert;
       const info = getActiveTokenInfo(target);
@@ -2746,6 +2845,7 @@ function onAutocompleteResult(m) {
 }
 
 function renderAutocomplete() {
+  hideTagChipInfoTooltip();
   let html = '<div class="tag-ac-list">';
   acResults.forEach((r, i) => {
     const sel = i === acSel ? ' selected' : '';
@@ -2842,6 +2942,7 @@ function hideAutocomplete() {
   acSel = -1;
   lastAcQuery = '';
   clearTimeout(acTimer);
+  hideTagChipInfoTooltip();
   tagTooltip.classList.remove('open', 'ac-mode');
 }
 
@@ -2877,6 +2978,7 @@ function bindTagAssist(textarea, options = {}) {
     setTimeout(() => {
       if (document.activeElement !== textarea) {
         hideAutocomplete();
+        hideTagChipInfoTooltip();
         tagTooltip.classList.remove('open', 'ac-mode');
       }
     }, 200);

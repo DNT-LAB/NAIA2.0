@@ -3520,6 +3520,24 @@ class RemoteBridge(QObject):
                     related.append(t)
         if related:
             result['related'] = related[:8]
+        extra_tags = list(result.get('implications', [])) + list(result.get('related', []))
+        if extra_tags:
+            extra_tag_info = {}
+            for extra_tag in extra_tags:
+                extra_key = str(extra_tag).strip().lower()
+                extra_info = self._kr_tags_raw.get(extra_key)
+                if not extra_info:
+                    continue
+                extra_tag_info[str(extra_tag)] = {
+                    "tag": extra_info.get('_tag', str(extra_tag)),
+                    "count": extra_info.get('freq', 0),
+                    "desc": extra_info.get('description', ''),
+                    "group": extra_info.get('group', ''),
+                    "subgroup": extra_info.get('subgroup', ''),
+                    "cat": extra_info.get('_cat', ''),
+                }
+            if extra_tag_info:
+                result['extra_tag_info'] = extra_tag_info
         # 캐릭터 태그 → character_analysis 상세 정보 추가
         if result.get('cat') == 'character' and self._char_analysis:
             match = self._char_analysis.get(tag_lower)

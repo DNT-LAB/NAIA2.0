@@ -217,10 +217,10 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 ## 히스토리 시스템
 
-- 서버: `_image_history` 200장 버퍼 (`threading.Lock` 보호), JSZip zip 다운로드
-- 패널: 뷰어 오른쪽 inline, `◀ Action ▶` 네비게이션 (Load Prompt / Reroll)
-- 각 항목에 `gen_params`, `source_row`, `prompt_context` 저장 (json round-trip 안전화)
-- Shared Mode: Delete 비활성
+- Remote WebSocket: 현재 생성 이미지와 메타데이터 broadcast만 담당
+- 데스크톱 히스토리/액션: `tabs/image_window.py`의 `HistoryItem` + `ImageHistoryWindow` 모델을 기준으로 구현
+- Load Prompt / Reroll / Queue 계열 액션은 Remote 전용 WebSocket 명령이 아니라 데스크톱 모델 어댑터가 필요
+- Shared Mode: 호스트 전역 히스토리 변경 액션은 차단
 
 ## 단축키
 
@@ -313,11 +313,9 @@ Settings > Web Session > "Shared Server Mode" 체크 시 활성화. 비영속 (�
 
 ## 히스토리 액션
 
-`◀ Action ▶` 메뉴: Load Prompt / Reroll / (Enqueue 숨김)
-
-- **Load Prompt**: `prompt_context.main_prompt` → 클라이언트 프롬프트 갱신 (broadcast)
-- **Reroll**: `source_row` → `on_instant_generation_requested()` (세션 오버라이드 주입)
-- **`_image_history`**: `threading.Lock` 보호 (`_history_lock`)
+- WebSocket에는 Remote 전용 히스토리 액션 명령을 두지 않는다.
+- Load Prompt / Reroll / Queue Front·Back / Restore Params는 데스크톱 `ImageWindow`의 `HistoryItem` 기반 액션을 기준으로 확장한다.
+- Remote에서 같은 기능을 노출해야 할 경우 서버 임시 버퍼를 만들지 말고 데스크톱 히스토리 모델을 읽는 어댑터를 추가한다.
 
 ## 생성 Progress Bar
 

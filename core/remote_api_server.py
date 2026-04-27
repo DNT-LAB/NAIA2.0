@@ -135,10 +135,10 @@ class RemoteBridge(QObject):
     request_depth_action = pyqtSignal(str)          # depth search action JSON
     request_restore_snapshot = pyqtSignal()          # 메인 검색 결과 스냅샷 복원
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
-    request_history_action = pyqtSignal(object, str)   # (ws, action_json)
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
+    request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
@@ -152,10 +152,6 @@ class RemoteBridge(QObject):
         super().__init__()
         self.app_context = app_context
         self.latest_webp: Optional[bytes] = None
-        self.latest_metadata: Optional[dict] = None
-        self._image_history: list = []  # [{webp, metadata, gen_params, source_row, prompt_context}, ...] 최대 5장 (초기 시딩용)
-        self._history_next_id: int = 1
-        self._history_lock = threading.Lock()  # _image_history 동시 접근 보호
         self._ws_manager: Optional[WebSocketManager] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._syncing_option = False
@@ -198,6 +194,7 @@ class RemoteBridge(QObject):
         self._anlas_timer: Optional[QTimer] = None
         self._anlas_fetch_in_flight: bool = False
         self._anlas_refresh_interval_ms: int = 5 * 60 * 1000  # 5분
+        self._remote_enhance_in_flight: bool = False
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -625,6 +622,72 @@ class RemoteBridge(QObject):
             if ws is not None:
                 self._pending_overrides.pop(ws, None)
             print(f"🌐 Remote: 생성 트리거 실패 — {e}")
+
+    def _send_result_enhance_error(self, ws, message: str):
+        payload = {
+            "type": "result_enhance_state",
+            "running": False,
+            "success": False,
+            "message": message,
+        }
+        toast = {"type": "toast", "message": message, "level": "error"}
+        if ws is not None:
+            self._send_json_to(ws, payload)
+            self._send_json_to(ws, toast)
+        else:
+            self._broadcast_json(payload)
+            self._broadcast_json(toast)
+
+    def _do_result_enhance(self, ws=None):
+        """현재 데스크탑 ImageWindow 히스토리 항목에 NAI Enhance를 실행."""
+        try:
+            if self._remote_enhance_in_flight:
+                self._send_result_enhance_error(ws, "Enhance is already running")
+                return
+
+            image_window = self._get_image_window_widget()
+            if not image_window:
+                self._send_result_enhance_error(ws, "ImageWindow is not ready")
+                return
+
+            item = getattr(image_window, "current_history_item", None)
+            if not item or not getattr(item, "image", None):
+                self._send_result_enhance_error(ws, "No image is selected")
+                return
+
+            current_mode = ""
+            if hasattr(self.app_context, "get_api_mode"):
+                current_mode = self.app_context.get_api_mode()
+            else:
+                current_mode = getattr(self.app_context, "current_api_mode", "")
+            if current_mode != "NAI":
+                self._send_result_enhance_error(ws, "Enhance is available in NAI mode only")
+                return
+
+            if not getattr(item, "generation_params", None):
+                self._send_result_enhance_error(ws, "Generation parameters are unavailable")
+                return
+
+            if getattr(image_window, "_enhance_upscale", None) == 1.0:
+                gen_ctrl = getattr(self.app_context, "generation_controller", None)
+                if gen_ctrl and getattr(gen_ctrl, "is_generating", False):
+                    self._send_result_enhance_error(ws, "Enhance is unavailable while generation is running")
+                    return
+
+            execute_enhance = getattr(image_window, "_execute_enhance", None)
+            if not callable(execute_enhance):
+                self._send_result_enhance_error(ws, "Enhance action is not available")
+                return
+
+            self._remote_enhance_in_flight = True
+            self._broadcast_json({"type": "result_enhance_state", "running": True})
+            execute_enhance()
+            print("🌐 Remote: Enhance 트리거됨")
+        except Exception as e:
+            self._remote_enhance_in_flight = False
+            message = f"Enhance request failed: {e}"
+            self._send_result_enhance_error(ws, message)
+            print(f"🌐 Remote: Enhance 트리거 실패 — {e}")
 
     def _do_random(self):
         """Random 요청 처리. deque에서 준비된 데이터를 pop하여 실행."""
@@ -4362,12 +4425,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         return FileResponse(str(target), media_type=media)
 
     @app.get("/api/viewer/meta/{path:path}")
-    async def viewer_meta(path: str):
+    async def viewer_meta(path: str, full: bool = False):
         target = bridge._validate_viewer_path(path)
         if not target:
             return JSONResponse({"error": "not found"}, 404)
 
-        def _extract(img_path):
+        def _extract(img_path, include_full=False):
             import json as _json
             from PIL import Image as _Image
 
@@ -4390,7 +4453,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                     pass
 
             if not meta:
-                return {}
+                return {"summary": {}, "raw": {}} if include_full else {}
 
             result = {}
             if 'prompt' in meta:
@@ -4423,9 +4486,15 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 for k in ('steps', 'scale', 'seed', 'sampler', 'width', 'height'):
                     if k in meta['parameters'] and k not in result:
                         result[k] = meta['parameters'][k]
+            if include_full:
+                try:
+                    raw_meta = _json.loads(_json.dumps(meta, default=str, ensure_ascii=False))
+                except Exception:
+                    raw_meta = str(meta)
+                return {"summary": result, "raw": raw_meta}
             return result
 
-        data = await asyncio.to_thread(_extract, target)
+        data = await asyncio.to_thread(_extract, target, full)
         return data
 
     @app.websocket("/ws")
@@ -4439,50 +4508,16 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 "shared_server_mode": bridge.shared_server_mode,
             }))
             await ws.send_text(json.dumps(bridge.get_desktop_window_state(ws)))
-            # 클라이언트 초기 메시지 수신 (onopen에서 get_search_state + client_state 전송)
-            # 히스토리 전송 전에 client_state를 받아 보유 수 확인
-            _client_history_count = 0
-            _pending_init_cmds = []  # client_state 외 초기 메시지 임시 보관
-            _HISTORY_INIT_MAX = 5
+            # 클라이언트 초기 메시지를 잠시 보관한 뒤 초기화 패킷 전송 후 재처리한다.
+            _pending_init_cmds = []
             try:
-                # 최대 2개 초기 메시지 소비 (get_search_state, client_state)
-                for _ in range(2):
-                    init_data = await asyncio.wait_for(ws.receive_text(), timeout=3.0)
-                    if init_data.startswith("{"):
-                        init_cmd = json.loads(init_data)
-                        if init_cmd.get("type") == "client_state":
-                            _client_history_count = int(init_cmd.get("history_count", 0))
-                        else:
-                            _pending_init_cmds.append(init_cmd)
-            except (asyncio.TimeoutError, Exception):
-                pass  # 타임아웃 또는 오류 → 기본값 0으로 진행
-
-            # 히스토리 전송 (_send_lock으로 broadcast 인터리빙 방지)
-            with bridge._history_lock:
-                total = len(bridge._image_history)
-                if _client_history_count < total:
-                    skip = max(_client_history_count, total - _HISTORY_INIT_MAX)
-                    send_entries = list(bridge._image_history[skip:])
+                init_data = await asyncio.wait_for(ws.receive_text(), timeout=3.0)
+                if init_data.startswith("{"):
+                    _pending_init_cmds.append(json.loads(init_data))
                 else:
-                    send_entries = []
-            if send_entries:
-                async with ws_manager._send_lock:
-                    for entry in send_entries:
-                        hist_meta = entry["metadata"]
-                        has_gen = bool(entry.get("gen_params"))
-                        has_src = entry.get("source_row") is not None
-                        main_prompt = ""
-                        pc = entry.get("prompt_context")
-                        if pc and isinstance(pc, dict):
-                            main_prompt = pc.get("main_prompt", "")
-                        await ws.send_text(json.dumps({
-                            "type": "image_meta", **hist_meta,
-                            "history_id": entry.get("history_id"),
-                            "has_gen_params": has_gen,
-                            "has_source_row": has_src,
-                            "main_prompt": main_prompt,
-                        }))
-                        await ws.send_bytes(entry["webp"])
+                    _pending_init_cmds.append(init_data)
+            except (asyncio.TimeoutError, Exception):
+                pass
 
             current_mode = bridge.app_context.get_api_mode()
             await ws.send_text(json.dumps({"type": "mode", "mode": current_mode}))
@@ -4509,14 +4544,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             bridge.request_get_module.emit(None, "vibe_transfer")
 
             # 보류된 초기 메시지를 메인 루프에 재주입
-            # (get_search_state, restore_session 등 초기화 단계에서 소비된 비-client_state 메시지)
+            # (get_search_state, restore_session 등 초기화 단계에서 소비된 메시지)
             _replay_queue = list(_pending_init_cmds)
 
             while True:
                 # 보류된 초기 메시지가 있으면 먼저 처리
                 if _replay_queue:
                     cmd = _replay_queue.pop(0)
-                    data = json.dumps(cmd)  # 아래 분기 재사용을 위해
+                    data = json.dumps(cmd) if isinstance(cmd, dict) else str(cmd)  # 아래 분기 재사용
                 else:
                     data = await ws.receive_text()
                 if data == "generate":

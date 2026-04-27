@@ -129,16 +129,35 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
       resultInfoContent,
       escHtml,
       showToast,
+      onDiskImageSelected: () => {
+        if (resultEnhance) resultEnhance.clearCurrentMeta();
+      },
     });
   })
   .catch(error => {
     console.error('Failed to initialize result history module', error);
+  });
+const resultEnhanceReady = import('./js/features/resultEnhance.mjs')
+  .then(({createResultEnhanceController}) => {
+    resultEnhance = createResultEnhanceController({
+      document,
+      WebSocket,
+      getWs: () => ws,
+      getMode: () => currentMode,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize result enhance module', error);
   });
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
       window,
+      fetch,
+      showToast,
+      escHtml,
     });
     resultContextMenu.bind();
   })
@@ -517,9 +536,6 @@ let _sharedParamsInit = false;  // Shared Mode: 초기 params 수신 완료 여�
 let _sharedOptionsInit = false;  // Shared Mode: 초기 options 수신 완료 여부
 let _restoreSessionTimeout = null;  // init_complete 미수신 시 안전망 타이머
 
-// ---- Result history rail ----
-let pendingMeta = null; // meta arrives before blob
-
 const $ = id => document.getElementById(id);
 const preview      = $('preview');
 const emptyMsg     = $('emptyMsg');
@@ -570,9 +586,8 @@ function handleWsBlob(data) {
   preview.src = url;
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
-  pendingMeta = null;
   setGen(false);
-  // Stats update — init_complete 이후의 blob만 카운트 (초기 시딩 제외)
+  // Stats update — init_complete 이후의 blob만 카운트
   if (_initDone) {
     if (sessionGenerationStats) sessionGenerationStats.record();
   }
@@ -604,7 +619,7 @@ function onWsMessageError(error) {
 }
 
 const wsMessageHandlers = {
-  image_meta: m => { pendingMeta = m; updateMeta(m); },
+  image_meta: updateMeta,
   status: m => setGen(m.is_generating),
   prompt_generated: updatePromptOnly,
   random_failed: onRandomFailed,

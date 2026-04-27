@@ -25,7 +25,6 @@ let quickFilter = null;
 let rightTabs = null;
 let resultInfoResizer = null;
 let resultHistory = null;
-let resultActions = null;
 let promptHighlighter = null;
 let moduleBadges = null;
 let cloudflaredControls = null;
@@ -133,19 +132,6 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize result history module', error);
-  });
-const resultActionsReady = import('./js/features/resultActions.mjs')
-  .then(({createResultActionsController}) => {
-    resultActions = createResultActionsController({
-      document,
-      getWs: () => ws,
-      WebSocket,
-      showToast,
-    });
-    resultActions.bind();
-  })
-  .catch(error => {
-    console.error('Failed to initialize result actions module', error);
   });
 const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
   .then(({createPromptHighlighter}) => {
@@ -606,7 +592,7 @@ function onWsMessageError(error) {
 }
 
 const wsMessageHandlers = {
-  image_meta: m => { pendingMeta = m; updateMeta(m); if (resultActions) resultActions.setCurrentMeta(m); },
+  image_meta: m => { pendingMeta = m; updateMeta(m); },
   status: m => setGen(m.is_generating),
   prompt_generated: updatePromptOnly,
   random_failed: onRandomFailed,
@@ -1075,7 +1061,6 @@ function navViewer(direction) { if (resultHistory) resultHistory.navViewer(direc
 function hideViewerNav() { if (resultHistory) resultHistory.hideNav(); }
 function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupPrompt(checked); }
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
-function toggleResultActions() { if (resultActions) resultActions.toggle(); }
 // ---- Stats functions ----
 
 function toggleAutoSave() {
@@ -2929,7 +2914,6 @@ Promise.all([
   customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,
-  resultActionsReady,
   promptHighlighterReady,
   tokenDisplayReady,
   moduleBadgesReady,

@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import QFileDialog
 from core import api_verification
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
-from core.tag_search_index import TagSearchIndex
+from core.tag_search_index import TagSearchIndex, normalize_search_query
 
 
 # ---------------------------------------------------------------------------
@@ -4614,11 +4614,11 @@ class RemoteBridge(QObject):
     def _search_kr_tags(self, query: str, limit: int = 20) -> list:
         """5단계 우선순위 태그 검색: exact → starts_with → kr_keyword → contains → desc
         prefix 라우팅: 'artist:x' → artist만, 'character:x' → character만"""
+        query = normalize_search_query(query)
+        if not query:
+            return []
         self._load_kr_tags()
         if not self._kr_tags_raw:
-            return []
-        query = query.strip()
-        if not query:
             return []
         # prefix 라우팅 (@artist → artist: 변환 포함)
         cat_filter = None

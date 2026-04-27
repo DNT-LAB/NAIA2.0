@@ -3236,7 +3236,9 @@ function getActiveTokenInfo(textarea) {
   const raw = text.substring(start, rawEnd);
   if (!raw || raw.startsWith('#')) return null;
   let stripped = stripAutocompleteTokenDecorators(raw);
-  stripped = stripped.replace(/^\d+(?:\.\d+)?::/, '');
+  while (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/.test(stripped)) {
+    stripped = stripped.replace(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/, '');
+  }
   stripped = stripped.replace(/\s*::$/, '');
   stripped = stripped.trim();
   if (!stripped) return null;

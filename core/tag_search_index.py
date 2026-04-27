@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import dataclass
@@ -13,6 +14,9 @@ from core.tag_axis_registry import TagAxisRegistry, normalize_tag
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KR_TAGS_PATH = PROJECT_ROOT / "data" / "KR_tags.parquet"
+_WEIGHT_PREFIX_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*")
+_WEIGHT_ONLY_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?::+)?$")
+_TRAILING_WEIGHT_MARK_RE = re.compile(r"\s*::$")
 
 
 def _norm(value: Any) -> str:
@@ -29,6 +33,26 @@ def _norm(value: Any) -> str:
 def _split_keywords(value: Any) -> list[str]:
     text = str(value or "").replace("<", "").replace(">", "")
     return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def normalize_search_query(value: Any) -> str:
+    """Normalize user tag search text and discard prompt weight fragments."""
+    query = _norm(value)
+    if not query:
+        return ""
+
+    while True:
+        stripped = _WEIGHT_PREFIX_RE.sub("", query, count=1).strip()
+        if stripped == query:
+            break
+        query = stripped
+
+    query = _TRAILING_WEIGHT_MARK_RE.sub("", query).strip()
+    if not query or _WEIGHT_ONLY_RE.fullmatch(query):
+        return ""
+    if not any(ch.isalnum() for ch in query):
+        return ""
+    return query
 
 
 @dataclass(frozen=True)
@@ -427,7 +451,7 @@ class TagSearchIndex:
         cats: set[str] | None,
         force_term_scan: bool,
     ) -> list[TagSearchResult]:
-        q = _norm(query)
+        q = normalize_search_query(query)
         if not q:
             return []
         q_tokens = [tok for tok in q.split() if tok]

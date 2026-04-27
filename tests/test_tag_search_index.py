@@ -1,6 +1,6 @@
 import pandas as pd
 
-from core.tag_search_index import TagSearchEntry, TagSearchIndex
+from core.tag_search_index import TagSearchEntry, TagSearchIndex, normalize_search_query
 
 
 def test_tag_search_index_matches_korean_event_keywords(tmp_path):
@@ -152,6 +152,36 @@ def test_tag_search_index_uses_candidate_index_for_keyword_queries(monkeypatch):
 
     assert index.search_tags("줄무늬")[:1] == ["striped shirt"]
     assert calls < 20
+
+
+def test_tag_search_index_ignores_prompt_weight_fragments(monkeypatch):
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(tag="monochrome", freq=100),
+            TagSearchEntry(tag="artist collaboration", freq=50),
+        ]
+    )
+
+    calls = 0
+    original_score = TagSearchIndex._score
+
+    def counting_score(*args):
+        nonlocal calls
+        calls += 1
+        return original_score(*args)
+
+    monkeypatch.setattr(TagSearchIndex, "_score", staticmethod(counting_score))
+
+    assert normalize_search_query("0.4") == ""
+    assert normalize_search_query("0.4::") == ""
+    assert normalize_search_query("-1.5::") == ""
+    assert normalize_search_query(".4::") == ""
+    assert normalize_search_query("-0.45:: monochrome") == "monochrome"
+    assert index.search_tags("0.4") == []
+    assert index.search_tags("0.4::") == []
+    assert index.search_tags("-1.5::") == []
+    assert index.search_tags("-0.45:: monochrome") == ["monochrome"]
+    assert calls == 1
 
 
 def test_tag_search_entrypoints_split_fast_and_semantic_recall():

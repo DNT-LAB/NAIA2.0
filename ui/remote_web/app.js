@@ -7,9 +7,6 @@ const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 let reconnTimer = null, genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
 
-// ---- Session generation stats ----
-let sessionGenTotal = 0;
-const sessionGenTimestamps = [];
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
@@ -36,6 +33,7 @@ let desktopWindowControl = null;
 let promptDrawerControl = null;
 let autoSavePanel = null;
 let saveDirectoryPanel = null;
+let sessionGenerationStats = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -211,6 +209,15 @@ const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize save directory panel module', error);
   });
+const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats.mjs')
+  .then(({createSessionGenerationStats}) => {
+    sessionGenerationStats = createSessionGenerationStats({
+      statsGenCount,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize session generation stats module', error);
+  });
 
 function saveSharedSession() {
   if (!sharedMode) return;
@@ -324,9 +331,7 @@ function handleWsBlob(data) {
   setGen(false);
   // Stats update — init_complete 이후의 blob만 카운트 (초기 시딩 제외)
   if (_initDone) {
-    sessionGenTotal++;
-    sessionGenTimestamps.push(Date.now());
-    updateGenStats();
+    if (sessionGenerationStats) sessionGenerationStats.record();
   }
 }
 
@@ -936,25 +941,7 @@ function _updateSaveUI() {
 }
 
 function updateGenStats() {
-  // Count + Rate를 하나의 pill에 표시: "5 (1.2/m)"
-  if (!statsGenCount) return;
-  const now = Date.now();
-  // Prune old timestamps
-  while (sessionGenTimestamps.length > 0 && sessionGenTimestamps[0] < now - 3600000) {
-    sessionGenTimestamps.shift();
-  }
-  // Rate 계산 (최근 10분)
-  const tenMinAgo = now - 600000;
-  const recent = sessionGenTimestamps.filter(t => t > tenMinAgo);
-  let rateStr = '';
-  if (recent.length >= 2) {
-    const windowMs = now - recent[0];
-    // 최소 60초 윈도우에서만 rate 표시 (짧은 구간 왜곡 방지)
-    if (windowMs >= 60000) {
-      rateStr = ' (' + (recent.length / (windowMs / 60000)).toFixed(1) + '/m)';
-    }
-  }
-  statsGenCount.textContent = sessionGenTotal + rateStr;
+  if (sessionGenerationStats) sessionGenerationStats.update();
 }
 
 function onLoadPrompt(prompt) {
@@ -4495,6 +4482,7 @@ Promise.all([
   promptDrawerReady,
   autoSavePanelReady,
   saveDirectoryPanelReady,
+  sessionGenerationStatsReady,
 ])
   .then(() => {
     initHistoryRail();

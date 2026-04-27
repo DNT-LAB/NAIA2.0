@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "description": "Manual Korean metadata overrides for high-impact tags missing from KR_tags.parquet. Interactive remains the relation source; these records only patch user-facing descriptions and search keywords.",
+  "translations": {
+    "striped": {
+      "description": "줄무늬 패턴. 너무 넓은 태그이므로 가능하면 striped shirt, striped clothes, striped background처럼 더 구체적인 태그를 함께 사용하는 것이 좋음.",
+      "keywords_kr": "<무늬>, 줄무늬, 스트라이프",
+      "source": "manual:2026-04-28"
+    },
+    "vertical stripes": {
+      "description": "세로 방향으로 이어지는 줄무늬.",
+      "keywords_kr": "<무늬>, 세로 줄무늬, 세로 스트라이프",
+      "source": "manual:2026-04-28"
+    },
+    "diagonal stripes": {
+      "description": "대각선 방향으로 이어지는 줄무늬.",
+      "keywords_kr": "<무늬>, 대각선 줄무늬, 사선 줄무늬",
+      "source": "manual:2026-04-28"
+    },
+    "horizontal stripes": {
+      "description": "가로 방향으로 이어지는 줄무늬.",
+      "keywords_kr": "<무늬>, 가로 줄무늬, 가로 스트라이프",
+      "source": "manual:2026-04-28"
+    },
+    "multicolored clothes": {
+      "description": "두 가지 이상의 색이 뚜렷하게 들어간 의상.",
+      "keywords_kr": "<의상색>, 다색 의상, 여러 색 옷, 멀티컬러 의상",
+      "source": "manual:2026-04-28"
+    },
+    "black footwear": {
+      "description": "검은색 신발류.",
+      "keywords_kr": "<신발>, 검은 신발, 검정 신발",
+      "source": "manual:2026-04-28"
+    },
+    "white headwear": {
+      "description": "흰색 모자나 머리 장식.",
+      "keywords_kr": "<머리장식>, 흰 모자, 흰 머리장식",
+      "source": "manual:2026-04-28"
+    },
+    "red headwear": {
+      "description": "붉은색 모자나 머리 장식.",
+      "keywords_kr": "<머리장식>, 빨간 모자, 붉은 머리장식",
+      "source": "manual:2026-04-28"
+    },
+    "topless": {
+      "description": "상의 없이 상반신이 드러난 상태. 하의는 착용했을 수 있음.",
+      "keywords_kr": "<노출>, 상의 없음, 상반신 노출, 탑리스",
+      "source": "manual:2026-04-28"
+    },
+    "eyebrows": {
+      "description": "눈썹. 특이한 모양이나 상태가 아니라면 보통 더 구체적인 눈썹 태그가 권장됨.",
+      "keywords_kr": "<눈썹>, 눈썹",
+      "source": "manual:2026-04-28"
+    }
+  }
+}

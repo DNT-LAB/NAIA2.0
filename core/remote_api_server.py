@@ -26,6 +26,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QFileDialog
 
 from core import api_verification
+from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.tag_search_index import TagSearchIndex
 
@@ -3333,48 +3334,10 @@ class RemoteBridge(QObject):
                     ('data/KR_tags.parquet', 1),
                     ('data/e621_KR_tags.parquet', 2),
                 ]
-                pq_count = 0
-                pq_backfill_count = 0
-                for pq_path, src_key in pq_sources:
-                    if not os.path.exists(pq_path):
-                        continue
-                    try:
-                        import pandas as pd
-                        df = pd.read_parquet(pq_path, columns=['tag', 'count', 'category', 'desc', 'keywords'])
-                        for _, row in df.iterrows():
-                            tag_raw = _norm(str(row['tag']).replace('_', ' '))
-                            tag_lower = tag_raw.lower()
-                            kw_str = str(row.get('keywords', '') or '')
-                            desc_str = str(row.get('desc', '') or '')
-                            if tag_lower in raw:
-                                existing = raw[tag_lower]
-                                updated = False
-                                if not str(existing.get('description') or '').strip() and desc_str.strip():
-                                    existing['description'] = desc_str
-                                    existing['_desc_lower'] = desc_str.lower()
-                                    updated = True
-                                if not str(existing.get('keywords_kr') or '').strip() and kw_str.strip():
-                                    existing['keywords_kr'] = kw_str
-                                    existing['_kw_lower'] = kw_str.replace('<', '').replace('>', '').lower()
-                                    updated = True
-                                if updated:
-                                    pq_backfill_count += 1
-                                continue
-                            entry = {
-                                '_tag': tag_raw, '_src': src_key,
-                                'freq': int(row.get('count', 0)),
-                                'description': desc_str,
-                                'group': str(row.get('category', '') or ''),
-                                'subgroup': '', 'keywords_kr': kw_str,
-                                '_kw_lower': kw_str.replace('<', '').replace('>', '').lower() if kw_str else '',
-                                '_desc_lower': desc_str.lower(),
-                            }
-                            if src_key == 2:
-                                entry['_cat'] = 'e621'
-                            raw[tag_lower] = entry
-                            pq_count += 1
-                    except Exception as e:
-                        print(f"🌐 Remote: fallback {pq_path} 로드 실패 — {e}")
+                pq_stats = merge_parquet_tag_records(raw, pq_sources)
+                override_stats = apply_translation_overrides(raw, 'data/tag_index/tag_translation_overrides.json')
+                for err in pq_stats.errors + override_stats.errors:
+                    print(f"🌐 Remote: tag metadata merge warning — {err}")
                 # --- Source 3-10: prompt engineering filter lists (그룹 소속만) ---
                 filter_sources = [
                     ('data/characteristic_list.txt', 3, '특징'),
@@ -3467,7 +3430,14 @@ class RemoteBridge(QObject):
                     self._tag_search_index = None
                     self._tag_relation_ranker = None
                     print(f"🌐 Remote: shared tag index build failed — {e}")
-                print(f"🌐 Remote: tag index — {src0} interactive + {pq_count} parquet + {pq_backfill_count} backfill + {filter_count} filter + {dict_count} dict = {len(raw)} total")
+                print(
+                    "🌐 Remote: tag index — "
+                    f"{src0} interactive + {pq_stats.added} parquet "
+                    f"+ {pq_stats.records_updated} KR merges "
+                    f"(desc fill {pq_stats.description_filled}, desc replace {pq_stats.description_replaced}, "
+                    f"kw fill {pq_stats.keywords_filled}, kw replace {pq_stats.keywords_replaced}) "
+                    f"+ {override_stats.applied} overrides + {filter_count} filter + {dict_count} dict = {len(raw)} total"
+                )
                 self._kr_tags_loaded = True
             except Exception as e:
                 self._kr_tags_loaded = True

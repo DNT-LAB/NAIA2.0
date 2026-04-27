@@ -35,6 +35,7 @@ let autoSavePanel = null;
 let saveDirectoryPanel = null;
 let sessionGenerationStats = null;
 let automationPanel = null;
+let characterPanel = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -228,6 +229,19 @@ const automationPanelReady = import('./js/features/automationPanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
+  });
+const characterPanelReady = import('./js/features/characterPanel.mjs')
+  .then(({createCharacterPanel}) => {
+    characterPanel = createCharacterPanel({
+      document,
+      escHtml,
+      bindTagAssist,
+      flushCharacterEdits,
+      setModuleParam,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize character panel module', error);
   });
 
 function saveSharedSession() {
@@ -2728,18 +2742,15 @@ function flushCharacterEdits() {
 }
 
 function addCharacterSlot() {
-  flushCharacterEdits();
-  setModuleParam('character', 'add_character', 'true');
+  if (characterPanel) characterPanel.addSlot();
 }
 
 function removeCharacterSlot(index) {
-  flushCharacterEdits();
-  setModuleParam('character', `remove_character_${index}`, 'true');
+  if (characterPanel) characterPanel.removeSlot(index);
 }
 
 function refreshCharacterPreview() {
-  flushCharacterEdits();
-  setModuleParam('character', 'preview_refresh', 'true');
+  if (characterPanel) characterPanel.refreshPreview();
 }
 
 // ---- Automation module ----
@@ -2753,51 +2764,7 @@ function renderAutomation(m) {
 
 // ---- Character module ----
 function renderCharacter(m) {
-  const chars = m.characters || [];
-  const charsHtml = chars.map((c, i) => `
-    <div class="mod-char-block" data-char-index="${i}">
-      <div class="mod-char-header">
-        <label class="mod-checkbox-item" style="margin:0">
-          <input type="checkbox" ${c.active ? 'checked' : ''} oninput="setModuleParam('character','char_active_${i}',String(this.checked))">
-          <span class="mod-checkbox-label">C${c.id}</span>
-        </label>
-        <button class="mod-btn-sm mod-btn-danger" ${chars.length > 1 ? '' : 'disabled'} onclick="removeCharacterSlot(${i})">Remove</button>
-      </div>
-      <textarea class="mod-textarea mod-char-prompt" placeholder="character prompt..." oninput="onModTextEdit('character','char_prompt_${i}',this.value)">${escHtml(c.prompt)}</textarea>
-      <textarea class="mod-textarea mod-uc mod-char-uc" placeholder="negative prompt (UC)..." oninput="onModTextEdit('character','char_uc_${i}',this.value)">${escHtml(c.uc)}</textarea>
-    </div>
-  `).join('');
-  const previewText = m.processed_preview_text || '';
-  const previewEmpty = !previewText.trim();
-
-  moduleBody.innerHTML = `
-    <div>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.activated ? 'checked' : ''} oninput="setModuleParam('character','activated',String(this.checked))">
-        <span class="mod-checkbox-label">Enable Character Prompts (NAID4+)</span>
-      </label>
-    </div>
-    <div>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" ${m.reroll_on_generate ? 'checked' : ''} oninput="setModuleParam('character','reroll_on_generate',String(this.checked))">
-        <span class="mod-checkbox-label">Process wildcards on Generate</span>
-      </label>
-    </div>
-    <div class="mod-char-actions">
-      <button class="mod-btn-sm" onclick="addCharacterSlot()">+ Add Character</button>
-      <button class="mod-btn-sm mod-btn-encode" onclick="refreshCharacterPreview()">Refresh Preview</button>
-      <span class="mod-char-meta">${m.active_count || 0} active / ${m.character_count || chars.length} slots</span>
-    </div>
-    ${charsHtml}
-    <div class="mod-char-preview">
-      <div class="mod-section-label">Final Applied Character Prompt</div>
-      ${previewEmpty
-        ? '<div class="mod-empty">No preview yet. Use Refresh Preview to process wildcards and show the applied character prompts.</div>'
-        : `<pre class="mod-char-preview-text">${escHtml(previewText)}</pre>`}
-    </div>
-  `;
-  // Bind autocomplete to character prompt textareas (not UC)
-  moduleBody.querySelectorAll('.mod-textarea:not(.mod-uc)').forEach(el => bindTagAssist(el));
+  if (characterPanel) characterPanel.render(m);
 }
 
 // ---- Conditional Prompt module ----
@@ -4443,6 +4410,7 @@ Promise.all([
   saveDirectoryPanelReady,
   sessionGenerationStatsReady,
   automationPanelReady,
+  characterPanelReady,
 ])
   .then(() => {
     initHistoryRail();

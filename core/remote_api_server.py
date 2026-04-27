@@ -357,6 +357,17 @@ class RemoteBridge(QObject):
             return False, "Cloudflared 터널 활성 중 — 저장 디렉토리 변경이 차단됩니다."
         return True, ""
 
+    def _result_enhance_gate(self, ws) -> tuple[bool, str]:
+        """Result Enhance는 로컬 호스트 단독 세션에서만 허용."""
+        host = self._ws_client_host(ws)
+        if host not in ("127.0.0.1", "::1"):
+            return False, "Result Enhance는 로컬(127.0.0.1) 접속에서만 가능합니다."
+        if self.shared_server_mode:
+            return False, "Shared Server Mode 활성 중 — Result Enhance가 차단됩니다."
+        if self._is_cloudflared_active():
+            return False, "Cloudflared 터널 활성 중 — Result Enhance가 차단됩니다."
+        return True, ""
+
     def _auto_save_settings_gate(self, ws) -> tuple[bool, str]:
         """호스트 전역 auto-save 정책은 Shared Mode에서 원격 변경 차단."""
         if self.shared_server_mode:
@@ -641,6 +652,11 @@ class RemoteBridge(QObject):
     def _do_result_enhance(self, ws=None):
         """현재 데스크탑 ImageWindow 히스토리 항목에 NAI Enhance를 실행."""
         try:
+            allowed, reason = self._result_enhance_gate(ws)
+            if not allowed:
+                self._send_result_enhance_error(ws, reason)
+                return
+
             if self._remote_enhance_in_flight:
                 self._send_result_enhance_error(ws, "Enhance is already running")
                 return

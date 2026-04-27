@@ -669,12 +669,6 @@ function connect() {
     if (setupController) setupController.resetInitialProbe();
     setLauncherConn(true);
     ws.send(JSON.stringify({type: 'get_search_state'}));
-    // 클라이언트 상태 전송 (히스토리 수 0 — viewer는 REST로 로드)
-    ws.send(JSON.stringify({
-      type: 'client_state',
-      history_count: 0,
-      desktop_shell: isDesktopShell,
-    }));
     // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
   };
   ws.onclose = () => {

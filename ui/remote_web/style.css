@@ -603,13 +603,45 @@ header {
 }
 
 .result-info-panel {
-  min-height: 96px;
-  max-height: 168px;
+  height: var(--result-info-height, 96px);
+  min-height: 72px;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-dim);
   background: linear-gradient(180deg, rgba(18,18,28,0.92), rgba(10,10,16,0.96));
+  flex: 0 0 auto;
+  position: relative;
+}
+.result-info-resize {
+  height: 7px;
+  margin-top: -4px;
+  cursor: ns-resize;
+  touch-action: none;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+.result-info-resize::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 44px;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(160,160,175,0.34);
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+}
+.result-info-resize:hover::before,
+body.resizing-result-info .result-info-resize::before {
+  opacity: 1;
+  background: rgba(157,139,255,0.58);
+}
+body.resizing-result-info {
+  cursor: ns-resize;
+  user-select: none;
 }
 .result-info-header {
   min-height: 30px;

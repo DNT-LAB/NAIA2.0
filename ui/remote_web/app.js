@@ -110,7 +110,10 @@ const viewerPanel    = $('viewerPanel');
 const viewerGrid     = $('viewerGrid');
 const viewerCountEl  = $('viewerCount');
 const viewerLoading  = $('viewerLoading');
+const resultMain = document.querySelector('.result-main');
+const resultInfoPanel = $('resultInfoPanel');
 const resultInfoContent = $('resultInfoContent');
+const resultInfoResize = $('resultInfoResize');
 const rightTabButtons = Array.from(document.querySelectorAll('.right-tab-btn'));
 const rightTabPanes   = Array.from(document.querySelectorAll('.right-tab-pane'));
 const statsGenCount  = $('statsGenCount');
@@ -132,6 +135,72 @@ const optBoxes = {
   auto_generate: $('optAutoGen'),
   wildcard_standalone: $('optWcStandalone'),
 };
+
+// ---- Result info resizer ----
+const RESULT_INFO_HEIGHT_KEY = 'naia_result_info_height';
+const RESULT_INFO_MIN_HEIGHT = 72;
+const RESULT_INFO_MIN_VIEWER_HEIGHT = 220;
+const RESULT_INFO_MAX_HEIGHT = 520;
+
+function clampResultInfoHeight(height) {
+  const hostHeight = resultMain ? resultMain.clientHeight : window.innerHeight;
+  const availableMax = Math.max(
+    RESULT_INFO_MIN_HEIGHT,
+    Math.min(RESULT_INFO_MAX_HEIGHT, hostHeight - RESULT_INFO_MIN_VIEWER_HEIGHT)
+  );
+  return Math.round(Math.min(Math.max(height, RESULT_INFO_MIN_HEIGHT), availableMax));
+}
+
+function setResultInfoHeight(height, persist = true) {
+  if (!resultInfoPanel) return;
+  const nextHeight = clampResultInfoHeight(height);
+  resultInfoPanel.style.setProperty('--result-info-height', `${nextHeight}px`);
+  if (persist) {
+    try { localStorage.setItem(RESULT_INFO_HEIGHT_KEY, String(nextHeight)); } catch (_) {}
+  }
+}
+
+function initResultInfoResizer() {
+  if (!resultInfoPanel || !resultInfoResize) return;
+
+  try {
+    const stored = Number(localStorage.getItem(RESULT_INFO_HEIGHT_KEY));
+    if (Number.isFinite(stored) && stored > 0) setResultInfoHeight(stored, false);
+  } catch (_) {}
+
+  let startY = 0;
+  let startHeight = 0;
+  let dragging = false;
+
+  resultInfoResize.addEventListener('pointerdown', e => {
+    dragging = true;
+    startY = e.clientY;
+    startHeight = resultInfoPanel.getBoundingClientRect().height;
+    document.body.classList.add('resizing-result-info');
+    resultInfoResize.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  resultInfoResize.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    setResultInfoHeight(startHeight - (e.clientY - startY), false);
+  });
+
+  const finishDrag = e => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('resizing-result-info');
+    try { resultInfoResize.releasePointerCapture(e.pointerId); } catch (_) {}
+    setResultInfoHeight(resultInfoPanel.getBoundingClientRect().height, true);
+  };
+
+  resultInfoResize.addEventListener('pointerup', finishDrag);
+  resultInfoResize.addEventListener('pointercancel', finishDrag);
+
+  window.addEventListener('resize', () => {
+    setResultInfoHeight(resultInfoPanel.getBoundingClientRect().height, true);
+  });
+}
 
 // ---- WebSocket ----
 
@@ -5593,4 +5662,5 @@ function _renderTfAc() {
   });
 }
 
+initResultInfoResizer();
 connect();

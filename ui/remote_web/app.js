@@ -29,6 +29,7 @@ const SHARED_STORAGE_KEY = 'naia_shared_session';
 let createWsMessageDispatcher = null;
 let quickFilter = null;
 let rightTabs = null;
+let resultInfoResizer = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -69,6 +70,17 @@ const rightTabsReady = import('./js/features/rightTabs.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize right tabs module', error);
+  });
+const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
+  .then(({createResultInfoResizer}) => {
+    resultInfoResizer = createResultInfoResizer({
+      document,
+      window,
+      localStorage,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize result info resizer module', error);
   });
 
 function saveSharedSession() {
@@ -158,10 +170,7 @@ const viewerRailToggle = $('viewerRailToggle');
 const viewerGrid     = $('viewerGrid');
 const viewerCountEl  = $('viewerCount');
 const viewerLoading  = $('viewerLoading');
-const resultMain = document.querySelector('.result-main');
-const resultInfoPanel = $('resultInfoPanel');
 const resultInfoContent = $('resultInfoContent');
-const resultInfoResize = $('resultInfoResize');
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
 let autoSaveEnabled  = true;
@@ -209,70 +218,8 @@ function initHistoryRail() {
   setHistoryRailCollapsed(collapsed, false);
 }
 
-// ---- Result info resizer ----
-const RESULT_INFO_HEIGHT_KEY = 'naia_result_info_height';
-const RESULT_INFO_MIN_HEIGHT = 72;
-const RESULT_INFO_MIN_VIEWER_HEIGHT = 220;
-const RESULT_INFO_MAX_HEIGHT = 520;
-
-function clampResultInfoHeight(height) {
-  const hostHeight = resultMain ? resultMain.clientHeight : window.innerHeight;
-  const availableMax = Math.max(
-    RESULT_INFO_MIN_HEIGHT,
-    Math.min(RESULT_INFO_MAX_HEIGHT, hostHeight - RESULT_INFO_MIN_VIEWER_HEIGHT)
-  );
-  return Math.round(Math.min(Math.max(height, RESULT_INFO_MIN_HEIGHT), availableMax));
-}
-
-function setResultInfoHeight(height, persist = true) {
-  if (!resultInfoPanel) return;
-  const nextHeight = clampResultInfoHeight(height);
-  resultInfoPanel.style.setProperty('--result-info-height', `${nextHeight}px`);
-  if (persist) {
-    try { localStorage.setItem(RESULT_INFO_HEIGHT_KEY, String(nextHeight)); } catch (_) {}
-  }
-}
-
 function initResultInfoResizer() {
-  if (!resultInfoPanel || !resultInfoResize) return;
-
-  try {
-    const stored = Number(localStorage.getItem(RESULT_INFO_HEIGHT_KEY));
-    if (Number.isFinite(stored) && stored > 0) setResultInfoHeight(stored, false);
-  } catch (_) {}
-
-  let startY = 0;
-  let startHeight = 0;
-  let dragging = false;
-
-  resultInfoResize.addEventListener('pointerdown', e => {
-    dragging = true;
-    startY = e.clientY;
-    startHeight = resultInfoPanel.getBoundingClientRect().height;
-    document.body.classList.add('resizing-result-info');
-    resultInfoResize.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-
-  resultInfoResize.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    setResultInfoHeight(startHeight - (e.clientY - startY), false);
-  });
-
-  const finishDrag = e => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.classList.remove('resizing-result-info');
-    try { resultInfoResize.releasePointerCapture(e.pointerId); } catch (_) {}
-    setResultInfoHeight(resultInfoPanel.getBoundingClientRect().height, true);
-  };
-
-  resultInfoResize.addEventListener('pointerup', finishDrag);
-  resultInfoResize.addEventListener('pointercancel', finishDrag);
-
-  window.addEventListener('resize', () => {
-    setResultInfoHeight(resultInfoPanel.getBoundingClientRect().height, true);
-  });
+  if (resultInfoResizer) resultInfoResizer.init();
 }
 
 // ---- WebSocket ----
@@ -5461,7 +5408,7 @@ function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
-Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady])
+Promise.all([quickFilterReady, wsDispatcherReady, rightTabsReady, resultInfoResizerReady])
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();

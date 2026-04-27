@@ -39,6 +39,7 @@ let characterPanel = null;
 let conditionalPromptPanel = null;
 let wildcardPanel = null;
 let wildcardManagerPanel = null;
+let imageModulePanels = null;
 let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
@@ -284,6 +285,21 @@ const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs
   })
   .catch(error => {
     console.error('Failed to initialize wildcard manager panel module', error);
+  });
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs')
+  .then(({createImageModulePanels}) => {
+    imageModulePanels = createImageModulePanels({
+      document,
+      moduleBody,
+      escHtml,
+      setModuleParam,
+      showToast,
+      openModule,
+      getCurrentModuleId: () => currentModuleId,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize image module panels', error);
   });
 const chunkPanelReady = import('./js/features/chunkPanel.mjs')
   .then(({createChunkPanel}) => {
@@ -2936,269 +2952,55 @@ function wcPromptNewFile() {
 
 // ---- Image upload helper ----
 function pasteModuleImage(moduleId) {
-  navigator.clipboard.read().then(items => {
-    for (const item of items) {
-      const imageType = item.types.find(t => t.startsWith('image/'));
-      if (imageType) {
-        item.getType(imageType).then(blob => {
-          uploadModuleImage(moduleId, new File([blob], 'clipboard.png', {type: blob.type}));
-        });
-        return;
-      }
-    }
-    showToast('No image in clipboard', 'error');
-  }).catch(() => showToast('Clipboard access denied', 'error'));
+  if (imageModulePanels) imageModulePanels.pasteImage(moduleId);
 }
 
 function uploadModuleImage(moduleId, file) {
-  if (!file || !file.type.startsWith('image/')) return;
-  const body = document.getElementById('modulePopupBody');
-  if (body) {
-    const ind = document.createElement('div');
-    ind.className = 'mod-upload-indicator';
-    ind.textContent = 'Uploading...';
-    ind.id = 'uploadIndicator';
-    body.prepend(ind);
-  }
-  // Client-side resize to max 2048px to save bandwidth
-  const img = new Image();
-  const reader = new FileReader();
-  reader.onload = () => {
-    img.onload = () => {
-      let w = img.width, h = img.height;
-      const MAX = 2048;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-        else { w = Math.round(w * MAX / h); h = MAX; }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/png');
-      const b64 = dataUrl.split(',')[1];
-      setModuleParam(moduleId, 'upload_image', b64);
-    };
-    img.src = reader.result;
-  };
-  reader.readAsDataURL(file);
+  if (imageModulePanels) imageModulePanels.uploadImage(moduleId, file);
 }
 
 // ---- Slider debounce for image modules ----
-let _sliderDebounce = {};
 function onModSlider(moduleId, key, value) {
-  const k = moduleId + '.' + key;
-  if (_sliderDebounce[k]) clearTimeout(_sliderDebounce[k]);
-  _sliderDebounce[k] = setTimeout(() => {
-    setModuleParam(moduleId, key, value);
-    delete _sliderDebounce[k];
-  }, 300);
+  if (imageModulePanels) imageModulePanels.onSlider(moduleId, key, value);
 }
 
 // ---- Character Reference module ----
-let _storageView = null; // tracks which storage is open
-
 function renderCharacterReference(m) {
-  if (!m.is_naid45) {
-    moduleBody.innerHTML = '<div class="mod-notice">Character Reference requires NAID4.5F/C model</div>';
-    return;
-  }
-  const frames = (m.frames || []).map((f, i) => `
-    <div class="mod-ref-frame ${f.is_enabled ? '' : 'disabled'}">
-      <div class="mod-ref-header">
-        <img class="mod-ref-thumb" src="data:image/jpeg;base64,${f.thumbnail}" alt="${escHtml(f.file_name)}">
-        <div class="mod-ref-controls">
-          <div class="mod-ref-controls-row">
-            <label class="mod-checkbox-item">
-              <input type="checkbox" ${f.is_enabled ? 'checked' : ''}
-                oninput="setModuleParam('character_reference','enable_${i}',String(this.checked))">
-              <span class="mod-checkbox-label">Enable</span>
-            </label>
-            <select class="mod-select-sm"
-              onchange="setModuleParam('character_reference','ref_type_${i}',this.value)">
-              <option value="character&style" ${f.reference_type==='character&style'?'selected':''}>Char & Style</option>
-              <option value="character" ${f.reference_type==='character'?'selected':''}>Character</option>
-              <option value="style" ${f.reference_type==='style'?'selected':''}>Style</option>
-            </select>
-            <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('character_reference','remove_frame_${i}','')">Remove</button>
-          </div>
-          <div class="mod-slider-row">
-            <span class="mod-slider-label">Strength</span>
-            <input type="range" min="0" max="20" step="1" value="${Math.round(f.strength*20)}"
-              oninput="this.nextElementSibling.textContent=(this.value/20).toFixed(2);onModSlider('character_reference','strength_${i}',(this.value/20).toFixed(2))">
-            <span class="mod-slider-value">${f.strength.toFixed(2)}</span>
-          </div>
-          <div class="mod-slider-row">
-            <span class="mod-slider-label">Fidelity</span>
-            <input type="range" min="0" max="20" step="1" value="${Math.round(f.fidelity*20)}"
-              oninput="this.nextElementSibling.textContent=(this.value/20).toFixed(2);onModSlider('character_reference','fidelity_${i}',(this.value/20).toFixed(2))">
-            <span class="mod-slider-value">${f.fidelity.toFixed(2)}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  `).join('');
-
-  moduleBody.innerHTML = `
-    <div class="mod-upload-bar">
-      <button class="mod-btn-upload" onclick="document.getElementById('charRefFileInput').click()">Upload</button>
-      <button class="mod-btn-upload" onclick="pasteModuleImage('character_reference')">Paste</button>
-      <input type="file" id="charRefFileInput" accept="image/*" style="display:none"
-        onchange="uploadModuleImage('character_reference',this.files[0]);this.value=''">
-      <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('character_reference')">Storage</button>
-    </div>
-    ${frames.length ? frames : '<div class="mod-empty">No character references loaded</div>'}
-  `;
+  if (imageModulePanels) imageModulePanels.renderCharacterReference(m);
 }
 
 // ---- Vibe Transfer module ----
 function renderVibeTransfer(m) {
-  const frames = (m.frames || []).map((f, i) => {
-    const thumbHtml = f.is_no_image
-      ? '<div class="mod-ref-noimage">No Image</div>'
-      : `<img class="mod-ref-thumb" src="data:image/jpeg;base64,${f.thumbnail}" alt="${escHtml(f.file_name)}">`;
-
-    const encHtml = f.is_no_image ? '' : `
-      <div class="mod-ref-encoding">
-        ${f.has_encoding
-          ? '<span class="mod-encode-status encoded">Encoded</span>'
-          : `<button class="mod-btn-sm mod-btn-encode" onclick="setModuleParam('vibe_transfer','encode_${i}','')">Encode (2 Anlas)</button>`}
-        ${f.encoding_keys.length ? `<span class="mod-encode-keys">IE: ${f.encoding_keys.map(k=>Number(k).toFixed(2)).join(', ')}</span>` : ''}
-      </div>`;
-
-    return `
-    <div class="mod-ref-frame ${f.is_enabled ? '' : 'disabled'}">
-      <div class="mod-ref-header">
-        ${thumbHtml}
-        <div class="mod-ref-controls">
-          <div class="mod-ref-controls-row">
-            <label class="mod-checkbox-item">
-              <input type="checkbox" ${f.is_enabled ? 'checked' : ''}
-                oninput="setModuleParam('vibe_transfer','enable_${i}',String(this.checked))">
-              <span class="mod-checkbox-label">Enable</span>
-            </label>
-            <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('vibe_transfer','remove_frame_${i}','')">Remove</button>
-          </div>
-          <div class="mod-slider-row">
-            <span class="mod-slider-label">Ref Strength</span>
-            <input type="range" min="-100" max="100" step="1" value="${Math.round(f.reference_strength*100)}"
-              oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','ref_strength_${i}',(this.value/100).toFixed(2))">
-            <span class="mod-slider-value">${f.reference_strength.toFixed(2)}</span>
-          </div>
-          <div class="mod-slider-row">
-            <span class="mod-slider-label">Info Extracted</span>
-            <input type="range" min="1" max="100" step="1" value="${Math.round(f.information_extracted*100)}"
-              oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','info_extracted_${i}',(this.value/100).toFixed(2))">
-            <span class="mod-slider-value">${f.information_extracted.toFixed(2)}</span>
-          </div>
-          ${encHtml}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-
-  moduleBody.innerHTML = `
-    <div class="mod-upload-bar">
-      <button class="mod-btn-upload" onclick="document.getElementById('vibeFileInput').click()">Upload</button>
-      <button class="mod-btn-upload" onclick="pasteModuleImage('vibe_transfer')">Paste</button>
-      <input type="file" id="vibeFileInput" accept="image/*" style="display:none"
-        onchange="uploadModuleImage('vibe_transfer',this.files[0]);this.value=''">
-      <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>
-      <span class="mod-frame-count">${m.frame_count}/${m.max_frames}</span>
-    </div>
-    <label class="mod-checkbox-item" style="margin-bottom:8px">
-      <input type="checkbox" ${m.normalize ? 'checked' : ''}
-        oninput="setModuleParam('vibe_transfer','normalize',String(this.checked))">
-      <span class="mod-checkbox-label">Normalize reference strength</span>
-    </label>
-    ${frames.length ? frames : '<div class="mod-empty">No vibe transfers loaded</div>'}
-  `;
+  if (imageModulePanels) imageModulePanels.renderVibeTransfer(m);
 }
 
 // ---- Storage view ----
 function requestStorage(moduleId) {
-  _storageView = moduleId;
-  setModuleParam(moduleId, 'get_storage', '');
+  if (imageModulePanels) imageModulePanels.requestStorage(moduleId);
 }
 
 function onStorageList(m) {
-  if (m.module_id === 'character_reference') renderCharRefStorage(m);
-  else if (m.module_id === 'vibe_transfer') renderVibeStorage(m);
+  if (imageModulePanels) imageModulePanels.onStorageList(m);
 }
 
 function renderCharRefStorage(m) {
-  if (currentModuleId !== 'character_reference') return;
-  const items = (m.items || []).map(it => `
-    <div class="mod-storage-item" onclick="applyCharRefStorage('${escHtml(it.file_hash)}')" title="${escHtml(it.file_name)}">
-      <img class="mod-storage-thumb" src="data:image/jpeg;base64,${it.thumbnail}" alt="">
-      <span class="mod-storage-name">${escHtml(it.character_name || it.file_name)}</span>
-    </div>
-  `).join('');
-
-  moduleBody.innerHTML = `
-    <div class="mod-upload-bar">
-      <button class="mod-btn-upload" onclick="setModuleParam('character_reference','get_storage','');/* refresh */">Refresh</button>
-      <button class="mod-btn-sm" onclick="openModule('character_reference')">Back</button>
-    </div>
-    ${items.length
-      ? '<div class="mod-storage-grid">' + items + '</div>'
-      : '<div class="mod-empty">No saved references</div>'}
-  `;
+  if (imageModulePanels) imageModulePanels.renderCharRefStorage(m);
 }
 
 function applyCharRefStorage(fileHash) {
-  setModuleParam('character_reference', 'apply_storage', fileHash);
-  // 적용 후 메인 뷰로 복귀
-  setTimeout(() => openModule('character_reference'), 500);
+  if (imageModulePanels) imageModulePanels.applyCharRefStorage(fileHash);
 }
 
 function renderVibeStorage(m) {
-  if (currentModuleId !== 'vibe_transfer') return;
-  const modelNames = Object.keys(m.models || {});
-  const currentModel = m.current_model || '';
-
-  // Build tabs
-  const tabBtns = modelNames.map(name =>
-    `<button class="mod-btn-sm mod-storage-tab ${name===currentModel?'active':''}" onclick="showVibeStorageTab(this,'${escHtml(name)}')">${escHtml(name)}</button>`
-  ).join('');
-
-  // Build tab contents
-  const tabContents = modelNames.map(name => {
-    const items = (m.models[name] || []).map(it => {
-      const ieKeys = (it.encoding_keys || []);
-      const defaultIe = ieKeys.length ? ieKeys[0] : 1.0;
-      return `
-        <div class="mod-storage-item" onclick="applyVibeStorage('${escHtml(name)}','${escHtml(it.file_hash)}',${defaultIe})" title="${escHtml(it.file_name)}">
-          <img class="mod-storage-thumb" src="data:image/jpeg;base64,${it.thumbnail}" alt="">
-          <span class="mod-storage-name">${escHtml(it.file_name)}</span>
-          ${ieKeys.length ? `<span class="mod-encode-keys">IE: ${ieKeys.map(k=>Number(k).toFixed(2)).join(', ')}</span>` : ''}
-        </div>`;
-    }).join('');
-    const vis = name === currentModel ? '' : 'style="display:none"';
-    return `<div class="mod-storage-grid mod-vibe-tab" data-model="${escHtml(name)}" ${vis}>${items || '<div class="mod-empty">Empty</div>'}</div>`;
-  }).join('');
-
-  moduleBody.innerHTML = `
-    <div class="mod-upload-bar">
-      <button class="mod-btn-upload" onclick="setModuleParam('vibe_transfer','get_storage','')">Refresh</button>
-      <button class="mod-btn-sm" onclick="openModule('vibe_transfer')">Back</button>
-    </div>
-    <div class="mod-storage-tabs">${tabBtns}</div>
-    ${tabContents || '<div class="mod-empty">No saved vibes</div>'}
-  `;
+  if (imageModulePanels) imageModulePanels.renderVibeStorage(m);
 }
 
 function showVibeStorageTab(btn, model) {
-  // Toggle tab buttons
-  btn.parentElement.querySelectorAll('.mod-storage-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  // Toggle content
-  moduleBody.querySelectorAll('.mod-vibe-tab').forEach(el => {
-    el.style.display = el.dataset.model === model ? '' : 'none';
-  });
+  if (imageModulePanels) imageModulePanels.showVibeStorageTab(btn, model);
 }
 
 function applyVibeStorage(model, fileHash, ieValue) {
-  setModuleParam('vibe_transfer', 'apply_storage', model + '|' + fileHash + '|' + ieValue);
+  if (imageModulePanels) imageModulePanels.applyVibeStorage(model, fileHash, ieValue);
 }
 
 // ---- Search system ----
@@ -4150,6 +3952,7 @@ Promise.all([
   conditionalPromptPanelReady,
   wildcardPanelReady,
   wildcardManagerPanelReady,
+  imageModulePanelsReady,
   chunkPanelReady,
 ])
   .then(() => {

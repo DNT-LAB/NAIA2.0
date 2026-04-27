@@ -41,6 +41,7 @@ let wildcardPanel = null;
 let wildcardManagerPanel = null;
 let imageModulePanels = null;
 let refinePanelControl = null;
+let tagSearchController = null;
 let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
@@ -317,6 +318,22 @@ const refinePanelReady = import('./js/features/refinePanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize refine panel module', error);
+  });
+const tagSearchReady = import('./js/features/tagSearch.mjs')
+  .then(({createTagSearchController}) => {
+    tagSearchController = createTagSearchController({
+      document,
+      input: tagSearchInput,
+      results: tagSearchResults,
+      promptEdit,
+      escHtml,
+      getWs: () => ws,
+      WebSocket,
+      onPromptEdit,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize tag search module', error);
   });
 const chunkPanelReady = import('./js/features/chunkPanel.mjs')
   .then(({createChunkPanel}) => {
@@ -3356,72 +3373,16 @@ function depthAction(action) {
 // ---- Tag search (KR/EN) ----
 const tagSearchInput = $('tagSearchInput');
 const tagSearchResults = $('tagSearchResults');
-let tagSearchTimer = null;
-
-let tagComposing = false;
-tagSearchInput.addEventListener('compositionstart', () => { tagComposing = true; });
-tagSearchInput.addEventListener('compositionend', () => {
-  tagComposing = false;
-  fireTagSearch();
-});
-tagSearchInput.addEventListener('input', () => {
-  if (!tagComposing) fireTagSearch();
-});
 function fireTagSearch() {
-  clearTimeout(tagSearchTimer);
-  const q = tagSearchInput.value.trim();
-  if (!q) { tagSearchResults.classList.remove('open'); return; }
-  tagSearchTimer = setTimeout(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type: 'tag_search', query: q}));
-    }
-  }, 150);  // 150ms — 실시간 체감
+  if (tagSearchController) tagSearchController.fireSearch();
 }
 
-// 외부 클릭 시 결과 닫기
-document.addEventListener('click', e => {
-  if (!e.target.closest('.tag-search-bar')) tagSearchResults.classList.remove('open');
-});
-
 function onTagSearchResult(m) {
-  // 입력이 이미 지워졌으면 (태그 삽입 후) 무시
-  if (!tagSearchInput.value.trim()) { tagSearchResults.classList.remove('open'); return; }
-  if (!m.results || !m.results.length) {
-    tagSearchResults.classList.remove('open');
-    return;
-  }
-  const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
-  tagSearchResults.innerHTML = m.results.map((r, i) =>
-    `<div class="tag-result-item" data-idx="${i}">
-      <span class="tag-result-tag">${escHtml(r.tag)}</span>
-      <span class="tag-result-desc">${escHtml(r.desc || r.group || '')}</span>
-      <span class="tag-result-count">${fmtCount(r.count)}</span>
-    </div>`
-  ).join('');
-  // data 속성 + addEventListener로 XSS 방지
-  tagSearchResults.querySelectorAll('.tag-result-item').forEach(el => {
-    const idx = +el.dataset.idx;
-    el.addEventListener('click', () => insertTag(m.results[idx].tag));
-  });
-  tagSearchResults.classList.add('open');
+  if (tagSearchController) tagSearchController.onResult(m);
 }
 
 function insertTag(tag) {
-  const pe = promptEdit;
-  const cur = pe.value;
-  const start = pe.selectionStart != null ? pe.selectionStart : cur.length;
-  // 커서 앞 문자 기준으로 쉼표 구분 판단
-  const before = cur.substring(0, start);
-  const needSep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',') && before.trim().length > 0;
-  const sep = needSep ? ', ' : '';
-  pe.value = before + sep + tag + ', ' + cur.substring(start);
-  pe.focus();
-  const newPos = start + sep.length + tag.length + 2;
-  pe.selectionStart = pe.selectionEnd = newPos;
-  onPromptEdit();
-  clearTimeout(tagSearchTimer);
-  tagSearchInput.value = '';
-  tagSearchResults.classList.remove('open');
+  if (tagSearchController) tagSearchController.insertTag(tag);
 }
 
 // ---- Tag tooltip + Autocomplete system ----
@@ -3850,6 +3811,7 @@ Promise.all([
   wildcardManagerPanelReady,
   imageModulePanelsReady,
   refinePanelReady,
+  tagSearchReady,
   chunkPanelReady,
 ])
   .then(() => {

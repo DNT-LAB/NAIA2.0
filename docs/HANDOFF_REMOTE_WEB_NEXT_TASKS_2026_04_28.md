@@ -31,19 +31,30 @@ Passed:
 - `node --check` for changed Remote Web feature modules
 - `python -m py_compile` for changed Python files
 
-Failed:
+Previously failed:
 
 - `git diff --check`
   - Main blocker: massive trailing whitespace in `modules/prompt_engineering_module.py`.
   - Also note line-ending warnings on `core/dll_fix.py` and several Remote Web `.mjs` files.
 
+## P0 Stabilization Update
+
+Completed in the current P0 round:
+
+- Normalized the `modules/prompt_engineering_module.py` diff so only the actual double-initialize guard remains.
+- Wired `ui/remote_web/js/features/instantWildcardPanel.mjs` into the existing WC panel through an `Instant Editor` action instead of adding another top-level launcher button.
+- Added minimal Instant Wildcard editor CSS.
+- Re-ran static validation:
+  - `node --check ui/remote_web/app.js`
+  - `node --check` for changed Remote Web feature modules
+  - `python -m py_compile` for changed Python files
+  - `git diff --check`
+  - FastAPI static smoke for `/js/features/e621EventPanel.mjs`, `/js/features/ollamaPanel.mjs`, `/js/features/instantWildcardPanel.mjs`
+
 ## Immediate Risks
 
-- `modules/prompt_engineering_module.py` appears line-ending/whitespace noisy; it must be normalized before a checkpoint commit.
-- `ui/remote_web/js/features/instantWildcardPanel.mjs` is untracked and appears unwired; decide whether to integrate it as a module panel or remove/defer it.
 - `Tools & Assistants` is now a flat button grid with too many peer modules. It needs an IA refactor before adding more modules.
 - `core/remote_api_server.py` gained about 1k lines; next stabilization should focus on behavior smoke and then adapter extraction, not more feature growth.
-- New `.mjs` files need FastAPI static route smoke checks because `ui/remote_web/CLAUDE.md` requires explicit static serving validation for new JS assets.
 - No browser/manual Remote Web smoke was observed in this audit.
 
 ## Next Task Assignment
@@ -143,6 +154,4 @@ Continue the `future01` Web Shell audit follow-ups:
 
 ## Recommended Next Concrete Task
 
-Start with P0. The current work is close to a checkpoint, but committing before `git diff --check` and the unwired `instantWildcardPanel.mjs` decision would leave avoidable cleanup debt.
-
-Then do P1 before broad behavior smoke, because the behavior smoke should validate the launcher structure users will actually keep using.
+P0 is complete. Discuss P1 launcher IA before implementation, then run P2 behavior smoke against the launcher structure users will actually keep using.

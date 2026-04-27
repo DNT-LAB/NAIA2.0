@@ -169,8 +169,7 @@ export function createResultImageInput({
 
   function bind() {
     if (viewer) {
-      viewer.tabIndex = 0;
-      viewer.addEventListener('pointerdown', () => viewer.focus({preventScroll: true}));
+      viewer.tabIndex = -1;
       viewer.addEventListener('dragenter', handleDragEnter);
       viewer.addEventListener('dragover', handleDragOver);
       viewer.addEventListener('dragleave', handleDragLeave);

@@ -36,6 +36,10 @@ class BaseMiddleModule(ABC):
         """UI 순서 (낮을수록 위에 표시)"""
         return 100
     
+    def initialize_with_context(self, app_context):
+        """AppContext 주입. 모듈이 별도 처리 필요하면 오버라이드."""
+        self.app_context = app_context
+
     def on_initialize(self):
         """모듈 초기화 시 호출"""
         pass

@@ -1085,7 +1085,7 @@ class SettingsWidget(QWidget):
         # 실제 자동완성 시스템에 반영
         if hasattr(self.app_context, 'main_window'):
             main_window = self.app_context.main_window
-            if hasattr(main_window, 'autocomplete_manager'):
+            if hasattr(main_window, 'autocomplete_manager') and main_window.autocomplete_manager is not None:
                 if checked:
                     main_window.autocomplete_manager.enable()
                 else:

@@ -176,13 +176,13 @@ class MiddleSectionController:
             layout.addWidget(fallback_widget)
             return
         
-        # 모듈들을 order 순서대로 정렬
-        sorted_classes = sorted(self.module_classes, key=lambda c: c().get_order())
-        
-        for cls in sorted_classes:
+        # 모듈들을 order 순서대로 정렬 (인스턴스 1회만 생성하여 재사용 — 정렬용 임시 인스턴스 금지)
+        instances = [cls() for cls in self.module_classes]
+        instances.sort(key=lambda inst: inst.get_order())
+
+        for module_instance in instances:
+            module_name = module_instance.__class__.__name__
             try:
-                # 1. 모듈 인스턴스 생성
-                module_instance = cls()
                 self.module_instances.append(module_instance)
                 
                 # 2. 컨텍스트 주입
@@ -233,7 +233,7 @@ class MiddleSectionController:
                     self.app_context.register_pipeline_hook(hook_info, module_instance)
                     
             except Exception as e:
-                print(f"모듈 '{cls.__name__}' UI 생성 또는 훅 등록 중 오류: {e}")
+                print(f"모듈 '{module_name}' UI 생성 또는 훅 등록 중 오류: {e}")
                 import traceback
                 traceback.print_exc()
         

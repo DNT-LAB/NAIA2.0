@@ -46,6 +46,9 @@ let characterPanel = null;
 let conditionalPromptPanel = null;
 let wildcardPanel = null;
 let wildcardManagerPanel = null;
+let instantWildcardPanel = null;
+let e621EventPanel = null;
+let ollamaPanel = null;
 let imageModulePanels = null;
 let refinePanelControl = null;
 let tagSearchController = null;
@@ -228,6 +231,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       showToast,
       escHtml,
       getMode: () => currentMode || modeSelect.value || 'NAI',
+      getCurrentSavedPath: () => resultHistory ? resultHistory.latestImagePath : '',
       onPasteImage: () => {
         if (resultImageInput) resultImageInput.pasteFromClipboard();
         else showToast('Image input is not ready', 'error');
@@ -447,6 +451,46 @@ const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs
   .catch(error => {
     console.error('Failed to initialize wildcard manager panel module', error);
   });
+const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs')
+  .then(({createInstantWildcardPanel}) => {
+    instantWildcardPanel = createInstantWildcardPanel({
+      document,
+      window,
+      escHtml,
+      setModuleParam,
+      bindTagAssist,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize instant wildcard panel module', error);
+  });
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs')
+  .then(({createE621EventPanel}) => {
+    e621EventPanel = createE621EventPanel({
+      document,
+      escHtml,
+      setModuleParam,
+      bindTagAssist,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize E621 event panel module', error);
+  });
+const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
+  .then(({createOllamaPanel}) => {
+    ollamaPanel = createOllamaPanel({
+      document,
+      escHtml,
+      setModuleParam,
+      bindTagAssist,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Ollama panel module', error);
+  });
 const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
@@ -541,6 +585,7 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs')
       showToast,
       updateModuleBtnState,
       positionFloatingPanel,
+      setModuleParam,
       onPromptEdit,
       fireModuleOninput: _fireModuleOninput,
       escHtml,
@@ -671,9 +716,82 @@ function handleWsBlob(data) {
   }
 }
 
+function setBootIndicator(text, progressPct, done) {
+  const el = document.getElementById('bootIndicator');
+  if (!el) return;
+  const txt = document.getElementById('bootIndicatorText');
+  const fill = document.getElementById('bootIndicatorBarFill');
+  if (txt && text != null) txt.textContent = text;
+  if (fill && progressPct != null) fill.style.width = Math.max(0, Math.min(100, progressPct)) + '%';
+  if (done) {
+    el.classList.add('done');
+    setTimeout(() => { el.classList.add('hidden'); }, 900);
+  } else {
+    el.classList.remove('hidden', 'done');
+  }
+}
+
+// ---- Boot finalization (사용자 사용 가능 시점 동기화) ----
+// 사용자 입장에서 "사용 가능"이란 검색/자동완성/태그 lookup 이 동작하는 시점.
+// 이는 서버의 lazy 인덱스(KR_tags + character_analysis) warmup 이 끝나야 가능하다.
+// 그래서 finalize 트리거는 서버의 명시적 "lazy_indices_ready" broadcast.
+// init_complete 는 캐시 도착 단계일 뿐 — 이걸로 finalize 하지 않는다.
+let _bootFinalized = false;
+let _bootSafetyTimer = null;
+let _bootProgressTimer = null;
+let _bootProgressPct = 75;
+const BOOT_SAFETY_MS = 30000;  // lazy warmup 누락/실패 대비 절대 안전망 (인덱스 빌드 ~수초)
+
+function _clearBootTimers() {
+  if (_bootSafetyTimer) { clearTimeout(_bootSafetyTimer); _bootSafetyTimer = null; }
+  if (_bootProgressTimer) { clearInterval(_bootProgressTimer); _bootProgressTimer = null; }
+}
+
+function finalizeBoot() {
+  if (_bootFinalized) return;
+  _bootFinalized = true;
+  _clearBootTimers();
+  setBootIndicator('Ready', 100, true);
+}
+
+function _startBootProgressAnimator() {
+  // init_complete ~ lazy_indices_ready 사이에 점진적 진행률 애니메이션 (75% → 95% 캡)
+  // 사용자에게 정지된 듯한 인상 방지. 실제 finalize 는 lazy_indices_ready 만이 트리거.
+  if (_bootProgressTimer) clearInterval(_bootProgressTimer);
+  _bootProgressPct = 75;
+  setBootIndicator('Building tag indices…', _bootProgressPct, false);
+  _bootProgressTimer = setInterval(() => {
+    if (_bootFinalized) {
+      clearInterval(_bootProgressTimer);
+      _bootProgressTimer = null;
+      return;
+    }
+    if (_bootProgressPct < 95) {
+      _bootProgressPct += 1;
+      setBootIndicator(null, _bootProgressPct, false);
+    }
+  }, 250);
+}
+
+function resetBootIndicatorState() {
+  _bootFinalized = false;
+  _bootProgressPct = 75;
+  _clearBootTimers();
+}
+
+function onLazyIndicesReady() {
+  finalizeBoot();
+}
+
 function onInitComplete() {
   _restoringSession = false;
   _initDone = true;
+  // 캐시 리플레이 도착 — 아직 사용 가능 단계 아님.
+  // lazy 인덱스 warmup 완료 broadcast 가 와야 finalize.
+  resetBootIndicatorState();
+  _startBootProgressAnimator();
+  // 절대 안전망 — broadcast 누락/예외 시에도 indicator 가 영원히 회전하지 않도록
+  _bootSafetyTimer = setTimeout(finalizeBoot, BOOT_SAFETY_MS);
   if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
   // 재연결 시 열려있는 모듈 자동 리프레시 (캐시 fallback 적용 위해)
   if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
@@ -733,6 +851,7 @@ const wsMessageHandlers = {
   session: onSession,
   desktop_window_state: onDesktopWindowState,
   init_complete: onInitComplete,
+  lazy_indices_ready: onLazyIndicesReady,
 };
 
 function connect() {
@@ -743,12 +862,16 @@ function connect() {
 
   ws.onopen = () => {
     _initDone = false;
+    setBootIndicator('Loading state…', 60, false);
     if (setupController) setupController.resetInitialProbe();
     setLauncherConn(true);
     ws.send(JSON.stringify({type: 'get_search_state'}));
     // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
   };
   ws.onclose = () => {
+    // 재연결 사이클을 위해 boot finalize 상태 리셋 (다음 init_complete 가 다시 시퀀스 시작)
+    resetBootIndicatorState();
+    setBootIndicator('Reconnecting…', 20, false);
     setLauncherConn(false);
     modeSwitching = false;
     if (modeSelect) modeSelect.disabled = true;
@@ -1412,7 +1535,7 @@ function onSession(m) {
   sharedMode = m.shared_server_mode || false;
   const autoGenCb = optBoxes.auto_generate;
   const naiOpt = modeSelect.querySelector('option[value="NAI"]');
-  const sharedDisabledModules = ['automation', 'wildcard', 'chunk', 'search'];
+  const sharedDisabledModules = ['automation', 'wildcard', 'instant_wildcard', 'chunk', 'search'];
   if (sharedMode) {
     // Auto Gen 차단
     if (autoGenCb) { autoGenCb.checked = false; autoGenCb.disabled = true; autoGenCb.parentElement.style.opacity = '0.4'; }
@@ -1959,7 +2082,7 @@ function openModule(moduleId) {
     return;
   }
   // Shared Mode: 데스크톱 전용 모듈 차단
-  if (sharedMode && ['automation', 'wildcard', 'chunk', 'search'].includes(moduleId)) {
+  if (sharedMode && ['automation', 'wildcard', 'instant_wildcard', 'chunk', 'search', 'e621_event', 'ollama'].includes(moduleId)) {
     showToast('This module is not available in Shared Server Mode', 'error');
     return;
   }
@@ -1969,8 +2092,10 @@ function openModule(moduleId) {
     return;
   }
   flushPendingModuleEdit(currentModuleId);
-  closeAuxiliaryPopups();
+  // chunk 는 1차 모듈과 공존 — 닫지 않고 새 anchor 로 재정렬만
+  closeAuxiliaryPopups(null, { keepChunk: moduleId !== 'chunk' });
   currentModuleId = moduleId;
+  modulePopup.classList.toggle('module-popup-e621', moduleId === 'e621_event');
   modulePopup.classList.add('open');
   relayoutFloatingPanels();
   updateModuleBtnState();
@@ -1987,7 +2112,10 @@ function openModule(moduleId) {
     vibe_transfer: 'Vibe Transfer',
     conditional_prompt: 'Conditional Prompt',
     wildcard: 'Wildcard',
+    instant_wildcard: 'Instant Wildcard',
     chunk: 'Chunk',
+    e621_event: 'E621 Event',
+    ollama: 'Ollama',
   };
   moduleTitle.textContent = titles[moduleId] || moduleId;
   if (moduleId === 'auto_save' && autoSavePanel) {
@@ -2005,6 +2133,7 @@ function openModule(moduleId) {
 function closeModule() {
   flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
+  modulePopup.classList.remove('module-popup-e621');
   closeAuxiliaryPopups();
   currentModuleId = null;
   if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
@@ -2083,8 +2212,16 @@ function closeAllPePanels() {
   if (promptEngineeringPopups) promptEngineeringPopups.closeAll();
 }
 
-function closeAuxiliaryPopups(exceptPanel = null) {
-  if (exceptPanel !== chunkPanel && isChunkOpen()) closeChunkPanel();
+function closeAuxiliaryPopups(exceptPanel = null, options = {}) {
+  // chunk 는 prompt-engineering 등 1차 모듈 popup 과 동시에 사용하도록 설계됨.
+  // 명시적으로 닫지 않는 한 살아남게 유지하고 새 anchor 로 재정렬만 한다.
+  if (exceptPanel !== chunkPanel && isChunkOpen()) {
+    if (options.keepChunk) {
+      if (chunkPanelControl) chunkPanelControl.relayout();
+    } else {
+      closeChunkPanel();
+    }
+  }
   if (exceptPanel !== refinePanel && refinePanelControl && refinePanelControl.isOpen()) closeRefine();
   if (exceptPanel !== pePresetAddPanel && promptEngineeringPopups?.isOpen('presetAdd')) closePePresetAddPanel();
   if (exceptPanel !== pePresetManagePanel && promptEngineeringPopups?.isOpen('presetManage')) closePePresetManagePanel();
@@ -2169,6 +2306,9 @@ function onModuleState(m) {
   else if (m.module_id === 'vibe_transfer') renderVibeTransfer(m);
   else if (m.module_id === 'save_directory') renderSaveDirectory(m);
   else if (m.module_id === 'wildcard') renderWildcard(m);
+  else if (m.module_id === 'instant_wildcard') renderInstantWildcard(m);
+  else if (m.module_id === 'e621_event') renderE621Event(m);
+  else if (m.module_id === 'ollama') renderOllama(m);
 }
 
 function openSaveDirectoryPanel() {
@@ -2462,6 +2602,117 @@ function renderWildcard(m) {
   if (wildcardPanel) wildcardPanel.render(m);
 }
 
+// ---- Instant Wildcard editor ----
+function renderInstantWildcard(m) {
+  if (instantWildcardPanel) instantWildcardPanel.render(m);
+}
+
+function instantWildcardSelectFile(value) {
+  if (instantWildcardPanel) instantWildcardPanel.selectFile(value);
+}
+
+function instantWildcardSelectKey(element) {
+  if (instantWildcardPanel) instantWildcardPanel.selectKey(element);
+}
+
+function instantWildcardReload() {
+  if (instantWildcardPanel) instantWildcardPanel.reload();
+}
+
+function instantWildcardAddGroup() {
+  if (instantWildcardPanel) instantWildcardPanel.addGroup();
+}
+
+function instantWildcardSave() {
+  if (instantWildcardPanel) instantWildcardPanel.save();
+}
+
+function instantWildcardRename() {
+  if (instantWildcardPanel) instantWildcardPanel.rename();
+}
+
+function instantWildcardDelete() {
+  if (instantWildcardPanel) instantWildcardPanel.deleteCurrent();
+}
+
+// ---- E621 Event module ----
+function renderE621Event(m) {
+  if (e621EventPanel) e621EventPanel.render(m);
+}
+
+function e621Search() {
+  if (e621EventPanel) e621EventPanel.search();
+}
+
+function e621Reset() {
+  if (e621EventPanel) e621EventPanel.reset();
+}
+
+function e621SetViewMode(value) {
+  if (e621EventPanel) e621EventPanel.setViewMode(value);
+}
+
+function e621SelectCategory(element) {
+  if (e621EventPanel) e621EventPanel.selectCategory(element);
+}
+
+function e621SelectFolder(element) {
+  if (e621EventPanel) e621EventPanel.selectFolder(element);
+}
+
+function e621SelectTag(element) {
+  if (e621EventPanel) e621EventPanel.selectTag(element);
+}
+
+function e621ToggleStar() {
+  if (e621EventPanel) e621EventPanel.toggleStar();
+}
+
+function e621HideSelected() {
+  if (e621EventPanel) e621EventPanel.hideSelected();
+}
+
+function e621RestoreHidden(element) {
+  if (e621EventPanel) e621EventPanel.restoreHidden(element);
+}
+
+function e621OnTestbenchInput(element) {
+  if (e621EventPanel) e621EventPanel.onTestbenchInput(element);
+}
+
+function e621Generate() {
+  if (e621EventPanel) e621EventPanel.generate();
+}
+
+// ---- Ollama module ----
+function renderOllama(m) {
+  if (ollamaPanel) ollamaPanel.render(m);
+}
+
+function ollamaRefresh() {
+  if (ollamaPanel) ollamaPanel.refresh();
+}
+
+function ollamaServerAction(action) {
+  if (ollamaPanel) ollamaPanel.serverAction(action);
+}
+
+function ollamaInputChanged(element) {
+  if (ollamaPanel) ollamaPanel.inputChanged(element);
+}
+
+function ollamaConvert() {
+  if (ollamaPanel) ollamaPanel.convert();
+}
+
+function ollamaCancel() {
+  if (ollamaPanel) ollamaPanel.cancel();
+}
+
+function ollamaCopyOutput() {
+  if (ollamaPanel) ollamaPanel.copyOutput();
+}
+
 // ---- Chunk Module (instant wildcard tree browser) ----
 function requestChunkState() {
   if (chunkPanelControl) chunkPanelControl.requestState();
@@ -2472,7 +2723,9 @@ function getChunkAnchor(target = null) {
 }
 
 function openChunkPanel(anchorEl = null, toggle = false) {
-  if (chunkPanelControl) chunkPanelControl.open(anchorEl, toggle);
+  if (!chunkPanelControl) return;
+  if (!(toggle && isChunkOpen())) closeAuxiliaryPopups(chunkPanel);
+  chunkPanelControl.open(anchorEl, toggle);
 }
 
 function closeChunkPanel() {
@@ -2489,6 +2742,14 @@ function chunkToggleGroup(groupEl) {
 
 function chunkInsert(el) {
   if (chunkPanelControl) chunkPanelControl.insert(el);
+}
+
+function chunkSaveNew(event) {
+  return chunkPanelControl ? chunkPanelControl.saveNew(event) : false;
+}
+
+function chunkUseSelection() {
+  if (chunkPanelControl) chunkPanelControl.useSelection();
 }
 
 function isChunkOpen() {
@@ -2662,6 +2923,7 @@ function restoreSnapshot() {
 const refinePanel = $('refinePanel');
 
 function getFloatingPanelWidth(panel) {
+  if (panel === chunkPanel) return 560;
   if (panel === peDebugPanel) return 520;
   if (panel === refinePanel) return 400;
   return 420;
@@ -3375,6 +3637,9 @@ Promise.all([
   conditionalPromptPanelReady,
   wildcardPanelReady,
   wildcardManagerPanelReady,
+  instantWildcardPanelReady,
+  e621EventPanelReady,
+  ollamaPanelReady,
   imageModulePanelsReady,
   refinePanelReady,
   tagSearchReady,
@@ -3390,6 +3655,7 @@ Promise.all([
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();
+    setBootIndicator('Connecting…', 25, false);
     connect();
   })
   .catch(error => {

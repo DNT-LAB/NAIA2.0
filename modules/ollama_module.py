@@ -2460,14 +2460,17 @@ class OllamaModule(BaseMiddleModule):
         main_layout.addLayout(output_layout)
 
         # Lazy 초기화: UI 렌더 완료 후 비동기 상태 확인
+        # TagDB 로드는 Ollama가 설치/실행 중으로 확인되거나, 첫 변환 시도 시에만 수행
         QTimer.singleShot(0, self._start_status_check)
-        QTimer.singleShot(100, self._load_resources)
 
         return self.widget
 
     def _load_resources(self):
-        """태그 DB 로드"""
+        """태그 DB 로드 (idempotent — Ollama 가용 확인 후 또는 첫 변환 시 호출)"""
+        if getattr(self, "_tag_db_loaded", False):
+            return
         if self.tag_db.load():
+            self._tag_db_loaded = True
             e621_sib = len(getattr(self.tag_db, '_e621_siblings', {}))
             e621_wiki = len(getattr(self.tag_db, '_e621_wiki_links', {}))
             print(f"[Ollama] 태그 DB 로드 완료: {self.tag_db.tag_count:,}개 "
@@ -2834,6 +2837,8 @@ class OllamaModule(BaseMiddleModule):
                 f"🟢 서버 연결됨 ({len(self.available_models)} 모델)", True)
             self._show_install_guide(False)
             self._update_session_controls()
+            # Ollama 가용 확인됨 — 첫 사용 전 미리 TagDB 로드 (변환 클릭 시 지연 방지)
+            QTimer.singleShot(50, self._load_resources)
 
     def _check_ollama_installed(self):
         """새로고침 버튼 호환용 래퍼"""
@@ -3026,6 +3031,9 @@ class OllamaModule(BaseMiddleModule):
                 "Ollama 서버가 실행되지 않았습니다.\n서버 시작 버튼을 눌러주세요."
             )
             return
+
+        # 부팅 시 lazy로 미뤘다면 여기서 보장 — 워커 진입 직전 동기 로드 (idempotent)
+        self._load_resources()
 
         self.convert_btn.setEnabled(False)
         self.convert_btn.setText("⏳ 변환 중...")

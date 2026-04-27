@@ -146,21 +146,68 @@ class ImageDownloadThread(QThread):
 class GitHubUpdateChecker(QThread):
     """GitHub 저장소의 최신 커밋을 확인하는 스레드"""
     update_available = pyqtSignal(str, str, str)  # latest_commit_sha, commit_message, commit_date
+    local_version_resolved = pyqtSignal(str, str, str)  # branch, sha, date — 메인 스레드 동기화용
 
-    def __init__(self, owner, repo, branch, current_sha):
+    def __init__(self, owner, repo, branch, current_sha=None, project_dir=None):
         super().__init__()
         self.owner = owner
         self.repo = repo
         self.branch = branch
         self.current_sha = current_sha
-        # 특정 브랜치의 최신 커밋을 가져오는 API URL
-        self.request_url = f"https://api.github.com/repos/{self.owner}/{self.repo}/commits?sha={self.branch}&per_page=1"
+        self.project_dir = project_dir or os.path.dirname(__file__)
+        self.request_url = None  # run()에서 branch 확정 후 빌드
         self.is_running = True
 
+    def _read_local_version(self):
+        """Git CLI로 로컬 브랜치/SHA/날짜 조회 (워커 스레드)."""
+        try:
+            git_dir = os.path.join(self.project_dir, '.git')
+            if not os.path.exists(git_dir):
+                return "", "", ""
+
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
+            br = subprocess.run(['git', 'branch', '--show-current'],
+                                capture_output=True, text=True,
+                                cwd=self.project_dir, startupinfo=startupinfo)
+            sh = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'],
+                                capture_output=True, text=True,
+                                cwd=self.project_dir, startupinfo=startupinfo)
+            dt = subprocess.run(['git', 'show', '-s', '--format=%cd', '--date=format:%Y%m%d', 'HEAD'],
+                                capture_output=True, text=True,
+                                cwd=self.project_dir, startupinfo=startupinfo)
+
+            if br.returncode == 0 and sh.returncode == 0 and dt.returncode == 0:
+                branch = br.stdout.strip() or self.branch
+                return branch, sh.stdout.strip(), dt.stdout.strip()
+        except FileNotFoundError:
+            print("⚠️ Git이 설치되어 있지 않습니다.")
+        except Exception as e:
+            print(f"⚠️ Git 정보 읽기 실패: {e}")
+        return "", "", ""
+
     def run(self):
+        # 1) 로컬 Git 정보가 사전에 주입되지 않았으면 워커 스레드에서 조회
         if not self.current_sha:
-            print("⚠️ 로컬 버전 정보(SHA)가 없어 업데이트를 확인할 수 없습니다.")
-            return
+            local_branch, local_sha, local_date = self._read_local_version()
+            if not local_sha:
+                print("⚠️ Git 정보를 가져올 수 없어 업데이트 확인을 건너뜁니다.")
+                return
+            if local_branch:
+                if local_branch != self.branch:
+                    print(f"⚠️ 브랜치 불일치: 로컬={local_branch}, 설정={self.branch}")
+                self.branch = local_branch
+            self.current_sha = local_sha
+            print(f"📍 현재 Git 정보: 브랜치={self.branch}, SHA={local_sha}, 날짜={local_date}")
+            self.local_version_resolved.emit(self.branch, local_sha, local_date)
+
+        self.request_url = (
+            f"https://api.github.com/repos/{self.owner}/{self.repo}/commits?sha={self.branch}&per_page=1"
+        )
 
         try:
             headers = {'User-Agent': 'NAIA-Update-Checker'}
@@ -959,17 +1006,12 @@ class ModernMainWindow(QMainWindow):
         ]:
             self.app_context.subscribe(queue_event, update_button_on_queue_event)
 
-        # 초기 설정 로드 (NAI 모드)
+        # 초기 설정 로드 (NAI 모드) — 위젯이 만들어진 직후 즉시 적용 필요
         self.generation_params_manager.load_mode_settings("NAI")
 
-        # [신규] 앱 시작 시 마지막 상태 로드
-        # self.load_generation_parameters()
-        self.load_last_search_state()
-
-        # ✅ 2. AutoCompleteManager 초기화 방식 변경
-        print("🔍 AutoCompleteManager 전역 인스턴스 요청 중...")
-        # 새로운 getter 패턴 사용
-        self.autocomplete_manager = get_autocomplete_manager(app_context=self.app_context)
+        # AutoCompleteManager 는 main_window.isVisible() 가드를 가지므로 show() 이후에 초기화.
+        # workflow_manager 는 즉시 필요할 수 있어 동기 유지.
+        self.autocomplete_manager = None
         self.workflow_manager = self.app_context.comfyui_workflow_manager
 
         self.main_prompt_textedit.installEventFilter(self)
@@ -985,12 +1027,31 @@ class ModernMainWindow(QMainWindow):
         QTimer.singleShot(150, lambda: self.ui_state_manager.restore_state(self))
         # 초기 체크박스 색상 설정 (기본 모델에 따라)
         QTimer.singleShot(300, self.update_naid_checkbox_colors)
-        
+
         # 프로그램 시작 시 업데이트 확인 (UI 초기화 완료 후 충분한 시간 뒤에)
         QTimer.singleShot(2000, self.check_for_updates)  # 2초 후 시작
 
         # 🆕 멀티 NAI 계정 알림 (업데이트 확인 후)
         QTimer.singleShot(3000, self._show_multi_account_notification)  # 3초 후 시작
+
+        # show() 이후 deferred 초기화: 마지막 검색 상태 + 자동완성 매니저
+        # showEvent → _publish_desktop_window_visibility 가 먼저 발행되도록 0ms 후 처리
+        QTimer.singleShot(0, self._post_show_initialization)
+
+    def _post_show_initialization(self):
+        """show() 직후 처리해야 하는 비핵심 초기화 (UI 즉시 표시를 우선)."""
+        # 마지막 검색 상태 — UI 즉각 영향 없음
+        try:
+            self.load_last_search_state()
+        except Exception as e:
+            print(f"⚠️ load_last_search_state 실패: {e}")
+
+        # AutoCompleteManager — show() 이후 (NAIA_cold_v4.get_autocomplete_manager 시그니처 유지)
+        try:
+            print("🔍 AutoCompleteManager 전역 인스턴스 요청 중...")
+            self.autocomplete_manager = get_autocomplete_manager(app_context=self.app_context)
+        except Exception as e:
+            print(f"⚠️ AutoCompleteManager 초기화 실패: {e}")
 
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)
@@ -5134,27 +5195,7 @@ class ModernMainWindow(QMainWindow):
         return "", "", ""
 
     def check_for_updates(self):
-        """업데이트 확인 스레드를 시작합니다."""
-        current_branch, current_sha, current_date = self.read_current_version()
-        
-        # Git 정보 저장
-        self.current_commit_sha = current_sha
-        self.current_commit_date = current_date
-        
-        # Git이 있는 경우 윈도우 타이틀 업데이트
-        if self.has_git and current_sha:
-            self.update_window_title()
-        
-        # 브랜치가 다르면 경고 메시지 출력
-        if current_branch and current_branch != self.github_branch:
-            print(f"⚠️ 브랜치 불일치: 로컬={current_branch}, 설정={self.github_branch}")
-            # 로컬 브랜치를 우선 사용
-            self.github_branch = current_branch
-        
-        if not current_sha:
-            print("⚠️ Git 정보를 가져올 수 없어 업데이트 확인을 건너뜁니다.")
-            return
-
+        """업데이트 확인 스레드를 시작합니다. Git 조회와 HTTP 요청 모두 워커 스레드에서 수행."""
         # 이전 스레드가 실행 중이면 중복 실행 방지
         if self.update_checker_thread and self.update_checker_thread.isRunning():
             return
@@ -5163,10 +5204,22 @@ class ModernMainWindow(QMainWindow):
             owner=self.github_repo_owner,
             repo=self.github_repo_name,
             branch=self.github_branch,
-            current_sha=current_sha
+            current_sha=None,  # 워커 내부에서 git CLI로 조회
+            project_dir=os.path.dirname(__file__),
         )
+        self.update_checker_thread.local_version_resolved.connect(self._on_local_version_resolved)
         self.update_checker_thread.update_available.connect(self.on_version_checked)
         self.update_checker_thread.start()
+
+    def _on_local_version_resolved(self, branch: str, sha: str, date: str):
+        """워커 스레드가 git CLI로 로컬 정보 조회를 마치면 호출."""
+        self.has_git = bool(sha)
+        self.current_commit_sha = sha
+        self.current_commit_date = date
+        if branch:
+            self.github_branch = branch
+        if sha:
+            self.update_window_title()
 
     def on_version_checked(self, latest_sha: str, commit_message: str, commit_date: str):
         """버전 확인 결과를 처리하고 필요시 업데이트 알림을 표시합니다."""

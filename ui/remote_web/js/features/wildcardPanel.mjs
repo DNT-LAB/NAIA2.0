@@ -51,6 +51,7 @@ export function createWildcardPanel({
       </div>
       <div class="mod-section" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <button class="mod-btn-sm" onclick="wcOpenBrowser()">Browse Files</button>
+        <button class="mod-btn-sm" onclick="openModule('instant_wildcard')">Instant Editor</button>
         <button class="mod-btn-sm" onclick="setModuleParam('wildcard','reset_sequential','')">Reset Seq</button>
         <button class="mod-btn-sm" onclick="setModuleParam('wildcard','reload','')">Reload</button>
         <span style="color:var(--text-dim);font-size:11px;margin-left:auto">Loaded: ${state.wildcard_count || 0}</span>

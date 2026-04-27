@@ -182,6 +182,10 @@ class RemoteBridge(QObject):
         self._kr_tags_loaded = False
         # 캐릭터 분석 역인덱스: char_name_lower → (copyright_group, data_dict)
         self._char_analysis: dict = {}
+        # 서버 측 lazy 인덱스(KR_tags + character_analysis) 워밍업 완료 플래그.
+        # 부팅 후 daemon thread 가 warmup → True 로 세팅 + WS broadcast.
+        # WS 클라이언트는 init_complete 이후 이 broadcast 를 받아야 사용 가능 시점으로 인지.
+        self._lazy_indices_ready = False
         # Rating 필터: Web Remote GSQE 버튼 상태
         self._active_ratings: set = {'g', 's', 'q', 'e'}
         # Tag filter IDs (Non-shared only — Shared는 session dict 사용)
@@ -1948,6 +1952,8 @@ class RemoteBridge(QObject):
             "vibe_transfer": "VibeTransferModule",
             "wildcard": "WildcardStatusModule",
             "instant_wildcard": "InstantWildcardModule",
+            "e621_event": "E621EventModuleV2",
+            "ollama": "OllamaModule",
         }
         target_class = class_map.get(module_id)
         if not target_class:
@@ -2042,8 +2048,14 @@ class RemoteBridge(QObject):
             return self._read_save_directory(ws=ws)
         elif module_id == "wildcard":
             return self._read_wildcard()
+        elif module_id == "instant_wildcard":
+            return self._read_instant_wildcard()
         elif module_id == "chunk":
             return self._read_chunk()
+        elif module_id == "e621_event":
+            return self._read_e621_event()
+        elif module_id == "ollama":
+            return self._read_ollama()
         return {}
 
     def _read_save_directory(self, ws=None) -> dict:
@@ -2422,6 +2434,617 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: conditional_prompt 상태 읽기 실패 — {e}")
             return {}
 
+    # --- E621 Event Module V2 ---
+
+    def _ensure_e621_loaded(self, module) -> bool:
+        """E621 module data/settings lazy-load for remote access."""
+        if not module:
+            return False
+        try:
+            if not getattr(module, "_remote_settings_loaded", False) and hasattr(module, "load_settings"):
+                module.load_settings()
+                module._remote_settings_loaded = True
+            if not getattr(module, "is_loaded", False) and hasattr(module, "load_data"):
+                module.load_data()
+            return bool(getattr(module, "data", None))
+        except Exception as e:
+            print(f"🌐 Remote: E621 데이터 로드 실패 — {e}")
+            return False
+
+    def _e621_view_mode(self, module) -> str:
+        radio = getattr(module, "radio_starred", None)
+        if radio is not None:
+            try:
+                return "starred" if radio.isChecked() else "default"
+            except Exception:
+                pass
+        return getattr(module, "_remote_view_mode", "default")
+
+    def _e621_category_data(self, module, category: str):
+        data = getattr(module, "data", None) or {}
+        for section in ("General", "Species"):
+            section_data = data.get(section, {})
+            if isinstance(section_data, dict) and category in section_data:
+                return section, section_data.get(category)
+        return None, None
+
+    def _e621_collect_tags(self, module, data) -> list:
+        tags = []
+        try:
+            module._collect_all_tags(data, tags)
+        except Exception:
+            tags = []
+        return tags
+
+    def _e621_format_count(self, module, count) -> str:
+        try:
+            return module._format_count(int(count or 0))
+        except Exception:
+            try:
+                return str(int(count or 0))
+            except Exception:
+                return "0"
+
+    def _e621_clean_wiki_text(self, module, text: str) -> str:
+        try:
+            return module._clean_wiki_text(text or "")
+        except Exception:
+            return text or ""
+
+    def _e621_tag_payload(self, module, tag_data: dict) -> dict:
+        tag_name = tag_data.get("tag", "") if isinstance(tag_data, dict) else ""
+        count = tag_data.get("count", 0) if isinstance(tag_data, dict) else 0
+        return {
+            "tag": tag_name,
+            "display": tag_name.replace("_", " "),
+            "kor": tag_data.get("kor", "") if isinstance(tag_data, dict) else "",
+            "count": count,
+            "count_label": self._e621_format_count(module, count),
+            "starred": tag_name in getattr(module, "starred_keys", set()),
+            "hidden": tag_name in getattr(module, "deleted_keys", set()),
+            "matched_in_wiki": bool(tag_data.get("matched_in_wiki", False)) if isinstance(tag_data, dict) else False,
+        }
+
+    def _e621_filter_tags(self, module, tags: list, include_hidden: bool = False) -> list:
+        deleted = getattr(module, "deleted_keys", set())
+        if not include_hidden:
+            tags = [tag for tag in tags if tag.get("tag", "") not in deleted]
+        if self._e621_view_mode(module) == "starred":
+            starred = getattr(module, "starred_keys", set())
+            tags = [tag for tag in tags if tag.get("tag", "") in starred]
+        return tags
+
+    def _e621_update_search_index(self, module, search_text: str):
+        search_text = (search_text or "").strip().lower()
+        module._remote_search_text = search_text
+        module.searched_tree = {}
+        if not search_text:
+            module.is_searching = False
+            return
+        if not getattr(module, "data", None):
+            module.is_searching = False
+            return
+
+        searched_tree = {}
+        data = module.data or {}
+        all_categories = {}
+        for section in ("General", "Species"):
+            section_data = data.get(section, {})
+            if isinstance(section_data, dict):
+                all_categories.update(section_data)
+
+        for category_name, category_data in all_categories.items():
+            if not isinstance(category_data, dict):
+                continue
+            category_folders = {}
+            for folder_name, folder_data in category_data.items():
+                folder_tags = self._e621_collect_tags(module, folder_data)
+                matched = []
+                for tag_data in folder_tags:
+                    tag_name = tag_data.get("tag", "")
+                    matched_in_tag = search_text in tag_name.lower()
+                    matched_in_wiki = False
+                    if not getattr(module, "disable_wiki_search", False) and not matched_in_tag:
+                        wiki_body = tag_data.get("wiki_body", "").lower()
+                        wiki_preview = tag_data.get("wiki_preview", "").lower()
+                        matched_in_wiki = search_text in wiki_body or search_text in wiki_preview
+                    if matched_in_tag or matched_in_wiki:
+                        tagged = dict(tag_data)
+                        tagged["matched_in_wiki"] = matched_in_wiki
+                        matched.append(tagged)
+                if matched:
+                    category_folders[folder_name] = matched
+            if category_folders:
+                searched_tree[category_name] = category_folders
+
+        module.searched_tree = searched_tree
+        module.is_searching = bool(searched_tree)
+
+    def _e621_categories(self, module) -> list:
+        data = getattr(module, "data", None) or {}
+        starred = getattr(module, "starred_keys", set())
+        categories = []
+        for section in ("General", "Species"):
+            section_data = data.get(section, {})
+            if not isinstance(section_data, dict):
+                continue
+            for name in sorted(section_data.keys()):
+                category_data = section_data.get(name, {})
+                tags = self._e621_collect_tags(module, category_data)
+                hidden = getattr(module, "deleted_keys", set())
+                visible_tags = [tag for tag in tags if tag.get("tag", "") not in hidden]
+                starred_count = sum(1 for tag in visible_tags if tag.get("tag", "") in starred)
+                categories.append({
+                    "name": name,
+                    "section": section,
+                    "folder_count": len(category_data) if isinstance(category_data, dict) else 0,
+                    "tag_count": len(visible_tags),
+                    "starred_count": starred_count,
+                    "matched": bool(getattr(module, "is_searching", False) and name in getattr(module, "searched_tree", {})),
+                    "selected": name == getattr(module, "current_category", None),
+                })
+        return categories
+
+    def _e621_folders(self, module) -> list:
+        category = getattr(module, "current_category", None)
+        if not category:
+            return []
+        folders_source = None
+        if getattr(module, "is_searching", False):
+            folders_source = getattr(module, "searched_tree", {}).get(category, {})
+        else:
+            _, folders_source = self._e621_category_data(module, category)
+        if not isinstance(folders_source, dict):
+            return []
+
+        folders = []
+        for folder_name in sorted(folders_source.keys()):
+            tags = self._e621_collect_tags(module, folders_source.get(folder_name))
+            tags = self._e621_filter_tags(module, tags)
+            if not tags:
+                continue
+            folders.append({
+                "name": folder_name,
+                "display": folder_name.replace("_", " "),
+                "tag_count": len(tags),
+                "selected": folder_name == getattr(module, "current_level2", None),
+            })
+        return folders
+
+    def _e621_visible_tags(self, module) -> list:
+        selected_category = getattr(module, "current_category", None)
+        selected_folder = getattr(module, "current_level2", None)
+        tags = []
+        if getattr(module, "is_searching", False):
+            searched_tree = getattr(module, "searched_tree", {})
+            category_items = (
+                [(selected_category, searched_tree.get(selected_category, {}))]
+                if selected_category else list(searched_tree.items())
+            )
+            seen = set()
+            for _, folders in category_items:
+                if not isinstance(folders, dict):
+                    continue
+                folder_items = (
+                    [(selected_folder, folders.get(selected_folder, []))]
+                    if selected_folder else list(folders.items())
+                )
+                for _, folder_tags in folder_items:
+                    for tag_data in folder_tags or []:
+                        tag_name = tag_data.get("tag", "")
+                        if tag_name in seen:
+                            continue
+                        seen.add(tag_name)
+                        tags.append(tag_data)
+        elif selected_category:
+            _, category_data = self._e621_category_data(module, selected_category)
+            if isinstance(category_data, dict):
+                if selected_folder:
+                    tags = self._e621_collect_tags(module, category_data.get(selected_folder, {}))
+                else:
+                    tags = self._e621_collect_tags(module, category_data)
+        tags = self._e621_filter_tags(module, tags)
+        tags.sort(key=lambda item: int(item.get("count") or 0), reverse=True)
+        return tags
+
+    def _e621_find_tag(self, module, tag_name: str) -> dict | None:
+        if not tag_name:
+            return None
+        for tag_data in self._e621_visible_tags(module):
+            if tag_data.get("tag", "") == tag_name:
+                return tag_data
+        data = getattr(module, "data", None) or {}
+        for section in ("General", "Species"):
+            section_data = data.get(section, {})
+            if not isinstance(section_data, dict):
+                continue
+            for category_data in section_data.values():
+                for tag_data in self._e621_collect_tags(module, category_data):
+                    if tag_data.get("tag", "") == tag_name:
+                        return tag_data
+        return None
+
+    def _e621_wiki_payload(self, module, tag_data: dict | None) -> dict:
+        if not tag_data:
+            return {"tag": "", "text": ""}
+        tag_name = tag_data.get("tag", "")
+        count = tag_data.get("count", 0)
+        body = tag_data.get("wiki_body") or tag_data.get("wiki_preview") or ""
+        clean_body = self._e621_clean_wiki_text(module, body) if body else "No wiki text"
+        display = tag_name.replace("_", " ")
+        text = f"Tag: {display}\nCount: {self._e621_format_count(module, count)}\n\n{'=' * 50}\n\n{clean_body}"
+        return {"tag": tag_name, "text": text}
+
+    def _e621_testbench_text(self, module) -> str:
+        edit = getattr(module, "related_tags_edit", None)
+        if edit is not None:
+            try:
+                return edit.toPlainText()
+            except Exception:
+                pass
+        return getattr(
+            module,
+            "_remote_testbench_text",
+            "1girl, 1boy, 2:: e621태그는_강조하여_입력하세요 ::, duo, male/female, nsfw, rating:explicit",
+        )
+
+    def _read_e621_event(self) -> dict:
+        try:
+            module = self._find_module("e621_event")
+            if not module:
+                return {}
+            loaded = self._ensure_e621_loaded(module)
+            selected_name = getattr(module, "_remote_selected_tag", None) or getattr(module, "current_level3", None)
+            selected_tag = self._e621_find_tag(module, selected_name) if loaded else None
+            visible_tags = self._e621_visible_tags(module) if loaded else []
+            tag_limit = 300
+            return {
+                "type": "module_state",
+                "module_id": "e621_event",
+                "data_loaded": loaded,
+                "data_path": str(getattr(module, "data_path", "")),
+                "search_text": getattr(module, "_remote_search_text", "") or (
+                    module.search_input.text() if getattr(module, "search_input", None) else ""
+                ),
+                "view_mode": self._e621_view_mode(module),
+                "disable_translation": bool(getattr(module, "disable_translation", False)),
+                "disable_wiki_search": bool(getattr(module, "disable_wiki_search", False)),
+                "current_category": getattr(module, "current_category", None),
+                "current_level2": getattr(module, "current_level2", None),
+                "categories": self._e621_categories(module) if loaded else [],
+                "folders": self._e621_folders(module) if loaded else [],
+                "tags": [self._e621_tag_payload(module, item) for item in visible_tags[:tag_limit]],
+                "tag_total": len(visible_tags),
+                "tag_limit": tag_limit,
+                "starred_total": len(getattr(module, "starred_keys", set())),
+                "hidden_total": len(getattr(module, "deleted_keys", set())),
+                "hidden_items": sorted(getattr(module, "deleted_keys", set()))[:120],
+                "selected": self._e621_tag_payload(module, selected_tag) if selected_tag else None,
+                "wiki": self._e621_wiki_payload(module, selected_tag),
+                "testbench": self._e621_testbench_text(module),
+            }
+        except Exception as e:
+            print(f"🌐 Remote: e621_event 상태 읽기 실패 — {e}")
+            return {}
+
+    def _broadcast_e621_event_state(self):
+        state = self._read_e621_event()
+        if state:
+            self._broadcast_json(state)
+
+    # --- Ollama Module ---
+
+    def _ollama_supported_models(self) -> list:
+        try:
+            from modules.ollama_module import SUPPORTED_MODELS
+            return list(SUPPORTED_MODELS)
+        except Exception:
+            return [
+                "huihui_ai/qwen3-vl-abliterated:8b-instruct",
+                "huihui_ai/qwen3-vl-abliterated:4b-instruct",
+            ]
+
+    def _ollama_creativity_options(self) -> list:
+        try:
+            from modules.ollama_module import CREATIVITY_PROFILES
+            return [
+                {"value": value, "label": profile.get("label", str(value))}
+                for value, profile in sorted(CREATIVITY_PROFILES.items())
+            ]
+        except Exception:
+            return [
+                {"value": 0.1, "label": "Conservative"},
+                {"value": 0.3, "label": "Restrained"},
+                {"value": 0.5, "label": "Default"},
+                {"value": 0.7, "label": "Creative"},
+                {"value": 0.9, "label": "Bold"},
+            ]
+
+    def _probe_ollama_status(self, module, include_install_probe: bool = False):
+        try:
+            import requests
+            response = requests.get("http://localhost:11434/api/tags", timeout=1)
+            if response.status_code == 200:
+                models_data = response.json().get("models", [])
+                module.ollama_installed = True
+                module.ollama_server_running = True
+                module.available_models = [item.get("name", "") for item in models_data if item.get("name")]
+                return
+        except Exception:
+            pass
+
+        module.ollama_server_running = False
+        module.available_models = []
+        if include_install_probe:
+            try:
+                import subprocess
+                import sys
+                proc = subprocess.run(
+                    ["ollama", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                )
+                module.ollama_installed = proc.returncode == 0
+            except Exception:
+                module.ollama_installed = bool(getattr(module, "ollama_installed", False))
+
+    def _ollama_input_text(self, module) -> str:
+        edit = getattr(module, "input_text", None)
+        if edit is not None:
+            try:
+                return edit.toPlainText()
+            except Exception:
+                pass
+        return getattr(module, "_remote_input_text", "")
+
+    def _ollama_output_text(self, module) -> str:
+        edit = getattr(module, "output_text", None)
+        if edit is not None:
+            try:
+                return edit.toPlainText()
+            except Exception:
+                pass
+        return getattr(module, "_remote_output_text", "")
+
+    def _ollama_creativity_value(self, module) -> float:
+        combo = getattr(module, "creativity_combo", None)
+        if combo is not None:
+            try:
+                return float(combo.currentData())
+            except Exception:
+                pass
+        return float(getattr(module, "_remote_creativity", 0.5))
+
+    def _read_ollama(self) -> dict:
+        try:
+            module = self._find_module("ollama")
+            if not module:
+                return {}
+            if not getattr(module, "_remote_ollama_state_initialized", False):
+                self._probe_ollama_status(module, include_install_probe=True)
+                module._remote_ollama_state_initialized = True
+            worker = getattr(module, "worker", None)
+            is_running = bool(worker and worker.isRunning())
+            return {
+                "type": "module_state",
+                "module_id": "ollama",
+                "installed": bool(getattr(module, "ollama_installed", False)),
+                "server_running": bool(getattr(module, "ollama_server_running", False)),
+                "available_models": list(getattr(module, "available_models", [])),
+                "supported_models": self._ollama_supported_models(),
+                "selected_model": getattr(module, "selected_model", ""),
+                "load_model": bool(module.load_checkbox.isChecked()) if getattr(module, "load_checkbox", None) else bool(getattr(module, "_remote_load_model", False)),
+                "auto_offload": bool(module.offload_checkbox.isChecked()) if getattr(module, "offload_checkbox", None) else bool(getattr(module, "_remote_auto_offload", True)),
+                "e621_nsfw_boost": bool(module.e621_nsfw_boost_checkbox.isChecked()) if getattr(module, "e621_nsfw_boost_checkbox", None) else bool(getattr(module, "_remote_e621_nsfw_boost", False)),
+                "creativity": self._ollama_creativity_value(module),
+                "creativity_options": self._ollama_creativity_options(),
+                "tag_db_loaded": bool(getattr(module.tag_db, "is_loaded", False)),
+                "tag_count": module.tag_db.tag_count() if getattr(module.tag_db, "is_loaded", False) else 0,
+                "input": self._ollama_input_text(module),
+                "output": self._ollama_output_text(module),
+                "status": getattr(module, "_remote_status_text", "") or (
+                    module.status_label.text() if getattr(module, "status_label", None) else ""
+                ),
+                "progress": int(getattr(module, "_remote_progress", 0)),
+                "is_running": is_running,
+                "stages": list(getattr(module, "_remote_stage_outputs", []))[-20:],
+            }
+        except Exception as e:
+            print(f"🌐 Remote: ollama 상태 읽기 실패 — {e}")
+            return {}
+
+    def _broadcast_ollama_state(self):
+        state = self._read_ollama()
+        if state:
+            self._broadcast_json(state)
+
+    def _on_remote_ollama_status(self, module, status: str):
+        module._remote_status_text = status
+        self._broadcast_ollama_state()
+
+    def _on_remote_ollama_progress(self, module, percent: int):
+        module._remote_progress = int(percent)
+        self._broadcast_ollama_state()
+
+    def _on_remote_ollama_stage(self, module, stage_name: str, content: str, color: str):
+        stages = list(getattr(module, "_remote_stage_outputs", []))
+        stages.append({"stage": stage_name, "content": content, "color": color})
+        module._remote_stage_outputs = stages[-20:]
+        self._broadcast_ollama_state()
+
+    def _on_remote_ollama_complete(self, module, result: dict):
+        combined = result.get("combined_prompt", "")
+        module._remote_output_text = combined
+        module._remote_status_text = "Conversion complete"
+        module._remote_progress = 100
+        if getattr(module, "output_text", None) is not None:
+            module.output_text.setPlainText(combined)
+        if getattr(module, "copy_btn", None) is not None:
+            module.copy_btn.setEnabled(bool(combined))
+        self._broadcast_ollama_state()
+
+    def _on_remote_ollama_failed(self, module, error: str):
+        module._remote_status_text = f"Conversion failed: {error}"
+        self._broadcast_json({"type": "toast", "message": module._remote_status_text, "level": "error"})
+        self._broadcast_ollama_state()
+
+    def _on_remote_ollama_finished(self, module):
+        worker = getattr(module, "worker", None)
+        if worker:
+            worker.deleteLater()
+            module.worker = None
+        self._probe_ollama_status(module, include_install_probe=False)
+        self._broadcast_ollama_state()
+
+    def _on_remote_ollama_server_action_complete(self, module, success: bool):
+        module._server_action_worker = None
+        self._probe_ollama_status(module, include_install_probe=True)
+        module._remote_status_text = "Ollama server action complete" if success else "Ollama server action failed"
+        self._broadcast_ollama_state()
+
+    def _set_ollama(self, key: str, value: str):
+        try:
+            module = self._find_module("ollama")
+            if not module:
+                return
+            should_broadcast = True
+
+            if key == "refresh":
+                self._probe_ollama_status(module, include_install_probe=True)
+                if not getattr(module.tag_db, "is_loaded", False):
+                    try:
+                        module.tag_db.load()
+                    except Exception as e:
+                        print(f"🌐 Remote: Ollama tag DB load 실패 — {e}")
+            elif key == "model":
+                module.selected_model = value
+                if getattr(module, "model_combo", None) is not None:
+                    idx = module.model_combo.findText(value)
+                    if idx >= 0:
+                        module.model_combo.setCurrentIndex(idx)
+            elif key == "auto_offload":
+                checked = value == "true"
+                module._remote_auto_offload = checked
+                if getattr(module, "offload_checkbox", None) is not None:
+                    module.offload_checkbox.setChecked(checked)
+            elif key == "e621_nsfw_boost":
+                checked = value == "true"
+                module._remote_e621_nsfw_boost = checked
+                if getattr(module, "e621_nsfw_boost_checkbox", None) is not None:
+                    module.e621_nsfw_boost_checkbox.setChecked(checked)
+            elif key == "creativity":
+                creativity = float(value)
+                module._remote_creativity = creativity
+                if getattr(module, "creativity_combo", None) is not None:
+                    for idx in range(module.creativity_combo.count()):
+                        if float(module.creativity_combo.itemData(idx)) == creativity:
+                            module.creativity_combo.setCurrentIndex(idx)
+                            break
+            elif key == "input":
+                module._remote_input_text = value
+                if getattr(module, "input_text", None) is not None:
+                    module.input_text.setPlainText(value)
+                should_broadcast = False
+            elif key == "server_action":
+                if value not in ("start", "stop"):
+                    return
+                active = getattr(module, "_server_action_worker", None)
+                if active and active.isRunning():
+                    self._broadcast_json({"type": "toast", "message": "Ollama server action is already running", "level": "error"})
+                    return
+                from modules.ollama_module import OllamaServerActionWorker
+                module._remote_status_text = "Starting Ollama server..." if value == "start" else "Stopping Ollama server..."
+                self._broadcast_ollama_state()
+                worker = OllamaServerActionWorker(action=value)
+                module._server_action_worker = worker
+                worker.action_completed.connect(lambda success, m=module: self._on_remote_ollama_server_action_complete(m, success))
+                worker.finished.connect(worker.deleteLater)
+                worker.start()
+            elif key == "load_model":
+                checked = value == "true"
+                module._remote_load_model = checked
+                if getattr(module, "load_checkbox", None) is not None:
+                    module.load_checkbox.setChecked(checked)
+                elif checked:
+                    import requests
+                    requests.post(
+                        "http://localhost:11434/api/chat",
+                        json={
+                            "model": module.selected_model,
+                            "messages": [{"role": "user", "content": "test"}],
+                            "stream": False,
+                            "keep_alive": -1,
+                        },
+                        timeout=120,
+                    )
+                else:
+                    import requests
+                    requests.post(
+                        "http://localhost:11434/api/chat",
+                        json={
+                            "model": module.selected_model,
+                            "messages": [{"role": "user", "content": ""}],
+                            "stream": False,
+                            "keep_alive": 0,
+                        },
+                        timeout=10,
+                    )
+            elif key == "convert":
+                prompt = value.strip() or self._ollama_input_text(module).strip()
+                if not prompt:
+                    self._broadcast_json({"type": "toast", "message": "Ollama prompt is empty", "level": "error"})
+                    return
+                worker = getattr(module, "worker", None)
+                if worker and worker.isRunning():
+                    self._broadcast_json({"type": "toast", "message": "Ollama conversion is already running", "level": "error"})
+                    return
+                if not getattr(module.tag_db, "is_loaded", False):
+                    module.tag_db.load()
+                module._remote_input_text = prompt
+                module._remote_output_text = ""
+                module._remote_progress = 0
+                module._remote_stage_outputs = []
+                if getattr(module, "input_text", None) is not None:
+                    module.input_text.setPlainText(prompt)
+                from modules.ollama_module import OllamaConversionWorker
+                worker = OllamaConversionWorker(
+                    prompt=prompt,
+                    model=getattr(module, "selected_model", self._ollama_supported_models()[0]),
+                    tag_db=module.tag_db,
+                    auto_offload=bool(module.offload_checkbox.isChecked()) if getattr(module, "offload_checkbox", None) else bool(getattr(module, "_remote_auto_offload", True)),
+                    e621_nsfw_boost=bool(module.e621_nsfw_boost_checkbox.isChecked()) if getattr(module, "e621_nsfw_boost_checkbox", None) else bool(getattr(module, "_remote_e621_nsfw_boost", False)),
+                    creativity=self._ollama_creativity_value(module),
+                )
+                module.worker = worker
+                worker.conversion_completed.connect(lambda result, m=module: self._on_remote_ollama_complete(m, result))
+                worker.conversion_failed.connect(lambda error, m=module: self._on_remote_ollama_failed(m, error))
+                worker.status_changed.connect(lambda status, m=module: self._on_remote_ollama_status(m, status))
+                worker.progress_updated.connect(lambda percent, m=module: self._on_remote_ollama_progress(m, percent))
+                worker.stage_output.connect(lambda stage, content, color, m=module: self._on_remote_ollama_stage(m, stage, content, color))
+                worker.finished.connect(lambda m=module: self._on_remote_ollama_finished(m))
+                worker.start()
+            elif key == "cancel":
+                worker = getattr(module, "worker", None)
+                if worker and worker.isRunning():
+                    worker.cancel()
+                    worker.quit()
+            elif key == "copy_output":
+                output = self._ollama_output_text(module).strip()
+                if output:
+                    from PyQt6.QtWidgets import QApplication
+                    QApplication.clipboard().setText(output)
+                    self._broadcast_json({"type": "toast", "message": "Ollama output copied", "level": "success"})
+            else:
+                should_broadcast = False
+
+            if should_broadcast:
+                self._broadcast_ollama_state()
+        except Exception as e:
+            print(f"🌐 Remote: ollama 설정 실패 — {key}={value}: {e}")
+            self._broadcast_json({"type": "toast", "message": f"Ollama action failed: {e}", "level": "error"})
+
     def _do_set_module(self, module_id: str, key: str, value: str):
         """웹에서 변경한 모듈 파라미터를 메인 앱에 반영"""
         if module_id == "prompt_engineering":
@@ -2442,6 +3065,12 @@ class RemoteBridge(QObject):
             self._set_save_directory(key, value)
         elif module_id == "wildcard":
             self._set_wildcard(key, value)
+        elif module_id == "instant_wildcard":
+            self._set_instant_wildcard(key, value)
+        elif module_id == "e621_event":
+            self._set_e621_event(key, value)
+        elif module_id == "ollama":
+            self._set_ollama(key, value)
 
     def _set_auto_save_settings(self, key: str, value: str):
         try:
@@ -2796,6 +3425,155 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: conditional_prompt 설정 실패 — {key}={value}: {e}")
 
+    def _set_e621_event(self, key: str, value: str):
+        try:
+            m = self._find_module("e621_event")
+            if not m:
+                return
+            self._ensure_e621_loaded(m)
+            should_broadcast = True
+
+            if key == "search":
+                search_text = value.strip()
+                if getattr(m, "search_input", None) is not None:
+                    m.search_input.setText(search_text)
+                self._e621_update_search_index(m, search_text)
+                m.current_category = None
+                m.current_level2 = None
+                m.current_level3 = None
+                m._remote_selected_tag = None
+            elif key == "reset":
+                if getattr(m, "widget", None) is not None and hasattr(m, "on_reset"):
+                    try:
+                        m.on_reset()
+                    except Exception:
+                        pass
+                m.current_category = None
+                m.current_level2 = None
+                m.current_level3 = None
+                m._remote_selected_tag = None
+                m._remote_search_text = ""
+                m.is_searching = False
+                m.searched_tree = {}
+            elif key == "view_mode":
+                mode = "starred" if value == "starred" else "default"
+                m._remote_view_mode = mode
+                if getattr(m, "radio_starred", None) is not None and getattr(m, "radio_default", None) is not None:
+                    if mode == "starred":
+                        m.radio_starred.setChecked(True)
+                    else:
+                        m.radio_default.setChecked(True)
+            elif key == "category":
+                category = value or None
+                m.current_category = category
+                m.current_level2 = None
+                m.current_level3 = None
+                m._remote_selected_tag = None
+                if category and getattr(m, "category_buttons", None):
+                    button = m.category_buttons.get(category)
+                    if button is not None:
+                        try:
+                            button.setChecked(True)
+                        except Exception:
+                            pass
+            elif key == "level2":
+                m.current_level2 = value or None
+                m.current_level3 = None
+                m._remote_selected_tag = None
+            elif key == "selected_tag":
+                tag_name = value or None
+                m.current_level3 = tag_name
+                m._remote_selected_tag = tag_name
+                if tag_name and getattr(m, "level3_list", None) is not None:
+                    try:
+                        for row in range(m.level3_list.count()):
+                            item = m.level3_list.item(row)
+                            tag_data = item.data(Qt.ItemDataRole.UserRole)
+                            if tag_data and tag_data.get("tag", "") == tag_name:
+                                m.level3_list.setCurrentItem(item)
+                                m.on_level3_clicked(item)
+                                break
+                    except Exception:
+                        pass
+            elif key == "toggle_star":
+                tag_name = value.strip()
+                if tag_name:
+                    if tag_name in m.starred_keys:
+                        m.starred_keys.discard(tag_name)
+                    else:
+                        m.starred_keys.add(tag_name)
+                    m.save_starred_keys()
+                    m.current_level3 = tag_name
+                    m._remote_selected_tag = tag_name
+                    if hasattr(m, "update_category_starred_labels"):
+                        try:
+                            m.update_category_starred_labels()
+                        except Exception:
+                            pass
+            elif key == "hide":
+                tag_name = value.strip()
+                if tag_name:
+                    m.deleted_keys.add(tag_name)
+                    m.save_deleted_keys()
+                    m.current_level3 = None
+                    m._remote_selected_tag = None
+            elif key == "restore":
+                tag_name = value.strip()
+                if tag_name:
+                    m.deleted_keys.discard(tag_name)
+                    m.save_deleted_keys()
+            elif key == "disable_translation":
+                m.disable_translation = (value == "true")
+                if getattr(m, "disable_translation_checkbox", None) is not None:
+                    m.disable_translation_checkbox.setChecked(m.disable_translation)
+                m.save_settings()
+            elif key == "disable_wiki_search":
+                m.disable_wiki_search = (value == "true")
+                if getattr(m, "disable_wiki_search_checkbox", None) is not None:
+                    m.disable_wiki_search_checkbox.setChecked(m.disable_wiki_search)
+                m.save_settings()
+                if getattr(m, "_remote_search_text", ""):
+                    self._e621_update_search_index(m, m._remote_search_text)
+            elif key == "testbench":
+                m._remote_testbench_text = value
+                if getattr(m, "related_tags_edit", None) is not None:
+                    m.related_tags_edit.setPlainText(value)
+            elif key == "generate":
+                prompt = value.strip() or self._e621_testbench_text(m)
+                tags = [tag.strip() for tag in prompt.split(",") if tag.strip()]
+                if not tags:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "E621 testbench is empty",
+                        "level": "error",
+                    })
+                    return
+                m._remote_testbench_text = prompt
+                if getattr(m, "related_tags_edit", None) is not None:
+                    m.related_tags_edit.setPlainText(prompt)
+                tags_data = {
+                    "id": 10000000,
+                    "artist": [],
+                    "copyright": [],
+                    "character": [],
+                    "general": tags,
+                    "meta": [],
+                }
+                if hasattr(m, "signals") and hasattr(m.signals, "generation_requested"):
+                    m.signals.generation_requested.emit(tags_data)
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": f"E621 generation requested ({len(tags)} tags)",
+                    "level": "success",
+                })
+            else:
+                should_broadcast = False
+
+            if should_broadcast:
+                self._broadcast_e621_event_state()
+        except Exception as e:
+            print(f"🌐 Remote: e621_event 설정 실패 — {key}={value}: {e}")
+
     # --- Character Reference / Vibe Transfer (이미지 업로드 모듈) ---
 
     def _generate_thumbnail_b64(self, pil_image, max_side=128) -> str:
@@ -3011,6 +3789,250 @@ class RemoteBridge(QObject):
             self.app_context.stealth_mode = prev_stealth
 
     # ── Wildcard Module ──
+
+    # --- Instant Wildcard Module ---
+
+    def _instant_wildcard_filename(self, name: str) -> str:
+        filename = Path(str(name or "").strip()).name
+        if not filename:
+            return ""
+        if not filename.endswith(".json"):
+            filename += ".json"
+        return filename
+
+    def _reload_instant_wildcards(self, module) -> bool:
+        if not module:
+            return False
+        try:
+            module.save_path.mkdir(parents=True, exist_ok=True)
+            default_file = module.save_path / "default.json"
+            if not default_file.exists() and hasattr(module, "create_initial_files"):
+                module.create_initial_files()
+
+            if getattr(module, "file_combo", None) is not None and getattr(module, "key_combo", None) is not None:
+                module.load_all_wildcards()
+            else:
+                module.json_data.clear()
+                module.instant_wildcard_dict.clear()
+                module.instant_wildcard_tree.clear()
+                json_files = sorted([
+                    item.name for item in module.save_path.glob("*.json")
+                    if item.name != "wc_metadata.json"
+                ])
+                if "default.json" in json_files:
+                    json_files.remove("default.json")
+                    json_files.insert(0, "default.json")
+
+                for filename in json_files:
+                    filepath = module.save_path / filename
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as handle:
+                            data = json.load(handle)
+                        if not isinstance(data, dict):
+                            data = {}
+                        module.json_data[filename] = data
+                        basename = filename[:-5] if filename.endswith(".json") else filename
+                        module.instant_wildcard_tree[basename] = data.copy()
+                        for key, value in data.items():
+                            flat_key = key
+                            if flat_key in module.instant_wildcard_dict and basename != "default":
+                                flat_key = f"{flat_key} ({basename})"
+                            module.instant_wildcard_dict[flat_key] = value
+                    except Exception as e:
+                        print(f"🌐 Remote: instant wildcard 파일 로드 실패 — {filename}: {e}")
+
+                if hasattr(module, "signals") and hasattr(module.signals, "wildcards_updated"):
+                    module.signals.wildcards_updated.emit(module.instant_wildcard_dict)
+                wildcard_manager = getattr(getattr(module, "app_context", None), "wildcard_manager", None)
+                if wildcard_manager:
+                    wildcard_manager.update_instant_wildcards(
+                        module.instant_wildcard_dict,
+                        module.instant_wildcard_tree,
+                    )
+
+            if module.json_data:
+                if module.current_file not in module.json_data:
+                    module.current_file = next(iter(module.json_data.keys()))
+                current_items = module.json_data.get(module.current_file, {})
+                if current_items and module.current_key not in current_items:
+                    module.current_key = next(iter(sorted(current_items.keys())))
+                elif not current_items:
+                    module.current_key = None
+            else:
+                module.current_file = None
+                module.current_key = None
+            return True
+        except Exception as e:
+            print(f"🌐 Remote: instant_wildcard reload 실패 — {e}")
+            return False
+
+    def _write_instant_wildcard_file(self, module, filename: str) -> bool:
+        filename = self._instant_wildcard_filename(filename)
+        if not filename:
+            return False
+        try:
+            module.save_path.mkdir(parents=True, exist_ok=True)
+            filepath = module.save_path / filename
+            data = module.json_data.get(filename, {})
+            with open(filepath, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+            self._reload_instant_wildcards(module)
+            return True
+        except Exception as e:
+            print(f"🌐 Remote: instant_wildcard 저장 실패 — {filename}: {e}")
+            return False
+
+    def _read_instant_wildcard(self) -> dict:
+        try:
+            module = self._find_module("instant_wildcard")
+            if not module:
+                return {}
+            self._reload_instant_wildcards(module)
+            files = []
+            for filename in sorted(module.json_data.keys(), key=lambda name: (name != "default.json", name)):
+                data = module.json_data.get(filename, {})
+                group = filename[:-5] if filename.endswith(".json") else filename
+                files.append({
+                    "name": filename,
+                    "group": group,
+                    "count": len(data) if isinstance(data, dict) else 0,
+                    "selected": filename == module.current_file,
+                })
+
+            current_file = module.current_file
+            current_data = module.json_data.get(current_file, {}) if current_file else {}
+            items = []
+            if isinstance(current_data, dict):
+                for key in sorted(current_data.keys()):
+                    items.append({
+                        "key": key,
+                        "value": current_data.get(key, ""),
+                        "selected": key == module.current_key,
+                    })
+            current_value = ""
+            if current_file and module.current_key:
+                current_value = module.json_data.get(current_file, {}).get(module.current_key, "")
+
+            return {
+                "type": "module_state",
+                "module_id": "instant_wildcard",
+                "files": files,
+                "items": items,
+                "current_file": current_file,
+                "current_group": current_file[:-5] if current_file and current_file.endswith(".json") else current_file,
+                "current_key": module.current_key,
+                "current_value": current_value,
+                "flat_count": len(getattr(module, "instant_wildcard_dict", {})),
+                "save_path": str(getattr(module, "save_path", "")),
+            }
+        except Exception as e:
+            print(f"🌐 Remote: instant_wildcard 상태 읽기 실패 — {e}")
+            return {}
+
+    def _broadcast_instant_wildcard_state(self):
+        state = self._read_instant_wildcard()
+        if state:
+            self._broadcast_json(state)
+        wildcard_state = self._read_wildcard()
+        if wildcard_state:
+            self._broadcast_json(wildcard_state)
+
+    def _set_instant_wildcard(self, key: str, value: str):
+        try:
+            module = self._find_module("instant_wildcard")
+            if not module:
+                return
+            self._reload_instant_wildcards(module)
+            should_broadcast = True
+
+            if key == "reload":
+                self._reload_instant_wildcards(module)
+            elif key == "select_file":
+                filename = self._instant_wildcard_filename(value)
+                if filename in module.json_data:
+                    module.current_file = filename
+                    data = module.json_data.get(filename, {})
+                    module.current_key = next(iter(sorted(data.keys()))) if data else None
+                    if getattr(module, "file_combo", None) is not None:
+                        module.file_combo.setCurrentText(filename)
+            elif key == "select_key":
+                item_key = value.strip()
+                if module.current_file and item_key in module.json_data.get(module.current_file, {}):
+                    module.current_key = item_key
+                    if getattr(module, "key_combo", None) is not None:
+                        module.key_combo.setCurrentText(item_key)
+                    if getattr(module, "value_edit", None) is not None:
+                        module.value_edit.setPlainText(module.json_data[module.current_file][item_key])
+            elif key == "value":
+                if module.current_file and module.current_key:
+                    module.json_data.setdefault(module.current_file, {})[module.current_key] = value
+                    self._write_instant_wildcard_file(module, module.current_file)
+            elif key == "upsert":
+                payload = json.loads(value)
+                filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)
+                item_key = str(payload.get("key", "")).strip()
+                item_value = str(payload.get("value", ""))
+                if not filename or not item_key:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "Instant wildcard file/key is required",
+                        "level": "error",
+                    })
+                    return
+                module.json_data.setdefault(filename, {})[item_key] = item_value
+                module.current_file = filename
+                module.current_key = item_key
+                self._write_instant_wildcard_file(module, filename)
+            elif key == "delete":
+                payload = json.loads(value)
+                filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)
+                item_key = str(payload.get("key", "")).strip()
+                if filename in module.json_data and item_key in module.json_data[filename]:
+                    del module.json_data[filename][item_key]
+                    image_path = Path("save") / "instant_wildcard" / "images" / filename[:-5] / f"{item_key}.png"
+                    if image_path.exists():
+                        try:
+                            image_path.unlink()
+                        except Exception as e:
+                            print(f"🌐 Remote: instant wildcard 이미지 삭제 실패 — {e}")
+                    if module.current_file == filename and module.current_key == item_key:
+                        remaining = module.json_data.get(filename, {})
+                        module.current_key = next(iter(sorted(remaining.keys()))) if remaining else None
+                    self._write_instant_wildcard_file(module, filename)
+            elif key == "rename":
+                payload = json.loads(value)
+                filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)
+                old_key = str(payload.get("old_key", "")).strip()
+                new_key = str(payload.get("new_key", "")).strip()
+                if filename in module.json_data and old_key in module.json_data[filename] and new_key:
+                    if new_key != old_key:
+                        module.json_data[filename][new_key] = module.json_data[filename].pop(old_key)
+                        old_image = Path("save") / "instant_wildcard" / "images" / filename[:-5] / f"{old_key}.png"
+                        new_image = Path("save") / "instant_wildcard" / "images" / filename[:-5] / f"{new_key}.png"
+                        if old_image.exists():
+                            try:
+                                new_image.parent.mkdir(parents=True, exist_ok=True)
+                                old_image.rename(new_image)
+                            except Exception as e:
+                                print(f"🌐 Remote: instant wildcard 이미지 이름 변경 실패 — {e}")
+                    module.current_file = filename
+                    module.current_key = new_key
+                    self._write_instant_wildcard_file(module, filename)
+            elif key == "add_group":
+                filename = self._instant_wildcard_filename(value)
+                if filename:
+                    if filename not in module.json_data:
+                        module.json_data[filename] = {}
+                        self._write_instant_wildcard_file(module, filename)
+                    module.current_file = filename
+                    module.current_key = None
+            else:
+                should_broadcast = False
+
+            if should_broadcast:
+                self._broadcast_instant_wildcard_state()
+        except Exception as e:
+            print(f"🌐 Remote: instant_wildcard 설정 실패 — {key}={value}: {e}")
 
     def _read_wildcard(self) -> dict:
         """와일드카드 모듈 상태 읽기"""
@@ -3748,7 +4770,10 @@ class RemoteBridge(QObject):
                 }
             if extra_tag_info:
                 result['extra_tag_info'] = extra_tag_info
-        # 캐릭터 태그 → character_analysis 상세 정보 추가
+        # 캐릭터 태그 → character_analysis 상세 정보 추가 (첫 호출 시 lazy 빌드)
+        if result.get('cat') == 'character':
+            if not self._char_analysis:
+                self._load_char_analysis()
         if result.get('cat') == 'character' and self._char_analysis:
             match = self._char_analysis.get(tag_lower)
             if match:
@@ -4823,8 +5848,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             # Shared Mode 에서는 호스트 잔액 노출 금지
             if bridge._anlas_cache and not bridge.shared_server_mode:
                 await ws.send_text(json.dumps(bridge._anlas_payload()))
-            # init_complete: 클라이언트에 초기화 완료 신호 (복원 가드 해제용)
+            # init_complete: 클라이언트에 캐시 도착 완료 신호 (복원 가드 해제용)
+            # 단 사용자 사용 가능 시점은 lazy_indices_ready 도 도착해야 함.
             await ws.send_text(json.dumps({"type": "init_complete"}))
+            # 이미 lazy 인덱스 워밍업이 끝난 상태(재연결/늦은 접속) 면 즉시 알린다.
+            if bridge._lazy_indices_ready:
+                await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
             # 메인 스레드에서 캐시 갱신 + broadcast (초기화 타이밍 이슈 방지)
             bridge.request_refresh_cache.emit()
             # Send module badge states (automation countdown, character count)
@@ -5485,11 +6514,35 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     if bridge.shared_server_mode:
         print(f"🌐 Remote: Shared Server Mode 활성 상태로 시작")
 
-    # KR_tags 인덱스 + character_analysis 백그라운드 로드 (첫 검색 지연 방지)
-    def _bg_load():
-        bridge._load_kr_tags()
-        bridge._load_char_analysis()
-    threading.Thread(target=_bg_load, daemon=True, name="KR-Tags-Loader").start()
+    # KR_tags 인덱스 + character_analysis 는 부팅 main thread 가 끝난 직후
+    # daemon thread 에서 워밍업한다. 부팅 자체는 이미 lazy 라 안 늦지만,
+    # "사용자 사용 가능 시점"은 이 인덱스가 빌드 완료되어야 검색/자동완성/태그 lookup 이
+    # 정상 동작. 완료 시 모든 WS 클라이언트에 broadcast 하여 boot indicator 와 동기화.
+    def _bg_warmup_lazy_indices():
+        try:
+            bridge._load_kr_tags()
+        except Exception as e:
+            print(f"🌐 Remote: KR_tags warmup 실패 — {e}")
+        try:
+            bridge._load_char_analysis()
+        except Exception as e:
+            print(f"🌐 Remote: character_analysis warmup 실패 — {e}")
+        bridge._lazy_indices_ready = True
+        # event loop 가 준비될 때까지 잠깐 대기 (NAIA-RemoteAPI thread 가 set_event_loop 호출)
+        import time as _time
+        for _ in range(50):
+            if bridge._loop is not None:
+                break
+            _time.sleep(0.1)
+        if bridge._loop is not None and bridge._ws_manager is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    bridge._ws_manager.broadcast_json({"type": "lazy_indices_ready"}),
+                    bridge._loop,
+                )
+            except Exception as e:
+                print(f"🌐 Remote: lazy_indices_ready broadcast 실패 — {e}")
+    threading.Thread(target=_bg_warmup_lazy_indices, daemon=True, name="LazyIndices-Warmup").start()
 
     # FastAPI 앱 생성 + uvicorn 시작
     app = create_app(bridge, ws_manager)

@@ -92,6 +92,7 @@ export function createResultContextMenu({
   onShowMetadata = null,
   onImageAction = null,
   getMode = () => '',
+  getCurrentSavedPath = () => '',
 }) {
   let menu = null;
   let metadataModal = null;
@@ -232,10 +233,16 @@ export function createResultContextMenu({
     return null;
   }
 
+  function isElementVisible(element) {
+    if (!element || !element.getClientRects().length) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  }
+
   function hasVisibleImage(image) {
     if (!image || !image.getAttribute('src')) return false;
     if (image.id === 'preview') return isPreviewVisible(image);
-    return true;
+    return isElementVisible(image);
   }
 
   function getImagePlanePath(sourceImage) {
@@ -243,13 +250,21 @@ export function createResultContextMenu({
       if (sourceImage.dataset && sourceImage.dataset.source === 'saved' && sourceImage.dataset.path) {
         return sourceImage.dataset.path;
       }
-      return extractViewerPathFromSrc(sourceImage.getAttribute('src'));
+      const pathFromSrc = extractViewerPathFromSrc(sourceImage.getAttribute('src'));
+      if (pathFromSrc) return pathFromSrc;
+      if (sourceImage.id === 'preview' && sourceImage.dataset?.source === 'current') {
+        return String(getCurrentSavedPath() || '');
+      }
+      return '';
     }
     const preview = document.getElementById('preview');
     if (preview && preview.dataset && preview.dataset.source === 'saved' && preview.dataset.path) {
       return preview.dataset.path;
     }
-    return preview ? extractViewerPathFromSrc(preview.getAttribute('src')) : '';
+    const pathFromPreview = preview ? extractViewerPathFromSrc(preview.getAttribute('src')) : '';
+    if (pathFromPreview) return pathFromPreview;
+    if (preview?.dataset?.source === 'current') return String(getCurrentSavedPath() || '');
+    return '';
   }
 
   function buildContext(source, path = '', hasImage = false, imageSrc = '') {

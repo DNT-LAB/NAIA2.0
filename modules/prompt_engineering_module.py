@@ -1673,14 +1673,18 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if self.widget:
                 self.update_visibility_for_mode(current_mode)
             
-            # API 모드 변경 시그널 연결
-            self.app_context.subscribe("api_mode_changed", self.on_api_mode_changed_preset)
+            # API 모드 변경 시그널 연결 — controller가 on_initialize를 두 번 호출하므로 중복 가드
+            if not getattr(self, "_api_mode_subscribed", False):
+                self.app_context.subscribe("api_mode_changed", self.on_api_mode_changed_preset)
+                self._api_mode_subscribed = True
             
         self.load_mode_settings()
         
         # 지연 초기화 - MainWindow가 완전히 초기화된 후 실행
-        # 500ms 지연으로 충분한 초기화 시간 확보
-        QTimer.singleShot(500, self.delayed_preset_initialization)
+        # 500ms 지연으로 충분한 초기화 시간 확보 (idempotent: 두 번째 호출에서는 재예약하지 않음)
+        if not getattr(self, "_delayed_preset_scheduled", False):
+            self._delayed_preset_scheduled = True
+            QTimer.singleShot(500, self.delayed_preset_initialization)
     
     # ==================== 퀵 프리셋 관련 메서드 ====================
     

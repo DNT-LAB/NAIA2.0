@@ -373,6 +373,13 @@ class TaggerWorker(QThread):
 
     def run(self):
         try:
+            # transitive torch DLL 의존이 있을 경우 [WinError 1114] 회피용 안전망
+            try:
+                from core.dll_fix import load_torch_dlls
+                load_torch_dlls()
+            except Exception:
+                pass
+
             global HAS_TAGGER_LIBS, ort
             if not HAS_TAGGER_LIBS:
                 # find_spec과 실제 import 불일치 대비: 한번 더 시도

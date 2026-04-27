@@ -110,6 +110,7 @@ const viewerPanel    = $('viewerPanel');
 const viewerGrid     = $('viewerGrid');
 const viewerCountEl  = $('viewerCount');
 const viewerLoading  = $('viewerLoading');
+const resultInfoContent = $('resultInfoContent');
 const rightTabButtons = Array.from(document.querySelectorAll('.right-tab-btn'));
 const rightTabPanes   = Array.from(document.querySelectorAll('.right-tab-pane'));
 const statsGenCount  = $('statsGenCount');
@@ -959,6 +960,9 @@ function onViewerNewImage(m) {
   if (didPrepend) {
     prependViewerThumb(m.rel_path);
   }
+  if (_viewerNavIdx < 0 || !_currentViewerPath || _currentViewerPath === m.rel_path) {
+    _loadResultInfo(m.rel_path);
+  }
   // Viewer nav 활성 상태이고 실제로 DOM에 prepend된 경우에만 스냅샷 동기화
   // (중복 WS 메시지로 DOM은 그대로인데 스냅샷만 밀리면 active 하이라이트가 어긋남)
   if (didPrepend && _viewerNavIdx >= 0 && _viewerNavPaths.length > 0
@@ -1254,6 +1258,7 @@ function _showViewerImage(relPath) {
   preview.src = '/api/viewer/image/' + encodeURI(relPath);
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
+  _loadResultInfo(relPath);
   // Show nav + prompt toggle
   const actions = document.querySelector('.viewer-nav-actions');
   if (actions) actions.classList.add('visible');
@@ -1344,6 +1349,44 @@ let _promptFloatCache = {};  // relPath → html
 let _promptFloatCacheKeys = [];
 const _PROMPT_CACHE_MAX = 80;
 
+function _rememberPromptMetaHtml(relPath, html) {
+  _promptFloatCache[relPath] = html;
+  _promptFloatCacheKeys = _promptFloatCacheKeys.filter(k => k !== relPath);
+  _promptFloatCacheKeys.push(relPath);
+  while (_promptFloatCacheKeys.length > _PROMPT_CACHE_MAX) {
+    delete _promptFloatCache[_promptFloatCacheKeys.shift()];
+  }
+}
+
+async function _getPromptMetaHtml(relPath) {
+  if (_promptFloatCache[relPath]) return _promptFloatCache[relPath];
+
+  const resp = await fetch('/api/viewer/meta/' + encodeURI(relPath));
+  const meta = await resp.json();
+  let html = '';
+  if (meta.prompt) {
+    html += '<div class="pf-island"><span class="pf-label">Prompt</span>' + escHtml(meta.prompt) + '</div>';
+  }
+  if (meta.characters && meta.characters.length) {
+    for (let i = 0; i < meta.characters.length; i++) {
+      html += `<div class="pf-island"><span class="pf-label">Character ${i + 1}</span>` + escHtml(meta.characters[i]) + '</div>';
+    }
+  }
+  if (!html) html = '<div class="pf-island"><span class="pf-label">No metadata</span></div>';
+  _rememberPromptMetaHtml(relPath, html);
+  return html;
+}
+
+async function _loadResultInfo(relPath) {
+  if (!resultInfoContent || !relPath) return;
+  resultInfoContent.innerHTML = '<span class="result-info-empty">loading metadata...</span>';
+  try {
+    resultInfoContent.innerHTML = await _getPromptMetaHtml(relPath);
+  } catch (e) {
+    resultInfoContent.innerHTML = '<span class="result-info-empty">metadata unavailable</span>';
+  }
+}
+
 async function _loadPromptForFloat(relPath, floatId, contentId) {
   const pf = $(floatId);
   const content = $(contentId);
@@ -1363,29 +1406,12 @@ async function _loadPromptForFloat(relPath, floatId, contentId) {
   pf.classList.add('visible');
 
   try {
-    const resp = await fetch('/api/viewer/meta/' + encodeURI(relPath));
-    const meta = await resp.json();
-    let html = '';
-    if (meta.prompt) {
-      html += '<div class="pf-island"><span class="pf-label">Prompt</span>' + escHtml(meta.prompt) + '</div>';
-    }
-    if (meta.characters && meta.characters.length) {
-      for (let i = 0; i < meta.characters.length; i++) {
-        html += `<div class="pf-island"><span class="pf-label">Character ${i + 1}</span>` + escHtml(meta.characters[i]) + '</div>';
-      }
-    }
-    if (!html) html = '<div class="pf-island"><span class="pf-label">No metadata</span></div>';
+    const html = await _getPromptMetaHtml(relPath);
     content.innerHTML = html;
     // 넘칠 때만 스크롤 활성화
     requestAnimationFrame(() => {
       content.classList.toggle('scrollable', content.scrollHeight > content.clientHeight);
     });
-    _promptFloatCache[relPath] = html;
-    _promptFloatCacheKeys = _promptFloatCacheKeys.filter(k => k !== relPath);
-    _promptFloatCacheKeys.push(relPath);
-    while (_promptFloatCacheKeys.length > _PROMPT_CACHE_MAX) {
-      delete _promptFloatCache[_promptFloatCacheKeys.shift()];
-    }
   } catch (e) {
     content.innerHTML = '<span class="pf-label">Failed to load</span>';
   }

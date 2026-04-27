@@ -3936,6 +3936,9 @@ class RemoteBridge(QObject):
         wildcard_state = self._read_wildcard()
         if wildcard_state:
             self._broadcast_json(wildcard_state)
+        chunk_state = self._read_chunk()
+        if chunk_state:
+            self._broadcast_json(chunk_state)
 
     def _set_instant_wildcard(self, key: str, value: str):
         try:
@@ -3982,7 +3985,14 @@ class RemoteBridge(QObject):
                 module.json_data.setdefault(filename, {})[item_key] = item_value
                 module.current_file = filename
                 module.current_key = item_key
-                self._write_instant_wildcard_file(module, filename)
+                saved = self._write_instant_wildcard_file(module, filename)
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": f"Chunk saved: {item_key}" if saved else "Chunk save failed",
+                    "level": "success" if saved else "error",
+                })
+                if not saved:
+                    should_broadcast = False
             elif key == "delete":
                 payload = json.loads(value)
                 filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)

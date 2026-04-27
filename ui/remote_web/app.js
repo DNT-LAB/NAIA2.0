@@ -2134,11 +2134,12 @@ function closeModule() {
   flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
-  closeAuxiliaryPopups();
+  closeAuxiliaryPopups(null, { keepChunk: true });
   currentModuleId = null;
   if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
   updateModuleHeaderAction(null);
   updateModuleBtnState();
+  if (chunkPanelControl) chunkPanelControl.relayout();
 }
 
 function updateModuleBtnState() {
@@ -2750,6 +2751,10 @@ function chunkSaveNew(event) {
 
 function chunkUseSelection() {
   if (chunkPanelControl) chunkPanelControl.useSelection();
+}
+
+function openChunkFromSelection(target, event = null) {
+  if (chunkPanelControl) chunkPanelControl.openFromSelection(target, event);
 }
 
 function isChunkOpen() {
@@ -3507,6 +3512,13 @@ function hideAutocomplete() {
 function bindTagAssist(textarea, options = {}) {
   textarea._excludeE621Autocomplete = !!options.excludeE621;
   let composing = false;
+  const allowChunkBridge = !options.disableChunkBridge;
+  function hasTextSelection() {
+    return textarea.selectionStart != null
+      && textarea.selectionEnd != null
+      && textarea.selectionStart !== textarea.selectionEnd
+      && textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).trim().length > 0;
+  }
   textarea.addEventListener('compositionstart', () => { composing = true; });
   textarea.addEventListener('compositionend', () => {
     composing = false;
@@ -3530,6 +3542,14 @@ function bindTagAssist(textarea, options = {}) {
   textarea.addEventListener('focus', () => {
     acTarget = textarea;
     if (!acMode) checkTagHint();
+  });
+  textarea.addEventListener('contextmenu', e => {
+    if (!allowChunkBridge || sharedMode || textarea === negEdit || textarea.classList.contains('mod-uc')) return;
+    if (!hasTextSelection() || !chunkPanelControl) return;
+    e.preventDefault();
+    acTarget = textarea;
+    hideAutocomplete();
+    openChunkFromSelection(textarea, e);
   });
   textarea.addEventListener('blur', () => {
     setTimeout(() => {

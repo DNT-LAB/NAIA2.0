@@ -21,6 +21,7 @@ export function createChunkPanel({
   let anchorPinned = false;     // true 면 자동 재해결을 하지 않음 (명시 anchor 우선)
   let triggerInfo = null;
   let latestGroups = [];
+  let pendingAddPrefill = null;
 
   function requestState() {
     const ws = getWs();
@@ -58,23 +59,37 @@ export function createChunkPanel({
 
   function applyStandalonePosition() {
     if (!panel) return false;
-    // viewer-wrapper(우측 결과 영역)의 좌측 가장자리에 abut — prompt 영역 침범 금지
     const viewer = document.querySelector('.viewer-wrapper');
-    if (!viewer) return false;
-    const r = viewer.getBoundingClientRect();
-    if (!r || r.width <= 0) return false;
+    const controlPanel = document.querySelector('.control-panel');
+    if (!viewer && !controlPanel) return false;
+    const viewerRect = viewer?.getBoundingClientRect();
+    const controlRect = controlPanel?.getBoundingClientRect();
     const vv = window.visualViewport;
+    const viewportLeft = vv ? vv.offsetLeft : 0;
     const viewportTop = vv ? vv.offsetTop : 0;
+    const viewportWidth = vv ? vv.width : window.innerWidth;
     const viewportHeight = vv ? vv.height : window.innerHeight;
     const margin = 12;
-    const width = Math.min(420, Math.max(320, r.width - margin * 2));
-    const top = Math.max(viewportTop + margin, r.top + margin);
-    panel.style.left = `${r.left + margin}px`;
+
+    const regionLeft = Math.max(
+      viewportLeft + margin,
+      viewerRect?.left ?? ((controlRect?.right ?? viewportLeft) + margin),
+      controlRect ? controlRect.right + margin : viewportLeft + margin,
+    );
+    const regionRight = viewportLeft + viewportWidth - margin;
+    const regionWidth = Math.max(280, regionRight - regionLeft);
+    const minWidth = Math.min(360, regionWidth);
+    const width = Math.min(560, Math.max(minWidth, regionWidth - margin * 2));
+    const left = Math.min(regionRight - width, regionLeft + Math.max(0, (regionWidth - width) / 2));
+    const baseTop = viewerRect?.top ?? controlRect?.top ?? viewportTop;
+    const top = Math.max(viewportTop + margin, baseTop + margin);
+
+    panel.style.left = `${Math.max(viewportLeft + margin, left)}px`;
     panel.style.top = `${top}px`;
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
     panel.style.width = `${width}px`;
-    panel.style.maxWidth = `${r.width - margin * 2}px`;
+    panel.style.maxWidth = `${regionWidth}px`;
     panel.style.maxHeight = `${Math.max(220, viewportHeight - (top - viewportTop) - margin)}px`;
     return true;
   }
@@ -150,6 +165,41 @@ export function createChunkPanel({
     `;
   }
 
+  function selectedTextFrom(target) {
+    if (!target || target.selectionStart == null || target.selectionEnd == null) return '';
+    if (target.selectionStart === target.selectionEnd) return '';
+    return target.value.substring(target.selectionStart, target.selectionEnd).trim();
+  }
+
+  function suggestKeyFromValue(value) {
+    const firstToken = (value || '')
+      .split(/[,\n]/)
+      .map(part => part.trim())
+      .find(Boolean) || '';
+    const cleaned = firstToken
+      .replace(/^[({\[\s]+|[)}\]\s]+$/g, '')
+      .replace(/^[+-]?\d+(?:\.\d+)?::\s*/, '')
+      .replace(/\s*::\s*$/, '')
+      .replace(/^#+/, '')
+      .replace(/[^\p{L}\p{N}_-]+/gu, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+    return cleaned || `chunk_${Date.now().toString(36)}`;
+  }
+
+  function applyPendingAddPrefill() {
+    if (!pendingAddPrefill || !panel) return false;
+    const keyInput = panel.querySelector('#chunkAddKey');
+    const valueInput = panel.querySelector('#chunkAddValue');
+    if (!keyInput || !valueInput) return false;
+    valueInput.value = pendingAddPrefill.value;
+    keyInput.value = pendingAddPrefill.key || suggestKeyFromValue(pendingAddPrefill.value);
+    keyInput.focus();
+    keyInput.select();
+    pendingAddPrefill = null;
+    return true;
+  }
+
   function render(message) {
     const chunkBody = panel ? panel.querySelector('.pe-popup-body') : null;
     const renderTarget = chunkBody || moduleBody;
@@ -183,6 +233,7 @@ export function createChunkPanel({
     html += renderAddForm(groups);
     html += '</div>';
     renderTarget.innerHTML = html;
+    applyPendingAddPrefill();
     relayout();
   }
 
@@ -226,14 +277,12 @@ export function createChunkPanel({
     close();
   }
 
-  function getSelectionText() {
-    const target = getAcTarget() || promptEdit;
-    if (!target || target.selectionStart == null || target.selectionEnd == null) return '';
-    if (target.selectionStart === target.selectionEnd) return '';
-    return target.value.substring(target.selectionStart, target.selectionEnd).trim();
+  function getSelectionText(target = null) {
+    return selectedTextFrom(target || getAcTarget() || promptEdit);
   }
 
   function useSelection() {
+    const keyInput = panel ? panel.querySelector('#chunkAddKey') : null;
     const valueInput = panel ? panel.querySelector('#chunkAddValue') : null;
     if (!valueInput) return;
     const selection = getSelectionText();
@@ -242,6 +291,9 @@ export function createChunkPanel({
       return;
     }
     valueInput.value = selection;
+    if (keyInput && !keyInput.value.trim()) {
+      keyInput.value = suggestKeyFromValue(selection);
+    }
   }
 
   function saveNew(event) {
@@ -251,21 +303,48 @@ export function createChunkPanel({
     const valueInput = panel ? panel.querySelector('#chunkAddValue') : null;
     const fallbackGroup = latestGroups[0]?.name || 'default';
     const group = (groupInput?.value || fallbackGroup).trim();
-    const key = (keyInput?.value || '').trim();
-    const value = valueInput?.value || '';
-    if (!group || !key) {
-      showToast('Group and key are required', 'error');
+    const value = (valueInput?.value || '').trim();
+    let key = (keyInput?.value || '').trim();
+    if (!value) {
+      showToast('Chunk value is required', 'error');
       return false;
     }
+    if (!key) key = suggestKeyFromValue(value);
+    if (!group || !key) {
+      showToast('Group is required', 'error');
+      return false;
+    }
+    if (keyInput) keyInput.value = key;
     setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
-      file: group.endsWith('.json') ? group : `${group}.json`,
+      file: group.toLowerCase().endsWith('.json') ? group : `${group}.json`,
       key,
       value,
     }));
-    document.defaultView?.setTimeout(requestState, 180);
+    document.defaultView?.setTimeout(requestState, 120);
+    document.defaultView?.setTimeout(requestState, 320);
     if (keyInput) keyInput.value = '';
     if (valueInput) valueInput.value = '';
     return false;
+  }
+
+  function openFromSelection(target, event = null) {
+    const selection = getSelectionText(target);
+    if (!selection) {
+      showToast('No prompt selection', 'error');
+      return;
+    }
+    pendingAddPrefill = {
+      value: selection,
+      key: suggestKeyFromValue(selection),
+    };
+    if (target) {
+      target.focus();
+    }
+    const anchor = getAnchor(target);
+    openPanel(anchor, false);
+    if (event?.clientX != null && event?.clientY != null) {
+      panel?.setAttribute('data-open-source', 'selection-context');
+    }
   }
 
   function relayout() {
@@ -301,6 +380,7 @@ export function createChunkPanel({
     insert,
     saveNew,
     useSelection,
+    openFromSelection,
     relayout,
     isOpen,
     setTriggerInfo,

@@ -43,6 +43,7 @@ let imageModulePanels = null;
 let refinePanelControl = null;
 let tagSearchController = null;
 let mobileViewportControl = null;
+let searchPanelControl = null;
 let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
@@ -59,7 +60,7 @@ const quickFilterReady = import('./js/features/quickFilter.mjs')
       localStorage,
       WebSocket,
       getWs: () => ws,
-      getRatingState: () => ratingState,
+      getRatingState: getRatingStateSnapshot,
       syncRatingButtons,
       computeLocalFilteredCount: _computeLocalFilteredCount,
       updateSearchCount,
@@ -349,6 +350,24 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
+const searchPanelReady = import('./js/features/searchPanel.mjs')
+  .then(({createSearchPanel}) => {
+    searchPanelControl = createSearchPanel({
+      document,
+      moduleBody,
+      searchCountEl,
+      escHtml,
+      getWs: () => ws,
+      WebSocket,
+      getQuickFilter: () => quickFilter,
+      getSharedMode: () => sharedMode,
+      getCurrentModuleId: () => currentModuleId,
+      bindTagAssist,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize search panel module', error);
+  });
 const chunkPanelReady = import('./js/features/chunkPanel.mjs')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
@@ -383,7 +402,7 @@ function saveSharedSession() {
     options: {},
     p_eng: _sharedPEng || null,
     cond: _sharedCond || null,
-    ratings: Object.keys(ratingState).filter(k => ratingState[k]),
+    ratings: getActiveRatings(),
     tag_filter: quickState.tag_filter || null,
     tag_filter_exclude: quickState.tag_filter_exclude || null,
     tag_filter_active: !!quickState.tag_filter_active,
@@ -506,9 +525,7 @@ function onInitComplete() {
 function afterWsJsonMessage(m) {
   // Update search count from prompt_generated
   if (m.type === 'prompt_generated' && 'remaining' in m) {
-    if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
-    const filtered = _computeLocalFilteredCount();
-    updateSearchCount(filtered !== null ? filtered : m.remaining);
+    if (searchPanelControl) searchPanelControl.updatePromptGeneratedCount(m);
   }
 }
 
@@ -1180,8 +1197,7 @@ function _restoreSharedSession() {
   if (!saved) {
     // 저장된 세션 없음 (최초 접속) — GSQE 기본값을 서버에 전송
     if (ws && ws.readyState === WebSocket.OPEN) {
-      const active = Object.keys(ratingState).filter(k => ratingState[k]);
-      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
+      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: getActiveRatings()}));
     }
     syncRatingButtons();
     return;
@@ -1213,14 +1229,11 @@ function _restoreSharedSession() {
   }
   // Rating 복원
   if (saved.ratings && Array.isArray(saved.ratings)) {
-    for (const k of ['g','s','q','e']) {
-      ratingState[k] = saved.ratings.includes(k);
-    }
+    setRatingsFromList(saved.ratings);
     syncRatingButtons();
     // 서버 세션에 rating 저장
     if (ws && ws.readyState === WebSocket.OPEN) {
-      const active = Object.keys(ratingState).filter(k => ratingState[k]);
-      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
+      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: getActiveRatings()}));
     }
   }
   // Tag filter 복원
@@ -1278,8 +1291,7 @@ function send(cmd) {
     }, 2000);
     // Shared Mode: 개인 rating 선호를 함께 전송
     if (sharedMode) {
-      const active = Object.keys(ratingState).filter(k => ratingState[k]);
-      ws.send(JSON.stringify({type: 'random', ratings: active}));
+      ws.send(JSON.stringify({type: 'random', ratings: getActiveRatings()}));
       return;
     }
   }
@@ -2989,236 +3001,67 @@ function applyVibeStorage(model, fileHash, ieValue) {
 
 // ---- Search system ----
 const searchCountEl = $('searchCount');
-let searchingActive = false;
+const DEFAULT_RATING_STATE = {g: true, s: true, q: true, e: true};
 
-// Rating filter state (synced with module-bar GSQE buttons)
-let ratingState = {g: true, s: true, q: true, e: true};
-let _cachedRatingCounts = null; // {g:N, s:N, q:N, e:N} — 서버 search_state에서 캐시
+function getRatingStateSnapshot() {
+  return searchPanelControl ? searchPanelControl.getRatingState() : DEFAULT_RATING_STATE;
+}
+
+function getActiveRatings() {
+  const state = getRatingStateSnapshot();
+  return Object.keys(state).filter(key => state[key]);
+}
+
+function setRatingsFromList(ratings) {
+  if (searchPanelControl) searchPanelControl.setRatingsFromList(ratings);
+}
 
 function _computeLocalFilteredCount() {
-  // Tag Filter active 시 tag filter 결과의 rating_counts 사용, 아니면 전체 검색 결과
-  const quickRatingCounts = quickFilter ? quickFilter.getRatingCounts() : null;
-  const rc = (quickFilter && quickFilter.isActive() && quickRatingCounts) ? quickRatingCounts : _cachedRatingCounts;
-  if (!rc || !Object.keys(rc).length) return null;
-  let count = 0;
-  for (const k of ['g','s','q','e']) {
-    if (ratingState[k]) count += (rc[k] || 0);
-  }
-  return count;
+  return searchPanelControl ? searchPanelControl.computeLocalFilteredCount() : null;
 }
 
 function toggleRating(r) {
-  ratingState[r] = !ratingState[r];
-  syncRatingButtons();
-  // If search module is open, sync its checkboxes too
-  if (currentModuleId === 'search') {
-    const cb = document.getElementById('sr_' + r);
-    if (cb) cb.checked = ratingState[r];
-  }
-  if (sharedMode) {
-    // 최소 1개 보장 (서버 set_active_ratings와 동일 정책)
-    const anyActive = Object.values(ratingState).some(v => v);
-    if (!anyActive) { ratingState.q = true; ratingState.e = true; syncRatingButtons(); }
-    // 로컬 즉시 반영
-    const localCount = _computeLocalFilteredCount();
-    if (localCount !== null) updateSearchCount(localCount);
-    // 서버 세션에 rating 저장 (응답으로 정확한 카운트 갱신)
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      const active = Object.keys(ratingState).filter(k => ratingState[k]);
-      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
-    }
-    if (quickFilter) quickFilter.savePreferences();
-    return;
-  }
-  // Send to server for instant count update
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    const active = Object.keys(ratingState).filter(k => ratingState[k]);
-    ws.send(JSON.stringify({type: 'set_active_ratings', ratings: active}));
-  }
-  if (quickFilter) quickFilter.savePreferences();
+  if (searchPanelControl) searchPanelControl.toggleRating(r);
 }
 
 function onFilterReset(m) {
-  // 서버에서 검색 데이터 교체 시 (새 검색/Parquet 로드/Depth Assign/복원)
-  // GSQE 전체 활성화
-  ratingState = {g: true, s: true, q: true, e: true};
-  syncRatingButtons();
-  // Tag filter 전체 초기화 (서버 전송 없이 — 이미 서버에서 처리됨)
-  if (quickFilter) quickFilter.reset({persist: false});
-  // Count/Rating 갱신
-  if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
-  if (m.count != null) updateSearchCount(m.count);
-  if (!sharedMode) {
-    if (quickFilter) quickFilter.restorePreferences();
-  } else {
-    if (quickFilter) quickFilter.updateHighlight();
-  }
+  if (searchPanelControl) searchPanelControl.onFilterReset(m);
 }
 
 function onRatingUpdate(m) {
-  if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
-  if (sharedMode) {
-    // Tag filter active 시 로컬 계산 우선 (서버 count는 전체 풀 기준이라 tag_filter 미반영)
-    if (quickFilter && quickFilter.isActive() && quickFilter.getRatingCounts()) {
-      const localCount = _computeLocalFilteredCount();
-      if (localCount !== null) { updateSearchCount(localCount); return; }
-    }
-    if (m.count != null) updateSearchCount(m.count);
-    return;
-  }
-  updateSearchCount(m.count || 0);
-  // Sync active_ratings
-  if (m.active_ratings) {
-    for (const k of ['g','s','q','e']) {
-      ratingState[k] = m.active_ratings.includes(k);
-    }
-    syncRatingButtons();
-  }
-  if (quickFilter) quickFilter.updateHighlight();
+  if (searchPanelControl) searchPanelControl.onRatingUpdate(m);
 }
 
 function syncRatingButtons() {
-  document.querySelectorAll('.rating-btn').forEach(btn => {
-    if (!btn.dataset.r) return; // Filter 버튼 등 data-r 없는 요소 스킵
-    btn.classList.toggle('active', !!ratingState[btn.dataset.r]);
-  });
-  if (quickFilter) quickFilter.updateHighlight();
+  if (searchPanelControl) searchPanelControl.syncRatingButtons();
 }
 
 function updateSearchCount(count) {
-  searchCountEl.textContent = count;
+  if (searchPanelControl) searchPanelControl.updateSearchCount(count);
 }
 
 function onSearchState(m) {
-  // rating_counts 캐시 (shared mode 로컬 카운트 계산용)
-  if (m.rating_counts) _cachedRatingCounts = m.rating_counts;
-  if (sharedMode && _cachedRatingCounts) {
-    // Shared Mode: 개인 ratingState 기준으로 카운트 계산
-    updateSearchCount(_computeLocalFilteredCount());
-  } else {
-    updateSearchCount(m.count || 0);
-  }
-  searchingActive = false;
-  // Shared Mode: 서버 전역 rating 무시 (개인 rating 보호)
-  if (!sharedMode) {
-    // Sync rating state from server (prefer active_ratings over legacy ratings)
-    if (m.active_ratings) {
-      for (const k of ['g','s','q','e']) {
-        ratingState[k] = m.active_ratings.includes(k);
-      }
-    } else if (m.ratings) {
-      for (const k of ['g','s','q','e']) {
-        if (k in m.ratings) ratingState[k] = !!m.ratings[k];
-      }
-    }
-  }
-  const savedQuick = (!sharedMode && quickFilter) ? quickFilter.loadPreferences() : null;
-  if (savedQuick) {
-    // localStorage rating preference wins over server defaults after reconnect/search refresh.
-    for (const k of ['g', 's', 'q', 'e']) {
-      ratingState[k] = savedQuick.ratings.includes(k);
-    }
-    syncRatingButtons();
-  } else {
-    syncRatingButtons();
-  }
-  if (currentModuleId === 'search') renderSearch(m);
+  if (searchPanelControl) searchPanelControl.onSearchState(m);
 }
 
 function onSearchProgress(m) {
-  if (currentModuleId === 'search') {
-    const prog = moduleBody.querySelector('.search-progress');
-    if (prog) prog.textContent = `Searching... ${m.completed}/${m.total}`;
-  }
+  if (searchPanelControl) searchPanelControl.onSearchProgress(m);
 }
 
 function renderSearch(m) {
-  const ratingItems = [
-    ['e', 'Explicit'], ['q', 'NSFW'], ['s', 'Sensitive'], ['g', 'General']
-  ].map(([k, label]) =>
-    `<label class="mod-checkbox-item">
-      <input type="checkbox" id="sr_${k}" ${ratingState[k] ? 'checked' : ''}>
-      <span class="mod-checkbox-label">${label}</span>
-    </label>`
-  ).join('');
-
-  const parquets = (m.parquets || []).map(f =>
-    `<div class="search-parquet-item" onclick="loadParquet('${escHtml(f)}')">${escHtml(f)}</div>`
-  ).join('');
-
-  moduleBody.innerHTML = `
-    <div class="search-top-row">
-      <div>
-        <div class="mod-section-label">Remaining</div>
-        <div class="search-count-display">${m.count || 0}</div>
-      </div>
-      <div class="search-top-actions">
-        <button class="mod-action-btn mod-refine" onclick="openRefine()">Refine</button>
-        <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()">Restore</button>
-      </div>
-    </div>
-    <div>
-      <div class="mod-section-label">Search Keyword</div>
-      <input class="mod-input" id="searchQuery" type="text" value="${escHtml(m.query)}" placeholder="tags, keywords...">
-    </div>
-    <div>
-      <div class="mod-section-label">Exclude Keyword</div>
-      <input class="mod-input" id="searchExclude" type="text" value="${escHtml(m.exclude)}" placeholder="exclude tags...">
-    </div>
-    <div>
-      <div class="mod-section-label">Ratings</div>
-      <div class="mod-checkbox-grid">${ratingItems}</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button class="mod-action-btn mod-start" onclick="doSearch()" ${searchingActive ? 'disabled' : ''}>Search</button>
-      <span class="search-progress" style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)"></span>
-    </div>
-    ${parquets.length ? `<div>
-      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')">
-        Custom Parquets (${m.parquets.length}) <span class="mod-collapse-arrow">▶</span>
-      </div>
-      <div class="search-parquet-list collapsed">${parquets}</div>
-    </div>` : ''}
-  `;
-
-  // Bind tag autocomplete to Prompt Search inputs.
-  ['searchQuery', 'searchExclude'].forEach(id => {
-    const el = moduleBody.querySelector(`#${id}`);
-    if (el) bindTagAssist(el, { excludeE621: true });
-  });
+  if (searchPanelControl) searchPanelControl.renderSearch(m);
 }
 
 function doSearch() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const query = (document.getElementById('searchQuery') || {}).value || '';
-  const exclude = (document.getElementById('searchExclude') || {}).value || '';
-  // Sync rating state from search module checkboxes back to bar buttons
-  for (const k of ['e','q','s','g']) {
-    const el = document.getElementById('sr_' + k);
-    if (el) ratingState[k] = el.checked;
-  }
-  syncRatingButtons();
-  if (quickFilter) quickFilter.savePreferences();
-  const ratings = {};
-  for (const k of ['e','q','s','g']) {
-    ratings['rating_' + k] = ratingState[k];
-  }
-  searchingActive = true;
-  ws.send(JSON.stringify({type: 'search', query, exclude, ...ratings}));
-  const prog = moduleBody.querySelector('.search-progress');
-  if (prog) prog.textContent = 'Starting...';
-  const btn = moduleBody.querySelector('.mod-start');
-  if (btn) btn.disabled = true;
+  if (searchPanelControl) searchPanelControl.doSearch();
 }
 
 function loadParquet(filename) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({type: 'load_parquet', filename}));
+  if (searchPanelControl) searchPanelControl.loadParquet(filename);
 }
 
 function restoreSnapshot() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({type: 'restore_snapshot'}));
+  if (searchPanelControl) searchPanelControl.restoreSnapshot();
 }
 
 // ---- Refine (Depth Search) panel ----
@@ -3763,6 +3606,7 @@ Promise.all([
   refinePanelReady,
   tagSearchReady,
   mobileViewportReady,
+  searchPanelReady,
   chunkPanelReady,
 ])
   .then(() => {

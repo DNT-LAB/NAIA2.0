@@ -16,12 +16,16 @@ export function createChunkPanel({
   fireModuleOninput,
   escHtml,
 }) {
+  const CHUNK_PANEL_WIDTH = 420;
+  const CHUNK_PANEL_MIN_WIDTH = 320;
   let open = false;
   let anchorEl = null;          // 명시적으로 전달된 anchor (예: $ trigger 의 textarea)
   let anchorPinned = false;     // true 면 자동 재해결을 하지 않음 (명시 anchor 우선)
   let triggerInfo = null;
   let latestGroups = [];
   let pendingAddPrefill = null;
+  let selectionMenu = null;
+  let selectionMenuPayload = null;
 
   function requestState() {
     const ws = getWs();
@@ -57,11 +61,9 @@ export function createChunkPanel({
     return null;
   }
 
-  function applyStandalonePosition() {
-    if (!panel) return false;
+  function getSafeRegion(margin = 12) {
     const viewer = document.querySelector('.viewer-wrapper');
     const controlPanel = document.querySelector('.control-panel');
-    if (!viewer && !controlPanel) return false;
     const viewerRect = viewer?.getBoundingClientRect();
     const controlRect = controlPanel?.getBoundingClientRect();
     const vv = window.visualViewport;
@@ -69,34 +71,67 @@ export function createChunkPanel({
     const viewportTop = vv ? vv.offsetTop : 0;
     const viewportWidth = vv ? vv.width : window.innerWidth;
     const viewportHeight = vv ? vv.height : window.innerHeight;
-    const margin = 12;
-
     const regionLeft = Math.max(
       viewportLeft + margin,
       viewerRect?.left ?? ((controlRect?.right ?? viewportLeft) + margin),
       controlRect ? controlRect.right + margin : viewportLeft + margin,
     );
     const regionRight = viewportLeft + viewportWidth - margin;
-    const regionWidth = Math.max(280, regionRight - regionLeft);
-    const minWidth = Math.min(360, regionWidth);
-    const width = Math.min(560, Math.max(minWidth, regionWidth - margin * 2));
-    const left = Math.min(regionRight - width, regionLeft + Math.max(0, (regionWidth - width) / 2));
     const baseTop = viewerRect?.top ?? controlRect?.top ?? viewportTop;
-    const top = Math.max(viewportTop + margin, baseTop + margin);
+    return { viewportLeft, viewportTop, viewportWidth, viewportHeight, regionLeft, regionRight, baseTop, margin };
+  }
 
-    panel.style.left = `${Math.max(viewportLeft + margin, left)}px`;
+  function setPanelFrame(left, top, width, regionWidth, maxHeight) {
+    panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
     panel.style.width = `${width}px`;
     panel.style.maxWidth = `${regionWidth}px`;
-    panel.style.maxHeight = `${Math.max(220, viewportHeight - (top - viewportTop) - margin)}px`;
+    panel.style.maxHeight = `${maxHeight}px`;
+  }
+
+  function applyStandalonePosition() {
+    if (!panel) return false;
+    const region = getSafeRegion(12);
+    if (region.regionRight <= region.regionLeft) return false;
+    const { viewportLeft, viewportTop, viewportHeight, regionLeft, regionRight, baseTop, margin } = region;
+    const regionWidth = Math.max(280, regionRight - regionLeft);
+    const minWidth = Math.min(CHUNK_PANEL_MIN_WIDTH, regionWidth);
+    const width = Math.min(CHUNK_PANEL_WIDTH, Math.max(minWidth, regionWidth - margin * 2));
+    const left = Math.min(regionRight - width, regionLeft + Math.max(0, (regionWidth - width) / 2));
+    const top = Math.max(viewportTop + margin, baseTop + margin);
+    const maxHeight = Math.max(220, viewportHeight - (top - viewportTop) - margin);
+
+    setPanelFrame(Math.max(viewportLeft + margin, left), top, width, regionWidth, maxHeight);
+    return true;
+  }
+
+  function applyAnchoredPosition(anchor) {
+    if (!panel || !anchor || !isAnchorVisible(anchor)) return false;
+    const anchorRect = anchor.getBoundingClientRect();
+    if (!anchorRect || anchorRect.width <= 0 || anchorRect.height <= 0) return false;
+    const region = getSafeRegion(12);
+    if (region.regionRight <= region.regionLeft) return false;
+    const { viewportTop, viewportHeight, regionLeft, regionRight, margin } = region;
+    const regionWidth = Math.max(280, regionRight - regionLeft);
+    const minWidth = Math.min(CHUNK_PANEL_MIN_WIDTH, regionWidth);
+    const width = Math.min(CHUNK_PANEL_WIDTH, Math.max(minWidth, regionWidth - margin * 2));
+    let left = anchorRect.right + margin;
+    if (left < regionLeft || left + width > regionRight) {
+      left = regionLeft + Math.max(0, (regionWidth - width) / 2);
+    }
+    left = Math.min(Math.max(regionLeft, left), regionRight - width);
+    const top = Math.max(viewportTop + margin, anchorRect.top);
+    const maxHeight = Math.max(220, viewportHeight - (top - viewportTop) - margin);
+    setPanelFrame(left, top, width, regionWidth, maxHeight);
     return true;
   }
 
   function placePanel(liveAnchor) {
     if (!panel) return;
     if (liveAnchor) {
+      if (applyAnchoredPosition(liveAnchor)) return;
       positionFloatingPanel(panel, liveAnchor);
       return;
     }
@@ -140,12 +175,17 @@ export function createChunkPanel({
       panel.classList.remove('open');
       panel.classList.remove('chunk-panel-standalone');
     }
+    hideSelectionMenu();
     updateModuleBtnState();
   }
 
   function renderAddForm(groups) {
-    const groupOptions = groups.map(group => `<option value="${escHtml(group.name)}"></option>`).join('');
     const defaultGroup = groups[0]?.name || 'default';
+    const groupNames = groups.length ? groups.map(group => group.name) : [defaultGroup];
+    const groupOptions = groupNames.map(name => {
+      const selected = name === defaultGroup ? ' selected' : '';
+      return `<option value="${escHtml(name)}"${selected}>${escHtml(name)}</option>`;
+    }).join('');
     return `
       <form class="chunk-add-form" onsubmit="return chunkSaveNew(event)">
         <div class="chunk-add-head">
@@ -153,10 +193,9 @@ export function createChunkPanel({
           <button class="mod-btn-sm" type="button" onclick="chunkUseSelection()">Use Selection</button>
         </div>
         <div class="chunk-add-grid">
-          <input class="mod-input" id="chunkAddGroup" list="chunkAddGroups" value="${escHtml(defaultGroup)}" placeholder="group">
+          <select class="mod-input" id="chunkAddGroup">${groupOptions}</select>
           <input class="mod-input" id="chunkAddKey" placeholder="key">
         </div>
-        <datalist id="chunkAddGroups">${groupOptions}</datalist>
         <textarea class="mod-textarea chunk-add-value" id="chunkAddValue" placeholder="tag, tag, tag"></textarea>
         <div class="chunk-add-actions">
           <button class="mod-action-btn mod-start" type="submit">Add</button>
@@ -197,6 +236,78 @@ export function createChunkPanel({
     keyInput.focus();
     keyInput.select();
     pendingAddPrefill = null;
+    return true;
+  }
+
+  function hideSelectionMenu() {
+    selectionMenu?.classList.remove('open');
+    selectionMenuPayload = null;
+  }
+
+  function ensureSelectionMenu() {
+    if (selectionMenu) return selectionMenu;
+    selectionMenu = document.createElement('div');
+    selectionMenu.className = 'result-context-menu chunk-selection-menu';
+    selectionMenu.innerHTML = `
+      <div class="result-context-group">
+        <button class="result-context-item" type="button" data-action="add-chunk">
+          <span>Add to Chunk</span><span class="result-context-arrow">›</span>
+        </button>
+      </div>
+    `;
+    document.body.appendChild(selectionMenu);
+    selectionMenu.addEventListener('click', event => {
+      const actionButton = event.target.closest('[data-action="add-chunk"]');
+      if (!actionButton || !selectionMenuPayload) return;
+      event.preventDefault();
+      const { target, value, key } = selectionMenuPayload;
+      hideSelectionMenu();
+      pendingAddPrefill = { value, key };
+      if (target) target.focus();
+      openPanel(getAnchor(target), false);
+    });
+    document.addEventListener('pointerdown', event => {
+      if (selectionMenu?.classList.contains('open') && !selectionMenu.contains(event.target)) {
+        hideSelectionMenu();
+      }
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') hideSelectionMenu();
+    });
+    return selectionMenu;
+  }
+
+  function placeSelectionMenu(event) {
+    const menu = ensureSelectionMenu();
+    const vv = window.visualViewport;
+    const viewportLeft = vv ? vv.offsetLeft : 0;
+    const viewportTop = vv ? vv.offsetTop : 0;
+    const viewportWidth = vv ? vv.width : window.innerWidth;
+    const viewportHeight = vv ? vv.height : window.innerHeight;
+    const margin = 8;
+    menu.classList.add('open');
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(viewportLeft + margin, event.clientX),
+      viewportLeft + viewportWidth - rect.width - margin,
+    );
+    const top = Math.min(
+      Math.max(viewportTop + margin, event.clientY),
+      viewportTop + viewportHeight - rect.height - margin,
+    );
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  function showSelectionMenu(target, event) {
+    const selection = getSelectionText(target);
+    if (!selection || !event) return false;
+    selectionMenuPayload = {
+      target,
+      value: selection,
+      key: suggestKeyFromValue(selection),
+    };
+    placeSelectionMenu(event);
     return true;
   }
 
@@ -381,6 +492,8 @@ export function createChunkPanel({
     saveNew,
     useSelection,
     openFromSelection,
+    showSelectionMenu,
+    hideSelectionMenu,
     relayout,
     isOpen,
     setTriggerInfo,

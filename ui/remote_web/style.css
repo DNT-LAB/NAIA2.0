@@ -3288,7 +3288,7 @@ body.resizing-result-info {
   flex-direction: column;
   gap: 10px;
 }
-#chunkPanel { width: min(560px, 94vw); }
+#chunkPanel { width: min(420px, 94vw); }
 #peDebugPanel { width: min(520px, 94vw); }
 /* Depth filter 2-column grid (checkbox + input) */
 .depth-filter-grid {
@@ -4350,6 +4350,11 @@ body.resizing-result-info {
 .chunk-add-value {
   min-height: 68px;
   resize: vertical;
+}
+.chunk-selection-menu {
+  z-index: 2450;
+  min-width: 170px;
+  max-width: min(220px, calc(100vw - 16px));
 }
 @media (max-width: 767px) {
   .chunk-add-grid {

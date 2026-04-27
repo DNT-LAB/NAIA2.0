@@ -2928,7 +2928,7 @@ function restoreSnapshot() {
 const refinePanel = $('refinePanel');
 
 function getFloatingPanelWidth(panel) {
-  if (panel === chunkPanel) return 560;
+  if (panel === chunkPanel) return 420;
   if (panel === peDebugPanel) return 520;
   if (panel === refinePanel) return 400;
   return 420;
@@ -3546,10 +3546,11 @@ function bindTagAssist(textarea, options = {}) {
   textarea.addEventListener('contextmenu', e => {
     if (!allowChunkBridge || sharedMode || textarea === negEdit || textarea.classList.contains('mod-uc')) return;
     if (!hasTextSelection() || !chunkPanelControl) return;
-    e.preventDefault();
     acTarget = textarea;
     hideAutocomplete();
-    openChunkFromSelection(textarea, e);
+    if (chunkPanelControl.showSelectionMenu(textarea, e)) {
+      e.preventDefault();
+    }
   });
   textarea.addEventListener('blur', () => {
     setTimeout(() => {

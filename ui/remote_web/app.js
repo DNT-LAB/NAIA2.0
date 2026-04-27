@@ -31,6 +31,7 @@ let cloudflaredControls = null;
 let generationProgress = null;
 let desktopWindowControl = null;
 let promptDrawerControl = null;
+let tokenDisplayControl = null;
 let autoSavePanel = null;
 let saveDirectoryPanel = null;
 let sessionGenerationStats = null;
@@ -125,14 +126,28 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
   });
+const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
+  .then(({createTokenDisplay}) => {
+    tokenDisplayControl = createTokenDisplay({
+      promptEdit,
+      negEdit,
+      promptTokenLabel,
+      negativeTokenLabel,
+      modeSelect,
+      getCurrentMode: () => currentMode,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize token display module', error);
+  });
 const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
       getMode: () => currentMode || modeSelect.value || 'NAI',
       estimateTokenCount,
-      setCharacterPromptText: value => { lastCharacterPromptText = value; },
-      setCharacterTokenCount: value => { lastCharacterTokenCount = value; },
+      setCharacterPromptText: value => { if (tokenDisplayControl) tokenDisplayControl.setCharacterPromptText(value); },
+      setCharacterTokenCount: value => { if (tokenDisplayControl) tokenDisplayControl.setCharacterTokenCount(value); },
       updatePromptTokenEstimate,
     });
   })
@@ -627,117 +642,28 @@ function updateMeta(m) {
   updateMetaChips(m);
 }
 
-let lastCharacterTokenCount = 0;
-let lastCharacterPromptText = '';
-let lastMainTokenCount = null;
-let lastMainTokenSourceText = '';
-let lastMainTokenMode = '';
-let lastNegativeTokenCount = null;
-let lastNegativeTokenSourceText = '';
-let lastNegativeTokenMode = '';
-
 function cleanPromptForTokenEstimate(text, mode) {
-  let cleaned = (text || '')
-    .split(',')
-    .map(part => part.trim())
-    .filter(part => part && !part.startsWith('#'))
-    .join(', ');
-  if (mode === 'NAI') {
-    cleaned = cleaned.replace(/-?\d+(?:\.\d+)?::/g, '').replace(/::/g, '');
-  } else if (mode === 'WEBUI' || mode === 'COMFYUI') {
-    cleaned = cleaned
-      .replace(/\\[()]/g, ' ')
-      .replace(/\(([^()]+?)(?::[+-]?\d*\.?\d+)?\)/g, '$1');
-  }
-  return cleaned.replace(/\s+/g, ' ').replace(/\s+,/g, ',').replace(/,+/g, ',').trim();
+  return tokenDisplayControl ? tokenDisplayControl.cleanPromptForTokenEstimate(text, mode) : '';
 }
 
 function estimateTokenCount(text, mode) {
-  const cleaned = cleanPromptForTokenEstimate(text, mode);
-  if (!cleaned) return 0;
-  const base = Math.ceil(cleaned.length / 5);
-  const correction = mode === 'NAI' ? 1.12 : 0.99;
-  return Math.max(1, Math.ceil(base * correction));
-}
-
-function formatPromptTokenLabel(main, character, mode) {
-  if (mode === 'NAI') {
-    return `Estimated Tokens : ${main + character} (Main ${main} + Character ${character})`;
-  }
-  return `Estimated Tokens : ${main}`;
-}
-
-function formatNegativeTokenLabel(count) {
-  return `Estimated Tokens : ${count}`;
+  return tokenDisplayControl ? tokenDisplayControl.estimateTokenCount(text, mode) : 0;
 }
 
 function updateNegativeTokenEstimate() {
-  if (!negativeTokenLabel) return;
-  const mode = currentMode || modeSelect.value || 'NAI';
-  const hasExactNegative = lastNegativeTokenCount !== null
-    && lastNegativeTokenSourceText === negEdit.value
-    && lastNegativeTokenMode === mode;
-  const negative = hasExactNegative ? lastNegativeTokenCount : estimateTokenCount(negEdit.value, mode);
-  negativeTokenLabel.textContent = formatNegativeTokenLabel(negative);
+  if (tokenDisplayControl) tokenDisplayControl.updateNegativeTokenEstimate();
 }
 
 function updatePromptTokenEstimate() {
-  const mode = currentMode || modeSelect.value || 'NAI';
-  if (promptTokenLabel) {
-    const hasExactMain = lastMainTokenCount !== null
-      && lastMainTokenSourceText === promptEdit.value
-      && lastMainTokenMode === mode;
-    const main = hasExactMain ? lastMainTokenCount : estimateTokenCount(promptEdit.value, mode);
-    const character = mode === 'NAI'
-      ? (lastCharacterTokenCount || estimateTokenCount(lastCharacterPromptText, mode))
-      : 0;
-    promptTokenLabel.textContent = formatPromptTokenLabel(main, character, mode);
-  }
-  updateNegativeTokenEstimate();
+  if (tokenDisplayControl) tokenDisplayControl.updatePromptTokenEstimate();
 }
 
 function applyNegativeTokenPayload(m) {
-  if (!negativeTokenLabel) return;
-  if (Number.isFinite(Number(m.negative_token_count))) {
-    const mode = currentMode || modeSelect.value || 'NAI';
-    lastNegativeTokenCount = Number(m.negative_token_count);
-    lastNegativeTokenSourceText = typeof m.negative_prompt === 'string' ? m.negative_prompt : negEdit.value;
-    lastNegativeTokenMode = mode;
-    negativeTokenLabel.textContent = formatNegativeTokenLabel(lastNegativeTokenCount);
-    return;
-  }
-  updateNegativeTokenEstimate();
+  if (tokenDisplayControl) tokenDisplayControl.applyNegativeTokenPayload(m);
 }
 
 function applyPromptTokenPayload(m) {
-  applyNegativeTokenPayload(m);
-  if (!promptTokenLabel) return;
-  if (m.prompt_token_label) {
-    promptTokenLabel.textContent = m.prompt_token_label;
-    if (m.prompt_token_counts) {
-      if (Number.isFinite(Number(m.prompt_token_counts.main))) {
-        lastMainTokenCount = Number(m.prompt_token_counts.main);
-        lastMainTokenSourceText = typeof m.prompt === 'string' ? m.prompt : promptEdit.value;
-        lastMainTokenMode = currentMode || modeSelect.value || 'NAI';
-      }
-      if (Number.isFinite(Number(m.prompt_token_counts.character))) {
-        lastCharacterTokenCount = Number(m.prompt_token_counts.character);
-      }
-    }
-    return;
-  }
-  if (m.prompt_token_counts) {
-    const counts = m.prompt_token_counts;
-    const main = Number(counts.main) || 0;
-    const character = Number(counts.character) || 0;
-    lastMainTokenCount = main;
-    lastMainTokenSourceText = typeof m.prompt === 'string' ? m.prompt : promptEdit.value;
-    lastMainTokenMode = currentMode || modeSelect.value || 'NAI';
-    lastCharacterTokenCount = character;
-    promptTokenLabel.textContent = formatPromptTokenLabel(main, character, currentMode || modeSelect.value || 'NAI');
-    return;
-  }
-  updatePromptTokenEstimate();
+  if (tokenDisplayControl) tokenDisplayControl.applyPromptTokenPayload(m);
 }
 
 function unlockRandomButton() {
@@ -1042,8 +968,7 @@ function syncPrompts(m) {
 function onPromptEdit() {
   if (syncingPrompt) return;
   _localPromptDirty = true;
-  lastMainTokenCount = null;
-  lastNegativeTokenCount = null;
+  if (tokenDisplayControl) tokenDisplayControl.invalidatePromptCounts();
   updatePromptHighlight();
   updatePromptTokenEstimate();
   if (promptSendTimer) clearTimeout(promptSendTimer);
@@ -3589,6 +3514,7 @@ Promise.all([
   resultInfoResizerReady,
   resultHistoryReady,
   promptHighlighterReady,
+  tokenDisplayReady,
   moduleBadgesReady,
   cloudflaredControlsReady,
   generationProgressReady,

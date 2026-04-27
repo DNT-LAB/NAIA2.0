@@ -38,6 +38,7 @@ let automationPanel = null;
 let characterPanel = null;
 let conditionalPromptPanel = null;
 let wildcardPanel = null;
+let chunkPanelControl = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -269,6 +270,29 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
+  });
+const chunkPanelReady = import('./js/features/chunkPanel.mjs')
+  .then(({createChunkPanel}) => {
+    chunkPanelControl = createChunkPanel({
+      document,
+      panel: chunkPanel,
+      moduleBody,
+      modulePopup,
+      promptEdit,
+      getWs: () => ws,
+      WebSocket,
+      getSharedMode: () => sharedMode,
+      getAcTarget: () => acTarget,
+      showToast,
+      updateModuleBtnState,
+      positionFloatingPanel,
+      onPromptEdit,
+      fireModuleOninput: _fireModuleOninput,
+      escHtml,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize chunk panel module', error);
   });
 
 function saveSharedSession() {
@@ -1891,7 +1915,7 @@ function closeModule() {
   modulePopup.classList.remove('open');
   closeAuxiliaryPopups();
   currentModuleId = null;
-  chunkTriggerInfo = null;
+  if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
   updateModuleHeaderAction(null);
   updateModuleBtnState();
 }
@@ -1899,7 +1923,7 @@ function closeModule() {
 function updateModuleBtnState() {
   document.querySelectorAll('.module-btn').forEach(btn => {
     const isChunkBtn = btn.dataset.module === 'chunk';
-    btn.classList.toggle('active', isChunkBtn ? chunkOpen : btn.dataset.module === currentModuleId);
+    btn.classList.toggle('active', isChunkBtn ? isChunkOpen() : btn.dataset.module === currentModuleId);
   });
   const pb = document.querySelector('.module-prompt-btn');
   if (pb) pb.classList.toggle('active', currentModuleId === 'search');
@@ -1910,8 +1934,6 @@ const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peDebugPanel = $('peDebugPanel');
-let chunkOpen = false;
-let chunkAnchorEl = null;
 let peE621Open = false;
 let pePresetAddOpen = false;
 let pePresetManageOpen = false;
@@ -1933,7 +1955,7 @@ function closeAllPePanels() {
 }
 
 function closeAuxiliaryPopups(exceptPanel = null) {
-  if (exceptPanel !== chunkPanel && chunkOpen) closeChunkPanel();
+  if (exceptPanel !== chunkPanel && isChunkOpen()) closeChunkPanel();
   if (exceptPanel !== refinePanel && refineOpen) closeRefine();
   if (exceptPanel !== pePresetAddPanel && pePresetAddOpen) closePePresetAddPanel();
   if (exceptPanel !== pePresetManagePanel && pePresetManageOpen) closePePresetManagePanel();
@@ -2057,7 +2079,7 @@ function onModuleState(m) {
     lastPromptEngineeringState = m;
     syncPromptEngineeringPopups();
   }
-  if (m.module_id === 'chunk' && chunkOpen) {
+  if (m.module_id === 'chunk' && isChunkOpen()) {
     renderChunk(m);
   }
 
@@ -2821,115 +2843,36 @@ function renderWildcard(m) {
 }
 
 // ---- Chunk Module (instant wildcard tree browser) ----
-let chunkTriggerInfo = null;  // {raw, stripped, start, end} — 삽입 위치
-
 function requestChunkState() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'chunk'}));
-  }
+  if (chunkPanelControl) chunkPanelControl.requestState();
 }
 
 function getChunkAnchor(target = null) {
-  return target?.closest?.('.module-popup, .pe-popup, .refine-popup, .tag-filter-popup') || modulePopup;
+  return chunkPanelControl ? chunkPanelControl.getAnchor(target) : modulePopup;
 }
 
 function openChunkPanel(anchorEl = null, toggle = false) {
-  if (sharedMode) {
-    showToast('This module is not available in Shared Server Mode', 'error');
-    return;
-  }
-  if (toggle && chunkOpen) {
-    closeChunkPanel();
-    return;
-  }
-  chunkAnchorEl = anchorEl || chunkAnchorEl || modulePopup;
-  chunkOpen = true;
-  if (chunkPanel) {
-    chunkPanel.classList.add('open');
-    const body = chunkPanel.querySelector('.pe-popup-body');
-    if (body) {
-      body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
-    }
-    positionFloatingPanel(chunkPanel, chunkAnchorEl);
-  }
-  updateModuleBtnState();
-  requestChunkState();
+  if (chunkPanelControl) chunkPanelControl.open(anchorEl, toggle);
 }
 
 function closeChunkPanel() {
-  chunkOpen = false;
-  chunkTriggerInfo = null;
-  if (chunkPanel) chunkPanel.classList.remove('open');
-  updateModuleBtnState();
+  if (chunkPanelControl) chunkPanelControl.close();
 }
 
 function renderChunk(m) {
-  const chunkBody = chunkPanel ? chunkPanel.querySelector('.pe-popup-body') : null;
-  const renderTarget = (chunkOpen && chunkBody) ? chunkBody : moduleBody;
-  const groups = m.groups || [];
-  if (!groups.length) {
-    renderTarget.innerHTML = '<div class="mod-empty">No instant wildcards found.<br>Add them via the desktop Instant Wildcard module.</div>';
-    return;
-  }
-  let html = '<div class="chunk-hint">Select an item to insert at cursor. Type <code>$</code> in prompt to trigger.</div>';
-  html += '<div class="chunk-tree">';
-  for (const g of groups) {
-    html += `<div class="chunk-group">`;
-    html += `<div class="chunk-group-name" onclick="chunkToggleGroup(this.parentElement)">📁 ${escHtml(g.name)} <span class="wc-count">(${g.items.length})</span></div>`;
-    html += '<div class="chunk-group-items">';
-    for (const item of g.items) {
-      const preview = item.value.length > 80 ? item.value.substring(0, 80) + '…' : item.value;
-      html += `<div class="chunk-item" onclick="chunkInsert(this)" data-value="${escHtml(item.value)}">`;
-      html += `<div class="chunk-item-key">${escHtml(item.key)}</div>`;
-      html += `<div class="chunk-item-preview">${escHtml(preview)}</div>`;
-      html += `</div>`;
-    }
-    html += '</div></div>';
-  }
-  html += '</div>';
-  renderTarget.innerHTML = html;
-  if (chunkOpen && chunkPanel) positionFloatingPanel(chunkPanel, chunkAnchorEl || modulePopup);
+  if (chunkPanelControl) chunkPanelControl.render(m);
 }
 
 function chunkToggleGroup(groupEl) {
-  const wasOpen = groupEl.classList.contains('open');
-  // 다른 그룹 모두 닫기
-  groupEl.parentElement.querySelectorAll('.chunk-group.open').forEach(g => g.classList.remove('open'));
-  if (!wasOpen) groupEl.classList.add('open');
+  if (chunkPanelControl) chunkPanelControl.toggleGroup(groupEl);
 }
 
 function chunkInsert(el) {
-  const value = el.dataset.value;
-  if (!value) return;
-  const target = acTarget || promptEdit;
-  const text = target.value || '';
-  target.focus();
-  let insertStart = 0;
-  let insertEnd = 0;
-  let insertText = '';
-  if (chunkTriggerInfo) {
-    // $로 트리거된 경우 — 트리거 토큰만 교체
-    insertStart = chunkTriggerInfo.start;
-    insertEnd = chunkTriggerInfo.end;
-    insertText = value;
-    chunkTriggerInfo = null;
-  } else {
-    // 모듈 버튼으로 열린 경우 — 커서 위치에 삽입
-    const pos = target.selectionStart != null ? target.selectionStart : text.length;
-    const before = text.substring(0, pos);
-    // 앞에 콤마+공백 필요 여부
-    const sep = before.trim().length > 0 && !/,\s*$/.test(before) ? ', ' : '';
-    insertStart = pos;
-    insertEnd = pos;
-    insertText = sep + value;
-  }
-  target.value = text.substring(0, insertStart) + insertText + text.substring(insertEnd);
-  const newPos = insertStart + insertText.length;
-  target.selectionStart = target.selectionEnd = newPos;
-  if (target === promptEdit) onPromptEdit();
-  else _fireModuleOninput(target);
-  // 자동 닫기
-  closeChunkPanel();
+  if (chunkPanelControl) chunkPanelControl.insert(el);
+}
+
+function isChunkOpen() {
+  return !!(chunkPanelControl && chunkPanelControl.isOpen());
 }
 
 // ---- Wildcard Manager (file browser + editor + generator) ----
@@ -3658,7 +3601,7 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
 
 function relayoutFloatingPanels() {
   positionFloatingPanel(refinePanel, modulePopup);
-  positionFloatingPanel(chunkPanel, chunkAnchorEl || modulePopup);
+  if (chunkPanelControl) chunkPanelControl.relayout();
   positionFloatingPanel(pePresetAddPanel, modulePopup);
   positionFloatingPanel(pePresetManagePanel, modulePopup);
   positionFloatingPanel(peE621Panel, modulePopup);
@@ -4050,7 +3993,7 @@ function scheduleAutocomplete() {
     } else if (allowTriggers && s.startsWith('$')) {
       // Chunk trigger: open floating Chunk panel
       clearTimeout(acTimer);
-      chunkTriggerInfo = info;
+      if (chunkPanelControl) chunkPanelControl.setTriggerInfo(info);
       openChunkPanel(getChunkAnchor(target));
       return;
     } else {
@@ -4300,6 +4243,7 @@ Promise.all([
   characterPanelReady,
   conditionalPromptPanelReady,
   wildcardPanelReady,
+  chunkPanelReady,
 ])
   .then(() => {
     initHistoryRail();

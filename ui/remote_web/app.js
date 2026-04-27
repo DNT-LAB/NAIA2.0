@@ -6,7 +6,6 @@ let ws, blobUrl = null, generating = false, drawerOpen = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let reconnTimer = null, genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
-let progressTimer = null;
 
 // ---- Session generation stats ----
 let sessionGenTotal = 0;
@@ -34,6 +33,7 @@ let resultHistory = null;
 let promptHighlighter = null;
 let moduleBadges = null;
 let cloudflaredControls = null;
+let generationProgress = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -141,6 +141,18 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
+  });
+const generationProgressReady = import('./js/features/generationProgress.mjs')
+  .then(({createGenerationProgress}) => {
+    generationProgress = createGenerationProgress({
+      document,
+      window,
+      getGenStartTime: () => genStartTime,
+      getDurations: () => genDurations,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize generation progress module', error);
   });
 
 function saveSharedSession() {
@@ -1302,49 +1314,11 @@ function stopGenTimer() {
 
 // ---- Generation Progress Bar ----
 function startProgress() {
-  const bar = $('genProgressBar');
-  const bar2 = $('genProgressBar2');
-  const wrap = $('genProgress');
-  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
-  if (window._progressFinishTimeout) { clearTimeout(window._progressFinishTimeout); window._progressFinishTimeout = null; }
-  bar.style.transition = 'none'; bar.style.width = '0%';
-  bar2.style.transition = 'none'; bar2.style.width = '0%';
-  void bar.offsetWidth;
-  bar.style.transition = 'width 0.3s linear';
-  bar2.style.transition = 'width 0.3s linear';
-  wrap.classList.add('active');
-
-  const estimated = genDurations.length > 0
-    ? genDurations.reduce((a, b) => a + b, 0) / genDurations.length
-    : 12000;
-
-  progressTimer = setInterval(() => {
-    const elapsed = Date.now() - genStartTime;
-    const pct = Math.min((elapsed / estimated) * 100, 100);
-    bar.style.width = pct + '%';
-    // overtime: 2nd bar (orange) starts from 0%
-    if (elapsed > estimated) {
-      const overPct = Math.min(((elapsed - estimated) / estimated) * 100, 100);
-      bar2.style.width = overPct + '%';
-    }
-  }, 50);
+  if (generationProgress) generationProgress.start();
 }
 
 function finishProgress() {
-  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
-  if (window._progressFinishTimeout) { clearTimeout(window._progressFinishTimeout); window._progressFinishTimeout = null; }
-  const bar = $('genProgressBar');
-  const bar2 = $('genProgressBar2');
-  const wrap = $('genProgress');
-  bar.style.transition = 'width 0.2s ease-out';
-  bar2.style.transition = 'width 0.2s ease-out';
-  bar.style.width = '100%';
-  window._progressFinishTimeout = setTimeout(() => {
-    window._progressFinishTimeout = null;
-    wrap.classList.remove('active');
-    bar.style.width = '0%';
-    bar2.style.width = '0%';
-  }, 400);
+  if (generationProgress) generationProgress.finish();
 }
 
 // ---- Options sync ----
@@ -4678,6 +4652,7 @@ Promise.all([
   promptHighlighterReady,
   moduleBadgesReady,
   cloudflaredControlsReady,
+  generationProgressReady,
 ])
   .then(() => {
     initHistoryRail();

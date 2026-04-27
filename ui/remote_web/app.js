@@ -48,6 +48,7 @@ let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
+let customSelectsControl = null;
 let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
 let promptEngineeringActions = null;
@@ -92,6 +93,17 @@ const rightTabsReady = import('./js/features/rightTabs.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize right tabs module', error);
+  });
+const customSelectsReady = import('./js/features/customSelects.mjs')
+  .then(({createCustomSelectController}) => {
+    customSelectsControl = createCustomSelectController({
+      document,
+      window,
+    });
+    customSelectsControl.start();
+  })
+  .catch(error => {
+    console.error('Failed to initialize custom select module', error);
   });
 const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .then(({createResultInfoResizer}) => {
@@ -2851,6 +2863,7 @@ Promise.all([
   quickFilterReady,
   wsDispatcherReady,
   rightTabsReady,
+  customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,
   promptHighlighterReady,

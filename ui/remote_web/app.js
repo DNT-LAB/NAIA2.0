@@ -2948,14 +2948,36 @@ function getActiveTokenInfo(textarea) {
   while (rawEnd > start && /\s/.test(text[rawEnd - 1])) rawEnd--;
   const raw = text.substring(start, rawEnd);
   if (!raw || raw.startsWith('#')) return null;
-  let stripped = raw;
-  stripped = stripped.replace(/^-?\(+/, '');
-  stripped = stripped.replace(/(?::[\d.]+)?\)+$/, '');
+  let stripped = stripAutocompleteTokenDecorators(raw);
   stripped = stripped.replace(/^\d+(?:\.\d+)?::/, '');
   stripped = stripped.replace(/\s*::$/, '');
   stripped = stripped.trim();
   if (!stripped) return null;
   return { raw, stripped, start, end: rawEnd };
+}
+
+function stripAutocompleteTokenDecorators(raw) {
+  let stripped = raw.trim();
+  if (stripped.startsWith('-(')) {
+    stripped = stripped.substring(1);
+  }
+  while (stripped.startsWith('(') && stripped.endsWith(')') && hasWrappingParentheses(stripped)) {
+    stripped = stripped.substring(1, stripped.length - 1).trim();
+  }
+  stripped = stripped.replace(/:\d+(?:\.\d+)?$/, '').trim();
+  return stripped;
+}
+
+function hasWrappingParentheses(text) {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '(') depth += 1;
+    else if (char === ')') depth -= 1;
+    if (depth === 0 && i < text.length - 1) return false;
+    if (depth < 0) return false;
+  }
+  return depth === 0;
 }
 
 function getTagAtCursor(textarea) {

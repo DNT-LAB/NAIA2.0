@@ -41,6 +41,7 @@ Failed:
 
 - `modules/prompt_engineering_module.py` appears line-ending/whitespace noisy; it must be normalized before a checkpoint commit.
 - `ui/remote_web/js/features/instantWildcardPanel.mjs` is untracked and appears unwired; decide whether to integrate it as a module panel or remove/defer it.
+- `Tools & Assistants` is now a flat button grid with too many peer modules. It needs an IA refactor before adding more modules.
 - `core/remote_api_server.py` gained about 1k lines; next stabilization should focus on behavior smoke and then adapter extraction, not more feature growth.
 - New `.mjs` files need FastAPI static route smoke checks because `ui/remote_web/CLAUDE.md` requires explicit static serving validation for new JS assets.
 - No browser/manual Remote Web smoke was observed in this audit.
@@ -66,7 +67,45 @@ Owner: backend/frontend integrator
    - `/js/features/instantWildcardPanel.mjs` only if wired/kept
 5. Checkpoint commit once the above passes.
 
-### P1 — Remote Web Behavior Smoke
+### P1 — Tools & Assistants IA Refactor
+
+Owner: frontend/product flow
+
+Goal: replace the flat module button grid with a `1 + 3` structure so module growth does not make the control area harder to scan.
+
+Required structure:
+
+- Fixed primary button: `P.Engineering`
+- Category 1, `Prompt / Tag Tools`: `E621`, `Wildcard`, `Chunk`, `Cond`
+- Category 2, `Character / Reference`: `Character`, `Char Ref`, `Vibe`
+- Category 3, `Assistants / Automation`: `Ollama`, `Automation`
+
+Implementation notes:
+
+- Keep `P.Engineering` as a standalone always-visible button because it is mandatory in the generation workflow.
+- Replace the remaining flat buttons in `ui/remote_web/index.html` with three category controls that expose leaf modules through a compact popup/dropdown/segmented panel.
+- Preserve existing module actions: leaf selection should still call `openModule(moduleId)` or `openChunkPanel(...)` without changing server protocol.
+- Bubble status to the category level:
+  - active state if any child module is open;
+  - badge count if any child has a badge;
+  - disabled/NAI-only/shared-mode state if all usable children are blocked, with leaf-level blocked reasons preserved.
+- Move module metadata into a single JS registry in `ui/remote_web/app.js` or a new `js/features/moduleLauncher.mjs`:
+  - title
+  - category
+  - action type (`module` vs `chunk`)
+  - NAI-only / shared-mode blocked flags
+  - badge element id
+- After registry extraction, use it for title lookup, active state, mode/shared availability, and category rendering so new modules are registered once.
+- Mobile requirement: categories must remain usable in the drawer without horizontal overflow; category popups should close on module open and on outside click.
+
+Validation:
+
+- Desktop and mobile screenshot check for the category launcher.
+- NAI vs non-NAI mode: `Character`, `Char Ref`, `Vibe` disabled behavior still correct.
+- Shared Mode: blocked modules still blocked and existing toast behavior remains.
+- Open/close/toggle behavior remains correct for `P.Engineering`, a normal module, and `Chunk`.
+
+### P2 — Remote Web Behavior Smoke
 
 Owner: QA/product flow
 
@@ -79,11 +118,11 @@ Owner: QA/product flow
 4. Layout:
    - desktop and mobile viewport checks for E621, Ollama, chunk, module popup close/reopen behavior.
 
-### P2 — Bridge Debt Reduction
+### P3 — Bridge Debt Reduction
 
 Owner: backend architect
 
-After P0/P1, extract module-specific bridge logic out of `core/remote_api_server.py`:
+After P0/P1/P2, extract module-specific bridge logic out of `core/remote_api_server.py`:
 
 - `e621_event` DTO/read/set helpers
 - `ollama` DTO/read/set helpers
@@ -91,7 +130,7 @@ After P0/P1, extract module-specific bridge logic out of `core/remote_api_server
 
 Target outcome: `remote_api_server.py` keeps WS routing and thread handoff; module behavior moves into testable adapter/helper units.
 
-### P3 — Web Shell Contract Continuation
+### P4 — Web Shell Contract Continuation
 
 Owner: product/architecture
 
@@ -105,3 +144,5 @@ Continue the `future01` Web Shell audit follow-ups:
 ## Recommended Next Concrete Task
 
 Start with P0. The current work is close to a checkpoint, but committing before `git diff --check` and the unwired `instantWildcardPanel.mjs` decision would leave avoidable cleanup debt.
+
+Then do P1 before broad behavior smoke, because the behavior smoke should validate the launcher structure users will actually keep using.

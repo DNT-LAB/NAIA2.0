@@ -4267,48 +4267,29 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             "images": entries[start:end],
         }
 
-    @app.get("/api/viewer/download-all")
-    async def viewer_download_all():
-        entries = await asyncio.to_thread(bridge._scan_save_folder)
-        if not entries:
-            return JSONResponse({"error": "viewer is empty"}, status_code=404)
-
-        from starlette.background import BackgroundTask
-
-        def _build_zip():
+    @app.post("/api/viewer/open-folder")
+    async def viewer_open_folder():
+        def _open_folder():
             import os
-            import tempfile
-            import zipfile
+            import subprocess
+            import sys
 
-            tmp = tempfile.NamedTemporaryFile(prefix="naia_viewer_", suffix=".zip", delete=False)
-            tmp_path = Path(tmp.name)
-            tmp.close()
+            folder = Path(bridge.app_context.session_save_path)
+            folder.mkdir(parents=True, exist_ok=True)
 
-            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-                for entry in entries:
-                    target = bridge._validate_viewer_path(entry.get("rel_path", ""))
-                    if not target:
-                        continue
-                    zf.write(str(target), arcname=entry["rel_path"])
+            if sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(folder)])
+            elif os.name == "nt":
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+            return str(folder)
 
-            return tmp_path
-
-        def _cleanup_temp_zip(path_str: str):
-            import os
-            try:
-                os.unlink(path_str)
-            except OSError:
-                pass
-
-        zip_path = await asyncio.to_thread(_build_zip)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"naia_viewer_{timestamp}.zip"
-        return FileResponse(
-            str(zip_path),
-            media_type="application/zip",
-            filename=filename,
-            background=BackgroundTask(_cleanup_temp_zip, str(zip_path)),
-        )
+        try:
+            opened = await asyncio.to_thread(_open_folder)
+            return {"ok": True, "path": opened}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/api/viewer/thumb/{path:path}")
     async def viewer_thumb(path: str, size: int = 0):
@@ -4324,14 +4305,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         return Response(content=thumb_bytes, media_type="image/webp")
 
     @app.get("/api/viewer/image/{path:path}")
-    async def viewer_image(path: str, download: bool = False):
+    async def viewer_image(path: str):
         target = bridge._validate_viewer_path(path)
         if not target:
             return JSONResponse({"error": "not found"}, 404)
         ext = target.suffix.lower()
         media = {".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(ext, "image/png")
-        if download:
-            return FileResponse(str(target), media_type=media, filename=target.name)
         return FileResponse(str(target), media_type=media)
 
     @app.get("/api/viewer/meta/{path:path}")

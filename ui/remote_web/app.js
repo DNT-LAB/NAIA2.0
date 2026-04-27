@@ -1067,12 +1067,7 @@ function openViewerPopup() {
             <div class="prompt-float-content" id="vpPromptContent"></div>
           </div>
           <div class="viewer-bottom-controls" style="display:flex">
-            <label class="prompt-float-toggle" style="display:flex">
-              <input type="checkbox" id="vpPromptCb" onchange="toggleVpPrompt(this.checked)">
-              <span>Prompt</span>
-            </label>
-            <button class="viewer-download-btn viewer-download-all-btn" onclick="downloadAllImages()">Download All</button>
-            <button class="viewer-download-btn" onclick="downloadImage(_vpCurrentPath)">Download</button>
+            <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
           </div>
         </div>
       </div>
@@ -1181,7 +1176,6 @@ function _viewerLightboxBaseHtml() {
       </div>
       <div class="viewer-lightbox-controls">
         <button class="viewer-lightbox-btn${_lightboxPromptVisible ? ' accent' : ''}" id="viewerLightboxPromptBtn" onclick="toggleLightboxPrompt()">${promptBtnText}</button>
-        <button class="viewer-lightbox-btn accent" onclick="downloadImage()">Download</button>
         <button class="viewer-lightbox-btn danger" onclick="closeViewerLightbox()">Close</button>
       </div>
     </div>`;
@@ -1259,19 +1253,12 @@ function _showViewerImage(relPath) {
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
   _loadResultInfo(relPath);
-  // Show nav + prompt toggle
+  // Show nav
   const actions = document.querySelector('.viewer-nav-actions');
   if (actions) actions.classList.add('visible');
-  const toggle = $('promptFloatToggle');
-  if (toggle) toggle.classList.add('visible');
-  const toggleM = $('promptFloatToggleMobile');
-  if (toggleM) toggleM.classList.add('visible');
   // Highlight active thumb
   const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
   thumbs.forEach((t, i) => t.classList.toggle('active', i === _viewerNavIdx));
-  // Auto-load prompt if checkbox is checked
-  const cb = $('promptFloatCb');
-  if (cb && cb.checked) _loadPromptForFloat(relPath, 'promptFloat', 'promptFloatContent');
 }
 
 function navViewer(dir) {
@@ -1289,12 +1276,6 @@ function hideViewerNav() {
   _currentViewerPath = '';
   const actions = document.querySelector('.viewer-nav-actions');
   if (actions) actions.classList.remove('visible');
-  const toggle = $('promptFloatToggle');
-  if (toggle) toggle.classList.remove('visible');
-  const toggleM = $('promptFloatToggleMobile');
-  if (toggleM) toggleM.classList.remove('visible');
-  const pf = $('promptFloat');
-  if (pf) pf.classList.remove('visible');
   viewerGrid.querySelectorAll('.viewer-thumb.active').forEach(t => t.classList.remove('active'));
   _hideLatestViewerBadge();
 }
@@ -1329,21 +1310,6 @@ document.addEventListener('keydown', e => {
     hideViewerNav();
   }
 });
-
-// ---- Prompt floating panel (reusable) ----
-
-function togglePromptFloat(checked) {
-  const pf = $('promptFloat');
-  if (pf) pf.classList.toggle('visible', checked);
-  // 두 체크박스 동기화 (PC ↔ 모바일)
-  const cb1 = $('promptFloatCb');
-  const cb2 = $('promptFloatCbMobile');
-  if (cb1 && cb1.checked !== checked) cb1.checked = checked;
-  if (cb2 && cb2.checked !== checked) cb2.checked = checked;
-  if (checked && _currentViewerPath) {
-    _loadPromptForFloat(_currentViewerPath, 'promptFloat', 'promptFloatContent');
-  }
-}
 
 let _promptFloatCache = {};  // relPath → html
 let _promptFloatCacheKeys = [];
@@ -1417,54 +1383,20 @@ async function _loadPromptForFloat(relPath, floatId, contentId) {
   }
 }
 
-// ---- Download ----
+// ---- Result folder ----
 
 let _latestImagePath = '';  // 다운로드 가능한 최신 이미지 경로
 
-async function downloadImage(preferredPath = '') {
-  const path = preferredPath || _currentViewerPath || _latestImagePath;
-  if (!path) {
-    showToast('Download failed. Image not saved.', 'error');
-    return;
-  }
+async function openResultFolder() {
   try {
-    const resp = await fetch('/api/viewer/image/' + encodeURI(path) + '?download=1');
+    const resp = await fetch('/api/viewer/open-folder', { method: 'POST' });
     if (!resp.ok) {
-      showToast('Download failed. Image not saved.', 'error');
+      showToast('Open folder failed.', 'error');
       return;
     }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = path.split('/').pop() || 'image';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    showToast('Opened result folder.', 'success');
   } catch (e) {
-    showToast('Download failed. Image not saved.', 'error');
-  }
-}
-
-async function downloadAllImages() {
-  try {
-    const resp = await fetch('/api/viewer/download-all');
-    if (!resp.ok) {
-      showToast('Download all failed. Viewer is empty.', 'error');
-      return;
-    }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'naia_viewer_images.zip';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    showToast('Download all failed.', 'error');
+    showToast('Open folder failed.', 'error');
   }
 }
 

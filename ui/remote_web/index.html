@@ -450,22 +450,13 @@
             <button class="viewer-hist-btn" onclick="hideViewerNav()">Close</button>
             <button class="viewer-hist-btn nav" onclick="navViewer(1)">&#9654;</button>
           </div>
-          <!-- Prompt floating panel (reusable: main viewer + popup viewer) -->
-          <div class="prompt-float" id="promptFloat">
-            <div class="prompt-float-content" id="promptFloatContent"></div>
-          </div>
           <div class="viewer-bottom-controls">
-            <label class="prompt-float-toggle" id="promptFloatToggle">
-              <input type="checkbox" id="promptFloatCb" onchange="togglePromptFloat(this.checked)">
-              <span>Prompt</span>
-            </label>
-            <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
+            <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
           </div>
         </div>
         <section class="result-info-panel" id="resultInfoPanel" aria-label="Generation info">
           <div class="result-info-header">
             <span>Generation Info</span>
-            <button class="result-info-action" onclick="togglePromptFloat(true)">Prompt Popup</button>
           </div>
           <div class="result-info-content" id="resultInfoContent">
             <span class="result-info-empty">select a history item...</span>
@@ -479,16 +470,6 @@
         </div>
         <div class="viewer-panel-grid" id="viewerGrid"></div>
         <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
-        <div class="viewer-panel-bottom">
-          <label class="viewer-panel-prompt-toggle" id="promptFloatToggleMobile">
-            <input type="checkbox" id="promptFloatCbMobile" onchange="togglePromptFloat(this.checked)">
-            <span>Prompt</span>
-          </label>
-          <div class="viewer-panel-actions">
-            <button class="viewer-download-btn viewer-download-all-btn" onclick="downloadAllImages()">Download All</button>
-            <button class="viewer-download-btn" onclick="downloadImage()">Download</button>
-          </div>
-        </div>
       </aside>
     </div>
   </div>

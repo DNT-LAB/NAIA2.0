@@ -628,21 +628,6 @@ header {
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.result-info-action {
-  height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--border-dim);
-  border-radius: 5px;
-  background: rgba(255,255,255,0.04);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  cursor: pointer;
-}
-.result-info-action:hover {
-  color: var(--text-primary);
-  background: rgba(255,255,255,0.08);
-}
 .result-info-content {
   flex: 1;
   overflow-y: auto;
@@ -993,8 +978,6 @@ header {
   bottom: 42px; left: 8px; right: 8px;
   max-width: none;
 }
-.viewer-popup-right .prompt-float-toggle { display: flex; }
-
 /* ---- Prompt floating panel (reusable) ---- */
 .prompt-float {
   position: absolute;
@@ -1035,7 +1018,7 @@ header {
   margin-bottom: 5px;
 }
 .pf-island:last-child { margin-bottom: 0; }
-/* PC용 bottom controls container (Prompt toggle + Download) */
+/* Result action */
 .viewer-bottom-controls {
   position: absolute;
   bottom: 8px; right: 10px;
@@ -1044,25 +1027,7 @@ header {
   gap: 4px;
   align-items: center;
 }
-/* PC용 floating prompt toggle */
-.prompt-float-toggle {
-  display: none;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  background: rgba(18,18,26,0.92);
-  backdrop-filter: blur(8px);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-dim);
-  cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.06);
-}
-.prompt-float-toggle.visible { display: none; } /* 모바일: 항상 숨김 */
-.prompt-float-toggle input { margin: 0; width: 12px; height: 12px; accent-color: var(--accent); }
-/* Download 버튼 */
-.viewer-download-btn {
+.viewer-folder-btn {
   padding: 3px 10px;
   border-radius: 12px;
   background: rgba(140,140,155,0.55);
@@ -1075,47 +1040,7 @@ header {
   white-space: nowrap;
   transition: background 0.2s;
 }
-.viewer-download-btn:hover { background: rgba(160,160,175,0.7); }
-/* 모바일 viewer panel 하단 (Prompt + Download) */
-.viewer-panel-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-top: 1px solid var(--border-dim);
-  flex-shrink: 0;
-}
-.viewer-panel-actions {
-  display: flex;
-  margin-left: auto;
-}
-.viewer-panel-prompt-toggle {
-  display: none;
-  flex: 1;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.viewer-panel-prompt-toggle.visible { display: flex; }
-.viewer-panel-prompt-toggle input { margin: 0; width: 12px; height: 12px; accent-color: var(--accent); }
-.viewer-panel-bottom .viewer-download-btn {
-  padding: 8px 12px;
-  border-radius: 0;
-  border: none;
-  border-left: 1px solid var(--border-dim);
-  background: rgba(140,140,155,0.3);
-}
-.viewer-panel-bottom .viewer-download-btn:first-child {
-  border-left: none;
-}
-.viewer-download-all-btn {
-  background: rgba(124,106,239,0.22) !important;
-  color: #f2eeff;
-}
+.viewer-folder-btn:hover { background: rgba(160,160,175,0.7); }
 
 /* ---- Prompt slide-up (mobile) ---- */
 .prompt-drawer {
@@ -2926,11 +2851,8 @@ header {
   .viewer-panel-grid { grid-template-columns: 1fr; }
   .viewer-panel .viewer-thumb { aspect-ratio: auto; }
   .viewer-pop-btn { display: flex; align-items: center; justify-content: center; }
-  /* PC: bottom controls 활성화, 모바일용 panel-bottom 내 prompt toggle 숨김 */
+  /* PC: bottom controls 활성화 */
   .viewer-bottom-controls { display: flex; }
-  .viewer-panel-prompt-toggle { display: none !important; }
-  .viewer-panel-bottom .viewer-download-btn { display: inline-flex; }
-  .prompt-float-toggle.visible { display: flex; }
   .prompt-float { left: auto; right: 10px; max-width: 420px; }
   /* PC: tag tooltip at top-left of viewer area */
   .tag-tooltip {

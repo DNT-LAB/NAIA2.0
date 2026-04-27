@@ -1,5 +1,6 @@
 const ACTION_METADATA = 'show_metadata';
 const ACTION_PASTE_IMAGE = 'paste_image';
+const ACTION_IMAGE_ACTION = 'image_action';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -8,6 +9,7 @@ const DEFAULT_CAPABILITIES = {
   restore_params: false,
   metadata: false,
   paste_image: true,
+  image_action: false,
   open_file: false,
   save_image: false,
   copy_png: false,
@@ -37,8 +39,8 @@ const MAIN_IMAGE_MENU = [
   {
     label: 'NAI 인페인트 메뉴',
     children: [
-      {label: 'Send to img2img'},
-      {label: 'Send to Inpaint'},
+      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img'},
+      {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint'},
       {label: 'Instant Outpaint Request'},
       {label: 'Send to Outpainting'},
       {label: 'Use as outpainting base'},
@@ -88,6 +90,8 @@ export function createResultContextMenu({
   escHtml = defaultEscHtml,
   onPasteImage = () => {},
   onShowMetadata = null,
+  onImageAction = null,
+  getMode = () => '',
 }) {
   let menu = null;
   let metadataModal = null;
@@ -122,6 +126,11 @@ export function createResultContextMenu({
     if (item.action === ACTION_PASTE_IMAGE) {
       return hasCapability(context, 'paste_image');
     }
+    if (item.action === ACTION_IMAGE_ACTION) {
+      if (!hasCapability(context, 'image_action')) return false;
+      if (item.modes && !item.modes.includes(String(getMode() || '').toUpperCase())) return false;
+      return typeof onImageAction === 'function';
+    }
     return false;
   }
 
@@ -133,12 +142,13 @@ export function createResultContextMenu({
     const enabled = isItemEnabled(item, context);
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
+    const imageActionAttr = item.imageAction ? ` data-image-action="${item.imageAction}"` : '';
     const childHtml = item.children
       ? `<div class="result-context-children">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group">
-        <button type="button" class="result-context-item${danger}"${actionAttr}${disabledAttr}>
+        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${disabledAttr}>
           <span>${escapeText(item.label)}</span>${item.children ? '<span class="result-context-arrow">›</span>' : ''}
         </button>
         ${childHtml}
@@ -175,6 +185,8 @@ export function createResultContextMenu({
           showMetadata(context);
         } else if (action === ACTION_PASTE_IMAGE) {
           onPasteImage();
+        } else if (action === ACTION_IMAGE_ACTION) {
+          onImageAction(context, button.dataset.imageAction || '');
         }
       });
     });
@@ -240,7 +252,7 @@ export function createResultContextMenu({
     return preview ? extractViewerPathFromSrc(preview.getAttribute('src')) : '';
   }
 
-  function buildContext(source, path = '', hasImage = false) {
+  function buildContext(source, path = '', hasImage = false, imageSrc = '') {
     const isCurrent = source === 'current';
     const isSaved = source === 'saved';
     const isInput = source === 'input';
@@ -249,12 +261,14 @@ export function createResultContextMenu({
       id: isSaved && path ? `saved:${path}` : source,
       source,
       path,
+      imageSrc,
       hasImage,
       hasMetadata: metadataAvailable,
       capabilities: {
         ...DEFAULT_CAPABILITIES,
         metadata: metadataAvailable,
         paste_image: true,
+        image_action: hasImage,
         copy_png: hasImage,
         copy_webp: hasImage,
         open_file: isSaved && Boolean(path),
@@ -291,6 +305,7 @@ export function createResultContextMenu({
       source: asset.source ?? context.source,
       path: asset.path ?? context.path,
       filePath: asset.file_path ?? context.filePath,
+      imageSrc: asset.image_url ?? asset.imageUrl ?? context.imageSrc,
       hasImage: Boolean(asset.has_image ?? asset.hasImage ?? context.hasImage),
       hasMetadata: Boolean(asset.has_metadata ?? asset.hasMetadata ?? context.hasMetadata),
       capabilities,
@@ -315,7 +330,8 @@ export function createResultContextMenu({
 
   function buildThumbnailContext(thumb) {
     const path = thumb.dataset.path || '';
-    return buildContext('saved', path, true);
+    const imageSrc = path ? '/api/viewer/image/' + encodeURI(path) : (thumb.getAttribute('src') || '');
+    return buildContext('saved', path, true, imageSrc);
   }
 
   function buildImagePlaneContext(target) {
@@ -330,7 +346,7 @@ export function createResultContextMenu({
     const source = path
       ? 'saved'
       : (datasetSource === 'input' ? 'input' : 'current');
-    return buildContext(source, path, true);
+    return buildContext(source, path, true, image.getAttribute('src') || '');
   }
 
   async function showMetadata(context) {

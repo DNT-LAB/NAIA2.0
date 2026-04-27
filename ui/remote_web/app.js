@@ -227,11 +227,13 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       fetch,
       showToast,
       escHtml,
+      getMode: () => currentMode || modeSelect.value || 'NAI',
       onPasteImage: () => {
         if (resultImageInput) resultImageInput.pasteFromClipboard();
         else showToast('Image input is not ready', 'error');
       },
       onShowMetadata: showMetadataInTab,
+      onImageAction: requestContextImageAction,
     });
     resultContextMenu.bind();
   })
@@ -1207,6 +1209,31 @@ async function requestMetadataImageAction(payload, action) {
   } catch (error) {
     console.error('Metadata image action failed', error);
     showToast(error.message || 'Metadata image action failed', 'error');
+  }
+}
+
+async function requestContextImageAction(context, action) {
+  let imageUrl = context?.imageSrc || '';
+  const label = context?.path || context?.filePath || 'Result Image';
+  if (!imageUrl && context?.path) {
+    imageUrl = '/api/viewer/image/' + encodeURI(context.path);
+  }
+  if (!imageUrl && context?.source === 'current') {
+    const preview = document.getElementById('preview');
+    imageUrl = preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : '';
+  }
+  if (!imageUrl) {
+    showToast('Result image is unavailable', 'error');
+    return;
+  }
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    await requestPopupImageAction({blob, label}, action);
+  } catch (error) {
+    console.error('Context image action failed', error);
+    showToast(error.message || 'Context image action failed', 'error');
   }
 }
 

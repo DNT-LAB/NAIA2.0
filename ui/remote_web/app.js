@@ -51,6 +51,7 @@ let danbooruFeedbackControl = null;
 let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
 let promptEngineeringActions = null;
+let promptEngineeringPopups = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -1717,34 +1718,50 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering popup renderers module', error);
   });
-let peE621Open = false;
-let pePresetAddOpen = false;
-let pePresetManageOpen = false;
-let peDanbooruOpen = false;
-let peDebugOpen = false;
-
-function requestPromptEngineeringState() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'prompt_engineering'}));
-  }
-}
+const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs')
+  .then(({createPromptEngineeringPopups}) => {
+    promptEngineeringPopups = createPromptEngineeringPopups({
+      getSharedMode: () => sharedMode,
+      getWs: () => ws,
+      WebSocket,
+      modulePopup,
+      panels: {
+        e621: peE621Panel,
+        presetAdd: pePresetAddPanel,
+        presetManage: pePresetManagePanel,
+        danbooru: peDanbooruPanel,
+        debug: peDebugPanel,
+      },
+      positionFloatingPanel,
+      relayoutFloatingPanels,
+      closeAuxiliaryPopups,
+      refreshDebug: refreshPromptEngineeringDebug,
+      getLastState: () => lastPromptEngineeringState,
+      renderers: {
+        presetAdd: renderPePresetAddPanel,
+        presetManage: renderPePresetManagePanel,
+        e621: renderPeE621Panel,
+        danbooru: renderPeDanbooruPanel,
+        debug: renderPeDebugPanel,
+      },
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Prompt Engineering popups module', error);
+  });
 
 function closeAllPePanels() {
-  closePeE621Panel();
-  closePePresetAddPanel();
-  closePePresetManagePanel();
-  closePeDanbooruPanel();
-  closePeDebugPanel();
+  if (promptEngineeringPopups) promptEngineeringPopups.closeAll();
 }
 
 function closeAuxiliaryPopups(exceptPanel = null) {
   if (exceptPanel !== chunkPanel && isChunkOpen()) closeChunkPanel();
   if (exceptPanel !== refinePanel && refinePanelControl && refinePanelControl.isOpen()) closeRefine();
-  if (exceptPanel !== pePresetAddPanel && pePresetAddOpen) closePePresetAddPanel();
-  if (exceptPanel !== pePresetManagePanel && pePresetManageOpen) closePePresetManagePanel();
-  if (exceptPanel !== peE621Panel && peE621Open) closePeE621Panel();
-  if (exceptPanel !== peDanbooruPanel && peDanbooruOpen) closePeDanbooruPanel();
-  if (exceptPanel !== peDebugPanel && peDebugOpen) closePeDebugPanel();
+  if (exceptPanel !== pePresetAddPanel && promptEngineeringPopups?.isOpen('presetAdd')) closePePresetAddPanel();
+  if (exceptPanel !== pePresetManagePanel && promptEngineeringPopups?.isOpen('presetManage')) closePePresetManagePanel();
+  if (exceptPanel !== peE621Panel && promptEngineeringPopups?.isOpen('e621')) closePeE621Panel();
+  if (exceptPanel !== peDanbooruPanel && promptEngineeringPopups?.isOpen('danbooru')) closePeDanbooruPanel();
+  if (exceptPanel !== peDebugPanel && promptEngineeringPopups?.isOpen('debug')) closePeDebugPanel();
 
   const tagFilterPopup = document.getElementById('tagFilterPopup');
   if (exceptPanel !== tagFilterPopup && tagFilterPopup?.classList.contains('open')) {
@@ -1753,100 +1770,47 @@ function closeAuxiliaryPopups(exceptPanel = null) {
 }
 
 function openPePresetAddPanel() {
-  if (sharedMode) return;
-  if (pePresetAddOpen) { closePePresetAddPanel(); return; }
-  closeAuxiliaryPopups(pePresetAddPanel);
-  pePresetAddOpen = true;
-  pePresetAddPanel.classList.add('open');
-  positionFloatingPanel(pePresetAddPanel, modulePopup);
-  const body = pePresetAddPanel.querySelector('.pe-popup-body');
-  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
-  syncPromptEngineeringPopups();
-  requestPromptEngineeringState();
+  if (promptEngineeringPopups) promptEngineeringPopups.openPresetAdd();
 }
 
 function closePePresetAddPanel() {
-  pePresetAddOpen = false;
-  pePresetAddPanel.classList.remove('open');
+  if (promptEngineeringPopups) promptEngineeringPopups.closePresetAdd();
 }
 
 function openPePresetManagePanel() {
-  if (sharedMode) return;
-  if (pePresetManageOpen) { closePePresetManagePanel(); return; }
-  closeAuxiliaryPopups(pePresetManagePanel);
-  pePresetManageOpen = true;
-  pePresetManagePanel.classList.add('open');
-  positionFloatingPanel(pePresetManagePanel, modulePopup);
-  const body = pePresetManagePanel.querySelector('.pe-popup-body');
-  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
-  syncPromptEngineeringPopups();
-  requestPromptEngineeringState();
+  if (promptEngineeringPopups) promptEngineeringPopups.openPresetManage();
 }
 
 function closePePresetManagePanel() {
-  pePresetManageOpen = false;
-  pePresetManagePanel.classList.remove('open');
+  if (promptEngineeringPopups) promptEngineeringPopups.closePresetManage();
 }
 
 function openPeE621Panel() {
-  if (peE621Open) { closePeE621Panel(); return; }
-  closeAuxiliaryPopups(peE621Panel);
-  peE621Open = true;
-  peE621Panel.classList.add('open');
-  positionFloatingPanel(peE621Panel, modulePopup);
-  const body = peE621Panel.querySelector('.pe-popup-body');
-  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
-  syncPromptEngineeringPopups();
-  requestPromptEngineeringState();
+  if (promptEngineeringPopups) promptEngineeringPopups.openE621();
 }
 
 function closePeE621Panel() {
-  peE621Open = false;
-  peE621Panel.classList.remove('open');
+  if (promptEngineeringPopups) promptEngineeringPopups.closeE621();
 }
 
 function openPeDanbooruPanel() {
-  if (peDanbooruOpen) { closePeDanbooruPanel(); return; }
-  closeAuxiliaryPopups(peDanbooruPanel);
-  peDanbooruOpen = true;
-  peDanbooruPanel.classList.add('open');
-  positionFloatingPanel(peDanbooruPanel, modulePopup);
-  const body = peDanbooruPanel.querySelector('.pe-popup-body');
-  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
-  syncPromptEngineeringPopups();
-  requestPromptEngineeringState();
+  if (promptEngineeringPopups) promptEngineeringPopups.openDanbooru();
 }
 
 function closePeDanbooruPanel() {
-  peDanbooruOpen = false;
-  peDanbooruPanel.classList.remove('open');
+  if (promptEngineeringPopups) promptEngineeringPopups.closeDanbooru();
 }
 
 function openPeDebugPanel() {
-  if (peDebugOpen) { closePeDebugPanel(); return; }
-  closeAuxiliaryPopups(peDebugPanel);
-  peDebugOpen = true;
-  peDebugPanel.classList.add('open');
-  positionFloatingPanel(peDebugPanel, modulePopup);
-  const body = peDebugPanel.querySelector('.pe-popup-body');
-  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
-  syncPromptEngineeringPopups();
-  refreshPromptEngineeringDebug();
+  if (promptEngineeringPopups) promptEngineeringPopups.openDebug();
 }
 
 function closePeDebugPanel() {
-  peDebugOpen = false;
-  peDebugPanel.classList.remove('open');
+  if (promptEngineeringPopups) promptEngineeringPopups.closeDebug();
 }
 
 function syncPromptEngineeringPopups() {
-  relayoutFloatingPanels();
-  if (!lastPromptEngineeringState) return;
-  if (pePresetAddOpen) renderPePresetAddPanel(lastPromptEngineeringState);
-  if (pePresetManageOpen) renderPePresetManagePanel(lastPromptEngineeringState);
-  if (peE621Open) renderPeE621Panel(lastPromptEngineeringState);
-  if (peDanbooruOpen) renderPeDanbooruPanel(lastPromptEngineeringState);
-  if (peDebugOpen) renderPeDebugPanel(lastPromptEngineeringState);
+  if (promptEngineeringPopups) promptEngineeringPopups.sync(lastPromptEngineeringState);
 }
 
 function onModuleState(m) {
@@ -2915,6 +2879,7 @@ Promise.all([
   promptEngineeringPopupRenderersReady,
   promptEngineeringPanelReady,
   promptEngineeringActionsReady,
+  promptEngineeringPopupsReady,
 ])
   .then(() => {
     initHistoryRail();

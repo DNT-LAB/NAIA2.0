@@ -1,6 +1,24 @@
 const ACTION_METADATA = 'show_metadata';
 const ACTION_PASTE_IMAGE = 'paste_image';
 
+const DEFAULT_CAPABILITIES = {
+  load_prompt: false,
+  reroll: false,
+  queue: false,
+  restore_params: false,
+  metadata: false,
+  paste_image: true,
+  open_file: false,
+  save_image: false,
+  copy_png: false,
+  copy_webp: false,
+  upscale_nai: false,
+  inpaint: false,
+  character_reference: false,
+  remote_event: false,
+  delete: false,
+};
+
 const MAIN_IMAGE_MENU = [
   {label: '프롬프트 불러오기'},
   {label: '프롬프트 다시개봉'},
@@ -69,12 +87,15 @@ export function createResultContextMenu({
   showToast = () => {},
   escHtml = defaultEscHtml,
   onPasteImage = () => {},
+  onShowMetadata = null,
 }) {
   let menu = null;
   let metadataModal = null;
+  let menuVersion = 0;
 
   function close() {
     if (!menu) return;
+    menuVersion += 1;
     menu.remove();
     menu = null;
   }
@@ -89,15 +110,27 @@ export function createResultContextMenu({
     return escHtml(String(value ?? ''));
   }
 
+  function hasCapability(context, key) {
+    return Boolean(context?.capabilities?.[key]);
+  }
+
+  function isItemEnabled(item, context) {
+    if (item.alwaysEnabled) return true;
+    if (item.action === ACTION_METADATA) {
+      return hasCapability(context, 'metadata');
+    }
+    if (item.action === ACTION_PASTE_IMAGE) {
+      return hasCapability(context, 'paste_image');
+    }
+    return false;
+  }
+
   function renderItem(item, context) {
     if (item.type === 'separator') {
       return '<div class="result-context-separator"></div>';
     }
     const danger = item.danger ? ' danger' : '';
-    const enabled = Boolean(
-      item.alwaysEnabled
-      || (item.action === ACTION_METADATA && context.hasMetadata && (!item.requiresPath || context.path || context.source === 'current'))
-    );
+    const enabled = isItemEnabled(item, context);
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
     const childHtml = item.children
@@ -110,6 +143,13 @@ export function createResultContextMenu({
         </button>
         ${childHtml}
       </div>`;
+  }
+
+  function renderMenu(kind, context) {
+    if (!menu) return;
+    const items = kind === 'thumbnail' ? THUMBNAIL_MENU : MAIN_IMAGE_MENU;
+    menu.innerHTML = items.map(item => renderItem(item, context)).join('');
+    bindActions(context);
   }
 
   function positionMenu(x, y) {
@@ -131,6 +171,7 @@ export function createResultContextMenu({
         const action = button.dataset.action;
         close();
         if (action === ACTION_METADATA) {
+          if (typeof onShowMetadata === 'function' && onShowMetadata(context) !== false) return;
           showMetadata(context);
         } else if (action === ACTION_PASTE_IMAGE) {
           onPasteImage();
@@ -141,18 +182,24 @@ export function createResultContextMenu({
 
   function open(kind, x, y, context = {}) {
     close();
-    const items = kind === 'thumbnail' ? THUMBNAIL_MENU : MAIN_IMAGE_MENU;
+    const version = ++menuVersion;
     menu = document.createElement('div');
     menu.className = `result-context-menu ${kind === 'thumbnail' ? 'thumbnail' : 'image-plane'}`;
-    menu.innerHTML = items.map(item => renderItem(item, context)).join('');
+    renderMenu(kind, context);
     document.body.appendChild(menu);
     menu.classList.add('open');
-    bindActions(context);
     positionMenu(x, y);
+    refreshAssetContext(kind, context, version, x, y);
   }
 
   function isPreviewVisible(preview) {
     return preview && preview.classList.contains('show') && preview.getAttribute('src');
+  }
+
+  function viewerMetaUrl(path, full = false) {
+    const params = new URLSearchParams({path: String(path || '')});
+    if (full) params.set('full', '1');
+    return '/api/viewer/meta?' + params.toString();
   }
 
   function extractViewerPathFromSrc(src) {
@@ -161,14 +208,25 @@ export function createResultContextMenu({
       const url = new URL(src, window.location.href);
       const prefix = '/api/viewer/image/';
       if (!url.pathname.startsWith(prefix)) return '';
-      return decodeURI(url.pathname.slice(prefix.length));
+      return decodeURIComponent(url.pathname.slice(prefix.length));
     } catch (error) {
       return '';
     }
   }
 
-  function getImagePlanePath(target) {
-    const sourceImage = target.closest('#preview, #viewerLightboxImg, #vpPreview');
+  function getSourceImageFromTarget(target) {
+    const sourceImage = target.closest('#preview, #viewerLightboxImg, #vpPreview, .vp-preview');
+    if (sourceImage && sourceImage.getAttribute('src')) return sourceImage;
+    return null;
+  }
+
+  function hasVisibleImage(image) {
+    if (!image || !image.getAttribute('src')) return false;
+    if (image.id === 'preview') return isPreviewVisible(image);
+    return true;
+  }
+
+  function getImagePlanePath(sourceImage) {
     if (sourceImage && sourceImage.getAttribute('src')) {
       if (sourceImage.dataset && sourceImage.dataset.source === 'saved' && sourceImage.dataset.path) {
         return sourceImage.dataset.path;
@@ -182,6 +240,99 @@ export function createResultContextMenu({
     return preview ? extractViewerPathFromSrc(preview.getAttribute('src')) : '';
   }
 
+  function buildContext(source, path = '', hasImage = false) {
+    const isCurrent = source === 'current';
+    const isSaved = source === 'saved';
+    const isInput = source === 'input';
+    const metadataAvailable = hasImage && isSaved;
+    return {
+      id: isSaved && path ? `saved:${path}` : source,
+      source,
+      path,
+      hasImage,
+      hasMetadata: metadataAvailable,
+      capabilities: {
+        ...DEFAULT_CAPABILITIES,
+        metadata: metadataAvailable,
+        paste_image: true,
+        copy_png: hasImage,
+        copy_webp: hasImage,
+        open_file: isSaved && Boolean(path),
+        save_image: isCurrent && hasImage,
+      },
+    };
+  }
+
+  function assetUrlForContext(context) {
+    if (!context || !context.hasImage) return '';
+    if (context.source === 'saved' && context.path) {
+      const params = new URLSearchParams({path: context.path});
+      return '/api/result/asset/saved?' + params.toString();
+    }
+    if (context.source === 'current') {
+      return '/api/result/asset/current';
+    }
+    return '';
+  }
+
+  function mergeAssetContext(context, asset) {
+    if (!asset || typeof asset !== 'object') return context;
+    const capabilities = {
+      ...DEFAULT_CAPABILITIES,
+      ...(context.capabilities || {}),
+      ...(asset.capabilities || {}),
+    };
+    if ('has_metadata' in asset || 'hasMetadata' in asset) {
+      capabilities.metadata = Boolean(asset.has_metadata ?? asset.hasMetadata);
+    }
+    return {
+      ...context,
+      id: asset.id ?? context.id,
+      source: asset.source ?? context.source,
+      path: asset.path ?? context.path,
+      filePath: asset.file_path ?? context.filePath,
+      hasImage: Boolean(asset.has_image ?? asset.hasImage ?? context.hasImage),
+      hasMetadata: Boolean(asset.has_metadata ?? asset.hasMetadata ?? context.hasMetadata),
+      capabilities,
+    };
+  }
+
+  async function refreshAssetContext(kind, context, version, x, y) {
+    const url = assetUrlForContext(context);
+    if (!url) return;
+    try {
+      const response = await fetchFn(url);
+      if (!response.ok) return;
+      const asset = await response.json();
+      if (!menu || version !== menuVersion) return;
+      const mergedContext = mergeAssetContext(context, asset);
+      renderMenu(kind, mergedContext);
+      positionMenu(x, y);
+    } catch (error) {
+      console.warn('Failed to resolve result asset context', error);
+    }
+  }
+
+  function buildThumbnailContext(thumb) {
+    const path = thumb.dataset.path || '';
+    return buildContext('saved', path, true);
+  }
+
+  function buildImagePlaneContext(target) {
+    const preview = document.getElementById('preview');
+    const sourceImage = getSourceImageFromTarget(target);
+    const image = sourceImage || preview;
+    const hasImage = hasVisibleImage(image);
+    if (!hasImage) return buildContext('empty', '', false);
+
+    const path = getImagePlanePath(image);
+    const datasetSource = image?.dataset ? image.dataset.source : '';
+    const source = path
+      ? 'saved'
+      : (datasetSource === 'input' ? 'input' : 'current');
+    return buildContext(source, path, true);
+  }
+
   async function showMetadata(context) {
     const path = context && context.path ? context.path : '';
     const useCurrent = !path && context && context.source === 'current';
@@ -191,7 +342,7 @@ export function createResultContextMenu({
     }
     try {
       const url = path
-        ? '/api/viewer/meta/' + encodeURI(path) + '?full=1'
+        ? viewerMetaUrl(path, true)
         : '/api/result/metadata';
       const response = await fetchFn(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -258,7 +409,7 @@ export function createResultContextMenu({
     const thumb = target.closest('.viewer-thumb');
     if (thumb) {
       event.preventDefault();
-      open('thumbnail', event.clientX, event.clientY, {path: thumb.dataset.path || '', hasImage: true, hasMetadata: true});
+      open('thumbnail', event.clientX, event.clientY, buildThumbnailContext(thumb));
       return;
     }
 
@@ -266,20 +417,10 @@ export function createResultContextMenu({
       return;
     }
 
-    const preview = document.getElementById('preview');
     const imagePlaneTarget = target.closest('#preview, #viewerLightboxImg, .vp-preview, .viewer');
     if (imagePlaneTarget) {
       event.preventDefault();
-      const hasImage = isPreviewVisible(preview);
-      const path = getImagePlanePath(target);
-      const previewSource = preview && preview.dataset ? preview.dataset.source : '';
-      const source = hasImage ? (path ? 'saved' : (previewSource === 'input' ? 'input' : 'current')) : 'empty';
-      open('image-plane', event.clientX, event.clientY, {
-        path,
-        source,
-        hasImage,
-        hasMetadata: hasImage && source !== 'input',
-      });
+      open('image-plane', event.clientX, event.clientY, buildImagePlaneContext(target));
     }
   }
 

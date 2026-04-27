@@ -1,6 +1,15 @@
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const PROMPT_CACHE_MAX = 80;
 
+function encodeViewerPath(relPath) {
+  return String(relPath || '').split('/').map(part => encodeURIComponent(part)).join('/');
+}
+
+function viewerMetaUrl(relPath) {
+  const params = new URLSearchParams({path: String(relPath || '')});
+  return '/api/viewer/meta?' + params.toString();
+}
+
 export function createResultHistoryController({
   document,
   window,
@@ -75,7 +84,7 @@ export function createResultHistoryController({
     img.className = 'viewer-thumb';
     img.loading = 'lazy';
     img.dataset.path = relPath;
-    img.src = '/api/viewer/thumb/' + encodeURI(relPath);
+    img.src = '/api/viewer/thumb/' + encodeViewerPath(relPath);
     img.onclick = () => thumbClick(relPath);
     viewerGrid.appendChild(img);
   }
@@ -86,7 +95,7 @@ export function createResultHistoryController({
     img.className = 'viewer-thumb';
     img.loading = 'lazy';
     img.dataset.path = relPath;
-    img.src = '/api/viewer/thumb/' + encodeURI(relPath);
+    img.src = '/api/viewer/thumb/' + encodeViewerPath(relPath);
     img.onclick = () => thumbClick(relPath);
     viewerGrid.prepend(img);
   }
@@ -140,7 +149,7 @@ export function createResultHistoryController({
 
   async function getPromptMetaHtml(relPath) {
     if (promptFloatCache[relPath]) return promptFloatCache[relPath];
-    const resp = await fetch('/api/viewer/meta/' + encodeURI(relPath));
+    const resp = await fetch(viewerMetaUrl(relPath));
     const meta = await resp.json();
     let html = '';
     if (meta.prompt) {
@@ -276,7 +285,7 @@ export function createResultHistoryController({
   function showImage(relPath) {
     currentViewerPath = relPath;
     onDiskImageSelected(relPath);
-    preview.src = '/api/viewer/image/' + encodeURI(relPath);
+    preview.src = '/api/viewer/image/' + encodeViewerPath(relPath);
     preview.dataset.source = 'saved';
     preview.dataset.path = relPath;
     preview.classList.add('show');
@@ -296,7 +305,9 @@ export function createResultHistoryController({
       resetLightbox();
       const img = getEl('viewerLightboxImg');
       if (lb && img) {
-        img.src = '/api/viewer/image/' + encodeURI(relPath);
+        img.src = '/api/viewer/image/' + encodeViewerPath(relPath);
+        img.dataset.source = 'saved';
+        img.dataset.path = relPath;
         lb.classList.add('open');
         syncLightboxPromptUi();
         if (lightboxPromptVisible) {
@@ -381,7 +392,7 @@ export function createResultHistoryController({
         img.className = 'viewer-thumb';
         img.loading = 'lazy';
         img.dataset.path = message.rel_path;
-        img.src = '/api/viewer/thumb/' + encodeURI(message.rel_path);
+        img.src = '/api/viewer/thumb/' + encodeViewerPath(message.rel_path);
         img.onclick = () => selectPopupImage(message.rel_path, img);
         vpGrid.prepend(img);
       }
@@ -437,7 +448,7 @@ export function createResultHistoryController({
           img.className = 'viewer-thumb';
           img.loading = 'lazy';
           img.dataset.path = entry.rel_path;
-          img.src = '/api/viewer/thumb/' + encodeURI(entry.rel_path);
+          img.src = '/api/viewer/thumb/' + encodeViewerPath(entry.rel_path);
           img.onclick = () => selectPopupImage(entry.rel_path, img);
           grid.appendChild(img);
         }
@@ -454,7 +465,11 @@ export function createResultHistoryController({
   function selectPopupImage(relPath, thumbEl) {
     vpCurrentPath = relPath;
     const previewEl = getEl('vpPreview');
-    if (previewEl) previewEl.src = '/api/viewer/image/' + encodeURI(relPath);
+    if (previewEl) {
+      previewEl.src = '/api/viewer/image/' + encodeViewerPath(relPath);
+      previewEl.dataset.source = 'saved';
+      previewEl.dataset.path = relPath;
+    }
     const grid = getEl('vpGrid');
     if (grid) grid.querySelectorAll('.viewer-thumb').forEach(thumb => thumb.classList.remove('active'));
     if (thumbEl) thumbEl.classList.add('active');

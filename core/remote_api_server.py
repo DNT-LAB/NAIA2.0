@@ -856,6 +856,129 @@ class RemoteBridge(QObject):
             "has_metadata": bool(extracted),
         }
 
+    def _source_row_available(self, source_row) -> bool:
+        if source_row is None:
+            return False
+        try:
+            return not bool(source_row.empty)
+        except Exception:
+            return True
+
+    def _current_api_mode(self) -> str:
+        try:
+            if hasattr(self.app_context, "get_api_mode"):
+                return self.app_context.get_api_mode()
+            return str(getattr(self.app_context, "current_api_mode", "") or "")
+        except Exception:
+            return ""
+
+    def _build_current_result_asset_payload(self) -> dict:
+        """Context menu가 사용할 현재 Result의 얇은 액션 계약."""
+        image_window = self._get_image_window_widget()
+        item = getattr(image_window, "current_history_item", None) if image_window else None
+        has_item_image = bool(item and getattr(item, "image", None))
+        has_latest_image = self.latest_webp is not None
+        metadata_payload = self.latest_metadata_payload if isinstance(self.latest_metadata_payload, dict) else {}
+        raw = metadata_payload.get("raw", {}) if isinstance(metadata_payload, dict) else {}
+        if not isinstance(raw, dict):
+            raw = {}
+        summary = metadata_payload.get("summary", {}) if isinstance(metadata_payload, dict) else {}
+        if not isinstance(summary, dict):
+            summary = {}
+
+        generation_params = getattr(item, "generation_params", None) if item else None
+        if not generation_params:
+            generation_params = raw.get("generation_params", {})
+        prompt_context = getattr(item, "prompt_context", None) if item else None
+        if not prompt_context:
+            prompt_context = raw.get("prompt_context", {})
+        source_row = getattr(item, "source_row", None) if item else None
+
+        filepath = str(getattr(item, "filepath", "") or "") if item else ""
+        has_file = bool(filepath and Path(filepath).is_file())
+        has_generation_params = bool(generation_params)
+        has_source_row = self._source_row_available(source_row)
+        has_prompt = bool(
+            (isinstance(prompt_context, dict) and (prompt_context.get("main_prompt") or prompt_context.get("final_prompt")))
+            or (isinstance(generation_params, dict) and generation_params.get("input"))
+            or summary.get("prompt")
+        )
+        mode = self._current_api_mode()
+        has_image = has_item_image or has_latest_image
+
+        return {
+            "id": "current",
+            "source": "current",
+            "path": "",
+            "file_path": filepath if has_file else "",
+            "label": "Current Result",
+            "image_url": "/api/latest-image" if has_latest_image else "",
+            "metadata_url": "/api/result/metadata",
+            "has_image": has_image,
+            "has_metadata": bool(metadata_payload),
+            "capabilities": {
+                "load_prompt": bool(has_prompt),
+                "reroll": bool(has_source_row),
+                "queue": bool(has_generation_params),
+                "restore_params": bool(has_generation_params),
+                "metadata": bool(metadata_payload),
+                "paste_image": True,
+                "open_file": has_file,
+                "save_image": bool(has_item_image and not has_file),
+                "copy_png": has_image,
+                "copy_webp": has_image,
+                "upscale_nai": bool(has_image and mode == "NAI"),
+                "inpaint": has_item_image,
+                "character_reference": has_item_image,
+                "remote_event": has_source_row,
+                "delete": False,
+            },
+        }
+
+    def _build_saved_result_asset_payload(self, rel_path: str) -> dict | None:
+        """저장 폴더 이미지의 ResultAsset 계약. HistoryItem 정보가 없으면 보수적으로 제한."""
+        target = self._validate_viewer_path(rel_path)
+        if not target:
+            return None
+        try:
+            stat = target.stat()
+            save_dir = self._get_viewer_save_dir().resolve()
+            normalized_path = target.relative_to(save_dir).as_posix()
+        except Exception:
+            stat = None
+            normalized_path = rel_path.replace("\\", "/")
+
+        return {
+            "id": f"saved:{normalized_path}",
+            "source": "saved",
+            "path": normalized_path,
+            "file_path": str(target),
+            "label": target.name,
+            "image_url": "",
+            "metadata_url": "",
+            "has_image": True,
+            "has_metadata": True,
+            "size_bytes": stat.st_size if stat else None,
+            "mtime": stat.st_mtime if stat else None,
+            "capabilities": {
+                "load_prompt": False,
+                "reroll": False,
+                "queue": False,
+                "restore_params": False,
+                "metadata": True,
+                "paste_image": True,
+                "open_file": True,
+                "save_image": False,
+                "copy_png": True,
+                "copy_webp": True,
+                "upscale_nai": self._current_api_mode() == "NAI",
+                "inpaint": False,
+                "character_reference": False,
+                "remote_event": False,
+                "delete": False,
+            },
+        }
+
     def _do_random(self):
         """Random 요청 처리. deque에서 준비된 데이터를 pop하여 실행."""
         if not self._pending_random_requests:
@@ -4430,6 +4553,20 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": "No image generated yet"}, status_code=404)
         return bridge.latest_metadata_payload
 
+    @app.get("/api/result/asset/current")
+    async def api_current_result_asset():
+        asset = await asyncio.to_thread(bridge._build_current_result_asset_payload)
+        if not asset.get("has_image"):
+            return JSONResponse({"error": "No image generated yet"}, status_code=404)
+        return asset
+
+    @app.get("/api/result/asset/saved")
+    async def api_saved_result_asset(path: str):
+        asset = await asyncio.to_thread(bridge._build_saved_result_asset_payload, path)
+        if not asset:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return asset
+
     @app.post("/api/metadata/extract")
     async def api_metadata_extract(req: Request):
         image_bytes = await req.body()
@@ -4512,6 +4649,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         ext = target.suffix.lower()
         media = {".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(ext, "image/png")
         return FileResponse(str(target), media_type=media)
+
+    @app.get("/api/viewer/meta")
+    async def viewer_meta_query(path: str, full: bool = False):
+        return await viewer_meta(path, full)
 
     @app.get("/api/viewer/meta/{path:path}")
     async def viewer_meta(path: str, full: bool = False):

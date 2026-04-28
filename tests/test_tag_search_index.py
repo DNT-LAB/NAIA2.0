@@ -239,6 +239,28 @@ def test_tag_search_index_does_not_expand_category_tokens(monkeypatch):
     assert calls < 20
 
 
+def test_tag_search_index_drops_fast_cache_misses_without_scoring(monkeypatch):
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(tag=f"known tag {idx}", search_blob=f"known tag {idx}")
+            for idx in range(1000)
+        ]
+    )
+
+    calls = 0
+    original_score = TagSearchIndex._score
+
+    def counting_score(*args):
+        nonlocal calls
+        calls += 1
+        return original_score(*args)
+
+    monkeypatch.setattr(TagSearchIndex, "_score", staticmethod(counting_score))
+
+    assert index.search_tags("artlimorino831") == []
+    assert calls == 0
+
+
 def test_tag_search_entrypoints_split_fast_and_semantic_recall():
     entries = [
         TagSearchEntry(

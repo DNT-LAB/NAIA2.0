@@ -420,6 +420,7 @@ class TagSearchIndex:
             sources=sources,
             cats=cats,
             force_term_scan=False,
+            scan_substrings=False,
         )
 
     def search_tag_filter(
@@ -441,6 +442,7 @@ class TagSearchIndex:
             sources=sources,
             cats=cats,
             force_term_scan=False,
+            scan_substrings=False,
         )
 
     def search_semantic(
@@ -462,6 +464,7 @@ class TagSearchIndex:
             sources=sources,
             cats=cats,
             force_term_scan=True,
+            scan_substrings=True,
         )
 
     def search_event_semantic(
@@ -483,6 +486,7 @@ class TagSearchIndex:
             sources=sources,
             cats=cats,
             force_term_scan=True,
+            scan_substrings=True,
         )
 
     def _search(
@@ -495,6 +499,7 @@ class TagSearchIndex:
         sources: set[str] | None,
         cats: set[str] | None,
         force_term_scan: bool,
+        scan_substrings: bool,
     ) -> list[TagSearchResult]:
         q = normalize_search_query(query)
         if not q:
@@ -507,10 +512,10 @@ class TagSearchIndex:
             q_tokens,
             limit=limit,
             force_term_scan=force_term_scan,
+            scan_substrings=scan_substrings,
         )
-        tag_iterable = candidate_tags if candidate_tags is not None else self._entries.keys()
 
-        for tag in tag_iterable:
+        for tag in candidate_tags:
             entry = self._entries[tag]
             if require_event is True and not entry.is_event:
                 continue
@@ -562,7 +567,8 @@ class TagSearchIndex:
         *,
         limit: int | None,
         force_term_scan: bool = False,
-    ) -> set[str] | None:
+        scan_substrings: bool = False,
+    ) -> set[str]:
         candidates: set[str] = set()
 
         if query in self._entries:
@@ -574,7 +580,7 @@ class TagSearchIndex:
                 break
             candidates.add(tag)
 
-        if self._should_scan_tag_substrings(query):
+        if scan_substrings and self._should_scan_tag_substrings(query):
             candidates.update(tag for tag in self._sorted_tags if query in tag)
 
         token_sets = [self._term_to_tags.get(token) for token in query_tokens]
@@ -591,7 +597,9 @@ class TagSearchIndex:
         if term_matches:
             candidates.update(term_matches)
 
-        should_scan_terms = force_term_scan or not self._has_enough_candidates(candidates, limit)
+        should_scan_terms = force_term_scan or (
+            scan_substrings and not self._has_enough_candidates(candidates, limit)
+        )
         if self._should_scan_terms(query) and should_scan_terms:
             for term, tags in self._term_to_tags.items():
                 if term != query and query in term:
@@ -600,7 +608,7 @@ class TagSearchIndex:
         if force_term_scan:
             candidates.update(tag for tag, blob in self._blob_by_tag.items() if query in blob)
 
-        return candidates or None
+        return candidates
 
     @staticmethod
     def _has_enough_candidates(candidates: set[str], limit: int | None) -> bool:

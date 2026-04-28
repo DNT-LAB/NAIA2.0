@@ -4617,22 +4617,22 @@ class RemoteBridge(QObject):
         query = normalize_search_query(query)
         if not query:
             return []
-        self._load_kr_tags()
-        if not self._kr_tags_raw:
-            return []
         # prefix 라우팅 (@artist → artist: 변환 포함)
         cat_filter = None
         ql = query.lower()
         if ql.startswith('@'):
             cat_filter = 'artist'
-            ql = ql[1:]
+            ql = normalize_search_query(ql[1:])
         else:
             for pfx in ('artist:', 'character:'):
                 if ql.startswith(pfx):
                     cat_filter = pfx[:-1]  # 'artist' or 'character'
-                    ql = ql[len(pfx):]
+                    ql = normalize_search_query(ql[len(pfx):])
                     break
         if not ql:
+            return []
+        self._load_kr_tags()
+        if not self._kr_tags_raw:
             return []
         if self._tag_search_index is not None:
             cats = {cat_filter} if cat_filter else None

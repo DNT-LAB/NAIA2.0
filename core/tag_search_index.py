@@ -541,7 +541,7 @@ class TagSearchIndex:
         term_to_tags: dict[str, set[str]] = defaultdict(set)
 
         for tag, entry in self._entries.items():
-            blob = self._blob_by_tag[tag]
+            blob = self._make_candidate_blob(entry)
             for token in set(blob.split()):
                 if not token:
                     continue
@@ -574,7 +574,7 @@ class TagSearchIndex:
                 break
             candidates.add(tag)
 
-        if len(query) >= 2:
+        if self._should_scan_tag_substrings(query):
             candidates.update(tag for tag in self._sorted_tags if query in tag)
 
         token_sets = [self._term_to_tags.get(token) for token in query_tokens]
@@ -615,6 +615,20 @@ class TagSearchIndex:
         if any(ord(ch) > 127 for ch in query):
             return True
         return len(query) >= 3
+
+    @staticmethod
+    def _should_scan_tag_substrings(query: str) -> bool:
+        if any(ord(ch) > 127 for ch in query):
+            return len(query) >= 2
+        return len(query) >= 3
+
+    def _make_candidate_blob(self, entry: TagSearchEntry) -> str:
+        parts = [
+            entry.tag,
+            entry.desc,
+            " ".join(entry.keywords),
+        ]
+        return _norm(" ".join(part for part in parts if part))
 
     def _make_blob(self, entry: TagSearchEntry) -> str:
         parts = [

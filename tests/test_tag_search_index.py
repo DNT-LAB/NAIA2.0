@@ -211,6 +211,34 @@ def test_tag_search_index_ignores_prompt_weight_fragments(monkeypatch):
     assert calls == 1
 
 
+def test_tag_search_index_does_not_expand_category_tokens(monkeypatch):
+    entries = [
+        TagSearchEntry(
+            tag=f"sample creator {idx}",
+            freq=idx,
+            cat="artist",
+            category="artist",
+            search_blob=f"sample creator {idx} artist",
+        )
+        for idx in range(1000)
+    ]
+    entries.append(TagSearchEntry(tag="artist name", freq=100, search_blob="artist name"))
+    index = TagSearchIndex(entries)
+
+    calls = 0
+    original_score = TagSearchIndex._score
+
+    def counting_score(*args):
+        nonlocal calls
+        calls += 1
+        return original_score(*args)
+
+    monkeypatch.setattr(TagSearchIndex, "_score", staticmethod(counting_score))
+
+    assert index.search_tags("artist") == ["artist name"]
+    assert calls < 20
+
+
 def test_tag_search_entrypoints_split_fast_and_semantic_recall():
     entries = [
         TagSearchEntry(

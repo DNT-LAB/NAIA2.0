@@ -3373,6 +3373,32 @@ function onTagLookupResult(m) {
 }
 
 // ---- Autocomplete mode ----
+function normalizeAutocompleteQuery(stripped, allowTriggers) {
+  const query = String(stripped || '').trim();
+  if (!query) return '';
+  const lower = query.toLowerCase();
+
+  if (allowTriggers && (lower.startsWith('__') || lower.startsWith('$'))) {
+    return query;
+  }
+
+  for (const namespace of ['artist', 'character']) {
+    const prefix = namespace + ':';
+    if (prefix.startsWith(lower) && lower.length >= 2) return '';
+    if (lower.startsWith(prefix)) {
+      const suffix = query.slice(prefix.length).trim();
+      return suffix ? query : '';
+    }
+  }
+
+  if (lower === '@') return '';
+  if (lower.startsWith('@')) {
+    return query.slice(1).trim() ? query : '';
+  }
+
+  return query;
+}
+
 function scheduleAutocomplete() {
   const target = acTarget || promptEdit;
   const info = getActiveTokenInfo(target);
@@ -3383,13 +3409,19 @@ function scheduleAutocomplete() {
     checkTagHint();
     return;
   }
-  if (info.stripped === lastAcQuery) return;
-  lastAcQuery = info.stripped;
+  const query = normalizeAutocompleteQuery(info.stripped, allowTriggers);
+  if (!query) {
+    hideAutocomplete();
+    checkTagHint();
+    return;
+  }
+  if (query === lastAcQuery) return;
+  lastAcQuery = query;
   clearTimeout(acTimer);
   clearTimeout(tagLookupTimer);
   acTimer = setTimeout(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const s = info.stripped;
+    const s = query;
     if (allowTriggers && s.startsWith('__')) {
       // Wildcard autocomplete: __keyword → search wildcard names
       const q = s.replace(/^_+/, '').replace(/_+$/, '');

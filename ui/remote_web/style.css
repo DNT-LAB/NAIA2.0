@@ -2453,27 +2453,34 @@ body.resizing-result-info {
   background: var(--bg-elevated); border: 1px solid var(--border-dim);
   border-radius: 8px; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, background 0.2s, opacity 0.2s;
   flex: 1; min-width: 0;
-}
-.opt-toggle:has(input:checked) {
-  border-color: var(--accent); background: rgba(124,106,239,0.08);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  outline: none;
 }
 .opt-toggle.is-on {
   border-color: var(--accent); background: rgba(124,106,239,0.08);
 }
+.opt-toggle:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(157,139,255,0.26);
+}
+.opt-toggle:disabled {
+  cursor: not-allowed;
+}
 .opt-toggle.is-pending {
   border-color: rgba(157,139,255,0.62);
 }
-.opt-toggle input {
-  appearance: none; -webkit-appearance: none;
+.opt-box {
   width: 14px; height: 14px;
   border: 1.5px solid var(--border-glow); border-radius: 3px;
-  background: transparent; cursor: pointer; flex-shrink: 0;
+  background: transparent; flex-shrink: 0;
   position: relative; transition: all 0.2s;
 }
-.opt-toggle input:checked { background: var(--accent); border-color: var(--accent); }
-.opt-toggle input:checked::after {
+.opt-toggle.is-on .opt-box { background: var(--accent); border-color: var(--accent); }
+.opt-toggle.is-on .opt-box::after {
   content: ''; position: absolute; left: 3.5px; top: 1px;
   width: 4px; height: 7px;
   border: solid #fff; border-width: 0 1.5px 1.5px 0;

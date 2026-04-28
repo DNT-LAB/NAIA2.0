@@ -386,21 +386,24 @@
   <!-- Bottom controls (options + resolution + buttons) -->
   <div class="bottom-controls">
     <div class="options-row">
-      <label class="opt-toggle">
-        <input type="checkbox" id="optPromptFixed"
-               onchange="setOption('prompt_fixed', this.checked)">
+      <button type="button" class="opt-toggle" id="optPromptFixed"
+              data-option="prompt_fixed" data-checked="false" aria-pressed="false"
+              onclick="toggleOptionButton('prompt_fixed')">
+        <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">Prompt Fixed</span>
-      </label>
-      <label class="opt-toggle">
-        <input type="checkbox" id="optAutoGen"
-               onchange="setOption('auto_generate', this.checked)">
+      </button>
+      <button type="button" class="opt-toggle" id="optAutoGen"
+              data-option="auto_generate" data-checked="false" aria-pressed="false"
+              onclick="toggleOptionButton('auto_generate')">
+        <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">Auto Gen</span>
-      </label>
-      <label class="opt-toggle">
-        <input type="checkbox" id="optWcStandalone"
-               onchange="setOption('wildcard_standalone', this.checked)">
+      </button>
+      <button type="button" class="opt-toggle" id="optWcStandalone"
+              data-option="wildcard_standalone" data-checked="false" aria-pressed="false"
+              onclick="toggleOptionButton('wildcard_standalone')">
+        <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">WC Solo</span>
-      </label>
+      </button>
     </div>
     <div class="quick-params">
       <select class="param-select quick-select" id="qResolution" onchange="setParam('resolution',this.value)"></select>

@@ -617,8 +617,8 @@ function saveSharedSession() {
     tag_filter_exclude: quickState.tag_filter_exclude || null,
     tag_filter_active: !!quickState.tag_filter_active,
   };
-  for (const [key, cb] of Object.entries(optBoxes)) {
-    if (key !== 'auto_generate') data.options[key] = cb.checked;
+  for (const key of Object.keys(optBoxes)) {
+    if (key !== 'auto_generate') data.options[key] = getOptionChecked(key);
   }
   try { localStorage.setItem(SHARED_STORAGE_KEY, JSON.stringify(data)); } catch(_) {}
 }
@@ -940,7 +940,7 @@ function unlockRandomButton() {
     clearTimeout(window._randomTimeout);
     window._randomTimeout = null;
   }
-  const fixed = !!(optBoxes.prompt_fixed && optBoxes.prompt_fixed.checked);
+  const fixed = getOptionChecked('prompt_fixed');
   btnRnd.disabled = fixed;
   btnRnd.style.opacity = fixed ? '0.4' : '';
 }
@@ -1561,7 +1561,7 @@ function onSession(m) {
     if (autoGenCb) {
       applyOptionState('auto_generate', false);
       autoGenCb.disabled = true;
-      autoGenCb.parentElement.style.opacity = '0.4';
+      autoGenCb.style.opacity = '0.4';
     }
     // Auto Save 토글 차단 (호스트 전역 설정)
     if (statsSave) { statsSave.style.pointerEvents = 'none'; statsSave.style.opacity = '0.5'; }
@@ -1595,7 +1595,7 @@ function onSession(m) {
     _sharedParamsInit = false;
     _sharedOptionsInit = false;
     _sharedPromptsInit = false;
-    if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.parentElement.style.opacity = ''; }
+    if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.style.opacity = ''; }
     if (statsSave) { statsSave.style.pointerEvents = ''; statsSave.style.opacity = ''; }
     modeSelect.disabled = false;
     if (setupLauncherBtn) setupLauncherBtn.style.display = '';
@@ -1763,20 +1763,20 @@ function finishProgress() {
 }
 
 // ---- Options sync ----
+function getOptionChecked(key) {
+  const control = optBoxes[key];
+  return !!(control && control.dataset.checked === 'true');
+}
+
 function applyOptionState(key, value, options = {}) {
-  const cb = optBoxes[key];
-  if (!cb) return false;
+  const control = optBoxes[key];
+  if (!control) return false;
   const next = !!value;
   const clearPending = options.clearPending !== false;
-  if (cb.checked !== next) cb.checked = next;
-
-  const shell = cb.closest('.opt-toggle');
-  if (shell) {
-    shell.classList.toggle('is-on', next);
-    if (clearPending) shell.classList.remove('is-pending');
-    shell.setAttribute('aria-pressed', next ? 'true' : 'false');
-    shell.dataset.checked = next ? 'true' : 'false';
-  }
+  control.dataset.checked = next ? 'true' : 'false';
+  control.classList.toggle('is-on', next);
+  if (clearPending) control.classList.remove('is-pending');
+  control.setAttribute('aria-pressed', next ? 'true' : 'false');
 
   if (key === 'prompt_fixed') {
     btnRnd.disabled = next;
@@ -1789,14 +1789,13 @@ function applyOptionState(key, value, options = {}) {
 }
 
 function markOptionPending(key, pending) {
-  const cb = optBoxes[key];
-  const shell = cb ? cb.closest('.opt-toggle') : null;
-  if (shell) shell.classList.toggle('is-pending', !!pending);
+  const control = optBoxes[key];
+  if (control) control.classList.toggle('is-pending', !!pending);
 }
 
 function refreshAllOptionVisuals() {
-  for (const [key, cb] of Object.entries(optBoxes)) {
-    applyOptionState(key, !!(cb && cb.checked));
+  for (const key of Object.keys(optBoxes)) {
+    applyOptionState(key, getOptionChecked(key));
   }
 }
 
@@ -1825,10 +1824,16 @@ function syncOptions(m) {
 }
 
 function syncRatingBarVisibility() {
-  const pf = optBoxes.prompt_fixed && optBoxes.prompt_fixed.checked;
-  const wc = optBoxes.wildcard_standalone && optBoxes.wildcard_standalone.checked;
+  const pf = getOptionChecked('prompt_fixed');
+  const wc = getOptionChecked('wildcard_standalone');
   const bar = document.querySelector('.tag-filter-rating-row');
   if (bar) bar.style.display = (pf || wc) ? 'none' : '';
+}
+
+function toggleOptionButton(key) {
+  const control = optBoxes[key];
+  if (!control || control.disabled) return;
+  setOption(key, !getOptionChecked(key));
 }
 
 function setOption(key, value) {

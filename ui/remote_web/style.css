@@ -2422,7 +2422,7 @@ body.resizing-result-info {
   font-weight: 600;
 }
 .prompt-token-artist {
-  color: rgba(255, 205, 196, 0.96);
+  color: rgba(255, 205, 196, 1.00);
 }
 .prompt-token-character,
 .prompt-token-copyright {
@@ -2438,7 +2438,7 @@ body.resizing-result-info {
   color: rgba(255, 255, 255, 0.85);
 }
 .prompt-token-low {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.78);
 }
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }

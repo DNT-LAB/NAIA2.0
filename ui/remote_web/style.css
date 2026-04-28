@@ -2417,6 +2417,28 @@ body.resizing-result-info {
 .activated-summary-separator {
   color: var(--text-dim);
 }
+.prompt-token-comment {
+  color: #f4df8a;
+  font-weight: 600;
+}
+.prompt-token-artist {
+  color: rgba(244, 135, 125, 0.74);
+}
+.prompt-token-character {
+  color: rgba(166, 227, 161, 0.54);
+}
+.prompt-token-unknown {
+  color: rgba(235, 238, 248, 0.96);
+}
+.prompt-token-high {
+  color: rgba(235, 238, 248, 0.88);
+}
+.prompt-token-mid {
+  color: rgba(235, 238, 248, 0.80);
+}
+.prompt-token-low {
+  color: rgba(235, 238, 248, 0.70);
+}
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }
 .nai-wt-blue { background: rgba(80,120,220,0.18); border-radius: 2px; }

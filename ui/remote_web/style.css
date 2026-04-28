@@ -2422,27 +2422,27 @@ body.resizing-result-info {
   font-weight: 600;
 }
 .prompt-token-artist {
-  color: rgba(255, 210, 205, 0.38);
+  color: rgba(255, 218, 214, 0.72);
 }
 .prompt-token-character {
-  color: rgba(202, 232, 201, 0.30);
+  color: rgba(216, 240, 215, 0.50);
 }
 .prompt-token-unknown {
-  color: rgba(235, 238, 248, 0.96);
+  color: rgba(238, 241, 250, 0.98);
 }
 .prompt-token-high {
-  color: rgba(235, 238, 248, 0.88);
+  color: rgba(238, 241, 250, 0.92);
 }
 .prompt-token-mid {
-  color: rgba(235, 238, 248, 0.80);
+  color: rgba(238, 241, 250, 0.86);
 }
 .prompt-token-low {
-  color: rgba(235, 238, 248, 0.70);
+  color: rgba(238, 241, 250, 0.80);
 }
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }
-.nai-wt-blue { background: rgba(80,120,220,0.18); border-radius: 2px; }
-.nai-wt-red { background: rgba(220,80,80,0.18); border-radius: 2px; }
+.nai-wt-blue { background: rgba(80,120,220,0.10); border-radius: 2px; }
+.nai-wt-red { background: rgba(220,80,80,0.10); border-radius: 2px; }
 .webui-group {
   border-radius: 2px;
   -webkit-box-decoration-break: clone;

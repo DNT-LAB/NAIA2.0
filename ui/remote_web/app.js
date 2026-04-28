@@ -2,7 +2,7 @@
    NAIA Remote — client-side logic
    ============================================================ */
 
-let ws, blobUrl = null, generating = false;
+let ws, blobUrl = null, latestResultBlob = null, generating = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let reconnTimer = null, genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
@@ -138,9 +138,8 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
       showToast,
       renderPromptInfoHtml,
       onPromptInfoTagLookup: lookupPromptInfoTag,
-      onDiskImageSelected: relPath => {
+      onDiskImageSelected: () => {
         if (resultEnhance) resultEnhance.clearCurrentMeta();
-        if (metadataViewer) metadataViewer.loadSaved(relPath, {silent: true});
       },
     });
   })
@@ -195,6 +194,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs')
         }
         metadataViewer.displayPayload(payload.metadataPayload, {
           label: payload.label,
+          blob: payload.blob,
           imageUrl: payload.imageUrl,
           revokeImageUrl: payload.revokeImageUrl,
         });
@@ -707,6 +707,7 @@ function handleWsBlob(data) {
   const url = URL.createObjectURL(data);
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = url;
+  latestResultBlob = data instanceof Blob ? data : null;
   preview.src = url;
   preview.dataset.source = 'current';
   preview.dataset.path = '';
@@ -910,7 +911,6 @@ function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
   updateMetaChips(m);
   if (resultEnhance) resultEnhance.setCurrentMeta(m);
-  if (metadataViewer) metadataViewer.loadCurrent({silent: true});
 }
 
 function cleanPromptForTokenEstimate(text, mode) {
@@ -1365,15 +1365,20 @@ async function requestContextImageAction(context, action) {
 
 async function loadMetadataFromContextImage(context = {}) {
   const imageUrl = context.imageSrc || '';
-  if (!imageUrl) {
-    metadataViewer.loadCurrent({silent: false});
-    return;
-  }
   const label = context.label || context.path || context.filePath || 'Result Image';
   try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const blob = await response.blob();
+    let blob = context.blob || null;
+    if (!blob && context.source === 'current' && latestResultBlob) blob = latestResultBlob;
+    if (!blob && imageUrl.startsWith('blob:') && latestResultBlob) blob = latestResultBlob;
+    if (!blob) {
+      if (!imageUrl) {
+        showToast('Image data is unavailable', 'error');
+        return;
+      }
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      blob = await response.blob();
+    }
     await metadataViewer.loadImageBlob(blob, label, {imageUrl});
   } catch (error) {
     console.error('Context metadata image extraction failed', error);
@@ -1388,10 +1393,8 @@ function showMetadataInTab(context = {}) {
   }
   if (context.path) {
     metadataViewer.loadSaved(context.path, {silent: false});
-  } else if (context.hasImage && context.imageSrc) {
+  } else if (context.hasImage || context.imageSrc || context.blob || context.source === 'current') {
     loadMetadataFromContextImage(context);
-  } else if (context.source === 'current') {
-    metadataViewer.loadCurrent({silent: false});
   } else {
     return false;
   }

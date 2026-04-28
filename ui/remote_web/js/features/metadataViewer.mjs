@@ -26,7 +26,8 @@ export function createMetadataViewer({
   const applyCharacterSettingsBtn = document.getElementById('metadataApplyCharacterSettingsBtn');
   const sendImg2ImgBtn = document.getElementById('metadataSendImg2ImgBtn');
 
-  let currentSource = {kind: 'current', path: ''};
+  const EMPTY_SOURCE = {kind: 'empty', path: ''};
+  let currentSource = EMPTY_SOURCE;
   let currentActionPayload = null;
   let activeImageCleanup = null;
   let loading = false;
@@ -235,10 +236,6 @@ export function createMetadataViewer({
   function imageUrlForSource(source) {
     if (source.imageUrl) return source.imageUrl;
     if (source.kind === 'saved' && source.path) return '/api/viewer/image/' + encodeURI(source.path);
-    if (source.kind === 'current') {
-      const preview = document.getElementById('preview');
-      return preview && preview.classList.contains('show') ? preview.getAttribute('src') : '';
-    }
     return '';
   }
 
@@ -341,7 +338,7 @@ export function createMetadataViewer({
 
   function render(data, source = currentSource) {
     const payload = data && typeof data === 'object' ? data : {};
-    const label = payload.label || source.label || source.path || 'Current Result';
+    const label = payload.label || source.label || source.path || 'Input Image';
     const prompt = getPrompt(payload);
     const negative = getNegative(payload);
     const characters = renderCharacters(payload);
@@ -392,34 +389,33 @@ export function createMetadataViewer({
         },
       };
     }
-    return {
-      url: '/api/result/metadata',
-      init: {},
-    };
+    return null;
   }
 
   function unavailableMessage(source) {
     if (source.kind === 'saved') return 'Metadata unavailable';
     if (source.kind === 'input') return 'Input image metadata unavailable';
-    return 'No current result metadata';
-  }
-
-  function isExpectedEmptyCurrent(source, error) {
-    return source.kind === 'current' && error && error.status === 404;
+    return 'No image selected';
   }
 
   async function loadSource(source = currentSource, options = {}) {
     const requestId = ++requestSerial;
+    const nextSource = source || EMPTY_SOURCE;
     loading = true;
-    currentSource = source;
+    currentSource = nextSource;
     if (refreshBtn) refreshBtn.disabled = true;
     if (!options.silent) setStatus('Loading...', 'busy');
 
     try {
-      const request = buildRequest(source);
+      const request = buildRequest(nextSource);
+      if (!request) {
+        renderEmpty(unavailableMessage(nextSource));
+        setStatus('Idle', 'muted');
+        return;
+      }
       if (request.payload) {
         if (requestId !== requestSerial) return;
-        render(request.payload, source);
+        render(request.payload, nextSource);
         return;
       }
       const response = await fetch(request.url, request.init);
@@ -430,23 +426,19 @@ export function createMetadataViewer({
       }
       const data = await response.json();
       if (requestId !== requestSerial) return;
-      if (source.kind === 'saved' && source.path && data && typeof data === 'object') {
-        data.label = source.path;
+      if (nextSource.kind === 'saved' && nextSource.path && data && typeof data === 'object') {
+        data.label = nextSource.path;
         data.source = 'saved';
-      } else if (source.kind === 'input' && data && typeof data === 'object') {
-        data.label = source.label || data.label || 'Input Image';
+      } else if (nextSource.kind === 'input' && data && typeof data === 'object') {
+        data.label = nextSource.label || data.label || 'Input Image';
         data.source = 'input';
       }
-      render(data, source);
+      render(data, nextSource);
     } catch (error) {
       if (requestId !== requestSerial) return;
-      renderEmpty(unavailableMessage(source));
-      if (isExpectedEmptyCurrent(source, error)) {
-        setStatus('Idle', 'muted');
-      } else {
-        setStatus('Unavailable', 'error');
-        if (!options.silent && showToast) showToast('Failed to load metadata', 'error');
-      }
+      renderEmpty(unavailableMessage(nextSource));
+      setStatus('Unavailable', 'error');
+      if (!options.silent && showToast) showToast('Failed to load metadata', 'error');
     } finally {
       if (requestId === requestSerial) {
         loading = false;
@@ -456,11 +448,11 @@ export function createMetadataViewer({
   }
 
   function loadCurrent(options = {}) {
-    return loadSource({kind: 'current', path: ''}, options);
+    return loadSource(EMPTY_SOURCE, options);
   }
 
   function loadSaved(path, options = {}) {
-    if (!path) return loadCurrent(options);
+    if (!path) return loadSource(EMPTY_SOURCE, options);
     return loadSource({kind: 'saved', path}, options);
   }
 
@@ -485,6 +477,7 @@ export function createMetadataViewer({
       path: '',
       label: payload.label || 'Input Image',
       payload,
+      blob: options.blob || null,
       imageUrl: options.imageUrl || '',
       revokeImageUrl: options.revokeImageUrl || null,
     }, {silent: true});
@@ -492,7 +485,7 @@ export function createMetadataViewer({
   }
 
   function refresh() {
-    return loadSource(currentSource, {silent: false});
+    return loadSource(currentSource || EMPTY_SOURCE, {silent: false});
   }
 
   function switchDetailTab(tabName) {
@@ -523,7 +516,7 @@ export function createMetadataViewer({
   bindAction(applySettingsBtn, onApplySettings);
   bindAction(applyCharacterSettingsBtn, onApplyCharacterSettings);
   bindAction(sendImg2ImgBtn, onSendImg2Img);
-  renderEmpty('No current result metadata');
+  renderEmpty('No image selected');
   setStatus('Idle', 'muted');
 
   return {

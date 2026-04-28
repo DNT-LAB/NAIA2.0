@@ -136,6 +136,8 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
       resultInfoContent,
       escHtml,
       showToast,
+      renderPromptInfoHtml,
+      onPromptInfoTagLookup: lookupPromptInfoTag,
       onDiskImageSelected: relPath => {
         if (resultEnhance) resultEnhance.clearCurrentMeta();
         if (metadataViewer) metadataViewer.loadSaved(relPath, {silent: true});
@@ -3120,6 +3122,7 @@ function insertTag(tag) {
 const tagTooltip = $('tagTooltip');
 let lastLookupTag = '';
 let tagLookupTimer = null;
+let tagLookupReadOnly = false;
 let tagChipInfoTooltip = null;
 // Autocomplete state
 let acMode = false;
@@ -3214,6 +3217,63 @@ function renderTooltipExtraTag(tag, infoMap, extraClass = '') {
     if (info.cat) attrs.push(`data-tooltip-cat="${escHtml(info.cat)}"`);
   }
   return `<span ${attrs.join(' ')}>${escHtml(tagText)}</span>`;
+}
+
+function normalizePromptInfoLookupTag(raw) {
+  let text = String(raw || '').trim();
+  if (!text || text.startsWith('#')) return '';
+  while (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/.test(text)) {
+    text = text.replace(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/, '').trim();
+  }
+  text = text.replace(/\s*::\s*$/, '').trim();
+  text = stripAutocompleteTokenDecorators(text);
+  text = text.replace(/^(artist|character|copyright|general|meta):/i, '').trim();
+  if (!text || text.startsWith('$') || text.startsWith('__')) return '';
+  return text;
+}
+
+function renderPromptInfoToken(raw) {
+  const source = String(raw || '');
+  const leading = source.match(/^\s*/)?.[0] || '';
+  const trailing = source.match(/\s*$/)?.[0] || '';
+  const core = source.trim();
+  if (!core) return escHtml(source);
+  const lookupTag = normalizePromptInfoLookupTag(core);
+  if (!lookupTag) return escHtml(source);
+  return escHtml(leading) +
+    `<button type="button" class="generation-info-tag" data-tag="${escHtml(lookupTag)}" title="Show tag info">${escHtml(core)}</button>` +
+    escHtml(trailing);
+}
+
+function renderPromptInfoText(text) {
+  const parts = String(text || '').split(',');
+  return parts.map((part, index) => {
+    const rendered = renderPromptInfoToken(part);
+    return index < parts.length - 1 ? rendered + '<span class="generation-info-comma">,</span>' : rendered;
+  }).join('');
+}
+
+function renderPromptInfoHtml(label, text) {
+  return `<div class="pf-island"><span class="pf-label">${escHtml(label)}</span>` +
+    `<span class="generation-info-tags">${renderPromptInfoText(text)}</span></div>`;
+}
+
+function lookupPromptInfoTag(tag) {
+  const lookupTag = normalizePromptInfoLookupTag(tag);
+  if (!lookupTag) return;
+  acMode = false;
+  acTarget = null;
+  lastLookupTag = lookupTag;
+  tagLookupReadOnly = true;
+  hideTagChipInfoTooltip();
+  clearTimeout(tagLookupTimer);
+  tagTooltip.classList.remove('open', 'ac-mode', 'left-side');
+  tagTooltip.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">loading...</span></div>';
+  tagTooltip.classList.add('open');
+  positionTagTooltip();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'tag_lookup', tag: lookupTag}));
+  }
 }
 
 function ensureTagChipInfoTooltip() {
@@ -3338,6 +3398,7 @@ function checkTagHint() {
   const tag = getTagAtCursor(target);
   if (tag === lastLookupTag) return;
   lastLookupTag = tag;
+  tagLookupReadOnly = false;
   if (!tag) { hideTagChipInfoTooltip(); tagTooltip.classList.remove('open', 'ac-mode'); return; }
   hideTagChipInfoTooltip();
   tagTooltip.classList.remove('open', 'ac-mode');
@@ -3404,8 +3465,12 @@ function onTagLookupResult(m) {
     el.addEventListener('mousedown', e => {
       e.preventDefault();
       hideTagChipInfoTooltip();
-      const target = acTarget || promptEdit;
       const tag = el.dataset.insert;
+      if (tagLookupReadOnly) {
+        lookupPromptInfoTag(tag);
+        return;
+      }
+      const target = acTarget || promptEdit;
       const info = getActiveTokenInfo(target);
       if (!info) return;
       const text = target.value;

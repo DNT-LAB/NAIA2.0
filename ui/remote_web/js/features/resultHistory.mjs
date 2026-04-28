@@ -20,6 +20,8 @@ export function createResultHistoryController({
   resultInfoContent,
   escHtml,
   showToast,
+  renderPromptInfoHtml = null,
+  onPromptInfoTagLookup = null,
   onDiskImageSelected = () => {},
 }) {
   const getEl = id => document.getElementById(id);
@@ -147,17 +149,35 @@ export function createResultHistoryController({
     }
   }
 
+  function renderPromptBlock(label, text) {
+    if (typeof renderPromptInfoHtml === 'function') {
+      return renderPromptInfoHtml(label, text);
+    }
+    return `<div class="pf-island"><span class="pf-label">${escHtml(label)}</span>${escHtml(text)}</div>`;
+  }
+
+  function bindPromptInfoTags(root) {
+    if (!root || typeof onPromptInfoTagLookup !== 'function') return;
+    root.querySelectorAll('.generation-info-tag[data-tag]').forEach(button => {
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        onPromptInfoTagLookup(button.dataset.tag || button.textContent || '');
+      });
+    });
+  }
+
   async function getPromptMetaHtml(relPath) {
     if (promptFloatCache[relPath]) return promptFloatCache[relPath];
     const resp = await fetch(viewerMetaUrl(relPath));
     const meta = await resp.json();
     let html = '';
     if (meta.prompt) {
-      html += '<div class="pf-island"><span class="pf-label">Prompt</span>' + escHtml(meta.prompt) + '</div>';
+      html += renderPromptBlock('Prompt', meta.prompt);
     }
     if (meta.characters && meta.characters.length) {
       for (let i = 0; i < meta.characters.length; i++) {
-        html += `<div class="pf-island"><span class="pf-label">Character ${i + 1}</span>` + escHtml(meta.characters[i]) + '</div>';
+        html += renderPromptBlock(`Character ${i + 1}`, meta.characters[i]);
       }
     }
     if (!html) html = '<div class="pf-island"><span class="pf-label">No metadata</span></div>';
@@ -170,6 +190,7 @@ export function createResultHistoryController({
     resultInfoContent.innerHTML = '<span class="result-info-empty">loading metadata...</span>';
     try {
       resultInfoContent.innerHTML = await getPromptMetaHtml(relPath);
+      bindPromptInfoTags(resultInfoContent);
     } catch (_) {
       resultInfoContent.innerHTML = '<span class="result-info-empty">metadata unavailable</span>';
     }
@@ -182,6 +203,7 @@ export function createResultHistoryController({
 
     if (promptFloatCache[relPath]) {
       content.innerHTML = promptFloatCache[relPath];
+      bindPromptInfoTags(content);
       window.requestAnimationFrame(() => {
         content.classList.toggle('scrollable', content.scrollHeight > content.clientHeight);
       });
@@ -195,6 +217,7 @@ export function createResultHistoryController({
     try {
       const html = await getPromptMetaHtml(relPath);
       content.innerHTML = html;
+      bindPromptInfoTags(content);
       window.requestAnimationFrame(() => {
         content.classList.toggle('scrollable', content.scrollHeight > content.clientHeight);
       });

@@ -1216,6 +1216,39 @@ body.resizing-result-info {
   border: none;
   white-space: pre-wrap;
 }
+.result-info-content .pf-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.generation-info-tags {
+  white-space: pre-wrap;
+}
+.generation-info-tag {
+  display: inline;
+  padding: 0 1px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.generation-info-tag:hover,
+.generation-info-tag:focus-visible {
+  color: var(--accent-light);
+  background: rgba(157,139,255,0.14);
+  outline: none;
+}
+.generation-info-comma {
+  color: var(--text-muted);
+}
 .result-info-empty {
   color: var(--text-dim);
 }

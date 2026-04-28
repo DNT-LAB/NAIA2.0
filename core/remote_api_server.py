@@ -1212,7 +1212,7 @@ class RemoteBridge(QObject):
     def _do_set_option(self, key: str, checked: bool):
         """웹에서 토글한 옵션을 메인 앱 체크박스에 반영"""
         try:
-            checked = bool(checked)
+            checked = self._coerce_bool(checked)
             # auto_save: image_window 체크박스 (OPTION_KEYS 외)
             if key == "auto_save":
                 auto_save_checkbox = self._get_auto_save_checkbox()
@@ -1231,13 +1231,16 @@ class RemoteBridge(QObject):
                 return
             mw = self.app_context.main_window
             cb = mw.generation_checkboxes.get(label)
-            if cb and cb.isChecked() != checked:
-                self._syncing_option = True
-                try:
-                    cb.setChecked(checked)
-                finally:
-                    self._syncing_option = False
-                print(f"🌐 Remote: {label} → {checked}")
+            if cb:
+                if cb.isChecked() != checked:
+                    self._syncing_option = True
+                    try:
+                        cb.setChecked(checked)
+                    finally:
+                        self._syncing_option = False
+                    print(f"🌐 Remote: {label} → {checked}")
+                self._sync_detached_option_widget(key, checked)
+                self._refresh_generation_option_ui(key, cb)
             if cb:
                 # setChecked() emits toggled synchronously while _syncing_option is True,
                 # so the normal checkbox-slot broadcast is intentionally skipped.
@@ -1246,6 +1249,51 @@ class RemoteBridge(QObject):
         except Exception as e:
             self._syncing_option = False
             print(f"🌐 Remote: 옵션 설정 실패 — {e}")
+
+    def _sync_detached_option_widget(self, key: str, checked: bool):
+        """분리된 프롬프트 창의 복제 체크박스를 직접 갱신."""
+        attr_map = {
+            "prompt_fixed": "detached_prompt_fixed",
+            "auto_generate": "detached_auto_generate",
+        }
+        attr = attr_map.get(key)
+        if not attr:
+            return
+        try:
+            mw = self.app_context.main_window
+            detached_cb = getattr(mw, attr, None)
+            if detached_cb is None:
+                return
+            was_blocked = detached_cb.blockSignals(True)
+            try:
+                detached_cb.setChecked(checked)
+            finally:
+                detached_cb.blockSignals(was_blocked)
+            self._repaint_checkbox(detached_cb)
+        except Exception as e:
+            print(f"🌐 Remote: 분리 체크박스 동기화 실패 — {key}: {e}")
+
+    def _refresh_generation_option_ui(self, key: str, cb):
+        """옵션 변경 후 체크박스와 관련 버튼의 시각 상태를 즉시 갱신."""
+        try:
+            self._repaint_checkbox(cb)
+            if key == "prompt_fixed":
+                updater = getattr(self.app_context.main_window, "update_random_prompt_button_state", None)
+                if callable(updater):
+                    updater()
+        except Exception as e:
+            print(f"🌐 Remote: 옵션 UI 갱신 실패 — {key}: {e}")
+
+    @staticmethod
+    def _repaint_checkbox(cb):
+        try:
+            style = cb.style()
+            style.unpolish(cb)
+            style.polish(cb)
+            cb.update()
+            cb.repaint()
+        except Exception:
+            pass
 
     # --- API 모드 변경 (Qt 메인 스레드에서 실행) ---
 
@@ -5538,6 +5586,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     app = FastAPI(title="NAIA Remote")
 
     web_dir = Path(__file__).parent.parent / "ui" / "remote_web"
+    no_cache_headers = {"Cache-Control": "no-store, max-age=0"}
+
+    def web_file(path: Path, media_type: str):
+        return FileResponse(str(path), media_type=media_type, headers=no_cache_headers)
+
     js_dir = web_dir / "js"
     if js_dir.exists():
         app.mount("/js", StaticFiles(directory=str(js_dir)), name="remote_js")
@@ -5546,18 +5599,18 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     async def index():
         html_path = web_dir / "index.html"
         if html_path.exists():
-            return FileResponse(str(html_path), media_type="text/html")
+            return web_file(html_path, "text/html")
         return JSONResponse({"error": "index.html not found"}, status_code=404)
 
     @app.get("/style.css")
     async def serve_css():
         p = web_dir / "style.css"
-        return FileResponse(str(p), media_type="text/css") if p.exists() else JSONResponse({"error": "not found"}, 404)
+        return web_file(p, "text/css") if p.exists() else JSONResponse({"error": "not found"}, 404)
 
     @app.get("/app.js")
     async def serve_js():
         p = web_dir / "app.js"
-        return FileResponse(str(p), media_type="application/javascript") if p.exists() else JSONResponse({"error": "not found"}, 404)
+        return web_file(p, "application/javascript") if p.exists() else JSONResponse({"error": "not found"}, 404)
 
     @app.post("/api/generate")
     async def api_generate():
@@ -5963,7 +6016,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_random.emit()
                         elif cmd_type == "set_option":
                             opt_key = cmd.get("key", "")
-                            option_value = bool(cmd.get("value"))
+                            option_value = bridge._coerce_bool(cmd.get("value"))
                             if bridge.shared_server_mode:
                                 if opt_key in ("auto_generate", "auto_save"):
                                     await ws.send_text(json.dumps({
@@ -6246,7 +6299,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                     # options (prompt_fixed, wildcard_standalone)
                                     opts = cmd.get("options")
                                     if opts and isinstance(opts, dict):
-                                        session["options"] = {k: bool(v) for k, v in opts.items()}
+                                        session["options"] = {
+                                            k: bridge._coerce_bool(v)
+                                            for k, v in opts.items()
+                                        }
                                     # P.Eng override
                                     p_eng = cmd.get("p_eng")
                                     if p_eng and isinstance(p_eng, dict):

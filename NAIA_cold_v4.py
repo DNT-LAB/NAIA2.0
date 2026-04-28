@@ -4737,66 +4737,55 @@ class ModernMainWindow(QMainWindow):
     
     def setup_main_to_detached_sync(self):
         """메인 윈도우 컨트롤들의 시그널을 분리된 창과 연결"""
+        self._detached_sync_connections = []
+
+        def connect_detached(signal, slot):
+            signal.connect(slot)
+            self._detached_sync_connections.append((signal, slot))
+
         # 해상도 콤보박스
-        self.resolution_combo.currentTextChanged.connect(
-            lambda text: self.detached_resolution_combo.setCurrentText(text) 
-            if hasattr(self, 'detached_resolution_combo') else None
+        connect_detached(
+            self.resolution_combo.currentTextChanged,
+            lambda text: self.detached_resolution_combo.setCurrentText(text)
+            if hasattr(self, 'detached_resolution_combo') else None,
         )
         
         # 체크박스들
-        self.random_resolution_checkbox.toggled.connect(
+        connect_detached(
+            self.random_resolution_checkbox.toggled,
             lambda checked: self.detached_random_resolution.setChecked(checked)
-            if hasattr(self, 'detached_random_resolution') else None
+            if hasattr(self, 'detached_random_resolution') else None,
         )
-        self.auto_fit_resolution_checkbox.toggled.connect(
+        connect_detached(
+            self.auto_fit_resolution_checkbox.toggled,
             lambda checked: self.detached_auto_fit.setChecked(checked)
-            if hasattr(self, 'detached_auto_fit') else None
+            if hasattr(self, 'detached_auto_fit') else None,
         )
-        self.seed_fix_checkbox.toggled.connect(
+        connect_detached(
+            self.seed_fix_checkbox.toggled,
             lambda checked: self.detached_seed_fix.setChecked(checked)
-            if hasattr(self, 'detached_seed_fix') else None
+            if hasattr(self, 'detached_seed_fix') else None,
         )
-        self.generation_checkboxes["프롬프트 고정"].toggled.connect(
+        connect_detached(
+            self.generation_checkboxes["프롬프트 고정"].toggled,
             lambda checked: self.detached_prompt_fixed.setChecked(checked)
-            if hasattr(self, 'detached_prompt_fixed') else None
+            if hasattr(self, 'detached_prompt_fixed') else None,
         )
-        self.generation_checkboxes["자동 생성"].toggled.connect(
+        connect_detached(
+            self.generation_checkboxes["자동 생성"].toggled,
             lambda checked: self.detached_auto_generate.setChecked(checked)
-            if hasattr(self, 'detached_auto_generate') else None
+            if hasattr(self, 'detached_auto_generate') else None,
         )
     
     def cleanup_main_to_detached_sync(self):
         """메인 윈도우 컨트롤들의 동기화 시그널 연결 해제"""
-        try:
-            # 기존 연결들을 안전하게 해제
-            self.resolution_combo.currentTextChanged.disconnect()
-        except TypeError:
-            pass  # 연결되지 않았으면 무시
-        
-        try:
-            self.random_resolution_checkbox.toggled.disconnect()
-        except TypeError:
-            pass
-        
-        try:
-            self.auto_fit_resolution_checkbox.toggled.disconnect()
-        except TypeError:
-            pass
-        
-        try:
-            self.seed_fix_checkbox.toggled.disconnect()
-        except TypeError:
-            pass
-        
-        try:
-            self.generation_checkboxes["프롬프트 고정"].toggled.disconnect()
-        except TypeError:
-            pass
-        
-        try:
-            self.generation_checkboxes["자동 생성"].toggled.disconnect()
-        except TypeError:
-            pass         
+        connections = getattr(self, '_detached_sync_connections', [])
+        for signal, slot in connections:
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
+        self._detached_sync_connections = []
 
     def open_depth_search_tab(self):
         """심층 검색 탭을 열거나, 이미 열려있으면 해당 탭으로 전환"""

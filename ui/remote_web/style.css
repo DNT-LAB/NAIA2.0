@@ -2431,13 +2431,13 @@ body.resizing-result-info {
   color: rgba(255, 255, 255, 1.00);
 }
 .prompt-token-high {
-  color: rgba(255, 255, 255, 0.98);
+  color: rgba(255, 255, 255, 1.00);
 }
 .prompt-token-mid {
-  color: rgba(255, 255, 255, 0.94);
+  color: rgba(255, 255, 255, 0.85);
 }
 .prompt-token-low {
-  color: rgba(255, 255, 255, 0.90);
+  color: rgba(255, 255, 255, 0.85);
 }
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }

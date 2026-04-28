@@ -91,6 +91,9 @@ export function createPromptTagClassifier(index = {}) {
     if (midValueTags.has(tag)) {
       return {kind: 'mid', className: 'prompt-token-mid', tag};
     }
+    if (/^year \d{4}$/.test(tag)) {
+      return {kind: 'low', className: 'prompt-token-low', tag};
+    }
     if (knownTags.has(tag)) {
       return {kind: 'low', className: 'prompt-token-low', tag};
     }

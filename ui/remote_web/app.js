@@ -62,6 +62,7 @@ let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
 let promptEngineeringActions = null;
 let promptEngineeringPopups = null;
+let promptHighlightIndexPromise = null;
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -257,6 +258,7 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
       promptEdit,
       escHtml,
     });
+    if (_bootFinalized) loadPromptHighlightIndex();
   })
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
@@ -788,8 +790,28 @@ function resetBootIndicatorState() {
   _clearBootTimers();
 }
 
+async function loadPromptHighlightIndex() {
+  if (promptHighlightIndexPromise) return promptHighlightIndexPromise;
+  promptHighlightIndexPromise = (async () => {
+    try {
+      await promptHighlighterReady;
+      if (!promptHighlighter) return;
+      const response = await fetch('/api/prompt-highlight-index', {cache: 'no-store'});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const index = await response.json();
+      promptHighlighter.setTagClassificationIndex(index);
+      if (index?.stats) console.info('Prompt highlight index loaded', index.stats);
+    } catch (error) {
+      promptHighlightIndexPromise = null;
+      console.warn('Failed to load prompt highlight index', error);
+    }
+  })();
+  return promptHighlightIndexPromise;
+}
+
 function onLazyIndicesReady() {
   finalizeBoot();
+  loadPromptHighlightIndex();
 }
 
 function onInitComplete() {

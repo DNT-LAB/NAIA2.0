@@ -181,6 +181,7 @@ class RemoteBridge(QObject):
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
         self._tag_search_index: Optional[TagSearchIndex] = None
         self._tag_relation_ranker: Optional[TagRelationRanker] = None
+        self._prompt_highlight_index_cache: Optional[dict] = None
         self._kr_tags_lock = threading.Lock()
         self._kr_tags_loaded = False
         # 캐릭터 분석 역인덱스: char_name_lower → (copyright_group, data_dict)
@@ -4835,6 +4836,129 @@ class RemoteBridge(QObject):
                 self._kr_tags_loaded = True
                 print(f"🌐 Remote: tag index 로드 실패 — {e}")
 
+    def _read_prompt_highlight_index(self) -> dict:
+        """Prompt highlighter용 compact tag class index.
+
+        Web typing path must not call TagSearchIndex on every keypress. Instead,
+        the client receives these Sets once and classifies tokens locally with
+        O(1) membership checks. The source of truth is the same merged
+        `_kr_tags_raw` corpus used to build TagSearchIndex, plus P.Engineering
+        filter lists for high/mid value buckets.
+        """
+        if self._prompt_highlight_index_cache is not None:
+            return self._prompt_highlight_index_cache
+
+        self._load_kr_tags()
+
+        def _norm_tag(value) -> str:
+            return (
+                str(value or "")
+                .replace("\\(", "(")
+                .replace("\\)", ")")
+                .replace("_", " ")
+                .strip()
+                .lower()
+            )
+
+        def _add_tags(target: set[str], values):
+            if not values:
+                return
+            for value in values:
+                tag = _norm_tag(value)
+                if tag:
+                    target.add(tag)
+
+        def _read_json_tags(path: Path) -> set[str]:
+            tags: set[str] = set()
+            if not path.exists():
+                return tags
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                def _collect_tag_lists(node, depth: int = 0):
+                    if depth > 4:
+                        return
+                    if isinstance(node, list):
+                        _add_tags(tags, node)
+                        return
+                    if not isinstance(node, dict):
+                        return
+                    for key in ("tags", "modifiers", "uncategorized"):
+                        if isinstance(node.get(key), list):
+                            _add_tags(tags, node.get(key))
+                    for key in ("groups", "categories", "regions"):
+                        value = node.get(key)
+                        if isinstance(value, dict):
+                            for child in value.values():
+                                _collect_tag_lists(child, depth + 1)
+                        elif isinstance(value, list):
+                            _add_tags(tags, value)
+
+                if isinstance(data, dict):
+                    _collect_tag_lists(data)
+                elif isinstance(data, list):
+                    _add_tags(tags, data)
+            except Exception as e:
+                print(f"🌐 Remote: prompt highlight taglist load failed ({path}): {e}")
+            return tags
+
+        root_dir = Path(__file__).resolve().parent.parent
+        taglist_dir = root_dir / "data" / "taglist"
+
+        high_value = set()
+        high_value.update(_read_json_tags(taglist_dir / "expression_tags.json"))
+        high_value.update(_read_json_tags(taglist_dir / "pose_action_tags.json"))
+
+        mid_value = set()
+        mid_value.update(_read_json_tags(taglist_dir / "object_tags.json"))
+        mid_value.update(_read_json_tags(taglist_dir / "clothing_regions.json"))
+        clothes_path = root_dir / "data" / "clothes_list.txt"
+        if clothes_path.exists():
+            try:
+                with open(clothes_path, "r", encoding="utf-8") as f:
+                    _add_tags(mid_value, [line.strip() for line in f if line.strip()])
+            except Exception as e:
+                print(f"🌐 Remote: prompt highlight clothes list load failed: {e}")
+
+        artist_tags = set()
+        character_tags = set()
+        known_tags = set()
+        for tag_lower, info in self._kr_tags_raw.items():
+            tag = _norm_tag(info.get("_tag", tag_lower))
+            if not tag:
+                continue
+            cat = str(info.get("_cat", "") or "")
+            if cat == "artist":
+                artist_tags.add(tag)
+            elif cat == "character":
+                character_tags.add(tag)
+            else:
+                known_tags.add(tag)
+
+        known_tags.update(high_value)
+        known_tags.update(mid_value)
+        known_tags.update(_read_json_tags(taglist_dir / "style_meta_tags.json"))
+        known_tags.difference_update(artist_tags)
+        known_tags.difference_update(character_tags)
+
+        payload = {
+            "highValueTags": sorted(high_value),
+            "midValueTags": sorted(mid_value),
+            "knownTags": sorted(known_tags),
+            "artistTags": sorted(artist_tags),
+            "characterTags": sorted(character_tags),
+            "stats": {
+                "high": len(high_value),
+                "mid": len(mid_value),
+                "known": len(known_tags),
+                "artists": len(artist_tags),
+                "characters": len(character_tags),
+            },
+        }
+        self._prompt_highlight_index_cache = payload
+        return payload
+
     def _load_char_analysis(self):
         """character_analysis.json → 역인덱스 구축 + _kr_tags_raw 누락 캐릭터 보강"""
         if self._char_analysis:
@@ -5832,6 +5956,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     async def serve_js():
         p = web_dir / "app.js"
         return web_file(p, "application/javascript") if p.exists() else JSONResponse({"error": "not found"}, 404)
+
+    @app.get("/api/prompt-highlight-index")
+    async def api_prompt_highlight_index():
+        data = await asyncio.to_thread(bridge._read_prompt_highlight_index)
+        content = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        return Response(content=content, media_type="application/json", headers=no_cache_headers)
 
     @app.post("/api/generate")
     async def api_generate():

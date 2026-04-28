@@ -1560,7 +1560,6 @@ function onSession(m) {
     // Auto Gen 차단
     if (autoGenCb) {
       applyOptionState('auto_generate', false);
-      _lastSentOption.auto_generate = false;
       autoGenCb.disabled = true;
       autoGenCb.parentElement.style.opacity = '0.4';
     }
@@ -1640,7 +1639,6 @@ function _restoreSharedSession() {
   if (saved.options) {
     for (const [key, val] of Object.entries(saved.options)) {
       applyOptionState(key, val);
-      _lastSentOption[key] = !!val;
     }
   }
   // 클라이언트 UI 복원: prompt + negative prompt
@@ -1765,8 +1763,6 @@ function finishProgress() {
 }
 
 // ---- Options sync ----
-const _lastSentOption = {};  // dedupe: oninput + onchange 중복 호출 + broadcast → sync 루프 차단
-
 function applyOptionState(key, value, options = {}) {
   const cb = optBoxes[key];
   if (!cb) return false;
@@ -1805,19 +1801,23 @@ function refreshAllOptionVisuals() {
 }
 
 function syncOptions(m) {
-  if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
-  // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 options 보호)
-  if (sharedMode && _sharedOptionsInit) return;
-  if (sharedMode) _sharedOptionsInit = true;
-  syncingOptions = true;
-  for (const [key, cb] of Object.entries(optBoxes)) {
-    if (key in m) {
-      const next = !!m[key];
-      applyOptionState(key, next);
-      _lastSentOption[key] = next;
-    }
+  const sessionEcho = !!m._session_echo;
+  if (!sessionEcho) {
+    if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
+    // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 options 보호)
+    if (sharedMode && _sharedOptionsInit) return;
+    if (sharedMode) _sharedOptionsInit = true;
   }
-  syncingOptions = false;
+  syncingOptions = true;
+  try {
+    for (const key of Object.keys(optBoxes)) {
+      if (key in m) {
+        applyOptionState(key, !!m[key]);
+      }
+    }
+  } finally {
+    syncingOptions = false;
+  }
   // Auto-save 상태 동기화
   if ('auto_save' in m) {
     if (autoSavePanel) autoSavePanel.syncEnabled(m.auto_save);
@@ -1838,10 +1838,6 @@ function setOption(key, value) {
     return;
   }
   if (!applyOptionState(key, next, {clearPending: false})) return;
-  // dedupe: oninput + onchange 둘 다 등록되어 같은 click 에 두 번 호출되거나,
-  // sync → 대입 → 환경 따라 이벤트 재발사 → setOption 재호출 루프(oscillation) 차단.
-  if (_lastSentOption[key] === next) return;
-  _lastSentOption[key] = next;
   if (ws && ws.readyState === WebSocket.OPEN) {
     markOptionPending(key, true);
     ws.send(JSON.stringify({type: 'set_option', key, value: next}));

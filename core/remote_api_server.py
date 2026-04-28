@@ -5940,6 +5940,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 elif data == "sync":
                     if not bridge.shared_server_mode and bridge._cached_prompts:
                         await ws.send_text(json.dumps(bridge._cached_prompts))
+                    if bridge._cached_options:
+                        await ws.send_text(json.dumps(bridge._cached_options))
                     if bridge._cached_params:
                         await ws.send_text(json.dumps(bridge._cached_params))
                 elif data.startswith("{"):
@@ -5961,19 +5963,29 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_random.emit()
                         elif cmd_type == "set_option":
                             opt_key = cmd.get("key", "")
+                            option_value = bool(cmd.get("value"))
                             if bridge.shared_server_mode:
                                 if opt_key in ("auto_generate", "auto_save"):
-                                    pass  # 차단 (호스트 전역 설정)
+                                    await ws.send_text(json.dumps({
+                                        "type": "options",
+                                        "_session_echo": True,
+                                        opt_key: False,
+                                    }))
                                 elif opt_key in ("prompt_fixed", "wildcard_standalone"):
                                     # 세션별 저장
                                     session = ws_manager.sessions.get(ws)
                                     if session:
                                         opts = session.setdefault("options", {})
-                                        opts[opt_key] = bool(cmd.get("value"))
+                                        opts[opt_key] = option_value
+                                    await ws.send_text(json.dumps({
+                                        "type": "options",
+                                        "_session_echo": True,
+                                        opt_key: option_value,
+                                    }))
                                 else:
-                                    bridge.request_set_option.emit(opt_key, cmd["value"])
+                                    bridge.request_set_option.emit(opt_key, option_value)
                             else:
-                                bridge.request_set_option.emit(opt_key, cmd["value"])
+                                bridge.request_set_option.emit(opt_key, option_value)
                         elif cmd_type == "set_prompt":
                             if bridge.shared_server_mode:
                                 # Shared: negative만 세션에 저장 (positive는 Generate 시 전송)

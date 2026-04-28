@@ -60,8 +60,8 @@ Completed after the P0 stabilization pass:
   - add-chunk writes through instant wildcard upsert and refreshes Chunk state;
   - selected prompt text uses a custom context menu that keeps normal text-edit actions and adds `Add to Chunk`.
 - `Tools & Assistants` IA compression:
-  - `P.Engineering` is kept as the fixed primary button;
-  - the remaining launchers are grouped into three categories: `Prompt`, `Character`, and `Assistant`;
+  - `프롬프트 엔지니어링` is kept as the fixed primary button;
+  - the remaining launchers are grouped into three categories: `프롬프트 도구`, `NAI 전용 도구`, and `자동화 / 고급 기능`;
   - module metadata and category state are centralized in `ui/remote_web/js/features/moduleLauncher.mjs`;
   - category buttons mirror child active, disabled, and badge/status state.
 
@@ -102,14 +102,14 @@ Goal: replace the flat module button grid with a `1 + 3` structure so module gro
 
 Required structure:
 
-- Fixed primary button: `P.Engineering`
-- Category 1, `Prompt / Tag Tools`: `E621`, `Wildcard`, `Chunk`, `Cond`
-- Category 2, `Character / Reference`: `Character`, `Char Ref`, `Vibe`
-- Category 3, `Assistants / Automation`: `Ollama`, `Automation`
+- Fixed primary button: `프롬프트 엔지니어링`
+- Category 1, `프롬프트 도구`: `E621`, `Wildcard`, `Chunk`, `Cond`
+- Category 2, `NAI 전용 도구 (다른 모드에서 차단)`: `Character`, `Char Ref`, `Vibe`
+- Category 3, `자동화 / 고급 기능`: `Ollama`, `Automation`
 
 Implementation notes:
 
-- Keep `P.Engineering` as a standalone always-visible button because it is mandatory in the generation workflow.
+- Keep `프롬프트 엔지니어링` as a standalone always-visible button because it is mandatory in the generation workflow.
 - Replace the remaining flat buttons in `ui/remote_web/index.html` with three category controls that expose leaf modules through a compact popup/dropdown/segmented panel.
 - Preserve existing module actions: leaf selection should still call `openModule(moduleId)` or `openChunkPanel(...)` without changing server protocol.
 - Bubble status to the category level:
@@ -130,7 +130,7 @@ Validation:
 - Desktop and mobile screenshot check for the category launcher.
 - NAI vs non-NAI mode: `Character`, `Char Ref`, `Vibe` disabled behavior still correct.
 - Shared Mode: blocked modules still blocked and existing toast behavior remains.
-- Open/close/toggle behavior remains correct for `P.Engineering`, a normal module, and `Chunk`.
+- Open/close/toggle behavior remains correct for `프롬프트 엔지니어링`, a normal module, and `Chunk`.
 
 ### P2 — Remote Web Behavior Smoke
 

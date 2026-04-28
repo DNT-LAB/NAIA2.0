@@ -1,7 +1,7 @@
 const MODULE_REGISTRY = {
   prompt_engineering: {
-    label: 'P.Engineering',
-    title: 'Prompt Engineering',
+    label: '프롬프트 엔지니어링',
+    title: '프롬프트 엔지니어링',
     action: 'module',
   },
   e621_event: {
@@ -75,20 +75,20 @@ const MODULE_REGISTRY = {
 const CATEGORY_REGISTRY = [
   {
     id: 'prompt_tools',
-    label: 'Prompt',
-    title: 'Prompt / Tag Tools',
+    label: '프롬프트 도구',
+    title: '프롬프트 도구',
     moduleIds: ['e621_event', 'wildcard', 'chunk', 'conditional_prompt'],
   },
   {
     id: 'character_tools',
-    label: 'Character',
-    title: 'Character / Reference',
+    label: 'NAI 전용 도구',
+    title: 'NAI 전용 도구 (다른 모드에서 차단)',
     moduleIds: ['character', 'character_reference', 'vibe_transfer'],
   },
   {
     id: 'assistant_tools',
-    label: 'Assistant',
-    title: 'Assistants / Automation',
+    label: '자동화 / 고급 기능',
+    title: '자동화 / 고급 기능',
     moduleIds: ['ollama', 'automation'],
   },
 ];

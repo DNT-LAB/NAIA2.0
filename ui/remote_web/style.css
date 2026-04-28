@@ -2891,6 +2891,7 @@ body.resizing-result-info {
   align-items: center;
   justify-content: center;
   gap: 4px;
+  min-width: 0;
   min-height: 24px;
   padding: 3px 8px;
   background: rgba(34,34,51,0.58);
@@ -2903,6 +2904,11 @@ body.resizing-result-info {
   letter-spacing: 0.1px;
   white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
+}
+.module-btn > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .module-btn:hover {
   background: rgba(255,255,255,0.045);

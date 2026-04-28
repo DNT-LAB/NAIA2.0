@@ -284,6 +284,7 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
       setCharacterPromptText: value => { if (tokenDisplayControl) tokenDisplayControl.setCharacterPromptText(value); },
       setCharacterTokenCount: value => { if (tokenDisplayControl) tokenDisplayControl.setCharacterTokenCount(value); },
       updatePromptTokenEstimate,
+      openModule,
     });
   })
   .catch(error => {

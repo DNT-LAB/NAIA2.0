@@ -5,6 +5,7 @@ export function createModuleBadges({
   setCharacterPromptText,
   setCharacterTokenCount,
   updatePromptTokenEstimate,
+  openModule,
 }) {
   const activatedSummary = document.getElementById('activatedSummary');
   const activatedFooter = document.getElementById('promptTokenFooter');
@@ -22,10 +23,16 @@ export function createModuleBadges({
     return '';
   }
 
-  function createActivatedPart(className, text) {
-    const part = document.createElement('span');
+  function createActivatedPart(className, text, moduleId) {
+    const part = document.createElement('button');
+    part.type = 'button';
     part.className = `activated-summary-part ${className}`;
     part.textContent = text;
+    part.title = `Open ${text.replace(/^\d+\s+/, '')}`;
+    part.addEventListener('click', event => {
+      event.stopPropagation();
+      if (typeof openModule === 'function') openModule(moduleId);
+    });
     return part;
   }
 
@@ -34,13 +41,25 @@ export function createModuleBadges({
 
     const parts = [];
     if (activatedCounts.characters > 0) {
-      parts.push({className: 'character', text: `${activatedCounts.characters} Characters`});
+      parts.push({
+        className: 'character',
+        moduleId: 'character',
+        text: `${activatedCounts.characters} Characters`,
+      });
     }
     if (activatedCounts.vibe > 0) {
-      parts.push({className: 'vibe', text: `${activatedCounts.vibe} Vibe Transfer`});
+      parts.push({
+        className: 'vibe',
+        moduleId: 'vibe_transfer',
+        text: `${activatedCounts.vibe} Vibe Transfer`,
+      });
     }
     if (activatedCounts.reference > 0) {
-      parts.push({className: 'pref', text: `${activatedCounts.reference} P.Reference`});
+      parts.push({
+        className: 'pref',
+        moduleId: 'character_reference',
+        text: `${activatedCounts.reference} P.Reference`,
+      });
     }
 
     const hasActivated = parts.length > 0;
@@ -63,7 +82,7 @@ export function createModuleBadges({
         separator.textContent = ', ';
         activatedSummary.append(separator);
       }
-      activatedSummary.append(createActivatedPart(part.className, part.text));
+      activatedSummary.append(createActivatedPart(part.className, part.text, part.moduleId));
     });
   }
 

@@ -2379,9 +2379,28 @@ body.resizing-result-info {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-muted);
+  pointer-events: auto;
 }
 .activated-summary span {
   overflow: visible;
+}
+.activated-summary-part {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.activated-summary-part:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.activated-summary-part:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
 }
 .activated-summary-label.character,
 .activated-summary-part.character {

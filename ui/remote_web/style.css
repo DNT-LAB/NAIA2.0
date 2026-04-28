@@ -2897,7 +2897,7 @@ body.resizing-result-info {
   background: rgba(34,34,51,0.58);
   border: 1px solid rgba(232,232,240,0.1);
   border-radius: 6px;
-  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.2s;
@@ -2945,6 +2945,8 @@ body.resizing-result-info {
 .module-badge.char { background: rgba(106,191,123,0.2); color: #6abf7b; }
 .module-btn.active .module-badge { background: rgba(255,255,255,0.2); color: #fff; }
 .module-primary-btn {
+  justify-content: flex-start;
+  padding-left: 12px;
   border-color: rgba(157,139,255,0.28);
   color: var(--accent-glow);
 }
@@ -2960,6 +2962,10 @@ body.resizing-result-info {
   padding-left: 9px;
   padding-right: 8px;
 }
+.module-category-label {
+  flex: 1 1 auto;
+  text-align: left;
+}
 .module-category-btn::after {
   content: "▴";
   color: var(--text-dim);
@@ -2974,17 +2980,30 @@ body.resizing-result-info {
   border-color: rgba(106,191,123,0.42);
   color: #88d696;
 }
+.module-category-badges {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 3px;
+  margin-left: 4px;
+}
+.module-category-badges.hidden { display: none; }
 .module-category-badge {
-  display: inline-block;
-  margin-left: 3px;
-  margin-right: 3px;
-  padding: 1px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  min-width: 16px;
+  padding: 1px 3px;
   border-radius: 3px;
   background: rgba(106,191,123,0.22);
   color: #88d696;
-  font-size: 8px;
+  font-size: 8.5px;
   font-weight: 700;
 }
+.module-category-badge-char { background: rgba(106,191,123,0.22); color: #88d696; }
+.module-category-badge-ref { background: rgba(168,127,212,0.22); color: #c9a7ef; }
+.module-category-badge-vibe { background: rgba(212,160,106,0.24); color: #e8b975; }
 .module-category-badge.hidden { display: none; }
 .module-category-menu {
   display: none;
@@ -3013,7 +3032,7 @@ body.resizing-result-info {
   padding: 1px 2px 4px;
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 8.5px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.8px;
   text-transform: uppercase;

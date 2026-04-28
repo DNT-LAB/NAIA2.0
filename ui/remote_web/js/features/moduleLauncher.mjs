@@ -38,6 +38,8 @@ const MODULE_REGISTRY = {
     action: 'module',
     naiOnly: true,
     badgeId: 'badgeChar',
+    categoryBadgeLabel: 'C',
+    categoryBadgeClass: 'char',
   },
   character_reference: {
     label: 'Char Ref',
@@ -46,6 +48,8 @@ const MODULE_REGISTRY = {
     action: 'module',
     naiOnly: true,
     badgeId: 'badgeCharRef',
+    categoryBadgeLabel: 'R',
+    categoryBadgeClass: 'ref',
   },
   vibe_transfer: {
     label: 'Vibe',
@@ -54,6 +58,8 @@ const MODULE_REGISTRY = {
     action: 'module',
     naiOnly: true,
     badgeId: 'badgeVibe',
+    categoryBadgeLabel: 'V',
+    categoryBadgeClass: 'vibe',
   },
   ollama: {
     label: 'Ollama',
@@ -84,6 +90,7 @@ const CATEGORY_REGISTRY = [
     label: 'NAI 전용 도구',
     title: 'NAI 전용 도구 (다른 모드에서 차단)',
     moduleIds: ['character', 'character_reference', 'vibe_transfer'],
+    splitBadges: true,
   },
   {
     id: 'assistant_tools',
@@ -137,7 +144,7 @@ export function createModuleLauncher({
     return `
       <div class="module-category" data-module-category="${category.id}">
         <button type="button" class="module-btn module-category-btn" data-category-toggle="${category.id}" title="${category.title}">
-          <span>${category.label}</span><span class="module-category-badge hidden"></span>
+          <span class="module-category-label">${category.label}</span><span class="module-category-badges hidden"></span>
         </button>
         <div class="module-category-menu" role="menu" aria-label="${category.title}">
           <div class="module-category-title">${category.title}</div>
@@ -190,26 +197,56 @@ export function createModuleLauncher({
     return category.moduleIds
       .map(moduleId => {
         const config = MODULE_REGISTRY[moduleId];
-        return config?.badgeId ? document.getElementById(config.badgeId) : null;
+        const badge = config?.badgeId ? document.getElementById(config.badgeId) : null;
+        if (!badge || badge.classList.contains('hidden') || !badge.textContent.trim()) return null;
+        return {
+          moduleId,
+          label: config.categoryBadgeLabel || config.label,
+          className: config.categoryBadgeClass || '',
+          title: config.title,
+          value: badge.textContent.trim(),
+        };
       })
-      .filter(badge => badge && !badge.classList.contains('hidden') && badge.textContent.trim());
+      .filter(Boolean);
   }
 
   function applyCategoryBadge(category, categoryEl) {
-    const badgeEl = categoryEl.querySelector('.module-category-badge');
-    if (!badgeEl) return;
+    const badgeGroup = categoryEl.querySelector('.module-category-badges');
+    if (!badgeGroup) return;
     const badges = visibleBadges(category);
     if (!badges.length) {
-      badgeEl.classList.add('hidden');
-      badgeEl.textContent = '';
+      if (badgeGroup.dataset.badgeSignature === '' && badgeGroup.classList.contains('hidden')) return;
+      badgeGroup.dataset.badgeSignature = '';
+      badgeGroup.classList.add('hidden');
+      badgeGroup.replaceChildren();
       return;
     }
-    const values = badges.map(badge => badge.textContent.trim());
+    const signature = category.splitBadges
+      ? badges.map(badge => `${badge.moduleId}:${badge.value}`).join('|')
+      : badges.map(badge => badge.value).join('|');
+    if (badgeGroup.dataset.badgeSignature === signature && !badgeGroup.classList.contains('hidden')) return;
+    badgeGroup.dataset.badgeSignature = signature;
+    badgeGroup.replaceChildren();
+    if (category.splitBadges) {
+      badges.forEach(badge => {
+        const chip = document.createElement('span');
+        chip.className = `module-category-badge module-category-badge-${badge.className || badge.moduleId}`;
+        chip.textContent = `${badge.label}${badge.value}`;
+        chip.title = `${badge.title}: ${badge.value}`;
+        badgeGroup.append(chip);
+      });
+      badgeGroup.classList.remove('hidden');
+      return;
+    }
+    const values = badges.map(badge => badge.value);
     const numericValues = values.map(value => Number(value)).filter(value => Number.isFinite(value));
-    badgeEl.textContent = numericValues.length === values.length
+    const chip = document.createElement('span');
+    chip.className = 'module-category-badge';
+    chip.textContent = numericValues.length === values.length
       ? String(numericValues.reduce((sum, value) => sum + value, 0))
       : (values.length === 1 ? values[0] : String(values.length));
-    badgeEl.classList.remove('hidden');
+    badgeGroup.append(chip);
+    badgeGroup.classList.remove('hidden');
   }
 
   function moduleIsActive(moduleId) {

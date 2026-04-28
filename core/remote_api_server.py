@@ -3928,6 +3928,7 @@ class RemoteBridge(QObject):
                 temp_path = temp_dir / f"vibe_{int(time.time() * 1000)}.png"
                 temp_path.write_bytes(img_bytes)
                 m._add_vibe_frame(str(temp_path))
+                self._disable_all_char_ref_frames()
             elif key.startswith("remove_frame_"):
                 idx = int(key.split("_")[-1])
                 if 0 <= idx < len(m.vibe_frames):
@@ -3969,6 +3970,7 @@ class RemoteBridge(QObject):
                 if len(parts) >= 3:
                     model, file_hash, ie_str = parts[0], parts[1], parts[2]
                     m._on_apply_vibe_from_storage(model, file_hash, "", float(ie_str))
+                    self._disable_all_char_ref_frames()
             elif key == "restore_metadata":
                 self._restore_vibe_transfer_from_metadata(m, value)
             # 변경 후 상태 브로드캐스트

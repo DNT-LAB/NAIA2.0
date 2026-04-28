@@ -1212,14 +1212,18 @@ class RemoteBridge(QObject):
     def _do_set_option(self, key: str, checked: bool):
         """웹에서 토글한 옵션을 메인 앱 체크박스에 반영"""
         try:
+            checked = bool(checked)
             # auto_save: image_window 체크박스 (OPTION_KEYS 외)
             if key == "auto_save":
                 auto_save_checkbox = self._get_auto_save_checkbox()
                 if auto_save_checkbox and auto_save_checkbox.isChecked() != checked:
                     self._syncing_option = True
-                    auto_save_checkbox.setChecked(checked)
-                    self._syncing_option = False
+                    try:
+                        auto_save_checkbox.setChecked(checked)
+                    finally:
+                        self._syncing_option = False
                     print(f"🌐 Remote: 자동 저장 → {checked}")
+                self.broadcast_options()
                 return
 
             label = self.OPTION_KEYS.get(key)
@@ -1229,9 +1233,16 @@ class RemoteBridge(QObject):
             cb = mw.generation_checkboxes.get(label)
             if cb and cb.isChecked() != checked:
                 self._syncing_option = True
-                cb.setChecked(checked)
-                self._syncing_option = False
+                try:
+                    cb.setChecked(checked)
+                finally:
+                    self._syncing_option = False
                 print(f"🌐 Remote: {label} → {checked}")
+            if cb:
+                # setChecked() emits toggled synchronously while _syncing_option is True,
+                # so the normal checkbox-slot broadcast is intentionally skipped.
+                # Send one authoritative echo after the desktop state is applied.
+                self.broadcast_options()
         except Exception as e:
             self._syncing_option = False
             print(f"🌐 Remote: 옵션 설정 실패 — {e}")
@@ -5429,20 +5440,36 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: 프롬프트 전송 실패 — {e}")
 
     def on_generation_result(self, result: dict):
-        """생성 완료 시 PIL→WebP 변환 후 WebSocket broadcast"""
-        # NAI 모드에서 생성 끝나면 Anlas 잔액 갱신 (실제 사용량 반영)
+        """생성 완료 시그널 슬롯 (Qt 메인 스레드).
+        무거운 작업(WebP 인코딩 + 메타데이터 추출 + broadcast)은 워커 스레드로 위임 — 메인 스레드 블록 금지.
+        """
+        # NAI 모드에서 생성 끝나면 Anlas 잔액 갱신 (가벼움 — 비동기 HTTP)
         try:
             if hasattr(self.app_context, "get_api_mode") and self.app_context.get_api_mode() == "NAI":
                 self._refresh_anlas_async()
         except Exception:
             pass
-        try:
-            image = result.get("image")
-            if image is None:
-                return
+        image = result.get("image")
+        if image is None:
+            return
+        # 메인 스레드는 worker 시작만 — image.save(WEBP method=4) 가 ~수백 ms 잡으면 GUI 정지
+        threading.Thread(
+            target=self._encode_and_broadcast_result,
+            args=(image, result),
+            daemon=True,
+            name="ResultBroadcast",
+        ).start()
 
+    def _encode_and_broadcast_result(self, image, result: dict):
+        """워커 스레드: WebP 인코딩 → 즉시 broadcast → 무거운 metadata 후처리.
+        broadcast 를 먼저 큐잉해서 클라이언트 페인트 latency 최소화. metadata payload 빌드는
+        /api/result/metadata 호출 시까지만 준비되면 되므로 broadcast 뒤로 미룬다.
+        """
+        try:
+            # 1. WebP 인코딩 — method=0 (가장 빠름, GIL 점유 시간 최소화)
+            #    method=4 대비 ~3-5x 빠름. 파일 크기는 약간 커지나 미리보기 용도라 무관.
             buf = io.BytesIO()
-            image.save(buf, format='WEBP', quality=85, method=4)
+            image.save(buf, format='WEBP', quality=85, method=0)
             webp_bytes = buf.getvalue()
 
             gen_params = result.get("generation_params", {})
@@ -5461,20 +5488,24 @@ class RemoteBridge(QObject):
                 "model": gen_params.get("model", ""),
             }
 
-            # /api/latest-image 호환을 위해 최신 이미지만 보존한다.
+            # 2. /api/latest-image 호환을 위한 최신 이미지 보존 (GIL 하 atomic 대입)
             self.latest_webp = webp_bytes
-            self.latest_metadata_payload = self._build_result_metadata_payload(image, result, webp_bytes)
 
-            if not self._has_clients():
-                return
+            # 3. broadcast 우선 — 메인 스레드/클라이언트가 이미지를 빨리 받도록
+            if self._has_clients():
+                self._broadcast_json({"type": "status", "is_generating": False})
+                if self._loop and self._ws_manager:
+                    asyncio.run_coroutine_threadsafe(
+                        self._ws_manager.broadcast_image(webp_bytes, metadata),
+                        self._loop,
+                    )
 
-            self._broadcast_json({"type": "status", "is_generating": False})
-
-            if self._loop and self._ws_manager:
-                asyncio.run_coroutine_threadsafe(
-                    self._ws_manager.broadcast_image(webp_bytes, metadata),
-                    self._loop
-                )
+            # 4. 무거운 metadata payload 는 broadcast 큐잉 후에 빌드
+            #    (ImageMetadataExtractor.extract_metadata 가 PIL 동기 작업 — GIL 부담)
+            try:
+                self.latest_metadata_payload = self._build_result_metadata_payload(image, result, webp_bytes)
+            except Exception as e:
+                print(f"🌐 Remote: latest_metadata_payload 빌드 실패 — {e}")
         except Exception as e:
             print(f"🌐 Remote: 이미지 변환/broadcast 실패 — {e}")
 

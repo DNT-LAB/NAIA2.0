@@ -1558,7 +1558,12 @@ function onSession(m) {
   const sharedDisabledModules = ['automation', 'wildcard', 'instant_wildcard', 'chunk', 'search'];
   if (sharedMode) {
     // Auto Gen 차단
-    if (autoGenCb) { autoGenCb.checked = false; autoGenCb.disabled = true; autoGenCb.parentElement.style.opacity = '0.4'; }
+    if (autoGenCb) {
+      applyOptionState('auto_generate', false);
+      _lastSentOption.auto_generate = false;
+      autoGenCb.disabled = true;
+      autoGenCb.parentElement.style.opacity = '0.4';
+    }
     // Auto Save 토글 차단 (호스트 전역 설정)
     if (statsSave) { statsSave.style.pointerEvents = 'none'; statsSave.style.opacity = '0.5'; }
     // Shared Mode 에선 모드 콤보박스 전체 비활성화 (호스트가 사전 설정)
@@ -1634,15 +1639,9 @@ function _restoreSharedSession() {
   // 클라이언트 UI 복원: options
   if (saved.options) {
     for (const [key, val] of Object.entries(saved.options)) {
-      const cb = optBoxes[key];
-      if (cb) cb.checked = val;
+      applyOptionState(key, val);
+      _lastSentOption[key] = !!val;
     }
-    // Prompt Fixed → Random 버튼 차단
-    if (optBoxes.prompt_fixed) {
-      btnRnd.disabled = optBoxes.prompt_fixed.checked;
-      btnRnd.style.opacity = optBoxes.prompt_fixed.checked ? '0.4' : '';
-    }
-    syncRatingBarVisibility();
   }
   // 클라이언트 UI 복원: prompt + negative prompt
   if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); updatePromptTokenEstimate(); }
@@ -1766,6 +1765,45 @@ function finishProgress() {
 }
 
 // ---- Options sync ----
+const _lastSentOption = {};  // dedupe: oninput + onchange 중복 호출 + broadcast → sync 루프 차단
+
+function applyOptionState(key, value, options = {}) {
+  const cb = optBoxes[key];
+  if (!cb) return false;
+  const next = !!value;
+  const clearPending = options.clearPending !== false;
+  if (cb.checked !== next) cb.checked = next;
+
+  const shell = cb.closest('.opt-toggle');
+  if (shell) {
+    shell.classList.toggle('is-on', next);
+    if (clearPending) shell.classList.remove('is-pending');
+    shell.setAttribute('aria-pressed', next ? 'true' : 'false');
+    shell.dataset.checked = next ? 'true' : 'false';
+  }
+
+  if (key === 'prompt_fixed') {
+    btnRnd.disabled = next;
+    btnRnd.style.opacity = next ? '0.4' : '';
+  }
+  if (key === 'prompt_fixed' || key === 'wildcard_standalone') {
+    syncRatingBarVisibility();
+  }
+  return true;
+}
+
+function markOptionPending(key, pending) {
+  const cb = optBoxes[key];
+  const shell = cb ? cb.closest('.opt-toggle') : null;
+  if (shell) shell.classList.toggle('is-pending', !!pending);
+}
+
+function refreshAllOptionVisuals() {
+  for (const [key, cb] of Object.entries(optBoxes)) {
+    applyOptionState(key, !!(cb && cb.checked));
+  }
+}
+
 function syncOptions(m) {
   if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
   // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 options 보호)
@@ -1773,16 +1811,13 @@ function syncOptions(m) {
   if (sharedMode) _sharedOptionsInit = true;
   syncingOptions = true;
   for (const [key, cb] of Object.entries(optBoxes)) {
-    if (key in m) cb.checked = m[key];
+    if (key in m) {
+      const next = !!m[key];
+      applyOptionState(key, next);
+      _lastSentOption[key] = next;
+    }
   }
   syncingOptions = false;
-  // Prompt Fixed 상태에 따라 Random 버튼 차단
-  const pf = optBoxes.prompt_fixed;
-  if (pf) {
-    btnRnd.disabled = pf.checked;
-    btnRnd.style.opacity = pf.checked ? '0.4' : '';
-  }
-  syncRatingBarVisibility();
   // Auto-save 상태 동기화
   if ('auto_save' in m) {
     if (autoSavePanel) autoSavePanel.syncEnabled(m.auto_save);
@@ -1797,17 +1832,21 @@ function syncRatingBarVisibility() {
 }
 
 function setOption(key, value) {
-  if (syncingOptions) return;
-  // Prompt Fixed → Random 버튼 차단/해제
-  if (key === 'prompt_fixed') {
-    btnRnd.disabled = !!value;
-    btnRnd.style.opacity = value ? '0.4' : '';
+  const next = !!value;
+  if (syncingOptions) {
+    applyOptionState(key, next);
+    return;
   }
-  if (key === 'prompt_fixed' || key === 'wildcard_standalone') {
-    syncRatingBarVisibility();
-  }
+  if (!applyOptionState(key, next, {clearPending: false})) return;
+  // dedupe: oninput + onchange 둘 다 등록되어 같은 click 에 두 번 호출되거나,
+  // sync → 대입 → 환경 따라 이벤트 재발사 → setOption 재호출 루프(oscillation) 차단.
+  if (_lastSentOption[key] === next) return;
+  _lastSentOption[key] = next;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'set_option', key, value}));
+    markOptionPending(key, true);
+    ws.send(JSON.stringify({type: 'set_option', key, value: next}));
+  } else {
+    markOptionPending(key, false);
   }
   saveSharedSession();
 }
@@ -3726,6 +3765,7 @@ Promise.all([
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();
+    refreshAllOptionVisuals();
     setBootIndicator('Connecting…', 25, false);
     connect();
   })

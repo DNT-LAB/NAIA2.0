@@ -3101,31 +3101,39 @@ class ModernMainWindow(QMainWindow):
                 self.image_window.update_info(info_text)
             except Exception as e:
                 print(f"❌ 정보 업데이트 실패: {e}")
-                
-            # 히스토리 추가
-            try:
-                print(f"  - image_object type: {type(image_object)}")
-                print(f"  - raw_bytes type: {type(raw_bytes)}, length: {len(raw_bytes) if raw_bytes else 'None'}")
-                print(f"  - info_text type: {type(info_text)}, length: {len(info_text) if info_text else 'None'}")
-                print(f"  - source_row type: {type(source_row)}")
-                
-                # 🆕 확장된 메타데이터와 함께 히스토리 추가
-                self.image_window.add_to_history(
-                    image_object, 
-                    raw_bytes, 
-                    info_text, 
-                    source_row,
-                    generation_result=result  # 🆕 전체 결과 객체 전달
-                )
-            except Exception as e:
-                print(f"❌ 히스토리 추가 실패: {e}")
-                import traceback
-                traceback.print_exc()
-            
+
             self.status_bar.showMessage("🎉 생성 완료!")
 
-            # Remote API 서버에 결과 전달
+            # Remote API 서버에 결과 우선 전달 — broadcast worker 가 add_to_history 전에 큐잉되도록.
+            # add_to_history 는 thumbnail QPixmap 변환 + Auto Save 디스크 IO + WEBP 인코딩으로
+            # 메인 스레드를 ~수백 ms 잡는다. broadcast 가 그 뒤로 밀리면 Web Shell 페인트도 늦어진다.
             self.app_context.publish("generation_result_available", result)
+
+            # 히스토리 추가는 한 frame 늦춰서 broadcast 큐잉 + 첫 페인트가 먼저 일어나게 한다.
+            def _deferred_add_to_history(
+                _image=image_object,
+                _raw=raw_bytes,
+                _info=info_text,
+                _src=source_row,
+                _result=result,
+            ):
+                try:
+                    print(f"  - image_object type: {type(_image)}")
+                    print(f"  - raw_bytes type: {type(_raw)}, length: {len(_raw) if _raw else 'None'}")
+                    print(f"  - info_text type: {type(_info)}, length: {len(_info) if _info else 'None'}")
+                    print(f"  - source_row type: {type(_src)}")
+                    self.image_window.add_to_history(
+                        _image,
+                        _raw,
+                        _info,
+                        _src,
+                        generation_result=_result,
+                    )
+                except Exception as e:
+                    print(f"❌ 히스토리 추가 실패: {e}")
+                    import traceback
+                    traceback.print_exc()
+            QTimer.singleShot(0, _deferred_add_to_history)
             
             # 자동화 모듈 처리 (안전하게)
             if self.automation_module:
@@ -3155,7 +3163,8 @@ class ModernMainWindow(QMainWindow):
                             # 폴백: 기존 방식 사용
                             if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
                                 self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
-                            from PyQt6.QtCore import QTimer
+                            # 모듈 레벨 import (line 40) 사용 — 함수-로컬 import 는
+                            # 같은 함수 위쪽에서 QTimer 참조 시 UnboundLocalError 유발하므로 금지.
                             QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
                     else:
                         if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:

@@ -2459,6 +2459,12 @@ body.resizing-result-info {
 .opt-toggle:has(input:checked) {
   border-color: var(--accent); background: rgba(124,106,239,0.08);
 }
+.opt-toggle.is-on {
+  border-color: var(--accent); background: rgba(124,106,239,0.08);
+}
+.opt-toggle.is-pending {
+  border-color: rgba(157,139,255,0.62);
+}
 .opt-toggle input {
   appearance: none; -webkit-appearance: none;
   width: 14px; height: 14px;

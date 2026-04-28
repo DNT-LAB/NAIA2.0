@@ -687,6 +687,7 @@ const optBoxes = {
   auto_generate: $('optAutoGen'),
   wildcard_standalone: $('optWcStandalone'),
 };
+const pendingOptionValues = Object.create(null);
 
 // ---- Result history wrappers ----
 function setHistoryRailCollapsed(collapsed, persist = true) { if (resultHistory) resultHistory.setRailCollapsed(collapsed, persist); }
@@ -1775,7 +1776,10 @@ function applyOptionState(key, value, options = {}) {
   const clearPending = options.clearPending !== false;
   control.dataset.checked = next ? 'true' : 'false';
   control.classList.toggle('is-on', next);
-  if (clearPending) control.classList.remove('is-pending');
+  if (clearPending) {
+    delete pendingOptionValues[key];
+    control.classList.remove('is-pending');
+  }
   control.setAttribute('aria-pressed', next ? 'true' : 'false');
 
   if (key === 'prompt_fixed') {
@@ -1790,7 +1794,18 @@ function applyOptionState(key, value, options = {}) {
 
 function markOptionPending(key, pending) {
   const control = optBoxes[key];
+  if (pending) pendingOptionValues[key] = getOptionChecked(key);
+  else delete pendingOptionValues[key];
   if (control) control.classList.toggle('is-pending', !!pending);
+}
+
+function hasPendingOption(key) {
+  return Object.prototype.hasOwnProperty.call(pendingOptionValues, key);
+}
+
+function shouldApplyIncomingOption(key, next, sessionEcho) {
+  if (!hasPendingOption(key)) return true;
+  return sessionEcho || pendingOptionValues[key] === next;
 }
 
 function refreshAllOptionVisuals() {
@@ -1811,7 +1826,13 @@ function syncOptions(m) {
   try {
     for (const key of Object.keys(optBoxes)) {
       if (key in m) {
-        applyOptionState(key, !!m[key]);
+        if (sharedMode && key === 'auto_generate') {
+          applyOptionState(key, false);
+          continue;
+        }
+        const next = !!m[key];
+        if (!shouldApplyIncomingOption(key, next, sessionEcho)) continue;
+        applyOptionState(key, next);
       }
     }
   } finally {

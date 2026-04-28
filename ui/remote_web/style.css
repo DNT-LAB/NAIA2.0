@@ -2298,6 +2298,9 @@ body.resizing-result-info {
   resize: none;
   transition: none;
 }
+.prompt-highlight-wrap.has-activated-summary .prompt-edit {
+  padding-bottom: 66px;
+}
 .prompt-highlight-wrap .prompt-edit:focus {
   border-color: transparent;
 }
@@ -2333,6 +2336,9 @@ body.resizing-result-info {
   overflow: auto;
   pointer-events: none;
 }
+.prompt-highlight-wrap.has-activated-summary .prompt-highlight {
+  padding-bottom: 66px;
+}
 .prompt-highlight-wrap.nai-preview .prompt-highlight,
 .prompt-highlight-wrap.is-editing .prompt-highlight { display: block; }
 .prompt-token-footer {
@@ -2344,6 +2350,7 @@ body.resizing-result-info {
   min-height: 34px;
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 8px 16px;
   border-top: 1px solid rgba(232,232,240,0.1);
   background: linear-gradient(180deg, rgba(11,13,22,0.72), rgba(10,10,15,0.94));
@@ -2356,9 +2363,40 @@ body.resizing-result-info {
   overflow: hidden;
   pointer-events: none;
 }
+.prompt-token-footer.has-activated {
+  min-height: 52px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 16px;
+}
 .prompt-token-footer span {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.activated-summary {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+.activated-summary span {
+  overflow: visible;
+}
+.activated-summary-label.character,
+.activated-summary-part.character {
+  color: #6abf7b;
+}
+.activated-summary-label.vibe,
+.activated-summary-part.vibe {
+  color: #b9892e;
+}
+.activated-summary-label.pref,
+.activated-summary-part.pref {
+  color: #c8b8ff;
+}
+.activated-summary-separator {
+  color: var(--text-dim);
 }
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }

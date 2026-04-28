@@ -1013,6 +1013,29 @@ class RemoteBridge(QObject):
         except Exception:
             return True
 
+    def _get_current_result_source_row(self):
+        image_window = self._get_image_window_widget()
+        item = getattr(image_window, "current_history_item", None) if image_window else None
+        source_row = getattr(item, "source_row", None) if item else None
+        if not self._source_row_available(source_row):
+            return None
+        try:
+            return source_row.copy()
+        except Exception:
+            return source_row
+
+    def _open_path_location(self, target: Path):
+        import subprocess
+        import sys
+
+        path = Path(target)
+        if sys.platform.startswith("win"):
+            subprocess.Popen(["explorer", f"/select,{str(path)}"])
+        elif sys.platform.startswith("darwin"):
+            subprocess.Popen(["open", "-R", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
+
     def _current_api_mode(self) -> str:
         try:
             if hasattr(self.app_context, "get_api_mode"):
@@ -1064,13 +1087,13 @@ class RemoteBridge(QObject):
         has_metadata = bool(metadata_payload or rel_path)
 
         return {
-            "id": f"saved:{rel_path}" if rel_path else "current",
-            "source": "saved" if rel_path else "current",
+            "id": "current",
+            "source": "current",
             "path": rel_path,
             "file_path": filepath if has_file else "",
             "label": Path(filepath).name if rel_path else "Current Result",
             "image_url": ("/api/viewer/image/" + encoded_rel_path) if rel_path else ("/api/latest-image" if has_latest_image else ""),
-            "metadata_url": ("/api/viewer/meta?path=" + quote(rel_path, safe="") + "&full=1") if rel_path else "/api/result/metadata",
+            "metadata_url": "/api/result/metadata",
             "has_image": has_image,
             "has_metadata": has_metadata,
             "capabilities": {
@@ -1118,10 +1141,10 @@ class RemoteBridge(QObject):
             "size_bytes": stat.st_size if stat else None,
             "mtime": stat.st_mtime if stat else None,
             "capabilities": {
-                "load_prompt": False,
+                "load_prompt": True,
                 "reroll": False,
                 "queue": False,
-                "restore_params": False,
+                "restore_params": True,
                 "metadata": True,
                 "paste_image": True,
                 "open_file": True,
@@ -5984,6 +6007,19 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         bridge.request_random.emit()
         return {"status": "random_generation_requested"}
 
+    @app.post("/api/result/action/reroll")
+    async def api_result_action_reroll():
+        source_row = await asyncio.to_thread(bridge._get_current_result_source_row)
+        if not bridge._source_row_available(source_row):
+            return JSONResponse({"error": "Reroll source is unavailable"}, status_code=400)
+        bridge._pending_random_requests.append({
+            "ws": None,
+            "source_row": source_row,
+            "active_ratings": set(bridge._active_ratings),
+        })
+        bridge.request_random.emit()
+        return {"ok": True, "action": "reroll"}
+
     @app.post("/api/comfyui/random")
     async def api_comfyui_random(req: Request):
         """ComfyUI 전용 sync 랜덤 프롬프트 요청.
@@ -6299,6 +6335,35 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return {"ok": True, "path": opened}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    @app.post("/api/result/open-location")
+    async def api_result_open_location(req: Request):
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+
+        target = None
+        rel_path = str(body.get("path") or "").strip()
+        if rel_path:
+            target = bridge._validate_viewer_path(rel_path)
+        else:
+            asset = await asyncio.to_thread(bridge._build_current_result_asset_payload)
+            file_path = asset.get("file_path") if isinstance(asset, dict) else ""
+            if file_path:
+                target = Path(file_path)
+
+        if not target or not Path(target).is_file():
+            return JSONResponse({"error": "Image file is unavailable"}, status_code=404)
+
+        try:
+            save_dir = bridge._get_viewer_save_dir().resolve()
+            Path(target).resolve().relative_to(save_dir)
+        except Exception:
+            return JSONResponse({"error": "Image file is outside the result folder"}, status_code=400)
+
+        await asyncio.to_thread(bridge._open_path_location, Path(target))
+        return {"ok": True}
 
     @app.get("/api/viewer/thumb/{path:path}")
     async def viewer_thumb(path: str, size: int = 0):

@@ -71,12 +71,17 @@ Completed after the P0 stabilization pass:
 - Vibe Transfer Remote Web follow-up:
   - Reference Strength now has a direct numeric input (`-1.00` to `1.00`, step `0.01`) synced with the slider.
   - The Vibe Reference Strength slider hit area and thumb are larger for easier dragging.
+- Result context menu follow-up:
+  - `프롬프트 불러오기`, `프롬프트 다시개봉`, `생성 설정 복원`, `파일 위치 열기`, `이미지 저장`, `PNG로 클립보드 복사`, and `WEBP로 클립보드 복사` are now wired from the Remote Web context menu.
+  - Current-result reroll uses the existing random prompt pipeline with the current history item's `source_row`; saved thumbnails remain reroll-disabled.
+  - Saved-result prompt/settings actions load image metadata directly; current-result prompt/settings actions prefer `/api/result/metadata`.
 
 ## Immediate Risks
 
 - `Tools & Assistants` has been compressed into the planned `1 + 3` launcher. Remaining risk is visual/manual smoke across desktop, mobile drawer, NAI/non-NAI mode, and Shared Mode.
 - `core/remote_api_server.py` gained about 1k lines; next stabilization should focus on behavior smoke and then adapter extraction, not more feature growth.
 - No browser/manual Remote Web smoke was observed in this audit.
+- Result context menu clipboard image writes depend on browser Clipboard API support, especially for WEBP.
 
 ## Next Task Assignment
 

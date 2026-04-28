@@ -246,6 +246,12 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       },
       onShowMetadata: showMetadataInTab,
       onImageAction: requestContextImageAction,
+      onLoadPrompt: loadPromptFromResultContext,
+      onRerollPrompt: rerollPromptFromResultContext,
+      onRestoreSettings: restoreSettingsFromResultContext,
+      onOpenLocation: openResultLocationFromContext,
+      onSaveImage: saveResultImageFromContext,
+      onCopyImage: copyResultImageFromContext,
     });
     resultContextMenu.bind();
   })
@@ -1367,6 +1373,257 @@ async function requestMetadataImageAction(payload, action) {
   } catch (error) {
     console.error('Metadata image action failed', error);
     showToast(error.message || 'Metadata image action failed', 'error');
+  }
+}
+
+function isMetadataActionObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isMetadataActionPresent(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function tryParseMetadataActionJson(value) {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed || !/^[{[]/.test(trimmed)) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    return value;
+  }
+}
+
+function getMetadataActionRaw(data) {
+  if (!data || typeof data !== 'object') return data;
+  return Object.prototype.hasOwnProperty.call(data, 'raw') ? data.raw : data;
+}
+
+function getMetadataActionSources(data) {
+  const summary = isMetadataActionObject(data?.summary) ? data.summary : {};
+  const raw = getMetadataActionRaw(data);
+  const extracted = isMetadataActionObject(raw?.extracted_metadata) ? raw.extracted_metadata : {};
+  const generationParams = isMetadataActionObject(raw?.generation_params) ? raw.generation_params : {};
+  const promptContext = isMetadataActionObject(raw?.prompt_context) ? raw.prompt_context : {};
+  const apiMetadata = isMetadataActionObject(raw?.api_metadata) ? raw.api_metadata : {};
+  const rawAsMetadata = isMetadataActionObject(raw) && !raw.extracted_metadata ? raw : {};
+  const comment = tryParseMetadataActionJson(extracted.Comment || extracted.comment || rawAsMetadata.Comment || rawAsMetadata.comment);
+  const extractedParams = isMetadataActionObject(extracted.parameters) ? extracted.parameters : {};
+  const rawParams = isMetadataActionObject(rawAsMetadata.parameters) ? rawAsMetadata.parameters : {};
+  return [
+    promptContext,
+    summary,
+    generationParams,
+    extracted,
+    rawAsMetadata,
+    isMetadataActionObject(comment) ? comment : {},
+    extractedParams,
+    rawParams,
+    apiMetadata,
+    isMetadataActionObject(raw?.image) ? raw.image : {},
+  ].filter(source => isMetadataActionObject(source) && Object.keys(source).length > 0);
+}
+
+function findMetadataActionValue(data, aliases) {
+  const sources = getMetadataActionSources(data);
+  for (const source of sources) {
+    for (const alias of aliases) {
+      if (isMetadataActionPresent(source[alias])) return source[alias];
+    }
+  }
+  return '';
+}
+
+function buildMetadataActionPayload(data, context = {}) {
+  const width = findMetadataActionValue(data, ['width']);
+  const height = findMetadataActionValue(data, ['height']);
+  const resolution = width && height
+    ? `${width} x ${height}`
+    : findMetadataActionValue(data, ['resolution']);
+  const params = {};
+  [
+    ['resolution', resolution],
+    ['steps', findMetadataActionValue(data, ['steps'])],
+    ['cfg_scale', findMetadataActionValue(data, ['cfg_scale', 'scale', 'cfg'])],
+    ['cfg_rescale', findMetadataActionValue(data, ['cfg_rescale'])],
+    ['seed', findMetadataActionValue(data, ['seed'])],
+    ['sampler', findMetadataActionValue(data, ['sampler', 'sampler_name'])],
+    ['scheduler', findMetadataActionValue(data, ['noise_schedule', 'scheduler'])],
+    ['sm', findMetadataActionValue(data, ['sm'])],
+    ['sm_dyn', findMetadataActionValue(data, ['sm_dyn'])],
+    ['VAR+', findMetadataActionValue(data, ['VAR+', 'skip_cfg_above_sigma'])],
+    ['model', findMetadataActionValue(data, ['model', 'Model', 'model_name', 'checkpoint'])],
+  ].forEach(([key, value]) => {
+    if (isMetadataActionPresent(value)) params[key] = value;
+  });
+  return {
+    data,
+    source: context,
+    prompt: findMetadataActionValue(data, ['main_prompt', 'final_prompt', 'prompt', 'input', '_raw_input', 'Description', 'description']),
+    negative: findMetadataActionValue(data, ['uc', 'negative', 'negative_prompt']),
+    params,
+  };
+}
+
+async function loadContextMetadataPayload(context = {}) {
+  const path = context.path || '';
+  const url = context.metadataUrl
+    || (path ? `/api/viewer/meta?path=${encodeURIComponent(path)}&full=1` : '/api/result/metadata');
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+async function loadPromptFromResultContext(context = {}) {
+  try {
+    const data = await loadContextMetadataPayload(context);
+    const payload = buildMetadataActionPayload(data, context);
+    const prompt = String(payload.prompt || '').trim();
+    if (!prompt) {
+      showToast('No prompt metadata found', 'error');
+      return;
+    }
+    onLoadPrompt(prompt);
+  } catch (error) {
+    console.error('Load prompt from context failed', error);
+    showToast(error.message || 'Load prompt failed', 'error');
+  }
+}
+
+async function restoreSettingsFromResultContext(context = {}) {
+  try {
+    const data = await loadContextMetadataPayload(context);
+    const payload = buildMetadataActionPayload(data, context);
+    applyMetadataSettings(payload);
+  } catch (error) {
+    console.error('Restore settings from context failed', error);
+    showToast(error.message || 'Restore settings failed', 'error');
+  }
+}
+
+async function rerollPromptFromResultContext(context = {}) {
+  if (!context?.capabilities?.reroll) {
+    showToast('Reroll source is unavailable', 'error');
+    return;
+  }
+  try {
+    const response = await fetch('/api/result/action/reroll', {method: 'POST'});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    showToast('Prompt reroll requested', 'success');
+  } catch (error) {
+    console.error('Prompt reroll failed', error);
+    showToast(error.message || 'Prompt reroll failed', 'error');
+  }
+}
+
+async function openResultLocationFromContext(context = {}) {
+  try {
+    const response = await fetch('/api/result/open-location', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        source: context.source || '',
+        path: context.path || '',
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    showToast('Opened image location', 'success');
+  } catch (error) {
+    console.error('Open image location failed', error);
+    showToast(error.message || 'Open image location failed', 'error');
+  }
+}
+
+function contextImageUrl(context = {}) {
+  if (context.imageSrc) return context.imageSrc;
+  if (context.path) return '/api/viewer/image/' + encodeURI(context.path);
+  if (context.source === 'current') {
+    const preview = document.getElementById('preview');
+    const previewUrl = preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : '';
+    return previewUrl || '/api/latest-image';
+  }
+  return '';
+}
+
+async function fetchContextImageBlob(context = {}) {
+  const imageUrl = contextImageUrl(context);
+  if (!imageUrl) throw new Error('Result image is unavailable');
+  if (imageUrl.startsWith('blob:') && latestResultBlob) return latestResultBlob;
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.blob();
+}
+
+function filenameFromContext(context = {}, fallbackExt = 'png') {
+  const rawName = String(context.label || context.path || 'naia-result')
+    .split(/[\\/]/)
+    .pop()
+    .replace(/\.[^.]+$/, '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .trim();
+  return `${rawName || 'naia-result'}.${fallbackExt}`;
+}
+
+async function saveResultImageFromContext(context = {}) {
+  try {
+    const blob = await fetchContextImageBlob(context);
+    const ext = blob.type === 'image/webp' ? 'webp' : (blob.type === 'image/jpeg' ? 'jpg' : 'png');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filenameFromContext(context, ext);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Image download started', 'success');
+  } catch (error) {
+    console.error('Save image failed', error);
+    showToast(error.message || 'Save image failed', 'error');
+  }
+}
+
+async function convertImageBlob(blob, mimeType) {
+  if (blob.type === mimeType) return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0);
+  if (typeof bitmap.close === 'function') bitmap.close();
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(converted => {
+      if (converted) resolve(converted);
+      else reject(new Error('Image conversion failed'));
+    }, mimeType, 0.95);
+  });
+}
+
+async function copyResultImageFromContext(context = {}, format = 'png') {
+  const normalizedFormat = String(format || 'png').toLowerCase();
+  const mimeType = normalizedFormat === 'webp' ? 'image/webp' : 'image/png';
+  try {
+    if (!navigator.clipboard?.write || !window.ClipboardItem) {
+      showToast('Image clipboard is not supported by this browser', 'error');
+      return;
+    }
+    const blob = await fetchContextImageBlob(context);
+    const converted = await convertImageBlob(blob, mimeType);
+    await navigator.clipboard.write([
+      new window.ClipboardItem({[converted.type || mimeType]: converted}),
+    ]);
+    showToast(`${normalizedFormat.toUpperCase()} copied to clipboard`, 'success');
+  } catch (error) {
+    console.error('Copy image failed', error);
+    showToast(error.message || 'Copy image failed', 'error');
   }
 }
 

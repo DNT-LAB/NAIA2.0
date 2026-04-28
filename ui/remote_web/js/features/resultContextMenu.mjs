@@ -1,6 +1,12 @@
 const ACTION_METADATA = 'show_metadata';
 const ACTION_PASTE_IMAGE = 'paste_image';
 const ACTION_IMAGE_ACTION = 'image_action';
+const ACTION_LOAD_PROMPT = 'load_prompt';
+const ACTION_REROLL_PROMPT = 'reroll_prompt';
+const ACTION_RESTORE_PARAMS = 'restore_params';
+const ACTION_OPEN_LOCATION = 'open_location';
+const ACTION_SAVE_IMAGE = 'save_image';
+const ACTION_COPY_IMAGE = 'copy_image';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -22,18 +28,18 @@ const DEFAULT_CAPABILITIES = {
 };
 
 const MAIN_IMAGE_MENU = [
-  {label: '프롬프트 불러오기'},
-  {label: '프롬프트 다시개봉'},
+  {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
+  {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
   {type: 'separator'},
-  {label: '생성 설정 복원'},
+  {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {label: '전체 메타데이터 보기', action: ACTION_METADATA},
   {type: 'separator'},
   {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
   {type: 'separator'},
-  {label: '파일 위치 열기'},
-  {label: '이미지 저장'},
-  {label: 'PNG로 클립보드 복사'},
-  {label: 'WEBP로 클립보드 복사'},
+  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
+  {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
+  {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
+  {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
   {type: 'separator'},
   {label: 'NAI 2x 업스케일'},
   {
@@ -52,8 +58,8 @@ const MAIN_IMAGE_MENU = [
 ];
 
 const THUMBNAIL_MENU = [
-  {label: '프롬프트 불러오기'},
-  {label: '프롬프트 다시개봉'},
+  {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
+  {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
   {type: 'separator'},
   {
     label: '큐 앞에 추가',
@@ -70,10 +76,10 @@ const THUMBNAIL_MENU = [
     ],
   },
   {type: 'separator'},
-  {label: '생성 설정 복원'},
+  {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {label: '전체 메타데이터 보기', action: ACTION_METADATA, requiresPath: true},
-  {label: 'PNG로 클립보드 복사'},
-  {label: 'WEBP로 클립보드 복사'},
+  {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
+  {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
   {type: 'separator'},
   {label: 'NAI 2x 업스케일'},
   {type: 'separator'},
@@ -91,6 +97,12 @@ export function createResultContextMenu({
   onPasteImage = () => {},
   onShowMetadata = null,
   onImageAction = null,
+  onLoadPrompt = null,
+  onRerollPrompt = null,
+  onRestoreSettings = null,
+  onOpenLocation = null,
+  onSaveImage = null,
+  onCopyImage = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
 }) {
@@ -121,11 +133,33 @@ export function createResultContextMenu({
 
   function isItemEnabled(item, context) {
     if (item.alwaysEnabled) return true;
+    if (item.children) {
+      return item.children.some(child => isItemEnabled(child, context));
+    }
+    if (item.capability && !hasCapability(context, item.capability)) return false;
+    if (item.action === ACTION_LOAD_PROMPT) {
+      return typeof onLoadPrompt === 'function';
+    }
+    if (item.action === ACTION_REROLL_PROMPT) {
+      return typeof onRerollPrompt === 'function';
+    }
+    if (item.action === ACTION_RESTORE_PARAMS) {
+      return typeof onRestoreSettings === 'function';
+    }
     if (item.action === ACTION_METADATA) {
       return hasCapability(context, 'metadata');
     }
     if (item.action === ACTION_PASTE_IMAGE) {
       return hasCapability(context, 'paste_image');
+    }
+    if (item.action === ACTION_OPEN_LOCATION) {
+      return typeof onOpenLocation === 'function';
+    }
+    if (item.action === ACTION_SAVE_IMAGE) {
+      return typeof onSaveImage === 'function';
+    }
+    if (item.action === ACTION_COPY_IMAGE) {
+      return typeof onCopyImage === 'function';
     }
     if (item.action === ACTION_IMAGE_ACTION) {
       if (!hasCapability(context, 'image_action')) return false;
@@ -144,12 +178,13 @@ export function createResultContextMenu({
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
     const imageActionAttr = item.imageAction ? ` data-image-action="${item.imageAction}"` : '';
+    const copyFormatAttr = item.copyFormat ? ` data-copy-format="${item.copyFormat}"` : '';
     const childHtml = item.children
       ? `<div class="result-context-children">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group">
-        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${disabledAttr}>
+        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${copyFormatAttr}${disabledAttr}>
           <span>${escapeText(item.label)}</span>${item.children ? '<span class="result-context-arrow">›</span>' : ''}
         </button>
         ${childHtml}
@@ -181,11 +216,23 @@ export function createResultContextMenu({
         if (button.disabled) return;
         const action = button.dataset.action;
         close();
-        if (action === ACTION_METADATA) {
+        if (action === ACTION_LOAD_PROMPT) {
+          onLoadPrompt(context);
+        } else if (action === ACTION_REROLL_PROMPT) {
+          onRerollPrompt(context);
+        } else if (action === ACTION_RESTORE_PARAMS) {
+          onRestoreSettings(context);
+        } else if (action === ACTION_METADATA) {
           if (typeof onShowMetadata === 'function' && onShowMetadata(context) !== false) return;
           showMetadata(context);
         } else if (action === ACTION_PASTE_IMAGE) {
           onPasteImage();
+        } else if (action === ACTION_OPEN_LOCATION) {
+          onOpenLocation(context);
+        } else if (action === ACTION_SAVE_IMAGE) {
+          onSaveImage(context);
+        } else if (action === ACTION_COPY_IMAGE) {
+          onCopyImage(context, button.dataset.copyFormat || 'png');
         } else if (action === ACTION_IMAGE_ACTION) {
           onImageAction(context, button.dataset.imageAction || '');
         }
@@ -358,8 +405,8 @@ export function createResultContextMenu({
     const hasImage = hasVisibleImage(image);
     if (!hasImage) return buildContext('empty', '', false);
 
-    const path = getImagePlanePath(image);
     const datasetSource = image?.dataset ? image.dataset.source : '';
+    const path = datasetSource === 'current' ? '' : getImagePlanePath(image);
     const source = path
       ? 'saved'
       : (datasetSource === 'input' ? 'input' : 'current');

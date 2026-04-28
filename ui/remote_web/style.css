@@ -2424,8 +2424,9 @@ body.resizing-result-info {
 .prompt-token-artist {
   color: rgba(255, 205, 196, 0.96);
 }
-.prompt-token-character {
-  color: rgba(216, 240, 215, 0.50);
+.prompt-token-character,
+.prompt-token-copyright {
+  color: rgba(178, 244, 194, 0.82);
 }
 .prompt-token-unknown {
   color: rgba(255, 255, 255, 1.00);

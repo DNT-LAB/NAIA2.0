@@ -64,6 +64,7 @@ export function createPromptTagClassifier(index = {}) {
   let knownTags = makeLookupSet(index.knownTags);
   let artistTags = makeLookupSet(index.artistTags);
   let characterTags = makeLookupSet(index.characterTags);
+  let copyrightTags = makeLookupSet(index.copyrightTags);
 
   function setIndex(nextIndex = {}) {
     highValueTags = makeLookupSet(nextIndex.highValueTags);
@@ -71,6 +72,7 @@ export function createPromptTagClassifier(index = {}) {
     knownTags = makeLookupSet(nextIndex.knownTags);
     artistTags = makeLookupSet(nextIndex.artistTags);
     characterTags = makeLookupSet(nextIndex.characterTags);
+    copyrightTags = makeLookupSet(nextIndex.copyrightTags);
   }
 
   function classify(raw) {
@@ -84,6 +86,9 @@ export function createPromptTagClassifier(index = {}) {
     }
     if (namespace === 'character' || characterTags.has(tag)) {
       return {kind: 'character', className: 'prompt-token-character', tag};
+    }
+    if (namespace === 'copyright' || copyrightTags.has(tag)) {
+      return {kind: 'copyright', className: 'prompt-token-copyright', tag};
     }
     if (highValueTags.has(tag)) {
       return {kind: 'high', className: 'prompt-token-high', tag};
@@ -101,7 +106,7 @@ export function createPromptTagClassifier(index = {}) {
   }
 
   function summarize(text) {
-    const counts = {plain: 0, comment: 0, artist: 0, character: 0, high: 0, mid: 0, low: 0, unknown: 0};
+    const counts = {plain: 0, comment: 0, artist: 0, character: 0, copyright: 0, high: 0, mid: 0, low: 0, unknown: 0};
     splitPromptTextForClassification(text).forEach(token => {
       const result = classify(token);
       counts[result.kind] = (counts[result.kind] || 0) + 1;

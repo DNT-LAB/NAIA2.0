@@ -4849,6 +4849,7 @@ class RemoteBridge(QObject):
             return self._prompt_highlight_index_cache
 
         self._load_kr_tags()
+        self._load_char_analysis()
 
         def _norm_tag(value) -> str:
             return (
@@ -4923,6 +4924,7 @@ class RemoteBridge(QObject):
 
         artist_tags = set()
         character_tags = set()
+        copyright_tags = set()
         known_tags = set()
         for tag_lower, info in self._kr_tags_raw.items():
             tag = _norm_tag(info.get("_tag", tag_lower))
@@ -4933,6 +4935,8 @@ class RemoteBridge(QObject):
                 artist_tags.add(tag)
             elif cat == "character":
                 character_tags.add(tag)
+            elif cat == "copyright":
+                copyright_tags.add(tag)
             else:
                 known_tags.add(tag)
 
@@ -4941,6 +4945,7 @@ class RemoteBridge(QObject):
         known_tags.update(_read_json_tags(taglist_dir / "style_meta_tags.json"))
         known_tags.difference_update(artist_tags)
         known_tags.difference_update(character_tags)
+        known_tags.difference_update(copyright_tags)
 
         payload = {
             "highValueTags": sorted(high_value),
@@ -4948,12 +4953,14 @@ class RemoteBridge(QObject):
             "knownTags": sorted(known_tags),
             "artistTags": sorted(artist_tags),
             "characterTags": sorted(character_tags),
+            "copyrightTags": sorted(copyright_tags),
             "stats": {
                 "high": len(high_value),
                 "mid": len(mid_value),
                 "known": len(known_tags),
                 "artists": len(artist_tags),
                 "characters": len(character_tags),
+                "copyrights": len(copyright_tags),
             },
         }
         self._prompt_highlight_index_cache = payload

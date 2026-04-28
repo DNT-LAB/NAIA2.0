@@ -99,7 +99,7 @@ export function createChunkPanel({
     const regionWidth = Math.max(280, regionRight - regionLeft);
     const minWidth = Math.min(CHUNK_PANEL_MIN_WIDTH, regionWidth);
     const width = Math.min(CHUNK_PANEL_WIDTH, Math.max(minWidth, regionWidth - margin * 2));
-    const left = Math.min(regionRight - width, regionLeft + Math.max(0, (regionWidth - width) / 2));
+    const left = Math.min(regionRight - width, regionLeft);
     const top = Math.max(viewportTop + margin, baseTop + margin);
     const maxHeight = Math.max(220, viewportHeight - (top - viewportTop) - margin);
 
@@ -250,21 +250,30 @@ export function createChunkPanel({
     selectionMenu.className = 'result-context-menu chunk-selection-menu';
     selectionMenu.innerHTML = `
       <div class="result-context-group">
-        <button class="result-context-item" type="button" data-action="add-chunk">
+        <button class="result-context-item" type="button" data-action="undo"><span>Undo</span></button>
+        <button class="result-context-item" type="button" data-action="redo"><span>Redo</span></button>
+      </div>
+      <div class="result-context-separator"></div>
+      <div class="result-context-group">
+        <button class="result-context-item" type="button" data-action="cut"><span>Cut</span></button>
+        <button class="result-context-item" type="button" data-action="copy"><span>Copy</span></button>
+        <button class="result-context-item" type="button" data-action="paste"><span>Paste</span></button>
+        <button class="result-context-item" type="button" data-action="paste-plain"><span>Paste and match style</span></button>
+        <button class="result-context-item" type="button" data-action="select-all"><span>Select all</span></button>
+      </div>
+      <div class="result-context-separator"></div>
+      <div class="result-context-group">
+        <button class="result-context-item chunk-context-add" type="button" data-action="add-chunk">
           <span>Add to Chunk</span><span class="result-context-arrow">›</span>
         </button>
       </div>
     `;
     document.body.appendChild(selectionMenu);
     selectionMenu.addEventListener('click', event => {
-      const actionButton = event.target.closest('[data-action="add-chunk"]');
+      const actionButton = event.target.closest('[data-action]');
       if (!actionButton || !selectionMenuPayload) return;
       event.preventDefault();
-      const { target, value, key } = selectionMenuPayload;
-      hideSelectionMenu();
-      pendingAddPrefill = { value, key };
-      if (target) target.focus();
-      openPanel(getAnchor(target), false);
+      runSelectionMenuAction(actionButton.dataset.action);
     });
     document.addEventListener('pointerdown', event => {
       if (selectionMenu?.classList.contains('open') && !selectionMenu.contains(event.target)) {
@@ -275,6 +284,74 @@ export function createChunkPanel({
       if (event.key === 'Escape') hideSelectionMenu();
     });
     return selectionMenu;
+  }
+
+  function notifyTextChanged(target) {
+    if (!target) return;
+    if (target === promptEdit) onPromptEdit();
+    else fireModuleOninput(target);
+  }
+
+  function replaceTargetSelection(target, text) {
+    if (!target) return;
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? start;
+    target.focus();
+    if (typeof target.setRangeText === 'function') {
+      target.setRangeText(text, start, end, 'end');
+    } else {
+      target.value = `${target.value.substring(0, start)}${text}${target.value.substring(end)}`;
+      const next = start + text.length;
+      target.selectionStart = target.selectionEnd = next;
+    }
+    notifyTextChanged(target);
+  }
+
+  async function writeClipboard(text) {
+    const clipboard = document.defaultView?.navigator?.clipboard;
+    if (clipboard?.writeText) {
+      await clipboard.writeText(text);
+      return true;
+    }
+    return document.execCommand?.('copy') === true;
+  }
+
+  async function readClipboard() {
+    const clipboard = document.defaultView?.navigator?.clipboard;
+    if (clipboard?.readText) {
+      return clipboard.readText();
+    }
+    return '';
+  }
+
+  async function runSelectionMenuAction(action) {
+    const payload = selectionMenuPayload;
+    if (!payload) return;
+    const { target, value, key } = payload;
+    hideSelectionMenu();
+    if (target) target.focus();
+    try {
+      if (action === 'add-chunk') {
+        pendingAddPrefill = { value, key };
+        openPanel(getAnchor(target), false);
+      } else if (action === 'undo' || action === 'redo') {
+        document.execCommand?.(action);
+        notifyTextChanged(target);
+      } else if (action === 'cut') {
+        await writeClipboard(getSelectionText(target));
+        replaceTargetSelection(target, '');
+      } else if (action === 'copy') {
+        await writeClipboard(getSelectionText(target));
+      } else if (action === 'paste' || action === 'paste-plain') {
+        const text = await readClipboard();
+        if (text) replaceTargetSelection(target, text);
+      } else if (action === 'select-all') {
+        target?.select?.();
+      }
+    } catch (error) {
+      console.warn('Chunk context action failed', error);
+      showToast('Clipboard action failed', 'error');
+    }
   }
 
   function placeSelectionMenu(event) {
@@ -438,26 +515,6 @@ export function createChunkPanel({
     return false;
   }
 
-  function openFromSelection(target, event = null) {
-    const selection = getSelectionText(target);
-    if (!selection) {
-      showToast('No prompt selection', 'error');
-      return;
-    }
-    pendingAddPrefill = {
-      value: selection,
-      key: suggestKeyFromValue(selection),
-    };
-    if (target) {
-      target.focus();
-    }
-    const anchor = getAnchor(target);
-    openPanel(anchor, false);
-    if (event?.clientX != null && event?.clientY != null) {
-      panel?.setAttribute('data-open-source', 'selection-context');
-    }
-  }
-
   function relayout() {
     if (!open || !panel) return;
     const liveAnchor = resolveLiveAnchor();
@@ -491,7 +548,6 @@ export function createChunkPanel({
     insert,
     saveNew,
     useSelection,
-    openFromSelection,
     showSelectionMenu,
     hideSelectionMenu,
     relayout,

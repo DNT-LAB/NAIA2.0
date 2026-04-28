@@ -4365,8 +4365,8 @@ body.resizing-result-info {
 }
 .chunk-selection-menu {
   z-index: 2450;
-  min-width: 170px;
-  max-width: min(220px, calc(100vw - 16px));
+  min-width: 260px;
+  max-width: min(340px, calc(100vw - 16px));
 }
 @media (max-width: 767px) {
   .chunk-add-grid {

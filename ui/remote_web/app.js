@@ -2773,10 +2773,6 @@ function chunkUseSelection() {
   if (chunkPanelControl) chunkPanelControl.useSelection();
 }
 
-function openChunkFromSelection(target, event = null) {
-  if (chunkPanelControl) chunkPanelControl.openFromSelection(target, event);
-}
-
 function isChunkOpen() {
   return !!(chunkPanelControl && chunkPanelControl.isOpen());
 }

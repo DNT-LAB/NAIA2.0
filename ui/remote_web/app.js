@@ -1553,7 +1553,23 @@ function contextImageUrl(context = {}) {
   return '';
 }
 
-async function fetchContextImageBlob(context = {}) {
+function contextImagePngUrl(context = {}) {
+  const params = new URLSearchParams();
+  const source = String(context.source || (context.path ? 'saved' : 'current')).trim() || 'current';
+  params.set('source', source);
+  if (source !== 'current' && context.path) params.set('path', context.path);
+  return '/api/result/image/png?' + params.toString();
+}
+
+async function fetchContextImageBlob(context = {}, options = {}) {
+  if (String(options.format || '').toLowerCase() === 'png') {
+    const response = await fetch(contextImagePngUrl(context), {cache: 'no-store'});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    return response.blob();
+  }
   const imageUrl = contextImageUrl(context);
   if (!imageUrl) throw new Error('Result image is unavailable');
   if (imageUrl.startsWith('blob:') && latestResultBlob) return latestResultBlob;
@@ -1572,18 +1588,54 @@ function filenameFromContext(context = {}, fallbackExt = 'png') {
   return `${rawName || 'naia-result'}.${fallbackExt}`;
 }
 
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function pickPngSaveHandle(filename) {
+  if (typeof window.showSaveFilePicker !== 'function') return false;
+  try {
+    return await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [{
+        description: 'PNG image',
+        accept: {'image/png': ['.png']},
+      }],
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') return null;
+    throw error;
+  }
+}
+
+async function writeBlobToFileHandle(handle, blob) {
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(blob);
+  } finally {
+    await writable.close();
+  }
+}
+
 async function saveResultImageFromContext(context = {}) {
   try {
-    const blob = await fetchContextImageBlob(context);
-    const ext = blob.type === 'image/webp' ? 'webp' : (blob.type === 'image/jpeg' ? 'jpg' : 'png');
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filenameFromContext(context, ext);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const filename = filenameFromContext(context, 'png');
+    const saveHandle = await pickPngSaveHandle(filename);
+    if (saveHandle === null) return;
+    const blob = await fetchContextImageBlob(context, {format: 'png'});
+    if (saveHandle) {
+      await writeBlobToFileHandle(saveHandle, blob);
+      showToast('Image saved', 'success');
+      return;
+    }
+    downloadBlob(blob, filename);
     showToast('Image download started', 'success');
   } catch (error) {
     console.error('Save image failed', error);
@@ -1616,7 +1668,9 @@ async function copyResultImageFromContext(context = {}, format = 'png') {
       showToast('Image clipboard is not supported by this browser', 'error');
       return;
     }
-    const blob = await fetchContextImageBlob(context);
+    const blob = normalizedFormat === 'png'
+      ? await fetchContextImageBlob(context, {format: 'png'})
+      : await fetchContextImageBlob(context);
     const converted = await convertImageBlob(blob, mimeType);
     await navigator.clipboard.write([
       new window.ClipboardItem({[converted.type || mimeType]: converted}),

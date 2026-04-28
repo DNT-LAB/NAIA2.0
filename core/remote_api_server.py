@@ -1247,6 +1247,72 @@ class RemoteBridge(QObject):
         else:
             subprocess.Popen(["xdg-open", str(path.parent)])
 
+    def _result_png_filename(self, source_name: str = "") -> str:
+        raw_name = Path(str(source_name or "")).name
+        raw_name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", raw_name).strip()
+        stem = Path(raw_name).stem if raw_name else ""
+        return f"{stem or 'naia-result'}.png"
+
+    def _download_content_disposition(self, filename: str) -> str:
+        ascii_name = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" ._")
+        ascii_name = ascii_name or "naia-result.png"
+        return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
+
+    def _is_png_bytes(self, image_bytes: bytes) -> bool:
+        if not image_bytes or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return False
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(image_bytes)) as opened:
+                return (opened.format or "").upper() == "PNG"
+        except Exception:
+            return False
+
+    def _pil_image_to_png_bytes(self, image) -> bytes:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def _build_result_png_payload(self, source: str = "", rel_path: str = "") -> tuple[bytes, str]:
+        from PIL import Image
+
+        source = str(source or "").strip().lower()
+        rel_path = str(rel_path or "").strip()
+
+        if rel_path and source != "current":
+            target = self._validate_viewer_path(rel_path)
+            if not target:
+                raise FileNotFoundError("Image file is unavailable")
+            if target.suffix.lower() == ".png":
+                return target.read_bytes(), self._result_png_filename(target.name)
+            with Image.open(str(target)) as opened:
+                opened.load()
+                image = opened.convert("RGBA").copy()
+            return self._pil_image_to_png_bytes(image), self._result_png_filename(target.name)
+
+        image_window = self._get_image_window_widget()
+        item = getattr(image_window, "current_history_item", None) if image_window else None
+        if item and getattr(item, "image", None):
+            filepath = str(getattr(item, "filepath", "") or "")
+            label = filepath or "naia-result.png"
+            raw_bytes = getattr(item, "raw_bytes", None)
+            if raw_bytes:
+                raw_bytes = bytes(raw_bytes)
+                if self._is_png_bytes(raw_bytes):
+                    return raw_bytes, self._result_png_filename(label)
+            if filepath and Path(filepath).is_file() and Path(filepath).suffix.lower() == ".png":
+                return Path(filepath).read_bytes(), self._result_png_filename(filepath)
+            return self._pil_image_to_png_bytes(item.image), self._result_png_filename(label)
+
+        if self.latest_webp:
+            with Image.open(io.BytesIO(self.latest_webp)) as opened:
+                opened.load()
+                image = opened.convert("RGBA").copy()
+            return self._pil_image_to_png_bytes(image), "naia-result.png"
+
+        raise FileNotFoundError("No image is selected")
+
     def _current_api_mode(self) -> str:
         try:
             if hasattr(self.app_context, "get_api_mode"):
@@ -6325,6 +6391,24 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             content=bridge.latest_webp,
             media_type="image/webp",
             headers={"Content-Disposition": "attachment; filename=naia_latest.webp"}
+        )
+
+    @app.get("/api/result/image/png")
+    async def api_result_image_png(source: str = "", path: str = ""):
+        try:
+            png_bytes, filename = await asyncio.to_thread(bridge._build_result_png_payload, source, path)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"PNG export failed: {e}"}, status_code=500)
+
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": bridge._download_content_disposition(filename),
+                "Cache-Control": "no-store",
+            },
         )
 
     @app.get("/api/result/metadata")

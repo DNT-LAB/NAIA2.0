@@ -75,7 +75,7 @@ Completed after the P0 stabilization pass:
   - `프롬프트 불러오기`, `프롬프트 다시개봉`, `생성 설정 복원`, `파일 위치 열기`, `이미지 저장`, `PNG로 클립보드 복사`, and `WEBP로 클립보드 복사` are now wired from the Remote Web context menu.
   - `NAI 2x 업스케일` is also wired from the Remote Web context menu through the existing NovelAI upscale API path.
   - `이미지 저장` and `PNG로 클립보드 복사` now fetch server-side PNG bytes through `/api/result/image/png`; current generated results prefer the original `HistoryItem.raw_bytes` PNG when available, and browser Save Picker is used before the download fallback.
-  - Current-result reroll uses the existing random prompt pipeline with the current history item's `source_row`; saved thumbnails remain reroll-disabled.
+  - Current-result reroll now reuses the desktop `ImageWindow._reroll_current_prompt()` path through a Qt queued bridge signal; saved thumbnails remain reroll-disabled.
   - Saved-result prompt/settings actions load image metadata directly; current-result prompt/settings actions prefer `/api/result/metadata`.
 
 ## Immediate Risks

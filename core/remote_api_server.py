@@ -142,6 +142,7 @@ class RemoteBridge(QObject):
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
+    request_result_reroll = pyqtSignal()                # 현재 ImageWindow 결과의 desktop reroll 재사용
     request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
@@ -1234,6 +1235,27 @@ class RemoteBridge(QObject):
             return source_row.copy()
         except Exception:
             return source_row
+
+    def _do_result_reroll(self):
+        """데스크탑 ImageWindow의 '프롬프트 다시개봉' 구현체를 Remote Web에서 재사용."""
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            self._broadcast_json({"type": "toast", "message": "ImageWindow is not ready", "level": "error"})
+            return
+
+        reroll_current_prompt = getattr(image_window, "_reroll_current_prompt", None)
+        if callable(reroll_current_prompt):
+            reroll_current_prompt()
+            print("🌐 Remote: desktop 프롬프트 다시개봉 실행")
+            return
+
+        item = getattr(image_window, "current_history_item", None)
+        source_row = getattr(item, "source_row", None) if item else None
+        if not self._source_row_available(source_row):
+            self._broadcast_json({"type": "toast", "message": "Reroll source is unavailable", "level": "error"})
+            return
+        image_window.instant_generation_requested.emit(source_row)
+        print("🌐 Remote: desktop 프롬프트 다시개봉 fallback 실행")
 
     def _open_path_location(self, target: Path):
         import subprocess
@@ -6289,12 +6311,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         source_row = await asyncio.to_thread(bridge._get_current_result_source_row)
         if not bridge._source_row_available(source_row):
             return JSONResponse({"error": "Reroll source is unavailable"}, status_code=400)
-        bridge._pending_random_requests.append({
-            "ws": None,
-            "source_row": source_row,
-            "active_ratings": set(bridge._active_ratings),
-        })
-        bridge.request_random.emit()
+        bridge.request_result_reroll.emit()
         return {"ok": True, "action": "reroll"}
 
     @app.post("/api/comfyui/random")
@@ -7357,6 +7374,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
+    bridge.request_result_reroll.connect(bridge._do_result_reroll, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_upscale.connect(bridge._do_result_upscale, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)

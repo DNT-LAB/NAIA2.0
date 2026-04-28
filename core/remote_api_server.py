@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlparse
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
@@ -5754,6 +5754,130 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         if not asset:
             return JSONResponse({"error": "not found"}, status_code=404)
         return asset
+
+    @app.post("/api/image/fetch")
+    async def api_image_fetch(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        url = str(payload.get("url") or req.query_params.get("url") or "").strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return JSONResponse({"error": "Only http/https image URLs are supported"}, status_code=400)
+
+        max_bytes = 64 * 1024 * 1024
+
+        def _validate_public_url(candidate_url: str):
+            import ipaddress
+            import socket
+
+            candidate = urlparse(candidate_url)
+            if candidate.scheme not in {"http", "https"} or not candidate.hostname:
+                raise ValueError("Only http/https image URLs are supported")
+            try:
+                addresses = socket.getaddrinfo(
+                    candidate.hostname,
+                    candidate.port or (443 if candidate.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            except OSError as e:
+                raise ValueError(f"Could not resolve image host: {e}") from e
+            for address in addresses:
+                ip = ipaddress.ip_address(address[4][0])
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_reserved
+                    or ip.is_unspecified
+                ):
+                    raise ValueError("Private network image URLs are not supported")
+            return candidate
+
+        def _fetch_remote_image():
+            import requests
+            from PIL import Image
+
+            current_url = url
+            response = None
+            for _ in range(5):
+                current = _validate_public_url(current_url)
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (compatible; NAIA-Remote/1.0)",
+                    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                    "Referer": f"{current.scheme}://{current.netloc}/",
+                }
+                response = requests.get(
+                    current_url,
+                    headers=headers,
+                    timeout=(5, 20),
+                    stream=True,
+                    allow_redirects=False,
+                )
+                if response.is_redirect or response.is_permanent_redirect:
+                    location = response.headers.get("location")
+                    response.close()
+                    if not location:
+                        raise ValueError("Image URL redirected without a location")
+                    current_url = urljoin(current_url, location)
+                    continue
+                break
+            else:
+                raise ValueError("Too many redirects")
+
+            if response is None:
+                raise ValueError("Could not fetch image")
+
+            with response:
+                if response.status_code >= 400:
+                    raise ValueError(f"HTTP {response.status_code}")
+                content_length = response.headers.get("content-length")
+                if content_length and int(content_length) > max_bytes:
+                    raise ValueError("Image is too large")
+                media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                chunks = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("Image is too large")
+                    chunks.append(chunk)
+                image_bytes = b"".join(chunks)
+
+            if not media_type.startswith("image/"):
+                try:
+                    with Image.open(io.BytesIO(image_bytes)) as img:
+                        fmt = (img.format or "").lower()
+                    media_type = {
+                        "jpeg": "image/jpeg",
+                        "jpg": "image/jpeg",
+                        "png": "image/png",
+                        "webp": "image/webp",
+                        "gif": "image/gif",
+                        "bmp": "image/bmp",
+                        "tiff": "image/tiff",
+                    }.get(fmt, "")
+                except Exception:
+                    media_type = ""
+            if not media_type.startswith("image/"):
+                raise ValueError("URL did not return an image")
+            return image_bytes, media_type
+
+        try:
+            image_bytes, media_type = await asyncio.to_thread(_fetch_remote_image)
+            return Response(
+                content=image_bytes,
+                media_type=media_type,
+                headers={"Cache-Control": "no-store"},
+            )
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     @app.post("/api/metadata/extract")
     async def api_metadata_extract(req: Request):

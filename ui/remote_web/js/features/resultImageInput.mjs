@@ -34,7 +34,104 @@ export function createResultImageInput({
     if (!dataTransfer) return false;
     const types = Array.from(dataTransfer.types || []);
     if (types.includes('Files')) return true;
-    return types.some(type => type.startsWith('image/'));
+    return types.some(type => type.startsWith('image/'))
+      || types.includes('text/html')
+      || types.includes('text/uri-list')
+      || types.includes('text/x-moz-url')
+      || types.includes('text/plain');
+  }
+
+  function normalizeDroppedUrl(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (/^data:image\//i.test(text)) return text;
+    try {
+      const url = new URL(text, window.location.href);
+      return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function firstUriFromList(value) {
+    return String(value || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(line => line && !line.startsWith('#')) || '';
+  }
+
+  function firstSrcsetUrl(srcset) {
+    return String(srcset || '')
+      .split(',')
+      .map(part => part.trim().split(/\s+/)[0])
+      .find(Boolean) || '';
+  }
+
+  function extractImageUrlFromHtml(html) {
+    if (!html) return '';
+    try {
+      const parser = new window.DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const image = doc.querySelector('img[src], source[srcset], source[src]');
+      if (!image) return '';
+      const candidates = [
+        firstSrcsetUrl(image.getAttribute('srcset')),
+        image.getAttribute('src'),
+        image.getAttribute('data-src'),
+        image.getAttribute('data-original'),
+        image.getAttribute('data-lazy-src'),
+        image.getAttribute('data-url'),
+        image.closest('a[href]')?.getAttribute('href'),
+      ].map(normalizeDroppedUrl).filter(Boolean);
+      return candidates.find(url => !url.startsWith('blob:')) || candidates[0] || '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function getImageUrlFromDataTransfer(dataTransfer) {
+    if (!dataTransfer) return '';
+    return extractImageUrlFromHtml(dataTransfer.getData('text/html'))
+      || normalizeDroppedUrl(firstUriFromList(dataTransfer.getData('text/uri-list')))
+      || normalizeDroppedUrl(firstUriFromList(dataTransfer.getData('text/x-moz-url')))
+      || normalizeDroppedUrl(dataTransfer.getData('text/plain'));
+  }
+
+  function labelFromImageUrl(imageUrl) {
+    try {
+      const url = new URL(imageUrl);
+      const name = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '');
+      return name || 'Web Image';
+    } catch (_) {
+      return 'Web Image';
+    }
+  }
+
+  async function fetchImageUrlAsBlob(imageUrl) {
+    const url = String(imageUrl || '');
+    let response = null;
+    if (/^data:image\//i.test(url) || url.startsWith('blob:')) {
+      try {
+        response = await fetchFn(url);
+      } catch (error) {
+        throw new Error(url.startsWith('blob:')
+          ? 'External blob URLs cannot be imported directly'
+          : error.message);
+      }
+    } else {
+      response = await fetchFn('/api/image/fetch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url}),
+      });
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    if (!isImageBlob(blob)) throw new Error('Dropped URL is not an image');
+    return blob;
   }
 
   function createImageUrl(blob) {
@@ -93,6 +190,20 @@ export function createResultImageInput({
     });
   }
 
+  async function handleImageUrl(imageUrl, label = 'Web Image') {
+    if (!imageUrl) {
+      showToast('Image URL required', 'error');
+      return;
+    }
+    try {
+      const blob = await fetchImageUrlAsBlob(imageUrl);
+      await handleImageBlob(blob, label || labelFromImageUrl(imageUrl));
+    } catch (error) {
+      console.error('Web image import failed', error);
+      showToast(error.message || 'Failed to load web image', 'error');
+    }
+  }
+
   async function readImageFromClipboard() {
     if (!navigatorRef.clipboard || typeof navigatorRef.clipboard.read !== 'function') {
       throw new Error('Clipboard image read is unavailable');
@@ -124,7 +235,13 @@ export function createResultImageInput({
   function handlePasteEvent(event) {
     if (isEditableTarget(event.target)) return;
     const file = getImageFileFromDataTransfer(event.clipboardData);
-    if (!file) return;
+    if (!file) {
+      const imageUrl = getImageUrlFromDataTransfer(event.clipboardData);
+      if (!imageUrl) return;
+      event.preventDefault();
+      handleImageUrl(imageUrl, labelFromImageUrl(imageUrl));
+      return;
+    }
     event.preventDefault();
     handleImageBlob(file, 'Clipboard Image');
   }
@@ -160,11 +277,16 @@ export function createResultImageInput({
     dragDepth = 0;
     setDragActive(false);
     const file = getImageFileFromDataTransfer(event.dataTransfer);
-    if (!file) {
-      showToast('Image file required', 'error');
+    if (file) {
+      handleImageBlob(file, file.name || 'Dropped Image');
       return;
     }
-    handleImageBlob(file, file.name || 'Dropped Image');
+    const imageUrl = getImageUrlFromDataTransfer(event.dataTransfer);
+    if (!imageUrl) {
+      showToast('Image file or image URL required', 'error');
+      return;
+    }
+    handleImageUrl(imageUrl, labelFromImageUrl(imageUrl));
   }
 
   function bind() {

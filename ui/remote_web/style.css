@@ -2422,22 +2422,22 @@ body.resizing-result-info {
   font-weight: 600;
 }
 .prompt-token-artist {
-  color: rgba(255, 226, 222, 0.86);
+  color: rgba(255, 205, 196, 0.96);
 }
 .prompt-token-character {
   color: rgba(216, 240, 215, 0.50);
 }
 .prompt-token-unknown {
-  color: rgba(241, 244, 252, 1.00);
+  color: rgba(255, 255, 255, 1.00);
 }
 .prompt-token-high {
-  color: rgba(241, 244, 252, 0.96);
+  color: rgba(255, 255, 255, 0.98);
 }
 .prompt-token-mid {
-  color: rgba(241, 244, 252, 0.91);
+  color: rgba(255, 255, 255, 0.94);
 }
 .prompt-token-low {
-  color: rgba(241, 244, 252, 0.86);
+  color: rgba(255, 255, 255, 0.90);
 }
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }

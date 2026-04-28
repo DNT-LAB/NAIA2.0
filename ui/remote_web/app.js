@@ -33,6 +33,7 @@ let metadataViewer = null;
 let pendingResultEnhanceConfig = null;
 let promptHighlighter = null;
 let moduleBadges = null;
+let moduleLauncherControl = null;
 let cloudflaredControls = null;
 let generationProgress = null;
 let setupController = null;
@@ -1973,6 +1974,7 @@ function updateModeSelectAvailability() {
     modeApiCombo.classList.toggle('no-connected-mode', !anyConnected);
     modeApiCombo.classList.toggle('mode-unavailable', !currentConnected);
   }
+  if (moduleLauncherControl) moduleLauncherControl.updateState();
 }
 
 function syncMode(mode) {
@@ -2163,6 +2165,24 @@ const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
 let pendingModuleEdit = null;
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
+  .then(({createModuleLauncher}) => {
+    moduleLauncherControl = createModuleLauncher({
+      document,
+      getMode: () => currentMode || modeSelect.value || 'NAI',
+      getSharedMode: () => sharedMode,
+      getCurrentModuleId: () => currentModuleId,
+      isModulePopupOpen: () => modulePopup.classList.contains('open'),
+      isChunkOpen,
+      openModule,
+      openChunkPanel,
+    });
+    moduleLauncherControl.render();
+    moduleLauncherControl.bind();
+  })
+  .catch(error => {
+    console.error('Failed to initialize module launcher', error);
+  });
 
 let lastPromptEngineeringState = null;
 const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs')
@@ -2256,7 +2276,7 @@ function openModule(moduleId) {
     e621_event: 'E621 Event',
     ollama: 'Ollama',
   };
-  moduleTitle.textContent = titles[moduleId] || moduleId;
+  moduleTitle.textContent = moduleLauncherControl?.moduleTitle(moduleId) || titles[moduleId] || moduleId;
   if (moduleId === 'auto_save' && autoSavePanel) {
     autoSavePanel.renderCached();
   }
@@ -2282,12 +2302,13 @@ function closeModule() {
 }
 
 function updateModuleBtnState() {
-  document.querySelectorAll('.module-btn').forEach(btn => {
+  document.querySelectorAll('.module-btn[data-module]').forEach(btn => {
     const isChunkBtn = btn.dataset.module === 'chunk';
     btn.classList.toggle('active', isChunkBtn ? isChunkOpen() : btn.dataset.module === currentModuleId);
   });
   const pb = document.querySelector('.module-prompt-btn');
   if (pb) pb.classList.toggle('active', currentModuleId === 'search');
+  if (moduleLauncherControl) moduleLauncherControl.updateState();
 }
 
 const peE621Panel = $('peE621Panel');
@@ -3892,6 +3913,7 @@ Promise.all([
   resultContextMenuReady,
   promptHighlighterReady,
   tokenDisplayReady,
+  moduleLauncherReady,
   moduleBadgesReady,
   cloudflaredControlsReady,
   setupControllerReady,

@@ -360,18 +360,7 @@
       <!-- Module bar -->
       <div class="assistants-section">
         <div class="assistants-label">Tools &amp; Assistants <span class="assistants-info">i</span></div>
-        <div class="module-bar">
-          <button class="module-btn" data-module="prompt_engineering" onclick="openModule('prompt_engineering')">P.Engineering</button>
-          <button class="module-btn" data-module="e621_event" onclick="openModule('e621_event')">E621</button>
-          <button class="module-btn" data-module="ollama" onclick="openModule('ollama')">Ollama</button>
-          <button class="module-btn" data-module="automation" onclick="openModule('automation')">Automation<span class="module-badge hidden" id="badgeAuto"></span></button>
-          <button class="module-btn" data-module="character" onclick="openModule('character')">Character<span class="module-badge hidden" id="badgeChar"></span></button>
-          <button class="module-btn nai-only-disabled" data-module="character_reference" onclick="openModule('character_reference')">Char Ref<span class="module-badge hidden" id="badgeCharRef"></span></button>
-          <button class="module-btn nai-only-disabled" data-module="vibe_transfer" onclick="openModule('vibe_transfer')">Vibe<span class="module-badge hidden" id="badgeVibe"></span></button>
-          <button class="module-btn" data-module="wildcard" onclick="openModule('wildcard')">WC</button>
-          <button class="module-btn" data-module="chunk" onclick="openChunkPanel(null, true)">Chunk</button>
-          <button class="module-btn" data-module="conditional_prompt" onclick="openModule('conditional_prompt')">Cond</button>
-        </div>
+        <div class="module-bar module-launcher" id="moduleLauncher"></div>
       </div>
     </div>
   </div>

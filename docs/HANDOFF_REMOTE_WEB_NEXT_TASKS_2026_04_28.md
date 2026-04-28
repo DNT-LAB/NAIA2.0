@@ -51,9 +51,23 @@ Completed in the current P0 round:
   - `git diff --check`
   - FastAPI static smoke for `/js/features/e621EventPanel.mjs`, `/js/features/ollamaPanel.mjs`, `/js/features/instantWildcardPanel.mjs`
 
+## Recent Tracking Update
+
+Completed after the P0 stabilization pass:
+
+- Chunk UX stabilization:
+  - standalone/anchored placement no longer covers the prompt editor;
+  - add-chunk writes through instant wildcard upsert and refreshes Chunk state;
+  - selected prompt text uses a custom context menu that keeps normal text-edit actions and adds `Add to Chunk`.
+- `Tools & Assistants` IA compression:
+  - `P.Engineering` is kept as the fixed primary button;
+  - the remaining launchers are grouped into three categories: `Prompt`, `Character`, and `Assistant`;
+  - module metadata and category state are centralized in `ui/remote_web/js/features/moduleLauncher.mjs`;
+  - category buttons mirror child active, disabled, and badge/status state.
+
 ## Immediate Risks
 
-- `Tools & Assistants` is now a flat button grid with too many peer modules. It needs an IA refactor before adding more modules.
+- `Tools & Assistants` has been compressed into the planned `1 + 3` launcher. Remaining risk is visual/manual smoke across desktop, mobile drawer, NAI/non-NAI mode, and Shared Mode.
 - `core/remote_api_server.py` gained about 1k lines; next stabilization should focus on behavior smoke and then adapter extraction, not more feature growth.
 - No browser/manual Remote Web smoke was observed in this audit.
 
@@ -81,6 +95,8 @@ Owner: backend/frontend integrator
 ### P1 — Tools & Assistants IA Refactor
 
 Owner: frontend/product flow
+
+Status: implemented; needs manual visual smoke.
 
 Goal: replace the flat module button grid with a `1 + 3` structure so module growth does not make the control area harder to scan.
 

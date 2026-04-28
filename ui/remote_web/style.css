@@ -2785,11 +2785,12 @@ body.resizing-result-info {
   flex-shrink: 1;
   align-items: center;
   align-content: start;
-  max-height: 82px;
+  max-height: none;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   overscroll-behavior: contain;
-  padding-right: 2px;
+  padding-right: 0;
+  position: relative;
 }
 .module-prompt-btn {
   padding: 6px 12px;
@@ -2937,6 +2938,85 @@ body.resizing-result-info {
 .module-badge.hidden { display: none; }
 .module-badge.char { background: rgba(106,191,123,0.2); color: #6abf7b; }
 .module-btn.active .module-badge { background: rgba(255,255,255,0.2); color: #fff; }
+.module-primary-btn {
+  border-color: rgba(157,139,255,0.28);
+  color: var(--accent-glow);
+}
+.module-category {
+  position: relative;
+  min-width: 0;
+}
+.module-category > .module-category-btn {
+  width: 100%;
+}
+.module-category-btn {
+  justify-content: space-between;
+  padding-left: 9px;
+  padding-right: 8px;
+}
+.module-category-btn::after {
+  content: "▴";
+  color: var(--text-dim);
+  font-size: 8px;
+  margin-left: auto;
+}
+.module-category.menu-open > .module-category-btn::after {
+  color: var(--accent-glow);
+}
+.module-category.category-status > .module-category-btn,
+.module-category-btn.category-status {
+  border-color: rgba(106,191,123,0.42);
+  color: #88d696;
+}
+.module-category-badge {
+  display: inline-block;
+  margin-left: 3px;
+  margin-right: 3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(106,191,123,0.22);
+  color: #88d696;
+  font-size: 8px;
+  font-weight: 700;
+}
+.module-category-badge.hidden { display: none; }
+.module-category-menu {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 230;
+  min-width: min(230px, calc(100vw - 24px));
+  max-height: min(240px, 48vh);
+  overflow-y: auto;
+  padding: 8px;
+  gap: 5px;
+  background: rgba(18,18,28,0.98);
+  border: 1px solid var(--border-glow);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.42);
+}
+.module-category:nth-child(even) .module-category-menu {
+  left: auto;
+  right: 0;
+}
+.module-category.menu-open .module-category-menu {
+  display: grid;
+}
+.module-category-title {
+  padding: 1px 2px 4px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.module-menu-item {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 28px;
+}
 
 /* ---- Module floating panel ---- */
 .module-popup {

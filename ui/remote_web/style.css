@@ -840,6 +840,14 @@ header {
   border-color: #2f8beb;
   color: #fff;
 }
+.metadata-action-btn.vibe {
+  background: #3a2f5f;
+  border-color: #5a4a8f;
+  color: #c8b8ff;
+}
+.metadata-action-btn.vibe:hover:not(:disabled) {
+  background: #4a3f6f;
+}
 .metadata-action-btn:disabled {
   opacity: 0.42;
   cursor: default;

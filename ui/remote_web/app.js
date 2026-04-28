@@ -173,6 +173,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
       onApplySettings: applyMetadataSettings,
       onApplyCharacterSettings: applyMetadataCharacterSettings,
       onSendImg2Img: payload => requestMetadataImageAction(payload, 'img2img'),
+      onRestoreVibeTransfer: applyMetadataVibeTransfer,
     });
   })
   .catch(error => {
@@ -1531,6 +1532,28 @@ function applyMetadataCharacterSettings(payload) {
   }));
   saveSharedSession();
   showToast(`Applied ${validCharacters.length} character prompts from metadata`, 'success');
+}
+
+function applyMetadataVibeTransfer(payload) {
+  if ((currentMode || modeSelect.value) !== 'NAI') {
+    showToast('Vibe Transfer is only available in NAI mode', 'error');
+    return;
+  }
+  const vibeTransfer = payload?.vibeTransfer;
+  if (!vibeTransfer || !Array.isArray(vibeTransfer.reference_image_multiple) || !vibeTransfer.reference_image_multiple.length) {
+    showToast('No Vibe Transfer data in metadata', 'error');
+    return;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('Remote connection is not open', 'error');
+    return;
+  }
+  if (currentModuleId !== 'vibe_transfer') {
+    openModule('vibe_transfer');
+  }
+  setModuleParam('vibe_transfer', 'restore_metadata', JSON.stringify(vibeTransfer));
+  saveSharedSession();
+  showToast(`Vibe Transfer restore requested (${vibeTransfer.reference_image_multiple.length})`, 'success');
 }
 // ---- Stats functions ----
 

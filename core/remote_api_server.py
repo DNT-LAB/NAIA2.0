@@ -3939,6 +3939,8 @@ class RemoteBridge(QObject):
                 if len(parts) >= 3:
                     model, file_hash, ie_str = parts[0], parts[1], parts[2]
                     m._on_apply_vibe_from_storage(model, file_hash, "", float(ie_str))
+            elif key == "restore_metadata":
+                self._restore_vibe_transfer_from_metadata(m, value)
             # 변경 후 상태 브로드캐스트
             state = self._read_vibe_transfer()
             if state:
@@ -3947,6 +3949,100 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: vibe_transfer 설정 실패 — {key}{'(image)' if key == 'upload_image' else ''}: {e}")
         finally:
             self.app_context.stealth_mode = prev_stealth
+
+    def _vibe_model_from_source(self, source: str) -> Optional[str]:
+        model_map = {
+            "NovelAI Diffusion V4.5 4BDE2A90": "NAID4.5F",
+            "NovelAI Diffusion V4.5 C02D4F98": "NAID4.5C",
+            "NovelAI Diffusion V4 7ABFFA2A": "NAID4.0C",
+            "NovelAI Diffusion V4 37442FCA": "NAID4.0F",
+        }
+        source_text = str(source or "")
+        for needle, model_name in model_map.items():
+            if needle in source_text:
+                return model_name
+        return None
+
+    def _current_vibe_model(self, module) -> str:
+        getter = getattr(module, "_get_current_model", None)
+        if callable(getter):
+            return str(getter() or "")
+        return ""
+
+    def _restore_vibe_transfer_from_metadata(self, module, value: str):
+        try:
+            payload = json.loads(value) if isinstance(value, str) else value
+        except Exception as e:
+            self._broadcast_json({"type": "toast", "message": f"Invalid Vibe metadata: {e}", "level": "error"})
+            return
+        if not isinstance(payload, dict):
+            self._broadcast_json({"type": "toast", "message": "Invalid Vibe metadata", "level": "error"})
+            return
+
+        ref_images = payload.get("reference_image_multiple") or []
+        if not isinstance(ref_images, list):
+            ref_images = [ref_images]
+        ref_images = [str(item) for item in ref_images if item]
+        if not ref_images:
+            self._broadcast_json({"type": "toast", "message": "No Vibe Transfer data in metadata", "level": "error"})
+            return
+
+        source_model = payload.get("source_model") or self._vibe_model_from_source(payload.get("source", ""))
+        if not source_model:
+            self._broadcast_json({"type": "toast", "message": "Unsupported Vibe metadata source model", "level": "error"})
+            return
+
+        current_model = self._current_vibe_model(module)
+        if current_model and source_model not in current_model:
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"Vibe metadata requires {source_model}; current model is {current_model}",
+                "level": "error",
+            })
+            return
+
+        def _number_list(raw):
+            if not isinstance(raw, list):
+                raw = [raw] if raw not in (None, "") else []
+            result = []
+            for item in raw:
+                try:
+                    result.append(float(item))
+                except Exception:
+                    pass
+            return result
+
+        strengths = _number_list(payload.get("reference_strength_multiple"))
+        information_extracted = _number_list(payload.get("reference_information_extracted_multiple"))
+
+        if hasattr(module, "normalize_checkbox"):
+            normalize = bool(payload.get("normalize_reference_strength_multiple", False))
+            module.normalize_checkbox.setChecked(normalize)
+
+        import hashlib
+        added_count = 0
+        for index, encoding in enumerate(ref_images):
+            per_hash = hashlib.sha256(encoding.encode()).hexdigest()[:16]
+            per_vibe_data = {
+                "reference_image_multiple": [encoding],
+                "reference_strength_multiple": [strengths[index] if index < len(strengths) else 0.6],
+                "reference_information_extracted_multiple": [information_extracted[index]]
+                if index < len(information_extracted) else [],
+                "source_model": source_model,
+            }
+            frame = module._add_vibe_frame_from_metadata(f"no_image_metadata_{per_hash}", per_vibe_data)
+            if frame:
+                added_count += 1
+
+        if added_count:
+            self._disable_all_char_ref_frames()
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"Restored {added_count} Vibe Transfer frame(s)",
+                "level": "success",
+            })
+        else:
+            self._broadcast_json({"type": "toast", "message": "No Vibe Transfer frames restored", "level": "error"})
 
     # ── Wildcard Module ──
 

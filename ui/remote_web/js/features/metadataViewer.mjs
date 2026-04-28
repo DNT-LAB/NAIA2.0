@@ -7,6 +7,7 @@ export function createMetadataViewer({
   onApplySettings = null,
   onApplyCharacterSettings = null,
   onSendImg2Img = null,
+  onRestoreVibeTransfer = null,
 }) {
   const statusEl = document.getElementById('metadataStatus');
   const titleEl = document.getElementById('metadataTitle');
@@ -24,6 +25,7 @@ export function createMetadataViewer({
   const applyPromptBtn = document.getElementById('metadataApplyPromptBtn');
   const applySettingsBtn = document.getElementById('metadataApplySettingsBtn');
   const applyCharacterSettingsBtn = document.getElementById('metadataApplyCharacterSettingsBtn');
+  const restoreVibeBtn = document.getElementById('metadataRestoreVibeBtn');
   const sendImg2ImgBtn = document.getElementById('metadataSendImg2ImgBtn');
 
   const EMPTY_SOURCE = {kind: 'empty', path: ''};
@@ -68,6 +70,49 @@ export function createMetadataViewer({
     if (!isPresent(value)) return [];
     if (Array.isArray(value)) return value.filter(isPresent);
     return [value];
+  }
+
+  function normalizeStringList(value) {
+    const parsed = tryParseJson(value);
+    if (!isPresent(parsed)) return [];
+    const items = Array.isArray(parsed) ? parsed : [parsed];
+    return items
+      .map(item => String(item ?? '').trim())
+      .filter(Boolean);
+  }
+
+  function normalizeNumberList(value) {
+    const parsed = tryParseJson(value);
+    if (!isPresent(parsed)) return [];
+    const items = Array.isArray(parsed) ? parsed : [parsed];
+    return items
+      .map(item => Number(item))
+      .filter(item => Number.isFinite(item));
+  }
+
+  function normalizeBoolean(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    const text = String(value ?? '').trim().toLowerCase();
+    return !['', '0', 'false', 'none', 'null', 'undefined'].includes(text);
+  }
+
+  function modelFromSource(source) {
+    const text = String(source || '');
+    const modelMap = [
+      ['NovelAI Diffusion V4.5 4BDE2A90', 'NAID4.5F'],
+      ['NovelAI Diffusion V4.5 C02D4F98', 'NAID4.5C'],
+      ['NovelAI Diffusion V4 7ABFFA2A', 'NAID4.0C'],
+      ['NovelAI Diffusion V4 37442FCA', 'NAID4.0F'],
+    ];
+    const matched = modelMap.find(([needle]) => text.includes(needle));
+    return matched ? matched[1] : '';
+  }
+
+  function alignNumberList(values, count, fallback) {
+    return Array.from({length: count}, (_, index) => (
+      Number.isFinite(values[index]) ? values[index] : fallback
+    ));
   }
 
   function releaseOwnedImage() {
@@ -175,13 +220,41 @@ export function createMetadataViewer({
     return source || findValue(data, ['model', 'Model', 'model_name', 'checkpoint']) || software || '';
   }
 
+  function getVibeTransferData(data) {
+    const referenceImages = normalizeStringList(findValue(data, ['reference_image_multiple']));
+    if (!referenceImages.length) return null;
+
+    const source = findValue(data, ['Source', 'source']);
+    const sourceModel = modelFromSource(source);
+    if (!sourceModel) return null;
+
+    const strengths = alignNumberList(
+      normalizeNumberList(findValue(data, ['reference_strength_multiple'])),
+      referenceImages.length,
+      0.6
+    );
+    const informationExtracted = normalizeNumberList(
+      findValue(data, ['reference_information_extracted_multiple'])
+    );
+    const normalizeValue = findValue(data, ['normalize_reference_strength_multiple']);
+
+    return {
+      source,
+      source_model: sourceModel,
+      reference_image_multiple: referenceImages,
+      reference_strength_multiple: strengths,
+      reference_information_extracted_multiple: informationExtracted,
+      normalize_reference_strength_multiple: isPresent(normalizeValue) ? normalizeBoolean(normalizeValue) : false,
+    };
+  }
+
   function formatParamValue(value) {
     if (typeof value === 'boolean') return value ? 'true' : 'false';
     if (Array.isArray(value)) return value.map(item => safeText(item)).join(', ');
     return safeText(value);
   }
 
-  function buildParams(data) {
+  function buildParams(data, vibeTransfer = null) {
     const {width, height} = getDimensions(data);
     const resolution = width && height ? `${width} x ${height}` : findValue(data, ['resolution']);
     const fields = [
@@ -201,6 +274,13 @@ export function createMetadataViewer({
       {key: 'Source', label: 'Source', value: findValue(data, ['Source', 'source'])},
       {key: 'Title', label: 'Title', value: findValue(data, ['Title', 'title'])},
       {key: 'Description', label: 'Description', value: findValue(data, ['Description', 'description'])},
+      {
+        key: 'vibe_transfer',
+        label: 'Vibe Transfer',
+        value: vibeTransfer
+          ? `${vibeTransfer.reference_image_multiple.length} (${vibeTransfer.source_model})`
+          : '',
+      },
     ];
     const rows = fields.filter(field => isPresent(field.value));
     const canonical = {};
@@ -322,12 +402,20 @@ export function createMetadataViewer({
     const hasPrompt = hasPayload && (currentActionPayload.prompt || currentActionPayload.negative);
     const hasParams = hasPayload && Object.keys(currentActionPayload.params || {}).length > 0;
     const hasCharacters = hasPayload && (currentActionPayload.characters || []).length > 0;
+    const hasVibeTransfer = hasPayload && Boolean(currentActionPayload.vibeTransfer);
     const hasImageActionSource = hasPayload && (currentActionPayload.blob || currentActionPayload.imageUrl);
     if (applyCharacterSettingsBtn) applyCharacterSettingsBtn.style.display = hasCharacters ? '' : 'none';
+    if (restoreVibeBtn) {
+      restoreVibeBtn.style.display = hasVibeTransfer ? '' : 'none';
+      restoreVibeBtn.textContent = hasVibeTransfer
+        ? `📦 Vibe Transfer 복원 (${currentActionPayload.vibeTransfer.source_model})`
+        : '📦 Vibe Transfer 복원';
+    }
     [
       [applyPromptBtn, typeof onApplyPrompt === 'function' && hasPrompt],
       [applySettingsBtn, typeof onApplySettings === 'function' && hasParams],
       [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters],
+      [restoreVibeBtn, typeof onRestoreVibeTransfer === 'function' && hasVibeTransfer],
       [sendImg2ImgBtn, typeof onSendImg2Img === 'function' && hasImageActionSource],
     ].forEach(([button, enabled]) => {
       if (!button) return;
@@ -343,7 +431,8 @@ export function createMetadataViewer({
     const negative = getNegative(payload);
     const characters = renderCharacters(payload);
     const charactersUc = getCharacterNegatives(payload);
-    const {rows, canonical} = buildParams(payload);
+    const vibeTransfer = getVibeTransferData(payload);
+    const {rows, canonical} = buildParams(payload, vibeTransfer);
     if (titleEl) titleEl.textContent = label;
     const imageUrl = renderPreview(payload, source);
     renderPromptBlock(promptEl, prompt, 'No prompt metadata');
@@ -361,6 +450,7 @@ export function createMetadataViewer({
       params: canonical,
       characters,
       charactersUc,
+      vibeTransfer,
     };
     updateActionButtons();
     setStatus(payload.has_metadata === false ? 'No metadata' : 'Loaded', payload.has_metadata === false ? 'muted' : 'ok');
@@ -515,6 +605,7 @@ export function createMetadataViewer({
   bindAction(applyPromptBtn, onApplyPrompt);
   bindAction(applySettingsBtn, onApplySettings);
   bindAction(applyCharacterSettingsBtn, onApplyCharacterSettings);
+  bindAction(restoreVibeBtn, onRestoreVibeTransfer);
   bindAction(sendImg2ImgBtn, onSendImg2Img);
   renderEmpty('No image selected');
   setStatus('Idle', 'muted');

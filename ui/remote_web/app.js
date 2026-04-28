@@ -2932,6 +2932,22 @@ function onModSlider(moduleId, key, value) {
   if (imageModulePanels) imageModulePanels.onSlider(moduleId, key, value);
 }
 
+function onVibeIeDraft(index, value) {
+  if (imageModulePanels) imageModulePanels.updateVibeIeDraft(index, value);
+}
+
+function commitVibeIeDraft(index, value) {
+  if (imageModulePanels) imageModulePanels.commitVibeIeDraft(index, value);
+}
+
+function selectVibeEncoding(index, ieValue) {
+  if (imageModulePanels) imageModulePanels.selectVibeEncoding(index, ieValue);
+}
+
+function encodeVibeFrame(index) {
+  if (imageModulePanels) imageModulePanels.encodeVibeFrame(index);
+}
+
 // ---- Character Reference module ----
 function renderCharacterReference(m) {
   if (imageModulePanels) imageModulePanels.renderCharacterReference(m);

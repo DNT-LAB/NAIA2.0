@@ -80,6 +80,155 @@ export function createImageModulePanels({
     }, 300);
   }
 
+  function formatIe(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '1.00';
+    const clamped = Math.max(0.01, Math.min(1, Math.round(number * 100) / 100));
+    return clamped.toFixed(2);
+  }
+
+  function getEncodedIeValues(frame) {
+    return (frame.encoding_keys || [])
+      .map(key => Number(key))
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+  }
+
+  function hasEncodedIe(keys, ieText) {
+    const ie = Number(ieText);
+    return keys.some(key => Math.abs(key - ie) < 0.000001);
+  }
+
+  function getVibeFrameElement(index) {
+    return moduleBody.querySelector(`.mod-ref-frame[data-vibe-index="${index}"]`);
+  }
+
+  function getFrameEncodedKeys(frameElement) {
+    return (frameElement?.dataset.encodingKeys || '')
+      .split(',')
+      .map(value => Number(value))
+      .filter(Number.isFinite);
+  }
+
+  function updateVibeIeDraft(index, rawValue) {
+    const frameElement = getVibeFrameElement(index);
+    if (!frameElement) return null;
+    const ieText = formatIe(Number(rawValue) / 100);
+    const encodedKeys = getFrameEncodedKeys(frameElement);
+    const encoded = hasEncodedIe(encodedKeys, ieText);
+    const canEncode = frameElement.dataset.canEncode === 'true';
+    const sliderValue = frameElement.querySelector('.mod-vibe-ie-value');
+    const encodeButton = frameElement.querySelector('[data-vibe-encode-btn]');
+    const status = frameElement.querySelector('[data-vibe-encode-status]');
+    const chips = frameElement.querySelectorAll('.mod-ie-chip');
+
+    frameElement.dataset.pendingIe = ieText;
+    if (sliderValue) sliderValue.textContent = ieText;
+
+    if (status) {
+      status.classList.toggle('encoded', encoded);
+      status.classList.toggle('pending', !encoded);
+      status.textContent = encoded ? `Encoded IE ${ieText}` : `Encode required for IE ${ieText}`;
+    }
+
+    if (encodeButton) {
+      encodeButton.dataset.ie = ieText;
+      encodeButton.textContent = `Encode IE ${ieText}`;
+      encodeButton.classList.toggle('hidden', encoded || !canEncode);
+    }
+
+    chips.forEach(chip => {
+      chip.classList.toggle('active', Math.abs(Number(chip.dataset.ie) - Number(ieText)) < 0.000001);
+    });
+    frameElement.classList.toggle('needs-encoding', canEncode && !encoded);
+    return {ieText, encoded};
+  }
+
+  function commitVibeIeDraft(index, rawValue) {
+    const draft = updateVibeIeDraft(index, rawValue);
+    if (draft?.encoded) {
+      setModuleParam('vibe_transfer', `info_extracted_${index}`, draft.ieText);
+    }
+  }
+
+  function selectVibeEncoding(index, ieValue) {
+    const ieText = formatIe(ieValue);
+    const frameElement = getVibeFrameElement(index);
+    const slider = frameElement?.querySelector('.mod-vibe-ie-slider');
+    if (slider) slider.value = String(Math.round(Number(ieText) * 100));
+    updateVibeIeDraft(index, Number(ieText) * 100);
+    setModuleParam('vibe_transfer', `info_extracted_${index}`, ieText);
+  }
+
+  function encodeVibeFrame(index) {
+    const frameElement = getVibeFrameElement(index);
+    if (!frameElement || frameElement.dataset.canEncode !== 'true') return;
+    const slider = frameElement.querySelector('.mod-vibe-ie-slider');
+    const ieText = frameElement.dataset.pendingIe || formatIe((Number(slider?.value) || 100) / 100);
+    const encodeButton = frameElement.querySelector('[data-vibe-encode-btn]');
+    if (encodeButton) {
+      encodeButton.disabled = true;
+      encodeButton.textContent = 'Encoding...';
+    }
+    setModuleParam('vibe_transfer', `encode_${index}`, ieText);
+  }
+
+  function renderVibeEncodingControls(frame, index) {
+    const encodedKeys = getEncodedIeValues(frame);
+    const currentIe = formatIe(frame.information_extracted);
+    const hasCurrentEncoding = hasEncodedIe(encodedKeys, currentIe);
+    const canEncode = !frame.is_no_image && !frame.is_naid3 && !frame.encoding_in_progress;
+    const keyData = encodedKeys.map(formatIe).join(',');
+    const frameFlags = [
+      `data-vibe-index="${index}"`,
+      `data-pending-ie="${currentIe}"`,
+      `data-encoding-keys="${keyData}"`,
+      `data-can-encode="${canEncode ? 'true' : 'false'}"`,
+    ].join(' ');
+    const encodedChips = encodedKeys.map(key => {
+      const keyText = formatIe(key);
+      const active = Math.abs(Number(keyText) - Number(currentIe)) < 0.000001 ? ' active' : '';
+      return `<button class="mod-ie-chip${active}" data-ie="${keyText}" onclick="selectVibeEncoding(${index},${keyText})">${keyText}</button>`;
+    }).join('');
+
+    if (frame.is_no_image) {
+      return {
+        frameFlags,
+        html: `
+          <div class="mod-vibe-encode-row">
+            <span class="mod-encode-status encoded">Stored encoded vibe</span>
+            ${encodedChips ? `<div class="mod-ie-chip-list">${encodedChips}</div>` : ''}
+          </div>`,
+      };
+    }
+
+    const statusText = frame.encoding_in_progress
+      ? `Encoding IE ${currentIe}...`
+      : hasCurrentEncoding
+        ? `Encoded IE ${currentIe}`
+        : `Encode required for IE ${currentIe}`;
+    const statusClass = hasCurrentEncoding ? 'encoded' : 'pending';
+    const encodeHidden = hasCurrentEncoding || frame.encoding_in_progress || frame.is_naid3 ? ' hidden' : '';
+    const encodeDisabled = frame.encoding_in_progress ? ' disabled' : '';
+
+    return {
+      frameFlags,
+      html: `
+          <div class="mod-slider-row mod-vibe-ie-row">
+            <span class="mod-slider-label">Info Extracted</span>
+            <input class="mod-vibe-ie-slider" type="range" min="1" max="100" step="1" value="${Math.round(Number(currentIe) * 100)}"
+              oninput="onVibeIeDraft(${index},this.value)"
+              onchange="commitVibeIeDraft(${index},this.value)">
+            <span class="mod-slider-value mod-vibe-ie-value">${currentIe}</span>
+          </div>
+          <div class="mod-vibe-encode-row">
+            <button class="mod-btn-sm mod-btn-encode${encodeHidden}" data-vibe-encode-btn data-ie="${currentIe}" onclick="encodeVibeFrame(${index})"${encodeDisabled}>Encode IE ${currentIe}</button>
+            <span class="mod-encode-status ${statusClass}" data-vibe-encode-status>${statusText}</span>
+            ${encodedChips ? `<div class="mod-ie-chip-list">${encodedChips}</div>` : ''}
+          </div>`,
+    };
+  }
+
   function renderCharacterReference(message) {
     if (!message.is_naid45) {
       moduleBody.innerHTML = '<div class="mod-notice">Character Reference requires NAID4.5F/C model</div>';
@@ -138,17 +287,11 @@ export function createImageModulePanels({
       const thumbHtml = frame.is_no_image
         ? '<div class="mod-ref-noimage">No Image</div>'
         : `<img class="mod-ref-thumb" src="data:image/jpeg;base64,${frame.thumbnail}" alt="${escHtml(frame.file_name)}">`;
-
-      const encHtml = frame.is_no_image ? '' : `
-      <div class="mod-ref-encoding">
-        ${frame.has_encoding
-          ? '<span class="mod-encode-status encoded">Encoded</span>'
-          : `<button class="mod-btn-sm mod-btn-encode" onclick="setModuleParam('vibe_transfer','encode_${index}','')">Encode (2 Anlas)</button>`}
-        ${frame.encoding_keys.length ? `<span class="mod-encode-keys">IE: ${frame.encoding_keys.map(key => Number(key).toFixed(2)).join(', ')}</span>` : ''}
-      </div>`;
+      const encodingControls = renderVibeEncodingControls(frame, index);
+      const needsEncoding = !frame.is_no_image && !frame.is_naid3 && !frame.has_encoding ? ' needs-encoding' : '';
 
       return `
-    <div class="mod-ref-frame ${frame.is_enabled ? '' : 'disabled'}">
+    <div class="mod-ref-frame ${frame.is_enabled ? '' : 'disabled'}${needsEncoding}" ${encodingControls.frameFlags}>
       <div class="mod-ref-header">
         ${thumbHtml}
         <div class="mod-ref-controls">
@@ -166,13 +309,7 @@ export function createImageModulePanels({
               oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','ref_strength_${index}',(this.value/100).toFixed(2))">
             <span class="mod-slider-value">${frame.reference_strength.toFixed(2)}</span>
           </div>
-          <div class="mod-slider-row">
-            <span class="mod-slider-label">Info Extracted</span>
-            <input type="range" min="1" max="100" step="1" value="${Math.round(frame.information_extracted*100)}"
-              oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','info_extracted_${index}',(this.value/100).toFixed(2))">
-            <span class="mod-slider-value">${frame.information_extracted.toFixed(2)}</span>
-          </div>
-          ${encHtml}
+          ${encodingControls.html}
         </div>
       </div>
     </div>`;
@@ -285,6 +422,10 @@ export function createImageModulePanels({
     pasteImage,
     uploadImage,
     onSlider,
+    updateVibeIeDraft,
+    commitVibeIeDraft,
+    selectVibeEncoding,
+    encodeVibeFrame,
     renderCharacterReference,
     renderVibeTransfer,
     requestStorage,

@@ -3793,6 +3793,8 @@ class RemoteBridge(QObject):
             if not m:
                 return {}
             frames = []
+            encoding_worker = getattr(m, "encoding_worker", None)
+            encoding_target = getattr(m, "_encoding_target_frame", None)
             for i, f in enumerate(m.vibe_frames):
                 thumb = ""
                 try:
@@ -3800,18 +3802,27 @@ class RemoteBridge(QObject):
                         thumb = self._generate_thumbnail_b64(f.image)
                 except Exception:
                     pass
-                encoding_keys = list(f.vibe_encodings.keys()) if hasattr(f, 'vibe_encodings') else []
-                has_encoding = f.information_extracted in f.vibe_encodings if hasattr(f, 'vibe_encodings') else False
+                encoding_keys = sorted(float(k) for k in getattr(f, 'vibe_encodings', {}).keys())
+                information_extracted = float(getattr(f, 'information_extracted', 1.0))
+                active_encoding = None
+                has_encoding = False
+                if encoding_keys:
+                    active_encoding = min(encoding_keys, key=lambda key: abs(key - information_extracted))
+                    has_encoding = abs(active_encoding - information_extracted) < 1e-9
+                is_encoding = bool(encoding_worker and encoding_worker.isRunning() and encoding_target is f)
                 frames.append({
                     "index": i,
                     "file_hash": f.file_hash,
                     "file_name": f.file_name,
                     "is_enabled": f.is_enabled,
                     "is_no_image": f.is_no_image,
+                    "is_naid3": bool(getattr(f, 'is_naid3', False)),
                     "reference_strength": f.reference_strength,
-                    "information_extracted": f.information_extracted,
+                    "information_extracted": information_extracted,
                     "has_encoding": has_encoding,
-                    "encoding_keys": [float(k) for k in encoding_keys],
+                    "active_encoding": active_encoding,
+                    "encoding_in_progress": is_encoding,
+                    "encoding_keys": encoding_keys,
                     "thumbnail": thumb,
                 })
             return {
@@ -3893,6 +3904,22 @@ class RemoteBridge(QObject):
             m = self._find_module("vibe_transfer")
             if not m:
                 return
+
+            def _set_frame_information_extracted(frame, raw_value):
+                information_extracted = max(0.01, min(1.0, round(float(raw_value), 2)))
+                frame.information_extracted = information_extracted
+                slider = getattr(frame, 'info_extracted_slider', None)
+                if slider is not None:
+                    slider.setValue(int(round(information_extracted * 100)))
+                label = getattr(frame, 'info_extracted_label', None)
+                if label is not None:
+                    label.setText(f"Information Extracted {information_extracted:.2f}")
+                if hasattr(frame, '_update_encoding_status'):
+                    frame._update_encoding_status()
+                if hasattr(frame, '_update_encode_button_visibility'):
+                    frame._update_encode_button_visibility()
+                return information_extracted
+
             if key == "upload_image":
                 img_bytes = base64.b64decode(value)
                 temp_dir = Path("temp/remote_upload")
@@ -3919,7 +3946,7 @@ class RemoteBridge(QObject):
             elif key.startswith("info_extracted_"):
                 idx = int(key.split("_")[-1])
                 if 0 <= idx < len(m.vibe_frames):
-                    m.vibe_frames[idx].info_extracted_slider.setValue(int(float(value) * 100))
+                    _set_frame_information_extracted(m.vibe_frames[idx], value)
             elif key == "normalize":
                 if hasattr(m, 'normalize_checkbox'):
                     m.normalize_checkbox.setChecked(value == "true")
@@ -3928,6 +3955,8 @@ class RemoteBridge(QObject):
                 if 0 <= idx < len(m.vibe_frames):
                     frame = m.vibe_frames[idx]
                     if not frame.is_no_image:
+                        if value not in (None, ""):
+                            _set_frame_information_extracted(frame, value)
                         m._on_encoding_requested(frame, frame.information_extracted)
             elif key == "get_storage":
                 storage = self._scan_vibe_storage()

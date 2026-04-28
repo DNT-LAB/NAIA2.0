@@ -99,6 +99,13 @@ export function createImageModulePanels({
     return keys.some(key => Math.abs(key - ie) < 0.000001);
   }
 
+  function formatRefStrength(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    const clamped = Math.max(-1, Math.min(1, Math.round(number * 100) / 100));
+    return clamped.toFixed(2);
+  }
+
   function getVibeFrameElement(index) {
     return moduleBody.querySelector(`.mod-ref-frame[data-vibe-index="${index}"]`);
   }
@@ -171,6 +178,37 @@ export function createImageModulePanels({
       encodeButton.textContent = 'Encoding...';
     }
     setModuleParam('vibe_transfer', `encode_${index}`, ieText);
+  }
+
+  function updateVibeRefStrengthDraft(index, rawValue, source = '') {
+    const frameElement = getVibeFrameElement(index);
+    if (!frameElement) return null;
+    const strengthText = formatRefStrength(rawValue);
+    const slider = frameElement.querySelector('.mod-vibe-rs-slider');
+    const input = frameElement.querySelector('.mod-vibe-rs-input');
+    if (!strengthText) {
+      if (input) input.classList.add('invalid');
+      return null;
+    }
+
+    frameElement.dataset.pendingRs = strengthText;
+    if (slider && source !== 'slider') slider.value = String(Math.round(Number(strengthText) * 100));
+    if (input) {
+      input.classList.remove('invalid');
+      if (source !== 'input') input.value = strengthText;
+    }
+    return strengthText;
+  }
+
+  function commitVibeRefStrength(index, rawValue) {
+    const frameElement = getVibeFrameElement(index);
+    if (!frameElement) return;
+    let strengthText = updateVibeRefStrengthDraft(index, rawValue);
+    if (!strengthText) {
+      strengthText = frameElement.dataset.pendingRs || '0.00';
+      updateVibeRefStrengthDraft(index, strengthText);
+    }
+    setModuleParam('vibe_transfer', `ref_strength_${index}`, strengthText);
   }
 
   function renderVibeEncodingControls(frame, index) {
@@ -289,9 +327,10 @@ export function createImageModulePanels({
         : `<img class="mod-ref-thumb" src="data:image/jpeg;base64,${frame.thumbnail}" alt="${escHtml(frame.file_name)}">`;
       const encodingControls = renderVibeEncodingControls(frame, index);
       const needsEncoding = !frame.is_no_image && !frame.is_naid3 && !frame.has_encoding ? ' needs-encoding' : '';
+      const refStrength = formatRefStrength(frame.reference_strength) || '0.00';
 
       return `
-    <div class="mod-ref-frame ${frame.is_enabled ? '' : 'disabled'}${needsEncoding}" ${encodingControls.frameFlags}>
+    <div class="mod-ref-frame ${frame.is_enabled ? '' : 'disabled'}${needsEncoding}" data-pending-rs="${refStrength}" ${encodingControls.frameFlags}>
       <div class="mod-ref-header">
         ${thumbHtml}
         <div class="mod-ref-controls">
@@ -303,11 +342,15 @@ export function createImageModulePanels({
             </label>
             <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('vibe_transfer','remove_frame_${index}','')">Remove</button>
           </div>
-          <div class="mod-slider-row">
+          <div class="mod-slider-row mod-vibe-rs-row">
             <span class="mod-slider-label">Ref Strength</span>
-            <input type="range" min="-100" max="100" step="1" value="${Math.round(frame.reference_strength*100)}"
-              oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2);onModSlider('vibe_transfer','ref_strength_${index}',(this.value/100).toFixed(2))">
-            <span class="mod-slider-value">${frame.reference_strength.toFixed(2)}</span>
+            <input class="mod-vibe-rs-slider" type="range" min="-100" max="100" step="1" value="${Math.round(Number(refStrength)*100)}"
+              oninput="onVibeRefStrengthDraft(${index},this.value/100,'slider')"
+              onchange="commitVibeRefStrength(${index},this.value/100)">
+            <input class="mod-vibe-rs-input" type="number" min="-1" max="1" step="0.01" inputmode="decimal" value="${refStrength}"
+              oninput="onVibeRefStrengthDraft(${index},this.value,'input')"
+              onchange="commitVibeRefStrength(${index},this.value)"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">
           </div>
           ${encodingControls.html}
         </div>
@@ -426,6 +469,8 @@ export function createImageModulePanels({
     commitVibeIeDraft,
     selectVibeEncoding,
     encodeVibeFrame,
+    updateVibeRefStrengthDraft,
+    commitVibeRefStrength,
     renderCharacterReference,
     renderVibeTransfer,
     requestStorage,

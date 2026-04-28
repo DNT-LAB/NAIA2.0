@@ -2976,6 +2976,14 @@ function onModSlider(moduleId, key, value) {
   if (imageModulePanels) imageModulePanels.onSlider(moduleId, key, value);
 }
 
+function onVibeRefStrengthDraft(index, value, source = '') {
+  if (imageModulePanels) imageModulePanels.updateVibeRefStrengthDraft(index, value, source);
+}
+
+function commitVibeRefStrength(index, value) {
+  if (imageModulePanels) imageModulePanels.commitVibeRefStrength(index, value);
+}
+
 function onVibeIeDraft(index, value) {
   if (imageModulePanels) imageModulePanels.updateVibeIeDraft(index, value);
 }

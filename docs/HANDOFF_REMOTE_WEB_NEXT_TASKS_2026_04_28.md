@@ -68,6 +68,9 @@ Completed after the P0 stabilization pass:
   - `NAI 전용 도구` no longer collapses `Character`, `Char Ref`, and `Vibe` counts into one total; it shows per-module `C/R/V` badge chips.
   - launcher text was enlarged slightly, and the fixed `프롬프트 엔지니어링` button is left-aligned.
   - Vibe upload/storage activation now also disables all Character Reference frames, matching the existing Char Ref → Vibe exclusion path.
+- Vibe Transfer Remote Web follow-up:
+  - Reference Strength now has a direct numeric input (`-1.00` to `1.00`, step `0.01`) synced with the slider.
+  - The Vibe Reference Strength slider hit area and thumb are larger for easier dragging.
 
 ## Immediate Risks
 

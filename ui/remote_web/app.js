@@ -252,6 +252,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       onOpenLocation: openResultLocationFromContext,
       onSaveImage: saveResultImageFromContext,
       onCopyImage: copyResultImageFromContext,
+      onUpscaleNai: upscaleResultFromContext,
     });
     resultContextMenu.bind();
   })
@@ -1624,6 +1625,28 @@ async function copyResultImageFromContext(context = {}, format = 'png') {
   } catch (error) {
     console.error('Copy image failed', error);
     showToast(error.message || 'Copy image failed', 'error');
+  }
+}
+
+function upscaleResultFromContext(context = {}) {
+  if ((currentMode || modeSelect.value) !== 'NAI') {
+    showToast('NAI upscale is only available in NAI mode', 'error');
+    return;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('Remote connection is not open', 'error');
+    return;
+  }
+  try {
+    ws.send(JSON.stringify({
+      type: 'result_upscale',
+      source: context.source || '',
+      path: context.source === 'current' ? '' : (context.path || ''),
+    }));
+    showToast('NAI 2x upscale requested', 'success');
+  } catch (error) {
+    console.error('NAI upscale request failed', error);
+    showToast('NAI upscale request failed', 'error');
   }
 }
 

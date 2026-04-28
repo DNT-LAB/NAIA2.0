@@ -142,6 +142,7 @@ class RemoteBridge(QObject):
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
+    request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
@@ -206,6 +207,9 @@ class RemoteBridge(QObject):
         self._anlas_fetch_in_flight: bool = False
         self._anlas_refresh_interval_ms: int = 5 * 60 * 1000  # 5분
         self._remote_enhance_in_flight: bool = False
+        self._remote_upscale_in_flight: bool = False
+        self._remote_upscale_thread = None
+        self._remote_upscale_worker = None
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -805,6 +809,213 @@ class RemoteBridge(QObject):
             message = f"Enhance request failed: {e}"
             self._send_result_enhance_error(ws, message)
             print(f"🌐 Remote: Enhance 트리거 실패 — {e}")
+
+    def _send_result_upscale_state(self, ws, running: bool = False, success: bool = False, message: str = ""):
+        payload = {
+            "type": "result_upscale_state",
+            "running": running,
+            "success": success,
+            "message": message,
+        }
+        if ws is not None:
+            self._send_json_to(ws, payload)
+            if message:
+                self._send_json_to(ws, {
+                    "type": "toast",
+                    "message": message,
+                    "level": "success" if success else "error",
+                })
+        else:
+            self._broadcast_json(payload)
+            if message:
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": message,
+                    "level": "success" if success else "error",
+                })
+
+    def _resolve_result_upscale_source(self, payload: dict) -> dict:
+        from PIL import Image
+        from PyQt6.QtGui import QPixmap
+
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            raise RuntimeError("ImageWindow is not ready")
+
+        source = str(payload.get("source") or "").strip().lower()
+        rel_path = str(payload.get("path") or "").strip()
+        use_saved_path = bool(rel_path and source != "current")
+
+        if use_saved_path:
+            target = self._validate_viewer_path(rel_path)
+            if not target:
+                raise RuntimeError("Image file is unavailable")
+            image_bytes = Path(target).read_bytes()
+            with Image.open(io.BytesIO(image_bytes)) as opened:
+                pil_image = opened.convert("RGBA").copy()
+            raw_bytes = image_bytes
+            info_text = f"Upscaled from {Path(target).name}"
+            source_row = None
+            generation_params = {}
+            prompt_context = {}
+            api_metadata = {"upscale_source_path": rel_path}
+        else:
+            item = getattr(image_window, "current_history_item", None)
+            if not item or not getattr(item, "image", None):
+                raise RuntimeError("No image is selected")
+            pil_image = item.image
+            raw_bytes = getattr(item, "raw_bytes", None) or b""
+            info_text = getattr(item, "info_text", "") or ""
+            source_row = getattr(item, "source_row", None)
+            generation_params = dict(getattr(item, "generation_params", {}) or {})
+            prompt_context = dict(getattr(item, "prompt_context", {}) or {})
+            api_metadata = dict(getattr(item, "api_metadata", {}) or {})
+
+        png_buffer = io.BytesIO()
+        pil_image.save(png_buffer, format="PNG")
+        png_bytes = png_buffer.getvalue()
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(png_bytes):
+            raise RuntimeError("Image conversion failed")
+
+        return {
+            "image_window": image_window,
+            "pixmap": pixmap,
+            "raw_bytes": raw_bytes or png_bytes,
+            "info_text": info_text,
+            "source_row": source_row,
+            "generation_params": generation_params,
+            "prompt_context": prompt_context,
+            "api_metadata": api_metadata,
+        }
+
+    def _do_result_upscale(self, ws=None, payload_json: str = "{}"):
+        """Remote Web 컨텍스트 메뉴에서 NAI 2x 업스케일을 실행."""
+        try:
+            allowed, reason = self._result_enhance_gate(ws)
+            if not allowed:
+                self._send_result_upscale_state(ws, False, False, reason)
+                return
+
+            if self._remote_upscale_in_flight:
+                self._send_result_upscale_state(ws, False, False, "NAI upscale is already running")
+                return
+
+            current_mode = self.app_context.get_api_mode() if hasattr(self.app_context, "get_api_mode") else getattr(self.app_context, "current_api_mode", "")
+            if current_mode != "NAI":
+                self._send_result_upscale_state(ws, False, False, "NAI upscale is available in NAI mode only")
+                return
+
+            try:
+                payload = json.loads(payload_json) if isinstance(payload_json, str) else dict(payload_json or {})
+            except Exception:
+                payload = {}
+            context = self._resolve_result_upscale_source(payload)
+
+            from PyQt6.QtCore import QObject as _QObject, QThread, pyqtSignal as _pyqtSignal
+
+            class UpscaleWorker(_QObject):
+                finished = _pyqtSignal(dict)
+
+                def __init__(self, api_service, pixmap, raw_bytes):
+                    super().__init__()
+                    self.api_service = api_service
+                    self.pixmap = pixmap
+                    self.raw_bytes = raw_bytes
+
+                def run(self):
+                    result = self.api_service.upscale_NAI(self.pixmap, raw_bytes=self.raw_bytes)
+                    self.finished.emit(result)
+
+            self._remote_upscale_in_flight = True
+            self._send_result_upscale_state(ws, True, False, "")
+            thread = QThread()
+            worker = UpscaleWorker(self.app_context.api_service, context["pixmap"], context["raw_bytes"])
+            self._remote_upscale_thread = thread
+            self._remote_upscale_worker = worker
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.finished.connect(lambda result: self._handle_result_upscale(result, context, ws))
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(lambda: setattr(self, "_remote_upscale_thread", None))
+            thread.finished.connect(lambda: setattr(self, "_remote_upscale_worker", None))
+            thread.start()
+            print("🌐 Remote: NAI 2x upscale 트리거됨")
+        except Exception as e:
+            self._remote_upscale_in_flight = False
+            message = f"NAI upscale request failed: {e}"
+            self._send_result_upscale_state(ws, False, False, message)
+            print(f"🌐 Remote: NAI 2x upscale 트리거 실패 — {e}")
+
+    def _handle_result_upscale(self, result: dict, context: dict, ws=None):
+        from PIL import Image
+        from PyQt6.QtCore import QBuffer, QIODevice
+
+        self._remote_upscale_in_flight = False
+        try:
+            if not isinstance(result, dict) or result.get("status") != "success":
+                message = result.get("message", "NAI upscale failed") if isinstance(result, dict) else "NAI upscale failed"
+                self._send_result_upscale_state(ws, False, False, message)
+                return
+
+            upscaled_pixmap = result.get("image")
+            raw_bytes = result.get("raw_bytes")
+            if raw_bytes:
+                image_data = raw_bytes
+            else:
+                qbuffer = QBuffer()
+                qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                upscaled_pixmap.save(qbuffer, "PNG")
+                image_data = qbuffer.data().data()
+                qbuffer.close()
+
+            with Image.open(io.BytesIO(image_data)) as opened:
+                upscaled_image = opened.copy()
+
+            info_text = (context.get("info_text") or "").strip()
+            if info_text:
+                info_text = f"{info_text}\nUpscaled: 2x ({upscaled_image.width}x{upscaled_image.height})"
+            else:
+                info_text = f"Upscaled: 2x ({upscaled_image.width}x{upscaled_image.height})"
+
+            generation_params = dict(context.get("generation_params") or {})
+            generation_params.pop("image_bytes", None)
+            generation_params["width"] = upscaled_image.width
+            generation_params["height"] = upscaled_image.height
+            generation_params["api_mode"] = "NAI"
+            generation_params["upscale_factor"] = 2
+
+            api_metadata = dict(context.get("api_metadata") or {})
+            api_metadata.update({
+                "upscaled": True,
+                "upscale_factor": 2,
+                "upscale_method": "NAI",
+            })
+            generation_result = {
+                "image": upscaled_image,
+                "generation_params": generation_params,
+                "prompt_context": dict(context.get("prompt_context") or {}),
+                "api_metadata": api_metadata,
+                "creation_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "backend_type": "NAI",
+            }
+
+            image_window = context.get("image_window")
+            if image_window and hasattr(image_window, "add_to_history"):
+                image_window.add_to_history(
+                    upscaled_image,
+                    image_data,
+                    info_text,
+                    context.get("source_row"),
+                    generation_result=generation_result,
+                )
+            self.app_context.publish("generation_result_available", generation_result)
+            self._send_result_upscale_state(ws, False, True, "NAI 2x upscale complete")
+        except Exception as e:
+            self._send_result_upscale_state(ws, False, False, f"NAI upscale result failed: {e}")
+            print(f"🌐 Remote: NAI 2x upscale 결과 처리 실패 — {e}")
 
     def _do_image_action(self, action: str, image_bytes: bytes, label: str = ""):
         """Remote image action popup에서 전달된 이미지를 데스크탑 동작으로 라우팅."""
@@ -6886,6 +7097,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_result_enhance.emit(ws)
                         elif cmd_type == "set_result_enhance_config":
                             bridge.request_set_result_enhance_config.emit(ws, json.dumps(cmd))
+                        elif cmd_type == "result_upscale":
+                            bridge.request_result_upscale.emit(ws, json.dumps(cmd))
                         elif cmd_type == "probe_api":
                             # 저장된 토큰/URL 로 실시간 연결 가능 여부 확인.
                             # keyring 값 사용 — 웹으로 토큰이 노출되지 않음. 저장/타임스탬프 갱신 없음.
@@ -7060,6 +7273,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
+    bridge.request_result_upscale.connect(bridge._do_result_upscale, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
 

@@ -7,6 +7,7 @@ const ACTION_RESTORE_PARAMS = 'restore_params';
 const ACTION_OPEN_LOCATION = 'open_location';
 const ACTION_SAVE_IMAGE = 'save_image';
 const ACTION_COPY_IMAGE = 'copy_image';
+const ACTION_UPSCALE_NAI = 'upscale_nai';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -41,7 +42,7 @@ const MAIN_IMAGE_MENU = [
   {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
   {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
   {type: 'separator'},
-  {label: 'NAI 2x 업스케일'},
+  {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
   {
     label: 'NAI 인페인트 메뉴',
     children: [
@@ -81,7 +82,7 @@ const THUMBNAIL_MENU = [
   {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
   {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
   {type: 'separator'},
-  {label: 'NAI 2x 업스케일'},
+  {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
@@ -103,6 +104,7 @@ export function createResultContextMenu({
   onOpenLocation = null,
   onSaveImage = null,
   onCopyImage = null,
+  onUpscaleNai = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
 }) {
@@ -160,6 +162,10 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_COPY_IMAGE) {
       return typeof onCopyImage === 'function';
+    }
+    if (item.action === ACTION_UPSCALE_NAI) {
+      if (item.modes && !item.modes.includes(String(getMode() || '').toUpperCase())) return false;
+      return typeof onUpscaleNai === 'function';
     }
     if (item.action === ACTION_IMAGE_ACTION) {
       if (!hasCapability(context, 'image_action')) return false;
@@ -233,6 +239,8 @@ export function createResultContextMenu({
           onSaveImage(context);
         } else if (action === ACTION_COPY_IMAGE) {
           onCopyImage(context, button.dataset.copyFormat || 'png');
+        } else if (action === ACTION_UPSCALE_NAI) {
+          onUpscaleNai(context);
         } else if (action === ACTION_IMAGE_ACTION) {
           onImageAction(context, button.dataset.imageAction || '');
         }

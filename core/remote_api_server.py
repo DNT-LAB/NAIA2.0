@@ -141,6 +141,7 @@ class RemoteBridge(QObject):
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
+    request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
@@ -172,6 +173,7 @@ class RemoteBridge(QObject):
         self._cached_prompts: dict = {}
         self._cached_params: dict = {}
         self._cached_options: dict = {}
+        self._cached_result_enhance_config: dict = {}
         # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
         # Shared Server Mode: 클라이언트별 독립 P.Eng/Params/Negative
         self.shared_server_mode = False
@@ -491,6 +493,7 @@ class RemoteBridge(QObject):
         self._cached_prompts = self.get_current_prompts()
         self._cached_params = self.get_generation_params()
         self._cached_options = {"type": "options", **self.get_options()}
+        self._cached_result_enhance_config = self._result_enhance_config_payload()
 
     # --- 시그널 슬롯 래퍼 (lambda 대신 disconnect 가능) ---
 
@@ -502,6 +505,8 @@ class RemoteBridge(QObject):
                 self._broadcast_json(self._cached_options)
             if self._cached_params:
                 self._broadcast_json(self._cached_params)
+            if self._cached_result_enhance_config:
+                self._broadcast_json(self._cached_result_enhance_config)
 
     def _on_option_toggled_slot(self, checked=None):
         """체크박스 toggled → 옵션 브로드캐스트"""
@@ -657,6 +662,93 @@ class RemoteBridge(QObject):
             self._broadcast_json(payload)
             self._broadcast_json(toast)
 
+    @staticmethod
+    def _clamp_result_enhance_number(value, minimum: float, maximum: float, fallback: float) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return min(maximum, max(minimum, number))
+
+    def _normalize_result_enhance_config(self, payload: dict | None = None) -> dict:
+        """Desktop ImageWindow와 Web Remote가 공유하는 Enhance 설정 payload."""
+        payload = payload or {}
+        image_window = self._get_image_window_widget()
+        fallback_upscale = getattr(image_window, "_enhance_upscale", 1.5) if image_window else 1.5
+        fallback_strength = getattr(image_window, "_enhance_strength", 0.2) if image_window else 0.2
+        fallback_noise = getattr(image_window, "_enhance_noise", 0.0) if image_window else 0.0
+
+        upscale_value = payload.get("upscale", fallback_upscale)
+        try:
+            upscale = 1.0 if abs(float(upscale_value) - 1.0) < 0.01 else 1.5
+        except (TypeError, ValueError):
+            upscale = 1.5
+        strength = round(
+            self._clamp_result_enhance_number(payload.get("strength", fallback_strength), 0.1, 0.9, 0.2),
+            1,
+        )
+        noise = round(
+            self._clamp_result_enhance_number(payload.get("noise", fallback_noise), 0.0, 0.1, 0.0),
+            1,
+        )
+        return {
+            "type": "result_enhance_config",
+            "upscale": upscale,
+            "strength": strength,
+            "noise": noise,
+        }
+
+    def _result_enhance_config_payload(self) -> dict:
+        return self._normalize_result_enhance_config()
+
+    def _broadcast_result_enhance_config(self):
+        self._cached_result_enhance_config = self._result_enhance_config_payload()
+        self._broadcast_json(self._cached_result_enhance_config)
+
+    def _do_set_result_enhance_config(self, ws=None, payload_json: str = "{}"):
+        """Web Remote에서 전달된 Enhance 설정을 Desktop ImageWindow에 반영."""
+        try:
+            allowed, reason = self._result_enhance_gate(ws)
+            if not allowed:
+                self._send_result_enhance_error(ws, reason)
+                return
+
+            image_window = self._get_image_window_widget()
+            if not image_window:
+                self._send_result_enhance_error(ws, "ImageWindow is not ready")
+                return
+
+            try:
+                payload = json.loads(payload_json) if isinstance(payload_json, str) else dict(payload_json or {})
+            except Exception:
+                payload = {}
+
+            config = self._normalize_result_enhance_config(payload)
+            image_window._enhance_upscale = config["upscale"]
+            image_window._enhance_strength = config["strength"]
+            image_window._enhance_noise = config["noise"]
+
+            update_text = getattr(image_window, "_update_enhance_button_text", None)
+            if callable(update_text):
+                update_text()
+            update_state = getattr(image_window, "_update_enhance_button_state", None)
+            if callable(update_state):
+                update_state()
+            save_settings = getattr(image_window, "save_settings", None)
+            if callable(save_settings):
+                save_settings()
+
+            self._cached_result_enhance_config = config
+            self._broadcast_json(config)
+            self._send_json_to(ws, {"type": "toast", "message": "Enhance settings updated", "level": "success"})
+            print(
+                "🌐 Remote: Enhance 설정 갱신 "
+                f"(x{config['upscale']:g}, strength={config['strength']:.1f}, noise={config['noise']:.1f})"
+            )
+        except Exception as e:
+            self._send_result_enhance_error(ws, f"Enhance settings update failed: {e}")
+            print(f"🌐 Remote: Enhance 설정 갱신 실패 — {e}")
+
     def _do_result_enhance(self, ws=None):
         """현재 데스크탑 ImageWindow 히스토리 항목에 NAI Enhance를 실행."""
         try:
@@ -705,7 +797,7 @@ class RemoteBridge(QObject):
 
             self._remote_enhance_in_flight = True
             self._broadcast_json({"type": "result_enhance_state", "running": True})
-            execute_enhance()
+            execute_enhance(show_progress=False, notify_ui=False)
             print("🌐 Remote: Enhance 트리거됨")
         except Exception as e:
             self._remote_enhance_in_flight = False
@@ -5571,6 +5663,10 @@ class RemoteBridge(QObject):
         if not success and message:
             self._broadcast_json({"type": "toast", "message": str(message), "level": "error"})
 
+    def on_result_enhance_config_changed(self, *_args, **_kwargs):
+        """Desktop Enhance 설정 변경을 Web Remote에 동기화."""
+        self._broadcast_result_enhance_config()
+
     def _broadcast_json(self, data: dict):
         if self._loop and self._ws_manager:
             asyncio.run_coroutine_threadsafe(
@@ -6069,6 +6165,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 await ws.send_text(json.dumps(bridge._cached_prompts))
             if bridge._cached_params:
                 await ws.send_text(json.dumps(bridge._cached_params))
+            if bridge._cached_result_enhance_config:
+                await ws.send_text(json.dumps(bridge._cached_result_enhance_config))
             # api_status 는 per-ws 평가 (setup_allowed 가 클라이언트 IP에 따라 다름)
             await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
             # 캐시된 Anlas 있으면 바로 송신 (viewer pill 초기화)
@@ -6121,6 +6219,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         await ws.send_text(json.dumps(bridge._cached_options))
                     if bridge._cached_params:
                         await ws.send_text(json.dumps(bridge._cached_params))
+                    if bridge._cached_result_enhance_config:
+                        await ws.send_text(json.dumps(bridge._cached_result_enhance_config))
                 elif data.startswith("{"):
                     try:
                         cmd = json.loads(data)
@@ -6455,6 +6555,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_generate.emit()
                         elif cmd_type == "result_enhance":
                             bridge.request_result_enhance.emit(ws)
+                        elif cmd_type == "set_result_enhance_config":
+                            bridge.request_set_result_enhance_config.emit(ws, json.dumps(cmd))
                         elif cmd_type == "probe_api":
                             # 저장된 토큰/URL 로 실시간 연결 가능 여부 확인.
                             # keyring 값 사용 — 웹으로 토큰이 노출되지 않음. 저장/타임스탬프 갱신 없음.
@@ -6628,6 +6730,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
     bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
+    bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
 
@@ -6653,6 +6756,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     # AppContext 이벤트 구독
     app_context.subscribe("generation_result_available", bridge.on_generation_result)
     app_context.subscribe("result_enhance_completed", bridge.on_result_enhance_completed)
+    app_context.subscribe("result_enhance_config_changed", bridge.on_result_enhance_config_changed)
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("image_saved", bridge._on_image_saved)
@@ -6825,7 +6929,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "result_enhance_completed", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed"]:
+            for event_name in ["generation_result_available", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

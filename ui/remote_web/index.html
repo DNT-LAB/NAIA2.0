@@ -462,7 +462,10 @@
           <div class="result-info-resize" id="resultInfoResize" title="Drag to resize generation info"></div>
           <div class="result-info-header">
             <span>Generation Info</span>
-            <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
+            <div class="result-enhance-controls">
+              <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
+              <button class="result-enhance-settings-btn" id="resultEnhanceSettingsBtn" title="Enhance settings" aria-label="Enhance settings">⚙</button>
+            </div>
           </div>
           <div class="result-info-content" id="resultInfoContent">
             <span class="result-info-empty">select a history item...</span>

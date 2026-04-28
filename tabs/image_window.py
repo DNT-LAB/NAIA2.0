@@ -3233,29 +3233,43 @@ class ImageWindow(QWidget):
             self._enhance_upscale, self._enhance_strength, self._enhance_noise = dialog.get_settings()
             self._update_enhance_button_text()
             self.save_settings()
+            if self.app_context:
+                self.app_context.publish("result_enhance_config_changed", {
+                    "upscale": self._enhance_upscale,
+                    "strength": self._enhance_strength,
+                    "noise": self._enhance_noise,
+                })
 
-    def _execute_enhance(self):
+    def _execute_enhance(self, checked: bool = False, *, show_progress: bool = True, notify_ui: bool = True):
         """Enhance 실행 — img2img API 호출"""
         from PyQt6.QtWidgets import QProgressDialog
         import io, copy
 
+        def _fail(title: str, message: str, level: str = 'warning'):
+            if notify_ui:
+                self._show_styled_message_main(title, message, level)
+            elif self.app_context:
+                self.app_context.publish("result_enhance_completed", False, message)
+
         item = self.current_history_item
         if not item or not item.image:
-            self._show_styled_message_main("오류", "Enhance 할 이미지가 없습니다.", 'warning')
+            _fail("오류", "Enhance 할 이미지가 없습니다.", 'warning')
             return
         if getattr(self.app_context, 'current_api_mode', '') != 'NAI':
-            self._show_styled_message_main("오류", "Enhance는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
+            _fail("오류", "Enhance는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
             return
         if not getattr(item, 'generation_params', None):
-            self._show_styled_message_main("오류", "생성 파라미터가 없는 이미지입니다.", 'warning')
+            _fail("오류", "생성 파라미터가 없는 이미지입니다.", 'warning')
             return
 
         # x1 Enhance는 동일 해상도 img2img → 생성 중이면 API 충돌 방지
         if self._enhance_upscale == 1.0:
             gen_ctrl = getattr(self.app_context, 'generation_controller', None)
             if gen_ctrl and getattr(gen_ctrl, 'is_generating', False):
-                self._show_styled_message_main(
-                    "Enhance 대기", "이미지 생성 중에는 x1 Enhance를 사용할 수 없습니다.\n생성 완료 후 다시 시도해주세요.", 'warning')
+                _fail(
+                    "Enhance 대기",
+                    "이미지 생성 중에는 x1 Enhance를 사용할 수 없습니다.\n생성 완료 후 다시 시도해주세요.",
+                    'warning')
                 return
 
         # 이미지 → PNG bytes
@@ -3283,12 +3297,14 @@ class ImageWindow(QWidget):
         params.pop('type', None)
         params.pop('mask_bytes', None)
 
-        # 진행 다이얼로그
-        progress = QProgressDialog("Enhance 처리 중...", None, 0, 0, self)
-        progress.setWindowTitle("Enhance")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setCancelButton(None)
-        progress.show()
+        # 진행 다이얼로그. Web Remote 호출은 Desktop dialog 없이 백그라운드 처리한다.
+        progress = None
+        if show_progress:
+            progress = QProgressDialog("Enhance 처리 중...", None, 0, 0, self)
+            progress.setWindowTitle("Enhance")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setCancelButton(None)
+            progress.show()
 
         self.enhance_button.setEnabled(False)
 
@@ -3311,7 +3327,8 @@ class ImageWindow(QWidget):
 
         self._enhance_thread.started.connect(self._enhance_worker.run)
         self._enhance_worker.finished.connect(
-            lambda result: self._handle_enhance_result(result, progress, orig_w, orig_h, new_w, new_h, item, params)
+            lambda result: self._handle_enhance_result(
+                result, progress, orig_w, orig_h, new_w, new_h, item, params, notify_ui=notify_ui)
         )
         self._enhance_worker.finished.connect(self._enhance_thread.quit)
         self._enhance_worker.finished.connect(self._enhance_worker.deleteLater)
@@ -3319,7 +3336,7 @@ class ImageWindow(QWidget):
 
         self._enhance_thread.start()
 
-    def _handle_enhance_result(self, result: dict, progress, orig_w, orig_h, new_w, new_h, source_item=None, generation_params=None):
+    def _handle_enhance_result(self, result: dict, progress, orig_w, orig_h, new_w, new_h, source_item=None, generation_params=None, notify_ui: bool = True):
         """Enhance API 결과 처리"""
         import io as _io
         import copy as _copy
@@ -3328,7 +3345,8 @@ class ImageWindow(QWidget):
         success = False
         completion_message = ""
         try:
-            progress.close()
+            if progress is not None:
+                progress.close()
             self._update_enhance_button_state()
 
             if result.get('status') == 'success':
@@ -3339,7 +3357,8 @@ class ImageWindow(QWidget):
                     pil_image = Image.open(_io.BytesIO(raw_bytes))
                 if pil_image is None:
                     completion_message = "결과 이미지를 처리할 수 없습니다."
-                    self._show_styled_message_main("Enhance 실패", completion_message, 'critical')
+                    if notify_ui:
+                        self._show_styled_message_main("Enhance 실패", completion_message, 'critical')
                     return
                 if raw_bytes is None:
                     buf = _io.BytesIO()
@@ -3391,7 +3410,8 @@ class ImageWindow(QWidget):
                 print(f"✅ Enhance 성공: {orig_w}x{orig_h} → {new_w}x{new_h}")
             else:
                 completion_message = result.get('message', '알 수 없는 오류')
-                self._show_styled_message_main("Enhance 실패", completion_message, 'critical')
+                if notify_ui:
+                    self._show_styled_message_main("Enhance 실패", completion_message, 'critical')
         finally:
             if self.app_context:
                 self.app_context.publish("result_enhance_completed", success, completion_message)

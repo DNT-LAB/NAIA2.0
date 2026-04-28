@@ -30,6 +30,7 @@ let resultContextMenu = null;
 let resultImageInput = null;
 let imageActionPopup = null;
 let metadataViewer = null;
+let pendingResultEnhanceConfig = null;
 let promptHighlighter = null;
 let moduleBadges = null;
 let cloudflaredControls = null;
@@ -150,11 +151,13 @@ const resultEnhanceReady = import('./js/features/resultEnhance.mjs')
   .then(({createResultEnhanceController}) => {
     resultEnhance = createResultEnhanceController({
       document,
+      window,
       WebSocket,
       getWs: () => ws,
       getMode: () => currentMode,
       showToast,
     });
+    if (pendingResultEnhanceConfig) resultEnhance.setConfig(pendingResultEnhanceConfig);
   })
   .catch(error => {
     console.error('Failed to initialize result enhance module', error);
@@ -828,7 +831,11 @@ const wsMessageHandlers = {
   options: syncOptions,
   params: updateParams,
   mode: m => syncMode(m.mode),
-  result_enhance_state: m => { if (resultEnhance) resultEnhance.setRunning(!!m.running); },
+  result_enhance_state: m => { if (resultEnhance) resultEnhance.handleState(m); },
+  result_enhance_config: m => {
+    pendingResultEnhanceConfig = m;
+    if (resultEnhance) resultEnhance.setConfig(m);
+  },
   mode_result: onModeResult,
   api_status: updateApiStatus,
   verify_result: onVerifyResult,

@@ -468,6 +468,12 @@ export function createMetadataViewer({
         init: {},
       };
     }
+    if (source.kind === 'current') {
+      return {
+        url: '/api/result/metadata',
+        init: {},
+      };
+    }
     if (source.kind === 'input' && source.blob) {
       const label = encodeURIComponent(source.label || 'Input Image');
       return {
@@ -538,7 +544,7 @@ export function createMetadataViewer({
   }
 
   function loadCurrent(options = {}) {
-    return loadSource(EMPTY_SOURCE, options);
+    return loadSource({kind: 'current', path: ''}, options);
   }
 
   function loadSaved(path, options = {}) {
@@ -576,6 +582,11 @@ export function createMetadataViewer({
 
   function refresh() {
     return loadSource(currentSource || EMPTY_SOURCE, {silent: false});
+  }
+
+  function getCurrentSource() {
+    const source = currentSource || EMPTY_SOURCE;
+    return {...source, blob: null, payload: null, revokeImageUrl: null};
   }
 
   function switchDetailTab(tabName) {
@@ -616,5 +627,6 @@ export function createMetadataViewer({
     loadImageBlob,
     displayPayload,
     refresh,
+    getCurrentSource,
   };
 }

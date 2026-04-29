@@ -9,6 +9,7 @@ const ACTION_OPEN_LOCATION = 'open_location';
 const ACTION_SAVE_IMAGE = 'save_image';
 const ACTION_COPY_IMAGE = 'copy_image';
 const ACTION_UPSCALE_NAI = 'upscale_nai';
+const ACTION_METADATA_DETACHED = 'show_metadata_detached';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -53,7 +54,14 @@ const MAIN_IMAGE_MENU = [
   },
   {type: 'separator'},
   {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
-  {label: '전체 메타데이터 보기', action: ACTION_METADATA},
+  {
+    label: '메타데이터',
+    capability: 'metadata',
+    children: [
+      {label: '탭에서 보기', action: ACTION_METADATA},
+      {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED},
+    ],
+  },
   {type: 'separator'},
   {
     label: '이미지 작업',
@@ -105,7 +113,14 @@ const THUMBNAIL_MENU = [
   },
   {type: 'separator'},
   {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
-  {label: '전체 메타데이터 보기', action: ACTION_METADATA, requiresPath: true},
+  {
+    label: '메타데이터',
+    capability: 'metadata',
+    children: [
+      {label: '탭에서 보기', action: ACTION_METADATA, requiresPath: true},
+      {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED, requiresPath: true},
+    ],
+  },
   {
     label: '이미지 작업',
     children: [
@@ -133,6 +148,7 @@ export function createResultContextMenu({
   escHtml = defaultEscHtml,
   onPasteImage = () => {},
   onShowMetadata = null,
+  onShowMetadataDetached = null,
   onImageAction = null,
   onLoadPrompt = null,
   onRerollPrompt = null,
@@ -184,6 +200,7 @@ export function createResultContextMenu({
 
   function isItemEnabled(item, context) {
     if (item.alwaysEnabled) return true;
+    if (item.requiresPath && !context?.path) return false;
     if (item.children) {
       return item.children.some(child => isItemEnabled(child, context));
     }
@@ -203,6 +220,9 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_METADATA) {
       return hasCapability(context, 'metadata');
+    }
+    if (item.action === ACTION_METADATA_DETACHED) {
+      return typeof onShowMetadataDetached === 'function' && hasCapability(context, 'metadata');
     }
     if (item.action === ACTION_PASTE_IMAGE) {
       return hasCapability(context, 'paste_image');
@@ -394,6 +414,8 @@ export function createResultContextMenu({
         } else if (action === ACTION_METADATA) {
           if (typeof onShowMetadata === 'function' && onShowMetadata(context) !== false) return;
           showMetadata(context);
+        } else if (action === ACTION_METADATA_DETACHED) {
+          if (typeof onShowMetadataDetached === 'function') onShowMetadataDetached(context);
         } else if (action === ACTION_PASTE_IMAGE) {
           onPasteImage();
         } else if (action === ACTION_OPEN_LOCATION) {

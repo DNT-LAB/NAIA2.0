@@ -742,6 +742,11 @@ header {
   opacity: 0.45;
   cursor: default;
 }
+.metadata-refresh-btn#metadataDetachBtn {
+  color: var(--accent-glow);
+  border-color: rgba(139, 118, 255, 0.36);
+  background: rgba(139, 118, 255, 0.09);
+}
 .metadata-layout {
   flex: 1;
   min-height: 0;
@@ -3334,6 +3339,22 @@ body.resizing-result-info {
   border-color: rgba(178, 223, 219, 0.42);
   transform: translateY(-1px);
 }
+.module-popup-icon-btn {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(139, 118, 255, 0.38);
+  border-radius: 7px;
+  background: rgba(139, 118, 255, 0.10);
+  color: var(--accent-glow);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.module-popup-icon-btn:hover {
+  background: rgba(139, 118, 255, 0.18);
+  color: var(--text-primary);
+}
 .module-popup-title {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
   letter-spacing: 0.8px; text-transform: uppercase;
@@ -3351,6 +3372,70 @@ body.resizing-result-info {
   overflow: hidden;
   min-height: 0;
   padding: 12px 14px;
+}
+
+/* ---- Detached popout windows ---- */
+body.detached-shell {
+  display: block !important;
+  min-width: 0;
+  overflow: hidden;
+}
+body.detached-shell header,
+body.detached-shell .control-panel,
+body.detached-shell .right-tab-bar,
+body.detached-shell .viewer-panel,
+body.detached-shell .viewer-lightbox {
+  display: none !important;
+}
+body.detached-shell .app-layout {
+  display: block;
+}
+body.detached-shell .viewer-wrapper {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  border: 0;
+}
+body.detached-module .viewer-wrapper {
+  display: none !important;
+}
+body.detached-module #modulePopup {
+  display: flex !important;
+  position: fixed !important;
+  inset: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.detached-module #modulePopup.module-popup-e621 {
+  inset: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+}
+body.detached-module #modulePopup .module-popup-body {
+  min-height: 0;
+  max-height: none;
+}
+body.detached-metadata .right-tab-pane {
+  display: none !important;
+}
+body.detached-metadata #rightTabPngInfo {
+  display: block !important;
+  position: fixed;
+  inset: 0;
+}
+body.detached-metadata .metadata-viewer {
+  height: 100dvh;
+}
+body.detached-metadata .metadata-layout {
+  height: calc(100dvh - 56px);
 }
 
 /* Module popup inner elements */

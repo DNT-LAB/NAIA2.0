@@ -16,7 +16,15 @@ let sessionId = null, sharedMode = false;
 let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
 const urlParams = new URLSearchParams(location.search);
 const isDesktopShell = urlParams.get('desktop_shell') === '1';
+const detachedMode = urlParams.get('detached') || '';
+const detachedModuleId = urlParams.get('module') || '';
+const detachedMetadataPath = urlParams.get('metadata_path') || urlParams.get('path') || '';
+const detachedMetadataSource = urlParams.get('source') || '';
+const isDetachedShell = detachedMode === 'module' || detachedMode === 'metadata';
+const isDetachedModule = detachedMode === 'module';
+const isDetachedMetadata = detachedMode === 'metadata';
 if (isDesktopShell) document.body.classList.add('desktop-shell');
+if (isDetachedShell) document.body.classList.add('detached-shell', `detached-${detachedMode}`);
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
@@ -260,6 +268,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
         else showToast('Image input is not ready', 'error');
       },
       onShowMetadata: showMetadataInTab,
+      onShowMetadataDetached: openMetadataDetachedFromContext,
       onImageAction: requestContextImageAction,
       onLoadPrompt: loadPromptFromResultContext,
       onRerollPrompt: rerollPromptFromResultContext,
@@ -1330,6 +1339,94 @@ function setNaiHighlightMode(mode) {
 function switchRightTab(tabName, options = {}) {
   if (rightTabs) rightTabs.switchTo(tabName);
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
+}
+
+function buildDetachedUrl(kind, params = {}) {
+  const url = new URL(location.href);
+  url.searchParams.set('detached', kind);
+  url.searchParams.delete('module');
+  url.searchParams.delete('metadata_path');
+  url.searchParams.delete('path');
+  url.searchParams.delete('source');
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  });
+  return url.toString();
+}
+
+function openDetachedWindow(url, name, features) {
+  const popup = window.open(url, name, features);
+  if (!popup) {
+    showToast('Popup blocked by browser', 'error');
+    return null;
+  }
+  popup.focus?.();
+  return popup;
+}
+
+function openDetachedModule(moduleId) {
+  if (!moduleId) return null;
+  return openDetachedWindow(
+    buildDetachedUrl('module', {module: moduleId}),
+    `naia-module-${moduleId}-${Date.now()}`,
+    'popup=yes,width=1180,height=860,resizable=yes,scrollbars=no'
+  );
+}
+
+function detachCurrentModule() {
+  if (!currentModuleId) {
+    showToast('No module is open', 'error');
+    return;
+  }
+  openDetachedModule(currentModuleId);
+}
+
+function openMetadataDetachedFromContext(context = {}) {
+  const path = context.path || '';
+  const source = context.source || '';
+  const params = path
+    ? {metadata_path: path}
+    : {source: source === 'current' ? 'current' : 'current'};
+  return openDetachedWindow(
+    buildDetachedUrl('metadata', params),
+    `naia-metadata-${Date.now()}`,
+    'popup=yes,width=1220,height=860,resizable=yes,scrollbars=yes'
+  );
+}
+
+function detachMetadataViewer() {
+  const source = metadataViewer?.getCurrentSource?.() || {};
+  if (source.kind === 'saved' && source.path) {
+    openMetadataDetachedFromContext({path: source.path, source: 'saved'});
+    return;
+  }
+  if (source.kind === 'current') {
+    openMetadataDetachedFromContext({source: 'current'});
+    return;
+  }
+  showToast('Only saved/current result metadata can be detached', 'error');
+}
+
+function initializeDetachedShell() {
+  if (!isDetachedShell) return;
+  if (isDetachedModule) {
+    document.title = `NAIA Module - ${detachedModuleId || 'Detached'}`;
+    if (detachedModuleId) openModule(detachedModuleId);
+    return;
+  }
+  if (isDetachedMetadata) {
+    document.title = 'NAIA Metadata';
+    switchRightTab('pngInfo', {skipMetadataRefresh: true});
+    if (detachedMetadataPath) {
+      metadataViewer?.loadSaved(detachedMetadataPath, {silent: false});
+    } else if (detachedMetadataSource === 'current' || !detachedMetadataSource) {
+      metadataViewer?.loadCurrent({silent: false});
+    } else {
+      showToast('Unsupported detached metadata source', 'error');
+    }
+  }
 }
 
 // ---- Result history (disk-based image browser) ----
@@ -2560,6 +2657,7 @@ const modulePopup = $('modulePopup');
 const moduleTitle = $('modulePopupTitle');
 const moduleBody = $('modulePopupBody');
 const modulePopupAction = $('modulePopupAction');
+const modulePopupDetach = $('modulePopupDetach');
 const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
@@ -2621,6 +2719,7 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
   });
 
 function updateModuleHeaderAction(moduleId) {
+  if (modulePopupDetach) modulePopupDetach.style.display = (!isDetachedShell && moduleId) ? '' : 'none';
   if (!modulePopupAction) return;
   if (moduleId === 'prompt_engineering' && !sharedMode && modeSelect.value === 'NAI') {
     modulePopupAction.textContent = '추천 설정 적용';
@@ -2689,6 +2788,10 @@ function openModule(moduleId) {
 }
 
 function closeModule() {
+  if (isDetachedModule) {
+    if (window.opener) window.close();
+    return;
+  }
   flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
@@ -4355,6 +4458,7 @@ Promise.all([
     initHistoryRail();
     initResultInfoResizer();
     refreshAllOptionVisuals();
+    initializeDetachedShell();
     setBootIndicator('Connecting…', 25, false);
     connect();
   })

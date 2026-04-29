@@ -1380,8 +1380,52 @@ function detachCurrentModule() {
     showToast('No module is open', 'error');
     return;
   }
-  openDetachedModule(currentModuleId);
+  if (isDetachedModule) {
+    attachCurrentModule();
+    return;
+  }
+  const popup = openDetachedModule(currentModuleId);
+  if (popup) closeModule();
 }
+
+function postAttachModuleRequest(moduleId) {
+  if (!window.opener || window.opener.closed) return false;
+  window.opener.postMessage({type: 'naia_attach_module', moduleId}, window.location.origin);
+  return true;
+}
+
+function attachCurrentModule() {
+  const moduleId = currentModuleId || detachedModuleId;
+  if (!moduleId) {
+    showToast('No module is open', 'error');
+    return;
+  }
+  if (!postAttachModuleRequest(moduleId)) {
+    showToast('Main window is unavailable', 'error');
+    return;
+  }
+  window.close();
+}
+
+function handleDetachedMessage(event) {
+  if (event.origin !== window.location.origin) return;
+  const data = event.data || {};
+  if (data.type !== 'naia_attach_module' || !data.moduleId) return;
+  const moduleId = String(data.moduleId);
+  if (!(currentModuleId === moduleId && modulePopup.classList.contains('open'))) {
+    openModule(moduleId);
+  }
+  window.focus?.();
+}
+
+function handleDetachedBeforeUnload() {
+  if (!isDetachedModule) return;
+  const moduleId = currentModuleId || detachedModuleId;
+  if (moduleId) postAttachModuleRequest(moduleId);
+}
+
+window.addEventListener('message', handleDetachedMessage);
+window.addEventListener('beforeunload', handleDetachedBeforeUnload);
 
 function openMetadataDetachedFromContext(context = {}) {
   const path = context.path || '';
@@ -2719,7 +2763,11 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
   });
 
 function updateModuleHeaderAction(moduleId) {
-  if (modulePopupDetach) modulePopupDetach.style.display = (!isDetachedShell && moduleId) ? '' : 'none';
+  if (modulePopupDetach) {
+    modulePopupDetach.style.display = moduleId ? '' : 'none';
+    modulePopupDetach.textContent = isDetachedModule ? 'Attach' : 'Popout';
+    modulePopupDetach.title = isDetachedModule ? 'Attach to main window' : 'Open detached window';
+  }
   if (!modulePopupAction) return;
   if (moduleId === 'prompt_engineering' && !sharedMode && modeSelect.value === 'NAI') {
     modulePopupAction.textContent = '추천 설정 적용';

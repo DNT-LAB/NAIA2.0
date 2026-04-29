@@ -128,6 +128,17 @@ export function createConditionalPromptPanel({
     const modeLabel = isV2 ? 'New Editor DSL' : 'Legacy DSL';
     const presetLabel = m.active_preset ? `<span class="cond-status-chip">Preset ${escHtml(m.active_preset)}</span>` : '';
     const opts = normalizeEngineOptions(m.engine_options);
+    const presets = Array.isArray(m.presets) ? m.presets : [];
+    const presetOptions = [
+      `<option value="">Load preset...</option>`,
+      ...presets.map(preset => {
+        const name = String(preset.name || '');
+        const suffix = preset.is_bundled ? ' bundle' : ' user';
+        const count = Number.isFinite(Number(preset.rule_count)) ? ` (${Number(preset.rule_count)})` : '';
+        const selected = name && name === m.active_preset ? ' selected' : '';
+        return `<option value="${escHtml(name)}"${selected}>${escHtml(name + count + suffix)}</option>`;
+      }),
+    ].join('');
 
     moduleBody.innerHTML = `
       <div>
@@ -143,6 +154,12 @@ export function createConditionalPromptPanel({
           <button type="button" class="cond-mode-btn ${!isV2 ? 'active' : ''}" data-cond-mode="legacy" onclick="setModuleParam('conditional_prompt','editor_mode','legacy')">Legacy DSL</button>
           <button type="button" class="cond-mode-btn ${isV2 ? 'active' : ''}" data-cond-mode="v2" onclick="setModuleParam('conditional_prompt','editor_mode','v2')">New Editor</button>
         </div>
+      </div>
+      <div>
+        <div class="mod-section-label">Preset</div>
+        <select class="mod-select" id="condPresetSelect" onchange="if(this.value)setModuleParam('conditional_prompt','preset_load',this.value)">
+          ${presetOptions}
+        </select>
       </div>
       <div>
         <div class="cond-rules-head">

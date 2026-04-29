@@ -3495,6 +3495,46 @@ class RemoteBridge(QObject):
             "stop_on_match": bool(raw.get("stop_on_match", False)),
         }
 
+    def _cond_preset_infos(self) -> list:
+        try:
+            from modules.conditional.preset_io import get_default_storage
+
+            infos = []
+            for info in get_default_storage().list_all():
+                infos.append({
+                    "name": info.name,
+                    "description": info.description,
+                    "is_bundled": bool(info.is_bundled),
+                    "rule_count": int(info.rule_count),
+                })
+            return infos
+        except Exception as e:
+            print(f"🌐 Remote: conditional preset 목록 읽기 실패 — {e}")
+            return []
+
+    def _cond_preset_override(self, name: str) -> dict | None:
+        try:
+            from modules.conditional.preset_io import get_default_storage
+            from modules.conditional.dsl_serializer import serialize_rulebook
+
+            storage = get_default_storage()
+            book = storage.load(name)
+            dsl = serialize_rulebook(book)
+            return {
+                "editor_mode": "v2",
+                "rules": dsl,
+                "active_rules": dsl,
+                "rules_v2": dsl,
+                "engine_options": self._cond_engine_options(source={
+                    "max_passes": book.max_passes,
+                    "stop_on_match": book.stop_on_match,
+                }),
+                "active_preset": name,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: conditional preset 로드 실패 — {name}: {e}")
+            return None
+
     def _cond_state_values_from_module(self, module) -> dict:
         legacy_rules = ""
         rules_textedit = getattr(module, "rules_textedit", None)
@@ -3543,6 +3583,7 @@ class RemoteBridge(QObject):
             "rules_v2": rules_v2,
             "engine_options": self._cond_engine_options(module),
             "active_preset": active_preset or "",
+            "presets": self._cond_preset_infos(),
         }
 
     def _cond_override_from_module(self, module) -> dict:
@@ -3592,6 +3633,7 @@ class RemoteBridge(QObject):
             "type": "module_state",
             "module_id": "conditional_prompt",
             **values,
+            "presets": self._cond_preset_infos(),
             "log": "",
         }
 
@@ -3635,6 +3677,10 @@ class RemoteBridge(QObject):
             opts = dict(values["engine_options"])
             opts["stop_on_match"] = value == "true"
             values["engine_options"] = self._cond_engine_options(source=opts)
+        elif key == "preset_load":
+            preset = self._cond_preset_override(value)
+            if preset is not None:
+                values.update(preset)
         override.clear()
         override.update(values)
 
@@ -4705,6 +4751,23 @@ class RemoteBridge(QObject):
                 else:
                     m._engine_options = opts
                 should_broadcast = True
+            elif key == "preset_load":
+                loaded = False
+                if hasattr(m, "load_preset_by_name"):
+                    loaded = bool(m.load_preset_by_name(value))
+                if loaded:
+                    should_broadcast = True
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": f"조건부 프리셋 로드: {value}",
+                        "level": "success",
+                    })
+                else:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": f"조건부 프리셋을 찾을 수 없습니다: {value}",
+                        "level": "error",
+                    })
             elif key == "test":
                 # test_rules()를 직접 호출 (test_button은 로컬 변수)
                 if hasattr(m, 'test_rules'):
@@ -7900,6 +7963,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 if session:
                                     co = session.setdefault("cond_override", {})
                                     bridge._update_cond_override(co, mkey, mval)
+                                    if mkey != "test":
+                                        await ws.send_text(json.dumps(
+                                            bridge._cond_state_from_override(co)
+                                        ))
                                     # test는 세션 오버라이드로 실행 불가 — 무시
                             elif bridge.shared_server_mode and mid == "prompt_engineering":
                                 session = ws_manager.sessions.get(ws)

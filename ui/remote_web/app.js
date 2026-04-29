@@ -2948,8 +2948,12 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
 function updateModuleHeaderAction(moduleId) {
   if (modulePopupDetach) {
     modulePopupDetach.style.display = moduleId ? '' : 'none';
-    modulePopupDetach.textContent = isDetachedModule ? 'Attach' : 'Popout';
+    modulePopupDetach.textContent = isDetachedModule ? '↙' : '↗';
     modulePopupDetach.title = isDetachedModule ? 'Attach to main window' : 'Open detached window';
+    modulePopupDetach.setAttribute(
+      'aria-label',
+      isDetachedModule ? 'Attach to main window' : 'Open detached window',
+    );
   }
   if (!modulePopupAction) return;
   if (moduleId === 'prompt_engineering' && !sharedMode && modeSelect.value === 'NAI') {

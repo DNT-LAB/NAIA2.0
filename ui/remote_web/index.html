@@ -141,7 +141,7 @@
     <span class="module-popup-title" id="modulePopupTitle"></span>
     <div class="module-popup-actions">
       <button class="module-popup-action-btn" id="modulePopupAction" style="display:none"></button>
-      <button class="module-popup-icon-btn" id="modulePopupDetach" onclick="detachCurrentModule()" title="Open detached window">Popout</button>
+      <button class="module-popup-icon-btn" id="modulePopupDetach" onclick="detachCurrentModule()" title="Open detached window" aria-label="Open detached window">↗</button>
       <button class="history-close" onclick="closeModule()">&times;</button>
     </div>
   </div>
@@ -512,7 +512,7 @@
         </div>
         <div class="metadata-toolbar-actions">
           <span class="metadata-status" id="metadataStatus"></span>
-          <button class="metadata-refresh-btn" id="metadataDetachBtn" onclick="detachMetadataViewer()">Popout</button>
+          <button class="metadata-refresh-btn" id="metadataDetachBtn" onclick="detachMetadataViewer()" title="Open detached window" aria-label="Open detached window">↗</button>
           <button class="metadata-refresh-btn" id="metadataRefreshBtn" onclick="refreshMetadataViewer()">Refresh</button>
         </div>
       </header>

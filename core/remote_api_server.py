@@ -206,6 +206,7 @@ class RemoteBridge(QObject):
         self._viewer_cache_dir: str = ""
         self._cached_e621_event_key: tuple | None = None
         self._cached_e621_event_state: dict | None = None
+        self._thumbnail_b64_cache: dict[tuple, str] = {}
         # NAI Anlas: 주기 + 생성 이벤트 기반 refresh. 웹 viewer 좌하단에 pill로 표시.
         self._anlas_cache: Optional[dict] = None     # {"anlas": int, "opus": bool, "tier": str, "fetched_at": str}
         self._anlas_timer: Optional[QTimer] = None
@@ -4668,8 +4669,21 @@ class RemoteBridge(QObject):
 
     # --- Character Reference / Vibe Transfer (이미지 업로드 모듈) ---
 
-    def _generate_thumbnail_b64(self, pil_image, max_side=128) -> str:
+    def _thumbnail_cache_key(self, frame, pil_image, max_side: int) -> tuple:
+        size = getattr(pil_image, "size", None)
+        return (
+            max_side,
+            getattr(frame, "file_hash", "") or "",
+            getattr(frame, "file_name", "") or "",
+            id(pil_image),
+            size,
+            getattr(pil_image, "mode", ""),
+        )
+
+    def _generate_thumbnail_b64(self, pil_image, max_side=128, cache_key=None) -> str:
         """PIL 이미지를 작은 JPEG 썸네일 base64로 변환"""
+        if cache_key is not None and cache_key in self._thumbnail_b64_cache:
+            return self._thumbnail_b64_cache[cache_key]
         from PIL import Image
         thumb = pil_image.copy()
         thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
@@ -4677,7 +4691,12 @@ class RemoteBridge(QObject):
             thumb = thumb.convert('RGB')
         buf = io.BytesIO()
         thumb.save(buf, format="JPEG", quality=70)
-        return base64.b64encode(buf.getvalue()).decode()
+        encoded = base64.b64encode(buf.getvalue()).decode()
+        if cache_key is not None:
+            if len(self._thumbnail_b64_cache) > 512:
+                self._thumbnail_b64_cache.clear()
+            self._thumbnail_b64_cache[cache_key] = encoded
+        return encoded
 
     def _read_character_reference(self) -> dict:
         try:
@@ -4689,7 +4708,10 @@ class RemoteBridge(QObject):
                 thumb = ""
                 try:
                     if hasattr(f, 'image') and f.image:
-                        thumb = self._generate_thumbnail_b64(f.image)
+                        thumb = self._generate_thumbnail_b64(
+                            f.image,
+                            cache_key=self._thumbnail_cache_key(f, f.image, 128),
+                        )
                 except Exception:
                     pass
                 frames.append({
@@ -4731,7 +4753,10 @@ class RemoteBridge(QObject):
                 thumb = ""
                 try:
                     if hasattr(f, 'image') and f.image and not f.is_no_image:
-                        thumb = self._generate_thumbnail_b64(f.image)
+                        thumb = self._generate_thumbnail_b64(
+                            f.image,
+                            cache_key=self._thumbnail_cache_key(f, f.image, 128),
+                        )
                 except Exception:
                     pass
                 encoding_keys = sorted(float(k) for k in getattr(f, 'vibe_encodings', {}).keys())
@@ -5019,7 +5044,33 @@ class RemoteBridge(QObject):
             filename += ".json"
         return filename
 
-    def _reload_instant_wildcards(self, module) -> bool:
+    def _instant_wildcard_file_signature(self, module) -> tuple:
+        try:
+            module.save_path.mkdir(parents=True, exist_ok=True)
+            entries = []
+            for item in sorted(module.save_path.glob("*.json"), key=lambda path: path.name):
+                if item.name == "wc_metadata.json":
+                    continue
+                stat = item.stat()
+                entries.append((item.name, stat.st_mtime_ns, stat.st_size))
+            return tuple(entries)
+        except Exception:
+            return ()
+
+    def _ensure_instant_wildcard_selection(self, module):
+        if module.json_data:
+            if module.current_file not in module.json_data:
+                module.current_file = next(iter(module.json_data.keys()))
+            current_items = module.json_data.get(module.current_file, {})
+            if current_items and module.current_key not in current_items:
+                module.current_key = next(iter(sorted(current_items.keys())))
+            elif not current_items:
+                module.current_key = None
+        else:
+            module.current_file = None
+            module.current_key = None
+
+    def _reload_instant_wildcards(self, module, *, force: bool = False) -> bool:
         if not module:
             return False
         try:
@@ -5027,6 +5078,15 @@ class RemoteBridge(QObject):
             default_file = module.save_path / "default.json"
             if not default_file.exists() and hasattr(module, "create_initial_files"):
                 module.create_initial_files()
+
+            signature = self._instant_wildcard_file_signature(module)
+            if (
+                not force
+                and getattr(module, "_remote_iw_file_signature", None) == signature
+                and getattr(module, "json_data", None)
+            ):
+                self._ensure_instant_wildcard_selection(module)
+                return True
 
             if getattr(module, "file_combo", None) is not None and getattr(module, "key_combo", None) is not None:
                 module.load_all_wildcards()
@@ -5069,17 +5129,8 @@ class RemoteBridge(QObject):
                         module.instant_wildcard_tree,
                     )
 
-            if module.json_data:
-                if module.current_file not in module.json_data:
-                    module.current_file = next(iter(module.json_data.keys()))
-                current_items = module.json_data.get(module.current_file, {})
-                if current_items and module.current_key not in current_items:
-                    module.current_key = next(iter(sorted(current_items.keys())))
-                elif not current_items:
-                    module.current_key = None
-            else:
-                module.current_file = None
-                module.current_key = None
+            module._remote_iw_file_signature = signature
+            self._ensure_instant_wildcard_selection(module)
             return True
         except Exception as e:
             print(f"🌐 Remote: instant_wildcard reload 실패 — {e}")
@@ -5095,7 +5146,7 @@ class RemoteBridge(QObject):
             data = module.json_data.get(filename, {})
             with open(filepath, "w", encoding="utf-8") as handle:
                 json.dump(data, handle, ensure_ascii=False, indent=2)
-            self._reload_instant_wildcards(module)
+            self._reload_instant_wildcards(module, force=True)
             return True
         except Exception as e:
             print(f"🌐 Remote: instant_wildcard 저장 실패 — {filename}: {e}")
@@ -5168,7 +5219,7 @@ class RemoteBridge(QObject):
             should_broadcast = True
 
             if key == "reload":
-                self._reload_instant_wildcards(module)
+                self._reload_instant_wildcards(module, force=True)
             elif key == "select_file":
                 filename = self._instant_wildcard_filename(value)
                 if filename in module.json_data:

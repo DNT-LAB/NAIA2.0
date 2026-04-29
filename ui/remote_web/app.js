@@ -20,9 +20,11 @@ const detachedMode = urlParams.get('detached') || '';
 const detachedModuleId = urlParams.get('module') || '';
 const detachedMetadataPath = urlParams.get('metadata_path') || urlParams.get('path') || '';
 const detachedMetadataSource = urlParams.get('source') || '';
+const detachedSnapshotToken = urlParams.get('snapshot') || '';
 const isDetachedShell = detachedMode === 'module' || detachedMode === 'metadata';
 const isDetachedModule = detachedMode === 'module';
 const isDetachedMetadata = detachedMode === 'metadata';
+const DETACHED_MODULE_SNAPSHOT_PREFIX = 'naia.detachedModuleSnapshot.';
 if (isDesktopShell) document.body.classList.add('desktop-shell');
 if (isDetachedShell) document.body.classList.add('detached-shell', `detached-${detachedMode}`);
 
@@ -73,6 +75,7 @@ let promptEngineeringPanelControl = null;
 let promptEngineeringActions = null;
 let promptEngineeringPopups = null;
 let promptHighlightIndexPromise = null;
+const moduleStateCache = new Map();
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -1368,8 +1371,11 @@ function openDetachedWindow(url, name, features) {
 
 function openDetachedModule(moduleId) {
   if (!moduleId) return null;
+  const snapshotToken = saveDetachedModuleSnapshot(moduleId);
+  const params = {module: moduleId};
+  if (snapshotToken) params.snapshot = snapshotToken;
   return openDetachedWindow(
-    buildDetachedUrl('module', {module: moduleId}),
+    buildDetachedUrl('module', params),
     `naia-module-${moduleId}-${Date.now()}`,
     'popup=yes,width=1180,height=860,resizable=yes,scrollbars=no'
   );
@@ -1384,13 +1390,108 @@ function detachCurrentModule() {
     attachCurrentModule();
     return;
   }
+  flushCurrentModuleEditsForDetach();
   const popup = openDetachedModule(currentModuleId);
   if (popup) closeModule();
 }
 
+function flushCurrentModuleEditsForDetach() {
+  if (currentModuleId === 'prompt_engineering') {
+    flushPromptEngineeringEdits();
+  } else if (currentModuleId === 'character') {
+    flushCharacterEdits();
+  } else {
+    flushPendingModuleEdit(currentModuleId);
+  }
+}
+
+function saveDetachedModuleSnapshot(moduleId) {
+  const state = collectModuleSnapshotState(moduleId);
+  if (!state) return '';
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    localStorage.setItem(
+      DETACHED_MODULE_SNAPSHOT_PREFIX + token,
+      JSON.stringify({moduleId, state, createdAt: Date.now()}),
+    );
+    return token;
+  } catch (error) {
+    console.warn('Failed to save detached module snapshot', error);
+    return '';
+  }
+}
+
+function cloneModuleState(state) {
+  if (!state) return null;
+  try {
+    return typeof structuredClone === 'function'
+      ? structuredClone(state)
+      : JSON.parse(JSON.stringify(state));
+  } catch (_) {
+    try { return JSON.parse(JSON.stringify(state)); } catch (error) {
+      console.warn('Failed to clone module state snapshot', error);
+      return null;
+    }
+  }
+}
+
+function collectModuleSnapshotState(moduleId) {
+  const state = cloneModuleState(moduleStateCache.get(moduleId));
+  if (!state) return null;
+
+  if (moduleId === 'prompt_engineering') {
+    const pre = document.getElementById('modPrePrompt');
+    const post = document.getElementById('modPostPrompt');
+    const autoHide = document.getElementById('modAutoHide');
+    if (pre) state.pre_prompt = pre.value;
+    if (post) state.post_prompt = post.value;
+    if (autoHide) state.auto_hide = autoHide.value;
+  } else if (moduleId === 'character' && Array.isArray(state.characters)) {
+    document.querySelectorAll('[data-char-index]').forEach(block => {
+      const idx = Number(block.dataset.charIndex);
+      const character = state.characters[idx];
+      if (!character) return;
+      const prompt = block.querySelector('.mod-char-prompt');
+      const uc = block.querySelector('.mod-char-uc');
+      if (prompt) character.prompt = prompt.value;
+      if (uc) character.uc = uc.value;
+    });
+  } else if (moduleId === 'conditional_prompt') {
+    const rules = document.getElementById('condRulesInput');
+    if (rules) state.rules = rules.value;
+  } else if (moduleId === 'e621_event') {
+    const search = document.getElementById('e621SearchInput');
+    const testbench = document.getElementById('e621Testbench');
+    if (search) state.search_text = search.value;
+    if (testbench) state.testbench = testbench.value;
+  }
+
+  return state;
+}
+
+function takeDetachedModuleSnapshot(moduleId) {
+  if (!detachedSnapshotToken) return null;
+  const key = DETACHED_MODULE_SNAPSHOT_PREFIX + detachedSnapshotToken;
+  try {
+    const raw = localStorage.getItem(key);
+    localStorage.removeItem(key);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload || payload.moduleId !== moduleId || !payload.state) return null;
+    return payload.state;
+  } catch (error) {
+    console.warn('Failed to read detached module snapshot', error);
+    return null;
+  }
+}
+
 function postAttachModuleRequest(moduleId) {
   if (!window.opener || window.opener.closed) return false;
-  window.opener.postMessage({type: 'naia_attach_module', moduleId}, window.location.origin);
+  window.opener.postMessage({
+    type: 'naia_attach_module',
+    moduleId,
+    state: moduleStateCache.get(moduleId) || null,
+  }, window.location.origin);
   return true;
 }
 
@@ -1412,9 +1513,13 @@ function handleDetachedMessage(event) {
   const data = event.data || {};
   if (data.type !== 'naia_attach_module' || !data.moduleId) return;
   const moduleId = String(data.moduleId);
+  if (data.state && data.state.module_id === moduleId) {
+    moduleStateCache.set(moduleId, data.state);
+  }
   if (!(currentModuleId === moduleId && modulePopup.classList.contains('open'))) {
     openModule(moduleId);
   }
+  if (data.state && currentModuleId === moduleId) renderModuleState(data.state);
   window.focus?.();
 }
 
@@ -1457,7 +1562,14 @@ function initializeDetachedShell() {
   if (!isDetachedShell) return;
   if (isDetachedModule) {
     document.title = `NAIA Module - ${detachedModuleId || 'Detached'}`;
-    if (detachedModuleId) openModule(detachedModuleId);
+    if (detachedModuleId) {
+      openModule(detachedModuleId);
+      const snapshot = takeDetachedModuleSnapshot(detachedModuleId);
+      if (snapshot) {
+        moduleStateCache.set(detachedModuleId, snapshot);
+        renderModuleState(snapshot);
+      }
+    }
     return;
   }
   if (isDetachedMetadata) {
@@ -2991,6 +3103,7 @@ function syncPromptEngineeringPopups() {
 }
 
 function onModuleState(m) {
+  if (m.module_id) moduleStateCache.set(m.module_id, m);
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);
@@ -3008,6 +3121,10 @@ function onModuleState(m) {
   }
 
   if (m.module_id !== currentModuleId) return;
+  renderModuleState(m);
+}
+
+function renderModuleState(m) {
   if (m.module_id === 'auto_save') renderAutoSavePanel(m);
   else if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
   else if (m.module_id === 'automation') renderAutomation(m);

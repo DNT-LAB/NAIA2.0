@@ -142,7 +142,7 @@ class RemoteBridge(QObject):
     request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
-    request_result_reroll = pyqtSignal()                # 현재 ImageWindow 결과의 desktop reroll 재사용
+    request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
     request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
@@ -1236,11 +1236,47 @@ class RemoteBridge(QObject):
         except Exception:
             return source_row
 
-    def _do_result_reroll(self):
+    def _get_result_context_source_row(self, payload: dict | None = None):
+        payload = payload if isinstance(payload, dict) else {}
+        source = str(payload.get("source") or "").strip().lower()
+        rel_path = str(payload.get("path") or "").strip()
+        file_path = str(payload.get("file_path") or payload.get("filePath") or "").strip()
+
+        if rel_path and source != "current":
+            item = self._find_history_item_by_path(rel_path=rel_path, file_path=file_path)
+            source_row = getattr(item, "source_row", None) if item else None
+            if not self._source_row_available(source_row):
+                return None
+            try:
+                return source_row.copy()
+            except Exception:
+                return source_row
+
+        return self._get_current_result_source_row()
+
+    def _do_result_reroll(self, payload_json: str = "{}"):
         """데스크탑 ImageWindow의 '프롬프트 다시개봉' 구현체를 Remote Web에서 재사용."""
+        try:
+            payload = json.loads(payload_json) if payload_json else {}
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
         image_window = self._get_image_window_widget()
         if not image_window:
             self._broadcast_json({"type": "toast", "message": "ImageWindow is not ready", "level": "error"})
+            return
+
+        source = str(payload.get("source") or "").strip().lower()
+        rel_path = str(payload.get("path") or "").strip()
+        if rel_path and source != "current":
+            source_row = self._get_result_context_source_row(payload)
+            if not self._source_row_available(source_row):
+                self._broadcast_json({"type": "toast", "message": "Reroll source is unavailable", "level": "error"})
+                return
+            image_window.instant_generation_requested.emit(source_row)
+            print("🌐 Remote: saved result 프롬프트 다시개봉 실행")
             return
 
         reroll_current_prompt = getattr(image_window, "_reroll_current_prompt", None)
@@ -1403,7 +1439,7 @@ class RemoteBridge(QObject):
                 "metadata": has_metadata,
                 "paste_image": True,
                 "open_file": has_file,
-                "save_image": bool(has_item_image and not has_file),
+                "save_image": has_image,
                 "copy_png": has_image,
                 "copy_webp": has_image,
                 "upscale_nai": bool(has_image and mode == "NAI"),
@@ -1426,6 +1462,9 @@ class RemoteBridge(QObject):
         except Exception:
             stat = None
             normalized_path = rel_path.replace("\\", "/")
+        matched_item = self._find_history_item_by_path(rel_path=normalized_path)
+        matched_source_row = getattr(matched_item, "source_row", None) if matched_item else None
+        has_source_row = self._source_row_available(matched_source_row)
 
         return {
             "id": f"saved:{normalized_path}",
@@ -1441,13 +1480,13 @@ class RemoteBridge(QObject):
             "mtime": stat.st_mtime if stat else None,
             "capabilities": {
                 "load_prompt": True,
-                "reroll": False,
+                "reroll": has_source_row,
                 "queue": False,
                 "restore_params": True,
                 "metadata": True,
                 "paste_image": True,
                 "open_file": True,
-                "save_image": False,
+                "save_image": True,
                 "copy_png": True,
                 "copy_webp": True,
                 "upscale_nai": self._current_api_mode() == "NAI",
@@ -2474,6 +2513,52 @@ class RemoteBridge(QObject):
                 return legacy_widget
         except Exception:
             pass
+        return None
+
+    def _find_history_item_by_path(self, rel_path: str = "", file_path: str = ""):
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            return None
+
+        target = None
+        rel_path = str(rel_path or "").strip()
+        file_path = str(file_path or "").strip()
+        if rel_path:
+            target = self._validate_viewer_path(rel_path)
+        elif file_path:
+            try:
+                target = Path(file_path).resolve()
+            except Exception:
+                target = None
+        if not target:
+            return None
+
+        try:
+            target = Path(target).resolve()
+        except Exception:
+            return None
+
+        history_window = getattr(image_window, "image_history_window", None)
+        history_widgets = getattr(history_window, "history_widgets", []) if history_window else []
+        for widget in history_widgets:
+            item = getattr(widget, "history_item", None)
+            item_path = getattr(item, "filepath", "") if item else ""
+            if not item_path:
+                continue
+            try:
+                if Path(item_path).resolve() == target:
+                    return item
+            except Exception:
+                continue
+
+        current_item = getattr(image_window, "current_history_item", None)
+        current_path = getattr(current_item, "filepath", "") if current_item else ""
+        if current_path:
+            try:
+                if Path(current_path).resolve() == target:
+                    return current_item
+            except Exception:
+                pass
         return None
 
     def _get_auto_save_checkbox(self):
@@ -6307,11 +6392,17 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         return {"status": "random_generation_requested"}
 
     @app.post("/api/result/action/reroll")
-    async def api_result_action_reroll():
-        source_row = await asyncio.to_thread(bridge._get_current_result_source_row)
+    async def api_result_action_reroll(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        source_row = await asyncio.to_thread(bridge._get_result_context_source_row, payload)
         if not bridge._source_row_available(source_row):
             return JSONResponse({"error": "Reroll source is unavailable"}, status_code=400)
-        bridge.request_result_reroll.emit()
+        bridge.request_result_reroll.emit(json.dumps(payload))
         return {"ok": True, "action": "reroll"}
 
     @app.post("/api/comfyui/random")

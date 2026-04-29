@@ -342,7 +342,7 @@ export function createResultContextMenu({
         copy_png: hasImage,
         copy_webp: hasImage,
         open_file: isSaved && Boolean(path),
-        save_image: isCurrent && hasImage,
+        save_image: (isCurrent || isSaved) && hasImage,
       },
     };
   }

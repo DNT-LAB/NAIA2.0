@@ -1509,7 +1509,15 @@ async function rerollPromptFromResultContext(context = {}) {
     return;
   }
   try {
-    const response = await fetch('/api/result/action/reroll', {method: 'POST'});
+    const response = await fetch('/api/result/action/reroll', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        source: context.source || '',
+        path: context.path || '',
+        file_path: context.filePath || '',
+      }),
+    });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || `HTTP ${response.status}`);

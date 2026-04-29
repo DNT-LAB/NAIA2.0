@@ -76,6 +76,8 @@ let promptEngineeringActions = null;
 let promptEngineeringPopups = null;
 let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
+let detachedAttachPosted = false;
+let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
 const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
   .then(module => {
     createWsMessageDispatcher = module.createWsMessageDispatcher;
@@ -860,8 +862,8 @@ function onInitComplete() {
   _bootSafetyTimer = setTimeout(finalizeBoot, BOOT_SAFETY_MS);
   if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
   // 재연결 시 열려있는 모듈 자동 리프레시 (캐시 fallback 적용 위해)
-  if (currentModuleId && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'get_module_state', module_id: currentModuleId}));
+  if (currentModuleId && !isModuleStateGuarded(currentModuleId)) {
+    requestModuleState(currentModuleId);
   }
   if (resultHistory) resultHistory.prepareInitialHistory();
   if (!sharedMode) {
@@ -1485,13 +1487,25 @@ function takeDetachedModuleSnapshot(moduleId) {
   }
 }
 
-function postAttachModuleRequest(moduleId) {
+function currentModuleTransferState(moduleId) {
+  if (currentModuleId === moduleId) {
+    flushCurrentModuleEditsForDetach();
+  } else {
+    flushPendingModuleEdit(moduleId);
+  }
+  const state = collectModuleSnapshotState(moduleId) || moduleStateCache.get(moduleId) || null;
+  if (state && state.module_id === moduleId) moduleStateCache.set(moduleId, state);
+  return state;
+}
+
+function postAttachModuleRequest(moduleId, options = {}) {
   if (!window.opener || window.opener.closed) return false;
   window.opener.postMessage({
     type: 'naia_attach_module',
     moduleId,
-    state: moduleStateCache.get(moduleId) || null,
+    state: currentModuleTransferState(moduleId),
   }, window.location.origin);
+  if (options.markPosted !== false) detachedAttachPosted = true;
   return true;
 }
 
@@ -1513,24 +1527,51 @@ function handleDetachedMessage(event) {
   const data = event.data || {};
   if (data.type !== 'naia_attach_module' || !data.moduleId) return;
   const moduleId = String(data.moduleId);
-  if (data.state && data.state.module_id === moduleId) {
-    moduleStateCache.set(moduleId, data.state);
-  }
+  const transferredState = (data.state && data.state.module_id === moduleId) ? data.state : null;
   if (!(currentModuleId === moduleId && modulePopup.classList.contains('open'))) {
-    openModule(moduleId);
+    openModule(moduleId, {
+      initialState: transferredState,
+      skipStateRequest: !!transferredState,
+      guardInitialState: !!transferredState,
+    });
+  } else if (transferredState) {
+    moduleStateCache.set(moduleId, transferredState);
+    renderModuleState(transferredState);
+    guardTransferredModuleState(moduleId);
   }
-  if (data.state && currentModuleId === moduleId) renderModuleState(data.state);
   window.focus?.();
 }
 
 function handleDetachedBeforeUnload() {
-  if (!isDetachedModule) return;
+  if (!isDetachedModule || detachedAttachPosted) return;
   const moduleId = currentModuleId || detachedModuleId;
-  if (moduleId) postAttachModuleRequest(moduleId);
+  if (moduleId) postAttachModuleRequest(moduleId, {markPosted: true});
 }
 
 window.addEventListener('message', handleDetachedMessage);
 window.addEventListener('beforeunload', handleDetachedBeforeUnload);
+
+function guardTransferredModuleState(moduleId, delayMs = 900) {
+  if (!moduleId) return;
+  if (transferredModuleStateGuard.timer) {
+    clearTimeout(transferredModuleStateGuard.timer);
+    transferredModuleStateGuard.timer = null;
+  }
+  transferredModuleStateGuard.moduleId = moduleId;
+  transferredModuleStateGuard.until = Date.now() + delayMs;
+  transferredModuleStateGuard.timer = setTimeout(() => {
+    if (currentModuleId === moduleId) requestModuleState(moduleId);
+    if (transferredModuleStateGuard.moduleId === moduleId) {
+      transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
+    }
+  }, delayMs);
+}
+
+function isModuleStateGuarded(moduleId) {
+  return !!moduleId
+    && transferredModuleStateGuard.moduleId === moduleId
+    && Date.now() < transferredModuleStateGuard.until;
+}
 
 function openMetadataDetachedFromContext(context = {}) {
   const path = context.path || '';
@@ -1563,12 +1604,12 @@ function initializeDetachedShell() {
   if (isDetachedModule) {
     document.title = `NAIA Module - ${detachedModuleId || 'Detached'}`;
     if (detachedModuleId) {
-      openModule(detachedModuleId);
       const snapshot = takeDetachedModuleSnapshot(detachedModuleId);
-      if (snapshot) {
-        moduleStateCache.set(detachedModuleId, snapshot);
-        renderModuleState(snapshot);
-      }
+      openModule(detachedModuleId, {
+        initialState: snapshot,
+        skipStateRequest: !!snapshot,
+        guardInitialState: !!snapshot,
+      });
     }
     return;
   }
@@ -2892,7 +2933,17 @@ function updateModuleHeaderAction(moduleId) {
   modulePopupAction.textContent = '';
 }
 
-function openModule(moduleId) {
+function requestModuleState(moduleId) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (moduleId === 'search') {
+    ws.send(JSON.stringify({type: 'get_search_state'}));
+  } else {
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: moduleId}));
+  }
+  return true;
+}
+
+function openModule(moduleId, options = {}) {
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
@@ -2938,12 +2989,13 @@ function openModule(moduleId) {
   if (moduleId === 'auto_save' && autoSavePanel) {
     autoSavePanel.renderCached();
   }
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    if (moduleId === 'search') {
-      ws.send(JSON.stringify({type: 'get_search_state'}));
-    } else {
-      ws.send(JSON.stringify({type: 'get_module_state', module_id: moduleId}));
-    }
+  if (options.initialState && options.initialState.module_id === moduleId) {
+    moduleStateCache.set(moduleId, options.initialState);
+    renderModuleState(options.initialState);
+    if (options.guardInitialState) guardTransferredModuleState(moduleId);
+  }
+  if (!options.skipStateRequest) {
+    requestModuleState(moduleId);
   }
 }
 
@@ -3103,6 +3155,7 @@ function syncPromptEngineeringPopups() {
 }
 
 function onModuleState(m) {
+  if (isModuleStateGuarded(m.module_id)) return;
   if (m.module_id) moduleStateCache.set(m.module_id, m);
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);

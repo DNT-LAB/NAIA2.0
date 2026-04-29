@@ -15,7 +15,9 @@ export function createConditionalPromptPanel({
 
   function normalizeEngineOptions(options = {}) {
     const rawMax = Number(options.max_passes ?? 1);
-    const maxPasses = Number.isFinite(rawMax) ? Math.max(1, Math.round(rawMax)) : 1;
+    const maxPasses = Number.isFinite(rawMax)
+      ? Math.min(20, Math.max(1, Math.round(rawMax)))
+      : 1;
     return {
       max_passes: maxPasses,
       stop_on_match: Boolean(options.stop_on_match),
@@ -105,10 +107,8 @@ export function createConditionalPromptPanel({
   function render(state) {
     let m = normalizeState(state);
     if (getSharedMode()) {
-      const sharedCond = getSharedCond();
-      if (sharedCond) {
-        m = normalizeState({...m, ...sharedCond});
-      }
+      // Shared Mode is a legacy path. Treat server module_state as authoritative;
+      // restore_session already sends any saved client override to the server.
       setSharedCond({
         enabled: m.enabled,
         editor_mode: m.editor_mode,

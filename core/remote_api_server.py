@@ -3491,7 +3491,7 @@ class RemoteBridge(QObject):
         except Exception:
             max_passes = 1
         return {
-            "max_passes": max(1, max_passes),
+            "max_passes": min(20, max(1, max_passes)),
             "stop_on_match": bool(raw.get("stop_on_match", False)),
         }
 
@@ -7963,7 +7963,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 if session:
                                     co = session.setdefault("cond_override", {})
                                     bridge._update_cond_override(co, mkey, mval)
-                                    if mkey != "test":
+                                    if mkey in (
+                                        "enabled", "editor_mode", "mode",
+                                        "engine_options", "max_passes",
+                                        "stop_on_match", "preset_load",
+                                    ):
                                         await ws.send_text(json.dumps(
                                             bridge._cond_state_from_override(co)
                                         ))

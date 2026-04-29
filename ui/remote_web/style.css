@@ -3380,6 +3380,23 @@ body.detached-shell {
   min-width: 0;
   overflow: hidden;
 }
+body.detached-module {
+  --detached-module-width: 720px;
+}
+body.detached-module.detached-module-prompt_engineering { --detached-module-width: 640px; }
+body.detached-module.detached-module-character { --detached-module-width: 760px; }
+body.detached-module.detached-module-conditional_prompt { --detached-module-width: 720px; }
+body.detached-module.detached-module-wildcard,
+body.detached-module.detached-module-instant_wildcard,
+body.detached-module.detached-module-search { --detached-module-width: 680px; }
+body.detached-module.detached-module-chunk,
+body.detached-module.detached-module-auto_save,
+body.detached-module.detached-module-save_directory { --detached-module-width: 620px; }
+body.detached-module.detached-module-automation,
+body.detached-module.detached-module-ollama { --detached-module-width: 760px; }
+body.detached-module.detached-module-character_reference,
+body.detached-module.detached-module-vibe_transfer { --detached-module-width: 900px; }
+body.detached-module.detached-module-e621_event { --detached-module-width: 1120px; }
 body.detached-shell header,
 body.detached-shell .control-panel,
 body.detached-shell .right-tab-bar,
@@ -3403,21 +3420,27 @@ body.detached-module .viewer-wrapper {
 body.detached-module #modulePopup {
   display: flex !important;
   position: fixed !important;
-  inset: 0 !important;
-  width: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  left: 50% !important;
+  right: auto !important;
+  width: min(100vw, var(--detached-module-width)) !important;
   max-width: none !important;
   max-height: none !important;
   margin: 0 !important;
-  border: 0;
+  transform: translateX(-50%);
+  border-top: 0;
+  border-bottom: 0;
   border-radius: 0;
   box-shadow: none;
 }
 body.detached-module #modulePopup.module-popup-e621 {
-  inset: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
+  width: min(100vw, var(--detached-module-width)) !important;
+  left: 50% !important;
+  right: auto !important;
   top: 0 !important;
   bottom: 0 !important;
+  transform: translateX(-50%);
 }
 body.detached-module #modulePopup .module-popup-body {
   min-height: 0;

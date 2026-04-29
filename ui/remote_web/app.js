@@ -27,6 +27,9 @@ const isDetachedMetadata = detachedMode === 'metadata';
 const DETACHED_MODULE_SNAPSHOT_PREFIX = 'naia.detachedModuleSnapshot.';
 if (isDesktopShell) document.body.classList.add('desktop-shell');
 if (isDetachedShell) document.body.classList.add('detached-shell', `detached-${detachedMode}`);
+if (isDetachedModule && detachedModuleId) {
+  document.body.classList.add(`detached-module-${detachedModuleId.replace(/[^a-z0-9_-]/gi, '_')}`);
+}
 
 // ---- Shared Mode LocalStorage 세션 유지 ----
 const SHARED_STORAGE_KEY = 'naia_shared_session';
@@ -1341,6 +1344,33 @@ function setNaiHighlightMode(mode) {
 
 // ---- Right panel top-level tabs ----
 
+const DETACHED_MODULE_GEOMETRY = {
+  prompt_engineering: {width: 640, height: 860},
+  character: {width: 760, height: 860},
+  conditional_prompt: {width: 720, height: 780},
+  wildcard: {width: 680, height: 780},
+  instant_wildcard: {width: 680, height: 780},
+  chunk: {width: 620, height: 700},
+  search: {width: 680, height: 760},
+  auto_save: {width: 620, height: 680},
+  save_directory: {width: 620, height: 680},
+  automation: {width: 760, height: 760},
+  character_reference: {width: 900, height: 780},
+  vibe_transfer: {width: 900, height: 780},
+  e621_event: {width: 1120, height: 820},
+  ollama: {width: 760, height: 780},
+};
+const DEFAULT_DETACHED_MODULE_GEOMETRY = {width: 720, height: 760};
+const DETACHED_METADATA_GEOMETRY = {width: 1040, height: 820};
+
+function detachedWindowFeatures({width, height}, {scrollbars = 'no'} = {}) {
+  return `popup=yes,width=${width},height=${height},resizable=yes,scrollbars=${scrollbars}`;
+}
+
+function getDetachedModuleGeometry(moduleId) {
+  return DETACHED_MODULE_GEOMETRY[moduleId] || DEFAULT_DETACHED_MODULE_GEOMETRY;
+}
+
 function switchRightTab(tabName, options = {}) {
   if (rightTabs) rightTabs.switchTo(tabName);
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
@@ -1379,7 +1409,7 @@ function openDetachedModule(moduleId) {
   return openDetachedWindow(
     buildDetachedUrl('module', params),
     `naia-module-${moduleId}-${Date.now()}`,
-    'popup=yes,width=1180,height=860,resizable=yes,scrollbars=no'
+    detachedWindowFeatures(getDetachedModuleGeometry(moduleId))
   );
 }
 
@@ -1582,7 +1612,7 @@ function openMetadataDetachedFromContext(context = {}) {
   return openDetachedWindow(
     buildDetachedUrl('metadata', params),
     `naia-metadata-${Date.now()}`,
-    'popup=yes,width=1220,height=860,resizable=yes,scrollbars=yes'
+    detachedWindowFeatures(DETACHED_METADATA_GEOMETRY, {scrollbars: 'yes'})
   );
 }
 

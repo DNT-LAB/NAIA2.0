@@ -6,6 +6,8 @@ backend alive, while QWebEngine renders the existing Remote Web client.
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlparse
+
 from PyQt6.QtCore import QTimer, QUrl, Qt
 from PyQt6.QtWidgets import QApplication, QMainWindow
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
@@ -49,19 +51,41 @@ class _WebShellPage(QWebEnginePage):
 class _WebShellPopupWindow(QMainWindow):
     """Detached QWebEngine window opened by Web Shell window.open()."""
 
+    _DEFAULT_SIZE = (720, 760)
+    _METADATA_SIZE = (1040, 820)
+    _MODULE_SIZES = {
+        "prompt_engineering": (640, 860),
+        "character": (760, 860),
+        "conditional_prompt": (720, 780),
+        "wildcard": (680, 780),
+        "instant_wildcard": (680, 780),
+        "chunk": (620, 700),
+        "search": (680, 760),
+        "auto_save": (620, 680),
+        "save_directory": (620, 680),
+        "automation": (760, 760),
+        "character_reference": (900, 780),
+        "vibe_transfer": (900, 780),
+        "e621_event": (1120, 820),
+        "ollama": (760, 780),
+    }
+
     def __init__(self, owner: "WebWrapperWindow"):
         super().__init__(owner)
         self._owner = owner
+        self._geometry_key = ""
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle("NAIA Web Shell - Detached")
-        self.setMinimumSize(720, 520)
-        self.resize(1180, 860)
+        self.setMinimumSize(520, 420)
+        self.resize(*self._DEFAULT_SIZE)
 
         self._view = QWebEngineView(self)
         self._page = _WebShellPage(self, popup_factory=owner._create_popup_page)
         self._view.setPage(self._page)
         self._configure_settings(self._view.settings())
         self._page.titleChanged.connect(self._on_title_changed)
+        self._page.urlChanged.connect(self._apply_url_geometry)
+        self._page.geometryChangeRequested.connect(self._apply_requested_geometry)
         self._page.windowCloseRequested.connect(self.close)
         self.setCentralWidget(self._view)
 
@@ -76,6 +100,42 @@ class _WebShellPopupWindow(QMainWindow):
     def _on_title_changed(self, title: str):
         if title:
             self.setWindowTitle(title)
+
+    def _apply_requested_geometry(self, rect):
+        if not rect.isValid():
+            return
+        width = max(520, rect.width())
+        height = max(420, rect.height())
+        self.resize(width, height)
+
+    def _apply_url_geometry(self, url: QUrl):
+        parsed = urlparse(url.toString())
+        query = parse_qs(parsed.query)
+        mode = (query.get("detached") or [""])[0]
+        if mode == "module":
+            module_id = (query.get("module") or [""])[0]
+            size = self._MODULE_SIZES.get(module_id, self._DEFAULT_SIZE)
+            key = f"module:{module_id}:{size[0]}x{size[1]}"
+        elif mode == "metadata":
+            size = self._METADATA_SIZE
+            key = f"metadata:{size[0]}x{size[1]}"
+        else:
+            return
+
+        if self._geometry_key == key:
+            return
+        self._geometry_key = key
+        self.resize(*size)
+        self._center_on_owner()
+
+    def _center_on_owner(self):
+        owner = getattr(self, "_owner", None)
+        if owner is None:
+            return
+        owner_geometry = owner.geometry()
+        x = owner_geometry.x() + max(0, (owner_geometry.width() - self.width()) // 2)
+        y = owner_geometry.y() + max(0, (owner_geometry.height() - self.height()) // 2)
+        self.move(x, y)
 
     def closeEvent(self, event):
         owner = getattr(self, "_owner", None)

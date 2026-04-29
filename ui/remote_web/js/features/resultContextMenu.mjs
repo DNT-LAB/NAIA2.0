@@ -55,25 +55,28 @@ const MAIN_IMAGE_MENU = [
   {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {label: '전체 메타데이터 보기', action: ACTION_METADATA},
   {type: 'separator'},
-  {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
-  {type: 'separator'},
-  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
-  {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
-  {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
-  {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
-  {type: 'separator'},
-  {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
   {
-    label: 'NAI 인페인트 메뉴',
+    label: '이미지 작업',
     children: [
+      {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
+      {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
+      {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
+      {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
+      {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
+    ],
+  },
+  {
+    label: 'NAI 도구',
+    children: [
+      {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
       {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img'},
       {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint'},
       {label: 'Instant Outpaint Request'},
       {label: 'Send to Outpainting'},
       {label: 'Use as outpainting base'},
+      {label: 'Send to Character Reference'},
     ],
   },
-  {label: 'Send to Character Reference'},
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
 ];
@@ -103,10 +106,19 @@ const THUMBNAIL_MENU = [
   {type: 'separator'},
   {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {label: '전체 메타데이터 보기', action: ACTION_METADATA, requiresPath: true},
-  {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
-  {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
-  {type: 'separator'},
-  {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
+  {
+    label: '이미지 작업',
+    children: [
+      {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
+      {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
+    ],
+  },
+  {
+    label: 'NAI 도구',
+    children: [
+      {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
+    ],
+  },
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
@@ -136,6 +148,18 @@ export function createResultContextMenu({
   let menu = null;
   let metadataModal = null;
   let menuVersion = 0;
+
+  function isTouchMenu() {
+    const mediaQuery = window.matchMedia?.('(hover: none), (pointer: coarse)');
+    return Boolean(mediaQuery?.matches) || window.innerWidth <= 720;
+  }
+
+  function syncMenuMode() {
+    if (!menu) return;
+    const touch = isTouchMenu();
+    menu.classList.toggle('touch-mode', touch);
+    menu.classList.toggle('flyout-mode', !touch);
+  }
 
   function close() {
     if (!menu) return;
@@ -208,6 +232,7 @@ export function createResultContextMenu({
     if (item.type === 'separator') {
       return '<div class="result-context-separator"></div>';
     }
+    const hasChildren = Array.isArray(item.children) && item.children.length > 0;
     const danger = item.danger ? ' danger' : '';
     const enabled = isItemEnabled(item, context);
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
@@ -216,13 +241,14 @@ export function createResultContextMenu({
     const copyFormatAttr = item.copyFormat ? ` data-copy-format="${item.copyFormat}"` : '';
     const queuePositionAttr = item.queuePosition ? ` data-queue-position="${item.queuePosition}"` : '';
     const queueModeAttr = item.queueMode ? ` data-queue-mode="${item.queueMode}"` : '';
-    const childHtml = item.children
-      ? `<div class="result-context-children">${item.children.map(child => renderItem(child, context)).join('')}</div>`
+    const submenuAttr = hasChildren ? ' data-submenu-trigger="true" aria-haspopup="menu" aria-expanded="false"' : '';
+    const childHtml = hasChildren
+      ? `<div class="result-context-children" role="menu">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
-      <div class="result-context-group">
-        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${disabledAttr}>
-          <span>${escapeText(item.label)}</span>${item.children ? '<span class="result-context-arrow">›</span>' : ''}
+      <div class="result-context-group${hasChildren ? ' has-children' : ''}">
+        <button type="button" class="result-context-item${danger}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${submenuAttr}${disabledAttr}>
+          <span>${escapeText(item.label)}</span>${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}
         </button>
         ${childHtml}
       </div>`;
@@ -230,6 +256,7 @@ export function createResultContextMenu({
 
   function renderMenu(kind, context) {
     if (!menu) return;
+    syncMenuMode();
     const items = kind === 'thumbnail' ? THUMBNAIL_MENU : MAIN_IMAGE_MENU;
     menu.innerHTML = items.map(item => renderItem(item, context)).join('');
     bindActions(context);
@@ -242,10 +269,110 @@ export function createResultContextMenu({
     const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
     menu.style.left = `${Math.round(left)}px`;
     menu.style.top = `${Math.round(top)}px`;
+    positionOpenSubmenus();
+  }
+
+  function getDirectChild(parent, selector) {
+    try {
+      return parent.querySelector(`:scope > ${selector}`);
+    } catch (error) {
+      return Array.from(parent.children).find(child => child.matches(selector)) || null;
+    }
+  }
+
+  function closeSiblingSubmenus(group) {
+    const parent = group.parentElement;
+    if (!parent) return;
+    Array.from(parent.children).forEach(child => {
+      if (child !== group && child.classList?.contains('submenu-open')) {
+        closeSubmenu(child);
+      }
+    });
+  }
+
+  function closeSubmenu(group) {
+    group.classList.remove('submenu-open');
+    const trigger = getDirectChild(group, '.result-context-item');
+    const childMenu = getDirectChild(group, '.result-context-children');
+    trigger?.setAttribute('aria-expanded', 'false');
+    if (childMenu) {
+      childMenu.style.left = '';
+      childMenu.style.top = '';
+    }
+    group.querySelectorAll('.result-context-group.submenu-open').forEach(closeSubmenu);
+  }
+
+  function openSubmenu(group) {
+    if (!group || !menu) return;
+    closeSiblingSubmenus(group);
+    group.classList.add('submenu-open');
+    getDirectChild(group, '.result-context-item')?.setAttribute('aria-expanded', 'true');
+    if (!isTouchMenu()) {
+      positionSubmenu(group);
+    }
+  }
+
+  function toggleTouchSubmenu(group) {
+    if (!group) return;
+    if (group.classList.contains('submenu-open')) {
+      closeSubmenu(group);
+    } else {
+      openSubmenu(group);
+    }
+  }
+
+  function positionOpenSubmenus() {
+    if (!menu || isTouchMenu()) return;
+    menu.querySelectorAll('.result-context-group.submenu-open').forEach(positionSubmenu);
+  }
+
+  function positionSubmenu(group) {
+    const trigger = getDirectChild(group, '.result-context-item');
+    const childMenu = getDirectChild(group, '.result-context-children');
+    if (!trigger || !childMenu) return;
+
+    childMenu.style.visibility = 'hidden';
+    childMenu.style.display = 'grid';
+    const triggerRect = trigger.getBoundingClientRect();
+    const childRect = childMenu.getBoundingClientRect();
+    const gap = 8;
+    const margin = 8;
+    const rightLeft = triggerRect.right + gap;
+    const fitsRight = rightLeft + childRect.width <= window.innerWidth - margin;
+    const left = fitsRight
+      ? rightLeft
+      : Math.max(margin, triggerRect.left - childRect.width - gap);
+    const top = Math.max(margin, Math.min(triggerRect.top, window.innerHeight - childRect.height - margin));
+    childMenu.style.left = `${Math.round(left)}px`;
+    childMenu.style.top = `${Math.round(top)}px`;
+    childMenu.classList.toggle('flyout-left', !fitsRight);
+    childMenu.style.visibility = '';
+    childMenu.style.display = '';
   }
 
   function bindActions(context) {
     if (!menu) return;
+    menu.querySelectorAll('[data-submenu-trigger]').forEach(button => {
+      const group = button.closest('.result-context-group');
+      button.addEventListener('click', event => {
+        if (!isTouchMenu()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.disabled) return;
+        toggleTouchSubmenu(group);
+      });
+      button.addEventListener('mouseenter', () => {
+        if (!button.disabled && !isTouchMenu()) openSubmenu(group);
+      });
+      button.addEventListener('focus', () => {
+        if (!button.disabled && !isTouchMenu()) openSubmenu(group);
+      });
+    });
+    menu.querySelectorAll('.result-context-group.has-children').forEach(group => {
+      group.addEventListener('mouseleave', () => {
+        if (!isTouchMenu()) closeSubmenu(group);
+      });
+    });
     menu.querySelectorAll('[data-action]').forEach(button => {
       button.addEventListener('click', event => {
         event.preventDefault();

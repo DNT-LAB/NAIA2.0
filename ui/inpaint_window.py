@@ -367,9 +367,8 @@ class InpaintWindow(QDialog):
             # Directly call accept to process the mask
             dialog.accept()
             return dialog.result
-        
-        result_code = dialog.exec()
 
-        if result_code == QDialog.DialogCode.Accepted:
-            return dialog.result
+        # TODO(web-dialog): 원래 InpaintWindow.exec() — Web Shell 패널로 재구현 필요. 차단 → None 반환.
+        print("[Dialog/SKIPPED] InpaintWindow 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
         return None

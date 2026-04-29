@@ -731,39 +731,13 @@ class QuickSearchBlock(BlockWidget):
             self._progress_dialog = None
 
     def _show_download_result(self, success: bool, message: str):
-        """다운로드 결과 메시지 표시"""
-        # 실패이고 취소된 경우 메시지 표시 안함
+        """다운로드 결과 메시지 표시.
+        TODO(web-dialog): 원래 QMessageBox — Web Shell 토스트로 재구현 필요."""
         if not success and "취소" in message:
             return
-
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("다운로드 완료" if success else "다운로드 실패")
-        msg_box.setText(message)
-        msg_box.setIcon(QMessageBox.Icon.Information if success else QMessageBox.Icon.Warning)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        
-        # 스타일 적용 (다크 테마)
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_primary']};
-                color: {DARK_COLORS['text_primary']};
-            }}
-            QLabel {{
-                color: {DARK_COLORS['text_primary']};
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 6px 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-        """)
-        
-        msg_box.exec()
+        level = "INFO" if success else "WARN"
+        title = "다운로드 완료" if success else "다운로드 실패"
+        print(f"[Dialog/{level}] {title}: {message}")
 
         if success:
             # 메타데이터 재로드

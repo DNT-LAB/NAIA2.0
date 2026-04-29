@@ -21,8 +21,54 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
     QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox, QSpinBox, QSlider, QDoubleSpinBox,
-    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy, QRadioButton
+    QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy, QRadioButton,
+    QInputDialog,
 )
+
+# ============================================================================
+# TODO(web-dialog): future01 Web Shell 마이그레이션 — 글로벌 dialog static method 차단
+# ----------------------------------------------------------------------------
+# 데스크톱 GUI 가 hidden 모드로 동작하므로, blocking modal static method 들을 글로벌
+# 차단. 호출처가 23+ 파일에 분산돼 있어 일괄 monkey-patch 가 가장 효율적.
+# Web Shell 측 파일 업로드 / 입력 모달로 호출처를 재구현 시 이 monkey-patch 제거 가능.
+# 각 함수는 안전한 빈 결과를 반환 (사용자 의도 입력 차단).
+# ============================================================================
+def _wd_blocked_open(*args, **kwargs):
+    print("[Dialog/SKIPPED] QFileDialog.getOpenFileName 차단 — Web Shell 파일 업로드로 재구현 예정")
+    return ("", "")
+def _wd_blocked_open_multi(*args, **kwargs):
+    print("[Dialog/SKIPPED] QFileDialog.getOpenFileNames 차단 — Web Shell 다중 파일 업로드로 재구현 예정")
+    return ([], "")
+def _wd_blocked_save(*args, **kwargs):
+    print("[Dialog/SKIPPED] QFileDialog.getSaveFileName 차단 — Web Shell 다운로드로 재구현 예정")
+    return ("", "")
+def _wd_blocked_dir(*args, **kwargs):
+    print("[Dialog/SKIPPED] QFileDialog.getExistingDirectory 차단 — Web Shell 경로 입력으로 재구현 예정")
+    return ""
+def _wd_blocked_input_text(*args, **kwargs):
+    print("[Dialog/SKIPPED] QInputDialog.getText 차단 — Web Shell 입력 모달로 재구현 예정")
+    return ("", False)
+def _wd_blocked_input_int(*args, **kwargs):
+    print("[Dialog/SKIPPED] QInputDialog.getInt 차단 — Web Shell 입력 모달로 재구현 예정")
+    return (0, False)
+def _wd_blocked_input_double(*args, **kwargs):
+    print("[Dialog/SKIPPED] QInputDialog.getDouble 차단 — Web Shell 입력 모달로 재구현 예정")
+    return (0.0, False)
+def _wd_blocked_input_item(*args, **kwargs):
+    print("[Dialog/SKIPPED] QInputDialog.getItem 차단 — Web Shell 선택 모달로 재구현 예정")
+    return ("", False)
+def _wd_blocked_input_multiline(*args, **kwargs):
+    print("[Dialog/SKIPPED] QInputDialog.getMultiLineText 차단 — Web Shell 입력 모달로 재구현 예정")
+    return ("", False)
+QFileDialog.getOpenFileName = staticmethod(_wd_blocked_open)
+QFileDialog.getOpenFileNames = staticmethod(_wd_blocked_open_multi)
+QFileDialog.getSaveFileName = staticmethod(_wd_blocked_save)
+QFileDialog.getExistingDirectory = staticmethod(_wd_blocked_dir)
+QInputDialog.getText = staticmethod(_wd_blocked_input_text)
+QInputDialog.getInt = staticmethod(_wd_blocked_input_int)
+QInputDialog.getDouble = staticmethod(_wd_blocked_input_double)
+QInputDialog.getItem = staticmethod(_wd_blocked_input_item)
+QInputDialog.getMultiLineText = staticmethod(_wd_blocked_input_multiline)
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
 from core.generation_controller import GenerationController
@@ -477,7 +523,12 @@ class PromptTextEdit(QTextEdit):
 
         popup.move(new_x, new_y)
 
-        popup.exec()
+        # TODO(web-dialog): 원래 Img2ImgPopup.exec() — img2img/inpaint/vibe/tag 액션 선택 모달.
+        # Web Shell 마이그레이션: Web Shell 측 컨텍스트 메뉴(resultContextMenu.mjs 또는 별도 모달)로 재구현 필요.
+        # 현재 임시 동작: blocking modal 차단 — popup 자체를 표시하지 않고 콘솔 안내만.
+        # 시그널들(img2img_requested 등)은 위에서 이미 연결됐지만 사용자 입력이 없으니 발사되지 않음.
+        print("[Dialog/SKIPPED] Img2ImgPopup 모달 호출 차단 — Web Shell 컨텍스트 메뉴로 재구현 예정")
+        popup.deleteLater()
 
     def dragEnterEvent(self, event):
         """드래그 진입 시 이벤트 (선택적으로 미리보기 제공)"""
@@ -2341,7 +2392,10 @@ class ModernMainWindow(QMainWindow):
         cancel_btn.clicked.connect(dialog.reject)
         layout.addWidget(cancel_btn)
 
-        dialog.exec()
+        # TODO(web-dialog): 원래 Turbo Mode 선택 dialog (txt2img/inpaint/cancel) — Web Shell 모달로 재구현.
+        # 현재: 사용자 선택 없이 진행 차단 (취소 동작과 동일 효과).
+        print("[Dialog/SKIPPED] Turbo Mode 선택 모달 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
 
     def _on_turbo_mode_selected(self, dialog, mode: str):
         """터보 모드 선택됨"""
@@ -5488,16 +5542,18 @@ class ModernMainWindow(QMainWindow):
             traceback.print_exc()
 
     def open_resolution_manager(self):
-        """해상도 관리 다이얼로그를 열고, 결과를 반영합니다."""
+        """해상도 관리 다이얼로그를 열고, 결과를 반영합니다.
+        TODO(web-dialog): 원래 ResolutionManagerDialog.exec() — 해상도 목록 편집 모달.
+        Web Shell 측 해상도 관리 화면으로 재구현 필요. 현재는 호출 차단."""
         default_resolutions = [
             "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
             "1088 x 960", "1152 x 896", "1216 x 832"
         ]
+        print("[Dialog/SKIPPED] ResolutionManagerDialog 모달 차단 — Web Shell 해상도 편집 UI 재구현 예정")
+        return
+        # 아래 원본 흐름 (Web Shell 재구현 시 참고용):
         dialog = ResolutionManagerDialog(self.resolutions, default_resolutions, self)
-
-        # print(f"[DEBUG] 해상도 관리 다이얼로그 열림")
         dialog_result = dialog.exec()
-        # print(f"[DEBUG] 다이얼로그 결과: {dialog_result}")
 
         if dialog_result:
             new_resolutions = dialog.get_updated_resolutions()
@@ -6094,20 +6150,13 @@ class ModernMainWindow(QMainWindow):
                 msg.setWindowTitle("설정 저장 완료")
                 msg.setText(f"현재 모드({current_mode})의 설정이 저장되었습니다.")
                 
+                # TODO(web-dialog): 원래 QMessageBox(Information) "설정 저장 완료" — 3초 자동 닫기.
+                # Web Shell 토스트(short, auto-dismiss)로 재구현 권장.
                 details = f"저장된 항목:\n• " + "\n• ".join(saved_items)
                 if failed_items:
                     details += f"\n\n실패한 항목:\n• " + "\n• ".join(failed_items)
-                msg.setDetailedText(details)
-                
-                # 자동으로 닫히도록 타이머 설정 (3초 후 자동 닫기)
-                from PyQt6.QtCore import QTimer
-                timer = QTimer()
-                timer.timeout.connect(msg.accept)
-                timer.setSingleShot(True)
-                timer.start(3000)  # 3초 후 자동 닫기
-                
-                msg.exec()
-            
+                print(f"[Dialog/INFO] 설정 저장 완료: {details}")
+
         except Exception as e:
             error_message = f"❌ 설정 저장 중 예외 발생: {str(e)}"
             print(error_message)
@@ -6193,15 +6242,17 @@ class ModernMainWindow(QMainWindow):
                 # ComfyUI는 'prompt'와 'workflow' 키에 JSON 문자열로 저장합니다.
                 metadata = img.info
                 if 'prompt' not in metadata or 'workflow' not in metadata:
-                    QMessageBox.warning(self, "오류", "선택한 이미지에서 ComfyUI 워크플로우 정보를 찾을 수 없습니다. 만약 NAIA에서 생성한 이미지라면 COMFYUI에서 먼저 이미지를 생성하여 저장한 뒤 NAIA로 불러와주세요.")
+                    # TODO(web-dialog): 원래 QMessageBox.warning — Web Shell 토스트로 재구현.
+                    print("[Dialog/WARN] 오류: 선택한 이미지에서 ComfyUI 워크플로우 정보를 찾을 수 없습니다.")
                     return
 
                 # 워크플로우 분석 및 검증
                 analysis_result = self.workflow_manager.analyze_workflow_for_ui(metadata)
 
-                # 검증 결과 팝업 표시
-                dialog = WorkflowValidationDialog(analysis_result, self)
-                dialog.exec()
+                # TODO(web-dialog): 원래 WorkflowValidationDialog.exec() — 워크플로우 검증 결과 모달.
+                # Web Shell 모달/패널로 재구현 권장. 현재는 결과를 콘솔에 요약 출력.
+                print(f"[Dialog/INFO] WorkflowValidationDialog 결과: success={analysis_result.get('success')}, "
+                      f"messages={analysis_result.get('messages', [])}")
 
                 # 검증 성공 시, 실제 워크플로우를 매니저에 로드
                 if analysis_result['success']:
@@ -6212,7 +6263,8 @@ class ModernMainWindow(QMainWindow):
                     self.status_bar.showMessage("✅ 커스텀 워크플로우가 활성화되었습니다.", 3000)
 
         except Exception as e:
-            QMessageBox.critical(self, "파일 오류", f"이미지를 분석하는 중 오류가 발생했습니다:\n{e}")
+            # TODO(web-dialog): 원래 QMessageBox.critical "파일 오류" — Web Shell error 토스트로 재구현.
+            print(f"[Dialog/ERROR] 파일 오류: 이미지 분석 중 오류 — {e}")
 
     # [신규] 워크플로우 타입 토글 시 호출될 메서드
     def _on_workflow_type_changed(self):
@@ -6536,79 +6588,17 @@ class ModernMainWindow(QMainWindow):
                 # NAI ↔ WEBUI 간 상호 호환 불가
                 if (source_mode == "NAI" and current_mode == "WEBUI") or \
                    (source_mode == "WEBUI" and current_mode == "NAI"):
-                    error_msg = QMessageBox(self)
-                    error_msg.setWindowTitle("호환되지 않는 모드")
-                    error_msg.setText(f"{source_mode} 모드의 설정값을 {current_mode} 모드에서 적용할 수 없습니다.\n\n"
-                                     f"동일한 모드로 전환한 후 다시 시도해주세요.")
-                    error_msg.setIcon(QMessageBox.Icon.Critical)
-                    
-                    # 다크 테마 및 하얀 텍스트 적용
-                    error_msg.setStyleSheet("""
-                        QMessageBox {
-                            background-color: #2b2b2b;
-                            color: white;
-                        }
-                        QMessageBox QLabel {
-                            color: white;
-                        }
-                        QMessageBox QPushButton {
-                            background-color: #404040;
-                            border: 1px solid #555555;
-                            color: white;
-                            padding: 5px 15px;
-                            border-radius: 3px;
-                        }
-                        QMessageBox QPushButton:hover {
-                            background-color: #505050;
-                        }
-                        QMessageBox QPushButton:pressed {
-                            background-color: #353535;
-                        }
-                    """)
-                    
-                    error_msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-                    error_msg.exec()
+                    # TODO(web-dialog): 원래 QMessageBox(Critical) "호환되지 않는 모드" — Web Shell error 토스트로 재구현.
+                    print(f"[Dialog/ERROR] 호환되지 않는 모드: {source_mode} → {current_mode} 적용 불가")
                     return
-            
-            # 경고 메시지 표시
+
+            # TODO(web-dialog): 원래 QMessageBox(Warning Yes/No) "설정값 일괄 적용" — destructive confirm.
+            # Web Shell 모달 confirm + 콜백 패턴으로 재구현 필요. 안전 기본값으로 진행 차단(=No).
             has_characters = 'characters' in settings
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("설정값 일괄 적용")
-            if has_characters:
-                msg_box.setText("현재 프리셋의 설정값이 소실되며,\n캐릭터 프롬프트가 추가됩니다.\n(기존 캐릭터는 비활성화)\n\n계속하시겠습니까?")
-            else:
-                msg_box.setText("현재 프리셋의 설정값이 소실됩니다.\n계속하시겠습니까?")
-            msg_box.setIcon(QMessageBox.Icon.Warning)
-            
-            # 다크 테마 및 하얀 텍스트 적용
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #2b2b2b;
-                    color: white;
-                }
-                QMessageBox QLabel {
-                    color: white;
-                }
-                QMessageBox QPushButton {
-                    background-color: #404040;
-                    border: 1px solid #555555;
-                    color: white;
-                    padding: 5px 15px;
-                    border-radius: 3px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #505050;
-                }
-                QMessageBox QPushButton:pressed {
-                    background-color: #353535;
-                }
-            """)
-            
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-            
-            if msg_box.exec() != QMessageBox.StandardButton.Yes:
-                return
+            warn_text = ("현재 프리셋의 설정값이 소실되며, 캐릭터 프롬프트가 추가됩니다."
+                         if has_characters else "현재 프리셋의 설정값이 소실됩니다.")
+            print(f"[Dialog/CONFIRM(skipped→No)] 설정값 일괄 적용: {warn_text}  — 안전 차단")
+            return
             
             print(f"📝 메타데이터 설정 적용 시작 (모드: {current_mode})")
             

@@ -919,8 +919,9 @@ class ImageTaggerBlock(BlockWidget):
             self._start_model_download()
 
     def _start_model_download(self):
-        """모델 다운로드 시작"""
-        # 패키지 설치 후 다시 체크 및 로드 시도
+        """모델 다운로드 시작.
+        TODO(web-dialog): 원래 DownloadProgressDialog.exec() — 워커와 결합된 modal 진행률.
+        Web Shell 진행률 토스트/패널로 재구현 필요. 현재는 워커는 시작하되 모달 차단."""
         global ort
         if 'onnxruntime' not in sys.modules:
             try:
@@ -928,31 +929,27 @@ class ImageTaggerBlock(BlockWidget):
                 global HAS_TAGGER_LIBS
                 HAS_TAGGER_LIBS = True
             except ImportError:
-                QMessageBox.critical(self, "오류", "패키지 설치 후 로드에 실패했습니다. 프로그램을 재시작해주세요.")
+                # TODO(web-dialog): 원래 QMessageBox.critical — Web Shell error 토스트.
+                print("[Dialog/ERROR] 오류: onnxruntime 로드 실패. 프로그램을 재시작해주세요.")
                 return
 
         self.download_worker = TaggerDownloadWorker()
-
-        # 커스텀 다운로드 다이얼로그
-        self.progress_dialog = DownloadProgressDialog(self)
-
-        # 워커 시그널 연결
-        self.download_worker.progress.connect(self.progress_dialog.set_progress)
         self.download_worker.finished.connect(self._on_download_finished)
+        # 진행률 다이얼로그는 차단 — 워커는 백그라운드에서 계속 진행, 진행률은 콘솔로 출력 가능
+        self.download_worker.progress.connect(
+            lambda pct, msg: print(f"[Tagger Download] {pct}% - {msg}")
+        )
         self.download_worker.start()
-
-        # 다이얼로그 표시
-        self.progress_dialog.exec()
+        print("[Dialog/SKIPPED] DownloadProgressDialog 차단 — 워커는 백그라운드 실행 중. Web Shell 진행률 UI 재구현 예정")
 
     def _on_download_finished(self, success, message):
-        if hasattr(self, 'progress_dialog'):
-            self.progress_dialog.close()
-
         if success:
-            QMessageBox.information(self, "완료", "모든 준비가 완료되었습니다.")
+            # TODO(web-dialog): 원래 QMessageBox.information "완료" — Web Shell 토스트.
+            print("[Dialog/INFO] 완료: 모든 준비가 완료되었습니다.")
             self._setup_main_view()
         else:
-            QMessageBox.critical(self, "실패", f"다운로드 중 오류가 발생했습니다:\n{message}")
+            # TODO(web-dialog): 원래 QMessageBox.critical "실패" — Web Shell error 토스트.
+            print(f"[Dialog/ERROR] 실패: 다운로드 중 오류 — {message}")
 
     # --- 이미지 로드 관련 로직 ---
 

@@ -1641,16 +1641,14 @@ class E621EventModuleV2(BaseMiddleModule):
         print(f"[OK] 숨김 처리: {tag_name}")
 
     def on_manage_clicked(self):
-        """숨긴 항목 관리"""
+        """숨긴 항목 관리.
+        TODO(web-dialog): 원래 HiddenItemsDialog.exec() — Web Shell 패널/모달로 재구현 필요."""
         if not self.deleted_keys:
-            QMessageBox.information(self.widget, "알림", "숨긴 항목이 없습니다.")
+            # TODO(web-dialog): 원래 QMessageBox.information "알림" — Web Shell 토스트로 재구현.
+            print("[Dialog/INFO] 알림: 숨긴 항목이 없습니다.")
             return
 
-        dialog = HiddenItemsDialog(self.deleted_keys, self.widget)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            restored_keys = dialog.get_restored_keys()
-            if restored_keys:
-                self.restore_hidden_items(restored_keys)
+        print(f"[Dialog/SKIPPED] HiddenItemsDialog 차단 ({len(self.deleted_keys)}개 숨김 항목) — Web Shell 재구현 예정")
 
     def restore_hidden_items(self, keys_to_restore: List[str]):
         """숨긴 항목 복원"""

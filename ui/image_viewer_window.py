@@ -1087,17 +1087,8 @@ class NAIAImageViewer(QWidget):
     # ================================================================
 
     def _open_bindings_dialog(self):
-        dlg = ViewerBindingsDialog(
-            self._bindings,
-            dest_path=self._dest_path,
-            use_session_folder=self._use_session_folder,
-            parent=self
-        )
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._bindings = dlg.get_bindings()
-            self._dest_path = dlg.get_dest_path()
-            self._use_session_folder = dlg.get_use_session_folder()
-            self._save_bindings()
+        """TODO(web-dialog): 원래 ViewerBindingsDialog.exec() — Web Shell 패널로 재구현 필요."""
+        print("[Dialog/SKIPPED] ViewerBindingsDialog 차단 — Web Shell 재구현 예정")
 
     # ================================================================
     # 컨텍스트 메뉴

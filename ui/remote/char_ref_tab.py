@@ -1111,7 +1111,9 @@ class CharRefTabMixin:
         button_layout.addWidget(cancel_btn)
         layout.addLayout(button_layout)
 
-        dialog.exec()
+        # TODO(web-dialog): 원래 char_ref 메타데이터 편집 dialog.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] char_ref 메타데이터 dialog 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
 
     def _save_char_ref_metadata(self, file_hash: str, metadata: dict):
         """캐릭터 레퍼런스 메타데이터 저장"""

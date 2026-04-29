@@ -850,39 +850,19 @@ class VibeStorageItem(QFrame):
         self.apply_requested.emit(self.model, self.file_hash, self.file_name, encoding_value)
         
     def _on_rename(self):
-        """Handle rename action"""
+        """Handle rename action.
+        TODO(web-dialog): 원래 QInputDialog "파일명 변경" — Web Shell 입력 모달로 재구현 필요.
+        현재는 차단 — 이름 변경은 Web Shell Vibe Transfer 패널에서 처리."""
+        print(f"[Dialog/SKIPPED] Vibe 파일명 변경 dialog 차단 (file={self.file_name}) — Web Shell 재구현 예정")
+        return
+        # 아래 원본 흐름:
         dialog = QInputDialog(self)
         dialog.setWindowTitle("파일명 변경")
         dialog.setLabelText("새 파일명을 입력하세요:")
         dialog.setTextValue(self.file_name)
-        dialog.setStyleSheet("""
-            QInputDialog {
-                background-color: #1a1a1a;
-                color: white;
-            }
-            QLabel {
-                color: white;
-            }
-            QLineEdit {
-                background-color: #2a2a2a;
-                color: white;
-                border: 1px solid #444;
-                padding: 5px;
-            }
-            QPushButton {
-                background-color: #3a3a3a;
-                color: white;
-                border: 1px solid #555;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #4a4a4a;
-            }
-        """)
-        
         ok = dialog.exec()
         new_name = dialog.textValue()
-        
+
         if ok and new_name and new_name != self.file_name:
             # Update JSON file with new name
             json_path = Path("save/vibe_transfer") / self.model / f"{self.file_hash}.json"

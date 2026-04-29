@@ -855,9 +855,9 @@ class RandomFilterDialog(QDialog):
         return config
 
     def _on_guide_clicked(self):
-        """가이드 버튼 클릭 핸들러"""
-        guide_dialog = AutoHideGuideDialog(self)
-        guide_dialog.exec()
+        """가이드 버튼 클릭 핸들러.
+        TODO(web-dialog): 원래 AutoHideGuideDialog.exec() — Web Shell 패널로 재구현 필요."""
+        print("[Dialog/SKIPPED] AutoHideGuideDialog 차단 — Web Shell 재구현 예정")
 
     def accept(self):
         self.save_config()

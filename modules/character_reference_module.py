@@ -667,7 +667,9 @@ class CharacterStorageItem(QFrame):
                 msg_box.setWindowTitle("오류")
                 msg_box.setText("Character Prompt가 설정되지 않았습니다.")
                 msg_box.setStyleSheet(self._get_messagebox_style())
-                msg_box.exec()
+                # TODO(web-dialog): Web Shell 토스트로 재구현. 임시 콘솔 출력.
+                print("[Dialog/ERROR] 오류: Character Prompt가 설정되지 않았습니다.")
+                msg_box.deleteLater()
                 return
             
             # Get CharacterModule from app_context
@@ -685,7 +687,9 @@ class CharacterStorageItem(QFrame):
                 msg_box.setWindowTitle("오류")
                 msg_box.setText("CharacterModule을 찾을 수 없습니다.")
                 msg_box.setStyleSheet(self._get_messagebox_style())
-                msg_box.exec()
+                # TODO(web-dialog): Web Shell 토스트로 재구현.
+                print("[Dialog/ERROR] 오류: CharacterModule을 찾을 수 없습니다.")
+                msg_box.deleteLater()
                 return
             
             # Assign to C1
@@ -727,7 +731,9 @@ class CharacterStorageItem(QFrame):
             msg_box.setWindowTitle("완료")
             msg_box.setText("이미지 및 캐릭터 프롬프트가 적용되었습니다.")
             msg_box.setStyleSheet(self._get_messagebox_style())
-            msg_box.exec()
+            # TODO(web-dialog): Web Shell 토스트로 재구현.
+            print("[Dialog/INFO] 완료: 이미지 및 캐릭터 프롬프트가 적용되었습니다.")
+            msg_box.deleteLater()
             
         except Exception as e:
             print(f"Error in _on_assign_c1: {e}")
@@ -737,7 +743,9 @@ class CharacterStorageItem(QFrame):
             msg_box.setWindowTitle("오류")
             msg_box.setText(f"C1 할당 중 오류가 발생했습니다: {str(e)}")
             msg_box.setStyleSheet(self._get_messagebox_style())
-            msg_box.exec()
+            # TODO(web-dialog): Web Shell 토스트로 재구현.
+            print(f"[Dialog/ERROR] 오류: C1 할당 중 오류가 발생했습니다: {str(e)}")
+            msg_box.deleteLater()
     
     def _close_storage_window(self):
         """Close the parent CharacterStorageWindow"""
@@ -923,7 +931,9 @@ class CharacterStorageItem(QFrame):
             msg_box.setWindowTitle("저장 완료")
             msg_box.setText("메타데이터가 성공적으로 저장되었습니다.")
             msg_box.setStyleSheet(self._get_messagebox_style())
-            msg_box.exec()
+            # TODO(web-dialog): Web Shell 토스트로 재구현.
+            print("[Dialog/INFO] 저장 완료: 메타데이터가 성공적으로 저장되었습니다.")
+            msg_box.deleteLater()
         
         save_btn.clicked.connect(on_save)
         button_layout.addWidget(save_btn)
@@ -1198,33 +1208,8 @@ class CharacterStorageWindow(QDialog):
             print(f"✅ Opened storage folder: {folder_path}")
             
         except Exception as e:
-            print(f"❌ Failed to open storage folder: {e}")
-            # Show error message
-            from PyQt6.QtWidgets import QMessageBox
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(QMessageBox.Icon.Warning)
-            msg_box.setWindowTitle("오류")
-            msg_box.setText(f"폴더를 열 수 없습니다: {str(e)}")
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #1a1a1a;
-                    color: white;
-                }
-                QMessageBox QLabel {
-                    color: white;
-                }
-                QMessageBox QPushButton {
-                    background-color: #3a3a3a;
-                    color: white;
-                    border: 1px solid #555;
-                    padding: 5px 15px;
-                    min-width: 60px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #4a4a4a;
-                }
-            """)
-            msg_box.exec()
+            # TODO(web-dialog): 원래 QMessageBox(Warning) "오류" — Web Shell 토스트로 재구현.
+            print(f"[Dialog/WARN] 오류: 폴더를 열 수 없습니다: {str(e)}")
 
 
 class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
@@ -1417,57 +1402,11 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
                 
                 self._add_character_frame(str(temp_file))
             else:
-                # Warning message with dark theme
-                msg_box = QMessageBox()
-                msg_box.setIcon(QMessageBox.Icon.Warning)
-                msg_box.setWindowTitle("Warning")
-                msg_box.setText("No valid image found in clipboard.")
-                msg_box.setStyleSheet("""
-                    QMessageBox {
-                        background-color: #1a1a1a;
-                        color: white;
-                    }
-                    QMessageBox QLabel {
-                        color: white;
-                    }
-                    QMessageBox QPushButton {
-                        background-color: #3a3a3a;
-                        color: white;
-                        border: 1px solid #555;
-                        padding: 5px 15px;
-                        min-width: 60px;
-                    }
-                    QMessageBox QPushButton:hover {
-                        background-color: #4a4a4a;
-                    }
-                """)
-                msg_box.exec()
+                # TODO(web-dialog): 원래 QMessageBox(Warning) "No valid image found in clipboard." — Web Shell 토스트로 재구현.
+                print("[Dialog/WARN] No valid image found in clipboard.")
         else:
-            # Warning message with dark theme
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Icon.Warning)
-            msg_box.setWindowTitle("Warning")
-            msg_box.setText("No image found in clipboard.")
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #1a1a1a;
-                    color: white;
-                }
-                QMessageBox QLabel {
-                    color: white;
-                }
-                QMessageBox QPushButton {
-                    background-color: #3a3a3a;
-                    color: white;
-                    border: 1px solid #555;
-                    padding: 5px 15px;
-                    min-width: 60px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #4a4a4a;
-                }
-            """)
-            msg_box.exec()
+            # TODO(web-dialog): 원래 QMessageBox(Warning) "No image found in clipboard." — Web Shell 토스트로 재구현.
+            print("[Dialog/WARN] No image found in clipboard.")
     
     def _add_character_frame(self, file_path: str) -> Optional[CharacterReferenceFrame]:
         """Add a new character reference frame"""
@@ -1483,31 +1422,8 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
             return frame
             
         except Exception as e:
-            # Error message with dark theme
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Icon.Critical)
-            msg_box.setWindowTitle("Error")
-            msg_box.setText(f"Failed to add character reference: {str(e)}")
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #1a1a1a;
-                    color: white;
-                }
-                QMessageBox QLabel {
-                    color: white;
-                }
-                QMessageBox QPushButton {
-                    background-color: #3a3a3a;
-                    color: white;
-                    border: 1px solid #555;
-                    padding: 5px 15px;
-                    min-width: 60px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #4a4a4a;
-                }
-            """)
-            msg_box.exec()
+            # TODO(web-dialog): 원래 QMessageBox(Critical) "Failed to add character reference" — Web Shell 토스트로 재구현.
+            print(f"[Dialog/ERROR] Failed to add character reference: {str(e)}")
             return None
     
     def _remove_frame(self, frame: CharacterReferenceFrame):
@@ -1536,63 +1452,15 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
             
             if frame:
                 # Enable this frame with default settings
-                # (reference_type="character&style", strength=1.0, fidelity=1.0 by default)
                 frame.enable_check.setChecked(True)
                 frame.is_enabled = True
                 frame._update_enabled_display()
-                    
-                # Success message with dark theme
-                msg_box = QMessageBox()
-                msg_box.setIcon(QMessageBox.Icon.Information)
-                msg_box.setWindowTitle("Applied")
-                msg_box.setText(f"Character reference '{file_name}' has been applied.")
-                msg_box.setStyleSheet("""
-                    QMessageBox {
-                        background-color: #1a1a1a;
-                        color: white;
-                    }
-                    QMessageBox QLabel {
-                        color: white;
-                    }
-                    QMessageBox QPushButton {
-                        background-color: #3a3a3a;
-                        color: white;
-                        border: 1px solid #555;
-                        padding: 5px 15px;
-                        min-width: 60px;
-                    }
-                    QMessageBox QPushButton:hover {
-                        background-color: #4a4a4a;
-                    }
-                """)
-                msg_box.exec()
-            
+                # TODO(web-dialog): 원래 QMessageBox(Information) "Applied" — Web Shell 토스트로 재구현.
+                print(f"[Dialog/INFO] Applied: Character reference '{file_name}' has been applied.")
+
         except Exception as e:
-            # Error message with dark theme
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Icon.Critical)
-            msg_box.setWindowTitle("Error")
-            msg_box.setText(f"Failed to apply character reference: {str(e)}")
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #1a1a1a;
-                    color: white;
-                }
-                QMessageBox QLabel {
-                    color: white;
-                }
-                QMessageBox QPushButton {
-                    background-color: #3a3a3a;
-                    color: white;
-                    border: 1px solid #555;
-                    padding: 5px 15px;
-                    min-width: 60px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #4a4a4a;
-                }
-            """)
-            msg_box.exec()
+            # TODO(web-dialog): 원래 QMessageBox(Critical) "Failed to apply character reference" — Web Shell 토스트로 재구현.
+            print(f"[Dialog/ERROR] Failed to apply character reference: {str(e)}")
     
     def get_parameters(self) -> Dict[str, Any]:
         """Get Character Reference API parameters"""

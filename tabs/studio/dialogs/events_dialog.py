@@ -324,9 +324,8 @@ class EventsDialog(QDialog):
         # Generate sequence text
         sequence_text = generate_sequence_text(frames_data)
 
-        # Show dialog
-        dialog = SequenceTextDialog(sequence_text, self)
-        dialog.exec()
+        # TODO(web-dialog): 원래 SequenceTextDialog.exec() — Web Shell 패널로 재구현 필요.
+        print(f"[Dialog/SKIPPED] SequenceTextDialog 차단 — Web Shell 재구현 예정\n[sequence] {sequence_text}")
 
     def _on_apply(self):
         """Apply changes to frames"""

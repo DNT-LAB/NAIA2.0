@@ -2022,36 +2022,33 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.save_last_used_preset_info()
     
     def add_preset(self):
-        """새 프리셋 추가 다이얼로그"""
+        """새 프리셋 추가 다이얼로그.
+        TODO(web-dialog): 원래 QDialog "새 프리셋 추가" — 프리셋 이름 입력 모달.
+        Web Shell 측 프리셋 추가 입력은 Prompt Engineering popup 의 "Add Preset" 패널이
+        이미 구현되어 있음 (`pePresetAddPanel`). 데스크톱 호출은 차단."""
+        print("[Dialog/SKIPPED] 새 프리셋 추가 dialog 차단 — Web Shell 의 Add Preset 패널 사용")
+        return
+        # 아래 원본 흐름 (Web Shell 재구현 시 참고용):
         dialog = QDialog(self.widget if self.widget else None)
         dialog.setWindowTitle("새 프리셋 추가")
         dialog.setStyleSheet(f"background-color: {DARK_COLORS['background']};")
-        
         layout = QGridLayout(dialog)
         dynamic_styles = get_dynamic_styles()
-        
-        # 이름 입력
         name_label = QLabel("프리셋 이름:")
         name_label.setStyleSheet(dynamic_styles['label_style'])
         layout.addWidget(name_label, 0, 0)
-        
         name_input = QLineEdit()
         name_input.setStyleSheet(dynamic_styles['compact_lineedit'])
         name_input.setProperty("autocomplete_ignore", True)
         layout.addWidget(name_input, 0, 1)
-        
-        # 안내 메시지
         info_label = QLabel("현재 설정이 복사됩니다.")
         info_label.setStyleSheet(dynamic_styles['label_style'])
-        layout.addWidget(info_label, 1, 0, 1, 2)  # 두 컬럼에 걸쳐 표시
-        
-        # 버튼
+        layout.addWidget(info_label, 1, 0, 1, 2)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.setStyleSheet(dynamic_styles['primary_button'])
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons, 2, 0, 1, 2)
-        
         if dialog.exec() == QDialog.DialogCode.Accepted:
             preset_name = name_input.text().strip()
             

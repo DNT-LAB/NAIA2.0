@@ -17,6 +17,36 @@ except ImportError:
     SSL_CONTEXT = ssl.create_default_context()
 from typing import Dict, List, Optional, Tuple
 
+# TODO(web-dialog): blocking QMessageBox 대체용 stub. .exec() 호출 시 print 만 수행하고
+# QMessageBox.StandardButton.No (=65536) 반환하여 destructive confirm 을 안전 차단.
+# Web Shell 토스트/모달로 재구현 시 이 stub 제거하고 호출처를 명시적 비동기 패턴으로 교체.
+class _PrintMessageBoxStub:
+    def __init__(self, title="", text=""):
+        self._title = str(title or "")
+        self._text = str(text or "")
+        self._info = ""
+        self._detail = ""
+    def setText(self, t): self._text = str(t or "")
+    def setWindowTitle(self, t): self._title = str(t or "")
+    def setIcon(self, *a, **kw): pass
+    def setStyleSheet(self, *a, **kw): pass
+    def setStandardButtons(self, *a, **kw): pass
+    def setDefaultButton(self, *a, **kw): pass
+    def setInformativeText(self, t): self._info = str(t or "")
+    def setDetailedText(self, t): self._detail = str(t or "")
+    def addButton(self, *a, **kw): return None
+    def clickedButton(self): return None
+    def standardButton(self, *a, **kw):
+        from PyQt6.QtWidgets import QMessageBox as _QMB
+        return _QMB.StandardButton.No
+    def exec(self):
+        suffix = ""
+        if self._info: suffix += f" | info: {self._info}"
+        if self._detail: suffix += f" | detail: {self._detail}"
+        print(f"[Dialog] {self._title}: {self._text}{suffix}")
+        from PyQt6.QtWidgets import QMessageBox as _QMB
+        return _QMB.StandardButton.No  # destructive confirm 안전 차단
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLineEdit, QLabel, QFileDialog, QMessageBox,
@@ -1431,40 +1461,10 @@ class ArtistRandomizerSettings(QDialog):
         print(f"💾 Artist Randomizer Rule Saved: {rule_name}")
     
     def _create_styled_messagebox(self, title, text, icon):
-        """스타일이 적용된 메시지박스 생성"""
-        msg = QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setIcon(icon)
-        
-        # 다크 테마 스타일 적용
-        msg.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_primary']};
-                color: white;
-            }}
-            QMessageBox QLabel {{
-                color: white;
-                font-size: {get_scaled_font_size(16)}px;
-            }}
-            QMessageBox QPushButton {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: white;
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px {get_scaled_size(20)}px;
-                font-size: {get_scaled_font_size(14)}px;
-                min-width: {get_scaled_size(80)}px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-            QMessageBox QPushButton:pressed {{
-                background-color: {DARK_COLORS['accent_blue']};
-            }}
-        """)
-        
-        return msg
+        """TODO(web-dialog): 원래 dark-themed QMessageBox — Web Shell 토스트로 재구현 필요.
+        호출처가 .exec()/.exec()==Yes/.setStandardButtons 등 QMessageBox 메서드를 호출하므로
+        stub 객체를 반환해 .exec() 시 print 만 수행하고 No 반환 (안전 기본값)."""
+        return _PrintMessageBoxStub(title, text)
     
     def _apply_rule(self):
         """현재 규칙을 적용 (저장 포함)"""
@@ -2415,21 +2415,12 @@ class ArtistThumbModule(BaseTabModule):
 
         # 파일 존재 확인
         if not file_path.exists():
-            # 다운로드 확인 다이얼로그
-            msg = QMessageBox(self.widget)
-            msg.setWindowTitle("썸네일 데이터 다운로드")
-            msg.setText(f"{mode} 썸네일 데이터가 필요합니다.")
-            msg.setInformativeText(f"약 2.6GB의 데이터를 다운로드합니다.\n계속하시겠습니까?")
-            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            msg.setIcon(QMessageBox.Icon.Information)
-
-            if msg.exec() == QMessageBox.StandardButton.Yes:
-                self.current_mode = mode
-                self._download_thumbnail_data(mode, file_path)
-            else:
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(self._previous_mode)
-                self.mode_combo.blockSignals(False)
+            # TODO(web-dialog): 원래 QMessageBox(Yes/No) 다운로드 confirm (~2.6GB) — Web Shell confirm 모달로 재구현 필요.
+            # 안전 기본값: 다운로드 차단, 이전 모드로 복귀.
+            print(f"[Dialog/CONFIRM(skipped→No)] 썸네일 데이터 다운로드 ({mode}, ~2.6GB) — Web Shell 재구현 예정")
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText(self._previous_mode)
+            self.mode_combo.blockSignals(False)
         else:
             # 파일이 있으면 로드 (current_mode, _previous_mode는 로드 성공 시 갱신)
             self._load_thumbnail_data(mode, file_path)

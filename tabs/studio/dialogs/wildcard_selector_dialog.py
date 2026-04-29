@@ -566,39 +566,13 @@ class WildcardSelectorDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-        if dialog.exec():
-            lines = [line.strip() for line in text_edit.toPlainText().split('\n') if line.strip()]
-            if not lines:
-                return
-            if len(lines) > 9:
-                self._show_warning("Maximum 9 lines allowed. Only first 9 will be used.")
-                lines = lines[:9]
-
-            # Create instant wildcard frame
-            instant_name = f"Instant_{len([f for f in self.wildcard_rows if f.is_instant]) + 1}"
-            instant_info = {'name': instant_name, 'item_count': len(lines)}
-
-            frame = self._create_wildcard_row(len(self.wildcard_rows), instant_info)
-            frame.is_instant = True
-            frame.instant_items = lines
-
-            # Insert before last stretch
-            self.list_layout.insertWidget(len(self.wildcard_rows), frame)
-            self.wildcard_rows.append(frame)
+        # TODO(web-dialog): 원래 instant wildcard 입력 dialog — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] Instant wildcard 입력 dialog 차단 — Web Shell 재구현 예정")
+        return
 
     def _show_warning(self, message: str):
-        """Show warning message"""
-        from PyQt6.QtWidgets import QMessageBox
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setText(message)
-        msg.setWindowTitle("Warning")
-        msg.setStyleSheet(f"""
-            QMessageBox {{ background-color: {DARK_COLORS['bg_primary']}; }}
-            QLabel {{ color: {DARK_COLORS['text_primary']}; }}
-            QPushButton {{ color: {DARK_COLORS['text_primary']}; }}
-        """)
-        msg.exec()
+        """TODO(web-dialog): 원래 QMessageBox(Warning) — Web Shell 토스트로 재구현 필요."""
+        print(f"[Dialog/WARN] Warning: {message}")
 
     def _on_1d_mode_clicked(self):
         """Handle 1D mode button click"""

@@ -891,18 +891,10 @@ class APIManagementWindow(QWidget):
 
     # 메시지 박스와 상태바를 업데이트하는 공통 메서드
     def _show_result_message(self, api_type: str, message: str, message_type: str):
+        """TODO(web-dialog): 원래 QMessageBox — Web Shell 토스트로 재구현 (api_status broadcast 활용 가능)."""
         self.main_window.status_bar.showMessage(message, 10000)
-        msg_box = QMessageBox(self)
-        msg_box_map = {
-            "info": QMessageBox.Icon.Information,
-            "warning": QMessageBox.Icon.Warning,
-            "error": QMessageBox.Icon.Critical
-        }
-        msg_box.setIcon(msg_box_map.get(message_type, QMessageBox.Icon.NoIcon))
-        msg_box.setText(f"{api_type} 검증 결과")
-        msg_box.setInformativeText(message)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msg_box.exec()
+        level = {"info": "INFO", "warning": "WARN", "error": "ERROR"}.get(message_type, "INFO")
+        print(f"[Dialog/{level}] {api_type} 검증 결과: {message}")
 
     def get_comfyui_settings(self) -> dict:
         """🆕 현재 ComfyUI 설정을 반환하는 메서드"""

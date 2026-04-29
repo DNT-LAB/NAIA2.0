@@ -1577,20 +1577,9 @@ class InteractiveWindow(QMainWindow):
 
             # 사용자에게 에러 알림 (QMessageBox)
             from PyQt6.QtWidgets import QMessageBox
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("이미지 생성 실패")
-            msg_box.setIcon(QMessageBox.Icon.Critical)
-            msg_box.setText("이미지 생성 중 오류가 발생했습니다.")
-
-            # 에러 메시지가 너무 길면 200자로 제한
+            # TODO(web-dialog): 원래 QMessageBox(Critical) "이미지 생성 실패" — Web Shell error 토스트로 재구현 필요.
             display_message = error_message if len(error_message) <= 200 else error_message[:200] + "..."
-            msg_box.setInformativeText(display_message)
-
-            # 전체 메시지를 상세 정보로 표시
-            msg_box.setDetailedText(error_message)
-
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg_box.exec()
+            print(f"[Dialog/ERROR] 이미지 생성 실패: {display_message}\n[detail] {error_message}")
 
             # 상태바 메시지
             if hasattr(self.app_context, 'main_window'):

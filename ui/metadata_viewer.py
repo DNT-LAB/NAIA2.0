@@ -958,34 +958,12 @@ class MetadataViewerWindow(QDialog):
                 if hasattr(main_window, 'status_bar'):
                     main_window.status_bar.showMessage("프롬프트가 적용되었습니다.", 3000)
             
-            # 적용 완료 메시지
-            msgbox = QMessageBox(self)
-            msgbox.setWindowTitle("적용 완료")
-            msgbox.setText("프롬프트가 적용되었습니다.")
-            msgbox.setStyleSheet(f"""
-                QMessageBox {{
-                    background-color: {DARK_COLORS['bg_secondary']};
-                    color: white;
-                }}
-                QMessageBox QLabel {{
-                    color: white;
-                }}
-                QPushButton {{
-                    background-color: {DARK_COLORS['bg_tertiary']};
-                    color: white;
-                    border: 1px solid {DARK_COLORS['border']};
-                    padding: 5px 15px;
-                    border-radius: 3px;
-                }}
-                QPushButton:hover {{
-                    background-color: {DARK_COLORS['bg_hover']};
-                }}
-            """)
-            msgbox.exec()
-            
+            # TODO(web-dialog): 원래 QMessageBox(Information) "적용 완료" — Web Shell 토스트로 재구현 필요.
+            print("[Dialog/INFO] 적용 완료: 프롬프트가 적용되었습니다.")
+
         except Exception as e:
-            print(f"❌ 프롬프트 적용 중 오류: {e}")
-            QMessageBox.critical(self, "오류", f"프롬프트 적용 실패:\n{str(e)}")
+            # TODO(web-dialog): 원래 QMessageBox.critical "오류" — Web Shell error 토스트로 재구현 필요.
+            print(f"[Dialog/ERROR] 오류: 프롬프트 적용 실패 — {str(e)}")
         
     def _on_apply_settings(self):
         """설정값 일괄 적용"""
@@ -1052,30 +1030,8 @@ class MetadataViewerWindow(QDialog):
     def _on_send_img2img(self):
         """img2img로 전송"""
         self.send_to_img2img.emit(self.pil_image, self.metadata)
-        # img2img로 전송 후에도 창을 닫지 않음
-        msgbox = QMessageBox(self)
-        msgbox.setWindowTitle("전송 완료")
-        msgbox.setText("이미지가 img2img로 전송되었습니다.")
-        msgbox.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: white;
-            }}
-            QMessageBox QLabel {{
-                color: white;
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                color: white;
-                border: 1px solid {DARK_COLORS['border']};
-                padding: 5px 15px;
-                border-radius: 3px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-        """)
-        msgbox.exec()
+        # TODO(web-dialog): 원래 QMessageBox(Information) "전송 완료" — Web Shell 토스트로 재구현 필요.
+        print("[Dialog/INFO] 전송 완료: 이미지가 img2img로 전송되었습니다.")
     
     def _has_vibe_transfer_data(self) -> bool:
         """메타데이터에 vibe transfer 데이터가 있는지 확인"""

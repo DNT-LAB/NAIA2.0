@@ -442,23 +442,13 @@ class MainController:
             # 성공한 항목이 있으면 토스트 메시지도 표시
             if saved_items:
                 # QMessageBox로 간단한 알림 표시 (자동으로 사라지지 않음, 사용자가 확인 필요)
-                msg = QMessageBox(self.main_window)
-                msg.setIcon(QMessageBox.Icon.Information)
-                msg.setWindowTitle("설정 저장 완료")
-                msg.setText(f"현재 모드({current_mode})의 설정이 저장되었습니다.")
-                
+                # TODO(web-dialog): 원래 QMessageBox(Information) "설정 저장 완료" — 3초 자동 닫기 타이머 포함.
+                # Web Shell 토스트(short, auto-dismiss 3s)로 재구현 권장.
+                # blocking dialog 가 메인 스레드를 잡으면 web shell 페인트도 정지하므로 콘솔 출력으로 대체.
                 details = f"저장된 항목:\n• " + "\n• ".join(saved_items)
                 if failed_items:
                     details += f"\n\n실패한 항목:\n• " + "\n• ".join(failed_items)
-                msg.setDetailedText(details)
-                
-                # 자동으로 닫히도록 타이머 설정 (3초 후 자동 닫기)
-                timer = QTimer()
-                timer.timeout.connect(msg.accept)
-                timer.setSingleShot(True)
-                timer.start(3000)  # 3초 후 자동 닫기
-                
-                msg.exec()
+                print(f"[Dialog/INFO] 설정 저장 완료: 현재 모드({current_mode})의 설정이 저장되었습니다.\n{details}")
             
         except Exception as e:
             error_message = f"❌ 설정 저장 중 예외 발생: {str(e)}"

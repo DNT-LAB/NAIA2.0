@@ -3510,12 +3510,9 @@ def main() -> None:
     assets, missing = load_assets()
     app = QApplication(sys.argv)
     if assets is None:
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Critical)
-        msg.setWindowTitle("Missing files")
-        msg.setText("Step1 assets are missing.")
-        msg.setDetailedText("\n".join(missing))
-        msg.exec()
+        # TODO(web-dialog): 원래 QMessageBox(Critical) "Missing files" — standalone runner 라 web shell 무관.
+        # 일관성을 위해 print 로 변경.
+        print(f"[Dialog/ERROR] Missing files: Step1 assets are missing.\n[detail]\n" + "\n".join(missing))
         sys.exit(1)
 
     viewer = PartitionBoundViewer(assets)

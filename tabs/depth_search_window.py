@@ -782,20 +782,8 @@ class DepthSearchWindow(QWidget):
     # --- 검색 속도 최적화 ---
 
     def _show_msg(self, icon, title, text):
-        """밝은 배경의 QMessageBox 표시 (다크 테마 상속 방지, 스텔스/원격 시 억제)"""
-        app_ctx = getattr(self.main_window, 'app_context', None) if self.main_window else None
-        if app_ctx and getattr(app_ctx, 'stealth_mode', False):
-            print(f"🌐 Stealth: depth_search 다이얼로그 억제 — {title}: {text}")
-            return
-        msg = QMessageBox(icon, title, text, QMessageBox.StandardButton.Ok, self)
-        msg.setStyleSheet("""
-            QMessageBox { background-color: #F0F0F0; color: #1a1a1a; }
-            QLabel { color: #1a1a1a; background: transparent; }
-            QPushButton { background-color: white; color: black; border: 1px solid #B0B0B0;
-                          border-radius: 4px; padding: 6px 16px; }
-            QPushButton:hover { background-color: #E0E0E0; }
-        """)
-        msg.exec()
+        """TODO(web-dialog): 원래 QMessageBox — Web Shell 토스트로 재구현 필요. 현재는 콘솔 출력만."""
+        print(f"[Dialog] depth_search — {title}: {text}")
 
     def _ensure_tags_string(self, df):
         """tags_string 컬럼이 없으면 빌드하여 캐싱 (이후 재검색 시 재빌드 불필요)"""

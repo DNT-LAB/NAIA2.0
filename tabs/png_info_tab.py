@@ -1207,8 +1207,10 @@ Steps: {params.get('steps', '')}, Sampler: {sampler}, CFG scale: {params.get('sc
         # 팝업 위치 설정 (버튼 근처)
         button_pos = self.extract_info_button.mapToGlobal(self.extract_info_button.rect().center())
         popup.move(button_pos.x() - popup.width() // 2, button_pos.y())
-        
-        popup.exec()
+
+        # TODO(web-dialog): 원래 Img2ImgPopup.exec() — Web Shell 컨텍스트 메뉴/모달로 재구현 필요.
+        print("[Dialog/SKIPPED] PNG Info → Img2ImgPopup 차단 — Web Shell 재구현 예정")
+        popup.deleteLater()
 
 class ImageDropArea(QLabel):
     file_dropped = pyqtSignal(str)

@@ -495,15 +495,9 @@ class BatchImageTabMixin:
     # === 이벤트 핸들러 ===
 
     def _on_batch_add_files(self):
-        """파일 추가 버튼 클릭"""
-        file_dialog = QFileDialog(self)
-        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
-        file_dialog.setNameFilter("Images (*.png *.jpg *.jpeg *.webp *.bmp)")
-
-        if file_dialog.exec():
-            selected_files = file_dialog.selectedFiles()
-            if selected_files:
-                self._batch_add_images(selected_files)
+        """파일 추가 버튼 클릭.
+        TODO(web-dialog): 원래 QFileDialog.exec() — Web Shell 파일 업로드로 재구현 필요."""
+        print("[Dialog/SKIPPED] QFileDialog (batch add files) 차단 — Web Shell 재구현 예정")
 
     def _batch_add_images(self, file_paths: List[str]):
         """이미지 파일들을 그리드에 추가"""
@@ -848,7 +842,9 @@ class BatchImageTabMixin:
 
         layout.addLayout(button_layout)
 
-        dialog.exec()
+        # TODO(web-dialog): 원래 dialog.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] batch_image_tab dialog 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
 
     def _on_batch_item_close_requested(self, index: int):
         """아이템 닫기 요청"""

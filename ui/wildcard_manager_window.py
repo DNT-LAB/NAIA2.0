@@ -772,14 +772,11 @@ class WildcardManagerWindow(QMainWindow):
         if line_edit:
             line_edit.setProperty("autocomplete_ignore", True)
         
-        if dialog.exec() == QInputDialog.DialogCode.Accepted:
-            file_name = dialog.textValue()
-            ok = True
-        else:
-            file_name = ""
-            ok = False
-        
-        if ok and file_name:
+        # TODO(web-dialog): 원래 QInputDialog "새 파일" — Web Shell 입력 모달로 재구현 필요. 안전 차단.
+        print("[Dialog/INPUT(skipped)] 새 파일 이름 입력 dialog 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
+        return
+        if False:  # unreachable — 원본 흐름 보존
             file_path = os.path.join(self.wildcard_manager.wildcards_dir, f"{file_name}.txt")
             
             if os.path.exists(file_path):
@@ -822,15 +819,11 @@ class WildcardManagerWindow(QMainWindow):
         if line_edit:
             line_edit.setProperty("autocomplete_ignore", True)
         
-        if dialog.exec() == QInputDialog.DialogCode.Accepted:
-            group_name = dialog.textValue()
-            ok = True
-        else:
-            group_name = ""
-            ok = False
-        
-        if ok and group_name:
-            # 유효한 폴더 이름인지 확인
+        # TODO(web-dialog): 원래 QInputDialog "새 그룹" — Web Shell 입력 모달로 재구현 필요. 안전 차단.
+        print("[Dialog/INPUT(skipped)] 새 그룹 이름 입력 dialog 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
+        return
+        if False:  # unreachable — 원본 흐름 보존
             invalid_chars = '<>:"|?*'
             if any(char in group_name for char in invalid_chars):
                 QMessageBox.warning(self, "경고", f"폴더 이름에 사용할 수 없는 문자가 포함되어 있습니다: {invalid_chars}")

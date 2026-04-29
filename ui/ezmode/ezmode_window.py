@@ -84,28 +84,11 @@ class EZModeWindow(QMainWindow):
         return True
 
     def _show_dependency_dialog(self, missing_packages: list):
-        """의존성 누락 안내"""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle("의존성 패키지 누락")
-
+        """의존성 누락 안내.
+        TODO(web-dialog): 원래 QMessageBox(Warning) — Web Shell 토스트/패널로 재구현 필요."""
         package_list = '\n'.join([f"  • {pkg}" for pkg in missing_packages])
-
-        msg.setText(
-            "EZ Mode를 사용하려면 다음 Python 패키지가 필요합니다:\n\n"
-            f"{package_list}\n\n"
-            "터미널에서 다음 명령어를 실행하여 설치하세요:"
-        )
-
         install_cmd = f"pip install {' '.join(missing_packages)}"
-
-        msg.setDetailedText(install_cmd)
-        msg.setInformativeText(
-            "설치 후 NAIA 2.0을 재시작하세요.\n\n"
-            "설치 명령어를 복사하려면 'Show Details'를 클릭하세요."
-        )
-
-        msg.exec()
+        print(f"[Dialog/WARN] 의존성 패키지 누락 — EZ Mode 사용 불가\n{package_list}\n설치: {install_cmd}")
 
     def _show_download_dialog(self, data_info: dict) -> bool:
         """데이터 다운로드 안내
@@ -160,40 +143,35 @@ class EZModeWindow(QMainWindow):
             "다운로드는 최초 1회만 필요하며, 수 분이 소요될 수 있습니다."
         )
 
-        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-
-        return msg.exec() == QMessageBox.StandardButton.Yes
+        # TODO(web-dialog): 원래 QMessageBox(Question Yes/No) "EZ Mode 데이터 다운로드" — Web Shell confirm 모달로 재구현 필요.
+        # 안전 기본값: 자동 다운로드 동의 차단 (False) — 사용자가 명시적으로 시작해야 함.
+        print(f"[Dialog/CONFIRM(skipped→No)] EZ Mode 데이터 다운로드 안내 (~2.8GB) — 다운로드 차단")
+        return False
 
     def _start_download(self) -> bool:
-        """EZ Mode 데이터 다운로드 시작
-
-        Returns:
-            bool: 다운로드 성공 여부
-        """
+        """EZ Mode 데이터 다운로드 시작.
+        TODO(web-dialog): 원래 QProgressDialog + QEventLoop.exec() 패턴 — 워커 완료까지 sub-event-loop 로 대기.
+        QEventLoop.exec() 는 메인 스레드를 blocking 하여 같은 프로세스 QWebEngineView 페인트도 정지.
+        Web Shell 진행률 표시 + 비동기 콜백 패턴으로 재구현 필요. 현재는 차단."""
+        print("[Dialog/SKIPPED] EZ Mode 다운로드 (QProgressDialog + QEventLoop.exec) 차단 — Web Shell 진행률 UI 재구현 예정")
+        return False
+        # 아래 원본 흐름 (Web Shell 재구현 시 참고용):
         from PyQt6.QtCore import QEventLoop
         import shutil
 
-        # 기존 matrices 폴더 정리 (불완전한 데이터 제거)
         matrices_path = Path('data/.ezmode/matrices')
         if matrices_path.exists():
             try:
-                print(f"[INFO] 기존 matrices 폴더 삭제 중...")
                 shutil.rmtree(matrices_path)
-                print(f"[OK] 기존 데이터 정리 완료")
             except Exception as e:
                 print(f"[WARN] 기존 폴더 삭제 실패: {e}")
 
-        # 진행 다이얼로그 생성
         progress_dialog = QProgressDialog(
-            "EZ Mode 데이터 다운로드 준비 중...",
-            "취소",
-            0, 100,
-            self
+            "EZ Mode 데이터 다운로드 준비 중...", "취소", 0, 100, self,
         )
         progress_dialog.setWindowTitle("데이터 다운로드")
         progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setMinimumDuration(0)  # 즉시 표시
+        progress_dialog.setMinimumDuration(0)
         progress_dialog.setValue(0)
 
         download_success = False
@@ -201,30 +179,22 @@ class EZModeWindow(QMainWindow):
         event_loop = QEventLoop()
 
         def on_progress(percent: int, message: str):
-            """진행률 업데이트"""
             progress_dialog.setValue(percent)
             progress_dialog.setLabelText(message)
 
         def on_finished(success: bool, message: str):
-            """다운로드 완료"""
             nonlocal download_success, download_message
             download_success = success
             download_message = message
             progress_dialog.setValue(100)
             progress_dialog.close()
-            event_loop.quit()  # 이벤트 루프 종료
+            event_loop.quit()
 
-        # 다운로더 생성 및 시작
         downloader = EZModeDownloader()
         worker = downloader.start_download(
-            progress_callback=on_progress,
-            finished_callback=on_finished
+            progress_callback=on_progress, finished_callback=on_finished,
         )
-
-        # 취소 버튼 비활성화 (다운로드 중단 시 데이터 손상 방지)
         progress_dialog.setCancelButton(None)
-
-        # 워커 완료까지 대기 (이벤트 루프 실행)
         event_loop.exec()
 
         # 결과 메시지 표시

@@ -340,14 +340,9 @@ class SketchWindow(QWidget):
             btn_layout.addWidget(cancel_btn)
             dlg.layout().addLayout(btn_layout)
 
-            if dlg.exec() == QColorDialog.DialogCode.Accepted:
-                color = dlg.currentColor()
-                self._custom_color = color
-                self._apply_color_btn_style(self._custom_btn, color)
-                self._canvas.set_brush_color(color)
-            else:
-                # 취소 시 기존 커스텀 색상 유지
-                self._canvas.set_brush_color(self._custom_color)
+            # TODO(web-dialog): 원래 QColorDialog.exec() — Web Shell 컬러 피커로 재구현 필요. 현재 차단.
+            print("[Dialog/SKIPPED] QColorDialog 차단 — 기존 커스텀 색상 유지. Web Shell 재구현 예정")
+            self._canvas.set_brush_color(self._custom_color)
 
     # ── Undo / Redo / Clear ──
 

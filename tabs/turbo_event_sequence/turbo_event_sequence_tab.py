@@ -929,13 +929,8 @@ class TurboEventSequenceTab(QWidget):
             # diff 재계산
             dialog._recalculate_all_diffs()
 
-            # 다이얼로그 표시
-            if dialog.exec():
-                # 저장 성공 시 원본 프롬프트 갱신
-                self.original_prompts = copy.deepcopy(self.confirmed_prompts)
-                # 메뉴 업데이트 (Custom 저장 비활성화)
-                self._update_save_menu()
-                print("✅ [Custom] CustomEventDialog를 통한 저장 완료")
+            # TODO(web-dialog): 원래 CustomEventDialog.exec() — Web Shell 패널로 재구현 필요.
+            print("[Dialog/SKIPPED] CustomEventDialog 차단 — Web Shell 재구현 예정")
 
         except Exception as e:
             print(f"❌ [Custom] CustomEventDialog 열기 실패: {e}")
@@ -1085,15 +1080,13 @@ class TurboEventSequenceTab(QWidget):
         self._update_ui_state()
 
     def _show_direction_change_warning(self) -> bool:
-        """해상도 변경 경고 다이얼로그 표시
-
-        Returns:
-            True: 사용자가 확인 → 이미지 초기화 진행
-            False: 사용자가 취소 → 기존 방향 유지
-        """
+        """해상도 변경 경고 다이얼로그.
+        TODO(web-dialog): 원래 QMessageBox(Yes/No) destructive confirm — Web Shell 모달로 재구현 필요.
+        안전 기본값: 변경 차단 (False) → 기존 방향 유지."""
+        print("[Dialog/CONFIRM(skipped→No)] 해상도 변경 경고 차단 — Web Shell 재구현 예정")
+        return False
+        # 아래 원본 흐름:
         from PyQt6.QtWidgets import QMessageBox
-
-        # 커스텀 스타일 다이얼로그
         msg = QMessageBox(self)
         msg.setWindowTitle("⚠️ 해상도 변경 경고")
         msg.setText("해상도를 변경하면 생성된 이미지가 모두 삭제됩니다.")
@@ -1101,33 +1094,7 @@ class TurboEventSequenceTab(QWidget):
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg.setDefaultButton(QMessageBox.StandardButton.No)
-
-        # 다크 테마 스타일 적용
-        msg.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_secondary']};
-            }}
-            QMessageBox QLabel {{
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(14)}px;
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px {get_scaled_size(16)}px;
-                font-size: {get_scaled_font_size(13)}px;
-                min-width: {get_scaled_size(60)}px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-                border-color: {DARK_COLORS['accent_blue']};
-            }}
-        """)
-
         result = msg.exec()
-
         if result == QMessageBox.StandardButton.Yes:
             # 이미지 초기화
             self.generated_images = []
@@ -1877,19 +1844,10 @@ class TurboEventSequenceTab(QWidget):
         """ultralytics 설치 안내 다이얼로그"""
         from PyQt6.QtWidgets import QMessageBox
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("패키지 설치 필요")
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setText("'배경 정보 유지' 기능을 사용하려면 ultralytics 패키지가 필요합니다.")
-        msg.setInformativeText("지금 설치하시겠습니까?\n\n설치에 1-2분 정도 소요될 수 있습니다.")
-
-        install_btn = msg.addButton("설치", QMessageBox.ButtonRole.AcceptRole)
-        msg.addButton("취소", QMessageBox.ButtonRole.RejectRole)
-
-        msg.exec()
-
-        if msg.clickedButton() == install_btn:
-            self._install_ultralytics()
+        # TODO(web-dialog): 원래 QMessageBox(Information) "패키지 설치 필요" — Web Shell confirm 모달로 재구현 필요.
+        # 안전 기본값: 자동 설치 차단. 사용자가 직접 터미널에서 `pip install ultralytics` 실행.
+        print("[Dialog/CONFIRM(skipped→Cancel)] 패키지 설치 필요: '배경 정보 유지' 기능에는 ultralytics 가 필요합니다. "
+              "터미널에서 `pip install ultralytics` 직접 실행해주세요.")
 
     def _install_ultralytics(self):
         """ultralytics 패키지 설치"""

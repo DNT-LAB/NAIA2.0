@@ -1031,9 +1031,12 @@ class HistoryItemWidget(QWidget):
             button_layout.addWidget(close_btn)
             
             layout.addLayout(button_layout)
-            
-            dialog.exec()
-            
+
+            # TODO(web-dialog): 원래 ComfyUI 워크플로우 표시 모달.
+            # Web Shell 패널/모달로 재구현 필요. 현재는 차단.
+            print("[Dialog/SKIPPED] ComfyUI 워크플로우 다이얼로그 차단 — Web Shell 패널 재구현 예정")
+            dialog.deleteLater()
+
         except Exception as e:
             print(f"❌ 워크플로우 다이얼로그 표시 실패: {e}")
 
@@ -1100,48 +1103,9 @@ class HistoryItemWidget(QWidget):
         print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
     
     def _show_styled_message(self, title, message, msg_type='warning'):
-        """다크 테마 스타일이 적용된 QMessageBox를 표시합니다."""
-        from PyQt6.QtWidgets import QMessageBox
-        
-        msg = QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        
-        if msg_type == 'warning':
-            msg.setIcon(QMessageBox.Icon.Warning)
-        elif msg_type == 'critical':
-            msg.setIcon(QMessageBox.Icon.Critical)
-        elif msg_type == 'information':
-            msg.setIcon(QMessageBox.Icon.Information)
-        
-        # 다크 테마 스타일 적용
-        msg.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-            }}
-            QMessageBox QLabel {{
-                color: {DARK_COLORS['text_primary']};
-                background-color: transparent;
-            }}
-            QMessageBox QPushButton {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                padding: 6px 20px;
-                border-radius: 4px;
-                min-width: 80px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-                border: 1px solid {DARK_COLORS['accent_blue']};
-            }}
-            QMessageBox QPushButton:pressed {{
-                background-color: {DARK_COLORS['bg_pressed']};
-            }}
-        """)
-        
-        msg.exec()
+        """TODO(web-dialog): 원래 dark-themed QMessageBox.exec() — Web Shell 토스트로 재구현."""
+        level = {'warning': 'WARN', 'critical': 'ERROR', 'information': 'INFO'}.get(msg_type, 'INFO')
+        print(f"[Dialog/{level}] {title}: {message}")
     
     def upscale_image_nai(self):
         """NAI API를 사용하여 이미지를 2배 업스케일합니다."""
@@ -2182,8 +2146,10 @@ class ImageWindow(QWidget):
         new_y = max(screen_rect.top() + 5, min(new_y, screen_rect.bottom() - popup_rect.height() - 5))
         
         popup.move(new_x, new_y)
-        popup.exec()
-    
+        # TODO(web-dialog): 원래 우클릭 컨텍스트 popup.exec() — Web Shell 컨텍스트 메뉴로 재구현.
+        print("[Dialog/SKIPPED] history 컨텍스트 popup 차단 — Web Shell 컨텍스트 메뉴 재구현 예정")
+        popup.deleteLater()
+
     def _open_inpaint_with_history(self, main_window, pil_image, history_item):
         """history_item의 캐릭터 프롬프트를 유지하며 Inpaint 윈도우를 엽니다."""
         from ui.inpaint_window import InpaintWindow
@@ -2235,37 +2201,11 @@ class ImageWindow(QWidget):
                         # Add the image to character reference module
                         frame = char_ref_module._add_character_frame(str(temp_file))
                         if frame:
-                            print(f"✅ Image sent to Character Reference: {temp_file}")
-                            # Show success message
-                            from PyQt6.QtWidgets import QMessageBox
-                            msg_box = QMessageBox()
-                            msg_box.setIcon(QMessageBox.Icon.Information)
-                            msg_box.setWindowTitle("성공")
-                            msg_box.setText("이미지가 Character Reference 모듈에 추가되었습니다.")
-                            msg_box.setStyleSheet("""
-                                QMessageBox {
-                                    background-color: #1a1a1a;
-                                    color: white;
-                                }
-                                QMessageBox QLabel {
-                                    color: white;
-                                }
-                                QMessageBox QPushButton {
-                                    background-color: #3a3a3a;
-                                    color: white;
-                                    border: 1px solid #555;
-                                    padding: 5px 15px;
-                                    min-width: 60px;
-                                }
-                                QMessageBox QPushButton:hover {
-                                    background-color: #4a4a4a;
-                                }
-                            """)
-                            msg_box.exec()
+                            # TODO(web-dialog): 원래 QMessageBox(Information) "성공" — Web Shell 토스트로 재구현.
+                            print(f"[Dialog/INFO] 성공: 이미지가 Character Reference 모듈에 추가되었습니다 ({temp_file})")
                         else:
-                            # Show error message if frame creation failed
-                            from PyQt6.QtWidgets import QMessageBox
-                            QMessageBox.warning(self, "오류", "Character Reference 모듈에 이미지를 추가하지 못했습니다.")
+                            # TODO(web-dialog): 원래 QMessageBox.warning "오류" — Web Shell 토스트로 재구현.
+                            print("[Dialog/WARN] 오류: Character Reference 모듈에 이미지를 추가하지 못했습니다.")
                     else:
                         # Show error if module not found
                         from PyQt6.QtWidgets import QMessageBox
@@ -2977,48 +2917,9 @@ class ImageWindow(QWidget):
         print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
     
     def _show_styled_message_main(self, title, message, msg_type='warning'):
-        """메인 이미지용 다크 테마 스타일이 적용된 QMessageBox를 표시합니다."""
-        from PyQt6.QtWidgets import QMessageBox
-        
-        msg = QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        
-        if msg_type == 'warning':
-            msg.setIcon(QMessageBox.Icon.Warning)
-        elif msg_type == 'critical':
-            msg.setIcon(QMessageBox.Icon.Critical)
-        elif msg_type == 'information':
-            msg.setIcon(QMessageBox.Icon.Information)
-        
-        # 다크 테마 스타일 적용
-        msg.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_primary']};
-            }}
-            QMessageBox QLabel {{
-                color: {DARK_COLORS['text_primary']};
-                background-color: transparent;
-            }}
-            QMessageBox QPushButton {{
-                background-color: {DARK_COLORS['bg_tertiary']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                padding: 6px 20px;
-                border-radius: 4px;
-                min-width: 80px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-                border: 1px solid {DARK_COLORS['accent_blue']};
-            }}
-            QMessageBox QPushButton:pressed {{
-                background-color: {DARK_COLORS['bg_pressed']};
-            }}
-        """)
-        
-        msg.exec()
+        """TODO(web-dialog): 원래 메인 이미지용 dark-themed QMessageBox.exec() — Web Shell 토스트로 재구현."""
+        level = {'warning': 'WARN', 'critical': 'ERROR', 'information': 'INFO'}.get(msg_type, 'INFO')
+        print(f"[Dialog/{level}] {title}: {message}")
     
     # ═══════════════════════════════════════════════════════════
     #  Enhance (img2img 고해상도 보강)
@@ -3227,7 +3128,12 @@ class ImageWindow(QWidget):
         return math.ceil(value / 64) * 64
 
     def _show_enhance_settings(self):
-        """Enhance 설정 다이얼로그 열기"""
+        """Enhance 설정 다이얼로그 열기.
+        TODO(web-dialog): 원래 EnhanceSettingsDialog.exec() — Web Shell 패널/모달로 재구현 필요.
+        현재는 다이얼로그 호출 차단 — Enhance 설정은 마지막 저장값 그대로 사용."""
+        print("[Dialog/SKIPPED] EnhanceSettingsDialog 차단 — Web Shell 설정 패널 재구현 예정")
+        return
+        # 아래는 Web Shell 재구현 시 참고용 원본 흐름:
         dialog = EnhanceSettingsDialog(self._enhance_upscale, self._enhance_strength, self._enhance_noise, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._enhance_upscale, self._enhance_strength, self._enhance_noise = dialog.get_settings()

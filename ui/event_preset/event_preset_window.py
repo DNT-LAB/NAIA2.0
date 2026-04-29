@@ -147,68 +147,19 @@ class EventPresetWindow(QMainWindow):
             EventPresetWindow._ensure_thumbnail_available(parent)
             return True
 
-        msg = QMessageBox(parent)
-        msg.setWindowTitle("Event Preset 데이터")
-        msg.setIcon(QMessageBox.Icon.Question)
-        msg.setText("Event Preset 데이터가 없습니다.\n다운로드하시겠습니까? (~385MB)")
-        msg.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-
-        if msg.exec() != QMessageBox.StandardButton.Yes:
-            return False
-
-        from .data_manager import DATA_ZIP_PATH
-
-        dialog = EventPresetDownloadDialog(parent)
-        worker = EventPresetDownloadWorker(DATA_ZIP_PATH)
-
-        success_flag = [False]
-
-        def on_finished(success: bool, message: str):
-            success_flag[0] = success
-            if not success:
-                QMessageBox.warning(parent, "다운로드 실패", message)
-            dialog.mark_finished()
-
-        worker.progress_updated.connect(dialog.update_progress)
-        worker.download_finished.connect(on_finished)
-        dialog.canceled.connect(worker.cancel)
-
-        worker.start()
-        dialog.exec()
-        worker.wait()
-
-        if success_flag[0]:
-            # preset 다운로드 성공 → 썸네일도 확인
-            EventPresetWindow._ensure_thumbnail_available(parent)
-
-        return success_flag[0]
+        # TODO(web-dialog): 원래 QMessageBox(Yes/No) confirm + EventPresetDownloadDialog.exec() (worker sub-loop, ~385MB).
+        # Web Shell 진행률 UI + confirm 모달로 재구현 필요. 안전 기본값 — 다운로드 차단.
+        print("[Dialog/CONFIRM(skipped→No)] Event Preset 데이터 다운로드 confirm 차단 (~385MB) — Web Shell 재구현 예정")
+        return False
 
     @staticmethod
     def _ensure_thumbnail_available(parent=None) -> None:
-        """썸네일 파일 존재 확인. 없으면 자동 다운로드."""
+        """썸네일 파일 존재 확인. 없으면 자동 다운로드.
+        TODO(web-dialog): 원래 EventPresetDownloadDialog.exec() (worker sub-loop) — Web Shell 진행률 UI 재구현 필요."""
         thumb_path = Path(__file__).resolve().parent.parent.parent / "data" / "event_preset_thumbnail"
         if thumb_path.exists():
             return
-
-        dialog = EventPresetDownloadDialog(parent)
-        dialog.setWindowTitle("Event Preset 썸네일 다운로드")
-        worker = ThumbnailDownloadWorker(thumb_path)
-
-        def on_finished(success: bool, message: str):
-            if not success:
-                print(f"[EventPreset] 썸네일 다운로드 실패: {message}")
-            dialog.mark_finished()
-
-        worker.progress_updated.connect(dialog.update_progress)
-        worker.download_finished.connect(on_finished)
-        dialog.canceled.connect(worker.cancel)
-
-        worker.start()
-        dialog.exec()
-        worker.wait()
+        print("[Dialog/SKIPPED] Event Preset 썸네일 다운로드 dialog 차단 — Web Shell 재구현 예정")
 
     # ------------------------------------------------------------------
     # 생성자
@@ -1305,50 +1256,10 @@ class EventPresetWindow(QMainWindow):
             self._fill_observed_combos(self.current_event)
 
     def _prompt_qs_download(self) -> bool:
-        """Quick Search 데이터 다운로드 유도. True=성공."""
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Full Mode 데이터")
-        msg.setIcon(QMessageBox.Icon.Question)
-        msg.setText(
-            "Full Mode에는 Quick Search 데이터가 필요합니다.\n"
-            "다운로드하시겠습니까? (~238MB)"
-        )
-        msg.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-
-        if msg.exec() != QMessageBox.StandardButton.Yes:
-            return False
-
-        from ui.remote.quick_search_tab import (
-            HUGGINGFACE_DATA_URL,
-            QUICK_SEARCH_DIR,
-            PartitionDataDownloadWorker,
-        )
-        from .download_worker import EventPresetDownloadDialog
-
-        dialog = EventPresetDownloadDialog(self)
-        dialog.setWindowTitle("Quick Search 데이터 다운로드")
-        worker = PartitionDataDownloadWorker(HUGGINGFACE_DATA_URL, QUICK_SEARCH_DIR)
-
-        success_flag = [False]
-
-        def on_finished(success: bool, message: str):
-            success_flag[0] = success
-            if not success:
-                QMessageBox.warning(self, "다운로드 실패", message)
-            dialog.mark_finished()
-
-        worker.progress_updated.connect(dialog.update_progress)
-        worker.download_finished.connect(on_finished)
-        dialog.canceled.connect(worker.cancel)
-
-        worker.start()
-        dialog.exec()
-        worker.wait()
-
-        return success_flag[0]
+        """Quick Search 데이터 다운로드 유도. True=성공.
+        TODO(web-dialog): 원래 QMessageBox(Yes/No) confirm + EventPresetDownloadDialog.exec() — Web Shell 진행률 UI 재구현 필요."""
+        print("[Dialog/CONFIRM(skipped→No)] Full Mode/Quick Search 데이터 다운로드 confirm 차단 (~238MB) — Web Shell 재구현 예정")
+        return False
 
     def _fill_cooccurrence_tables(self, event_name: str) -> None:
         """Expression/Clothing/Characteristic 테이블 채우기."""

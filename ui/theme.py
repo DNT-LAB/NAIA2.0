@@ -757,46 +757,54 @@ def get_message_box_stylesheet() -> str:
     """
 
 
+# ============================================================================
+# TODO(web-dialog): future01 Web Shell 마이그레이션
+# ----------------------------------------------------------------------------
+# 데스크톱 GUI 가 hidden 모드로 동작하고 모든 사용자 상호작용은 QWebEngineView
+# (Web Shell) 를 통해 이뤄지도록 마이그레이션 진행 중. QMessageBox.exec() 는
+# 메인 스레드를 blocking 하여 같은 프로세스의 QWebEngineView 페인트도 정지시키
+# 므로, 이 헬퍼들은 더 이상 dialog 를 띄우지 않고 콘솔에만 출력한다.
+#
+# 재구현 시 옵션:
+#   1) Web Shell 토스트(`showToast(...)` JS) — info/warn/error 알림용
+#   2) Web Shell 모달 dialog — confirm 류 (yes/no 응답 필요)
+#   3) 그대로 데스크톱 popup 유지가 필요하면 `QMessageBox(...).show()` 비-modal
+#      + `buttonClicked` 시그널 + 콜백 패턴
+#
+# 원본 동작 보존:
+#   - show_info: QMessageBox.Information.exec()
+#   - show_warning: QMessageBox.Warning.exec()
+#   - show_error: QMessageBox.Critical.exec()
+#   - show_question: QMessageBox.Question (Yes/No) — 사용자가 Yes 클릭하면 True
+#
+# show_question 은 안전한 기본값으로 항상 False 를 반환한다. 이 동작이 의미가
+# 있는 호출처(예: "삭제하시겠습니까?")는 의도치 않은 진행을 방지하지만, 정상
+# 흐름이 막힐 수 있으므로 호출처를 web shell confirm 으로 재설계해야 한다.
+# ============================================================================
+
+def _print_dialog(level: str, title: str, message: str):
+    """blocking dialog 대체 — stdout 로그만 (web shell 토스트로 교체할 자리)."""
+    print(f"[Dialog/{level}] {title}: {message}")
+
+
 def show_info(parent, title: str, message: str):
-    """Show dark-themed information message box"""
-    from PyQt6.QtWidgets import QMessageBox
-    msg = QMessageBox(parent)
-    msg.setIcon(QMessageBox.Icon.Information)
-    msg.setWindowTitle(title)
-    msg.setText(message)
-    msg.setStyleSheet(get_message_box_stylesheet())
-    msg.exec()
+    """TODO(web-dialog): 원래 QMessageBox(Information) — Web Shell 토스트로 재구현."""
+    _print_dialog("INFO", title, message)
 
 
 def show_warning(parent, title: str, message: str):
-    """Show dark-themed warning message box"""
-    from PyQt6.QtWidgets import QMessageBox
-    msg = QMessageBox(parent)
-    msg.setIcon(QMessageBox.Icon.Warning)
-    msg.setWindowTitle(title)
-    msg.setText(message)
-    msg.setStyleSheet(get_message_box_stylesheet())
-    msg.exec()
+    """TODO(web-dialog): 원래 QMessageBox(Warning) — Web Shell 토스트(warn 톤)로 재구현."""
+    _print_dialog("WARN", title, message)
 
 
 def show_error(parent, title: str, message: str):
-    """Show dark-themed error message box"""
-    from PyQt6.QtWidgets import QMessageBox
-    msg = QMessageBox(parent)
-    msg.setIcon(QMessageBox.Icon.Critical)
-    msg.setWindowTitle(title)
-    msg.setText(message)
-    msg.setStyleSheet(get_message_box_stylesheet())
-    msg.exec()
+    """TODO(web-dialog): 원래 QMessageBox(Critical) — Web Shell 토스트(error 톤)로 재구현."""
+    _print_dialog("ERROR", title, message)
 
 
 def show_question(parent, title: str, message: str) -> bool:
-    """Show dark-themed question message box, returns True if Yes clicked"""
-    from PyQt6.QtWidgets import QMessageBox
-    msg = QMessageBox(parent)
-    msg.setIcon(QMessageBox.Icon.Question)
-    msg.setWindowTitle(title)
-    msg.setText(message)
-    msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-    msg.setStyleSheet(get_message_box_stylesheet())
-    return msg.exec() == QMessageBox.StandardButton.Yes
+    """TODO(web-dialog): 원래 QMessageBox(Question, Yes/No).exec() — 안전 기본값 False 반환.
+    재구현 시 Web Shell 모달 confirm + 콜백 패턴으로 비동기화 필요.
+    현재 호출처는 False 반환에 의해 진행 차단되므로 가능한 빨리 재설계 권장."""
+    _print_dialog("CONFIRM(skipped→False)", title, message)
+    return False

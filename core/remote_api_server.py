@@ -4217,24 +4217,24 @@ class RemoteBridge(QObject):
             self._broadcast_json({"type": "toast", "message": f"저장 디렉토리 설정 실패: {e}", "level": "error"})
 
     def _do_browse_save_directory(self, ws):
+        # TODO(web-dialog): 원래 QFileDialog.getExistingDirectory(...) "저장 디렉토리 선택" — 메인 스레드 blocking modal.
+        # Web Shell 마이그레이션: 디렉토리 선택은 Web Shell 측에서 직접 처리해야 한다.
+        # 옵션 (A) Web Shell 디렉토리 입력 폼 + path 검증 후 set_base_save_directory 호출
+        #       (B) /api/viewer/* 류 경로처럼 서버에 path 텍스트 입력으로 받기
+        # 현재 임시 동작: 변경 없이 현재 경로 broadcast 만 수행 + 토스트로 안내.
         try:
             image_crud = getattr(self.app_context, "image_crud_controller", None)
             if not image_crud:
                 return
 
             current_path = str(getattr(image_crud, "_base_save_path", Path("output")))
-            new_path = QFileDialog.getExistingDirectory(None, "저장 디렉토리 선택", current_path)
-            if not new_path:
-                return
-
-            self._persist_base_save_directory_setting(new_path)
-            self.app_context.set_base_save_directory(new_path)
+            print(f"[Dialog/SKIPPED] 저장 디렉토리 선택 모달 호출 차단 — 현재 경로 유지: {current_path}")
             self._broadcast_save_directory_state()
             if ws is not None:
                 self._send_json_to(ws, {
                     "type": "toast",
-                    "message": f"저장 경로 변경: {new_path}",
-                    "level": "success",
+                    "message": "저장 경로 변경은 Web Shell 입력으로 진행해주세요.",
+                    "level": "warning",
                 })
         except Exception as e:
             print(f"🌐 Remote: save_directory 찾아보기 실패 — {e}")

@@ -819,10 +819,9 @@ class CharPromptTabMixin:
 
         layout.addLayout(btn_layout)
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_prompt = prompt_edit.toPlainText()
-            new_uc = uc_edit.toPlainText()
-            self._apply_char_prompt_to_module(slot_index, new_prompt, new_uc)
+        # TODO(web-dialog): 원래 캐릭터 프롬프트 편집 dialog.exec() — Web Shell 패널로 재구현 필요.
+        print(f"[Dialog/SKIPPED] 캐릭터 프롬프트 편집 dialog 차단 (slot={slot_index}) — Web Shell 재구현 예정")
+        dialog.deleteLater()
 
     def _apply_char_prompt_to_module(self, slot_index: int, prompt: str, uc: str):
         """캐릭터 프롬프트를 모듈에 적용"""
@@ -1288,14 +1287,9 @@ class CharPromptTabMixin:
         QMessageBox.information(self, "완료", "아이템이 삭제되었습니다.")
 
     def _on_manage_search_clicked(self):
-        """캐릭터 검색 버튼 클릭 → CharacterSearchDialog 사용"""
-        # CharacterSearchDialog에 프롬프트/UC TextEdit 전달
-        dialog = CharacterSearchDialog(
-            parent_prompt_textbox=self.char_prompt_manage_prompt_edit,
-            parent_uc_textbox=self.char_prompt_manage_uc_edit,
-            parent=self
-        )
-        dialog.exec()
+        """캐릭터 검색 버튼 클릭.
+        TODO(web-dialog): 원래 CharacterSearchDialog.exec() — Web Shell 패널로 재구현 필요."""
+        print("[Dialog/SKIPPED] CharacterSearchDialog (manage) 차단 — Web Shell 재구현 예정")
 
     def _on_manage_add_folder(self):
         """관리 탭에서 폴더 추가"""

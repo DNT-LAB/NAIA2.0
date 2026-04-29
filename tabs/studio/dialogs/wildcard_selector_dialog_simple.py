@@ -444,4 +444,7 @@ class WildcardSelectorDialogSimple(QDialog):
             }}
         """)
 
-        msg_box.exec()
+        # TODO(web-dialog): 원래 QMessageBox.exec() — Web Shell 토스트로 재구현 필요.
+        title = msg_box.windowTitle() if hasattr(msg_box, 'windowTitle') else 'Message'
+        text = msg_box.text() if hasattr(msg_box, 'text') else ''
+        print(f"[Dialog] {title}: {text}")

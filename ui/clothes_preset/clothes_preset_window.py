@@ -109,38 +109,10 @@ class ClothesPresetWindow(QMainWindow):
             return True
         dm.close()
 
-        msg = QMessageBox(parent)
-        msg.setWindowTitle("Clothes Preset 데이터")
-        msg.setText(
-            "Clothes Preset 데이터가 없습니다.\n"
-            "다운로드하시겠습니까?"
-        )
-        msg.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-        if msg.exec() != QMessageBox.StandardButton.Yes:
-            return False
-
-        success_flag = [False]
-
-        def on_finished(success: bool, message: str):
-            success_flag[0] = success
-            if not success:
-                QMessageBox.warning(parent, "다운로드 실패", message)
-            dialog.mark_finished()
-
-        dialog = ClothesPresetDownloadDialog(parent)
-        worker = ClothesPresetDownloadWorker(DATA_ZIP_PATH)
-        worker.progress_updated.connect(dialog.update_progress)
-        worker.download_finished.connect(on_finished)
-        dialog.canceled.connect(worker.cancel)
-
-        worker.start()
-        dialog.exec()
-        worker.wait()
-
-        return success_flag[0]
+        # TODO(web-dialog): 원래 QMessageBox(Yes/No) 다운로드 confirm + ClothesPresetDownloadDialog.exec() (worker sub-loop).
+        # Web Shell 진행률 UI + confirm 모달로 재구현 필요. 안전 기본값 — 다운로드 차단.
+        print("[Dialog/CONFIRM(skipped→No)] Clothes Preset 데이터 다운로드 confirm 차단 — Web Shell 재구현 예정")
+        return False
 
     # ------------------------------------------------------------------
     # 생성자

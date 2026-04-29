@@ -845,17 +845,9 @@ class StudioTab(BaseTabModule):
         if not frame:
             return
 
-        dialog = PromptSettingDialog(
-            frame_index,
-            frame.get_prompt_data(),
-            self.widget
-        )
-
-        if dialog.exec():
-            result = dialog.get_result()
-            if result:
-                frame.set_prompt_data(result)
-                self._update_start_button()
+        # TODO(web-dialog): 원래 PromptSettingDialog.exec() — Web Shell 패널/모달로 재구현 필요.
+        print(f"[Dialog/SKIPPED] PromptSettingDialog 차단 (frame={frame_index}) — Web Shell 재구현 예정")
+        return
 
     def _on_frame_updated(self, frame_index: int):
         """Handle frame update (for single frame generation)"""
@@ -1214,14 +1206,9 @@ class StudioTab(BaseTabModule):
         print(f"Studio: Global resolution set to {resolution}")
 
     def _on_open_presets_clicked(self):
-        """Open event presets using OpenPresetDialog"""
-        dialog = OpenPresetDialog(self.widget)
-
-        if dialog.exec() == dialog.DialogCode.Accepted:
-            preset_data = dialog.get_preset_data()
-            load_mode = dialog.get_load_mode()
-            if preset_data:
-                self._apply_preset_data(preset_data, load_mode)
+        """Open event presets using OpenPresetDialog.
+        TODO(web-dialog): 원래 OpenPresetDialog.exec() — Web Shell 패널로 재구현 필요."""
+        print("[Dialog/SKIPPED] OpenPresetDialog 차단 — Web Shell 재구현 예정")
 
     def _apply_preset_data(self, preset_data: dict, load_mode: str = OpenPresetDialog.LOAD_ALL):
         """Apply loaded preset data to Studio Tab based on load mode"""
@@ -1285,8 +1272,9 @@ class StudioTab(BaseTabModule):
         }
 
         # Show save dialog
-        dialog = SavePresetDialog(frames_data, images, global_prompts, self.widget)
-        dialog.exec()
+        # TODO(web-dialog): 원래 SavePresetDialog.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] SavePresetDialog 차단 — Web Shell 재구현 예정")
+        return
 
     def _on_export_views_clicked(self):
         """Export generated images as a grid image
@@ -1309,29 +1297,17 @@ class StudioTab(BaseTabModule):
                     images.append((frame.index, pil_image))
 
         if not images:
-            QMessageBox.warning(self.widget, "Warning", "No images to export.")
+            # TODO(web-dialog): 원래 QMessageBox.warning — Web Shell 토스트.
+            print("[Dialog/WARN] Warning: No images to export.")
             return
 
-        # Show export dialog
-        dialog = ExportViewsDialog(images, self.widget)
-        dialog.exec()
+        # TODO(web-dialog): 원래 ExportViewsDialog.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] ExportViewsDialog 차단 — Web Shell 재구현 예정")
 
     def _on_events_clicked(self):
-        """Open batch event editor dialog"""
-        if not self.frame_manager:
-            return
-
-        # Create dialog with frame manager
-        dialog = EventsDialog(self.frame_manager, self.widget)
-
-        # Connect signals for frame button locking
-        dialog.dialog_opened.connect(self._lock_frame_buttons)
-        dialog.dialog_closed.connect(self._unlock_frame_buttons)
-
-        # Execute dialog
-        dialog.exec()
-
-        # Update UI after dialog closes
+        """Open batch event editor dialog.
+        TODO(web-dialog): 원래 EventsDialog.exec() — Web Shell 패널로 재구현 필요."""
+        print("[Dialog/SKIPPED] EventsDialog 차단 — Web Shell 재구현 예정")
         self._update_start_button()
 
     def _lock_frame_buttons(self):
@@ -1383,67 +1359,14 @@ class StudioTab(BaseTabModule):
 
     # === Helper methods ===
     def _show_styled_message(self, title: str, text: str, icon=QMessageBox.Icon.Information):
-        """Show QMessageBox with dark theme styling"""
-        msg_box = QMessageBox(self.widget)
-        msg_box.setWindowTitle(title)
-        msg_box.setText(text)
-        msg_box.setIcon(icon)
-
-        # Apply dark theme
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_primary']};
-            }}
-            QLabel {{
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(13)}px;
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: {DARK_COLORS['text_primary']};
-                border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-size: {get_scaled_font_size(13)}px;
-                min-width: 60px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['accent_blue_hover']};
-            }}
-        """)
-        msg_box.exec()
+        """TODO(web-dialog): 원래 dark-themed QMessageBox.exec() — Web Shell 토스트로 재구현 필요."""
+        print(f"[Dialog] {title}: {text}")
 
     def _show_styled_question(self, title: str, text: str) -> bool:
-        """Show QMessageBox question with dark theme styling. Returns True if Yes."""
-        msg_box = QMessageBox(self.widget)
-        msg_box.setWindowTitle(title)
-        msg_box.setText(text)
-        msg_box.setIcon(QMessageBox.Icon.Question)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-
-        # Apply dark theme
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_primary']};
-            }}
-            QLabel {{
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(13)}px;
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: {DARK_COLORS['text_primary']};
-                border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-size: {get_scaled_font_size(13)}px;
-                min-width: 60px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['accent_blue_hover']};
-            }}
-        """)
-        return msg_box.exec() == QMessageBox.StandardButton.Yes
+        """TODO(web-dialog): 원래 dark-themed QMessageBox(Yes/No).exec() — Web Shell confirm 모달로 재구현 필요.
+        안전 기본값으로 항상 False 반환 (destructive 동작 차단)."""
+        print(f"[Dialog/CONFIRM(skipped→No)] {title}: {text}")
+        return False
 
     # === Wildcard analyzer methods ===
     # === New Wildcard Selector Methods ===
@@ -1474,7 +1397,8 @@ class StudioTab(BaseTabModule):
             self._update_assign_button()
 
         dialog.wildcard_selected.connect(on_selected)
-        dialog.exec()
+        # TODO(web-dialog): 원래 WildcardSelectorDialogSimple.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] WildcardSelectorDialogSimple (WC1) 차단 — Web Shell 재구현 예정")
 
     def _on_wc2_clicked(self):
         """Open wildcard selector for WC2"""
@@ -1503,7 +1427,8 @@ class StudioTab(BaseTabModule):
             self._update_assign_button()
 
         dialog.wildcard_selected.connect(on_selected)
-        dialog.exec()
+        # TODO(web-dialog): 원래 WildcardSelectorDialogSimple.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] WildcardSelectorDialogSimple (WC2) 차단 — Web Shell 재구현 예정")
 
     def _update_assign_button(self):
         """Enable ASSIGN button if at least one wildcard is selected"""
@@ -1795,7 +1720,8 @@ class StudioTab(BaseTabModule):
         dialog.mode_1d_requested.connect(lambda: self._on_1d_mode_selected(dialog))
         dialog.mode_2d_requested.connect(lambda x, y, x_items, y_items: self._on_2d_mode_selected(x, y, x_items, y_items, prompt_pattern, dialog))
 
-        dialog.exec()
+        # TODO(web-dialog): 원래 WildcardSelectorDialog.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] WildcardSelectorDialog (1D/2D 모드 선택) 차단 — Web Shell 재구현 예정")
 
     def _on_1d_mode_selected(self, dialog):
         """Handle 1D mode selection - use existing auto-assign logic"""

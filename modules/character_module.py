@@ -488,6 +488,11 @@ class CharacterSearchDialog(QDialog):
             parent=self
         )
 
+        # TODO(web-dialog): 원래 캐릭터 사전 편집 dialog.exec() — Web Shell 패널/모달로 재구현 필요.
+        # 현재는 dialog 호출 차단 — 사용자 행동 없이 종료.
+        print("[Dialog/SKIPPED] 캐릭터 사전 편집 dialog 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
+        return
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # 저장 완료, 딕셔너리 갱신
             self.save_custom_dict()
@@ -905,9 +910,9 @@ class CharacterPositionManagerDialog(QDialog):
                     if pos and len(pos) >= 2:
                         used_positions.append(pos)
 
-        dialog = CharacterPositionGridDialog(char_index, current_pos, used_positions, parent=self)
-        dialog.position_selected.connect(self._on_position_selected)
-        dialog.exec()
+        # TODO(web-dialog): 원래 CharacterPositionGridDialog.exec() — 캐릭터 위치 5x5 그리드 선택 모달.
+        # Web Shell 패널로 재구현 필요. 현재는 차단.
+        print(f"[Dialog/SKIPPED] CharacterPositionGridDialog 차단 (char_index={char_index}) — Web Shell 재구현 예정")
 
     def _on_position_selected(self, char_index: int, position: str):
         """그리드에서 위치 선택 시 (실시간 피드백)"""
@@ -1032,13 +1037,9 @@ class NAID4CharacterInput(QWidget):
         layout.addLayout(button_layout)
 
     def open_character_search(self):
-        """캐릭터 검색 다이얼로그 열기"""
-        dialog = CharacterSearchDialog(
-            parent_prompt_textbox=self.prompt_textbox,
-            parent_uc_textbox=self.uc_textbox,
-            parent=self
-        )
-        dialog.exec()
+        """캐릭터 검색 다이얼로그 열기.
+        TODO(web-dialog): 원래 CharacterSearchDialog.exec() — Web Shell 패널로 재구현 필요."""
+        print("[Dialog/SKIPPED] CharacterSearchDialog 차단 — Web Shell 재구현 예정")
 
 
 class CharacterModule(BaseMiddleModule, ModeAwareModule):

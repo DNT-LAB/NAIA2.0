@@ -412,10 +412,10 @@ class TempGenerationWindow(QMainWindow):
             }}
         """)
 
-        # 다이얼로그 실행
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            print(f"[TempGenerationWindow #{self.window_id}] 메인 UI 적용 취소됨")
-            return
+        # TODO(web-dialog): 원래 메인 UI 적용 confirm dialog.exec() — Web Shell 모달로 재구현 필요.
+        # 안전 기본값: 적용 차단 (destructive — 메인 UI 덮어씀).
+        print(f"[Dialog/SKIPPED] TempGenerationWindow 메인 UI 적용 confirm 차단 (#{self.window_id}) — Web Shell 재구현 예정")
+        return
 
         # 선택된 항목 수집
         apply_sections = {

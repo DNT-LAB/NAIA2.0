@@ -310,9 +310,9 @@ NAIA의 WEBUI모드는 sd-webui-api-payload-display Extension이 있어야 Adeta
             print(f"[NAIA] Payload 처리 중 오류: {e}")
     
     def show_json_converter_window(self, extension_data):
-        """사용자가 필요한 Extension만 선택하는 JSON 변환 윈도우"""
-        dialog = JsonConverterDialog(extension_data, self.app_context, self)
-        dialog.exec()
+        """사용자가 필요한 Extension만 선택하는 JSON 변환 윈도우.
+        TODO(web-dialog): 원래 JsonConverterDialog.exec() — Web Shell 패널/모달로 재구현 필요."""
+        print("[Dialog/SKIPPED] JsonConverterDialog 차단 — Web Shell 재구현 예정")
 
 class JsonConverterDialog(QDialog):
     """Extension 선택 및 JSON 변환 다이얼로그"""

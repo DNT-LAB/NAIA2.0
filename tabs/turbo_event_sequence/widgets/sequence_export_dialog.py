@@ -40,57 +40,44 @@ OLLAMA_PROMPT_PATH = Path(__file__).parent.parent.parent.parent / "workflows" / 
 
 # === QMessageBox 스타일링 헬퍼 함수 ===
 
+# TODO(web-dialog): blocking QMessageBox 대체용 stub. .exec() 호출 시 print 만 수행하고
+# QMessageBox.StandardButton.No (=65536) 반환하여 destructive confirm 을 안전 차단.
+# Web Shell 토스트/모달로 재구현 시 이 stub 제거하고 호출처를 명시적 비동기 패턴으로 교체.
+class _PrintMessageBoxStub:
+    def __init__(self, icon=None, title="", text=""):
+        self._icon = icon
+        self._title = str(title or "")
+        self._text = str(text or "")
+        self._info = ""
+        self._detail = ""
+    def setText(self, t): self._text = str(t or "")
+    def setWindowTitle(self, t): self._title = str(t or "")
+    def setIcon(self, i): self._icon = i
+    def setStyleSheet(self, *a, **kw): pass
+    def setStandardButtons(self, *a, **kw): pass
+    def setDefaultButton(self, *a, **kw): pass
+    def setInformativeText(self, t): self._info = str(t or "")
+    def setDetailedText(self, t): self._detail = str(t or "")
+    def addButton(self, *a, **kw): return None
+    def clickedButton(self): return None
+    def standardButton(self, *a, **kw): return QMessageBox.StandardButton.No
+    def exec(self):
+        # icon → level 매핑
+        level = "INFO"
+        if self._icon == QMessageBox.Icon.Warning: level = "WARN"
+        elif self._icon == QMessageBox.Icon.Critical: level = "ERROR"
+        elif self._icon == QMessageBox.Icon.Question: level = "CONFIRM(skipped→No)"
+        suffix = ""
+        if self._info: suffix += f" | info: {self._info}"
+        if self._detail: suffix += f" | detail: {self._detail}"
+        print(f"[Dialog/{level}] {self._title}: {self._text}{suffix}")
+        return QMessageBox.StandardButton.No  # destructive confirm 안전 차단
+
+
 def _create_styled_messagebox(parent, icon, title, text, buttons=None):
-    """하얀색 텍스트를 가진 스타일링된 QMessageBox 생성
-
-    Args:
-        parent: 부모 위젯
-        icon: QMessageBox.Icon (Information, Warning, Critical, Question)
-        title: 제목
-        text: 메시지 텍스트
-        buttons: QMessageBox.StandardButton (기본값: Ok)
-
-    Returns:
-        QMessageBox 인스턴스
-    """
-    msg = QMessageBox(parent)
-    msg.setIcon(icon)
-    msg.setWindowTitle(title)
-    msg.setText(text)
-
-    if buttons:
-        msg.setStandardButtons(buttons)
-    else:
-        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-
-    # 하얀색 텍스트 스타일 적용
-    msg.setStyleSheet(f"""
-        QMessageBox {{
-            background-color: {DARK_COLORS['bg_primary']};
-            color: #FFFFFF;
-        }}
-        QMessageBox QLabel {{
-            color: #FFFFFF;
-            font-size: {get_scaled_font_size(12)}px;
-        }}
-        QPushButton {{
-            background-color: {DARK_COLORS['accent_blue']};
-            color: #FFFFFF;
-            border: none;
-            border-radius: {get_scaled_size(4)}px;
-            padding: {get_scaled_size(6)}px {get_scaled_size(12)}px;
-            font-size: {get_scaled_font_size(11)}px;
-            min-width: {get_scaled_size(70)}px;
-        }}
-        QPushButton:hover {{
-            background-color: {DARK_COLORS['accent_blue_hover']};
-        }}
-        QPushButton:pressed {{
-            background-color: {DARK_COLORS['accent_blue']};
-        }}
-    """)
-
-    return msg
+    """TODO(web-dialog): 원래 dark-themed QMessageBox — Web Shell 토스트로 재구현 필요.
+    blocking modal 차단을 위해 stub 객체 반환. .exec() 시 print + No 반환."""
+    return _PrintMessageBoxStub(icon=icon, title=title, text=text)
 
 
 # === 콘솔 로그 윈도우 ===
@@ -2726,50 +2713,10 @@ class SequenceExportDialog(QDialog):
 
         self.video_generated.emit(output_path)
 
-        # 완료 메시지 및 파일 열기 질문 (폰트 크기 증가)
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle("생성 완료")
-        msg.setText(f"동영상이 생성되었습니다.\n저장 경로: {output_path}\n\n지금 재생하시겠습니까?")
-        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-
-        # 스타일 적용 (폰트 크기 +4px)
-        font_size = get_scaled_font_size(16)  # 기본 12 + 4
-        btn_font_size = get_scaled_font_size(15) # 기본 11 + 4
-
-        msg.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {DARK_COLORS['bg_primary']};
-                color: #FFFFFF;
-            }}
-            QMessageBox QLabel {{
-                color: #FFFFFF;
-                font-size: {font_size}px;
-            }}
-            QPushButton {{
-                background-color: {DARK_COLORS['accent_blue']};
-                color: #FFFFFF;
-                border: none;
-                border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(8)}px {get_scaled_size(16)}px;
-                font-size: {btn_font_size}px;
-                min-width: {get_scaled_size(80)}px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['accent_blue_hover']};
-            }}
-            QPushButton:pressed {{
-                background-color: {DARK_COLORS['accent_blue']};
-            }}
-        """)
-
-        reply = msg.exec()
-
-        if reply == QMessageBox.StandardButton.Yes:
-            # 내장 플레이어로 재생
-            player = SimpleVideoPlayer(output_path, self)
-            player.exec()
-        else:
+        # TODO(web-dialog): 원래 QMessageBox(Yes/No) "생성 완료" + SimpleVideoPlayer.exec() —
+        # Web Shell 토스트 + 파일 링크로 재구현 필요. 안전 기본값: 재생 차단, 폴더 열기로 진행.
+        print(f"[Dialog/CONFIRM(skipped→No)] 생성 완료: 동영상이 생성되었습니다 — {output_path} (재생 차단, 폴더 열기로 진행)")
+        if False:
             # 아니오 누르면 폴더 열기
             try:
                 import os

@@ -214,66 +214,27 @@ class RemoteWindow(QMainWindow, QuickSearchTabMixin, EventTabMixin, InstantWcTab
         """)
 
     def _show_warning(self, title: str, message: str):
-        """다크 테마가 적용된 경고 다이얼로그"""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        self._style_dialog(msg)
-        msg.exec()
+        """TODO(web-dialog): 원래 QMessageBox(Warning) — Web Shell 토스트로 재구현 필요."""
+        print(f"[Dialog/WARN] {title}: {message}")
 
     def _show_info(self, title: str, message: str):
-        """다크 테마가 적용된 정보 다이얼로그"""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        self._style_dialog(msg)
-        msg.exec()
+        """TODO(web-dialog): 원래 QMessageBox(Information) — Web Shell 토스트로 재구현 필요."""
+        print(f"[Dialog/INFO] {title}: {message}")
 
     def _show_question(self, title: str, message: str) -> bool:
-        """다크 테마가 적용된 확인 다이얼로그 (Yes/No)"""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Question)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        self._style_dialog(msg)
-        return msg.exec() == QMessageBox.StandardButton.Yes
+        """TODO(web-dialog): 원래 QMessageBox(Yes/No) — Web Shell confirm 모달로 재구현 필요. 안전 기본값 False."""
+        print(f"[Dialog/CONFIRM(skipped→No)] {title}: {message}")
+        return False
 
     def _get_text_input(self, title: str, label: str) -> tuple:
-        """다크 테마가 적용된 텍스트 입력 다이얼로그"""
-        from PyQt6.QtWidgets import QInputDialog, QLineEdit
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle(title)
-        dialog.setLabelText(label)
-        dialog.setInputMode(QInputDialog.InputMode.TextInput)
-
-        self._style_dialog(dialog)
-
-        # ✅ 스타일 적용 후에 line edit를 "다시" 잡기
-        line_edit = None
-        if hasattr(dialog, "lineEdit"):
-            line_edit = dialog.lineEdit()
-        if line_edit is None:
-            line_edit = dialog.findChild(QLineEdit)
-
-        if line_edit:
-            line_edit.setProperty("autocomplete_ignore", True)
-
-        ok = dialog.exec()
-        return dialog.textValue(), ok == QInputDialog.DialogCode.Accepted
+        """TODO(web-dialog): 원래 QInputDialog(TextInput) — Web Shell 입력 모달로 재구현 필요. 안전 기본값 ('', False)."""
+        print(f"[Dialog/INPUT(skipped)] {title}: {label}")
+        return "", False
 
     def _get_item_input(self, title: str, label: str, items: list) -> tuple:
-        """다크 테마가 적용된 항목 선택 다이얼로그"""
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle(title)
-        dialog.setLabelText(label)
-        dialog.setComboBoxItems(items)
-        dialog.setComboBoxEditable(False)
-        self._style_dialog(dialog)
-        ok = dialog.exec()
-        return dialog.textValue(), ok == QInputDialog.DialogCode.Accepted
+        """TODO(web-dialog): 원래 QInputDialog(ComboBox) — Web Shell 선택 모달로 재구현 필요. 안전 기본값 ('', False)."""
+        print(f"[Dialog/INPUT(skipped)] {title}: {label} (items={len(items)})")
+        return "", False
 
     def _ensure_directories(self):
         """필요한 디렉토리 생성"""

@@ -1238,28 +1238,9 @@ class RuleEditorWindow(QDialog):
             self._set_dirty(False)
 
     def _ask_dirty_choice(self, context_label: str) -> str:
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("저장되지 않은 변경")
-        box.setText(
-            f"'{context_label}' 전에 편집 내용을 저장하시겠습니까?"
-        )
-        apply_btn = box.addButton(
-            "적용 후 계속", QMessageBox.ButtonRole.AcceptRole
-        )
-        discard_btn = box.addButton(
-            "변경 버림", QMessageBox.ButtonRole.DestructiveRole
-        )
-        cancel_btn = box.addButton(
-            "취소", QMessageBox.ButtonRole.RejectRole
-        )
-        box.setDefaultButton(cancel_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is apply_btn:
-            return "apply"
-        if clicked is discard_btn:
-            return "discard"
+        """TODO(web-dialog): 원래 QMessageBox(Question) 3지선다 (적용 후 계속 / 변경 버림 / 취소).
+        Web Shell 모달 confirm + 콜백 패턴으로 재구현 필요. 안전 기본값으로 "cancel" 반환 — 사용자 행동 차단."""
+        print(f"[Dialog/CONFIRM(skipped→cancel)] 저장되지 않은 변경: '{context_label}' 전에 편집 내용을 저장하시겠습니까?")
         return "cancel"
 
     def _update_active_preset_label(self) -> None:

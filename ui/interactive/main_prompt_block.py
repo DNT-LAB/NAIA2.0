@@ -625,18 +625,9 @@ class MainPromptBlock(BlockWidget):
         # RandomFilterDialog 생성 및 표시
         dialog = RandomFilterDialog(parent=self, tags_data=tags_data)
 
-        # 다이얼로그 실행
-        if dialog.exec():  # 사용자가 '저장' 클릭
-            # 새 설정 가져오기
-            new_config = dialog.get_config()
-            self.random_filter_config = new_config
-
-            # 파일 저장 (다이얼로그 내부에서도 저장하지만, 멤버 변수 동기화를 위해)
-            self.save_random_filter_config()
-
-            print(f"✅ 고급 필터 설정 업데이트됨: {len(new_config)}개 항목")
-        else:
-            print("❌ 고급 필터 설정 취소됨")
+        # TODO(web-dialog): 원래 RandomFilterDialog.exec() — Web Shell 패널로 재구현 필요.
+        print("[Dialog/SKIPPED] RandomFilterDialog 차단 — Web Shell 재구현 예정")
+        dialog.deleteLater()
 
     # ===== 포맷팅 로직 =====
 

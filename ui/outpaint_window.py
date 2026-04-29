@@ -692,7 +692,6 @@ class OutpaintWindow(QDialog):
 
     @staticmethod
     def get_outpaint_data(pil_image: Image.Image, parent=None) -> dict | None:
-        dialog = OutpaintWindow(pil_image, parent)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            return dialog.result
+        """TODO(web-dialog): 원래 OutpaintWindow.exec() — Web Shell 패널로 재구현 필요. 차단 → None 반환."""
+        print("[Dialog/SKIPPED] OutpaintWindow 차단 — Web Shell 재구현 예정")
         return None

@@ -62,6 +62,7 @@ class _WebShellPopupWindow(QMainWindow):
         self._view.setPage(self._page)
         self._configure_settings(self._view.settings())
         self._page.titleChanged.connect(self._on_title_changed)
+        self._page.windowCloseRequested.connect(self.close)
         self.setCentralWidget(self._view)
 
     @staticmethod

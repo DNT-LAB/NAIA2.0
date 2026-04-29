@@ -3,6 +3,7 @@ const ACTION_PASTE_IMAGE = 'paste_image';
 const ACTION_IMAGE_ACTION = 'image_action';
 const ACTION_LOAD_PROMPT = 'load_prompt';
 const ACTION_REROLL_PROMPT = 'reroll_prompt';
+const ACTION_QUEUE_RESULT = 'queue_result';
 const ACTION_RESTORE_PARAMS = 'restore_params';
 const ACTION_OPEN_LOCATION = 'open_location';
 const ACTION_SAVE_IMAGE = 'save_image';
@@ -31,6 +32,23 @@ const DEFAULT_CAPABILITIES = {
 const MAIN_IMAGE_MENU = [
   {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
+  {type: 'separator'},
+  {
+    label: '큐 앞에 추가',
+    capability: 'queue',
+    children: [
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: false},
+      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: true},
+    ],
+  },
+  {
+    label: '큐 뒤에 추가',
+    capability: 'queue',
+    children: [
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: false},
+      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: true},
+    ],
+  },
   {type: 'separator'},
   {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {label: '전체 메타데이터 보기', action: ACTION_METADATA},
@@ -64,16 +82,18 @@ const THUMBNAIL_MENU = [
   {type: 'separator'},
   {
     label: '큐 앞에 추가',
+    capability: 'queue',
     children: [
-      {label: '원본 프롬프트 유지'},
-      {label: '현재 UI 프롬프트 반영'},
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: false},
+      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: true},
     ],
   },
   {
     label: '큐 뒤에 추가',
+    capability: 'queue',
     children: [
-      {label: '원본 프롬프트 유지'},
-      {label: '현재 UI 프롬프트 반영'},
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: false},
+      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: true},
     ],
   },
   {type: 'separator'},
@@ -100,6 +120,7 @@ export function createResultContextMenu({
   onImageAction = null,
   onLoadPrompt = null,
   onRerollPrompt = null,
+  onQueueResult = null,
   onRestoreSettings = null,
   onOpenLocation = null,
   onSaveImage = null,
@@ -145,6 +166,9 @@ export function createResultContextMenu({
     if (item.action === ACTION_REROLL_PROMPT) {
       return typeof onRerollPrompt === 'function';
     }
+    if (item.action === ACTION_QUEUE_RESULT) {
+      return typeof onQueueResult === 'function' && hasCapability(context, 'queue');
+    }
     if (item.action === ACTION_RESTORE_PARAMS) {
       return typeof onRestoreSettings === 'function';
     }
@@ -185,12 +209,14 @@ export function createResultContextMenu({
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
     const imageActionAttr = item.imageAction ? ` data-image-action="${item.imageAction}"` : '';
     const copyFormatAttr = item.copyFormat ? ` data-copy-format="${item.copyFormat}"` : '';
+    const queuePositionAttr = item.queuePosition ? ` data-queue-position="${item.queuePosition}"` : '';
+    const useCurrentUiAttr = item.useCurrentUi ? ' data-use-current-ui="1"' : '';
     const childHtml = item.children
       ? `<div class="result-context-children">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group">
-        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${copyFormatAttr}${disabledAttr}>
+        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${useCurrentUiAttr}${disabledAttr}>
           <span>${escapeText(item.label)}</span>${item.children ? '<span class="result-context-arrow">›</span>' : ''}
         </button>
         ${childHtml}
@@ -226,6 +252,11 @@ export function createResultContextMenu({
           onLoadPrompt(context);
         } else if (action === ACTION_REROLL_PROMPT) {
           onRerollPrompt(context);
+        } else if (action === ACTION_QUEUE_RESULT) {
+          onQueueResult(context, {
+            position: button.dataset.queuePosition || 'back',
+            useCurrentUi: button.dataset.useCurrentUi === '1',
+          });
         } else if (action === ACTION_RESTORE_PARAMS) {
           onRestoreSettings(context);
         } else if (action === ACTION_METADATA) {

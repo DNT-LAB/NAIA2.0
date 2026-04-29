@@ -143,8 +143,10 @@ class RemoteBridge(QObject):
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
+    request_result_queue = pyqtSignal(str)              # result context JSON — 결과 이미지를 생성 큐에 추가
     request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
+    request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
@@ -224,6 +226,168 @@ class RemoteBridge(QObject):
 
     def _has_clients(self) -> bool:
         return bool(self._ws_manager and self._ws_manager.active_connections)
+
+    @staticmethod
+    def _queue_preview(value, limit: int = 140) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+    def _queue_param_summary(self, params: dict | None = None, request=None) -> dict:
+        params = params if isinstance(params, dict) else {}
+        prompt = params.get("_raw_input") or params.get("input") or params.get("prompt") or ""
+        negative = params.get("negative_prompt") or params.get("uc") or ""
+        width = params.get("width")
+        height = params.get("height")
+        resolution = f"{width}x{height}" if width and height else ""
+
+        character_count = 0
+        characters = params.get("characters")
+        if isinstance(characters, (list, tuple)):
+            character_count = len(characters)
+        nai_characters = getattr(request, "nai_characters", None) if request else None
+        if not character_count and nai_characters:
+            character_count = len(getattr(nai_characters, "characters", []) or [])
+
+        vibe_count = 0
+        vibes = params.get("reference_image_multiple")
+        if isinstance(vibes, (list, tuple)):
+            vibe_count = len(vibes)
+        nai_vibes = getattr(request, "nai_vibe_transfer", None) if request else None
+        if not vibe_count and nai_vibes:
+            vibe_count = len(getattr(nai_vibes, "reference_image_multiple", []) or [])
+
+        char_ref_count = 0
+        director_images = params.get("director_reference_images")
+        if isinstance(director_images, (list, tuple)):
+            char_ref_count = len(director_images)
+        nai_ref = getattr(request, "nai_character_reference", None) if request else None
+        if not char_ref_count and nai_ref:
+            char_ref_count = len(getattr(nai_ref, "director_reference_images", []) or [])
+
+        return {
+            "prompt_preview": self._queue_preview(prompt),
+            "negative_preview": self._queue_preview(negative, 100),
+            "mode": str(params.get("api_mode") or self._current_api_mode() or ""),
+            "resolution": resolution,
+            "seed": str(params.get("seed") or ""),
+            "source": str(params.get("_remote_queue_source") or "queue"),
+            "label": str(params.get("_remote_queue_label") or ""),
+            "character_count": character_count,
+            "vibe_count": vibe_count,
+            "char_ref_count": char_ref_count,
+        }
+
+    def _serialize_queue_request(self, request, position: int | None = None, active: bool = False) -> dict:
+        params = getattr(request, "params", {}) if request else {}
+        summary = self._queue_param_summary(params, request=request)
+        source_row = getattr(request, "source_row", None) if request else None
+        source_name = str(getattr(source_row, "name", "") or "")
+        label = summary["label"] or source_name or summary["source"]
+        return {
+            **summary,
+            "id": str(getattr(request, "request_id", "") or ""),
+            "position": position,
+            "priority": int(getattr(request, "priority", 0) or 0),
+            "status": "processing" if active else str(getattr(request, "status", "pending") or "pending"),
+            "created_at": getattr(getattr(request, "created_at", None), "isoformat", lambda: None)(),
+            "started_at": getattr(getattr(request, "started_at", None), "isoformat", lambda: None)(),
+            "completed_at": getattr(getattr(request, "completed_at", None), "isoformat", lambda: None)(),
+            "wait_time": request.get_wait_time() if request and hasattr(request, "get_wait_time") else None,
+            "elapsed_time": request.get_elapsed_time() if request and hasattr(request, "get_elapsed_time") else None,
+            "label": self._queue_preview(label, 80),
+        }
+
+    def _serialize_active_generation(self) -> dict | None:
+        try:
+            gc = self.app_context.main_window.generation_controller
+            params = getattr(gc, "current_generation_params", None)
+            if not isinstance(params, dict):
+                return None
+            request = params.get("_generation_request")
+            if request:
+                return self._serialize_queue_request(request, position=0, active=True)
+            summary = self._queue_param_summary(params)
+            return {
+                **summary,
+                "id": "active",
+                "position": 0,
+                "priority": 0,
+                "status": "processing",
+                "created_at": None,
+                "started_at": None,
+                "completed_at": None,
+                "wait_time": None,
+                "elapsed_time": None,
+                "label": summary["label"] or summary["source"] or "Current generation",
+            }
+        except Exception:
+            return None
+
+    def _build_queue_state(self) -> dict:
+        try:
+            queue_manager = self.app_context.generation_queue_manager
+            gc = self.app_context.main_window.generation_controller
+            queued = [
+                self._serialize_queue_request(request, position=index + 1)
+                for index, request in enumerate(queue_manager.get_all_requests())
+            ]
+            active = self._serialize_active_generation() if getattr(gc, "is_generating", False) else None
+            if active and active.get("id") == "active" and not queued:
+                active = None
+            stats = queue_manager.get_queue_stats()
+            return {
+                "type": "queue_state",
+                "is_generating": bool(getattr(gc, "is_generating", False)),
+                "paused": bool(stats.get("is_paused", False)),
+                "total": int(stats.get("total", len(queued)) or 0),
+                "has_urgent": bool(stats.get("has_urgent", False)),
+                "priority_counts": stats.get("priority_counts", {}),
+                "active": active,
+                "items": queued,
+            }
+        except Exception as e:
+            return {
+                "type": "queue_state",
+                "error": str(e),
+                "is_generating": False,
+                "paused": False,
+                "total": 0,
+                "active": None,
+                "items": [],
+            }
+
+    def _broadcast_queue_state(self, _data=None):
+        if self._has_clients():
+            self._broadcast_json(self._build_queue_state())
+
+    def _do_queue_action(self, payload_json: str = "{}"):
+        try:
+            payload = json.loads(payload_json) if payload_json else {}
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        action = str(payload.get("action") or "").strip().lower()
+        request_id = str(payload.get("request_id") or payload.get("id") or "").strip()
+        queue_manager = self.app_context.generation_queue_manager
+        try:
+            if action == "pause":
+                queue_manager.pause_queue()
+            elif action == "resume":
+                queue_manager.resume_queue()
+            elif action == "clear":
+                queue_manager.clear_queue()
+            elif action == "remove":
+                if not request_id:
+                    raise ValueError("request_id is required")
+                if not queue_manager.remove_request(request_id):
+                    raise ValueError("queue item not found")
+            else:
+                raise ValueError("unsupported queue action")
+            self._broadcast_queue_state()
+        except Exception as e:
+            self._broadcast_json({"type": "toast", "message": f"Queue action failed: {e}", "level": "error"})
+            self._broadcast_queue_state()
 
     def _send_json_to(self, ws, data: dict):
         """특정 WS 클라이언트에만 JSON 전송 (Qt 메인 스레드에서 호출)."""
@@ -599,10 +763,6 @@ class RemoteBridge(QObject):
             negative = req.get("negative", "")
 
             gc = self.app_context.main_window.generation_controller
-            if gc.is_generating:
-                print("🌐 Remote: 이미 생성 중 — 무시")
-                self._send_json_to(ws, {"type": "status", "is_generating": True, "message": "already_generating"})
-                return
 
             # Shared Mode: 세션 오버라이드 주입 (Qt main thread에서 실행 — 위젯 접근 안전)
             session_overrides = self._inject_session_overrides(ws)
@@ -641,12 +801,29 @@ class RemoteBridge(QObject):
                 else:
                     session_overrides = {**session_overrides, **prompt_overrides}
 
+            if session_overrides is None:
+                session_overrides = {}
+            else:
+                session_overrides = dict(session_overrides)
+            session_overrides.setdefault("_remote_queue_source", "Web")
+
             # pending overrides에 source 기록 (on_prompt_generated에서 사용)
             if ws is not None:
                 self._pending_overrides[ws] = {"source": "generate"}
 
+            queue_manager = self.app_context.generation_queue_manager
+            if gc.is_generating or not queue_manager.is_empty():
+                gc._enqueue_current_request(session_overrides, priority=0)
+                if not gc.is_generating and not queue_manager.is_paused():
+                    QTimer.singleShot(0, gc._process_next_queue_request)
+                self._send_json_to(ws, {"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                self._broadcast_queue_state()
+                print("🌐 Remote: 생성 요청을 큐에 추가")
+                return
+
             gc.execute_generation_pipeline(overrides=session_overrides, priority=0)
             self._broadcast_json({"type": "status", "is_generating": True})
+            self._broadcast_queue_state()
             print("🌐 Remote: 생성 트리거됨")
         except Exception as e:
             if ws is not None:
@@ -1254,6 +1431,30 @@ class RemoteBridge(QObject):
 
         return self._get_current_result_source_row()
 
+    def _get_result_context_history_item(self, payload: dict | None = None):
+        payload = payload if isinstance(payload, dict) else {}
+        source = str(payload.get("source") or "").strip().lower()
+        rel_path = str(payload.get("path") or "").strip()
+        file_path = str(payload.get("file_path") or payload.get("filePath") or "").strip()
+        if rel_path and source != "current":
+            return self._find_history_item_by_path(rel_path=rel_path, file_path=file_path)
+        image_window = self._get_image_window_widget()
+        return getattr(image_window, "current_history_item", None) if image_window else None
+
+    def _result_context_generation_params(self, payload: dict | None = None) -> dict:
+        item = self._get_result_context_history_item(payload)
+        params = getattr(item, "generation_params", None) if item else None
+        if isinstance(params, dict) and params:
+            return params.copy()
+
+        payload = payload if isinstance(payload, dict) else {}
+        source = str(payload.get("source") or "").strip().lower()
+        if source == "current" and isinstance(self.latest_metadata_payload, dict):
+            raw = self.latest_metadata_payload.get("raw", {})
+            if isinstance(raw, dict) and isinstance(raw.get("generation_params"), dict):
+                return raw["generation_params"].copy()
+        return {}
+
     def _do_result_reroll(self, payload_json: str = "{}"):
         """데스크탑 ImageWindow의 '프롬프트 다시개봉' 구현체를 Remote Web에서 재사용."""
         try:
@@ -1292,6 +1493,95 @@ class RemoteBridge(QObject):
             return
         image_window.instant_generation_requested.emit(source_row)
         print("🌐 Remote: desktop 프롬프트 다시개봉 fallback 실행")
+
+    def _do_result_queue(self, payload_json: str = "{}"):
+        """Result 컨텍스트 메뉴에서 현재/저장 결과를 생성 큐에 추가."""
+        try:
+            payload = json.loads(payload_json) if payload_json else {}
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        try:
+            from core.generation_request import GenerationRequest
+            import pandas as pd
+
+            params = self._result_context_generation_params(payload)
+            if not params:
+                self._broadcast_json({"type": "toast", "message": "Queue source params are unavailable", "level": "error"})
+                self._broadcast_queue_state()
+                return
+
+            priority = 100 if str(payload.get("position") or "back").lower() == "front" else 0
+            use_current_ui = bool(payload.get("use_current_ui") or payload.get("useCurrentUi"))
+            source = str(payload.get("source") or "").strip() or "result"
+            label = str(payload.get("label") or payload.get("path") or source or "result").strip()
+
+            if use_current_ui:
+                main_window = self.app_context.main_window
+                current_params = main_window.get_main_parameters()
+                params["input"] = current_params.get("input", params.get("input", ""))
+                params["negative_prompt"] = current_params.get("negative_prompt", params.get("negative_prompt", ""))
+
+                char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                if char_module and hasattr(char_module, "activate_checkbox") and char_module.activate_checkbox.isChecked():
+                    char_params = char_module.get_parameters()
+                    if char_params and char_params.get("characters"):
+                        params["characters"] = char_params["characters"]
+                        params["uc"] = char_params["uc"]
+                        params["character_positions"] = char_params.get("character_positions", [])
+                    else:
+                        params.pop("characters", None)
+                        params.pop("uc", None)
+                        params.pop("character_positions", None)
+                else:
+                    params.pop("characters", None)
+                    params.pop("uc", None)
+                    params.pop("character_positions", None)
+
+            main_window = self.app_context.main_window
+            if hasattr(main_window, "random_resolution_checkbox") and main_window.random_resolution_checkbox:
+                if main_window.random_resolution_checkbox.isChecked():
+                    random_index = random.randint(0, main_window.resolution_combo.count() - 1)
+                    selected_value = main_window.resolution_combo.itemText(random_index)
+                    width, height = map(int, selected_value.split(" x "))
+                    params["width"] = width
+                    params["height"] = height
+
+            if hasattr(main_window, "seed_fix_checkbox") and main_window.seed_fix_checkbox:
+                if not main_window.seed_fix_checkbox.isChecked():
+                    random_seed = random.randint(0, 9999999999)
+                    params["seed"] = random_seed
+                    params["extra_noise_seed"] = random_seed
+
+            params.pop("_generation_request", None)
+            params["_remote_queue_source"] = "Current UI" if use_current_ui else source
+            params["_remote_queue_label"] = label
+
+            item = self._get_result_context_history_item(payload)
+            source_row = getattr(item, "source_row", None) if item else None
+            if source_row is None:
+                source_row = pd.Series()
+
+            request = GenerationRequest(params=params, source_row=source_row, priority=priority, max_retries=0)
+            queue_manager = self.app_context.generation_queue_manager
+            if priority > 0:
+                queue_manager.enqueue_with_priority(request)
+            else:
+                queue_manager.enqueue_request(request)
+
+            gc = self.app_context.main_window.generation_controller
+            if not gc.is_generating and not queue_manager.is_paused():
+                QTimer.singleShot(0, gc._process_next_queue_request)
+
+            position_label = "front" if priority > 0 else "back"
+            self._broadcast_json({"type": "toast", "message": f"Queued result to {position_label}", "level": "success"})
+            self._broadcast_queue_state()
+        except Exception as e:
+            print(f"🌐 Remote: result queue failed — {e}")
+            self._broadcast_json({"type": "toast", "message": f"Queue result failed: {e}", "level": "error"})
+            self._broadcast_queue_state()
 
     def _open_path_location(self, target: Path):
         import subprocess
@@ -1465,6 +1755,7 @@ class RemoteBridge(QObject):
         matched_item = self._find_history_item_by_path(rel_path=normalized_path)
         matched_source_row = getattr(matched_item, "source_row", None) if matched_item else None
         has_source_row = self._source_row_available(matched_source_row)
+        has_generation_params = bool(getattr(matched_item, "generation_params", None)) if matched_item else False
 
         return {
             "id": f"saved:{normalized_path}",
@@ -1481,7 +1772,7 @@ class RemoteBridge(QObject):
             "capabilities": {
                 "load_prompt": True,
                 "reroll": has_source_row,
-                "queue": False,
+                "queue": has_generation_params,
                 "restore_params": True,
                 "metadata": True,
                 "paste_image": True,
@@ -2457,6 +2748,7 @@ class RemoteBridge(QObject):
         """generation_started 이벤트 → 웹에 상태 전송"""
         if self._has_clients():
             self._broadcast_json({"type": "status", "is_generating": True})
+            self._broadcast_queue_state()
 
     # --- 모듈 상태 (Qt 메인 스레드에서 실행) ---
 
@@ -6385,6 +6677,26 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         bridge.request_generate.emit()
         return {"status": "generation_requested"}
 
+    @app.get("/api/queue/state")
+    async def api_queue_state():
+        return await asyncio.to_thread(bridge._build_queue_state)
+
+    @app.post("/api/queue/action")
+    async def api_queue_action(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        action = str(payload.get("action") or "").strip().lower()
+        if action not in {"pause", "resume", "clear", "remove"}:
+            return JSONResponse({"error": "Unsupported queue action"}, status_code=400)
+        if action == "remove" and not str(payload.get("request_id") or payload.get("id") or "").strip():
+            return JSONResponse({"error": "request_id is required"}, status_code=400)
+        bridge.request_queue_action.emit(json.dumps(payload))
+        return {"ok": True, "action": action}
+
     @app.post("/api/random")
     async def api_random():
         bridge._pending_random_requests.append({"ws": None, "source_row": None, "active_ratings": set(bridge._active_ratings)})
@@ -6404,6 +6716,23 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": "Reroll source is unavailable"}, status_code=400)
         bridge.request_result_reroll.emit(json.dumps(payload))
         return {"ok": True, "action": "reroll"}
+
+    @app.post("/api/result/action/queue")
+    async def api_result_action_queue(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        position = str(payload.get("position") or "back").strip().lower()
+        if position not in {"front", "back"}:
+            return JSONResponse({"error": "position must be front or back"}, status_code=400)
+        params = await asyncio.to_thread(bridge._result_context_generation_params, payload)
+        if not params:
+            return JSONResponse({"error": "Queue source params are unavailable"}, status_code=400)
+        bridge.request_result_queue.emit(json.dumps(payload))
+        return {"ok": True, "action": "queue", "position": position}
 
     @app.post("/api/comfyui/random")
     async def api_comfyui_random(req: Request):
@@ -6899,6 +7228,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 await ws.send_text(json.dumps(bridge._cached_params))
             if bridge._cached_result_enhance_config:
                 await ws.send_text(json.dumps(bridge._cached_result_enhance_config))
+            await ws.send_text(json.dumps(bridge._build_queue_state()))
             # api_status 는 per-ws 평가 (setup_allowed 가 클라이언트 IP에 따라 다름)
             await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
             # 캐시된 Anlas 있으면 바로 송신 (viewer pill 초기화)
@@ -7466,8 +7796,10 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_reroll.connect(bridge._do_result_reroll, Qt.ConnectionType.QueuedConnection)
+    bridge.request_result_queue.connect(bridge._do_result_queue, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_upscale.connect(bridge._do_result_upscale, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
+    bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
 
     # 검색 컨트롤러 시그널 연결
@@ -7515,6 +7847,15 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
 
     # 생성 상태 이벤트 (메인 UI/자동생성 포함 전체 감지)
     app_context.subscribe("generation_started", bridge._on_generation_started_signal)
+    app_context.subscribe("generation_result_available", bridge._broadcast_queue_state)
+    for queue_event in [
+        "queue_request_enqueued", "queue_request_dequeued",
+        "queue_queue_paused", "queue_queue_resumed",
+        "queue_queue_cleared", "queue_request_removed",
+        "queue_request_started", "queue_request_completed",
+        "queue_request_failed", "queue_state_changed",
+    ]:
+        app_context.subscribe(queue_event, bridge._broadcast_queue_state)
 
     # 체크박스 변경 → 웹 동기화 (메서드 참조로 disconnect 가능)
     _checkbox_connections = []

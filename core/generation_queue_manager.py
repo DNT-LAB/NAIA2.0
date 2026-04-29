@@ -143,26 +143,34 @@ class GenerationQueueManager:
     def pause_queue(self):
         """큐 일시정지"""
         with self._queue_lock:
+            queue_size = len(self._queue)
             if not self._is_paused:
                 self._is_paused = True
-                queue_size = len(self._queue)
+                should_publish = True
+            else:
+                should_publish = False
 
-        self._publish_queue_event("queue_paused", {
-            "queue_size": queue_size
-        })
+        if should_publish:
+            self._publish_queue_event("queue_paused", {
+                "queue_size": queue_size
+            })
 
         print(f"[QUEUE] ⏸️ 큐 일시정지 (대기 중: {queue_size})")
 
     def resume_queue(self):
         """큐 재개"""
         with self._queue_lock:
+            queue_size = len(self._queue)
             if self._is_paused:
                 self._is_paused = False
-                queue_size = len(self._queue)
+                should_publish = True
+            else:
+                should_publish = False
 
-        self._publish_queue_event("queue_resumed", {
-            "queue_size": queue_size
-        })
+        if should_publish:
+            self._publish_queue_event("queue_resumed", {
+                "queue_size": queue_size
+            })
 
         print(f"[QUEUE] ▶️ 큐 재개 (대기 중: {queue_size})")
 

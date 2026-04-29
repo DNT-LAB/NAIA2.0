@@ -627,6 +627,11 @@ class GenerationController:
 
         # 요청 상태 업데이트
         next_request.mark_processing()
+        self.context.publish("queue_request_started", {
+            "request_id": next_request.request_id,
+            "priority": next_request.priority,
+            "queue_size": queue_manager.get_queue_size()
+        })
 
         # context 업데이트
         self.context.current_source_row = next_request.source_row
@@ -821,6 +826,14 @@ class GenerationController:
         """생성 완료 시 호출되는 슬롯"""
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
+        if isinstance(self.current_generation_params, dict):
+            current_request = self.current_generation_params.get("_generation_request")
+            if current_request:
+                current_request.mark_completed()
+                self.context.publish("queue_request_completed", {
+                    "request_id": current_request.request_id,
+                    "priority": current_request.priority
+                })
         # 🆕 현재 생성 파라미터 정리
         self.current_generation_params = None
         # Shared Server Mode 세션 오버라이드 정리
@@ -850,6 +863,15 @@ class GenerationController:
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
+        if isinstance(self.current_generation_params, dict):
+            current_request = self.current_generation_params.get("_generation_request")
+            if current_request:
+                current_request.mark_failed(error_message)
+                self.context.publish("queue_request_failed", {
+                    "request_id": current_request.request_id,
+                    "priority": current_request.priority,
+                    "error": error_message
+                })
         # Shared Server Mode 세션 오버라이드 정리
         self.context.session_p_eng_override = None
         self.context.session_cond_override = None
@@ -1189,6 +1211,7 @@ class GenerationController:
 
             # UI 상태 업데이트
             self._update_button_with_queue_size()
+            self.context.publish("queue_state_changed", {"reason": "thread_finished"})
 
             # 🆕 FR-2-1: 임시 창 모드 플래그 해제
             if self.context.temp_window_mode:

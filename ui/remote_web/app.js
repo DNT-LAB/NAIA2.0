@@ -28,6 +28,7 @@ let resultHistory = null;
 let resultEnhance = null;
 let resultContextMenu = null;
 let resultImageInput = null;
+let queuePanel = null;
 let imageActionPopup = null;
 let metadataViewer = null;
 let pendingResultEnhanceConfig = null;
@@ -230,6 +231,20 @@ const resultImageInputReady = import('./js/features/resultImageInput.mjs')
   .catch(error => {
     console.error('Failed to initialize result image input module', error);
   });
+const queuePanelReady = import('./js/features/queuePanel.mjs')
+  .then(({createQueuePanelController}) => {
+    queuePanel = createQueuePanelController({
+      document,
+      fetch,
+      localStorage,
+      showToast,
+      escHtml,
+    });
+    queuePanel.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize queue panel module', error);
+  });
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
@@ -253,6 +268,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       onSaveImage: saveResultImageFromContext,
       onCopyImage: copyResultImageFromContext,
       onUpscaleNai: upscaleResultFromContext,
+      onQueueResult: queueResultFromContext,
     });
     resultContextMenu.bind();
   })
@@ -868,6 +884,7 @@ const wsMessageHandlers = {
     pendingResultEnhanceConfig = m;
     if (resultEnhance) resultEnhance.setConfig(m);
   },
+  queue_state: m => { if (queuePanel) queuePanel.handleState(m); },
   mode_result: onModeResult,
   api_status: updateApiStatus,
   verify_result: onVerifyResult,
@@ -1526,6 +1543,36 @@ async function rerollPromptFromResultContext(context = {}) {
   } catch (error) {
     console.error('Prompt reroll failed', error);
     showToast(error.message || 'Prompt reroll failed', 'error');
+  }
+}
+
+async function queueResultFromContext(context = {}, options = {}) {
+  if (!context?.capabilities?.queue) {
+    showToast('Queue source is unavailable', 'error');
+    return;
+  }
+  try {
+    const response = await fetch('/api/result/action/queue', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        source: context.source || '',
+        path: context.path || '',
+        file_path: context.filePath || '',
+        label: context.label || '',
+        position: options.position || 'back',
+        use_current_ui: Boolean(options.useCurrentUi),
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    if (queuePanel) queuePanel.refresh();
+    showToast(options.position === 'front' ? 'Queued at front' : 'Queued at back', 'success');
+  } catch (error) {
+    console.error('Queue result failed', error);
+    showToast(error.message || 'Queue result failed', 'error');
   }
 }
 
@@ -4260,6 +4307,7 @@ Promise.all([
   metadataViewerReady,
   imageActionPopupReady,
   resultImageInputReady,
+  queuePanelReady,
   resultContextMenuReady,
   promptHighlighterReady,
   tokenDisplayReady,

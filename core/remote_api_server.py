@@ -204,6 +204,8 @@ class RemoteBridge(QObject):
         self._viewer_cache: list = []
         self._viewer_cache_time: float = 0
         self._viewer_cache_dir: str = ""
+        self._cached_e621_event_key: tuple | None = None
+        self._cached_e621_event_state: dict | None = None
         # NAI Anlas: 주기 + 생성 이벤트 기반 refresh. 웹 viewer 좌하단에 pill로 표시.
         self._anlas_cache: Optional[dict] = None     # {"anlas": int, "opus": bool, "tier": str, "fetched_at": str}
         self._anlas_timer: Optional[QTimer] = None
@@ -3763,24 +3765,55 @@ class RemoteBridge(QObject):
             "1girl, 1boy, 2:: e621태그는_강조하여_입력하세요 ::, duo, male/female, nsfw, rating:explicit",
         )
 
+    def _e621_effective_search_text(self, module) -> str:
+        remote_text = getattr(module, "_remote_search_text", "")
+        if remote_text:
+            return remote_text
+        search_input = getattr(module, "search_input", None)
+        if search_input is not None:
+            try:
+                return search_input.text()
+            except Exception:
+                pass
+        return ""
+
+    def _e621_event_state_cache_key(self, module, loaded: bool) -> tuple:
+        selected_name = getattr(module, "_remote_selected_tag", None) or getattr(module, "current_level3", None)
+        return (
+            id(getattr(module, "data", None)),
+            bool(loaded),
+            self._e621_effective_search_text(module),
+            bool(getattr(module, "is_searching", False)),
+            self._e621_view_mode(module),
+            bool(getattr(module, "disable_translation", False)),
+            bool(getattr(module, "disable_wiki_search", False)),
+            getattr(module, "current_category", None),
+            getattr(module, "current_level2", None),
+            selected_name,
+            tuple(sorted(getattr(module, "starred_keys", set()))),
+            tuple(sorted(getattr(module, "deleted_keys", set()))),
+            self._e621_testbench_text(module),
+        )
+
     def _read_e621_event(self) -> dict:
         try:
             module = self._find_module("e621_event")
             if not module:
                 return {}
             loaded = self._ensure_e621_loaded(module)
+            cache_key = self._e621_event_state_cache_key(module, loaded)
+            if self._cached_e621_event_key == cache_key and self._cached_e621_event_state is not None:
+                return self._cached_e621_event_state
             selected_name = getattr(module, "_remote_selected_tag", None) or getattr(module, "current_level3", None)
             selected_tag = self._e621_find_tag(module, selected_name) if loaded else None
             visible_tags = self._e621_visible_tags(module) if loaded else []
             tag_limit = 300
-            return {
+            state = {
                 "type": "module_state",
                 "module_id": "e621_event",
                 "data_loaded": loaded,
                 "data_path": str(getattr(module, "data_path", "")),
-                "search_text": getattr(module, "_remote_search_text", "") or (
-                    module.search_input.text() if getattr(module, "search_input", None) else ""
-                ),
+                "search_text": self._e621_effective_search_text(module),
                 "view_mode": self._e621_view_mode(module),
                 "disable_translation": bool(getattr(module, "disable_translation", False)),
                 "disable_wiki_search": bool(getattr(module, "disable_wiki_search", False)),
@@ -3798,6 +3831,9 @@ class RemoteBridge(QObject):
                 "wiki": self._e621_wiki_payload(module, selected_tag),
                 "testbench": self._e621_testbench_text(module),
             }
+            self._cached_e621_event_key = cache_key
+            self._cached_e621_event_state = state
+            return state
         except Exception as e:
             print(f"🌐 Remote: e621_event 상태 읽기 실패 — {e}")
             return {}

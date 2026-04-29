@@ -24,6 +24,7 @@ export function createChunkPanel({
   let triggerInfo = null;
   let latestGroups = [];
   let pendingAddPrefill = null;
+  let lastAddGroup = '';
   let selectionMenu = null;
   let selectionMenuPayload = null;
 
@@ -56,7 +57,8 @@ export function createChunkPanel({
     // anchor 가 없으면 standalone 모드로 viewer-wrapper(우측 결과 영역) 위에 띄움.
     // 좌측 control-panel(prompt 입력 영역)을 anchor 로 쓰면 chunk 가 prompt 영역을 침범하므로 금지.
     if (modulePopup?.classList.contains('open')) return modulePopup;
-    const auxOpen = document.querySelector('.pe-popup.open, .refine-popup.open');
+    const auxOpen = Array.from(document.querySelectorAll('.pe-popup.open, .refine-popup.open'))
+      .find(el => el !== panel);
     if (auxOpen) return auxOpen;
     return null;
   }
@@ -179,9 +181,30 @@ export function createChunkPanel({
     updateModuleBtnState();
   }
 
+  function chooseAddGroup(groups) {
+    const groupNames = groups.map(group => group.name).filter(Boolean);
+    if (lastAddGroup && groupNames.includes(lastAddGroup)) return lastAddGroup;
+    return groupNames[0] || 'default';
+  }
+
+  function syncAddGroup(groupName) {
+    const normalized = (groupName || '').trim();
+    if (!normalized) return;
+    lastAddGroup = normalized;
+    const groupInput = panel ? panel.querySelector('#chunkAddGroup') : null;
+    if (!groupInput) return;
+    const hasOption = Array.from(groupInput.options || []).some(option => option.value === normalized);
+    if (!hasOption) return;
+    if (groupInput.value !== normalized) {
+      groupInput.value = normalized;
+      groupInput.dispatchEvent(new Event('input', { bubbles: true }));
+      groupInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
   function renderAddForm(groups) {
-    const defaultGroup = groups[0]?.name || 'default';
-    const groupNames = groups.length ? groups.map(group => group.name) : [defaultGroup];
+    const defaultGroup = chooseAddGroup(groups);
+    const groupNames = groups.length ? groups.map(group => group.name).filter(Boolean) : [defaultGroup];
     const groupOptions = groupNames.map(name => {
       const selected = name === defaultGroup ? ' selected' : '';
       return `<option value="${escHtml(name)}"${selected}>${escHtml(name)}</option>`;
@@ -193,7 +216,7 @@ export function createChunkPanel({
           <button class="mod-btn-sm" type="button" onclick="chunkUseSelection()">Use Selection</button>
         </div>
         <div class="chunk-add-grid">
-          <select class="mod-input" id="chunkAddGroup">${groupOptions}</select>
+          <select class="mod-select" id="chunkAddGroup">${groupOptions}</select>
           <input class="mod-input" id="chunkAddKey" placeholder="key">
         </div>
         <textarea class="mod-textarea chunk-add-value" id="chunkAddValue" placeholder="tag, tag, tag"></textarea>
@@ -404,7 +427,7 @@ export function createChunkPanel({
     } else {
       html += '<div class="chunk-tree">';
       for (const group of groups) {
-        html += '<div class="chunk-group">';
+        html += `<div class="chunk-group" data-group-name="${escHtml(group.name)}">`;
         html += `<div class="chunk-group-name" onclick="chunkToggleGroup(this.parentElement)">\u{1F4C1} ${escHtml(group.name)} <span class="wc-count">(${group.items.length})</span></div>`;
         html += '<div class="chunk-group-items">';
         for (const item of group.items) {
@@ -430,7 +453,10 @@ export function createChunkPanel({
     groupEl.parentElement.querySelectorAll('.chunk-group.open').forEach(group => {
       group.classList.remove('open');
     });
-    if (!wasOpen) groupEl.classList.add('open');
+    if (!wasOpen) {
+      groupEl.classList.add('open');
+      syncAddGroup(groupEl.dataset.groupName || '');
+    }
   }
 
   function insert(element) {
@@ -503,6 +529,7 @@ export function createChunkPanel({
       return false;
     }
     if (keyInput) keyInput.value = key;
+    lastAddGroup = group;
     setModuleParam('instant_wildcard', 'upsert', JSON.stringify({
       file: group.toLowerCase().endsWith('.json') ? group : `${group}.json`,
       key,

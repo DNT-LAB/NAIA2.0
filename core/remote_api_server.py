@@ -1455,6 +1455,50 @@ class RemoteBridge(QObject):
                 return raw["generation_params"].copy()
         return {}
 
+    def _result_queue_mode(self, payload: dict | None = None) -> str:
+        payload = payload if isinstance(payload, dict) else {}
+        mode = str(payload.get("queue_mode") or payload.get("queueMode") or "").strip().lower()
+        if not mode and (payload.get("use_current_ui") or payload.get("useCurrentUi")):
+            mode = "reopen"
+        if mode not in {"original", "reopen", "current_character"}:
+            mode = "original"
+        return mode
+
+    def _collect_prompt_reopen_settings(self) -> dict:
+        mw = self.app_context.main_window
+        comfyui_sampling_mode = "eps"
+        if hasattr(mw, "anima_radio") and mw.anima_radio.isChecked():
+            comfyui_sampling_mode = "anima"
+        elif hasattr(mw, "v_pred_radio") and mw.v_pred_radio.isChecked():
+            comfyui_sampling_mode = "v_prediction"
+        elif hasattr(mw, "eps_radio") and mw.eps_radio.isChecked():
+            comfyui_sampling_mode = "eps"
+
+        return {
+            "prompt_fixed": False,
+            "auto_generate": False,
+            "turbo_mode": bool(mw.generation_checkboxes.get("터보 옵션") and mw.generation_checkboxes["터보 옵션"].isChecked()),
+            "wildcard_standalone": False,
+            "auto_fit_resolution": bool(getattr(mw, "auto_fit_resolution_checkbox", None) and mw.auto_fit_resolution_checkbox.isChecked()),
+            "api_mode": self.app_context.get_api_mode(),
+            "comfyui_sampling_mode": comfyui_sampling_mode,
+        }
+
+    def _apply_current_character_params(self, params: dict) -> dict:
+        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+        if char_module and hasattr(char_module, "activate_checkbox") and char_module.activate_checkbox.isChecked():
+            char_params = char_module.get_parameters()
+            if char_params and char_params.get("characters"):
+                params["characters"] = char_params["characters"]
+                params["uc"] = char_params["uc"]
+                params["character_positions"] = char_params.get("character_positions", [])
+                return params
+
+        params.pop("characters", None)
+        params.pop("uc", None)
+        params.pop("character_positions", None)
+        return params
+
     def _do_result_reroll(self, payload_json: str = "{}"):
         """데스크탑 ImageWindow의 '프롬프트 다시개봉' 구현체를 Remote Web에서 재사용."""
         try:
@@ -1514,31 +1558,31 @@ class RemoteBridge(QObject):
                 return
 
             priority = 100 if str(payload.get("position") or "back").lower() == "front" else 0
-            use_current_ui = bool(payload.get("use_current_ui") or payload.get("useCurrentUi"))
+            queue_mode = self._result_queue_mode(payload)
             source = str(payload.get("source") or "").strip() or "result"
             label = str(payload.get("label") or payload.get("path") or source or "result").strip()
+            item = self._get_result_context_history_item(payload)
+            source_row = getattr(item, "source_row", None) if item else None
 
-            if use_current_ui:
-                main_window = self.app_context.main_window
-                current_params = main_window.get_main_parameters()
-                params["input"] = current_params.get("input", params.get("input", ""))
-                params["negative_prompt"] = current_params.get("negative_prompt", params.get("negative_prompt", ""))
-
-                char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
-                if char_module and hasattr(char_module, "activate_checkbox") and char_module.activate_checkbox.isChecked():
-                    char_params = char_module.get_parameters()
-                    if char_params and char_params.get("characters"):
-                        params["characters"] = char_params["characters"]
-                        params["uc"] = char_params["uc"]
-                        params["character_positions"] = char_params.get("character_positions", [])
-                    else:
-                        params.pop("characters", None)
-                        params.pop("uc", None)
-                        params.pop("character_positions", None)
-                else:
-                    params.pop("characters", None)
-                    params.pop("uc", None)
-                    params.pop("character_positions", None)
+            if queue_mode == "reopen":
+                if not self._source_row_available(source_row):
+                    self._broadcast_json({"type": "toast", "message": "P.Eng / WC source row is unavailable", "level": "error"})
+                    self._broadcast_queue_state()
+                    return
+                settings = self._collect_prompt_reopen_settings()
+                prompt = self.app_context.main_window.prompt_gen_controller.generate_instant_source_silent(source_row, settings)
+                if not prompt:
+                    self._broadcast_json({"type": "toast", "message": "P.Eng / WC reopen failed", "level": "error"})
+                    self._broadcast_queue_state()
+                    return
+                params["input"] = prompt
+                params["_raw_input"] = prompt
+            elif queue_mode == "current_character":
+                if self._current_api_mode() != "NAI":
+                    self._broadcast_json({"type": "toast", "message": "Current character queue is only available in NAI mode", "level": "error"})
+                    self._broadcast_queue_state()
+                    return
+                params = self._apply_current_character_params(params)
 
             main_window = self.app_context.main_window
             if hasattr(main_window, "random_resolution_checkbox") and main_window.random_resolution_checkbox:
@@ -1556,11 +1600,14 @@ class RemoteBridge(QObject):
                     params["extra_noise_seed"] = random_seed
 
             params.pop("_generation_request", None)
-            params["_remote_queue_source"] = "Current UI" if use_current_ui else source
+            source_labels = {
+                "original": source,
+                "reopen": "P.Eng / WC",
+                "current_character": "Current Character",
+            }
+            params["_remote_queue_source"] = source_labels.get(queue_mode, source)
             params["_remote_queue_label"] = label
 
-            item = self._get_result_context_history_item(payload)
-            source_row = getattr(item, "source_row", None) if item else None
             if source_row is None:
                 source_row = pd.Series()
 
@@ -6728,11 +6775,18 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         position = str(payload.get("position") or "back").strip().lower()
         if position not in {"front", "back"}:
             return JSONResponse({"error": "position must be front or back"}, status_code=400)
+        queue_mode = bridge._result_queue_mode(payload)
+        if queue_mode == "reopen":
+            source_row = await asyncio.to_thread(bridge._get_result_context_source_row, payload)
+            if not bridge._source_row_available(source_row):
+                return JSONResponse({"error": "P.Eng / WC source row is unavailable"}, status_code=400)
+        if queue_mode == "current_character" and bridge._current_api_mode() != "NAI":
+            return JSONResponse({"error": "Current character queue is only available in NAI mode"}, status_code=400)
         params = await asyncio.to_thread(bridge._result_context_generation_params, payload)
         if not params:
             return JSONResponse({"error": "Queue source params are unavailable"}, status_code=400)
         bridge.request_result_queue.emit(json.dumps(payload))
-        return {"ok": True, "action": "queue", "position": position}
+        return {"ok": True, "action": "queue", "position": position, "queue_mode": queue_mode}
 
     @app.post("/api/comfyui/random")
     async def api_comfyui_random(req: Request):

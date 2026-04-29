@@ -37,16 +37,18 @@ const MAIN_IMAGE_MENU = [
     label: '큐 앞에 추가',
     capability: 'queue',
     children: [
-      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: false},
-      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: true},
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', queueMode: 'original'},
+      {label: 'P.Eng / WC 재개봉', action: ACTION_QUEUE_RESULT, capability: 'reroll', queuePosition: 'front', queueMode: 'reopen'},
+      {label: '현재 캐릭터로 재요청', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', queueMode: 'current_character', modes: ['NAI']},
     ],
   },
   {
     label: '큐 뒤에 추가',
     capability: 'queue',
     children: [
-      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: false},
-      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: true},
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', queueMode: 'original'},
+      {label: 'P.Eng / WC 재개봉', action: ACTION_QUEUE_RESULT, capability: 'reroll', queuePosition: 'back', queueMode: 'reopen'},
+      {label: '현재 캐릭터로 재요청', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', queueMode: 'current_character', modes: ['NAI']},
     ],
   },
   {type: 'separator'},
@@ -84,16 +86,18 @@ const THUMBNAIL_MENU = [
     label: '큐 앞에 추가',
     capability: 'queue',
     children: [
-      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: false},
-      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', useCurrentUi: true},
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', queueMode: 'original'},
+      {label: 'P.Eng / WC 재개봉', action: ACTION_QUEUE_RESULT, capability: 'reroll', queuePosition: 'front', queueMode: 'reopen'},
+      {label: '현재 캐릭터로 재요청', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'front', queueMode: 'current_character', modes: ['NAI']},
     ],
   },
   {
     label: '큐 뒤에 추가',
     capability: 'queue',
     children: [
-      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: false},
-      {label: '현재 UI 프롬프트 반영', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', useCurrentUi: true},
+      {label: '원본 프롬프트 유지', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', queueMode: 'original'},
+      {label: 'P.Eng / WC 재개봉', action: ACTION_QUEUE_RESULT, capability: 'reroll', queuePosition: 'back', queueMode: 'reopen'},
+      {label: '현재 캐릭터로 재요청', action: ACTION_QUEUE_RESULT, capability: 'queue', queuePosition: 'back', queueMode: 'current_character', modes: ['NAI']},
     ],
   },
   {type: 'separator'},
@@ -167,6 +171,7 @@ export function createResultContextMenu({
       return typeof onRerollPrompt === 'function';
     }
     if (item.action === ACTION_QUEUE_RESULT) {
+      if (item.modes && !item.modes.includes(String(getMode() || '').toUpperCase())) return false;
       return typeof onQueueResult === 'function' && hasCapability(context, 'queue');
     }
     if (item.action === ACTION_RESTORE_PARAMS) {
@@ -210,13 +215,13 @@ export function createResultContextMenu({
     const imageActionAttr = item.imageAction ? ` data-image-action="${item.imageAction}"` : '';
     const copyFormatAttr = item.copyFormat ? ` data-copy-format="${item.copyFormat}"` : '';
     const queuePositionAttr = item.queuePosition ? ` data-queue-position="${item.queuePosition}"` : '';
-    const useCurrentUiAttr = item.useCurrentUi ? ' data-use-current-ui="1"' : '';
+    const queueModeAttr = item.queueMode ? ` data-queue-mode="${item.queueMode}"` : '';
     const childHtml = item.children
       ? `<div class="result-context-children">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group">
-        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${useCurrentUiAttr}${disabledAttr}>
+        <button type="button" class="result-context-item${danger}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${disabledAttr}>
           <span>${escapeText(item.label)}</span>${item.children ? '<span class="result-context-arrow">›</span>' : ''}
         </button>
         ${childHtml}
@@ -255,7 +260,7 @@ export function createResultContextMenu({
         } else if (action === ACTION_QUEUE_RESULT) {
           onQueueResult(context, {
             position: button.dataset.queuePosition || 'back',
-            useCurrentUi: button.dataset.useCurrentUi === '1',
+            mode: button.dataset.queueMode || 'original',
           });
         } else if (action === ACTION_RESTORE_PARAMS) {
           onRestoreSettings(context);

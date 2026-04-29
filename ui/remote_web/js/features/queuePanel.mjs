@@ -23,12 +23,14 @@ export function createQueuePanelController({
   const STORAGE_KEY = 'naia_queue_panel_collapsed';
   let state = {active: null, items: [], paused: false, total: 0, is_generating: false};
   let collapsed = localStorage.getItem(STORAGE_KEY) === '1';
+  let holdVisibleUntil = 0;
 
   function visibleState(nextState) {
     return Boolean(
       nextState?.active
       || (Array.isArray(nextState?.items) && nextState.items.length)
       || nextState?.paused
+      || Date.now() < holdVisibleUntil
     );
   }
 
@@ -120,7 +122,7 @@ export function createQueuePanelController({
     const activeHtml = hasActive ? renderItem(state.active, {active: true}) : '';
     const pendingHtml = items.length
       ? items.map(item => renderItem(item)).join('')
-      : '<div class="queue-empty">No pending items</div>';
+      : `<div class="queue-empty">${Date.now() < holdVisibleUntil ? 'Waiting for queue update...' : 'No pending items'}</div>`;
     body.innerHTML = `${activeHtml}${pendingHtml}`;
     bindRowActions();
   }
@@ -154,12 +156,28 @@ export function createQueuePanelController({
   }
 
   function handleState(nextState = {}) {
+    const wasHidden = root.hidden;
+    const nextVisible = visibleState(nextState);
+    if (wasHidden && nextVisible) {
+      collapsed = false;
+      localStorage.setItem(STORAGE_KEY, '0');
+    }
     state = {
       ...state,
       ...nextState,
       items: Array.isArray(nextState.items) ? nextState.items : [],
     };
     render();
+  }
+
+  function wake() {
+    holdVisibleUntil = Date.now() + 2500;
+    collapsed = false;
+    localStorage.setItem(STORAGE_KEY, '0');
+    render();
+    setTimeout(() => {
+      if (Date.now() >= holdVisibleUntil) render();
+    }, 2600);
   }
 
   function init() {
@@ -186,5 +204,6 @@ export function createQueuePanelController({
     init,
     refresh,
     handleState,
+    wake,
   };
 }

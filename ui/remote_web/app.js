@@ -1552,6 +1552,7 @@ async function queueResultFromContext(context = {}, options = {}) {
     return;
   }
   try {
+    if (queuePanel && typeof queuePanel.wake === 'function') queuePanel.wake();
     const response = await fetch('/api/result/action/queue', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1561,15 +1562,20 @@ async function queueResultFromContext(context = {}, options = {}) {
         file_path: context.filePath || '',
         label: context.label || '',
         position: options.position || 'back',
-        use_current_ui: Boolean(options.useCurrentUi),
+        queue_mode: options.mode || 'original',
       }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || `HTTP ${response.status}`);
     }
-    if (queuePanel) queuePanel.refresh();
-    showToast(options.position === 'front' ? 'Queued at front' : 'Queued at back', 'success');
+    if (queuePanel) setTimeout(() => queuePanel.refresh(), 180);
+    const modeLabel = options.mode === 'reopen'
+      ? 'P.Eng / WC'
+      : options.mode === 'current_character'
+        ? 'current character'
+        : 'original';
+    showToast(`${modeLabel} queued ${options.position === 'front' ? 'at front' : 'at back'}`, 'success');
   } catch (error) {
     console.error('Queue result failed', error);
     showToast(error.message || 'Queue result failed', 'error');

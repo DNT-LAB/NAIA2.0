@@ -743,8 +743,10 @@ header {
   cursor: default;
 }
 .metadata-refresh-btn#metadataDetachBtn {
-  width: 30px;
-  min-width: 30px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -752,7 +754,9 @@ header {
   color: var(--accent-glow);
   border-color: rgba(139, 118, 255, 0.36);
   background: rgba(139, 118, 255, 0.09);
-  font-size: 16px;
+  font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 1;
 }
 .metadata-layout {
@@ -3348,9 +3352,10 @@ body.resizing-result-info {
   transform: translateY(-1px);
 }
 .module-popup-icon-btn {
-  width: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -3359,10 +3364,10 @@ body.resizing-result-info {
   border-radius: 7px;
   background: rgba(139, 118, 255, 0.10);
   color: var(--accent-glow);
-  font-family: var(--font-display);
-  font-size: 17px;
+  font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
+  font-size: 15px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 .module-popup-icon-btn:hover {

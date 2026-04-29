@@ -9,6 +9,40 @@ export function createConditionalPromptPanel({
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
 
+  function normalizeMode(mode) {
+    return mode === 'v2' ? 'v2' : 'legacy';
+  }
+
+  function normalizeEngineOptions(options = {}) {
+    const rawMax = Number(options.max_passes ?? 1);
+    const maxPasses = Number.isFinite(rawMax) ? Math.max(1, Math.round(rawMax)) : 1;
+    return {
+      max_passes: maxPasses,
+      stop_on_match: Boolean(options.stop_on_match),
+    };
+  }
+
+  function normalizeState(state = {}) {
+    const mode = normalizeMode(state.editor_mode || state.mode);
+    const hasLegacy = state.rules_legacy != null;
+    const hasV2 = state.rules_v2 != null;
+    const fallbackRules = state.rules != null ? String(state.rules) : '';
+    const rulesLegacy = hasLegacy ? String(state.rules_legacy) : (mode === 'legacy' ? fallbackRules : '');
+    const rulesV2 = hasV2 ? String(state.rules_v2) : (mode === 'v2' ? fallbackRules : '');
+    const activeRules = mode === 'v2' ? rulesV2 : rulesLegacy;
+    return {
+      ...state,
+      enabled: Boolean(state.enabled),
+      editor_mode: mode,
+      rules: activeRules,
+      active_rules: activeRules,
+      rules_legacy: rulesLegacy,
+      rules_v2: rulesV2,
+      engine_options: normalizeEngineOptions(state.engine_options || {}),
+      active_preset: state.active_preset || '',
+    };
+  }
+
   function formatLog(log) {
     if (!log) return '<span style="color:var(--text-dim)">No log yet</span>';
     return escHtml(log).split('\n').map(line => {
@@ -56,7 +90,8 @@ export function createConditionalPromptPanel({
   function onRulesInput(element) {
     const highlight = document.getElementById('condRulesHighlight');
     if (highlight) highlight.innerHTML = formatRules(element.value);
-    onModTextEdit('conditional_prompt', 'rules', element.value);
+    const key = element.dataset.condRuleKey || 'rules';
+    onModTextEdit('conditional_prompt', key, element.value);
   }
 
   function syncScroll(element) {
@@ -68,16 +103,32 @@ export function createConditionalPromptPanel({
   }
 
   function render(state) {
-    const m = state;
+    let m = normalizeState(state);
     if (getSharedMode()) {
       const sharedCond = getSharedCond();
       if (sharedCond) {
-        if (sharedCond.enabled != null) m.enabled = sharedCond.enabled;
-        if (sharedCond.rules != null) m.rules = sharedCond.rules;
+        m = normalizeState({...m, ...sharedCond});
       }
-      setSharedCond({ enabled: !!m.enabled, rules: m.rules || '' });
+      setSharedCond({
+        enabled: m.enabled,
+        editor_mode: m.editor_mode,
+        rules: m.active_rules,
+        active_rules: m.active_rules,
+        rules_legacy: m.rules_legacy,
+        rules_v2: m.rules_v2,
+        engine_options: m.engine_options,
+        active_preset: m.active_preset,
+      });
       saveSharedSession();
     }
+
+    const isV2 = m.editor_mode === 'v2';
+    const activeRuleKey = isV2 ? 'rules_v2' : 'rules_legacy';
+    const activeRules = isV2 ? m.rules_v2 : m.rules_legacy;
+    const modeLabel = isV2 ? 'New Editor DSL' : 'Legacy DSL';
+    const presetLabel = m.active_preset ? `<span class="cond-status-chip">Preset ${escHtml(m.active_preset)}</span>` : '';
+    const opts = normalizeEngineOptions(m.engine_options);
+
     moduleBody.innerHTML = `
       <div>
         <label class="mod-checkbox-item">
@@ -86,10 +137,34 @@ export function createConditionalPromptPanel({
         </label>
       </div>
       <div>
-        <div class="mod-section-label">Rules</div>
+        <div class="mod-section-label">Execution Path</div>
+        <input type="hidden" id="condEditorMode" value="${escHtml(m.editor_mode)}">
+        <div class="cond-mode-row">
+          <button type="button" class="cond-mode-btn ${!isV2 ? 'active' : ''}" data-cond-mode="legacy" onclick="setModuleParam('conditional_prompt','editor_mode','legacy')">Legacy DSL</button>
+          <button type="button" class="cond-mode-btn ${isV2 ? 'active' : ''}" data-cond-mode="v2" onclick="setModuleParam('conditional_prompt','editor_mode','v2')">New Editor</button>
+        </div>
+      </div>
+      <div>
+        <div class="cond-rules-head">
+          <div class="mod-section-label">Rules (${modeLabel})</div>
+          ${presetLabel}
+        </div>
         <div class="cond-rules-wrap">
-          <div class="cond-rules-highlight" id="condRulesHighlight">${formatRules(m.rules)}</div>
-          <textarea class="mod-textarea cond-rules-input" id="condRulesInput" placeholder="(condition):action&#10;# comment lines ignored" oninput="onCondRulesInput(this)" onscroll="syncCondScroll(this)">${escHtml(m.rules)}</textarea>
+          <div class="cond-rules-highlight" id="condRulesHighlight">${formatRules(activeRules)}</div>
+          <textarea class="mod-textarea cond-rules-input" id="condRulesInput" data-cond-rule-key="${activeRuleKey}" placeholder="(condition):action&#10;# comment lines ignored" oninput="onCondRulesInput(this)" onscroll="syncCondScroll(this)">${escHtml(activeRules)}</textarea>
+        </div>
+      </div>
+      <div>
+        <div class="mod-section-label">Engine Options</div>
+        <div class="cond-engine-grid">
+          <label class="mod-field">
+            <span class="mod-field-label">Max Passes</span>
+            <input class="mod-input" id="condMaxPasses" type="number" min="1" max="20" step="1" value="${escHtml(String(opts.max_passes))}" onchange="setModuleParam('conditional_prompt','max_passes',this.value)">
+          </label>
+          <label class="mod-checkbox-item cond-stop-row">
+            <input type="checkbox" id="condStopOnMatch" ${opts.stop_on_match ? 'checked' : ''} onchange="setModuleParam('conditional_prompt','stop_on_match',String(this.checked))">
+            <span class="mod-checkbox-label">Stop On Match</span>
+          </label>
         </div>
       </div>
       <div>
@@ -99,12 +174,8 @@ export function createConditionalPromptPanel({
         <div class="collapsed" style="font-size:10px;color:var(--text-dim);line-height:1.5;padding:6px 0">
           <b>Condition:</b> tag, ~tag (NOT), *tag (exact), e|q|s|g (rating)<br>
           <b>Logic:</b> &amp; (AND), | (OR), () grouping<br>
-          <b>Actions:</b><br>
-          &nbsp; tag=new_tag (replace)<br>
-          &nbsp; main+=tag (append to main)<br>
-          &nbsp; prefix+=tag / postfix+=tag<br>
-          &nbsp; ^ = multi-tag separator<br>
-          &nbsp; "quoted, tags" for comma values<br>
+          <b>Actions:</b> main+=tag, prefix+=tag, postfix+=tag, old=new<br>
+          <b>Character:</b> char_set(N, enabled), char:N+=tag, uc:N=value<br>
           <b>Example:</b> (e):prefix+=nsfw^rating:explicit,
         </div>
       </div>

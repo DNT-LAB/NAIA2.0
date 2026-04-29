@@ -714,11 +714,13 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             if not cond_override.get("enabled"):
                 return context
             rules_text = cond_override.get("rules", "").strip()
+            opts = cond_override.get("engine_options") or self._engine_options or {}
         else:
             if not self.enable_checkbox or not self.enable_checkbox.isChecked():
                 return context
             # 174 hotfix (FR-02/10): 활성 모드가 'v2' 면 _rules_v2_dsl, 아니면 rules_textedit
             rules_text = self._active_rules_text()
+            opts = self._engine_options or {}
 
         print("🔀 조건부 프롬프트 훅 실행...")
 
@@ -727,7 +729,6 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         
         # 규칙 처리 및 로그 생성
         # Sub-phase 1.7 hotfix (P1): engine_options 를 런타임에 반영
-        opts = self._engine_options or {}
         logs = []
         modified_context = self._apply_rules(
             context, rules_text, logs,

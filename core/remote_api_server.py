@@ -885,15 +885,13 @@ class RemoteBridge(QObject):
             else:
                 session["p_eng_override"] = {}
         self.app_context.session_p_eng_override = session["p_eng_override"]
-        # Cond: 동일 패턴
+        # Cond: 동일 패턴. v2 편집기 모드에서는 레거시 textedit 이 아니라
+        # 실제 활성 DSL 을 복사해야 원격 세션 생성 결과가 데스크톱과 일치한다.
         if session.get("cond_override") is None:
             if getattr(self.app_context, 'shared_copy_cond', False):
                 cm = self._find_module("conditional_prompt")
                 if cm:
-                    session["cond_override"] = {
-                        "enabled": cm.enable_checkbox.isChecked() if hasattr(cm, 'enable_checkbox') else False,
-                        "rules": cm.rules_textedit.toPlainText() if hasattr(cm, 'rules_textedit') else "",
-                    }
+                    session["cond_override"] = self._cond_override_from_module(cm)
                 else:
                     session["cond_override"] = {}
             else:
@@ -3476,6 +3474,170 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: character 상태 읽기 실패 — {e}")
             return {}
 
+    def _cond_engine_options(self, module=None, source=None) -> dict:
+        raw = source
+        if raw is None and module is not None:
+            try:
+                if hasattr(module, "get_engine_options"):
+                    raw = module.get_engine_options()
+                else:
+                    raw = getattr(module, "_engine_options", None)
+            except Exception:
+                raw = None
+        if not isinstance(raw, dict):
+            raw = {}
+        try:
+            max_passes = int(raw.get("max_passes", 1))
+        except Exception:
+            max_passes = 1
+        return {
+            "max_passes": max(1, max_passes),
+            "stop_on_match": bool(raw.get("stop_on_match", False)),
+        }
+
+    def _cond_state_values_from_module(self, module) -> dict:
+        legacy_rules = ""
+        rules_textedit = getattr(module, "rules_textedit", None)
+        if rules_textedit is not None:
+            try:
+                legacy_rules = rules_textedit.toPlainText()
+            except Exception:
+                legacy_rules = ""
+
+        try:
+            editor_mode = module.get_editor_mode() if hasattr(module, "get_editor_mode") else getattr(module, "_editor_mode", "legacy")
+        except Exception:
+            editor_mode = "legacy"
+        editor_mode = editor_mode if editor_mode in ("legacy", "v2") else "legacy"
+
+        try:
+            rules_v2 = module.get_v2_dsl() if hasattr(module, "get_v2_dsl") else getattr(module, "_rules_v2_dsl", "")
+        except Exception:
+            rules_v2 = ""
+        rules_v2 = rules_v2 if isinstance(rules_v2, str) else ""
+
+        active_rules = rules_v2 if editor_mode == "v2" else legacy_rules
+        active_preset = None
+        try:
+            if hasattr(module, "get_active_preset_name"):
+                active_preset = module.get_active_preset_name()
+            else:
+                active_preset = getattr(module, "_active_preset_name", None)
+        except Exception:
+            active_preset = None
+
+        enable_checkbox = getattr(module, "enable_checkbox", None)
+        enabled = False
+        if enable_checkbox is not None:
+            try:
+                enabled = bool(enable_checkbox.isChecked())
+            except Exception:
+                enabled = False
+
+        return {
+            "enabled": enabled,
+            "editor_mode": editor_mode,
+            "rules": active_rules,
+            "active_rules": active_rules,
+            "rules_legacy": legacy_rules,
+            "rules_v2": rules_v2,
+            "engine_options": self._cond_engine_options(module),
+            "active_preset": active_preset or "",
+        }
+
+    def _cond_override_from_module(self, module) -> dict:
+        values = self._cond_state_values_from_module(module)
+        return {
+            "enabled": values["enabled"],
+            "editor_mode": values["editor_mode"],
+            "rules": values["active_rules"],
+            "active_rules": values["active_rules"],
+            "rules_legacy": values["rules_legacy"],
+            "rules_v2": values["rules_v2"],
+            "engine_options": values["engine_options"],
+            "active_preset": values["active_preset"],
+        }
+
+    def _sanitize_cond_override(self, cond: dict | None) -> dict:
+        if not isinstance(cond, dict):
+            return {}
+        editor_mode = str(cond.get("editor_mode", cond.get("mode", "legacy")))
+        editor_mode = editor_mode if editor_mode in ("legacy", "v2") else "legacy"
+        rules_legacy = str(cond.get("rules_legacy", ""))
+        rules_v2 = str(cond.get("rules_v2", ""))
+        if "rules" in cond:
+            active_rules = str(cond.get("rules", ""))
+        elif editor_mode == "v2":
+            active_rules = rules_v2
+        else:
+            active_rules = rules_legacy
+        if editor_mode == "legacy" and not rules_legacy:
+            rules_legacy = active_rules
+        elif editor_mode == "v2" and not rules_v2:
+            rules_v2 = active_rules
+        return {
+            "enabled": bool(cond.get("enabled", False)),
+            "editor_mode": editor_mode,
+            "rules": active_rules,
+            "active_rules": active_rules,
+            "rules_legacy": rules_legacy,
+            "rules_v2": rules_v2,
+            "engine_options": self._cond_engine_options(source=cond.get("engine_options")),
+            "active_preset": str(cond.get("active_preset", "")),
+        }
+
+    def _cond_state_from_override(self, override: dict) -> dict:
+        values = self._sanitize_cond_override(override)
+        return {
+            "type": "module_state",
+            "module_id": "conditional_prompt",
+            **values,
+            "log": "",
+        }
+
+    def _update_cond_override(self, override: dict, key: str, value: str) -> None:
+        values = self._sanitize_cond_override(override)
+        if key == "enabled":
+            values["enabled"] = value == "true"
+        elif key in ("editor_mode", "mode"):
+            mode = value if value in ("legacy", "v2") else values["editor_mode"]
+            values["editor_mode"] = mode
+            values["rules"] = values["rules_v2"] if mode == "v2" else values["rules_legacy"]
+            values["active_rules"] = values["rules"]
+        elif key == "rules_legacy":
+            values["rules_legacy"] = value
+            if values["editor_mode"] != "v2":
+                values["rules"] = value
+                values["active_rules"] = value
+        elif key == "rules_v2":
+            values["rules_v2"] = value
+            if values["editor_mode"] == "v2":
+                values["rules"] = value
+                values["active_rules"] = value
+        elif key == "rules":
+            values["rules"] = value
+            values["active_rules"] = value
+            if values["editor_mode"] == "v2":
+                values["rules_v2"] = value
+            else:
+                values["rules_legacy"] = value
+        elif key == "engine_options":
+            try:
+                payload = json.loads(value or "{}")
+            except Exception:
+                payload = {}
+            values["engine_options"] = self._cond_engine_options(source=payload)
+        elif key == "max_passes":
+            opts = dict(values["engine_options"])
+            opts["max_passes"] = value
+            values["engine_options"] = self._cond_engine_options(source=opts)
+        elif key == "stop_on_match":
+            opts = dict(values["engine_options"])
+            opts["stop_on_match"] = value == "true"
+            values["engine_options"] = self._cond_engine_options(source=opts)
+        override.clear()
+        override.update(values)
+
     def _read_conditional_prompt(self, ws=None) -> dict:
         try:
             m = self._find_module("conditional_prompt")
@@ -3487,26 +3649,23 @@ class RemoteBridge(QObject):
                 # 1회 초기화
                 if session.get("cond_override") is None:
                     if getattr(self.app_context, 'shared_copy_cond', False):
-                        session["cond_override"] = {
-                            "enabled": m.enable_checkbox.isChecked() if hasattr(m, 'enable_checkbox') else False,
-                            "rules": m.rules_textedit.toPlainText() if hasattr(m, 'rules_textedit') else "",
-                        }
+                        session["cond_override"] = self._cond_override_from_module(m)
                     else:
                         session["cond_override"] = {}
-                override = session["cond_override"]
-                return {
-                    "type": "module_state",
-                    "module_id": "conditional_prompt",
-                    "enabled": override.get("enabled", False),
-                    "rules": override.get("rules", ""),
-                    "log": "",
-                }
+                return self._cond_state_from_override(session["cond_override"])
+            values = self._cond_state_values_from_module(m)
+            log = ""
+            log_textedit = getattr(m, "log_textedit", None)
+            if log_textedit is not None:
+                try:
+                    log = log_textedit.toPlainText()
+                except Exception:
+                    log = ""
             return {
                 "type": "module_state",
                 "module_id": "conditional_prompt",
-                "enabled": m.enable_checkbox.isChecked() if hasattr(m, 'enable_checkbox') else False,
-                "rules": m.rules_textedit.toPlainText() if hasattr(m, 'rules_textedit') else "",
-                "log": m.log_textedit.toPlainText() if hasattr(m, 'log_textedit') else "",
+                **values,
+                "log": log,
             }
         except Exception as e:
             print(f"🌐 Remote: conditional_prompt 상태 읽기 실패 — {e}")
@@ -4500,18 +4659,59 @@ class RemoteBridge(QObject):
             m = self._find_module("conditional_prompt")
             if not m:
                 return
+            should_broadcast = False
             if key == "enabled":
                 m.enable_checkbox.setChecked(value == "true")
-                state = self._read_conditional_prompt()
-                if state:
-                    self._broadcast_json(state)
+                should_broadcast = True
+            elif key in ("editor_mode", "mode"):
+                if value in ("legacy", "v2"):
+                    if hasattr(m, "set_editor_mode"):
+                        m.set_editor_mode(value)
+                    else:
+                        m._editor_mode = value
+                    should_broadcast = True
+            elif key == "rules_legacy":
+                if getattr(m, "rules_textedit", None) is not None:
+                    m.rules_textedit.setPlainText(value)
+            elif key == "rules_v2":
+                if hasattr(m, "set_v2_dsl"):
+                    m.set_v2_dsl(value)
+                elif getattr(m, "rules_textedit", None) is not None:
+                    m.rules_textedit.setPlainText(value)
             elif key == "rules":
-                m.rules_textedit.setPlainText(value)
+                mode = m.get_editor_mode() if hasattr(m, "get_editor_mode") else getattr(m, "_editor_mode", "legacy")
+                if mode == "v2" and hasattr(m, "set_v2_dsl"):
+                    m.set_v2_dsl(value)
+                elif getattr(m, "rules_textedit", None) is not None:
+                    m.rules_textedit.setPlainText(value)
+            elif key in ("engine_options", "max_passes", "stop_on_match"):
+                opts = self._cond_engine_options(m)
+                if key == "engine_options":
+                    try:
+                        opts = self._cond_engine_options(source=json.loads(value or "{}"))
+                    except Exception:
+                        opts = self._cond_engine_options(source={})
+                elif key == "max_passes":
+                    opts["max_passes"] = value
+                    opts = self._cond_engine_options(source=opts)
+                elif key == "stop_on_match":
+                    opts["stop_on_match"] = value == "true"
+                    opts = self._cond_engine_options(source=opts)
+                if hasattr(m, "set_engine_options"):
+                    m.set_engine_options(
+                        max_passes=opts["max_passes"],
+                        stop_on_match=opts["stop_on_match"],
+                    )
+                else:
+                    m._engine_options = opts
+                should_broadcast = True
             elif key == "test":
                 # test_rules()를 직접 호출 (test_button은 로컬 변수)
                 if hasattr(m, 'test_rules'):
                     m.test_rules()
                 # 테스트 완료 후 로그 갱신 브로드캐스트
+                should_broadcast = True
+            if should_broadcast:
                 state = self._read_conditional_prompt()
                 if state:
                     self._broadcast_json(state)
@@ -7699,10 +7899,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 session = ws_manager.sessions.get(ws)
                                 if session:
                                     co = session.setdefault("cond_override", {})
-                                    if mkey == "enabled":
-                                        co["enabled"] = (mval == "true")
-                                    elif mkey == "rules":
-                                        co["rules"] = mval
+                                    bridge._update_cond_override(co, mkey, mval)
                                     # test는 세션 오버라이드로 실행 불가 — 무시
                             elif bridge.shared_server_mode and mid == "prompt_engineering":
                                 session = ws_manager.sessions.get(ws)
@@ -7916,10 +8113,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                     # Cond override
                                     cond = cmd.get("cond")
                                     if cond and isinstance(cond, dict):
-                                        session["cond_override"] = {
-                                            "enabled": bool(cond.get("enabled", False)),
-                                            "rules": str(cond.get("rules", "")),
-                                        }
+                                        session["cond_override"] = bridge._sanitize_cond_override(cond)
                                     print(f"🌐 Session restored from client LocalStorage (session={session['id']})")
                         elif cmd_type == "generate":
                             bridge._pending_generate_requests.append({

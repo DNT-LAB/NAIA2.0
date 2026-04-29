@@ -4316,6 +4316,52 @@ body.detached-metadata .metadata-layout {
 }
 
 /* Conditional Prompt rules highlight overlay */
+.cond-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cond-mode-btn {
+  min-height: 34px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.cond-mode-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.cond-mode-btn.active {
+  border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.18);
+  color: var(--text-primary);
+}
+.cond-rules-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cond-status-chip {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(178, 223, 219, 0.24);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(178, 223, 219, 0.08);
+  color: #b2dfdb;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+}
 .cond-rules-wrap {
   position: relative;
   min-height: 140px;
@@ -4348,6 +4394,17 @@ body.detached-metadata .metadata-layout {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
+}
+.cond-engine-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  gap: 10px;
+  align-items: end;
+}
+.cond-stop-row {
+  min-height: 33px;
+  align-items: center;
+  padding-bottom: 1px;
 }
 
 /* Conditional Prompt log viewer */

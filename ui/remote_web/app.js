@@ -1489,8 +1489,31 @@ function collectModuleSnapshotState(moduleId) {
       if (uc) character.uc = uc.value;
     });
   } else if (moduleId === 'conditional_prompt') {
+    const mode = document.getElementById('condEditorMode');
     const rules = document.getElementById('condRulesInput');
-    if (rules) state.rules = rules.value;
+    if (mode) state.editor_mode = mode.value === 'v2' ? 'v2' : 'legacy';
+    if (rules) {
+      const key = rules.dataset.condRuleKey || 'rules';
+      state[key] = rules.value;
+      if ((state.editor_mode || '') === 'v2') {
+        state.rules_v2 = rules.value;
+      } else {
+        state.rules_legacy = rules.value;
+      }
+      state.rules = rules.value;
+      state.active_rules = rules.value;
+    }
+    const maxPasses = document.getElementById('condMaxPasses');
+    const stopOnMatch = document.getElementById('condStopOnMatch');
+    if (maxPasses || stopOnMatch) {
+      const currentOptions = state.engine_options && typeof state.engine_options === 'object'
+        ? state.engine_options
+        : {};
+      state.engine_options = {
+        max_passes: maxPasses ? Math.max(1, Math.round(Number(maxPasses.value) || 1)) : (currentOptions.max_passes || 1),
+        stop_on_match: stopOnMatch ? !!stopOnMatch.checked : !!currentOptions.stop_on_match,
+      };
+    }
   } else if (moduleId === 'e621_event') {
     const search = document.getElementById('e621SearchInput');
     const testbench = document.getElementById('e621Testbench');
@@ -3410,6 +3433,66 @@ function setPromptEngineeringOption(key, checked) {
   if (promptEngineeringActions) promptEngineeringActions.setOption(key, checked);
 }
 
+function normalizeSharedCondState(state = {}) {
+  const mode = state.editor_mode === 'v2' || state.mode === 'v2' ? 'v2' : 'legacy';
+  const fallbackRules = state.rules != null ? String(state.rules) : '';
+  const rulesLegacy = state.rules_legacy != null ? String(state.rules_legacy) : (mode === 'legacy' ? fallbackRules : '');
+  const rulesV2 = state.rules_v2 != null ? String(state.rules_v2) : (mode === 'v2' ? fallbackRules : '');
+  const activeRules = mode === 'v2' ? rulesV2 : rulesLegacy;
+  const options = state.engine_options && typeof state.engine_options === 'object' ? state.engine_options : {};
+  const maxPasses = Math.max(1, Math.round(Number(options.max_passes ?? 1) || 1));
+  return {
+    enabled: !!state.enabled,
+    editor_mode: mode,
+    rules: activeRules,
+    active_rules: activeRules,
+    rules_legacy: rulesLegacy,
+    rules_v2: rulesV2,
+    engine_options: {
+      max_passes: maxPasses,
+      stop_on_match: !!options.stop_on_match,
+    },
+    active_preset: state.active_preset || '',
+  };
+}
+
+function updateSharedCondParam(key, value) {
+  const cond = normalizeSharedCondState(_sharedCond || {});
+  if (key === 'enabled') {
+    cond.enabled = value === 'true';
+  } else if (key === 'editor_mode' || key === 'mode') {
+    cond.editor_mode = value === 'v2' ? 'v2' : 'legacy';
+    cond.rules = cond.editor_mode === 'v2' ? cond.rules_v2 : cond.rules_legacy;
+    cond.active_rules = cond.rules;
+  } else if (key === 'rules_legacy') {
+    cond.rules_legacy = value;
+    if (cond.editor_mode !== 'v2') {
+      cond.rules = value;
+      cond.active_rules = value;
+    }
+  } else if (key === 'rules_v2') {
+    cond.rules_v2 = value;
+    if (cond.editor_mode === 'v2') {
+      cond.rules = value;
+      cond.active_rules = value;
+    }
+  } else if (key === 'rules') {
+    cond.rules = value;
+    cond.active_rules = value;
+    if (cond.editor_mode === 'v2') cond.rules_v2 = value;
+    else cond.rules_legacy = value;
+  } else if (key === 'max_passes') {
+    cond.engine_options.max_passes = Math.max(1, Math.round(Number(value) || 1));
+  } else if (key === 'stop_on_match') {
+    cond.engine_options.stop_on_match = value === 'true';
+  } else if (key === 'engine_options') {
+    try {
+      cond.engine_options = normalizeSharedCondState({engine_options: JSON.parse(value || '{}')}).engine_options;
+    } catch (_) { /* keep previous options */ }
+  }
+  _sharedCond = normalizeSharedCondState(cond);
+}
+
 function setModuleParam(moduleId, key, value, options = {}) {
   if (!options.skipPendingFlush) flushPendingModuleEdit(moduleId);
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -3429,9 +3512,7 @@ function setModuleParam(moduleId, key, value, options = {}) {
       }
       saveSharedSession();
     } else if (moduleId === 'conditional_prompt') {
-      if (!_sharedCond) _sharedCond = {};
-      if (key === 'enabled') _sharedCond.enabled = (value === 'true');
-      else if (key === 'rules') _sharedCond.rules = value;
+      updateSharedCondParam(key, value);
       saveSharedSession();
     }
   }

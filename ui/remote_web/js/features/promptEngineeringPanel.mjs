@@ -31,10 +31,6 @@ export function createPromptEngineeringPanel({
   document,
   moduleBody,
   escHtml,
-  getSharedMode,
-  getSharedPromptEngineering,
-  setSharedPromptEngineering,
-  saveSharedSession,
   bindTagAssist,
 }) {
   function captureFocus() {
@@ -59,34 +55,8 @@ export function createPromptEngineeringPanel({
     try { el.setSelectionRange(snap.selectionStart, snap.selectionEnd); } catch (e) {}
   }
 
-  function applySharedCache(m) {
-    const sharedPromptEngineering = getSharedPromptEngineering();
-    if (sharedPromptEngineering) {
-      if (sharedPromptEngineering.pre_prompt != null) m.pre_prompt = sharedPromptEngineering.pre_prompt;
-      if (sharedPromptEngineering.post_prompt != null) m.post_prompt = sharedPromptEngineering.post_prompt;
-      if (sharedPromptEngineering.auto_hide != null) m.auto_hide = sharedPromptEngineering.auto_hide;
-      if (sharedPromptEngineering.preset != null) m.preset = sharedPromptEngineering.preset;
-      if (sharedPromptEngineering.preprocessing_options) {
-        if (!m.preprocessing) m.preprocessing = {};
-        for (const [key, value] of Object.entries(sharedPromptEngineering.preprocessing_options)) {
-          m.preprocessing[key] = value;
-        }
-      }
-    }
-    setSharedPromptEngineering({
-      pre_prompt: m.pre_prompt || '',
-      post_prompt: m.post_prompt || '',
-      auto_hide: m.auto_hide || '',
-      preset: m.preset || '',
-      preprocessing_options: m.preprocessing ? {...m.preprocessing} : {},
-    });
-    saveSharedSession();
-  }
-
   function render(m) {
     const focusSnap = captureFocus();
-    const sharedMode = getSharedMode();
-    if (sharedMode) applySharedCache(m);
 
     const presetOpts = (m.preset_options || [])
       .map(preset => `<option value="${preset}"${preset === m.preset ? ' selected' : ''}>${preset}</option>`)
@@ -100,12 +70,7 @@ export function createPromptEngineeringPanel({
     </label>`
     ).join('');
 
-    const presetControlHtml = sharedMode ? `
-    <div>
-      <div class="mod-section-label">Preset</div>
-      <select class="mod-select" id="modPreset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
-    </div>
-  ` : `
+    const presetControlHtml = `
     <div>
       <div class="mod-section-label">Quick Preset</div>
       <div class="mod-preset-toolbar">
@@ -116,7 +81,7 @@ export function createPromptEngineeringPanel({
     </div>
   `;
 
-    const advancedHtml = sharedMode ? '' : `
+    const advancedHtml = `
     <div>
       <div class="mod-section-label">Tools</div>
       <div class="mod-inline-row">

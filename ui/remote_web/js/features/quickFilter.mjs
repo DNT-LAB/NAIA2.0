@@ -121,7 +121,6 @@ export function createQuickFilterController(deps) {
     savePreferences(preferences, storage);
     updateHighlight();
     send({type: 'save_search_filter_state', ...preferences});
-    deps.saveSharedSession();
   }
 
   function load() {
@@ -481,27 +480,6 @@ export function createQuickFilterController(deps) {
     return applyPreferences(saved, options);
   }
 
-  function restoreSharedState(saved) {
-    const savedIncludeTags = normalizeTags(saved.tag_filter);
-    const savedExcludeTags = normalizeTags(saved.tag_filter_exclude);
-    if (!savedIncludeTags.length && !savedExcludeTags.length) {
-      updateHighlight();
-      return false;
-    }
-    includeTags = savedIncludeTags;
-    excludeTags = savedExcludeTags;
-    active = saved.tag_filter_active !== false;
-    ratingCounts = null;
-    renderIncludeChips();
-    renderExcludeChips();
-    updateHighlight();
-    if (isSocketOpen()) {
-      pendingAssignOnRestore = active;
-      send({type: 'tag_filter_search', tags: payload()});
-    }
-    return true;
-  }
-
   return {
     bindInputs,
     toggle,
@@ -517,7 +495,6 @@ export function createQuickFilterController(deps) {
     onAutocompleteResult,
     applyPreferences,
     restorePreferences,
-    restoreSharedState,
     updateHighlight,
     savePreferences: save,
     loadPreferences: load,
@@ -526,10 +503,5 @@ export function createQuickFilterController(deps) {
     payload,
     isActive: () => active,
     getRatingCounts: () => ratingCounts,
-    getSharedSessionState: () => ({
-      tag_filter: includeTags.length ? [...includeTags] : null,
-      tag_filter_exclude: excludeTags.length ? [...excludeTags] : null,
-      tag_filter_active: active,
-    }),
   };
 }

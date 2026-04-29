@@ -1,7 +1,6 @@
 const LOADING_HTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">Loading...</div>';
 
 export function createPromptEngineeringPopups({
-  getSharedMode,
   getWs,
   WebSocket,
   modulePopup,
@@ -33,8 +32,7 @@ export function createPromptEngineeringPopups({
     if (body) body.innerHTML = LOADING_HTML;
   }
 
-  function openPanel(key, {sharedBlocked = false, refreshOnly = false} = {}) {
-    if (sharedBlocked && getSharedMode()) return;
+  function openPanel(key, {refreshOnly = false} = {}) {
     const panel = panels[key];
     if (!panel) return;
     if (openState[key]) {
@@ -76,9 +74,9 @@ export function createPromptEngineeringPopups({
   }
 
   return {
-    openPresetAdd: () => openPanel('presetAdd', {sharedBlocked: true}),
+    openPresetAdd: () => openPanel('presetAdd'),
     closePresetAdd: () => closePanel('presetAdd'),
-    openPresetManage: () => openPanel('presetManage', {sharedBlocked: true}),
+    openPresetManage: () => openPanel('presetManage'),
     closePresetManage: () => closePanel('presetManage'),
     openE621: () => openPanel('e621'),
     closeE621: () => closePanel('e621'),

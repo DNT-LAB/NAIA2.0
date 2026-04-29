@@ -2,7 +2,6 @@ export function createPromptEngineeringPopupRenderers({
   document,
   requestAnimationFrame,
   escHtml,
-  getSharedMode,
   createPromptPreset,
   bindDanbooruFeedback,
   panels,
@@ -41,9 +40,8 @@ export function createPromptEngineeringPopupRenderers({
   function renderPresetManage(m) {
     const body = getBody(panels.presetManage);
     if (!body) return;
-    const sharedMode = getSharedMode();
-    const canSaveCurrent = !!m.preset_can_save_current && !sharedMode;
-    const canDeleteCurrent = !!m.preset_can_delete && !sharedMode;
+    const canSaveCurrent = !!m.preset_can_save_current;
+    const canDeleteCurrent = !!m.preset_can_delete;
     body.innerHTML = `
     <div class="mod-section-label">Current Preset</div>
     <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>

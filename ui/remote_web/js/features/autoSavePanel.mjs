@@ -2,7 +2,6 @@ export function createAutoSavePanel({
   document,
   getWs,
   WebSocket,
-  getSharedMode,
   getCurrentModuleId,
   isModulePopupOpen,
   escHtml,
@@ -58,11 +57,8 @@ export function createAutoSavePanel({
   function render(state = lastState) {
     const panelState = state || defaultState();
     lastState = panelState;
-    const sharedMode = getSharedMode();
     const statusText = panelState.auto_save ? 'Enabled' : 'Disabled';
-    const desc = sharedMode
-      ? 'Shared Mode에서는 호스트의 Auto Save 설정을 따릅니다.'
-      : 'Web Session은 시작 시 Auto Save가 강제로 켜집니다. 필요하면 여기서만 변경할 수 있습니다.';
+    const desc = 'Web Session은 시작 시 Auto Save가 강제로 켜집니다. 필요하면 여기서만 변경할 수 있습니다.';
     const actionOptions = (panelState.memory_action_options || []).map(opt =>
       `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
@@ -79,7 +75,6 @@ export function createAutoSavePanel({
         </div>
         <div class="mod-inline-row">
           <button class="mod-action-btn ${panelState.auto_save ? 'mod-stop' : 'mod-start'}"
-                  ${sharedMode ? 'disabled' : ''}
                   onclick="setAutoSaveEnabled(${panelState.auto_save ? 'false' : 'true'})">
             ${panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save'}
           </button>
@@ -88,12 +83,12 @@ export function createAutoSavePanel({
           </button>
         </div>
         <label class="mod-checkbox-item">
-          <input type="checkbox" ${panelState.save_as_webp ? 'checked' : ''} ${sharedMode ? 'disabled' : ''}
+          <input type="checkbox" ${panelState.save_as_webp ? 'checked' : ''}
                  onchange="onAutoSaveWebpChange(this.checked)">
           <span class="mod-checkbox-label">WEBP로 저장</span>
         </label>
         <label class="mod-checkbox-item">
-          <input type="checkbox" ${panelState.history_limit_enabled ? 'checked' : ''} ${sharedMode ? 'disabled' : ''}
+          <input type="checkbox" ${panelState.history_limit_enabled ? 'checked' : ''}
                  onchange="onHistoryLimitToggle(this.checked)">
           <span class="mod-checkbox-label">히스토리 큐 제한 활성화</span>
         </label>
@@ -101,12 +96,12 @@ export function createAutoSavePanel({
           <span class="mod-field-label">Max History Length</span>
           <input class="mod-input" type="number" min="100" max="10000" step="100"
                  value="${escHtml(String(panelState.max_history_length ?? 2000))}"
-                 ${panelState.history_limit_enabled && !sharedMode ? '' : 'disabled'}
+                 ${panelState.history_limit_enabled ? '' : 'disabled'}
                  onchange="onHistoryLimitLengthChange(this.value)">
         </label>
         <label class="mod-field">
           <span class="mod-field-label">On Limit Reached</span>
-          <select class="mod-select" ${panelState.history_limit_enabled && !sharedMode ? '' : 'disabled'}
+          <select class="mod-select" ${panelState.history_limit_enabled ? '' : 'disabled'}
                   onchange="onHistoryLimitActionChange(this.value)">
             ${actionOptions}
           </select>

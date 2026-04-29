@@ -708,7 +708,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
         """파이프라인 훅 실행"""
-        # Shared Server Mode: 세션 오버라이드 우선
+        # 시뮬레이션/테스트용 임시 조건부 규칙 오버라이드 우선
         cond_override = getattr(self.app_context, 'session_cond_override', None) if hasattr(self, 'app_context') else None
         if cond_override is not None:
             if not cond_override.get("enabled"):

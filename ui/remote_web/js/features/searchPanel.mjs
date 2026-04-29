@@ -6,7 +6,6 @@ export function createSearchPanel({
   getWs,
   WebSocket,
   getQuickFilter,
-  getSharedMode,
   getCurrentModuleId,
   bindTagAssist,
 }) {
@@ -77,7 +76,6 @@ export function createSearchPanel({
   }
 
   function saveFilterState(extra = {}) {
-    if (getSharedMode()) return;
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({
@@ -95,26 +93,13 @@ export function createSearchPanel({
       if (checkbox) checkbox.checked = ratingState[rating];
     }
     const quickFilter = getQuickFilter();
-    if (getSharedMode()) {
-      const anyActive = Object.values(ratingState).some(value => value);
-      if (!anyActive) {
-        ratingState.q = true;
-        ratingState.e = true;
-        syncRatingButtons();
-      }
-      const localCount = computeLocalFilteredCount();
-      if (localCount !== null) updateSearchCount(localCount);
-      sendActiveRatings();
-      if (quickFilter) quickFilter.savePreferences();
-      return;
-    }
     sendActiveRatings();
     if (quickFilter) quickFilter.savePreferences();
   }
 
   function onFilterReset(message) {
     const quickFilter = getQuickFilter();
-    const serverPreferences = !getSharedMode() ? message.filter_preferences : null;
+    const serverPreferences = message.filter_preferences;
     if (serverPreferences) {
       setRatingsFromList(serverPreferences.ratings);
       if (quickFilter) {
@@ -129,25 +114,11 @@ export function createSearchPanel({
     }
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
     if (message.count != null) updateSearchCount(message.count);
-    if (quickFilter && getSharedMode()) {
-      quickFilter.updateHighlight();
-    }
   }
 
   function onRatingUpdate(message) {
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
     const quickFilter = getQuickFilter();
-    if (getSharedMode()) {
-      if (quickFilter && quickFilter.isActive() && quickFilter.getRatingCounts()) {
-        const localCount = computeLocalFilteredCount();
-        if (localCount !== null) {
-          updateSearchCount(localCount);
-          return;
-        }
-      }
-      if (message.count != null) updateSearchCount(message.count);
-      return;
-    }
     updateSearchCount(message.count || 0);
     if (message.active_ratings) {
       setRatingsFromList(message.active_ratings);
@@ -167,23 +138,17 @@ export function createSearchPanel({
 
   function onSearchState(message) {
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
-    if (getSharedMode() && cachedRatingCounts) {
-      updateSearchCount(computeLocalFilteredCount());
-    } else {
-      updateSearchCount(message.count || 0);
-    }
+    updateSearchCount(message.count || 0);
     searchingActive = false;
-    if (!getSharedMode()) {
-      if (message.active_ratings) {
-        setRatingsFromList(message.active_ratings);
-      } else if (message.ratings) {
-        for (const key of ['g','s','q','e']) {
-          if (key in message.ratings) ratingState[key] = !!message.ratings[key];
-        }
+    if (message.active_ratings) {
+      setRatingsFromList(message.active_ratings);
+    } else if (message.ratings) {
+      for (const key of ['g','s','q','e']) {
+        if (key in message.ratings) ratingState[key] = !!message.ratings[key];
       }
     }
     const quickFilter = getQuickFilter();
-    const serverPreferences = !getSharedMode() ? message.filter_preferences : null;
+    const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
       quickFilter.applyPreferences(serverPreferences, {send: false});
     } else if (serverPreferences) {

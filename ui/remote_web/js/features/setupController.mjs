@@ -2,7 +2,6 @@ export function createSetupController({
   document,
   getWs,
   WebSocket,
-  getSharedMode,
   showToast,
   updateModeSelectAvailability,
   renderCloudflaredControls,
@@ -42,7 +41,6 @@ export function createSetupController({
   }
 
   function openApiPopup() {
-    if (getSharedMode()) return;
     setupOverlay.classList.add('open');
     if (apiStatusLast) applySetupGate(apiStatusLast);
     const ws = getWs();
@@ -91,11 +89,6 @@ export function createSetupController({
       showToast('Connect at least one backend first', 'error');
       return;
     }
-    setupOverlay.classList.remove('open');
-  }
-
-  function forceCloseForSharedMode() {
-    setupForced = false;
     setupOverlay.classList.remove('open');
   }
 
@@ -315,7 +308,6 @@ export function createSetupController({
     probeApi,
     onProbeResult,
     closeApiPopup,
-    forceCloseForSharedMode,
     onSetupBackdrop,
     switchSetupTab,
     toggleSetupReveal,

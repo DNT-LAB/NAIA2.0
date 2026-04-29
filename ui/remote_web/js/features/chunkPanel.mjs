@@ -6,7 +6,6 @@ export function createChunkPanel({
   promptEdit,
   getWs,
   WebSocket,
-  getSharedMode,
   getAcTarget,
   showToast,
   updateModuleBtnState,
@@ -143,10 +142,6 @@ export function createChunkPanel({
   }
 
   function openPanel(anchor = null, toggle = false) {
-    if (getSharedMode()) {
-      showToast('This module is not available in Shared Server Mode', 'error');
-      return;
-    }
     if (toggle && open) {
       close();
       return;

@@ -169,7 +169,7 @@ def get_pipeline_hook_info(self):
 
 **기본 실행 모드 (174 확정)**: `_editor_mode = "legacy"`. 신규 설치 / 설정 파일 미존재 / 미지정 값은 전부 legacy fallback. v2 로의 전환은 사용자가 명시적으로 라디오 토글하거나 편집기에서 "적용" 클릭 시(`set_editor_mode("v2")`) 또는 프리셋 로드 시 발생.
 
-**cond_override**: Shared Server Mode 에서 `app_context.session_cond_override` 가 세팅되면 enable_checkbox 무시하고 override 의 rules 사용.
+**cond_override**: Conditional Prompt v2 시뮬레이션에서 `app_context.session_cond_override` 가 세팅되면 enable_checkbox 무시하고 override 의 rules 사용.
 
 **NAID4 게이트 — 캐릭터 계열 액션의 모드 제한**:
 

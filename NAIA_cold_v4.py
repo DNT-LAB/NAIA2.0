@@ -4959,7 +4959,7 @@ class ModernMainWindow(QMainWindow):
                               source_row_override=None):
         """[랜덤/다음 프롬프트] 버튼 클릭 시 컨트롤러를 통해 프롬프트 생성을 시작
         Args:
-            settings_override: UI 체크박스 대신 사용할 설정값 (Shared Mode 세션별 오버라이드)
+            settings_override: UI 체크박스 대신 사용할 호출자 제공 설정값
             active_ratings: Rating 필터 (Remote GSQE 버튼 상태, None이면 전체)
             source_row_override: 외부 주입 source_row (Remote tag filter). pop 없이 사용.
         """

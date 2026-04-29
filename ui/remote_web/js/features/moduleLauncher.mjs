@@ -9,21 +9,18 @@ const MODULE_REGISTRY = {
     title: 'E621 Event',
     category: 'prompt_tools',
     action: 'module',
-    sharedBlocked: true,
   },
   wildcard: {
     label: 'WC',
     title: 'Wildcard',
     category: 'prompt_tools',
     action: 'module',
-    sharedBlocked: true,
   },
   chunk: {
     label: 'Chunk',
     title: 'Chunk',
     category: 'prompt_tools',
     action: 'chunk',
-    sharedBlocked: true,
   },
   conditional_prompt: {
     label: 'Cond',
@@ -66,14 +63,12 @@ const MODULE_REGISTRY = {
     title: 'Ollama',
     category: 'assistant_tools',
     action: 'module',
-    sharedBlocked: true,
   },
   automation: {
     label: 'Automation',
     title: 'Automation',
     category: 'assistant_tools',
     action: 'module',
-    sharedBlocked: true,
     badgeId: 'badgeAuto',
   },
 };
@@ -103,7 +98,6 @@ const CATEGORY_REGISTRY = [
 export function createModuleLauncher({
   document,
   getMode,
-  getSharedMode,
   getCurrentModuleId,
   isModulePopupOpen,
   isChunkOpen,
@@ -122,7 +116,6 @@ export function createModuleLauncher({
     const config = MODULE_REGISTRY[moduleId];
     if (!config) return false;
     if (config.naiOnly && getMode() !== 'NAI') return true;
-    if (config.sharedBlocked && getSharedMode()) return true;
     return false;
   }
 

@@ -1,10 +1,6 @@
 export function createConditionalPromptPanel({
   document,
   escHtml,
-  getSharedMode,
-  getSharedCond,
-  setSharedCond,
-  saveSharedSession,
   onModTextEdit,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
@@ -106,21 +102,6 @@ export function createConditionalPromptPanel({
 
   function render(state) {
     let m = normalizeState(state);
-    if (getSharedMode()) {
-      // Shared Mode is a legacy path. Treat server module_state as authoritative;
-      // restore_session already sends any saved client override to the server.
-      setSharedCond({
-        enabled: m.enabled,
-        editor_mode: m.editor_mode,
-        rules: m.active_rules,
-        active_rules: m.active_rules,
-        rules_legacy: m.rules_legacy,
-        rules_v2: m.rules_v2,
-        engine_options: m.engine_options,
-        active_preset: m.active_preset,
-      });
-      saveSharedSession();
-    }
 
     const isV2 = m.editor_mode === 'v2';
     const activeRuleKey = isV2 ? 'rules_v2' : 'rules_legacy';

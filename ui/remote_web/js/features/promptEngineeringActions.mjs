@@ -1,6 +1,5 @@
 export function createPromptEngineeringActions({
   document,
-  getSharedMode,
   getMode,
   showToast,
   confirmDialog = message => globalThis.confirm(message),
@@ -40,7 +39,6 @@ export function createPromptEngineeringActions({
   }
 
   function applyRecommendedPreset() {
-    if (getSharedMode()) return;
     if (getMode() !== 'NAI') {
       showToast('추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.', 'error');
       return;

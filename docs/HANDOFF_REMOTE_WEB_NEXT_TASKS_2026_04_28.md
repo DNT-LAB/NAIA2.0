@@ -81,7 +81,7 @@ Completed after the P0 stabilization pass:
 
 ## Immediate Risks
 
-- `Tools & Assistants` has been compressed into the planned `1 + 3` launcher. Remaining risk is visual/manual smoke across desktop, mobile drawer, NAI/non-NAI mode, and Shared Mode.
+- `Tools & Assistants` has been compressed into the planned `1 + 3` launcher. Remaining risk is visual/manual smoke across desktop, mobile drawer, and NAI/non-NAI mode.
 - `core/remote_api_server.py` gained about 1k lines; next stabilization should focus on behavior smoke and then adapter extraction, not more feature growth.
 - No browser/manual Remote Web smoke was observed in this audit.
 - Result context menu clipboard image writes depend on browser Clipboard API support, especially for WEBP.
@@ -130,21 +130,21 @@ Implementation notes:
 - Bubble status to the category level:
   - active state if any child module is open;
   - badge count if any child has a badge;
-  - disabled/NAI-only/shared-mode state if all usable children are blocked, with leaf-level blocked reasons preserved.
+  - disabled/NAI-only state if all usable children are blocked, with leaf-level blocked reasons preserved.
 - Move module metadata into a single JS registry in `ui/remote_web/app.js` or a new `js/features/moduleLauncher.mjs`:
   - title
   - category
   - action type (`module` vs `chunk`)
-  - NAI-only / shared-mode blocked flags
+  - NAI-only blocked flags
   - badge element id
-- After registry extraction, use it for title lookup, active state, mode/shared availability, and category rendering so new modules are registered once.
+- After registry extraction, use it for title lookup, active state, mode availability, and category rendering so new modules are registered once.
 - Mobile requirement: categories must remain usable in the drawer without horizontal overflow; category popups should close on module open and on outside click.
 
 Validation:
 
 - Desktop and mobile screenshot check for the category launcher.
 - NAI vs non-NAI mode: `Character`, `Char Ref`, `Vibe` disabled behavior still correct.
-- Shared Mode: blocked modules still blocked and existing toast behavior remains.
+- Shared Mode support has been retired; no shared-mode launcher validation is required.
 - Open/close/toggle behavior remains correct for `프롬프트 엔지니어링`, a normal module, and `Chunk`.
 
 ### P2 — Remote Web Behavior Smoke

@@ -1410,7 +1410,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         print("🔧 프롬프트 엔지니어링 훅 실행...")
 
-        # Shared Server Mode: 세션 오버라이드 우선
+        # Remote/ComfyUI per-request P.Eng override 우선
         session_override = getattr(self.app_context, 'session_p_eng_override', None) if hasattr(self, 'app_context') else None
         if session_override is not None:
             # 빈 dict → 전부 빈 값으로 (데스크톱 폴백 방지)

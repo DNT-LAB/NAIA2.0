@@ -740,7 +740,7 @@ class GenerationController:
         self.generation_worker.set_generation_params(params, source_row)
 
         # 🔧 FIX: 메인 스레드에서 main_prompt 텍스트 캡처 (워커에서 크로스 스레드 UI 접근 방지)
-        # Shared Mode remote: overrides로 주입된 프롬프트는 _raw_input에 원본 보존
+        # Per-request overrides로 주입된 프롬프트는 _raw_input에 원본 보존
         try:
             raw_input = params.pop('_raw_input', None)
             if raw_input is not None:
@@ -836,7 +836,7 @@ class GenerationController:
                 })
         # 🆕 현재 생성 파라미터 정리
         self.current_generation_params = None
-        # Shared Server Mode 세션 오버라이드 정리
+        # Per-request P.Eng/Conditional 오버라이드 정리
         self.context.session_p_eng_override = None
         self.context.session_cond_override = None
 
@@ -872,7 +872,7 @@ class GenerationController:
                     "priority": current_request.priority,
                     "error": error_message
                 })
-        # Shared Server Mode 세션 오버라이드 정리
+        # Per-request P.Eng/Conditional 오버라이드 정리
         self.context.session_p_eng_override = None
         self.context.session_cond_override = None
 
@@ -1172,7 +1172,7 @@ class GenerationController:
         # 🆕 안전장치: 지연 실행으로 이벤트 루프에서 안전하게 처리
         QTimer.singleShot(100, _safe_cleanup)
 
-        # Shared Server Mode 세션 오버라이드 안전망 (cancel 등으로 finished/error 콜백 누락 시)
+        # Per-request P.Eng/Conditional 오버라이드 안전망 (cancel 등으로 finished/error 콜백 누락 시)
         if getattr(self.context, 'session_p_eng_override', None) is not None:
             self.context.session_p_eng_override = None
         if getattr(self.context, 'session_cond_override', None) is not None:

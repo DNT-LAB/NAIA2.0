@@ -220,7 +220,7 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 - Remote WebSocket: 현재 생성 이미지와 메타데이터 broadcast만 담당
 - 데스크톱 히스토리/액션: `tabs/image_window.py`의 `HistoryItem` + `ImageHistoryWindow` 모델을 기준으로 구현
 - Load Prompt / Reroll / Queue 계열 액션은 Remote 전용 WebSocket 명령이 아니라 데스크톱 모델 어댑터가 필요
-- Shared Mode: 호스트 전역 히스토리 변경 액션은 차단
+- 히스토리 변경 액션은 데스크톱 모델 어댑터를 통해 처리한다.
 
 ## 단축키
 
@@ -265,49 +265,15 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 ---
 
-## Shared Server Mode (다중 사용자 독립 세션)
+## Shared Server Mode 지원 종료
 
-Settings > Web Session > "Shared Server Mode" 체크 시 활성화. 비영속 (앱 재시작 시 OFF).
+Shared Server Mode는 2026-04-30 기준 지원 종료. Web Session은 데스크톱 상태를 원격에서 조작하는 단일 호스트 세션으로 동작한다.
 
-### 세션 격리 대상
-
-| 항목 | 저장 위치 | 주입 시점 |
-|------|-----------|----------|
-| P.Engineering (pre/post/auto-hide/전처리) | `session["p_eng_override"]` | `_inject_session_overrides()` → `app_context.session_p_eng_override` |
-| Conditional Prompt (enabled/rules) | `session["cond_override"]` | `_inject_session_overrides()` → `app_context.session_cond_override` |
-| Negative Prompt | `session["negative_prompt"]` | `_do_generate` / `on_prompt_generated` |
-| 생성 파라미터 (해상도/스텝/CFG 등) | `session["params_override"]` | `execute_generation_pipeline(overrides=)` |
-| Prompt Fixed / WC Solo | `session["options"]` | `_get_session_settings_override()` → `trigger_random_prompt(settings_override=)` |
-
-### 1-time 초기화 패턴
-
-세션의 override가 `None`이면 최초 1회만 데스크톱에서 복사(Copy P.Eng/Cond 체크 시) 또는 빈 dict로 초기화. 이후 세션이 소유.
-
-### 차단 항목 (Shared Mode)
-
-| 항목 | 클라이언트 | 서버 |
-|------|-----------|------|
-| Auto Gen | checkbox disabled | `set_option("auto_generate")` 무시 |
-| NAI 모드 전환 | option disabled | `_do_set_mode("NAI")` 차단 |
-| Automation / Wildcard / Chunk / Search | 버튼 `nai-only-disabled` | 모듈 진입 차단 |
-| 검색 / Depth / Restore / Load Parquet | — | 서버 요청 무시 |
-| `__` / `$` / `@` autocomplete 트리거 | `scheduleAutocomplete` 가드 | — |
-| 히스토리 Delete | 버튼 disabled | — |
-
-### WS별 Pending Overrides
-
-`_do_random()` → `prompt_generated` → 자동생성 경로에서 비동기 간극 발생.
-`_pending_overrides: dict[ws, {"params", "negative", "settings_override"}]`로 WS별 격리.
-
-### Override Cleanup
-
-- `_on_generation_finished` / `_on_generation_error`: `session_p_eng_override` / `session_cond_override` = None
-- `_on_thread_finished`: 안전망 (cancel 시 위 콜백 누락 대비)
-- WS disconnect: `_current_request_ws` 무효화 + pending 제거 + `_auto_generate_pending` 해제
-
-### UI 미조작 원칙
-
-세션별 옵션(WC Solo 등)은 `settings_override` dict로 전달. **데스크톱 UI 체크박스를 임시 조작하지 않음**.
+- Settings > Web Session의 Shared Server Mode / Copy P.Eng / Copy Cond UI 제거
+- WebSocket `restore_session`, shared LocalStorage(`naia_shared_session`), 세션별 P.Eng/Cond/Params/Negative 격리 제거
+- 검색, Chunk, Wildcard, Automation 등 기존 shared-only 차단 제거
+- `session_p_eng_override`는 ComfyUI per-request `peng_override` 용도로 유지
+- `session_cond_override`는 Conditional Prompt v2 시뮬레이션 용도로 유지
 
 ---
 

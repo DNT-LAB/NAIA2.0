@@ -12,8 +12,7 @@ let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
 let _localPromptDirty = false;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
-let sessionId = null, sharedMode = false;
-let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
+let sessionId = null;
 const urlParams = new URLSearchParams(location.search);
 const isDesktopShell = urlParams.get('desktop_shell') === '1';
 const detachedMode = urlParams.get('detached') || '';
@@ -31,8 +30,6 @@ if (isDetachedModule && detachedModuleId) {
   document.body.classList.add(`detached-module-${detachedModuleId.replace(/[^a-z0-9_-]/gi, '_')}`);
 }
 
-// ---- Shared Mode LocalStorage 세션 유지 ----
-const SHARED_STORAGE_KEY = 'naia_shared_session';
 let createWsMessageDispatcher = null;
 let quickFilter = null;
 let rightTabs = null;
@@ -100,7 +97,6 @@ const quickFilterReady = import('./js/features/quickFilter.mjs')
       syncRatingButtons,
       computeLocalFilteredCount: _computeLocalFilteredCount,
       updateSearchCount,
-      saveSharedSession,
       closeAuxiliaryPopups,
       escHtml,
       catStyle,
@@ -353,7 +349,6 @@ const setupControllerReady = import('./js/features/setupController.mjs')
       document,
       getWs: () => ws,
       WebSocket,
-      getSharedMode: () => sharedMode,
       showToast,
       updateModeSelectAvailability,
       renderCloudflaredControls,
@@ -405,7 +400,6 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs')
       document,
       getWs: () => ws,
       WebSocket,
-      getSharedMode: () => sharedMode,
       getCurrentModuleId: () => currentModuleId,
       isModulePopupOpen: () => modulePopup.classList.contains('open'),
       escHtml,
@@ -467,10 +461,6 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
       escHtml,
-      getSharedMode: () => sharedMode,
-      getSharedCond: () => _sharedCond,
-      setSharedCond: value => { _sharedCond = value; },
-      saveSharedSession,
       onModTextEdit,
     });
   })
@@ -611,7 +601,6 @@ const searchPanelReady = import('./js/features/searchPanel.mjs')
       getWs: () => ws,
       WebSocket,
       getQuickFilter: () => quickFilter,
-      getSharedMode: () => sharedMode,
       getCurrentModuleId: () => currentModuleId,
       bindTagAssist,
     });
@@ -629,7 +618,6 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs')
       promptEdit,
       getWs: () => ws,
       WebSocket,
-      getSharedMode: () => sharedMode,
       getAcTarget: () => acTarget,
       showToast,
       updateModuleBtnState,
@@ -651,38 +639,6 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
     console.error('Failed to initialize Danbooru feedback module', error);
   });
 
-function saveSharedSession() {
-  if (!sharedMode) return;
-  const quickState = quickFilter ? quickFilter.getSharedSessionState() : {};
-  const data = {
-    params: _collectCurrentParams(),
-    prompt: promptEdit.value,
-    negative_prompt: negEdit.value,
-    options: {},
-    p_eng: _sharedPEng || null,
-    cond: _sharedCond || null,
-    ratings: getActiveRatings(),
-    tag_filter: quickState.tag_filter || null,
-    tag_filter_exclude: quickState.tag_filter_exclude || null,
-    tag_filter_active: !!quickState.tag_filter_active,
-  };
-  for (const key of Object.keys(optBoxes)) {
-    if (key !== 'auto_generate') data.options[key] = getOptionChecked(key);
-  }
-  try { localStorage.setItem(SHARED_STORAGE_KEY, JSON.stringify(data)); } catch(_) {}
-}
-
-function loadSharedSession() {
-  try {
-    const raw = localStorage.getItem(SHARED_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch(_) { return null; }
-}
-
-function clearSharedSession() {
-  try { localStorage.removeItem(SHARED_STORAGE_KEY); } catch(_) {}
-}
-
 function _collectCurrentParams() {
   const p = {};
   if (paramEls.resolution.value) p.resolution = paramEls.resolution.value;
@@ -699,12 +655,6 @@ function _collectCurrentParams() {
   });
   return p;
 }
-
-// Shared Mode 세션별 P.Eng / Cond 캐시 (모듈 set 시 갱신)
-let _sharedPEng = null, _sharedCond = null;
-let _sharedParamsInit = false;  // Shared Mode: 초기 params 수신 완료 여부
-let _sharedOptionsInit = false;  // Shared Mode: 초기 options 수신 완료 여부
-let _restoreSessionTimeout = null;  // init_complete 미수신 시 안전망 타이머
 
 const $ = id => document.getElementById(id);
 const preview      = $('preview');
@@ -855,7 +805,6 @@ function onLazyIndicesReady() {
 }
 
 function onInitComplete() {
-  _restoringSession = false;
   _initDone = true;
   // 캐시 리플레이 도착 — 아직 사용 가능 단계 아님.
   // lazy 인덱스 warmup 완료 broadcast 가 와야 finalize.
@@ -863,16 +812,13 @@ function onInitComplete() {
   _startBootProgressAnimator();
   // 절대 안전망 — broadcast 누락/예외 시에도 indicator 가 영원히 회전하지 않도록
   _bootSafetyTimer = setTimeout(finalizeBoot, BOOT_SAFETY_MS);
-  if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
   // 재연결 시 열려있는 모듈 자동 리프레시 (캐시 fallback 적용 위해)
   if (currentModuleId && !isModuleStateGuarded(currentModuleId)) {
     requestModuleState(currentModuleId);
   }
   if (resultHistory) resultHistory.prepareInitialHistory();
-  if (!sharedMode) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type: 'get_search_state'}));
-    }
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'get_search_state'}));
   }
 }
 
@@ -1071,77 +1017,6 @@ function populateSelect(el, options, current) {
 }
 
 function updateParams(m) {
-  // Shared Mode 재연결 복원 중: 서버 초기값(데스크톱) 무시, params만 복원 적용
-  if (_restoringSession) {
-    const saved = loadSharedSession();
-    if (saved && saved.params) {
-      // select 옵션은 서버에서 채워야 하므로 populateSelect는 실행하되 값은 복원값 사용
-      syncingParams = true;
-      populateSelect(paramEls.model, m.options_model, saved.params.model || m.model);
-      populateSelect(paramEls.sampler, m.options_sampler, saved.params.sampler || m.sampler);
-      populateSelect(paramEls.scheduler, m.options_scheduler, saved.params.scheduler || m.scheduler);
-      populateSelect(paramEls.resolution, m.options_resolution, saved.params.resolution || m.resolution);
-      populateSelect(qResolution, m.options_resolution, saved.params.resolution || m.resolution);
-      if (saved.params.steps) paramEls.steps.value = saved.params.steps;
-      else if (m.steps !== undefined) paramEls.steps.value = m.steps;
-      if (saved.params.cfg_scale) paramEls.cfg_scale.value = saved.params.cfg_scale;
-      else if (m.cfg_scale !== undefined) paramEls.cfg_scale.value = m.cfg_scale;
-      if (saved.params.cfg_rescale) paramEls.cfg_rescale.value = saved.params.cfg_rescale;
-      else if (m.cfg_rescale !== undefined) paramEls.cfg_rescale.value = m.cfg_rescale;
-      if (saved.params.seed) paramEls.seed.value = saved.params.seed;
-      else if (m.seed !== undefined) paramEls.seed.value = m.seed;
-      if (m.steps_range) { paramEls.steps.min = m.steps_range[0]; paramEls.steps.max = m.steps_range[1]; }
-      // 모드별 표시/숨김은 서버 값 그대로
-      const mode = m.api_mode || '';
-      document.querySelectorAll('.mode-nai').forEach(el => el.style.display = mode === 'NAI' ? '' : 'none');
-      $('webuiParams').style.display = mode === 'WEBUI' ? '' : 'none';
-      $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
-      // flags는 저장값 우선 적용
-      const flags = [];
-      const naiFlagsEnabled = m.nai_flags_enabled || {};
-      if (mode === 'NAI') {
-        for (const key of ['SMEA', 'DYN', 'VAR+', 'DECRISP']) {
-          if (key in m) {
-            const savedVal = saved.params[key];
-            const on = savedVal !== undefined ? savedVal === 'true' : m[key];
-            flags.push({key, name: key, on, enabled: naiFlagsEnabled[key] !== false});
-          }
-        }
-      }
-      if ('seed_fixed' in m) { const sv = saved.params.seed_fixed; flags.push({key: 'seed_fixed', name: 'Seed Fix', on: sv !== undefined ? sv === 'true' : m.seed_fixed, enabled: true}); }
-      if ('random_resolution' in m) { const sv = saved.params.random_resolution; flags.push({key: 'random_resolution', name: 'Rnd Res', on: sv !== undefined ? sv === 'true' : m.random_resolution, enabled: true}); }
-      if ('auto_fit_resolution' in m) { const sv = saved.params.auto_fit_resolution; flags.push({key: 'auto_fit_resolution', name: 'Auto Res', on: sv !== undefined ? sv === 'true' : m.auto_fit_resolution, enabled: true}); }
-      paramFlags.innerHTML = flags.map(f =>
-        `<span class="param-flag${f.on ? ' on' : ''}${f.enabled ? '' : ' disabled'}" data-key="${f.key}" onclick="${f.enabled ? 'toggleFlag(this)' : ''}">${f.name}</span>`
-      ).join('');
-      if ('random_resolution' in m) { const sv = saved.params.random_resolution; qRndRes.classList.toggle('on', sv !== undefined ? sv === 'true' : m.random_resolution); }
-      if ('auto_fit_resolution' in m) { const sv = saved.params.auto_fit_resolution; qAutoRes.classList.toggle('on', sv !== undefined ? sv === 'true' : m.auto_fit_resolution); }
-      // WEBUI HR — 서버 값 그대로 (LocalStorage에 미저장)
-      if (mode === 'WEBUI') {
-        if ('enable_hr' in m) $('pEnableHr').checked = m.enable_hr;
-        if ('hr_scale' in m) $('pHrScale').value = m.hr_scale;
-        populateSelect($('pHrUpscaler'), m.options_hr_upscaler, m.hr_upscaler);
-        if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
-        if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
-        if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
-      }
-      // ComfyUI sampling mode — 서버가 명시적으로 보낸 경우에만 적용 (EPS 기본값 리셋 방지)
-      if (mode === 'COMFYUI' && 'sampling_mode' in m) {
-        const sm = m.sampling_mode;
-        $('flagEps').classList.toggle('on', sm === 'eps');
-        $('flagVpred').classList.toggle('on', sm === 'v_prediction');
-        $('flagAnima').classList.toggle('on', sm === 'anima');
-        $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
-        if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
-      }
-      syncingParams = false;
-      _sharedParamsInit = true;
-      return;
-    }
-  }
-  // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 params 보호)
-  if (sharedMode && _sharedParamsInit) return;
-  if (sharedMode) _sharedParamsInit = true;
   syncingParams = true;
   populateSelect(paramEls.model, m.options_model, m.model);
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
@@ -1213,7 +1088,6 @@ function setParam(key, value) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
   }
-  saveSharedSession();
 }
 
 function toggleFlag(el) {
@@ -1246,7 +1120,6 @@ function setSamplingMode(mode) {
 
 // ---- Prompt sync ----
 
-let _sharedPromptsInit = false;  // Shared Mode: 초기 prompts sync 완료 여부
 let deferredPromptSync = null;
 
 function _isPromptFieldFocused() {
@@ -1278,23 +1151,6 @@ function flushDeferredPromptSync() {
 }
 
 function syncPrompts(m) {
-  if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
-  // Shared Mode: 초기 1회만 서버 값 수용 (이후 broadcast는 세션별 프롬프트 보호)
-  if (sharedMode && _sharedPromptsInit) return;
-  if (sharedMode) {
-    _sharedPromptsInit = true;
-    // LocalStorage에 저장된 프롬프트가 있으면 서버값 대신 유지
-    const saved = loadSharedSession();
-    let restoredPromptLocally = false;
-    if (saved) {
-      if (saved.prompt != null) { m.prompt = saved.prompt; restoredPromptLocally = true; }
-      if (saved.negative_prompt != null) { m.negative_prompt = saved.negative_prompt; restoredPromptLocally = true; }
-    }
-    if (restoredPromptLocally) {
-      delete m.prompt_token_label;
-      delete m.prompt_token_counts;
-    }
-  }
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
   const negativeChanged = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
 
@@ -1327,7 +1183,6 @@ function onPromptEdit() {
     }
     promptSendTimer = null;
     _localPromptDirty = false;
-    saveSharedSession();
   }, 500);
 }
 
@@ -2177,6 +2032,7 @@ function showMetadataInTab(context = {}) {
   return true;
 }
 
+
 function applyMetadataPrompt(payload) {
   if (!payload) return;
   if (promptEdit && payload.prompt != null) promptEdit.value = payload.prompt || '';
@@ -2196,7 +2052,6 @@ function applyMetadataPrompt(payload) {
       negative_prompt: negEdit.value,
     }));
   }
-  saveSharedSession();
   showToast('Prompt applied from metadata', 'success');
 }
 
@@ -2267,7 +2122,6 @@ function applyMetadataSettings(payload, options = {}) {
     if (applyMetadataFlag(key, value)) applied += 1;
   });
   if (applied > 0) {
-    saveSharedSession();
     if (!options.silent) showToast('Settings applied from metadata', 'success');
   } else if (!options.silent) {
     showToast('No applicable settings in metadata', 'error');
@@ -2297,7 +2151,6 @@ function applyMetadataCharacterSettings(payload) {
     characters,
     characters_uc: charactersUc,
   }));
-  saveSharedSession();
   showToast(`Applied ${validCharacters.length} character prompts from metadata`, 'success');
 }
 
@@ -2319,7 +2172,6 @@ function applyMetadataVibeTransfer(payload) {
     openModule('vibe_transfer');
   }
   setModuleParam('vibe_transfer', 'restore_metadata', JSON.stringify(vibeTransfer));
-  saveSharedSession();
   showToast(`Vibe Transfer restore requested (${vibeTransfer.reference_image_multiple.length})`, 'success');
 }
 // ---- Stats functions ----
@@ -2355,64 +2207,15 @@ function onLoadPrompt(prompt) {
 
 function onSession(m) {
   if (m.session_id) sessionId = m.session_id;
-  sharedMode = m.shared_server_mode || false;
   const autoGenCb = optBoxes.auto_generate;
   const naiOpt = modeSelect.querySelector('option[value="NAI"]');
-  const sharedDisabledModules = ['automation', 'wildcard', 'instant_wildcard', 'chunk', 'search'];
-  if (sharedMode) {
-    // Auto Gen 차단
-    if (autoGenCb) {
-      applyOptionState('auto_generate', false);
-      autoGenCb.disabled = true;
-      autoGenCb.style.opacity = '0.4';
-    }
-    // Auto Save 토글 차단 (호스트 전역 설정)
-    if (statsSave) { statsSave.style.pointerEvents = 'none'; statsSave.style.opacity = '0.5'; }
-    // Shared Mode 에선 모드 콤보박스 전체 비활성화 (호스트가 사전 설정)
-    modeSelect.disabled = true;
-    // API Configuration 진입점 자체 숨김 — Setup/연동은 호스트 전용
-    if (setupLauncherBtn) setupLauncherBtn.style.display = 'none';
-    // 혹시 모달이 열려 있으면 강제로 닫기 (Shared 전환 중 상태)
-    if (setupController) setupController.forceCloseForSharedMode();
-    // Anlas pill 숨김 — 호스트 잔액 노출 금지
-    if (anlasPill) anlasPill.classList.add('hidden');
-    // NAI 비활성화
-    if (naiOpt) naiOpt.disabled = true;
-    // Automation / WC / Chunk 비활성화
-    sharedDisabledModules.forEach(mid => {
-      const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
-      if (btn) btn.classList.add('nai-only-disabled');
-    });
-    // 열려있는 차단 모듈 닫기
-    if (sharedDisabledModules.includes(currentModuleId)) closeModule();
-    // 초기 params/options/prompts 수신 대기 (select 옵션 목록 채우기 위해)
-    _sharedParamsInit = false;
-    _sharedOptionsInit = false;
-    _sharedPromptsInit = false;
-    // LocalStorage에서 세션 복원 (재연결 시)
-    _restoreSharedSession();
-  } else {
-    // Shared Mode 해제 → 복원
-    _restoringSession = false;  // 복원 가드 해제 (Shared ON → OFF 전환 시)
-    if (_restoreSessionTimeout) { clearTimeout(_restoreSessionTimeout); _restoreSessionTimeout = null; }
-    _sharedParamsInit = false;
-    _sharedOptionsInit = false;
-    _sharedPromptsInit = false;
-    if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.style.opacity = ''; }
-    if (statsSave) { statsSave.style.pointerEvents = ''; statsSave.style.opacity = ''; }
-    modeSelect.disabled = false;
-    if (setupLauncherBtn) setupLauncherBtn.style.display = '';
-    // Anlas pill 은 서버가 다시 anlas_update 송신 시 자동으로 다시 표시됨
-    if (naiOpt) naiOpt.disabled = false;
-    sharedDisabledModules.forEach(mid => {
-      const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
-      if (btn) btn.classList.remove('nai-only-disabled');
-    });
-    clearSharedSession();
-    if (quickFilter) quickFilter.reset({sendClear: false, persist: false});
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type: 'get_search_state'}));
-    }
+  if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.style.opacity = ''; }
+  if (statsSave) { statsSave.style.pointerEvents = ''; statsSave.style.opacity = ''; }
+  modeSelect.disabled = false;
+  if (setupLauncherBtn) setupLauncherBtn.style.display = '';
+  if (naiOpt) naiOpt.disabled = false;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'get_search_state'}));
   }
   updateModeSelectAvailability();
 }
@@ -2424,61 +2227,6 @@ function onDesktopWindowState(m) {
 function toggleDesktopWindow() {
   if (desktopWindowControl) desktopWindowControl.toggle();
 }
-
-function _restoreSharedSession() {
-  const saved = loadSharedSession();
-  if (!saved) {
-    // 저장된 세션 없음 (최초 접속) — GSQE 기본값을 서버에 전송
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: getActiveRatings()}));
-    }
-    syncRatingButtons();
-    return;
-  }
-  // 서버 초기값(데스크톱 값) 무시 가드 ON
-  _restoringSession = true;
-  // 서버에 세션 복원 요청
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'restore_session', ...saved }));
-  }
-  // 클라이언트 UI 복원: options
-  if (saved.options) {
-    for (const [key, val] of Object.entries(saved.options)) {
-      applyOptionState(key, val);
-    }
-  }
-  // 클라이언트 UI 복원: prompt + negative prompt
-  if (saved.prompt != null) { promptEdit.value = saved.prompt; updatePromptHighlight(); updatePromptTokenEstimate(); }
-  if (saved.negative_prompt != null) {
-    negEdit.value = saved.negative_prompt;
-    updateNegativeTokenEstimate();
-  }
-  // Rating 복원
-  if (saved.ratings && Array.isArray(saved.ratings)) {
-    setRatingsFromList(saved.ratings);
-    syncRatingButtons();
-    // 서버 세션에 rating 저장
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type: 'set_active_ratings', ratings: getActiveRatings()}));
-    }
-  }
-  // Tag filter 복원
-  if (quickFilter) quickFilter.restoreSharedState(saved);
-  // P.Eng / Cond 캐시 복원 (모듈 열 때 사용)
-  _sharedPEng = saved.p_eng || null;
-  _sharedCond = saved.cond || null;
-  // 가드 해제는 서버의 init_complete 메시지 수신 시 (onmessage 핸들러)
-  // 안전망: init_complete 미수신 시 5초 후 강제 해제
-  if (_restoreSessionTimeout) clearTimeout(_restoreSessionTimeout);
-  _restoreSessionTimeout = setTimeout(() => {
-    if (_restoringSession) {
-      console.warn('init_complete timeout — forcing restore guard release');
-      _restoringSession = false;
-    }
-    _restoreSessionTimeout = null;
-  }, 5000);
-}
-
 
 // ---- Drawer & Tabs ----
 const isPC = window.matchMedia('(min-width: 768px)');
@@ -2515,11 +2263,8 @@ function send(cmd) {
         unlockRandomButton();
       }
     }, 2000);
-    // Shared Mode: 개인 rating 선호를 함께 전송
-    if (sharedMode) {
-      ws.send(JSON.stringify({type: 'random', ratings: getActiveRatings()}));
-      return;
-    }
+    ws.send(JSON.stringify({type: 'random', ratings: getActiveRatings()}));
+    return;
   }
   ws.send(cmd);
 }
@@ -2621,20 +2366,10 @@ function refreshAllOptionVisuals() {
 
 function syncOptions(m) {
   const sessionEcho = !!m._session_echo;
-  if (!sessionEcho) {
-    if (_restoringSession) return;  // 복원 중: 서버 초기값 무시
-    // Shared Mode: 초기 1회만 서버 값 수용, 이후 broadcast 무시 (세션별 options 보호)
-    if (sharedMode && _sharedOptionsInit) return;
-    if (sharedMode) _sharedOptionsInit = true;
-  }
   syncingOptions = true;
   try {
     for (const key of Object.keys(optBoxes)) {
       if (key in m) {
-        if (sharedMode && key === 'auto_generate') {
-          applyOptionState(key, false);
-          continue;
-        }
         const next = !!m[key];
         if (!shouldApplyIncomingOption(key, next, sessionEcho)) continue;
         applyOptionState(key, next);
@@ -2675,7 +2410,6 @@ function setOption(key, value) {
   } else {
     markOptionPending(key, false);
   }
-  saveSharedSession();
 }
 
 // ---- Mode sync ----
@@ -2700,21 +2434,15 @@ function updateModeSelectAvailability() {
     if (!opt) return;
     const connected = isModeConnected(mode);
     const displayFallback = !anyConnected && mode === modeSelect.value;
-    opt.disabled = sharedMode ? opt.disabled : !(connected || displayFallback);
+    opt.disabled = !(connected || displayFallback);
     opt.dataset.connected = connected ? '1' : '0';
   });
 
-  if (sharedMode) {
-    modeSelect.disabled = true;
-  } else {
-    modeSelect.disabled = modeSwitching || !anyConnected;
-  }
+  modeSelect.disabled = modeSwitching || !anyConnected;
 
   const currentConnected = isModeConnected(modeSelect.value);
   modeSelect.classList.toggle('mode-unavailable', !currentConnected);
-  modeSelect.title = sharedMode
-    ? 'Shared Server Mode controls API mode'
-    : (anyConnected ? 'Only connected API modes are selectable' : 'No connected API session. Open API setup');
+  modeSelect.title = anyConnected ? 'Only connected API modes are selectable' : 'No connected API session. Open API setup';
   if (modeApiCombo) {
     modeApiCombo.classList.toggle('has-connected-mode', anyConnected);
     modeApiCombo.classList.toggle('no-connected-mode', !anyConnected);
@@ -2741,11 +2469,6 @@ function syncMode(mode) {
   // 비NAI 모드에서 열려있는 NAI 전용 모듈 닫기
   if (!isNai && naiOnlyModules.includes(currentModuleId)) {
     closeModule();
-  }
-  // Shared Mode + Cloudflared: NAI 옵션 비활성화
-  if (sharedMode) {
-    const naiOpt = modeSelect.querySelector('option[value="NAI"]');
-    if (naiOpt) naiOpt.disabled = true;
   }
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
@@ -2886,8 +2609,6 @@ const anlasPill = $('anlasPill');
 const anlasValue = $('anlasValue');
 function onAnlasUpdate(m) {
   if (!anlasPill || !anlasValue) return;
-  // Shared Mode 에서는 호스트 잔액을 절대 노출 안 함
-  if (sharedMode) { anlasPill.classList.add('hidden'); return; }
   if (!m.available) {
     anlasPill.classList.add('hidden');
     return;
@@ -2917,7 +2638,6 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
     moduleLauncherControl = createModuleLauncher({
       document,
       getMode: () => currentMode || modeSelect.value || 'NAI',
-      getSharedMode: () => sharedMode,
       getCurrentModuleId: () => currentModuleId,
       isModulePopupOpen: () => modulePopup.classList.contains('open'),
       isChunkOpen,
@@ -2938,10 +2658,6 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
       document,
       moduleBody,
       escHtml,
-      getSharedMode: () => sharedMode,
-      getSharedPromptEngineering: () => _sharedPEng,
-      setSharedPromptEngineering: value => { _sharedPEng = value; },
-      saveSharedSession,
       bindTagAssist,
     });
   })
@@ -2952,7 +2668,6 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
-      getSharedMode: () => sharedMode,
       getMode: () => modeSelect.value,
       showToast,
       confirmDialog: message => confirm(message),
@@ -2979,7 +2694,7 @@ function updateModuleHeaderAction(moduleId) {
     );
   }
   if (!modulePopupAction) return;
-  if (moduleId === 'prompt_engineering' && !sharedMode && modeSelect.value === 'NAI') {
+  if (moduleId === 'prompt_engineering' && modeSelect.value === 'NAI') {
     modulePopupAction.textContent = '추천 설정 적용';
     modulePopupAction.style.display = '';
     modulePopupAction.onclick = applyRecommendedPromptPreset;
@@ -3004,11 +2719,6 @@ function openModule(moduleId, options = {}) {
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
-    return;
-  }
-  // Shared Mode: 데스크톱 전용 모듈 차단
-  if (sharedMode && ['automation', 'wildcard', 'instant_wildcard', 'chunk', 'search', 'e621_event', 'ollama'].includes(moduleId)) {
-    showToast('This module is not available in Shared Server Mode', 'error');
     return;
   }
   // Toggle: same module clicked again → close
@@ -3093,7 +2803,6 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
       document,
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,
-      getSharedMode: () => sharedMode,
       createPromptPreset,
       bindDanbooruFeedback,
       panels: {
@@ -3111,7 +2820,6 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
 const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs')
   .then(({createPromptEngineeringPopups}) => {
     promptEngineeringPopups = createPromptEngineeringPopups({
-      getSharedMode: () => sharedMode,
       getWs: () => ws,
       WebSocket,
       modulePopup,
@@ -3378,7 +3086,6 @@ function flushMainPromptAndParams() {
       ws.send(JSON.stringify({type: 'set_param', key, value}));
     });
   }
-  saveSharedSession();
 }
 
 function flushPromptPresetSaveState() {
@@ -3433,88 +3140,10 @@ function setPromptEngineeringOption(key, checked) {
   if (promptEngineeringActions) promptEngineeringActions.setOption(key, checked);
 }
 
-function normalizeSharedCondState(state = {}) {
-  const mode = state.editor_mode === 'v2' || state.mode === 'v2' ? 'v2' : 'legacy';
-  const fallbackRules = state.rules != null ? String(state.rules) : '';
-  const rulesLegacy = state.rules_legacy != null ? String(state.rules_legacy) : (mode === 'legacy' ? fallbackRules : '');
-  const rulesV2 = state.rules_v2 != null ? String(state.rules_v2) : (mode === 'v2' ? fallbackRules : '');
-  const activeRules = mode === 'v2' ? rulesV2 : rulesLegacy;
-  const options = state.engine_options && typeof state.engine_options === 'object' ? state.engine_options : {};
-  const maxPasses = Math.max(1, Math.round(Number(options.max_passes ?? 1) || 1));
-  return {
-    enabled: !!state.enabled,
-    editor_mode: mode,
-    rules: activeRules,
-    active_rules: activeRules,
-    rules_legacy: rulesLegacy,
-    rules_v2: rulesV2,
-    engine_options: {
-      max_passes: maxPasses,
-      stop_on_match: !!options.stop_on_match,
-    },
-    active_preset: state.active_preset || '',
-  };
-}
-
-function updateSharedCondParam(key, value) {
-  const cond = normalizeSharedCondState(_sharedCond || {});
-  if (key === 'enabled') {
-    cond.enabled = value === 'true';
-  } else if (key === 'editor_mode' || key === 'mode') {
-    cond.editor_mode = value === 'v2' ? 'v2' : 'legacy';
-    cond.rules = cond.editor_mode === 'v2' ? cond.rules_v2 : cond.rules_legacy;
-    cond.active_rules = cond.rules;
-  } else if (key === 'rules_legacy') {
-    cond.rules_legacy = value;
-    if (cond.editor_mode !== 'v2') {
-      cond.rules = value;
-      cond.active_rules = value;
-    }
-  } else if (key === 'rules_v2') {
-    cond.rules_v2 = value;
-    if (cond.editor_mode === 'v2') {
-      cond.rules = value;
-      cond.active_rules = value;
-    }
-  } else if (key === 'rules') {
-    cond.rules = value;
-    cond.active_rules = value;
-    if (cond.editor_mode === 'v2') cond.rules_v2 = value;
-    else cond.rules_legacy = value;
-  } else if (key === 'max_passes') {
-    cond.engine_options.max_passes = Math.max(1, Math.round(Number(value) || 1));
-  } else if (key === 'stop_on_match') {
-    cond.engine_options.stop_on_match = value === 'true';
-  } else if (key === 'engine_options') {
-    try {
-      cond.engine_options = normalizeSharedCondState({engine_options: JSON.parse(value || '{}')}).engine_options;
-    } catch (_) { /* keep previous options */ }
-  }
-  _sharedCond = normalizeSharedCondState(cond);
-}
-
 function setModuleParam(moduleId, key, value, options = {}) {
   if (!options.skipPendingFlush) flushPendingModuleEdit(moduleId);
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_module_param', module_id: moduleId, key, value}));
-  }
-  // Shared Mode: P.Eng/Cond 로컬 캐시 갱신
-  if (sharedMode) {
-    if (moduleId === 'prompt_engineering') {
-      if (!_sharedPEng) _sharedPEng = {};
-      if (key === 'pre_prompt' || key === 'post_prompt' || key === 'auto_hide') {
-        _sharedPEng[key] = value;
-      } else if (key.startsWith('pp_')) {
-        if (!_sharedPEng.preprocessing_options) _sharedPEng.preprocessing_options = {};
-        _sharedPEng.preprocessing_options[key.slice(3)] = (value === 'true');
-      } else if (key === 'preset') {
-        _sharedPEng.preset = value;
-      }
-      saveSharedSession();
-    } else if (moduleId === 'conditional_prompt') {
-      updateSharedCondParam(key, value);
-      saveSharedSession();
-    }
   }
 }
 
@@ -4464,7 +4093,7 @@ function normalizeAutocompleteQuery(stripped, allowTriggers) {
 function scheduleAutocomplete() {
   const target = acTarget || promptEdit;
   const info = getActiveTokenInfo(target);
-  const allowTriggers = !sharedMode && target !== negEdit;
+  const allowTriggers = target !== negEdit;
   const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
   if (!info || (!isChunkTrigger && info.stripped.length < 2)) {
     hideAutocomplete();
@@ -4656,7 +4285,7 @@ function bindTagAssist(textarea, options = {}) {
     if (!acMode) checkTagHint();
   });
   textarea.addEventListener('contextmenu', e => {
-    if (!allowChunkBridge || sharedMode || textarea === negEdit || textarea.classList.contains('mod-uc')) return;
+    if (!allowChunkBridge || textarea === negEdit || textarea.classList.contains('mod-uc')) return;
     if (!hasTextSelection() || !chunkPanelControl) return;
     acTarget = textarea;
     hideAutocomplete();

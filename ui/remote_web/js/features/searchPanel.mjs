@@ -68,6 +68,25 @@ export function createSearchPanel({
     }
   }
 
+  function collectFilterState() {
+    return {
+      query: (document.getElementById('searchQuery') || {}).value || '',
+      exclude: (document.getElementById('searchExclude') || {}).value || '',
+      ratings: getActiveRatings(),
+    };
+  }
+
+  function saveFilterState(extra = {}) {
+    if (getSharedMode()) return;
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'save_search_filter_state',
+      ...collectFilterState(),
+      ...extra,
+    }));
+  }
+
   function toggleRating(rating) {
     ratingState[rating] = !ratingState[rating];
     syncRatingButtons();
@@ -94,15 +113,23 @@ export function createSearchPanel({
   }
 
   function onFilterReset(message) {
-    ratingState = { g: true, s: true, q: true, e: true };
-    syncRatingButtons();
     const quickFilter = getQuickFilter();
-    if (quickFilter) quickFilter.reset({ persist: false });
+    const serverPreferences = !getSharedMode() ? message.filter_preferences : null;
+    if (serverPreferences) {
+      setRatingsFromList(serverPreferences.ratings);
+      if (quickFilter) {
+        quickFilter.applyPreferences(serverPreferences, {send: false});
+      } else {
+        syncRatingButtons();
+      }
+    } else {
+      ratingState = { g: true, s: true, q: true, e: true };
+      syncRatingButtons();
+      if (quickFilter) quickFilter.reset({ persist: false });
+    }
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
     if (message.count != null) updateSearchCount(message.count);
-    if (!getSharedMode()) {
-      if (quickFilter) quickFilter.restorePreferences();
-    } else if (quickFilter) {
+    if (quickFilter && getSharedMode()) {
       quickFilter.updateHighlight();
     }
   }
@@ -156,9 +183,11 @@ export function createSearchPanel({
       }
     }
     const quickFilter = getQuickFilter();
-    const savedQuick = (!getSharedMode() && quickFilter) ? quickFilter.loadPreferences() : null;
-    if (savedQuick) {
-      setRatingsFromList(savedQuick.ratings);
+    const serverPreferences = !getSharedMode() ? message.filter_preferences : null;
+    if (serverPreferences && quickFilter) {
+      quickFilter.applyPreferences(serverPreferences, {send: false});
+    } else if (serverPreferences) {
+      setRatingsFromList(serverPreferences.ratings);
       syncRatingButtons();
     } else {
       syncRatingButtons();
@@ -224,8 +253,22 @@ export function createSearchPanel({
 
     ['searchQuery', 'searchExclude'].forEach(id => {
       const element = moduleBody.querySelector(`#${id}`);
-      if (element) bindTagAssist(element, { excludeE621: true });
+      if (element) {
+        bindTagAssist(element, { excludeE621: true });
+        element.addEventListener('change', () => saveFilterState());
+        element.addEventListener('blur', () => saveFilterState());
+      }
     });
+    for (const key of ['e','q','s','g']) {
+      const checkbox = moduleBody.querySelector(`#sr_${key}`);
+      if (!checkbox) continue;
+      checkbox.addEventListener('change', () => {
+        ratingState[key] = checkbox.checked;
+        syncRatingButtons();
+        sendActiveRatings();
+        saveFilterState({ratings: getActiveRatings()});
+      });
+    }
   }
 
   function doSearch() {
@@ -245,6 +288,7 @@ export function createSearchPanel({
       ratings['rating_' + key] = ratingState[key];
     }
     searchingActive = true;
+    saveFilterState({query, exclude, ratings: getActiveRatings()});
     ws.send(JSON.stringify({ type: 'search', query, exclude, ...ratings }));
     const progress = moduleBody.querySelector('.search-progress');
     if (progress) progress.textContent = 'Starting...';

@@ -117,8 +117,10 @@ export function createQuickFilterController(deps) {
   }
 
   function save() {
-    savePreferences(collectPreferences(), storage);
+    const preferences = collectPreferences();
+    savePreferences(preferences, storage);
     updateHighlight();
+    send({type: 'save_search_filter_state', ...preferences});
     deps.saveSharedSession();
   }
 

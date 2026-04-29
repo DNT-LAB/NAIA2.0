@@ -194,8 +194,9 @@ class RemoteBridge(QObject):
         # 부팅 후 daemon thread 가 warmup → True 로 세팅 + WS broadcast.
         # WS 클라이언트는 init_complete 이후 이 broadcast 를 받아야 사용 가능 시점으로 인지.
         self._lazy_indices_ready = False
+        self._search_filter_state = self._load_search_filter_state()
         # Rating 필터: Web Remote GSQE 버튼 상태
-        self._active_ratings: set = {'g', 's', 'q', 'e'}
+        self._active_ratings: set = set(self._search_filter_state.get("ratings") or ['g', 's', 'q', 'e'])
         # Tag filter IDs (Non-shared only — Shared는 session dict 사용)
         self._active_tag_filter_ids: set | None = None
         # 필터 적용 중 _save_search_snapshot에서 reset 방지
@@ -216,6 +217,174 @@ class RemoteBridge(QObject):
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
+
+    def _search_filter_state_path(self) -> Path:
+        return Path("save") / "remote_web_filter_state.json"
+
+    def _normalize_rating_list(self, ratings=None) -> list[str]:
+        source = ratings if ratings is not None else ['g', 's', 'q', 'e']
+        if isinstance(source, str):
+            source = list(source)
+        try:
+            picked = {str(item).strip().lower() for item in source}
+        except TypeError:
+            picked = set()
+        normalized = [key for key in ('g', 's', 'q', 'e') if key in picked]
+        return normalized or ['g', 's', 'q', 'e']
+
+    def _normalize_filter_tags(self, value) -> list[str]:
+        if not isinstance(value, (list, tuple, set)):
+            return []
+        out = []
+        seen = set()
+        for item in value:
+            tag = str(item or "").strip().replace(" ", "_")
+            if not tag:
+                continue
+            negative = tag.startswith("-")
+            tag_body = tag[1:] if negative else tag
+            tag_body = tag_body.lstrip("-")
+            if not tag_body:
+                continue
+            clean = ("-" if negative else "") + tag_body
+            if clean in seen:
+                continue
+            seen.add(clean)
+            out.append(clean)
+        return out
+
+    def _default_search_filter_state(self) -> dict:
+        return {
+            "version": 1,
+            "query": "",
+            "exclude": "",
+            "ratings": ['g', 's', 'q', 'e'],
+            "tag_filter": [],
+            "tag_filter_exclude": [],
+            "tag_filter_active": False,
+            "updated_at": None,
+        }
+
+    def _normalize_search_filter_state(self, raw) -> dict:
+        state = self._default_search_filter_state()
+        if isinstance(raw, dict):
+            state["query"] = str(raw.get("query", state["query"]) or "")
+            state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
+            state["ratings"] = self._normalize_rating_list(raw.get("ratings", state["ratings"]))
+            state["tag_filter"] = self._normalize_filter_tags(
+                raw.get("tag_filter") or raw.get("include") or raw.get("include_tags")
+            )
+            exclude_tags = raw.get("tag_filter_exclude") or raw.get("exclude_tags")
+            state["tag_filter_exclude"] = [
+                tag.lstrip("-") for tag in self._normalize_filter_tags(exclude_tags)
+            ]
+            state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
+                bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
+            )
+            state["updated_at"] = raw.get("updated_at")
+        return state
+
+    def _load_search_filter_state(self) -> dict:
+        path = self._search_filter_state_path()
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8") as f:
+                    return self._normalize_search_filter_state(json.load(f))
+        except Exception as e:
+            print(f"🌐 Remote: filter state 로드 실패 — {e}")
+        return self._default_search_filter_state()
+
+    def _write_search_filter_state(self):
+        try:
+            state = self._normalize_search_filter_state(self._search_filter_state)
+            state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self._search_filter_state = state
+            path = self._search_filter_state_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            tmp_path.replace(path)
+        except Exception as e:
+            print(f"🌐 Remote: filter state 저장 실패 — {e}")
+
+    def _save_search_filter_state(self, **updates):
+        state = dict(self._search_filter_state or self._default_search_filter_state())
+        if "query" in updates and updates["query"] is not None:
+            state["query"] = str(updates["query"] or "")
+        if "exclude" in updates and updates["exclude"] is not None:
+            state["exclude"] = str(updates["exclude"] or "")
+        if "ratings" in updates and updates["ratings"] is not None:
+            state["ratings"] = self._normalize_rating_list(updates["ratings"])
+        if "tag_filter" in updates and updates["tag_filter"] is not None:
+            state["tag_filter"] = [
+                tag.lstrip("-") for tag in self._normalize_filter_tags(updates["tag_filter"])
+            ]
+        if "tag_filter_exclude" in updates and updates["tag_filter_exclude"] is not None:
+            state["tag_filter_exclude"] = [
+                tag.lstrip("-") for tag in self._normalize_filter_tags(updates["tag_filter_exclude"])
+            ]
+        if "tag_filter_active" in updates and updates["tag_filter_active"] is not None:
+            state["tag_filter_active"] = bool(updates["tag_filter_active"])
+        state = self._normalize_search_filter_state(state)
+        self._search_filter_state = state
+        self._active_ratings = set(state["ratings"])
+        self.app_context.remote_active_ratings = set(self._active_ratings)
+        self._write_search_filter_state()
+
+    def _save_search_filter_state_from_payload(self, payload: dict):
+        if not isinstance(payload, dict):
+            return
+        self._save_search_filter_state(
+            query=payload.get("query") if "query" in payload else None,
+            exclude=payload.get("exclude") if "exclude" in payload else None,
+            ratings=payload.get("ratings") if "ratings" in payload else None,
+            tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
+            tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
+            tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
+        )
+
+    def _apply_saved_search_filter_state(self):
+        state = self._normalize_search_filter_state(self._search_filter_state)
+        self._search_filter_state = state
+        self._active_ratings = set(state["ratings"])
+        self.app_context.remote_active_ratings = set(self._active_ratings)
+        mw = getattr(self.app_context, "main_window", None)
+        if not mw:
+            return
+        try:
+            if hasattr(mw, "search_input"):
+                mw.search_input.setText(state["query"])
+            if hasattr(mw, "exclude_input"):
+                mw.exclude_input.setText(state["exclude"])
+        except Exception as e:
+            print(f"🌐 Remote: saved filter UI 적용 실패 — {e}")
+
+    def _restore_saved_tag_filter_ids(self) -> bool:
+        state = self._normalize_search_filter_state(self._search_filter_state)
+        tags = [*state["tag_filter"], *["-" + tag for tag in state["tag_filter_exclude"]]]
+        if not state["tag_filter_active"] or not tags:
+            self._active_tag_filter_ids = None
+            return False
+        result = self._do_tag_filter_search(tags)
+        ids = result.pop("_ids", set()) if isinstance(result, dict) else set()
+        self._active_tag_filter_ids = ids or None
+        return bool(self._active_tag_filter_ids)
+
+    def _restore_saved_search_filter_state(self):
+        self._apply_saved_search_filter_state()
+        try:
+            mw = self.app_context.main_window
+            if not mw or not mw.search_results or mw.search_results.is_empty():
+                return
+            master = getattr(mw, "_master_filter_snapshot", None)
+            if master is None or master.empty:
+                mw._master_filter_snapshot = mw.search_results.get_dataframe().copy()
+            self._restore_saved_tag_filter_ids()
+            self._do_apply_filters()
+        except Exception as e:
+            print(f"🌐 Remote: saved filter 복원 실패 — {e}")
 
     def set_ws_manager(self, ws_manager: WebSocketManager):
         self._ws_manager = ws_manager
@@ -5975,6 +6144,8 @@ class RemoteBridge(QObject):
             mw = self.app_context.main_window
             if not mw:
                 return {}
+            if not self.shared_server_mode:
+                self._apply_saved_search_filter_state()
             count = mw.search_results.get_count() if mw.search_results else 0
             # 현재 검색 파라미터
             query = mw.search_input.text() if hasattr(mw, 'search_input') else ""
@@ -6004,10 +6175,11 @@ class RemoteBridge(QObject):
                 "count": filtered_count,
                 "total_count": count,
                 "rating_counts": rating_counts,
-                "active_ratings": list(self._active_ratings),
+                "active_ratings": self._normalize_rating_list(self._active_ratings),
                 "query": query,
                 "exclude": exclude,
                 "ratings": ratings,
+                "filter_preferences": self._normalize_search_filter_state(self._search_filter_state),
                 "parquets": parquets,
             }
         except Exception as e:
@@ -6035,6 +6207,11 @@ class RemoteBridge(QObject):
             # active_ratings 갱신: 클라이언트가 보낸 rating 상태 반영
             self._active_ratings = set(
                 k for k in 'gsqe' if params.get(f"rating_{k}", True)
+            )
+            self._save_search_filter_state(
+                query=params.get("query", ""),
+                exclude=params.get("exclude", ""),
+                ratings=self._normalize_rating_list(self._active_ratings),
             )
             # 검색 실행
             mw.trigger_search()
@@ -6363,9 +6540,7 @@ class RemoteBridge(QObject):
         _save_search_snapshot()에서 호출됨 (필터 적용 중에는 _skip_filter_reset으로 우회)."""
         if self.shared_server_mode:
             return
-        # GSQE 전체 활성화
-        self._active_ratings = {'g', 's', 'q', 'e'}
-        self.app_context.remote_active_ratings = None
+        self._apply_saved_search_filter_state()
         # Tag filter 초기화
         self._active_tag_filter_ids = None
         if self._ws_manager:
@@ -6376,6 +6551,11 @@ class RemoteBridge(QObject):
         mw = self.app_context.main_window
         if mw and mw.search_results and not mw.search_results.is_empty():
             mw._master_filter_snapshot = mw.search_results.get_dataframe().copy()
+        has_tag_filter = self._restore_saved_tag_filter_ids()
+        has_rating_filter = set(self._active_ratings) != {'g', 's', 'q', 'e'}
+        if has_rating_filter or has_tag_filter:
+            self._do_apply_filters()
+            return
         # Web 클라이언트에 filter_reset broadcast
         if not self._has_clients():
             return
@@ -6387,6 +6567,8 @@ class RemoteBridge(QObject):
             "type": "filter_reset",
             "count": count,
             "rating_counts": rc,
+            "active_ratings": self._normalize_rating_list(self._active_ratings),
+            "filter_preferences": self._normalize_search_filter_state(self._search_filter_state),
         })
 
     def _on_tab_added(self, tab_id: str, instance):
@@ -7509,6 +7691,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             else:
                                 bridge._active_ratings = new_ratings
                                 bridge.app_context.remote_active_ratings = new_ratings
+                                bridge._save_search_filter_state(ratings=bridge._normalize_rating_list(new_ratings))
                                 bridge.request_apply_filters.emit()
                             # 즉시 카운트 계산하여 응답
                             if bridge.shared_server_mode:
@@ -7521,10 +7704,13 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 count = info["count"]
                             await ws.send_text(json.dumps({
                                 "type": "rating_update",
-                                "active_ratings": list(new_ratings),
+                                "active_ratings": bridge._normalize_rating_list(new_ratings),
                                 "count": count,
                                 "rating_counts": rc,
                             }))
+                        elif cmd_type == "save_search_filter_state":
+                            if not bridge.shared_server_mode:
+                                await asyncio.to_thread(bridge._save_search_filter_state_from_payload, cmd)
                         elif cmd_type == "tag_filter_search":
                             tags = cmd.get("tags", [])
                             if tags:
@@ -7556,6 +7742,19 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 # Non-shared: master에서 GSQE + Tag Filter 재적용
                                 if not bridge.shared_server_mode:
                                     bridge._active_tag_filter_ids = tf.get("ids")
+                                    bridge._save_search_filter_state(
+                                        tag_filter=[
+                                            str(tag).lstrip("-")
+                                            for tag in tf.get("tags", [])
+                                            if not str(tag).startswith("-")
+                                        ],
+                                        tag_filter_exclude=[
+                                            str(tag).lstrip("-")
+                                            for tag in tf.get("tags", [])
+                                            if str(tag).startswith("-")
+                                        ],
+                                        tag_filter_active=True,
+                                    )
                                     bridge.request_apply_filters.emit()
                                 await ws.send_text(json.dumps({
                                     "type": "tag_filter_assigned",
@@ -7577,6 +7776,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             # Non-shared: tag filter 해제 + 재적용
                             if not bridge.shared_server_mode:
                                 bridge._active_tag_filter_ids = None
+                                bridge._save_search_filter_state(
+                                    tag_filter=[],
+                                    tag_filter_exclude=[],
+                                    tag_filter_active=False,
+                                )
                                 bridge.request_apply_filters.emit()
                             await ws.send_text(json.dumps({
                                 "type": "tag_filter_result", "count": 0,
@@ -7855,6 +8059,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
+    QTimer.singleShot(0, bridge._restore_saved_search_filter_state)
 
     # 검색 컨트롤러 시그널 연결
     mw = app_context.main_window

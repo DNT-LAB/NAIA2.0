@@ -854,7 +854,9 @@ function onInitComplete() {
   }
   if (resultHistory) resultHistory.prepareInitialHistory();
   if (!sharedMode) {
-    if (quickFilter) quickFilter.restorePreferences();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'get_search_state'}));
+    }
   }
 }
 
@@ -2061,7 +2063,10 @@ function onSession(m) {
       if (btn) btn.classList.remove('nai-only-disabled');
     });
     clearSharedSession();
-    if (quickFilter) quickFilter.reset({restoreSaved: true});
+    if (quickFilter) quickFilter.reset({sendClear: false, persist: false});
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'get_search_state'}));
+    }
   }
   updateModeSelectAvailability();
 }

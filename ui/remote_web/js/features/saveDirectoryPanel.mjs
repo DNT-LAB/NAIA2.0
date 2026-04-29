@@ -1,10 +1,9 @@
 export function createSaveDirectoryPanel({
   document,
-  getWs,
-  WebSocket,
   escHtml,
   openModule,
   setModuleParam,
+  showToast,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
   let lastState = null;
@@ -51,9 +50,12 @@ export function createSaveDirectoryPanel({
         ${accessNotice}
         <label class="mod-field">
           <span class="mod-field-label">Base Save Path</span>
-          <input class="mod-input" id="saveDirBasePath" value="${escHtml(m.base_path || '')}" readonly disabled autocomplete="off" spellcheck="false">
+          <input class="mod-input" id="saveDirBasePath" value="${escHtml(m.base_path || '')}"
+                 ${controlAllowed ? '' : 'readonly disabled'}
+                 autocomplete="off" spellcheck="false"
+                 onkeydown="if(event.key==='Enter') browseSaveDirectory()">
           <div class="mod-inline-row">
-            <button class="mod-btn-secondary" ${browseAllowed ? '' : 'disabled'} onclick="browseSaveDirectory()">Browse</button>
+            <button class="mod-btn-secondary" ${browseAllowed ? '' : 'disabled'} onclick="browseSaveDirectory()">Apply Path</button>
           </div>
           ${browseNotice}
         </label>
@@ -90,10 +92,17 @@ export function createSaveDirectoryPanel({
   }
 
   function browse() {
-    const ws = getWs();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'browse_save_directory' }));
+    const input = document.getElementById('saveDirBasePath');
+    const value = (input?.value || '').trim();
+    if (!value) {
+      if (showToast) showToast('저장 경로를 입력해주세요.', 'error');
+      return;
     }
+    if (lastState) {
+      lastState.base_path = value;
+      render(lastState);
+    }
+    setModuleParam('save_directory', 'base_path', value);
   }
 
   function onTimestampToggle(checked) {

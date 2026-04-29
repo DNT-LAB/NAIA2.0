@@ -233,23 +233,27 @@ class GenerationQueueManager:
         Returns:
             성공 여부 (True/False)
         """
+        removed = False
+        queue_size = 0
+
         with self._queue_lock:
             for i, request in enumerate(self._queue):
                 if request.request_id == request_id:
-                    removed_request = self._queue[i]
                     del self._queue[i]
                     queue_size = len(self._queue)
+                    removed = True
+                    break
 
-                    # 이벤트 발행 (Lock 외부에서)
-                    self._publish_queue_event("request_removed", {
-                        "request_id": request_id,
-                        "queue_size": queue_size
-                    })
-
-                    print(f"[QUEUE] 요청 제거: {request_id[:8]}... (남은 큐: {queue_size})")
-                    return True
-
+        if not removed:
             return False
+
+        self._publish_queue_event("request_removed", {
+            "request_id": request_id,
+            "queue_size": queue_size
+        })
+
+        print(f"[QUEUE] 요청 제거: {request_id[:8]}... (남은 큐: {queue_size})")
+        return True
 
     def get_queue_stats(self) -> dict:
         """

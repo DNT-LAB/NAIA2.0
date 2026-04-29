@@ -404,11 +404,10 @@ const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs')
   .then(({createSaveDirectoryPanel}) => {
     saveDirectoryPanel = createSaveDirectoryPanel({
       document,
-      getWs: () => ws,
-      WebSocket,
       escHtml,
       openModule,
       setModuleParam,
+      showToast,
     });
   })
   .catch(error => {

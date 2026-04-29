@@ -139,7 +139,6 @@ class RemoteBridge(QObject):
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
-    request_browse_save_directory = pyqtSignal(object)  # (ws) — 로컬 전용 폴더 선택
     request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
@@ -4194,12 +4193,22 @@ class RemoteBridge(QObject):
                 return
 
             if key == "base_path":
+                raw_path = value.strip()
+                if not raw_path:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "저장 경로를 입력해주세요.",
+                        "level": "error",
+                    })
+                    return
+                new_path = str(Path(raw_path).expanduser())
+                image_crud.set_base_save_directory(new_path)
+                self._persist_base_save_directory_setting(new_path)
                 self._broadcast_json({
                     "type": "toast",
-                    "message": "기본 저장 경로는 Browse로만 변경할 수 있습니다.",
-                    "level": "error",
+                    "message": f"저장 경로 변경: {new_path}",
+                    "level": "success",
                 })
-                return
             elif key == "use_timestamp_folder":
                 image_crud.set_use_timestamp_folder(value == "true")
             elif key == "filename_format":
@@ -4215,35 +4224,6 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: save_directory 설정 실패 — {key}={value}: {e}")
             self._broadcast_json({"type": "toast", "message": f"저장 디렉토리 설정 실패: {e}", "level": "error"})
-
-    def _do_browse_save_directory(self, ws):
-        # TODO(web-dialog): 원래 QFileDialog.getExistingDirectory(...) "저장 디렉토리 선택" — 메인 스레드 blocking modal.
-        # Web Shell 마이그레이션: 디렉토리 선택은 Web Shell 측에서 직접 처리해야 한다.
-        # 옵션 (A) Web Shell 디렉토리 입력 폼 + path 검증 후 set_base_save_directory 호출
-        #       (B) /api/viewer/* 류 경로처럼 서버에 path 텍스트 입력으로 받기
-        # 현재 임시 동작: 변경 없이 현재 경로 broadcast 만 수행 + 토스트로 안내.
-        try:
-            image_crud = getattr(self.app_context, "image_crud_controller", None)
-            if not image_crud:
-                return
-
-            current_path = str(getattr(image_crud, "_base_save_path", Path("output")))
-            print(f"[Dialog/SKIPPED] 저장 디렉토리 선택 모달 호출 차단 — 현재 경로 유지: {current_path}")
-            self._broadcast_save_directory_state()
-            if ws is not None:
-                self._send_json_to(ws, {
-                    "type": "toast",
-                    "message": "저장 경로 변경은 Web Shell 입력으로 진행해주세요.",
-                    "level": "warning",
-                })
-        except Exception as e:
-            print(f"🌐 Remote: save_directory 찾아보기 실패 — {e}")
-            if ws is not None:
-                self._send_json_to(ws, {
-                    "type": "toast",
-                    "message": f"저장 디렉토리 선택 실패: {e}",
-                    "level": "error",
-                })
 
     def _set_prompt_engineering(self, key: str, value: str):
         try:
@@ -6144,8 +6124,6 @@ class RemoteBridge(QObject):
             mw = self.app_context.main_window
             if not mw:
                 return {}
-            if not self.shared_server_mode:
-                self._apply_saved_search_filter_state()
             count = mw.search_results.get_count() if mw.search_results else 0
             # 현재 검색 파라미터
             query = mw.search_input.text() if hasattr(mw, 'search_input') else ""
@@ -7652,16 +7630,6 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                         po["preset"] = mval
                             else:
                                 bridge.request_set_module.emit(mid, mkey, mval)
-                        elif cmd_type == "browse_save_directory":
-                            allowed, reason = bridge._save_directory_gate(ws)
-                            if not allowed:
-                                await ws.send_text(json.dumps({
-                                    "type": "toast",
-                                    "message": reason,
-                                    "level": "error",
-                                }))
-                                continue
-                            bridge.request_browse_save_directory.emit(ws)
                         elif cmd_type in ("get_search_state", "search", "load_parquet",
                                            "depth_action", "get_depth_state", "restore_snapshot"):
                             if bridge.shared_server_mode:
@@ -8050,7 +8018,6 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_apply_filters.connect(bridge._do_apply_filters, Qt.ConnectionType.QueuedConnection)
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
-    bridge.request_browse_save_directory.connect(bridge._do_browse_save_directory, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_reroll.connect(bridge._do_result_reroll, Qt.ConnectionType.QueuedConnection)

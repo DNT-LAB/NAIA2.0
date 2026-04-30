@@ -9,7 +9,7 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlparse
 
 from PyQt6.QtCore import QTimer, QUrl, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QStackedLayout, QVBoxLayout, QWidget
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -25,6 +25,7 @@ from core.web_shell_config import (
 class _WebShellPage(QWebEnginePage):
     """Filter known Chromium noise without hiding real client errors."""
 
+    _EXTERNAL_BROWSER_SCHEME = "naia-open-browser"
     _NOISE_FRAGMENTS = (
         "Permissions policy violation",
         "TrustedHTML",
@@ -47,6 +48,21 @@ class _WebShellPage(QWebEnginePage):
         if self._popup_factory is None:
             return super().createWindow(_window_type)
         return self._popup_factory()
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        if url.scheme() == self._EXTERNAL_BROWSER_SCHEME:
+            self._open_external_browser(url)
+            return False
+        return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+
+    @staticmethod
+    def _open_external_browser(url: QUrl):
+        query = parse_qs(urlparse(url.toString()).query)
+        target = (query.get("url") or [""])[0].strip()
+        parsed = urlparse(target)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return
+        QDesktopServices.openUrl(QUrl(target))
 
 
 class _WebShellPopupWindow(QMainWindow):

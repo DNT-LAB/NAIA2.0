@@ -434,6 +434,7 @@
       <span class="boot-indicator-text" id="bootIndicatorText">Connecting…</span>
       <div class="boot-indicator-bar"><div class="boot-indicator-bar-fill" id="bootIndicatorBarFill"></div></div>
     </div>
+    <button class="open-browser-btn" type="button" onclick="openInSystemBrowser()" title="기본 브라우저에서 열기">브라우저에서 열기...</button>
     <button class="right-tab-btn right-tab-settings" data-right-tab="settings" data-temporary-hidden="true" hidden onclick="switchRightTab('settings')" role="tab" aria-selected="false">
       <span class="right-tab-icon">⚙</span><span>Settings</span>
     </button>
@@ -590,6 +591,25 @@
 <!-- Viewer lightbox / popup overlay -->
 <div class="viewer-lightbox" id="viewerLightbox" onclick="onLightboxClick(event)"></div>
 
+<script>
+function buildSystemBrowserUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('desktop_shell');
+  if (url.hostname === '0.0.0.0') url.hostname = '127.0.0.1';
+  return url.toString();
+}
+
+function openInSystemBrowser() {
+  const target = buildSystemBrowserUrl();
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('desktop_shell') === '1') {
+    window.location.href = `naia-open-browser://open?url=${encodeURIComponent(target)}`;
+    return;
+  }
+  const popup = window.open(target, '_blank', 'noopener,noreferrer');
+  popup?.focus?.();
+}
+</script>
 <script src="app.js"></script>
 </body>
 </html>

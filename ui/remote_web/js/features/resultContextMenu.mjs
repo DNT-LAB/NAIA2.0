@@ -164,6 +164,7 @@ export function createResultContextMenu({
   let menu = null;
   let metadataModal = null;
   let menuVersion = 0;
+  const submenuCloseTimers = new WeakMap();
 
   function isTouchMenu() {
     const mediaQuery = window.matchMedia?.('(hover: none), (pointer: coarse)');
@@ -300,6 +301,27 @@ export function createResultContextMenu({
     }
   }
 
+  function clearSubmenuCloseTimer(group) {
+    const timer = submenuCloseTimers.get(group);
+    if (!timer) return;
+    window.clearTimeout(timer);
+    submenuCloseTimers.delete(group);
+  }
+
+  function scheduleSubmenuClose(group) {
+    if (!group || isTouchMenu()) return;
+    clearSubmenuCloseTimer(group);
+    const version = menuVersion;
+    const timer = window.setTimeout(() => {
+      submenuCloseTimers.delete(group);
+      if (!menu || version !== menuVersion) return;
+      const childMenu = getDirectChild(group, '.result-context-children');
+      if (group.matches(':hover') || childMenu?.matches(':hover')) return;
+      closeSubmenu(group);
+    }, 180);
+    submenuCloseTimers.set(group, timer);
+  }
+
   function closeSiblingSubmenus(group) {
     const parent = group.parentElement;
     if (!parent) return;
@@ -311,6 +333,7 @@ export function createResultContextMenu({
   }
 
   function closeSubmenu(group) {
+    clearSubmenuCloseTimer(group);
     group.classList.remove('submenu-open');
     const trigger = getDirectChild(group, '.result-context-item');
     const childMenu = getDirectChild(group, '.result-context-children');
@@ -324,6 +347,7 @@ export function createResultContextMenu({
 
   function openSubmenu(group) {
     if (!group || !menu) return;
+    clearSubmenuCloseTimer(group);
     closeSiblingSubmenus(group);
     group.classList.add('submenu-open');
     getDirectChild(group, '.result-context-item')?.setAttribute('aria-expanded', 'true');
@@ -354,14 +378,15 @@ export function createResultContextMenu({
     childMenu.style.visibility = 'hidden';
     childMenu.style.display = 'grid';
     const triggerRect = trigger.getBoundingClientRect();
+    const parentMenuRect = (group.parentElement || menu).getBoundingClientRect();
     const childRect = childMenu.getBoundingClientRect();
-    const gap = 8;
+    const overlap = 1;
     const margin = 8;
-    const rightLeft = triggerRect.right + gap;
+    const rightLeft = parentMenuRect.right - overlap;
     const fitsRight = rightLeft + childRect.width <= window.innerWidth - margin;
     const left = fitsRight
       ? rightLeft
-      : Math.max(margin, triggerRect.left - childRect.width - gap);
+      : Math.max(margin, parentMenuRect.left - childRect.width + overlap);
     const top = Math.max(margin, Math.min(triggerRect.top, window.innerHeight - childRect.height - margin));
     childMenu.style.left = `${Math.round(left)}px`;
     childMenu.style.top = `${Math.round(top)}px`;
@@ -382,16 +407,22 @@ export function createResultContextMenu({
         toggleTouchSubmenu(group);
       });
       button.addEventListener('mouseenter', () => {
+        clearSubmenuCloseTimer(group);
         if (!button.disabled && !isTouchMenu()) openSubmenu(group);
       });
       button.addEventListener('focus', () => {
+        clearSubmenuCloseTimer(group);
         if (!button.disabled && !isTouchMenu()) openSubmenu(group);
       });
     });
     menu.querySelectorAll('.result-context-group.has-children').forEach(group => {
+      const childMenu = getDirectChild(group, '.result-context-children');
+      group.addEventListener('mouseenter', () => clearSubmenuCloseTimer(group));
       group.addEventListener('mouseleave', () => {
-        if (!isTouchMenu()) closeSubmenu(group);
+        scheduleSubmenuClose(group);
       });
+      childMenu?.addEventListener('mouseenter', () => clearSubmenuCloseTimer(group));
+      childMenu?.addEventListener('mouseleave', () => scheduleSubmenuClose(group));
     });
     menu.querySelectorAll('[data-action]').forEach(button => {
       button.addEventListener('click', event => {

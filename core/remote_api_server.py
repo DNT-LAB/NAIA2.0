@@ -2593,14 +2593,15 @@ class RemoteBridge(QObject):
             # auto_save: image_window 체크박스 (OPTION_KEYS 외)
             if key == "auto_save":
                 auto_save_checkbox = self._get_auto_save_checkbox()
-                if auto_save_checkbox and auto_save_checkbox.isChecked() != checked:
+                if auto_save_checkbox and not auto_save_checkbox.isChecked():
                     self._syncing_option = True
                     try:
-                        auto_save_checkbox.setChecked(checked)
+                        auto_save_checkbox.setChecked(True)
                     finally:
                         self._syncing_option = False
-                    print(f"🌐 Remote: 자동 저장 → {checked}")
+                print("🌐 Remote: 자동 저장은 항상 활성화됩니다.")
                 self.broadcast_options()
+                self._broadcast_auto_save_settings()
                 return
 
             label = self.OPTION_KEYS.get(key)
@@ -2929,8 +2930,9 @@ class RemoteBridge(QObject):
             }
             # auto_save: image_window의 체크박스
             auto_save_checkbox = self._get_auto_save_checkbox()
-            if auto_save_checkbox:
-                opts["auto_save"] = auto_save_checkbox.isChecked()
+            if auto_save_checkbox and not auto_save_checkbox.isChecked():
+                auto_save_checkbox.setChecked(True)
+            opts["auto_save"] = True
             return opts
         except Exception:
             return {}
@@ -3683,7 +3685,7 @@ class RemoteBridge(QObject):
             return {
                 "type": "module_state",
                 "module_id": "auto_save",
-                "auto_save": bool(auto_save_checkbox and auto_save_checkbox.isChecked()),
+                "auto_save": True,
                 "save_as_webp": bool(save_as_webp_checkbox and save_as_webp_checkbox.isChecked()),
                 "history_limit_enabled": bool(history_limit_enabled and history_limit_enabled.isChecked()),
                 "max_history_length": int(max_history_length.value()) if max_history_length else 2000,

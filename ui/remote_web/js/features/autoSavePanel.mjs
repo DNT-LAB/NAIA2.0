@@ -31,7 +31,8 @@ export function createAutoSavePanel({
 
   function setState(state) {
     lastState = state;
-    if (state && 'auto_save' in state) enabled = !!state.auto_save;
+    if (lastState) lastState.auto_save = true;
+    enabled = true;
   }
 
   function open() {
@@ -39,26 +40,24 @@ export function createAutoSavePanel({
   }
 
   function setEnabled(value) {
-    enabled = !!value;
-    if (lastState) lastState.auto_save = enabled;
+    enabled = true;
+    if (lastState) lastState.auto_save = true;
     updateSaveUi();
-    const ws = getWs();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'set_option', key: 'auto_save', value: enabled }));
-    }
+    showToast('Auto Save is always enabled to preserve history.', 'success');
   }
 
   function syncEnabled(value) {
-    enabled = !!value;
-    if (lastState) lastState.auto_save = enabled;
+    enabled = true;
+    if (lastState) lastState.auto_save = true;
     updateSaveUi();
   }
 
   function render(state = lastState) {
     const panelState = state || defaultState();
+    panelState.auto_save = true;
     lastState = panelState;
     const statusText = panelState.auto_save ? 'Enabled' : 'Disabled';
-    const desc = 'Web Session은 시작 시 Auto Save가 강제로 켜집니다. 필요하면 여기서만 변경할 수 있습니다.';
+    const desc = 'Auto Save는 히스토리 보존을 위해 항상 켜져 있습니다.';
     const actionOptions = (panelState.memory_action_options || []).map(opt =>
       `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
@@ -74,11 +73,10 @@ export function createAutoSavePanel({
           <div class="mod-status" style="text-align:left;line-height:1.6">${desc}</div>
         </div>
         <div class="mod-inline-row">
-          <button class="mod-action-btn ${panelState.auto_save ? 'mod-stop' : 'mod-start'}"
-                  onclick="setAutoSaveEnabled(${panelState.auto_save ? 'false' : 'true'})">
-            ${panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save'}
+          <button class="mod-action-btn mod-start" type="button" disabled>
+            Auto Save Locked
           </button>
-          <button class="mod-btn-secondary" onclick="openSaveDirectoryPanel()">
+          <button class="mod-btn-secondary" type="button" onclick="openSaveDirectoryPanel()">
             Save Directory Settings
           </button>
         </div>

@@ -1572,6 +1572,9 @@ class ImageWindow(QWidget):
         control_layout = QHBoxLayout()
         self.auto_save_checkbox = QCheckBox("자동 저장")
         self.auto_save_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.auto_save_checkbox.setChecked(True)
+        self.auto_save_checkbox.setEnabled(False)
+        self.auto_save_checkbox.setToolTip("자동 저장은 히스토리 보존을 위해 항상 활성화됩니다.")
         self.auto_save_checkbox.toggled.connect(self.save_settings)
 
         self.toggle_history_button = QPushButton("📜 히스토리 숨기기")
@@ -1838,8 +1841,13 @@ class ImageWindow(QWidget):
 
     def save_settings(self):
         """체크박스 설정을 JSON 파일에 저장합니다."""
+        if self.auto_save_checkbox and not self.auto_save_checkbox.isChecked():
+            self.auto_save_checkbox.blockSignals(True)
+            self.auto_save_checkbox.setChecked(True)
+            self.auto_save_checkbox.blockSignals(False)
+
         settings = {
-            "auto_save": self.auto_save_checkbox.isChecked(),
+            "auto_save": True,
             "save_as_webp": self.save_as_webp_checkbox.isChecked(),
             "enhance_upscale": self._enhance_upscale,
             "enhance_strength": self._enhance_strength,
@@ -1868,26 +1876,31 @@ class ImageWindow(QWidget):
                 self.auto_save_checkbox.blockSignals(True)
                 self.save_as_webp_checkbox.blockSignals(True)
                 
-                self.auto_save_checkbox.setChecked(settings.get("auto_save", False))
+                self.auto_save_checkbox.setChecked(True)
                 self.save_as_webp_checkbox.setChecked(settings.get("save_as_webp", False))
 
                 self.auto_save_checkbox.blockSignals(False)
                 self.save_as_webp_checkbox.blockSignals(False)
+                self.auto_save_checkbox.setEnabled(False)
 
                 # Enhance 설정 복원
                 self._enhance_upscale = settings.get("enhance_upscale", 1.5)
                 self._enhance_strength = settings.get("enhance_strength", 0.2)
                 self._enhance_noise = settings.get("enhance_noise", 0.0)
                 self._update_enhance_button_text()
+                self.save_settings()
                 
             except Exception as e:
                 print(f"Failed to load image_window settings: {e}")
                 # 로드 실패시 기본값 사용
-                self.auto_save_checkbox.setChecked(False)
+                self.auto_save_checkbox.setChecked(True)
+                self.auto_save_checkbox.setEnabled(False)
                 self.save_as_webp_checkbox.setChecked(False)
+                self.save_settings()
         else:
             # 파일이 없으면 기본값으로 설정하고 저장
-            self.auto_save_checkbox.setChecked(False)
+            self.auto_save_checkbox.setChecked(True)
+            self.auto_save_checkbox.setEnabled(False)
             self.save_as_webp_checkbox.setChecked(False)
             self.save_settings()
 

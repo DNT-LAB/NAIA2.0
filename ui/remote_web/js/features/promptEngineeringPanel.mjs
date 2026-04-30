@@ -4,6 +4,7 @@ const PP_OPTIONS = [
   ['remove_character_name', 'Remove Character Name'],
   ['remove_character_features', 'Remove Char Features'],
   ['remove_clothes', 'Remove Clothing'],
+  ['remove_clothing_event', 'Remove Clothing Events'],
   ['remove_color', 'Remove Color Tags'],
   ['remove_location_and_background_color', 'Remove Location/BG'],
   ['remove_expression', 'Remove Expression'],
@@ -26,6 +27,22 @@ const PP_OPTION_TONES = {
 };
 
 const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
+
+function labelForPreprocessingKey(key) {
+  return String(key || '')
+    .replace(/^remove_/, 'Remove ')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function buildPreprocessingOptions(preprocessing) {
+  const knownKeys = new Set(PP_OPTIONS.map(([key]) => key));
+  const dynamicOptions = Object.keys(preprocessing || {})
+    .filter(key => !knownKeys.has(key))
+    .sort()
+    .map(key => [key, labelForPreprocessingKey(key)]);
+  return [...PP_OPTIONS, ...dynamicOptions];
+}
 
 export function createPromptEngineeringPanel({
   document,
@@ -63,7 +80,7 @@ export function createPromptEngineeringPanel({
       .join('');
 
     const preprocessing = m.preprocessing || {};
-    const preprocessingHtml = PP_OPTIONS.map(([key, label]) =>
+    const preprocessingHtml = buildPreprocessingOptions(preprocessing).map(([key, label]) =>
       `<label class="mod-checkbox-item ${PP_OPTION_TONES[key] || ''}">
       <input type="checkbox" ${preprocessing[key] ? 'checked' : ''} oninput="setPromptEngineeringOption('${key}', this.checked)">
       <span class="mod-checkbox-label">${label}</span>

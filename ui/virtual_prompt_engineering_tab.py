@@ -50,6 +50,7 @@ class VirtualPromptEngineeringTab(QWidget):
             "랜덤 프롬프트의 캐릭터명을 제거": "remove_character_name",
             "랜덤 프롬프트의 캐릭터 특징을 제거": "remove_character_features",
             "랜덤 프롬프트의 의류 태그를 제거": "remove_clothes",
+            "랜덤 프롬프트의 의상 이벤트 태그를 제거": "remove_clothing_event",
             "랜덤 프롬프트의 색상포함 태그를 제거": "remove_color",
             "랜덤 프롬프트의 장소와 배경색을 제거": "remove_location_and_background_color",
             "랜덤 프롬프트의 표정 태그를 제거": "remove_expression",

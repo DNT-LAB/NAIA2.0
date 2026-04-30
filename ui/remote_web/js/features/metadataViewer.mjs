@@ -9,6 +9,7 @@ export function createMetadataViewer({
   onSendImg2Img = null,
   onRestoreVibeTransfer = null,
 }) {
+  const REMOTE_IMG2IMG_ACTIONS_ENABLED = false;
   const statusEl = document.getElementById('metadataStatus');
   const titleEl = document.getElementById('metadataTitle');
   const previewEl = document.getElementById('metadataPreview');
@@ -27,6 +28,9 @@ export function createMetadataViewer({
   const applyCharacterSettingsBtn = document.getElementById('metadataApplyCharacterSettingsBtn');
   const restoreVibeBtn = document.getElementById('metadataRestoreVibeBtn');
   const sendImg2ImgBtn = document.getElementById('metadataSendImg2ImgBtn');
+  if (!REMOTE_IMG2IMG_ACTIONS_ENABLED && sendImg2ImgBtn) {
+    sendImg2ImgBtn.style.display = 'none';
+  }
 
   const EMPTY_SOURCE = {kind: 'empty', path: ''};
   let currentSource = EMPTY_SOURCE;
@@ -416,7 +420,7 @@ export function createMetadataViewer({
       [applySettingsBtn, typeof onApplySettings === 'function' && hasParams],
       [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters],
       [restoreVibeBtn, typeof onRestoreVibeTransfer === 'function' && hasVibeTransfer],
-      [sendImg2ImgBtn, typeof onSendImg2Img === 'function' && hasImageActionSource],
+      [sendImg2ImgBtn, REMOTE_IMG2IMG_ACTIONS_ENABLED && typeof onSendImg2Img === 'function' && hasImageActionSource],
     ].forEach(([button, enabled]) => {
       if (!button) return;
       button.disabled = !enabled;

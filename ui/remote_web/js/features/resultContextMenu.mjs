@@ -77,8 +77,6 @@ const MAIN_IMAGE_MENU = [
     label: 'NAI 도구',
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
-      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img'},
-      {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint'},
       {label: 'Instant Outpaint Request'},
       {label: 'Send to Outpainting'},
       {label: 'Use as outpainting base'},
@@ -132,7 +130,6 @@ const THUMBNAIL_MENU = [
     label: 'NAI 도구',
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
-      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img'},
     ],
   },
   {type: 'separator'},

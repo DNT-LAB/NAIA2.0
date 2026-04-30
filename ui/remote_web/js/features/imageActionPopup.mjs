@@ -10,6 +10,7 @@ export function createImageActionPopup({
   onDanbooru = null,
   onVibeTransfer = null,
 }) {
+  const REMOTE_IMG2IMG_ACTIONS_ENABLED = false;
   let root = null;
   let activePayload = null;
 
@@ -108,8 +109,8 @@ export function createImageActionPopup({
           ${sizeText ? `<div class="image-action-meta">${escapeText(sizeText)}</div>` : ''}
         </div>
         <div class="image-action-buttons">
-          ${actionButton({action: 'img2img', icon: '↗', label: 'Img2Img 전송', tone: 'primary'})}
-          ${actionButton({action: 'inpaint', icon: '✎', label: 'Inpaint 전송'})}
+          ${REMOTE_IMG2IMG_ACTIONS_ENABLED ? actionButton({action: 'img2img', icon: '↗', label: 'Img2Img 전송', tone: 'primary'}) : ''}
+          ${REMOTE_IMG2IMG_ACTIONS_ENABLED ? actionButton({action: 'inpaint', icon: '✎', label: 'Inpaint 전송'}) : ''}
           ${hasMetadata ? actionButton({action: 'metadata', icon: '▤', label: '메타데이터', tone: 'metadata'}) : ''}
           ${actionButton({action: 'danbooru', icon: '#', label: 'Danbooru 분석', tone: 'danbooru'})}
           ${showVibe ? actionButton({action: 'vibe', icon: '◇', label: 'Vibe Transfer', tone: 'vibe'}) : ''}

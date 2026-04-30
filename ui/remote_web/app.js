@@ -1289,7 +1289,7 @@ const DETACHED_MODULE_GEOMETRY = {
   automation: {width: 760, height: 760},
   character_reference: {width: 900, height: 780},
   vibe_transfer: {width: 900, height: 780},
-  img2img: {width: 760, height: 860},
+  img2img: {width: 960, height: 860},
   e621_event: {width: 1120, height: 820},
   ollama: {width: 760, height: 780},
 };
@@ -2873,11 +2873,13 @@ function openModule(moduleId, options = {}) {
     closeModule();
     return;
   }
+  if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
   flushPendingModuleEdit(currentModuleId);
   // chunk 는 1차 모듈과 공존 — 닫지 않고 새 anchor 로 재정렬만
   closeAuxiliaryPopups(null, { keepChunk: moduleId !== 'chunk' });
   currentModuleId = moduleId;
   modulePopup.classList.toggle('module-popup-e621', moduleId === 'e621_event');
+  modulePopup.classList.toggle('module-popup-img2img', moduleId === 'img2img');
   modulePopup.classList.add('open');
   relayoutFloatingPanels();
   updateModuleBtnState();
@@ -2919,9 +2921,11 @@ function closeModule() {
     if (window.opener) window.close();
     return;
   }
+  if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
   flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
+  modulePopup.classList.remove('module-popup-img2img');
   closeAuxiliaryPopups(null, { keepChunk: true });
   currentModuleId = null;
   if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
@@ -3668,6 +3672,14 @@ function img2imgGenerate() {
 
 function img2imgClose() {
   if (img2imgPanel) img2imgPanel.close();
+}
+
+function img2imgOpenMaskEditor() {
+  if (img2imgPanel) img2imgPanel.openMaskEditor();
+}
+
+function img2imgCloseMaskEditor() {
+  if (img2imgPanel) img2imgPanel.closeMaskEditor();
 }
 
 function img2imgMaskBrush(value) {

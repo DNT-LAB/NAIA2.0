@@ -47,38 +47,23 @@ export function createImg2ImgPanel({
 
   function renderMaskEditor(state) {
     if (!isInpaint(state)) return '';
-    const preview = state.preview
-      ? `<img id="img2imgMaskBase" src="${state.preview}" alt="">`
-      : '<div class="mod-empty">미리보기 없음</div>';
-    const status = state.has_mask
+    const hasDraft = !!maskDrafts.get(sessionKey(state));
+    const status = hasDraft
+      ? '마스크 초안 준비됨. 편집창에서 적용하세요.'
+      : state.has_mask
       ? '마스크 적용됨'
       : '생성 전에 마스크를 그리고 적용하세요.';
     return `
-      <div class="mod-img2img-mask-editor">
+      <div class="mod-img2img-mask-editor mod-img2img-mask-compact">
         <div class="mod-img2img-mask-top">
           <div>
             <div class="mod-section-label">인페인트 마스크</div>
-            <div class="mod-img2img-mask-status" id="img2imgMaskStatus">${escHtml(status)}</div>
-          </div>
-          <div class="mod-img2img-mask-actions">
-            <button type="button" class="mod-btn-sm${maskMode === 'paint' ? ' active' : ''}" data-mask-mode="paint" onclick="img2imgMaskMode('paint')">칠하기</button>
-            <button type="button" class="mod-btn-sm${maskMode === 'erase' ? ' active' : ''}" data-mask-mode="erase" onclick="img2imgMaskMode('erase')">지우기</button>
-            <button type="button" class="mod-btn-sm" onclick="img2imgClearMask()">초기화</button>
+            <div class="mod-img2img-mask-status" id="img2imgMaskStatus" data-img2img-mask-status>${escHtml(status)}</div>
           </div>
         </div>
-        <div class="mod-img2img-mask-stage">
-          <div class="mod-img2img-mask-frame">
-            ${preview}
-            <canvas id="img2imgMaskCanvas" class="mod-img2img-mask-canvas" aria-label="인페인트 마스크"></canvas>
-          </div>
-        </div>
-        <div class="mod-img2img-mask-bottom">
-          <label class="mod-img2img-mask-brush">
-            브러시
-            <input type="range" min="8" max="160" step="8" value="${maskBrushSize}" oninput="img2imgMaskBrush(this.value)">
-            <strong id="img2imgMaskBrushValue">${maskBrushSize}</strong>
-          </label>
-          <button type="button" class="mod-action-btn mod-start" onclick="img2imgApplyMask()">마스크 적용</button>
+        <div class="mod-img2img-mask-compact-actions">
+          <button type="button" class="mod-action-btn mod-start" onclick="img2imgOpenMaskEditor()">Edit Mask</button>
+          <button type="button" class="mod-btn-secondary" onclick="img2imgClearMask()">초기화</button>
         </div>
       </div>`;
   }
@@ -86,6 +71,7 @@ export function createImg2ImgPanel({
   function render(state) {
     currentState = state || null;
     if (!state || !state.active) {
+      closeMaskEditor();
       moduleBody.innerHTML = `
         <div class="mod-empty">
           활성 Img2Img 세션이 없습니다. 결과 이미지 컨텍스트 메뉴나 이미지 붙여넣기로 이미지를 전송하세요.
@@ -104,6 +90,67 @@ export function createImg2ImgPanel({
     const generateLabel = inpaint ? '인페인트 생성' : '생성';
     const generateDisabled = state.can_generate ? '' : 'disabled';
     const generateTitle = state.requires_mask ? ' title="생성 전에 인페인트 마스크를 적용하세요"' : '';
+    const controlsHtml = `
+      <div class="mod-img2img-controls">
+        <div class="mod-img2img-range">
+          <label>강도 <strong id="img2imgStrengthValue">${formatRatio(state.strength_value)}</strong></label>
+          <input type="range" min="1" max="99" value="${strength}" oninput="img2imgSlider('strength', this.value)">
+        </div>
+        <div class="mod-img2img-range">
+          <label>노이즈 <strong id="img2imgNoiseValue">${formatRatio(state.noise_value)}</strong></label>
+          <input type="range" min="0" max="99" value="${noise}" oninput="img2imgSlider('noise', this.value)">
+        </div>
+        <div class="mod-field mod-img2img-repeat">
+          <label class="mod-field-label">반복</label>
+          <input class="mod-input" type="number" min="1" max="99" value="${repeat}" oninput="img2imgRepeat(this.value)">
+        </div>
+      </div>`;
+    const promptsHtml = `
+      <div class="mod-img2img-prompt-block">
+        <div class="mod-section-label">메인 프롬프트</div>
+        <textarea class="mod-textarea mod-textarea-lg mod-img2img-main-prompt" id="img2imgMainPrompt" oninput="img2imgText('main_prompt', this.value)">${escHtml(state.main_prompt || '')}</textarea>
+      </div>
+      <div class="mod-img2img-prompt-block">
+        <div class="mod-section-label">네거티브 프롬프트</div>
+        <textarea class="mod-textarea mod-img2img-negative-prompt" id="img2imgNegativePrompt" oninput="img2imgText('negative_prompt', this.value)">${escHtml(state.negative_prompt || '')}</textarea>
+      </div>`;
+    const charactersHtml = `
+      <div class="mod-char-actions">
+        <button type="button" class="mod-btn-sm" onclick="img2imgAddCharacter()">+ 캐릭터 추가</button>
+        <span class="mod-char-meta">캐릭터 슬롯 ${characters.length}개</span>
+      </div>
+      ${characters.map(renderCharacter).join('')}`;
+    const actionsHtml = `
+      <div class="mod-img2img-actions">
+        <button type="button" class="mod-action-btn mod-start" ${generateDisabled}${generateTitle} onclick="img2imgGenerate()">${generateLabel}</button>
+        <button type="button" class="mod-btn-secondary" onclick="img2imgClose()">세션 닫기</button>
+      </div>`;
+
+    if (inpaint) {
+      moduleBody.innerHTML = `
+        <div class="mod-img2img mod-img2img-inpaint">
+          <div class="mod-img2img-inpaint-layout">
+            <section class="mod-img2img-primary">
+              ${promptsHtml}
+              ${charactersHtml}
+            </section>
+            <aside class="mod-img2img-side">
+              <div class="mod-img2img-source-card">
+                <div class="mod-section-label">소스</div>
+                <div class="mod-info-chip">${escHtml(state.source_label || '결과 이미지')}</div>
+                <div class="mod-img2img-meta">${escHtml(state.mode || 'inpaint')} · ${Number(state.width) || 0}×${Number(state.height) || 0}</div>
+              </div>
+              ${renderMaskEditor(state)}
+              ${controlsHtml}
+              ${actionsHtml}
+            </aside>
+          </div>
+        </div>`;
+      if (document.getElementById('img2imgMaskDialogCanvas')) {
+        setTimeoutFn(() => updateMaskStatus(activeMaskCanvas(), currentState), 0);
+      }
+      return;
+    }
 
     moduleBody.innerHTML = `
       <div class="mod-img2img">
@@ -118,50 +165,76 @@ export function createImg2ImgPanel({
 
         ${renderMaskEditor(state)}
 
-        <div class="mod-img2img-controls">
-          <div class="mod-img2img-range">
-            <label>강도 <strong id="img2imgStrengthValue">${formatRatio(state.strength_value)}</strong></label>
-            <input type="range" min="1" max="99" value="${strength}" oninput="img2imgSlider('strength', this.value)">
-          </div>
-          <div class="mod-img2img-range">
-            <label>노이즈 <strong id="img2imgNoiseValue">${formatRatio(state.noise_value)}</strong></label>
-            <input type="range" min="0" max="99" value="${noise}" oninput="img2imgSlider('noise', this.value)">
-          </div>
-          <div class="mod-field mod-img2img-repeat">
-            <label class="mod-field-label">반복</label>
-            <input class="mod-input" type="number" min="1" max="99" value="${repeat}" oninput="img2imgRepeat(this.value)">
-          </div>
-        </div>
-
-        <div>
-          <div class="mod-section-label">메인 프롬프트</div>
-          <textarea class="mod-textarea mod-textarea-lg" id="img2imgMainPrompt" oninput="img2imgText('main_prompt', this.value)">${escHtml(state.main_prompt || '')}</textarea>
-        </div>
-        <div>
-          <div class="mod-section-label">네거티브 프롬프트</div>
-          <textarea class="mod-textarea" id="img2imgNegativePrompt" oninput="img2imgText('negative_prompt', this.value)">${escHtml(state.negative_prompt || '')}</textarea>
-        </div>
-
-        <div class="mod-char-actions">
-          <button type="button" class="mod-btn-sm" onclick="img2imgAddCharacter()">+ 캐릭터 추가</button>
-          <span class="mod-char-meta">캐릭터 슬롯 ${characters.length}개</span>
-        </div>
-        ${characters.map(renderCharacter).join('')}
-
-        <div class="mod-img2img-actions">
-          <button type="button" class="mod-action-btn mod-start" ${generateDisabled}${generateTitle} onclick="img2imgGenerate()">${generateLabel}</button>
-          <button type="button" class="mod-btn-secondary" onclick="img2imgClose()">세션 닫기</button>
-        </div>
+        ${controlsHtml}
+        ${promptsHtml}
+        ${charactersHtml}
+        ${actionsHtml}
       </div>`;
-
-    if (inpaint) {
-      setTimeoutFn(() => setupMaskCanvas(state), 0);
-    }
   }
 
-  function setupMaskCanvas(state) {
-    const canvas = document.getElementById('img2imgMaskCanvas');
-    const image = document.getElementById('img2imgMaskBase');
+  function openMaskEditor() {
+    if (!currentState || !isInpaint(currentState)) {
+      showToast('활성 인페인트 세션이 없습니다', 'error');
+      return;
+    }
+    closeMaskEditor();
+    const preview = currentState.preview
+      ? `<img id="img2imgMaskDialogBase" src="${currentState.preview}" alt="">`
+      : '<div class="mod-empty">미리보기 없음</div>';
+    const dialog = document.createElement('div');
+    dialog.id = 'img2imgMaskDialog';
+    dialog.className = 'mod-img2img-mask-dialog open';
+    dialog.innerHTML = `
+      <div class="mod-img2img-mask-dialog-card" role="dialog" aria-label="인페인트 마스크 편집">
+        <div class="mod-img2img-mask-dialog-header">
+          <div>
+            <div class="module-popup-title">Edit Mask</div>
+            <div class="mod-img2img-mask-status" data-img2img-mask-status id="img2imgMaskDialogStatus"></div>
+          </div>
+          <button type="button" class="history-close" onclick="img2imgCloseMaskEditor()">&times;</button>
+        </div>
+        <div class="mod-img2img-mask-dialog-tools">
+          <div class="mod-img2img-mask-actions">
+            <button type="button" class="mod-btn-sm${maskMode === 'paint' ? ' active' : ''}" data-mask-mode="paint" onclick="img2imgMaskMode('paint')">칠하기</button>
+            <button type="button" class="mod-btn-sm${maskMode === 'erase' ? ' active' : ''}" data-mask-mode="erase" onclick="img2imgMaskMode('erase')">지우기</button>
+            <button type="button" class="mod-btn-sm" onclick="img2imgClearMask()">초기화</button>
+          </div>
+          <label class="mod-img2img-mask-brush">
+            브러시
+            <input type="range" min="8" max="160" step="8" value="${maskBrushSize}" oninput="img2imgMaskBrush(this.value)">
+            <strong data-img2img-mask-brush-value>${maskBrushSize}</strong>
+          </label>
+          <button type="button" class="mod-action-btn mod-start" onclick="img2imgApplyMask()">마스크 적용</button>
+        </div>
+        <div class="mod-img2img-mask-dialog-stage">
+          <div class="mod-img2img-mask-frame">
+            ${preview}
+            <canvas id="img2imgMaskDialogCanvas" class="mod-img2img-mask-canvas" aria-label="인페인트 마스크"></canvas>
+          </div>
+        </div>
+      </div>`;
+    dialog.addEventListener('click', event => {
+      if (event.target === dialog) closeMaskEditor();
+    });
+    document.body.appendChild(dialog);
+    setTimeoutFn(() => setupMaskCanvas(currentState, {
+      canvasId: 'img2imgMaskDialogCanvas',
+      imageId: 'img2imgMaskDialogBase',
+    }), 0);
+  }
+
+  function closeMaskEditor() {
+    const dialog = document.getElementById('img2imgMaskDialog');
+    if (dialog) dialog.remove();
+  }
+
+  function activeMaskCanvas() {
+    return document.getElementById('img2imgMaskDialogCanvas') || document.getElementById('img2imgMaskCanvas');
+  }
+
+  function setupMaskCanvas(state, ids = {}) {
+    const canvas = document.getElementById(ids.canvasId || 'img2imgMaskCanvas');
+    const image = document.getElementById(ids.imageId || 'img2imgMaskBase');
     if (!canvas || !image) return;
 
     const key = sessionKey(state);
@@ -302,14 +375,15 @@ export function createImg2ImgPanel({
   }
 
   function updateMaskStatus(canvas, state = currentState) {
-    const status = document.getElementById('img2imgMaskStatus');
-    if (!status || !canvas) return;
+    if (!canvas) return;
     const localCount = maskPixelCount(canvas);
+    let text = '생성 전에 마스크를 그리고 적용하세요.';
     if (localCount > 0) {
-      status.textContent = state?.has_mask ? '마스크 적용됨. 수정 후 다시 적용하면 갱신됩니다.' : '마스크 초안 준비됨. 생성 전에 적용하세요.';
-    } else {
-      status.textContent = '생성 전에 마스크를 그리고 적용하세요.';
+      text = state?.has_mask ? '마스크 적용됨. 수정 후 다시 적용하면 갱신됩니다.' : '마스크 초안 준비됨. 생성 전에 적용하세요.';
     }
+    document.querySelectorAll('[data-img2img-mask-status]').forEach(status => {
+      status.textContent = text;
+    });
   }
 
   function maskDataUrl(canvas) {
@@ -389,26 +463,31 @@ export function createImg2ImgPanel({
 
   function close() {
     flushPendingModuleEdit('img2img');
+    closeMaskEditor();
     setModuleParam('img2img', 'close', 'true');
     showToast('Img2Img 세션을 닫았습니다', 'success');
   }
 
   function maskBrush(value) {
     maskBrushSize = Math.max(8, Math.min(160, Math.round(Number(value) || 48)));
-    const label = document.getElementById('img2imgMaskBrushValue');
-    if (label) label.textContent = String(maskBrushSize);
+    document.querySelectorAll('[data-img2img-mask-brush-value]').forEach(label => {
+      label.textContent = String(maskBrushSize);
+    });
   }
 
   function setMaskMode(mode) {
     maskMode = mode === 'erase' ? 'erase' : 'paint';
-    moduleBody.querySelectorAll('.mod-img2img-mask-actions [data-mask-mode]').forEach(button => {
+    document.querySelectorAll('.mod-img2img-mask-actions [data-mask-mode]').forEach(button => {
       button.classList.toggle('active', button.dataset.maskMode === maskMode);
     });
   }
 
   function applyMask() {
-    const canvas = document.getElementById('img2imgMaskCanvas');
-    if (!canvas) return;
+    const canvas = activeMaskCanvas();
+    if (!canvas) {
+      openMaskEditor();
+      return;
+    }
     const {dataUrl, count} = maskDataUrl(canvas);
     if (count <= 0) {
       showToast('인페인트 마스크가 비어 있습니다', 'error');
@@ -421,13 +500,16 @@ export function createImg2ImgPanel({
   }
 
   function clearMask() {
-    const canvas = document.getElementById('img2imgMaskCanvas');
+    const canvas = activeMaskCanvas();
     if (canvas) {
       clearCanvas(canvas);
       updateMaskStatus(canvas, currentState);
     }
     const key = sessionKey();
     if (key) maskDrafts.delete(key);
+    document.querySelectorAll('[data-img2img-mask-status]').forEach(status => {
+      status.textContent = '생성 전에 마스크를 그리고 적용하세요.';
+    });
     setModuleParam('img2img', 'clear_mask', 'true');
   }
 
@@ -441,6 +523,8 @@ export function createImg2ImgPanel({
     setCharacterActive,
     generate,
     close,
+    openMaskEditor,
+    closeMaskEditor,
     maskBrush,
     setMaskMode,
     applyMask,

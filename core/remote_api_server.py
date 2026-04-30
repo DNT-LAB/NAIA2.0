@@ -3079,6 +3079,53 @@ class RemoteBridge(QObject):
         self._viewer_cache_dir = save_dir_str
         return entries
 
+    def _scan_memory_history(self) -> list:
+        """현재 ImageWindow 히스토리에 남아있는 이미지 목록만 반환."""
+        from pathlib import Path
+        from datetime import datetime
+
+        image_window = self._get_image_window_widget()
+        history_window = getattr(image_window, "image_history_window", None) if image_window else None
+        history_widgets = getattr(history_window, "history_widgets", []) if history_window else []
+        if not history_widgets:
+            return []
+
+        save_dir = self._get_viewer_save_dir().resolve()
+        entries = []
+        seen_paths = set()
+
+        for widget in history_widgets:
+            item = getattr(widget, "history_item", None)
+            filepath = str(getattr(item, "filepath", "") or "") if item else ""
+            if not filepath:
+                continue
+
+            try:
+                path = Path(filepath).resolve()
+                path.relative_to(save_dir)
+            except Exception:
+                continue
+
+            if path in seen_paths or not path.is_file():
+                continue
+            seen_paths.add(path)
+
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+
+            entries.append({
+                "rel_path": path.relative_to(save_dir).as_posix(),
+                "filename": path.name,
+                "size_bytes": stat.st_size,
+                "mtime": stat.st_mtime,
+                "mtime_iso": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+
+        entries.sort(key=lambda e: e["mtime"], reverse=True)
+        return entries
+
     def _invalidate_viewer_cache(self):
         """viewer 캐시 무효화 (새 이미지 저장 시)"""
         self._viewer_cache_time = 0
@@ -7772,14 +7819,20 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     # --- Viewer REST API ---
 
     @app.get("/api/viewer/list")
-    async def viewer_list(page: int = 0, per_page: int = 30):
-        entries = await asyncio.to_thread(bridge._scan_save_folder)
+    async def viewer_list(page: int = 0, per_page: int = 30, scope: str = "memory"):
+        if str(scope or "").lower() in {"disk", "saved", "all"}:
+            entries = await asyncio.to_thread(bridge._scan_save_folder)
+            resolved_scope = "disk"
+        else:
+            entries = await asyncio.to_thread(bridge._scan_memory_history)
+            resolved_scope = "memory"
         start = page * per_page
         end = start + per_page
         return {
             "total": len(entries),
             "page": page,
             "per_page": per_page,
+            "scope": resolved_scope,
             "images": entries[start:end],
         }
 

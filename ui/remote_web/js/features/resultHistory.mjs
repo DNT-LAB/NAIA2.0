@@ -102,12 +102,21 @@ export function createResultHistoryController({
     viewerGrid.prepend(img);
   }
 
+  function viewerListUrl(page, perPage) {
+    const params = new URLSearchParams({
+      scope: 'memory',
+      page: String(page),
+      per_page: String(perPage),
+    });
+    return `/api/viewer/list?${params.toString()}`;
+  }
+
   async function loadPage(page) {
     if (viewerLoadingMore || !viewerGrid) return;
     viewerLoadingMore = true;
     if (viewerLoading) viewerLoading.style.display = '';
     try {
-      const resp = await fetch(`/api/viewer/list?page=${page}&per_page=30`);
+      const resp = await fetch(viewerListUrl(page, 30));
       const data = await resp.json();
       viewerTotal = data.total;
       if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
@@ -133,7 +142,7 @@ export function createResultHistoryController({
   }
 
   function prepareInitialHistory() {
-    fetch('/api/viewer/list?page=0&per_page=1').then(resp => resp.json()).then(data => {
+    fetch(viewerListUrl(0, 1)).then(resp => resp.json()).then(data => {
       viewerTotal = data.total;
       if (viewerCountEl) viewerCountEl.textContent = data.total;
       if (data.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
@@ -461,7 +470,7 @@ export function createResultHistoryController({
     const loading = getEl('vpLoading');
     if (loading) loading.style.display = '';
     try {
-      const resp = await fetch(`/api/viewer/list?page=${page}&per_page=30`);
+      const resp = await fetch(viewerListUrl(page, 30));
       const data = await resp.json();
       const grid = getEl('vpGrid');
       if (grid) {

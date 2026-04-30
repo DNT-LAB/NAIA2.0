@@ -1413,7 +1413,57 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         with open(preset_file, 'w', encoding='utf-8') as f:
             json.dump(preset_data, f, ensure_ascii=False, indent=2)
 
-    def create_and_apply_recommended_preset(self) -> tuple[bool, str]:
+    def _find_existing_recommended_preset_name(self) -> Optional[str]:
+        """이미 생성된 추천 프리셋이 있으면 가장 기본 이름을 우선 반환."""
+        preset_dir = self.get_preset_dir("NAI")
+        if (preset_dir / "recommend.json").exists():
+            return "recommend"
+
+        candidates = sorted(
+            path.stem for path in preset_dir.glob("recommend_*.json")
+            if path.is_file()
+        )
+        return candidates[0] if candidates else None
+
+    def _apply_preset_selection(self, preset_name: str):
+        """콤보박스/프리셋 상태/마지막 사용 기록을 같은 방식으로 갱신."""
+        self.load_preset_list()
+
+        if self.preset_combo:
+            self.preset_combo.blockSignals(True)
+            self.preset_combo.setCurrentText(preset_name)
+            self.preset_combo.blockSignals(False)
+
+        self.is_randomized_mode = False
+        self._hide_randomized_ui()
+        self.load_preset(preset_name)
+        self.last_preset = self.current_preset
+        self.current_preset = preset_name
+        self.save_last_used_preset_info()
+
+    def _auto_apply_recommended_preset_for_initial_nai(self) -> bool:
+        """NAI 최초 초기화에서 last_used가 없을 때 추천 프리셋을 자동 적용."""
+        current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        if current_mode != "NAI":
+            return False
+        if self.load_last_used_preset_info("NAI"):
+            return False
+
+        existing_name = self._find_existing_recommended_preset_name()
+        if existing_name:
+            print(f"📂 NAI 추천 프리셋 자동 복원: {existing_name}")
+            self._apply_preset_selection(existing_name)
+            return True
+
+        ok, preset_name = self.create_and_apply_recommended_preset(save_current=False)
+        if ok:
+            print(f"📝 NAI 추천 프리셋 자동 생성 및 적용: {preset_name}")
+            return True
+
+        print(f"⚠️ NAI 추천 프리셋 자동 적용 실패: {preset_name}")
+        return False
+
+    def create_and_apply_recommended_preset(self, *, save_current: bool = True) -> tuple[bool, str]:
         """웹 GUI용 추천 프리셋 생성 후 즉시 적용."""
         current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
         if current_mode != "NAI":
@@ -1421,7 +1471,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         preset_name = self._get_unique_preset_name("recommend")
         current_preset = self.current_preset
-        if current_preset and current_preset not in ("", "(프리셋 없음)", "*randomized"):
+        if save_current and current_preset and current_preset not in ("", "(프리셋 없음)", "*randomized"):
             self.save_current_preset(current_preset)
 
         module_settings = self.collect_current_settings()
@@ -1512,19 +1562,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "api_mode": current_mode,
         }
         self._write_preset_data(preset_name, preset_data)
-        self.load_preset_list()
-
-        if self.preset_combo:
-            self.preset_combo.blockSignals(True)
-            self.preset_combo.setCurrentText(preset_name)
-            self.preset_combo.blockSignals(False)
-
-        self.is_randomized_mode = False
-        self._hide_randomized_ui()
-        self.load_preset(preset_name)
-        self.last_preset = self.current_preset
-        self.current_preset = preset_name
-        self.save_last_used_preset_info()
+        self._apply_preset_selection(preset_name)
         return True, preset_name
 
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
@@ -1831,6 +1869,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 마지막 사용한 프리셋 정보 로드
         last_used = self.load_last_used_preset_info()
+
+        if not last_used and self._auto_apply_recommended_preset_for_initial_nai():
+            return
 
         # 사용할 프리셋 결정
         preset_to_load = None
@@ -2576,6 +2617,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 새 모드의 마지막 사용 프리셋 로드
         last_used = self.load_last_used_preset_info(new_mode)
+
+        if not last_used and new_mode == "NAI" and self._auto_apply_recommended_preset_for_initial_nai():
+            return
 
         preset_to_load = None
         if last_used and last_used in self.preset_list:

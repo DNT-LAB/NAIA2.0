@@ -414,19 +414,19 @@
     <button class="right-tab-btn active" data-right-tab="result" onclick="switchRightTab('result')" role="tab" aria-selected="true">
       <span class="right-tab-icon">🖼</span><span>Result</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="danbooru" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="danbooru" data-temporary-hidden="true" hidden onclick="switchRightTab('danbooru')" role="tab" aria-selected="false">
       <span class="right-tab-icon">📦</span><span>Danbooru</span>
     </button>
     <button class="right-tab-btn" data-right-tab="pngInfo" onclick="switchRightTab('pngInfo')" role="tab" aria-selected="false">
       <span class="right-tab-icon">📝</span><span>Metadata</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="thumb" onclick="switchRightTab('thumb')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="thumb" data-temporary-hidden="true" hidden onclick="switchRightTab('thumb')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🖼</span><span>Thumb</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="artists" onclick="switchRightTab('artists')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="artists" data-temporary-hidden="true" hidden onclick="switchRightTab('artists')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🎨</span><span>Artists</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="studio" onclick="switchRightTab('studio')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="studio" data-temporary-hidden="true" hidden onclick="switchRightTab('studio')" role="tab" aria-selected="false">
       <span class="right-tab-icon">▣</span><span>Studio</span>
     </button>
     <div class="boot-indicator" id="bootIndicator" role="status" aria-live="polite">
@@ -434,7 +434,7 @@
       <span class="boot-indicator-text" id="bootIndicatorText">Connecting…</span>
       <div class="boot-indicator-bar"><div class="boot-indicator-bar-fill" id="bootIndicatorBarFill"></div></div>
     </div>
-    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" onclick="switchRightTab('settings')" role="tab" aria-selected="false">
+    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" data-temporary-hidden="true" hidden onclick="switchRightTab('settings')" role="tab" aria-selected="false">
       <span class="right-tab-icon">⚙</span><span>Settings</span>
     </button>
   </div>
@@ -496,7 +496,7 @@
     </div>
   </div>
 
-  <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" role="tabpanel">
+  <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" data-temporary-hidden="true" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Danbooru</h2>
@@ -555,28 +555,28 @@
       </div>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabThumb" data-right-pane="thumb" role="tabpanel">
+  <div class="right-tab-pane" id="rightTabThumb" data-right-pane="thumb" data-temporary-hidden="true" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Thumb</h2>
       <p>스타일 썸네일 탐색 기능을 Web Shell 패널로 옮길 자리입니다.</p>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabArtists" data-right-pane="artists" role="tabpanel">
+  <div class="right-tab-pane" id="rightTabArtists" data-right-pane="artists" data-temporary-hidden="true" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Artists</h2>
       <p>아티스트 갤러리와 관심 작가 기능을 Remote UI로 재구성할 자리입니다.</p>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" role="tabpanel">
+  <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" data-temporary-hidden="true" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Studio</h2>
       <p>다중 프레임 생성 관리 기능을 Web Shell에 맞게 분리할 자리입니다.</p>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabSettings" data-right-pane="settings" role="tabpanel">
+  <div class="right-tab-pane" id="rightTabSettings" data-right-pane="settings" data-temporary-hidden="true" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Settings</h2>

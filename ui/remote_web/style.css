@@ -3402,7 +3402,7 @@ body.detached-shell {
 body.detached-module {
   --detached-module-width: 720px;
 }
-body.detached-module.detached-module-prompt_engineering { --detached-module-width: 640px; }
+body.detached-module.detached-module-prompt_engineering { --detached-module-width: 660px; }
 body.detached-module.detached-module-character { --detached-module-width: 760px; }
 body.detached-module.detached-module-conditional_prompt { --detached-module-width: 720px; }
 body.detached-module.detached-module-wildcard,
@@ -6194,4 +6194,25 @@ select.setup-input { cursor: pointer; }
   .viewer-latest-badge.visible {
     transform: translate(50%, 0);
   }
+}
+
+/* Detached module popouts should not oscillate around mobile breakpoints while
+   the native window is being dragged or resized. */
+body.detached-module .mod-preset-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+body.detached-module .mod-inline-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+body.detached-module .mod-grid-2,
+body.detached-module .mod-debug-meta-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+body.detached-module .mod-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }

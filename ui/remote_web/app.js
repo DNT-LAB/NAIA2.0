@@ -24,6 +24,11 @@ const isDetachedShell = detachedMode === 'module' || detachedMode === 'metadata'
 const isDetachedModule = detachedMode === 'module';
 const isDetachedMetadata = detachedMode === 'metadata';
 const DETACHED_MODULE_SNAPSHOT_PREFIX = 'naia.detachedModuleSnapshot.';
+const detachedDesktopMediaQuery = {
+  matches: true,
+  addEventListener() {},
+  removeEventListener() {},
+};
 if (isDesktopShell) document.body.classList.add('desktop-shell');
 if (isDetachedShell) document.body.classList.add('detached-shell', `detached-${detachedMode}`);
 if (isDetachedModule && detachedModuleId) {
@@ -388,7 +393,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
       document,
       getWs: () => ws,
       WebSocket,
-      mediaQuery: isPC,
+      mediaQuery: layoutMediaQuery,
     });
   })
   .catch(error => {
@@ -582,7 +587,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
     mobileViewportControl = createMobileViewportController({
       window,
       document,
-      isPC,
+      isPC: layoutMediaQuery,
       relayoutFloatingPanels,
       positionTagTooltip,
       getTagTooltip: () => tagTooltip,
@@ -2230,6 +2235,8 @@ function toggleDesktopWindow() {
 
 // ---- Drawer & Tabs ----
 const isPC = window.matchMedia('(min-width: 768px)');
+const layoutMediaQuery = isDetachedShell ? detachedDesktopMediaQuery : isPC;
+const isDesktopLayout = () => isDetachedShell || isPC.matches;
 
 function toggleDrawer() {
   if (promptDrawerControl) promptDrawerControl.toggle();
@@ -3586,7 +3593,8 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
   const viewportLeft = vv ? vv.offsetLeft : 0;
   const viewportWidth = vv ? vv.width : window.innerWidth;
   const viewportHeight = vv ? vv.height : window.innerHeight;
-  const margin = isPC.matches ? 16 : 12;
+  const desktopLayout = isDesktopLayout();
+  const margin = desktopLayout ? 16 : 12;
   const sideMargin = 12;
   const minWidth = Math.min(320, Math.max(260, viewportWidth - sideMargin * 2));
   const preferredWidth = Math.min(getFloatingPanelWidth(panel), viewportWidth - sideMargin * 2);
@@ -3594,7 +3602,7 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
   panel.style.right = 'auto';
   panel.style.bottom = 'auto';
 
-  if (!isPC.matches) {
+  if (!desktopLayout) {
     const width = Math.max(minWidth, preferredWidth);
     panel.style.left = `${viewportLeft + sideMargin}px`;
     panel.style.top = `${viewportTop + sideMargin}px`;

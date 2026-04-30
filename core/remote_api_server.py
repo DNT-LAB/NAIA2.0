@@ -1673,7 +1673,7 @@ class RemoteBridge(QObject):
         if "," in text and text.lower().startswith("data:"):
             text = text.split(",", 1)[1]
         if not text:
-            return None, None, 0
+            return None, None, 0, 0
 
         mask_bytes = base64.b64decode(text)
         with Image.open(io.BytesIO(mask_bytes)) as opened:
@@ -1686,11 +1686,14 @@ class RemoteBridge(QObject):
         full_mask = full_mask.point(threshold_table, "L")
         white_pixels = int(full_mask.histogram()[255])
         if white_pixels <= 0:
-            return None, None, 0
+            return None, None, 0, 0
 
         small_size = (max(1, target_size[0] // 8), max(1, target_size[1] // 8))
         small_mask = full_mask.resize(small_size, Image.Resampling.NEAREST).point(threshold_table, "L")
-        return full_mask, small_mask, white_pixels
+        painted_blocks = int(small_mask.histogram()[255])
+        if painted_blocks < 8:
+            return None, None, white_pixels, painted_blocks
+        return full_mask, small_mask, white_pixels, painted_blocks
 
     def _set_img2img(self, key: str, value: str):
         key = str(key or "")
@@ -1720,11 +1723,13 @@ class RemoteBridge(QObject):
                 target = getattr(window, "pil_image", None)
                 if not target:
                     raise RuntimeError("Inpaint source image is unavailable")
-                full_mask, small_mask, white_pixels = self._decode_remote_inpaint_mask(
+                full_mask, small_mask, white_pixels, painted_blocks = self._decode_remote_inpaint_mask(
                     value,
                     (int(target.width), int(target.height)),
                 )
                 if not full_mask or not small_mask:
+                    if white_pixels > 0:
+                        raise RuntimeError("Inpaint mask is too small")
                     raise RuntimeError("Inpaint mask is empty")
                 window.mode = "inpaint"
                 window.full_mask_pil = full_mask
@@ -1734,7 +1739,7 @@ class RemoteBridge(QObject):
                     window._update_preview()
                 if hasattr(window, "_update_title"):
                     window._update_title()
-                print(f"🌐 Remote: inpaint mask applied ({white_pixels} px)")
+                print(f"🌐 Remote: inpaint mask applied ({white_pixels} px, {painted_blocks} blocks)")
                 should_broadcast = True
             elif key == "clear_mask":
                 if str(getattr(window, "mode", "")).lower() == "inpaint":

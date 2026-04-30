@@ -67,6 +67,7 @@ class _WebShellPopupWindow(QMainWindow):
         "automation": (760, 760),
         "character_reference": (900, 780),
         "vibe_transfer": (900, 780),
+        "img2img": (960, 860),
         "e621_event": (1120, 820),
         "ollama": (760, 780),
     }

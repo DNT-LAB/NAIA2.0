@@ -634,8 +634,8 @@ export function createImg2ImgPanel({
       return;
     }
     const {dataUrl, count} = maskDataUrl(canvas);
-    if (count <= 0) {
-      showToast('인페인트 마스크가 비어 있습니다', 'error');
+    if (count < 8) {
+      showToast('인페인트 마스크는 8개 이상의 8px 블록이 필요합니다', 'error');
       return;
     }
     rememberMaskDraft(canvas);

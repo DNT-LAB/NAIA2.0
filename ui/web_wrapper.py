@@ -9,7 +9,8 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlparse
 
 from PyQt6.QtCore import QTimer, QUrl, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QStackedLayout, QVBoxLayout, QWidget
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
@@ -163,16 +164,19 @@ class WebWrapperWindow(QMainWindow):
         self.stop_server_on_close = stop_server_on_close
         self.quit_on_close = quit_on_close
         self._server_started = False
+        self._remote_load_started = False
         self._closed = False
         self._popup_windows = set()
+        self._boot_overlay = None
+        self._boot_label = None
 
         self.setWindowTitle("NAIA Web Shell")
         self.setMinimumSize(1100, 760)
         self.resize(1440, 920)
 
         self._setup_webview()
-        self._start_remote_backend()
-        self._load_shell()
+        self._set_boot_status("Preparing desktop session...")
+        QTimer.singleShot(80, self._start_backend_and_load_shell)
 
         app = QApplication.instance()
         if app is not None:
@@ -182,12 +186,67 @@ class WebWrapperWindow(QMainWindow):
         self._view = QWebEngineView(self)
         self._page = _WebShellPage(self, popup_factory=self._create_popup_page)
         self._view.setPage(self._page)
+        self._view.setStyleSheet("background:#0f0f17;")
+        self.setStyleSheet("background:#0f0f17;")
+        try:
+            self._page.setBackgroundColor(QColor("#0f0f17"))
+        except Exception:
+            pass
 
         settings = self._view.settings()
         _WebShellPopupWindow._configure_settings(settings)
 
         self._view.loadFinished.connect(self._on_load_finished)
-        self.setCentralWidget(self._view)
+
+        container = QWidget(self)
+        stack = QStackedLayout(container)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        stack.addWidget(self._view)
+        self._boot_overlay = self._create_boot_overlay(container)
+        stack.addWidget(self._boot_overlay)
+        self.setCentralWidget(container)
+
+    def _create_boot_overlay(self, parent):
+        overlay = QWidget(parent)
+        overlay.setObjectName("webShellBootOverlay")
+        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        overlay.setStyleSheet("""
+            #webShellBootOverlay {
+                background: #0f0f17;
+                color: #f6f0ff;
+            }
+            QLabel#webShellBootLabel {
+                color: #f6f0ff;
+                font-family: Pretendard, Segoe UI, sans-serif;
+            }
+        """)
+        layout = QVBoxLayout(overlay)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.addStretch(1)
+        self._boot_label = QLabel(overlay)
+        self._boot_label.setObjectName("webShellBootLabel")
+        self._boot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._boot_label.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(self._boot_label)
+        layout.addStretch(1)
+        return overlay
+
+    def _set_boot_status(self, status: str):
+        if not self._boot_label:
+            return
+        self._boot_label.setText(f"""
+            <div style="font-size:30px;font-weight:800;">NAIA2</div>
+            <div style="margin-top:10px;font-size:18px;font-weight:700;color:#b7a8ff;">
+                Starting Web Shell
+            </div>
+            <div style="margin-top:18px;font-size:14px;color:#a8a2bb;">
+                {status}
+            </div>
+        """)
+        if self._boot_overlay:
+            self._boot_overlay.show()
+            self._boot_overlay.raise_()
 
     def _create_popup_page(self):
         popup = _WebShellPopupWindow(self)
@@ -195,6 +254,16 @@ class WebWrapperWindow(QMainWindow):
         popup.destroyed.connect(lambda _=None, window=popup: self._popup_windows.discard(window))
         popup.show()
         return popup._page
+
+    def _start_backend_and_load_shell(self):
+        if self._closed:
+            return
+        self._set_boot_status("Starting local backend...")
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        self._start_remote_backend()
+        self._load_shell()
 
     def _start_remote_backend(self):
         from core import remote_api_server
@@ -212,14 +281,21 @@ class WebWrapperWindow(QMainWindow):
         print(f"NAIA Web Shell backend: http://{self.host}:{self.port}")
 
     def _load_shell(self):
+        self._remote_load_started = True
+        self._set_boot_status("Connecting to local session...")
         self._view.load(QUrl(build_web_shell_url(self.host, self.port, embedded=True)))
 
     def _on_load_finished(self, ok: bool):
+        if not self._remote_load_started:
+            return
         if ok:
             self.setWindowTitle(f"NAIA Web Shell - {self.host}:{self.port}")
+            if self._boot_overlay:
+                self._boot_overlay.hide()
             return
 
         self.setWindowTitle("NAIA Web Shell - load failed")
+        self._set_boot_status("Local session is not ready. Retrying...")
         QTimer.singleShot(1000, self._load_shell)
 
     def _stop_remote_backend(self):

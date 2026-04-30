@@ -28,6 +28,7 @@
   --z-result-context-menu: 2400;
   --z-result-dialog: 2500;
   --z-image-action-dialog: 2550;
+  --z-app-confirm: 2580;
   --z-ui-lock: 2600;
   --z-toast: 2610;
 }
@@ -450,6 +451,93 @@ header {
   color: #f5d0d0;
   border: 1px solid rgba(240,64,64,0.4);
   box-shadow: 0 4px 16px rgba(140,30,30,0.3);
+}
+
+/* ---- App confirm dialog ---- */
+.app-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-app-confirm);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5,5,10,0.56);
+}
+.app-confirm-overlay.open {
+  display: flex;
+}
+.app-confirm-dialog {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 16px;
+  width: min(520px, 92vw);
+  padding: 22px;
+  border: 1px solid var(--border-glow);
+  border-radius: 10px;
+  background: rgba(18,18,26,0.98);
+  box-shadow: 0 20px 70px rgba(0,0,0,0.55);
+  color: var(--text-primary);
+}
+.app-confirm-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-blue);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+}
+.app-confirm-copy {
+  min-width: 0;
+}
+.app-confirm-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.app-confirm-message {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.55;
+  word-break: keep-all;
+}
+.app-confirm-actions {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+.app-confirm-btn {
+  min-width: 92px;
+  height: 38px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.app-confirm-btn:hover {
+  border-color: var(--border-glow);
+  background: rgba(255,255,255,0.08);
+}
+.app-confirm-btn:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: 2px;
+}
+.app-confirm-btn-primary {
+  border-color: rgba(124,106,239,0.65);
+  background: rgba(124,106,239,0.22);
+  color: #f3f0ff;
 }
 
 /* ---- App layout ---- */

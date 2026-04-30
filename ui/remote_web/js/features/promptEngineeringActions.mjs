@@ -38,22 +38,22 @@ export function createPromptEngineeringActions({
     closePresetAddPanel();
   }
 
-  function applyRecommendedPreset() {
+  async function applyRecommendedPreset() {
     if (getMode() !== 'NAI') {
       showToast('추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.', 'error');
       return;
     }
-    if (!confirmDialog('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?')) return;
+    if (!await Promise.resolve(confirmDialog('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?'))) return;
     setModuleParam('prompt_engineering', 'preset_apply_recommended', 'true');
   }
 
-  function deleteCurrentPreset() {
+  async function deleteCurrentPreset() {
     const preset = document.getElementById('modPreset')?.value || '';
     if (!preset || preset === 'default' || preset === '*randomized') {
       showToast('This preset cannot be deleted', 'error');
       return;
     }
-    if (!confirmDialog(`Delete preset "${preset}"?`)) return;
+    if (!await Promise.resolve(confirmDialog(`Delete preset "${preset}"?`))) return;
     setModuleParam('prompt_engineering', 'preset_delete', preset);
     closePresetManagePanel();
   }

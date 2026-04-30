@@ -2721,6 +2721,67 @@ function showToast(msg, type, showConfigure) {
   }, showConfigure ? 4000 : 2500);
 }
 
+let confirmDialogResolve = null;
+function showConfirmDialog(message, options = {}) {
+  if (confirmDialogResolve) {
+    confirmDialogResolve(false);
+    confirmDialogResolve = null;
+  }
+
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay';
+    overlay.innerHTML = `
+      <section class="app-confirm-dialog" role="dialog" aria-modal="true" aria-label="${escHtml(options.title || 'Confirm')}">
+        <div class="app-confirm-icon" aria-hidden="true">i</div>
+        <div class="app-confirm-copy">
+          <div class="app-confirm-title">${escHtml(options.title || '확인')}</div>
+          <div class="app-confirm-message">${escHtml(message)}</div>
+        </div>
+        <div class="app-confirm-actions">
+          <button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(options.okText || 'OK')}</button>
+          <button class="app-confirm-btn" data-confirm-action="cancel" type="button">${escHtml(options.cancelText || 'Cancel')}</button>
+        </div>
+      </section>
+    `;
+
+    const cleanup = result => {
+      if (confirmDialogResolve !== cleanup) return;
+      confirmDialogResolve = null;
+      document.removeEventListener('keydown', onKeyDown, true);
+      overlay.remove();
+      resolve(result);
+    };
+    const onKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cleanup(false);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        cleanup(true);
+      }
+    };
+
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) {
+        cleanup(false);
+        return;
+      }
+      const button = event.target.closest('[data-confirm-action]');
+      if (!button) return;
+      cleanup(button.dataset.confirmAction === 'ok');
+    });
+
+    confirmDialogResolve = cleanup;
+    document.addEventListener('keydown', onKeyDown, true);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => {
+      overlay.classList.add('open');
+      overlay.querySelector('[data-confirm-action="ok"]')?.focus();
+    });
+  });
+}
+
 // ---- Setup / Initial Configuration ----
 // Sits on top of WS `api_status` / `verify_result` / `comfyui_models` / `setup_blocked`.
 // When `setup_required` is true the modal is forced open and cannot be dismissed
@@ -2874,7 +2935,7 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
       document,
       getMode: () => modeSelect.value,
       showToast,
-      confirmDialog: message => confirm(message),
+      confirmDialog: showConfirmDialog,
       flushPromptEngineeringEdits,
       flushMainPromptAndParams,
       setModuleParam,

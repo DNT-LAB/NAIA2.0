@@ -2222,6 +2222,7 @@ class RemoteBridge(QObject):
         stm = self.app_context.secure_token_manager
         timestamps = self._load_verify_timestamps()
         nai_token = (stm.get_token("nai_token") or "").strip()
+        setup_needed = self._is_setup_required()
         # 데스크탑 API 관리 창과 동일 마스킹 규칙: 앞 7자만 노출
         nai_preview = nai_token[:7] if len(nai_token) >= 7 else nai_token
         payload = {
@@ -2233,7 +2234,7 @@ class RemoteBridge(QObject):
             "comfyui_default_model": stm.get_token("comfyui_default_model") or "",
             "comfyui_sampling_mode": stm.get_token("comfyui_sampling_mode") or "",
             "active_mode": self.app_context.get_api_mode() if hasattr(self.app_context, "get_api_mode") else "",
-            "setup_required": self._is_setup_required(),
+            "setup_required": setup_needed,
             "last_verified": {
                 "nai": timestamps.get("nai_token_last_verified", ""),
                 "webui": timestamps.get("webui_url_last_verified", ""),
@@ -2248,6 +2249,7 @@ class RemoteBridge(QObject):
             allowed, reason = self._setup_gate(ws)
             payload["setup_allowed"] = allowed
             payload["setup_block_reason"] = reason
+            payload["setup_required"] = setup_needed and allowed
             cf_allowed, cf_reason = self._cloudflared_gate(ws)
             payload["cloudflared_control_allowed"] = cf_allowed
             payload["cloudflared_control_block_reason"] = cf_reason
@@ -2263,6 +2265,7 @@ class RemoteBridge(QObject):
             allowed, reason = self._setup_gate(ws)
             payload["setup_allowed"] = allowed
             payload["setup_block_reason"] = reason
+            payload["setup_required"] = bool(common.get("setup_required")) and allowed
             cf_allowed, cf_reason = self._cloudflared_gate(ws)
             payload["cloudflared_control_allowed"] = cf_allowed
             payload["cloudflared_control_block_reason"] = cf_reason
@@ -3292,29 +3295,6 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: conditional preset 목록 읽기 실패 — {e}")
             return []
-
-    def _cond_preset_override(self, name: str) -> dict | None:
-        try:
-            from modules.conditional.preset_io import get_default_storage
-            from modules.conditional.dsl_serializer import serialize_rulebook
-
-            storage = get_default_storage()
-            book = storage.load(name)
-            dsl = serialize_rulebook(book)
-            return {
-                "editor_mode": "v2",
-                "rules": dsl,
-                "active_rules": dsl,
-                "rules_v2": dsl,
-                "engine_options": self._cond_engine_options(source={
-                    "max_passes": book.max_passes,
-                    "stop_on_match": book.stop_on_match,
-                }),
-                "active_preset": name,
-            }
-        except Exception as e:
-            print(f"🌐 Remote: conditional preset 로드 실패 — {name}: {e}")
-            return None
 
     def _cond_state_values_from_module(self, module) -> dict:
         legacy_rules = ""

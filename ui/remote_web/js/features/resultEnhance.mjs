@@ -63,7 +63,7 @@ export function createResultEnhanceController({
   }
 
   function setCurrentMeta(meta) {
-    currentMeta = meta || null;
+    currentMeta = meta ? {...meta} : null;
     running = false;
     update();
   }
@@ -233,7 +233,13 @@ export function createResultEnhanceController({
     running = true;
     update();
     try {
-      socket.send(JSON.stringify({type: 'result_enhance'}));
+      const payload = {
+        type: 'result_enhance',
+        source: currentMeta?.source || '',
+        path: currentMeta?.source === 'current' ? '' : (currentMeta?.path || ''),
+        file_path: currentMeta?.file_path || currentMeta?.filePath || '',
+      };
+      socket.send(JSON.stringify(payload));
       if (showToast) showToast('Enhance request sent to server', 'success');
     } catch (error) {
       running = false;

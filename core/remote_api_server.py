@@ -134,7 +134,7 @@ class RemoteBridge(QObject):
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
-    request_result_enhance = pyqtSignal(object)         # (ws) — 현재 ImageWindow 결과 Enhance
+    request_result_enhance = pyqtSignal(object, str)    # (ws, json) — 현재/저장 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
     request_result_queue = pyqtSignal(str)              # result context JSON — 결과 이미지를 생성 큐에 추가
@@ -206,6 +206,8 @@ class RemoteBridge(QObject):
         self._anlas_fetch_in_flight: bool = False
         self._anlas_refresh_interval_ms: int = 5 * 60 * 1000  # 5분
         self._remote_enhance_in_flight: bool = False
+        self._remote_enhance_thread = None
+        self._remote_enhance_worker = None
         self._remote_upscale_in_flight: bool = False
         self._remote_upscale_thread = None
         self._remote_upscale_worker = None
@@ -961,8 +963,94 @@ class RemoteBridge(QObject):
             self._send_result_enhance_error(ws, f"Enhance settings update failed: {e}")
             print(f"🌐 Remote: Enhance 설정 갱신 실패 — {e}")
 
-    def _do_result_enhance(self, ws=None):
-        """현재 데스크탑 ImageWindow 히스토리 항목에 NAI Enhance를 실행."""
+    @staticmethod
+    def _round_enhance_size(value: float) -> int:
+        import math
+
+        return math.ceil(value / 64) * 64
+
+    def _resolve_result_enhance_source(self, payload: dict) -> dict:
+        import copy
+
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            raise RuntimeError("ImageWindow is not ready")
+
+        payload = payload if isinstance(payload, dict) else {}
+        source = str(payload.get("source") or "").strip().lower()
+        rel_path = str(payload.get("path") or "").strip()
+        file_path = str(payload.get("file_path") or payload.get("filePath") or "").strip()
+
+        if rel_path and source != "current":
+            item = self._find_history_item_by_path(rel_path=rel_path, file_path=file_path)
+            if not item:
+                raise RuntimeError("Selected history item is unavailable")
+        else:
+            item = getattr(image_window, "current_history_item", None)
+
+        if not item or not getattr(item, "image", None):
+            raise RuntimeError("No image is selected")
+        if not getattr(item, "generation_params", None):
+            raise RuntimeError("Generation parameters are unavailable")
+
+        return {
+            "image_window": image_window,
+            "item": item,
+            "generation_params": copy.deepcopy(getattr(item, "generation_params", {}) or {}),
+        }
+
+    def _prepare_result_enhance_context(self, payload: dict) -> dict:
+        import copy
+
+        context = self._resolve_result_enhance_source(payload)
+        image_window = context["image_window"]
+        item = context["item"]
+        image = item.image
+
+        upscale = getattr(image_window, "_enhance_upscale", 1.5)
+        strength = getattr(image_window, "_enhance_strength", 0.2)
+        noise = getattr(image_window, "_enhance_noise", 0.0)
+
+        orig_w, orig_h = image.size
+        if upscale == 1.0:
+            new_w, new_h = orig_w, orig_h
+        else:
+            round_size = getattr(image_window, "_round_to_64", None)
+            if callable(round_size):
+                new_w = round_size(orig_w * 1.5)
+                new_h = round_size(orig_h * 1.5)
+            else:
+                new_w = self._round_enhance_size(orig_w * 1.5)
+                new_h = self._round_enhance_size(orig_h * 1.5)
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        image_bytes = buffer.getvalue()
+
+        params = copy.deepcopy(context["generation_params"])
+        params["image_bytes"] = image_bytes
+        params["strength"] = strength
+        params["noise"] = noise
+        params["width"] = new_w
+        params["height"] = new_h
+        params["api_mode"] = "NAI"
+        params.pop("type", None)
+        params.pop("mask_bytes", None)
+
+        context.update({
+            "params": params,
+            "orig_w": orig_w,
+            "orig_h": orig_h,
+            "new_w": new_w,
+            "new_h": new_h,
+            "upscale": upscale,
+            "strength": strength,
+            "noise": noise,
+        })
+        return context
+
+    def _do_result_enhance(self, ws=None, payload_json: str = "{}"):
+        """현재/저장 ImageWindow 히스토리 항목에 NAI Enhance를 실행."""
         try:
             allowed, reason = self._result_enhance_gate(ws)
             if not allowed:
@@ -971,16 +1059,6 @@ class RemoteBridge(QObject):
 
             if self._remote_enhance_in_flight:
                 self._send_result_enhance_error(ws, "Enhance is already running")
-                return
-
-            image_window = self._get_image_window_widget()
-            if not image_window:
-                self._send_result_enhance_error(ws, "ImageWindow is not ready")
-                return
-
-            item = getattr(image_window, "current_history_item", None)
-            if not item or not getattr(item, "image", None):
-                self._send_result_enhance_error(ws, "No image is selected")
                 return
 
             current_mode = ""
@@ -992,9 +1070,12 @@ class RemoteBridge(QObject):
                 self._send_result_enhance_error(ws, "Enhance is available in NAI mode only")
                 return
 
-            if not getattr(item, "generation_params", None):
-                self._send_result_enhance_error(ws, "Generation parameters are unavailable")
-                return
+            try:
+                payload = json.loads(payload_json) if isinstance(payload_json, str) else dict(payload_json or {})
+            except Exception:
+                payload = {}
+            context = self._prepare_result_enhance_context(payload)
+            image_window = context["image_window"]
 
             if getattr(image_window, "_enhance_upscale", None) == 1.0:
                 gen_ctrl = getattr(self.app_context, "generation_controller", None)
@@ -1002,20 +1083,134 @@ class RemoteBridge(QObject):
                     self._send_result_enhance_error(ws, "Enhance is unavailable while generation is running")
                     return
 
-            execute_enhance = getattr(image_window, "_execute_enhance", None)
-            if not callable(execute_enhance):
-                self._send_result_enhance_error(ws, "Enhance action is not available")
-                return
+            from PyQt6.QtCore import QObject as _QObject, QThread, pyqtSignal as _pyqtSignal
+
+            class EnhanceWorker(_QObject):
+                finished = _pyqtSignal(dict)
+
+                def __init__(self, api_service, params):
+                    super().__init__()
+                    self.api_service = api_service
+                    self.params = params
+
+                def run(self):
+                    try:
+                        result = self.api_service.call_generation_api(self.params)
+                    except Exception as exc:
+                        result = {"status": "error", "message": str(exc)}
+                    self.finished.emit(result)
 
             self._remote_enhance_in_flight = True
             self._broadcast_json({"type": "result_enhance_state", "running": True})
-            execute_enhance(show_progress=False, notify_ui=False)
+            if hasattr(image_window, "enhance_button"):
+                image_window.enhance_button.setEnabled(False)
+            thread = QThread()
+            worker = EnhanceWorker(self.app_context.api_service, context["params"])
+            self._remote_enhance_thread = thread
+            self._remote_enhance_worker = worker
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.finished.connect(lambda result: self._handle_remote_result_enhance(result, context, ws))
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(lambda: setattr(self, "_remote_enhance_thread", None))
+            thread.finished.connect(lambda: setattr(self, "_remote_enhance_worker", None))
+            thread.start()
             print("🌐 Remote: Enhance 트리거됨")
         except Exception as e:
             self._remote_enhance_in_flight = False
             message = f"Enhance request failed: {e}"
             self._send_result_enhance_error(ws, message)
             print(f"🌐 Remote: Enhance 트리거 실패 — {e}")
+
+    def _handle_remote_result_enhance(self, result: dict, context: dict, ws=None):
+        from PIL import Image
+        import copy
+
+        self._remote_enhance_in_flight = False
+        success = False
+        completion_message = ""
+        try:
+            image_window = context.get("image_window")
+            source_item = context.get("item")
+            if not image_window or not source_item:
+                completion_message = "Enhance result target is unavailable"
+                return
+
+            update_state = getattr(image_window, "_update_enhance_button_state", None)
+            if callable(update_state):
+                update_state()
+
+            if not isinstance(result, dict) or result.get("status") != "success":
+                completion_message = result.get("message", "Enhance failed") if isinstance(result, dict) else "Enhance failed"
+                return
+
+            pil_image = result.get("image")
+            raw_bytes = result.get("raw_bytes")
+            if pil_image is None and raw_bytes:
+                pil_image = Image.open(io.BytesIO(raw_bytes))
+            if pil_image is None:
+                completion_message = "Enhance result image is unavailable"
+                return
+            if raw_bytes is None:
+                buffer = io.BytesIO()
+                pil_image.save(buffer, format="PNG")
+                raw_bytes = buffer.getvalue()
+
+            info_text = getattr(source_item, "info_text", "") or ""
+            info_text += (
+                f"\nEnhanced: x{context.get('upscale', 1.5):g}, "
+                f"strength={context.get('strength', 0.2):.1f}, "
+                f"noise={context.get('noise', 0.0):.1f} "
+                f"({context.get('new_w')}x{context.get('new_h')})"
+            )
+
+            enhanced_params = copy.deepcopy(context.get("params") or {})
+            enhanced_params.pop("image_bytes", None)
+            enhanced_params["width"] = context.get("new_w")
+            enhanced_params["height"] = context.get("new_h")
+            enhanced_params["strength"] = context.get("strength", 0.2)
+            enhanced_params["noise"] = context.get("noise", 0.0)
+            enhanced_params["api_mode"] = "NAI"
+
+            api_metadata = copy.deepcopy(getattr(source_item, "api_metadata", {}) or {})
+            api_metadata.update({
+                "enhanced": True,
+                "enhance_upscale": context.get("upscale", 1.5),
+                "enhance_strength": context.get("strength", 0.2),
+                "enhance_noise": context.get("noise", 0.0),
+                "source_size": (context.get("orig_w"), context.get("orig_h")),
+                "result_size": (context.get("new_w"), context.get("new_h")),
+            })
+
+            generation_result = {
+                "image": pil_image,
+                "raw_bytes": raw_bytes,
+                "info": info_text,
+                "source_row": getattr(source_item, "source_row", None),
+                "generation_params": enhanced_params,
+                "prompt_context": copy.deepcopy(getattr(source_item, "prompt_context", {}) or {}),
+                "api_metadata": api_metadata,
+                "creation_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "backend_type": "NAI",
+            }
+            image_window.add_to_history(
+                pil_image,
+                raw_bytes,
+                info_text,
+                getattr(source_item, "source_row", None),
+                generation_result=generation_result,
+            )
+            self.app_context.publish("generation_result_available", generation_result)
+            success = True
+            completion_message = "Enhance complete"
+            print(
+                f"✅ Remote Enhance 성공: "
+                f"{context.get('orig_w')}x{context.get('orig_h')} → {context.get('new_w')}x{context.get('new_h')}"
+            )
+        finally:
+            self.on_result_enhance_completed(success, completion_message)
 
     def _send_result_upscale_state(self, ws, running: bool = False, success: bool = False, message: str = ""):
         payload = {
@@ -1786,6 +1981,7 @@ class RemoteBridge(QObject):
         mode = self._current_api_mode()
         has_image = has_item_image or has_latest_image
         has_metadata = bool(metadata_payload or rel_path)
+        can_enhance = bool(has_item_image and has_generation_params)
 
         return {
             "id": "current",
@@ -1797,6 +1993,7 @@ class RemoteBridge(QObject):
             "metadata_url": "/api/result/metadata",
             "has_image": has_image,
             "has_metadata": has_metadata,
+            "can_enhance": can_enhance,
             "capabilities": {
                 "load_prompt": bool(has_prompt),
                 "reroll": bool(has_source_row),
@@ -1809,6 +2006,7 @@ class RemoteBridge(QObject):
                 "copy_png": has_image,
                 "copy_webp": has_image,
                 "upscale_nai": bool(has_image and mode == "NAI"),
+                "enhance": can_enhance,
                 "inpaint": has_item_image,
                 "character_reference": has_item_image,
                 "remote_event": has_source_row,
@@ -1832,6 +2030,7 @@ class RemoteBridge(QObject):
         matched_source_row = getattr(matched_item, "source_row", None) if matched_item else None
         has_source_row = self._source_row_available(matched_source_row)
         has_generation_params = bool(getattr(matched_item, "generation_params", None)) if matched_item else False
+        can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params)
 
         return {
             "id": f"saved:{normalized_path}",
@@ -1843,6 +2042,7 @@ class RemoteBridge(QObject):
             "metadata_url": "",
             "has_image": True,
             "has_metadata": True,
+            "can_enhance": can_enhance,
             "size_bytes": stat.st_size if stat else None,
             "mtime": stat.st_mtime if stat else None,
             "capabilities": {
@@ -1857,6 +2057,7 @@ class RemoteBridge(QObject):
                 "copy_png": True,
                 "copy_webp": True,
                 "upscale_nai": self._current_api_mode() == "NAI",
+                "enhance": can_enhance,
                 "inpaint": False,
                 "character_reference": False,
                 "remote_event": False,
@@ -7698,7 +7899,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             })
                             bridge.request_generate.emit()
                         elif cmd_type == "result_enhance":
-                            bridge.request_result_enhance.emit(ws)
+                            bridge.request_result_enhance.emit(ws, json.dumps(cmd))
                         elif cmd_type == "set_result_enhance_config":
                             bridge.request_set_result_enhance_config.emit(ws, json.dumps(cmd))
                         elif cmd_type == "result_upscale":

@@ -47,6 +47,7 @@ let queuePanel = null;
 let imageActionPopup = null;
 let metadataViewer = null;
 let pendingResultEnhanceConfig = null;
+let resultEnhanceAssetRequestId = 0;
 let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
@@ -159,9 +160,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs')
       showToast,
       renderPromptInfoHtml,
       onPromptInfoTagLookup: lookupPromptInfoTag,
-      onDiskImageSelected: () => {
-        if (resultEnhance) resultEnhance.clearCurrentMeta();
-      },
+      onDiskImageSelected: updateResultEnhanceForSavedPath,
     });
   })
   .catch(error => {
@@ -935,7 +934,64 @@ function updateMetaChips(m) {
 function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
   updateMetaChips(m);
-  if (resultEnhance) resultEnhance.setCurrentMeta(m);
+  if (resultEnhance) {
+    resultEnhanceAssetRequestId += 1;
+    resultEnhance.setCurrentMeta({
+      ...m,
+      source: 'current',
+      path: '',
+      can_enhance: !!m.can_enhance,
+    });
+  }
+}
+
+function enhanceMetaFromAsset(asset, fallback = {}) {
+  const capabilities = asset?.capabilities || {};
+  return {
+    source: asset?.source || fallback.source || '',
+    path: asset?.path ?? fallback.path ?? '',
+    file_path: asset?.file_path ?? asset?.filePath ?? fallback.file_path ?? fallback.filePath ?? '',
+    label: asset?.label ?? fallback.label ?? '',
+    width: asset?.width ?? fallback.width,
+    height: asset?.height ?? fallback.height,
+    can_enhance: Boolean(asset?.can_enhance ?? asset?.canEnhance ?? capabilities.enhance ?? fallback.can_enhance ?? fallback.canEnhance),
+  };
+}
+
+async function updateResultEnhanceForSavedPath(relPath = '') {
+  if (!resultEnhance) return;
+  const path = String(relPath || '');
+  const requestId = ++resultEnhanceAssetRequestId;
+  if (!path) {
+    resultEnhance.clearCurrentMeta();
+    return;
+  }
+
+  resultEnhance.setCurrentMeta(enhanceMetaFromAsset(null, {
+    source: 'saved',
+    path,
+    can_enhance: false,
+  }));
+
+  try {
+    const response = await fetch('/api/result/asset/saved?path=' + encodeURIComponent(path), {cache: 'no-store'});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const asset = await response.json();
+    if (requestId !== resultEnhanceAssetRequestId || !resultEnhance) return;
+    resultEnhance.setCurrentMeta(enhanceMetaFromAsset(asset, {
+      source: 'saved',
+      path,
+    }));
+  } catch (error) {
+    console.warn('Failed to resolve saved result Enhance state', error);
+    if (requestId === resultEnhanceAssetRequestId && resultEnhance) {
+      resultEnhance.setCurrentMeta(enhanceMetaFromAsset(null, {
+        source: 'saved',
+        path,
+        can_enhance: false,
+      }));
+    }
+  }
 }
 
 function cleanPromptForTokenEstimate(text, mode) {

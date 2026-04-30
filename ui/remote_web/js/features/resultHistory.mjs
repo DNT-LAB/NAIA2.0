@@ -487,6 +487,7 @@ export function createResultHistoryController({
 
   function selectPopupImage(relPath, thumbEl) {
     vpCurrentPath = relPath;
+    onDiskImageSelected(relPath);
     const previewEl = getEl('vpPreview');
     if (previewEl) {
       previewEl.src = '/api/viewer/image/' + encodeViewerPath(relPath);

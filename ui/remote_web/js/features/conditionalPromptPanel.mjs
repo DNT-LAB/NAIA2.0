@@ -46,7 +46,7 @@ export function createConditionalPromptPanel({
     return escHtml(log).split('\n').map(line => {
       if (!line.trim()) return '';
       if (line.includes('Condition Not Met') || line.includes('Error:')) {
-        return `<div style="color:var(--text-muted)">${line}</div>`;
+        return `<div style="color:#888">${line}</div>`;
       }
       if (line.includes('Condition Met')) {
         return `<div style="color:#4CAF50">${line}</div>`;

@@ -1443,16 +1443,15 @@ class RemoteBridge(QObject):
             if not main_window:
                 raise RuntimeError("Main window is not ready")
 
-            if action == "img2img":
+            if action in {"img2img", "inpaint"}:
                 self._open_remote_img2img_session(
                     pil_image=pil_image,
                     history_item=None,
+                    mode=action,
                     source_label=label or "Input Image",
                 )
-                print(f"🌐 Remote: hidden img2img session opened — {label or 'Input Image'}")
+                print(f"🌐 Remote: hidden {action} session opened — {label or 'Input Image'}")
                 return
-            elif action == "inpaint":
-                handler = getattr(main_window, "activate_inpaint_mode", None)
             elif action == "danbooru":
                 handler = getattr(main_window, "on_tag_interrogation_requested", None)
             else:
@@ -1500,9 +1499,9 @@ class RemoteBridge(QObject):
             if callable(close_window):
                 close_window(window_id)
 
-    def _pil_preview_data_url(self, pil_image, max_side: int = 640) -> str:
+    def _pil_preview_payload(self, pil_image, max_side: int = 640) -> tuple[str, int, int]:
         if pil_image is None:
-            return ""
+            return "", 0, 0
         try:
             from PIL import Image
 
@@ -1513,9 +1512,27 @@ class RemoteBridge(QObject):
             buffer = io.BytesIO()
             thumb.save(buffer, format="PNG", optimize=True)
             encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-            return f"data:image/png;base64,{encoded}"
+            return f"data:image/png;base64,{encoded}", int(thumb.width), int(thumb.height)
         except Exception as exc:
             print(f"🌐 Remote: img2img preview encode failed — {exc}")
+            return "", 0, 0
+
+    def _pil_preview_data_url(self, pil_image, max_side: int = 640) -> str:
+        return self._pil_preview_payload(pil_image, max_side=max_side)[0]
+
+    def _mask_preview_data_url(self, mask_image, size: tuple[int, int]) -> str:
+        if mask_image is None or not size[0] or not size[1]:
+            return ""
+        try:
+            from PIL import Image
+
+            mask = mask_image.convert("L").resize(size, Image.Resampling.NEAREST)
+            buffer = io.BytesIO()
+            mask.save(buffer, format="PNG", optimize=True)
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            return f"data:image/png;base64,{encoded}"
+        except Exception as exc:
+            print(f"🌐 Remote: inpaint mask preview encode failed — {exc}")
             return ""
 
     def _remote_img2img_strength_float(self, raw_value: int) -> float:
@@ -1533,6 +1550,9 @@ class RemoteBridge(QObject):
         pil_image = getattr(window, "pil_image", None)
         strength_raw = int(window.strength_slider.value())
         noise_raw = int(window.noise_slider.value())
+        preview, preview_width, preview_height = self._pil_preview_payload(pil_image)
+        mode = str(getattr(window, "mode", "img2img") or "img2img")
+        has_mask = bool(getattr(window, "full_mask_pil", None) or getattr(window, "small_mask_pil", None))
         characters = []
         for index, row in enumerate(getattr(window, "character_rows", []) or []):
             characters.append({
@@ -1547,11 +1567,18 @@ class RemoteBridge(QObject):
             "module_id": "img2img",
             "active": True,
             "window_id": int(getattr(window, "window_id", 0) or 0),
-            "mode": str(getattr(window, "mode", "img2img") or "img2img"),
+            "mode": mode,
             "source_label": self._remote_img2img_source_label,
             "width": int(getattr(pil_image, "width", 0) or 0),
             "height": int(getattr(pil_image, "height", 0) or 0),
-            "preview": self._pil_preview_data_url(pil_image),
+            "preview": preview,
+            "preview_width": preview_width,
+            "preview_height": preview_height,
+            "has_mask": has_mask,
+            "mask_preview": self._mask_preview_data_url(
+                getattr(window, "full_mask_pil", None) or getattr(window, "small_mask_pil", None),
+                (preview_width, preview_height),
+            ),
             "strength": strength_raw,
             "strength_value": self._remote_img2img_strength_float(strength_raw),
             "noise": noise_raw,
@@ -1560,36 +1587,41 @@ class RemoteBridge(QObject):
             "main_prompt": window.main_prompt_edit.toPlainText(),
             "negative_prompt": window.negative_prompt_edit.toPlainText(),
             "characters": characters,
-            "can_generate": bool(pil_image),
+            "requires_mask": mode == "inpaint" and not has_mask,
+            "can_generate": bool(pil_image) and (mode != "inpaint" or has_mask),
         }
 
     def _broadcast_img2img_state(self):
         self._broadcast_json(self._read_img2img())
 
-    def _open_remote_img2img_session(self, pil_image, history_item=None, source_label: str = ""):
+    def _open_remote_img2img_session(self, pil_image, history_item=None, source_label: str = "",
+                                     mode: str = "img2img", mask_data=None):
         manager = self._img2img_manager()
         if not manager:
             raise RuntimeError("Img2Img manager is not ready")
         if pil_image is None:
             raise RuntimeError("Img2Img source image is unavailable")
+        mode = "inpaint" if str(mode or "").strip().lower() == "inpaint" else "img2img"
 
         self._close_remote_img2img_session()
         window = manager.create_window(
             pil_image=pil_image,
-            mode="img2img",
+            mode=mode,
+            mask_data=mask_data,
             history_item=history_item,
             visible=False,
         )
         self._remote_img2img_window_id = int(getattr(window, "window_id", 0) or 0)
         self._remote_img2img_source_label = str(source_label or "Result Image")
         self._broadcast_img2img_state()
+        label = "Inpaint" if mode == "inpaint" else "Img2Img"
         self._broadcast_json({
             "type": "toast",
-            "message": "Img2Img session ready",
+            "message": f"{label} session ready",
             "level": "success",
         })
 
-    def _resolve_result_img2img_source(self, payload: dict) -> tuple[object, object, str]:
+    def _resolve_result_image_action_source(self, payload: dict, action_label: str = "Img2Img") -> tuple[object, object, str]:
         from PIL import Image
 
         item = self._get_result_context_history_item(payload)
@@ -1600,7 +1632,7 @@ class RemoteBridge(QObject):
 
         rel_path = str(payload.get("path") or "").strip()
         if rel_path:
-            raise RuntimeError("Saved Img2Img requires an in-memory history item")
+            raise RuntimeError(f"Saved {action_label} requires an in-memory history item")
 
         source = str(payload.get("source") or "").strip().lower()
         if source == "current" and self.latest_webp:
@@ -1615,20 +1647,48 @@ class RemoteBridge(QObject):
             if not isinstance(payload, dict):
                 payload = {}
             action = str(payload.get("action") or "").strip().lower()
-            if action != "img2img":
+            if action not in {"img2img", "inpaint"}:
                 self._broadcast_json({"type": "toast", "message": "Unsupported result image action", "level": "error"})
                 return
-            pil_image, history_item, label = self._resolve_result_img2img_source(payload)
+            action_label = "Inpaint" if action == "inpaint" else "Img2Img"
+            pil_image, history_item, label = self._resolve_result_image_action_source(payload, action_label)
             self._open_remote_img2img_session(
                 pil_image=pil_image,
                 history_item=history_item,
+                mode=action,
                 source_label=label,
             )
-            print(f"🌐 Remote: result img2img session opened — {label}")
+            print(f"🌐 Remote: result {action} session opened — {label}")
         except Exception as e:
-            message = f"Img2Img action failed: {e}"
+            message = f"Image action failed: {e}"
             self._broadcast_json({"type": "toast", "message": message, "level": "error"})
-            print(f"🌐 Remote: result img2img action failed — {e}")
+            print(f"🌐 Remote: result image action failed — {e}")
+
+    def _decode_remote_inpaint_mask(self, value: str, target_size: tuple[int, int]):
+        from PIL import Image
+
+        text = str(value or "").strip()
+        if "," in text and text.lower().startswith("data:"):
+            text = text.split(",", 1)[1]
+        if not text:
+            return None, None, 0
+
+        mask_bytes = base64.b64decode(text)
+        with Image.open(io.BytesIO(mask_bytes)) as opened:
+            full_mask = opened.convert("L")
+
+        if full_mask.size != target_size:
+            full_mask = full_mask.resize(target_size, Image.Resampling.NEAREST)
+
+        threshold_table = [0 if i <= 127 else 255 for i in range(256)]
+        full_mask = full_mask.point(threshold_table, "L")
+        white_pixels = int(full_mask.histogram()[255])
+        if white_pixels <= 0:
+            return None, None, 0
+
+        small_size = (max(1, target_size[0] // 8), max(1, target_size[1] // 8))
+        small_mask = full_mask.resize(small_size, Image.Resampling.NEAREST).point(threshold_table, "L")
+        return full_mask, small_mask, white_pixels
 
     def _set_img2img(self, key: str, value: str):
         key = str(key or "")
@@ -1654,6 +1714,34 @@ class RemoteBridge(QObject):
                 window.noise_slider.setValue(max(0, min(99, int(float(value)))))
             elif key == "repeat":
                 window.repeat_spin.setValue(max(1, min(99, int(float(value)))))
+            elif key == "mask_png":
+                target = getattr(window, "pil_image", None)
+                if not target:
+                    raise RuntimeError("Inpaint source image is unavailable")
+                full_mask, small_mask, white_pixels = self._decode_remote_inpaint_mask(
+                    value,
+                    (int(target.width), int(target.height)),
+                )
+                if not full_mask or not small_mask:
+                    raise RuntimeError("Inpaint mask is empty")
+                window.mode = "inpaint"
+                window.full_mask_pil = full_mask
+                window.small_mask_pil = small_mask
+                window._outpaint_data = None
+                if hasattr(window, "_update_preview"):
+                    window._update_preview()
+                if hasattr(window, "_update_title"):
+                    window._update_title()
+                print(f"🌐 Remote: inpaint mask applied ({white_pixels} px)")
+                should_broadcast = True
+            elif key == "clear_mask":
+                if str(getattr(window, "mode", "")).lower() == "inpaint":
+                    window.full_mask_pil = None
+                    window.small_mask_pil = None
+                    window._outpaint_data = None
+                    if hasattr(window, "_update_preview"):
+                        window._update_preview()
+                    should_broadcast = True
             elif key == "add_character":
                 window._add_character_row()
                 should_broadcast = True
@@ -1689,7 +1777,8 @@ class RemoteBridge(QObject):
                 if not main_window or not hasattr(main_window, "on_img2img_window_generate"):
                     raise RuntimeError("Generation controller is not ready")
                 main_window.on_img2img_window_generate(params["img2img_batch_window_id"], params)
-                self._broadcast_json({"type": "toast", "message": "Img2Img generation requested", "level": "success"})
+                label = "Inpaint" if str(getattr(window, "mode", "")).lower() == "inpaint" else "Img2Img"
+                self._broadcast_json({"type": "toast", "message": f"{label} generation requested", "level": "success"})
                 should_broadcast = True
             else:
                 return

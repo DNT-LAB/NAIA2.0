@@ -1653,7 +1653,7 @@ async function requestPopupImageAction(payload, action) {
     return;
   }
   try {
-    if (action === 'img2img') {
+    if (action === 'img2img' || action === 'inpaint') {
       discardPendingModuleEdit('img2img');
     }
     const label = encodeURIComponent(payload.label || 'Input Image');
@@ -1666,7 +1666,7 @@ async function requestPopupImageAction(payload, action) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || `HTTP ${response.status}`);
     }
-    if (action === 'img2img') {
+    if (action === 'img2img' || action === 'inpaint') {
       openModule('img2img', {forceOpen: true});
     } else if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
       openModule('vibe_transfer');
@@ -2079,7 +2079,7 @@ function resultContextCommandPayload(context = {}) {
 }
 
 async function requestContextImageAction(context, action) {
-  if (action === 'img2img' && context?.source !== 'input') {
+  if ((action === 'img2img' || action === 'inpaint') && context?.source !== 'input') {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       showToast('Remote connection is not open', 'error');
       return;
@@ -2092,10 +2092,10 @@ async function requestContextImageAction(context, action) {
         ...resultContextCommandPayload(context || {}),
       }));
       openModule('img2img', {forceOpen: true});
-      showToast('Img2Img session requested', 'success');
+      showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session requested`, 'success');
     } catch (error) {
-      console.error('Context img2img request failed', error);
-      showToast('Img2Img request failed', 'error');
+      console.error('Context image action request failed', error);
+      showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} request failed`, 'error');
     }
     return;
   }
@@ -3668,6 +3668,22 @@ function img2imgGenerate() {
 
 function img2imgClose() {
   if (img2imgPanel) img2imgPanel.close();
+}
+
+function img2imgMaskBrush(value) {
+  if (img2imgPanel) img2imgPanel.maskBrush(value);
+}
+
+function img2imgMaskMode(mode) {
+  if (img2imgPanel) img2imgPanel.setMaskMode(mode);
+}
+
+function img2imgApplyMask() {
+  if (img2imgPanel) img2imgPanel.applyMask();
+}
+
+function img2imgClearMask() {
+  if (img2imgPanel) img2imgPanel.clearMask();
 }
 
 // ---- Storage view ----

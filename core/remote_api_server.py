@@ -1596,6 +1596,45 @@ class RemoteBridge(QObject):
     def _broadcast_img2img_state(self):
         self._broadcast_json(self._read_img2img())
 
+    def _reuse_remote_img2img_window(self, window, pil_image, manager, history_item=None,
+                                     mode: str = "img2img", mask_data=None):
+        """Reconfigure the hidden remote Img2Img window without rebuilding its Qt widget tree."""
+        main_window = getattr(self.app_context, "main_window", None)
+
+        previous_mode = str(getattr(window, "mode", "img2img") or "img2img")
+        try:
+            manager._last_strength_by_mode[previous_mode] = window.strength_slider.value()
+            manager._last_noise_by_mode[previous_mode] = window.noise_slider.value()
+        except Exception:
+            pass
+
+        window.set_image(pil_image, mode, mask_data, None)
+        if hasattr(window, "_create_character_rows"):
+            window._create_character_rows([])
+        if hasattr(window, "main_prompt_edit"):
+            window.main_prompt_edit.clear()
+        if hasattr(window, "negative_prompt_edit"):
+            window.negative_prompt_edit.clear()
+
+        if (history_item and (
+                getattr(history_item, 'prompt_context', None) or
+                getattr(history_item, 'generation_params', None))):
+            window.initialize_from_history_item(history_item)
+        elif main_window and hasattr(window, "initialize_from_main_ui"):
+            window.initialize_from_main_ui(main_window)
+
+        active_mode = str(getattr(window, "mode", "img2img") or "img2img")
+        try:
+            window.strength_slider.setValue(manager._last_strength_by_mode.get(active_mode, 70))
+            window.noise_slider.setValue(manager._last_noise_by_mode.get(active_mode, 0))
+            window.repeat_spin.setValue(1)
+        except Exception:
+            pass
+        restore_button = getattr(window, "_restore_button", None)
+        if callable(restore_button):
+            restore_button()
+        return window
+
     def _open_remote_img2img_session(self, pil_image, history_item=None, source_label: str = "",
                                      mode: str = "img2img", mask_data=None):
         manager = self._img2img_manager()
@@ -1605,14 +1644,25 @@ class RemoteBridge(QObject):
             raise RuntimeError("Img2Img source image is unavailable")
         mode = "inpaint" if str(mode or "").strip().lower() == "inpaint" else "img2img"
 
-        self._close_remote_img2img_session()
-        window = manager.create_window(
-            pil_image=pil_image,
-            mode=mode,
-            mask_data=mask_data,
-            history_item=history_item,
-            visible=False,
-        )
+        window = self._get_remote_img2img_window()
+        if window:
+            window = self._reuse_remote_img2img_window(
+                window=window,
+                pil_image=pil_image,
+                manager=manager,
+                history_item=history_item,
+                mode=mode,
+                mask_data=mask_data,
+            )
+        else:
+            self._close_remote_img2img_session()
+            window = manager.create_window(
+                pil_image=pil_image,
+                mode=mode,
+                mask_data=mask_data,
+                history_item=history_item,
+                visible=False,
+            )
         self._remote_img2img_window_id = int(getattr(window, "window_id", 0) or 0)
         self._remote_img2img_source_label = str(source_label or "Result Image")
         self._broadcast_img2img_state()

@@ -53,6 +53,7 @@ let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
 let cloudflaredControls = null;
+let img2imgSessionPopup = null;
 let generationProgress = null;
 let setupController = null;
 let desktopWindowControl = null;
@@ -1290,7 +1291,7 @@ const DETACHED_MODULE_GEOMETRY = {
   automation: {width: 760, height: 760},
   character_reference: {width: 900, height: 780},
   vibe_transfer: {width: 900, height: 780},
-  img2img: {width: 960, height: 860},
+  img2img: {width: 1080, height: 860},
   e621_event: {width: 1120, height: 820},
   ollama: {width: 760, height: 780},
 };
@@ -1336,6 +1337,14 @@ function openDetachedWindow(url, name, features) {
   return popup;
 }
 
+function isLivePopup(popup) {
+  try {
+    return !!popup && !popup.closed;
+  } catch (_) {
+    return false;
+  }
+}
+
 function openDetachedModule(moduleId, options = {}) {
   if (!moduleId) return null;
   const snapshotToken = options.skipSnapshot ? '' : saveDetachedModuleSnapshot(moduleId);
@@ -1351,12 +1360,17 @@ function openDetachedModule(moduleId, options = {}) {
 
 function openImg2ImgSessionSurface() {
   if (isDesktopLayout() && !isDetachedModule) {
+    if (isLivePopup(img2imgSessionPopup)) {
+      img2imgSessionPopup.focus?.();
+      return true;
+    }
     const popup = openDetachedModule('img2img', {
       standalone: true,
       skipSnapshot: true,
       windowName: 'naia-img2img-session',
     });
     if (popup) {
+      img2imgSessionPopup = popup;
       if (currentModuleId === 'img2img' && modulePopup.classList.contains('open')) closeModule();
       return true;
     }

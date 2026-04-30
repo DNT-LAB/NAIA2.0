@@ -4898,11 +4898,17 @@ body.detached-metadata .metadata-layout {
   color: #ffb4b4;
 }
 .mod-btn-sm {
-  border: 1px solid var(--border-dim); background: transparent; color: var(--text-dim);
+  border: 1px solid rgba(157,139,255,0.22);
+  background: rgba(255,255,255,0.035);
+  color: var(--text-muted);
   padding: 3px 8px; border-radius: 3px; font-size: 9px; cursor: pointer;
   font-family: var(--font-mono);
 }
-.mod-btn-sm:hover { background: var(--bg-hover); color: var(--text-muted); }
+.mod-btn-sm:hover {
+  background: var(--bg-hover);
+  border-color: rgba(157,139,255,0.42);
+  color: var(--text-primary);
+}
 .mod-btn-danger { border-color: #d32f2f; color: #ef5350; }
 .mod-btn-danger:hover { background: rgba(211,47,47,0.15); }
 .mod-btn-encode { border-color: var(--accent); color: var(--accent); }

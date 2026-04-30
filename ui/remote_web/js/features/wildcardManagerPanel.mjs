@@ -27,7 +27,7 @@ export function createWildcardManagerPanel({
 
   function renderTree(tree) {
     let html = '<div class="mod-section" style="display:flex;gap:6px;margin-bottom:8px">'
-      + '<button class="mod-btn-sm" onclick="openModule(\'wildcard\')">\u2190 Back</button>'
+      + '<button class="mod-btn-sm" onclick="openModule(\'wildcard\',{forceOpen:true})">\u2190 Back</button>'
       + '<button class="mod-btn-sm" onclick="wcPromptNewFile()">+ New File</button>'
       + '<button class="mod-btn-sm" onclick="setModuleParam(\'wildcard\',\'get_file_tree\',\'\')">Refresh</button>'
       + '</div>';

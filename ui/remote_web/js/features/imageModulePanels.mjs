@@ -398,7 +398,7 @@ export function createImageModulePanels({
     moduleBody.innerHTML = `
     <div class="mod-upload-bar">
       <button class="mod-btn-upload" onclick="setModuleParam('character_reference','get_storage','');/* refresh */">Refresh</button>
-      <button class="mod-btn-sm" onclick="openModule('character_reference')">Back</button>
+      <button class="mod-btn-sm" onclick="openModule('character_reference',{forceOpen:true})">Back</button>
     </div>
     ${items.length
       ? '<div class="mod-storage-grid">' + items + '</div>'
@@ -408,7 +408,7 @@ export function createImageModulePanels({
 
   function applyCharRefStorage(fileHash) {
     setModuleParam('character_reference', 'apply_storage', fileHash);
-    setTimeoutFn(() => openModule('character_reference'), 500);
+    setTimeoutFn(() => openModule('character_reference', {forceOpen: true}), 500);
   }
 
   function renderVibeStorage(message) {
@@ -438,7 +438,7 @@ export function createImageModulePanels({
     moduleBody.innerHTML = `
     <div class="mod-upload-bar">
       <button class="mod-btn-upload" onclick="setModuleParam('vibe_transfer','get_storage','')">Refresh</button>
-      <button class="mod-btn-sm" onclick="openModule('vibe_transfer')">Back</button>
+      <button class="mod-btn-sm" onclick="openModule('vibe_transfer',{forceOpen:true})">Back</button>
     </div>
     <div class="mod-storage-tabs">${tabBtns}</div>
     ${tabContents || '<div class="mod-empty">No saved vibes</div>'}

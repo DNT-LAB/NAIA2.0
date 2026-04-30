@@ -3981,6 +3981,21 @@ body.detached-metadata .metadata-layout {
   border-radius: 8px;
   background: rgba(12, 12, 20, 0.42);
 }
+.mod-img2img-source-preview {
+  height: 150px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-dim);
+  border-radius: 7px;
+  background: var(--bg-deep);
+}
+.mod-img2img-source-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
 .mod-img2img-inpaint .mod-img2img-main-prompt {
   min-height: 260px;
   max-height: 44dvh;

@@ -87,6 +87,9 @@ export function createImg2ImgPanel({
     const preview = state.preview
       ? `<img class="mod-img2img-preview-img" src="${state.preview}" alt="">`
       : '<div class="mod-empty">미리보기 없음</div>';
+    const sourcePreview = state.preview
+      ? `<img class="mod-img2img-source-img" src="${state.preview}" alt="">`
+      : '<div class="mod-empty">미리보기 없음</div>';
     const generateLabel = inpaint ? '인페인트 생성' : '생성';
     const generateDisabled = state.can_generate ? '' : 'disabled';
     const generateTitle = state.requires_mask ? ' title="생성 전에 인페인트 마스크를 적용하세요"' : '';
@@ -137,6 +140,7 @@ export function createImg2ImgPanel({
             <aside class="mod-img2img-side">
               <div class="mod-img2img-source-card">
                 <div class="mod-section-label">소스</div>
+                <div class="mod-img2img-source-preview">${sourcePreview}</div>
                 <div class="mod-info-chip">${escHtml(state.source_label || '결과 이미지')}</div>
                 <div class="mod-img2img-meta">${escHtml(state.mode || 'inpaint')} · ${Number(state.width) || 0}×${Number(state.height) || 0}</div>
               </div>

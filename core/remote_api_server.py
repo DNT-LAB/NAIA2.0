@@ -1600,10 +1600,7 @@ class RemoteBridge(QObject):
 
         rel_path = str(payload.get("path") or "").strip()
         if rel_path:
-            target = self._validate_viewer_path(rel_path)
-            if target:
-                with Image.open(target) as opened:
-                    return opened.convert("RGBA").copy(), None, Path(target).name
+            raise RuntimeError("Saved Img2Img requires an in-memory history item")
 
         source = str(payload.get("source") or "").strip().lower()
         if source == "current" and self.latest_webp:
@@ -2265,6 +2262,7 @@ class RemoteBridge(QObject):
         matched_source_row = getattr(matched_item, "source_row", None) if matched_item else None
         has_source_row = self._source_row_available(matched_source_row)
         has_generation_params = bool(getattr(matched_item, "generation_params", None)) if matched_item else False
+        has_history_image = bool(matched_item and getattr(matched_item, "image", None))
         can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params)
 
         return {
@@ -2291,6 +2289,7 @@ class RemoteBridge(QObject):
                 "save_image": True,
                 "copy_png": True,
                 "copy_webp": True,
+                "image_action": has_history_image,
                 "upscale_nai": self._current_api_mode() == "NAI",
                 "enhance": can_enhance,
                 "inpaint": False,

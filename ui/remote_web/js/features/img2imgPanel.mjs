@@ -6,7 +6,12 @@ export function createImg2ImgPanel({
   onModTextEdit,
   flushPendingModuleEdit,
   showToast,
+  setTimeoutFn = globalThis.setTimeout,
+  clearTimeoutFn = globalThis.clearTimeout,
 }) {
+  const sliderDebounce = {};
+  const sliderPending = {};
+
   function formatRatio(value, fallback = '0.00') {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
@@ -97,7 +102,24 @@ export function createImg2ImgPanel({
     const raw = Math.max(key === 'strength' ? 1 : 0, Math.min(99, Math.round(Number(rawValue) || 0)));
     const label = document.getElementById(key === 'strength' ? 'img2imgStrengthValue' : 'img2imgNoiseValue');
     if (label) label.textContent = formatRatio(key === 'strength' && raw === 99 ? 1 : raw / 100);
-    setModuleParam('img2img', key, String(raw));
+    sliderPending[key] = String(raw);
+    if (sliderDebounce[key]) clearTimeoutFn(sliderDebounce[key]);
+    sliderDebounce[key] = setTimeoutFn(() => commitSlider(key), 250);
+  }
+
+  function commitSlider(key) {
+    if (!(key in sliderPending)) return;
+    if (sliderDebounce[key]) {
+      clearTimeoutFn(sliderDebounce[key]);
+      delete sliderDebounce[key];
+    }
+    const value = sliderPending[key];
+    delete sliderPending[key];
+    setModuleParam('img2img', key, value);
+  }
+
+  function flushSliders() {
+    Object.keys(sliderPending).forEach(commitSlider);
   }
 
   function repeat(value) {
@@ -124,6 +146,7 @@ export function createImg2ImgPanel({
   }
 
   function generate() {
+    flushSliders();
     flushPendingModuleEdit('img2img');
     setModuleParam('img2img', 'generate', 'true');
   }

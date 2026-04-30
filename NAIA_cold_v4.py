@@ -813,9 +813,9 @@ class Img2ImgWindowManager:
         window.set_image(pil_image, mode, mask_data, outpaint_data)
 
         # 프롬프트 초기화
-        if (history_item and
-                hasattr(history_item, 'prompt_context') and
-                history_item.prompt_context):
+        if (history_item and (
+                getattr(history_item, 'prompt_context', None) or
+                getattr(history_item, 'generation_params', None))):
             window.initialize_from_history_item(history_item)
         else:
             window.initialize_from_main_ui(self.main_window)

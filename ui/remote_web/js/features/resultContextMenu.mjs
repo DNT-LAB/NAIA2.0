@@ -555,7 +555,7 @@ export function createResultContextMenu({
         ...DEFAULT_CAPABILITIES,
         metadata: metadataAvailable,
         paste_image: true,
-        image_action: hasImage,
+        image_action: hasImage && !isSaved,
         copy_png: hasImage,
         copy_webp: hasImage,
         open_file: isSaved && Boolean(path),
@@ -620,7 +620,9 @@ export function createResultContextMenu({
   function buildThumbnailContext(thumb) {
     const path = thumb.dataset.path || '';
     const imageSrc = path ? '/api/viewer/image/' + encodeURI(path) : (thumb.getAttribute('src') || '');
-    return buildContext('saved', path, true, imageSrc);
+    const context = buildContext('saved', path, true, imageSrc);
+    context.capabilities.image_action = false;
+    return context;
   }
 
   function buildImagePlaneContext(target) {

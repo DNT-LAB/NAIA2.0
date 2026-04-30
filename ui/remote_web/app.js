@@ -1653,6 +1653,9 @@ async function requestPopupImageAction(payload, action) {
     return;
   }
   try {
+    if (action === 'img2img') {
+      discardPendingModuleEdit('img2img');
+    }
     const label = encodeURIComponent(payload.label || 'Input Image');
     const response = await fetch(`/api/image-action/${encodeURIComponent(action)}?label=${label}`, {
       method: 'POST',
@@ -1664,7 +1667,7 @@ async function requestPopupImageAction(payload, action) {
       throw new Error(data.error || `HTTP ${response.status}`);
     }
     if (action === 'img2img') {
-      openModule('img2img');
+      openModule('img2img', {forceOpen: true});
     } else if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
       openModule('vibe_transfer');
     }
@@ -2082,12 +2085,13 @@ async function requestContextImageAction(context, action) {
       return;
     }
     try {
+      discardPendingModuleEdit('img2img');
       ws.send(JSON.stringify({
         type: 'result_image_action',
         action,
         ...resultContextCommandPayload(context || {}),
       }));
-      openModule('img2img');
+      openModule('img2img', {forceOpen: true});
       showToast('Img2Img session requested', 'success');
     } catch (error) {
       console.error('Context img2img request failed', error);
@@ -2852,6 +2856,20 @@ function openModule(moduleId, options = {}) {
   }
   // Toggle: same module clicked again → close
   if (currentModuleId === moduleId && modulePopup.classList.contains('open')) {
+    if (options.forceOpen) {
+      relayoutFloatingPanels();
+      updateModuleBtnState();
+      updateModuleHeaderAction(moduleId);
+      if (options.initialState && options.initialState.module_id === moduleId) {
+        moduleStateCache.set(moduleId, options.initialState);
+        renderModuleState(options.initialState);
+        if (options.guardInitialState) guardTransferredModuleState(moduleId);
+      }
+      if (!options.skipStateRequest) {
+        requestModuleState(moduleId);
+      }
+      return;
+    }
     closeModule();
     return;
   }
@@ -3265,6 +3283,16 @@ function flushPendingModuleEdit(moduleId = null) {
   const pending = pendingModuleEdit;
   pendingModuleEdit = null;
   setModuleParam(pending.moduleId, pending.key, pending.value, {skipPendingFlush: true});
+}
+
+function discardPendingModuleEdit(moduleId = null) {
+  if (!pendingModuleEdit) return;
+  if (moduleId && pendingModuleEdit.moduleId !== moduleId) return;
+  if (moduleSendTimer) {
+    clearTimeout(moduleSendTimer);
+    moduleSendTimer = null;
+  }
+  pendingModuleEdit = null;
 }
 
 function setPromptEngineeringOption(key, checked) {

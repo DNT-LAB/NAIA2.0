@@ -2839,13 +2839,17 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
 
 function updateModuleHeaderAction(moduleId) {
   if (modulePopupDetach) {
-    modulePopupDetach.style.display = moduleId ? '' : 'none';
-    modulePopupDetach.textContent = isDetachedModule ? '↙' : '↗';
-    modulePopupDetach.title = isDetachedModule ? 'Attach to main window' : 'Open detached window';
-    modulePopupDetach.setAttribute(
-      'aria-label',
-      isDetachedModule ? 'Attach to main window' : 'Open detached window',
-    );
+    const showDetachAction = Boolean(moduleId)
+      && !(isDetachedModule && (detachedStandalone || detachedModuleId === 'img2img'));
+    modulePopupDetach.style.display = showDetachAction ? '' : 'none';
+    if (showDetachAction) {
+      modulePopupDetach.textContent = isDetachedModule ? '↙' : '↗';
+      modulePopupDetach.title = isDetachedModule ? 'Attach to main window' : 'Open detached window';
+      modulePopupDetach.setAttribute(
+        'aria-label',
+        isDetachedModule ? 'Attach to main window' : 'Open detached window',
+      );
+    }
   }
   if (!modulePopupAction) return;
   if (moduleId === 'prompt_engineering' && modeSelect.value === 'NAI') {
@@ -2901,6 +2905,7 @@ function openModule(moduleId, options = {}) {
   currentModuleId = moduleId;
   modulePopup.classList.toggle('module-popup-e621', moduleId === 'e621_event');
   modulePopup.classList.toggle('module-popup-img2img', moduleId === 'img2img');
+  modulePopup.classList.remove('module-popup-inpaint');
   modulePopup.classList.add('open');
   relayoutFloatingPanels();
   updateModuleBtnState();
@@ -2947,6 +2952,7 @@ function closeModule() {
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
   modulePopup.classList.remove('module-popup-img2img');
+  modulePopup.classList.remove('module-popup-inpaint');
   closeAuxiliaryPopups(null, { keepChunk: true });
   currentModuleId = null;
   if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
@@ -3660,6 +3666,13 @@ function renderVibeTransfer(m) {
 
 // ---- Img2Img module ----
 function renderImg2Img(m) {
+  const mode = String(m?.mode || '').toLowerCase();
+  const title = mode === 'inpaint' ? 'Inpaint' : 'Img2Img';
+  if (currentModuleId === 'img2img' && moduleTitle) moduleTitle.textContent = title;
+  if (modulePopup) modulePopup.classList.toggle('module-popup-inpaint', mode === 'inpaint');
+  if (isDetachedModule && detachedModuleId === 'img2img') {
+    document.title = `NAIA Module - ${title.toLowerCase()}`;
+  }
   if (img2imgPanel) img2imgPanel.render(m);
 }
 

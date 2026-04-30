@@ -44,6 +44,22 @@ export function createImg2ImgPanel({
     return String(state?.mode || '').toLowerCase() === 'inpaint';
   }
 
+  function cssUrlString(value) {
+    return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n]/g, '');
+  }
+
+  function renderSourcePreview(state) {
+    if (!state?.preview) return '<div class="mod-empty">미리보기 없음</div>';
+    const mask = state.mask_preview
+      ? `<div class="mod-img2img-source-mask" style="--img2img-mask-url:url('${escHtml(cssUrlString(state.mask_preview))}')"></div>`
+      : '';
+    return `
+      <div class="mod-img2img-source-preview-frame">
+        <img class="mod-img2img-source-img" src="${state.preview}" alt="">
+        ${mask}
+      </div>`;
+  }
+
   function sessionKey(state = currentState) {
     return String(state?.window_id || '');
   }
@@ -146,9 +162,7 @@ export function createImg2ImgPanel({
     const preview = state.preview
       ? `<img class="mod-img2img-preview-img" src="${state.preview}" alt="">`
       : '<div class="mod-empty">미리보기 없음</div>';
-    const sourcePreview = state.preview
-      ? `<img class="mod-img2img-source-img" src="${state.preview}" alt="">`
-      : '<div class="mod-empty">미리보기 없음</div>';
+    const sourcePreview = renderSourcePreview(state);
     const generateLabel = inpaint ? '인페인트 생성' : '생성';
     const generateDisabled = state.can_generate ? '' : 'disabled';
     const generateTitle = state.requires_mask ? ' title="생성 전에 인페인트 마스크를 적용하세요"' : '';
@@ -645,6 +659,16 @@ export function createImg2ImgPanel({
     rememberMaskDraft(canvas);
     flushPendingModuleEdit('img2img');
     setModuleParam('img2img', 'mask_png', dataUrl);
+    closeMaskEditor();
+    if (currentState) {
+      render({
+        ...currentState,
+        has_mask: true,
+        mask_preview: dataUrl,
+        requires_mask: false,
+        can_generate: true,
+      });
+    }
     showToast('인페인트 마스크를 적용했습니다', 'success');
   }
 

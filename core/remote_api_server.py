@@ -1551,6 +1551,8 @@ class RemoteBridge(QObject):
         strength_raw = int(window.strength_slider.value())
         noise_raw = int(window.noise_slider.value())
         preview, preview_width, preview_height = self._pil_preview_payload(pil_image)
+        image_width = int(getattr(pil_image, "width", 0) or 0)
+        image_height = int(getattr(pil_image, "height", 0) or 0)
         mode = str(getattr(window, "mode", "img2img") or "img2img")
         has_mask = bool(getattr(window, "full_mask_pil", None) or getattr(window, "small_mask_pil", None))
         characters = []
@@ -1569,15 +1571,15 @@ class RemoteBridge(QObject):
             "window_id": int(getattr(window, "window_id", 0) or 0),
             "mode": mode,
             "source_label": self._remote_img2img_source_label,
-            "width": int(getattr(pil_image, "width", 0) or 0),
-            "height": int(getattr(pil_image, "height", 0) or 0),
+            "width": image_width,
+            "height": image_height,
             "preview": preview,
             "preview_width": preview_width,
             "preview_height": preview_height,
             "has_mask": has_mask,
             "mask_preview": self._mask_preview_data_url(
                 getattr(window, "full_mask_pil", None) or getattr(window, "small_mask_pil", None),
-                (preview_width, preview_height),
+                (image_width, image_height),
             ),
             "strength": strength_raw,
             "strength_value": self._remote_img2img_strength_float(strength_raw),

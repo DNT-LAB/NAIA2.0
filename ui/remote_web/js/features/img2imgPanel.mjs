@@ -9,9 +9,12 @@ export function createImg2ImgPanel({
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
 }) {
+  const MASK_CELL_SIZE = 8;
+  const MASK_OVERLAY_COLOR = 'rgba(0, 0, 255, 0.47)';
   const sliderDebounce = {};
   const sliderPending = {};
   const maskDrafts = new Map();
+  const maskCanvasDrafts = new WeakMap();
   let currentState = null;
   let maskBrushSize = 48;
   let maskMode = 'paint';
@@ -45,9 +48,65 @@ export function createImg2ImgPanel({
     return String(state?.window_id || '');
   }
 
+  function sourceDimensions(state = currentState) {
+    const width = Math.max(1, Math.floor(Number(state?.width) || Number(state?.preview_width) || 1));
+    const height = Math.max(1, Math.floor(Number(state?.height) || Number(state?.preview_height) || 1));
+    return {width, height};
+  }
+
+  function gridDimensions(width, height) {
+    return {
+      gridWidth: Math.max(1, Math.floor(width / MASK_CELL_SIZE)),
+      gridHeight: Math.max(1, Math.floor(height / MASK_CELL_SIZE)),
+    };
+  }
+
+  function createMaskDraft(state = currentState) {
+    const {width, height} = sourceDimensions(state);
+    const {gridWidth, gridHeight} = gridDimensions(width, height);
+    return {
+      sourceWidth: width,
+      sourceHeight: height,
+      gridWidth,
+      gridHeight,
+      cells: new Uint8Array(gridWidth * gridHeight),
+    };
+  }
+
+  function draftMatchesState(draft, state = currentState) {
+    if (!draft || !state) return false;
+    const {width, height} = sourceDimensions(state);
+    const {gridWidth, gridHeight} = gridDimensions(width, height);
+    return draft.sourceWidth === width
+      && draft.sourceHeight === height
+      && draft.gridWidth === gridWidth
+      && draft.gridHeight === gridHeight
+      && draft.cells?.length === gridWidth * gridHeight;
+  }
+
+  function getOrCreateMaskDraft(state = currentState) {
+    const key = sessionKey(state);
+    let draft = key ? maskDrafts.get(key) : null;
+    if (!draftMatchesState(draft, state)) {
+      draft = createMaskDraft(state);
+      if (key) maskDrafts.set(key, draft);
+    }
+    return draft;
+  }
+
+  function countMaskCells(draft) {
+    if (!draft?.cells) return 0;
+    let count = 0;
+    for (let i = 0; i < draft.cells.length; i += 1) {
+      if (draft.cells[i]) count += 1;
+    }
+    return count;
+  }
+
   function renderMaskEditor(state) {
     if (!isInpaint(state)) return '';
-    const hasDraft = !!maskDrafts.get(sessionKey(state));
+    const draft = maskDrafts.get(sessionKey(state));
+    const hasDraft = countMaskCells(draft) > 0;
     const status = hasDraft
       ? '마스크 초안 준비됨. 편집창에서 적용하세요.'
       : state.has_mask
@@ -246,16 +305,17 @@ export function createImg2ImgPanel({
     let lastPoint = null;
 
     const initialize = () => {
-      const width = Math.max(1, image.naturalWidth || Number(state.preview_width) || 1);
-      const height = Math.max(1, image.naturalHeight || Number(state.preview_height) || 1);
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
+      const draft = getOrCreateMaskDraft(state);
+      maskCanvasDrafts.set(canvas, draft);
+      if (canvas.width !== draft.sourceWidth || canvas.height !== draft.sourceHeight) {
+        canvas.width = draft.sourceWidth;
+        canvas.height = draft.sourceHeight;
       }
-      clearCanvas(canvas);
-      const draft = key ? maskDrafts.get(key) : '';
-      const maskSource = draft || state.mask_preview || '';
-      if (maskSource) loadMaskToCanvas(canvas, maskSource);
+      if (countMaskCells(draft) <= 0 && state.mask_preview) {
+        loadMaskToCanvas(canvas, state.mask_preview);
+      } else {
+        renderMaskCanvas(canvas, draft);
+      }
       updateMaskStatus(canvas, state);
     };
 
@@ -296,6 +356,12 @@ export function createImg2ImgPanel({
   }
 
   function clearCanvas(canvas) {
+    const draft = maskCanvasDrafts.get(canvas);
+    if (draft?.cells) {
+      draft.cells.fill(0);
+      renderMaskCanvas(canvas, draft);
+      return;
+    }
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
@@ -308,15 +374,11 @@ export function createImg2ImgPanel({
   }
 
   function drawMaskPoint(canvas, point, erase = false) {
-    const ctx = canvas.getContext('2d');
-    const radius = Math.max(4, Number(maskBrushSize) || 48) / 2;
-    ctx.save();
-    ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
-    ctx.fillStyle = 'rgba(92, 120, 255, 0.58)';
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    const draft = maskCanvasDrafts.get(canvas);
+    if (!draft) return;
+    const gridPoint = pointToGrid(draft, point);
+    paintGridBrush(draft, gridPoint.x, gridPoint.y, erase);
+    renderMaskCanvas(canvas, draft);
   }
 
   function drawMaskStroke(canvas, from, to, erase = false) {
@@ -324,40 +386,118 @@ export function createImg2ImgPanel({
       drawMaskPoint(canvas, to, erase);
       return;
     }
-    const distance = Math.hypot(to.x - from.x, to.y - from.y);
-    const step = Math.max(2, (Number(maskBrushSize) || 48) / 3);
-    const steps = Math.max(1, Math.ceil(distance / step));
-    for (let i = 1; i <= steps; i += 1) {
-      const t = i / steps;
-      drawMaskPoint(canvas, {
-        x: from.x + (to.x - from.x) * t,
-        y: from.y + (to.y - from.y) * t,
-      }, erase);
+    const draft = maskCanvasDrafts.get(canvas);
+    if (!draft) return;
+    const start = pointToGrid(draft, from);
+    const end = pointToGrid(draft, to);
+    paintGridLine(draft, start.x, start.y, end.x, end.y, erase);
+    renderMaskCanvas(canvas, draft);
+  }
+
+  function pointToGrid(draft, point) {
+    return {
+      x: Math.max(0, Math.min(draft.gridWidth - 1, Math.floor(point.x / MASK_CELL_SIZE))),
+      y: Math.max(0, Math.min(draft.gridHeight - 1, Math.floor(point.y / MASK_CELL_SIZE))),
+    };
+  }
+
+  function paintGridBrush(draft, centerX, centerY, erase = false) {
+    const brushSizeGrid = Math.max(1, Math.floor((Number(maskBrushSize) || 48) / MASK_CELL_SIZE));
+    const halfBrush = Math.floor(brushSizeGrid / 2);
+    const value = erase ? 0 : 1;
+    for (let dy = -halfBrush; dy <= halfBrush; dy += 1) {
+      const y = centerY + dy;
+      if (y < 0 || y >= draft.gridHeight) continue;
+      for (let dx = -halfBrush; dx <= halfBrush; dx += 1) {
+        const x = centerX + dx;
+        if (x < 0 || x >= draft.gridWidth) continue;
+        draft.cells[y * draft.gridWidth + x] = value;
+      }
+    }
+  }
+
+  function paintGridLine(draft, x0, y0, x1, y1, erase = false) {
+    let x = x0;
+    let y = y0;
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let error = dx - dy;
+
+    while (true) {
+      paintGridBrush(draft, x, y, erase);
+      if (x === x1 && y === y1) break;
+      const error2 = 2 * error;
+      if (error2 > -dy) {
+        error -= dy;
+        x += sx;
+      }
+      if (error2 < dx) {
+        error += dx;
+        y += sy;
+      }
+    }
+  }
+
+  function renderMaskCanvas(canvas, draft = maskCanvasDrafts.get(canvas)) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!draft?.cells) return;
+    ctx.fillStyle = MASK_OVERLAY_COLOR;
+    for (let gy = 0; gy < draft.gridHeight; gy += 1) {
+      for (let gx = 0; gx < draft.gridWidth; gx += 1) {
+        if (!draft.cells[gy * draft.gridWidth + gx]) continue;
+        const x = gx * MASK_CELL_SIZE;
+        const y = gy * MASK_CELL_SIZE;
+        ctx.fillRect(
+          x,
+          y,
+          Math.min(MASK_CELL_SIZE, draft.sourceWidth - x),
+          Math.min(MASK_CELL_SIZE, draft.sourceHeight - y),
+        );
+      }
     }
   }
 
   function loadMaskToCanvas(canvas, dataUrl) {
+    const draft = maskCanvasDrafts.get(canvas);
+    if (!draft) return;
     const image = new Image();
     image.onload = () => {
       const tmp = document.createElement('canvas');
-      tmp.width = canvas.width;
-      tmp.height = canvas.height;
+      tmp.width = draft.sourceWidth;
+      tmp.height = draft.sourceHeight;
       const tmpCtx = tmp.getContext('2d');
-      tmpCtx.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const src = tmpCtx.getImageData(0, 0, canvas.width, canvas.height);
-      const ctx = canvas.getContext('2d');
-      const out = ctx.createImageData(canvas.width, canvas.height);
-      for (let i = 0; i < src.data.length; i += 4) {
-        const alpha = src.data[i + 3];
-        const lit = src.data[i] + src.data[i + 1] + src.data[i + 2];
-        if (alpha > 8 && lit > 32) {
-          out.data[i] = 92;
-          out.data[i + 1] = 120;
-          out.data[i + 2] = 255;
-          out.data[i + 3] = 148;
+      tmpCtx.drawImage(image, 0, 0, draft.sourceWidth, draft.sourceHeight);
+      const src = tmpCtx.getImageData(0, 0, draft.sourceWidth, draft.sourceHeight);
+      draft.cells.fill(0);
+      for (let gy = 0; gy < draft.gridHeight; gy += 1) {
+        for (let gx = 0; gx < draft.gridWidth; gx += 1) {
+          let total = 0;
+          let samples = 0;
+          const startX = gx * MASK_CELL_SIZE;
+          const startY = gy * MASK_CELL_SIZE;
+          const endX = Math.min(startX + MASK_CELL_SIZE, draft.sourceWidth);
+          const endY = Math.min(startY + MASK_CELL_SIZE, draft.sourceHeight);
+          for (let y = startY; y < endY; y += 1) {
+            for (let x = startX; x < endX; x += 1) {
+              const i = (y * draft.sourceWidth + x) * 4;
+              const alpha = src.data[i + 3];
+              const value = alpha > 8
+                ? (src.data[i] + src.data[i + 1] + src.data[i + 2]) / 3
+                : 0;
+              total += value;
+              samples += 1;
+            }
+          }
+          if (samples > 0 && total / samples > 127) {
+            draft.cells[gy * draft.gridWidth + gx] = 1;
+          }
         }
       }
-      ctx.putImageData(out, 0, 0);
+      renderMaskCanvas(canvas, draft);
+      rememberMaskDraft(canvas);
       updateMaskStatus(canvas, currentState);
     };
     image.src = dataUrl;
@@ -365,17 +505,12 @@ export function createImg2ImgPanel({
 
   function rememberMaskDraft(canvas, key = sessionKey()) {
     if (!key) return;
-    maskDrafts.set(key, canvas.toDataURL('image/png'));
+    const draft = maskCanvasDrafts.get(canvas);
+    if (draft) maskDrafts.set(key, draft);
   }
 
   function maskPixelCount(canvas) {
-    const ctx = canvas.getContext('2d');
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let count = 0;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] > 8) count += 1;
-    }
-    return count;
+    return countMaskCells(maskCanvasDrafts.get(canvas));
   }
 
   function updateMaskStatus(canvas, state = currentState) {
@@ -391,22 +526,28 @@ export function createImg2ImgPanel({
   }
 
   function maskDataUrl(canvas) {
-    const ctx = canvas.getContext('2d');
-    const src = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const draft = maskCanvasDrafts.get(canvas);
+    if (!draft) return {dataUrl: '', count: 0};
     const outCanvas = document.createElement('canvas');
-    outCanvas.width = canvas.width;
-    outCanvas.height = canvas.height;
+    outCanvas.width = draft.sourceWidth;
+    outCanvas.height = draft.sourceHeight;
     const outCtx = outCanvas.getContext('2d');
-    const out = outCtx.createImageData(canvas.width, canvas.height);
-    let count = 0;
-    for (let i = 0; i < src.data.length; i += 4) {
-      const masked = src.data[i + 3] > 8;
-      const value = masked ? 255 : 0;
-      out.data[i] = value;
-      out.data[i + 1] = value;
-      out.data[i + 2] = value;
-      out.data[i + 3] = 255;
-      if (masked) count += 1;
+    const out = outCtx.createImageData(draft.sourceWidth, draft.sourceHeight);
+    const count = countMaskCells(draft);
+    for (let y = 0; y < draft.sourceHeight; y += 1) {
+      for (let x = 0; x < draft.sourceWidth; x += 1) {
+        const gx = Math.floor(x / MASK_CELL_SIZE);
+        const gy = Math.floor(y / MASK_CELL_SIZE);
+        const masked = gx < draft.gridWidth && gy < draft.gridHeight
+          ? draft.cells[gy * draft.gridWidth + gx] > 0
+          : false;
+        const value = masked ? 255 : 0;
+        const i = (y * draft.sourceWidth + x) * 4;
+        out.data[i] = value;
+        out.data[i + 1] = value;
+        out.data[i + 2] = value;
+        out.data[i + 3] = 255;
+      }
     }
     outCtx.putImageData(out, 0, 0);
     return {dataUrl: outCanvas.toDataURL('image/png'), count};

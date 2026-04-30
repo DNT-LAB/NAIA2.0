@@ -20,6 +20,7 @@ const detachedModuleId = urlParams.get('module') || '';
 const detachedMetadataPath = urlParams.get('metadata_path') || urlParams.get('path') || '';
 const detachedMetadataSource = urlParams.get('source') || '';
 const detachedSnapshotToken = urlParams.get('snapshot') || '';
+const detachedStandalone = urlParams.get('standalone') === '1';
 const isDetachedShell = detachedMode === 'module' || detachedMode === 'metadata';
 const isDetachedModule = detachedMode === 'module';
 const isDetachedMetadata = detachedMode === 'metadata';
@@ -1316,6 +1317,7 @@ function buildDetachedUrl(kind, params = {}) {
   url.searchParams.delete('metadata_path');
   url.searchParams.delete('path');
   url.searchParams.delete('source');
+  url.searchParams.delete('standalone');
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, String(value));
@@ -1334,16 +1336,33 @@ function openDetachedWindow(url, name, features) {
   return popup;
 }
 
-function openDetachedModule(moduleId) {
+function openDetachedModule(moduleId, options = {}) {
   if (!moduleId) return null;
-  const snapshotToken = saveDetachedModuleSnapshot(moduleId);
+  const snapshotToken = options.skipSnapshot ? '' : saveDetachedModuleSnapshot(moduleId);
   const params = {module: moduleId};
   if (snapshotToken) params.snapshot = snapshotToken;
+  if (options.standalone) params.standalone = '1';
   return openDetachedWindow(
     buildDetachedUrl('module', params),
-    `naia-module-${moduleId}-${Date.now()}`,
+    options.windowName || `naia-module-${moduleId}-${Date.now()}`,
     detachedWindowFeatures(getDetachedModuleGeometry(moduleId))
   );
+}
+
+function openImg2ImgSessionSurface() {
+  if (isDesktopLayout() && !isDetachedModule) {
+    const popup = openDetachedModule('img2img', {
+      standalone: true,
+      skipSnapshot: true,
+      windowName: 'naia-img2img-session',
+    });
+    if (popup) {
+      if (currentModuleId === 'img2img' && modulePopup.classList.contains('open')) closeModule();
+      return true;
+    }
+  }
+  openModule('img2img', {forceOpen: true});
+  return true;
 }
 
 function detachCurrentModule() {
@@ -1547,7 +1566,7 @@ function handleDetachedMessage(event) {
 }
 
 function handleDetachedBeforeUnload() {
-  if (!isDetachedModule || detachedAttachPosted) return;
+  if (!isDetachedModule || detachedAttachPosted || detachedStandalone) return;
   const moduleId = currentModuleId || detachedModuleId;
   if (moduleId) postAttachModuleRequest(moduleId, {markPosted: true});
 }
@@ -1652,9 +1671,11 @@ async function requestPopupImageAction(payload, action) {
     showToast('Image data is unavailable', 'error');
     return;
   }
+  let img2imgSurfaceOpened = false;
   try {
     if (action === 'img2img' || action === 'inpaint') {
       discardPendingModuleEdit('img2img');
+      img2imgSurfaceOpened = openImg2ImgSessionSurface();
     }
     const label = encodeURIComponent(payload.label || 'Input Image');
     const response = await fetch(`/api/image-action/${encodeURIComponent(action)}?label=${label}`, {
@@ -1667,7 +1688,7 @@ async function requestPopupImageAction(payload, action) {
       throw new Error(data.error || `HTTP ${response.status}`);
     }
     if (action === 'img2img' || action === 'inpaint') {
-      openModule('img2img', {forceOpen: true});
+      if (!img2imgSurfaceOpened) openImg2ImgSessionSurface();
     } else if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
       openModule('vibe_transfer');
     }
@@ -2091,7 +2112,7 @@ async function requestContextImageAction(context, action) {
         action,
         ...resultContextCommandPayload(context || {}),
       }));
-      openModule('img2img', {forceOpen: true});
+      openImg2ImgSessionSurface();
       showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session requested`, 'success');
     } catch (error) {
       console.error('Context image action request failed', error);

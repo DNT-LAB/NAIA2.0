@@ -28,7 +28,7 @@ from PIL.ImageQt import ImageQt
 import io
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QSize, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtGui import QAction, QColor, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -73,12 +73,25 @@ from utils.reference_inpaint_preprocess import prepare_variation_inpaint_canvas
 # ---------------------------------------------------------------------------
 
 
-def _load_pixmap_for_label(image_path: Path, target_w: int, target_h: int) -> Optional[QPixmap]:
-    """Open an image and return a centered pixmap padded to exact size."""
+def _load_pixmap_for_label(
+    image_path: Path,
+    target_w: int,
+    target_h: int,
+    mode: str = "fit",
+) -> Optional[QPixmap]:
+    """Open an image and return a pixmap sized for the target label.
+
+    Modes:
+        - "fit":  종횡비 보존 + 부족 영역은 검은 캔버스로 패딩 (기본, 그리드/썸네일용).
+        - "fill": 종횡비 보존하되 라벨을 가득 채우도록 한 변을 잘라낸다
+                  (KeepAspectRatioByExpanding 등가, 레거시 썸네일용).
+    """
     try:
         image = Image.open(image_path)
         if image.mode != "RGBA":
             image = image.convert("RGBA")
+        if mode == "fill":
+            return _scale_image_to_fill(image, target_w, target_h)
         image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", (target_w, target_h), (16, 16, 16, 255))
         canvas.paste(image, ((target_w - image.width) // 2, (target_h - image.height) // 2), image)
@@ -86,6 +99,81 @@ def _load_pixmap_for_label(image_path: Path, target_w: int, target_h: int) -> Op
     except Exception as exc:
         print(f"Failed to load pixmap for {image_path}: {exc}")
         return None
+
+
+def _scale_image_to_fill(image: Image.Image, target_w: int, target_h: int) -> QPixmap:
+    """KeepAspectRatioByExpanding 등가: 라벨을 꽉 채우도록 확장 스케일 후 center-crop.
+
+    portrait 이미지가 가로로 긴 라벨에 들어갈 때 좌우 검은 띠가 생기는 letterbox
+    를 제거한다. 결과 픽스맵 크기가 정확히 (target_w, target_h) 이라 라벨 배경
+    색이 노출되지 않는다. A|B 비교 패널에서는 이 crop 경로를 쓰지 않는다.
+    """
+    if target_w <= 0 or target_h <= 0:
+        return QPixmap.fromImage(ImageQt(image))
+    img_w, img_h = image.size
+    if img_w <= 0 or img_h <= 0:
+        return QPixmap.fromImage(ImageQt(image))
+    scale = max(target_w / img_w, target_h / img_h)
+    new_w = max(1, round(img_w * scale))
+    new_h = max(1, round(img_h * scale))
+    scaled = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    left = max(0, (new_w - target_w) // 2)
+    top = max(0, (new_h - target_h) // 2)
+    cropped = scaled.crop((left, top, left + target_w, top + target_h))
+    return QPixmap.fromImage(ImageQt(cropped))
+
+
+class ImagePaneWidget(QWidget):
+    """A|B 비교용 이미지 패널. 원본 픽스맵은 그대로 보관하고 paintEvent에서 맞춘다."""
+
+    def __init__(self, placeholder: str = "", parent=None):
+        super().__init__(parent)
+        self._pixmap = QPixmap()
+        self._placeholder = placeholder
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def set_pixmap(self, pixmap: Optional[QPixmap]) -> None:
+        # 레이아웃 확정 전 width()를 읽지 않고, 실제 그리기 시점의 영역을 사용한다.
+        self._pixmap = pixmap if pixmap is not None else QPixmap()
+        self.update()
+
+    def set_placeholder(self, text: str) -> None:
+        self._placeholder = text
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        return QSize(400, 600)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        if self._pixmap.isNull():
+            painter.setPen(QColor(DARK_COLORS['text_secondary']))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._placeholder)
+            painter.setPen(Qt.GlobalColor.darkGray)
+            painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+            return
+
+        try:
+            scaled = self._pixmap.scaled(
+                rect.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x = rect.x() + (rect.width() - scaled.width()) // 2
+            y = rect.y() + (rect.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+        except Exception as exc:
+            print(f"Failed to paint image pane: {exc}")
+
+        painter.setPen(Qt.GlobalColor.darkGray)
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
 
 
 # ---------------------------------------------------------------------------
@@ -1071,7 +1159,6 @@ class VariationsTab(QWidget):
         self._primary_path: Optional[Path] = None
         self._result_cards: list[VariationResultCard] = []
         self._selected_card: Optional[VariationResultCard] = None
-        self._preview_source_image: Optional[Image.Image] = None
         self._active_worker: Optional[VariationGenerationWorker] = None
 
         # Continuous generation session state (character_asset_generation_window 패턴)
@@ -1234,26 +1321,53 @@ class VariationsTab(QWidget):
         outer.addWidget(left_host)
 
         # -------------------------------------------------------------
-        # Center column — expanded preview for the selected result
+        # Center column — A|B compare (left: primary | right: variation)
         # -------------------------------------------------------------
+        # ImagePaneWidget은 paintEvent 시점의 실제 영역으로 원본 픽스맵을 fit 한다.
+        # 레이아웃 확정 전 label.width()가 최소폭으로 읽히던 attempt-4 문제를 피한다.
         center_column = QVBoxLayout()
         center_column.setContentsMargins(0, 0, 0, 0)
         center_column.setSpacing(get_scaled_size(6))
 
-        center_title = QLabel("생성 결과")
-        center_title.setStyleSheet(
+        # 타이틀 행 — 좌(원본) / 우(결과) 두 패널을 폭 1:1 로 배분.
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(get_scaled_size(8))
+
+        compare_title = QLabel("원본 (A)")
+        compare_title.setStyleSheet(
+            f"color: {DARK_COLORS['text_secondary']}; font-size: {get_scaled_font_size(13)}px; font-weight: 700;"
+        )
+        compare_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_row.addWidget(compare_title, stretch=1)
+
+        result_title = QLabel("생성 결과 (B)")
+        result_title.setStyleSheet(
             f"color: {DARK_COLORS['text_primary']}; font-size: {get_scaled_font_size(14)}px; font-weight: 700;"
         )
-        center_column.addWidget(center_title)
+        result_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_row.addWidget(result_title, stretch=1)
 
-        self.preview_label = QLabel("생성된 결과가 여기 크게 표시됩니다.")
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumSize(get_scaled_size(420), get_scaled_size(560))
-        self.preview_label.setStyleSheet(
-            f"QLabel {{ border: 1px solid #333; background: #0e1218; color: {DARK_COLORS['text_secondary']}; }}"
-        )
-        self.preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        center_column.addWidget(self.preview_label, stretch=1)
+        center_column.addLayout(title_row)
+
+        # 이미지 행 — 좌측 원본(A) / 우측 최신 결과(B). 각 패널은 같은 stretch로
+        # 50/50 폭을 받고, 실제 스케일링은 ImagePaneWidget.paintEvent에 맡긴다.
+        image_row = QHBoxLayout()
+        image_row.setContentsMargins(0, 0, 0, 0)
+        image_row.setSpacing(get_scaled_size(8))
+
+        portrait_min_w = get_scaled_size(220)
+        portrait_min_h = get_scaled_size(360)
+
+        self.pane_a = ImagePaneWidget("원본 캐릭터가 여기 표시됩니다.")
+        self.pane_a.setMinimumSize(portrait_min_w, portrait_min_h)
+        image_row.addWidget(self.pane_a, stretch=1)
+
+        self.pane_b = ImagePaneWidget("생성된 결과가 여기 크게 표시됩니다.")
+        self.pane_b.setMinimumSize(portrait_min_w, portrait_min_h)
+        image_row.addWidget(self.pane_b, stretch=1)
+
+        center_column.addLayout(image_row, stretch=1)
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
@@ -1363,6 +1477,9 @@ class VariationsTab(QWidget):
         )
         if preview is not None:
             self.character_preview.setPixmap(preview)
+
+        # A|B compare 좌측 슬롯도 새 캐릭터 primary 로 즉시 갱신.
+        self._render_compare()
 
         # Prefill character prompt/UC from the primary image's NAI metadata so
         # the user only has to add a main prompt for the variation.
@@ -1571,6 +1688,9 @@ class VariationsTab(QWidget):
             "wildcard_standalone": True,
             "api_mode": api_mode,
             "comfyui_sampling_mode": "eps",
+            # Variations 탭은 항상 레퍼런스 인셋 컨텍스트.
+            # ReferenceInsetAutoInjectModule 트리거.
+            "reference_inset_tag_required": True,
         }
 
         try:
@@ -1696,27 +1816,23 @@ class VariationsTab(QWidget):
     def _update_preview(self):
         enhance_busy = self._enhance_worker is not None
         if self._selected_card is None:
-            self._preview_source_image = None
-            self.preview_label.setPixmap(QPixmap())
-            self.preview_label.setText("생성된 결과가 여기 크게 표시됩니다.")
+            self.pane_b.set_placeholder("생성된 결과가 여기 크게 표시됩니다.")
+            self.pane_b.set_pixmap(QPixmap())
+            # 결과가 없어도 좌측 A 슬롯(원본) 은 항상 갱신해 캐릭터 시각 컨텍스트를 유지.
+            self._render_compare()
             self.save_btn.setEnabled(False)
             self.save_enhance_btn.setEnabled(False)
             self.discard_btn.setEnabled(False)
             return
         image = self._selected_card.result.get("image")
         if image is None:
-            self._preview_source_image = None
-            self.preview_label.setPixmap(QPixmap())
-            self.preview_label.setText("결과 이미지가 비어있습니다.")
+            self.pane_b.set_placeholder("결과 이미지가 비어있습니다.")
+            self.pane_b.set_pixmap(QPixmap())
+            self._render_compare()
             self.save_btn.setEnabled(False)
             self.save_enhance_btn.setEnabled(False)
             self.discard_btn.setEnabled(not enhance_busy)
             return
-        try:
-            self._preview_source_image = image.copy()
-        except Exception as exc:
-            print(f"Failed to clone preview image: {exc}")
-            self._preview_source_image = image
         self._render_preview()
         self.save_btn.setEnabled(not enhance_busy)
         # Enhance is NAI-only (img2img pass). Grey the button out in other
@@ -1726,19 +1842,60 @@ class VariationsTab(QWidget):
         self.discard_btn.setEnabled(not enhance_busy)
 
     def _render_preview(self):
-        if self._preview_source_image is None:
+        if self._selected_card is None:
+            self.pane_b.set_placeholder("생성된 결과가 여기 크게 표시됩니다.")
+            self.pane_b.set_pixmap(QPixmap())
+            self._render_compare()
             return
+        result = self._selected_card.result
         try:
-            preview = self._preview_source_image.copy()
-            if preview.mode != "RGBA":
-                preview = preview.convert("RGBA")
-            target_w = max(self.preview_label.width(), get_scaled_size(420))
-            target_h = max(self.preview_label.height(), get_scaled_size(560))
-            preview.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
-            self.preview_label.setText("")
-            self.preview_label.setPixmap(QPixmap.fromImage(ImageQt(preview)))
+            # PNG 원본 바이트를 우선 사용해 리사이즈/크롭 없는 원본 픽스맵을 전달한다.
+            pixmap = QPixmap()
+            raw_bytes = result.get("raw_bytes") or result.get("image_bytes")
+            if raw_bytes and not pixmap.loadFromData(raw_bytes):
+                pixmap = QPixmap()
+
+            if pixmap.isNull():
+                image = result.get("image")
+                if image is None:
+                    self.pane_b.set_placeholder("결과 이미지가 비어있습니다.")
+                    self.pane_b.set_pixmap(QPixmap())
+                    self._render_compare()
+                    return
+                preview = image.copy()
+                if preview.mode != "RGBA":
+                    preview = preview.convert("RGBA")
+                pixmap = QPixmap.fromImage(ImageQt(preview))
+
+            self.pane_b.set_placeholder("생성된 결과가 여기 크게 표시됩니다.")
+            self.pane_b.set_pixmap(pixmap)
         except Exception as exc:
             print(f"Failed to render central preview: {exc}")
+            self.pane_b.set_placeholder("결과 이미지 로드 실패")
+            self.pane_b.set_pixmap(QPixmap())
+        # A|B compare 의 좌측(원본) 도 같은 시점에 갱신.
+        self._render_compare()
+
+    def _render_compare(self):
+        """좌측 A 슬롯에 원본(primary) 캐릭터 이미지를 원본 픽스맵으로 전달."""
+        primary_path = self._primary_path
+        if primary_path is None or not Path(primary_path).exists():
+            self.pane_a.set_placeholder("원본 캐릭터가 여기 표시됩니다.")
+            self.pane_a.set_pixmap(QPixmap())
+            return
+        try:
+            # 디스크의 primary 이미지를 그대로 읽고, 크기 조정은 paintEvent에 맡긴다.
+            pixmap = QPixmap(str(primary_path))
+            if pixmap.isNull():
+                self.pane_a.set_placeholder("원본 이미지 로드 실패")
+                self.pane_a.set_pixmap(QPixmap())
+                return
+            self.pane_a.set_placeholder("원본 캐릭터가 여기 표시됩니다.")
+            self.pane_a.set_pixmap(pixmap)
+        except Exception as exc:
+            print(f"Failed to render compare (primary): {exc}")
+            self.pane_a.set_placeholder("원본 이미지 로드 실패")
+            self.pane_a.set_pixmap(QPixmap())
 
     # -- save / discard drive the currently selected card ----------------
 
@@ -2124,16 +2281,27 @@ class CharacterAssetStorageWindow(QMainWindow):
 
         # 화면 가용 영역의 90%를 넘지 않도록 클램프 — DPI 스케일링이 큰 환경에서
         # 초기 크기가 화면 밖으로 벗어나는 것을 막는다.
+        #
+        # A|B compare 라벨 폭 산정 (Variations 탭, 스케일 1.0):
+        #   라벨 height ≈ 윈도우 height(960) − 타이틀/액션/마진(≈ 130) ≈ 830
+        #   portrait 4:7 → 라벨 1개 폭 ≈ 830 × 4/7 ≈ 474
+        #   양쪽 라벨 합 + 라벨 사이 spacing(8) = 474 × 2 + 8 ≈ 956
+        #   고정 영역: left controls(540) + right thumbs(≈ 268) + outer/spacing(≈ 48) ≈ 856
+        #   합계 default_w = 856 + 956 ≈ 1812. 여유 8 추가해 1820 으로.
+        #
+        # 윈도우 폭만 충분히 주면 layout 의 stretch=1 분배가 자연스럽게 portrait
+        # 비율에 맞는 라벨 폭을 만들어내므로, 동적 setFixedWidth 같은 코드 우회는
+        # 불필요하다.
         screen = QApplication.primaryScreen()
         if screen is not None:
             geo = screen.availableGeometry()
-            default_w = min(get_scaled_size(1480), int(geo.width() * 0.9))
-            default_h = min(get_scaled_size(940), int(geo.height() * 0.9))
-            min_w = min(get_scaled_size(1080), int(geo.width() * 0.8))
-            min_h = min(get_scaled_size(680), int(geo.height() * 0.8))
+            default_w = min(get_scaled_size(1820), int(geo.width() * 0.95))
+            default_h = min(get_scaled_size(960), int(geo.height() * 0.9))
+            min_w = min(get_scaled_size(1540), int(geo.width() * 0.85))
+            min_h = min(get_scaled_size(740), int(geo.height() * 0.8))
         else:
-            default_w, default_h = get_scaled_size(1480), get_scaled_size(940)
-            min_w, min_h = get_scaled_size(1080), get_scaled_size(680)
+            default_w, default_h = get_scaled_size(1820), get_scaled_size(960)
+            min_w, min_h = get_scaled_size(1540), get_scaled_size(740)
         self.resize(default_w, default_h)
         self.setMinimumSize(min_w, min_h)
         self.setStyleSheet(f"""

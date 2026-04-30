@@ -15,7 +15,7 @@ class InpaintGenerationWorker(QThread):
     progress_update = pyqtSignal(str)
     
     def __init__(self, app_context, composite_img: Image.Image, mask_img: Image.Image, 
-                 main_prompt: str, negative_prompt: str, strength: float = 0.7,
+                 main_prompt: str, negative_prompt: str, strength: float = 1.0,
                  small_mask: Image.Image = None, character_prompts: list = None):
         super().__init__()
         self.app_context = app_context

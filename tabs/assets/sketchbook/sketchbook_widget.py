@@ -1489,13 +1489,13 @@ class SketchbookWidget(QWidget):
                         # Use the new method to properly process the mask
                         if panel.set_mask_from_sketchbook(mask_pil):
                             # Set initial parameters after successful mask processing
-                            panel.strength_slider.setValue(99)  # 0.99
+                            panel.strength_slider.setValue(99)  # 1.0 (슬라이더 최댓값 승격)
                             panel.noise_slider.setValue(5)      # 0.05
-                        
+
                         print("✅ Canvas and mask transferred to Main Window")
                         print(f"   Canvas size: {canvas_pil.size}")
                         print(f"   Mask size: {mask_pil.size}")
-                        print(f"   Strength: 0.99, Noise: 0.05")
+                        print(f"   Strength: 1.00, Noise: 0.05")
                     else:
                         print("⚠️ img2img_panel not found in main window")
                     

@@ -1343,7 +1343,7 @@ class TurboEventSequenceTab(QWidget):
             app_context=self.app_context,
             prompts=single_prompt,
             direction=self.selected_direction,
-            strength=0.7,
+            strength=1.0,
             negative_prompt=self._get_negative_prompt(),
             prev_images=prev_images,
             start_index=index,
@@ -1414,7 +1414,7 @@ class TurboEventSequenceTab(QWidget):
             app_context=self.app_context,
             prompts=prompts_to_generate,
             direction=self.selected_direction,
-            strength=0.7,
+            strength=1.0,
             negative_prompt=self._get_negative_prompt(),
             prev_images=prev_images,
             start_index=0,  # Worker 내부 인덱스는 0부터 시작

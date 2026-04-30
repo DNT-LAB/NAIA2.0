@@ -229,7 +229,7 @@ generation_finished → _update_grid_image(is_sequence_complete=True)
 override_params = {
     'type': 'inpaint', 'input': prompt, 'negative_prompt': neg,
     'image_bytes': canvas_bytes, 'mask_bytes': mask_bytes,
-    'width': w, 'height': h, 'strength': 0.7, 'noise': 0.0,
+    'width': w, 'height': h, 'strength': 1.0, 'noise': 0.0,
     'random_resolution': False, 'turbo_sequence_request': True,
 }
 ```

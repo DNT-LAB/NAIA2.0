@@ -52,7 +52,7 @@ class CharacterAssetResultCard(QFrame):
 
         title = QLabel(f"Asset #{self.index}")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(13)}px; font-weight: 600;")
+        title.setStyleSheet(f"color: white; font-size: {get_scaled_font_size(15)}px; font-weight: 600;")
         layout.addWidget(title)
 
         image_label = QLabel()
@@ -135,11 +135,11 @@ class CharacterAssetGenerationWindow(QDialog):
             f"}}"
         )
         section_title_style = (
-            f"font-size: {get_scaled_font_size(14)}px; "
+            f"font-size: {get_scaled_font_size(16)}px; "
             f"font-weight: 700; color: {DARK_COLORS['text_primary']};"
         )
         helper_text_style = (
-            f"font-size: {get_scaled_font_size(12)}px; "
+            f"font-size: {get_scaled_font_size(14)}px; "
             f"color: {DARK_COLORS['text_secondary']};"
         )
         editor_style = f"""
@@ -151,7 +151,7 @@ class CharacterAssetGenerationWindow(QDialog):
                 color: {DARK_COLORS['text_primary']};
                 selection-background-color: {DARK_COLORS['accent_blue']};
                 font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
-                font-size: {get_scaled_font_size(18)}px;
+                font-size: {get_scaled_font_size(20)}px;
             }}
             QTextEdit:focus {{
                 border: 2px solid {DARK_COLORS['accent_blue']};
@@ -168,7 +168,7 @@ class CharacterAssetGenerationWindow(QDialog):
         header_row.setSpacing(get_scaled_size(12))
 
         header = QLabel("캐릭터 에셋 생성")
-        header.setStyleSheet(f"font-size: {get_scaled_font_size(24)}px; font-weight: 700; color: white;")
+        header.setStyleSheet(f"font-size: {get_scaled_font_size(26)}px; font-weight: 700; color: white;")
         header_desc = QLabel("체크된 캐릭터를 불러와 수정하고, 연속 생성 결과를 비교 저장합니다.")
         header_desc.setStyleSheet(helper_text_style)
 
@@ -563,7 +563,7 @@ class CharacterAssetGenerationWindow(QDialog):
             QLabel {{
                 background-color: {bg};
                 color: white;
-                font-size: {get_scaled_font_size(15)}px;
+                font-size: {get_scaled_font_size(17)}px;
                 font-weight: 600;
                 padding: {get_scaled_size(10)}px {get_scaled_size(18)}px;
                 border-radius: {get_scaled_size(8)}px;

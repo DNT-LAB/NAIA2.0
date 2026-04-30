@@ -13,6 +13,8 @@ let sessionGenTotal = 0;
 const sessionGenTimestamps = [];
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
+// 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
+let _localPromptDirty = false;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let sessionId = null, sharedMode = false;
 let _restoringSession = false;  // 재연결 복원 중 서버 초기값 무시 플래그
@@ -250,8 +252,9 @@ function updatePromptOnly(prompt, source) {
   if (source === 'random' && awaitingMyRandom) {
     awaitingMyRandom = false;
     if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
-    if (_isPromptFieldFocused() && prompt !== promptEdit.value) {
-      deferredPromptSync = { ...(deferredPromptSync || {}), prompt };
+    if (_isPromptEditingActive() && prompt !== promptEdit.value) {
+      // 편집 중: 사용자 입력을 보호. Random 결과를 다시 받으려면 Random 다시 누르면 됨.
+      // (deferredPromptSync는 blur flush 경로 제거로 더 이상 쓰지 않음)
     } else {
       syncingPrompt = true;
       promptEdit.value = prompt;
@@ -461,6 +464,12 @@ function _isPromptFieldFocused() {
   return document.activeElement === promptEdit || document.activeElement === negEdit;
 }
 
+// 사용자가 메인 프롬프트/네거티브를 편집 중인 상태 판정.
+// focus 중이거나, 타이핑 후 서버 동기화 debounce가 남은 경우 → 서버 브로드캐스트로 덮어쓰기 금지.
+function _isPromptEditingActive() {
+  return _isPromptFieldFocused() || _localPromptDirty;
+}
+
 function _applyPromptSync(m) {
   syncingPrompt = true;
   if ('prompt' in m && m.prompt !== promptEdit.value) promptEdit.value = m.prompt;
@@ -494,8 +503,10 @@ function syncPrompts(m) {
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
   const negativeChanged = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
 
-  if (_isPromptFieldFocused() && (promptChanged || negativeChanged)) {
-    deferredPromptSync = { ...(deferredPromptSync || {}), ...m };
+  if (_isPromptEditingActive() && (promptChanged || negativeChanged)) {
+    // 편집 중: 서버 값 버림. blur해도 자동 flush 안 함 (사용자 편집 보호).
+    // 사용자 편집이 flush되면 서버가 다시 브로드캐스트하여 자연스럽게 동기화됨.
+    deferredPromptSync = null;
     updateMetaChips(m);
     return;
   }
@@ -505,6 +516,7 @@ function syncPrompts(m) {
 
 function onPromptEdit() {
   if (syncingPrompt) return;
+  _localPromptDirty = true;
   updatePromptHighlight();
   if (promptSendTimer) clearTimeout(promptSendTimer);
   promptSendTimer = setTimeout(() => {
@@ -515,6 +527,8 @@ function onPromptEdit() {
         negative_prompt: negEdit.value,
       }));
     }
+    promptSendTimer = null;
+    _localPromptDirty = false;
     saveSharedSession();
   }, 500);
 }
@@ -706,6 +720,11 @@ function initViewer() {
   loadViewerPage(0);
 }
 
+function _hasViewerThumb(relPath) {
+  if (!viewerGrid || !relPath) return false;
+  return !!viewerGrid.querySelector(`.viewer-thumb[data-path="${CSS.escape(relPath)}"]`);
+}
+
 async function loadViewerPage(page) {
   if (viewerLoadingMore) return;
   viewerLoadingMore = true;
@@ -716,7 +735,10 @@ async function loadViewerPage(page) {
     viewerTotal = data.total;
     if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
     viewerTab.classList.toggle('visible', viewerTotal > 0);
+    // Dedup: 서버는 offset 기반 페이지네이션이라 생성 중 새 이미지가 들어오면 경계가 어긋나
+    // 이미 로드된 항목이 다시 올 수 있음. DOM에 존재하는 rel_path는 skip.
     for (const entry of data.images) {
+      if (_hasViewerThumb(entry.rel_path)) continue;
       appendViewerThumb(entry.rel_path);
     }
     viewerPage = page + 1;
@@ -731,6 +753,7 @@ function appendViewerThumb(relPath) {
   const img = document.createElement('img');
   img.className = 'viewer-thumb';
   img.loading = 'lazy';
+  img.dataset.path = relPath;
   img.src = '/api/viewer/thumb/' + encodeURI(relPath);
   img.onclick = () => viewerThumbClick(relPath);
   viewerGrid.appendChild(img);
@@ -740,6 +763,7 @@ function prependViewerThumb(relPath) {
   const img = document.createElement('img');
   img.className = 'viewer-thumb';
   img.loading = 'lazy';
+  img.dataset.path = relPath;
   img.src = '/api/viewer/thumb/' + encodeURI(relPath);
   img.onclick = () => viewerThumbClick(relPath);
   viewerGrid.prepend(img);
@@ -768,14 +792,34 @@ function onViewerNewImage(m) {
   viewerTotal++;
   if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
   viewerTab.classList.add('visible');
-  // Prepend to grid if viewer is initialized
-  if (viewerGrid.children.length > 0 || viewerOpen) {
+  // Prepend to grid if viewer is initialized (중복 방지)
+  const alreadyInGrid = _hasViewerThumb(m.rel_path);
+  const didPrepend = !alreadyInGrid && (viewerGrid.children.length > 0 || viewerOpen);
+  if (didPrepend) {
     prependViewerThumb(m.rel_path);
+  }
+  // Viewer nav 활성 상태이고 실제로 DOM에 prepend된 경우에만 스냅샷 동기화
+  // (중복 WS 메시지로 DOM은 그대로인데 스냅샷만 밀리면 active 하이라이트가 어긋남)
+  if (didPrepend && _viewerNavIdx >= 0 && _viewerNavPaths.length > 0
+      && !_viewerNavPaths.includes(m.rel_path)) {
+    _viewerNavPaths.unshift(m.rel_path);
+    if (_viewerNavIdx === 0) {
+      // 최신을 보고 있었음 → 새 이미지로 자동 포커스 이동 (Q1-B)
+      _showViewerImage(m.rel_path);
+    } else {
+      // 과거 이미지를 탐색 중 → 인덱스를 한 칸 밀어서 같은 이미지를 유지 + "최신으로" 뱃지 표시
+      _viewerNavIdx += 1;
+      _viewerPendingNewCount += 1;
+      _showLatestViewerBadge();
+      // 활성 thumb 하이라이트 재정렬 (prepend로 DOM 인덱스가 밀림)
+      const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
+      thumbs.forEach((t, i) => t.classList.toggle('active', i === _viewerNavIdx));
+    }
   }
   // Popup grid에도 반영
   if (_viewerPopupOpen) {
     const vpGrid = $('vpGrid');
-    if (vpGrid) {
+    if (vpGrid && !vpGrid.querySelector(`.viewer-thumb[data-path="${CSS.escape(m.rel_path)}"]`)) {
       const img = document.createElement('img');
       img.className = 'viewer-thumb';
       img.loading = 'lazy';
@@ -787,6 +831,41 @@ function onViewerNewImage(m) {
     const cnt = $('vpCount');
     if (cnt) cnt.textContent = viewerTotal;
   }
+}
+
+// ---- "최신으로" 뱃지 (Viewer nav 활성 상태에서 과거 이미지 탐색 중 새 이미지 도착 시 노출) ----
+let _viewerPendingNewCount = 0;
+
+function _ensureLatestViewerBadge() {
+  let el = document.getElementById('viewerLatestBadge');
+  if (el) return el;
+  el = document.createElement('button');
+  el.id = 'viewerLatestBadge';
+  el.className = 'viewer-latest-badge';
+  el.type = 'button';
+  el.onclick = jumpToLatestViewerImage;
+  document.body.appendChild(el);
+  return el;
+}
+
+function _showLatestViewerBadge() {
+  const el = _ensureLatestViewerBadge();
+  const n = _viewerPendingNewCount;
+  el.textContent = n > 1 ? `↓ 최신으로 (+${n})` : '↓ 최신으로';
+  el.classList.add('visible');
+}
+
+function _hideLatestViewerBadge() {
+  _viewerPendingNewCount = 0;
+  const el = document.getElementById('viewerLatestBadge');
+  if (el) el.classList.remove('visible');
+}
+
+function jumpToLatestViewerImage() {
+  if (_viewerNavPaths.length === 0) { _hideLatestViewerBadge(); return; }
+  _viewerNavIdx = 0;
+  _showViewerImage(_viewerNavPaths[0]);
+  _hideLatestViewerBadge();
 }
 
 // Infinite scroll
@@ -853,7 +932,9 @@ async function loadViewerPopupPage(page) {
     const resp = await fetch(`/api/viewer/list?page=${page}&per_page=30`);
     const data = await resp.json();
     const grid = $('vpGrid');
+    // Dedup: offset 페이지네이션이 생성 중 새 이미지로 경계 밀림 → DOM에 있는 항목 skip
     for (const entry of data.images) {
+      if (grid.querySelector(`.viewer-thumb[data-path="${CSS.escape(entry.rel_path)}"]`)) continue;
       const img = document.createElement('img');
       img.className = 'viewer-thumb';
       img.loading = 'lazy';
@@ -987,15 +1068,23 @@ function viewerThumbClick(relPath) {
   _viewerNavPaths = [];
   const thumbs = viewerGrid.querySelectorAll('.viewer-thumb');
   thumbs.forEach(t => {
-    const src = t.getAttribute('src') || '';
-    const match = src.match(/\/api\/viewer\/thumb\/(.+)$/);
-    if (match) _viewerNavPaths.push(decodeURI(match[1]));
+    // data-path 우선, 없으면 src에서 추출 (구버전 fallback)
+    const p = t.dataset.path;
+    if (p) {
+      _viewerNavPaths.push(p);
+    } else {
+      const src = t.getAttribute('src') || '';
+      const match = src.match(/\/api\/viewer\/thumb\/(.+)$/);
+      if (match) _viewerNavPaths.push(decodeURI(match[1]));
+    }
   });
   _viewerNavIdx = _viewerNavPaths.indexOf(relPath);
   if (_viewerNavIdx < 0) {
     _viewerNavPaths = [relPath];
     _viewerNavIdx = 0;
   }
+  // 새 스냅샷 기준이므로 "최신으로" 뱃지 리셋
+  _hideLatestViewerBadge();
   _showViewerImage(relPath);
 }
 
@@ -1024,6 +1113,8 @@ function navViewer(dir) {
   if (next >= 0 && next < _viewerNavPaths.length) {
     _viewerNavIdx = next;
     _showViewerImage(_viewerNavPaths[_viewerNavIdx]);
+    // 최신으로 복귀 → 뱃지 숨김
+    if (_viewerNavIdx === 0) _hideLatestViewerBadge();
   }
 }
 
@@ -1039,6 +1130,7 @@ function hideViewerNav() {
   const pf = $('promptFloat');
   if (pf) pf.classList.remove('visible');
   viewerGrid.querySelectorAll('.viewer-thumb.active').forEach(t => t.classList.remove('active'));
+  _hideLatestViewerBadge();
 }
 
 // ---- Keyboard navigation (Arrow Up/Down) ----
@@ -1310,12 +1402,10 @@ function updateGenStats() {
 
 function onLoadPrompt(prompt) {
   if (!prompt) return;
-  if (_isPromptFieldFocused() && prompt !== promptEdit.value) {
-    deferredPromptSync = { ...(deferredPromptSync || {}), prompt };
-  } else {
-    promptEdit.value = prompt;
-    onPromptEdit();
-  }
+  // 사용자가 히스토리에서 "Load Prompt"를 명시적으로 클릭한 경우 — 편집 중이어도 즉시 적용.
+  // (blur 시 자동 flush를 제거했으므로 defer하면 영원히 안 들어감)
+  promptEdit.value = prompt;
+  onPromptEdit();
   showToast('Prompt loaded', 'success');
 }
 
@@ -1587,6 +1677,7 @@ function send(cmd) {
   if (cmd === 'generate') {
     if (generating) return;
     if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
+    _localPromptDirty = false;
     ws.send(JSON.stringify({
       type: 'generate',
       prompt: promptEdit.value,
@@ -2674,7 +2765,35 @@ function updateVibeBadge(m) {
   badge.textContent = enabledCount;
 }
 
+// prompt_engineering 모듈의 편집 가능한 textarea 목록 (focus 보존 대상)
+const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
+
+function _capturePromptEngineeringFocus() {
+  const active = document.activeElement;
+  if (!active || !PE_EDITABLE_IDS.includes(active.id)) return null;
+  return {
+    id: active.id,
+    value: active.value,
+    selectionStart: active.selectionStart,
+    selectionEnd: active.selectionEnd,
+    scrollTop: active.scrollTop,
+  };
+}
+
+function _restorePromptEngineeringFocus(snap) {
+  if (!snap) return;
+  const el = document.getElementById(snap.id);
+  if (!el) return;
+  // 편집 중이던 로컬 값 + 커서/스크롤 복원. 서버 broadcast가 현재 편집값과 다른 값을 보내더라도
+  // 사용자 로컬 편집을 우선 (debounce flush 후 서버에 반영됨).
+  el.value = snap.value;
+  el.scrollTop = snap.scrollTop;
+  try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+  try { el.setSelectionRange(snap.selectionStart, snap.selectionEnd); } catch (e) {}
+}
+
 function renderPromptEngineering(m) {
+  const _peFocusSnap = _capturePromptEngineeringFocus();
   if (sharedMode) {
     if (_sharedPEng) {
       // 캐시 우선 적용 (서버는 데스크톱 값 반환, 세션 값이 우선)
@@ -2767,6 +2886,8 @@ function renderPromptEngineering(m) {
     const el = document.getElementById(id);
     if (el) bindTagAssist(el);
   });
+  // 재빌드 이전에 편집 중이던 필드 복원 (focus + value + selection)
+  _restorePromptEngineeringFocus(_peFocusSnap);
 }
 
 function renderPePresetAddPanel(m) {
@@ -3101,6 +3222,7 @@ function flushMainPromptAndParams() {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
   }
+  _localPromptDirty = false;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
@@ -4958,9 +5080,13 @@ bindTagAssist(negEdit);
 promptEdit.addEventListener('focus', () => { applyPromptHighlightState(); });
 promptEdit.addEventListener('blur', () => {
   applyPromptHighlightState();
-  setTimeout(flushDeferredPromptSync, 0);
+  // blur 시 flush 제거: 편집값을 서버 값으로 자동 덮어쓰지 않음 (Q2-B).
+  // 남은 defer 값은 버려서 stale overwrite 방지.
+  deferredPromptSync = null;
 });
-negEdit.addEventListener('blur', () => { setTimeout(flushDeferredPromptSync, 0); });
+negEdit.addEventListener('blur', () => {
+  deferredPromptSync = null;
+});
 promptEdit.addEventListener('compositionend', () => { onPromptEdit(); });
 promptEdit.addEventListener('input', () => { onPromptEdit(); });
 applyPromptHighlightState();

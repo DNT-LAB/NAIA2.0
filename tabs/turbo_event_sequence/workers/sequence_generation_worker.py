@@ -78,7 +78,7 @@ class SequenceGenerationWorker(QObject):
         app_context: 'AppContext',
         prompts: List[Dict],
         direction: str = 'horizontal',
-        strength: float = 0.7,
+        strength: float = 1.0,
         negative_prompt: str = '',
         prev_images: List[Image.Image] = None,
         start_index: int = 0,

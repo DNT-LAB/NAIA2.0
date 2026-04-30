@@ -1,0 +1,1622 @@
+{
+  "version": 2,
+  "description": "의류 관련 이벤트(상태/동작) 태그. v2: 각 태그에 garment_noun(함의 의류명)과 region(의류 부위)을 부착하여 사용자 의상 컨텍스트와의 충돌 해결에 활용. garment_noun이 null이면 garment-free (의류 비종속 narrative — 의상 사고/이펙트 등).",
+  "categories": {
+    "adjusting": [
+      {
+        "tag": "adjusting apron",
+        "garment_noun": "apron",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "adjusting belt",
+        "garment_noun": "belt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "adjusting dress",
+        "garment_noun": "dress",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "adjusting eyepatch",
+        "garment_noun": "eyepatch",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "adjusting shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      }
+    ],
+    "grabbing": [
+      {
+        "tag": "apron grab",
+        "garment_noun": "apron",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "blindfold pull",
+        "garment_noun": "blindfold",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "bra tug",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "cape tug",
+        "garment_noun": "cape",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "capelet lift",
+        "garment_noun": "capelet",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "cardigan pull",
+        "garment_noun": "cardigan",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "choker pull",
+        "garment_noun": "choker",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "coat grab",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "coat hold",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "coat tug",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "hood grab",
+        "garment_noun": "hood",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "hood lift",
+        "garment_noun": "hood",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "hoodie pull",
+        "garment_noun": "hoodie",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "kimono tug",
+        "garment_noun": "kimono",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "neck lift",
+        "garment_noun": null,
+        "region": null
+      },
+      {
+        "tag": "necklace pull",
+        "garment_noun": "necklace",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "pantyhose lift",
+        "garment_noun": "pantyhose",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "pulling off legwear",
+        "garment_noun": "legwear",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "sarong hold",
+        "garment_noun": "sarong",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "shorts tug",
+        "garment_noun": "shorts",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "sweater vest lift",
+        "garment_noun": "sweater vest",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "towel lift",
+        "garment_noun": "towel",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "turtleneck lift",
+        "garment_noun": "turtleneck",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "vest lift",
+        "garment_noun": "vest",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "vest pull",
+        "garment_noun": "vest",
+        "region": "UPPER_BODY"
+      }
+    ],
+    "holding": [
+      {
+        "tag": "holding apron",
+        "garment_noun": "apron",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "holding coat",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "holding earrings",
+        "garment_noun": "earrings",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding hairpin",
+        "garment_noun": "hairpin",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding headband",
+        "garment_noun": "headband",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding headdress",
+        "garment_noun": "headdress",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding hood",
+        "garment_noun": "hood",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding leotard",
+        "garment_noun": "leotard",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "holding pants",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "holding sash",
+        "garment_noun": "sash",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "holding shoe",
+        "garment_noun": "shoe",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "holding sock",
+        "garment_noun": "sock",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "holding sweater",
+        "garment_noun": "sweater",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "holding tiara",
+        "garment_noun": "tiara",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding unworn helmet",
+        "garment_noun": "helmet",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "holding unworn jacket",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "holding veil",
+        "garment_noun": "veil",
+        "region": "HEAD_NECK_FACE"
+      }
+    ],
+    "removing": [
+      {
+        "tag": "removing bikini top",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "removing bowtie",
+        "garment_noun": "bowtie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "removing cape",
+        "garment_noun": "cape",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "removing cloak",
+        "garment_noun": "cloak",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "removing hood",
+        "garment_noun": "hood",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "removing necktie",
+        "garment_noun": "necktie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "removing pants",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "removing thighhigh",
+        "garment_noun": "thighhigh",
+        "region": "LEGS_FEET"
+      }
+    ],
+    "removed": [
+      {
+        "tag": "bracelet removed",
+        "garment_noun": "bracelet",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "capelet removed",
+        "garment_noun": "capelet",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "choker removed",
+        "garment_noun": "choker",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "diving mask removed",
+        "garment_noun": "mask",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "earmuffs removed",
+        "garment_noun": "earmuffs",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "earphones removed",
+        "garment_noun": "earphones",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "fundoshi removed",
+        "garment_noun": "fundoshi",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "hakama removed",
+        "garment_noun": "hakama",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "head wreath removed",
+        "garment_noun": "head wreath",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "headdress removed",
+        "garment_noun": "headdress",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "headset removed",
+        "garment_noun": "headset",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "jacket partially removed",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "kimono partially removed",
+        "garment_noun": "kimono",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "leotard removed",
+        "garment_noun": "leotard",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "neck ribbon removed",
+        "garment_noun": "neck ribbon",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "overalls removed",
+        "garment_noun": "overalls",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "pasties removed",
+        "garment_noun": "pasties",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "pauldron removed",
+        "garment_noun": "pauldron",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "pendant removed",
+        "garment_noun": "pendant",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "ring removed",
+        "garment_noun": "ring",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "robe partially removed",
+        "garment_noun": "robe",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "single earphone removed",
+        "garment_noun": "earphone",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "single sock removed",
+        "garment_noun": "sock",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "skirt partially removed",
+        "garment_noun": "skirt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "suspenders removed",
+        "garment_noun": "suspenders",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "sweater vest removed",
+        "garment_noun": "sweater vest",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tiara removed",
+        "garment_noun": "tiara",
+        "region": "HEAD_NECK_FACE"
+      }
+    ],
+    "tying": [
+      {
+        "tag": "scarf tying",
+        "garment_noun": "scarf",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "tying bikini",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "tying bra",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tying panties",
+        "garment_noun": "panties",
+        "region": "WAIST_HIP"
+      }
+    ],
+    "tied": [
+      {
+        "tag": "sleeves tied together",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tied jacket",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tied shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tied skirt",
+        "garment_noun": "skirt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "tied sleeves",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tied sweater",
+        "garment_noun": "sweater",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tied tank top",
+        "garment_noun": "tank top",
+        "region": "UPPER_BODY"
+      }
+    ],
+    "untied": [
+      {
+        "tag": "untied bikini",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "untied bikini bottom",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "untied bikini top",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "untied footwear",
+        "garment_noun": "footwear",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "untied panties",
+        "garment_noun": "panties",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "untied ribbon",
+        "garment_noun": "ribbon",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "untied shoe",
+        "garment_noun": "shoe",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "untied shoelaces",
+        "garment_noun": "shoelaces",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "untied straps",
+        "garment_noun": "straps",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "untied swimsuit",
+        "garment_noun": "swimsuit",
+        "region": "FULL_BODY"
+      }
+    ],
+    "unbuttoned": [
+      {
+        "tag": "unbuttoned dress",
+        "garment_noun": "dress",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unbuttoned jacket",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unbuttoned shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unbuttoned sleeves",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unbuttoned vest",
+        "garment_noun": "vest",
+        "region": "UPPER_BODY"
+      }
+    ],
+    "undone": [
+      {
+        "tag": "undone ascot",
+        "garment_noun": "ascot",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone bowtie",
+        "garment_noun": "bowtie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone bra",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "undone chin strap",
+        "garment_noun": "chin strap",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone collar",
+        "garment_noun": "collar",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone cross tie",
+        "garment_noun": "cross tie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone duijin",
+        "garment_noun": "duijin",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "undone neck ribbon",
+        "garment_noun": "neck ribbon",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone neckerchief",
+        "garment_noun": "neckerchief",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone necktie",
+        "garment_noun": "necktie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "undone skirt",
+        "garment_noun": "skirt",
+        "region": "WAIST_HIP"
+      }
+    ],
+    "unworn": [
+      {
+        "tag": "unworn apron",
+        "garment_noun": "apron",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn armband",
+        "garment_noun": "armband",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "unworn armor",
+        "garment_noun": "armor",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn ascot",
+        "garment_noun": "ascot",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn backpack",
+        "garment_noun": "backpack",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "unworn bag",
+        "garment_noun": "bag",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "unworn bandana",
+        "garment_noun": "bandana",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn belt",
+        "garment_noun": "belt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn bikini",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn bikini bottom",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn bikini top",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn blazer",
+        "garment_noun": "blazer",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn blindfold",
+        "garment_noun": "blindfold",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn bloomers",
+        "garment_noun": "bloomers",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn blouse",
+        "garment_noun": "blouse",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn boots",
+        "garment_noun": "boots",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn bow",
+        "garment_noun": "bow",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn bowtie",
+        "garment_noun": "bowtie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn bra",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn bracelet",
+        "garment_noun": "bracelet",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "unworn buruma",
+        "garment_noun": "buruma",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn camisole",
+        "garment_noun": "camisole",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn cape",
+        "garment_noun": "cape",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn cardigan",
+        "garment_noun": "cardigan",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn cloak",
+        "garment_noun": "cloak",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn coat",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn collar",
+        "garment_noun": "collar",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn crown",
+        "garment_noun": "crown",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn dress",
+        "garment_noun": "dress",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn earring",
+        "garment_noun": "earring",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn eyepatch",
+        "garment_noun": "eyepatch",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn eyewear",
+        "garment_noun": "eyewear",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn fake animal ears",
+        "garment_noun": "fake animal ears",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn footwear",
+        "garment_noun": "footwear",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn gag",
+        "garment_noun": "gag",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn gloves",
+        "garment_noun": "gloves",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "unworn goggles",
+        "garment_noun": "goggles",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn hair bow",
+        "garment_noun": "hair bow",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn hair ornament",
+        "garment_noun": "hair ornament",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn hairband",
+        "garment_noun": "hairband",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn hairclip",
+        "garment_noun": "hairclip",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn haori",
+        "garment_noun": "haori",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn hat",
+        "garment_noun": "hat",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn headband",
+        "garment_noun": "headband",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn headgear",
+        "garment_noun": "headgear",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn headphones",
+        "garment_noun": "headphones",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn headwear",
+        "garment_noun": "headwear",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn helmet",
+        "garment_noun": "helmet",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn hoodie",
+        "garment_noun": "hoodie",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn jacket",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn jewelry",
+        "garment_noun": "jewelry",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn kimono",
+        "garment_noun": "kimono",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn kneehighs",
+        "garment_noun": "kneehighs",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn lanyard",
+        "garment_noun": "lanyard",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn legwear",
+        "garment_noun": "legwear",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn leotard",
+        "garment_noun": "leotard",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn maid headdress",
+        "garment_noun": "maid headdress",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn male underwear",
+        "garment_noun": "underwear",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn mask",
+        "garment_noun": "mask",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn neckerchief",
+        "garment_noun": "neckerchief",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn necklace",
+        "garment_noun": "necklace",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn necktie",
+        "garment_noun": "necktie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn panties",
+        "garment_noun": "panties",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn pants",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn pantyhose",
+        "garment_noun": "pantyhose",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn ribbon",
+        "garment_noun": "ribbon",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn ring",
+        "garment_noun": "ring",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "unworn robe",
+        "garment_noun": "robe",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn sandals",
+        "garment_noun": "sandals",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn sarong",
+        "garment_noun": "sarong",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn scarf",
+        "garment_noun": "scarf",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn scrunchie",
+        "garment_noun": "scrunchie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn shoes",
+        "garment_noun": "shoes",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn shorts",
+        "garment_noun": "shorts",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn skirt",
+        "garment_noun": "skirt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "unworn sleeves",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn slippers",
+        "garment_noun": "slippers",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn socks",
+        "garment_noun": "socks",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn sweater",
+        "garment_noun": "sweater",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn swim cap",
+        "garment_noun": "swim cap",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "unworn swimsuit",
+        "garment_noun": "swimsuit",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "unworn thighhighs",
+        "garment_noun": "thighhighs",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "unworn vest",
+        "garment_noun": "vest",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "unworn wig",
+        "garment_noun": "wig",
+        "region": "HEAD_NECK_FACE"
+      }
+    ],
+    "torn": [
+      {
+        "tag": "torn apron",
+        "garment_noun": "apron",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn armband",
+        "garment_noun": "armband",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "torn ascot",
+        "garment_noun": "ascot",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn bag",
+        "garment_noun": "bag",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "torn bandages",
+        "garment_noun": "bandages",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn bandeau",
+        "garment_noun": "bandeau",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn belt",
+        "garment_noun": "belt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn bike shorts",
+        "garment_noun": "bike shorts",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn bikini",
+        "garment_noun": "bikini",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn blindfold",
+        "garment_noun": "blindfold",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn bodystocking",
+        "garment_noun": "bodystocking",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn bodysuit",
+        "garment_noun": "bodysuit",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn boots",
+        "garment_noun": "boots",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn bow",
+        "garment_noun": "bow",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn bra",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn buruma",
+        "garment_noun": "buruma",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn camisole",
+        "garment_noun": "camisole",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn cape",
+        "garment_noun": "cape",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn capelet",
+        "garment_noun": "capelet",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn choker",
+        "garment_noun": "choker",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn cloak",
+        "garment_noun": "cloak",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn cloth",
+        "garment_noun": "cloth",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn clothes",
+        "garment_noun": "torn clothes",
+        "region": "STYLE"
+      },
+      {
+        "tag": "torn coat",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn dress",
+        "garment_noun": "dress",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn footwear",
+        "garment_noun": "footwear",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn garter belt",
+        "garment_noun": "belt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn gloves",
+        "garment_noun": "gloves",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "torn hair ribbon",
+        "garment_noun": "hair ribbon",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn hakama",
+        "garment_noun": "hakama",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn hat",
+        "garment_noun": "hat",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn headband",
+        "garment_noun": "headband",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn hood",
+        "garment_noun": "hood",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn hoodie",
+        "garment_noun": "hoodie",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn jacket",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn jeans",
+        "garment_noun": "jeans",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn jumpsuit",
+        "garment_noun": "jumpsuit",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn kimono",
+        "garment_noun": "kimono",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn leggings",
+        "garment_noun": "leggings",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn legwear",
+        "garment_noun": "legwear",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn leotard",
+        "garment_noun": "leotard",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn mask",
+        "garment_noun": "mask",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn neckerchief",
+        "garment_noun": "neckerchief",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn necktie",
+        "garment_noun": "necktie",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn overalls",
+        "garment_noun": "overalls",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn panties",
+        "garment_noun": "panties",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn pants",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn pantyhose",
+        "garment_noun": "pantyhose",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn ribbon",
+        "garment_noun": "ribbon",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn robe",
+        "garment_noun": "robe",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn sack",
+        "garment_noun": "sack",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn sarashi",
+        "garment_noun": "sarashi",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn sarong",
+        "garment_noun": "sarong",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn scarf",
+        "garment_noun": "scarf",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn shoes",
+        "garment_noun": "shoes",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn shorts",
+        "garment_noun": "shorts",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn skirt",
+        "garment_noun": "skirt",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "torn sleeve",
+        "garment_noun": "sleeve",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn sleeves",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn socks",
+        "garment_noun": "socks",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn sports bra",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn straps",
+        "garment_noun": "straps",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn sweater",
+        "garment_noun": "sweater",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn sweater vest",
+        "garment_noun": "sweater vest",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn swimsuit",
+        "garment_noun": "swimsuit",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "torn tabard",
+        "garment_noun": "tabard",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn tank top",
+        "garment_noun": "tank top",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn thighhighs",
+        "garment_noun": "thighhighs",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "torn tube top",
+        "garment_noun": "tube top",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "torn umbrella",
+        "garment_noun": "umbrella",
+        "region": "ARMS_HANDS"
+      },
+      {
+        "tag": "torn veil",
+        "garment_noun": "veil",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "torn vest",
+        "garment_noun": "vest",
+        "region": "UPPER_BODY"
+      }
+    ],
+    "tucked": [
+      {
+        "tag": "pants rolled up",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "pants tucked in",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "shirt overhang",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "shirt partially tucked in",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "shirt rolled up",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "sleeve pushed up",
+        "garment_noun": "sleeve",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "sleeve rolled up",
+        "garment_noun": "sleeve",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "sleeves pushed up",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "sleeves rolled up",
+        "garment_noun": "sleeves",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "sweater partially tucked in",
+        "garment_noun": "sweater",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "sweater tucked in",
+        "garment_noun": "sweater",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "tucked money",
+        "garment_noun": null,
+        "region": null
+      },
+      {
+        "tag": "untucked shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      }
+    ],
+    "exposing": [
+      {
+        "tag": "bra peek",
+        "garment_noun": "bra",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "leotard peek",
+        "garment_noun": "leotard",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "leotard peel",
+        "garment_noun": "leotard",
+        "region": "FULL_BODY"
+      }
+    ],
+    "hand_interaction": [
+      {
+        "tag": "hand in another's shirt",
+        "garment_noun": "shirt",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "hand in jacket",
+        "garment_noun": "jacket",
+        "region": "UPPER_BODY"
+      },
+      {
+        "tag": "hand in thighhighs",
+        "garment_noun": "thighhighs",
+        "region": "LEGS_FEET"
+      },
+      {
+        "tag": "hand in underwear",
+        "garment_noun": "underwear",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "hand on another's hat",
+        "garment_noun": "hat",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "hand on helmet",
+        "garment_noun": "helmet",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "hand under dress",
+        "garment_noun": "dress",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "hands in pants",
+        "garment_noun": "pants",
+        "region": "WAIST_HIP"
+      }
+    ],
+    "effect": [
+      {
+        "tag": "burning clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "burnt clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "exploding clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "floating armor",
+        "garment_noun": "armor",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "floating clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "melting halo",
+        "garment_noun": "halo",
+        "region": "HEAD_NECK_FACE"
+      },
+      {
+        "tag": "steaming clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      },
+      {
+        "tag": "transforming clothes",
+        "garment_noun": "clothes",
+        "region": "FULL_BODY"
+      }
+    ],
+    "malfunction": [
+      {
+        "tag": "imminent undressing",
+        "garment_noun": null,
+        "region": null
+      },
+      {
+        "tag": "slip showing",
+        "garment_noun": null,
+        "region": null
+      },
+      {
+        "tag": "suspenders slip",
+        "garment_noun": "suspenders",
+        "region": "WAIST_HIP"
+      },
+      {
+        "tag": "wardrobe error",
+        "garment_noun": null,
+        "region": null
+      },
+      {
+        "tag": "wardrobe malfunction",
+        "garment_noun": null,
+        "region": null
+      }
+    ],
+    "misc": [
+      {
+        "tag": "coat stash",
+        "garment_noun": "coat",
+        "region": "UPPER_BODY"
+      }
+    ]
+  }
+}

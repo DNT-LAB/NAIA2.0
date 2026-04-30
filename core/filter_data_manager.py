@@ -24,6 +24,13 @@ class FilterDataManager:
         self._clothing_tag_to_region: Dict[str, str] = {}
         self._unassigned_region: str = "UNASSIGNED"
 
+        # 의상 이벤트(상태/동작) 태그 — 의류 그 자체와 분리
+        self._clothing_event_set: Set[str] = set()
+        self._clothing_event_categories: Dict[str, List[str]] = {}
+        self._clothing_event_tag_to_category: Dict[str, str] = {}
+        # v2: 태그별 메타 (garment_noun, region, garment_bound)
+        self._clothing_event_meta: Dict[str, Dict[str, Optional[str]]] = {}
+
         # Noise 태그 필터링용 whitelist (빈도 > 24인 태그만 통과)
         self._valid_tag_whitelist: frozenset = frozenset()
         self._NOISE_THRESHOLD = 24
@@ -104,6 +111,57 @@ class FilterDataManager:
             self._object_set = set(obj_data.get('tags', []))
             print(f"  → 사물 태그: {len(self._object_set)}개")
 
+        # clothing_event.json: 의상 이벤트(상태/동작) 카테고리 → flat set + 역 매핑 + 메타
+        event_data = self._load_json_tag_list('clothing_event.json')
+        if event_data:
+            version = int(event_data.get('version', 1))
+            raw_categories = event_data.get('categories', {})
+            tags: Set[str] = set()
+            cat_map: Dict[str, List[str]] = {}
+            tag_to_cat: Dict[str, str] = {}
+            meta_map: Dict[str, Dict[str, Optional[str]]] = {}
+
+            for cat, entries in raw_categories.items():
+                cat_tags: List[str] = []
+                for entry in entries:
+                    if isinstance(entry, dict):
+                        # v2 스키마
+                        tag = entry.get('tag', '')
+                        if not tag:
+                            continue
+                        noun = entry.get('garment_noun')
+                        region = entry.get('region')
+                        meta_map[tag] = {
+                            'category': cat,
+                            'garment_noun': noun,
+                            'region': region,
+                            'garment_bound': bool(noun),
+                        }
+                    else:
+                        # v1 스키마 (list[str]) — 메타 없음
+                        tag = str(entry)
+                        if not tag:
+                            continue
+                        meta_map[tag] = {
+                            'category': cat,
+                            'garment_noun': None,
+                            'region': None,
+                            'garment_bound': False,
+                        }
+                    cat_tags.append(tag)
+                    tags.add(tag)
+                    tag_to_cat[tag] = cat
+                cat_map[cat] = cat_tags
+
+            self._clothing_event_categories = cat_map
+            self._clothing_event_set = tags
+            self._clothing_event_tag_to_category = tag_to_cat
+            self._clothing_event_meta = meta_map
+            bound_n = sum(1 for m in meta_map.values() if m['garment_bound'])
+            print(f"  → 의상 이벤트 태그: {len(self._clothing_event_set)}개 "
+                  f"({len(self._clothing_event_categories)}개 카테고리, v{version}, "
+                  f"garment-bound {bound_n}/{len(meta_map)})")
+
         # clothing_regions.json: regions dict 저장 + 역 매핑 생성
         region_data = self._load_json_tag_list('clothing_regions.json')
         if region_data:
@@ -139,6 +197,7 @@ class FilterDataManager:
             classified.update(self._pose_action_set)
             classified.update(self._meta_set)
             classified.update(self._object_set)
+            classified.update(self._clothing_event_set)
             for region_tags in self._clothing_region_map.values():
                 classified.update(region_tags)
 
@@ -166,3 +225,37 @@ class FilterDataManager:
     def get_clothing_region(self, tag: str) -> str:
         """의류 태그의 Region을 반환합니다. 매핑 없으면 UNASSIGNED."""
         return self._clothing_tag_to_region.get(tag, self._unassigned_region)
+
+    def get_clothing_event_category(self, tag: str) -> Optional[str]:
+        """의상 이벤트 태그의 카테고리를 반환합니다. 미분류면 None."""
+        return self._clothing_event_tag_to_category.get(tag)
+
+    def get_clothing_event_meta(self, tag: str) -> Optional[Dict[str, Optional[str]]]:
+        """의상 이벤트 태그 메타(category/garment_noun/region/garment_bound) 반환. 미분류면 None."""
+        return self._clothing_event_meta.get(tag)
+
+    def get_garment_region(self, garment_tag: str) -> Optional[str]:
+        """임의 의류 태그의 region을 추정. 정확 매칭 우선, 없으면 substring(가장 긴 매치).
+
+        clothing_regions.json만 사용. 매핑 실패 시 None.
+        """
+        if not garment_tag:
+            return None
+        t = garment_tag.lower().strip()
+        # 정확 매칭
+        direct = self._clothing_tag_to_region.get(t)
+        if direct:
+            return direct
+        # Substring 매칭 — 가장 긴 의류 명사가 우선
+        best_region: Optional[str] = None
+        best_len = 0
+        # 단어 경계 매칭 (의도하지 않은 부분 일치 방지)
+        padded = f" {t} "
+        for known, region in self._clothing_tag_to_region.items():
+            if not known:
+                continue
+            kp = f" {known} "
+            if kp in padded and len(known) > best_len:
+                best_region = region
+                best_len = len(known)
+        return best_region

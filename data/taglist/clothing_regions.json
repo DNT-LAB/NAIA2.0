@@ -1,18 +1,22 @@
 {
-  "version": 1,
-  "description": "의류 태그 Region별 분류 (내부 추적용)",
+  "version": 2,
+  "description": "의류 태그 Region별 분류 (내부 추적용). v2: clothing_event 매칭에 필요한 일반 의류 명사 보강.",
   "regions": {
     "HEAD_NECK_FACE": [
       "balaclava", "crown", "hair bow", "hair ribbon", "hairband", "headband",
       "forehead protector", "sweatband", "hachimaki", "mongkhon", "headdress",
       "maid headdress", "tiara", "veil", "honggaitou", "hood",
-      "earrings", "hoop earrings", "stud earrings", "earclip",
+      "earrings", "hoop earrings", "stud earrings", "earclip", "earring",
+      "earmuffs", "earphones", "earphone", "headset", "headphones",
+      "helmet", "goggles", "bandana", "head wreath", "hat", "headgear",
+      "fake animal ears", "wig", "swim cap", "scrunchie",
       "glasses", "monocle", "hair ornament", "hair beads", "hair bobbles",
       "hairclip", "hairpin", "hair scrunchie", "hair stick", "kanzashi",
-      "mask", "plague doctor mask", "surgical mask",
+      "mask", "plague doctor mask", "surgical mask", "blindfold", "eyepatch",
       "ascot", "bowtie", "choker", "collar", "cross tie",
       "feather boa", "neck ruff", "neckerchief", "necklace", "necktie",
-      "tie clip", "neck ribbon", "scarf", "shawl"
+      "tie clip", "neck ribbon", "scarf", "shawl", "pendant", "ribbon",
+      "gag", "chin strap", "lanyard"
     ],
     "UPPER_BODY": [
       "blouse", "frilled shirt", "sleeveless shirt", "bustier", "crop top",
@@ -28,9 +32,11 @@
       "sleeveless turtleneck", "ribbed sweater", "aran sweater",
       "tabard", "tailcoat", "tank top", "stringer", "tube top",
       "bandeau", "underbust", "vest", "sweater vest", "waistcoat",
-      "cape", "capelet", "side cape", "stole", "sash", "shoulder sash",
-      "raglan sleeves", "apron", "sarashi", "midriff sarashi",
-      "chest sarashi", "budget sarashi", "tasuki"
+      "cape", "capelet", "cloak", "side cape", "stole", "sash",
+      "shoulder sash", "raglan sleeves", "apron", "sarashi",
+      "midriff sarashi", "chest sarashi", "budget sarashi", "tasuki",
+      "bra", "bow", "pasties", "pauldron", "sleeve", "sleeves",
+      "straps", "towel", "duijin"
     ],
     "WAIST_HIP": [
       "bloomers", "buruma", "chaps", "kilt", "pants", "bell-bottoms",
@@ -43,7 +49,7 @@
       "miniskirt", "overall skirt", "plaid skirt", "pleated skirt",
       "suspender skirt", "belt", "buckle", "belt chain", "sam browne belt",
       "suspenders", "hakama", "hakama skirt", "hakama short skirt",
-      "hakama pants", "loincloth"
+      "hakama pants", "loincloth", "panties", "panty"
     ],
     "ARMS_HANDS": [
       "anklet", "arm belt", "armband", "armlet", "bracelet", "bangle",
@@ -51,7 +57,8 @@
       "arm warmers", "gloves", "boxing gloves", "elbow gloves",
       "fingerless gloves", "spiked gloves", "yugake", "mittens",
       "ring", "claw ring", "wedding ring", "thighlet", "wide sleeves",
-      "wristband", "wrist cuffs", "wrist scrunchie"
+      "wristband", "wrist cuffs", "wrist scrunchie",
+      "bag", "backpack", "umbrella"
     ],
     "LEGS_FEET": [
       "boots", "ankle boots", "armored boots", "cowboy boots", "spurs",
@@ -64,7 +71,9 @@
       "zouri", "oxfords", "saddle shoes", "monk shoes", "slippers",
       "animal slippers", "ballet slippers", "crocs", "uwabaki",
       "sneakers", "high tops", "converse", "toeless footwear",
-      "winged footwear", "wedge heels", "leg belt", "tabi", "shoes"
+      "winged footwear", "wedge heels", "leg belt", "tabi", "shoes",
+      "shoe", "sock", "socks", "shoelaces", "thighhigh", "thighhighs",
+      "kneehighs", "pantyhose", "leggings"
     ],
     "FULL_BODY": [
       "dress", "armor", "armored dress", "bikini armor", "costume",
@@ -96,7 +105,7 @@
       "panda costume", "penguin costume", "pig costume",
       "rabbit costume", "reindeer costume", "seal costume",
       "sheep costume", "tiger costume", "straw cape", "mino boushi",
-      "sweater dress", "cassock"
+      "sweater dress", "cassock", "bandages", "cloth", "sack"
     ],
     "STYLE": [
       "casual", "contemporary", "sportswear", "streetwear", "gothic",

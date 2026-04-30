@@ -6,6 +6,7 @@ export function createResultImageInput({
   showToast = () => {},
   navigatorRef = window.navigator,
   URLRef = window.URL,
+  onInternalDrop = null,
 }) {
   const viewer = document.querySelector('.viewer');
   let localPreviewUrl = null;
@@ -28,6 +29,23 @@ export function createResultImageInput({
     const items = Array.from(dataTransfer.items || []);
     const imageItem = items.find(item => item.kind === 'file' && item.type && item.type.startsWith('image/'));
     return imageItem ? imageItem.getAsFile() : null;
+  }
+
+  function readInternalDragSource(dataTransfer) {
+    if (!dataTransfer) return null;
+    let raw = '';
+    try {
+      raw = dataTransfer.getData('application/x-naia-source');
+    } catch (_) {
+      return null;
+    }
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   function dataTransferHasImage(dataTransfer) {
@@ -276,6 +294,14 @@ export function createResultImageInput({
     event.preventDefault();
     dragDepth = 0;
     setDragActive(false);
+    const internal = readInternalDragSource(event.dataTransfer);
+    if (internal && typeof onInternalDrop === 'function') {
+      try {
+        if (onInternalDrop(internal) !== false) return;
+      } catch (error) {
+        console.error('Internal drop handler failed', error);
+      }
+    }
     const file = getImageFileFromDataTransfer(event.dataTransfer);
     if (file) {
       handleImageBlob(file, file.name || 'Dropped Image');

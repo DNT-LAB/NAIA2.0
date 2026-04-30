@@ -320,6 +320,21 @@ export function createMetadataViewer({
   function imageUrlForSource(source) {
     if (source.imageUrl) return source.imageUrl;
     if (source.kind === 'saved' && source.path) return '/api/viewer/image/' + encodeURI(source.path);
+    if ((source.kind === 'input' || source.kind === 'payload')
+        && source.blob
+        && typeof URL !== 'undefined'
+        && typeof URL.createObjectURL === 'function') {
+      const url = URL.createObjectURL(source.blob);
+      source.imageUrl = url;
+      const previousCleanup = source.revokeImageUrl;
+      source.revokeImageUrl = () => {
+        try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+        if (typeof previousCleanup === 'function') {
+          try { previousCleanup(); } catch (_) { /* noop */ }
+        }
+      };
+      return url;
+    }
     return '';
   }
 

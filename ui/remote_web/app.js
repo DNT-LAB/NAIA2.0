@@ -244,6 +244,7 @@ const resultImageInputReady = import('./js/features/resultImageInput.mjs')
         else showToast('Image action popup is not ready', 'error');
       },
       showToast,
+      onInternalDrop: handleInternalImageDrop,
     });
     resultImageInput.bind();
   })
@@ -2198,6 +2199,41 @@ function showMetadataInTab(context = {}) {
   return true;
 }
 
+function handleInternalImageDrop(info) {
+  if (!info || typeof info !== 'object') return false;
+  const path = typeof info.path === 'string' ? info.path : '';
+  const source = typeof info.source === 'string' ? info.source : '';
+  if (path) {
+    return showMetadataInTab({path, source: source || 'saved'});
+  }
+  if (source === 'current') {
+    return showMetadataInTab({source: 'current', hasImage: true});
+  }
+  return false;
+}
+
+document.addEventListener('dragstart', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  let payload = null;
+  if (target.id === 'preview') {
+    payload = {
+      type: 'preview',
+      source: target.dataset.source || '',
+      path: target.dataset.path || '',
+    };
+  } else if (target.classList && target.classList.contains('viewer-thumb')) {
+    payload = {
+      type: 'history',
+      source: 'saved',
+      path: target.dataset.path || '',
+    };
+  }
+  if (!payload || !event.dataTransfer) return;
+  try {
+    event.dataTransfer.setData('application/x-naia-source', JSON.stringify(payload));
+  } catch (_) { /* noop */ }
+}, true);
 
 function applyMetadataPrompt(payload) {
   if (!payload) return;

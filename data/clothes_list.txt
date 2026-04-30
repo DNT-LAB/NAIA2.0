@@ -41,11 +41,6 @@ adapted costume
 adapted uniform
 adeptus' temptation (genshin impact)
 adhesive bra
-adjusting apron
-adjusting belt
-adjusting dress
-adjusting eyepatch
-adjusting shirt
 admiral (kancolle) (cosplay)
 admire vega (umamusume) (cosplay)
 adrian helmet
@@ -267,7 +262,6 @@ apricot (fruit)
 apron
 apron aside
 apron basket
-apron grab
 aqua apron
 aqua armor
 aqua belt
@@ -955,7 +949,6 @@ blender (software)
 blindfold
 blindfold down
 blindfold mask
-blindfold pull
 bling-bang-bang-born (creepy nuts)
 blob (google)
 bloblobber (splatoon)
@@ -1202,14 +1195,11 @@ bra
 bra aside
 bra on head
 bra over clothes
-bra peek
 bra print
 bra strap
-bra tug
 bra visible through clothes
 brace
 bracelet
-bracelet removed
 bracer
 braces
 bradamante (fate) (cosplay)
@@ -1367,8 +1357,6 @@ bunnytop (xenoblade x)
 burger costume
 burger hair ornament
 burger hat
-burning clothes
-burnt clothes
 buruma
 buruma under skirt
 business casual
@@ -1477,10 +1465,7 @@ canopy (forest)
 canopy (shelter)
 cape
 cape clasp
-cape tug
 capelet
-capelet lift
-capelet removed
 capital ship (eve online)
 capote (e.g.o)
 caprese salad
@@ -1501,7 +1486,6 @@ card in hat
 card pendant
 cardigan
 cardigan on shoulders
-cardigan pull
 cardigan under jacket
 cardigan vest
 cardiogram print
@@ -1744,8 +1728,6 @@ choir set (bloodborne)
 choker
 choker jewel
 choker over clothes
-choker pull
-choker removed
 chouzetsusaikawa tenshi-chan (cosplay)
 christian louboutin (brand)
 christmas nightmare (e.g.o)
@@ -1827,12 +1809,9 @@ coat
 coat around waist
 coat bow
 coat dress
-coat grab
-coat hold
 coat of arms
 coat on shoulders
 coat over head
-coat tug
 coattails
 cock ring
 cocktail dress
@@ -2296,7 +2275,6 @@ diving helmet
 diving mask
 diving mask around neck
 diving mask on head
-diving mask removed
 diving suit
 dixie cup hat
 dizzy (guilty gear) (cosplay)
@@ -2450,9 +2428,7 @@ ear through crown
 earclip
 earflap beanie
 earmuffs
-earmuffs removed
 earphones
-earphones removed
 earpiece
 earplugs
 earrings
@@ -3058,7 +3034,6 @@ full-length zipper
 full-stop office (identity) (project moon)
 funade no mae no one day trip (project sekai)
 fundoshi
-fundoshi removed
 funeral dress
 funeral veil
 funny glasses
@@ -3723,18 +3698,10 @@ hanamichi middle school uniform
 hanamusubi (love live!)
 hanasakigawa school uniform
 hanbok
-hand in another's shirt
-hand in jacket
-hand in thighhighs
-hand in underwear
-hand on another's hat
-hand on helmet
-hand under dress
 hand wraps
 handbag
 handcuff dangle
 handjob gesture (not ok)
-hands in pants
 hanegasaki academy school uniform
 hanekawa tsubasa (cosplay)
 haneoka school uniform
@@ -3806,12 +3773,10 @@ head mirror
 head ornament
 head scarf
 head wreath
-head wreath removed
 head-mounted display
 headband
 headband around neck
 headdress
-headdress removed
 headgear
 headlamp
 headphones
@@ -3820,7 +3785,6 @@ headphones over headwear
 headpiece
 headscarf
 headset
-headset removed
 headwear switch
 headwear with attached mittens
 headwear writing
@@ -3993,28 +3957,11 @@ hockey mask
 hockey sweater
 hogwarts school uniform
 hoi-poi capsule
-holding apron
 holding baton (weapon)
-holding coat
-holding earrings
-holding hairpin
-holding headband
-holding headdress
 holding heart (organ)
-holding hood
-holding leotard
-holding pants
 holding pendant
-holding sash
-holding shoe
-holding sock
 holding steering wheel
 holding stopwatch
-holding sweater
-holding tiara
-holding unworn helmet
-holding unworn jacket
-holding veil
 hole in sock
 holiday (e.g.o)
 holiday holiday (love live!)
@@ -4054,8 +4001,6 @@ honggaitou
 honnoji academy school uniform
 hood
 hood down
-hood grab
-hood lift
 hood over eyes
 hood over one eye
 hood up
@@ -4080,7 +4025,6 @@ hooded top
 hooded track jacket
 hooded vest
 hoodie
-hoodie pull
 hoof gloves
 hoof shoes
 hook office (identity) (project moon)
@@ -4202,7 +4146,6 @@ illyasviel von einzbern (cosplay)
 iluna (nijisanji)
 imadake dabuchi tabemi (cosplay)
 imaizumi kagerou (cosplay)
-imminent undressing
 immiscible discord (project sekai)
 imperial fists
 implied cheating (relationship)
@@ -4308,7 +4251,6 @@ jacket over head
 jacket over hoodie
 jacket over jacket
 jacket over swimsuit
-jacket partially removed
 jacket under coat
 jackets
 jade bracelet
@@ -4551,9 +4493,7 @@ kimono
 kimono around waist
 kimono dress
 kimono on shoulders
-kimono partially removed
 kimono skirt
-kimono tug
 kin-iro mosaic high school uniform
 kin-iro mosaic middle school uniform
 kinchaku
@@ -4962,9 +4902,6 @@ leopard print bra
 leopard print panties
 leotard
 leotard over bodysuit
-leotard peek
-leotard peel
-leotard removed
 leotard under clothes
 leotard under leotard
 let's be one (love live!)
@@ -5293,7 +5230,6 @@ mejiro palmer (umamusume) (cosplay)
 melahoa (armor)
 mellow yellow (idolmaster)
 melon hair ornament
-melting halo
 meltryllis (fate) (cosplay)
 meltryllis (swimsuit lancer) (fate) (cosplay)
 melusine (fate) (cosplay)
@@ -5755,10 +5691,8 @@ neck brace
 neck corset
 neck flower
 neck garter
-neck lift
 neck piercing
 neck ribbon
-neck ribbon removed
 neck ring
 neck ruff
 neck tassel
@@ -5769,7 +5703,6 @@ necklace
 necklace between breasts
 necklace between pecs
 necklace in mouth
-necklace pull
 necktie
 necktie around wrists
 necktie aside
@@ -6193,7 +6126,6 @@ over-rim eyewear
 overall shorts
 overall skirt
 overalls
-overalls removed
 overcoat
 overhead line
 overshirt
@@ -6280,8 +6212,6 @@ panties under yoga pants
 panties visible through clothes
 pants
 pants around ankles
-pants rolled up
-pants tucked in
 pants under dress
 pants under leotard
 pants under shorts
@@ -6296,7 +6226,6 @@ pantyhose
 pantyhose around legs
 pantyhose around one leg
 pantyhose cutout
-pantyhose lift
 pantyhose over swimsuit
 pantyhose under buruma
 pantyhose under leotard
@@ -6334,7 +6263,6 @@ party hat
 passion!!!!!! (love live!)
 passionlip (fate) (cosplay)
 pasties
-pasties removed
 pasties under clothes
 patch
 patchouli knowledge (cosplay)
@@ -6343,7 +6271,6 @@ patissier
 patterned eyes
 patterned legwear
 patterned skin
-pauldron removed
 pauldrons
 paw collar
 paw earrings
@@ -6395,7 +6322,6 @@ pendant
 pendant choker
 pendant collar
 pendant earring
-pendant removed
 pendant watch
 penguin costume
 penguin hair ornament
@@ -6938,7 +6864,6 @@ puffy-trimmed capelet
 puffy-trimmed dress
 puffy-trimmed jacket
 puka puka
-pulling off legwear
 pullover
 puma (brand)
 pumpkin bra
@@ -7328,13 +7253,6 @@ remembering
 remilia scarlet (cosplay)
 reminiscence marionette (ensemble stars!)
 remnant cube (wuthering waves)
-removing bikini top
-removing bowtie
-removing cape
-removing cloak
-removing necktie
-removing pants
-removing thighhigh
 renaissance clothes
 renpu girls school uniform
 rerebrace
@@ -7469,7 +7387,6 @@ ring box
 ring gag
 ring hair ornament
 ring necklace
-ring removed
 ring-con
 ringer t-shirt
 rinmeikan girls school uniform
@@ -7483,7 +7400,6 @@ ro-500 (kancolle) (cosplay)
 road of radiance (umamusume)
 robe
 robe on shoulders
-robe partially removed
 robe slip
 robin (bird)
 rocker-chic
@@ -7663,7 +7579,6 @@ saratoga (kancolle) (cosplay)
 sarayashiki junior high school uniform
 sari
 sarong
-sarong hold
 sash
 sash bow
 sashimono
@@ -7691,7 +7606,6 @@ scarf bow
 scarf choker
 scarf on head
 scarf over mouth
-scarf tying
 scarlet aeonia (elden ring)
 scathach (fate) (cosplay)
 scattered hair
@@ -7953,10 +7867,7 @@ shirt
 shirt belt
 shirt bow
 shirt over dress
-shirt overhang
-shirt partially tucked in
 shirt ribbon
-shirt rolled up
 shirt stay
 shirt straps
 shirt tan
@@ -8001,7 +7912,6 @@ short-sleeved sweater
 shorts
 shorts around ankles
 shorts tan
-shorts tug
 shorts under dress
 shorts under shorts
 shorts under skirt
@@ -8128,7 +8038,6 @@ single detached legging
 single detached sleeve
 single drill
 single ear cover
-single earphone removed
 single earring
 single elbow glove
 single elbow pad
@@ -8170,7 +8079,6 @@ single sleeve past fingers
 single sleeve past wrist
 single slipper
 single sock
-single sock removed
 single strap
 single stripe
 single tear
@@ -8207,7 +8115,6 @@ skirt around one ankle
 skirt cutout
 skirt over leggings
 skirt pants
-skirt partially removed
 skirt pocket
 skirt set
 skirt suit
@@ -8244,9 +8151,7 @@ sleeve cuff bow
 sleeve cuffs
 sleeve garter
 sleeve pouch
-sleeve pushed up
 sleeve ribbon
-sleeve rolled up
 sleeve slit
 sleeve tied shut
 sleeve zipper
@@ -8273,9 +8178,6 @@ sleeveless turtleneck dress
 sleeveless turtleneck leotard
 sleeves past fingers
 sleeves past wrists
-sleeves pushed up
-sleeves rolled up
-sleeves tied together
 sling bikini top
 slingshot dress
 slingshot swimsuit
@@ -8553,7 +8455,6 @@ stars we chase (love live!)
 start!! true dreams (love live!)
 starting future (umamusume)
 statue of the seven (cosplay)
-steaming clothes
 steampunk maid costume
 steel ball (jojo)
 steel glove
@@ -8793,8 +8694,6 @@ suspender skirt
 suspender top
 suspenders
 suspenders gap
-suspenders removed
-suspenders slip
 suspenders under shirt
 suzumebachi (shikai)
 suzumiya haruhi (cosplay)
@@ -8806,14 +8705,10 @@ sweater
 sweater dress
 sweater guard
 sweater jacket
-sweater partially tucked in
-sweater tucked in
 sweater under dress
 sweater under jacket
 sweater under shirt
 sweater vest
-sweater vest lift
-sweater vest removed
 sweatpants
 sweaty clothes
 swedish flag bikini
@@ -9084,7 +8979,6 @@ thumbcuffs
 thundering pulse (genshin impact)
 thyrsus (fire emblem)
 tiara
-tiara removed
 tibetan clothes
 tie clip
 tie-back dress
@@ -9092,13 +8986,7 @@ tie-dye
 tied dress
 tied ears
 tied hoodie strings
-tied jacket
 tied jumpsuit
-tied shirt
-tied skirt
-tied sleeves
-tied sweater
-tied tank top
 tifa lockhart (cosplay)
 tifa lockhart's refined dress
 tiger costume
@@ -9189,81 +9077,8 @@ torii earrings
 torii hair ornament
 torioigasa
 toritsu hakuou academy school uniform
-torn apron
-torn armband
-torn ascot
-torn bag
-torn bandages
-torn bandeau
-torn belt
-torn bike shorts
-torn bikini
-torn blindfold
-torn bodystocking
-torn bodysuit
-torn boots
-torn bow
-torn bra
-torn buruma
-torn camisole
-torn cape
-torn capelet
-torn choker
-torn cloak
-torn cloth
-torn clothes
-torn coat
 torn curtains
-torn dress
-torn footwear
-torn garter belt
-torn gloves
-torn hair ribbon
-torn hakama
-torn hat
-torn headband
-torn hood
-torn hoodie
-torn jacket
-torn jeans
-torn jumpsuit
-torn kimono
-torn leggings
-torn legwear
-torn leotard
-torn mask
-torn neckerchief
-torn necktie
-torn overalls
-torn panties
-torn pants
-torn pantyhose
 torn photo
-torn ribbon
-torn robe
-torn sack
-torn sarashi
-torn sarong
-torn scarf
-torn shirt
-torn shoes
-torn shorts
-torn skirt
-torn sleeve
-torn sleeves
-torn socks
-torn sports bra
-torn straps
-torn sweater
-torn sweater vest
-torn swimsuit
-torn tabard
-torn tank top
-torn thighhighs
-torn tube top
-torn umbrella
-torn veil
-torn vest
 torpedo (splatoon)
 tortoiseshell-framed eyewear
 toshima (tokyo)
@@ -9271,7 +9086,6 @@ tote bag
 touou academy school uniform
 towel around neck
 towel around waist
-towel lift
 towel on arm
 towel on head
 towel on legs
@@ -9299,7 +9113,6 @@ train (clothing)
 training bra
 training outfit (fire emblem engage)
 transformation brooch (sailor moon)
-transforming clothes
 translucent bunnysuit
 translucent swimsuit
 transparent bag
@@ -9369,7 +9182,6 @@ tsuwabuki high school uniform
 tube dress
 tube socks
 tube top
-tucked money
 tulaytullah's remembrance (genshin impact)
 tulip hat
 tulip skirt
@@ -9386,7 +9198,6 @@ turtleneck coat
 turtleneck dress
 turtleneck jacket
 turtleneck leotard
-turtleneck lift
 turtleneck one-piece swimsuit
 turtleneck shirt
 turtleneck shrug
@@ -9483,9 +9294,6 @@ two-tone tank top
 two-tone thighhighs
 two-tone tube top
 two-tone vest
-tying bikini
-tying bra
-tying panties
 typhoon (kamen rider)
 tzitzi-ya-ku (armor)
 u.a. cheerleader uniform
@@ -9515,11 +9323,6 @@ uminomori private academy school uniform
 umpire
 un uniform (muv-luv)
 unaligned ears
-unbuttoned dress
-unbuttoned jacket
-unbuttoned shirt
-unbuttoned sleeves
-unbuttoned vest
 unconventional maid
 unconventional school uniform
 undead (ensemble stars!)
@@ -9540,16 +9343,6 @@ underwear
 underwear only
 underwear writing
 underworld (ornament)
-undone ascot
-undone bowtie
-undone bra
-undone chin strap
-undone collar
-undone cross tie
-undone neck ribbon
-undone neckerchief
-undone necktie
-undone skirt
 uneven footwear
 uneven gloves
 uneven legwear
@@ -9566,101 +9359,6 @@ unitard
 united states medal of honor
 universal federation army uniform
 unofficial sailor senshi uniform
-untied bikini
-untied bikini bottom
-untied bikini top
-untied panties
-untied ribbon
-untied shoe
-untied shoelaces
-untied straps
-untied swimsuit
-untucked shirt
-unworn apron
-unworn armband
-unworn armor
-unworn ascot
-unworn backpack
-unworn bag
-unworn bandana
-unworn belt
-unworn bikini
-unworn bikini bottom
-unworn bikini top
-unworn blazer
-unworn blindfold
-unworn bloomers
-unworn blouse
-unworn boots
-unworn bow
-unworn bowtie
-unworn bra
-unworn bracelet
-unworn buruma
-unworn camisole
-unworn cape
-unworn cardigan
-unworn cloak
-unworn clothes
-unworn coat
-unworn collar
-unworn crown
-unworn dress
-unworn earring
-unworn eyepatch
-unworn eyewear
-unworn fake animal ears
-unworn gag
-unworn gloves
-unworn goggles
-unworn hair bow
-unworn hair ornament
-unworn hairband
-unworn hairclip
-unworn haori
-unworn hat
-unworn headband
-unworn headgear
-unworn headphones
-unworn headwear
-unworn helmet
-unworn hoodie
-unworn jacket
-unworn jewelry
-unworn kimono
-unworn kneehighs
-unworn lanyard
-unworn legwear
-unworn leotard
-unworn maid headdress
-unworn male underwear
-unworn mask
-unworn neckerchief
-unworn necklace
-unworn necktie
-unworn panties
-unworn pants
-unworn pantyhose
-unworn ribbon
-unworn ring
-unworn robe
-unworn sandals
-unworn sarong
-unworn scarf
-unworn scrunchie
-unworn shirt
-unworn shoes
-unworn shorts
-unworn skirt
-unworn sleeves
-unworn slippers
-unworn socks
-unworn sweater
-unworn swim cap
-unworn swimsuit
-unworn thighhighs
-unworn vest
-unworn wig
 up sleeve
 uproar (holostars)
 upshirt
@@ -9761,9 +9459,7 @@ very long robe
 very long sleeves
 vespoid (armor)
 vest
-vest lift
 vest pouch
-vest pull
 vi-o-la suit
 vibrator in leg garter
 vibrator under pantyhose
@@ -9827,8 +9523,6 @@ waraji
 warbonnet
 wardress (nikke)
 wardrobe
-wardrobe error
-wardrobe malfunction
 warrior (dq3) (cosplay)
 warspite (kancolle) (cosplay)
 wataboushi
@@ -10783,7 +10477,6 @@ classic lolita
 claw hair clip
 closed jacket
 coat on head
-coat stash
 cockade
 collared suit
 colored lapels
@@ -10811,7 +10504,6 @@ e-girl
 earmuffs around neck
 edging underwear
 elmo training outfit
-exploding clothes
 eyes visible through eyewear
 familia uniform
 fatigues
@@ -10819,7 +10511,6 @@ festival jinbei
 fishnet armwear
 flag patch
 flight suit
-floating clothes
 floral print bow
 floral print sarong
 floral print sash
@@ -10983,7 +10674,6 @@ red lining
 red straps
 reflective eyewear
 rei no mizugi
-removing hood
 riding outfit
 round bag
 round collar
@@ -11024,7 +10714,6 @@ sleeveless turtleneck bodysuit
 sleeveless turtleneck shirt
 sleeveless vest
 sleeves past elbows
-slip showing
 snail hair ornament
 snake costume
 soap shoes
@@ -11077,7 +10766,6 @@ two-tone wrist cuffs
 two-tone wristband
 ukrainian clothes
 under covers
-undone duijin
 unwrap me body bow
 vertical-striped bow
 vertical-striped ribbon
@@ -11172,7 +10860,6 @@ gothic punk
 grey scrunchie
 hair clipper
 hair straightener
-hakama removed
 hand chains
 handheld fan
 hanzou academy uniform
@@ -11282,8 +10969,6 @@ ultra recon squad uniform
 ultraman suit
 under armour
 uniqlo
-untied footwear
-unworn footwear
 urban camouflage
 vans
 vermilion city school uniform
@@ -11321,7 +11006,6 @@ food-themed brooch
 print armband
 tomato costume
 gold embroidery
-floating armor
 suzu head
 strawberry hat ornament
 huge bowtie

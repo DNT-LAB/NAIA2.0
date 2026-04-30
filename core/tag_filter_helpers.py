@@ -190,6 +190,7 @@ def apply_tag_filters(
     1. Auto Hide (보호 키워드 + 패턴 매칭)
     2. remove_character_features → filter_manager.characteristic_list
     3. remove_clothes → filter_manager.clothes_list (+ region 추적)
+    3.5 remove_clothing_event → filter_manager._clothing_event_set (+ category 추적)
     4. remove_color → filter_manager.color_list + _is_color_exception()
     5. remove_location_and_background_color → filter_manager._location_set
     6. remove_expression (NEW) → filter_manager._expression_set
@@ -256,6 +257,29 @@ def apply_tag_filters(
             removed_tags.append(keyword)
     filter_log.append({
         'name': '의류',
+        'enabled': enabled,
+        'removed': removed_tags[before_len:],
+    })
+
+    # 3.5 remove_clothing_event (의상 이벤트: 상태/동작)
+    enabled = checkbox_options.get("remove_clothing_event", False)
+    before_len = len(removed_tags)
+    if enabled:
+        event_set = filter_manager._clothing_event_set
+        temp = [keyword for keyword in main_tags if keyword in event_set]
+
+        if track_clothing_regions and temp:
+            removed_by_category = defaultdict(list)
+            for keyword in temp:
+                cat = filter_manager.get_clothing_event_category(keyword) or 'unknown'
+                removed_by_category[cat].append(keyword)
+            result['removed_clothing_events_by_category'] = dict(removed_by_category)
+
+        for keyword in temp:
+            main_tags.remove(keyword)
+            removed_tags.append(keyword)
+    filter_log.append({
+        'name': '의상 이벤트',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })

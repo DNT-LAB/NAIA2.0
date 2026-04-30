@@ -4006,11 +4006,28 @@ body.detached-metadata .metadata-layout {
   max-height: 28dvh;
   overflow-y: auto;
 }
+.mod-img2img-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.75fr) minmax(280px, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+.mod-img2img-tune {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+}
 .mod-img2img-head {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
   gap: 12px;
   align-items: stretch;
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-head {
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 .mod-img2img-preview {
   min-height: 180px;
@@ -4021,6 +4038,10 @@ body.detached-metadata .metadata-layout {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-preview {
+  height: clamp(220px, 30dvh, 320px);
+  min-height: 220px;
 }
 .mod-img2img-preview-img {
   width: 100%;
@@ -4068,6 +4089,25 @@ body.detached-metadata .metadata-layout {
 .mod-img2img-range input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-controls {
+  grid-template-columns: 1fr;
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-actions {
+  margin-top: auto;
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-actions > * {
+  flex: 1;
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-main-prompt {
+  min-height: 220px;
+  max-height: 38dvh;
+  overflow-y: auto;
+}
+.mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-negative-prompt {
+  min-height: 132px;
+  max-height: 28dvh;
+  overflow-y: auto;
 }
 .mod-img2img-mask-editor {
   display: flex;
@@ -4228,9 +4268,24 @@ body.detached-metadata .metadata-layout {
   .module-popup.module-popup-img2img {
     max-height: calc(100dvh - 72px);
   }
+  .mod-img2img-body {
+    grid-template-columns: 1fr;
+  }
   .mod-img2img-head,
   .mod-img2img-controls {
     grid-template-columns: 1fr;
+  }
+  .mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-preview {
+    height: clamp(180px, 28dvh, 260px);
+    min-height: 180px;
+  }
+  .mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-main-prompt {
+    min-height: 220px;
+    max-height: 42dvh;
+  }
+  .mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-negative-prompt {
+    min-height: 150px;
+    max-height: 32dvh;
   }
   .mod-img2img-actions {
     flex-direction: column;

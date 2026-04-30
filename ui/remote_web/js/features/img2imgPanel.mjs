@@ -217,21 +217,25 @@ export function createImg2ImgPanel({
 
     moduleBody.innerHTML = `
       <div class="mod-img2img">
-        <div class="mod-img2img-head">
-          <div class="mod-img2img-preview">${preview}</div>
-          <div class="mod-img2img-summary">
-            <div class="mod-section-label">소스</div>
-            <div class="mod-info-chip">${escHtml(state.source_label || '결과 이미지')}</div>
-            <div class="mod-img2img-meta">${escHtml(state.mode || 'img2img')} · ${Number(state.width) || 0}×${Number(state.height) || 0}</div>
+        <div class="mod-img2img-body">
+          <div class="mod-img2img-head">
+            <div class="mod-img2img-preview">${preview}</div>
+            <div class="mod-img2img-summary">
+              <div class="mod-section-label">소스</div>
+              <div class="mod-info-chip">${escHtml(state.source_label || '결과 이미지')}</div>
+              <div class="mod-img2img-meta">${escHtml(state.mode || 'img2img')} · ${Number(state.width) || 0}×${Number(state.height) || 0}</div>
+            </div>
+          </div>
+          <div class="mod-img2img-tune">
+            ${controlsHtml}
+            ${actionsHtml}
           </div>
         </div>
 
         ${renderMaskEditor(state)}
 
-        ${controlsHtml}
         ${promptsHtml}
         ${charactersHtml}
-        ${actionsHtml}
       </div>`;
   }
 

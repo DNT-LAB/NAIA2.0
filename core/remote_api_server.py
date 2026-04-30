@@ -139,6 +139,7 @@ class RemoteBridge(QObject):
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
     request_result_queue = pyqtSignal(str)              # result context JSON — 결과 이미지를 생성 큐에 추가
     request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
+    request_result_image_action = pyqtSignal(str)       # result context JSON — 숨김 img2img 세션 등
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
@@ -211,6 +212,8 @@ class RemoteBridge(QObject):
         self._remote_upscale_in_flight: bool = False
         self._remote_upscale_thread = None
         self._remote_upscale_worker = None
+        self._remote_img2img_window_id: Optional[int] = None
+        self._remote_img2img_source_label: str = ""
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -1441,7 +1444,13 @@ class RemoteBridge(QObject):
                 raise RuntimeError("Main window is not ready")
 
             if action == "img2img":
-                handler = getattr(main_window, "activate_img2img_panel", None)
+                self._open_remote_img2img_session(
+                    pil_image=pil_image,
+                    history_item=None,
+                    source_label=label or "Input Image",
+                )
+                print(f"🌐 Remote: hidden img2img session opened — {label or 'Input Image'}")
+                return
             elif action == "inpaint":
                 handler = getattr(main_window, "activate_inpaint_mode", None)
             elif action == "danbooru":
@@ -1467,6 +1476,232 @@ class RemoteBridge(QObject):
             message = f"{labels.get(action, 'Image')} action failed: {e}"
             self._broadcast_json({"type": "toast", "message": message, "level": "error"})
             print(f"🌐 Remote: image action failed — {action}: {e}")
+
+    def _img2img_manager(self):
+        main_window = getattr(self.app_context, "main_window", None)
+        if not main_window:
+            return None
+        return getattr(main_window, "img2img_window_manager", None)
+
+    def _get_remote_img2img_window(self):
+        manager = self._img2img_manager()
+        window_id = self._remote_img2img_window_id
+        if not manager or not window_id:
+            return None
+        return getattr(manager, "windows", {}).get(window_id)
+
+    def _close_remote_img2img_session(self):
+        manager = self._img2img_manager()
+        window_id = self._remote_img2img_window_id
+        self._remote_img2img_window_id = None
+        self._remote_img2img_source_label = ""
+        if manager and window_id:
+            close_window = getattr(manager, "close_window", None)
+            if callable(close_window):
+                close_window(window_id)
+
+    def _pil_preview_data_url(self, pil_image, max_side: int = 640) -> str:
+        if pil_image is None:
+            return ""
+        try:
+            from PIL import Image
+
+            thumb = pil_image.copy()
+            thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            if thumb.mode not in ("RGB", "RGBA"):
+                thumb = thumb.convert("RGBA")
+            buffer = io.BytesIO()
+            thumb.save(buffer, format="PNG", optimize=True)
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            return f"data:image/png;base64,{encoded}"
+        except Exception as exc:
+            print(f"🌐 Remote: img2img preview encode failed — {exc}")
+            return ""
+
+    def _remote_img2img_strength_float(self, raw_value: int) -> float:
+        return 1.0 if int(raw_value) == 99 else int(raw_value) / 100.0
+
+    def _read_img2img(self) -> dict:
+        window = self._get_remote_img2img_window()
+        if not window:
+            return {
+                "type": "module_state",
+                "module_id": "img2img",
+                "active": False,
+            }
+
+        pil_image = getattr(window, "pil_image", None)
+        strength_raw = int(window.strength_slider.value())
+        noise_raw = int(window.noise_slider.value())
+        characters = []
+        for index, row in enumerate(getattr(window, "character_rows", []) or []):
+            characters.append({
+                "id": index + 1,
+                "active": bool(row["active_checkbox"].isChecked()),
+                "prompt": row["prompt_edit"].toPlainText(),
+                "uc": row["uc_edit"].toPlainText(),
+            })
+
+        return {
+            "type": "module_state",
+            "module_id": "img2img",
+            "active": True,
+            "window_id": int(getattr(window, "window_id", 0) or 0),
+            "mode": str(getattr(window, "mode", "img2img") or "img2img"),
+            "source_label": self._remote_img2img_source_label,
+            "width": int(getattr(pil_image, "width", 0) or 0),
+            "height": int(getattr(pil_image, "height", 0) or 0),
+            "preview": self._pil_preview_data_url(pil_image),
+            "strength": strength_raw,
+            "strength_value": self._remote_img2img_strength_float(strength_raw),
+            "noise": noise_raw,
+            "noise_value": noise_raw / 100.0,
+            "repeat": int(window.repeat_spin.value()),
+            "main_prompt": window.main_prompt_edit.toPlainText(),
+            "negative_prompt": window.negative_prompt_edit.toPlainText(),
+            "characters": characters,
+            "can_generate": bool(pil_image),
+        }
+
+    def _broadcast_img2img_state(self):
+        self._broadcast_json(self._read_img2img())
+
+    def _open_remote_img2img_session(self, pil_image, history_item=None, source_label: str = ""):
+        manager = self._img2img_manager()
+        if not manager:
+            raise RuntimeError("Img2Img manager is not ready")
+        if pil_image is None:
+            raise RuntimeError("Img2Img source image is unavailable")
+
+        self._close_remote_img2img_session()
+        window = manager.create_window(
+            pil_image=pil_image,
+            mode="img2img",
+            history_item=history_item,
+            visible=False,
+        )
+        self._remote_img2img_window_id = int(getattr(window, "window_id", 0) or 0)
+        self._remote_img2img_source_label = str(source_label or "Result Image")
+        self._broadcast_img2img_state()
+        self._broadcast_json({
+            "type": "toast",
+            "message": "Img2Img session ready",
+            "level": "success",
+        })
+
+    def _resolve_result_img2img_source(self, payload: dict) -> tuple[object, object, str]:
+        from PIL import Image
+
+        item = self._get_result_context_history_item(payload)
+        item_image = getattr(item, "image", None) if item else None
+        label = str(payload.get("label") or payload.get("path") or "Result Image")
+        if item_image is not None:
+            return item_image.copy(), item, label
+
+        rel_path = str(payload.get("path") or "").strip()
+        if rel_path:
+            target = self._validate_viewer_path(rel_path)
+            if target:
+                with Image.open(target) as opened:
+                    return opened.convert("RGBA").copy(), None, Path(target).name
+
+        source = str(payload.get("source") or "").strip().lower()
+        if source == "current" and self.latest_webp:
+            with Image.open(io.BytesIO(self.latest_webp)) as opened:
+                return opened.convert("RGBA").copy(), None, "Current Result"
+
+        raise RuntimeError("Img2Img source is unavailable")
+
+    def _do_result_image_action(self, payload_json: str = "{}"):
+        try:
+            payload = json.loads(payload_json or "{}")
+            if not isinstance(payload, dict):
+                payload = {}
+            action = str(payload.get("action") or "").strip().lower()
+            if action != "img2img":
+                self._broadcast_json({"type": "toast", "message": "Unsupported result image action", "level": "error"})
+                return
+            pil_image, history_item, label = self._resolve_result_img2img_source(payload)
+            self._open_remote_img2img_session(
+                pil_image=pil_image,
+                history_item=history_item,
+                source_label=label,
+            )
+            print(f"🌐 Remote: result img2img session opened — {label}")
+        except Exception as e:
+            message = f"Img2Img action failed: {e}"
+            self._broadcast_json({"type": "toast", "message": message, "level": "error"})
+            print(f"🌐 Remote: result img2img action failed — {e}")
+
+    def _set_img2img(self, key: str, value: str):
+        key = str(key or "")
+        try:
+            if key == "close":
+                self._close_remote_img2img_session()
+                self._broadcast_img2img_state()
+                return
+
+            window = self._get_remote_img2img_window()
+            if not window:
+                self._broadcast_json({"type": "toast", "message": "No active Img2Img session", "level": "error"})
+                return
+
+            should_broadcast = False
+            if key == "main_prompt":
+                window.main_prompt_edit.setPlainText(value)
+            elif key == "negative_prompt":
+                window.negative_prompt_edit.setPlainText(value)
+            elif key == "strength":
+                window.strength_slider.setValue(max(1, min(99, int(float(value)))))
+            elif key == "noise":
+                window.noise_slider.setValue(max(0, min(99, int(float(value)))))
+            elif key == "repeat":
+                window.repeat_spin.setValue(max(1, min(99, int(float(value)))))
+            elif key == "add_character":
+                window._add_character_row()
+                should_broadcast = True
+            elif key.startswith("remove_character_"):
+                index = int(key.rsplit("_", 1)[-1])
+                rows = getattr(window, "character_rows", []) or []
+                if 0 <= index < len(rows):
+                    window._remove_character_row(rows[index])
+                    should_broadcast = True
+            elif key.startswith("char_active_"):
+                index = int(key.rsplit("_", 1)[-1])
+                rows = getattr(window, "character_rows", []) or []
+                if 0 <= index < len(rows):
+                    rows[index]["active_checkbox"].setChecked(self._coerce_bool(value))
+            elif key.startswith("char_prompt_"):
+                index = int(key.rsplit("_", 1)[-1])
+                rows = getattr(window, "character_rows", []) or []
+                if 0 <= index < len(rows):
+                    rows[index]["prompt_edit"].setPlainText(value)
+            elif key.startswith("char_uc_"):
+                index = int(key.rsplit("_", 1)[-1])
+                rows = getattr(window, "character_rows", []) or []
+                if 0 <= index < len(rows):
+                    rows[index]["uc_edit"].setPlainText(value)
+            elif key == "generate":
+                params = window._collect_generation_params()
+                repeat_count = int(window.repeat_spin.value())
+                if repeat_count > 1:
+                    params["img2img_batch_request"] = True
+                    params["img2img_batch_total"] = repeat_count
+                params["img2img_batch_window_id"] = int(getattr(window, "window_id", 0) or 0)
+                main_window = getattr(self.app_context, "main_window", None)
+                if not main_window or not hasattr(main_window, "on_img2img_window_generate"):
+                    raise RuntimeError("Generation controller is not ready")
+                main_window.on_img2img_window_generate(params["img2img_batch_window_id"], params)
+                self._broadcast_json({"type": "toast", "message": "Img2Img generation requested", "level": "success"})
+                should_broadcast = True
+            else:
+                return
+
+            if should_broadcast:
+                self._broadcast_img2img_state()
+        except Exception as e:
+            print(f"🌐 Remote: img2img 설정 실패 — {key}={value}: {e}")
+            self._broadcast_json({"type": "toast", "message": f"Img2Img update failed: {e}", "level": "error"})
 
     def _metadata_json_safe(self, value):
         """메타데이터 응답에 싣기 어려운 객체/바이트를 안전하게 축약."""
@@ -3144,6 +3379,8 @@ class RemoteBridge(QObject):
             return self._read_character_reference()
         elif module_id == "vibe_transfer":
             return self._read_vibe_transfer()
+        elif module_id == "img2img":
+            return self._read_img2img()
         elif module_id == "save_directory":
             return self._read_save_directory(ws=ws)
         elif module_id == "wildcard":
@@ -4232,6 +4469,8 @@ class RemoteBridge(QObject):
             self._set_character_reference(key, value)
         elif module_id == "vibe_transfer":
             self._set_vibe_transfer(key, value)
+        elif module_id == "img2img":
+            self._set_img2img(key, value)
         elif module_id == "save_directory":
             self._set_save_directory(key, value)
         elif module_id == "wildcard":
@@ -7904,6 +8143,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_set_result_enhance_config.emit(ws, json.dumps(cmd))
                         elif cmd_type == "result_upscale":
                             bridge.request_result_upscale.emit(ws, json.dumps(cmd))
+                        elif cmd_type == "result_image_action":
+                            bridge.request_result_image_action.emit(json.dumps(cmd))
                         elif cmd_type == "probe_api":
                             # 저장된 토큰/URL 로 실시간 연결 가능 여부 확인.
                             # keyring 값 사용 — 웹으로 토큰이 노출되지 않음. 저장/타임스탬프 갱신 없음.
@@ -8079,6 +8320,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_result_reroll.connect(bridge._do_result_reroll, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_queue.connect(bridge._do_result_queue, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_upscale.connect(bridge._do_result_upscale, Qt.ConnectionType.QueuedConnection)
+    bridge.request_result_image_action.connect(bridge._do_result_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)

@@ -799,7 +799,8 @@ class Img2ImgWindowManager:
 
     def create_window(self, pil_image, mode='img2img',
                       mask_data=None, outpaint_data=None,
-                      history_item=None, auto_generate=False):
+                      history_item=None, auto_generate=False,
+                      visible=True):
         """새 독립 Img2Img 윈도우 생성"""
         window_id = self._next_id
         self._next_id += 1
@@ -825,13 +826,29 @@ class Img2ImgWindowManager:
         window.noise_slider.setValue(self._last_noise_by_mode.get(_wm, 0))
 
         self.windows[window_id] = window
-        window.show()
+        if visible:
+            window.show()
 
         # 즉시 생성 (Outpaint Accept 등)
         if auto_generate:
             window.on_generate_clicked()
 
         return window
+
+    def close_window(self, window_id: int):
+        """등록된 Img2Img 윈도우/숨김 세션을 닫고 관리자 상태를 정리."""
+        window = self.windows.get(window_id)
+        if not window:
+            self._batch_states.pop(window_id, None)
+            return
+
+        window.close()
+        if window_id in self.windows:
+            self._on_window_closing(window_id)
+        try:
+            window.deleteLater()
+        except Exception:
+            pass
 
     def _on_window_closing(self, window_id):
         if window_id in self.windows:

@@ -69,6 +69,7 @@ let instantWildcardPanel = null;
 let e621EventPanel = null;
 let ollamaPanel = null;
 let imageModulePanels = null;
+let img2imgPanel = null;
 let refinePanelControl = null;
 let tagSearchController = null;
 let mobileViewportControl = null;
@@ -548,6 +549,21 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
+  });
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs')
+  .then(({createImg2ImgPanel}) => {
+    img2imgPanel = createImg2ImgPanel({
+      document,
+      moduleBody,
+      escHtml,
+      setModuleParam,
+      onModTextEdit,
+      flushPendingModuleEdit,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Img2Img panel', error);
   });
 const refinePanelReady = import('./js/features/refinePanel.mjs')
   .then(({createRefinePanel}) => {
@@ -1273,6 +1289,7 @@ const DETACHED_MODULE_GEOMETRY = {
   automation: {width: 760, height: 760},
   character_reference: {width: 900, height: 780},
   vibe_transfer: {width: 900, height: 780},
+  img2img: {width: 760, height: 860},
   e621_event: {width: 1120, height: 820},
   ollama: {width: 760, height: 780},
 };
@@ -1435,6 +1452,24 @@ function collectModuleSnapshotState(moduleId) {
     const testbench = document.getElementById('e621Testbench');
     if (search) state.search_text = search.value;
     if (testbench) state.testbench = testbench.value;
+  } else if (moduleId === 'img2img') {
+    const mainPrompt = document.getElementById('img2imgMainPrompt');
+    const negativePrompt = document.getElementById('img2imgNegativePrompt');
+    if (mainPrompt) state.main_prompt = mainPrompt.value;
+    if (negativePrompt) state.negative_prompt = negativePrompt.value;
+    if (Array.isArray(state.characters)) {
+      document.querySelectorAll('[data-img2img-char-index]').forEach(block => {
+        const idx = Number(block.dataset.img2imgCharIndex);
+        const character = state.characters[idx];
+        if (!character) return;
+        const prompt = block.querySelector('.mod-char-prompt');
+        const uc = block.querySelector('.mod-char-uc');
+        const active = block.querySelector('input[type="checkbox"]');
+        if (prompt) character.prompt = prompt.value;
+        if (uc) character.uc = uc.value;
+        if (active) character.active = !!active.checked;
+      });
+    }
   }
 
   return state;
@@ -1628,7 +1663,9 @@ async function requestPopupImageAction(payload, action) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || `HTTP ${response.status}`);
     }
-    if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
+    if (action === 'img2img') {
+      openModule('img2img');
+    } else if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
       openModule('vibe_transfer');
     }
   } catch (error) {
@@ -2029,7 +2066,36 @@ function upscaleResultFromContext(context = {}) {
   }
 }
 
+function resultContextCommandPayload(context = {}) {
+  return {
+    source: context.source || '',
+    path: context.source === 'current' ? '' : (context.path || ''),
+    file_path: context.filePath || '',
+    label: context.label || context.path || context.filePath || 'Result Image',
+  };
+}
+
 async function requestContextImageAction(context, action) {
+  if (action === 'img2img' && context?.source !== 'input') {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showToast('Remote connection is not open', 'error');
+      return;
+    }
+    try {
+      ws.send(JSON.stringify({
+        type: 'result_image_action',
+        action,
+        ...resultContextCommandPayload(context || {}),
+      }));
+      openModule('img2img');
+      showToast('Img2Img session requested', 'success');
+    } catch (error) {
+      console.error('Context img2img request failed', error);
+      showToast('Img2Img request failed', 'error');
+    }
+    return;
+  }
+
   let imageUrl = context?.imageSrc || '';
   const label = context?.path || context?.filePath || 'Result Image';
   if (!imageUrl && context?.path) {
@@ -2808,6 +2874,7 @@ function openModule(moduleId, options = {}) {
     character: 'NAID4 Character',
     character_reference: 'Character Reference',
     vibe_transfer: 'Vibe Transfer',
+    img2img: 'Img2Img',
     conditional_prompt: 'Conditional Prompt',
     wildcard: 'Wildcard',
     instant_wildcard: 'Instant Wildcard',
@@ -3013,6 +3080,7 @@ function renderModuleState(m) {
   else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
   else if (m.module_id === 'character_reference') renderCharacterReference(m);
   else if (m.module_id === 'vibe_transfer') renderVibeTransfer(m);
+  else if (m.module_id === 'img2img') renderImg2Img(m);
   else if (m.module_id === 'save_directory') renderSaveDirectory(m);
   else if (m.module_id === 'wildcard') renderWildcard(m);
   else if (m.module_id === 'instant_wildcard') renderInstantWildcard(m);
@@ -3535,6 +3603,43 @@ function renderCharacterReference(m) {
 // ---- Vibe Transfer module ----
 function renderVibeTransfer(m) {
   if (imageModulePanels) imageModulePanels.renderVibeTransfer(m);
+}
+
+// ---- Img2Img module ----
+function renderImg2Img(m) {
+  if (img2imgPanel) img2imgPanel.render(m);
+}
+
+function img2imgSlider(key, value) {
+  if (img2imgPanel) img2imgPanel.slider(key, value);
+}
+
+function img2imgRepeat(value) {
+  if (img2imgPanel) img2imgPanel.repeat(value);
+}
+
+function img2imgText(key, value) {
+  if (img2imgPanel) img2imgPanel.text(key, value);
+}
+
+function img2imgAddCharacter() {
+  if (img2imgPanel) img2imgPanel.addCharacter();
+}
+
+function img2imgRemoveCharacter(index) {
+  if (img2imgPanel) img2imgPanel.removeCharacter(index);
+}
+
+function img2imgSetCharacterActive(index, checked) {
+  if (img2imgPanel) img2imgPanel.setCharacterActive(index, checked);
+}
+
+function img2imgGenerate() {
+  if (img2imgPanel) img2imgPanel.generate();
+}
+
+function img2imgClose() {
+  if (img2imgPanel) img2imgPanel.close();
 }
 
 // ---- Storage view ----
@@ -4469,6 +4574,7 @@ Promise.all([
   e621EventPanelReady,
   ollamaPanelReady,
   imageModulePanelsReady,
+  img2imgPanelReady,
   refinePanelReady,
   tagSearchReady,
   mobileViewportReady,

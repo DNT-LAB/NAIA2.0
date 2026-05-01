@@ -79,6 +79,7 @@ let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
+let danbooruTabControl = null;
 let customSelectsControl = null;
 let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
@@ -119,6 +120,19 @@ const rightTabsReady = import('./js/features/rightTabs.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize right tabs module', error);
+  });
+const danbooruTabReady = import('./js/features/danbooruTab.mjs')
+  .then(({createDanbooruTabController}) => {
+    danbooruTabControl = createDanbooruTabController({
+      document,
+      escHtml,
+      showToast,
+      setPromptText: applyPromptText,
+      requestGenerate: () => send('generate'),
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Danbooru tab module', error);
   });
 const customSelectsReady = import('./js/features/customSelects.mjs')
   .then(({createCustomSelectController}) => {
@@ -1298,6 +1312,27 @@ function onPromptEdit() {
     promptSendTimer = null;
     _localPromptDirty = false;
   }, 500);
+}
+
+function applyPromptText(prompt) {
+  if (promptSendTimer) {
+    clearTimeout(promptSendTimer);
+    promptSendTimer = null;
+  }
+  syncingPrompt = true;
+  promptEdit.value = String(prompt || '');
+  syncingPrompt = false;
+  _localPromptDirty = false;
+  updatePromptHighlight();
+  applyPromptHighlightState();
+  updatePromptTokenEstimate();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'set_prompt',
+      prompt: promptEdit.value,
+      negative_prompt: negEdit.value,
+    }));
+  }
 }
 
 // ---- Prompt syntax highlight (main prompt only) ----
@@ -3669,6 +3704,7 @@ Promise.all([
   quickFilterReady,
   remoteWsClientReady,
   rightTabsReady,
+  danbooruTabReady,
   customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,

@@ -414,19 +414,19 @@
     <button class="right-tab-btn active" data-right-tab="result" onclick="switchRightTab('result')" role="tab" aria-selected="true">
       <span class="right-tab-icon">🖼</span><span>Result</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="danbooru" data-temporary-hidden="true" hidden onclick="switchRightTab('danbooru')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="danbooru" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false">
       <span class="right-tab-icon">📦</span><span>Danbooru</span>
     </button>
     <button class="right-tab-btn" data-right-tab="pngInfo" onclick="switchRightTab('pngInfo')" role="tab" aria-selected="false">
       <span class="right-tab-icon">📝</span><span>Metadata</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="thumb" data-temporary-hidden="true" hidden onclick="switchRightTab('thumb')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="thumb" onclick="switchRightTab('thumb')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🖼</span><span>Thumb</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="artists" data-temporary-hidden="true" hidden onclick="switchRightTab('artists')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="artists" onclick="switchRightTab('artists')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🎨</span><span>Artists</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="studio" data-temporary-hidden="true" hidden onclick="switchRightTab('studio')" role="tab" aria-selected="false">
+    <button class="right-tab-btn" data-right-tab="studio" onclick="switchRightTab('studio')" role="tab" aria-selected="false">
       <span class="right-tab-icon">▣</span><span>Studio</span>
     </button>
     <div class="boot-indicator" id="bootIndicator" role="status" aria-live="polite">
@@ -435,7 +435,7 @@
       <div class="boot-indicator-bar"><div class="boot-indicator-bar-fill" id="bootIndicatorBarFill"></div></div>
     </div>
     <button class="open-browser-btn" type="button" onclick="openInSystemBrowser()" title="기본 브라우저에서 열기">브라우저에서 열기...</button>
-    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" data-temporary-hidden="true" hidden onclick="switchRightTab('settings')" role="tab" aria-selected="false">
+    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" onclick="switchRightTab('settings')" role="tab" aria-selected="false">
       <span class="right-tab-icon">⚙</span><span>Settings</span>
     </button>
   </div>
@@ -497,11 +497,40 @@
     </div>
   </div>
 
-  <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" data-temporary-hidden="true" hidden role="tabpanel">
-    <div class="right-tab-placeholder">
-      <div class="placeholder-kicker">TODO</div>
-      <h2>Danbooru</h2>
-      <p>Remote Session에서는 WebView 대신 URL/Post ID 기반 Danbooru client로 구현할 예정입니다.</p>
+  <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" hidden role="tabpanel">
+    <div class="danbooru-tab">
+      <header class="danbooru-toolbar">
+        <div>
+          <div class="metadata-kicker">Danbooru Mirror</div>
+          <h2>Danbooru Post Tags</h2>
+        </div>
+        <div class="danbooru-search">
+          <input class="danbooru-input" id="danbooruQuery" type="text" placeholder="post ID or https://danbooru.donmai.us/posts/..." autocomplete="off" spellcheck="false">
+          <button class="metadata-refresh-btn" id="danbooruLoadBtn" type="button">Load</button>
+        </div>
+      </header>
+      <div class="danbooru-status" id="danbooruStatus">Enter a Danbooru post URL or ID.</div>
+      <div class="danbooru-layout">
+        <section class="danbooru-preview-card">
+          <div class="danbooru-image-stage">
+            <img id="danbooruPreview" alt="">
+            <span id="danbooruPreviewEmpty" class="metadata-empty">No post loaded</span>
+          </div>
+          <div class="danbooru-meta" id="danbooruMeta"></div>
+        </section>
+        <section class="danbooru-data-card">
+          <div class="danbooru-card-header">
+            <span>Extracted Tags</span>
+            <div class="danbooru-actions">
+              <button class="metadata-refresh-btn" id="danbooruApplyBtn" type="button" disabled>Apply Prompt</button>
+              <button class="metadata-action-btn primary" id="danbooruGenerateBtn" type="button" disabled>Generate</button>
+            </div>
+          </div>
+          <div class="danbooru-tags" id="danbooruTags"></div>
+          <div class="metadata-section-title">Prompt Preview</div>
+          <pre class="danbooru-prompt" id="danbooruPrompt"></pre>
+        </section>
+      </div>
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabPngInfo" data-right-pane="pngInfo" role="tabpanel">
@@ -556,28 +585,28 @@
       </div>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabThumb" data-right-pane="thumb" data-temporary-hidden="true" hidden role="tabpanel">
+  <div class="right-tab-pane" id="rightTabThumb" data-right-pane="thumb" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Thumb</h2>
       <p>스타일 썸네일 탐색 기능을 Web Shell 패널로 옮길 자리입니다.</p>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabArtists" data-right-pane="artists" data-temporary-hidden="true" hidden role="tabpanel">
+  <div class="right-tab-pane" id="rightTabArtists" data-right-pane="artists" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Artists</h2>
       <p>아티스트 갤러리와 관심 작가 기능을 Remote UI로 재구성할 자리입니다.</p>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" data-temporary-hidden="true" hidden role="tabpanel">
+  <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Studio</h2>
       <p>다중 프레임 생성 관리 기능을 Web Shell에 맞게 분리할 자리입니다.</p>
     </div>
   </div>
-  <div class="right-tab-pane" id="rightTabSettings" data-right-pane="settings" data-temporary-hidden="true" hidden role="tabpanel">
+  <div class="right-tab-pane" id="rightTabSettings" data-right-pane="settings" hidden role="tabpanel">
     <div class="right-tab-placeholder">
       <div class="placeholder-kicker">TODO</div>
       <h2>Settings</h2>

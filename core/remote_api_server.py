@@ -28,6 +28,7 @@ from PyQt6.QtCore import QByteArray, QMimeData, QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core import api_verification
+from core.danbooru_client import fetch_danbooru_post
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.tag_search_index import TagSearchIndex, normalize_search_query
@@ -143,6 +144,7 @@ class RemoteBridge(QObject):
     request_result_image_action = pyqtSignal(str)       # result context JSON — 숨김 img2img 세션 등
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_copy_png_to_clipboard = pyqtSignal(bytes, str)  # (png_bytes, filename)
+    request_danbooru_prompt_preview = pyqtSignal(object)  # request dict with event/tags/prompt
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
@@ -217,6 +219,7 @@ class RemoteBridge(QObject):
         self._remote_upscale_worker = None
         self._remote_img2img_window_id: Optional[int] = None
         self._remote_img2img_source_label: str = ""
+        self._danbooru_prompt_preview_bridge_connected = False
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -1505,6 +1508,75 @@ class RemoteBridge(QObject):
             message = f"{labels.get(action, 'Image')} action failed: {e}"
             self._broadcast_json({"type": "toast", "message": message, "level": "error"})
             print(f"🌐 Remote: image action failed — {action}: {e}")
+
+    def _load_characteristic_tags(self) -> set[str]:
+        path = Path("data") / "characteristic_list.txt"
+        try:
+            return {
+                line.strip().replace("_", " ")
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+        except Exception:
+            return set()
+
+    def _build_danbooru_prompt_preview(self, tags: dict) -> str:
+        if not isinstance(tags, dict):
+            return ""
+
+        main_window = getattr(self.app_context, "main_window", None)
+        controller = getattr(main_window, "prompt_gen_controller", None) if main_window else None
+        if controller and hasattr(controller, "generate_instant_source_silent"):
+            try:
+                prompt = controller.generate_instant_source_silent(tags, self._collect_prompt_reopen_settings())
+                if prompt:
+                    return str(prompt)
+            except Exception as e:
+                print(f"🌐 Remote: Danbooru prompt preview failed — {e}")
+
+        general_tags = tags.get("general") if isinstance(tags.get("general"), list) else []
+        return ", ".join(map(str, general_tags))
+
+    def _fallback_danbooru_prompt(self, tags: dict) -> str:
+        general_tags = tags.get("general") if isinstance(tags, dict) and isinstance(tags.get("general"), list) else []
+        return ", ".join(map(str, general_tags))
+
+    def _request_danbooru_prompt_preview(self, tags: dict) -> str:
+        main_window = getattr(self.app_context, "main_window", None)
+        controller = getattr(main_window, "prompt_gen_controller", None) if main_window else None
+        if not controller or not self._danbooru_prompt_preview_bridge_connected:
+            return self._fallback_danbooru_prompt(tags)
+
+        event = threading.Event()
+        request = {
+            "tags": tags,
+            "prompt": "",
+            "event": event,
+        }
+        self.request_danbooru_prompt_preview.emit(request)
+        if not event.wait(5.0):
+            print("🌐 Remote: Danbooru prompt preview timed out")
+            return self._fallback_danbooru_prompt(tags)
+        return str(request.get("prompt") or "") or self._fallback_danbooru_prompt(tags)
+
+    def _do_danbooru_prompt_preview(self, request: dict):
+        try:
+            request["prompt"] = self._build_danbooru_prompt_preview(request.get("tags", {}))
+        except Exception as e:
+            print(f"🌐 Remote: Danbooru prompt preview bridge failed — {e}")
+            request["prompt"] = self._fallback_danbooru_prompt(request.get("tags", {}))
+        finally:
+            event = request.get("event")
+            if event:
+                event.set()
+
+    def _build_danbooru_post_payload(self, query: str) -> dict:
+        post = fetch_danbooru_post(
+            query,
+            characteristic_tags=self._load_characteristic_tags(),
+        )
+        post["prompt"] = self._request_danbooru_prompt_preview(post.get("tags", {}))
+        return post
 
     def _img2img_manager(self):
         main_window = getattr(self.app_context, "main_window", None)
@@ -8003,6 +8075,20 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         bridge.request_image_action.emit(action, image_bytes, label)
         return {"ok": True, "action": action}
 
+    @app.post("/api/danbooru/post")
+    async def api_danbooru_post(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        query = str(payload.get("query") or req.query_params.get("query") or "").strip()
+        try:
+            return await asyncio.to_thread(bridge._build_danbooru_post_payload, query)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Danbooru lookup failed: {e}"}, status_code=502)
+
     @app.get("/api/result/asset/current")
     async def api_current_result_asset():
         asset = await asyncio.to_thread(bridge._build_current_result_asset_payload)
@@ -8820,6 +8906,8 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_result_image_action.connect(bridge._do_result_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_copy_png_to_clipboard.connect(bridge._do_copy_png_to_clipboard, Qt.ConnectionType.QueuedConnection)
+    bridge.request_danbooru_prompt_preview.connect(bridge._do_danbooru_prompt_preview, Qt.ConnectionType.QueuedConnection)
+    bridge._danbooru_prompt_preview_bridge_connected = True
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
     QTimer.singleShot(0, bridge._restore_saved_search_filter_state)

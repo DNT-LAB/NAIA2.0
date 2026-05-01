@@ -1,15 +1,11 @@
 export function createRightTabsController({document, onLeaveResult}) {
   const buttons = Array.from(document.querySelectorAll('.right-tab-btn'));
   const panes = Array.from(document.querySelectorAll('.right-tab-pane'));
-  const temporaryHiddenTabs = new Set(['danbooru', 'thumb', 'artists', 'studio', 'settings']);
   const hiddenTabs = new Set(
-    [
-      ...temporaryHiddenTabs,
-      ...buttons
-        .filter(button => button.hidden || button.dataset.temporaryHidden === 'true')
-        .map(button => button.dataset.rightTab)
-        .filter(Boolean),
-    ],
+    buttons
+      .filter(button => button.dataset.rightTabHidden === 'true')
+      .map(button => button.dataset.rightTab)
+      .filter(Boolean),
   );
 
   function hideTabButton(button) {

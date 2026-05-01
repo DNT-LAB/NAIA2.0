@@ -30,7 +30,25 @@ const DEFAULT_CAPABILITIES = {
   delete: false,
 };
 
+const MAIN_IMAGE_ACTIONS = [
+  {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
+  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
+  {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
+  {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
+  {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp', badge: 'WEBP', badgeTone: 'blue'},
+  {type: 'separator'},
+];
+
+const THUMBNAIL_IMAGE_ACTIONS = [
+  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
+  {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
+  {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
+  {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp', badge: 'WEBP', badgeTone: 'blue'},
+  {type: 'separator'},
+];
+
 const MAIN_IMAGE_MENU = [
+  ...MAIN_IMAGE_ACTIONS,
   {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
   {type: 'separator'},
@@ -64,16 +82,6 @@ const MAIN_IMAGE_MENU = [
   },
   {type: 'separator'},
   {
-    label: '이미지 작업',
-    children: [
-      {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
-      {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
-      {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
-      {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
-      {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
-    ],
-  },
-  {
     label: 'NAI 도구',
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
@@ -90,6 +98,7 @@ const MAIN_IMAGE_MENU = [
 ];
 
 const THUMBNAIL_MENU = [
+  ...THUMBNAIL_IMAGE_ACTIONS,
   {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
   {type: 'separator'},
@@ -119,13 +128,6 @@ const THUMBNAIL_MENU = [
     children: [
       {label: '탭에서 보기', action: ACTION_METADATA, requiresPath: true},
       {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED, requiresPath: true},
-    ],
-  },
-  {
-    label: '이미지 작업',
-    children: [
-      {label: 'PNG로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png'},
-      {label: 'WEBP로 클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_webp', copyFormat: 'webp'},
     ],
   },
   {
@@ -269,13 +271,17 @@ export function createResultContextMenu({
     const queuePositionAttr = item.queuePosition ? ` data-queue-position="${item.queuePosition}"` : '';
     const queueModeAttr = item.queueMode ? ` data-queue-mode="${item.queueMode}"` : '';
     const submenuAttr = hasChildren ? ' data-submenu-trigger="true" aria-haspopup="menu" aria-expanded="false"' : '';
+    const badgeClass = item.badgeTone ? ` ${item.badgeTone}` : '';
+    const badgeHtml = item.badge
+      ? `<span class="result-context-badge${badgeClass}">${escapeText(item.badge)}</span>`
+      : '';
     const childHtml = hasChildren
       ? `<div class="result-context-children" role="menu">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group${hasChildren ? ' has-children' : ''}">
         <button type="button" class="result-context-item${danger}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${submenuAttr}${disabledAttr}>
-          <span>${escapeText(item.label)}</span>${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}
+          <span>${escapeText(item.label)}</span><span class="result-context-item-tail">${badgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
         </button>
         ${childHtml}
       </div>`;

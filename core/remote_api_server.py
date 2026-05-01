@@ -2326,6 +2326,36 @@ class RemoteBridge(QObject):
         ascii_name = ascii_name or "naia-result.png"
         return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
 
+    def _image_media_type_for_path(self, image_path: 'Path') -> str:
+        ext = Path(image_path).suffix.lower()
+        return {
+            ".webp": "image/webp",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".bmp": "image/bmp",
+        }.get(ext, "image/png")
+
+    def _resolve_result_original_file(self, source: str = "", rel_path: str = "") -> 'Path | None':
+        source = str(source or "").strip().lower()
+        rel_path = str(rel_path or "").strip()
+
+        if rel_path:
+            target = self._validate_viewer_path(rel_path)
+            if target and Path(target).is_file():
+                return Path(target)
+
+        if source and source != "current":
+            return None
+
+        image_window = self._get_image_window_widget()
+        item = getattr(image_window, "current_history_item", None) if image_window else None
+        filepath = str(getattr(item, "filepath", "") or "") if item else ""
+        if filepath and Path(filepath).is_file():
+            return Path(filepath).resolve()
+
+        return None
+
     def _is_png_bytes(self, image_bytes: bytes) -> bool:
         if not image_bytes or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
             return False
@@ -2348,16 +2378,17 @@ class RemoteBridge(QObject):
         source = str(source or "").strip().lower()
         rel_path = str(rel_path or "").strip()
 
-        if rel_path and source != "current":
+        if rel_path:
             target = self._validate_viewer_path(rel_path)
-            if not target:
+            if not target and source != "current":
                 raise FileNotFoundError("Image file is unavailable")
-            if target.suffix.lower() == ".png":
+            if target and target.suffix.lower() == ".png":
                 return target.read_bytes(), self._result_png_filename(target.name)
-            with Image.open(str(target)) as opened:
-                opened.load()
-                image = opened.convert("RGBA").copy()
-            return self._pil_image_to_png_bytes(image), self._result_png_filename(target.name)
+            if target:
+                with Image.open(str(target)) as opened:
+                    opened.load()
+                    image = opened.convert("RGBA").copy()
+                return self._pil_image_to_png_bytes(image), self._result_png_filename(target.name)
 
         image_window = self._get_image_window_widget()
         item = getattr(image_window, "current_history_item", None) if image_window else None
@@ -7878,6 +7909,27 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             },
         )
 
+    @app.get("/api/result/image/original")
+    async def api_result_image_original(source: str = "", path: str = ""):
+        target = await asyncio.to_thread(bridge._resolve_result_original_file, source, path)
+        if target:
+            return FileResponse(
+                str(target),
+                media_type=bridge._image_media_type_for_path(target),
+                filename=target.name,
+                headers={"Cache-Control": "no-store"},
+            )
+        if bridge.latest_webp is not None:
+            return Response(
+                content=bridge.latest_webp,
+                media_type="image/webp",
+                headers={
+                    "Content-Disposition": bridge._download_content_disposition("naia_latest.webp"),
+                    "Cache-Control": "no-store",
+                },
+            )
+        return JSONResponse({"error": "No original image is available"}, status_code=404)
+
     @app.get("/api/result/metadata")
     async def api_result_metadata():
         if bridge.latest_metadata_payload is None:
@@ -8157,9 +8209,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         target = bridge._validate_viewer_path(path)
         if not target:
             return JSONResponse({"error": "not found"}, 404)
-        ext = target.suffix.lower()
-        media = {".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(ext, "image/png")
-        return FileResponse(str(target), media_type=media)
+        return FileResponse(str(target), media_type=bridge._image_media_type_for_path(target))
 
     @app.get("/api/viewer/meta")
     async def viewer_meta_query(path: str, full: bool = False):

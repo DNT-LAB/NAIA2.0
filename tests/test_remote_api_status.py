@@ -115,3 +115,23 @@ def test_saved_result_asset_accepts_memory_history_key(tmp_path):
     assert asset["path"] == history_key
     assert asset["file_path"] == str(image_path.resolve())
     assert asset["capabilities"]["image_action"] is True
+
+
+def test_original_result_file_prefers_memory_history_path(tmp_path):
+    bridge, image_path = _bridge_with_history(tmp_path)
+    history_key = bridge._scan_memory_history()[0]["rel_path"]
+
+    target = bridge._resolve_result_original_file("current", history_key)
+
+    assert target == image_path.resolve()
+    assert bridge._image_media_type_for_path(target) == "image/png"
+
+
+def test_png_payload_uses_path_even_for_current_source(tmp_path):
+    bridge, image_path = _bridge_with_history(tmp_path)
+    history_key = bridge._scan_memory_history()[0]["rel_path"]
+
+    payload, filename = bridge._build_result_png_payload("current", history_key)
+
+    assert payload == image_path.read_bytes()
+    assert filename == "00001.png"

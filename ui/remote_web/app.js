@@ -1959,12 +1959,29 @@ function contextImagePngUrl(context = {}) {
   const params = new URLSearchParams();
   const source = String(context.source || (context.path ? 'saved' : 'current')).trim() || 'current';
   params.set('source', source);
-  if (source !== 'current' && context.path) params.set('path', context.path);
+  if (context.path) params.set('path', context.path);
   return '/api/result/image/png?' + params.toString();
 }
 
+function contextImageOriginalUrl(context = {}) {
+  const params = new URLSearchParams();
+  const source = String(context.source || (context.path ? 'saved' : 'current')).trim() || 'current';
+  params.set('source', source);
+  if (context.path) params.set('path', context.path);
+  return '/api/result/image/original?' + params.toString();
+}
+
 async function fetchContextImageBlob(context = {}, options = {}) {
-  if (String(options.format || '').toLowerCase() === 'png') {
+  const format = String(options.format || '').toLowerCase();
+  if (format === 'original') {
+    const response = await fetch(contextImageOriginalUrl(context), {cache: 'no-store'});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    return response.blob();
+  }
+  if (format === 'png') {
     const response = await fetch(contextImagePngUrl(context), {cache: 'no-store'});
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -2062,6 +2079,10 @@ async function convertImageBlob(blob, mimeType) {
   });
 }
 
+function blobMatchesMime(blob, mimeType) {
+  return String(blob?.type || '').toLowerCase() === String(mimeType || '').toLowerCase();
+}
+
 async function copyResultImageFromContext(context = {}, format = 'png') {
   const normalizedFormat = String(format || 'png').toLowerCase();
   const mimeType = normalizedFormat === 'webp' ? 'image/webp' : 'image/png';
@@ -2070,14 +2091,23 @@ async function copyResultImageFromContext(context = {}, format = 'png') {
       showToast('Image clipboard is not supported by this browser', 'error');
       return;
     }
-    const blob = normalizedFormat === 'png'
-      ? await fetchContextImageBlob(context, {format: 'png'})
-      : await fetchContextImageBlob(context);
-    const converted = await convertImageBlob(blob, mimeType);
+    let originalBlob = null;
+    try {
+      originalBlob = await fetchContextImageBlob(context, {format: 'original'});
+    } catch (originalError) {
+      originalBlob = normalizedFormat === 'png'
+        ? await fetchContextImageBlob(context, {format: 'png'})
+        : await fetchContextImageBlob(context);
+    }
+    const clipboardBlob = blobMatchesMime(originalBlob, mimeType)
+      ? originalBlob
+      : (normalizedFormat === 'png'
+        ? await fetchContextImageBlob(context, {format: 'png'})
+        : await convertImageBlob(originalBlob, mimeType));
     await navigator.clipboard.write([
-      new window.ClipboardItem({[converted.type || mimeType]: converted}),
+      new window.ClipboardItem({[mimeType]: clipboardBlob}),
     ]);
-    showToast(`${normalizedFormat.toUpperCase()} copied to clipboard`, 'success');
+    showToast(`${normalizedFormat.toUpperCase()} blob copied to clipboard`, 'success');
   } catch (error) {
     console.error('Copy image failed', error);
     showToast(error.message || 'Copy image failed', 'error');

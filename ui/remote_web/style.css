@@ -1813,6 +1813,30 @@ body.resizing-result-info {
   font-size: 13px;
   transition: transform 120ms ease;
 }
+.result-context-item-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.result-context-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 17px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.result-context-badge.blue {
+  border-color: rgba(40, 120, 216, 0.55);
+  color: #cce5ff;
+  background: rgba(40, 120, 216, 0.28);
+}
 .result-context-menu.touch-mode .result-context-group.submenu-open > .result-context-item .result-context-arrow {
   transform: rotate(90deg);
 }

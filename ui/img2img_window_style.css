@@ -8,13 +8,16 @@ QMainWindow#NaiaImg2ImgWindow,
 QDialog#NaiaInpaintWindow {
     background: #0a0a0f;
     color: #e8e8f0;
-    font-family: "Outfit", "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-size: 13px;
 }
 
 QWidget#NaiaImg2ImgCentral,
 QWidget#NaiaInpaintRoot {
     background: #0a0a0f;
     color: #e8e8f0;
+    font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-size: 13px;
 }
 
 QWidget#NaiaImg2ImgPreviewPanel,
@@ -30,13 +33,13 @@ QWidget#NaiaInpaintToolbar {
 QLabel[naiaRole="field-label"] {
     color: #8888a0;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 QLabel[naiaRole="value-label"] {
     color: #9d8bff;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 QLabel#NaiaImg2ImgPreview {
@@ -52,7 +55,9 @@ QTextEdit[naiaRole="img2img-textedit"] {
     color: #e8e8f0;
     border: 1px solid #2a2a3d;
     border-radius: 7px;
-    padding: 8px;
+    padding: 6px;
+    font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-size: 13px;
     selection-background-color: #7c6aef;
     selection-color: #ffffff;
 }
@@ -77,8 +82,9 @@ QTabWidget#NaiaImg2ImgTabs QTabBar::tab {
     border-bottom: none;
     border-top-left-radius: 7px;
     border-top-right-radius: 7px;
-    padding: 7px 12px;
-    min-width: 96px;
+    padding: 6px 10px;
+    min-width: 84px;
+    font-size: 12px;
 }
 
 QTabWidget#NaiaImg2ImgTabs QTabBar::tab:selected {
@@ -102,6 +108,7 @@ QWidget#NaiaImg2ImgCharacterRow {
 QCheckBox[naiaRole="img2img-check"] {
     color: #e8e8f0;
     font-weight: 700;
+    font-size: 12px;
 }
 
 QPushButton[naiaRole="secondary"],
@@ -111,7 +118,8 @@ QPushButton#NaiaInpaintShapeButton {
     color: #e8e8f0;
     border: 1px solid #2a2a3d;
     border-radius: 7px;
-    padding: 7px 12px;
+    padding: 6px 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -128,7 +136,8 @@ QPushButton#NaiaInpaintSaveButton {
     color: #ffffff;
     border: 1px solid #9d8bff;
     border-radius: 7px;
-    padding: 8px 16px;
+    padding: 7px 14px;
+    font-size: 13px;
     font-weight: 800;
 }
 
@@ -148,14 +157,15 @@ QPushButton#NaiaImg2ImgCancelButton {
     color: #ffffff;
     border: 1px solid #c24141;
     border-radius: 7px;
-    padding: 8px 14px;
+    padding: 7px 12px;
+    font-size: 12px;
     font-weight: 800;
 }
 
 QSlider::groove:horizontal {
     background: #2a2a3d;
-    height: 8px;
-    border-radius: 4px;
+    height: 6px;
+    border-radius: 3px;
 }
 
 QSlider::sub-page:horizontal {
@@ -165,8 +175,8 @@ QSlider::sub-page:horizontal {
 
 QSlider::handle:horizontal {
     background: #e8e8f0;
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     margin: -5px 0;
     border-radius: 4px;
     border: 1px solid #9d8bff;
@@ -177,7 +187,8 @@ QSpinBox {
     color: #e8e8f0;
     border: 1px solid #2a2a3d;
     border-radius: 7px;
-    padding: 5px 8px;
+    padding: 4px 6px;
+    font-size: 12px;
 }
 
 QProgressBar {

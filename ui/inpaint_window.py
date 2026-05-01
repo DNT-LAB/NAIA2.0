@@ -2,8 +2,8 @@ from PIL import Image
 from PIL.ImageQt import ImageQt
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSlider, QWidget)
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt, QPointF, QEvent
+from PyQt6.QtGui import QGuiApplication, QPainter, QPixmap, QFont
+from PyQt6.QtCore import Qt, QPointF, QEvent, QTimer
 import numpy as np
 from ui.img2img_window_style import load_img2img_window_stylesheet
 
@@ -77,10 +77,11 @@ class InpaintWindow(QDialog):
     def init_ui(self):
         self.setObjectName("NaiaInpaintWindow")
         self.setWindowTitle("Inpaint Image")
-        self.setMinimumSize(800, 600)
+        self.setFont(QFont("Pretendard", 10))
         self.setStyleSheet(load_img2img_window_stylesheet())
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
         
         top_bar = self._create_top_bar()
         main_layout.addWidget(top_bar)
@@ -88,6 +89,14 @@ class InpaintWindow(QDialog):
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setObjectName("NaiaInpaintCanvas")
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setRenderHints(
+            QPainter.RenderHint.Antialiasing |
+            QPainter.RenderHint.SmoothPixmapTransform
+        )
+        self.view.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         main_layout.addWidget(self.view)
         self.view.viewport().installEventFilter(self)
         
@@ -98,13 +107,57 @@ class InpaintWindow(QDialog):
         self.scene.addItem(self.composite_item)
         
         self.scene.setSceneRect(self.background_pixmap.rect().toRectF())
-        self.resize(self.original_pil_image.width + 40, self.original_pil_image.height + 100)
+        initial_width, initial_height = self._initial_window_size()
+        self.setMinimumSize(min(720, initial_width), min(520, initial_height))
+        self.resize(initial_width, initial_height)
+        QTimer.singleShot(0, self._fit_canvas_to_view)
+
+    def _available_screen_size(self) -> tuple[int, int]:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if not screen:
+            return 1280, 800
+        rect = screen.availableGeometry()
+        return rect.width(), rect.height()
+
+    def _initial_window_size(self) -> tuple[int, int]:
+        screen_w, screen_h = self._available_screen_size()
+        available_w = max(1, screen_w - 24)
+        available_h = max(1, screen_h - 24)
+        max_w = min(1180, max(640, int(screen_w * 0.72)), available_w)
+        max_h = min(900, max(480, int(screen_h * 0.82)), available_h)
+        image_w, image_h = self.original_pil_image.size
+        toolbar_h = 86
+        scale = min(
+            (max_w - 32) / max(1, image_w),
+            (max_h - toolbar_h) / max(1, image_h),
+            1.0,
+        )
+        width = int(image_w * scale) + 32
+        height = int(image_h * scale) + toolbar_h
+        min_w = min(720, max_w)
+        min_h = min(520, max_h)
+        width = min(max(min_w, width), max_w)
+        height = min(max(min_h, height), max_h)
+        return width, height
+
+    def _fit_canvas_to_view(self):
+        if not hasattr(self, "view") or not hasattr(self, "scene"):
+            return
+        rect = self.scene.sceneRect()
+        if rect.isNull():
+            return
+        self.view.resetTransform()
+        self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._fit_canvas_to_view)
 
     def _create_top_bar(self) -> QWidget:
         top_widget = QWidget()
         top_widget.setObjectName("NaiaInpaintToolbar")
         layout = QHBoxLayout(top_widget)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(8)
         
         pen_size_label = QLabel("Pen Size:")
@@ -119,6 +172,7 @@ class InpaintWindow(QDialog):
         self.shape_button = QPushButton("Square Brush")
         self.shape_button.setObjectName("NaiaInpaintShapeButton")
         self.shape_button.setCheckable(True)
+        self.shape_button.setMinimumHeight(34)
         self.shape_button.toggled.connect(self._toggle_brush_shape)
         
         layout.addWidget(pen_size_label)
@@ -129,10 +183,14 @@ class InpaintWindow(QDialog):
         
         save_button = QPushButton("Save Image")
         save_button.setObjectName("NaiaInpaintSaveButton")
+        save_button.setMinimumHeight(34)
+        save_button.setMinimumWidth(118)
         save_button.clicked.connect(self.accept)
         
         close_button = QPushButton("X")
         close_button.setObjectName("NaiaInpaintCloseButton")
+        close_button.setMinimumHeight(34)
+        close_button.setMinimumWidth(44)
         close_button.clicked.connect(self.reject)
         
         layout.addWidget(save_button)
@@ -379,7 +437,7 @@ class InpaintWindow(QDialog):
                 self.setMinimumSize(int(min_width), int(min_height))
 
             max_width = min(max(800, int(screen_rect.width() * 0.76)), available_width)
-            max_height = min(max(600, int(screen_rect.height() * 0.84)), available_height)
+            max_height = min(max(600, int(screen_rect.height() * 0.82)), available_height)
             self.resize(min(self.width(), max_width), min(self.height(), max_height))
 
             prompt_widget = getattr(host, "main_prompt_textedit", None)
@@ -405,6 +463,7 @@ class InpaintWindow(QDialog):
             x = min_x if max_x < min_x else max(min_x, min(x, max_x))
             y = min_y if max_y < min_y else max(min_y, min(y, max_y))
             self.move(x, y)
+            QTimer.singleShot(0, self._fit_canvas_to_view)
         except Exception as exc:
             print(f"⚠️ InpaintWindow 위치 조정 실패: {exc}")
 

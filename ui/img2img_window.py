@@ -18,8 +18,8 @@ from PyQt6.QtWidgets import (
     QSpinBox, QProgressBar
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QPixmap, QCloseEvent
-from ui.scaling_manager import get_scaled_size
+from PyQt6.QtGui import QGuiApplication, QPixmap, QCloseEvent, QFont
+from ui.scaling_manager import get_scaled_size, get_scaled_font_size
 from ui.img2img_window_style import load_img2img_window_stylesheet
 
 
@@ -57,8 +57,13 @@ class Img2ImgWindow(QMainWindow):
         """UI 초기화 - 3컬럼 수평 레이아웃"""
         self.setObjectName("NaiaImg2ImgWindow")
         self.setWindowTitle("Img2Img")
-        self.setMinimumSize(get_scaled_size(900), get_scaled_size(520))
-        self.resize(get_scaled_size(1080), get_scaled_size(640))
+        self.setFont(QFont("Pretendard", get_scaled_font_size(10)))
+        initial_width, initial_height = self._initial_window_size()
+        self.setMinimumSize(
+            min(get_scaled_size(820), initial_width),
+            min(get_scaled_size(500), initial_height),
+        )
+        self.resize(initial_width, initial_height)
 
         # 독립 창 플래그
         self.setWindowFlags(
@@ -77,14 +82,14 @@ class Img2ImgWindow(QMainWindow):
 
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(
-            get_scaled_size(12), get_scaled_size(12),
-            get_scaled_size(12), get_scaled_size(12)
+            get_scaled_size(10), get_scaled_size(10),
+            get_scaled_size(10), get_scaled_size(10)
         )
-        main_layout.setSpacing(get_scaled_size(10))
+        main_layout.setSpacing(get_scaled_size(8))
 
         # === 3컬럼 수평 레이아웃 ===
         content_layout = QHBoxLayout()
-        content_layout.setSpacing(get_scaled_size(12))
+        content_layout.setSpacing(get_scaled_size(8))
 
         # 좌측: 이미지 + 슬라이더 + 버튼
         left_panel = self._create_left_panel()
@@ -93,9 +98,9 @@ class Img2ImgWindow(QMainWindow):
         # 우측: 탭뷰 (캐릭터 + 네거티브)
         right_panel = self._create_right_panel()
 
-        content_layout.addWidget(left_panel, stretch=30)
-        content_layout.addWidget(center_panel, stretch=35)
-        content_layout.addWidget(right_panel, stretch=35)
+        content_layout.addWidget(left_panel, stretch=28)
+        content_layout.addWidget(center_panel, stretch=36)
+        content_layout.addWidget(right_panel, stretch=36)
 
         main_layout.addLayout(content_layout)
 
@@ -114,19 +119,19 @@ class Img2ImgWindow(QMainWindow):
         self.repeat_spin = QSpinBox()
         self.repeat_spin.setRange(1, 99)
         self.repeat_spin.setValue(1)
-        self.repeat_spin.setFixedWidth(get_scaled_size(60))
+        self.repeat_spin.setFixedWidth(get_scaled_size(54))
         row1.addWidget(self.repeat_spin)
 
         self.generate_btn = QPushButton("🎨 Generate")
         self.generate_btn.setObjectName("NaiaImg2ImgGenerateButton")
-        self.generate_btn.setMinimumHeight(get_scaled_size(42))
+        self.generate_btn.setMinimumHeight(get_scaled_size(36))
         self.generate_btn.clicked.connect(self.on_generate_clicked)
         row1.addWidget(self.generate_btn, stretch=1)
 
         self.cancel_btn = QPushButton("■ 중지")
         self.cancel_btn.setObjectName("NaiaImg2ImgCancelButton")
-        self.cancel_btn.setMinimumHeight(get_scaled_size(42))
-        self.cancel_btn.setFixedWidth(get_scaled_size(80))
+        self.cancel_btn.setMinimumHeight(get_scaled_size(36))
+        self.cancel_btn.setFixedWidth(get_scaled_size(72))
         self.cancel_btn.clicked.connect(self._on_cancel_clicked)
         self.cancel_btn.setVisible(False)
         row1.addWidget(self.cancel_btn)
@@ -135,13 +140,36 @@ class Img2ImgWindow(QMainWindow):
 
         # Row 2: Progress Bar (hidden until batch)
         self.batch_progress = QProgressBar()
-        self.batch_progress.setFixedHeight(get_scaled_size(20))
+        self.batch_progress.setFixedHeight(get_scaled_size(18))
         self.batch_progress.setTextVisible(True)
         self.batch_progress.setFormat("")
         self.batch_progress.setVisible(False)
         bottom_layout.addWidget(self.batch_progress)
 
         main_layout.addLayout(bottom_layout)
+
+    def _available_screen_size(self) -> tuple[int, int]:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if not screen:
+            return 1280, 800
+        rect = screen.availableGeometry()
+        return rect.width(), rect.height()
+
+    def _initial_window_size(self) -> tuple[int, int]:
+        screen_w, screen_h = self._available_screen_size()
+        available_w = max(1, screen_w - get_scaled_size(24))
+        available_h = max(1, screen_h - get_scaled_size(24))
+        width = min(
+            get_scaled_size(1040),
+            max(get_scaled_size(720), int(screen_w * 0.64)),
+            available_w,
+        )
+        height = min(
+            get_scaled_size(600),
+            max(get_scaled_size(460), int(screen_h * 0.58)),
+            available_h,
+        )
+        return width, height
 
     # ─── 좌측 패널 ───────────────────────────────────────────
 
@@ -151,16 +179,16 @@ class Img2ImgWindow(QMainWindow):
         panel.setObjectName("NaiaImg2ImgPreviewPanel")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(
-            get_scaled_size(10), get_scaled_size(10),
-            get_scaled_size(10), get_scaled_size(10)
+            get_scaled_size(8), get_scaled_size(8),
+            get_scaled_size(8), get_scaled_size(8)
         )
-        layout.setSpacing(get_scaled_size(8))
+        layout.setSpacing(get_scaled_size(6))
 
         # 이미지 프리뷰
         self.preview_label = QLabel()
         self.preview_label.setObjectName("NaiaImg2ImgPreview")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumSize(get_scaled_size(250), get_scaled_size(250))
+        self.preview_label.setMinimumSize(get_scaled_size(210), get_scaled_size(210))
         layout.addWidget(self.preview_label, stretch=1)
 
         # Strength 슬라이더
@@ -225,8 +253,8 @@ class Img2ImgWindow(QMainWindow):
         panel.setObjectName("NaiaImg2ImgPromptPanel")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(
-            get_scaled_size(10), get_scaled_size(10),
-            get_scaled_size(10), get_scaled_size(10)
+            get_scaled_size(8), get_scaled_size(8),
+            get_scaled_size(8), get_scaled_size(8)
         )
         layout.setSpacing(get_scaled_size(4))
 
@@ -238,6 +266,7 @@ class Img2ImgWindow(QMainWindow):
         self.main_prompt_edit.setObjectName("NaiaImg2ImgMainPrompt")
         self.main_prompt_edit.setAcceptRichText(False)
         self.main_prompt_edit.setPlaceholderText("Main prompt...")
+        self.main_prompt_edit.setFont(QFont("Pretendard", get_scaled_font_size(10)))
         layout.addWidget(self.main_prompt_edit, stretch=1)
 
         return panel
@@ -274,10 +303,10 @@ class Img2ImgWindow(QMainWindow):
         tab_widget.setObjectName("NaiaImg2ImgCharacterTab")
         tab_layout = QVBoxLayout(tab_widget)
         tab_layout.setContentsMargins(
-            get_scaled_size(8), get_scaled_size(8),
-            get_scaled_size(8), get_scaled_size(8)
+            get_scaled_size(6), get_scaled_size(6),
+            get_scaled_size(6), get_scaled_size(6)
         )
-        tab_layout.setSpacing(get_scaled_size(6))
+        tab_layout.setSpacing(get_scaled_size(5))
 
         # 캐릭터 행을 담을 스크롤 영역
         self.character_scroll = QScrollArea()
@@ -308,8 +337,8 @@ class Img2ImgWindow(QMainWindow):
         tab_widget.setObjectName("NaiaImg2ImgUcTab")
         tab_layout = QVBoxLayout(tab_widget)
         tab_layout.setContentsMargins(
-            get_scaled_size(8), get_scaled_size(8),
-            get_scaled_size(8), get_scaled_size(8)
+            get_scaled_size(6), get_scaled_size(6),
+            get_scaled_size(6), get_scaled_size(6)
         )
         tab_layout.setSpacing(get_scaled_size(4))
 
@@ -321,6 +350,7 @@ class Img2ImgWindow(QMainWindow):
         self.negative_prompt_edit.setObjectName("NaiaImg2ImgNegativePrompt")
         self.negative_prompt_edit.setAcceptRichText(False)
         self.negative_prompt_edit.setPlaceholderText("Undesired content...")
+        self.negative_prompt_edit.setFont(QFont("Pretendard", get_scaled_font_size(10)))
         tab_layout.addWidget(self.negative_prompt_edit, stretch=1)
 
         return tab_widget
@@ -552,10 +582,10 @@ class Img2ImgWindow(QMainWindow):
         row_widget.setObjectName("NaiaImg2ImgCharacterRow")
         row_layout = QVBoxLayout(row_widget)
         row_layout.setContentsMargins(
-            get_scaled_size(6), get_scaled_size(4),
-            get_scaled_size(6), get_scaled_size(4)
+            get_scaled_size(5), get_scaled_size(4),
+            get_scaled_size(5), get_scaled_size(4)
         )
-        row_layout.setSpacing(get_scaled_size(3))
+        row_layout.setSpacing(get_scaled_size(2))
 
         # 상단 행: 체크박스 + 라벨 + 제거 버튼
         header_row = QHBoxLayout()
@@ -568,7 +598,7 @@ class Img2ImgWindow(QMainWindow):
         header_row.addStretch(1)
 
         remove_btn = QPushButton("✕")
-        remove_btn.setFixedSize(get_scaled_size(24), get_scaled_size(24))
+        remove_btn.setFixedSize(get_scaled_size(22), get_scaled_size(22))
         remove_btn.setProperty("naiaRole", "secondary")
         header_row.addWidget(remove_btn)
         row_layout.addLayout(header_row)
@@ -578,7 +608,8 @@ class Img2ImgWindow(QMainWindow):
         prompt_edit.setProperty("naiaRole", "img2img-textedit")
         prompt_edit.setAcceptRichText(False)
         prompt_edit.setPlaceholderText(f"Character {idx + 1} prompt")
-        prompt_edit.setMaximumHeight(get_scaled_size(65))
+        prompt_edit.setMaximumHeight(get_scaled_size(56))
+        prompt_edit.setFont(QFont("Pretendard", get_scaled_font_size(10)))
         prompt_edit.setPlainText(prompt_text)
         row_layout.addWidget(prompt_edit)
 
@@ -587,7 +618,8 @@ class Img2ImgWindow(QMainWindow):
         uc_edit.setProperty("naiaRole", "img2img-textedit")
         uc_edit.setAcceptRichText(False)
         uc_edit.setPlaceholderText(f"Character {idx + 1} UC")
-        uc_edit.setMaximumHeight(get_scaled_size(45))
+        uc_edit.setMaximumHeight(get_scaled_size(42))
+        uc_edit.setFont(QFont("Pretendard", get_scaled_font_size(10)))
         uc_edit.setPlainText(uc_text)
         row_layout.addWidget(uc_edit)
 

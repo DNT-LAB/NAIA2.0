@@ -893,14 +893,14 @@ class Img2ImgWindowManager:
                 right = image_bottom_right.x() - get_scaled_size(18)
                 bottom = image_bottom_right.y() - get_scaled_size(18)
 
-                workspace_width = max(get_scaled_size(900), right - left)
-                workspace_height = max(get_scaled_size(560), bottom - top)
-                width = min(get_scaled_size(1120), workspace_width, available_width)
-                height = min(get_scaled_size(680), workspace_height, available_height)
+                workspace_width = max(get_scaled_size(820), right - left)
+                workspace_height = max(get_scaled_size(500), bottom - top)
+                width = min(get_scaled_size(1040), workspace_width, available_width)
+                height = min(get_scaled_size(620), workspace_height, available_height)
             else:
                 frame = mw.frameGeometry()
-                width = min(get_scaled_size(1080), available_width)
-                height = min(get_scaled_size(640), available_height)
+                width = min(get_scaled_size(1000), available_width)
+                height = min(get_scaled_size(600), available_height)
                 left = frame.x() + max(0, (frame.width() - width) // 2)
                 top = frame.y() + max(0, (frame.height() - height) // 3)
 

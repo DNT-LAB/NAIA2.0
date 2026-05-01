@@ -877,6 +877,9 @@ class Img2ImgWindowManager:
                 return
             screen = mw.screen() if hasattr(mw, "screen") else window.screen()
             screen_rect = screen.availableGeometry() if screen else window.screen().availableGeometry()
+            outer_margin = get_scaled_size(12)
+            available_width = max(1, screen_rect.width() - (outer_margin * 2))
+            available_height = max(1, screen_rect.height() - (outer_margin * 2))
 
             prompt_widget = getattr(mw, 'main_prompt_textedit', None)
             image_widget = getattr(mw, 'image_window', None)
@@ -892,20 +895,28 @@ class Img2ImgWindowManager:
 
                 workspace_width = max(get_scaled_size(900), right - left)
                 workspace_height = max(get_scaled_size(560), bottom - top)
-                width = min(get_scaled_size(1120), workspace_width, screen_rect.width() - get_scaled_size(32))
-                height = min(get_scaled_size(680), workspace_height, screen_rect.height() - get_scaled_size(48))
+                width = min(get_scaled_size(1120), workspace_width, available_width)
+                height = min(get_scaled_size(680), workspace_height, available_height)
             else:
                 frame = mw.frameGeometry()
-                width = min(get_scaled_size(1080), screen_rect.width() - get_scaled_size(32))
-                height = min(get_scaled_size(640), screen_rect.height() - get_scaled_size(48))
+                width = min(get_scaled_size(1080), available_width)
+                height = min(get_scaled_size(640), available_height)
                 left = frame.x() + max(0, (frame.width() - width) // 2)
                 top = frame.y() + max(0, (frame.height() - height) // 3)
 
-            width = max(window.minimumWidth(), int(width))
-            height = max(window.minimumHeight(), int(height))
+            min_width = min(window.minimumWidth(), available_width)
+            min_height = min(window.minimumHeight(), available_height)
+            if min_width != window.minimumWidth() or min_height != window.minimumHeight():
+                window.setMinimumSize(int(min_width), int(min_height))
+            width = min(max(min_width, int(width)), available_width)
+            height = min(max(min_height, int(height)), available_height)
             window.resize(width, height)
-            x = max(screen_rect.left() + get_scaled_size(12), min(left, screen_rect.right() - width - get_scaled_size(12)))
-            y = max(screen_rect.top() + get_scaled_size(12), min(top, screen_rect.bottom() - height - get_scaled_size(12)))
+            min_x = screen_rect.left() + outer_margin
+            min_y = screen_rect.top() + outer_margin
+            max_x = screen_rect.right() - width - outer_margin
+            max_y = screen_rect.bottom() - height - outer_margin
+            x = min_x if max_x < min_x else max(min_x, min(left, max_x))
+            y = min_y if max_y < min_y else max(min_y, min(top, max_y))
             window.move(int(x), int(y))
         except Exception as exc:
             print(f"⚠️ [Img2ImgWindowManager] floating position failed: {exc}")

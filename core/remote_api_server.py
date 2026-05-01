@@ -638,6 +638,33 @@ class RemoteBridge(QObject):
             pass
         return ""
 
+    def _request_client_host(self, req) -> str:
+        """HTTP 클라이언트 IP 안전 추출 (loopback 판정용)."""
+        try:
+            if req is not None and getattr(req, "client", None) is not None:
+                return (req.client.host or "") if hasattr(req.client, "host") else ""
+        except Exception:
+            pass
+        return ""
+
+    def _is_loopback_host(self, host: str) -> bool:
+        host = str(host or "").strip()
+        if host in ("127.0.0.1", "::1", "localhost"):
+            return True
+        try:
+            import ipaddress
+            return ipaddress.ip_address(host).is_loopback
+        except Exception:
+            return False
+
+    def _desktop_img2img_gate(self, host: str) -> tuple[bool, str]:
+        """호스트 데스크탑에 PyQt img2img/Inpaint 창을 띄우는 요청 게이트."""
+        if not self._is_loopback_host(host):
+            return False, "Img2Img/Inpaint 데스크탑 창은 로컬(127.0.0.1) 접속에서만 열 수 있습니다."
+        if self._is_cloudflared_active():
+            return False, "Cloudflared 터널 활성 중 — Img2Img/Inpaint 데스크탑 창 열기가 차단됩니다."
+        return True, ""
+
     def _setup_gate(self, ws) -> tuple[bool, str]:
         """Setup UI 활성 조건 2중 게이트 — 전부 통과해야 토큰/URL 설정 허용.
 
@@ -7747,6 +7774,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         action = (action or "").strip().lower()
         if action not in {"img2img", "inpaint", "danbooru", "vibe"}:
             return JSONResponse({"error": "Unsupported action"}, status_code=400)
+        if action in {"img2img", "inpaint"}:
+            allowed, reason = bridge._desktop_img2img_gate(bridge._request_client_host(req))
+            if not allowed:
+                return JSONResponse({"error": reason}, status_code=403)
         image_bytes = await req.body()
         if not image_bytes:
             return JSONResponse({"error": "No image data"}, status_code=400)
@@ -8387,6 +8418,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         elif cmd_type == "result_upscale":
                             bridge.request_result_upscale.emit(ws, json.dumps(cmd))
                         elif cmd_type == "result_image_action":
+                            allowed, reason = bridge._desktop_img2img_gate(bridge._ws_client_host(ws))
+                            if not allowed:
+                                await ws.send_text(json.dumps({
+                                    "type": "toast",
+                                    "message": reason,
+                                    "level": "error",
+                                }))
+                                continue
                             bridge.request_result_image_action.emit(json.dumps(cmd))
                         elif cmd_type == "probe_api":
                             # 저장된 토큰/URL 로 실시간 연결 가능 여부 확인.

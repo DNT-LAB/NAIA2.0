@@ -370,8 +370,16 @@ class InpaintWindow(QDialog):
             screen = host.screen() if hasattr(host, "screen") else self.screen()
             screen_rect = screen.availableGeometry() if screen else self.screen().availableGeometry()
 
-            max_width = max(800, int(screen_rect.width() * 0.76))
-            max_height = max(600, int(screen_rect.height() * 0.84))
+            outer_margin = 12
+            available_width = max(1, screen_rect.width() - (outer_margin * 2))
+            available_height = max(1, screen_rect.height() - (outer_margin * 2))
+            min_width = min(self.minimumWidth(), available_width)
+            min_height = min(self.minimumHeight(), available_height)
+            if min_width != self.minimumWidth() or min_height != self.minimumHeight():
+                self.setMinimumSize(int(min_width), int(min_height))
+
+            max_width = min(max(800, int(screen_rect.width() * 0.76)), available_width)
+            max_height = min(max(600, int(screen_rect.height() * 0.84)), available_height)
             self.resize(min(self.width(), max_width), min(self.height(), max_height))
 
             prompt_widget = getattr(host, "main_prompt_textedit", None)
@@ -390,8 +398,12 @@ class InpaintWindow(QDialog):
                 x = parent_rect.x() + max(0, (parent_rect.width() - self.width()) // 2)
                 y = parent_rect.y() + max(0, (parent_rect.height() - self.height()) // 2)
 
-            x = max(screen_rect.left() + 12, min(x, screen_rect.right() - self.width() - 12))
-            y = max(screen_rect.top() + 12, min(y, screen_rect.bottom() - self.height() - 12))
+            min_x = screen_rect.left() + outer_margin
+            min_y = screen_rect.top() + outer_margin
+            max_x = screen_rect.right() - self.width() - outer_margin
+            max_y = screen_rect.bottom() - self.height() - outer_margin
+            x = min_x if max_x < min_x else max(min_x, min(x, max_x))
+            y = min_y if max_y < min_y else max(min_y, min(y, max_y))
             self.move(x, y)
         except Exception as exc:
             print(f"⚠️ InpaintWindow 위치 조정 실패: {exc}")

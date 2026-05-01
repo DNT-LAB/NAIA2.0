@@ -1444,13 +1444,13 @@ class RemoteBridge(QObject):
                 raise RuntimeError("Main window is not ready")
 
             if action in {"img2img", "inpaint"}:
-                self._open_remote_img2img_session(
+                self._open_desktop_img2img_surface(
                     pil_image=pil_image,
                     history_item=None,
                     mode=action,
                     source_label=label or "Input Image",
                 )
-                print(f"🌐 Remote: hidden {action} session opened — {label or 'Input Image'}")
+                print(f"🌐 Remote: desktop {action} surface opened — {label or 'Input Image'}")
                 return
             elif action == "danbooru":
                 handler = getattr(main_window, "on_tag_interrogation_requested", None)
@@ -1673,6 +1673,48 @@ class RemoteBridge(QObject):
             "level": "success",
         })
 
+    def _open_desktop_img2img_surface(self, pil_image, history_item=None, source_label: str = "",
+                                      mode: str = "img2img"):
+        """Open the native PyQt img2img/inpaint surface; Web Shell only requests it."""
+        manager = self._img2img_manager()
+        if not manager:
+            raise RuntimeError("Img2Img manager is not ready")
+        if pil_image is None:
+            raise RuntimeError("Img2Img source image is unavailable")
+
+        self._close_remote_img2img_session()
+        mode = "inpaint" if str(mode or "").strip().lower() == "inpaint" else "img2img"
+
+        if mode == "inpaint":
+            window = manager.create_inpaint_from_editor(
+                pil_image,
+                history_item=history_item,
+                parent=getattr(self.app_context, "main_window", None),
+            )
+            label = "Inpaint"
+        else:
+            window = manager.create_window(
+                pil_image=pil_image,
+                mode="img2img",
+                history_item=history_item,
+                visible=True,
+            )
+            label = "Img2Img"
+
+        if not window:
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"{label} request cancelled",
+                "level": "info",
+            })
+            return
+
+        self._broadcast_json({
+            "type": "toast",
+            "message": f"{label} opened on desktop",
+            "level": "success",
+        })
+
     def _resolve_result_image_action_source(self, payload: dict, action_label: str = "Img2Img") -> tuple[object, object, str]:
         from PIL import Image
 
@@ -1704,13 +1746,13 @@ class RemoteBridge(QObject):
                 return
             action_label = "Inpaint" if action == "inpaint" else "Img2Img"
             pil_image, history_item, label = self._resolve_result_image_action_source(payload, action_label)
-            self._open_remote_img2img_session(
+            self._open_desktop_img2img_surface(
                 pil_image=pil_image,
                 history_item=history_item,
                 mode=action,
                 source_label=label,
             )
-            print(f"🌐 Remote: result {action} session opened — {label}")
+            print(f"🌐 Remote: result {action} desktop surface opened — {label}")
         except Exception as e:
             message = f"Image action failed: {e}"
             self._broadcast_json({"type": "toast", "message": message, "level": "error"})
@@ -2383,9 +2425,10 @@ class RemoteBridge(QObject):
                 "save_image": has_image,
                 "copy_png": has_image,
                 "copy_webp": has_image,
+                "image_action": has_image,
                 "upscale_nai": bool(has_image and mode == "NAI"),
                 "enhance": can_enhance,
-                "inpaint": has_item_image,
+                "inpaint": has_image,
                 "character_reference": has_item_image,
                 "remote_event": has_source_row,
                 "delete": False,

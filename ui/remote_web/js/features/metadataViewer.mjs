@@ -8,8 +8,8 @@ export function createMetadataViewer({
   onApplyCharacterSettings = null,
   onSendImg2Img = null,
   onRestoreVibeTransfer = null,
+  canUseDesktopImg2Img = () => true,
 }) {
-  const REMOTE_IMG2IMG_ACTIONS_ENABLED = false;
   const statusEl = document.getElementById('metadataStatus');
   const titleEl = document.getElementById('metadataTitle');
   const previewEl = document.getElementById('metadataPreview');
@@ -28,9 +28,7 @@ export function createMetadataViewer({
   const applyCharacterSettingsBtn = document.getElementById('metadataApplyCharacterSettingsBtn');
   const restoreVibeBtn = document.getElementById('metadataRestoreVibeBtn');
   const sendImg2ImgBtn = document.getElementById('metadataSendImg2ImgBtn');
-  if (!REMOTE_IMG2IMG_ACTIONS_ENABLED && sendImg2ImgBtn) {
-    sendImg2ImgBtn.style.display = 'none';
-  }
+  if (sendImg2ImgBtn) sendImg2ImgBtn.style.display = 'none';
 
   const EMPTY_SOURCE = {kind: 'empty', path: ''};
   let currentSource = EMPTY_SOURCE;
@@ -423,7 +421,9 @@ export function createMetadataViewer({
     const hasCharacters = hasPayload && (currentActionPayload.characters || []).length > 0;
     const hasVibeTransfer = hasPayload && Boolean(currentActionPayload.vibeTransfer);
     const hasImageActionSource = hasPayload && (currentActionPayload.blob || currentActionPayload.imageUrl);
+    const desktopImg2ImgAvailable = typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img();
     if (applyCharacterSettingsBtn) applyCharacterSettingsBtn.style.display = hasCharacters ? '' : 'none';
+    if (sendImg2ImgBtn) sendImg2ImgBtn.style.display = desktopImg2ImgAvailable ? '' : 'none';
     if (restoreVibeBtn) {
       restoreVibeBtn.style.display = hasVibeTransfer ? '' : 'none';
       restoreVibeBtn.textContent = hasVibeTransfer
@@ -435,7 +435,7 @@ export function createMetadataViewer({
       [applySettingsBtn, typeof onApplySettings === 'function' && hasParams],
       [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters],
       [restoreVibeBtn, typeof onRestoreVibeTransfer === 'function' && hasVibeTransfer],
-      [sendImg2ImgBtn, REMOTE_IMG2IMG_ACTIONS_ENABLED && typeof onSendImg2Img === 'function' && hasImageActionSource],
+      [sendImg2ImgBtn, desktopImg2ImgAvailable && typeof onSendImg2Img === 'function' && hasImageActionSource],
     ].forEach(([button, enabled]) => {
       if (!button) return;
       button.disabled = !enabled;

@@ -19,12 +19,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QCloseEvent
-from ui.theme import DARK_COLORS, DARK_STYLES
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-
-# 윈도우 전용 배경색 (메인 테마보다 어두운 계열)
-_BG_WINDOW = '#181818'
-_BG_PANEL = '#1e1e1e'
+from ui.scaling_manager import get_scaled_size
+from ui.img2img_window_style import load_img2img_window_stylesheet
 
 
 class Img2ImgWindow(QMainWindow):
@@ -54,27 +50,15 @@ class Img2ImgWindow(QMainWindow):
         # 캐릭터 프롬프트 위젯 리스트
         self.character_rows = []
 
-        # 버튼 피드백 스타일
-        self.FEEDBACK_STYLE = f"""
-            QPushButton {{
-                background-color: {DARK_COLORS['text_disabled']};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 4px;
-                padding: 8px;
-                font-size: {get_scaled_font_size(18)}px;
-                font-weight: 500;
-            }}
-        """
-
         self.init_ui()
         print(f"✅ [Img2ImgWindow] 창 #{self.window_id} 생성됨")
 
     def init_ui(self):
         """UI 초기화 - 3컬럼 수평 레이아웃"""
+        self.setObjectName("NaiaImg2ImgWindow")
         self.setWindowTitle("Img2Img")
-        self.setMinimumSize(1000, 550)
-        self.resize(1200, 700)
+        self.setMinimumSize(get_scaled_size(900), get_scaled_size(520))
+        self.resize(get_scaled_size(1080), get_scaled_size(640))
 
         # 독립 창 플래그
         self.setWindowFlags(
@@ -85,15 +69,10 @@ class Img2ImgWindow(QMainWindow):
             Qt.WindowType.WindowTitleHint
         )
 
-        # 어두운 배경 테마
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {_BG_WINDOW};
-                color: {DARK_COLORS['text_primary']};
-            }}
-        """)
+        self.setStyleSheet(load_img2img_window_stylesheet())
 
         central_widget = QWidget()
+        central_widget.setObjectName("NaiaImg2ImgCentral")
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
@@ -129,45 +108,25 @@ class Img2ImgWindow(QMainWindow):
         row1.setSpacing(get_scaled_size(6))
 
         repeat_label = QLabel("횟수:")
-        repeat_label.setStyleSheet(
-            f"font-size: {get_scaled_font_size(14)}px; color: {DARK_COLORS['text_primary']};"
-        )
+        repeat_label.setProperty("naiaRole", "field-label")
         row1.addWidget(repeat_label)
 
         self.repeat_spin = QSpinBox()
         self.repeat_spin.setRange(1, 99)
         self.repeat_spin.setValue(1)
         self.repeat_spin.setFixedWidth(get_scaled_size(60))
-        self.repeat_spin.setStyleSheet(DARK_STYLES['compact_spinbox'])
         row1.addWidget(self.repeat_spin)
 
         self.generate_btn = QPushButton("🎨 Generate")
-        self.generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
+        self.generate_btn.setObjectName("NaiaImg2ImgGenerateButton")
         self.generate_btn.setMinimumHeight(get_scaled_size(42))
         self.generate_btn.clicked.connect(self.on_generate_clicked)
         row1.addWidget(self.generate_btn, stretch=1)
 
         self.cancel_btn = QPushButton("■ 중지")
+        self.cancel_btn.setObjectName("NaiaImg2ImgCancelButton")
         self.cancel_btn.setMinimumHeight(get_scaled_size(42))
         self.cancel_btn.setFixedWidth(get_scaled_size(80))
-        self.cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #8B0000;
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid #B22222;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: {get_scaled_font_size(14)}px;
-                font-weight: 500;
-            }}
-            QPushButton:hover {{
-                background-color: #A52A2A;
-                border: 1px solid #CD5C5C;
-            }}
-            QPushButton:pressed {{
-                background-color: #660000;
-            }}
-        """)
         self.cancel_btn.clicked.connect(self._on_cancel_clicked)
         self.cancel_btn.setVisible(False)
         row1.addWidget(self.cancel_btn)
@@ -179,20 +138,6 @@ class Img2ImgWindow(QMainWindow):
         self.batch_progress.setFixedHeight(get_scaled_size(20))
         self.batch_progress.setTextVisible(True)
         self.batch_progress.setFormat("")
-        self.batch_progress.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: {DARK_COLORS['bg_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(4)}px;
-                text-align: center;
-                color: {DARK_COLORS['text_primary']};
-                font-size: {get_scaled_font_size(13)}px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {DARK_COLORS['accent_blue']};
-                border-radius: {get_scaled_size(3)}px;
-            }}
-        """)
         self.batch_progress.setVisible(False)
         bottom_layout.addWidget(self.batch_progress)
 
@@ -203,59 +148,31 @@ class Img2ImgWindow(QMainWindow):
     def _create_left_panel(self) -> QWidget:
         """좌측 패널: 이미지 프리뷰 + Strength/Noise 슬라이더 + 버튼"""
         panel = QWidget()
+        panel.setObjectName("NaiaImg2ImgPreviewPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(
+            get_scaled_size(10), get_scaled_size(10),
+            get_scaled_size(10), get_scaled_size(10)
+        )
         layout.setSpacing(get_scaled_size(8))
 
         # 이미지 프리뷰
         self.preview_label = QLabel()
+        self.preview_label.setObjectName("NaiaImg2ImgPreview")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setMinimumSize(get_scaled_size(250), get_scaled_size(250))
-        self.preview_label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {_BG_PANEL};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(4)}px;
-            }}
-        """)
         layout.addWidget(self.preview_label, stretch=1)
-
-        # 슬라이더 스타일 (img2img_panel.py와 동일)
-        slider_style = f"""
-            QSlider::groove:horizontal {{
-                background: #22253F;
-                height: 12px;
-                border-radius: 4px;
-            }}
-            QSlider::handle:horizontal {{
-                background: #F5F3C2;
-                width: 18px;
-                height: 18px;
-                margin: -4px 0;
-                border-radius: 2px;
-            }}
-            QSlider::handle:horizontal:hover {{
-                background: {DARK_COLORS['accent_blue_hover']};
-            }}
-            QSlider::sub-page:horizontal {{
-                background: #525252;
-                border-radius: 4px;
-            }}
-        """
-        label_style = f"font-size: {get_scaled_font_size(13)}px; color: {DARK_COLORS['text_primary']};"
-        value_style = f"font-size: {get_scaled_font_size(13)}px; color: #AAA; min-width: 35px;"
 
         # Strength 슬라이더
         strength_row = QHBoxLayout()
         strength_label = QLabel("Strength:")
-        strength_label.setStyleSheet(label_style)
+        strength_label.setProperty("naiaRole", "field-label")
         self.strength_value_label = QLabel("0.70")
-        self.strength_value_label.setStyleSheet(value_style)
+        self.strength_value_label.setProperty("naiaRole", "value-label")
         self.strength_slider = QSlider(Qt.Orientation.Horizontal)
         self.strength_slider.setRange(1, 99)
         # 초기 모드는 'img2img' — i2i 기본값(0.7). 매니저가 mode-aware 복원으로 덮어씀.
         self.strength_slider.setValue(70)
-        self.strength_slider.setStyleSheet(slider_style)
         # NAI 웹 일치: 슬라이더 최댓값(99)은 순수 inpaint (strength=1.0) 로 승격.
         self.strength_slider.valueChanged.connect(
             lambda v: self.strength_value_label.setText(f"{(1.0 if v == 99 else v / 100.0):.2f}")
@@ -268,13 +185,12 @@ class Img2ImgWindow(QMainWindow):
         # Noise 슬라이더
         noise_row = QHBoxLayout()
         noise_label = QLabel("Noise:")
-        noise_label.setStyleSheet(label_style)
+        noise_label.setProperty("naiaRole", "field-label")
         self.noise_value_label = QLabel("0.00")
-        self.noise_value_label.setStyleSheet(value_style)
+        self.noise_value_label.setProperty("naiaRole", "value-label")
         self.noise_slider = QSlider(Qt.Orientation.Horizontal)
         self.noise_slider.setRange(0, 99)
         self.noise_slider.setValue(0)
-        self.noise_slider.setStyleSheet(slider_style)
         self.noise_slider.valueChanged.connect(
             lambda v: self.noise_value_label.setText(f"{v / 100.0:.2f}")
         )
@@ -288,12 +204,12 @@ class Img2ImgWindow(QMainWindow):
         btn_row.setSpacing(get_scaled_size(6))
 
         self.edit_mask_btn = QPushButton("Edit Mask")
-        self.edit_mask_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.edit_mask_btn.setProperty("naiaRole", "secondary")
         self.edit_mask_btn.clicked.connect(self._on_edit_mask_clicked)
         btn_row.addWidget(self.edit_mask_btn)
 
         self.outpaint_btn = QPushButton("Outpaint")
-        self.outpaint_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.outpaint_btn.setProperty("naiaRole", "secondary")
         self.outpaint_btn.clicked.connect(self._on_outpaint_clicked)
         btn_row.addWidget(self.outpaint_btn)
 
@@ -306,33 +222,22 @@ class Img2ImgWindow(QMainWindow):
     def _create_center_panel(self) -> QWidget:
         """중앙 패널: 메인 프롬프트 (전체 높이 차지)"""
         panel = QWidget()
+        panel.setObjectName("NaiaImg2ImgPromptPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(
+            get_scaled_size(10), get_scaled_size(10),
+            get_scaled_size(10), get_scaled_size(10)
+        )
         layout.setSpacing(get_scaled_size(4))
 
         main_label = QLabel("Main Prompt:")
-        main_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: {get_scaled_font_size(14)}px;
-                color: {DARK_COLORS['text_primary']};
-                font-weight: 600;
-            }}
-        """)
+        main_label.setProperty("naiaRole", "field-label")
         layout.addWidget(main_label)
 
         self.main_prompt_edit = QTextEdit()
+        self.main_prompt_edit.setObjectName("NaiaImg2ImgMainPrompt")
         self.main_prompt_edit.setAcceptRichText(False)
         self.main_prompt_edit.setPlaceholderText("Main prompt...")
-        self.main_prompt_edit.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {_BG_PANEL};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(4)}px;
-                padding: {get_scaled_size(6)}px;
-                font-size: {get_scaled_font_size(18)}px;
-            }}
-        """)
         layout.addWidget(self.main_prompt_edit, stretch=1)
 
         return panel
@@ -342,19 +247,10 @@ class Img2ImgWindow(QMainWindow):
     def _create_right_panel(self) -> QWidget:
         """우측 패널: 탭뷰 — [Character] / [Undesired Content] 탭"""
         self.tab_widget = QTabWidget()
-        self.tab_widget.setStyleSheet(DARK_STYLES['dark_tabs'])
+        self.tab_widget.setObjectName("NaiaImg2ImgTabs")
 
         # 공통 스타일 저장
-        self._textedit_style = f"""
-            QTextEdit {{
-                background-color: {_BG_PANEL};
-                color: {DARK_COLORS['text_primary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(3)}px;
-                padding: {get_scaled_size(4)}px;
-                font-size: {get_scaled_font_size(17)}px;
-            }}
-        """
+        self._textedit_style = ""
         self._scroll_style = f"""
             QScrollArea {{
                 border: none;
@@ -375,7 +271,7 @@ class Img2ImgWindow(QMainWindow):
     def _create_character_tab(self) -> QWidget:
         """Character 탭: 캐릭터 목록 + 추가 버튼"""
         tab_widget = QWidget()
-        tab_widget.setStyleSheet(f"QWidget {{ background-color: {_BG_WINDOW}; }}")
+        tab_widget.setObjectName("NaiaImg2ImgCharacterTab")
         tab_layout = QVBoxLayout(tab_widget)
         tab_layout.setContentsMargins(
             get_scaled_size(8), get_scaled_size(8),
@@ -385,15 +281,11 @@ class Img2ImgWindow(QMainWindow):
 
         # 캐릭터 행을 담을 스크롤 영역
         self.character_scroll = QScrollArea()
+        self.character_scroll.setObjectName("NaiaImg2ImgCharacterScroll")
         self.character_scroll.setWidgetResizable(True)
         self.character_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.character_scroll.setStyleSheet(f"""
-            QScrollArea {{ border: none; background-color: {_BG_WINDOW}; }}
-            QScrollArea > QWidget > QWidget {{ background-color: {_BG_WINDOW}; }}
-        """)
 
         self.character_container = QWidget()
-        self.character_container.setStyleSheet(f"background-color: {_BG_WINDOW};")
         self.character_layout = QVBoxLayout(self.character_container)
         self.character_layout.setContentsMargins(0, 0, 0, 0)
         self.character_layout.setSpacing(get_scaled_size(6))
@@ -404,7 +296,7 @@ class Img2ImgWindow(QMainWindow):
 
         # + Add Character 버튼
         self.add_char_btn = QPushButton("+ Add Character")
-        self.add_char_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.add_char_btn.setProperty("naiaRole", "secondary")
         self.add_char_btn.clicked.connect(self._add_character_row)
         tab_layout.addWidget(self.add_char_btn)
 
@@ -413,7 +305,7 @@ class Img2ImgWindow(QMainWindow):
     def _create_uc_tab(self) -> QWidget:
         """Undesired Content 탭: 네거티브 프롬프트"""
         tab_widget = QWidget()
-        tab_widget.setStyleSheet(f"QWidget {{ background-color: {_BG_WINDOW}; }}")
+        tab_widget.setObjectName("NaiaImg2ImgUcTab")
         tab_layout = QVBoxLayout(tab_widget)
         tab_layout.setContentsMargins(
             get_scaled_size(8), get_scaled_size(8),
@@ -422,19 +314,13 @@ class Img2ImgWindow(QMainWindow):
         tab_layout.setSpacing(get_scaled_size(4))
 
         neg_label = QLabel("Undesired Content:")
-        neg_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: {get_scaled_font_size(13)}px;
-                color: {DARK_COLORS['text_secondary']};
-                font-weight: 600;
-            }}
-        """)
+        neg_label.setProperty("naiaRole", "field-label")
         tab_layout.addWidget(neg_label)
 
         self.negative_prompt_edit = QTextEdit()
+        self.negative_prompt_edit.setObjectName("NaiaImg2ImgNegativePrompt")
         self.negative_prompt_edit.setAcceptRichText(False)
         self.negative_prompt_edit.setPlaceholderText("Undesired content...")
-        self.negative_prompt_edit.setStyleSheet(self._textedit_style)
         tab_layout.addWidget(self.negative_prompt_edit, stretch=1)
 
         return tab_widget
@@ -663,14 +549,7 @@ class Img2ImgWindow(QMainWindow):
         idx = len(self.character_rows)
 
         row_widget = QWidget()
-        row_widget.setObjectName("charRow")
-        row_widget.setStyleSheet(f"""
-            QWidget#charRow {{
-                background-color: {_BG_PANEL};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: {get_scaled_size(4)}px;
-            }}
-        """)
+        row_widget.setObjectName("NaiaImg2ImgCharacterRow")
         row_layout = QVBoxLayout(row_widget)
         row_layout.setContentsMargins(
             get_scaled_size(6), get_scaled_size(4),
@@ -684,52 +563,30 @@ class Img2ImgWindow(QMainWindow):
 
         active_checkbox = QCheckBox(f"C{idx + 1}")
         active_checkbox.setChecked(is_active)
-        active_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: {get_scaled_font_size(13)}px;
-                color: {DARK_COLORS['text_primary']};
-                font-weight: 600;
-                spacing: {get_scaled_size(4)}px;
-            }}
-            QCheckBox::indicator {{
-                width: {get_scaled_size(16)}px;
-                height: {get_scaled_size(16)}px;
-            }}
-        """)
+        active_checkbox.setProperty("naiaRole", "img2img-check")
         header_row.addWidget(active_checkbox)
         header_row.addStretch(1)
 
         remove_btn = QPushButton("✕")
         remove_btn.setFixedSize(get_scaled_size(24), get_scaled_size(24))
-        remove_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {DARK_COLORS['text_secondary']};
-                border: none;
-                font-size: {get_scaled_font_size(14)}px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                color: #FF6666;
-            }}
-        """)
+        remove_btn.setProperty("naiaRole", "secondary")
         header_row.addWidget(remove_btn)
         row_layout.addLayout(header_row)
 
         # Prompt 입력
         prompt_edit = QTextEdit()
+        prompt_edit.setProperty("naiaRole", "img2img-textedit")
         prompt_edit.setAcceptRichText(False)
         prompt_edit.setPlaceholderText(f"Character {idx + 1} prompt")
-        prompt_edit.setStyleSheet(self._textedit_style)
         prompt_edit.setMaximumHeight(get_scaled_size(65))
         prompt_edit.setPlainText(prompt_text)
         row_layout.addWidget(prompt_edit)
 
         # UC 입력
         uc_edit = QTextEdit()
+        uc_edit.setProperty("naiaRole", "img2img-textedit")
         uc_edit.setAcceptRichText(False)
         uc_edit.setPlaceholderText(f"Character {idx + 1} UC")
-        uc_edit.setStyleSheet(self._textedit_style)
         uc_edit.setMaximumHeight(get_scaled_size(45))
         uc_edit.setPlainText(uc_text)
         row_layout.addWidget(uc_edit)
@@ -776,7 +633,6 @@ class Img2ImgWindow(QMainWindow):
 
         # 버튼 피드백
         self.generate_btn.setText("요청 전달됨")
-        self.generate_btn.setStyleSheet(self.FEEDBACK_STYLE)
         self.generate_btn.setEnabled(False)
 
         params = self._collect_generation_params()
@@ -797,7 +653,6 @@ class Img2ImgWindow(QMainWindow):
     def _restore_button(self):
         """Generate 버튼 상태 복원"""
         self.generate_btn.setText("🎨 Generate")
-        self.generate_btn.setStyleSheet(DARK_STYLES['primary_button'])
         self.generate_btn.setEnabled(True)
 
     # ─── 배치 UI 제어 ──────────────────────────────────────

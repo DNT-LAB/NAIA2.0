@@ -2159,22 +2159,17 @@ class ImageWindow(QWidget):
         new_y = max(screen_rect.top() + 5, min(new_y, screen_rect.bottom() - popup_rect.height() - 5))
         
         popup.move(new_x, new_y)
-        # TODO(web-dialog): 원래 우클릭 컨텍스트 popup.exec() — Web Shell 컨텍스트 메뉴로 재구현.
-        print("[Dialog/SKIPPED] history 컨텍스트 popup 차단 — Web Shell 컨텍스트 메뉴 재구현 예정")
+        popup.exec()
         popup.deleteLater()
 
     def _open_inpaint_with_history(self, main_window, pil_image, history_item):
         """history_item의 캐릭터 프롬프트를 유지하며 Inpaint 윈도우를 엽니다."""
-        from ui.inpaint_window import InpaintWindow
-        result = InpaintWindow.get_inpaint_data(pil_image, None, main_window)
-        if result:
-            mask_data = {
-                'full_mask_image': result.get('full_mask_image'),
-                'small_mask_image': result.get('small_mask_image'),
-            }
-            main_window.img2img_window_manager.create_window(
-                pil_image, mode='inpaint', mask_data=mask_data,
-                history_item=history_item
+        manager = getattr(main_window, 'img2img_window_manager', None)
+        if manager:
+            manager.create_inpaint_from_editor(
+                pil_image,
+                history_item=history_item,
+                parent=main_window,
             )
 
     def _cleanup_temp_file(self, path):

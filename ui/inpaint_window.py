@@ -1,12 +1,11 @@
-import io
-from PIL import Image, ImageDraw
+from PIL import Image
 from PIL.ImageQt import ImageQt
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSlider, QWidget)
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen
-from PyQt6.QtCore import Qt, QPointF, QEvent, QBuffer, QIODevice, QRectF
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, QPointF, QEvent
 import numpy as np
-from .theme import DARK_STYLES, DARK_COLORS
+from ui.img2img_window_style import load_img2img_window_stylesheet
 
 class InpaintWindow(QDialog):
     def __init__(self, pil_image: Image.Image, initial_mask: Image.Image = None, parent=None):
@@ -76,9 +75,10 @@ class InpaintWindow(QDialog):
         self.alpha_layer_image = Image.fromarray(alpha_array, mode='L')
 
     def init_ui(self):
+        self.setObjectName("NaiaInpaintWindow")
         self.setWindowTitle("Inpaint Image")
         self.setMinimumSize(800, 600)
-        self.setStyleSheet(f"background-color: {DARK_COLORS['bg_secondary']};")
+        self.setStyleSheet(load_img2img_window_stylesheet())
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
         
@@ -87,7 +87,7 @@ class InpaintWindow(QDialog):
         
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
-        self.view.setStyleSheet("border-radius: 4px;")
+        self.view.setObjectName("NaiaInpaintCanvas")
         main_layout.addWidget(self.view)
         self.view.viewport().installEventFilter(self)
         
@@ -102,21 +102,24 @@ class InpaintWindow(QDialog):
 
     def _create_top_bar(self) -> QWidget:
         top_widget = QWidget()
+        top_widget.setObjectName("NaiaInpaintToolbar")
         layout = QHBoxLayout(top_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         
         pen_size_label = QLabel("Pen Size:")
+        pen_size_label.setProperty("naiaRole", "field-label")
         self.pen_size_value_label = QLabel(f"{self.brush_size}")
+        self.pen_size_value_label.setProperty("naiaRole", "value-label")
         self.pen_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.pen_size_slider.setRange(8, 160)  # 8픽셀 단위로 조정
         self.pen_size_slider.setValue(self.brush_size)
         self.pen_size_slider.valueChanged.connect(self._update_brush_size)
-        self.pen_size_slider.setStyleSheet(DARK_STYLES['compact_slider'])
         
         self.shape_button = QPushButton("Square Brush")
+        self.shape_button.setObjectName("NaiaInpaintShapeButton")
         self.shape_button.setCheckable(True)
         self.shape_button.toggled.connect(self._toggle_brush_shape)
-        self.shape_button.setStyleSheet(DARK_STYLES['secondary_button'])
         
         layout.addWidget(pen_size_label)
         layout.addWidget(self.pen_size_value_label)
@@ -125,11 +128,11 @@ class InpaintWindow(QDialog):
         layout.addStretch()
         
         save_button = QPushButton("Save Image")
-        save_button.setStyleSheet(DARK_STYLES['primary_button'])
+        save_button.setObjectName("NaiaInpaintSaveButton")
         save_button.clicked.connect(self.accept)
         
         close_button = QPushButton("X")
-        close_button.setStyleSheet(DARK_STYLES['secondary_button'])
+        close_button.setObjectName("NaiaInpaintCloseButton")
         close_button.clicked.connect(self.reject)
         
         layout.addWidget(save_button)
@@ -358,6 +361,41 @@ class InpaintWindow(QDialog):
             
         event.accept()
 
+    def _position_near_parent_workspace(self, parent=None):
+        """Place the mask editor over the prompt/image workspace instead of screen center."""
+        try:
+            host = parent or self.parent()
+            if not host:
+                return
+            screen = host.screen() if hasattr(host, "screen") else self.screen()
+            screen_rect = screen.availableGeometry() if screen else self.screen().availableGeometry()
+
+            max_width = max(800, int(screen_rect.width() * 0.76))
+            max_height = max(600, int(screen_rect.height() * 0.84))
+            self.resize(min(self.width(), max_width), min(self.height(), max_height))
+
+            prompt_widget = getattr(host, "main_prompt_textedit", None)
+            image_widget = getattr(host, "image_window", None)
+            if prompt_widget and image_widget:
+                prompt_top_left = prompt_widget.mapToGlobal(prompt_widget.rect().topLeft())
+                image_bottom_right = image_widget.mapToGlobal(image_widget.rect().bottomRight())
+                workspace_left = prompt_top_left.x() + int(prompt_widget.width() * 0.22)
+                workspace_top = prompt_top_left.y() + 12
+                workspace_right = image_bottom_right.x() - 12
+                workspace_bottom = image_bottom_right.y() - 12
+                x = workspace_left + max(0, (workspace_right - workspace_left - self.width()) // 2)
+                y = workspace_top + max(0, (workspace_bottom - workspace_top - self.height()) // 2)
+            else:
+                parent_rect = host.frameGeometry()
+                x = parent_rect.x() + max(0, (parent_rect.width() - self.width()) // 2)
+                y = parent_rect.y() + max(0, (parent_rect.height() - self.height()) // 2)
+
+            x = max(screen_rect.left() + 12, min(x, screen_rect.right() - self.width() - 12))
+            y = max(screen_rect.top() + 12, min(y, screen_rect.bottom() - self.height() - 12))
+            self.move(x, y)
+        except Exception as exc:
+            print(f"⚠️ InpaintWindow 위치 조정 실패: {exc}")
+
     @staticmethod
     def get_inpaint_data(pil_image: Image.Image, initial_mask: Image.Image = None, parent=None, auto_accept: bool = False) -> dict | None:
         dialog = InpaintWindow(pil_image, initial_mask, parent)
@@ -368,7 +406,10 @@ class InpaintWindow(QDialog):
             dialog.accept()
             return dialog.result
 
-        # TODO(web-dialog): 원래 InpaintWindow.exec() — Web Shell 패널로 재구현 필요. 차단 → None 반환.
-        print("[Dialog/SKIPPED] InpaintWindow 차단 — Web Shell 재구현 예정")
+        dialog._position_near_parent_workspace(parent)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.result
+            dialog.deleteLater()
+            return result
         dialog.deleteLater()
         return None

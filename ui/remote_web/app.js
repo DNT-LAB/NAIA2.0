@@ -196,6 +196,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
       onApplyCharacterSettings: applyMetadataCharacterSettings,
       onSendImg2Img: payload => requestMetadataImageAction(payload, 'img2img'),
       onRestoreVibeTransfer: applyMetadataVibeTransfer,
+      canUseDesktopImg2Img,
     });
   })
   .catch(error => {
@@ -209,6 +210,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs')
       escHtml,
       showToast,
       getMode: () => currentMode || modeSelect.value || 'NAI',
+      canUseDesktopImg2Img,
       onImg2Img: payload => requestPopupImageAction(payload, 'img2img'),
       onInpaint: payload => requestPopupImageAction(payload, 'inpaint'),
       onDanbooru: payload => requestPopupImageAction(payload, 'danbooru'),
@@ -290,6 +292,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       onCopyImage: copyResultImageFromContext,
       onUpscaleNai: upscaleResultFromContext,
       onQueueResult: queueResultFromContext,
+      canUseDesktopImg2Img,
     });
     resultContextMenu.bind();
   })
@@ -1686,11 +1689,9 @@ async function requestPopupImageAction(payload, action) {
     showToast('Image data is unavailable', 'error');
     return;
   }
-  let img2imgSurfaceOpened = false;
   try {
     if (action === 'img2img' || action === 'inpaint') {
       discardPendingModuleEdit('img2img');
-      img2imgSurfaceOpened = openImg2ImgSessionSurface();
     }
     const label = encodeURIComponent(payload.label || 'Input Image');
     const response = await fetch(`/api/image-action/${encodeURIComponent(action)}?label=${label}`, {
@@ -1703,7 +1704,7 @@ async function requestPopupImageAction(payload, action) {
       throw new Error(data.error || `HTTP ${response.status}`);
     }
     if (action === 'img2img' || action === 'inpaint') {
-      if (!img2imgSurfaceOpened) openImg2ImgSessionSurface();
+      showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} opened on desktop`, 'success');
     } else if (action === 'vibe' && (currentMode || modeSelect.value) === 'NAI') {
       openModule('vibe_transfer');
     }
@@ -2127,8 +2128,7 @@ async function requestContextImageAction(context, action) {
         action,
         ...resultContextCommandPayload(context || {}),
       }));
-      openImg2ImgSessionSurface();
-      showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session requested`, 'success');
+      showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} desktop surface requested`, 'success');
     } catch (error) {
       console.error('Context image action request failed', error);
       showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} request failed`, 'error');
@@ -2434,6 +2434,10 @@ function toggleDesktopWindow() {
 const isPC = window.matchMedia('(min-width: 768px)');
 const layoutMediaQuery = isDetachedShell ? detachedDesktopMediaQuery : isPC;
 const isDesktopLayout = () => isDetachedShell || isPC.matches;
+function canUseDesktopImg2Img() {
+  const coarsePointer = Boolean(window.matchMedia?.('(hover: none), (pointer: coarse)')?.matches);
+  return isDesktopLayout() && !coarsePointer;
+}
 
 function toggleDrawer() {
   if (promptDrawerControl) promptDrawerControl.toggle();

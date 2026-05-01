@@ -523,11 +523,7 @@ class PromptTextEdit(QTextEdit):
 
         popup.move(new_x, new_y)
 
-        # TODO(web-dialog): 원래 Img2ImgPopup.exec() — img2img/inpaint/vibe/tag 액션 선택 모달.
-        # Web Shell 마이그레이션: Web Shell 측 컨텍스트 메뉴(resultContextMenu.mjs 또는 별도 모달)로 재구현 필요.
-        # 현재 임시 동작: blocking modal 차단 — popup 자체를 표시하지 않고 콘솔 안내만.
-        # 시그널들(img2img_requested 등)은 위에서 이미 연결됐지만 사용자 입력이 없으니 발사되지 않음.
-        print("[Dialog/SKIPPED] Img2ImgPopup 모달 호출 차단 — Web Shell 컨텍스트 메뉴로 재구현 예정")
+        popup.exec()
         popup.deleteLater()
 
     def dragEnterEvent(self, event):
@@ -827,13 +823,92 @@ class Img2ImgWindowManager:
 
         self.windows[window_id] = window
         if visible:
-            window.show()
+            self._show_floating_window(window)
 
         # 즉시 생성 (Outpaint Accept 등)
         if auto_generate:
             window.on_generate_clicked()
 
         return window
+
+    def create_inpaint_from_editor(self, pil_image, history_item=None, parent=None):
+        """Open the native mask editor, then create the matching img2img/inpaint surface."""
+        from ui.inpaint_window import InpaintWindow
+
+        result = InpaintWindow.get_inpaint_data(
+            pil_image,
+            None,
+            parent or self.main_window,
+        )
+        if result is None:
+            return None
+
+        has_mask = bool(result.get('full_mask_image') and result.get('small_mask_image'))
+        if has_mask:
+            mask_data = {
+                'full_mask_image': result.get('full_mask_image'),
+                'small_mask_image': result.get('small_mask_image'),
+            }
+            return self.create_window(
+                pil_image=pil_image,
+                mode='inpaint',
+                mask_data=mask_data,
+                history_item=history_item,
+            )
+
+        return self.create_window(
+            pil_image=pil_image,
+            mode='img2img',
+            history_item=history_item,
+        )
+
+    def _show_floating_window(self, window):
+        """Show img2img surfaces over the prompt/image workspace."""
+        window.show()
+        self._position_floating_window(window)
+        window.raise_()
+        window.activateWindow()
+
+    def _position_floating_window(self, window):
+        """Position the native surface so it overlaps prompt + image zones without covering the app."""
+        try:
+            mw = self.main_window
+            if not mw:
+                return
+            screen = mw.screen() if hasattr(mw, "screen") else window.screen()
+            screen_rect = screen.availableGeometry() if screen else window.screen().availableGeometry()
+
+            prompt_widget = getattr(mw, 'main_prompt_textedit', None)
+            image_widget = getattr(mw, 'image_window', None)
+            if prompt_widget and image_widget:
+                prompt_top_left = prompt_widget.mapToGlobal(prompt_widget.rect().topLeft())
+                image_top_left = image_widget.mapToGlobal(image_widget.rect().topLeft())
+                image_bottom_right = image_widget.mapToGlobal(image_widget.rect().bottomRight())
+
+                left = prompt_top_left.x() + int(prompt_widget.width() * 0.24)
+                top = min(prompt_top_left.y(), image_top_left.y()) + get_scaled_size(18)
+                right = image_bottom_right.x() - get_scaled_size(18)
+                bottom = image_bottom_right.y() - get_scaled_size(18)
+
+                workspace_width = max(get_scaled_size(900), right - left)
+                workspace_height = max(get_scaled_size(560), bottom - top)
+                width = min(get_scaled_size(1120), workspace_width, screen_rect.width() - get_scaled_size(32))
+                height = min(get_scaled_size(680), workspace_height, screen_rect.height() - get_scaled_size(48))
+            else:
+                frame = mw.frameGeometry()
+                width = min(get_scaled_size(1080), screen_rect.width() - get_scaled_size(32))
+                height = min(get_scaled_size(640), screen_rect.height() - get_scaled_size(48))
+                left = frame.x() + max(0, (frame.width() - width) // 2)
+                top = frame.y() + max(0, (frame.height() - height) // 3)
+
+            width = max(window.minimumWidth(), int(width))
+            height = max(window.minimumHeight(), int(height))
+            window.resize(width, height)
+            x = max(screen_rect.left() + get_scaled_size(12), min(left, screen_rect.right() - width - get_scaled_size(12)))
+            y = max(screen_rect.top() + get_scaled_size(12), min(top, screen_rect.bottom() - height - get_scaled_size(12)))
+            window.move(int(x), int(y))
+        except Exception as exc:
+            print(f"⚠️ [Img2ImgWindowManager] floating position failed: {exc}")
 
     def close_window(self, window_id: int):
         """등록된 Img2Img 윈도우/숨김 세션을 닫고 관리자 상태를 정리."""
@@ -6327,16 +6402,10 @@ class ModernMainWindow(QMainWindow):
             if hasattr(self, 'img2img_panel'):
                 self.img2img_panel.set_image(pil_image)
             return
-        from ui.inpaint_window import InpaintWindow
-        result = InpaintWindow.get_inpaint_data(pil_image, None, self)
-        if result:
-            mask_data = {
-                'full_mask_image': result.get('full_mask_image'),
-                'small_mask_image': result.get('small_mask_image'),
-            }
-            self.img2img_window_manager.create_window(
-                pil_image, mode='inpaint', mask_data=mask_data
-            )
+        self.img2img_window_manager.create_inpaint_from_editor(
+            pil_image,
+            parent=self,
+        )
     
     def activate_vibe_transfer(self, pil_image: Image.Image):
         """Import Vibe Transfer 요청을 처리하여 이미지를 vibe transfer 모듈에 추가합니다."""
@@ -6565,16 +6634,10 @@ class ModernMainWindow(QMainWindow):
     def _on_tag_result_inpaint(self, pil_image, prompt_text: str):
         """태그 결과 창에서 Inpaint 요청"""
         self.main_prompt_textedit.setPlainText(prompt_text)
-        from ui.inpaint_window import InpaintWindow
-        result = InpaintWindow.get_inpaint_data(pil_image, None, self)
-        if result:
-            mask_data = {
-                'full_mask_image': result.get('full_mask_image'),
-                'small_mask_image': result.get('small_mask_image'),
-            }
-            self.img2img_window_manager.create_window(
-                pil_image, mode='inpaint', mask_data=mask_data
-            )
+        self.img2img_window_manager.create_inpaint_from_editor(
+            pil_image,
+            parent=self,
+        )
 
     def apply_prompt_from_metadata(self, prompt: str, negative: str):
         """메타데이터에서 프롬프트를 적용합니다."""
@@ -7064,22 +7127,10 @@ class ModernMainWindow(QMainWindow):
         if not history_item or not hasattr(history_item, 'image'):
             return
 
-        pil_image = history_item.image
-
-        from ui.inpaint_window import InpaintWindow
-        result = InpaintWindow.get_inpaint_data(pil_image, None, self)
-        if result is None:
-            return
-
-        mask_data = {
-            'full_mask_image': result.get('full_mask_image'),
-            'small_mask_image': result.get('small_mask_image'),
-        }
-        self.img2img_window_manager.create_window(
-            pil_image=pil_image,
-            mode='inpaint',
-            mask_data=mask_data,
-            history_item=history_item
+        self.img2img_window_manager.create_inpaint_from_editor(
+            history_item.image,
+            history_item=history_item,
+            parent=self,
         )
 
     def on_send_to_img2img_requested(self, history_item):

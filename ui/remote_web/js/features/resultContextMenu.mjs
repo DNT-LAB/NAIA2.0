@@ -77,6 +77,8 @@ const MAIN_IMAGE_MENU = [
     label: 'NAI 도구',
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
+      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true},
+      {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint', capability: 'inpaint', desktopImg2Img: true},
       {label: 'Instant Outpaint Request'},
       {label: 'Send to Outpainting'},
       {label: 'Use as outpainting base'},
@@ -130,6 +132,7 @@ const THUMBNAIL_MENU = [
     label: 'NAI 도구',
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
+      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true},
     ],
   },
   {type: 'separator'},
@@ -158,6 +161,7 @@ export function createResultContextMenu({
   onUpscaleNai = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
+  canUseDesktopImg2Img = () => true,
 }) {
   let menu = null;
   let metadataModal = null;
@@ -198,6 +202,7 @@ export function createResultContextMenu({
   }
 
   function isItemEnabled(item, context) {
+    if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) return false;
     if (item.alwaysEnabled) return true;
     if (item.requiresPath && !context?.path) return false;
     if (item.children) {
@@ -248,6 +253,9 @@ export function createResultContextMenu({
   }
 
   function renderItem(item, context) {
+    if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) {
+      return '';
+    }
     if (item.type === 'separator') {
       return '<div class="result-context-separator"></div>';
     }
@@ -553,6 +561,7 @@ export function createResultContextMenu({
         metadata: metadataAvailable,
         paste_image: true,
         image_action: hasImage && !isSaved,
+        inpaint: hasImage && !isSaved,
         copy_png: hasImage,
         copy_webp: hasImage,
         open_file: isSaved && Boolean(path),

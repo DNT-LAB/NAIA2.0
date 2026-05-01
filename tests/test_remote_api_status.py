@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 
@@ -118,6 +119,17 @@ def test_saved_result_asset_accepts_memory_history_key(tmp_path):
     assert asset["path"] == history_key
     assert asset["file_path"] == str(image_path.resolve())
     assert asset["capabilities"]["image_action"] is True
+    assert asset["capabilities"]["copy_png"] is True
+    assert "copy_webp" not in asset["capabilities"]
+
+
+def test_current_result_asset_does_not_advertise_webp_clipboard_copy(tmp_path):
+    bridge, _image_path = _bridge_with_history(tmp_path)
+
+    asset = bridge._build_current_result_asset_payload()
+
+    assert asset["capabilities"]["copy_png"] is True
+    assert "copy_webp" not in asset["capabilities"]
 
 
 def test_original_result_file_prefers_memory_history_path(tmp_path):
@@ -137,6 +149,21 @@ def test_png_payload_uses_path_even_for_current_source(tmp_path):
     payload, filename = bridge._build_result_png_payload("current", history_key)
 
     assert payload == image_path.read_bytes()
+    assert filename == "00001.png"
+
+
+def test_png_payload_preserves_saved_png_metadata_bytes(tmp_path):
+    bridge, image_path = _bridge_with_history(tmp_path)
+    png_info = PngInfo()
+    png_info.add_text("Comment", "naia-metadata-marker")
+    Image.new("RGB", (2, 2), "white").save(image_path, pnginfo=png_info)
+    original_bytes = image_path.read_bytes()
+    history_key = bridge._scan_memory_history()[0]["rel_path"]
+
+    payload, filename = bridge._build_result_png_payload("saved", history_key)
+
+    assert b"naia-metadata-marker" in original_bytes
+    assert payload == original_bytes
     assert filename == "00001.png"
 
 
@@ -165,6 +192,21 @@ def test_original_endpoint_does_not_fallback_for_invalid_saved_path(tmp_path):
     )
 
     assert response.status_code == 404
+
+
+def test_clipboard_png_endpoint_uses_saved_path_payload(tmp_path):
+    bridge, image_path = _bridge_with_history(tmp_path)
+    history_key = bridge._scan_memory_history()[0]["rel_path"]
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.post(
+        "/api/result/clipboard/png",
+        json={"source": "saved", "path": history_key},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filename"] == "00001.png"
+    assert response.json()["bytes"] == len(image_path.read_bytes())
 
 
 def test_original_endpoint_falls_back_for_current_without_path():

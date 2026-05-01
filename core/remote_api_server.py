@@ -24,8 +24,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtCore import QByteArray, QMimeData, QObject, pyqtSignal, Qt, QTimer
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core import api_verification
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
@@ -142,6 +142,7 @@ class RemoteBridge(QObject):
     request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
     request_result_image_action = pyqtSignal(str)       # result context JSON — 숨김 img2img 세션 등
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
+    request_copy_png_to_clipboard = pyqtSignal(bytes, str)  # (png_bytes, filename)
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
@@ -2412,6 +2413,31 @@ class RemoteBridge(QObject):
 
         raise FileNotFoundError("No image is selected")
 
+    def _set_png_clipboard_bytes(self, png_bytes: bytes, filename: str = ""):
+        if not png_bytes:
+            raise ValueError("No PNG data is available")
+
+        byte_array = QByteArray(bytes(png_bytes))
+        mime_data = QMimeData()
+        mime_data.setData("image/png", byte_array)
+        # Windows apps often look for the native registered PNG clipboard format.
+        # Supplying it alongside image/png avoids browser/OS bitmap re-encoding.
+        mime_data.setData('application/x-qt-windows-mime;value="PNG"', byte_array)
+        if filename:
+            mime_data.setText(str(filename))
+        QApplication.clipboard().setMimeData(mime_data)
+
+    def _do_copy_png_to_clipboard(self, png_bytes: bytes, filename: str = ""):
+        try:
+            self._set_png_clipboard_bytes(png_bytes, filename)
+        except Exception as e:
+            print(f"🌐 Remote: PNG clipboard copy failed — {e}")
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"PNG clipboard copy failed: {e}",
+                "level": "error",
+            })
+
     def _current_api_mode(self) -> str:
         try:
             if hasattr(self.app_context, "get_api_mode"):
@@ -2481,7 +2507,6 @@ class RemoteBridge(QObject):
                 "open_file": has_file,
                 "save_image": has_image,
                 "copy_png": has_image,
-                "copy_webp": has_image,
                 "image_action": has_image,
                 "upscale_nai": bool(has_image and mode == "NAI"),
                 "enhance": can_enhance,
@@ -2538,7 +2563,6 @@ class RemoteBridge(QObject):
                 "open_file": True,
                 "save_image": True,
                 "copy_png": True,
-                "copy_webp": True,
                 "image_action": has_history_image,
                 "upscale_nai": self._current_api_mode() == "NAI",
                 "enhance": can_enhance,
@@ -7932,6 +7956,28 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             )
         return JSONResponse({"error": "No original image is available"}, status_code=404)
 
+    @app.post("/api/result/clipboard/png")
+    async def api_result_clipboard_png(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        source = str(payload.get("source") or "")
+        path = str(payload.get("path") or "")
+        try:
+            png_bytes, filename = await asyncio.to_thread(bridge._build_result_png_payload, source, path)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"PNG clipboard payload failed: {e}"}, status_code=500)
+
+        bridge.request_copy_png_to_clipboard.emit(png_bytes, filename)
+        return {
+            "ok": True,
+            "filename": filename,
+            "bytes": len(png_bytes),
+        }
+
     @app.get("/api/result/metadata")
     async def api_result_metadata():
         if bridge.latest_metadata_payload is None:
@@ -8773,6 +8819,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_result_upscale.connect(bridge._do_result_upscale, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_image_action.connect(bridge._do_result_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
+    bridge.request_copy_png_to_clipboard.connect(bridge._do_copy_png_to_clipboard, Qt.ConnectionType.QueuedConnection)
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
     QTimer.singleShot(0, bridge._restore_saved_search_filter_state)

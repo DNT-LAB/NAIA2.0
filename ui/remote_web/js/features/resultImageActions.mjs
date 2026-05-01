@@ -6,6 +6,7 @@ export function createResultImageActions({
   getMode = () => 'NAI',
   getWs = () => null,
   getLatestResultBlob = () => null,
+  useNativeClipboard = () => false,
   getPreviewImageUrl = () => '',
   getMetadataViewer = () => null,
   getQueuePanel = () => null,
@@ -395,55 +396,53 @@ export function createResultImageActions({
     }
   }
 
-  async function convertImageBlob(blob, mimeType) {
-    if (blob.type === mimeType) return blob;
-    if (typeof window.createImageBitmap !== 'function') {
-      throw new Error('Image conversion is not supported by this browser');
-    }
-    const bitmap = await window.createImageBitmap(blob);
-    const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(bitmap, 0, 0);
-    if (typeof bitmap.close === 'function') bitmap.close();
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(converted => {
-        if (converted) resolve(converted);
-        else reject(new Error('Image conversion failed'));
-      }, mimeType, 0.95);
-    });
-  }
-
   function blobMatchesMime(blob, mimeType) {
     return String(blob?.type || '').toLowerCase() === String(mimeType || '').toLowerCase();
   }
 
+  async function copyPngViaNativeClipboard(context = {}) {
+    const response = await fetch('/api/result/clipboard/png', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(resultContextCommandPayload(context)),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    const data = await response.json().catch(() => ({}));
+    showToast(data.filename ? `PNG copied to clipboard: ${data.filename}` : 'PNG copied to clipboard', 'success');
+  }
+
   async function copyImageFromContext(context = {}, format = 'png') {
     const normalizedFormat = String(format || 'png').toLowerCase();
-    const mimeType = normalizedFormat === 'webp' ? 'image/webp' : 'image/png';
+    if (normalizedFormat !== 'png') {
+      showToast('Only PNG clipboard copy is supported', 'error');
+      return;
+    }
     try {
+      if (useNativeClipboard()) {
+        await copyPngViaNativeClipboard(context);
+        return;
+      }
       if (!window.navigator.clipboard?.write || !window.ClipboardItem) {
         showToast('Image clipboard is not supported by this browser', 'error');
         return;
       }
+      const mimeType = 'image/png';
       let originalBlob = null;
       try {
         originalBlob = await fetchContextImageBlob(context, {format: 'original'});
       } catch (originalError) {
-        originalBlob = normalizedFormat === 'png'
-          ? await fetchContextImageBlob(context, {format: 'png'})
-          : await fetchContextImageBlob(context);
+        originalBlob = await fetchContextImageBlob(context, {format: 'png'});
       }
       const clipboardBlob = blobMatchesMime(originalBlob, mimeType)
         ? originalBlob
-        : (normalizedFormat === 'png'
-          ? await fetchContextImageBlob(context, {format: 'png'})
-          : await convertImageBlob(originalBlob, mimeType));
+        : await fetchContextImageBlob(context, {format: 'png'});
       await window.navigator.clipboard.write([
         new window.ClipboardItem({[mimeType]: clipboardBlob}),
       ]);
-      showToast(`${normalizedFormat.toUpperCase()} blob copied to clipboard`, 'success');
+      showToast('PNG blob copied to clipboard', 'success');
     } catch (error) {
       console.error('Copy image failed', error);
       showToast(error.message || 'Copy image failed', 'error');

@@ -197,6 +197,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs')
       getMode: () => currentMode || modeSelect.value || 'NAI',
       getWs: () => ws,
       getLatestResultBlob: () => latestResultBlob,
+      useNativeClipboard: () => isDesktopShell,
       getPreviewImageUrl: () => (
         preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : ''
       ),

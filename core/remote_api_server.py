@@ -3418,7 +3418,7 @@ class RemoteBridge(QObject):
         import io
 
         abs_path = Path(abs_path).resolve()
-        thumb_path = self._thumbnail_cache_path(abs_path)
+        thumb_path = self._thumbnail_cache_path(abs_path, max_side)
         thumb_dir = thumb_path.parent
 
         # 캐시 유효성 확인 (원본 mtime vs 썸네일 mtime)
@@ -3448,15 +3448,14 @@ class RemoteBridge(QObject):
             print(f"🌐 Viewer: 썸네일 생성 실패 — {abs_path}: {e}")
             return b''
 
-    def _thumbnail_cache_path(self, abs_path: 'Path') -> 'Path':
-        save_dir = self._get_viewer_save_dir()
+    def _thumbnail_cache_path(self, abs_path: 'Path', max_side: int = 0) -> 'Path':
+        import tempfile
+
         abs_path = Path(abs_path).resolve()
-        try:
-            rel = abs_path.relative_to(save_dir.resolve())
-            return save_dir / ".thumbnails" / rel.parent / (rel.stem + ".thumb.webp")
-        except Exception:
-            digest = self._history_path_digest(abs_path)
-            return Path("save") / "remote_web_thumbnails" / digest[:2] / f"{digest}.thumb.webp"
+        digest = self._history_path_digest(abs_path)
+        size_token = "auto" if max_side <= 0 else str(max(1, int(max_side)))
+        cache_root = Path(tempfile.gettempdir()) / "NAIA2" / "remote_web_thumbnails"
+        return cache_root / digest[:2] / f"{digest}.{size_token}.thumb.webp"
 
     def _on_image_saved(self, data: dict):
         """image_saved 이벤트 핸들러 → viewer_new_image WS broadcast"""

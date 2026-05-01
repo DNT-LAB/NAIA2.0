@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from PIL import Image
+
 from core.remote_api_server import RemoteBridge
 
 
@@ -135,3 +137,17 @@ def test_png_payload_uses_path_even_for_current_source(tmp_path):
 
     assert payload == image_path.read_bytes()
     assert filename == "00001.png"
+
+
+def test_thumbnail_cache_is_not_created_inside_user_save_directory(tmp_path):
+    bridge, image_path = _bridge_with_history(tmp_path)
+    Image.new("RGB", (64, 96), "white").save(image_path)
+    save_dir = bridge._get_viewer_save_dir().resolve()
+
+    thumb_path = bridge._thumbnail_cache_path(image_path, 128)
+    thumb_bytes = bridge._get_or_create_thumbnail(image_path, 128)
+
+    assert thumb_bytes
+    assert ".thumbnails" not in thumb_path.parts
+    assert not thumb_path.resolve().is_relative_to(save_dir)
+    assert not (save_dir / ".thumbnails").exists()

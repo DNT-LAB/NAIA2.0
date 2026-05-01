@@ -4,7 +4,7 @@
 
 let ws, blobUrl = null, latestResultBlob = null, generating = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
-let reconnTimer = null, genTimer = null, genStartTime = 0;
+let genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
 
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
@@ -36,7 +36,7 @@ if (isDetachedModule && detachedModuleId) {
   document.body.classList.add(`detached-module-${detachedModuleId.replace(/[^a-z0-9_-]/gi, '_')}`);
 }
 
-let createWsMessageDispatcher = null;
+let wsClient = null;
 let quickFilter = null;
 let rightTabs = null;
 let resultInfoResizer = null;
@@ -88,14 +88,6 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const wsDispatcherReady = import('./js/core/wsDispatcher.mjs')
-  .then(module => {
-    createWsMessageDispatcher = module.createWsMessageDispatcher;
-  })
-  .catch(error => {
-    console.error('Failed to initialize WebSocket dispatcher module', error);
-    throw error;
-  });
 const quickFilterReady = import('./js/features/quickFilter.mjs')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
@@ -941,40 +933,41 @@ const wsMessageHandlers = {
   lazy_indices_ready: onLazyIndicesReady,
 };
 
-function connect() {
-  if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; }
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws`);
-  ws.binaryType = 'blob';
-
-  ws.onopen = () => {
-    _initDone = false;
-    setBootIndicator('Loading state…', 60, false);
-    if (setupController) setupController.resetInitialProbe();
-    setLauncherConn(true);
-    ws.send(JSON.stringify({type: 'get_search_state'}));
-    // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
-  };
-  ws.onclose = () => {
-    // 재연결 사이클을 위해 boot finalize 상태 리셋 (다음 init_complete 가 다시 시퀀스 시작)
-    resetBootIndicatorState();
-    setBootIndicator('Reconnecting…', 20, false);
-    setLauncherConn(false);
-    modeSwitching = false;
-    if (modeSelect) modeSelect.disabled = true;
-    if (desktopWindowControl) desktopWindowControl.disable();
-    reconnTimer = setTimeout(connect, 3000);
-  };
-  ws.onerror = () => ws.close();
-
-  ws.onmessage = createWsMessageDispatcher({
-    BlobClass: Blob,
-    onBlob: handleWsBlob,
-    handlers: wsMessageHandlers,
-    afterJson: afterWsJsonMessage,
-    onError: onWsMessageError,
+const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
+  .then(({createRemoteWsClient}) => {
+    wsClient = createRemoteWsClient({
+      window,
+      location,
+      WebSocket,
+      BlobClass: Blob,
+      handlers: wsMessageHandlers,
+      onBlob: handleWsBlob,
+      afterJson: afterWsJsonMessage,
+      onMessageError: onWsMessageError,
+      onSocketChange: socket => { ws = socket; },
+      onOpen: socket => {
+        _initDone = false;
+        setBootIndicator('Loading state…', 60, false);
+        if (setupController) setupController.resetInitialProbe();
+        setLauncherConn(true);
+        socket.send(JSON.stringify({type: 'get_search_state'}));
+        // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
+      },
+      onClose: () => {
+        // 재연결 사이클을 위해 boot finalize 상태 리셋 (다음 init_complete 가 다시 시퀀스 시작)
+        resetBootIndicatorState();
+        setBootIndicator('Reconnecting…', 20, false);
+        setLauncherConn(false);
+        modeSwitching = false;
+        if (modeSelect) modeSelect.disabled = true;
+        if (desktopWindowControl) desktopWindowControl.disable();
+      },
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize remote WebSocket client', error);
+    throw error;
   });
-}
 
 // ---- Meta / Prompt display ----
 
@@ -4234,7 +4227,7 @@ function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
 Promise.all([
   quickFilterReady,
-  wsDispatcherReady,
+  remoteWsClientReady,
   rightTabsReady,
   customSelectsReady,
   resultInfoResizerReady,
@@ -4285,7 +4278,7 @@ Promise.all([
     refreshAllOptionVisuals();
     initializeDetachedShell();
     setBootIndicator('Connecting…', 25, false);
-    connect();
+    if (wsClient) wsClient.connect();
   })
   .catch(error => {
     console.error('Failed to initialize remote shell', error);

@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
 from PIL import Image
 
-from core.remote_api_server import RemoteBridge
+from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 
 
 class _TokenManager:
@@ -151,3 +152,28 @@ def test_thumbnail_cache_is_not_created_inside_user_save_directory(tmp_path):
     assert ".thumbnails" not in thumb_path.parts
     assert not thumb_path.resolve().is_relative_to(save_dir)
     assert not (save_dir / ".thumbnails").exists()
+
+
+def test_original_endpoint_does_not_fallback_for_invalid_saved_path(tmp_path):
+    bridge, _image_path = _bridge_with_history(tmp_path)
+    bridge.latest_webp = b"latest-webp"
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.get(
+        "/api/result/image/original",
+        params={"source": "saved", "path": "missing.png"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_original_endpoint_falls_back_for_current_without_path():
+    bridge = RemoteBridge(_AppContext())
+    bridge.latest_webp = b"latest-webp"
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.get("/api/result/image/original", params={"source": "current"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/webp")
+    assert response.content == b"latest-webp"

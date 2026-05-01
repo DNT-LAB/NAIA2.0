@@ -7918,7 +7918,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 filename=target.name,
                 headers={"Cache-Control": "no-store"},
             )
-        if bridge.latest_webp is not None:
+        normalized_source = str(source or "").strip().lower()
+        requested_path = str(path or "").strip()
+        can_use_latest_fallback = not requested_path and normalized_source in {"", "current"}
+        if can_use_latest_fallback and bridge.latest_webp is not None:
             return Response(
                 content=bridge.latest_webp,
                 media_type="image/webp",

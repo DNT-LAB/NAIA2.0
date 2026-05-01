@@ -8,6 +8,7 @@ import io
 import json
 import asyncio
 import base64
+import hashlib
 import random
 import re
 import time
@@ -150,6 +151,7 @@ class RemoteBridge(QObject):
         "auto_generate": "자동 생성",
         "wildcard_standalone": "와일드카드 단독 모드",
     }
+    MEMORY_HISTORY_PATH_PREFIX = "__history__/"
 
     def __init__(self, app_context):
         super().__init__()
@@ -2413,10 +2415,7 @@ class RemoteBridge(QObject):
         has_file = bool(filepath and Path(filepath).is_file())
         rel_path = ""
         if has_file:
-            try:
-                rel_path = Path(filepath).resolve().relative_to(self._get_viewer_save_dir().resolve()).as_posix()
-            except Exception:
-                rel_path = ""
+            rel_path = self._memory_history_path_key(Path(filepath))
         encoded_rel_path = quote(rel_path, safe="/") if rel_path else ""
         has_generation_params = bool(generation_params)
         has_source_row = self._source_row_available(source_row)
@@ -2469,11 +2468,15 @@ class RemoteBridge(QObject):
             return None
         try:
             stat = target.stat()
-            save_dir = self._get_viewer_save_dir().resolve()
-            normalized_path = target.relative_to(save_dir).as_posix()
         except Exception:
             stat = None
+        if self._is_memory_history_path(rel_path):
             normalized_path = rel_path.replace("\\", "/")
+        else:
+            try:
+                normalized_path = target.relative_to(self._get_viewer_save_dir().resolve()).as_posix()
+            except Exception:
+                normalized_path = rel_path.replace("\\", "/")
         matched_item = self._find_history_item_by_path(rel_path=normalized_path)
         matched_source_row = getattr(matched_item, "source_row", None) if matched_item else None
         has_source_row = self._source_row_available(matched_source_row)
@@ -3209,29 +3212,27 @@ class RemoteBridge(QObject):
         return entries
 
     def _scan_memory_history(self) -> list:
-        """현재 ImageWindow 히스토리에 남아있는 이미지 목록만 반환."""
+        """현재 ImageWindow 히스토리에 남아있는 이미지 목록만 반환.
+
+        Web Shell의 History는 데스크탑 ImageHistoryWindow와 동일하게 현재 저장
+        폴더 설정이 아니라 메모리 HistoryItem을 기준으로 동작해야 한다. 따라서
+        URL path는 현재 저장 루트 상대경로가 아니라 HistoryItem.filepath에서 만든
+        안정 키를 사용한다. 실제 파일 접근은 키를 다시 메모리 히스토리에 대조해
+        허용하므로 임의 절대경로 노출 없이 저장 경로 변경에도 추적이 유지된다.
+        """
         from pathlib import Path
         from datetime import datetime
 
-        image_window = self._get_image_window_widget()
-        history_window = getattr(image_window, "image_history_window", None) if image_window else None
-        history_widgets = getattr(history_window, "history_widgets", []) if history_window else []
-        if not history_widgets:
-            return []
-
-        save_dir = self._get_viewer_save_dir().resolve()
         entries = []
         seen_paths = set()
 
-        for widget in history_widgets:
-            item = getattr(widget, "history_item", None)
+        for item in self._iter_memory_history_items():
             filepath = str(getattr(item, "filepath", "") or "") if item else ""
             if not filepath:
                 continue
 
             try:
                 path = Path(filepath).resolve()
-                path.relative_to(save_dir)
             except Exception:
                 continue
 
@@ -3245,8 +3246,10 @@ class RemoteBridge(QObject):
                 continue
 
             entries.append({
-                "rel_path": path.relative_to(save_dir).as_posix(),
+                "rel_path": self._memory_history_path_key(path),
                 "filename": path.name,
+                "file_path": str(path),
+                "source": "memory",
                 "size_bytes": stat.st_size,
                 "mtime": stat.st_mtime,
                 "mtime_iso": datetime.fromtimestamp(stat.st_mtime).isoformat(),
@@ -3259,22 +3262,123 @@ class RemoteBridge(QObject):
         """viewer 캐시 무효화 (새 이미지 저장 시)"""
         self._viewer_cache_time = 0
 
+    def _iter_memory_history_items(self):
+        """Yield in-memory HistoryItem objects without reading image bytes."""
+        image_window = self._get_image_window_widget()
+        if not image_window:
+            return
+
+        seen_ids = set()
+        history_window = getattr(image_window, "image_history_window", None)
+        history_widgets = getattr(history_window, "history_widgets", []) if history_window else []
+        for widget in history_widgets:
+            item = getattr(widget, "history_item", None)
+            if item is None or id(item) in seen_ids:
+                continue
+            seen_ids.add(id(item))
+            yield item
+
+        current_item = getattr(image_window, "current_history_item", None)
+        if current_item is not None and id(current_item) not in seen_ids:
+            yield current_item
+
+    def _history_path_digest(self, abs_path: 'Path') -> str:
+        import os
+
+        try:
+            normalized = os.path.normcase(str(Path(abs_path).resolve()))
+        except Exception:
+            normalized = os.path.normcase(str(abs_path))
+        return hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()[:24]
+
+    def _memory_history_path_key(self, abs_path: 'Path') -> str:
+        path = Path(abs_path)
+        digest = self._history_path_digest(path)
+        return f"{self.MEMORY_HISTORY_PATH_PREFIX}{digest}/{path.name}"
+
+    def _is_memory_history_path(self, rel_path: str) -> bool:
+        return str(rel_path or "").replace("\\", "/").startswith(self.MEMORY_HISTORY_PATH_PREFIX)
+
+    def _resolve_memory_history_path(self, rel_path: str) -> 'Path | None':
+        rel_path = str(rel_path or "").replace("\\", "/").strip()
+        if not self._is_memory_history_path(rel_path):
+            return None
+
+        rest = rel_path[len(self.MEMORY_HISTORY_PATH_PREFIX):]
+        digest = rest.split("/", 1)[0].strip()
+        if not digest:
+            return None
+
+        for item in self._iter_memory_history_items() or ():
+            filepath = str(getattr(item, "filepath", "") or "")
+            if not filepath:
+                continue
+            try:
+                path = Path(filepath).resolve()
+            except Exception:
+                continue
+            if self._history_path_digest(path) == digest and self._is_viewer_image_file(path):
+                return path
+        return None
+
+    def _resolve_memory_history_path_by_suffix(self, rel_path: str) -> 'Path | None':
+        """Resolve stale relative paths that were minted before the save root changed."""
+        rel_path = str(rel_path or "").replace("\\", "/").strip().lstrip("/")
+        if not rel_path or rel_path.startswith("../") or "/../" in rel_path:
+            return None
+        rel_parts = [part for part in Path(rel_path).parts if part not in ("", ".")]
+        if not rel_parts:
+            return None
+
+        matches = []
+        for item in self._iter_memory_history_items() or ():
+            filepath = str(getattr(item, "filepath", "") or "")
+            if not filepath:
+                continue
+            try:
+                path = Path(filepath).resolve()
+            except Exception:
+                continue
+            path_parts = list(path.parts)
+            if len(path_parts) >= len(rel_parts) and path_parts[-len(rel_parts):] == rel_parts and self._is_viewer_image_file(path):
+                matches.append(path)
+
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _is_viewer_image_file(self, path: 'Path') -> bool:
+        try:
+            target = Path(path)
+            return target.is_file() and target.suffix.lower() in {'.png', '.webp', '.jpg', '.jpeg'}
+        except Exception:
+            return False
+
     def _validate_viewer_path(self, rel_path: str) -> 'Path | None':
-        """상대 경로를 저장 폴더 기준으로 검증 (경로 탈출 방지)"""
+        """상대/히스토리 경로를 검증하고 실제 이미지 파일로 해석한다."""
         from pathlib import Path
+
+        history_target = self._resolve_memory_history_path(rel_path)
+        if history_target:
+            return history_target
+
         save_dir = self._get_viewer_save_dir().resolve()
         target = (save_dir / rel_path).resolve()
         try:
             target.relative_to(save_dir)
         except ValueError:
+            fallback = self._resolve_memory_history_path_by_suffix(rel_path)
+            if fallback:
+                return fallback
             print(f"🌐 Viewer: 경로 탈출 시도 차단 — {rel_path}")
             return None
-        if not target.is_file():
-            return None
-        IMAGE_EXTS = {'.png', '.webp', '.jpg', '.jpeg'}
-        if target.suffix.lower() not in IMAGE_EXTS:
-            return None
-        return target
+        if self._is_viewer_image_file(target):
+            return target
+
+        fallback = self._resolve_memory_history_path_by_suffix(rel_path)
+        if fallback:
+            return fallback
+        return None
 
     def _get_or_create_thumbnail(self, abs_path: 'Path', max_side: int = 0) -> bytes:
         """이미지 썸네일 반환 (디스크 캐시). max_side=0이면 원본의 절반. blocking."""
@@ -3282,10 +3386,9 @@ class RemoteBridge(QObject):
         from PIL import Image
         import io
 
-        save_dir = self._get_viewer_save_dir()
-        rel = abs_path.relative_to(save_dir.resolve())
-        thumb_dir = save_dir / ".thumbnails" / rel.parent
-        thumb_path = thumb_dir / (rel.stem + ".thumb.webp")
+        abs_path = Path(abs_path).resolve()
+        thumb_path = self._thumbnail_cache_path(abs_path)
+        thumb_dir = thumb_path.parent
 
         # 캐시 유효성 확인 (원본 mtime vs 썸네일 mtime)
         if thumb_path.exists():
@@ -3314,6 +3417,16 @@ class RemoteBridge(QObject):
             print(f"🌐 Viewer: 썸네일 생성 실패 — {abs_path}: {e}")
             return b''
 
+    def _thumbnail_cache_path(self, abs_path: 'Path') -> 'Path':
+        save_dir = self._get_viewer_save_dir()
+        abs_path = Path(abs_path).resolve()
+        try:
+            rel = abs_path.relative_to(save_dir.resolve())
+            return save_dir / ".thumbnails" / rel.parent / (rel.stem + ".thumb.webp")
+        except Exception:
+            digest = self._history_path_digest(abs_path)
+            return Path("save") / "remote_web_thumbnails" / digest[:2] / f"{digest}.thumb.webp"
+
     def _on_image_saved(self, data: dict):
         """image_saved 이벤트 핸들러 → viewer_new_image WS broadcast"""
         self._invalidate_viewer_cache()
@@ -3334,6 +3447,7 @@ class RemoteBridge(QObject):
             self._broadcast_json({
                 "type": "viewer_new_image",
                 "rel_path": rel,
+                "file_path": str(filepath),
                 "filename": filename,
                 "mtime_iso": mtime_iso,
             })
@@ -3709,6 +3823,7 @@ class RemoteBridge(QObject):
             self._send_json_to(ws, self._read_save_directory(ws=ws))
 
     def on_save_directory_changed(self, _data: dict):
+        self._invalidate_viewer_cache()
         self._broadcast_save_directory_state()
 
     def _persist_base_save_directory_setting(self, new_path: str):
@@ -8013,11 +8128,13 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         if not target or not Path(target).is_file():
             return JSONResponse({"error": "Image file is unavailable"}, status_code=404)
 
-        try:
-            save_dir = bridge._get_viewer_save_dir().resolve()
-            Path(target).resolve().relative_to(save_dir)
-        except Exception:
-            return JSONResponse({"error": "Image file is outside the result folder"}, status_code=400)
+        history_item = await asyncio.to_thread(bridge._find_history_item_by_path, rel_path=rel_path) if rel_path else None
+        if not history_item:
+            try:
+                save_dir = bridge._get_viewer_save_dir().resolve()
+                Path(target).resolve().relative_to(save_dir)
+            except Exception:
+                return JSONResponse({"error": "Image file is outside the result folder"}, status_code=400)
 
         await asyncio.to_thread(bridge._open_path_location, Path(target))
         return {"ok": True}

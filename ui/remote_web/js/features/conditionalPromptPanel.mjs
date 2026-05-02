@@ -20,6 +20,7 @@ export function createConditionalPromptPanel({
 
   let currentState = null;
   let selectedRuleId = null;
+  let presetPopoverOpen = false;
   let dirty = false;
   let bound = false;
 
@@ -563,7 +564,9 @@ export function createConditionalPromptPanel({
   }
 
   function renderModeBar(m) {
-    const presetLabel = m.active_preset ? `<span class="cond-status-chip">Preset ${escHtml(m.active_preset)}</span>` : '';
+    const presetName = safeText(m.active_preset || '').trim();
+    const presetLabel = presetName ? `<span class="cond-status-chip cond-preset-status">Preset ${escHtml(presetName)}</span>` : '';
+    const presetButtonLabel = presetName ? `프리셋: ${presetName}` : '프리셋';
     return `
       <div class="cond-topbar">
         <label class="mod-checkbox-item cond-enable-row">
@@ -575,6 +578,7 @@ export function createConditionalPromptPanel({
           <button type="button" class="cond-mode-btn ${m.editor_mode === 'v2' ? 'active' : ''}" data-cond-mode="v2">New Editor</button>
         </div>
         <div class="cond-status-row">
+          <button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
           ${presetLabel}
           <span class="cond-status-chip" id="condDirtyChip">${dirty ? '미적용 변경' : '적용됨'}</span>
         </div>
@@ -631,7 +635,7 @@ export function createConditionalPromptPanel({
     const selected = selectedRule();
     const simulationActive = Boolean(m.simulation);
     moduleBody.innerHTML = `
-      <div class="cond-root cond-v2-editor">
+      <div class="cond-root cond-v2-editor${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
         <div class="cond-summary-box" id="condSelectedSummary">${escHtml(selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.')}</div>
@@ -676,7 +680,10 @@ export function createConditionalPromptPanel({
     }).join('');
     return `
       <section class="cond-pane cond-preset-pane">
-        <div class="cond-pane-title">프리셋</div>
+        <div class="cond-pane-title-row">
+          <div class="cond-pane-title">프리셋</div>
+          <button type="button" class="cond-preset-close" data-cond-action="toggle-preset-popover" aria-label="프리셋 닫기">×</button>
+        </div>
         <select class="mod-select" id="condPresetSelect">${options}</select>
         <div class="cond-preset-list">${presetItems || '<div class="cond-empty">저장된 프리셋 없음</div>'}</div>
         <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(m.active_preset)}">
@@ -1164,6 +1171,7 @@ export function createConditionalPromptPanel({
       const mode = normalizeMode(modeButton.dataset.condMode);
       if (!currentState) return;
       currentState.editor_mode = mode;
+      presetPopoverOpen = false;
       sendModuleParam('conditional_prompt', 'editor_mode', mode);
       render(currentState);
       return;
@@ -1174,6 +1182,9 @@ export function createConditionalPromptPanel({
     if (action === 'toggle-syntax') {
       actionEl.classList.toggle('open');
       actionEl.nextElementSibling?.classList.toggle('collapsed');
+    } else if (action === 'toggle-preset-popover') {
+      presetPopoverOpen = !presetPopoverOpen;
+      renderWithScrollRestore(['.cond-rule-list', '.cond-condition-scroll']);
     } else if (action === 'select-rule') {
       selectedRuleId = actionEl.dataset.ruleId || '';
       renderWithScrollRestore(['.cond-rule-list']);
@@ -1252,10 +1263,16 @@ export function createConditionalPromptPanel({
     } else if (action === 'load-selected-preset') {
       const select = document.getElementById('condPresetSelect');
       const name = safeText(select?.value).trim();
-      if (name) sendModuleParam('conditional_prompt', 'preset_load', name);
+      if (name) {
+        presetPopoverOpen = false;
+        sendModuleParam('conditional_prompt', 'preset_load', name);
+      }
     } else if (action === 'load-preset') {
       const name = safeText(actionEl.dataset.presetName).trim();
-      if (name) sendModuleParam('conditional_prompt', 'preset_load', name);
+      if (name) {
+        presetPopoverOpen = false;
+        sendModuleParam('conditional_prompt', 'preset_load', name);
+      }
     }
   }
 

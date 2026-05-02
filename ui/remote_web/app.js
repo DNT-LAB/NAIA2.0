@@ -2609,11 +2609,11 @@ function openModule(moduleId, options = {}) {
     character_reference: 'Character Reference',
     vibe_transfer: 'Vibe Transfer',
     img2img: 'Img2Img',
-    conditional_prompt: 'Conditional Prompt',
-    wildcard: 'Wildcard',
+    conditional_prompt: '조건부 프롬프트',
+    wildcard: '와일드카드 관리',
     instant_wildcard: 'Instant Wildcard',
-    chunk: 'Chunk',
-    e621_event: 'E621 Event',
+    chunk: '와일드카드 청크',
+    e621_event: 'E621 연구모듈',
     ollama: 'Ollama',
   };
   moduleTitle.textContent = moduleLauncherControl?.moduleTitle(moduleId) || titles[moduleId] || moduleId;

@@ -5,8 +5,8 @@ const MODULE_REGISTRY = {
     action: 'module',
   },
   e621_event: {
-    label: 'E621',
-    title: 'E621 Event',
+    label: 'E621 연구모듈',
+    title: 'E621 연구모듈',
     category: 'prompt_tools',
     action: 'module',
   },
@@ -18,20 +18,20 @@ const MODULE_REGISTRY = {
     className: 'module-detached-tool',
   },
   wildcard: {
-    label: 'WC',
-    title: 'Wildcard',
+    label: '와일드카드 관리',
+    title: '와일드카드 관리',
     category: 'prompt_tools',
     action: 'module',
   },
   chunk: {
-    label: 'Chunk',
-    title: 'Chunk',
+    label: '와일드카드 청크',
+    title: '와일드카드 청크',
     category: 'prompt_tools',
     action: 'chunk',
   },
   conditional_prompt: {
-    label: 'Cond',
-    title: 'Conditional Prompt',
+    label: '조건부 프롬프트',
+    title: '조건부 프롬프트',
     category: 'prompt_tools',
     action: 'module',
   },
@@ -115,6 +115,65 @@ export function createModuleLauncher({
   const root = document.getElementById('moduleLauncher');
   let observer = null;
   let updateQueued = false;
+  let tooltipEl = null;
+  let tooltipOwner = null;
+
+  function tooltipAttr(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function ensureTooltip() {
+    if (tooltipEl) return tooltipEl;
+    tooltipEl = document.createElement('div');
+    tooltipEl.className = 'module-tooltip';
+    document.body.append(tooltipEl);
+    return tooltipEl;
+  }
+
+  function positionTooltip(target) {
+    if (!tooltipEl || !target) return;
+    const win = document.defaultView;
+    const viewportWidth = document.documentElement.clientWidth || win.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || win.innerHeight;
+    const rect = target.getBoundingClientRect();
+    const tipRect = tooltipEl.getBoundingClientRect();
+    const gap = 8;
+    let left = rect.left + rect.width / 2 - tipRect.width / 2;
+    left = Math.max(gap, Math.min(left, viewportWidth - tipRect.width - gap));
+    let top = rect.top - tipRect.height - gap;
+    if (top < gap) top = rect.bottom + gap;
+    top = Math.max(gap, Math.min(top, viewportHeight - tipRect.height - gap));
+    tooltipEl.style.left = `${Math.round(left)}px`;
+    tooltipEl.style.top = `${Math.round(top)}px`;
+  }
+
+  function showTooltip(target) {
+    if (!target || !root?.contains(target)) return;
+    const text = target.dataset.moduleTooltip || '';
+    if (!text.trim()) return;
+    const tooltip = ensureTooltip();
+    tooltipOwner = target;
+    tooltip.textContent = text;
+    tooltip.classList.add('open');
+    document.defaultView.requestAnimationFrame(() => {
+      if (tooltipOwner === target) positionTooltip(target);
+    });
+  }
+
+  function hideTooltip(target = null) {
+    if (target && tooltipOwner && target !== tooltipOwner) return;
+    tooltipOwner = null;
+    if (tooltipEl) tooltipEl.classList.remove('open');
+  }
+
+  function findTooltipTarget(target) {
+    const tooltipTarget = target?.closest?.('[data-module-tooltip]');
+    return tooltipTarget && root?.contains(tooltipTarget) ? tooltipTarget : null;
+  }
 
   function moduleTitle(moduleId) {
     return MODULE_REGISTRY[moduleId]?.title || moduleId;
@@ -134,8 +193,9 @@ export function createModuleLauncher({
       ? `<span class="module-badge hidden" id="${config.badgeId}"></span>`
       : '';
     const className = ['module-btn', extraClass, config.className || ''].filter(Boolean).join(' ');
+    const tooltip = tooltipAttr(config.title);
     return `
-      <button type="button" class="${className}" data-module="${moduleId}" title="${config.title}">
+      <button type="button" class="${className}" data-module="${moduleId}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
         <span>${config.label}</span>${badge}
       </button>
     `;
@@ -145,7 +205,7 @@ export function createModuleLauncher({
     const items = category.moduleIds.map(moduleId => renderModuleButton(moduleId, 'module-menu-item')).join('');
     return `
       <div class="module-category" data-module-category="${category.id}">
-        <button type="button" class="module-btn module-category-btn" data-category-toggle="${category.id}" title="${category.title}">
+        <button type="button" class="module-btn module-category-btn" data-category-toggle="${category.id}" aria-label="${tooltipAttr(category.title)}" data-module-tooltip="${tooltipAttr(category.title)}">
           <span class="module-category-label">${category.label}</span><span class="module-category-badges hidden"></span>
         </button>
         <div class="module-category-menu" role="menu" aria-label="${category.title}">
@@ -171,6 +231,7 @@ export function createModuleLauncher({
         category.classList.remove('menu-open');
       }
     });
+    hideTooltip();
   }
 
   function toggleCategory(categoryId) {
@@ -236,7 +297,8 @@ export function createModuleLauncher({
         const chip = document.createElement('span');
         chip.className = `module-category-badge module-category-badge-${badge.className || badge.moduleId}`;
         chip.textContent = `${badge.label}${badge.value}`;
-        chip.title = `${badge.title}: ${badge.value}`;
+        chip.setAttribute('aria-label', `${badge.title}: ${badge.value}`);
+        chip.dataset.moduleTooltip = `${badge.title}: ${badge.value}`;
         badgeGroup.append(chip);
       });
       badgeGroup.classList.remove('hidden');
@@ -322,6 +384,24 @@ export function createModuleLauncher({
     document.addEventListener('pointerdown', event => {
       if (!root.contains(event.target)) closeMenus();
     }, true);
+    root.addEventListener('pointerover', event => {
+      const target = findTooltipTarget(event.target);
+      if (target) showTooltip(target);
+    });
+    root.addEventListener('pointermove', () => {
+      if (tooltipOwner) positionTooltip(tooltipOwner);
+    });
+    root.addEventListener('pointerout', event => {
+      if (tooltipOwner && !tooltipOwner.contains(event.relatedTarget)) hideTooltip(tooltipOwner);
+    });
+    root.addEventListener('focusin', event => {
+      const target = findTooltipTarget(event.target);
+      if (target) showTooltip(target);
+    });
+    root.addEventListener('focusout', event => {
+      const target = findTooltipTarget(event.target);
+      if (target) hideTooltip(target);
+    });
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') closeMenus();
     });
@@ -339,6 +419,9 @@ export function createModuleLauncher({
   function cleanup() {
     if (observer) observer.disconnect();
     observer = null;
+    hideTooltip();
+    tooltipEl?.remove();
+    tooltipEl = null;
   }
 
   return {

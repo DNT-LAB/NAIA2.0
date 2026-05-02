@@ -3482,6 +3482,28 @@ body.resizing-result-info {
 .module-btn.vibe-active { border-color: #d4a06a; color: #d4a06a; }
 .module-btn.vibe-active.active { border-color: var(--accent-glow); color: #fff; }
 .module-btn.nai-only-disabled { opacity: 0.35; pointer-events: none; }
+.module-tooltip {
+  display: none;
+  position: fixed;
+  z-index: var(--z-floating-module-tooltip);
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 6px 8px;
+  background: rgba(12,12,20,0.98);
+  border: 1px solid rgba(157,139,255,0.42);
+  border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.42);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.module-tooltip.open {
+  display: block;
+}
 .module-badge {
   display: inline-block;
   margin-left: 4px;

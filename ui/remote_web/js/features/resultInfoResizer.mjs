@@ -1,7 +1,9 @@
 const STORAGE_KEY = 'naia_result_info_height';
-const MIN_HEIGHT = 72;
+const MIN_HEIGHT = 38;
 const MIN_VIEWER_HEIGHT = 220;
 const MAX_HEIGHT = 520;
+const COLLAPSED_HEIGHT = 44;
+const MAX_DRAG_MS = 12000;
 
 export function createResultInfoResizer({document, window, localStorage}) {
   const panel = document.getElementById('resultInfoPanel');
@@ -22,6 +24,7 @@ export function createResultInfoResizer({document, window, localStorage}) {
     if (!panel) return;
     const nextHeight = clampHeight(height);
     panel.style.setProperty('--result-info-height', `${nextHeight}px`);
+    panel.classList.toggle('is-collapsed', nextHeight <= COLLAPSED_HEIGHT);
     if (persist) {
       try { localStorage.setItem(STORAGE_KEY, String(nextHeight)); } catch (_) {}
     }
@@ -39,33 +42,70 @@ export function createResultInfoResizer({document, window, localStorage}) {
     let startY = 0;
     let startHeight = 0;
     let dragging = false;
+    let activePointerId = null;
+    let dragTimer = null;
 
-    handle.addEventListener('pointerdown', event => {
-      dragging = true;
-      startY = event.clientY;
-      startHeight = panel.getBoundingClientRect().height;
-      document.body.classList.add('resizing-result-info');
-      handle.setPointerCapture(event.pointerId);
-      event.preventDefault();
-    });
+    const clearDragTimer = () => {
+      if (!dragTimer) return;
+      window.clearTimeout(dragTimer);
+      dragTimer = null;
+    };
 
-    handle.addEventListener('pointermove', event => {
+    const updateDrag = event => {
       if (!dragging) return;
+      if (activePointerId !== null && event.pointerId !== activePointerId) return;
       setHeight(startHeight - (event.clientY - startY), false);
-    });
+      event.preventDefault();
+    };
 
-    const finishDrag = event => {
+    const finishDrag = (event = {}) => {
       if (!dragging) return;
+
+      const pointerId = event.pointerId ?? activePointerId;
       dragging = false;
+      activePointerId = null;
+      clearDragTimer();
       document.body.classList.remove('resizing-result-info');
-      try { handle.releasePointerCapture(event.pointerId); } catch (_) {}
+      window.removeEventListener('pointermove', updateDrag, true);
+      window.removeEventListener('pointerup', finishDrag, true);
+      window.removeEventListener('pointercancel', finishDrag, true);
+      try {
+        if (pointerId !== null && handle.hasPointerCapture(pointerId)) {
+          handle.releasePointerCapture(pointerId);
+        }
+      } catch (_) {}
       setHeight(panel.getBoundingClientRect().height, true);
     };
 
-    handle.addEventListener('pointerup', finishDrag);
-    handle.addEventListener('pointercancel', finishDrag);
+    const abortDrag = () => finishDrag({pointerId: activePointerId});
+
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== undefined && event.button !== 0) return;
+      if (dragging) finishDrag({pointerId: activePointerId});
+
+      dragging = true;
+      activePointerId = event.pointerId;
+      startY = event.clientY;
+      startHeight = panel.getBoundingClientRect().height;
+      document.body.classList.add('resizing-result-info');
+      try { handle.setPointerCapture(event.pointerId); } catch (_) {}
+      window.addEventListener('pointermove', updateDrag, true);
+      window.addEventListener('pointerup', finishDrag, true);
+      window.addEventListener('pointercancel', finishDrag, true);
+      dragTimer = window.setTimeout(abortDrag, MAX_DRAG_MS);
+      event.preventDefault();
+    });
+
+    handle.addEventListener('lostpointercapture', event => {
+      if (dragging && event.pointerId === activePointerId) finishDrag(event);
+    });
+    window.addEventListener('blur', abortDrag);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) abortDrag();
+    });
 
     window.addEventListener('resize', () => {
+      if (dragging) abortDrag();
       setHeight(panel.getBoundingClientRect().height, true);
     });
   }

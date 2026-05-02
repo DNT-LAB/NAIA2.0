@@ -1792,7 +1792,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 
 .result-info-panel {
   height: var(--result-info-height, 96px);
-  min-height: 72px;
+  min-height: 38px;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-dim);
@@ -2007,12 +2007,19 @@ body.resizing-result-info {
 }
 .result-info-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px 14px;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-secondary);
+}
+.result-info-panel.is-collapsed .result-info-header {
+  border-bottom: none;
+}
+.result-info-panel.is-collapsed .result-info-content {
+  display: none;
 }
 .result-info-content::-webkit-scrollbar { width: 3px; }
 .result-info-content::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }

@@ -1024,12 +1024,14 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .studio-field select {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--border-dim);
+  border: 1px solid rgba(157,139,255,0.24);
   border-radius: 7px;
-  background: var(--bg-primary);
+  background: #191829;
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
   outline: none;
 }
 .studio-field textarea {
@@ -1042,8 +1044,9 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .studio-field-tall textarea { min-height: 140px; }
 .studio-field input,
 .studio-field select {
-  height: 36px;
-  padding: 0 9px;
+  height: 42px;
+  padding: 0 12px;
+  line-height: normal;
 }
 .studio-field textarea::placeholder,
 .studio-field input::placeholder {
@@ -1053,6 +1056,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .studio-field input:focus,
 .studio-field select:focus {
   border-color: var(--accent);
+  background: #1f1d33;
 }
 .studio-toggle {
   display: flex;
@@ -1285,18 +1289,52 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.studio-editor-image {
+  width: 100%;
+  min-height: 176px;
+  max-height: 32vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(157,139,255,0.22);
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, rgba(124,106,239,0.16), rgba(255,255,255,0.035)),
+    #151421;
+}
+.studio-editor-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.studio-editor-image.empty {
+  gap: 4px;
+  align-content: center;
+  color: #d9d4ff;
+  font-family: var(--font-mono);
+}
+.studio-editor-image.empty span {
+  color: rgba(157,139,255,0.92);
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+}
+.studio-editor-image.empty small {
+  color: #c9c3f2;
+  font-size: 11px;
+}
 .studio-editor-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
 .studio-editor .studio-field-tall textarea {
   min-height: 160px;
 }
 .studio-editor .studio-field select,
 .studio-editor .studio-field input {
-  height: 38px;
-  font-size: 12px;
+  height: 44px;
+  font-size: 13px;
 }
 .studio-composed {
   display: grid;

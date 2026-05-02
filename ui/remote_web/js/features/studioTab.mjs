@@ -308,6 +308,21 @@ export function createStudioTabController({
       </section>`;
   }
 
+  function renderEditorImage(frame) {
+    const imageUrl = frameImages.get(frame.id);
+    if (!imageUrl) {
+      return `
+        <div class="studio-editor-image empty">
+          <span>${escHtml(frameId(selectedIndex))}</span>
+          <small>이미지 없음</small>
+        </div>`;
+    }
+    return `
+      <div class="studio-editor-image">
+        <img src="${imageUrl}" alt="${escHtml(frameId(selectedIndex))}">
+      </div>`;
+  }
+
   function renderEditor() {
     const frame = selectedFrame();
     if (!frame || !editorOpen) return '';
@@ -326,6 +341,7 @@ export function createStudioTabController({
             <button type="button" data-studio-action="close-editor" aria-label="프레임 편집기 닫기">닫기</button>
           </div>
         </div>
+        ${renderEditorImage(frame)}
         <label class="studio-field studio-field-tall">
           <span>Frame Prompt</span>
           <textarea data-studio-frame-field="prompt" spellcheck="false">${escHtml(frame.prompt)}</textarea>

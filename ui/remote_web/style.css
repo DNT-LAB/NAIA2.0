@@ -581,6 +581,9 @@ header {
   min-width: 0;
   background: var(--bg-surface);
 }
+.viewer-wrapper:has(.studio-editor) {
+  z-index: var(--z-floating-module);
+}
 .right-tab-bar {
   flex-shrink: 0;
   display: flex;
@@ -1259,14 +1262,14 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   left: 12px;
   top: 98px;
   bottom: 132px;
-  z-index: 90;
+  z-index: var(--z-floating-module-aux);
   width: min(456px, calc(100vw - 24px));
   max-height: none;
   padding: 14px;
   border: 1px solid rgba(157,139,255,0.32);
   border-radius: 12px;
   overflow: auto;
-  background: rgba(13,13,22,0.97);
+  background: #0d0d16;
   box-shadow: 0 22px 60px rgba(0,0,0,0.46), 0 0 0 1px rgba(255,255,255,0.035);
 }
 .studio-editor-head {

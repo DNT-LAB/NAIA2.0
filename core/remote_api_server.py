@@ -873,20 +873,28 @@ class RemoteBridge(QObject):
             ws = req.get("ws")
             prompt = req.get("prompt", "")
             negative = req.get("negative", "")
+            raw_overrides = req.get("overrides")
+            request_overrides = raw_overrides if isinstance(raw_overrides, dict) else None
 
             gc = self.app_context.main_window.generation_controller
 
-            # 웹 프롬프트를 데스크톱 UI에 반영한 뒤 현재 파이프라인으로 생성한다.
-            if prompt or negative:
-                self._syncing_prompt = True
-                mw = self.app_context.main_window
-                if prompt:
-                    mw.main_prompt_textedit.setPlainText(prompt)
-                if negative:
-                    mw.negative_prompt_textedit.setPlainText(negative)
-                self._syncing_prompt = False
-
-            session_overrides = {}
+            if request_overrides is not None:
+                # Studio and tool requests are per-generation overrides. They must not
+                # mutate the visible main prompt/negative fields.
+                session_overrides = dict(request_overrides)
+            else:
+                # 일반 웹 Generate는 기존처럼 웹 편집 내용을 데스크톱 UI에 반영한다.
+                if prompt or negative:
+                    self._syncing_prompt = True
+                    try:
+                        mw = self.app_context.main_window
+                        if prompt:
+                            mw.main_prompt_textedit.setPlainText(prompt)
+                        if negative:
+                            mw.negative_prompt_textedit.setPlainText(negative)
+                    finally:
+                        self._syncing_prompt = False
+                session_overrides = {}
             session_overrides.setdefault("_remote_queue_source", "Web")
 
             # pending overrides에 source 기록 (on_prompt_generated에서 사용)
@@ -8985,10 +8993,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "type": "tag_lookup_result", **info,
                             }))
                         elif cmd_type == "generate":
+                            raw_overrides = cmd.get("overrides")
                             bridge._pending_generate_requests.append({
                                 "ws": ws,
                                 "prompt": cmd.get("prompt", ""),
                                 "negative": cmd.get("negative_prompt", ""),
+                                "overrides": raw_overrides if isinstance(raw_overrides, dict) else None,
                             })
                             bridge.request_generate.emit()
                         elif cmd_type == "result_enhance":

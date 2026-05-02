@@ -54,6 +54,103 @@ def test_api_status_does_not_force_setup_when_backend_exists():
     assert local["setup_required"] is False
 
 
+class _TextEdit:
+    def __init__(self, text=""):
+        self.text = text
+        self.set_calls = []
+
+    def toPlainText(self):
+        return self.text
+
+    def setPlainText(self, text):
+        self.set_calls.append(text)
+        self.text = text
+
+
+class _GenerationController:
+    def __init__(self, is_generating=False):
+        self.is_generating = is_generating
+        self.executed = []
+        self.enqueued = []
+
+    def execute_generation_pipeline(self, overrides=None, priority=0):
+        self.executed.append((dict(overrides or {}), priority))
+
+    def _enqueue_current_request(self, overrides=None, priority=0):
+        self.enqueued.append((dict(overrides or {}), priority))
+
+
+class _QueueManager:
+    def __init__(self, empty=True, paused=False):
+        self._empty = empty
+        self.is_paused = paused
+
+    def is_empty(self):
+        return self._empty
+
+
+def _bridge_with_generate_context(is_generating=False, queue_empty=True):
+    prompt_edit = _TextEdit("main prompt")
+    negative_edit = _TextEdit("preset negative")
+    generation_controller = _GenerationController(is_generating=is_generating)
+    ctx = SimpleNamespace(
+        main_window=SimpleNamespace(
+            generation_controller=generation_controller,
+            main_prompt_textedit=prompt_edit,
+            negative_prompt_textedit=negative_edit,
+        ),
+        generation_queue_manager=_QueueManager(empty=queue_empty),
+    )
+    return RemoteBridge(ctx), generation_controller, prompt_edit, negative_edit
+
+
+def test_studio_generate_overrides_do_not_mutate_main_prompt_fields():
+    bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context()
+    overrides = {
+        "input": "studio frame prompt",
+        "negative_prompt": "studio additional negative",
+        "studio_request": True,
+        "_remote_queue_source": "Studio",
+    }
+    bridge._pending_generate_requests.append({
+        "ws": None,
+        "prompt": "should not touch main prompt",
+        "negative": "should not touch preset negative",
+        "overrides": overrides,
+    })
+
+    bridge._do_generate()
+
+    assert prompt_edit.toPlainText() == "main prompt"
+    assert negative_edit.toPlainText() == "preset negative"
+    assert prompt_edit.set_calls == []
+    assert negative_edit.set_calls == []
+    assert generation_controller.executed == [(overrides, 0)]
+
+
+def test_studio_generate_overrides_are_preserved_when_queued():
+    bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context(is_generating=True)
+    overrides = {
+        "input": "queued studio frame",
+        "negative_prompt": "queued studio negative",
+        "studio_request": True,
+        "_remote_queue_source": "Studio",
+    }
+    bridge._pending_generate_requests.append({
+        "ws": None,
+        "prompt": "should not touch main prompt",
+        "negative": "should not touch preset negative",
+        "overrides": overrides,
+    })
+
+    bridge._do_generate()
+
+    assert prompt_edit.toPlainText() == "main prompt"
+    assert negative_edit.toPlainText() == "preset negative"
+    assert generation_controller.executed == []
+    assert generation_controller.enqueued == [(overrides, 0)]
+
+
 class _ImageCrud:
     def __init__(self, save_dir):
         self._save_dir = save_dir

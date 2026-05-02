@@ -155,6 +155,41 @@ export function createStudioTabController({
     return nonEmpty([state.globalNegative, frame?.negative]).join(',\n');
   }
 
+  function parseResolution(value) {
+    const match = /(\d+)\s*[x×]\s*(\d+)/i.exec(safeText(value));
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return {width: Math.round(width), height: Math.round(height)};
+  }
+
+  function buildGenerationOverrides(frame, frameIndex, seed) {
+    const prompt = composePrompt(frame);
+    const negative = composeNegative(frame);
+    const resolution = frame?.resolution || state.globalResolution || getCurrentResolution() || '';
+    const size = parseResolution(resolution);
+    const overrides = {
+      input: prompt,
+      _raw_input: prompt,
+      random_resolution: false,
+      studio_request: true,
+      studio_frame_index: frameIndex,
+      _remote_queue_source: 'Studio',
+      _remote_queue_label: frameId(frameIndex),
+    };
+    if (negative) overrides.negative_prompt = negative;
+    if (size) {
+      overrides.width = size.width;
+      overrides.height = size.height;
+    }
+    if (seed) {
+      const numericSeed = Number(seed);
+      overrides.seed = Number.isFinite(numericSeed) ? Math.trunc(numericSeed) : seed;
+    }
+    return overrides;
+  }
+
   function seedModeLabel(value = state.seedMode) {
     if (value === 'reuse_previous') return '이전 프레임 시드 재사용';
     if (value === 'increment_previous') return '이전 프레임 +1';
@@ -745,11 +780,18 @@ export function createStudioTabController({
       token: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       startedAt: Date.now(),
     };
-    applyFrameParams(frame, seed);
-    setPromptFields(composePrompt(frame), composeNegative(frame));
+    const sent = generate({overrides: buildGenerationOverrides(frame, frameIndex, seed)});
+    if (sent === false) {
+      frame.status = 'error';
+      activeJob = null;
+      running = false;
+      showToast('Studio 생성 요청을 보낼 수 없습니다', 'error');
+      saveState();
+      render();
+      return;
+    }
     saveState();
     render();
-    generate();
   }
 
   function handleResultBlob(blob) {

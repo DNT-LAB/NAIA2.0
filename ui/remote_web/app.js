@@ -163,7 +163,7 @@ const studioTabReady = import('./js/features/studioTab.mjs')
       getCurrentResolution: () => paramEls.resolution?.value || qResolution?.value || '',
       setParam,
       setPromptFields: applyPromptFields,
-      generate: () => send('generate'),
+      generate: requestGenerate,
       showToast,
       escHtml,
     });
@@ -2057,17 +2057,23 @@ function switchTab(name) {
 }
 
 // ---- Controls ----
+function requestGenerate(payload = {}) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (generating) return false;
+  if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
+  _localPromptDirty = false;
+  const message = {type: 'generate', ...(payload && typeof payload === 'object' ? payload : {})};
+  ws.send(JSON.stringify(message));
+  return true;
+}
+
 function send(cmd) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (cmd === 'generate') {
-    if (generating) return;
-    if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
-    _localPromptDirty = false;
-    ws.send(JSON.stringify({
-      type: 'generate',
+    requestGenerate({
       prompt: promptEdit.value,
       negative_prompt: negEdit.value,
-    }));
+    });
     return;
   }
   if (cmd === 'random') {

@@ -7,10 +7,11 @@ export function createCustomSelectController({ document, window }) {
   let observer = null;
 
   function selectClasses(select) {
-    return Array.from(select.classList)
+    const classes = Array.from(select.classList)
       .filter(Boolean)
-      .map(name => `custom-${name}`)
-      .join(' ');
+      .map(name => `custom-${name}`);
+    if (select.closest?.('.studio-tab')) classes.push('custom-studio-select');
+    return classes.join(' ');
   }
 
   function enhance(select) {
@@ -171,10 +172,13 @@ export function createCustomSelectController({ document, window }) {
     const rect = state.button.getBoundingClientRect();
     const viewportGap = 8;
     const menuMaxHeight = Math.min(420, Math.max(160, window.innerHeight - viewportGap * 2));
+    const desiredHeight = Math.min(menuMaxHeight, Math.max(44, state.select.options.length * 36 + 8));
     const below = window.innerHeight - rect.bottom - viewportGap;
     const above = rect.top - viewportGap;
-    const openUpward = below < 180 && above > below;
-    const height = Math.min(menuMaxHeight, Math.max(120, openUpward ? above : below));
+    const preferBelow = state.wrapper.classList.contains('custom-studio-select') && below >= 64;
+    const openUpward = !preferBelow && below < desiredHeight && above > below;
+    const available = Math.max(44, openUpward ? above : below);
+    const height = Math.min(menuMaxHeight, desiredHeight, available);
     const top = openUpward ? Math.max(viewportGap, rect.top - height - 4) : Math.min(window.innerHeight - viewportGap, rect.bottom + 4);
 
     state.menu.style.left = `${Math.round(rect.left)}px`;

@@ -405,6 +405,41 @@ header {
   padding: 8px 10px;
   font-size: 12px;
 }
+.studio-field .custom-select {
+  width: 100%;
+}
+.studio-field .custom-select-button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(157,139,255,0.24);
+  border-radius: 7px;
+  background: #191829;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+}
+.studio-field .custom-select-button:focus-visible {
+  border-color: var(--accent);
+  background: #1f1d33;
+}
+.studio-editor .studio-field .custom-select-button {
+  min-height: 48px;
+  font-size: 13.5px;
+}
+.custom-select-menu.custom-studio-select {
+  padding: 6px;
+  border-color: rgba(157,139,255,0.32);
+  background: #11111b;
+  box-shadow: 0 16px 36px rgba(0,0,0,0.58), 0 0 0 1px rgba(255,255,255,0.035);
+}
+.custom-select-menu.custom-studio-select .custom-select-option {
+  min-height: 36px;
+  padding: 8px 10px;
+  color: #e8e5ff;
+  font-size: 12.5px;
+  font-weight: 700;
+}
 
 /* ---- UI Lock overlay ---- */
 .ui-lock {

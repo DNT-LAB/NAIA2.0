@@ -1,21 +1,13 @@
 export function createDanbooruTabController({
   document,
-  escHtml,
+  fetch: fetchFn = window.fetch.bind(window),
   showToast,
-  setPromptText,
-  requestGenerate,
 }) {
   const queryInput = document.getElementById('danbooruQuery');
-  const loadBtn = document.getElementById('danbooruLoadBtn');
-  const applyBtn = document.getElementById('danbooruApplyBtn');
-  const generateBtn = document.getElementById('danbooruGenerateBtn');
+  const openBtn = document.getElementById('danbooruLoadBtn');
+  const openNativeBtn = document.getElementById('danbooruOpenBrowserBtn');
   const statusEl = document.getElementById('danbooruStatus');
-  const preview = document.getElementById('danbooruPreview');
-  const previewEmpty = document.getElementById('danbooruPreviewEmpty');
-  const metaEl = document.getElementById('danbooruMeta');
-  const tagsEl = document.getElementById('danbooruTags');
-  const promptEl = document.getElementById('danbooruPrompt');
-  let lastPost = null;
+  let openedOnce = false;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -25,129 +17,55 @@ export function createDanbooruTabController({
   }
 
   function setBusy(busy) {
-    if (loadBtn) loadBtn.disabled = !!busy;
-    if (queryInput) queryInput.disabled = !!busy;
+    [openBtn, openNativeBtn, queryInput].forEach(el => {
+      if (el) el.disabled = !!busy;
+    });
   }
 
-  function fallbackPrompt(post) {
-    const tags = post?.tags || {};
-    const general = Array.isArray(tags.general) ? tags.general : [];
-    return general.join(', ');
-  }
-
-  function currentPrompt() {
-    return String(lastPost?.prompt || fallbackPrompt(lastPost) || '').trim();
-  }
-
-  function renderTags(tags = {}) {
-    if (!tagsEl) return;
-    const order = [
-      ['artist', 'Artist'],
-      ['copyright', 'Copyright'],
-      ['character', 'Character'],
-      ['general', 'General'],
-      ['meta', 'Meta'],
-    ];
-    tagsEl.innerHTML = order.map(([key, label]) => {
-      const values = Array.isArray(tags[key]) ? tags[key] : [];
-      const body = values.length ? values.join(', ') : '—';
-      return `
-        <div class="danbooru-tag-group">
-          <div class="danbooru-tag-title">${label} · ${values.length}</div>
-          <div class="danbooru-tag-list">${escHtml(body)}</div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  function renderPost(post) {
-    lastPost = post || null;
-    const hasPost = !!lastPost;
-    if (applyBtn) applyBtn.disabled = !hasPost;
-    if (generateBtn) generateBtn.disabled = !hasPost;
-
-    if (preview) {
-      preview.classList.toggle('show', !!lastPost?.preview_url);
-      if (lastPost?.preview_url) preview.src = lastPost.preview_url;
-      else preview.removeAttribute('src');
-    }
-    if (previewEmpty) previewEmpty.style.display = lastPost?.preview_url ? 'none' : '';
-
-    if (metaEl) {
-      if (!lastPost) metaEl.textContent = '';
-      else {
-        const rating = lastPost.rating ? `rating ${lastPost.rating}` : 'rating —';
-        const score = lastPost.score !== undefined && lastPost.score !== null ? `score ${lastPost.score}` : 'score —';
-        metaEl.innerHTML = `
-          <div><b>#${escHtml(String(lastPost.post_id || ''))}</b> · ${escHtml(rating)} · ${escHtml(score)}</div>
-          <div>${lastPost.post_url ? `<a href="${escHtml(lastPost.post_url)}" target="_blank" rel="noopener noreferrer">${escHtml(lastPost.post_url)}</a>` : ''}</div>
-        `;
-      }
-    }
-    renderTags(lastPost?.tags || {});
-    if (promptEl) promptEl.textContent = currentPrompt() || 'No prompt preview.';
-  }
-
-  async function load() {
+  async function openBrowser({automatic = false} = {}) {
     const query = String(queryInput?.value || '').trim();
-    if (!query) {
-      setStatus('Enter a Danbooru post URL or ID.', 'error');
-      return;
-    }
     setBusy(true);
-    setStatus('Loading Danbooru post...', 'busy');
+    setStatus('Opening PyQt6 Danbooru browser...', 'busy');
     try {
-      const response = await fetch('/api/danbooru/post', {
+      const response = await fetchFn('/api/danbooru/browser/open', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({query}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-      renderPost(data);
-      setStatus(`Loaded Danbooru post #${data.post_id}`, 'ok');
+      openedOnce = true;
+      setStatus('PyQt6 Danbooru browser opened.', 'ok');
+      if (!automatic && showToast) showToast('PyQt6 Danbooru browser opened', 'success');
+      return true;
     } catch (error) {
-      console.error('Danbooru lookup failed', error);
-      renderPost(null);
-      setStatus(error.message || 'Danbooru lookup failed', 'error');
-      if (showToast) showToast(error.message || 'Danbooru lookup failed', 'error');
+      console.error('PyQt6 Danbooru browser open failed', error);
+      setStatus(error.message || 'Failed to open PyQt6 Danbooru browser', 'error');
+      if (!automatic && showToast) showToast(error.message || 'Failed to open PyQt6 Danbooru browser', 'error');
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  function applyPrompt() {
-    const prompt = currentPrompt();
-    if (!prompt) {
-      if (showToast) showToast('No Danbooru prompt is available', 'error');
-      return false;
-    }
-    setPromptText(prompt);
-    if (showToast) showToast('Danbooru prompt applied', 'success');
-    return true;
-  }
-
-  function generate() {
-    if (!applyPrompt()) return;
-    requestGenerate();
+  function onActivated() {
+    if (openedOnce) return;
+    openBrowser({automatic: true});
   }
 
   function bind() {
-    loadBtn?.addEventListener('click', load);
-    applyBtn?.addEventListener('click', applyPrompt);
-    generateBtn?.addEventListener('click', generate);
+    openBtn?.addEventListener('click', () => openBrowser());
+    openNativeBtn?.addEventListener('click', () => openBrowser());
     queryInput?.addEventListener('keydown', event => {
-      if (event.key === 'Enter') load();
+      if (event.key === 'Enter') openBrowser();
     });
-    renderPost(null);
+    setStatus('PyQt6 Danbooru browser ready.', 'muted');
   }
 
   bind();
 
   return {
-    load,
-    applyPrompt,
-    generate,
-    renderPost,
+    openBrowser,
+    onActivated,
   };
 }

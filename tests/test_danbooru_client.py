@@ -87,3 +87,13 @@ def test_danbooru_post_endpoint_uses_public_post_json(monkeypatch):
     assert payload["post_id"] == 123
     assert payload["tags"]["general"] == ["solo", "smile"]
     assert payload["prompt"] == "solo, smile"
+
+
+def test_danbooru_browser_url_normalization_accepts_id_url_and_tags():
+    bridge = RemoteBridge(_AppContext())
+
+    assert bridge._normalize_danbooru_browser_url("123") == "https://danbooru.donmai.us/posts/123"
+    assert bridge._normalize_danbooru_browser_url("/posts/456") == "https://danbooru.donmai.us/posts/456"
+    assert bridge._normalize_danbooru_browser_url("rating:general 1girl") == (
+        "https://danbooru.donmai.us/posts?tags=rating:general%201girl"
+    )

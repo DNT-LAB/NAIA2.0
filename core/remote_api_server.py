@@ -28,7 +28,7 @@ from PyQt6.QtCore import QByteArray, QMimeData, QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core import api_verification
-from core.danbooru_client import fetch_danbooru_post
+from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.tag_search_index import TagSearchIndex, normalize_search_query
@@ -145,6 +145,7 @@ class RemoteBridge(QObject):
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_copy_png_to_clipboard = pyqtSignal(bytes, str)  # (png_bytes, filename)
     request_danbooru_prompt_preview = pyqtSignal(object)  # request dict with event/tags/prompt
+    request_open_danbooru_browser = pyqtSignal(str)     # URL — 기존 PyQt6 Danbooru WebView 탭 열기
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
@@ -673,6 +674,14 @@ class RemoteBridge(QObject):
             return False, "Img2Img/Inpaint 데스크탑 창은 로컬(127.0.0.1) 접속에서만 열 수 있습니다."
         if self._is_cloudflared_active():
             return False, "Cloudflared 터널 활성 중 — Img2Img/Inpaint 데스크탑 창 열기가 차단됩니다."
+        return True, ""
+
+    def _desktop_browser_gate(self, host: str) -> tuple[bool, str]:
+        """호스트 데스크탑에 PyQt WebEngine 창/탭을 띄우는 요청 게이트."""
+        if not self._is_loopback_host(host):
+            return False, "Danbooru PyQt6 브라우저는 로컬(127.0.0.1) 접속에서만 열 수 있습니다."
+        if self._is_cloudflared_active():
+            return False, "Cloudflared 터널 활성 중 — Danbooru PyQt6 브라우저 열기가 차단됩니다."
         return True, ""
 
     def _setup_gate(self, ws) -> tuple[bool, str]:
@@ -1581,6 +1590,70 @@ class RemoteBridge(QObject):
         )
         post["prompt"] = self._request_danbooru_prompt_preview(post.get("tags", {}))
         return post
+
+    def _normalize_danbooru_browser_url(self, value: str = "") -> str:
+        text = str(value or "").strip()
+        if not text:
+            return f"{DANBOORU_BASE_URL}/posts?tags=rating%3Ageneral&z=5"
+
+        if text.isdigit():
+            return f"{DANBOORU_BASE_URL}/posts/{text}"
+
+        if text.startswith("//"):
+            text = "https:" + text
+        elif text.startswith("/"):
+            text = urljoin(DANBOORU_BASE_URL, text)
+        elif re.match(r"^(?:www\.)?danbooru\.donmai\.us(?:/|$)", text, re.IGNORECASE):
+            text = "https://" + text
+        elif not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", text):
+            text = f"{DANBOORU_BASE_URL}/posts?tags={quote(text, safe=':-_~')}"
+
+        parsed = urlparse(text)
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or hostname not in {"danbooru.donmai.us", "www.danbooru.donmai.us"}:
+            raise ValueError("Danbooru URL, post ID, or tag query is required")
+        return text
+
+    def _do_open_danbooru_browser(self, url: str):
+        try:
+            target_url = self._normalize_danbooru_browser_url(url)
+            mw = getattr(self.app_context, "main_window", None)
+            if not mw:
+                print("🌐 Remote: main window unavailable for Danbooru browser")
+                return
+
+            if hasattr(mw, "set_web_session_window_visible"):
+                mw.set_web_session_window_visible(True)
+            else:
+                mw.show()
+                mw.raise_()
+                mw.activateWindow()
+
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            if not tab_controller:
+                print("🌐 Remote: tab controller unavailable for Danbooru browser")
+                return
+
+            tab_id = "BrowserTabModule"
+            module = None
+            if hasattr(tab_controller, "ensure_tab_loaded"):
+                module = tab_controller.ensure_tab_loaded(tab_id)
+            if module is None and hasattr(tab_controller, "get_tab_instance"):
+                module = tab_controller.get_tab_instance(tab_id)
+            if module is None and hasattr(tab_controller, "add_tab_by_name"):
+                tab_controller.add_tab_by_name(tab_id)
+                module = tab_controller.get_tab_instance(tab_id) if hasattr(tab_controller, "get_tab_instance") else None
+
+            if hasattr(tab_controller, "switch_to_tab"):
+                tab_controller.switch_to_tab(tab_id)
+
+            browser_widget = getattr(module, "browser_widget", None) if module else None
+            if browser_widget and hasattr(browser_widget, "load_url"):
+                QTimer.singleShot(180, lambda widget=browser_widget, target=target_url: widget.load_url(target))
+            print(f"🌐 Remote: opened PyQt6 Danbooru browser — {target_url}")
+        except Exception as e:
+            print(f"🌐 Remote: failed to open PyQt6 Danbooru browser — {e}")
 
     def _load_style_thumb_meta(self) -> dict:
         if self._style_thumb_meta_cache is not None:
@@ -8215,6 +8288,25 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         except Exception as e:
             return JSONResponse({"error": f"Danbooru lookup failed: {e}"}, status_code=502)
 
+    @app.post("/api/danbooru/browser/open")
+    async def api_danbooru_browser_open(req: Request):
+        allowed, reason = bridge._desktop_browser_gate(bridge._request_client_host(req))
+        if not allowed:
+            return JSONResponse({"error": reason}, status_code=403)
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        query = str(payload.get("url") or payload.get("query") or req.query_params.get("url") or "").strip()
+        try:
+            target_url = bridge._normalize_danbooru_browser_url(query)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        bridge.request_open_danbooru_browser.emit(target_url)
+        return {"ok": True, "url": target_url}
+
     @app.get("/api/thumb/state")
     async def api_thumb_state():
         try:
@@ -9069,6 +9161,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_copy_png_to_clipboard.connect(bridge._do_copy_png_to_clipboard, Qt.ConnectionType.QueuedConnection)
     bridge.request_danbooru_prompt_preview.connect(bridge._do_danbooru_prompt_preview, Qt.ConnectionType.QueuedConnection)
+    bridge.request_open_danbooru_browser.connect(bridge._do_open_danbooru_browser, Qt.ConnectionType.QueuedConnection)
     bridge._danbooru_prompt_preview_bridge_connected = True
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)

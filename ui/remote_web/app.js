@@ -126,10 +126,8 @@ const danbooruTabReady = import('./js/features/danbooruTab.mjs')
   .then(({createDanbooruTabController}) => {
     danbooruTabControl = createDanbooruTabController({
       document,
-      escHtml,
+      fetch: window.fetch.bind(window),
       showToast,
-      setPromptText: applyPromptText,
-      requestGenerate: () => send('generate'),
     });
   })
   .catch(error => {
@@ -1393,6 +1391,7 @@ function getDetachedModuleGeometry(moduleId) {
 function switchRightTab(tabName, options = {}) {
   const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
+  if (activeTab === 'danbooru' && danbooruTabControl?.onActivated) danbooruTabControl.onActivated();
   if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
 }
 

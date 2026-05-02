@@ -501,35 +501,17 @@
     <div class="danbooru-tab">
       <header class="danbooru-toolbar">
         <div>
-          <div class="metadata-kicker">Danbooru Mirror</div>
-          <h2>Danbooru Post Tags</h2>
+          <div class="metadata-kicker">Danbooru Browser</div>
+          <h2>PyQt6 WebView</h2>
         </div>
         <div class="danbooru-search">
-          <input class="danbooru-input" id="danbooruQuery" type="text" placeholder="post ID or https://danbooru.donmai.us/posts/..." autocomplete="off" spellcheck="false">
-          <button class="metadata-refresh-btn" id="danbooruLoadBtn" type="button">Load</button>
+          <input class="danbooru-input" id="danbooruQuery" type="text" placeholder="URL, post ID, or tag query" autocomplete="off" spellcheck="false">
+          <button class="metadata-refresh-btn" id="danbooruLoadBtn" type="button">Open</button>
         </div>
       </header>
-      <div class="danbooru-status" id="danbooruStatus">Enter a Danbooru post URL or ID.</div>
-      <div class="danbooru-layout">
-        <section class="danbooru-preview-card">
-          <div class="danbooru-image-stage">
-            <img id="danbooruPreview" alt="">
-            <span id="danbooruPreviewEmpty" class="metadata-empty">No post loaded</span>
-          </div>
-          <div class="danbooru-meta" id="danbooruMeta"></div>
-        </section>
-        <section class="danbooru-data-card">
-          <div class="danbooru-card-header">
-            <span>Extracted Tags</span>
-            <div class="danbooru-actions">
-              <button class="metadata-refresh-btn" id="danbooruApplyBtn" type="button" disabled>Apply Prompt</button>
-              <button class="metadata-action-btn primary" id="danbooruGenerateBtn" type="button" disabled>Generate</button>
-            </div>
-          </div>
-          <div class="danbooru-tags" id="danbooruTags"></div>
-          <div class="metadata-section-title">Prompt Preview</div>
-          <pre class="danbooru-prompt" id="danbooruPrompt"></pre>
-        </section>
+      <div class="danbooru-status" id="danbooruStatus">PyQt6 Danbooru browser ready.</div>
+      <div class="danbooru-native-panel">
+        <button class="metadata-action-btn primary danbooru-native-open" id="danbooruOpenBrowserBtn" type="button">Open PyQt6 Danbooru</button>
       </div>
     </div>
   </div>

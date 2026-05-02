@@ -81,6 +81,7 @@ let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
 let danbooruTabControl = null;
 let thumbTabControl = null;
+let artistThumbControl = null;
 let studioTabControl = null;
 let customSelectsControl = null;
 let promptEngineeringPopupRenderers = null;
@@ -146,6 +147,21 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
+  });
+const artistThumbReady = import('./js/features/artistThumbTab.mjs')
+  .then(({createArtistThumbController}) => {
+    artistThumbControl = createArtistThumbController({
+      document,
+      fetch: window.fetch.bind(window),
+      escHtml,
+      showToast,
+      promptEdit,
+      negEdit,
+      onPromptEdit,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Artist Thumb tab module', error);
   });
 const studioTabReady = import('./js/features/studioTab.mjs')
   .then(({createStudioTabController}) => {
@@ -555,6 +571,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
       document,
       escHtml,
       onModTextEdit,
+      setModuleParam,
     });
   })
   .catch(error => {
@@ -814,6 +831,9 @@ function handleWsBlob(data) {
   blobUrl = url;
   latestResultBlob = data instanceof Blob ? data : null;
   if (studioTabControl) studioTabControl.handleResultBlob(data);
+  if (artistThumbControl && typeof artistThumbControl.handleResultBlob === 'function') {
+    artistThumbControl.handleResultBlob(data);
+  }
   preview.src = url;
   preview.dataset.source = 'current';
   preview.dataset.path = '';
@@ -1040,6 +1060,9 @@ function updateMetaChips(m) {
 function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
   updateMetaChips(m);
+  if (artistThumbControl && typeof artistThumbControl.handleResultMeta === 'function') {
+    artistThumbControl.handleResultMeta(m);
+  }
   if (resultEnhance) {
     resultEnhanceAssetRequestId += 1;
     resultEnhance.setCurrentMeta({
@@ -1415,7 +1438,7 @@ function setNaiHighlightMode(mode) {
 const DETACHED_MODULE_GEOMETRY = {
   prompt_engineering: {width: 640, height: 860},
   character: {width: 760, height: 860},
-  conditional_prompt: {width: 720, height: 780},
+  conditional_prompt: {width: 1560, height: 900},
   wildcard: {width: 680, height: 780},
   instant_wildcard: {width: 680, height: 780},
   chunk: {width: 620, height: 700},
@@ -1444,6 +1467,7 @@ function switchRightTab(tabName, options = {}) {
   const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
   if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
+  if (activeTab === 'artists' && artistThumbControl) artistThumbControl.load();
 }
 
 function buildDetachedUrl(kind, params = {}) {
@@ -1590,6 +1614,9 @@ function collectModuleSnapshotState(moduleId) {
       if (uc) character.uc = uc.value;
     });
   } else if (moduleId === 'conditional_prompt') {
+    if (conditionalPromptPanel && typeof conditionalPromptPanel.collectState === 'function') {
+      return conditionalPromptPanel.collectState(state);
+    }
     const mode = document.getElementById('condEditorMode');
     const rules = document.getElementById('condRulesInput');
     if (mode) state.editor_mode = mode.value === 'v2' ? 'v2' : 'legacy';
@@ -2652,6 +2679,7 @@ function openModule(moduleId, options = {}) {
   currentModuleId = moduleId;
   modulePopup.classList.toggle('module-popup-e621', moduleId === 'e621_event');
   modulePopup.classList.toggle('module-popup-img2img', moduleId === 'img2img');
+  modulePopup.classList.toggle('module-popup-conditional', moduleId === 'conditional_prompt');
   modulePopup.classList.remove('module-popup-inpaint');
   modulePopup.classList.add('open');
   relayoutFloatingPanels();
@@ -2699,6 +2727,7 @@ function closeModule() {
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
   modulePopup.classList.remove('module-popup-img2img');
+  modulePopup.classList.remove('module-popup-conditional');
   modulePopup.classList.remove('module-popup-inpaint');
   closeAuxiliaryPopups(null, { keepChunk: true });
   currentModuleId = null;
@@ -3822,6 +3851,7 @@ Promise.all([
   rightTabsReady,
   danbooruTabReady,
   thumbTabReady,
+  artistThumbReady,
   studioTabReady,
   customSelectsReady,
   resultInfoResizerReady,

@@ -10,11 +10,19 @@ export function createThumbTabController({
   const categoriesEl = document.getElementById('thumbCategories');
   const statusEl = document.getElementById('thumbStatus');
   const gridEl = document.getElementById('thumbGrid');
+  const previewEl = document.getElementById('thumbPreview');
+  const previewTitleEl = document.getElementById('thumbPreviewTitle');
+  const previewImageEl = document.getElementById('thumbPreviewImage');
+  const previewEmptyEl = document.getElementById('thumbPreviewEmpty');
+  const previewCloseBtn = document.getElementById('thumbPreviewClose');
+  const previewInsertBtn = document.getElementById('thumbPreviewInsert');
+  const previewCopyBtn = document.getElementById('thumbPreviewCopy');
 
   let state = null;
   let statePromise = null;
   let activeCategory = '';
   let activeTags = [];
+  let selectedPreview = null;
   const categoryCache = new Map();
 
   function setStatus(message, tone = '') {
@@ -63,6 +71,32 @@ export function createThumbTabController({
         </div>
       </article>
     `).join('');
+  }
+
+  function closePreview() {
+    selectedPreview = null;
+    if (previewEl) previewEl.hidden = true;
+    if (previewImageEl) {
+      previewImageEl.removeAttribute('src');
+      previewImageEl.classList.remove('show');
+    }
+    if (previewEmptyEl) previewEmptyEl.hidden = false;
+    gridEl?.querySelectorAll('.thumb-card.active').forEach(card => card.classList.remove('active'));
+  }
+
+  function showPreview(item) {
+    if (!item || !previewEl) return;
+    selectedPreview = item;
+    previewEl.hidden = false;
+    if (previewTitleEl) previewTitleEl.textContent = item.tag || 'Style Preview';
+    if (previewImageEl) {
+      previewImageEl.src = item.image_url || '';
+      previewImageEl.classList.toggle('show', Boolean(item.image_url));
+    }
+    if (previewEmptyEl) previewEmptyEl.hidden = Boolean(item.image_url);
+    gridEl?.querySelectorAll('.thumb-card').forEach(card => {
+      card.classList.toggle('active', card.dataset.tag === item.tag);
+    });
   }
 
   function insertTag(tag) {
@@ -137,6 +171,7 @@ export function createThumbTabController({
         categoryCache.set(key, data);
       }
       activeTags = Array.isArray(data.tags) ? data.tags : [];
+      closePreview();
       renderGrid();
       setStatus(`${data.name || key} · ${activeTags.length.toLocaleString()} styles`, 'ok');
     } catch (error) {
@@ -149,6 +184,16 @@ export function createThumbTabController({
   }
 
   function bind() {
+    document.addEventListener('click', event => {
+      if (!previewEl || previewEl.hidden) return;
+      const target = event.target;
+      if (previewEl.contains(target)) return;
+      if (gridEl?.contains(target)) return;
+      closePreview();
+    });
+    previewEl?.addEventListener('click', event => {
+      event.stopPropagation();
+    });
     categoriesEl?.addEventListener('click', event => {
       const button = event.target.closest('.thumb-category-btn[data-category]');
       if (!button) return;
@@ -163,7 +208,25 @@ export function createThumbTabController({
       const insertButton = event.target.closest('.thumb-insert-btn[data-tag]');
       if (insertButton && insertTag(insertButton.dataset.tag || '') && showToast) {
         showToast('Style tag inserted', 'success');
+        return;
       }
+      const card = event.target.closest('.thumb-card[data-tag]');
+      if (card && gridEl.contains(card)) {
+        showPreview({
+          tag: card.dataset.tag || '',
+          image_url: card.querySelector('.thumb-card-image')?.getAttribute('src') || '',
+        });
+      }
+    });
+    previewCloseBtn?.addEventListener('click', closePreview);
+    previewInsertBtn?.addEventListener('click', () => {
+      if (selectedPreview?.tag && insertTag(selectedPreview.tag) && showToast) {
+        showToast('Style tag inserted', 'success');
+        closePreview();
+      }
+    });
+    previewCopyBtn?.addEventListener('click', () => {
+      if (selectedPreview?.tag) copyTag(selectedPreview.tag);
     });
     searchEl?.addEventListener('input', renderGrid);
   }

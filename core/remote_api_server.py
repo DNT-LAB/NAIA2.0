@@ -14,6 +14,8 @@ import re
 import time
 import threading
 import uuid
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -146,6 +148,7 @@ class RemoteBridge(QObject):
     request_copy_png_to_clipboard = pyqtSignal(bytes, str)  # (png_bytes, filename)
     request_danbooru_prompt_preview = pyqtSignal(object)  # request dict with event/tags/prompt
     request_open_danbooru_browser = pyqtSignal(str)     # URL — 기존 PyQt6 Danbooru WebView 탭 열기
+    request_artist_thumb_generate = pyqtSignal(object)  # Artist Thumbnail generate payload
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
 
@@ -158,6 +161,18 @@ class RemoteBridge(QObject):
     MEMORY_HISTORY_PATH_PREFIX = "__history__/"
     STYLE_THUMBNAILS_PATH = Path("data/taglist/style_thumbnails.json")
     STYLE_META_TAGS_PATH = Path("data/taglist/style_meta_tags.json")
+    ARTIST_THUMB_MODES = {
+        "NAID4.5F-31000": {
+            "label": "NAID4.5F-31000",
+            "path": Path("data/artist_thumbnail_nai.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID4.5_artist_thumbnail_31000/artist_thumbnail_nai",
+        },
+        "NoobNAI-XL-33000": {
+            "label": "NoobNAI-XL-33000",
+            "path": Path("data/artist_thumbnail.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
+        },
+    }
 
     def __init__(self, app_context):
         super().__init__()
@@ -227,6 +242,22 @@ class RemoteBridge(QObject):
         self._danbooru_prompt_preview_bridge_connected = False
         self._style_thumb_meta_cache: Optional[dict] = None
         self._style_thumb_data_cache: Optional[dict] = None
+        self._artist_thumb_data_cache: dict[str, dict] = {}
+        self._artist_thumb_image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
+        self._artist_thumb_lock = threading.RLock()
+        self._artist_thumb_download_thread: Optional[threading.Thread] = None
+        self._artist_thumb_download_cancel = threading.Event()
+        self._artist_thumb_download_state = {
+            "active": False,
+            "mode": "",
+            "percent": 0,
+            "downloaded_mb": 0.0,
+            "total_mb": 0.0,
+            "message": "",
+            "error": "",
+            "done": False,
+            "updated_at": "",
+        }
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -1809,6 +1840,553 @@ class RemoteBridge(QObject):
             encoded = encoded.split(",", 1)[1]
         image_bytes = base64.b64decode(encoded)
         return image_bytes, self._style_thumb_media_type(image_bytes)
+
+    def _artist_thumb_mode_info(self, mode: str) -> dict:
+        key = str(mode or "").strip()
+        info = self.ARTIST_THUMB_MODES.get(key)
+        if not info:
+            raise KeyError("Unknown artist thumbnail mode")
+        return info
+
+    def _artist_thumb_mode_path(self, mode: str) -> Path:
+        return Path(self._artist_thumb_mode_info(mode)["path"])
+
+    def _artist_thumb_download_snapshot(self) -> dict:
+        with self._artist_thumb_lock:
+            return dict(self._artist_thumb_download_state)
+
+    def _set_artist_thumb_download_state(self, **updates) -> dict:
+        with self._artist_thumb_lock:
+            self._artist_thumb_download_state.update(updates)
+            self._artist_thumb_download_state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            return dict(self._artist_thumb_download_state)
+
+    def _start_artist_thumb_download(self, mode: str) -> dict:
+        key = str(mode or "").strip()
+        info = self._artist_thumb_mode_info(key)
+        path = Path(info["path"])
+        url = str(info.get("url") or "")
+        if not url:
+            raise ValueError(f"download url is not configured: {key}")
+        if path.exists():
+            return self._set_artist_thumb_download_state(
+                active=False,
+                mode=key,
+                percent=100,
+                downloaded_mb=round(path.stat().st_size / (1024 * 1024), 1),
+                total_mb=round(path.stat().st_size / (1024 * 1024), 1),
+                message="이미 다운로드되어 있습니다.",
+                error="",
+                done=True,
+            )
+        with self._artist_thumb_lock:
+            if self._artist_thumb_download_state.get("active"):
+                return dict(self._artist_thumb_download_state)
+            self._artist_thumb_download_cancel.clear()
+            self._artist_thumb_download_state.update({
+                "active": True,
+                "mode": key,
+                "percent": 0,
+                "downloaded_mb": 0.0,
+                "total_mb": 0.0,
+                "message": "다운로드 준비 중...",
+                "error": "",
+                "done": False,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            })
+            worker = threading.Thread(
+                target=self._run_artist_thumb_download,
+                args=(key, path, url),
+                daemon=True,
+                name=f"artist-thumb-download-{key}",
+            )
+            self._artist_thumb_download_thread = worker
+            worker.start()
+            return dict(self._artist_thumb_download_state)
+
+    def _cancel_artist_thumb_download(self) -> dict:
+        state = self._artist_thumb_download_snapshot()
+        if state.get("active"):
+            self._artist_thumb_download_cancel.set()
+            return self._set_artist_thumb_download_state(message="다운로드 취소 중...")
+        return state
+
+    def _run_artist_thumb_download(self, mode: str, target_path: Path, url: str):
+        temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            request = urllib.request.Request(url, headers={"User-Agent": "NAIA/2.0.0 ArtistThumb Module"})
+            self._set_artist_thumb_download_state(message="다운로드 연결 중...")
+            with urllib.request.urlopen(request, timeout=30) as response:
+                total_size = int(response.headers.get("content-length", 0) or 0)
+                total_mb = round(total_size / (1024 * 1024), 1) if total_size else 0.0
+                downloaded = 0
+                last_update = 0.0
+                with temp_path.open("wb") as out_file:
+                    while True:
+                        if self._artist_thumb_download_cancel.is_set():
+                            raise InterruptedError("다운로드가 취소되었습니다.")
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out_file.write(chunk)
+                        downloaded += len(chunk)
+                        now = time.time()
+                        if now - last_update >= 0.25:
+                            percent = min(100, int((downloaded * 100) / total_size)) if total_size else 0
+                            downloaded_mb = round(downloaded / (1024 * 1024), 1)
+                            message = (
+                                f"다운로드 중... {percent}% ({downloaded_mb}/{total_mb} MB)"
+                                if total_size else f"다운로드 중... {downloaded_mb} MB"
+                            )
+                            self._set_artist_thumb_download_state(
+                                percent=percent,
+                                downloaded_mb=downloaded_mb,
+                                total_mb=total_mb,
+                                message=message,
+                            )
+                            last_update = now
+
+            file_size = temp_path.stat().st_size
+            if file_size < (1024 * 1024):
+                raise ValueError(f"다운로드된 파일이 너무 작습니다 ({file_size / 1024:.1f} KB)")
+            temp_path.replace(target_path)
+            with self._artist_thumb_lock:
+                self._artist_thumb_data_cache.clear()
+                self._artist_thumb_image_cache.clear()
+            size_mb = round(file_size / (1024 * 1024), 1)
+            self._set_artist_thumb_download_state(
+                active=False,
+                mode=mode,
+                percent=100,
+                downloaded_mb=size_mb,
+                total_mb=size_mb,
+                message=f"다운로드 완료 ({size_mb} MB)",
+                error="",
+                done=True,
+            )
+        except InterruptedError as e:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+            self._set_artist_thumb_download_state(
+                active=False,
+                mode=mode,
+                message=str(e),
+                error=str(e),
+                done=False,
+            )
+        except urllib.error.HTTPError as e:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+            message = f"HTTP 오류 {e.code}: {e.reason}"
+            self._set_artist_thumb_download_state(active=False, mode=mode, message=message, error=message, done=False)
+        except urllib.error.URLError as e:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+            message = f"네트워크 오류: {e.reason}"
+            self._set_artist_thumb_download_state(active=False, mode=mode, message=message, error=message, done=False)
+        except Exception as e:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+            message = f"다운로드 실패: {e}"
+            self._set_artist_thumb_download_state(active=False, mode=mode, message=message, error=message, done=False)
+
+    def _artist_thumb_artist_weights(self) -> dict:
+        try:
+            from artist_dictionary import artist_dict
+            return artist_dict if isinstance(artist_dict, dict) else {}
+        except Exception as e:
+            print(f"🌐 Remote: artist dictionary 로드 실패 — {e}")
+            return {}
+
+    def _read_artist_thumb_lines(self, path: Path) -> list[str]:
+        try:
+            if not path.exists():
+                return []
+            with path.open("r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            print(f"🌐 Remote: artist list 파일 읽기 실패 ({path}) — {e}")
+            return []
+
+    def _write_artist_thumb_lines(self, path: Path, values: list[str]):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        seen = set()
+        cleaned = []
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            cleaned.append(text)
+        with path.open("w", encoding="utf-8") as f:
+            for value in cleaned:
+                f.write(f"{value}\n")
+
+    def _artist_thumb_favorite_path(self) -> Path:
+        return Path("wildcards") / "favorite_artist.txt"
+
+    def _artist_thumb_banned_path(self) -> Path:
+        return Path("artist_thumb") / "banned_artist.txt"
+
+    def _artist_thumb_options_path(self) -> Path:
+        return Path("artist_thumb") / "generate_options.json"
+
+    def _artist_thumb_favorites(self) -> list[str]:
+        return self._read_artist_thumb_lines(self._artist_thumb_favorite_path())
+
+    def _artist_thumb_banned(self) -> list[str]:
+        return self._read_artist_thumb_lines(self._artist_thumb_banned_path())
+
+    def _artist_thumb_custom_filters(self) -> list[dict]:
+        base = Path("artist_thumb")
+        filters = []
+        if not base.exists():
+            return filters
+        for path in sorted(base.glob("*.txt")):
+            if path.name == "banned_artist.txt":
+                continue
+            filters.append({
+                "key": f"custom:{path.stem}",
+                "name": path.stem,
+                "count": len(self._read_artist_thumb_lines(path)),
+            })
+        return filters
+
+    def _load_artist_thumb_options(self) -> dict:
+        path = self._artist_thumb_options_path()
+        if not path.exists():
+            return {"prefix": "", "postfix": ""}
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+            return {
+                "prefix": str(data.get("prefix") or ""),
+                "postfix": str(data.get("postfix") or ""),
+            }
+        except Exception as e:
+            print(f"🌐 Remote: artist thumb 옵션 로드 실패 — {e}")
+            return {"prefix": "", "postfix": ""}
+
+    def _save_artist_thumb_options(self, options: dict) -> dict:
+        current = self._load_artist_thumb_options()
+        if isinstance(options, dict):
+            if "prefix" in options:
+                current["prefix"] = str(options.get("prefix") or "")
+            if "postfix" in options:
+                current["postfix"] = str(options.get("postfix") or "")
+        path = self._artist_thumb_options_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(current, f, ensure_ascii=False, indent=2)
+        return current
+
+    def _load_artist_thumb_data(self, mode: str) -> dict:
+        key = str(mode or "").strip()
+        if not key:
+            return {}
+        with self._artist_thumb_lock:
+            cached = self._artist_thumb_data_cache.get(key)
+            if cached is not None:
+                return cached
+            path = self._artist_thumb_mode_path(key)
+            if not path.exists():
+                raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("Artist thumbnail data is invalid")
+            self._artist_thumb_data_cache.clear()
+            self._artist_thumb_image_cache.clear()
+            self._artist_thumb_data_cache[key] = data
+            return data
+
+    def _artist_thumb_format_count(self, value) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return 0
+
+    def _artist_thumb_base_list(self, filter_key: str, weights: dict) -> tuple[list[str], str]:
+        key = str(filter_key or "all").strip() or "all"
+        favorites = self._artist_thumb_favorites()
+        banned = self._artist_thumb_banned()
+        banned_set = set(banned)
+
+        if key == "favorites":
+            return [a for a in favorites if a in weights], "관심 작가"
+        if key == "banned":
+            return [a for a in banned if a in weights], "제외 작가"
+        if key.startswith("custom:"):
+            name = key.split(":", 1)[1].strip()
+            safe_name = Path(name).name
+            items = self._read_artist_thumb_lines(Path("artist_thumb") / f"{safe_name}.txt")
+            return [a for a in items if a in weights], safe_name
+
+        return [a for a in weights.keys() if a not in banned_set], "전체 목록"
+
+    def _build_artist_thumb_state(self) -> dict:
+        weights = self._artist_thumb_artist_weights()
+        favorites = self._artist_thumb_favorites()
+        banned = self._artist_thumb_banned()
+        modes = []
+        for key, info in self.ARTIST_THUMB_MODES.items():
+            path = Path(info["path"])
+            modes.append({
+                "key": key,
+                "label": str(info.get("label") or key),
+                "available": path.exists(),
+                "loaded": key in self._artist_thumb_data_cache,
+                "size_mb": round(path.stat().st_size / (1024 * 1024), 1) if path.exists() else 0,
+            })
+        return {
+            "modes": modes,
+            "filters": [
+                {"key": "all", "name": "전체 목록", "count": max(0, len(weights) - len(set(banned)))},
+                {"key": "favorites", "name": "관심 작가", "count": len(favorites)},
+                {"key": "banned", "name": "제외 작가", "count": len(banned)},
+                *self._artist_thumb_custom_filters(),
+            ],
+            "artist_count": len(weights),
+            "favorites": favorites,
+            "banned": banned,
+            "options": self._load_artist_thumb_options(),
+            "download": self._artist_thumb_download_snapshot(),
+        }
+
+    def _build_artist_thumb_list(
+        self,
+        mode: str = "",
+        filter_key: str = "all",
+        query: str = "",
+        page: int = 0,
+        per_page: int = 48,
+    ) -> dict:
+        weights = self._artist_thumb_artist_weights()
+        thumb_data = self._load_artist_thumb_data(mode) if str(mode or "").strip() else {}
+        base_list, filter_name = self._artist_thumb_base_list(filter_key, weights)
+        if thumb_data:
+            thumb_keys = set(thumb_data.keys())
+            base_list = [artist for artist in base_list if artist in thumb_keys]
+
+        query_text = str(query or "").strip().lower().replace("_", " ")
+        if query_text:
+            base_list = [
+                artist for artist in base_list
+                if query_text in artist.lower().replace("_", " ")
+            ]
+
+        base_list = sorted(
+            base_list,
+            key=lambda artist: weights.get(artist, 0),
+            reverse=True,
+        )
+        total = len(base_list)
+        per_page = max(12, min(96, int(per_page or 48)))
+        page = max(0, int(page or 0))
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        if page >= total_pages:
+            page = max(0, total_pages - 1)
+        start = page * per_page
+        artists = base_list[start:start + per_page]
+        favorite_set = set(self._artist_thumb_favorites())
+        banned_set = set(self._artist_thumb_banned())
+        mode_key = str(mode or "").strip()
+
+        return {
+            "mode": mode_key,
+            "filter": str(filter_key or "all"),
+            "filter_name": filter_name,
+            "query": query,
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "items": [
+                {
+                    "artist": artist,
+                    "weight": self._artist_thumb_format_count(weights.get(artist, 0)),
+                    "favorite": artist in favorite_set,
+                    "banned": artist in banned_set,
+                    "has_image": bool(mode_key and artist in thumb_data),
+                    "image_url": (
+                        f"/api/artist-thumb/image?mode={quote(mode_key, safe='')}&artist={quote(artist, safe='')}"
+                        if mode_key and artist in thumb_data else ""
+                    ),
+                }
+                for artist in artists
+            ],
+        }
+
+    def _artist_thumb_media_type(self, image_bytes: bytes) -> str:
+        if image_bytes.startswith(b"\xff\xd8"):
+            return "image/jpeg"
+        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+            return "image/webp"
+        return "application/octet-stream"
+
+    def _build_artist_thumb_image_payload(self, mode: str, artist: str) -> tuple[bytes, str]:
+        mode_key = str(mode or "").strip()
+        artist_name = str(artist or "").strip()
+        if not mode_key:
+            raise ValueError("mode is required")
+        if not artist_name:
+            raise ValueError("artist is required")
+        cache_key = (mode_key, artist_name)
+        with self._artist_thumb_lock:
+            cached = self._artist_thumb_image_cache.get(cache_key)
+            if cached:
+                return cached
+
+        data = self._load_artist_thumb_data(mode_key)
+        encoded_list = data.get(artist_name)
+        if not encoded_list or not encoded_list[0]:
+            raise FileNotFoundError(f"Artist thumbnail not found: {artist_name}")
+        encoded = str(encoded_list[0])
+        if encoded.startswith("data:") and "," in encoded:
+            encoded = encoded.split(",", 1)[1]
+        raw = base64.b64decode(encoded)
+
+        try:
+            from PIL import Image
+            image = Image.open(io.BytesIO(raw))
+            image.load()
+            if image.width > 170:
+                image = image.crop((85, 0, image.width - 85, image.height))
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=86, optimize=True)
+            image_bytes = out.getvalue()
+            media_type = "image/jpeg"
+        except Exception:
+            image_bytes = raw
+            media_type = self._artist_thumb_media_type(raw)
+
+        with self._artist_thumb_lock:
+            if len(self._artist_thumb_image_cache) > 512:
+                self._artist_thumb_image_cache.pop(next(iter(self._artist_thumb_image_cache)), None)
+            self._artist_thumb_image_cache[cache_key] = (image_bytes, media_type)
+        return image_bytes, media_type
+
+    def _set_artist_thumb_favorite(self, artist: str, favorite: bool) -> dict:
+        artist_name = str(artist or "").strip()
+        if not artist_name:
+            raise ValueError("artist is required")
+        favorites = self._artist_thumb_favorites()
+        if favorite and artist_name not in favorites:
+            favorites.append(artist_name)
+        elif not favorite and artist_name in favorites:
+            favorites = [a for a in favorites if a != artist_name]
+        self._write_artist_thumb_lines(self._artist_thumb_favorite_path(), favorites)
+        return self._build_artist_thumb_state()
+
+    def _set_artist_thumb_banned(self, artist: str, banned: bool) -> dict:
+        artist_name = str(artist or "").strip()
+        if not artist_name:
+            raise ValueError("artist is required")
+        banned_list = self._artist_thumb_banned()
+        if banned and artist_name not in banned_list:
+            banned_list.append(artist_name)
+        elif not banned and artist_name in banned_list:
+            banned_list = [a for a in banned_list if a != artist_name]
+        self._write_artist_thumb_lines(self._artist_thumb_banned_path(), banned_list)
+        if banned:
+            favorites = [a for a in self._artist_thumb_favorites() if a != artist_name]
+            self._write_artist_thumb_lines(self._artist_thumb_favorite_path(), favorites)
+        return self._build_artist_thumb_state()
+
+    def _artist_thumb_final_prompt(self, payload: dict) -> str:
+        prompt_parts = []
+        for key in ("prefix", "positive", "postfix"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                prompt_parts.append(value)
+        return ", ".join(prompt_parts).strip()
+
+    def _do_artist_thumb_generate(self, payload: dict):
+        try:
+            payload = payload if isinstance(payload, dict) else {}
+            final_positive = self._artist_thumb_final_prompt(payload)
+            if not final_positive:
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": "Artist Thumbnail 프롬프트가 비어 있습니다.",
+                    "level": "error",
+                })
+                return
+
+            negative = payload.get("negative_prompt")
+            if negative is None:
+                try:
+                    negative = self.app_context.main_window.negative_prompt_textedit.toPlainText().strip()
+                except Exception:
+                    negative = ""
+
+            try:
+                width = int(payload.get("width") or 832)
+                height = int(payload.get("height") or 1216)
+            except Exception:
+                width, height = 832, 1216
+
+            overrides = {
+                "input": final_positive,
+                "_raw_input": final_positive,
+                "negative_prompt": str(negative or ""),
+                "width": width,
+                "height": height,
+                "random_resolution": False,
+                "artist_thumb_request": True,
+                "artist_thumb_request_id": str(payload.get("request_id") or uuid.uuid4().hex),
+                "_remote_queue_source": "Artist Thumb",
+                "_remote_queue_label": str(payload.get("artist") or "").strip(),
+            }
+
+            mw = getattr(self.app_context, "main_window", None)
+            if not mw:
+                raise RuntimeError("main window is not available")
+            auto_generate_checkbox = getattr(mw, "generation_checkboxes", {}).get("자동 생성") if mw else None
+            if auto_generate_checkbox and auto_generate_checkbox.isChecked():
+                auto_generate_checkbox.setChecked(False)
+
+            gc = getattr(mw, "generation_controller", None)
+            queue_manager = getattr(self.app_context, "generation_queue_manager", None)
+            if not gc or not queue_manager:
+                raise RuntimeError("generation controller is not available")
+            if gc.is_generating or not queue_manager.is_empty():
+                gc._enqueue_current_request(overrides, priority=0)
+                if not gc.is_generating and not queue_manager.is_paused():
+                    QTimer.singleShot(0, gc._process_next_queue_request)
+                self._broadcast_json({"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                self._broadcast_queue_state()
+                return
+
+            gc.execute_generation_pipeline(overrides=overrides, priority=0)
+            self._broadcast_json({"type": "status", "is_generating": True})
+            self._broadcast_queue_state()
+        except Exception as e:
+            print(f"🌐 Remote: Artist Thumb 생성 실패 — {e}")
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"Artist Thumb 생성 실패: {e}",
+                "level": "error",
+            })
 
     def _img2img_manager(self):
         main_window = getattr(self.app_context, "main_window", None)
@@ -4471,6 +5049,47 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: conditional preset 목록 읽기 실패 — {e}")
             return []
 
+    def _cond_rulebook_dict_from_dsl(self, dsl_text: str, module=None) -> dict:
+        """조건부 v2 DSL을 웹 편집기가 쓰는 RuleBook JSON으로 변환."""
+        try:
+            from dataclasses import asdict
+            from modules.conditional.dsl_parser import parse_rulebook
+            from modules.conditional.preset_io import SCHEMA_VERSION
+
+            book = parse_rulebook(dsl_text or "")
+            opts = self._cond_engine_options(module) if module is not None else {}
+            book.max_passes = int(opts.get("max_passes", book.max_passes))
+            book.stop_on_match = bool(opts.get("stop_on_match", book.stop_on_match))
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "name": "",
+                "description": "",
+                "engine_options": {
+                    "max_passes": book.max_passes,
+                    "stop_on_match": book.stop_on_match,
+                },
+                "rules": [asdict(rule) for rule in book.rules],
+            }
+        except Exception as e:
+            print(f"🌐 Remote: conditional RuleBook 변환 실패 — {e}")
+            return {
+                "schema_version": 1,
+                "name": "",
+                "description": "",
+                "engine_options": self._cond_engine_options(module) if module is not None else {},
+                "rules": [],
+            }
+
+    def _cond_book_from_json_value(self, value: str):
+        from modules.conditional.preset_io import rulebook_from_dict
+
+        data = json.loads(value or "{}")
+        if isinstance(data, dict) and isinstance(data.get("book"), dict):
+            data = data["book"]
+        if not isinstance(data, dict):
+            data = {}
+        return rulebook_from_dict(data), data
+
     def _cond_state_values_from_module(self, module) -> dict:
         legacy_rules = ""
         rules_textedit = getattr(module, "rules_textedit", None)
@@ -4517,6 +5136,7 @@ class RemoteBridge(QObject):
             "active_rules": active_rules,
             "rules_legacy": legacy_rules,
             "rules_v2": rules_v2,
+            "rules_v2_book": self._cond_rulebook_dict_from_dsl(rules_v2, module),
             "engine_options": self._cond_engine_options(module),
             "active_preset": active_preset or "",
             "presets": self._cond_preset_infos(),
@@ -5554,6 +6174,29 @@ class RemoteBridge(QObject):
                     m.set_v2_dsl(value)
                 elif getattr(m, "rules_textedit", None) is not None:
                     m.rules_textedit.setPlainText(value)
+            elif key == "rules_v2_book":
+                from modules.conditional.dsl_serializer import serialize_rulebook
+
+                book, data = self._cond_book_from_json_value(value)
+                opts = self._cond_engine_options(source=data.get("engine_options") or {})
+                book.max_passes = opts["max_passes"]
+                book.stop_on_match = opts["stop_on_match"]
+                dsl = serialize_rulebook(book)
+                if hasattr(m, "set_v2_dsl"):
+                    m.set_v2_dsl(dsl)
+                elif getattr(m, "rules_textedit", None) is not None:
+                    m.rules_textedit.setPlainText(dsl)
+                if hasattr(m, "set_engine_options"):
+                    m.set_engine_options(
+                        max_passes=opts["max_passes"],
+                        stop_on_match=opts["stop_on_match"],
+                    )
+                else:
+                    m._engine_options = opts
+                if hasattr(m, "set_editor_mode"):
+                    m.set_editor_mode("v2")
+                else:
+                    m._editor_mode = "v2"
             elif key == "rules":
                 mode = m.get_editor_mode() if hasattr(m, "get_editor_mode") else getattr(m, "_editor_mode", "legacy")
                 if mode == "v2" and hasattr(m, "set_v2_dsl"):
@@ -5598,6 +6241,115 @@ class RemoteBridge(QObject):
                         "message": f"조건부 프리셋을 찾을 수 없습니다: {value}",
                         "level": "error",
                     })
+            elif key == "preset_save":
+                from modules.conditional.preset_io import (
+                    get_default_storage,
+                    rulebook_from_dict,
+                )
+
+                payload = json.loads(value or "{}")
+                if isinstance(payload, str):
+                    payload = {"name": payload}
+                if not isinstance(payload, dict):
+                    payload = {}
+                name = str(payload.get("name") or "").strip()
+                book_data = payload.get("book") if isinstance(payload.get("book"), dict) else None
+                if not name:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "조건부 프리셋 이름이 비어 있습니다.",
+                        "level": "error",
+                    })
+                else:
+                    storage = get_default_storage()
+                    bundled_name = any(
+                        info.name == name and info.is_bundled
+                        for info in storage.list_all()
+                    )
+                    if bundled_name:
+                        self._broadcast_json({
+                            "type": "toast",
+                            "message": "번들 프리셋과 같은 이름으로 저장할 수 없습니다.",
+                            "level": "error",
+                        })
+                    else:
+                        if book_data is not None:
+                            book = rulebook_from_dict(book_data)
+                        else:
+                            from modules.conditional.dsl_parser import parse_rulebook
+
+                            current_dsl = m.get_v2_dsl() if hasattr(m, "get_v2_dsl") else getattr(m, "_rules_v2_dsl", "")
+                            book = parse_rulebook(current_dsl or "")
+                            opts = self._cond_engine_options(m)
+                            book.max_passes = opts["max_passes"]
+                            book.stop_on_match = opts["stop_on_match"]
+                        storage.save(name, book)
+                        m._active_preset_name = name
+                        should_broadcast = True
+                        self._broadcast_json({
+                            "type": "toast",
+                            "message": f"조건부 프리셋 저장: {name}",
+                            "level": "success",
+                        })
+            elif key == "preset_delete":
+                from modules.conditional.preset_io import get_default_storage
+
+                name = str(value or "").strip()
+                if name and get_default_storage().delete(name):
+                    if getattr(m, "_active_preset_name", None) == name:
+                        m._active_preset_name = None
+                    should_broadcast = True
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": f"조건부 프리셋 삭제: {name}",
+                        "level": "success",
+                    })
+                else:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": f"삭제할 사용자 프리셋을 찾을 수 없습니다: {name}",
+                        "level": "error",
+                    })
+            elif key == "simulate_v2":
+                from dataclasses import asdict
+                from modules.conditional.dsl_serializer import serialize_rulebook
+
+                book, data = self._cond_book_from_json_value(value)
+                opts = self._cond_engine_options(source=data.get("engine_options") or {})
+                book.max_passes = opts["max_passes"]
+                book.stop_on_match = opts["stop_on_match"]
+                dsl = serialize_rulebook(book)
+                if hasattr(m, "simulate_for_preview"):
+                    result = m.simulate_for_preview(rules_text=dsl)
+                else:
+                    result = {
+                        "ok": False,
+                        "error": "현재 조건부 프롬프트 모듈이 시뮬레이션을 지원하지 않습니다.",
+                    }
+                state = self._read_conditional_prompt()
+                if state:
+                    try:
+                        schema_version = int(data.get("schema_version", 1))
+                    except Exception:
+                        schema_version = 1
+                    state_book = {
+                        "schema_version": schema_version,
+                        "name": str(data.get("name") or ""),
+                        "description": str(data.get("description") or ""),
+                        "engine_options": opts,
+                        "rules": [asdict(rule) for rule in book.rules],
+                    }
+                    state.update({
+                        "editor_mode": "v2",
+                        "rules": dsl,
+                        "active_rules": dsl,
+                        "rules_v2": dsl,
+                        "rules_v2_book": state_book,
+                        "engine_options": opts,
+                        "local_dirty": True,
+                    })
+                    state["simulation"] = result
+                    self._broadcast_json(state)
             elif key == "test":
                 # test_rules()를 직접 호출 (test_button은 로컬 변수)
                 if hasattr(m, 'test_rules'):
@@ -7964,6 +8716,10 @@ class RemoteBridge(QObject):
                 "cfg_scale": gen_params.get("cfg_scale", ""),
                 "sampler": gen_params.get("sampler", ""),
                 "model": gen_params.get("model", ""),
+                "artist_thumb_request": bool(gen_params.get("artist_thumb_request")),
+                "artist_thumb_request_id": str(gen_params.get("artist_thumb_request_id") or ""),
+                "artist_thumb_artist": str(gen_params.get("_remote_queue_label") or ""),
+                "remote_queue_source": str(gen_params.get("_remote_queue_source") or ""),
             }
 
             # 2. /api/latest-image 호환을 위한 최신 이미지 보존 (GIL 하 atomic 대입)
@@ -8375,6 +9131,152 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             media_type=media_type,
             headers={"Cache-Control": "public, max-age=3600"},
         )
+
+    @app.get("/api/artist-thumb/state")
+    async def api_artist_thumb_state():
+        try:
+            return await asyncio.to_thread(bridge._build_artist_thumb_state)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb state failed: {e}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/list")
+    async def api_artist_thumb_list(
+        mode: str = "",
+        filter: str = "all",
+        query: str = "",
+        page: int = 0,
+        per_page: int = 48,
+    ):
+        try:
+            return await asyncio.to_thread(
+                bridge._build_artist_thumb_list,
+                mode,
+                filter,
+                query,
+                page,
+                per_page,
+            )
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb list failed: {e}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/image")
+    async def api_artist_thumb_image(mode: str = "", artist: str = ""):
+        try:
+            image_bytes, media_type = await asyncio.to_thread(
+                bridge._build_artist_thumb_image_payload,
+                mode,
+                artist,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except (FileNotFoundError, KeyError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb image failed: {e}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.post("/api/artist-thumb/favorite")
+    async def api_artist_thumb_favorite(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(
+                bridge._set_artist_thumb_favorite,
+                payload.get("artist", ""),
+                bool(payload.get("favorite", True)),
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb favorite failed: {e}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/ban")
+    async def api_artist_thumb_ban(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(
+                bridge._set_artist_thumb_banned,
+                payload.get("artist", ""),
+                bool(payload.get("banned", True)),
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb ban failed: {e}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/options")
+    async def api_artist_thumb_options(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._save_artist_thumb_options, payload)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb options failed: {e}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/download")
+    async def api_artist_thumb_download_state():
+        try:
+            return await asyncio.to_thread(bridge._artist_thumb_download_snapshot)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb download state failed: {e}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/download")
+    async def api_artist_thumb_download(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._start_artist_thumb_download, payload.get("mode", ""))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb download failed: {e}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/download/cancel")
+    async def api_artist_thumb_download_cancel():
+        try:
+            return await asyncio.to_thread(bridge._cancel_artist_thumb_download)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb download cancel failed: {e}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/generate")
+    async def api_artist_thumb_generate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if not bridge._artist_thumb_final_prompt(payload):
+            return JSONResponse({"error": "prompt is empty"}, status_code=400)
+        bridge.request_artist_thumb_generate.emit(payload)
+        return {"ok": True}
 
     @app.get("/api/result/asset/current")
     async def api_current_result_asset():
@@ -9198,6 +10100,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_danbooru_prompt_preview.connect(bridge._do_danbooru_prompt_preview, Qt.ConnectionType.QueuedConnection)
     bridge.request_open_danbooru_browser.connect(bridge._do_open_danbooru_browser, Qt.ConnectionType.QueuedConnection)
     bridge._danbooru_prompt_preview_bridge_connected = True
+    bridge.request_artist_thumb_generate.connect(bridge._do_artist_thumb_generate, Qt.ConnectionType.QueuedConnection)
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
     QTimer.singleShot(0, bridge._restore_saved_search_filter_state)

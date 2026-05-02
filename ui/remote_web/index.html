@@ -258,6 +258,30 @@
           <div class="prompt-highlight-wrap">
             <div class="prompt-highlight" id="promptHighlight"></div>
             <textarea class="prompt-edit" id="promptEdit" placeholder="prompt..." onscroll="syncPromptHighlight()"></textarea>
+            <aside class="thumb-preview" id="thumbPreview" hidden>
+              <header>
+                <span id="thumbPreviewTitle">Style Preview</span>
+                <button type="button" id="thumbPreviewClose" aria-label="Close style preview">Close</button>
+              </header>
+              <div class="thumb-preview-stage">
+                <img id="thumbPreviewImage" alt="">
+                <span id="thumbPreviewEmpty">Select a thumbnail</span>
+              </div>
+              <footer>
+                <button type="button" id="thumbPreviewInsert">Insert Tag</button>
+                <button type="button" id="thumbPreviewCopy">Copy</button>
+              </footer>
+            </aside>
+            <section class="artist-thumb-result" id="artistThumbResultPreview" hidden>
+              <header>
+                <span id="artistThumbResultTitle">Generated Result</span>
+                <button type="button" id="artistThumbResultClose" aria-label="Close result preview">Close</button>
+              </header>
+              <div class="artist-thumb-result-stage">
+                <img id="artistThumbResultImage" alt="">
+                <span id="artistThumbResultEmpty">Waiting for generated image...</span>
+              </div>
+            </section>
             <div class="prompt-token-footer" id="promptTokenFooter">
               <span id="promptTokenLabel">Estimated Tokens : 0 (Main 0 + Character 0)</span>
               <div class="activated-summary hidden" id="activatedSummary" aria-live="polite"></div>
@@ -432,7 +456,7 @@
       <div class="boot-indicator-bar"><div class="boot-indicator-bar-fill" id="bootIndicatorBarFill"></div></div>
     </div>
     <button class="open-browser-btn" type="button" onclick="openInSystemBrowser()" title="기본 브라우저에서 열기">브라우저에서 열기...</button>
-    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" onclick="switchRightTab('settings')" role="tab" aria-selected="false">
+    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" data-right-tab-hidden="true" onclick="switchRightTab('settings')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>
       <span class="right-tab-icon">⚙</span><span>Settings</span>
     </button>
   </div>
@@ -566,10 +590,71 @@
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabArtists" data-right-pane="artists" hidden role="tabpanel">
-    <div class="right-tab-placeholder">
-      <div class="placeholder-kicker">TODO</div>
-      <h2>Artists</h2>
-      <p>아티스트 갤러리와 관심 작가 기능을 Remote UI로 재구성할 자리입니다.</p>
+    <div class="artist-thumb-tab">
+      <div class="artist-thumb-layout">
+        <aside class="artist-thumb-side">
+          <label class="artist-thumb-field">
+            <span>Filter</span>
+            <select class="artist-thumb-select" id="artistThumbFilter"></select>
+          </label>
+          <section class="artist-thumb-selected">
+            <div class="artist-thumb-selected-stage">
+              <img id="artistThumbSelectedImage" alt="">
+              <span id="artistThumbSelectedEmpty">No artist selected</span>
+            </div>
+            <div class="artist-thumb-selected-name" id="artistThumbSelectedName">아티스트를 선택하세요</div>
+            <div class="artist-thumb-selected-meta" id="artistThumbSelectedMeta"></div>
+            <div class="artist-thumb-actions">
+              <button type="button" class="artist-thumb-btn" id="artistThumbFavoriteBtn" disabled>관심 작가 등록</button>
+              <button type="button" class="artist-thumb-btn danger" id="artistThumbBanBtn" disabled>제외</button>
+            </div>
+            <div class="artist-thumb-actions">
+              <button type="button" class="artist-thumb-btn" id="artistThumbCopyBtn" disabled>복사</button>
+              <button type="button" class="artist-thumb-btn" id="artistThumbInsertBtn" disabled>프롬프트 삽입</button>
+            </div>
+          </section>
+          <section class="artist-thumb-prompt-box">
+            <label class="artist-thumb-field">
+              <span>Prefix</span>
+              <textarea class="artist-thumb-textarea" id="artistThumbPrefix" spellcheck="false"></textarea>
+            </label>
+            <label class="artist-thumb-field">
+              <span>Artist Prompt</span>
+              <textarea class="artist-thumb-textarea artist-thumb-positive" id="artistThumbPositive" spellcheck="false" placeholder="artist:name"></textarea>
+            </label>
+            <label class="artist-thumb-field">
+              <span>Postfix</span>
+              <textarea class="artist-thumb-textarea" id="artistThumbPostfix" spellcheck="false"></textarea>
+            </label>
+            <button type="button" class="artist-thumb-generate" id="artistThumbGenerateBtn">Generate 832 x 1216</button>
+          </section>
+        </aside>
+        <section class="artist-thumb-panel">
+          <header class="artist-thumb-panel-head">
+            <div>
+              <div class="artist-thumb-kicker">Artist Thumbnail</div>
+              <div class="artist-thumb-summary" id="artistThumbSummary">Artist dictionary</div>
+            </div>
+            <div class="artist-thumb-toolbar-controls">
+              <select class="artist-thumb-select" id="artistThumbMode" aria-label="Thumbnail mode"></select>
+              <button type="button" class="artist-thumb-download-btn" id="artistThumbDownloadBtn" hidden>Download</button>
+              <input class="artist-thumb-search" id="artistThumbSearch" type="search" placeholder="Search artist" autocomplete="off" spellcheck="false">
+            </div>
+          </header>
+          <div class="artist-thumb-status" id="artistThumbStatus">Select a thumbnail mode.</div>
+          <div class="artist-thumb-grid" id="artistThumbGrid"></div>
+          <footer class="artist-thumb-pager">
+            <button type="button" class="artist-thumb-page-btn" id="artistThumbPrevBtn">Prev</button>
+            <span id="artistThumbPageLabel">0 / 0</span>
+            <label class="artist-thumb-goto">
+              <span>Go To</span>
+              <input id="artistThumbGotoInput" type="number" min="1" inputmode="numeric" autocomplete="off">
+              <button type="button" id="artistThumbGotoBtn">Go</button>
+            </label>
+            <button type="button" class="artist-thumb-page-btn" id="artistThumbNextBtn">Next</button>
+          </footer>
+        </section>
+      </div>
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" hidden role="tabpanel">

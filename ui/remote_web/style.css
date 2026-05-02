@@ -1004,7 +1004,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .thumb-panel {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
 }
-.thumb-tab { background: var(--bg-deep); }
+.thumb-tab { height: 100%; overflow: hidden; background: var(--bg-deep); }
 .thumb-toolbar {
   min-height: 58px; display: flex; align-items: center; justify-content: space-between;
   gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--border-dim);
@@ -1028,7 +1028,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .thumb-search:focus { border-color: var(--accent-blue); }
 .thumb-layout {
-  flex: 1; min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr);
+  flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: 190px minmax(0, 1fr);
 }
 .thumb-categories {
   min-height: 0; overflow: auto; padding: 8px; border-right: 1px solid var(--border-dim);
@@ -1062,15 +1062,16 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .thumb-status[data-tone="error"] { color: #ff6b6b; }
 .thumb-status[data-tone="busy"] { color: var(--accent-blue); }
 .thumb-grid {
-  flex: 1; min-height: 0; overflow: auto; display: grid; align-content: start;
+  flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; display: grid; align-content: start;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 10px;
+  grid-auto-rows: 196px; scrollbar-gutter: stable;
 }
 .thumb-card {
-  min-width: 0; display: grid; grid-template-rows: 150px auto; overflow: hidden;
+  min-width: 0; height: 196px; display: grid; grid-template-rows: 150px 46px; overflow: hidden;
   border: 1px solid var(--border-dim); border-radius: 6px; background: rgba(255, 255, 255, 0.025);
 }
 .thumb-card-image {
-  width: 100%; height: 150px; object-fit: cover; background: #11121a;
+  display: block; width: 100%; height: 150px; min-height: 150px; object-fit: cover; background: #11121a;
 }
 .thumb-card-footer {
   display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 6px;

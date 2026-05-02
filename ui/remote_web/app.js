@@ -1766,6 +1766,34 @@ function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
 
+function loadMetadataImageBlob(blob, label = 'Input Image') {
+  if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {
+    showToast('Metadata viewer is not ready', 'error');
+    return Promise.resolve(false);
+  }
+  return metadataViewer.loadImageBlob(blob, label || 'Input Image', {silent: false});
+}
+
+function pasteMetadataImageFromClipboard() {
+  if (!resultImageInput || typeof resultImageInput.pasteFromClipboard !== 'function') {
+    showToast('Image input is not ready', 'error');
+    return;
+  }
+  resultImageInput.pasteFromClipboard({
+    label: 'Clipboard Image',
+    onImageBlob: loadMetadataImageBlob,
+  });
+}
+
+function bindMetadataImageDropTarget() {
+  if (!resultImageInput || typeof resultImageInput.bindDropTarget !== 'function') return;
+  const stage = document.querySelector('.metadata-image-stage');
+  if (!stage) return;
+  resultImageInput.bindDropTarget(stage, {
+    onImageBlob: loadMetadataImageBlob,
+  });
+}
+
 function applyMetadataPrompt(payload) {
   if (!payload) return;
   if (promptEdit && payload.prompt != null) promptEdit.value = payload.prompt || '';
@@ -3768,6 +3796,7 @@ Promise.all([
   .then(() => {
     initHistoryRail();
     initResultInfoResizer();
+    bindMetadataImageDropTarget();
     refreshAllOptionVisuals();
     initializeDetachedShell();
     setBootIndicator('Connecting…', 25, false);

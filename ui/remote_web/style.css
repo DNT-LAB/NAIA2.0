@@ -1199,6 +1199,9 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   font-weight: 600;
   line-height: 1;
 }
+.metadata-clipboard-btn {
+  white-space: nowrap;
+}
 .metadata-layout {
   flex: 1;
   min-height: 0;
@@ -1244,6 +1247,11 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   border: 1px solid var(--border-dim);
   border-radius: 5px;
   background: #222;
+}
+.metadata-image-stage.drag-over {
+  outline: 2px solid rgba(124,106,239,0.72);
+  outline-offset: -5px;
+  background: rgba(124,106,239,0.08);
 }
 .metadata-image-stage img {
   max-width: 100%;

@@ -10,7 +10,7 @@ export function createResultImageInput({
 }) {
   const viewer = document.querySelector('.viewer');
   let localPreviewUrl = null;
-  let dragDepth = 0;
+  const dragDepthByTarget = new WeakMap();
 
   function isEditableTarget(target) {
     if (!target || !(target instanceof window.Element)) return false;
@@ -208,14 +208,25 @@ export function createResultImageInput({
     });
   }
 
-  async function handleImageUrl(imageUrl, label = 'Web Image') {
+  async function importImageBlob(blob, label = 'Input Image', options = {}) {
+    if (!isImageBlob(blob)) {
+      showToast('Image file required', 'error');
+      return;
+    }
+    const onImageBlob = typeof options.onImageBlob === 'function'
+      ? options.onImageBlob
+      : handleImageBlob;
+    await onImageBlob(blob, label);
+  }
+
+  async function handleImageUrl(imageUrl, label = 'Web Image', options = {}) {
     if (!imageUrl) {
       showToast('Image URL required', 'error');
       return;
     }
     try {
       const blob = await fetchImageUrlAsBlob(imageUrl);
-      await handleImageBlob(blob, label || labelFromImageUrl(imageUrl));
+      await importImageBlob(blob, label || labelFromImageUrl(imageUrl), options);
     } catch (error) {
       console.error('Web image import failed', error);
       showToast(error.message || 'Failed to load web image', 'error');
@@ -236,14 +247,14 @@ export function createResultImageInput({
     return null;
   }
 
-  async function pasteFromClipboard() {
+  async function pasteFromClipboard(options = {}) {
     try {
       const blob = await readImageFromClipboard();
       if (!blob) {
         showToast('No image in clipboard', 'error');
         return;
       }
-      await handleImageBlob(blob, 'Clipboard Image');
+      await importImageBlob(blob, options.label || 'Clipboard Image', options);
     } catch (error) {
       console.error('Clipboard image paste failed', error);
       showToast('Clipboard access denied', 'error');
@@ -261,73 +272,104 @@ export function createResultImageInput({
       return;
     }
     event.preventDefault();
-    handleImageBlob(file, 'Clipboard Image');
+    importImageBlob(file, 'Clipboard Image');
   }
 
-  function setDragActive(active) {
-    if (!viewer) return;
-    viewer.classList.toggle('drag-over', active);
+  function setDragActive(target, active, activeClass = 'drag-over') {
+    if (!target) return;
+    target.classList.toggle(activeClass, active);
   }
 
-  function handleDragEnter(event) {
-    if (!dataTransferHasImage(event.dataTransfer)) return;
-    event.preventDefault();
-    dragDepth += 1;
-    setDragActive(true);
+  function updateDragDepth(target, delta) {
+    if (!target) return 0;
+    const nextDepth = Math.max(0, (dragDepthByTarget.get(target) || 0) + delta);
+    if (nextDepth) dragDepthByTarget.set(target, nextDepth);
+    else dragDepthByTarget.delete(target);
+    return nextDepth;
   }
 
-  function handleDragOver(event) {
-    if (!dataTransferHasImage(event.dataTransfer)) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    setDragActive(true);
+  function resetDragDepth(target) {
+    if (!target) return;
+    dragDepthByTarget.delete(target);
   }
 
-  function handleDragLeave(event) {
-    if (!dataTransferHasImage(event.dataTransfer)) return;
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) setDragActive(false);
-  }
+  function bindDropTarget(target, options = {}) {
+    if (!target) return null;
+    const activeClass = options.activeClass || 'drag-over';
+    const internalDropHandler = typeof options.onInternalDrop === 'function'
+      ? options.onInternalDrop
+      : onInternalDrop;
 
-  function handleDrop(event) {
-    if (!dataTransferHasImage(event.dataTransfer)) return;
-    event.preventDefault();
-    dragDepth = 0;
-    setDragActive(false);
-    const internal = readInternalDragSource(event.dataTransfer);
-    if (internal && typeof onInternalDrop === 'function') {
-      try {
-        if (onInternalDrop(internal) !== false) return;
-      } catch (error) {
-        console.error('Internal drop handler failed', error);
+    const handleDragEnter = event => {
+      if (!dataTransferHasImage(event.dataTransfer)) return;
+      event.preventDefault();
+      updateDragDepth(target, 1);
+      setDragActive(target, true, activeClass);
+    };
+
+    const handleDragOver = event => {
+      if (!dataTransferHasImage(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      setDragActive(target, true, activeClass);
+    };
+
+    const handleDragLeave = event => {
+      if (!dataTransferHasImage(event.dataTransfer)) return;
+      const nextDepth = updateDragDepth(target, -1);
+      if (nextDepth === 0) setDragActive(target, false, activeClass);
+    };
+
+    const handleDrop = event => {
+      if (!dataTransferHasImage(event.dataTransfer)) return;
+      event.preventDefault();
+      resetDragDepth(target);
+      setDragActive(target, false, activeClass);
+      const internal = readInternalDragSource(event.dataTransfer);
+      if (internal && typeof internalDropHandler === 'function') {
+        try {
+          if (internalDropHandler(internal) !== false) return;
+        } catch (error) {
+          console.error('Internal drop handler failed', error);
+        }
       }
-    }
-    const file = getImageFileFromDataTransfer(event.dataTransfer);
-    if (file) {
-      handleImageBlob(file, file.name || 'Dropped Image');
-      return;
-    }
-    const imageUrl = getImageUrlFromDataTransfer(event.dataTransfer);
-    if (!imageUrl) {
-      showToast('Image file or image URL required', 'error');
-      return;
-    }
-    handleImageUrl(imageUrl, labelFromImageUrl(imageUrl));
+      const file = getImageFileFromDataTransfer(event.dataTransfer);
+      if (file) {
+        importImageBlob(file, file.name || 'Dropped Image', options);
+        return;
+      }
+      const imageUrl = getImageUrlFromDataTransfer(event.dataTransfer);
+      if (!imageUrl) {
+        showToast('Image file or image URL required', 'error');
+        return;
+      }
+      handleImageUrl(imageUrl, labelFromImageUrl(imageUrl), options);
+    };
+
+    target.tabIndex = -1;
+    target.addEventListener('dragenter', handleDragEnter);
+    target.addEventListener('dragover', handleDragOver);
+    target.addEventListener('dragleave', handleDragLeave);
+    target.addEventListener('drop', handleDrop);
+
+    return () => {
+      resetDragDepth(target);
+      setDragActive(target, false, activeClass);
+      target.removeEventListener('dragenter', handleDragEnter);
+      target.removeEventListener('dragover', handleDragOver);
+      target.removeEventListener('dragleave', handleDragLeave);
+      target.removeEventListener('drop', handleDrop);
+    };
   }
 
   function bind() {
-    if (viewer) {
-      viewer.tabIndex = -1;
-      viewer.addEventListener('dragenter', handleDragEnter);
-      viewer.addEventListener('dragover', handleDragOver);
-      viewer.addEventListener('dragleave', handleDragLeave);
-      viewer.addEventListener('drop', handleDrop);
-    }
+    bindDropTarget(viewer);
     document.addEventListener('paste', handlePasteEvent);
   }
 
   return {
     bind,
+    bindDropTarget,
     pasteFromClipboard,
     handleImageBlob,
   };

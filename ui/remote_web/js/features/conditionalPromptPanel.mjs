@@ -633,7 +633,6 @@ export function createConditionalPromptPanel({
     if (selectedRuleId && !book.rules.some(rule => rule.id === selectedRuleId)) selectedRuleId = null;
     if (!selectedRuleId && book.rules.length) selectedRuleId = book.rules[0].id;
     const selected = selectedRule();
-    const simulationActive = Boolean(m.simulation);
     moduleBody.innerHTML = `
       <div class="cond-root cond-v2-editor${presetPopoverOpen ? ' cond-preset-popover-open' : ''}">
         ${renderModeBar(m)}
@@ -647,7 +646,7 @@ export function createConditionalPromptPanel({
         </div>
         <div class="cond-bottom-actions">
           <button type="button" class="mod-action-btn" data-cond-action="reload-state">현재 DSL 다시 불러오기</button>
-          <button type="button" class="mod-action-btn" data-cond-action="${simulationActive ? 'clear-simulation' : 'test-rules'}">${simulationActive ? '시뮬레이션 종료' : '시뮬레이션'}</button>
+          <button type="button" class="mod-action-btn" data-cond-action="test-rules">시뮬레이션</button>
           <button type="button" class="mod-action-btn mod-start" data-cond-action="apply-book" ${dirty ? '' : 'disabled'}>✔ 모듈에 적용</button>
         </div>
         <div>
@@ -1187,6 +1186,7 @@ export function createConditionalPromptPanel({
       renderWithScrollRestore(['.cond-rule-list', '.cond-condition-scroll']);
     } else if (action === 'select-rule') {
       selectedRuleId = actionEl.dataset.ruleId || '';
+      if (currentState) currentState.simulation = null;
       renderWithScrollRestore(['.cond-rule-list']);
     } else if (action === 'add-rule') {
       const book = rulebook();
@@ -1242,11 +1242,6 @@ export function createConditionalPromptPanel({
     } else if (action === 'reload-state') {
       if (typeof globalThis.requestModuleState === 'function') {
         globalThis.requestModuleState('conditional_prompt');
-      }
-    } else if (action === 'clear-simulation') {
-      if (currentState) {
-        currentState.simulation = null;
-        renderWithScrollRestore(['.cond-rule-list', '.cond-condition-scroll']);
       }
     } else if (action === 'test-rules') {
       if (currentState?.editor_mode === 'v2') {

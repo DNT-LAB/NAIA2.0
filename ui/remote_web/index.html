@@ -586,10 +586,21 @@
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabThumb" data-right-pane="thumb" hidden role="tabpanel">
-    <div class="right-tab-placeholder">
-      <div class="placeholder-kicker">TODO</div>
-      <h2>Thumb</h2>
-      <p>스타일 썸네일 탐색 기능을 Web Shell 패널로 옮길 자리입니다.</p>
+    <div class="thumb-tab">
+      <header class="thumb-toolbar">
+        <div>
+          <h2>Thumb</h2>
+          <div class="thumb-summary" id="thumbSummary">Style thumbnails</div>
+        </div>
+        <input class="thumb-search" id="thumbSearch" type="search" placeholder="Search tag" autocomplete="off" spellcheck="false">
+      </header>
+      <div class="thumb-layout">
+        <nav class="thumb-categories" id="thumbCategories" aria-label="Style categories"></nav>
+        <section class="thumb-panel">
+          <div class="thumb-status" id="thumbStatus">Loading styles...</div>
+          <div class="thumb-grid" id="thumbGrid"></div>
+        </section>
+      </div>
     </div>
   </div>
   <div class="right-tab-pane" id="rightTabArtists" data-right-pane="artists" hidden role="tabpanel">

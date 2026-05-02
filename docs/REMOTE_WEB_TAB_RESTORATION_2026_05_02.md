@@ -13,7 +13,7 @@
 | Result | 기존 동작 유지 | `ImageWindow` history, result asset, context image actions, queue/enhance/upscale endpoints |
 | Danbooru | 이번 라운드에서 URL/Post ID 기반 미러링 구현 | `/api/danbooru/post`, Danbooru public post JSON, `data/characteristic_list.txt`, `PromptGenerationController.generate_instant_source_silent()` preview |
 | Metadata | 기존 동작 유지 | `/api/result/metadata`, `/api/metadata/extract`, metadata apply/restore bridge |
-| Thumb | 탭 노출만 복원 | `ThumbnailsTabModule`의 스타일 썸네일 소스, 선택 상태, 적용 액션을 Web Shell contract로 분리 필요 |
+| Thumb | 스타일 썸네일 카테고리/그리드/태그 삽입 구현 | `/api/thumb/state`, `/api/thumb/category/{key}`, `/api/thumb/image`, `data/taglist/style_meta_tags.json`, `data/taglist/style_thumbnails.json` |
 | Artists | 탭 노출만 복원 | `ArtistThumbModule` gallery/rule/randomizer state, `generation_completed_for_artist_thumb` 이벤트 bridge 필요 |
 | Studio | 탭 노출만 복원 | `StudioTab`의 frame/grid/sequence 상태와 generation override bridge 필요. 현재 개선 예정 기능과 충돌하지 않게 별도 라운드 권장 |
 | Settings | 탭 노출만 복원 | 기존 module popup의 API/Save/Web Session bridge를 top-level tab으로 재배치하는 UI 작업 필요 |
@@ -49,6 +49,19 @@ Remote Web로 옮길 때 별도 bridge가 필요한 데스크탑 전용 기능:
 - Filesystem actions: open folder/file location, native clipboard MIME, user save directory selection
 - Long-running generation workflows: `GenerationController`, queue manager, QThread worker cleanup
 - Tab detach/dock lifecycle and PyQt widget ownership
+
+## Thumb Tab Bridge
+
+Desktop 원본 탭(`tabs/thumbnails_tab.py`)은 `style_meta_tags.json`의 카테고리와 `style_thumbnails.json`의 `tag -> base64 image` 매핑을 로드해 스타일 참고용 썸네일 그리드를 만든다. 실제 동작은 브라우징과 태그명 클립보드 복사에 가깝고, generation pipeline을 직접 호출하지 않는다.
+
+Web Shell 구현은 54MB 수준의 thumbnail JSON을 한 번에 클라이언트로 보내지 않는다.
+
+- `/api/thumb/state`: 카테고리 목록과 사용 가능한 썸네일 수
+- `/api/thumb/category/{key}`: 선택 카테고리의 태그 목록과 이미지 URL
+- `/api/thumb/image?tag=...`: 특정 태그의 base64 썸네일을 decode한 이미지 bytes
+- Web UI: 카테고리 전환, 현재 카테고리 태그 검색, 태그 프롬프트 삽입, 태그명 복사
+
+이 구조는 이후 Thumb 탭을 더 확장하더라도 `app.js`가 아니라 `thumbTab.mjs`와 REST contract만 수정하도록 만든다.
 
 ## Review Notes
 

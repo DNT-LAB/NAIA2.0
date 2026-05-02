@@ -80,6 +80,7 @@ let searchPanelControl = null;
 let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
 let danbooruTabControl = null;
+let thumbTabControl = null;
 let customSelectsControl = null;
 let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
@@ -133,6 +134,19 @@ const danbooruTabReady = import('./js/features/danbooruTab.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Danbooru tab module', error);
+  });
+const thumbTabReady = import('./js/features/thumbTab.mjs')
+  .then(({createThumbTabController}) => {
+    thumbTabControl = createThumbTabController({
+      document,
+      escHtml,
+      showToast,
+      promptEdit,
+      onPromptEdit,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Thumb tab module', error);
   });
 const customSelectsReady = import('./js/features/customSelects.mjs')
   .then(({createCustomSelectController}) => {
@@ -1377,8 +1391,9 @@ function getDetachedModuleGeometry(moduleId) {
 }
 
 function switchRightTab(tabName, options = {}) {
-  if (rightTabs) rightTabs.switchTo(tabName);
+  const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
+  if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
 }
 
 function buildDetachedUrl(kind, params = {}) {
@@ -3705,6 +3720,7 @@ Promise.all([
   remoteWsClientReady,
   rightTabsReady,
   danbooruTabReady,
+  thumbTabReady,
   customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,

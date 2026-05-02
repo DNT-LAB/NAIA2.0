@@ -155,6 +155,8 @@ class RemoteBridge(QObject):
         "wildcard_standalone": "와일드카드 단독 모드",
     }
     MEMORY_HISTORY_PATH_PREFIX = "__history__/"
+    STYLE_THUMBNAILS_PATH = Path("data/taglist/style_thumbnails.json")
+    STYLE_META_TAGS_PATH = Path("data/taglist/style_meta_tags.json")
 
     def __init__(self, app_context):
         super().__init__()
@@ -220,6 +222,8 @@ class RemoteBridge(QObject):
         self._remote_img2img_window_id: Optional[int] = None
         self._remote_img2img_source_label: str = ""
         self._danbooru_prompt_preview_bridge_connected = False
+        self._style_thumb_meta_cache: Optional[dict] = None
+        self._style_thumb_data_cache: Optional[dict] = None
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -1577,6 +1581,128 @@ class RemoteBridge(QObject):
         )
         post["prompt"] = self._request_danbooru_prompt_preview(post.get("tags", {}))
         return post
+
+    def _load_style_thumb_meta(self) -> dict:
+        if self._style_thumb_meta_cache is not None:
+            return self._style_thumb_meta_cache
+
+        path = Path(self.STYLE_META_TAGS_PATH)
+        if not path.exists():
+            raise FileNotFoundError(f"Style thumbnail metadata not found: {path}")
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("Style thumbnail metadata is invalid")
+        categories = data.get("categories")
+        if not isinstance(categories, dict):
+            data["categories"] = {}
+        self._style_thumb_meta_cache = data
+        return data
+
+    def _load_style_thumb_data(self) -> dict:
+        if self._style_thumb_data_cache is not None:
+            return self._style_thumb_data_cache
+
+        path = Path(self.STYLE_THUMBNAILS_PATH)
+        if not path.exists():
+            raise FileNotFoundError(f"Style thumbnail data not found: {path}")
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("Style thumbnail data is invalid")
+        self._style_thumb_data_cache = {
+            str(key): str(value)
+            for key, value in data.items()
+            if isinstance(value, str) and value.strip()
+        }
+        return self._style_thumb_data_cache
+
+    def _style_thumb_categories(self) -> dict:
+        meta = self._load_style_thumb_meta()
+        categories = meta.get("categories", {})
+        return categories if isinstance(categories, dict) else {}
+
+    def _build_thumb_tab_state(self) -> dict:
+        categories = self._style_thumb_categories()
+        thumbnail_data = self._load_style_thumb_data()
+        thumbnail_keys = set(thumbnail_data.keys())
+        category_payload = []
+
+        for key, info in categories.items():
+            if not isinstance(info, dict):
+                continue
+            tags = [str(tag) for tag in info.get("tags", []) if str(tag or "").strip()]
+            available = [tag for tag in tags if tag in thumbnail_keys]
+            category_payload.append({
+                "key": str(key),
+                "name": str(info.get("name") or key),
+                "description": str(info.get("description") or ""),
+                "total": len(tags),
+                "available": len(available),
+            })
+
+        selected = ""
+        for category in category_payload:
+            if category["available"]:
+                selected = category["key"]
+                break
+        if not selected and category_payload:
+            selected = category_payload[0]["key"]
+
+        return {
+            "categories": category_payload,
+            "selected": selected,
+            "total_available": sum(category["available"] for category in category_payload),
+        }
+
+    def _build_thumb_category_payload(self, category_key: str) -> dict:
+        key = str(category_key or "").strip()
+        categories = self._style_thumb_categories()
+        if key not in categories:
+            raise KeyError("Unknown style thumbnail category")
+
+        info = categories[key]
+        if not isinstance(info, dict):
+            raise KeyError("Unknown style thumbnail category")
+        thumbnail_data = self._load_style_thumb_data()
+        tags = [
+            str(tag)
+            for tag in info.get("tags", [])
+            if str(tag or "").strip() and str(tag) in thumbnail_data
+        ]
+        return {
+            "key": key,
+            "name": str(info.get("name") or key),
+            "description": str(info.get("description") or ""),
+            "tags": [
+                {
+                    "tag": tag,
+                    "image_url": f"/api/thumb/image?tag={quote(tag, safe='')}",
+                }
+                for tag in tags
+            ],
+        }
+
+    def _style_thumb_media_type(self, image_bytes: bytes) -> str:
+        if image_bytes.startswith(b"\xff\xd8"):
+            return "image/jpeg"
+        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+            return "image/webp"
+        return "application/octet-stream"
+
+    def _build_thumb_image_payload(self, tag: str) -> tuple[bytes, str]:
+        tag_name = str(tag or "").strip()
+        if not tag_name:
+            raise ValueError("tag is required")
+        encoded = self._load_style_thumb_data().get(tag_name)
+        if not encoded:
+            raise FileNotFoundError(f"Style thumbnail not found: {tag_name}")
+        if encoded.startswith("data:") and "," in encoded:
+            encoded = encoded.split(",", 1)[1]
+        image_bytes = base64.b64decode(encoded)
+        return image_bytes, self._style_thumb_media_type(image_bytes)
 
     def _img2img_manager(self):
         main_window = getattr(self.app_context, "main_window", None)
@@ -8088,6 +8214,42 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=400)
         except Exception as e:
             return JSONResponse({"error": f"Danbooru lookup failed: {e}"}, status_code=502)
+
+    @app.get("/api/thumb/state")
+    async def api_thumb_state():
+        try:
+            return await asyncio.to_thread(bridge._build_thumb_tab_state)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Thumb state failed: {e}"}, status_code=500)
+
+    @app.get("/api/thumb/category/{category_key}")
+    async def api_thumb_category(category_key: str):
+        try:
+            return await asyncio.to_thread(bridge._build_thumb_category_payload, category_key)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Thumb category failed: {e}"}, status_code=500)
+
+    @app.get("/api/thumb/image")
+    async def api_thumb_image(tag: str = ""):
+        try:
+            image_bytes, media_type = await asyncio.to_thread(bridge._build_thumb_image_payload, tag)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Thumb image failed: {e}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     @app.get("/api/result/asset/current")
     async def api_current_result_asset():

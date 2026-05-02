@@ -61,6 +61,7 @@ export function createRightTabsController({document, onLeaveResult}) {
     if (nextTab !== 'result' && onLeaveResult) {
       onLeaveResult();
     }
+    return nextTab;
   }
 
   applyHiddenState();

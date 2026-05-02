@@ -25,6 +25,9 @@ export function createStudioTabController({
   let queue = [];
   let activeJob = null;
   let running = false;
+  let globalOpen = false;
+  let importOpen = false;
+  let importText = '';
   let idleFailTimer = null;
   const frameImages = new Map();
 
@@ -202,7 +205,18 @@ export function createStudioTabController({
 
   function renderGlobalPanel() {
     return `
-      <section class="studio-global-panel">
+      <section class="studio-global-panel${globalOpen ? ' open' : ''}">
+        <button type="button" class="studio-panel-toggle" data-studio-action="toggle-global">
+          <span>공통 설정</span>
+          <strong>${escHtml([
+            state.prefix ? 'Prefix' : '',
+            state.postfix ? 'Postfix' : '',
+            state.globalNegative ? 'Negative' : '',
+            state.globalResolution || getCurrentResolution() || '',
+            `${Math.max(1, state.repeat)}x`,
+            state.fixSeed ? 'Seed 고정' : '',
+          ].filter(Boolean).join(' · ') || '현재 메인 설정 사용')}</strong>
+        </button>
         <div class="studio-global-grid">
           <label class="studio-field">
             <span>Prefix</span>
@@ -230,6 +244,25 @@ export function createStudioTabController({
               <span>Seed 고정</span>
             </label>
           </div>
+        </div>
+      </section>`;
+  }
+
+  function renderImportPanel() {
+    if (!importOpen) return '';
+    return `
+      <section class="studio-import-panel">
+        <div class="studio-import-head">
+          <div>
+            <div class="studio-kicker">Batch Input</div>
+            <h3>줄별 프롬프트 배치</h3>
+          </div>
+          <button type="button" data-studio-action="toggle-import">닫기</button>
+        </div>
+        <textarea class="studio-import-textarea" data-studio-import-lines spellcheck="false" placeholder="한 줄에 프레임 하나씩 입력">${escHtml(importText)}</textarea>
+        <div class="studio-import-actions">
+          <button type="button" data-studio-action="import-lines-replace">프레임 교체</button>
+          <button type="button" data-studio-action="import-lines-append" class="primary">뒤에 추가</button>
         </div>
       </section>`;
   }
@@ -281,6 +314,7 @@ export function createStudioTabController({
           <button type="button" data-studio-action="sync-current">현재 프롬프트 가져오기</button>
           <button type="button" data-studio-action="apply-current">메인에 적용</button>
           <button type="button" data-studio-action="duplicate-frame">복제</button>
+          <button type="button" data-studio-action="clear-frame">비우기</button>
           <button type="button" data-studio-action="generate-selected" class="primary">선택 생성</button>
         </div>
       </aside>`;
@@ -316,12 +350,14 @@ export function createStudioTabController({
             <h2>다중 프레임 생성 보드</h2>
           </div>
           <div class="studio-toolbar-actions">
-            <button type="button" data-studio-action="add-frame">프레임 추가</button>
-            <button type="button" data-studio-action="reset-frames">9칸 초기화</button>
+            <button type="button" data-studio-action="capture-current-new">현재 캡처</button>
+            <button type="button" data-studio-action="toggle-import">줄별 배치</button>
+            <button type="button" data-studio-action="add-frame">빈 프레임</button>
             <button type="button" data-studio-action="start-sequence" class="primary" ${running || activeJob ? 'disabled' : ''}>순차 생성</button>
             <button type="button" data-studio-action="stop-sequence" class="danger" ${running || activeJob ? '' : 'disabled'}>중지</button>
           </div>
         </header>
+        ${renderImportPanel()}
         ${renderGlobalPanel()}
         <main class="studio-workspace">
           <section class="studio-board">
@@ -368,6 +404,50 @@ export function createStudioTabController({
     frame.status = frame.enabled ? 'idle' : 'idle';
     saveState();
     if (options.render !== false) render();
+  }
+
+  function currentPromptFrame(index) {
+    return {
+      ...createFrame(index),
+      prompt: promptEdit?.value || '',
+      negative: negEdit?.value || '',
+      resolution: getCurrentResolution() || '',
+    };
+  }
+
+  function captureCurrentAsNewFrame() {
+    const prompt = promptEdit?.value || '';
+    const negative = negEdit?.value || '';
+    if (!prompt.trim() && !negative.trim()) {
+      showToast('캡처할 현재 프롬프트가 비어 있습니다', 'error');
+      return;
+    }
+    state.frames.push(currentPromptFrame(state.frames.length));
+    selectedIndex = state.frames.length - 1;
+    saveState();
+    render();
+    showToast('현재 프롬프트를 새 Studio 프레임으로 캡처했습니다', 'success');
+  }
+
+  function clearSelectedFrame() {
+    const frame = selectedFrame();
+    if (!frame) return;
+    const oldUrl = frameImages.get(frame.id);
+    if (oldUrl) URL.revokeObjectURL(oldUrl);
+    frameImages.delete(frame.id);
+    Object.assign(frame, {
+      enabled: true,
+      prompt: '',
+      negative: '',
+      resolution: '',
+      seed: '',
+      status: 'idle',
+      runCount: 0,
+      lastSeed: '',
+      lastUpdated: '',
+    });
+    saveState();
+    render();
   }
 
   function selectFrame(index) {
@@ -448,6 +528,41 @@ export function createStudioTabController({
     state = createDefaultState();
     saveState();
     render();
+  }
+
+  function frameFromLine(line, index) {
+    return {
+      ...createFrame(index),
+      prompt: safeText(line).trim(),
+      negative: negEdit?.value || '',
+      resolution: state.globalResolution || getCurrentResolution() || '',
+    };
+  }
+
+  function importLines(mode) {
+    const lines = importText
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      showToast('배치할 프롬프트 줄이 없습니다', 'error');
+      return;
+    }
+    if (mode === 'replace') {
+      frameImages.forEach(url => URL.revokeObjectURL(url));
+      frameImages.clear();
+      state.frames = lines.map(frameFromLine);
+      selectedIndex = 0;
+    } else {
+      const start = state.frames.length;
+      state.frames.push(...lines.map((line, offset) => frameFromLine(line, start + offset)));
+      selectedIndex = start;
+    }
+    importText = '';
+    importOpen = false;
+    saveState();
+    render();
+    showToast(`${lines.length}개 프레임을 Studio에 배치했습니다`, 'success');
   }
 
   function clearIdleFailTimer() {
@@ -596,8 +711,20 @@ export function createStudioTabController({
     if (action === 'sync-current') syncSelectedFromMain();
     else if (action === 'apply-current') applySelectedToMain();
     else if (action === 'duplicate-frame') duplicateFrame();
+    else if (action === 'clear-frame') clearSelectedFrame();
+    else if (action === 'capture-current-new') captureCurrentAsNewFrame();
     else if (action === 'add-frame') addFrame();
     else if (action === 'reset-frames') resetFrames();
+    else if (action === 'toggle-global') {
+      globalOpen = !globalOpen;
+      render();
+    }
+    else if (action === 'toggle-import') {
+      importOpen = !importOpen;
+      render();
+    }
+    else if (action === 'import-lines-append') importLines('append');
+    else if (action === 'import-lines-replace') importLines('replace');
     else if (action === 'start-sequence') startSequence();
     else if (action === 'stop-sequence') stopSequence();
     else if (action === 'generate-selected') generateSelected();
@@ -622,6 +749,9 @@ export function createStudioTabController({
       const render = shouldRenderForInput(event.target);
       if (globalField) updateGlobal(globalField, event.target, {render});
       if (frameField) updateFrame(frameField, event.target, {render});
+      if (event.target.dataset.studioImportLines !== undefined) {
+        importText = safeText(event.target.value);
+      }
     });
     root.addEventListener('change', event => {
       const globalField = event.target.dataset.studioGlobal;

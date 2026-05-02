@@ -26,6 +26,7 @@ export function createStudioTabController({
   let activeJob = null;
   let running = false;
   let globalOpen = false;
+  let editorOpen = false;
   let importOpen = false;
   let importText = '';
   let idleFailTimer = null;
@@ -179,27 +180,44 @@ export function createStudioTabController({
     return escHtml(clean || fallback);
   }
 
+  function promptItems(text, limit = 12) {
+    const items = safeText(text)
+      .split(/[,\n]/)
+      .map(item => item.trim())
+      .filter(Boolean);
+    return {
+      shown: items.slice(0, limit),
+      overflow: Math.max(0, items.length - limit),
+    };
+  }
+
+  function renderPromptList(frame) {
+    const {shown, overflow} = promptItems(frame.prompt);
+    if (!shown.length) {
+      return '<div class="studio-frame-empty">프롬프트 없음</div>';
+    }
+    return `
+      <ul class="studio-frame-prompt-list">
+        ${shown.map(item => `<li>${escHtml(item)}</li>`).join('')}
+        ${overflow ? `<li class="muted">+ ${overflow}</li>` : ''}
+      </ul>`;
+  }
+
   function renderFrameCard(frame, index) {
     const selected = index === selectedIndex;
+    const open = selected && editorOpen;
     const imageUrl = frameImages.get(frame.id);
     const status = statusText(frame);
     const preview = imageUrl
       ? `<img src="${imageUrl}" alt="">`
-      : `<span>${escHtml(frameId(index))}</span>`;
+      : renderPromptList(frame);
     return `
-      <button type="button" class="studio-frame-card${selected ? ' selected' : ''}${frame.enabled ? '' : ' disabled'}" data-studio-frame="${index}">
-        <div class="studio-frame-preview">${preview}</div>
-        <div class="studio-frame-info">
-          <div class="studio-frame-top">
-            <strong>${escHtml(frameId(index))}</strong>
-            <span data-status="${escHtml(status)}">${escHtml(status)}</span>
-          </div>
-          <p>${previewText(frame.prompt)}</p>
-          <div class="studio-frame-meta">
-            <span>${escHtml(frame.resolution || state.globalResolution || getCurrentResolution() || 'current res')}</span>
-            <span>${frame.runCount ? `${frame.runCount}x` : '0x'}</span>
-          </div>
+      <button type="button" class="studio-frame-card${selected ? ' selected' : ''}${open ? ' open' : ''}${frame.enabled ? '' : ' disabled'}" data-studio-frame="${index}" aria-expanded="${open ? 'true' : 'false'}">
+        <div class="studio-frame-label">
+          <strong>${escHtml(frameId(index))}</strong>
+          <span class="studio-status-dot" data-status="${escHtml(status)}" aria-label="${escHtml(status)}"></span>
         </div>
+        <div class="studio-frame-preview${imageUrl ? ' has-image' : ''}">${preview}</div>
       </button>`;
   }
 
@@ -209,8 +227,6 @@ export function createStudioTabController({
         <button type="button" class="studio-panel-toggle" data-studio-action="toggle-global">
           <span>공통 설정</span>
           <strong>${escHtml([
-            state.prefix ? 'Prefix' : '',
-            state.postfix ? 'Postfix' : '',
             state.globalNegative ? 'Negative' : '',
             state.globalResolution || getCurrentResolution() || '',
             `${Math.max(1, state.repeat)}x`,
@@ -218,14 +234,6 @@ export function createStudioTabController({
           ].filter(Boolean).join(' · ') || '현재 메인 설정 사용')}</strong>
         </button>
         <div class="studio-global-grid">
-          <label class="studio-field">
-            <span>Prefix</span>
-            <textarea data-studio-global="prefix" spellcheck="false">${escHtml(state.prefix)}</textarea>
-          </label>
-          <label class="studio-field">
-            <span>Postfix</span>
-            <textarea data-studio-global="postfix" spellcheck="false">${escHtml(state.postfix)}</textarea>
-          </label>
           <label class="studio-field">
             <span>Global Negative</span>
             <textarea data-studio-global="globalNegative" spellcheck="false">${escHtml(state.globalNegative)}</textarea>
@@ -245,6 +253,20 @@ export function createStudioTabController({
             </label>
           </div>
         </div>
+      </section>`;
+  }
+
+  function renderFixedPromptPanel() {
+    return `
+      <section class="studio-fixed-panel">
+        <label class="studio-field">
+          <span>선행 고정 프레임</span>
+          <textarea data-studio-global="prefix" spellcheck="false" placeholder="모든 프레임 앞에 붙일 고정 프롬프트">${escHtml(state.prefix)}</textarea>
+        </label>
+        <label class="studio-field">
+          <span>후행 고정 프레임</span>
+          <textarea data-studio-global="postfix" spellcheck="false" placeholder="모든 프레임 뒤에 붙일 고정 프롬프트">${escHtml(state.postfix)}</textarea>
+        </label>
       </section>`;
   }
 
@@ -269,18 +291,21 @@ export function createStudioTabController({
 
   function renderEditor() {
     const frame = selectedFrame();
-    if (!frame) return '';
+    if (!frame || !editorOpen) return '';
     return `
-      <aside class="studio-editor">
+      <section class="studio-editor">
         <div class="studio-editor-head">
           <div>
             <div class="studio-kicker">Frame Editor</div>
             <h3>${escHtml(frameId(selectedIndex))}</h3>
           </div>
-          <label class="studio-toggle">
-            <input type="checkbox" data-studio-frame-field="enabled"${frame.enabled ? ' checked' : ''}>
-            <span>사용</span>
-          </label>
+          <div class="studio-editor-head-actions">
+            <label class="studio-toggle">
+              <input type="checkbox" data-studio-frame-field="enabled"${frame.enabled ? ' checked' : ''}>
+              <span>사용</span>
+            </label>
+            <button type="button" data-studio-action="close-editor" aria-label="프레임 편집기 닫기">닫기</button>
+          </div>
         </div>
         <label class="studio-field studio-field-tall">
           <span>Frame Prompt</span>
@@ -317,7 +342,7 @@ export function createStudioTabController({
           <button type="button" data-studio-action="clear-frame">비우기</button>
           <button type="button" data-studio-action="generate-selected" class="primary">선택 생성</button>
         </div>
-      </aside>`;
+      </section>`;
   }
 
   function renderQueueSummary() {
@@ -368,8 +393,9 @@ export function createStudioTabController({
             <div class="studio-frame-grid">
               ${state.frames.map(renderFrameCard).join('')}
             </div>
+            ${renderEditor()}
+            ${renderFixedPromptPanel()}
           </section>
-          ${renderEditor()}
         </main>
       </div>`;
   }
@@ -424,6 +450,7 @@ export function createStudioTabController({
     }
     state.frames.push(currentPromptFrame(state.frames.length));
     selectedIndex = state.frames.length - 1;
+    editorOpen = true;
     saveState();
     render();
     showToast('현재 프롬프트를 새 Studio 프레임으로 캡처했습니다', 'success');
@@ -451,7 +478,13 @@ export function createStudioTabController({
   }
 
   function selectFrame(index) {
-    selectedIndex = Math.max(0, Math.min(Number(index) || 0, state.frames.length - 1));
+    const nextIndex = Math.max(0, Math.min(Number(index) || 0, state.frames.length - 1));
+    if (nextIndex === selectedIndex) {
+      editorOpen = !editorOpen;
+    } else {
+      selectedIndex = nextIndex;
+      editorOpen = true;
+    }
     render();
   }
 
@@ -506,6 +539,7 @@ export function createStudioTabController({
     };
     state.frames.splice(selectedIndex + 1, 0, copy);
     selectedIndex += 1;
+    editorOpen = true;
     saveState();
     render();
   }
@@ -513,6 +547,7 @@ export function createStudioTabController({
   function addFrame() {
     state.frames.push(createFrame(state.frames.length));
     selectedIndex = state.frames.length - 1;
+    editorOpen = true;
     saveState();
     render();
   }
@@ -525,6 +560,7 @@ export function createStudioTabController({
     activeJob = null;
     running = false;
     selectedIndex = 0;
+    editorOpen = false;
     state = createDefaultState();
     saveState();
     render();
@@ -558,6 +594,7 @@ export function createStudioTabController({
       state.frames.push(...lines.map((line, offset) => frameFromLine(line, start + offset)));
       selectedIndex = start;
     }
+    editorOpen = false;
     importText = '';
     importOpen = false;
     saveState();
@@ -643,6 +680,7 @@ export function createStudioTabController({
     }
 
     selectedIndex = frameIndex;
+    editorOpen = false;
     const seed = state.fixSeed ? (frame.seed || frame.lastSeed || randomSeed()) : (frame.seed || randomSeed());
     frame.lastSeed = seed;
     frame.status = 'generating';
@@ -717,6 +755,10 @@ export function createStudioTabController({
     else if (action === 'reset-frames') resetFrames();
     else if (action === 'toggle-global') {
       globalOpen = !globalOpen;
+      render();
+    }
+    else if (action === 'close-editor') {
+      editorOpen = false;
       render();
     }
     else if (action === 'toggle-import') {

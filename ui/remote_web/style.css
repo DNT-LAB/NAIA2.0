@@ -736,6 +736,9 @@ header {
 body.desktop-shell .open-browser-btn {
   display: flex;
 }
+body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
+  margin-left: auto;
+}
 .open-browser-btn:hover {
   color: var(--text-primary);
   background: rgba(48,48,54,0.94);

@@ -8,26 +8,45 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLineEdit,
     QLabel,
-    QTextEdit,
     QFrame,
     QScrollArea,
     QSplitter,
 )
 from interfaces.base_tab_module import BaseTabModule
+from core.filter_data_manager import FilterDataManager
+from core.tag_filter_helpers import _is_color_exception
 import os
 import sys
 import re
 import json
+import io
+import contextlib
 
 
 DANBOORU_POST_PATTERN = r'danbooru\.donmai\.us/posts/(\d+)'
-DANBOORU_TAG_GROUPS = (
+DANBOORU_DATA_GROUPS = ('artist', 'copyright', 'character', 'general', 'meta')
+DANBOORU_PRIMARY_TAG_GROUPS = (
     ('artist', 'ARTIST'),
     ('copyright', 'COPYRIGHT'),
     ('character', 'CHARACTER'),
-    ('general', 'GENERAL'),
     ('meta', 'META'),
 )
+DANBOORU_GENERAL_GROUPS = (
+    ('character_features', 'CHARACTER FEATURES'),
+    ('subject_count', 'SUBJECT COUNT'),
+    ('clothing_events', 'CLOTHING EVENTS'),
+    ('clothes', 'CLOTHES'),
+    ('colors', 'COLORS'),
+    ('location_background', 'LOCATION / BACKGROUND'),
+    ('expression', 'EXPRESSION'),
+    ('pose_action', 'POSE / ACTION'),
+    ('objects', 'OBJECTS'),
+    ('meta_like', 'META-LIKE'),
+    ('noise', 'LOW-FREQ / NOISE'),
+    ('other', 'OTHER GENERALS'),
+)
+DANBOORU_FILTER_MANAGER_CACHE = None
+PERSON_COUNT_RE = re.compile(r'^(?:[1-5](?:boy|boys|girl|girls|other|others)|6\+(?:boys|girls|others))$')
 
 DANBOORU_BROWSER_QSS = """
 QWidget#NaiaDanbooruBrowser {
@@ -154,20 +173,11 @@ QLabel[naiaRole="tag-body"] {
     line-height: 1.35;
 }
 
-QTextEdit#NaiaDanbooruPromptPreview {
-    background: #1a1a26;
-    color: #e8e8f0;
-    border: 1px solid #2a2a3d;
-    border-radius: 7px;
-    padding: 8px;
-    font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
-    font-size: 12px;
-    selection-background-color: #7c6aef;
-    selection-color: #ffffff;
-}
-
-QTextEdit#NaiaDanbooruPromptPreview:focus {
-    border: 1px solid #7c6aef;
+QLabel#NaiaDanbooruGeneralTitle {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 900;
+    padding-top: 4px;
 }
 
 QSplitter::handle {
@@ -236,9 +246,14 @@ class BrowserTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         # ✅ 순서 변경: 프로필 설정을 UI 초기화보다 먼저
+        self.filter_manager = self._load_filter_manager()
+        self.characteristic = (
+            self.filter_manager.characteristic_list
+            if self.filter_manager is not None
+            else self._load_list_from_file()
+        )
         self.setup_selective_storage()
         self.init_ui()
-        self.characteristic = self._load_list_from_file()
         self.extracted_tags_data = {}
         
     def init_ui(self):
@@ -248,6 +263,7 @@ class BrowserTab(QWidget):
         self._last_auto_extract_post_id = None
         self._tag_title_labels = {}
         self._tag_body_labels = {}
+        self._tag_group_frames = {}
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -341,25 +357,21 @@ class BrowserTab(QWidget):
         tag_content_layout.setContentsMargins(0, 0, 0, 0)
         tag_content_layout.setSpacing(8)
 
-        for key, label in DANBOORU_TAG_GROUPS:
+        for key, label in DANBOORU_PRIMARY_TAG_GROUPS:
             group = self._create_tag_group(key, label)
+            tag_content_layout.addWidget(group)
+
+        self.general_breakdown_title = QLabel("GENERAL BREAKDOWN · 0")
+        self.general_breakdown_title.setObjectName("NaiaDanbooruGeneralTitle")
+        tag_content_layout.addWidget(self.general_breakdown_title)
+
+        for key, label in DANBOORU_GENERAL_GROUPS:
+            group = self._create_tag_group(f"general:{key}", label)
             tag_content_layout.addWidget(group)
 
         tag_content_layout.addStretch(1)
         self.tag_scroll.setWidget(tag_content)
         tag_layout.addWidget(self.tag_scroll, 1)
-
-        preview_label = QLabel("PROMPT PREVIEW")
-        preview_label.setProperty("naiaRole", "tag-title")
-        tag_layout.addWidget(preview_label)
-
-        self.prompt_preview = QTextEdit()
-        self.prompt_preview.setObjectName("NaiaDanbooruPromptPreview")
-        self.prompt_preview.setReadOnly(True)
-        self.prompt_preview.setMinimumHeight(96)
-        self.prompt_preview.setMaximumHeight(150)
-        self.prompt_preview.setProperty("autocomplete_ignore", True)
-        tag_layout.addWidget(self.prompt_preview)
 
         splitter.addWidget(tag_panel)
         splitter.setSizes([880, 360])
@@ -399,6 +411,7 @@ class BrowserTab(QWidget):
         layout.addWidget(body)
         self._tag_title_labels[key] = title
         self._tag_body_labels[key] = body
+        self._tag_group_frames[key] = group
         return group
         
     def setup_selective_storage(self):
@@ -602,13 +615,12 @@ class BrowserTab(QWidget):
         tags_data = self._normalize_extracted_tags(tags_data)
         self.extracted_tags_data = tags_data
 
-        for key, label in DANBOORU_TAG_GROUPS:
+        for key, label in DANBOORU_PRIMARY_TAG_GROUPS:
             tags = tags_data.get(key, [])
             self._tag_title_labels[key].setText(f"{label} · {len(tags)}")
             self._tag_body_labels[key].setText(', '.join(tags) if tags else '—')
 
-        fallback_prompt = self._build_prompt_preview(tags_data)
-        self.prompt_preview.setPlainText(fallback_prompt if fallback_prompt else "No prompt preview.")
+        self._render_general_breakdown(tags_data.get('general', []))
         self._set_status(f"#{tags_data.get('id')} 태그를 자동으로 읽었습니다.", "success")
         self.extract_tags_button.setEnabled(True)
         self._show_generation_widgets()
@@ -617,7 +629,7 @@ class BrowserTab(QWidget):
     def _normalize_extracted_tags(self, tags_data):
         normalized = {'id': tags_data.get('id')}
 
-        for key, _label in DANBOORU_TAG_GROUPS:
+        for key in DANBOORU_DATA_GROUPS:
             seen = set()
             normalized[key] = []
             for tag in tags_data.get(key, []):
@@ -636,11 +648,71 @@ class BrowserTab(QWidget):
 
         return normalized
 
-    def _build_prompt_preview(self, tags_data):
-        prompt_tags = []
-        for key in ('character', 'general'):
-            prompt_tags.extend(tags_data.get(key, []))
-        return ', '.join(prompt_tags)
+    def _render_general_breakdown(self, general_tags):
+        classified = self._classify_general_tags(general_tags)
+        total = sum(len(tags) for tags in classified.values())
+        self.general_breakdown_title.setText(f"GENERAL BREAKDOWN · {total}")
+
+        for key, label in DANBOORU_GENERAL_GROUPS:
+            frame_key = f"general:{key}"
+            tags = classified.get(key, [])
+            self._tag_title_labels[frame_key].setText(f"{label} · {len(tags)}")
+            self._tag_body_labels[frame_key].setText(', '.join(tags) if tags else '—')
+            self._tag_group_frames[frame_key].setVisible(bool(tags))
+
+    def _classify_general_tags(self, general_tags):
+        classified = {key: [] for key, _label in DANBOORU_GENERAL_GROUPS}
+        fm = self.filter_manager
+
+        for tag in general_tags:
+            bucket = self._general_tag_bucket(tag, fm)
+            classified[bucket].append(tag)
+
+        return classified
+
+    def _general_tag_bucket(self, tag, fm):
+        if PERSON_COUNT_RE.match(tag):
+            return 'subject_count'
+
+        if fm is None:
+            return 'other'
+
+        if tag in fm.characteristic_list:
+            return 'character_features'
+        if tag in fm._clothing_event_set:
+            return 'clothing_events'
+        if tag in fm.clothes_list or fm.get_garment_region(tag):
+            return 'clothes'
+        if (
+            fm.color_list
+            and not _is_color_exception(tag)
+            and any(color in tag for color in fm.color_list)
+        ):
+            return 'colors'
+        if tag in fm._location_set:
+            return 'location_background'
+        if tag in fm._expression_set:
+            return 'expression'
+        if tag in fm._pose_action_set:
+            return 'pose_action'
+        if tag in fm._object_set:
+            return 'objects'
+        if tag in fm._meta_set:
+            return 'meta_like'
+        if fm._valid_tag_whitelist and tag not in fm._valid_tag_whitelist:
+            return 'noise'
+        return 'other'
+
+    def _load_filter_manager(self):
+        global DANBOORU_FILTER_MANAGER_CACHE
+        try:
+            if DANBOORU_FILTER_MANAGER_CACHE is None:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    DANBOORU_FILTER_MANAGER_CACHE = FilterDataManager('data')
+            return DANBOORU_FILTER_MANAGER_CACHE
+        except Exception as e:
+            print(f"Filter manager load error: {e}")
+            return None
 
     def _load_list_from_file(self):
         """지정된 파일에서 한 줄에 하나씩 있는 태그를 읽어 리스트로 반환합니다."""
@@ -671,10 +743,15 @@ class BrowserTab(QWidget):
 
     def _clear_tag_panel(self):
         self.extracted_tags_data = {}
-        for key, label in DANBOORU_TAG_GROUPS:
+        for key, label in DANBOORU_PRIMARY_TAG_GROUPS:
             self._tag_title_labels[key].setText(f"{label} · 0")
             self._tag_body_labels[key].setText("—")
-        self.prompt_preview.setPlainText("No prompt preview.")
+        self.general_breakdown_title.setText("GENERAL BREAKDOWN · 0")
+        for key, label in DANBOORU_GENERAL_GROUPS:
+            frame_key = f"general:{key}"
+            self._tag_title_labels[frame_key].setText(f"{label} · 0")
+            self._tag_body_labels[frame_key].setText("—")
+            self._tag_group_frames[frame_key].hide()
         self._set_status("포스트를 선택하면 자동으로 태그를 읽습니다.", "warning")
         self.extract_tags_button.setEnabled(False)
 

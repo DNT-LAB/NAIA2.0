@@ -25,7 +25,7 @@ export function createDanbooruTabController({
   async function openBrowser({automatic = false} = {}) {
     const query = String(queryInput?.value || '').trim();
     setBusy(true);
-    setStatus('Opening PyQt6 Danbooru browser...', 'busy');
+    setStatus('단부루 웹 (Qt) 창을 여는 중...', 'busy');
     try {
       const response = await fetchFn('/api/danbooru/browser/open', {
         method: 'POST',
@@ -35,13 +35,13 @@ export function createDanbooruTabController({
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
       openedOnce = true;
-      setStatus('PyQt6 Danbooru browser opened.', 'ok');
-      if (!automatic && showToast) showToast('PyQt6 Danbooru browser opened', 'success');
+      setStatus('단부루 웹 (Qt) 창을 열었습니다.', 'ok');
+      if (!automatic && showToast) showToast('단부루 웹 (Qt) 창을 열었습니다', 'success');
       return true;
     } catch (error) {
       console.error('PyQt6 Danbooru browser open failed', error);
-      setStatus(error.message || 'Failed to open PyQt6 Danbooru browser', 'error');
-      if (!automatic && showToast) showToast(error.message || 'Failed to open PyQt6 Danbooru browser', 'error');
+      setStatus(error.message || '단부루 웹 (Qt) 창을 열지 못했습니다', 'error');
+      if (!automatic && showToast) showToast(error.message || '단부루 웹 (Qt) 창을 열지 못했습니다', 'error');
       return false;
     } finally {
       setBusy(false);
@@ -59,7 +59,7 @@ export function createDanbooruTabController({
     queryInput?.addEventListener('keydown', event => {
       if (event.key === 'Enter') openBrowser();
     });
-    setStatus('PyQt6 Danbooru browser ready.', 'muted');
+    setStatus('단부루 웹 (Qt) 창을 열 준비가 되었습니다.', 'muted');
   }
 
   bind();

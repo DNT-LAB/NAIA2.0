@@ -222,6 +222,8 @@ class RemoteBridge(QObject):
         self._remote_upscale_worker = None
         self._remote_img2img_window_id: Optional[int] = None
         self._remote_img2img_source_label: str = ""
+        self._danbooru_browser_window = None
+        self._danbooru_browser_widget = None
         self._danbooru_prompt_preview_bridge_connected = False
         self._style_thumb_meta_cache: Optional[dict] = None
         self._style_thumb_data_cache: Optional[dict] = None
@@ -1614,45 +1616,66 @@ class RemoteBridge(QObject):
             raise ValueError("Danbooru URL, post ID, or tag query is required")
         return text
 
+    def _clear_danbooru_browser_window(self, *_args):
+        self._danbooru_browser_window = None
+        self._danbooru_browser_widget = None
+
+    def _create_danbooru_browser_window(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QApplication, QMainWindow
+        from tabs.web_view import BrowserTab
+
+        main_window = getattr(self.app_context, "main_window", None)
+        window = QMainWindow(parent=None)
+        window.setWindowTitle("NAIA - 단부루 웹 (Qt)")
+        window.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        window.resize(1240, 860)
+        window.setMinimumSize(760, 520)
+
+        app = QApplication.instance()
+        if app and not app.windowIcon().isNull():
+            window.setWindowIcon(app.windowIcon())
+
+        browser = BrowserTab(window)
+        if main_window and hasattr(main_window, "on_instant_generation_requested"):
+            browser.generate_prompt_requested.connect(main_window.on_instant_generation_requested)
+        if main_window and hasattr(main_window, "on_generate_with_image_requested"):
+            browser.generate_with_image_requested.connect(main_window.on_generate_with_image_requested)
+
+        window.setCentralWidget(browser)
+        window.destroyed.connect(self._clear_danbooru_browser_window)
+        self._danbooru_browser_window = window
+        self._danbooru_browser_widget = browser
+        return window, browser
+
     def _do_open_danbooru_browser(self, url: str):
         try:
             target_url = self._normalize_danbooru_browser_url(url)
-            mw = getattr(self.app_context, "main_window", None)
-            if not mw:
-                print("🌐 Remote: main window unavailable for Danbooru browser")
-                return
+            window = self._danbooru_browser_window
+            browser = self._danbooru_browser_widget
+            if window is None or browser is None:
+                window, browser = self._create_danbooru_browser_window()
 
-            if hasattr(mw, "set_web_session_window_visible"):
-                mw.set_web_session_window_visible(True)
-            else:
-                mw.show()
-                mw.raise_()
-                mw.activateWindow()
-
-            right_view = getattr(mw, "image_window", None)
-            tab_controller = getattr(right_view, "tab_controller", None)
-            if not tab_controller:
-                print("🌐 Remote: tab controller unavailable for Danbooru browser")
-                return
-
-            tab_id = "BrowserTabModule"
-            module = None
-            if hasattr(tab_controller, "ensure_tab_loaded"):
-                module = tab_controller.ensure_tab_loaded(tab_id)
-            if module is None and hasattr(tab_controller, "get_tab_instance"):
-                module = tab_controller.get_tab_instance(tab_id)
-            if module is None and hasattr(tab_controller, "add_tab_by_name"):
-                tab_controller.add_tab_by_name(tab_id)
-                module = tab_controller.get_tab_instance(tab_id) if hasattr(tab_controller, "get_tab_instance") else None
-
-            if hasattr(tab_controller, "switch_to_tab"):
-                tab_controller.switch_to_tab(tab_id)
-
-            browser_widget = getattr(module, "browser_widget", None) if module else None
-            if browser_widget and hasattr(browser_widget, "load_url"):
-                QTimer.singleShot(180, lambda widget=browser_widget, target=target_url: widget.load_url(target))
-            print(f"🌐 Remote: opened PyQt6 Danbooru browser — {target_url}")
+            window.show()
+            if window.isMinimized():
+                window.showNormal()
+            window.raise_()
+            window.activateWindow()
+            QTimer.singleShot(120, lambda widget=browser, target=target_url: widget.load_url(target))
+            print(f"🌐 Remote: opened detached PyQt6 Danbooru browser — {target_url}")
         except Exception as e:
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"Danbooru Qt window failed: {e}",
+                "level": "error",
+            })
             print(f"🌐 Remote: failed to open PyQt6 Danbooru browser — {e}")
 
     def _load_style_thumb_meta(self) -> dict:

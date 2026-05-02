@@ -81,6 +81,7 @@ let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
 let danbooruTabControl = null;
 let thumbTabControl = null;
+let studioTabControl = null;
 let customSelectsControl = null;
 let promptEngineeringPopupRenderers = null;
 let promptEngineeringPanelControl = null;
@@ -145,6 +146,31 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
+  });
+const studioTabReady = import('./js/features/studioTab.mjs')
+  .then(({createStudioTabController}) => {
+    studioTabControl = createStudioTabController({
+      document,
+      localStorage,
+      WebSocket,
+      getWs: () => ws,
+      getGenerating: () => generating,
+      promptEdit,
+      negEdit,
+      getResolutionOptions: () => Array.from(paramEls.resolution?.options || [])
+        .map(option => option.value || option.textContent || '')
+        .filter(Boolean),
+      getCurrentResolution: () => paramEls.resolution?.value || qResolution?.value || '',
+      setParam,
+      setPromptFields: applyPromptFields,
+      generate: () => send('generate'),
+      showToast,
+      escHtml,
+    });
+    studioTabControl.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize Studio tab module', error);
   });
 const customSelectsReady = import('./js/features/customSelects.mjs')
   .then(({createCustomSelectController}) => {
@@ -787,6 +813,7 @@ function handleWsBlob(data) {
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = url;
   latestResultBlob = data instanceof Blob ? data : null;
+  if (studioTabControl) studioTabControl.handleResultBlob(data);
   preview.src = url;
   preview.dataset.source = 'current';
   preview.dataset.path = '';
@@ -1215,6 +1242,7 @@ function updateParams(m) {
     $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
     if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
   }
+  if (studioTabControl) studioTabControl.onParamsChanged();
   syncingParams = false;
 }
 
@@ -1338,6 +1366,30 @@ function applyPromptText(prompt) {
   updatePromptHighlight();
   applyPromptHighlightState();
   updatePromptTokenEstimate();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'set_prompt',
+      prompt: promptEdit.value,
+      negative_prompt: negEdit.value,
+    }));
+  }
+}
+
+function applyPromptFields(prompt, negative) {
+  if (promptSendTimer) {
+    clearTimeout(promptSendTimer);
+    promptSendTimer = null;
+  }
+  syncingPrompt = true;
+  promptEdit.value = String(prompt || '');
+  negEdit.value = String(negative || '');
+  syncingPrompt = false;
+  _localPromptDirty = false;
+  deferredPromptSync = null;
+  updatePromptHighlight();
+  applyPromptHighlightState();
+  updatePromptTokenEstimate();
+  updateNegativeTokenEstimate();
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
@@ -2036,6 +2088,7 @@ function send(cmd) {
 
 function setGen(v) {
   generating = v;
+  if (studioTabControl) studioTabControl.handleGenerationStatus(v);
   btnGen.disabled = v;
   if (v) {
     genStartTime = Date.now();
@@ -3763,6 +3816,7 @@ Promise.all([
   rightTabsReady,
   danbooruTabReady,
   thumbTabReady,
+  studioTabReady,
   customSelectsReady,
   resultInfoResizerReady,
   resultHistoryReady,

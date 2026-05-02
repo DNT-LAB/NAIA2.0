@@ -824,6 +824,8 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  --text-muted: #dedcff;
+  --text-dim: #c1bbf4;
   background: var(--bg-deep);
 }
 .studio-toolbar {
@@ -948,7 +950,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .studio-global-grid {
   display: none;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.55fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 12px 14px;
 }
@@ -995,7 +997,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .studio-run-settings {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   align-content: start;
 }
@@ -1012,7 +1014,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   font-weight: 800;
   letter-spacing: 0.8px;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: #d9d4ff;
 }
 .studio-field textarea,
 .studio-field input,
@@ -1024,7 +1026,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   outline: none;
 }
 .studio-field textarea {
@@ -1037,8 +1039,12 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .studio-field-tall textarea { min-height: 140px; }
 .studio-field input,
 .studio-field select {
-  height: 32px;
+  height: 36px;
   padding: 0 9px;
+}
+.studio-field textarea::placeholder,
+.studio-field input::placeholder {
+  color: rgba(222,220,255,0.72);
 }
 .studio-field textarea:focus,
 .studio-field input:focus,
@@ -1109,7 +1115,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 999px;
   background: rgba(255,255,255,0.035);
-  color: var(--text-muted);
+  color: #dfdcff;
   font-family: var(--font-mono);
   font-size: 10px;
 }
@@ -1119,7 +1125,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-dim);
+  color: #cfc9ff;
   font-family: var(--font-mono);
   font-size: 10px;
   text-align: right;
@@ -1224,7 +1230,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted);
+  color: #ecebff;
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.25;
@@ -1235,7 +1241,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   margin-right: 5px;
 }
 .studio-frame-prompt-list li.muted {
-  color: var(--text-dim);
+  color: #c9c3f2;
 }
 .studio-frame-empty {
   display: grid;
@@ -1243,17 +1249,25 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   width: 100%;
   min-height: 100%;
   padding: 12px;
-  color: var(--text-dim);
+  color: #cbc6f7;
   font-family: var(--font-mono);
   font-size: 11px;
 }
 .studio-editor {
   gap: 10px;
-  max-height: 44vh;
-  padding: 12px 14px;
-  border-top: 1px solid var(--border-dim);
+  position: fixed;
+  left: 12px;
+  top: 98px;
+  bottom: 132px;
+  z-index: 90;
+  width: min(456px, calc(100vw - 24px));
+  max-height: none;
+  padding: 14px;
+  border: 1px solid rgba(157,139,255,0.32);
+  border-radius: 12px;
   overflow: auto;
-  background: rgba(14,14,22,0.88);
+  background: rgba(13,13,22,0.97);
+  box-shadow: 0 22px 60px rgba(0,0,0,0.46), 0 0 0 1px rgba(255,255,255,0.035);
 }
 .studio-editor-head {
   display: flex;
@@ -1274,7 +1288,12 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   gap: 8px;
 }
 .studio-editor .studio-field-tall textarea {
-  min-height: 96px;
+  min-height: 160px;
+}
+.studio-editor .studio-field select,
+.studio-editor .studio-field input {
+  height: 38px;
+  font-size: 12px;
 }
 .studio-composed {
   display: grid;
@@ -1293,7 +1312,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   border: 1px solid var(--border-dim);
   border-radius: 7px;
   background: var(--bg-primary);
-  color: var(--text-muted);
+  color: #dfdcff;
   padding: 8px 9px;
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -1301,15 +1320,15 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .studio-fixed-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 12px 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px 18px;
   border-top: 1px solid var(--border-dim);
   background: rgba(20,20,32,0.94);
 }
 .studio-fixed-panel textarea {
-  min-height: 68px;
-  max-height: 18vh;
+  min-height: 132px;
+  max-height: 24vh;
 }
 @media (max-width: 1180px) {
   .studio-global-grid {
@@ -1317,6 +1336,9 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   }
   .studio-frame-grid {
     grid-template-columns: repeat(2, minmax(170px, 1fr));
+  }
+  .studio-fixed-panel {
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 900px) {
@@ -1343,7 +1365,15 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
     max-height: 44vh;
   }
   .studio-editor {
-    max-height: 56vh;
+    left: 10px;
+    right: 10px;
+    top: auto;
+    bottom: 74px;
+    width: auto;
+    max-height: 70vh;
+  }
+  .studio-run-settings {
+    grid-template-columns: 1fr;
   }
 }
 .thumb-tab,

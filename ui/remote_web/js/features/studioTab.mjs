@@ -20,6 +20,7 @@ export function createStudioTabController({
   const STORAGE_KEY = 'naia.studio.v1';
   const DEFAULT_FRAME_COUNT = 9;
   const GENERATION_IDLE_GRACE_MS = 3500;
+  const SEED_MODES = new Set(['random', 'reuse_previous', 'increment_previous']);
   let state = createDefaultState();
   let selectedIndex = 0;
   let queue = [];
@@ -66,6 +67,7 @@ export function createStudioTabController({
       globalNegative: '',
       globalResolution: '',
       repeat: 1,
+      seedMode: 'random',
       fixSeed: false,
       frames: Array.from({length: DEFAULT_FRAME_COUNT}, (_, index) => createFrame(index)),
     };
@@ -79,6 +81,7 @@ export function createStudioTabController({
     next.globalNegative = safeText(raw.globalNegative);
     next.globalResolution = safeText(raw.globalResolution);
     next.repeat = Math.max(1, Math.min(99, Math.round(Number(raw.repeat) || 1)));
+    next.seedMode = SEED_MODES.has(raw.seedMode) ? raw.seedMode : (raw.fixSeed ? 'reuse_previous' : 'random');
     next.fixSeed = Boolean(raw.fixSeed);
     if (Array.isArray(raw.frames) && raw.frames.length) {
       next.frames = raw.frames.map((frame, index) => ({
@@ -117,6 +120,7 @@ export function createStudioTabController({
         globalNegative: state.globalNegative,
         globalResolution: state.globalResolution,
         repeat: state.repeat,
+        seedMode: state.seedMode,
         fixSeed: state.fixSeed,
         frames: state.frames.map(frame => ({
           id: frame.id,
@@ -149,6 +153,22 @@ export function createStudioTabController({
 
   function composeNegative(frame) {
     return nonEmpty([state.globalNegative, frame?.negative]).join(',\n');
+  }
+
+  function seedModeLabel(value = state.seedMode) {
+    if (value === 'reuse_previous') return '이전 프레임 시드 재사용';
+    if (value === 'increment_previous') return '이전 프레임 +1';
+    return '랜덤';
+  }
+
+  function renderSeedModeOptions(value = state.seedMode) {
+    return [
+      ['random', '랜덤'],
+      ['reuse_previous', '이전 프레임 시드 재사용'],
+      ['increment_previous', '이전 프레임 +1'],
+    ].map(([mode, label]) =>
+      `<option value="${mode}"${mode === value ? ' selected' : ''}>${escHtml(label)}</option>`
+    ).join('');
   }
 
   function statusText(frame) {
@@ -227,17 +247,12 @@ export function createStudioTabController({
         <button type="button" class="studio-panel-toggle" data-studio-action="toggle-global">
           <span>공통 설정</span>
           <strong>${escHtml([
-            state.globalNegative ? 'Negative' : '',
             state.globalResolution || getCurrentResolution() || '',
             `${Math.max(1, state.repeat)}x`,
-            state.fixSeed ? 'Seed 고정' : '',
+            seedModeLabel(),
           ].filter(Boolean).join(' · ') || '현재 메인 설정 사용')}</strong>
         </button>
         <div class="studio-global-grid">
-          <label class="studio-field">
-            <span>Global Negative</span>
-            <textarea data-studio-global="globalNegative" spellcheck="false">${escHtml(state.globalNegative)}</textarea>
-          </label>
           <div class="studio-run-settings">
             <label class="studio-field">
               <span>Global Resolution</span>
@@ -247,9 +262,9 @@ export function createStudioTabController({
               <span>Repeat</span>
               <input type="number" min="1" max="99" value="${escHtml(String(state.repeat))}" data-studio-global="repeat">
             </label>
-            <label class="studio-toggle">
-              <input type="checkbox" data-studio-global="fixSeed"${state.fixSeed ? ' checked' : ''}>
-              <span>Seed 고정</span>
+            <label class="studio-field">
+              <span>Seed</span>
+              <select data-studio-global="seedMode">${renderSeedModeOptions()}</select>
             </label>
           </div>
         </div>
@@ -266,6 +281,10 @@ export function createStudioTabController({
         <label class="studio-field">
           <span>후행 고정 프레임</span>
           <textarea data-studio-global="postfix" spellcheck="false" placeholder="모든 프레임 뒤에 붙일 고정 프롬프트">${escHtml(state.postfix)}</textarea>
+        </label>
+        <label class="studio-field">
+          <span>공통 네거티브</span>
+          <textarea data-studio-global="globalNegative" spellcheck="false" placeholder="모든 프레임에 적용할 네거티브 프롬프트">${escHtml(state.globalNegative)}</textarea>
         </label>
       </section>`;
   }
@@ -312,8 +331,8 @@ export function createStudioTabController({
           <textarea data-studio-frame-field="prompt" spellcheck="false">${escHtml(frame.prompt)}</textarea>
         </label>
         <label class="studio-field">
-          <span>Frame Negative</span>
-          <textarea data-studio-frame-field="negative" spellcheck="false">${escHtml(frame.negative)}</textarea>
+          <span>Additional Negative</span>
+          <textarea data-studio-frame-field="negative" spellcheck="false" placeholder="공통 네거티브 뒤에 추가할 프레임 전용 네거티브">${escHtml(frame.negative)}</textarea>
         </label>
         <div class="studio-editor-grid">
           <label class="studio-field">
@@ -322,18 +341,8 @@ export function createStudioTabController({
           </label>
           <label class="studio-field">
             <span>Seed</span>
-            <input data-studio-frame-field="seed" value="${escHtml(frame.seed)}" placeholder="auto">
+            <select data-studio-global="seedMode">${renderSeedModeOptions()}</select>
           </label>
-        </div>
-        <div class="studio-composed">
-          <div>
-            <span>Composed Prompt</span>
-            <pre>${escHtml(composePrompt(frame) || 'empty')}</pre>
-          </div>
-          <div>
-            <span>Composed Negative</span>
-            <pre>${escHtml(composeNegative(frame) || 'empty')}</pre>
-          </div>
         </div>
         <div class="studio-editor-actions">
           <button type="button" data-studio-action="sync-current">현재 프롬프트 가져오기</button>
@@ -413,6 +422,8 @@ export function createStudioTabController({
   function updateGlobal(field, target, options = {}) {
     if (field === 'repeat') {
       state.repeat = Math.max(1, Math.min(99, Math.round(Number(target.value) || 1)));
+    } else if (field === 'seedMode') {
+      state.seedMode = SEED_MODES.has(target.value) ? target.value : 'random';
     } else if (field === 'fixSeed') {
       state.fixSeed = Boolean(target.checked);
     } else {
@@ -509,6 +520,32 @@ export function createStudioTabController({
     }
   }
 
+  function previousFrameSeed(index) {
+    for (let i = index - 1; i >= 0; i -= 1) {
+      const seed = safeText(state.frames[i]?.lastSeed).trim();
+      if (seed) return seed;
+    }
+    return '';
+  }
+
+  function incrementSeed(seed) {
+    const clean = safeText(seed).trim();
+    if (!clean) return randomSeed();
+    try {
+      return String(BigInt(clean) + 1n);
+    } catch {
+      const numeric = Number(clean);
+      return Number.isFinite(numeric) ? String(Math.max(0, Math.floor(numeric)) + 1) : randomSeed();
+    }
+  }
+
+  function resolveSeed(frameIndex) {
+    const previous = previousFrameSeed(frameIndex);
+    if (state.seedMode === 'reuse_previous') return previous || randomSeed();
+    if (state.seedMode === 'increment_previous') return previous ? incrementSeed(previous) : randomSeed();
+    return randomSeed();
+  }
+
   function applySelectedToMain() {
     const frame = selectedFrame();
     if (!frame) return false;
@@ -518,7 +555,7 @@ export function createStudioTabController({
       showToast('선택 프레임의 프롬프트가 비어 있습니다', 'error');
       return false;
     }
-    const seed = state.fixSeed ? (frame.seed || frame.lastSeed || randomSeed()) : (frame.seed || randomSeed());
+    const seed = resolveSeed(selectedIndex);
     frame.lastSeed = seed;
     applyFrameParams(frame, seed);
     setPromptFields(prompt, negative);
@@ -681,7 +718,7 @@ export function createStudioTabController({
 
     selectedIndex = frameIndex;
     editorOpen = false;
-    const seed = state.fixSeed ? (frame.seed || frame.lastSeed || randomSeed()) : (frame.seed || randomSeed());
+    const seed = resolveSeed(frameIndex);
     frame.lastSeed = seed;
     frame.status = 'generating';
     frame.lastUpdated = new Date().toISOString();

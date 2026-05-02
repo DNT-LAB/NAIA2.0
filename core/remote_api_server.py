@@ -1627,7 +1627,9 @@ class RemoteBridge(QObject):
 
         main_window = getattr(self.app_context, "main_window", None)
         window = QMainWindow(parent=None)
+        window.setObjectName("NaiaDanbooruWindow")
         window.setWindowTitle("NAIA - 단부루 웹 (Qt)")
+        window.setStyleSheet("QMainWindow#NaiaDanbooruWindow { background: #0a0a0f; }")
         window.setWindowFlags(
             Qt.WindowType.Window
             | Qt.WindowType.WindowMinimizeButtonHint

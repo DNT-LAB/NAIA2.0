@@ -1,15 +1,228 @@
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineSettings
-from PyQt6.QtCore import QUrl, QStandardPaths, pyqtSignal, QTimer
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QLabel, QTextEdit, QFrame
+from PyQt6.QtCore import QUrl, QStandardPaths, pyqtSignal, QTimer, Qt
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLineEdit,
+    QLabel,
+    QTextEdit,
+    QFrame,
+    QScrollArea,
+    QSplitter,
+)
 from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
-from ui.modern_menu import setModernStyle
 import os
 import sys
 import re
 import json
+
+
+DANBOORU_POST_PATTERN = r'danbooru\.donmai\.us/posts/(\d+)'
+DANBOORU_TAG_GROUPS = (
+    ('artist', 'ARTIST'),
+    ('copyright', 'COPYRIGHT'),
+    ('character', 'CHARACTER'),
+    ('general', 'GENERAL'),
+    ('meta', 'META'),
+)
+
+DANBOORU_BROWSER_QSS = """
+QWidget#NaiaDanbooruBrowser {
+    background: #0a0a0f;
+    color: #e8e8f0;
+    font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+QFrame#NaiaDanbooruBrowserPanel,
+QFrame#NaiaDanbooruToolbar,
+QFrame#NaiaDanbooruTagPanel {
+    background: #12121a;
+    border: 1px solid #2a2a3d;
+    border-radius: 8px;
+}
+
+QFrame#NaiaDanbooruToolbar {
+    border-radius: 7px;
+}
+
+QLineEdit#NaiaDanbooruAddress {
+    background: #1a1a26;
+    color: #e8e8f0;
+    border: 1px solid #2a2a3d;
+    border-radius: 7px;
+    padding: 7px 10px;
+    selection-background-color: #7c6aef;
+    selection-color: #ffffff;
+}
+
+QLineEdit#NaiaDanbooruAddress:focus {
+    border: 1px solid #7c6aef;
+}
+
+QPushButton[naiaRole="secondary"] {
+    background: #1a1a26;
+    color: #e8e8f0;
+    border: 1px solid #2a2a3d;
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QPushButton[naiaRole="secondary"]:hover {
+    background: #222233;
+    border-color: #3d3d5c;
+}
+
+QPushButton[naiaRole="primary"] {
+    background: #7c6aef;
+    color: #ffffff;
+    border: 1px solid #9d8bff;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+QPushButton[naiaRole="primary"]:hover {
+    background: #8f80f4;
+}
+
+QPushButton[naiaRole="primary"]:disabled,
+QPushButton[naiaRole="secondary"]:disabled {
+    background: #15151f;
+    color: #555568;
+    border-color: #242436;
+}
+
+QWebEngineView#NaiaDanbooruWebView {
+    background: #0a0a0f;
+    border: 1px solid #2a2a3d;
+    border-radius: 8px;
+}
+
+QLabel#NaiaDanbooruPanelTitle {
+    color: #ffffff;
+    font-size: 17px;
+    font-weight: 900;
+}
+
+QLabel#NaiaDanbooruStatus {
+    color: #8888a0;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#NaiaDanbooruStatus[naiaTone="success"] {
+    color: #48d27a;
+}
+
+QLabel#NaiaDanbooruStatus[naiaTone="warning"] {
+    color: #f0b35a;
+}
+
+QLabel#NaiaDanbooruStatus[naiaTone="error"] {
+    color: #ff7d8f;
+}
+
+QScrollArea#NaiaDanbooruTagScroll,
+QScrollArea#NaiaDanbooruTagScroll > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+QFrame[naiaRole="tag-group"] {
+    background: #1a1a26;
+    border: 1px solid #2a2a3d;
+    border-radius: 7px;
+}
+
+QLabel[naiaRole="tag-title"] {
+    color: #9d8bff;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0px;
+}
+
+QLabel[naiaRole="tag-body"] {
+    color: #e8e8f0;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+QTextEdit#NaiaDanbooruPromptPreview {
+    background: #1a1a26;
+    color: #e8e8f0;
+    border: 1px solid #2a2a3d;
+    border-radius: 7px;
+    padding: 8px;
+    font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif;
+    font-size: 12px;
+    selection-background-color: #7c6aef;
+    selection-color: #ffffff;
+}
+
+QTextEdit#NaiaDanbooruPromptPreview:focus {
+    border: 1px solid #7c6aef;
+}
+
+QSplitter::handle {
+    background: #171723;
+}
+"""
+
+DANBOORU_DARK_PAGE_JS = r"""
+(function() {
+    if (!location.hostname.includes('danbooru.donmai.us')) {
+        return;
+    }
+    let style = document.getElementById('naia-danbooru-dark-style');
+    if (!style) {
+        style = document.createElement('style');
+        style.id = 'naia-danbooru-dark-style';
+        document.head.appendChild(style);
+    }
+    style.textContent = `
+        html, body, #page, #content, #c-posts, #a-index, main {
+            background: #0a0a0f !important;
+            color: #e8e8f0 !important;
+        }
+        header, nav, menu, #top, #page-footer, #secondary-links, #nav {
+            background: #12121a !important;
+            color: #e8e8f0 !important;
+        }
+        a, a:visited {
+            color: #9d8bff !important;
+        }
+        a:hover {
+            color: #c1b8ff !important;
+        }
+        input, textarea, select, button {
+            background: #1a1a26 !important;
+            color: #e8e8f0 !important;
+            border-color: #2a2a3d !important;
+        }
+        section, article, aside, .card, .box, .notice, .post-preview {
+            background-color: transparent !important;
+            color: #e8e8f0 !important;
+        }
+        table, tr, td, th {
+            background: #12121a !important;
+            color: #e8e8f0 !important;
+            border-color: #2a2a3d !important;
+        }
+        .tag-type-0 a, .general-tag-list a { color: #e8e8f0 !important; }
+        .tag-type-1 a, .artist-tag-list a { color: #ff9fb2 !important; }
+        .tag-type-3 a, .copyright-tag-list a { color: #f0b35a !important; }
+        .tag-type-4 a, .character-tag-list a { color: #78d6ff !important; }
+        .tag-type-5 a, .meta-tag-list a { color: #48d27a !important; }
+    `;
+})();
+"""
 
 
 class SilentWebEnginePage(QWebEnginePage):
@@ -80,85 +293,163 @@ class BrowserTab(QWidget):
         
     def init_ui(self):
         """UI 초기화"""
+        self.setObjectName("NaiaDanbooruBrowser")
+        self.setStyleSheet(DANBOORU_BROWSER_QSS)
+        self._last_auto_extract_post_id = None
+        self._tag_title_labels = {}
+        self._tag_body_labels = {}
+
         main_layout = QVBoxLayout(self)
-        
-        # 주소 입력 바
-        address_layout = QHBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+
+        browser_panel = QFrame()
+        browser_panel.setObjectName("NaiaDanbooruBrowserPanel")
+        browser_layout = QVBoxLayout(browser_panel)
+        browser_layout.setContentsMargins(10, 10, 10, 10)
+        browser_layout.setSpacing(8)
+
+        toolbar = QFrame()
+        toolbar.setObjectName("NaiaDanbooruToolbar")
+        address_layout = QHBoxLayout(toolbar)
+        address_layout.setContentsMargins(8, 8, 8, 8)
+        address_layout.setSpacing(8)
+
+        self.back_button = self._create_toolbar_button("←")
+        self.forward_button = self._create_toolbar_button("→")
+        self.refresh_button = self._create_toolbar_button("⟳")
+
         self.address_bar = QLineEdit()
-        self.address_bar.setPlaceholderText("URL을 입력하세요...")
+        self.address_bar.setObjectName("NaiaDanbooruAddress")
+        self.address_bar.setPlaceholderText("URL, post ID, or tag query")
         self.address_bar.returnPressed.connect(self.navigate_to_url)
-        
-        self.go_button = QPushButton("이동")
+
+        self.go_button = self._create_toolbar_button("이동")
         self.go_button.clicked.connect(self.navigate_to_url)
-        
-        self.back_button = QPushButton("←")
-        self.forward_button = QPushButton("→")
-        self.refresh_button = QPushButton("⟳")
-        
+
         address_layout.addWidget(self.back_button)
         address_layout.addWidget(self.forward_button)
         address_layout.addWidget(self.refresh_button)
         address_layout.addWidget(self.address_bar)
         address_layout.addWidget(self.go_button)
-        main_layout.addLayout(address_layout)
-        
+        browser_layout.addWidget(toolbar)
+
         # ✅ 웹뷰 생성 시점 변경: 프로필이 이미 설정된 상태에서 생성
         self.browser = QWebEngineView()
+        self.browser.setObjectName("NaiaDanbooruWebView")
         self.browser.setPage(self.page)  # 이미 생성된 페이지 설정
-        main_layout.addWidget(self.browser, 1)
+        browser_layout.addWidget(self.browser, 1)
+        splitter.addWidget(browser_panel)
 
-        # --- 하단 패널 ---
-        bottom_panel = QFrame()
-        bottom_panel_layout = QVBoxLayout(bottom_panel)
-        bottom_panel_layout.setContentsMargins(0, 8, 0, 0)
+        tag_panel = QFrame()
+        tag_panel.setObjectName("NaiaDanbooruTagPanel")
+        tag_layout = QVBoxLayout(tag_panel)
+        tag_layout.setContentsMargins(12, 12, 12, 12)
+        tag_layout.setSpacing(10)
 
-        # 태그 추출 결과 표시 영역 (기본 숨김)
-        self.tags_display = QTextEdit()
-        self.tags_display.setFixedHeight(150)
-        #self.tags_display.setReadOnly(True)
-        self.tags_display.setStyleSheet(f"{DARK_STYLES['compact_textedit']} font-size: {get_scaled_font_size(16)}px;")
-        self.tags_display.setPlaceholderText("Danbooru 페이지에서 '📝 태그 추출' 버튼을 클릭하세요...")
-        self.tags_display.setVisible(False)
-        self.tags_display.setProperty("autocomplete_ignore", True)
-        setModernStyle(self.tags_display)  # Apply modern context menu style
-        bottom_panel_layout.addWidget(self.tags_display)
-
-        # 하단 버튼 레이아웃 (항상 보임)
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
-
-        self.extract_tags_button = QPushButton("📝 태그 추출")
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title = QLabel("Extracted Tags")
+        title.setObjectName("NaiaDanbooruPanelTitle")
+        self.extract_tags_button = self._create_toolbar_button("태그 다시 읽기")
+        self.extract_tags_button.setEnabled(False)
         self.extract_tags_button.clicked.connect(self.extract_danbooru_tags)
-        
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(self.extract_tags_button)
+        tag_layout.addLayout(title_row)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
         self.generate_prompt_button = QPushButton("프롬프트 생성")
-        self.generate_prompt_button.setStyleSheet(f"{DARK_STYLES['primary_button']} background-color: {DARK_COLORS['accent_blue']};")
+        self.generate_prompt_button.setProperty("naiaRole", "primary")
         self.generate_prompt_button.clicked.connect(self._on_generate_prompt_clicked)
-        self.generate_prompt_button.setVisible(False)
+        self.generate_prompt_button.setEnabled(False)
 
         self.generate_with_image_button = QPushButton("프롬프트+이미지 생성")
-        self.generate_with_image_button.setStyleSheet(f"{DARK_STYLES['primary_button']} background-color: {DARK_COLORS['warning']};")
+        self.generate_with_image_button.setProperty("naiaRole", "primary")
         self.generate_with_image_button.clicked.connect(self._on_generate_with_image_clicked)
-        self.generate_with_image_button.setVisible(False)
-        
-        self.close_button = QPushButton("닫기")
-        self.close_button.setStyleSheet(DARK_STYLES['secondary_button'])
-        self.close_button.clicked.connect(self._hide_generation_widgets)
+        self.generate_with_image_button.setEnabled(False)
+        action_row.addWidget(self.generate_prompt_button)
+        action_row.addWidget(self.generate_with_image_button)
+        tag_layout.addLayout(action_row)
 
-        button_layout.addWidget(self.extract_tags_button)
-        button_layout.addStretch(1)
-        button_layout.addWidget(self.generate_prompt_button)
-        button_layout.addWidget(self.generate_with_image_button)
-        button_layout.addWidget(self.close_button)
+        self.status_label = QLabel()
+        self.status_label.setObjectName("NaiaDanbooruStatus")
+        self.status_label.setWordWrap(True)
+        tag_layout.addWidget(self.status_label)
 
-        bottom_panel_layout.addLayout(button_layout)
-        main_layout.addWidget(bottom_panel)
+        self.tag_scroll = QScrollArea()
+        self.tag_scroll.setObjectName("NaiaDanbooruTagScroll")
+        self.tag_scroll.setWidgetResizable(True)
+        self.tag_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        tag_content = QWidget()
+        tag_content_layout = QVBoxLayout(tag_content)
+        tag_content_layout.setContentsMargins(0, 0, 0, 0)
+        tag_content_layout.setSpacing(8)
+
+        for key, label in DANBOORU_TAG_GROUPS:
+            group = self._create_tag_group(key, label)
+            tag_content_layout.addWidget(group)
+
+        tag_content_layout.addStretch(1)
+        self.tag_scroll.setWidget(tag_content)
+        tag_layout.addWidget(self.tag_scroll, 1)
+
+        preview_label = QLabel("PROMPT PREVIEW")
+        preview_label.setProperty("naiaRole", "tag-title")
+        tag_layout.addWidget(preview_label)
+
+        self.prompt_preview = QTextEdit()
+        self.prompt_preview.setObjectName("NaiaDanbooruPromptPreview")
+        self.prompt_preview.setReadOnly(True)
+        self.prompt_preview.setMinimumHeight(96)
+        self.prompt_preview.setMaximumHeight(150)
+        self.prompt_preview.setProperty("autocomplete_ignore", True)
+        tag_layout.addWidget(self.prompt_preview)
+
+        splitter.addWidget(tag_panel)
+        splitter.setSizes([880, 360])
+        main_layout.addWidget(splitter, 1)
+
+        self._clear_tag_panel()
 
         self.back_button.clicked.connect(self.browser.back)
         self.forward_button.clicked.connect(self.browser.forward)
         self.refresh_button.clicked.connect(self.browser.reload)
         self.browser.urlChanged.connect(self.update_address_bar)
+        self.browser.loadFinished.connect(self._on_load_finished)
         
         self.update_address_bar(self.browser.url())
+
+    def _create_toolbar_button(self, text):
+        button = QPushButton(text)
+        button.setProperty("naiaRole", "secondary")
+        button.setMinimumHeight(34)
+        return button
+
+    def _create_tag_group(self, key, label):
+        group = QFrame()
+        group.setProperty("naiaRole", "tag-group")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(5)
+
+        title = QLabel(f"{label} · 0")
+        title.setProperty("naiaRole", "tag-title")
+        body = QLabel("—")
+        body.setProperty("naiaRole", "tag-body")
+        body.setWordWrap(True)
+        body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        layout.addWidget(title)
+        layout.addWidget(body)
+        self._tag_title_labels[key] = title
+        self._tag_body_labels[key] = body
+        return group
         
     def setup_selective_storage(self):
         """Danbooru 로그인 정보만 저장하는 선택적 스토리지 설정"""
@@ -202,10 +493,13 @@ class BrowserTab(QWidget):
             
         # URL 형식 검증 및 보정
         if not url.startswith(('http://', 'https://')):
-            if '.' in url and ' ' not in url:
+            if url.isdigit():
+                url = f'https://danbooru.donmai.us/posts/{url}'
+            elif '.' in url and ' ' not in url:
                 url = 'https://' + url
             else:
-                url = f'https://www.google.com/search?q={url}'
+                query = url.replace(' ', '+')
+                url = f'https://danbooru.donmai.us/posts?tags={query}'
         
         self.load_url(url)
     
@@ -213,29 +507,41 @@ class BrowserTab(QWidget):
         self.address_bar.setText(qurl.toString())
         
         url_str = qurl.toString()
-        pattern = r'danbooru\.donmai\.us/posts/(\d+)'
-        is_danbooru_post = bool(re.search(pattern, url_str))
+        post_id = self._post_id_from_url(url_str)
+        is_danbooru_post = post_id is not None
         
         self.extract_tags_button.setEnabled(is_danbooru_post)
-        
-        # ▼▼▼▼▼ [수정] 버튼 스타일을 상태에 따라 명확하게 분리 ▼▼▼▼▼
+
         if is_danbooru_post:
-            # 활성화 상태 (녹색)
-            self.extract_tags_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {DARK_COLORS['success']};
-                    border: 1px solid {DARK_COLORS['border']};
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    font-weight: 500;
-                    color: {DARK_COLORS['text_primary']};
-                    font-size: {get_scaled_font_size(20)}px;
-                }}
-                QPushButton:hover {{ background-color: #5CBF60; }}
-            """)
+            self._set_status(f"#{post_id} 포스트 로드 중...", "warning")
         else:
             self._hide_generation_widgets()
-            self.extract_tags_button.setStyleSheet(DARK_STYLES['secondary_button'])
+            self._clear_tag_panel()
+
+    def _post_id_from_url(self, url):
+        match = re.search(DANBOORU_POST_PATTERN, url)
+        return int(match.group(1)) if match else None
+
+    def _on_load_finished(self, ok):
+        """페이지 로드 후 Danbooru 포스트면 자동으로 태그를 추출합니다."""
+        self._apply_danbooru_dark_theme()
+        if not ok:
+            self._set_status("페이지 로드에 실패했습니다.", "error")
+            return
+
+        post_id = self._post_id_from_url(self.browser.url().toString())
+        if post_id is None:
+            return
+
+        if self._last_auto_extract_post_id == post_id and self.extracted_tags_data:
+            return
+
+        self._last_auto_extract_post_id = post_id
+        QTimer.singleShot(150, self.extract_danbooru_tags)
+
+    def _apply_danbooru_dark_theme(self):
+        """Danbooru 페이지 본문도 창 톤과 최대한 맞춥니다."""
+        self.page.runJavaScript(DANBOORU_DARK_PAGE_JS)
 
     def load_url(self, url):
         """URL 로드"""
@@ -252,10 +558,14 @@ class BrowserTab(QWidget):
         current_url = self.browser.url().toString()
         
         # URL에서 ID 추출
-        if 'danbooru.donmai.us/posts/' not in current_url:
-            self.tags_display.setText("❌ Danbooru 포스트 페이지가 아닙니다.")
-            self.tags_display.show()
+        post_id = self._post_id_from_url(current_url)
+        if post_id is None:
+            self._set_status("Danbooru 포스트 페이지가 아닙니다.", "error")
+            self._clear_tag_panel()
             return
+
+        self._set_status(f"#{post_id} 태그를 읽는 중...", "warning")
+        self.extract_tags_button.setEnabled(False)
         
         # JavaScript로 페이지 HTML과 URL 가져오기
         js_code = """
@@ -273,36 +583,30 @@ class BrowserTab(QWidget):
     def process_page_data(self, page_data):
         """JavaScript에서 받은 페이지 데이터 처리"""
         if not page_data:
-            self.tags_display.setText("❌ 페이지 데이터를 가져올 수 없습니다.")
+            self._set_status("페이지 데이터를 가져올 수 없습니다.", "error")
+            self.extract_tags_button.setEnabled(True)
             return
         
         try:
             # URL에서 ID 추출
             url = page_data['url']
-            pattern = r'danbooru\.donmai\.us/posts/(\d+)'
-            match = re.search(pattern, url)
-            
-            if match:
-                post_id = int(match.group(1))
-            else:
-                post_id = None
+            post_id = self._post_id_from_url(url)
                 
             if not post_id:
-                self.tags_display.setText("❌ 포스트 ID를 찾을 수 없습니다.")
+                self._set_status("포스트 ID를 찾을 수 없습니다.", "error")
+                self.extract_tags_button.setEnabled(True)
                 return
             
             # HTML에서 태그 추출
             html = page_data['html']
             tags_data = self.parse_danbooru_tags(html, post_id)
-            
-            # ✅ 핵심 수정: 추출된 태그 데이터를 인스턴스 변수에 저장
-            self.extracted_tags_data = tags_data
-            
+
             # 결과 표시
             self.display_extracted_tags(tags_data)
             
         except Exception as e:
-            self.tags_display.setText(f"❌ 태그 추출 중 오류 발생: {str(e)}")
+            self._set_status(f"태그 추출 중 오류 발생: {str(e)}", "error")
+            self.extract_tags_button.setEnabled(True)
     
     def parse_danbooru_tags(self, html, post_id):
         """HTML에서 Danbooru 태그 정보 파싱"""
@@ -350,22 +654,48 @@ class BrowserTab(QWidget):
     
     def display_extracted_tags(self, tags_data):
         """추출된 태그를 UI에 표시"""
-        result_text = ""
-        cs = tags_data.get('character', [])
-        gs = tags_data.get('general', [])
-        cs = [tag.replace("_", " ") for tag in cs]
-        gs = [tag.replace("_", " ") for tag in gs]
-        tags_to_move = [tag for tag in gs if tag in self.characteristic]
+        tags_data = self._normalize_extracted_tags(tags_data)
+        self.extracted_tags_data = tags_data
+
+        for key, label in DANBOORU_TAG_GROUPS:
+            tags = tags_data.get(key, [])
+            self._tag_title_labels[key].setText(f"{label} · {len(tags)}")
+            self._tag_body_labels[key].setText(', '.join(tags) if tags else '—')
+
+        fallback_prompt = self._build_prompt_preview(tags_data)
+        self.prompt_preview.setPlainText(fallback_prompt if fallback_prompt else "No prompt preview.")
+        self._set_status(f"#{tags_data.get('id')} 태그를 자동으로 읽었습니다.", "success")
+        self.extract_tags_button.setEnabled(True)
+        self._show_generation_widgets()
+        print("🎯 Danbooru 태그 추출 및 표시 완료")
+
+    def _normalize_extracted_tags(self, tags_data):
+        normalized = {'id': tags_data.get('id')}
+
+        for key, _label in DANBOORU_TAG_GROUPS:
+            seen = set()
+            normalized[key] = []
+            for tag in tags_data.get(key, []):
+                cleaned = tag.replace("_", " ").strip()
+                if cleaned and cleaned not in seen:
+                    normalized[key].append(cleaned)
+                    seen.add(cleaned)
+
+        cs = normalized.get('character', [])
+        gs = normalized.get('general', [])
+        characteristic_set = set(self.characteristic)
+        tags_to_move = [tag for tag in gs if tag in characteristic_set and tag not in cs]
         for tag in tags_to_move:
             cs.append(tag)
             gs.remove(tag)
-        cs_str = ', '.join(cs)
-        gs_str = ', '.join(gs)
-        result_text = f"CHARACTER : {cs_str}\n\nGENERAL : {gs_str}"
-        
-        self.tags_display.setText(result_text)
-        self._show_generation_widgets()
-        print("🎯 Danbooru 태그 추출 및 표시 완료")
+
+        return normalized
+
+    def _build_prompt_preview(self, tags_data):
+        prompt_tags = []
+        for key in ('character', 'general'):
+            prompt_tags.extend(tags_data.get(key, []))
+        return ', '.join(prompt_tags)
 
     def _load_list_from_file(self):
         """지정된 파일에서 한 줄에 하나씩 있는 태그를 읽어 리스트로 반환합니다."""
@@ -385,16 +715,29 @@ class BrowserTab(QWidget):
             return []
 
     def _show_generation_widgets(self):
-        """태그 표시창과 생성 버튼들을 보여줍니다."""
-        self.tags_display.setVisible(True)
-        self.generate_prompt_button.setVisible(True)
-        self.generate_with_image_button.setVisible(True)
+        """생성 버튼들을 활성화합니다."""
+        self.generate_prompt_button.setEnabled(True)
+        self.generate_with_image_button.setEnabled(True)
 
     def _hide_generation_widgets(self):
-        """태그 표시창과 생성 버튼들을 숨깁니다."""
-        self.tags_display.setVisible(False)
-        self.generate_prompt_button.setVisible(False)
-        self.generate_with_image_button.setVisible(False)
+        """생성 버튼들을 비활성화합니다."""
+        self.generate_prompt_button.setEnabled(False)
+        self.generate_with_image_button.setEnabled(False)
+
+    def _clear_tag_panel(self):
+        self.extracted_tags_data = {}
+        for key, label in DANBOORU_TAG_GROUPS:
+            self._tag_title_labels[key].setText(f"{label} · 0")
+            self._tag_body_labels[key].setText("—")
+        self.prompt_preview.setPlainText("No prompt preview.")
+        self._set_status("포스트를 선택하면 자동으로 태그를 읽습니다.", "warning")
+        self.extract_tags_button.setEnabled(False)
+
+    def _set_status(self, text, tone="warning"):
+        self.status_label.setText(text)
+        self.status_label.setProperty("naiaTone", tone)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
     def _on_generate_prompt_clicked(self):
         """프롬프트 생성 버튼 클릭 시 호출"""

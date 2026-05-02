@@ -414,9 +414,6 @@
     <button class="right-tab-btn active" data-right-tab="result" onclick="switchRightTab('result')" role="tab" aria-selected="true">
       <span class="right-tab-icon">🖼</span><span>Result</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="danbooru" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false">
-      <span class="right-tab-icon">📦</span><span>Danbooru</span>
-    </button>
     <button class="right-tab-btn" data-right-tab="pngInfo" onclick="switchRightTab('pngInfo')" role="tab" aria-selected="false">
       <span class="right-tab-icon">📝</span><span>Metadata</span>
     </button>
@@ -497,24 +494,6 @@
     </div>
   </div>
 
-  <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" hidden role="tabpanel">
-    <div class="danbooru-tab">
-      <header class="danbooru-toolbar">
-        <div>
-          <div class="metadata-kicker">Danbooru Browser</div>
-          <h2>단부루 웹 (Qt)</h2>
-        </div>
-        <div class="danbooru-search">
-          <input class="danbooru-input" id="danbooruQuery" type="text" placeholder="URL, post ID, or tag query" autocomplete="off" spellcheck="false">
-          <button class="metadata-refresh-btn" id="danbooruLoadBtn" type="button">Open</button>
-        </div>
-      </header>
-      <div class="danbooru-status" id="danbooruStatus">단부루 웹 (Qt) 창을 열 준비가 되었습니다.</div>
-      <div class="danbooru-native-panel">
-        <button class="metadata-action-btn primary danbooru-native-open" id="danbooruOpenBrowserBtn" type="button">단부루 웹 (Qt) 열기</button>
-      </div>
-    </div>
-  </div>
   <div class="right-tab-pane" id="rightTabPngInfo" data-right-pane="pngInfo" role="tabpanel">
     <div class="metadata-viewer">
       <header class="metadata-toolbar">

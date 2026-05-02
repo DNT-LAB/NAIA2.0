@@ -123,15 +123,15 @@ const rightTabsReady = import('./js/features/rightTabs.mjs')
     console.error('Failed to initialize right tabs module', error);
   });
 const danbooruTabReady = import('./js/features/danbooruTab.mjs')
-  .then(({createDanbooruTabController}) => {
-    danbooruTabControl = createDanbooruTabController({
+  .then(({createDanbooruBrowserController}) => {
+    danbooruTabControl = createDanbooruBrowserController({
       document,
       fetch: window.fetch.bind(window),
       showToast,
     });
   })
   .catch(error => {
-    console.error('Failed to initialize Danbooru tab module', error);
+    console.error('Failed to initialize Danbooru browser module', error);
   });
 const thumbTabReady = import('./js/features/thumbTab.mjs')
   .then(({createThumbTabController}) => {
@@ -1391,7 +1391,6 @@ function getDetachedModuleGeometry(moduleId) {
 function switchRightTab(tabName, options = {}) {
   const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
-  if (activeTab === 'danbooru' && danbooruTabControl?.onActivated) danbooruTabControl.onActivated();
   if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
 }
 
@@ -2460,6 +2459,21 @@ const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
 let pendingModuleEdit = null;
+
+function openDanbooruBrowserTool() {
+  if (danbooruTabControl?.openBrowser) {
+    danbooruTabControl.openBrowser();
+    return;
+  }
+  danbooruTabReady.then(() => {
+    if (danbooruTabControl?.openBrowser) {
+      danbooruTabControl.openBrowser();
+    } else {
+      showToast('Danbooru browser is not ready', 'error');
+    }
+  });
+}
+
 const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
@@ -2470,6 +2484,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
       isChunkOpen,
       openModule,
       openChunkPanel,
+      openDanbooruBrowser: openDanbooruBrowserTool,
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();

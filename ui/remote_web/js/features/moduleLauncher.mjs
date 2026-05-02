@@ -10,6 +10,12 @@ const MODULE_REGISTRY = {
     category: 'prompt_tools',
     action: 'module',
   },
+  danbooru_browser: {
+    label: '📦 Danbooru',
+    title: 'Danbooru 웹 (Qt)',
+    category: 'prompt_tools',
+    action: 'danbooru_browser',
+  },
   wildcard: {
     label: 'WC',
     title: 'Wildcard',
@@ -78,7 +84,7 @@ const CATEGORY_REGISTRY = [
     id: 'prompt_tools',
     label: '프롬프트 도구',
     title: '프롬프트 도구',
-    moduleIds: ['e621_event', 'wildcard', 'chunk', 'conditional_prompt'],
+    moduleIds: ['danbooru_browser', 'e621_event', 'wildcard', 'chunk', 'conditional_prompt'],
   },
   {
     id: 'character_tools',
@@ -103,6 +109,7 @@ export function createModuleLauncher({
   isChunkOpen,
   openModule,
   openChunkPanel,
+  openDanbooruBrowser,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -180,6 +187,8 @@ export function createModuleLauncher({
     closeMenus();
     if (config.action === 'chunk') {
       openChunkPanel(null, true);
+    } else if (config.action === 'danbooru_browser') {
+      openDanbooruBrowser?.();
     } else {
       openModule(moduleId);
     }
@@ -244,6 +253,7 @@ export function createModuleLauncher({
 
   function moduleIsActive(moduleId) {
     if (moduleId === 'chunk') return isChunkOpen();
+    if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
     return isModulePopupOpen() && getCurrentModuleId() === moduleId;
   }
 

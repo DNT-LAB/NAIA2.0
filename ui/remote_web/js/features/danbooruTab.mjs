@@ -1,4 +1,4 @@
-export function createDanbooruTabController({
+export function createDanbooruBrowserController({
   document,
   fetch: fetchFn = window.fetch.bind(window),
   showToast,
@@ -7,7 +7,6 @@ export function createDanbooruTabController({
   const openBtn = document.getElementById('danbooruLoadBtn');
   const openNativeBtn = document.getElementById('danbooruOpenBrowserBtn');
   const statusEl = document.getElementById('danbooruStatus');
-  let openedOnce = false;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -22,8 +21,8 @@ export function createDanbooruTabController({
     });
   }
 
-  async function openBrowser({automatic = false} = {}) {
-    const query = String(queryInput?.value || '').trim();
+  async function openBrowser({automatic = false, query: explicitQuery = null} = {}) {
+    const query = String(explicitQuery ?? queryInput?.value ?? '').trim();
     setBusy(true);
     setStatus('단부루 웹 (Qt) 창을 여는 중...', 'busy');
     try {
@@ -34,7 +33,6 @@ export function createDanbooruTabController({
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-      openedOnce = true;
       setStatus('단부루 웹 (Qt) 창을 열었습니다.', 'ok');
       if (!automatic && showToast) showToast('단부루 웹 (Qt) 창을 열었습니다', 'success');
       return true;
@@ -46,11 +44,6 @@ export function createDanbooruTabController({
     } finally {
       setBusy(false);
     }
-  }
-
-  function onActivated() {
-    if (openedOnce) return;
-    openBrowser({automatic: true});
   }
 
   function bind() {
@@ -66,6 +59,7 @@ export function createDanbooruTabController({
 
   return {
     openBrowser,
-    onActivated,
   };
 }
+
+export const createDanbooruTabController = createDanbooruBrowserController;

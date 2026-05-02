@@ -175,56 +175,6 @@ QSplitter::handle {
 }
 """
 
-DANBOORU_DARK_PAGE_JS = r"""
-(function() {
-    if (!location.hostname.includes('danbooru.donmai.us')) {
-        return;
-    }
-    let style = document.getElementById('naia-danbooru-dark-style');
-    if (!style) {
-        style = document.createElement('style');
-        style.id = 'naia-danbooru-dark-style';
-        document.head.appendChild(style);
-    }
-    style.textContent = `
-        html, body, #page, #content, #c-posts, #a-index, main {
-            background: #0a0a0f !important;
-            color: #e8e8f0 !important;
-        }
-        header, nav, menu, #top, #page-footer, #secondary-links, #nav {
-            background: #12121a !important;
-            color: #e8e8f0 !important;
-        }
-        a, a:visited {
-            color: #9d8bff !important;
-        }
-        a:hover {
-            color: #c1b8ff !important;
-        }
-        input, textarea, select, button {
-            background: #1a1a26 !important;
-            color: #e8e8f0 !important;
-            border-color: #2a2a3d !important;
-        }
-        section, article, aside, .card, .box, .notice, .post-preview {
-            background-color: transparent !important;
-            color: #e8e8f0 !important;
-        }
-        table, tr, td, th {
-            background: #12121a !important;
-            color: #e8e8f0 !important;
-            border-color: #2a2a3d !important;
-        }
-        .tag-type-0 a, .general-tag-list a { color: #e8e8f0 !important; }
-        .tag-type-1 a, .artist-tag-list a { color: #ff9fb2 !important; }
-        .tag-type-3 a, .copyright-tag-list a { color: #f0b35a !important; }
-        .tag-type-4 a, .character-tag-list a { color: #78d6ff !important; }
-        .tag-type-5 a, .meta-tag-list a { color: #48d27a !important; }
-    `;
-})();
-"""
-
-
 class SilentWebEnginePage(QWebEnginePage):
     """JavaScript 콘솔 메시지를 필터링하는 커스텀 페이지 클래스"""
 
@@ -524,7 +474,6 @@ class BrowserTab(QWidget):
 
     def _on_load_finished(self, ok):
         """페이지 로드 후 Danbooru 포스트면 자동으로 태그를 추출합니다."""
-        self._apply_danbooru_dark_theme()
         if not ok:
             self._set_status("페이지 로드에 실패했습니다.", "error")
             return
@@ -538,10 +487,6 @@ class BrowserTab(QWidget):
 
         self._last_auto_extract_post_id = post_id
         QTimer.singleShot(150, self.extract_danbooru_tags)
-
-    def _apply_danbooru_dark_theme(self):
-        """Danbooru 페이지 본문도 창 톤과 최대한 맞춥니다."""
-        self.page.runJavaScript(DANBOORU_DARK_PAGE_JS)
 
     def load_url(self, url):
         """URL 로드"""

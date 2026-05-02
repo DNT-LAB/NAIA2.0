@@ -3455,6 +3455,24 @@ body.resizing-result-info {
   border-color: rgba(157,139,255,0.42);
   color: var(--accent-glow);
 }
+.module-btn.module-detached-tool {
+  margin-top: 4px;
+  border-color: rgba(106,191,123,0.42);
+  background: rgba(46,125,50,0.18);
+  color: #88d696;
+}
+.module-btn.module-detached-tool::after {
+  content: "↗";
+  margin-left: auto;
+  color: rgba(136,214,150,0.88);
+  font-size: 11px;
+  font-weight: 800;
+}
+.module-btn.module-detached-tool:hover {
+  border-color: rgba(136,214,150,0.74);
+  background: rgba(46,125,50,0.28);
+  color: #b4f0bf;
+}
 .module-btn.auto-active { border-color: #e8a84c; color: #e8a84c; }
 .module-btn.auto-active.active { border-color: var(--accent-glow); color: #fff; }
 .module-btn.char-active { border-color: #6abf7b; color: #6abf7b; }

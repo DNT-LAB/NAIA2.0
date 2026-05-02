@@ -12,9 +12,10 @@ const MODULE_REGISTRY = {
   },
   danbooru_browser: {
     label: '📦 Danbooru',
-    title: 'Danbooru 웹 (Qt)',
+    title: 'Danbooru 웹 (Qt) 별도 창 열기',
     category: 'prompt_tools',
     action: 'danbooru_browser',
+    className: 'module-detached-tool',
   },
   wildcard: {
     label: 'WC',
@@ -84,7 +85,7 @@ const CATEGORY_REGISTRY = [
     id: 'prompt_tools',
     label: '프롬프트 도구',
     title: '프롬프트 도구',
-    moduleIds: ['danbooru_browser', 'e621_event', 'wildcard', 'chunk', 'conditional_prompt'],
+    moduleIds: ['e621_event', 'wildcard', 'chunk', 'conditional_prompt', 'danbooru_browser'],
   },
   {
     id: 'character_tools',
@@ -132,8 +133,9 @@ export function createModuleLauncher({
     const badge = config.badgeId
       ? `<span class="module-badge hidden" id="${config.badgeId}"></span>`
       : '';
+    const className = ['module-btn', extraClass, config.className || ''].filter(Boolean).join(' ');
     return `
-      <button type="button" class="module-btn ${extraClass}" data-module="${moduleId}" title="${config.title}">
+      <button type="button" class="${className}" data-module="${moduleId}" title="${config.title}">
         <span>${config.label}</span>${badge}
       </button>
     `;

@@ -229,7 +229,7 @@ export function createStudioTabController({
     const imageUrl = frameImages.get(frame.id);
     const status = statusText(frame);
     const preview = imageUrl
-      ? `<img src="${imageUrl}" alt="">`
+      ? `<img src="${imageUrl}" alt="${escHtml(frameId(index))}">`
       : renderPromptList(frame);
     return `
       <button type="button" class="studio-frame-card${selected ? ' selected' : ''}${open ? ' open' : ''}${frame.enabled ? '' : ' disabled'}" data-studio-frame="${index}" aria-expanded="${open ? 'true' : 'false'}">
@@ -341,11 +341,13 @@ export function createStudioTabController({
             <button type="button" data-studio-action="close-editor" aria-label="프레임 편집기 닫기">닫기</button>
           </div>
         </div>
-        ${renderEditorImage(frame)}
-        <label class="studio-field studio-field-tall">
-          <span>Frame Prompt</span>
-          <textarea data-studio-frame-field="prompt" spellcheck="false">${escHtml(frame.prompt)}</textarea>
-        </label>
+        <div class="studio-editor-primary">
+          ${renderEditorImage(frame)}
+          <label class="studio-field studio-field-tall studio-frame-prompt-field">
+            <span>Frame Prompt</span>
+            <textarea data-studio-frame-field="prompt" spellcheck="false">${escHtml(frame.prompt)}</textarea>
+          </label>
+        </div>
         <label class="studio-field">
           <span>Additional Negative</span>
           <textarea data-studio-frame-field="negative" spellcheck="false" placeholder="공통 네거티브 뒤에 추가할 프레임 전용 네거티브">${escHtml(frame.negative)}</textarea>

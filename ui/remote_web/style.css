@@ -1149,9 +1149,10 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .studio-frame-card {
   min-width: 0;
-  min-height: 156px;
+  height: clamp(168px, 18vh, 220px);
+  min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(106px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
   padding: 9px;
   border: 1px solid var(--border-dim);
@@ -1204,9 +1205,9 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 .studio-status-dot[data-status="failed"] { background: #ff8a80; }
 .studio-status-dot[data-status="disabled"] { background: rgba(255,255,255,0.12); }
 .studio-frame-preview {
-  min-height: 106px;
+  min-height: 0;
   display: grid;
-  align-items: start;
+  place-items: center;
   overflow: hidden;
   border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.06);
@@ -1214,14 +1215,20 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
     linear-gradient(135deg, rgba(124,106,239,0.12), rgba(255,255,255,0.02)),
     var(--bg-primary);
 }
+.studio-frame-preview:not(.has-image) {
+  align-items: start;
+}
 .studio-frame-preview.has-image {
-  align-items: stretch;
+  background: #050506;
   padding: 0;
 }
 .studio-frame-preview img {
-  width: 100%;
+  display: block;
+  width: auto;
+  max-width: 100%;
   height: 100%;
-  object-fit: cover;
+  max-height: 100%;
+  object-fit: contain;
 }
 .studio-frame-prompt-list {
   width: 100%;
@@ -1289,22 +1296,29 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.studio-editor-primary {
+  display: grid;
+  grid-template-columns: minmax(148px, 42%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
 .studio-editor-image {
   width: 100%;
-  min-height: 176px;
-  max-height: 32vh;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
   display: grid;
   place-items: center;
   overflow: hidden;
   border: 1px solid rgba(157,139,255,0.22);
   border-radius: 9px;
-  background:
-    linear-gradient(135deg, rgba(124,106,239,0.16), rgba(255,255,255,0.035)),
-    #151421;
+  background: #050506;
 }
 .studio-editor-image img {
-  width: 100%;
+  display: block;
+  width: auto;
+  max-width: 100%;
   height: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 .studio-editor-image.empty {
@@ -1330,6 +1344,14 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .studio-editor .studio-field-tall textarea {
   min-height: 160px;
+}
+.studio-editor-primary .studio-frame-prompt-field {
+  height: 100%;
+}
+.studio-editor-primary .studio-frame-prompt-field textarea {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 .studio-editor .studio-field select,
 .studio-editor .studio-field input {

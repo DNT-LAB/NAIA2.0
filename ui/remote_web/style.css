@@ -1265,7 +1265,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   position: fixed;
   left: 12px;
   top: 98px;
-  bottom: 132px;
+  bottom: 12px;
   z-index: var(--z-floating-module-aux);
   width: min(456px, calc(100vw - 24px));
   max-height: none;
@@ -1409,9 +1409,9 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
     left: 10px;
     right: 10px;
     top: auto;
-    bottom: 74px;
+    bottom: 10px;
     width: auto;
-    max-height: 70vh;
+    max-height: calc(100dvh - 20px);
   }
   .studio-run-settings {
     grid-template-columns: 1fr;

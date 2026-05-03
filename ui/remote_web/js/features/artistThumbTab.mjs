@@ -403,6 +403,30 @@ export function createArtistThumbController({
     await loadPage(currentPage, {anchor: 'top', random: true});
   }
 
+  function renderSelectedMeta(item) {
+    if (!selectedMeta || !item) return;
+    const weight = formatWeight(item.weight);
+    selectedMeta.textContent = [
+      weight ? `weight ${weight}` : '',
+      item.favorite ? 'favorite' : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  function applyFavoriteState(item, favorite) {
+    if (!item) return;
+    item.favorite = favorite;
+    if (selected && selected.artist === item.artist) {
+      selected.favorite = favorite;
+      renderSelectedMeta(selected);
+    }
+    if (favoriteBtn) favoriteBtn.textContent = favorite ? '관심 작가 해제' : '관심 작가 등록';
+    gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+      if (card.dataset.artist === item.artist) {
+        card.classList.toggle('favorite', favorite);
+      }
+    });
+  }
+
   function selectArtist(item) {
     selected = item;
     if (positiveEl) {
@@ -410,13 +434,7 @@ export function createArtistThumbController({
       positiveEl.value = positiveAutoValue;
     }
     if (selectedName) selectedName.textContent = item.artist;
-    if (selectedMeta) {
-      const weight = formatWeight(item.weight);
-      selectedMeta.textContent = [
-        weight ? `weight ${weight}` : '',
-        item.favorite ? 'favorite' : '',
-      ].filter(Boolean).join(' · ');
-    }
+    renderSelectedMeta(item);
     if (selectedImage) {
       selectedImage.src = item.image_url || '';
       selectedImage.classList.toggle('show', Boolean(item.image_url));
@@ -467,9 +485,8 @@ export function createArtistThumbController({
     const next = !item.favorite;
     try {
       state = await postJson('/api/artist-thumb/favorite', {artist: item.artist, favorite: next});
-      item.favorite = next;
       renderState();
-      await loadPage(currentPage);
+      applyFavoriteState(item, next);
       showToast?.(next ? '관심 작가로 등록했습니다.' : '관심 작가에서 해제했습니다.', 'success');
     } catch (error) {
       showToast?.(error.message || 'Favorite failed', 'error');

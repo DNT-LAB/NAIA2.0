@@ -2068,6 +2068,64 @@ class RemoteBridge(QObject):
     def _artist_thumb_options_path(self) -> Path:
         return Path("artist_thumb") / "generate_options.json"
 
+    def _parse_resolution_pair(self, value) -> tuple[int, int] | None:
+        match = re.search(r"(\d+)\s*x\s*(\d+)", str(value or ""))
+        if not match:
+            return None
+        try:
+            width = int(match.group(1))
+            height = int(match.group(2))
+        except (TypeError, ValueError):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+
+    def _resolution_allowed_for_current_mode(self, width: int, height: int) -> bool:
+        if width <= 0 or height <= 0:
+            return False
+        if str(self._current_api_mode() or "").upper() != "NAI":
+            return True
+        if width % 64 != 0 or height % 64 != 0:
+            return False
+        return max(width, height) <= 2048 and min(width, height) <= 1536
+
+    def _artist_thumb_resolution_options(self) -> list[tuple[int, int]]:
+        defaults = [
+            (1024, 1024), (960, 1088), (896, 1152), (832, 1216),
+            (1088, 960), (1152, 896), (1216, 832),
+        ]
+        mw = getattr(self.app_context, "main_window", None)
+        combo = getattr(mw, "resolution_combo", None)
+        options = []
+        try:
+            count = combo.count() if combo is not None else 0
+        except Exception:
+            count = 0
+        for index in range(count):
+            try:
+                pair = self._parse_resolution_pair(combo.itemText(index))
+            except Exception:
+                pair = None
+            if pair and self._resolution_allowed_for_current_mode(*pair):
+                options.append(pair)
+        if not options:
+            options = [pair for pair in defaults if self._resolution_allowed_for_current_mode(*pair)]
+        return options or [(832, 1216)]
+
+    def _artist_thumb_random_resolution(self) -> tuple[int, int, str]:
+        width, height = random.SystemRandom().choice(self._artist_thumb_resolution_options())
+        return width, height, "random"
+
+    def _coerce_artist_thumb_resolution(self, width, height) -> tuple[int, int]:
+        try:
+            pair = (int(width), int(height))
+        except (TypeError, ValueError):
+            pair = (832, 1216)
+        if self._resolution_allowed_for_current_mode(*pair):
+            return pair
+        return (832, 1216)
+
     def _normalize_artist_thumb_values(self, values) -> list[str]:
         seen = set()
         normalized = []
@@ -2080,6 +2138,12 @@ class RemoteBridge(QObject):
             seen.add(text)
             normalized.append(text)
         return normalized
+
+    def _merge_artist_thumb_values(self, primary, additions) -> list[str]:
+        return self._normalize_artist_thumb_values([
+            *self._normalize_artist_thumb_values(primary),
+            *self._normalize_artist_thumb_values(additions),
+        ])
 
     def _normalize_artist_thumb_state(self, data, fallback: dict | None = None) -> dict:
         source = data if isinstance(data, dict) else {}
@@ -2098,17 +2162,21 @@ class RemoteBridge(QObject):
             "banned": self._read_artist_thumb_lines(self._artist_thumb_banned_path()),
         })
 
-    def _read_artist_thumb_state_file(self) -> dict | None:
+    def _read_artist_thumb_state_file(self, *, merge_legacy_additions: bool = True) -> dict:
         path = self._artist_thumb_state_path()
         if not path.exists():
-            return None
+            raise FileNotFoundError(path)
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            return self._normalize_artist_thumb_state(data, self._legacy_artist_thumb_state())
         except Exception as e:
-            print(f"🌐 Remote: artist thumb 상태 JSON 로드 실패 ({path}) — {e}")
-            return None
+            raise RuntimeError(f"artist thumb state JSON is invalid: {path}: {e}") from e
+        state = self._normalize_artist_thumb_state(data)
+        if merge_legacy_additions:
+            legacy = self._legacy_artist_thumb_state()
+            state["favorites"] = self._merge_artist_thumb_values(state["favorites"], legacy["favorites"])
+            state["banned"] = self._merge_artist_thumb_values(state["banned"], legacy["banned"])
+        return state
 
     def _sync_artist_thumb_state_mirrors(self, state: dict):
         normalized = self._normalize_artist_thumb_state(state)
@@ -2131,18 +2199,20 @@ class RemoteBridge(QObject):
 
     def _ensure_artist_thumb_state(self) -> dict:
         with self._artist_thumb_lock:
-            state = self._read_artist_thumb_state_file()
-            if state is None:
-                state = self._write_artist_thumb_state(self._legacy_artist_thumb_state())
-            else:
-                self._sync_artist_thumb_state_mirrors(state)
-            return state
+            path = self._artist_thumb_state_path()
+            if not path.exists():
+                return self._write_artist_thumb_state(self._legacy_artist_thumb_state())
+            return self._read_artist_thumb_state_file()
+
+    def _artist_thumb_state(self) -> dict:
+        with self._artist_thumb_lock:
+            return self._read_artist_thumb_state_file()
 
     def _artist_thumb_favorites(self) -> list[str]:
-        return list(self._ensure_artist_thumb_state().get("favorites", []))
+        return list(self._artist_thumb_state().get("favorites", []))
 
     def _artist_thumb_banned(self) -> list[str]:
-        return list(self._ensure_artist_thumb_state().get("banned", []))
+        return list(self._artist_thumb_state().get("banned", []))
 
     def _artist_thumb_custom_filters(self, weights: dict | None = None, banned_set: set[str] | None = None) -> list[dict]:
         base = Path("artist_thumb")
@@ -2453,7 +2523,7 @@ class RemoteBridge(QObject):
         if not artist_name:
             raise ValueError("artist is required")
         with self._artist_thumb_lock:
-            state = self._ensure_artist_thumb_state()
+            state = self._artist_thumb_state()
             favorites = list(state.get("favorites", []))
             if favorite and artist_name not in favorites:
                 favorites.append(artist_name)
@@ -2468,7 +2538,7 @@ class RemoteBridge(QObject):
         if not artist_name:
             raise ValueError("artist is required")
         with self._artist_thumb_lock:
-            state = self._ensure_artist_thumb_state()
+            state = self._artist_thumb_state()
             banned_list = list(state.get("banned", []))
             if banned and artist_name not in banned_list:
                 banned_list.append(artist_name)
@@ -2542,6 +2612,7 @@ class RemoteBridge(QObject):
                 height = int(payload.get("height") or 1216)
             except Exception:
                 width, height = 832, 1216
+            width, height = self._coerce_artist_thumb_resolution(width, height)
 
             overrides = {
                 "input": final_positive,
@@ -9228,28 +9299,23 @@ class RemoteBridge(QObject):
                 # NAIA combo 텍스트 포맷: "1024 x 1024" (공백 포함)
                 cf_width, cf_height, cf_res_source = None, None, "unknown"
                 try:
+                    artist_thumb_random_prompt = bool(cf_pending.get("artist_thumb_random_prompt"))
                     src_row = getattr(prompt_context, "source_row", None)
-                    if src_row is not None and "image_width" in src_row and "image_height" in src_row:
+                    if (
+                        not artist_thumb_random_prompt
+                        and src_row is not None
+                        and "image_width" in src_row
+                        and "image_height" in src_row
+                    ):
                         try:
                             w = int(src_row["image_width"])
                             h = int(src_row["image_height"])
-                            if w > 0 and h > 0:
+                            if w > 0 and h > 0 and self._resolution_allowed_for_current_mode(w, h):
                                 cf_width, cf_height, cf_res_source = w, h, "detected"
                         except (ValueError, TypeError):
                             pass
                     if cf_width is None:
-                        rc = getattr(_mw_for_cf, "resolution_combo", None)
-                        if rc is not None and rc.count() > 0:
-                            idx = random.randint(0, rc.count() - 1)
-                            text = rc.itemText(idx)
-                            try:
-                                # NAIA 표준 " x " 우선, 안전망으로 "x" 도 허용
-                                sep = " x " if " x " in text else "x"
-                                w_str, h_str = text.split(sep)
-                                w, h = int(w_str.strip()), int(h_str.strip())
-                                cf_width, cf_height, cf_res_source = w, h, "random"
-                            except Exception:
-                                pass
+                        cf_width, cf_height, cf_res_source = self._artist_thumb_random_resolution()
                 except Exception as e:
                     print(f"🌐 ComfyUI: 해상도 결정 실패 — {e}")
 
@@ -10058,6 +10124,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             "source_row": None,
             "active_ratings": set(bridge._active_ratings),
             "comfyui_request_id": request_id,
+            "artist_thumb_random_prompt": True,
             "respect_naia_autogen": False,
             "force_naia_skip_generate": True,
             "peng_override": peng_override,

@@ -94,6 +94,17 @@ class _QueueManager:
         return self._empty
 
 
+class _ResolutionCombo:
+    def __init__(self, items):
+        self.items = list(items)
+
+    def count(self):
+        return len(self.items)
+
+    def itemText(self, index):
+        return self.items[index]
+
+
 class _ToggleButton:
     def __init__(self, checked=False, enabled=True):
         self.checked = checked
@@ -101,6 +112,9 @@ class _ToggleButton:
 
     def setChecked(self, value):
         self.checked = bool(value)
+
+    def isChecked(self):
+        return self.checked
 
     def setEnabled(self, value):
         self.enabled = bool(value)
@@ -1000,7 +1014,7 @@ def test_artist_thumb_state_migrates_legacy_files_to_json(tmp_path, monkeypatch)
     assert bridge._artist_thumb_banned() == ["b", "missing"]
 
 
-def test_artist_thumb_state_json_is_source_of_truth(tmp_path, monkeypatch):
+def test_artist_thumb_state_reads_legacy_additions_without_mirror_write(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("artist_thumb").mkdir()
     Path("wildcards").mkdir()
@@ -1013,10 +1027,10 @@ def test_artist_thumb_state_json_is_source_of_truth(tmp_path, monkeypatch):
 
     bridge = RemoteBridge(_AppContext())
 
-    assert bridge._artist_thumb_favorites() == ["c"]
-    assert bridge._artist_thumb_banned() == ["d"]
-    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "c\n"
-    assert Path("artist_thumb/banned_artist.txt").read_text(encoding="utf-8") == "d\n"
+    assert bridge._artist_thumb_favorites() == ["c", "a"]
+    assert bridge._artist_thumb_banned() == ["d", "b"]
+    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "a\n"
+    assert Path("artist_thumb/banned_artist.txt").read_text(encoding="utf-8") == "b\n"
 
 
 def test_artist_thumb_state_updates_json_and_text_mirrors(tmp_path, monkeypatch):
@@ -1033,6 +1047,83 @@ def test_artist_thumb_state_updates_json_and_text_mirrors(tmp_path, monkeypatch)
     assert data["banned"] == ["b", "missing", "a"]
     assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "b\nc\n"
     assert Path("artist_thumb/banned_artist.txt").read_text(encoding="utf-8") == "b\nmissing\na\n"
+
+
+def test_artist_thumb_state_write_preserves_legacy_additions(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("wildcards").mkdir()
+    Path("artist_thumb/artist_state.json").write_text(
+        json.dumps({"version": 1, "favorites": ["c"], "banned": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path("wildcards/favorite_artist.txt").write_text("a\n", encoding="utf-8")
+
+    bridge = RemoteBridge(_AppContext())
+    bridge._set_artist_thumb_favorite("d", True)
+
+    data = json.loads(Path("artist_thumb/artist_state.json").read_text(encoding="utf-8"))
+    assert data["favorites"] == ["c", "a", "d"]
+    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "c\na\nd\n"
+
+
+def test_artist_thumb_state_rejects_corrupt_json_without_legacy_overwrite(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("wildcards").mkdir()
+    Path("artist_thumb/artist_state.json").write_text("{", encoding="utf-8")
+    Path("wildcards/favorite_artist.txt").write_text("a\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="artist thumb state JSON is invalid"):
+        RemoteBridge(_AppContext())
+
+    assert Path("artist_thumb/artist_state.json").read_text(encoding="utf-8") == "{"
+    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "a\n"
+
+
+def test_artist_thumb_random_resolution_filters_unsafe_nai_sizes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    bridge.app_context.main_window = SimpleNamespace(
+        resolution_combo=_ResolutionCombo([
+            "2048 x 2048",
+            "3072 x 4096",
+            "1536 x 2048",
+            "832 x 1216",
+        ])
+    )
+
+    assert bridge._artist_thumb_resolution_options() == [(1536, 2048), (832, 1216)]
+    assert bridge._coerce_artist_thumb_resolution(4096, 4096) == (832, 1216)
+    assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (1536, 2048)
+
+
+def test_artist_thumb_generate_coerces_invalid_nai_resolution(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    ctx.generation_queue_manager = _QueueManager(empty=True)
+    ctx.main_window = SimpleNamespace(
+        negative_prompt_textedit=_TextEdit(""),
+        generation_checkboxes={"자동 생성": _ToggleButton(False)},
+        generation_controller=_GenerationController(),
+        resolution_combo=_ResolutionCombo(["832 x 1216"]),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._broadcast_json = lambda payload: None
+    bridge._broadcast_queue_state = lambda: None
+
+    bridge._do_artist_thumb_generate({
+        "request_id": "req",
+        "artist": "artist",
+        "positive": "1girl",
+        "width": 4096,
+        "height": 4096,
+    })
+
+    overrides, priority = ctx.main_window.generation_controller.executed[0]
+    assert priority == 0
+    assert overrides["width"] == 832
+    assert overrides["height"] == 1216
 
 
 def test_artist_thumb_state_counts_visible_artists_after_bans(tmp_path, monkeypatch):

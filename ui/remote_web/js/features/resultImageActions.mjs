@@ -26,6 +26,22 @@ export function createResultImageActions({
     return value !== undefined && value !== null && value !== '';
   }
 
+  function currentMode() {
+    return String(getMode() || '').toUpperCase();
+  }
+
+  function isDesktopImg2ImgAction(action) {
+    return action === 'img2img' || action === 'inpaint';
+  }
+
+  function ensureNaiDesktopImg2ImgAction(action) {
+    if (!isDesktopImg2ImgAction(action)) return true;
+    if (currentMode() === 'NAI') return true;
+    const label = action === 'inpaint' ? 'Inpaint' : 'Img2Img';
+    showToast(`${label} is available in NAI mode only`, 'error');
+    return false;
+  }
+
   function tryParseMetadataActionJson(value) {
     if (typeof value !== 'string') return value;
     const trimmed = value.trim();
@@ -118,12 +134,15 @@ export function createResultImageActions({
   }
 
   async function requestPopupImageAction(payload, action) {
+    if (!ensureNaiDesktopImg2ImgAction(action)) {
+      return;
+    }
     if (!payload || !payload.blob) {
       showToast('Image data is unavailable', 'error');
       return;
     }
     try {
-      if (action === 'img2img' || action === 'inpaint') {
+      if (isDesktopImg2ImgAction(action)) {
         discardPendingModuleEdit('img2img');
       }
       const label = encodeURIComponent(payload.label || 'Input Image');
@@ -136,9 +155,9 @@ export function createResultImageActions({
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${response.status}`);
       }
-      if (action === 'img2img' || action === 'inpaint') {
+      if (isDesktopImg2ImgAction(action)) {
         showToast(`${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} opened on desktop`, 'success');
-      } else if (action === 'vibe' && getMode() === 'NAI') {
+      } else if (action === 'vibe' && currentMode() === 'NAI') {
         openModule('vibe_transfer');
       }
     } catch (error) {
@@ -450,7 +469,7 @@ export function createResultImageActions({
   }
 
   function upscaleFromContext(context = {}) {
-    if (getMode() !== 'NAI') {
+    if (currentMode() !== 'NAI') {
       showToast('NAI upscale is only available in NAI mode', 'error');
       return;
     }
@@ -482,7 +501,10 @@ export function createResultImageActions({
   }
 
   async function requestContextImageAction(context, action) {
-    if ((action === 'img2img' || action === 'inpaint') && context?.source !== 'input') {
+    if (!ensureNaiDesktopImg2ImgAction(action)) {
+      return;
+    }
+    if (isDesktopImg2ImgAction(action) && context?.source !== 'input') {
       const ws = getWs();
       if (!ws || ws.readyState !== window.WebSocket.OPEN) {
         showToast('Remote connection is not open', 'error');

@@ -1904,6 +1904,17 @@ class ImageWindow(QWidget):
             self.save_as_webp_checkbox.setChecked(False)
             self.save_settings()
 
+    def _current_api_mode(self) -> str:
+        try:
+            if self.app_context and hasattr(self.app_context, "get_api_mode"):
+                return str(self.app_context.get_api_mode() or "")
+            return str(getattr(self.app_context, "current_api_mode", "") or "")
+        except Exception:
+            return ""
+
+    def _is_nai_mode(self) -> bool:
+        return self._current_api_mode().upper() == "NAI"
+
     def show_main_image_context_menu(self, pos):
         """메인 이미지 우클릭 시 컨텍스트 메뉴를 표시합니다."""
         if not self.current_history_item:
@@ -1984,46 +1995,48 @@ class ImageWindow(QWidget):
         menu.addAction(copy_png_action)
         menu.addAction(copy_webp_action)
         
+        current_mode = self._current_api_mode().upper()
+
         # NAI Upscale 메뉴 추가
         menu.addSeparator()
         upscale_action = QAction("🔍 NAI 2x 업스케일", self)
         upscale_action.triggered.connect(self.upscale_current_image_nai)
         # NAI 모드가 아니면 비활성화
-        current_mode = self.app_context.get_api_mode() if self.app_context else None
         if current_mode != "NAI":
             upscale_action.setEnabled(False)
             upscale_action.setToolTip("NAI 모드에서만 사용 가능합니다")
         menu.addAction(upscale_action)
 
-        menu.addSeparator()
-        nai_inpaint_menu = QMenu("🎨 NAI 인페인트 메뉴", menu)
-        nai_inpaint_menu.setStyleSheet(menu.styleSheet())
+        if current_mode == "NAI":
+            menu.addSeparator()
+            nai_inpaint_menu = QMenu("🎨 NAI 인페인트 메뉴", menu)
+            nai_inpaint_menu.setStyleSheet(menu.styleSheet())
 
-        send_img2img = QAction("Send to img2img", nai_inpaint_menu)
-        send_img2img.triggered.connect(self._emit_send_to_img2img)
-        nai_inpaint_menu.addAction(send_img2img)
+            send_img2img = QAction("Send to img2img", nai_inpaint_menu)
+            send_img2img.triggered.connect(self._emit_send_to_img2img)
+            nai_inpaint_menu.addAction(send_img2img)
 
-        send_inpaint = QAction("Send to Inpaint", nai_inpaint_menu)
-        send_inpaint.triggered.connect(self._emit_send_to_inpaint)
-        nai_inpaint_menu.addAction(send_inpaint)
+            send_inpaint = QAction("Send to Inpaint", nai_inpaint_menu)
+            send_inpaint.triggered.connect(self._emit_send_to_inpaint)
+            nai_inpaint_menu.addAction(send_inpaint)
 
-        nai_inpaint_menu.addSeparator()
+            nai_inpaint_menu.addSeparator()
 
-        instant_outpaint = QAction("Instant Outpaint Request", nai_inpaint_menu)
-        instant_outpaint.triggered.connect(self._emit_instant_outpaint)
-        nai_inpaint_menu.addAction(instant_outpaint)
+            instant_outpaint = QAction("Instant Outpaint Request", nai_inpaint_menu)
+            instant_outpaint.triggered.connect(self._emit_instant_outpaint)
+            nai_inpaint_menu.addAction(instant_outpaint)
 
-        send_outpaint = QAction("Send to Outpainting", nai_inpaint_menu)
-        send_outpaint.triggered.connect(self._emit_send_to_outpaint)
-        nai_inpaint_menu.addAction(send_outpaint)
+            send_outpaint = QAction("Send to Outpainting", nai_inpaint_menu)
+            send_outpaint.triggered.connect(self._emit_send_to_outpaint)
+            nai_inpaint_menu.addAction(send_outpaint)
 
-        nai_inpaint_menu.addSeparator()
+            nai_inpaint_menu.addSeparator()
 
-        use_as_base = QAction("Use as outpainting base", nai_inpaint_menu)
-        use_as_base.triggered.connect(self._emit_use_as_outpaint_base)
-        nai_inpaint_menu.addAction(use_as_base)
+            use_as_base = QAction("Use as outpainting base", nai_inpaint_menu)
+            use_as_base.triggered.connect(self._emit_use_as_outpaint_base)
+            nai_inpaint_menu.addAction(use_as_base)
 
-        menu.addMenu(nai_inpaint_menu)
+            menu.addMenu(nai_inpaint_menu)
         
         # Add Send to Character Reference action
         send_to_character_ref_action = QAction("📸 Send to Character Reference", self)
@@ -2048,11 +2061,17 @@ class ImageWindow(QWidget):
     
     def _emit_send_to_img2img(self):
         """'Send to img2img' 요청 시그널을 발생시킵니다."""
+        if not self._is_nai_mode():
+            self._show_styled_message_main("오류", "Img2Img는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
+            return
         if self.current_history_item:
             self.send_to_img2img_requested.emit(self.current_history_item)
 
     def _emit_send_to_inpaint(self):
         """'Send to Inpaint' 요청 시그널을 발생시킵니다."""
+        if not self._is_nai_mode():
+            self._show_styled_message_main("오류", "Inpaint는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
+            return
         if self.current_history_item:
             self.send_to_inpaint_requested.emit(self.current_history_item)
 
@@ -2763,7 +2782,7 @@ class ImageWindow(QWidget):
             self.check_and_apply_history_limit()
         
         # NAI 모드에서 히스토리 아이템 추가 시 Anlas 업데이트
-        if self.app_context.current_api_mode == "NAI":
+        if self._is_nai_mode():
             if hasattr(self.app_context, 'main_window') and hasattr(self.app_context.main_window, 'update_anlas_display'):
                 self.app_context.main_window.update_anlas_display()
 
@@ -2947,7 +2966,7 @@ class ImageWindow(QWidget):
         enabled = (
             self.current_history_item is not None
             and self.current_history_item.image is not None
-            and getattr(self.app_context, 'current_api_mode', '') == 'NAI'
+            and self._is_nai_mode()
             and bool(getattr(self.current_history_item, 'generation_params', None))
         )
         self.enhance_button.setEnabled(enabled)
@@ -3169,7 +3188,7 @@ class ImageWindow(QWidget):
         if not item or not item.image:
             _fail("오류", "Enhance 할 이미지가 없습니다.", 'warning')
             return
-        if getattr(self.app_context, 'current_api_mode', '') != 'NAI':
+        if not self._is_nai_mode():
             _fail("오류", "Enhance는 NAI 모드에서만 사용할 수 있습니다.", 'warning')
             return
         if not getattr(item, 'generation_params', None):

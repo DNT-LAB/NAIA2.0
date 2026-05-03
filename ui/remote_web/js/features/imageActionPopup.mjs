@@ -91,7 +91,9 @@ export function createImageActionPopup({
     const hasMetadata = Boolean(metadata.has_metadata);
     const summary = metadata.summary || {};
     const sizeText = summary.width && summary.height ? `${summary.width} x ${summary.height}` : '';
-    const showDesktopImg2ImgActions = typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img();
+    const showDesktopImg2ImgActions = mode === 'NAI'
+      && typeof canUseDesktopImg2Img === 'function'
+      && canUseDesktopImg2Img();
 
     root = document.createElement('div');
     root.className = 'image-action-popup-root';

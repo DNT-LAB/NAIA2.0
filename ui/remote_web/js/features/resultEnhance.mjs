@@ -38,10 +38,14 @@ export function createResultEnhanceController({
     return `Enhance x${formatUpscale(config.upscale)} | ${config.strength.toFixed(1)}`;
   }
 
+  function currentMode() {
+    return String(getMode() || '').toUpperCase();
+  }
+
   function getDisabledReason() {
     if (running) return 'Enhance is running';
     if (!currentMeta) return 'No generated image is selected';
-    if (getMode() !== 'NAI') return 'Enhance is available in NAI mode only';
+    if (currentMode() !== 'NAI') return 'Enhance is available in NAI mode only';
     if (!currentMeta.can_enhance) {
       return 'Generation parameters are unavailable';
     }
@@ -59,7 +63,7 @@ export function createResultEnhanceController({
     button.classList.toggle('running', running);
     button.textContent = running ? 'Enhancing...' : label();
     button.title = disabledReason || 'Run NAI Enhance on the current desktop result';
-    if (settingsButton) settingsButton.disabled = running;
+    if (settingsButton) settingsButton.disabled = running || currentMode() !== 'NAI';
   }
 
   function setCurrentMeta(meta) {

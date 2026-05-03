@@ -80,10 +80,11 @@ const MAIN_IMAGE_MENU = [
   {type: 'separator'},
   {
     label: 'NAI 도구',
+    modes: ['NAI'],
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
-      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true},
-      {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint', capability: 'inpaint', desktopImg2Img: true},
+      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true, modes: ['NAI']},
+      {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint', capability: 'inpaint', desktopImg2Img: true, modes: ['NAI']},
       {label: 'Instant Outpaint Request'},
       {label: 'Send to Outpainting'},
       {label: 'Use as outpainting base'},
@@ -129,9 +130,10 @@ const THUMBNAIL_MENU = [
   },
   {
     label: 'NAI 도구',
+    modes: ['NAI'],
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
-      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true},
+      {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true, modes: ['NAI']},
     ],
   },
   {type: 'separator'},
@@ -200,7 +202,16 @@ export function createResultContextMenu({
     return Boolean(context?.capabilities?.[key]);
   }
 
+  function currentMode() {
+    return String(getMode() || '').toUpperCase();
+  }
+
+  function itemModeAllowed(item) {
+    return !item.modes || item.modes.includes(currentMode());
+  }
+
   function isItemEnabled(item, context) {
+    if (!itemModeAllowed(item)) return false;
     if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) return false;
     if (item.alwaysEnabled) return true;
     if (item.requiresPath && !context?.path) return false;
@@ -215,7 +226,6 @@ export function createResultContextMenu({
       return typeof onRerollPrompt === 'function';
     }
     if (item.action === ACTION_QUEUE_RESULT) {
-      if (item.modes && !item.modes.includes(String(getMode() || '').toUpperCase())) return false;
       return typeof onQueueResult === 'function' && hasCapability(context, 'queue');
     }
     if (item.action === ACTION_RESTORE_PARAMS) {
@@ -240,18 +250,19 @@ export function createResultContextMenu({
       return typeof onCopyImage === 'function';
     }
     if (item.action === ACTION_UPSCALE_NAI) {
-      if (item.modes && !item.modes.includes(String(getMode() || '').toUpperCase())) return false;
       return typeof onUpscaleNai === 'function';
     }
     if (item.action === ACTION_IMAGE_ACTION) {
       if (!hasCapability(context, 'image_action')) return false;
-      if (item.modes && !item.modes.includes(String(getMode() || '').toUpperCase())) return false;
       return typeof onImageAction === 'function';
     }
     return false;
   }
 
   function renderItem(item, context) {
+    if (!itemModeAllowed(item)) {
+      return '';
+    }
     if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) {
       return '';
     }
@@ -552,6 +563,8 @@ export function createResultContextMenu({
     const isSaved = source === 'saved';
     const isInput = source === 'input';
     const metadataAvailable = hasImage && isSaved;
+    const naiMode = currentMode() === 'NAI';
+    const canUseNaiImageAction = hasImage && !isSaved && naiMode;
     return {
       id: isSaved && path ? `saved:${path}` : source,
       source,
@@ -563,8 +576,8 @@ export function createResultContextMenu({
         ...DEFAULT_CAPABILITIES,
         metadata: metadataAvailable,
         paste_image: true,
-        image_action: hasImage && !isSaved,
-        inpaint: hasImage && !isSaved,
+        image_action: canUseNaiImageAction,
+        inpaint: canUseNaiImageAction,
         copy_png: hasImage,
         open_file: isSaved && Boolean(path),
         save_image: (isCurrent || isSaved) && hasImage,

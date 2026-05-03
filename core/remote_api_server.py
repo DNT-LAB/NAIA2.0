@@ -714,6 +714,11 @@ class RemoteBridge(QObject):
             return False, "Cloudflared 터널 활성 중 — Img2Img/Inpaint 데스크탑 창 열기가 차단됩니다."
         return True, ""
 
+    def _nai_img2img_mode_gate(self) -> tuple[bool, str]:
+        if str(self._current_api_mode() or "").upper() != "NAI":
+            return False, "Img2Img/Inpaint is available in NAI mode only"
+        return True, ""
+
     def _desktop_browser_gate(self, host: str) -> tuple[bool, str]:
         """호스트 데스크탑에 PyQt WebEngine 창/탭을 띄우는 요청 게이트."""
         if not self._is_loopback_host(host):
@@ -2180,6 +2185,7 @@ class RemoteBridge(QObject):
         query: str = "",
         page: int = 0,
         per_page: int = 48,
+        random_sample: bool = False,
     ) -> dict:
         weights = self._artist_thumb_artist_weights()
         thumb_data = self._load_artist_thumb_data(mode) if str(mode or "").strip() else {}
@@ -2206,8 +2212,12 @@ class RemoteBridge(QObject):
         total_pages = max(1, (total + per_page - 1) // per_page)
         if page >= total_pages:
             page = max(0, total_pages - 1)
-        start = page * per_page
-        artists = base_list[start:start + per_page]
+        if random_sample:
+            sample_size = min(per_page, total)
+            artists = random.sample(base_list, sample_size) if sample_size > 0 else []
+        else:
+            start = page * per_page
+            artists = base_list[start:start + per_page]
         favorite_set = set(self._artist_thumb_favorites())
         banned_set = set(self._artist_thumb_banned())
         mode_key = str(mode or "").strip()
@@ -2221,6 +2231,7 @@ class RemoteBridge(QObject):
             "per_page": per_page,
             "total": total,
             "total_pages": total_pages,
+            "random": bool(random_sample),
             "items": [
                 {
                     "artist": artist,
@@ -2593,6 +2604,9 @@ class RemoteBridge(QObject):
     def _open_desktop_img2img_surface(self, pil_image, history_item=None, source_label: str = "",
                                       mode: str = "img2img"):
         """Open the native PyQt img2img/inpaint surface; Web Shell only requests it."""
+        allowed, reason = self._nai_img2img_mode_gate()
+        if not allowed:
+            raise RuntimeError(reason)
         manager = self._img2img_manager()
         if not manager:
             raise RuntimeError("Img2Img manager is not ready")
@@ -2660,6 +2674,10 @@ class RemoteBridge(QObject):
             action = str(payload.get("action") or "").strip().lower()
             if action not in {"img2img", "inpaint"}:
                 self._broadcast_json({"type": "toast", "message": "Unsupported result image action", "level": "error"})
+                return
+            allowed, reason = self._nai_img2img_mode_gate()
+            if not allowed:
+                self._broadcast_json({"type": "toast", "message": reason, "level": "error"})
                 return
             action_label = "Inpaint" if action == "inpaint" else "Img2Img"
             pil_image, history_item, label = self._resolve_result_image_action_source(payload, action_label)
@@ -3369,10 +3387,12 @@ class RemoteBridge(QObject):
             or (isinstance(generation_params, dict) and generation_params.get("input"))
             or summary.get("prompt")
         )
-        mode = self._current_api_mode()
+        mode = str(self._current_api_mode() or "").upper()
+        nai_mode = mode == "NAI"
         has_image = has_item_image or has_latest_image
         has_metadata = bool(metadata_payload or rel_path)
-        can_enhance = bool(has_item_image and has_generation_params)
+        can_use_nai_img2img = bool(has_image and nai_mode)
+        can_enhance = bool(has_item_image and has_generation_params and nai_mode)
 
         return {
             "id": "current",
@@ -3395,10 +3415,10 @@ class RemoteBridge(QObject):
                 "open_file": has_file,
                 "save_image": has_image,
                 "copy_png": has_image,
-                "image_action": has_image,
-                "upscale_nai": bool(has_image and mode == "NAI"),
+                "image_action": can_use_nai_img2img,
+                "upscale_nai": bool(has_image and nai_mode),
                 "enhance": can_enhance,
-                "inpaint": has_image,
+                "inpaint": can_use_nai_img2img,
                 "character_reference": has_item_image,
                 "remote_event": has_source_row,
                 "delete": False,
@@ -3426,7 +3446,9 @@ class RemoteBridge(QObject):
         has_source_row = self._source_row_available(matched_source_row)
         has_generation_params = bool(getattr(matched_item, "generation_params", None)) if matched_item else False
         has_history_image = bool(matched_item and getattr(matched_item, "image", None))
-        can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params)
+        nai_mode = str(self._current_api_mode() or "").upper() == "NAI"
+        can_use_nai_img2img = bool(has_history_image and nai_mode)
+        can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params and nai_mode)
 
         return {
             "id": f"saved:{normalized_path}",
@@ -3451,8 +3473,8 @@ class RemoteBridge(QObject):
                 "open_file": True,
                 "save_image": True,
                 "copy_png": True,
-                "image_action": has_history_image,
-                "upscale_nai": self._current_api_mode() == "NAI",
+                "image_action": can_use_nai_img2img,
+                "upscale_nai": nai_mode,
                 "enhance": can_enhance,
                 "inpaint": False,
                 "character_reference": False,
@@ -9436,6 +9458,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             allowed, reason = bridge._desktop_img2img_gate(bridge._request_client_host(req))
             if not allowed:
                 return JSONResponse({"error": reason}, status_code=403)
+            allowed, reason = bridge._nai_img2img_mode_gate()
+            if not allowed:
+                return JSONResponse({"error": reason}, status_code=403)
         image_bytes = await req.body()
         if not image_bytes:
             return JSONResponse({"error": "No image data"}, status_code=400)
@@ -10302,6 +10327,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             bridge.request_result_upscale.emit(ws, json.dumps(cmd))
                         elif cmd_type == "result_image_action":
                             allowed, reason = bridge._desktop_img2img_gate(bridge._ws_client_host(ws))
+                            if not allowed:
+                                await ws.send_text(json.dumps({
+                                    "type": "toast",
+                                    "message": reason,
+                                    "level": "error",
+                                }))
+                                continue
+                            allowed, reason = bridge._nai_img2img_mode_gate()
                             if not allowed:
                                 await ws.send_text(json.dumps({
                                     "type": "toast",

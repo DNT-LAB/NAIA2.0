@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -289,7 +290,7 @@ class _ImageCrud:
         return self._use_timestamp_folder
 
 
-def _bridge_with_history(tmp_path):
+def _bridge_with_history(tmp_path, mode="NAI"):
     old_save_dir = tmp_path / "old_output" / "20260501_120000"
     new_save_dir = tmp_path / "new_output" / "20260501_120000"
     old_save_dir.mkdir(parents=True)
@@ -312,6 +313,7 @@ def _bridge_with_history(tmp_path):
         current_history_item=item,
     )
     ctx = _AppContext()
+    ctx.get_api_mode = lambda: mode
     ctx.image_crud_controller = _ImageCrud(new_save_dir)
     ctx.main_window = SimpleNamespace(image_window=image_window)
     bridge = RemoteBridge(ctx)
@@ -344,6 +346,7 @@ def test_saved_result_asset_accepts_memory_history_key(tmp_path):
     assert asset["path"] == history_key
     assert asset["file_path"] == str(image_path.resolve())
     assert asset["capabilities"]["image_action"] is True
+    assert asset["capabilities"]["enhance"] is True
     assert asset["capabilities"]["copy_png"] is True
     assert "copy_webp" not in asset["capabilities"]
 
@@ -354,7 +357,59 @@ def test_current_result_asset_does_not_advertise_webp_clipboard_copy(tmp_path):
     asset = bridge._build_current_result_asset_payload()
 
     assert asset["capabilities"]["copy_png"] is True
+    assert asset["capabilities"]["image_action"] is True
+    assert asset["capabilities"]["inpaint"] is True
+    assert asset["capabilities"]["enhance"] is True
     assert "copy_webp" not in asset["capabilities"]
+
+
+def test_current_result_asset_blocks_nai_image_actions_outside_nai_mode(tmp_path):
+    bridge, _image_path = _bridge_with_history(tmp_path, mode="COMFYUI")
+
+    asset = bridge._build_current_result_asset_payload()
+
+    assert asset["can_enhance"] is False
+    assert asset["capabilities"]["image_action"] is False
+    assert asset["capabilities"]["inpaint"] is False
+    assert asset["capabilities"]["enhance"] is False
+    assert asset["capabilities"]["upscale_nai"] is False
+
+
+def test_saved_result_asset_blocks_nai_image_actions_outside_nai_mode(tmp_path):
+    bridge, _image_path = _bridge_with_history(tmp_path, mode="WEBUI")
+    history_key = bridge._scan_memory_history()[0]["rel_path"]
+
+    asset = bridge._build_saved_result_asset_payload(history_key)
+
+    assert asset["can_enhance"] is False
+    assert asset["capabilities"]["image_action"] is False
+    assert asset["capabilities"]["enhance"] is False
+    assert asset["capabilities"]["upscale_nai"] is False
+
+
+def test_result_image_action_rejects_desktop_img2img_outside_nai_mode():
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "COMFYUI"
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._do_result_image_action(json.dumps({"action": "img2img", "source": "current"}))
+
+    assert broadcasts == [{
+        "type": "toast",
+        "message": "Img2Img/Inpaint is available in NAI mode only",
+        "level": "error",
+    }]
+
+
+def test_desktop_img2img_surface_rejects_non_nai_mode_before_manager_lookup():
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    bridge = RemoteBridge(ctx)
+
+    with pytest.raises(RuntimeError, match="NAI mode only"):
+        bridge._open_desktop_img2img_surface(Image.new("RGB", (2, 2), "white"))
 
 
 def test_original_result_file_prefers_memory_history_path(tmp_path):

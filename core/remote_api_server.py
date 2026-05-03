@@ -9140,6 +9140,24 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
     web_dir = Path(__file__).parent.parent / "ui" / "remote_web"
     no_cache_headers = {"Cache-Control": "no-store, max-age=0"}
+    image_export_base_headers = {
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Disposition, Content-Type",
+        "Cross-Origin-Resource-Policy": "cross-origin",
+    }
+
+    def image_export_headers(filename: str = "") -> dict:
+        headers = dict(image_export_base_headers)
+        if filename:
+            headers["Content-Disposition"] = bridge._download_content_disposition(filename)
+        return headers
+
+    def image_export_options_headers() -> dict:
+        headers = dict(image_export_base_headers)
+        headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        headers["Access-Control-Allow-Headers"] = "*"
+        return headers
 
     def web_file(path: Path, media_type: str):
         return FileResponse(str(path), media_type=media_type, headers=no_cache_headers)
@@ -9372,30 +9390,35 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     @app.get("/api/latest-image")
     async def api_latest_image():
         if bridge.latest_webp is None:
-            return JSONResponse({"error": "No image generated yet"}, status_code=404)
+            return JSONResponse({"error": "No image generated yet"}, status_code=404, headers=image_export_headers())
         return Response(
             content=bridge.latest_webp,
             media_type="image/webp",
-            headers={"Content-Disposition": "attachment; filename=naia_latest.webp"}
+            headers=image_export_headers("naia_latest.webp"),
         )
+
+    @app.options("/api/result/image/png")
+    async def api_result_image_png_options():
+        return Response(status_code=204, headers=image_export_options_headers())
 
     @app.get("/api/result/image/png")
     async def api_result_image_png(source: str = "", path: str = ""):
         try:
             png_bytes, filename = await asyncio.to_thread(bridge._build_result_png_payload, source, path)
         except FileNotFoundError as e:
-            return JSONResponse({"error": str(e)}, status_code=404)
+            return JSONResponse({"error": str(e)}, status_code=404, headers=image_export_headers())
         except Exception as e:
-            return JSONResponse({"error": f"PNG export failed: {e}"}, status_code=500)
+            return JSONResponse({"error": f"PNG export failed: {e}"}, status_code=500, headers=image_export_headers())
 
         return Response(
             content=png_bytes,
             media_type="image/png",
-            headers={
-                "Content-Disposition": bridge._download_content_disposition(filename),
-                "Cache-Control": "no-store",
-            },
+            headers=image_export_headers(filename),
         )
+
+    @app.options("/api/result/image/original")
+    async def api_result_image_original_options():
+        return Response(status_code=204, headers=image_export_options_headers())
 
     @app.get("/api/result/image/original")
     async def api_result_image_original(source: str = "", path: str = ""):
@@ -9405,7 +9428,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 str(target),
                 media_type=bridge._image_media_type_for_path(target),
                 filename=target.name,
-                headers={"Cache-Control": "no-store"},
+                headers=image_export_headers(),
             )
         normalized_source = str(source or "").strip().lower()
         requested_path = str(path or "").strip()
@@ -9414,12 +9437,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return Response(
                 content=bridge.latest_webp,
                 media_type="image/webp",
-                headers={
-                    "Content-Disposition": bridge._download_content_disposition("naia_latest.webp"),
-                    "Cache-Control": "no-store",
-                },
+                headers=image_export_headers("naia_latest.webp"),
             )
-        return JSONResponse({"error": "No original image is available"}, status_code=404)
+        return JSONResponse({"error": "No original image is available"}, status_code=404, headers=image_export_headers())
 
     @app.post("/api/result/clipboard/png")
     async def api_result_clipboard_png(req: Request):

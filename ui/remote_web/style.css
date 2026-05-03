@@ -616,8 +616,8 @@ header {
   min-width: 0;
   background: var(--bg-surface);
 }
-.viewer-wrapper:has(.studio-editor) {
-  z-index: var(--z-floating-module);
+.viewer-wrapper:has(.right-tab-pane.active .studio-editor) {
+  z-index: calc(var(--z-floating-module) - 1);
 }
 .right-tab-bar {
   flex-shrink: 0;

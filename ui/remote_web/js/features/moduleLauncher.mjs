@@ -79,6 +79,14 @@ const MODULE_REGISTRY = {
     action: 'comfyui_workflow_upload',
     modes: ['COMFYUI'],
   },
+  comfyui_open_web: {
+    label: 'ComfyUI 웹 열기',
+    title: '외부 브라우저에서 ComfyUI 열기',
+    category: 'comfyui_tools',
+    action: 'comfyui_open_web',
+    modes: ['COMFYUI'],
+    className: 'module-comfyui-tool',
+  },
   webui_tools_unavailable: {
     label: '사용 가능한 도구 없음',
     title: 'WEBUI 전용 도구는 현재 기본 사용 불가',
@@ -121,7 +129,7 @@ const CATEGORY_REGISTRY = [
     id: 'comfyui_tools',
     label: 'COMFYUI 전용 도구',
     title: 'COMFYUI 전용 도구',
-    moduleIds: ['comfyui_workflow_default', 'comfyui_workflow_upload'],
+    moduleIds: ['comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_open_web'],
   },
   {
     id: 'webui_tools',
@@ -149,6 +157,7 @@ export function createModuleLauncher({
   getComfyUiWorkflowState,
   switchComfyUiWorkflowDefault,
   uploadComfyUiWorkflow,
+  openComfyUiWeb,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -227,6 +236,13 @@ export function createModuleLauncher({
       return !Boolean(state?.has_custom);
     }
     return false;
+  }
+
+  function isActiveWorkflowMode(moduleId) {
+    const state = typeof getComfyUiWorkflowState === 'function' ? getComfyUiWorkflowState() : null;
+    const hasCustom = Boolean(state?.has_custom);
+    return (moduleId === 'comfyui_workflow_default' && !hasCustom)
+      || (moduleId === 'comfyui_workflow_upload' && hasCustom);
   }
 
   function isVisibleInMode(moduleId) {
@@ -311,6 +327,8 @@ export function createModuleLauncher({
       switchComfyUiWorkflowDefault?.();
     } else if (config.action === 'comfyui_workflow_upload') {
       uploadComfyUiWorkflow?.();
+    } else if (config.action === 'comfyui_open_web') {
+      openComfyUiWeb?.();
     } else {
       openModule(moduleId);
     }
@@ -389,6 +407,7 @@ export function createModuleLauncher({
       button.classList.toggle('hidden', !visible);
       button.classList.toggle('nai-only-disabled', blocked);
       button.classList.toggle('module-static-disabled', button.dataset.moduleStaticDisabled === '1');
+      button.classList.toggle('module-workflow-active', visible && isActiveWorkflowMode(moduleId));
       button.disabled = blocked;
       button.classList.toggle('active', visible && moduleIsActive(moduleId));
     });
@@ -498,6 +517,7 @@ export function createModuleLauncher({
     bind,
     cleanup,
     closeMenus,
+    openCategory: toggleCategory,
     updateState,
     moduleTitle,
   };

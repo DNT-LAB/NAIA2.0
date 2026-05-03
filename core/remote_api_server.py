@@ -24,7 +24,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, Response, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from PyQt6.QtCore import QByteArray, QMimeData, QObject, pyqtSignal, Qt, QTimer
@@ -9183,6 +9183,16 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     @app.get("/api/comfyui/workflow/state")
     async def api_comfyui_workflow_state():
         return await asyncio.to_thread(bridge._comfyui_workflow_state_payload)
+
+    @app.get("/api/comfyui/web")
+    async def api_comfyui_web():
+        stm = bridge.app_context.secure_token_manager
+        url = str(stm.get_token("comfyui_url") or "").strip()
+        if not url:
+            return JSONResponse({"ok": False, "error": "ComfyUI URL is not configured"}, status_code=404)
+        if not url.startswith(("http://", "https://")):
+            url = f"http://{url}"
+        return RedirectResponse(url)
 
     @app.post("/api/comfyui/workflow/upload")
     async def api_comfyui_workflow_upload(req: Request):

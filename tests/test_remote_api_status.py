@@ -265,6 +265,18 @@ def test_comfyui_workflow_upload_rejects_png_without_workflow_metadata():
     assert ctx.comfyui_workflow_manager.user_workflow is None
 
 
+def test_comfyui_web_endpoint_redirects_to_configured_url():
+    ctx = _ComfyWorkflowContext()
+    ctx.secure_token_manager = _TokenManager({"comfyui_url": "127.0.0.1:8188"})
+    bridge = RemoteBridge(ctx)
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.get("/api/comfyui/web", follow_redirects=False)
+
+    assert response.status_code in (307, 308)
+    assert response.headers["location"] == "http://127.0.0.1:8188"
+
+
 class _ImageCrud:
     def __init__(self, save_dir):
         self._save_dir = save_dir

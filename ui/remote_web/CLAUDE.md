@@ -230,8 +230,8 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 - `moduleLauncher.mjs`: `modes` 메타데이터로 NAI / COMFYUI / WEBUI 전용 카테고리를 분기한다.
 - NAI 모드에서만 Character / Character Reference / Vibe Transfer 도구와 활성 요약을 노출한다.
-- COMFYUI 모드에서는 COMFYUI 전용 도구 카테고리를 노출한다. `커스텀 워크플로우`는 PNG를 `/api/comfyui/workflow/upload`로 업로드하고, `기본 워크플로우 전환`은 커스텀 사용 중에만 활성화한다.
-- COMFYUI 모드의 프롬프트 footer 활성 요약 영역은 `Mode : ANIMA` / ANIMA weight / Basic 또는 Custom Workflow 상태를 표시하며, mode 텍스트 클릭 시 Params 탭으로 이동한다.
+- COMFYUI 모드에서는 COMFYUI 전용 도구 카테고리를 노출한다. `커스텀 워크플로우`는 PNG를 `/api/comfyui/workflow/upload`로 업로드하고, `기본 워크플로우 전환`은 커스텀 사용 중에만 활성화한다. `ComfyUI 웹 열기`는 `/api/comfyui/web` 리다이렉트를 사용한다.
+- COMFYUI 모드의 프롬프트 footer 활성 요약 영역은 `Mode : ANIMA` / ANIMA weight / Basic 또는 Custom Workflow 상태를 표시한다. mode 텍스트 클릭 시 Params 탭으로 이동하고, weight는 작은 입력 팝업, workflow 텍스트는 COMFYUI 전용 도구 메뉴를 연다.
 - WEBUI 모드에서는 WEBUI 전용 도구 카테고리를 노출하되 기본 사용 불가 상태로 둔다.
 - `openModule()`: 비NAI 모드에서 NAI 전용 모듈 직접 호출 시 toast 에러 + 차단
 

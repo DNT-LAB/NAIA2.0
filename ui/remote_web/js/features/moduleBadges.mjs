@@ -7,6 +7,8 @@ export function createModuleBadges({
   updatePromptTokenEstimate,
   openModule,
   openParamsTab,
+  setAnimaWeight,
+  openComfyUiTools,
 }) {
   const activatedSummary = document.getElementById('activatedSummary');
   const activatedFooter = document.getElementById('promptTokenFooter');
@@ -21,6 +23,9 @@ export function createModuleBadges({
     animaWeight: '0.75',
     workflowHasCustom: false,
   };
+  let weightPopover = null;
+  let weightInput = null;
+  let weightAnchor = null;
 
   function normalizeSamplingMode(value) {
     const mode = String(value || '').trim().toLowerCase();
@@ -77,6 +82,104 @@ export function createModuleBadges({
     return part;
   }
 
+  function closeWeightPopover() {
+    if (weightPopover) weightPopover.classList.remove('open');
+    weightAnchor = null;
+  }
+
+  function positionWeightPopover() {
+    if (!weightPopover || !weightAnchor) return;
+    const rect = weightAnchor.getBoundingClientRect();
+    const popRect = weightPopover.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth || document.defaultView.innerWidth;
+    const gap = 7;
+    let left = rect.left + rect.width / 2 - popRect.width / 2;
+    left = Math.max(gap, Math.min(left, viewportWidth - popRect.width - gap));
+    const top = Math.max(gap, rect.top - popRect.height - gap);
+    weightPopover.style.left = `${Math.round(left)}px`;
+    weightPopover.style.top = `${Math.round(top)}px`;
+  }
+
+  function commitWeight(value) {
+    const nextValue = String(value ?? '').trim();
+    comfyUiStatus.animaWeight = formatAnimaWeight(nextValue);
+    renderActivatedSummary();
+    if (typeof setAnimaWeight === 'function') setAnimaWeight(nextValue);
+  }
+
+  function ensureWeightPopover() {
+    if (weightPopover) return weightPopover;
+    weightPopover = document.createElement('div');
+    weightPopover.className = 'comfyui-weight-popover';
+    weightPopover.innerHTML = `
+      <input class="comfyui-weight-input" type="text" inputmode="decimal" placeholder="0.75" aria-label="ANIMA weight">
+      <button class="comfyui-weight-apply" type="button">OK</button>
+    `;
+    weightInput = weightPopover.querySelector('.comfyui-weight-input');
+    const applyButton = weightPopover.querySelector('.comfyui-weight-apply');
+    applyButton.addEventListener('click', event => {
+      event.preventDefault();
+      commitWeight(weightInput.value);
+      closeWeightPopover();
+    });
+    weightInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commitWeight(weightInput.value);
+        closeWeightPopover();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeWeightPopover();
+      }
+    });
+    document.body.append(weightPopover);
+    document.addEventListener('pointerdown', event => {
+      if (!weightPopover?.classList.contains('open')) return;
+      if (weightPopover.contains(event.target) || weightAnchor?.contains(event.target)) return;
+      closeWeightPopover();
+    }, true);
+    document.defaultView.addEventListener('resize', positionWeightPopover);
+    document.defaultView.addEventListener('scroll', positionWeightPopover, true);
+    return weightPopover;
+  }
+
+  function openWeightPopover(anchor) {
+    const popover = ensureWeightPopover();
+    weightAnchor = anchor;
+    weightInput.value = comfyUiStatus.animaWeight || '';
+    popover.classList.add('open');
+    positionWeightPopover();
+    weightInput.focus();
+    weightInput.select();
+  }
+
+  function createWeightPart(text) {
+    const part = document.createElement('button');
+    part.type = 'button';
+    part.className = 'activated-summary-part comfyui-weight';
+    part.textContent = text;
+    part.title = 'ANIMA Weight';
+    part.addEventListener('click', event => {
+      event.stopPropagation();
+      openWeightPopover(part);
+    });
+    return part;
+  }
+
+  function createWorkflowPart() {
+    const hasCustom = comfyUiStatus.workflowHasCustom;
+    const part = document.createElement('button');
+    part.type = 'button';
+    part.className = `activated-summary-part ${hasCustom ? 'comfyui-workflow-custom' : 'comfyui-workflow-basic'}`;
+    part.textContent = hasCustom ? 'Custom Workflow' : 'Basic Workflow';
+    part.title = 'COMFYUI 전용 도구';
+    part.addEventListener('click', event => {
+      event.stopPropagation();
+      if (typeof openComfyUiTools === 'function') openComfyUiTools();
+    });
+    return part;
+  }
+
   function appendBullet() {
     const bullet = document.createElement('span');
     bullet.className = 'activated-summary-bullet';
@@ -95,16 +198,10 @@ export function createModuleBadges({
     activatedSummary.append(createParamsPart('comfyui-mode', `Mode : ${displaySamplingMode(mode)}`));
     if (mode === 'anima') {
       appendBullet();
-      const weight = document.createElement('span');
-      weight.className = 'activated-summary-static comfyui-weight';
-      weight.textContent = `가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`;
-      activatedSummary.append(weight);
+      activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
     }
     appendBullet();
-    const workflow = document.createElement('span');
-    workflow.className = `activated-summary-static ${comfyUiStatus.workflowHasCustom ? 'comfyui-workflow-custom' : 'comfyui-workflow-basic'}`;
-    workflow.textContent = comfyUiStatus.workflowHasCustom ? 'Custom Workflow' : 'Basic Workflow';
-    activatedSummary.append(workflow);
+    activatedSummary.append(createWorkflowPart());
   }
 
   function renderActivatedSummary() {

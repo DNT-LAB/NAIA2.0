@@ -439,6 +439,8 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
       updatePromptTokenEstimate,
       openModule,
       openParamsTab: () => switchTab('params'),
+      setAnimaWeight: setAnimaWeightFromBadge,
+      openComfyUiTools,
     });
   })
   .catch(error => {
@@ -1314,6 +1316,12 @@ function setParam(key, value) {
   }
 }
 
+function setAnimaWeightFromBadge(value) {
+  const input = $('pAnimaWeight');
+  if (input) input.value = value;
+  setParam('anima_weight', value);
+}
+
 function toggleFlag(el) {
   if (el.classList.contains('disabled')) return;
   const key = el.dataset.key;
@@ -1418,6 +1426,30 @@ async function switchComfyUiWorkflowDefault() {
     showToast('Basic Workflow enabled', 'success');
   } catch (error) {
     showToast(error?.message || 'Workflow switch failed', 'error');
+  }
+}
+
+function openComfyUiWeb() {
+  if ((currentMode || modeSelect.value) !== 'COMFYUI') {
+    showToast('ComfyUI mode is required', 'error');
+    return;
+  }
+  const apiStatus = setupController ? setupController.getApiStatus() : null;
+  if (apiStatus && !apiStatus.comfyui_url) {
+    showToast('ComfyUI URL is not configured', 'error', true);
+    return;
+  }
+  const opened = window.open('/api/comfyui/web', '_blank');
+  if (opened) {
+    try { opened.opener = null; } catch (error) {}
+  } else {
+    showToast('Popup blocked by browser', 'error');
+  }
+}
+
+function openComfyUiTools() {
+  if (moduleLauncherControl && typeof moduleLauncherControl.openCategory === 'function') {
+    moduleLauncherControl.openCategory('comfyui_tools');
   }
 }
 
@@ -2687,6 +2719,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
       getComfyUiWorkflowState: () => comfyuiWorkflowState,
       switchComfyUiWorkflowDefault,
       uploadComfyUiWorkflow,
+      openComfyUiWeb,
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();

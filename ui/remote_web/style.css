@@ -4231,14 +4231,62 @@ body.resizing-result-info {
 .activated-summary-part.comfyui-mode {
   color: #c8b8ff;
 }
-.activated-summary-static.comfyui-weight {
-  color: #c8b8ff;
+.activated-summary-part.comfyui-weight {
+  color: #a7efa9;
 }
-.activated-summary-static.comfyui-workflow-basic {
+.activated-summary-part.comfyui-workflow-basic {
   color: #75cfff;
 }
-.activated-summary-static.comfyui-workflow-custom {
+.activated-summary-part.comfyui-workflow-custom {
   color: #ff8f88;
+}
+.comfyui-weight-popover {
+  display: none;
+  position: fixed;
+  z-index: var(--z-floating-module-tooltip);
+  align-items: center;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid rgba(167,239,169,0.52);
+  border-radius: 6px;
+  background: rgba(11,13,22,0.98);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.44);
+}
+.comfyui-weight-popover.open {
+  display: flex;
+}
+.comfyui-weight-input {
+  width: 74px;
+  height: 25px;
+  border: 1px solid rgba(167,239,169,0.34);
+  border-radius: 5px;
+  background: rgba(18,22,28,0.96);
+  color: #d9ffda;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  outline: none;
+  padding: 3px 7px;
+}
+.comfyui-weight-input:focus {
+  border-color: rgba(167,239,169,0.82);
+}
+.comfyui-weight-apply {
+  height: 25px;
+  min-width: 32px;
+  border: 1px solid rgba(167,239,169,0.38);
+  border-radius: 5px;
+  background: rgba(68,130,78,0.22);
+  color: #a7efa9;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.comfyui-weight-apply:hover {
+  background: rgba(68,130,78,0.34);
+  color: #d9ffda;
 }
 .prompt-token-comment {
   color: #f4df8a;
@@ -4845,6 +4893,36 @@ body.resizing-result-info {
 }
 .module-category-btn.module-category-disabled {
   opacity: 0.55;
+}
+.module-category[data-module-category="comfyui_tools"] > .module-category-btn {
+  border-color: rgba(157,139,255,0.38);
+  background: linear-gradient(135deg, rgba(91,82,214,0.48), rgba(124,106,239,0.42));
+  color: #d7d1ff;
+}
+.module-category[data-module-category="comfyui_tools"] > .module-category-btn:hover,
+.module-category[data-module-category="comfyui_tools"].menu-open > .module-category-btn {
+  border-color: rgba(199,125,186,0.68);
+  background: linear-gradient(135deg, rgba(91,82,214,0.78), rgba(124,106,239,0.66));
+  color: #fff;
+}
+.module-category[data-module-category="comfyui_tools"] .module-menu-item:not(.module-workflow-active) {
+  border-color: rgba(157,139,255,0.22);
+  background: rgba(45,40,82,0.32);
+  color: #cfc8ff;
+}
+.module-category[data-module-category="comfyui_tools"] .module-menu-item:not(.module-workflow-active):hover {
+  border-color: rgba(157,139,255,0.5);
+  background: rgba(75,64,150,0.34);
+  color: #fff;
+}
+.module-btn.module-workflow-active,
+.module-btn.module-workflow-active:disabled,
+.module-btn.module-workflow-active.nai-only-disabled {
+  opacity: 1;
+  border-color: rgba(199,125,186,0.78);
+  background: linear-gradient(135deg, rgba(91,82,214,0.95), rgba(124,106,239,0.92));
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
 .module-category-badges {
   display: inline-flex;

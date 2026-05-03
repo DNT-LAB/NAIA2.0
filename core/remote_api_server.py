@@ -2338,6 +2338,36 @@ class RemoteBridge(QObject):
                 prompt_parts.append(value)
         return ", ".join(prompt_parts).strip()
 
+    def _build_artist_thumb_random_peng_override(self, artist_prompt: str) -> dict:
+        artist_value = str(artist_prompt or "").strip().rstrip(",")
+        if not artist_value:
+            raise ValueError("artist_prompt is required")
+
+        module = self._find_module("prompt_engineering")
+        if not module:
+            return {
+                "pre_prompt": artist_value,
+                "post_prompt": "",
+                "auto_hide": "",
+                "preprocessing_options": {},
+            }
+
+        pre_prompt = module.pre_textedit.toPlainText() if module.pre_textedit else ""
+        post_prompt = module.post_textedit.toPlainText() if module.post_textedit else ""
+        auto_hide = module.auto_hide_textedit.toPlainText() if module.auto_hide_textedit else ""
+        preprocessing = {}
+        for label, checkbox in module.preprocessing_checkboxes.items():
+            key = module.option_key_map.get(label, label)
+            preprocessing[key] = checkbox.isChecked()
+
+        pre_prompt = str(pre_prompt or "").strip()
+        return {
+            "pre_prompt": f"{artist_value}, {pre_prompt}" if pre_prompt else artist_value,
+            "post_prompt": post_prompt,
+            "auto_hide": auto_hide,
+            "preprocessing_options": preprocessing,
+        }
+
     def _do_artist_thumb_generate(self, payload: dict):
         try:
             payload = payload if isinstance(payload, dict) else {}
@@ -9701,6 +9731,54 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return await asyncio.to_thread(bridge._cancel_artist_thumb_download)
         except Exception as e:
             return JSONResponse({"error": f"Artist Thumb download cancel failed: {e}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/random-prompt")
+    async def api_artist_thumb_random_prompt(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        artist_prompt = str(payload.get("artist_prompt") or "").strip()
+        if not artist_prompt:
+            return JSONResponse({"error": "artist_prompt is required"}, status_code=400)
+        try:
+            timeout = max(5.0, min(60.0, float(payload.get("timeout", 30))))
+        except (TypeError, ValueError):
+            timeout = 30.0
+
+        try:
+            peng_override = await asyncio.to_thread(
+                bridge._build_artist_thumb_random_peng_override,
+                artist_prompt,
+            )
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        request_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        with bridge._comfyui_requests_lock:
+            bridge._pending_comfyui_requests[request_id] = future
+
+        bridge._pending_random_requests.append({
+            "ws": None,
+            "source_row": None,
+            "active_ratings": set(bridge._active_ratings),
+            "comfyui_request_id": request_id,
+            "respect_naia_autogen": False,
+            "force_naia_skip_generate": True,
+            "peng_override": peng_override,
+        })
+        bridge.request_random.emit()
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            with bridge._comfyui_requests_lock:
+                bridge._pending_comfyui_requests.pop(request_id, None)
+            return JSONResponse({"error": "timeout"}, status_code=504)
 
     @app.post("/api/artist-thumb/generate")
     async def api_artist_thumb_generate(req: Request):

@@ -1999,15 +1999,31 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   font-size: 12px;
 }
 .artist-thumb-generate {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
   width: 100%;
   min-height: 40px;
-  margin-top: 2px;
+  margin-top: 0;
   font-weight: 800;
   background: linear-gradient(135deg, rgba(124, 106, 239, 0.95), rgba(157, 139, 255, 0.86));
   border-color: rgba(157, 139, 255, 0.5);
+}
+.artist-thumb-generate-stack {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 2px;
+  background: var(--bg-surface);
+}
+.artist-thumb-random-generate {
+  background: linear-gradient(135deg, rgba(237, 126, 47, 0.96), rgba(255, 169, 77, 0.88));
+  border-color: rgba(255, 169, 77, 0.58);
+  color: #fff7ed;
+}
+.artist-thumb-random-generate:hover {
+  border-color: rgba(255, 190, 110, 0.82);
+  background: linear-gradient(135deg, rgba(246, 137, 54, 1), rgba(255, 183, 92, 0.94));
 }
 .artist-thumb-status-row {
   min-height: 40px;

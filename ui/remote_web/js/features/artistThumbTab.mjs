@@ -34,6 +34,7 @@ export function createArtistThumbController({
   const positiveEl = document.getElementById('artistThumbPositive');
   const postfixEl = document.getElementById('artistThumbPostfix');
   const generateBtn = document.getElementById('artistThumbGenerateBtn');
+  const randomGenerateBtn = document.getElementById('artistThumbRandomGenerateBtn');
   const resultPreviewEl = document.getElementById('artistThumbResultPreview');
   const resultTitleEl = document.getElementById('artistThumbResultTitle');
   const resultCloseBtn = document.getElementById('artistThumbResultClose');
@@ -41,6 +42,8 @@ export function createArtistThumbController({
   const resultEmptyEl = document.getElementById('artistThumbResultEmpty');
 
   const PAGE_SIZE = 48;
+  const GENERATE_LABEL = 'Generate 832 x 1216';
+  const RANDOM_GENERATE_LABEL = 'Generate with Random Prompt';
   let state = null;
   let statePromise = null;
   let listRequestId = 0;
@@ -142,6 +145,24 @@ export function createArtistThumbController({
       resultImageEl.classList.remove('show');
     }
     if (resultEmptyEl) resultEmptyEl.hidden = false;
+  }
+
+  function setGenerateBusy(source, label) {
+    if (generateBtn) generateBtn.disabled = true;
+    if (randomGenerateBtn) randomGenerateBtn.disabled = true;
+    if (source === 'manual' && generateBtn) generateBtn.textContent = label || 'Requesting...';
+    if (source === 'random' && randomGenerateBtn) randomGenerateBtn.textContent = label || 'Randomizing...';
+  }
+
+  function clearGenerateBusy() {
+    if (generateBtn) {
+      generateBtn.disabled = false;
+      generateBtn.textContent = GENERATE_LABEL;
+    }
+    if (randomGenerateBtn) {
+      randomGenerateBtn.disabled = false;
+      randomGenerateBtn.textContent = RANDOM_GENERATE_LABEL;
+    }
   }
 
   function currentModeInfo() {
@@ -568,8 +589,7 @@ export function createArtistThumbController({
       revokeResultBlobUrl();
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
       showResultPreview('Waiting for generated image...');
-      generateBtn.disabled = true;
-      generateBtn.textContent = 'Requesting...';
+      setGenerateBusy('manual', 'Requesting...');
       await postJson('/api/artist-thumb/options', {
         prefix: payload.prefix,
         postfix: payload.postfix,
@@ -582,8 +602,55 @@ export function createArtistThumbController({
       showResultPreview(error.message || 'Generate failed');
       showToast?.(error.message || 'Generate failed', 'error');
     } finally {
-      generateBtn.disabled = false;
-      generateBtn.textContent = 'Generate 832 x 1216';
+      clearGenerateBusy();
+    }
+  }
+
+  async function generateWithRandomPrompt() {
+    const item = selectedPayload();
+    if (!item) return;
+    const artistPrompt = String(positiveEl?.value || formatArtistPrompt(item.artist) || '').trim();
+    if (!artistPrompt) {
+      showToast?.('Artist Prompt가 비어 있습니다.', 'error');
+      return;
+    }
+    const requestId = makeRequestId();
+    try {
+      pendingResultRequestId = requestId;
+      pendingResultMeta = null;
+      revokeResultBlobUrl();
+      if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · random prompt`;
+      showResultPreview('Generating random prompt...');
+      setGenerateBusy('random', 'Randomizing...');
+
+      const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
+        artist_prompt: artistPrompt,
+        timeout: 45,
+      });
+      const positive = String(randomPrompt.prompt || '').trim();
+      if (!positive) throw new Error('Random prompt is empty');
+
+      if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
+      showResultPreview('Waiting for generated image...');
+      if (randomGenerateBtn) randomGenerateBtn.textContent = 'Requesting...';
+      await postJson('/api/artist-thumb/generate', {
+        request_id: requestId,
+        artist: item.artist,
+        prefix: '',
+        positive,
+        postfix: '',
+        negative_prompt: String(randomPrompt.negative_prompt || negEdit?.value || ''),
+        width: 832,
+        height: 1216,
+      });
+      showToast?.('랜덤 프롬프트 생성 요청을 보냈습니다.', 'success');
+    } catch (error) {
+      pendingResultRequestId = '';
+      pendingResultMeta = null;
+      showResultPreview(error.message || 'Random prompt generate failed');
+      showToast?.(error.message || 'Random prompt generate failed', 'error');
+    } finally {
+      clearGenerateBusy();
     }
   }
 
@@ -709,6 +776,7 @@ export function createArtistThumbController({
     copyBtn?.addEventListener('click', copySelected);
     insertBtn?.addEventListener('click', insertSelected);
     generateBtn?.addEventListener('click', generateSelected);
+    randomGenerateBtn?.addEventListener('click', generateWithRandomPrompt);
     resultCloseBtn?.addEventListener('click', closeResultPreview);
     prefixEl?.addEventListener('input', scheduleSaveOptions);
     postfixEl?.addEventListener('input', scheduleSaveOptions);

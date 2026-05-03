@@ -91,6 +91,24 @@ def _is_naid3_model_from_context(app_context) -> bool:
     return "NAID3" in _get_current_model_from_context(app_context)
 
 
+def _coerce_vibe_float(value, default: Optional[float], minimum: float, maximum: float) -> Optional[float]:
+    if value is None:
+        return default
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, numeric))
+
+
+def _coerce_reference_strength(value, default: Optional[float] = 0.6) -> Optional[float]:
+    return _coerce_vibe_float(value, default, -1.0, 1.0)
+
+
+def _coerce_information_extracted(value, default: Optional[float] = 1.0) -> Optional[float]:
+    return _coerce_vibe_float(value, default, 0.0, 1.0)
+
+
 class VibeEncodingWorker(QThread):
     """Background worker for vibe encoding API calls"""
     encoding_finished = pyqtSignal(bool, str, dict)  # success, message, result
@@ -244,6 +262,12 @@ class VibeTransferFrame(QFrame):
                     self.vibe_encodings = {
                         float(k): v for k, v in data.get("encodings", {}).items()
                     }
+                    self.reference_strength = _coerce_reference_strength(
+                        data.get("reference_strength"), self.reference_strength
+                    )
+                    self.information_extracted = _coerce_information_extracted(
+                        data.get("information_extracted"), self.information_extracted
+                    )
             except Exception as e:
                 print(f"Failed to load vibe encodings: {e}")
                 
@@ -290,6 +314,8 @@ class VibeTransferFrame(QFrame):
             "file_name": self.file_name,
             "file_hash": self.file_hash,
             "encodings": {str(k): v for k, v in self.vibe_encodings.items()},
+            "reference_strength": self.reference_strength,
+            "information_extracted": self.information_extracted,
             "volatile": is_volatile  # Mark as volatile if no_image_
         }
         
@@ -537,6 +563,8 @@ class VibeTransferFrame(QFrame):
         """Update reference strength value"""
         self.reference_strength = value
         self.ref_strength_label.setText(f"Reference Strength {value:.2f}")
+        if self.vibe_encodings:
+            self._save_encodings()
     
     def _update_model_compatibility_display(self, current_model: str):
         """Update model label color based on compatibility"""
@@ -596,6 +624,8 @@ class VibeTransferFrame(QFrame):
             self.info_extracted_label.setText(f"Information Extracted {value:.2f}")
             self._update_encoding_status()
             self._update_encode_button_visibility()
+        if self.vibe_encodings:
+            self._save_encodings()
         
     def _update_encoding_status(self):
         """Update encoding status label based on available encodings"""
@@ -1513,6 +1543,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             # Process encodings for each model
             encodings_data = vibe_data.get('encodings', {})
             imported_any = False
+
+            # Extract importInfo.strength if present
+            import_strength = None
+            import_info = vibe_data.get('importInfo')
+            if isinstance(import_info, dict):
+                import_strength = _coerce_reference_strength(import_info.get('strength'), None)
             
             for model_key, model_name in model_map.items():
                 if model_key in encodings_data:
@@ -1531,18 +1567,16 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     
                     if vibe_encodings:
                         # Save to storage for this model
-                        self._save_imported_vibe(model_name, file_hash, image_path, vibe_encodings)
+                        self._save_imported_vibe(
+                            model_name,
+                            file_hash,
+                            image_path,
+                            vibe_encodings,
+                            reference_strength=import_strength,
+                        )
                         imported_any = True
             
             # Add frame if any encodings were imported
-            # Extract importInfo.strength if present
-            import_strength = None
-            import_info = vibe_data.get('importInfo')
-            if isinstance(import_info, dict):
-                s = import_info.get('strength')
-                if s is not None:
-                    import_strength = float(s)
-
             if imported_any and image_path:
                 # Check if this is a no_image case
                 is_no_image = "no_image_" in image_path
@@ -1562,6 +1596,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                         model_encodings = encodings_data[model_key]
                         reference_image_multiple = []
                         reference_strength_multiple = []
+                        reference_information_extracted_multiple = []
                         
                         for encoding_id, encoding_info in model_encodings.items():
                             if isinstance(encoding_info, dict):
@@ -1571,13 +1606,15 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                                 
                                 if encoding_value:
                                     reference_image_multiple.append(encoding_value)
-                                    reference_strength_multiple.append(float(info_extracted))
+                                    reference_strength_multiple.append(import_strength if import_strength is not None else 0.6)
+                                    reference_information_extracted_multiple.append(float(info_extracted))
                         
                         if reference_image_multiple:
                             # Create no_image vibe data
                             vibe_data = {
                                 'reference_image_multiple': reference_image_multiple,
-                                'reference_strength_multiple': reference_strength_multiple
+                                'reference_strength_multiple': reference_strength_multiple,
+                                'reference_information_extracted_multiple': reference_information_extracted_multiple,
                             }
                             
                             # Use special no_image frame creation
@@ -1621,7 +1658,15 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             print(f"Error processing vibe: {e}")
             return False
     
-    def _save_imported_vibe(self, model: str, file_hash: str, image_path: str, encodings: dict):
+    def _save_imported_vibe(
+        self,
+        model: str,
+        file_hash: str,
+        image_path: str,
+        encodings: dict,
+        reference_strength: Optional[float] = None,
+        information_extracted: Optional[float] = None,
+    ):
         """Save imported vibe to storage"""
         try:
             # Create directories
@@ -1642,6 +1687,13 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             
             # Save JSON data
             json_path = vibe_folder / f"{file_hash}.json"
+            existing_data = {}
+            if json_path.exists():
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                except Exception:
+                    existing_data = {}
             json_data = {
                 "file_hash": file_hash,
                 "file_path": image_path,
@@ -1649,6 +1701,14 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 "encodings": {str(k): v for k, v in encodings.items()},
                 "volatile": is_volatile
             }
+            if reference_strength is None and "reference_strength" in existing_data:
+                reference_strength = _coerce_reference_strength(existing_data.get("reference_strength"), None)
+            if information_extracted is None and "information_extracted" in existing_data:
+                information_extracted = _coerce_information_extracted(existing_data.get("information_extracted"), None)
+            if reference_strength is not None:
+                json_data["reference_strength"] = reference_strength
+            if information_extracted is not None:
+                json_data["information_extracted"] = information_extracted
             
             # Track volatile files
             if is_volatile:
@@ -1723,6 +1783,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         try:
             # Handle None values
             ref_img_multiple = vibe_data.get('reference_image_multiple') or []
+            ref_str_multiple = vibe_data.get('reference_strength_multiple') or []
             ref_ie_multiple = vibe_data.get('reference_information_extracted_multiple') or []
 
             # Early return if no valid vibe data
@@ -1765,6 +1826,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 # Default: use 1.0 as key (non-NAID3 models)
                 for encoding in ref_img_multiple:
                     frame.vibe_encodings[1.0] = encoding
+
+            if ref_str_multiple:
+                strength = _coerce_reference_strength(ref_str_multiple[0], frame.reference_strength)
+                frame.reference_strength = strength
+                frame.ref_strength_slider.setValue(int(strength * 100))
+                frame.ref_strength_label.setText(f"Reference Strength {strength:.2f}")
 
             # Mark this as a no_image frame by setting special properties
             frame.file_name = no_image_path
@@ -1842,7 +1909,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
 
             # Apply reference_strength if provided
             if ref_str_multiple:
-                strength = float(ref_str_multiple[0])
+                strength = _coerce_reference_strength(ref_str_multiple[0], frame.reference_strength)
                 frame.reference_strength = strength
                 frame.ref_strength_slider.setValue(int(strength * 100))
                 frame.ref_strength_label.setText(f"Reference Strength {strength:.2f}")
@@ -2073,6 +2140,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            stored_strength = _coerce_reference_strength(data.get("reference_strength"), None)
                 
             # Get original file path or use saved image
             file_path = data.get("file_path")
@@ -2094,6 +2162,10 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     # If already loaded, just update the slider value
                     frame.info_extracted_slider.setValue(int(selected_encoding * 100))
                     frame.information_extracted = selected_encoding
+                    if stored_strength is not None:
+                        frame.reference_strength = stored_strength
+                        frame.ref_strength_slider.setValue(int(stored_strength * 100))
+                        frame.ref_strength_label.setText(f"Reference Strength {stored_strength:.2f}")
                     frame._update_encoding_status()
                     frame._update_encode_button_visibility()
                     print(f"Vibe already loaded. Slider set to {selected_encoding:.2f}")
@@ -2117,6 +2189,10 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 frame.information_extracted = selected_encoding
                 frame.info_extracted_slider.setValue(int(selected_encoding * 100))
                 frame.info_extracted_label.setText(f"Information Extracted {selected_encoding:.2f}")
+                if stored_strength is not None:
+                    frame.reference_strength = stored_strength
+                    frame.ref_strength_slider.setValue(int(stored_strength * 100))
+                    frame.ref_strength_label.setText(f"Reference Strength {stored_strength:.2f}")
                     
                 # Update UI
                 frame._update_encoding_status()

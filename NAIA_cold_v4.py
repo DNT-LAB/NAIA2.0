@@ -2264,12 +2264,13 @@ class ModernMainWindow(QMainWindow):
 
         # ANIMA 가중치 입력 (ANIMA 선택 시만 표시)
         self.anima_weight_edit = QLineEdit()
-        self.anima_weight_edit.setPlaceholderText("0.75")
+        self.anima_weight_edit.setPlaceholderText("1")
+        self.anima_weight_edit.setText("1")
         self.anima_weight_edit.setFixedWidth(get_scaled_size(70))
         self.anima_weight_edit.setToolTip(
-            "ANIMA 가중치 (기본 0.75)\n"
+            "ANIMA 가중치 (기본 1)\n"
             "· 0 또는 1 입력 → 가중치 없음 (블록 래핑 생략)\n"
-            "· 잘못된 값 → 기본값 0.75"
+            "· 잘못된 값 → 기본값 1"
         )
         self.anima_weight_edit.setStyleSheet(DARK_STYLES['compact_lineedit'])
         self.anima_weight_edit.setProperty("autocomplete_ignore", True)
@@ -3107,7 +3108,7 @@ class ModernMainWindow(QMainWindow):
                     if workflow_type == "unet" and hasattr(self, 'comfyui_rescale_slider'):
                         params["rescale_cfg"] = self.comfyui_rescale_slider.value() / 100.0
 
-                    # ANIMA 모드: 사용자 지정 가중치 (공란/잘못된 값 → prompt_processor 가 기본값 0.75 로 복원)
+                    # ANIMA 모드: 사용자 지정 가중치 (공란/잘못된 값 → prompt_processor 가 기본값 1 로 복원)
                     if sampling_mode == "anima" and hasattr(self, 'anima_weight_edit'):
                         raw = self.anima_weight_edit.text().strip()
                         if raw:

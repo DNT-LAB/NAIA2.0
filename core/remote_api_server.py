@@ -4408,14 +4408,14 @@ class RemoteBridge(QObject):
     def _format_anima_weight(self, raw) -> str:
         text = str(raw or "").strip()
         if not text:
-            value = 0.75
+            value = 1.0
         else:
             try:
                 value = float(text)
             except (TypeError, ValueError):
-                value = 0.75
+                value = 1.0
             if not math.isfinite(value):
-                value = 0.75
+                value = 1.0
         return f"{value:.3f}".rstrip("0").rstrip(".")
 
     def _comfyui_workflow_state_payload(self, event_data: Optional[dict] = None) -> dict:

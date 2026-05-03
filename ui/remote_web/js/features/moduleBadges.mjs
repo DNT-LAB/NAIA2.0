@@ -20,7 +20,7 @@ export function createModuleBadges({
   };
   const comfyUiStatus = {
     samplingMode: 'eps',
-    animaWeight: '0.75',
+    animaWeight: '1',
     workflowHasCustom: false,
   };
   let weightPopover = null;
@@ -43,9 +43,9 @@ export function createModuleBadges({
 
   function formatAnimaWeight(value) {
     const text = String(value ?? '').trim();
-    if (!text) return '0.75';
+    if (!text) return '1';
     const parsed = Number(text);
-    if (!Number.isFinite(parsed)) return '0.75';
+    if (!Number.isFinite(parsed)) return '1';
     return parsed.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
   }
 
@@ -112,7 +112,7 @@ export function createModuleBadges({
     weightPopover = document.createElement('div');
     weightPopover.className = 'comfyui-weight-popover';
     weightPopover.innerHTML = `
-      <input class="comfyui-weight-input" type="text" inputmode="decimal" placeholder="0.75" aria-label="ANIMA weight">
+      <input class="comfyui-weight-input" type="text" inputmode="decimal" placeholder="1" aria-label="ANIMA weight">
       <button class="comfyui-weight-apply" type="button">OK</button>
     `;
     weightInput = weightPopover.querySelector('.comfyui-weight-input');

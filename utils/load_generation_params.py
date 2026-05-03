@@ -206,12 +206,10 @@ class GenerationParamsManager:
             if hasattr(mw, 'comfyui_rescale_slider') and mw.comfyui_rescale_slider:
                 settings["comfyui_rescale_cfg"] = mw.comfyui_rescale_slider.value() / 100.0
 
-            # ANIMA 가중치 — ANIMA 모드 선택 + 비공란일 때만 저장
+            # ANIMA 가중치 — ANIMA 모드 선택 시 공란은 기본값 1로 저장
             if (hasattr(mw, 'anima_radio') and mw.anima_radio.isChecked()
                     and hasattr(mw, 'anima_weight_edit')):
-                text = mw.anima_weight_edit.text().strip()
-                if text:
-                    settings["anima_weight"] = text
+                settings["anima_weight"] = mw.anima_weight_edit.text().strip() or "1"
 
             # WEBUI 전용 파라미터 수집
             if hasattr(mw, 'enable_hr_checkbox'):
@@ -301,7 +299,7 @@ class GenerationParamsManager:
             # ComfyUI 샘플링 모드 (eps, v_prediction, anima)
             "sampling_mode": "eps",
             "comfyui_rescale_cfg": 0.7,
-            "anima_weight": "",  # ANIMA 모드 전용, 공란 → prompt_processor 기본값 0.75
+            "anima_weight": "1",  # ANIMA 모드 전용, 공란 → prompt_processor 기본값 1
             
             # 기타 체크박스들
             "random_resolution_checked": False,
@@ -468,7 +466,7 @@ class GenerationParamsManager:
 
             # ANIMA 가중치 값 복원 (ANIMA 모드에서만 의미, 그 외 모드에서는 위젯이 숨김이라 무해)
             if hasattr(mw, 'anima_weight_edit'):
-                mw.anima_weight_edit.setText(str(settings.get("anima_weight", "")))
+                mw.anima_weight_edit.setText(str(settings.get("anima_weight") or "1"))
 
             # Rescale CFG / ANIMA 가중치 가시성: setChecked는 buttonClicked을 발생시키지 않으므로 수동 처리
             is_comfyui = (mw.get_current_api_mode() == "COMFYUI") if hasattr(mw, 'get_current_api_mode') else False

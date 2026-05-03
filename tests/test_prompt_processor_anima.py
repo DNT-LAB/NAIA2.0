@@ -55,3 +55,38 @@ def test_anima_prompt_formatting_uses_workflow_type_for_param_only_contexts():
 
     assert context.prefix_tags[0] == "1girl"
     assert context.main_tags[1] == "blue sky"
+
+
+def test_anima_prompt_formatting_defaults_to_weight_one_without_wrapping():
+    processor = _processor_with_main_radio(checked=False)
+    context = PromptContext(
+        source_row={},
+        settings={
+            "comfyui_sampling_mode": "anima",
+        },
+        prefix_tags=[],
+        main_tags=["1girl", "blue sky"],
+    )
+
+    processor._step_final_format(context)
+
+    assert context.prefix_tags[0] == "1girl"
+    assert context.main_tags[1] == "blue sky"
+
+
+def test_anima_prompt_formatting_invalid_weight_falls_back_to_one():
+    processor = _processor_with_main_radio(checked=False)
+    context = PromptContext(
+        source_row={},
+        settings={
+            "comfyui_sampling_mode": "anima",
+            "anima_weight": "not-a-number",
+        },
+        prefix_tags=[],
+        main_tags=["1girl", "blue sky"],
+    )
+
+    processor._step_final_format(context)
+
+    assert context.prefix_tags[0] == "1girl"
+    assert context.main_tags[1] == "blue sky"

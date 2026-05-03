@@ -958,3 +958,76 @@ def test_original_endpoint_falls_back_for_current_without_path():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/webp")
     assert response.content == b"latest-webp"
+
+
+def _bridge_with_artist_thumb_lists(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("wildcards").mkdir()
+    Path("artist_thumb/banned_artist.txt").write_text("b\nmissing\n", encoding="utf-8")
+    Path("artist_thumb/group.txt").write_text("a\nb\nc\nmissing\n", encoding="utf-8")
+    Path("wildcards/favorite_artist.txt").write_text("a\nb\n", encoding="utf-8")
+
+    bridge = RemoteBridge(_AppContext())
+    bridge._artist_thumb_artist_weights = lambda: {
+        "a": 10,
+        "b": 9,
+        "c": 8,
+        "d": 7,
+        "e": 6,
+    }
+    bridge._load_artist_thumb_data = lambda mode: {
+        "a": ["thumb"],
+        "b": ["thumb"],
+        "c": ["thumb"],
+        "d": ["thumb"],
+        "e": ["thumb"],
+    }
+    return bridge
+
+
+def test_artist_thumb_state_counts_visible_artists_after_bans(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+
+    state = bridge._build_artist_thumb_state()
+    counts = {item["key"]: item["count"] for item in state["filters"]}
+
+    assert counts["all"] == 4
+    assert counts["favorites"] == 1
+    assert counts["banned"] == 1
+    assert counts["custom:group"] == 2
+
+
+def test_artist_thumb_list_and_random_exclude_banned_artists(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+
+    payload = bridge._build_artist_thumb_list("mode", "all", "", 0, 48)
+    assert payload["total"] == 4
+    assert "b" not in {item["artist"] for item in payload["items"]}
+
+    favorite_payload = bridge._build_artist_thumb_list("mode", "favorites", "", 0, 48)
+    assert [item["artist"] for item in favorite_payload["items"]] == ["a"]
+
+    custom_payload = bridge._build_artist_thumb_list("mode", "custom:group", "", 0, 48)
+    assert custom_payload["total"] == 2
+    assert "b" not in {item["artist"] for item in custom_payload["items"]}
+
+    banned_random = bridge._build_artist_thumb_list("mode", "banned", "", 0, 2, True)
+    assert banned_random["total"] == 0
+    assert banned_random["items"] == []
+
+
+def test_artist_thumb_random_sample_avoids_recent_repeats(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+    weights = {"b": 100, **{f"a{i}": i for i in range(25)}}
+    bridge._artist_thumb_artist_weights = lambda: weights
+    bridge._load_artist_thumb_data = lambda mode: {artist: ["thumb"] for artist in weights}
+
+    first = bridge._build_artist_thumb_list("mode", "all", "", 0, 12, True)
+    second = bridge._build_artist_thumb_list("mode", "all", "", 0, 12, True)
+
+    first_artists = {item["artist"] for item in first["items"]}
+    second_artists = {item["artist"] for item in second["items"]}
+    assert len(first_artists) == 12
+    assert len(second_artists) == 12
+    assert first_artists.isdisjoint(second_artists)

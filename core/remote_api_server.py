@@ -249,6 +249,7 @@ class RemoteBridge(QObject):
         self._style_thumb_data_cache: Optional[dict] = None
         self._artist_thumb_data_cache: dict[str, dict] = {}
         self._artist_thumb_image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
+        self._artist_thumb_random_history: dict[tuple[str, str, str, int], list[str]] = {}
         self._artist_thumb_lock = threading.RLock()
         self._artist_thumb_download_thread: Optional[threading.Thread] = None
         self._artist_thumb_download_cancel = threading.Event()
@@ -2067,18 +2068,21 @@ class RemoteBridge(QObject):
     def _artist_thumb_banned(self) -> list[str]:
         return self._read_artist_thumb_lines(self._artist_thumb_banned_path())
 
-    def _artist_thumb_custom_filters(self) -> list[dict]:
+    def _artist_thumb_custom_filters(self, weights: dict | None = None, banned_set: set[str] | None = None) -> list[dict]:
         base = Path("artist_thumb")
         filters = []
         if not base.exists():
             return filters
+        weights = weights or self._artist_thumb_artist_weights()
+        banned_set = banned_set if banned_set is not None else set(self._artist_thumb_banned())
         for path in sorted(base.glob("*.txt")):
             if path.name == "banned_artist.txt":
                 continue
+            items = self._read_artist_thumb_lines(path)
             filters.append({
                 "key": f"custom:{path.stem}",
                 "name": path.stem,
-                "count": len(self._read_artist_thumb_lines(path)),
+                "count": len([a for a in items if a in weights and a not in banned_set]),
             })
         return filters
 
@@ -2138,28 +2142,74 @@ class RemoteBridge(QObject):
         except Exception:
             return 0
 
-    def _artist_thumb_base_list(self, filter_key: str, weights: dict) -> tuple[list[str], str]:
+    def _artist_thumb_base_list(
+        self,
+        filter_key: str,
+        weights: dict,
+        *,
+        exclude_banned: bool = True,
+        allow_banned_filter: bool = True,
+    ) -> tuple[list[str], str]:
         key = str(filter_key or "all").strip() or "all"
         favorites = self._artist_thumb_favorites()
         banned = self._artist_thumb_banned()
         banned_set = set(banned)
 
         if key == "favorites":
-            return [a for a in favorites if a in weights], "관심 작가"
+            items = [a for a in favorites if a in weights]
+            if exclude_banned:
+                items = [a for a in items if a not in banned_set]
+            return items, "관심 작가"
         if key == "banned":
+            if not allow_banned_filter:
+                return [], "제외 작가"
             return [a for a in banned if a in weights], "제외 작가"
         if key.startswith("custom:"):
             name = key.split(":", 1)[1].strip()
             safe_name = Path(name).name
             items = self._read_artist_thumb_lines(Path("artist_thumb") / f"{safe_name}.txt")
-            return [a for a in items if a in weights], safe_name
+            items = [a for a in items if a in weights]
+            if exclude_banned:
+                items = [a for a in items if a not in banned_set]
+            return items, safe_name
 
         return [a for a in weights.keys() if a not in banned_set], "전체 목록"
+
+    def _artist_thumb_random_sample(
+        self,
+        artists: list[str],
+        sample_size: int,
+        history_key: tuple[str, str, str, int],
+    ) -> list[str]:
+        if sample_size <= 0 or not artists:
+            return []
+
+        with self._artist_thumb_lock:
+            recent = set(self._artist_thumb_random_history.get(history_key, []))
+
+        candidates = [artist for artist in artists if artist not in recent]
+        if len(candidates) < sample_size:
+            candidates = list(artists)
+
+        picked = random.SystemRandom().sample(candidates, min(sample_size, len(candidates)))
+
+        with self._artist_thumb_lock:
+            history = [artist for artist in self._artist_thumb_random_history.get(history_key, []) if artist in artists]
+            history.extend(picked)
+            max_history = max(sample_size * 8, sample_size)
+            if len(history) > max_history:
+                history = history[-max_history:]
+            self._artist_thumb_random_history[history_key] = history
+            if len(self._artist_thumb_random_history) > 64:
+                self._artist_thumb_random_history.pop(next(iter(self._artist_thumb_random_history)), None)
+
+        return picked
 
     def _build_artist_thumb_state(self) -> dict:
         weights = self._artist_thumb_artist_weights()
         favorites = self._artist_thumb_favorites()
         banned = self._artist_thumb_banned()
+        banned_set = set(banned)
         modes = []
         for key, info in self.ARTIST_THUMB_MODES.items():
             path = Path(info["path"])
@@ -2173,10 +2223,14 @@ class RemoteBridge(QObject):
         return {
             "modes": modes,
             "filters": [
-                {"key": "all", "name": "전체 목록", "count": max(0, len(weights) - len(set(banned)))},
-                {"key": "favorites", "name": "관심 작가", "count": len(favorites)},
-                {"key": "banned", "name": "제외 작가", "count": len(banned)},
-                *self._artist_thumb_custom_filters(),
+                {"key": "all", "name": "전체 목록", "count": len(self._artist_thumb_base_list("all", weights)[0])},
+                {
+                    "key": "favorites",
+                    "name": "관심 작가",
+                    "count": len(self._artist_thumb_base_list("favorites", weights)[0]),
+                },
+                {"key": "banned", "name": "제외 작가", "count": len([a for a in banned if a in weights])},
+                *self._artist_thumb_custom_filters(weights, banned_set),
             ],
             "artist_count": len(weights),
             "favorites": favorites,
@@ -2194,9 +2248,15 @@ class RemoteBridge(QObject):
         per_page: int = 48,
         random_sample: bool = False,
     ) -> dict:
+        mode_key = str(mode or "").strip()
         weights = self._artist_thumb_artist_weights()
-        thumb_data = self._load_artist_thumb_data(mode) if str(mode or "").strip() else {}
-        base_list, filter_name = self._artist_thumb_base_list(filter_key, weights)
+        thumb_data = self._load_artist_thumb_data(mode_key) if mode_key else {}
+        base_list, filter_name = self._artist_thumb_base_list(
+            filter_key,
+            weights,
+            exclude_banned=True,
+            allow_banned_filter=not random_sample,
+        )
         if thumb_data:
             thumb_keys = set(thumb_data.keys())
             base_list = [artist for artist in base_list if artist in thumb_keys]
@@ -2221,13 +2281,16 @@ class RemoteBridge(QObject):
             page = max(0, total_pages - 1)
         if random_sample:
             sample_size = min(per_page, total)
-            artists = random.sample(base_list, sample_size) if sample_size > 0 else []
+            artists = self._artist_thumb_random_sample(
+                base_list,
+                sample_size,
+                (mode_key, str(filter_key or "all"), query_text, per_page),
+            )
         else:
             start = page * per_page
             artists = base_list[start:start + per_page]
         favorite_set = set(self._artist_thumb_favorites())
         banned_set = set(self._artist_thumb_banned())
-        mode_key = str(mode or "").strip()
 
         return {
             "mode": mode_key,
@@ -2239,6 +2302,7 @@ class RemoteBridge(QObject):
             "total": total,
             "total_pages": total_pages,
             "random": bool(random_sample),
+            "excluded_count": len(banned_set),
             "items": [
                 {
                     "artist": artist,

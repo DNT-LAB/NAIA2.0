@@ -51,6 +51,8 @@ export function createArtistThumbController({
   let optionsTimer = null;
   let currentPage = 0;
   let totalPages = 1;
+  let currentListTotal = 0;
+  let currentListFilterName = '전체 목록';
   let selected = null;
   let wheelPageLocked = false;
   let downloadTimer = null;
@@ -232,6 +234,13 @@ export function createArtistThumbController({
   function currentModeInfo() {
     const mode = currentMode();
     return (state?.modes || []).find(item => item.key === mode) || null;
+  }
+
+  function updateListStatus() {
+    const mode = currentMode();
+    const modeText = mode || '목록';
+    const statusPrefix = randomViewActive ? 'Random artists' : modeText;
+    setStatus(`${statusPrefix} · ${currentListFilterName || '전체 목록'} · ${Number(currentListTotal || 0).toLocaleString()} artists`, 'ok');
   }
 
   function updateRandomUi() {
@@ -427,14 +436,13 @@ export function createArtistThumbController({
       currentPage = Number(data.page || 0);
       totalPages = Math.max(1, Number(data.total_pages || 1));
       randomViewActive = Boolean(data.random);
+      currentListTotal = Number(data.total || 0);
+      currentListFilterName = data.filter_name || '전체 목록';
       renderGrid(data.items || []);
       updatePager();
       hasLoadedList = true;
       scrollGrid(options.anchor || 'top');
-      const count = Number(data.total || 0).toLocaleString();
-      const modeText = mode || '목록';
-      const statusPrefix = data.random ? 'Random artists' : modeText;
-      setStatus(`${statusPrefix} · ${data.filter_name || '전체 목록'} · ${count} artists`, 'ok');
+      updateListStatus();
     } catch (error) {
       if (requestId !== listRequestId) return;
       console.error('Artist Thumb list failed', error);
@@ -696,9 +704,20 @@ export function createArtistThumbController({
     state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned: true});
     const artist = item.artist;
     renderState();
+    let removedCount = 0;
     gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
-      if (card.dataset.artist === artist) card.remove();
+      if (card.dataset.artist === artist) {
+        card.remove();
+        removedCount += 1;
+      }
     });
+    if (removedCount > 0) {
+      currentListTotal = Math.max(0, currentListTotal - removedCount);
+      totalPages = Math.max(1, Math.ceil(currentListTotal / PAGE_SIZE));
+      if (currentPage >= totalPages) currentPage = Math.max(0, totalPages - 1);
+      updatePager();
+      updateListStatus();
+    }
     if (selected?.artist === artist) {
       clearSelectedArtist();
     }

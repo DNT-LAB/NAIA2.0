@@ -21,10 +21,65 @@ class _FakeContext:
         return self.mode
 
 
+class _FakeSlider:
+    def __init__(self):
+        self.value = None
+
+    def setValue(self, value):
+        self.value = value
+
+
+class _FakeLabel:
+    def __init__(self):
+        self.text = None
+
+    def setText(self, text):
+        self.text = text
+
+
+class _FakeFrame:
+    def __init__(self):
+        self.reference_strength = 0.6
+        self.information_extracted = 1.0
+        self.is_no_image = False
+        self.ref_strength_slider = _FakeSlider()
+        self.info_extracted_slider = _FakeSlider()
+        self.ref_strength_label = _FakeLabel()
+        self.info_extracted_label = _FakeLabel()
+        self.status_updates = 0
+        self.button_updates = 0
+
+    def _update_encoding_status(self):
+        self.status_updates += 1
+
+    def _update_encode_button_visibility(self):
+        self.button_updates += 1
+
+
 def _png_bytes(color=(12, 34, 56)):
     buffer = io.BytesIO()
     Image.new("RGB", (3, 2), color).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _write_vibe_storage(tmp_path, model, file_hash, original_path):
+    storage_dir = tmp_path / "save" / "vibe_transfer" / model
+    image_dir = storage_dir / "images"
+    image_dir.mkdir(parents=True)
+    Image.new("RGB", (4, 4), (88, 44, 22)).save(image_dir / f"{file_hash}.png")
+    storage_data = {
+        "file_hash": file_hash,
+        "file_path": str(original_path),
+        "file_name": "source.png",
+        "encodings": {"0.42": "encoded"},
+        "reference_strength": 0.73,
+        "information_extracted": 0.42,
+    }
+    (storage_dir / f"{file_hash}.json").write_text(
+        json.dumps(storage_data),
+        encoding="utf-8",
+    )
+    return storage_data
 
 
 def test_clipboard_mime_png_bytes_reads_raw_png_format():
@@ -178,3 +233,64 @@ def test_vibe_load_after_widget_ready_runs_once(tmp_path, monkeypatch):
     module._load_settings_after_widget_ready()
 
     assert calls == ["NAI"]
+
+
+def test_vibe_restore_uses_storage_image_when_original_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    missing_path = tmp_path / "missing.png"
+    _write_vibe_storage(tmp_path, "NAID4.5F", "abc123", missing_path)
+
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+
+    file_path, file_hash, storage_data = module._resolve_regular_frame_restore_source({
+        "file_path": str(missing_path),
+        "file_hash": "abc123",
+        "target_model": "NAID4.5F",
+    })
+
+    assert tmp_path.joinpath(file_path).resolve() == (
+        tmp_path / "save" / "vibe_transfer" / "NAID4.5F" / "images" / "abc123.png"
+    )
+    assert file_hash == "abc123"
+    assert storage_data["reference_strength"] == 0.73
+
+
+def test_vibe_restore_finds_legacy_storage_without_saved_hash(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    missing_path = tmp_path / "legacy-source.png"
+    _write_vibe_storage(tmp_path, "NAID4.5F", "legacy123", missing_path)
+
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+
+    file_path, file_hash, storage_data = module._resolve_regular_frame_restore_source({
+        "file_path": str(missing_path),
+        "target_model": "NAID4.5F",
+    })
+
+    assert tmp_path.joinpath(file_path).resolve() == (
+        tmp_path / "save" / "vibe_transfer" / "NAID4.5F" / "images" / "legacy123.png"
+    )
+    assert file_hash == "legacy123"
+    assert storage_data["information_extracted"] == 0.42
+
+
+def test_apply_frame_storage_metadata_updates_strength_and_information_extracted():
+    module = VibeTransferModule()
+    frame = _FakeFrame()
+
+    changed = module._apply_frame_storage_metadata(frame, {
+        "reference_strength": "0.81",
+        "information_extracted": "0.37",
+    })
+
+    assert changed is True
+    assert frame.reference_strength == 0.81
+    assert frame.information_extracted == 0.37
+    assert frame.ref_strength_slider.value == 81
+    assert frame.info_extracted_slider.value == 37
+    assert frame.ref_strength_label.text == "Reference Strength 0.81"
+    assert frame.info_extracted_label.text == "Information Extracted 0.37"
+    assert frame.status_updates == 1
+    assert frame.button_updates == 1

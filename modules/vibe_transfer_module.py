@@ -181,7 +181,15 @@ class VibeTransferFrame(QFrame):
     encoding_requested = pyqtSignal(object, float)  # Signal when encoding is requested
     changed = pyqtSignal()
     
-    def __init__(self, file_path: str, app_context: AppContext, parent=None, is_no_image: bool = False, target_model: str = None):
+    def __init__(
+        self,
+        file_path: str,
+        app_context: AppContext,
+        parent=None,
+        is_no_image: bool = False,
+        target_model: str = None,
+        file_hash_override: str = None,
+    ):
         super().__init__(parent)
         self.app_context = app_context
         self.file_path = file_path
@@ -191,7 +199,7 @@ class VibeTransferFrame(QFrame):
         
         # Only calculate hash and load image if not no_image
         if not self.is_no_image:
-            self.file_hash = self._calculate_file_hash(file_path)
+            self.file_hash = file_hash_override or self._calculate_file_hash(file_path)
             # Load image
             self.image = Image.open(file_path)
             self.image_data = self._image_to_base64(self.image)
@@ -1272,6 +1280,146 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         self.current_mode = current_mode
         if self.is_compatible_with_mode(current_mode):
             self.save_mode_settings(current_mode)
+
+    def _vibe_storage_model_names(self, preferred_model: Optional[str] = None) -> List[str]:
+        models: List[str] = []
+
+        def add_model(model_name):
+            if model_name and model_name not in models:
+                models.append(model_name)
+
+        add_model(preferred_model)
+        add_model(self._get_current_model())
+
+        storage_root = Path("save/vibe_transfer")
+        if storage_root.exists():
+            for model_dir in storage_root.iterdir():
+                if model_dir.is_dir():
+                    add_model(model_dir.name)
+
+        return models
+
+    @staticmethod
+    def _saved_file_paths_match(left: str, right: str) -> bool:
+        if not left or not right:
+            return False
+        if left == right:
+            return True
+        return os.path.normcase(os.path.normpath(left)) == os.path.normcase(os.path.normpath(right))
+
+    @staticmethod
+    def _read_vibe_storage_json(json_path: Path) -> Optional[Dict[str, Any]]:
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Failed to read vibe storage {json_path}: {e}")
+            return None
+
+    def _find_vibe_storage_record(
+        self,
+        file_hash: Optional[str] = None,
+        file_path: Optional[str] = None,
+        preferred_model: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+        storage_root = Path("save/vibe_transfer")
+
+        for model in self._vibe_storage_model_names(preferred_model):
+            if file_hash:
+                json_path = storage_root / model / f"{file_hash}.json"
+                if json_path.exists():
+                    data = self._read_vibe_storage_json(json_path)
+                    if data is not None:
+                        return model, file_hash, data
+
+        if not file_path or not storage_root.exists():
+            return None, None, None
+
+        for model in self._vibe_storage_model_names(preferred_model):
+            model_dir = storage_root / model
+            if not model_dir.exists():
+                continue
+            for json_path in model_dir.glob("*.json"):
+                data = self._read_vibe_storage_json(json_path)
+                if data is None:
+                    continue
+                if self._saved_file_paths_match(data.get("file_path"), file_path):
+                    stored_hash = data.get("file_hash") or json_path.stem
+                    return model, stored_hash, data
+
+        return None, None, None
+
+    def _resolve_regular_frame_restore_source(
+        self,
+        frame_data: Dict[str, Any],
+    ) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+        file_path = frame_data.get("file_path")
+        file_hash = frame_data.get("file_hash")
+        target_model = frame_data.get("target_model")
+        storage_model, storage_hash, storage_data = self._find_vibe_storage_record(
+            file_hash=file_hash,
+            file_path=file_path,
+            preferred_model=target_model,
+        )
+
+        if file_path and os.path.exists(file_path):
+            return file_path, storage_hash or file_hash, storage_data
+
+        if storage_model and storage_hash:
+            image_path = Path("save/vibe_transfer") / storage_model / "images" / f"{storage_hash}.png"
+            if image_path.exists():
+                return str(image_path), storage_hash, storage_data
+
+        return None, None, storage_data
+
+    @staticmethod
+    def _set_widget_value(widget, value: int):
+        if not widget:
+            return
+        if hasattr(widget, "blockSignals"):
+            previous = widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(previous)
+        else:
+            widget.setValue(value)
+
+    def _set_frame_reference_strength(self, frame: VibeTransferFrame, value) -> bool:
+        strength = _coerce_reference_strength(value, None)
+        if strength is None:
+            return False
+
+        frame.reference_strength = strength
+        self._set_widget_value(getattr(frame, "ref_strength_slider", None), int(strength * 100))
+        label = getattr(frame, "ref_strength_label", None)
+        if label:
+            label.setText(f"Reference Strength {strength:.2f}")
+        return True
+
+    def _set_frame_information_extracted(self, frame: VibeTransferFrame, value) -> bool:
+        information_extracted = _coerce_information_extracted(value, None)
+        if information_extracted is None:
+            return False
+
+        frame.information_extracted = information_extracted
+        if not getattr(frame, "is_no_image", False):
+            self._set_widget_value(
+                getattr(frame, "info_extracted_slider", None),
+                int(information_extracted * 100),
+            )
+            label = getattr(frame, "info_extracted_label", None)
+            if label:
+                label.setText(f"Information Extracted {information_extracted:.2f}")
+            frame._update_encoding_status()
+            frame._update_encode_button_visibility()
+        return True
+
+    def _apply_frame_storage_metadata(self, frame: VibeTransferFrame, data: Optional[Dict[str, Any]]) -> bool:
+        if not data:
+            return False
+
+        changed = self._set_frame_reference_strength(frame, data.get("reference_strength"))
+        changed = self._set_frame_information_extracted(frame, data.get("information_extracted")) or changed
+        return changed
         
     def collect_current_settings(self) -> Dict[str, Any]:
         """Collect current UI settings"""
@@ -1287,11 +1435,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 "information_extracted": frame.information_extracted,
                 "is_enabled": frame.is_enabled,
                 "is_no_image": frame.is_no_image,
+                "file_hash": getattr(frame, "file_hash", None),
+                "target_model": frame.target_model or self._get_current_model(),
             }
             if frame.is_no_image:
                 # 가상 경로는 파일이 없으므로 인코딩 데이터를 직접 저장
                 entry["vibe_encodings"] = {str(k): v for k, v in frame.vibe_encodings.items()}
-                entry["target_model"] = frame.target_model
             settings["vibe_frames"].append(entry)
 
         return settings
@@ -1330,22 +1479,29 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                         frame.is_enabled = frame_data.get("is_enabled", True)
                         frame.enable_check.setChecked(frame.is_enabled)
                 else:
-                    if not os.path.exists(frame_data["file_path"]):
+                    file_path, file_hash, storage_data = self._resolve_regular_frame_restore_source(frame_data)
+                    if not file_path:
                         continue
-                    frame = self._add_vibe_frame(frame_data["file_path"])
+                    frame = self._add_vibe_frame(file_path, file_hash_override=file_hash)
                     if frame:
-                        frame.reference_strength = frame_data.get("reference_strength", 0.6)
-                        frame.information_extracted = frame_data.get("information_extracted", 1.0)
+                        if storage_data:
+                            frame.vibe_encodings = {
+                                float(k): v for k, v in storage_data.get("encodings", {}).items()
+                            }
+                            self._apply_frame_storage_metadata(frame, storage_data)
+
+                        self._set_frame_reference_strength(
+                            frame,
+                            frame_data.get("reference_strength", frame.reference_strength),
+                        )
+                        self._set_frame_information_extracted(
+                            frame,
+                            frame_data.get("information_extracted", frame.information_extracted),
+                        )
                         frame.is_enabled = frame_data.get("is_enabled", True)
-
-                        # Update UI
-                        frame.ref_strength_slider.setValue(int(frame.reference_strength * 100))
-                        frame.info_extracted_slider.setValue(int(frame.information_extracted * 100))
                         frame.enable_check.setChecked(frame.is_enabled)
-
-                        # Update labels
-                        frame.ref_strength_label.setText(f"Reference Strength {frame.reference_strength:.2f}")
-                        frame.info_extracted_label.setText(f"Information Extracted {frame.information_extracted:.2f}")
+                        frame._update_encoding_status()
+                        frame._update_encode_button_visibility()
 
             # After applying settings (mode change), refresh encoding states
             self._refresh_all_encoding_states()
@@ -1767,7 +1923,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
     def _is_naid3_model(self) -> bool:
         return _is_naid3_model_from_context(self.app_context)
     
-    def _add_vibe_frame(self, file_path: str) -> Optional[VibeTransferFrame]:
+    def _add_vibe_frame(self, file_path: str, file_hash_override: str = None) -> Optional[VibeTransferFrame]:
         """Add a new vibe transfer frame"""
         if len(self.vibe_frames) >= 8:
             QMessageBox.warning(self.widget, "Limit Reached", "Maximum 8 vibe frames allowed")
@@ -1775,7 +1931,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             
         try:
             # Calculate hash of the new image to check for duplicates
-            new_hash = self._calculate_file_hash_static(file_path)
+            new_hash = file_hash_override or self._calculate_file_hash_static(file_path)
             
             # Check if this image already exists in current frames
             for existing_frame in self.vibe_frames:
@@ -1803,7 +1959,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     print(f"Error reading existing vibe data: {e}")
             
             # Create new frame (will auto-load existing encodings if available)
-            frame = VibeTransferFrame(file_path, self.app_context)
+            frame = VibeTransferFrame(file_path, self.app_context, file_hash_override=file_hash_override)
             self._connect_vibe_frame(frame)
             
             self.scroll_layout.addWidget(frame)
@@ -2123,6 +2279,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                         frame.vibe_encodings = {
                             float(k): v for k, v in data.get("encodings", {}).items()
                         }
+                        self._apply_frame_storage_metadata(frame, data)
                         
                         print(f"Loaded encodings for {frame.file_name}: {list(frame.vibe_encodings.keys())}")
                     except Exception as e:
@@ -2185,6 +2342,10 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             stored_strength = _coerce_reference_strength(data.get("reference_strength"), None)
+            stored_encodings = {
+                float(info_str): encoded_data
+                for info_str, encoded_data in data.get("encodings", {}).items()
+            }
                 
             # Get original file path or use saved image
             file_path = data.get("file_path")
@@ -2203,13 +2364,10 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     # no_image 프레임은 슬라이더가 없으므로 스킵
                     if frame.is_no_image:
                         return
+                    frame.vibe_encodings = stored_encodings
                     # If already loaded, just update the slider value
-                    frame.info_extracted_slider.setValue(int(selected_encoding * 100))
-                    frame.information_extracted = selected_encoding
-                    if stored_strength is not None:
-                        frame.reference_strength = stored_strength
-                        frame.ref_strength_slider.setValue(int(stored_strength * 100))
-                        frame.ref_strength_label.setText(f"Reference Strength {stored_strength:.2f}")
+                    self._set_frame_information_extracted(frame, selected_encoding)
+                    self._set_frame_reference_strength(frame, stored_strength)
                     frame._update_encoding_status()
                     frame._update_encode_button_visibility()
                     print(f"Vibe already loaded. Slider set to {selected_encoding:.2f}")
@@ -2222,21 +2380,14 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     return
                     
             # Add the vibe frame
-            frame = self._add_vibe_frame(file_path)
+            frame = self._add_vibe_frame(file_path, file_hash_override=file_hash)
             if frame:
                 # Load encodings
-                encodings = data.get("encodings", {})
-                for info_str, encoded_data in encodings.items():
-                    frame.vibe_encodings[float(info_str)] = encoded_data
+                frame.vibe_encodings = stored_encodings
                 
                 # Set the selected encoding value
-                frame.information_extracted = selected_encoding
-                frame.info_extracted_slider.setValue(int(selected_encoding * 100))
-                frame.info_extracted_label.setText(f"Information Extracted {selected_encoding:.2f}")
-                if stored_strength is not None:
-                    frame.reference_strength = stored_strength
-                    frame.ref_strength_slider.setValue(int(stored_strength * 100))
-                    frame.ref_strength_label.setText(f"Reference Strength {stored_strength:.2f}")
+                self._set_frame_information_extracted(frame, selected_encoding)
+                self._set_frame_reference_strength(frame, stored_strength)
                     
                 # Update UI
                 frame._update_encoding_status()

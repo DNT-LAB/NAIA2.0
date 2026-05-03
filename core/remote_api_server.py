@@ -152,6 +152,7 @@ class RemoteBridge(QObject):
     request_artist_thumb_generate = pyqtSignal(object)  # Artist Thumbnail generate payload
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
+    request_comfyui_workflow_action = pyqtSignal(str)   # request_id — ComfyUI workflow load/clear
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
     OPTION_KEYS = {
@@ -262,6 +263,9 @@ class RemoteBridge(QObject):
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
+        # ComfyUI workflow actions: FastAPI request_id → {loop, future, action, metadata}
+        self._pending_comfyui_workflow_actions: dict = {}
+        self._comfyui_workflow_actions_lock = threading.Lock()
 
     def _search_filter_state_path(self) -> Path:
         return Path("save") / "remote_web_filter_state.json"
@@ -4469,22 +4473,78 @@ class RemoteBridge(QObject):
         self._broadcast_comfyui_workflow_state(data)
         self._broadcast_params()
 
-    def _load_comfyui_workflow_from_png_bytes(self, image_bytes: bytes) -> dict:
+    def _extract_comfyui_workflow_metadata_from_png_bytes(self, image_bytes: bytes) -> dict:
         if not image_bytes:
-            return {"ok": False, "error": "No image data"}
-        manager = self._get_comfyui_workflow_manager()
-        if manager is None:
-            return {"ok": False, "error": "ComfyUI workflow manager is unavailable"}
+            raise ValueError("No image data")
 
         try:
             from PIL import Image
             with Image.open(io.BytesIO(image_bytes)) as img:
                 metadata = dict(img.info or {})
         except Exception as e:
-            return {"ok": False, "error": f"PNG 분석 실패: {e}"}
+            raise ValueError(f"PNG 분석 실패: {e}") from e
 
         if "prompt" not in metadata or not (metadata.get("workflow") or metadata.get("workflow_api")):
-            return {"ok": False, "error": "선택한 이미지에서 ComfyUI 워크플로우 정보를 찾을 수 없습니다."}
+            raise ValueError("선택한 이미지에서 ComfyUI 워크플로우 정보를 찾을 수 없습니다.")
+        return metadata
+
+    async def _request_comfyui_workflow_action(
+        self,
+        action: str,
+        metadata: Optional[dict] = None,
+        timeout: float = 30.0,
+    ) -> dict:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        request_id = uuid.uuid4().hex
+        with self._comfyui_workflow_actions_lock:
+            self._pending_comfyui_workflow_actions[request_id] = {
+                "loop": loop,
+                "future": future,
+                "action": action,
+                "metadata": metadata,
+            }
+        self.request_comfyui_workflow_action.emit(request_id)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            with self._comfyui_workflow_actions_lock:
+                self._pending_comfyui_workflow_actions.pop(request_id, None)
+
+    def _complete_comfyui_workflow_action(self, request: dict, result: dict):
+        loop = request.get("loop")
+        future = request.get("future")
+        if loop is None or future is None:
+            return
+        loop.call_soon_threadsafe(
+            lambda f=future, r=result: (f.set_result(r) if not f.done() else None)
+        )
+
+    def _do_comfyui_workflow_action(self, request_id: str):
+        with self._comfyui_workflow_actions_lock:
+            request = self._pending_comfyui_workflow_actions.pop(request_id, None)
+        if not request:
+            return
+
+        try:
+            action = str(request.get("action") or "").strip().lower()
+            if action == "load":
+                result = self._load_comfyui_workflow_from_metadata(request.get("metadata") or {})
+            elif action == "clear":
+                result = self._clear_comfyui_workflow()
+            else:
+                result = {"ok": False, "error": "Unsupported ComfyUI workflow action"}
+        except Exception as e:
+            result = {"ok": False, "error": f"ComfyUI workflow action failed: {e}"}
+        self._complete_comfyui_workflow_action(request, result)
+
+    def _load_comfyui_workflow_from_metadata(self, metadata: dict) -> dict:
+        manager = self._get_comfyui_workflow_manager()
+        if manager is None:
+            return {"ok": False, "error": "ComfyUI workflow manager is unavailable"}
+
+        if not isinstance(metadata, dict):
+            return {"ok": False, "error": "Invalid workflow metadata"}
 
         analysis_result = manager.analyze_workflow_for_ui(metadata)
         if not analysis_result.get("success"):
@@ -9130,14 +9190,24 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         max_bytes = 64 * 1024 * 1024
         if len(image_bytes) > max_bytes:
             return JSONResponse({"ok": False, "error": "Image is too large"}, status_code=413)
-        result = await asyncio.to_thread(bridge._load_comfyui_workflow_from_png_bytes, image_bytes)
+        try:
+            metadata = await asyncio.to_thread(bridge._extract_comfyui_workflow_metadata_from_png_bytes, image_bytes)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        try:
+            result = await bridge._request_comfyui_workflow_action("load", metadata=metadata)
+        except asyncio.TimeoutError:
+            return JSONResponse({"ok": False, "error": "ComfyUI workflow upload timed out"}, status_code=504)
         if not result.get("ok"):
             return JSONResponse(result, status_code=400)
         return result
 
     @app.post("/api/comfyui/workflow/default")
     async def api_comfyui_workflow_default():
-        result = await asyncio.to_thread(bridge._clear_comfyui_workflow)
+        try:
+            result = await bridge._request_comfyui_workflow_action("clear")
+        except asyncio.TimeoutError:
+            return JSONResponse({"ok": False, "error": "ComfyUI workflow switch timed out"}, status_code=504)
         if not result.get("ok"):
             return JSONResponse(result, status_code=400)
         return result
@@ -10292,6 +10362,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_artist_thumb_generate.connect(bridge._do_artist_thumb_generate, Qt.ConnectionType.QueuedConnection)
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
+    bridge.request_comfyui_workflow_action.connect(bridge._do_comfyui_workflow_action, Qt.ConnectionType.QueuedConnection)
     QTimer.singleShot(0, bridge._restore_saved_search_filter_state)
 
     # 검색 컨트롤러 시그널 연결
@@ -10496,7 +10567,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed"]:
+            for event_name in ["generation_result_available", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed", "comfyui_workflow_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

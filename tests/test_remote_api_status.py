@@ -210,6 +210,15 @@ def test_studio_generate_overrides_are_preserved_when_queued():
 def test_comfyui_workflow_upload_and_default_endpoints_load_png_metadata():
     ctx = _ComfyWorkflowContext()
     bridge = RemoteBridge(ctx)
+
+    async def run_workflow_action(action, metadata=None, timeout=30.0):
+        if action == "load":
+            return bridge._load_comfyui_workflow_from_metadata(metadata or {})
+        if action == "clear":
+            return bridge._clear_comfyui_workflow()
+        return {"ok": False, "error": "Unsupported ComfyUI workflow action"}
+
+    bridge._request_comfyui_workflow_action = run_workflow_action
     client = TestClient(create_app(bridge, WebSocketManager()))
 
     upload = client.post(

@@ -6,6 +6,7 @@ export function createArtistThumbController({
   promptEdit,
   negEdit,
   onPromptEdit,
+  setPromptFields,
   getGenerationMode = () => 'NAI',
   isComfyUiAnimaMode = () => false,
 }) {
@@ -770,6 +771,23 @@ export function createArtistThumbController({
     showToast?.('프롬프트에 삽입했습니다.', 'success');
   }
 
+  function applyGeneratedPromptToEditor(prompt, negativePrompt) {
+    if (!promptEdit) return;
+    const nextPrompt = String(prompt || '');
+    const nextNegative = negativePrompt != null
+      ? String(negativePrompt || '')
+      : String(negEdit?.value || '');
+    if (typeof setPromptFields === 'function') {
+      setPromptFields(nextPrompt, nextNegative);
+      return;
+    }
+    promptEdit.value = nextPrompt;
+    if (negEdit && negativePrompt != null) {
+      negEdit.value = nextNegative;
+    }
+    onPromptEdit?.();
+  }
+
   async function generateSelected() {
     const item = selectedPayload();
     if (!item) return;
@@ -833,20 +851,24 @@ export function createArtistThumbController({
         artist_prompt: artistPrompt,
         timeout: 45,
       });
-      const positive = String(randomPrompt.prompt || '').trim();
-      if (!positive) throw new Error('Random prompt is empty');
+      const positive = String(randomPrompt.prompt || '');
+      if (!positive.trim()) throw new Error('Random prompt is empty');
+      const negative = String(randomPrompt.negative_prompt || negEdit?.value || '');
+      const width = Number.parseInt(randomPrompt.width, 10) || 832;
+      const height = Number.parseInt(randomPrompt.height, 10) || 1216;
 
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
       if (randomGenerateBtn) randomGenerateBtn.textContent = 'Requesting...';
+      applyGeneratedPromptToEditor(positive, negative);
       await postJson('/api/artist-thumb/generate', {
         request_id: requestId,
         artist: item.artist,
         prefix: '',
         positive,
         postfix: '',
-        negative_prompt: String(randomPrompt.negative_prompt || negEdit?.value || ''),
-        width: 832,
-        height: 1216,
+        negative_prompt: negative,
+        width,
+        height,
       });
       showToast?.('랜덤 프롬프트 생성 요청을 보냈습니다.', 'success');
     } catch (error) {

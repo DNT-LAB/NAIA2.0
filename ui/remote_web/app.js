@@ -177,6 +177,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
       promptEdit,
       negEdit,
       onPromptEdit,
+      setPromptFields: applyPromptFields,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
       isComfyUiAnimaMode,
     });

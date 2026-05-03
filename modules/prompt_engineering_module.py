@@ -1435,6 +1435,26 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         except Exception:
             return False
 
+    def _recommended_auto_hide_prompt(self) -> str:
+        return (
+            "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, bad id, _logo, "
+            "bad twitter id, comic, __background__, ~blurry background, ~sky background, character doll, "
+            "stuffed animal, stuffed toy, speech bubble, cyclops, pov, 3d, glasses, mole, text focus, "
+            "thought bubble, watermark, web address, body writing, fake screenshot, facing away, |_|, "
+            "__piercing__, tattoo, _tattoo, _text, sound effects, greyscale, multiple views, __pubic hair__, "
+            "peeing, rabbit, __censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, "
+            "child on child, covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, "
+            "multiple boys, __measuring__, multiple views, big belly, curvy, doll joints, looking at viewer, "
+            "timestamp, battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, "
+            "on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, signature, "
+            "alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, armpit hair, "
+            "health bar, snapchat, facial mark, emoji, command spell, dark areolae, __piercing__, __bed__, "
+            "__pillow__, __sheet__, body markings, obese, __long tongue__, toddlercon, __name__, handprint, "
+            "__pasties__, mini person, __butt plug__, __eyepatch__, oppai loli, sex toy, loli, chibi, "
+            "chibi inset, makeup, mascara, large breasts, runny makeup, third eye, anal hair, __halo__, "
+            "__(style)__, __(cosplay)__, __freckles__, braces, gag, __joint__"
+        )
+
     def _create_and_apply_comfyui_anima_recommended_preset(self, *, save_current: bool = True) -> tuple[bool, str]:
         preset_name = self._get_unique_preset_name("recommend_anima")
         current_preset = self.current_preset
@@ -1450,7 +1470,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 "high-quality digital art, very thin lineart, low contrast shading, cinematic lighting, "
                 "very beautiful and detailed scene:0.8)"
             ),
-            "auto_hide_prompt": "",
+            "auto_hide_prompt": self._recommended_auto_hide_prompt(),
         }
         main_settings = {
             "negative": (
@@ -1510,24 +1530,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 "novel illustration, -1.2::simple illustration ::, -1::artist collaboration ::, "
                 "-1::multiple views ::, -1::duplicate ::, -0.8::censored ::"
             ),
-            "auto_hide_prompt": (
-                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, bad id, _logo, "
-                "bad twitter id, comic, __background__, ~blurry background, ~sky background, character doll, "
-                "stuffed animal, stuffed toy, speech bubble, cyclops, pov, 3d, glasses, mole, text focus, "
-                "thought bubble, watermark, web address, body writing, fake screenshot, facing away, |_|, "
-                "__piercing__, tattoo, _tattoo, _text, sound effects, greyscale, multiple views, __pubic hair__, "
-                "peeing, rabbit, __censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, "
-                "child on child, covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, "
-                "multiple boys, __measuring__, multiple views, big belly, curvy, doll joints, looking at viewer, "
-                "timestamp, battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, "
-                "on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, signature, "
-                "alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, armpit hair, "
-                "health bar, snapchat, facial mark, emoji, command spell, dark areolae, __piercing__, __bed__, "
-                "__pillow__, __sheet__, body markings, obese, __long tongue__, toddlercon, __name__, handprint, "
-                "__pasties__, mini person, __butt plug__, __eyepatch__, oppai loli, sex toy, loli, chibi, "
-                "chibi inset, makeup, mascara, large breasts, runny makeup, third eye, anal hair, __halo__, "
-                "__(style)__, __(cosplay)__, __freckles__, braces, gag, __joint__"
-            ),
+            "auto_hide_prompt": self._recommended_auto_hide_prompt(),
             "preprocessing_options": {
                 "remove_author": True,
                 "remove_work_title": True,

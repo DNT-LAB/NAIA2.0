@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QApplication, QDialog, QTabWidget, QGridLayout,
     QMenu, QInputDialog, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSize, QBuffer, QIODevice
 from PyQt6.QtGui import QPixmap, QImage, QAction
 from PIL import Image
 from PIL.ImageQt import ImageQt
@@ -21,6 +21,57 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+
+
+IMAGE_CLIPBOARD_FORMATS = (
+    "image/png",
+    'application/x-qt-windows-mime;value="PNG"',
+)
+
+
+def _qimage_to_png_bytes(image: QImage) -> Optional[bytes]:
+    if image is None or image.isNull():
+        return None
+    buffer = QBuffer()
+    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+        return None
+    if not image.save(buffer, "PNG"):
+        return None
+    return bytes(buffer.data())
+
+
+def _clipboard_mime_png_bytes(mime_data, clipboard_image: Optional[QImage] = None) -> Optional[bytes]:
+    """Extract PNG bytes from Qt clipboard MIME data.
+
+    Qt's hasImage()/imageData() can be false when another app, or NAIA's PNG
+    copy path, only provides raw image/png clipboard bytes.
+    """
+    if mime_data is None:
+        return None
+
+    if mime_data.hasImage():
+        image_data = mime_data.imageData()
+        if isinstance(image_data, QImage):
+            png_bytes = _qimage_to_png_bytes(image_data)
+            if png_bytes:
+                return png_bytes
+        elif isinstance(image_data, QPixmap):
+            png_bytes = _qimage_to_png_bytes(image_data.toImage())
+            if png_bytes:
+                return png_bytes
+
+    if clipboard_image is not None and not clipboard_image.isNull():
+        png_bytes = _qimage_to_png_bytes(clipboard_image)
+        if png_bytes:
+            return png_bytes
+
+    for fmt in IMAGE_CLIPBOARD_FORMATS:
+        if mime_data.hasFormat(fmt):
+            data = bytes(mime_data.data(fmt))
+            if data:
+                return data
+
+    return None
 
 
 def _get_current_model_from_context(app_context) -> str:
@@ -1255,7 +1306,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         self.upload_btn.clicked.connect(self._on_upload_image)
         buttons_row.addWidget(self.upload_btn)
         
-        self.clipboard_btn = QPushButton("📋 Copy Clipboard")
+        self.clipboard_btn = QPushButton("📋 From Clipboard")
         self.clipboard_btn.setStyleSheet(dynamic_styles['secondary_button'])
         self.clipboard_btn.clicked.connect(self._on_clipboard_image)
         buttons_row.addWidget(self.clipboard_btn)
@@ -1343,28 +1394,32 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         """Handle clipboard image button"""
         clipboard = QApplication.clipboard()
         mimedata = clipboard.mimeData()
-        
-        if mimedata.hasImage():
-            image = mimedata.imageData()
-            if image:
-                # 픽셀 데이터 기반으로 안정적인 해시 계산
-                from PyQt6.QtCore import QBuffer, QIODevice
-                buf = QBuffer()
-                buf.open(QIODevice.OpenModeFlag.WriteOnly)
-                QPixmap(image).save(buf, "PNG")
-                img_bytes = buf.data().data()
-                img_hash = hashlib.sha256(img_bytes).hexdigest()[:8]
 
-                temp_path = Path("temp") / f"clipboard_vibe_{img_hash}.png"
-                temp_path.parent.mkdir(exist_ok=True)
+        img_bytes = _clipboard_mime_png_bytes(mimedata, clipboard.image())
+        if img_bytes:
+            img_hash = hashlib.sha256(img_bytes).hexdigest()[:8]
 
-                if not temp_path.exists():
-                    with open(str(temp_path), 'wb') as f:
-                        f.write(img_bytes)
+            temp_path = Path("temp") / f"clipboard_vibe_{img_hash}.png"
+            temp_path.parent.mkdir(exist_ok=True)
 
-                self._add_vibe_frame(str(temp_path))
-        else:
-            QMessageBox.warning(self.widget, "Warning", "No image found in clipboard")
+            if not temp_path.exists():
+                with open(str(temp_path), 'wb') as f:
+                    f.write(img_bytes)
+
+            self._add_vibe_frame(str(temp_path))
+            return
+
+        if mimedata.hasUrls():
+            for url in mimedata.urls():
+                if not url.isLocalFile():
+                    continue
+                file_path = url.toLocalFile()
+                ext = Path(file_path).suffix.lower()
+                if ext in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"} and Path(file_path).exists():
+                    self._add_vibe_frame(file_path)
+                    return
+
+        QMessageBox.warning(self.widget, "Warning", "No image found in clipboard")
     
     def _on_import_vibe(self):
         """Handle .naiv4vibe import button"""

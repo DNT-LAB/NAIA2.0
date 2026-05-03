@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, Response, JSONResponse, RedirectResp
 from fastapi.staticfiles import StaticFiles
 
 from PyQt6.QtCore import QByteArray, QMimeData, QObject, pyqtSignal, Qt, QTimer
+from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core import api_verification
@@ -3330,6 +3331,9 @@ class RemoteBridge(QObject):
         # Windows apps often look for the native registered PNG clipboard format.
         # Supplying it alongside image/png avoids browser/OS bitmap re-encoding.
         mime_data.setData('application/x-qt-windows-mime;value="PNG"', byte_array)
+        qimage = QImage()
+        if qimage.loadFromData(bytes(png_bytes), "PNG"):
+            mime_data.setImageData(qimage)
         if filename:
             mime_data.setText(str(filename))
         QApplication.clipboard().setMimeData(mime_data)

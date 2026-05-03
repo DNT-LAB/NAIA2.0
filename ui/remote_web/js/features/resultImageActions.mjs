@@ -323,6 +323,62 @@ export function createResultImageActions({
     return '/api/result/image/original?' + params.toString();
   }
 
+  function absoluteAppUrl(url) {
+    try {
+      return new URL(url, window.location.href).href;
+    } catch (_) {
+      return String(url || '');
+    }
+  }
+
+  function mimeTypeForFilename(filename) {
+    const lower = String(filename || '').toLowerCase();
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.bmp')) return 'image/bmp';
+    return 'image/png';
+  }
+
+  function escapeDragAttribute(value) {
+    return String(value || '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[char]);
+  }
+
+  function filenameFromDragPayload(payload = {}) {
+    const name = String(payload.path || payload.filePath || payload.label || '')
+      .split(/[\\/]/)
+      .pop()
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+      .trim();
+    if (name) return name;
+    return 'naia-result.png';
+  }
+
+  function applyOriginalImageDragData(dataTransfer, payload = {}) {
+    if (!dataTransfer) return;
+    const source = payload.source || (payload.path ? 'saved' : 'current');
+    const originalUrl = absoluteAppUrl(contextImageOriginalUrl({source, path: payload.path || ''}));
+    const filename = filenameFromDragPayload(payload);
+    const mimeType = mimeTypeForFilename(filename);
+    try { dataTransfer.clearData(); } catch (_) { /* noop */ }
+    try { dataTransfer.effectAllowed = 'copy'; } catch (_) { /* noop */ }
+    try { dataTransfer.setData('text/uri-list', originalUrl); } catch (_) { /* noop */ }
+    try { dataTransfer.setData('text/plain', originalUrl); } catch (_) { /* noop */ }
+    try {
+      dataTransfer.setData(
+        'text/html',
+        `<img src="${escapeDragAttribute(originalUrl)}" alt="${escapeDragAttribute(filename)}">`
+      );
+    } catch (_) { /* noop */ }
+    try { dataTransfer.setData('DownloadURL', `${mimeType}:${filename}:${originalUrl}`); } catch (_) { /* noop */ }
+  }
+
   async function fetchContextImageBlob(context = {}, options = {}) {
     const format = String(options.format || '').toLowerCase();
     if (format === 'original') {
@@ -579,9 +635,11 @@ export function createResultImageActions({
       showToast('Metadata viewer is not ready', 'error');
       return false;
     }
-    if (context.path) {
+    if (context.source === 'current') {
+      metadataViewer.loadCurrent({silent: false});
+    } else if (context.path) {
       metadataViewer.loadSaved(context.path, {silent: false});
-    } else if (context.hasImage || context.imageSrc || context.blob || context.source === 'current') {
+    } else if (context.hasImage || context.imageSrc || context.blob) {
       loadMetadataFromContextImage(context);
     } else {
       return false;
@@ -624,6 +682,7 @@ export function createResultImageActions({
         };
       }
       if (!payload || !event.dataTransfer) return;
+      applyOriginalImageDragData(event.dataTransfer, payload);
       try {
         event.dataTransfer.setData('application/x-naia-source', JSON.stringify(payload));
       } catch (_) { /* noop */ }

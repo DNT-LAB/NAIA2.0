@@ -9,6 +9,7 @@ export function createMetadataViewer({
   onSendImg2Img = null,
   onRestoreVibeTransfer = null,
   canUseDesktopImg2Img = () => true,
+  getCurrentImageUrl = () => '',
 }) {
   const statusEl = document.getElementById('metadataStatus');
   const titleEl = document.getElementById('metadataTitle');
@@ -316,6 +317,9 @@ export function createMetadataViewer({
   }
 
   function imageUrlForSource(source) {
+    if (source.kind === 'current') {
+      return getCurrentImageUrl() || source.imageUrl || '/api/latest-image';
+    }
     if (source.imageUrl) return source.imageUrl;
     if (source.kind === 'saved' && source.path) return '/api/viewer/image/' + encodeURI(source.path);
     if ((source.kind === 'input' || source.kind === 'payload')

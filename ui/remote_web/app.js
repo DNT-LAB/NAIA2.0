@@ -300,6 +300,9 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
       onSendImg2Img: payload => callResultImageAction('requestMetadataImageAction', payload, 'img2img'),
       onRestoreVibeTransfer: applyMetadataVibeTransfer,
       canUseDesktopImg2Img,
+      getCurrentImageUrl: () => (
+        preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : ''
+      ),
     });
   })
   .catch(error => {

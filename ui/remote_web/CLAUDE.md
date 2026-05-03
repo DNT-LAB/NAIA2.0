@@ -226,11 +226,13 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 - `Ctrl+Enter` → Generate, `Alt+Enter` → Random
 
-### NAI 전용 모듈 모드 차단
+### 모드 전용 모듈 노출
 
-- `syncMode()`: 비NAI 모드에서 Char Ref/Vibe 버튼에 `nai-only-disabled` 클래스 (opacity 0.35 + pointer-events none)
-- `openModule()`: 비NAI 모드에서 클릭 시 toast 에러 + 차단
-- HTML 기본값: `nai-only-disabled` 클래스 적용 → `syncMode()`에서 NAI면 해제
+- `moduleLauncher.mjs`: `modes` 메타데이터로 NAI / COMFYUI / WEBUI 전용 카테고리를 분기한다.
+- NAI 모드에서만 Character / Character Reference / Vibe Transfer 도구와 활성 요약을 노출한다.
+- COMFYUI 모드에서는 COMFYUI 전용 도구 카테고리를 노출한다. 현재 워크플로우 업로드는 데스크탑 앱 제공 예정 상태로 표시한다.
+- WEBUI 모드에서는 WEBUI 전용 도구 카테고리를 노출하되 기본 사용 불가 상태로 둔다.
+- `openModule()`: 비NAI 모드에서 NAI 전용 모듈 직접 호출 시 toast 에러 + 차단
 
 ### 와일드카드 관리자 (WC → Browse Files)
 

@@ -40,7 +40,7 @@ const MODULE_REGISTRY = {
     title: 'NAID4 Character',
     category: 'character_tools',
     action: 'module',
-    naiOnly: true,
+    modes: ['NAI'],
     badgeId: 'badgeChar',
     categoryBadgeLabel: 'C',
     categoryBadgeClass: 'char',
@@ -50,7 +50,7 @@ const MODULE_REGISTRY = {
     title: 'Character Reference',
     category: 'character_tools',
     action: 'module',
-    naiOnly: true,
+    modes: ['NAI'],
     badgeId: 'badgeCharRef',
     categoryBadgeLabel: 'R',
     categoryBadgeClass: 'ref',
@@ -60,10 +60,28 @@ const MODULE_REGISTRY = {
     title: 'Vibe Transfer',
     category: 'character_tools',
     action: 'module',
-    naiOnly: true,
+    modes: ['NAI'],
     badgeId: 'badgeVibe',
     categoryBadgeLabel: 'V',
     categoryBadgeClass: 'vibe',
+  },
+  comfyui_workflow_upload: {
+    label: '워크플로우 업로드 예정',
+    title: 'ComfyUI 워크플로우 업로드는 NAIA 데스크탑 앱에서 제공 예정',
+    category: 'comfyui_tools',
+    action: 'placeholder',
+    modes: ['COMFYUI'],
+    disabled: true,
+    disabledReason: 'NAIA 데스크탑 앱에서 제공 예정',
+  },
+  webui_tools_unavailable: {
+    label: '사용 가능한 도구 없음',
+    title: 'WEBUI 전용 도구는 현재 기본 사용 불가',
+    category: 'webui_tools',
+    action: 'placeholder',
+    modes: ['WEBUI'],
+    disabled: true,
+    disabledReason: '현재 기본 사용 불가',
   },
   ollama: {
     label: 'Ollama',
@@ -93,6 +111,18 @@ const CATEGORY_REGISTRY = [
     title: 'NAI 전용 도구 (다른 모드에서 차단)',
     moduleIds: ['character', 'character_reference', 'vibe_transfer'],
     splitBadges: true,
+  },
+  {
+    id: 'comfyui_tools',
+    label: 'COMFYUI 전용 도구',
+    title: 'COMFYUI 전용 도구',
+    moduleIds: ['comfyui_workflow_upload'],
+  },
+  {
+    id: 'webui_tools',
+    label: 'WEBUI 전용 도구',
+    title: 'WEBUI 전용 도구 (기본 사용 불가)',
+    moduleIds: ['webui_tools_unavailable'],
   },
   {
     id: 'assistant_tools',
@@ -182,8 +212,20 @@ export function createModuleLauncher({
   function isBlocked(moduleId) {
     const config = MODULE_REGISTRY[moduleId];
     if (!config) return false;
-    if (config.naiOnly && getMode() !== 'NAI') return true;
+    if (!isVisibleInMode(moduleId)) return true;
+    if (config.disabled) return true;
     return false;
+  }
+
+  function isVisibleInMode(moduleId) {
+    const config = MODULE_REGISTRY[moduleId];
+    if (!config) return false;
+    if (!Array.isArray(config.modes) || !config.modes.length) return true;
+    return config.modes.includes(getMode());
+  }
+
+  function visibleCategoryModules(category) {
+    return category.moduleIds.filter(isVisibleInMode);
   }
 
   function renderModuleButton(moduleId, extraClass = '') {
@@ -193,9 +235,10 @@ export function createModuleLauncher({
       ? `<span class="module-badge hidden" id="${config.badgeId}"></span>`
       : '';
     const className = ['module-btn', extraClass, config.className || ''].filter(Boolean).join(' ');
-    const tooltip = tooltipAttr(config.title);
+    const disabledReason = config.disabledReason ? ` — ${config.disabledReason}` : '';
+    const tooltip = tooltipAttr(`${config.title}${disabledReason}`);
     return `
-      <button type="button" class="${className}" data-module="${moduleId}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
+      <button type="button" class="${className}" data-module="${moduleId}" aria-label="${tooltip}" data-module-tooltip="${tooltip}" data-module-static-disabled="${config.disabled ? '1' : '0'}">
         <span>${config.label}</span>${badge}
       </button>
     `;
@@ -237,7 +280,7 @@ export function createModuleLauncher({
   function toggleCategory(categoryId) {
     if (!root) return;
     const category = root.querySelector(`.module-category[data-module-category="${categoryId}"]`);
-    if (!category) return;
+    if (!category || category.classList.contains('hidden')) return;
     const willOpen = !category.classList.contains('menu-open');
     closeMenus(categoryId);
     category.classList.toggle('menu-open', willOpen);
@@ -325,19 +368,29 @@ export function createModuleLauncher({
     if (!root) return;
     root.querySelectorAll('.module-btn[data-module]').forEach(button => {
       const moduleId = button.dataset.module;
+      const visible = isVisibleInMode(moduleId);
       const blocked = isBlocked(moduleId);
+      button.classList.toggle('hidden', !visible);
       button.classList.toggle('nai-only-disabled', blocked);
+      button.classList.toggle('module-static-disabled', button.dataset.moduleStaticDisabled === '1');
       button.disabled = blocked;
-      button.classList.toggle('active', moduleIsActive(moduleId));
+      button.classList.toggle('active', visible && moduleIsActive(moduleId));
     });
 
     CATEGORY_REGISTRY.forEach(category => {
       const categoryEl = root.querySelector(`.module-category[data-module-category="${category.id}"]`);
       if (!categoryEl) return;
       const button = categoryEl.querySelector('.module-category-btn');
-      const anyActive = category.moduleIds.some(moduleIsActive);
-      const allBlocked = category.moduleIds.every(isBlocked);
-      const hasStatus = category.moduleIds.some(moduleId => {
+      const visibleModules = visibleCategoryModules(category);
+      const visible = visibleModules.length > 0;
+      categoryEl.classList.toggle('hidden', !visible);
+      if (!visible) {
+        categoryEl.classList.remove('menu-open');
+        return;
+      }
+      const anyActive = visibleModules.some(moduleIsActive);
+      const allBlocked = visibleModules.length > 0 && visibleModules.every(isBlocked);
+      const hasStatus = visibleModules.some(moduleId => {
         const leaf = root.querySelector(`.module-btn[data-module="${moduleId}"]`);
         return leaf?.classList.contains('auto-active')
           || leaf?.classList.contains('char-active')
@@ -349,9 +402,9 @@ export function createModuleLauncher({
       categoryEl.classList.toggle('category-status', hasStatus);
       if (button) {
         button.classList.toggle('active', anyActive || categoryEl.classList.contains('menu-open'));
-        button.classList.toggle('nai-only-disabled', allBlocked);
+        button.classList.toggle('module-category-disabled', allBlocked);
         button.classList.toggle('category-status', hasStatus);
-        button.disabled = allBlocked;
+        button.disabled = false;
       }
       applyCategoryBadge(category, categoryEl);
     });

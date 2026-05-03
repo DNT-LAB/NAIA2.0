@@ -4817,6 +4817,9 @@ body.resizing-result-info {
   border-color: rgba(106,191,123,0.42);
   color: #88d696;
 }
+.module-category-btn.module-category-disabled {
+  opacity: 0.55;
+}
 .module-category-badges {
   display: inline-flex;
   align-items: center;

@@ -2310,7 +2310,8 @@ function syncMode(mode) {
   currentMode = mode;
   setNaiHighlightMode(mode);
   updatePromptTokenEstimate();
-  // NAI 전용 모듈 버튼 비활성화 (character, character_reference, vibe_transfer)
+  if (moduleBadges) moduleBadges.updateModeState();
+  // 모드 전용 모듈 상태 갱신 (NAI 전용 도구는 비NAI에서 숨김)
   const isNai = mode === 'NAI';
   const naiOnlyModules = ['character', 'character_reference', 'vibe_transfer'];
   naiOnlyModules.forEach(mid => {

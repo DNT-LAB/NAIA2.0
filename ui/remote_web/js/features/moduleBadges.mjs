@@ -38,23 +38,24 @@ export function createModuleBadges({
 
   function renderActivatedSummary() {
     if (!activatedSummary) return;
+    const isNaiMode = getMode() === 'NAI';
 
     const parts = [];
-    if (activatedCounts.characters > 0) {
+    if (isNaiMode && activatedCounts.characters > 0) {
       parts.push({
         className: 'character',
         moduleId: 'character',
         text: `${activatedCounts.characters} Characters`,
       });
     }
-    if (activatedCounts.vibe > 0) {
+    if (isNaiMode && activatedCounts.vibe > 0) {
       parts.push({
         className: 'vibe',
         moduleId: 'vibe_transfer',
         text: `${activatedCounts.vibe} Vibe Transfer`,
       });
     }
-    if (activatedCounts.reference > 0) {
+    if (isNaiMode && activatedCounts.reference > 0) {
       parts.push({
         className: 'pref',
         moduleId: 'character_reference',
@@ -195,5 +196,9 @@ export function createModuleBadges({
     updateCharacter,
     updateCharacterReference,
     updateVibe,
+    updateModeState() {
+      renderActivatedSummary();
+      updatePromptTokenEstimate();
+    },
   };
 }

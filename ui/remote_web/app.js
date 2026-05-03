@@ -68,6 +68,20 @@ let tokenDisplayControl = null;
 let autoSavePanel = null;
 let saveDirectoryPanel = null;
 let sessionGenerationStats = null;
+
+function openUrlInSystemBrowser(target) {
+  const targetUrl = new URL(target, window.location.href);
+  if (targetUrl.hostname === '0.0.0.0') targetUrl.hostname = '127.0.0.1';
+  if (isDesktopShell) {
+    window.location.href = `naia-open-browser://open?url=${encodeURIComponent(targetUrl.toString())}`;
+    return true;
+  }
+  const popup = window.open(targetUrl.toString(), '_blank');
+  if (!popup) return false;
+  try { popup.opener = null; } catch (error) {}
+  popup.focus?.();
+  return true;
+}
 let automationPanel = null;
 let characterPanel = null;
 let conditionalPromptPanel = null;
@@ -1444,10 +1458,7 @@ function openComfyUiWeb() {
     showToast('ComfyUI URL is not configured', 'error', true);
     return;
   }
-  const opened = window.open('/api/comfyui/web', '_blank');
-  if (opened) {
-    try { opened.opener = null; } catch (error) {}
-  } else {
+  if (!openUrlInSystemBrowser('/api/comfyui/web')) {
     showToast('Popup blocked by browser', 'error');
   }
 }

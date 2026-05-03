@@ -9,6 +9,7 @@ import json
 import asyncio
 import base64
 import hashlib
+import math
 import random
 import re
 import time
@@ -4393,6 +4394,154 @@ class RemoteBridge(QObject):
     def _combo_items(self, combo) -> list:
         return [combo.itemText(i) for i in range(combo.count())]
 
+    def _get_comfyui_workflow_manager(self):
+        manager = getattr(self.app_context, "comfyui_workflow_manager", None)
+        if manager is not None:
+            return manager
+        mw = getattr(self.app_context, "main_window", None)
+        return getattr(mw, "workflow_manager", None)
+
+    def _format_anima_weight(self, raw) -> str:
+        text = str(raw or "").strip()
+        if not text:
+            value = 0.75
+        else:
+            try:
+                value = float(text)
+            except (TypeError, ValueError):
+                value = 0.75
+            if not math.isfinite(value):
+                value = 0.75
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+
+    def _comfyui_workflow_state_payload(self, event_data: Optional[dict] = None) -> dict:
+        manager = self._get_comfyui_workflow_manager()
+        event_data = event_data if isinstance(event_data, dict) else {}
+        node_map = getattr(manager, "user_workflow_node_map", None) or {}
+        has_custom = bool(getattr(manager, "user_workflow", None) is not None)
+        if "has_custom" in event_data:
+            has_custom = bool(event_data.get("has_custom"))
+        return {
+            "type": "comfyui_workflow_state",
+            "has_custom": has_custom,
+            "workflow_label": "Custom Workflow" if has_custom else "Basic Workflow",
+            "model_compat": event_data.get("model_compat", node_map.get("model_compat") if has_custom else None),
+            "locked_loader_class": event_data.get("locked_loader_class", node_map.get("locked_loader_class")),
+            "locked_model_display": event_data.get("locked_model_display", node_map.get("locked_model_display")),
+        }
+
+    def _set_comfyui_workflow_buttons(self, has_custom: bool):
+        mw = getattr(self.app_context, "main_window", None)
+        if not mw:
+            return
+        default_btn = getattr(mw, "workflow_default_btn", None)
+        custom_btn = getattr(mw, "workflow_custom_btn", None)
+        try:
+            if has_custom:
+                if custom_btn:
+                    custom_btn.setEnabled(True)
+                    custom_btn.setChecked(True)
+            else:
+                if default_btn:
+                    default_btn.setChecked(True)
+                if custom_btn:
+                    custom_btn.setEnabled(False)
+        except Exception as e:
+            print(f"🌐 Remote: ComfyUI 워크플로우 버튼 상태 갱신 실패 — {e}")
+
+    def _show_comfyui_workflow_status(self, message: str):
+        mw = getattr(self.app_context, "main_window", None)
+        status_bar = getattr(mw, "status_bar", None)
+        if status_bar and hasattr(status_bar, "showMessage"):
+            try:
+                status_bar.showMessage(message, 3000)
+            except Exception:
+                pass
+
+    def _broadcast_comfyui_workflow_state(self, event_data: Optional[dict] = None):
+        state = self._comfyui_workflow_state_payload(event_data)
+        if self._has_clients():
+            self._broadcast_json(state)
+        return state
+
+    def on_comfyui_workflow_changed(self, data: dict):
+        """Desktop/remote ComfyUI workflow changes → Web Remote state sync."""
+        self._broadcast_comfyui_workflow_state(data)
+        self._broadcast_params()
+
+    def _load_comfyui_workflow_from_png_bytes(self, image_bytes: bytes) -> dict:
+        if not image_bytes:
+            return {"ok": False, "error": "No image data"}
+        manager = self._get_comfyui_workflow_manager()
+        if manager is None:
+            return {"ok": False, "error": "ComfyUI workflow manager is unavailable"}
+
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                metadata = dict(img.info or {})
+        except Exception as e:
+            return {"ok": False, "error": f"PNG 분석 실패: {e}"}
+
+        if "prompt" not in metadata or not (metadata.get("workflow") or metadata.get("workflow_api")):
+            return {"ok": False, "error": "선택한 이미지에서 ComfyUI 워크플로우 정보를 찾을 수 없습니다."}
+
+        analysis_result = manager.analyze_workflow_for_ui(metadata)
+        if not analysis_result.get("success"):
+            return {
+                "ok": False,
+                "error": analysis_result.get("error_message") or "워크플로우 검증에 실패했습니다.",
+                "analysis": analysis_result,
+                "workflow": self._comfyui_workflow_state_payload(),
+            }
+
+        if not manager.load_workflow_from_metadata(metadata):
+            return {
+                "ok": False,
+                "error": "워크플로우를 로드하지 못했습니다.",
+                "analysis": analysis_result,
+                "workflow": self._comfyui_workflow_state_payload(),
+            }
+
+        self._set_comfyui_workflow_buttons(True)
+        self._show_comfyui_workflow_status("✅ 커스텀 워크플로우가 활성화되었습니다.")
+        state = self._comfyui_workflow_state_payload()
+        params = self.get_generation_params()
+        if params:
+            self._cached_params = params
+        if self._has_clients():
+            self._broadcast_json(state)
+            if params:
+                self._broadcast_json(params)
+        return {
+            "ok": True,
+            "analysis": analysis_result,
+            "workflow": state,
+            "params": params,
+        }
+
+    def _clear_comfyui_workflow(self) -> dict:
+        manager = self._get_comfyui_workflow_manager()
+        if manager is None:
+            return {"ok": False, "error": "ComfyUI workflow manager is unavailable"}
+
+        manager.clear_user_workflow()
+        self._set_comfyui_workflow_buttons(False)
+        self._show_comfyui_workflow_status("🔄 기본 워크플로우로 전환되었습니다.")
+        state = self._comfyui_workflow_state_payload()
+        params = self.get_generation_params()
+        if params:
+            self._cached_params = params
+        if self._has_clients():
+            self._broadcast_json(state)
+            if params:
+                self._broadcast_json(params)
+        return {
+            "ok": True,
+            "workflow": state,
+            "params": params,
+        }
+
     def get_generation_params(self) -> dict:
         """현재 생성 파라미터 + 선택 가능 옵션 목록 반환"""
         try:
@@ -4448,6 +4597,14 @@ class RemoteBridge(QObject):
                     params["sampling_mode"] = "anima"
             if hasattr(mw, 'comfyui_rescale_slider'):
                 params["rescale_cfg"] = round(mw.comfyui_rescale_slider.value() / 100.0, 2)
+            if hasattr(mw, 'anima_weight_edit'):
+                raw_anima_weight = mw.anima_weight_edit.text().strip()
+                params["anima_weight_raw"] = raw_anima_weight
+                params["anima_weight"] = self._format_anima_weight(raw_anima_weight)
+            workflow_state = self._comfyui_workflow_state_payload()
+            params["comfyui_workflow"] = {k: v for k, v in workflow_state.items() if k != "type"}
+            params["comfyui_workflow_has_custom"] = workflow_state["has_custom"]
+            params["comfyui_workflow_label"] = workflow_state["workflow_label"]
             return params
         except Exception as e:
             print(f"🌐 Remote: 파라미터 읽기 실패 — {e}")
@@ -4503,11 +4660,21 @@ class RemoteBridge(QObject):
                 mw.hr_cfg_spinbox.setValue(float(value))
             # ComfyUI
             elif key == "sampling_mode" and hasattr(mw, 'eps_radio'):
-                if value == "eps": mw.eps_radio.setChecked(True)
-                elif value == "v_prediction": mw.v_pred_radio.setChecked(True)
-                elif value == "anima": mw.anima_radio.setChecked(True)
+                button = None
+                if value == "eps":
+                    button = mw.eps_radio
+                elif value == "v_prediction":
+                    button = mw.v_pred_radio
+                elif value == "anima":
+                    button = mw.anima_radio
+                if button is not None:
+                    button.setChecked(True)
+                    if hasattr(mw, '_on_sampling_mode_changed'):
+                        mw._on_sampling_mode_changed(button)
             elif key == "rescale_cfg" and hasattr(mw, 'comfyui_rescale_slider'):
                 mw.comfyui_rescale_slider.setValue(int(float(value) * 100))
+            elif key == "anima_weight" and hasattr(mw, 'anima_weight_edit'):
+                mw.anima_weight_edit.setText(value)
             self._syncing_param = False
         except Exception as e:
             self._syncing_param = False
@@ -8953,6 +9120,28 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 status_code=503,
             )
 
+    @app.get("/api/comfyui/workflow/state")
+    async def api_comfyui_workflow_state():
+        return await asyncio.to_thread(bridge._comfyui_workflow_state_payload)
+
+    @app.post("/api/comfyui/workflow/upload")
+    async def api_comfyui_workflow_upload(req: Request):
+        image_bytes = await req.body()
+        max_bytes = 64 * 1024 * 1024
+        if len(image_bytes) > max_bytes:
+            return JSONResponse({"ok": False, "error": "Image is too large"}, status_code=413)
+        result = await asyncio.to_thread(bridge._load_comfyui_workflow_from_png_bytes, image_bytes)
+        if not result.get("ok"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.post("/api/comfyui/workflow/default")
+    async def api_comfyui_workflow_default():
+        result = await asyncio.to_thread(bridge._clear_comfyui_workflow)
+        if not result.get("ok"):
+            return JSONResponse(result, status_code=400)
+        return result
+
     @app.get("/api/status")
     async def api_status():
         try:
@@ -10134,6 +10323,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("desktop_window_visibility_changed", bridge.on_desktop_window_visibility_changed)
     app_context.subscribe("cloudflared_status_changed", bridge.on_cloudflared_status_changed)
     app_context.subscribe("save_directory_changed", bridge.on_save_directory_changed)
+    app_context.subscribe("comfyui_workflow_changed", bridge.on_comfyui_workflow_changed)
 
     # NAI 모드에서 시작된 경우 Anlas 타이머 부트 + 초기 fetch
     try:
@@ -10225,6 +10415,8 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
         if w: _param_signal_sources.append((w, "toggled"))
     if hasattr(mw, 'comfyui_rescale_slider'):
         _param_signal_sources.append((mw.comfyui_rescale_slider, "valueChanged"))
+    if hasattr(mw, 'anima_weight_edit'):
+        _param_signal_sources.append((mw.anima_weight_edit, "textChanged"))
 
     for widget, signal_name in _param_signal_sources:
         try:

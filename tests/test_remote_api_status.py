@@ -1,11 +1,14 @@
 import base64
+import io
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
+from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 
 
@@ -89,6 +92,59 @@ class _QueueManager:
         return self._empty
 
 
+class _ToggleButton:
+    def __init__(self, checked=False, enabled=True):
+        self.checked = checked
+        self.enabled = enabled
+
+    def setChecked(self, value):
+        self.checked = bool(value)
+
+    def setEnabled(self, value):
+        self.enabled = bool(value)
+
+
+class _StatusBar:
+    def __init__(self):
+        self.messages = []
+
+    def showMessage(self, message, timeout=0):
+        self.messages.append((message, timeout))
+
+
+class _ComfyWorkflowContext(_AppContext):
+    def __init__(self):
+        self.secure_token_manager = _TokenManager()
+        self.cloudflared_active = False
+        self.cloudflared_tunnel_url = ""
+        self.cloudflared_status_text = ""
+        self.comfyui_workflow_manager = ComfyUIWorkflowManager()
+        self.comfyui_workflow_manager.set_app_context(self)
+        self.events = []
+        self.main_window = SimpleNamespace(
+            workflow_default_btn=_ToggleButton(checked=True),
+            workflow_custom_btn=_ToggleButton(checked=False, enabled=False),
+            status_bar=_StatusBar(),
+        )
+
+    def get_api_mode(self):
+        return "COMFYUI"
+
+    def publish(self, event_name, payload):
+        self.events.append((event_name, payload))
+
+
+def _comfyui_workflow_png_bytes():
+    fixture = Path("tests/comfyui/fixtures/anima_int8_metadata.json")
+    metadata = json.loads(fixture.read_text(encoding="utf-8"))
+    png_info = PngInfo()
+    for key in ("prompt", "workflow"):
+        png_info.add_text(key, metadata[key])
+    buffer = io.BytesIO()
+    Image.new("RGB", (4, 4), "white").save(buffer, format="PNG", pnginfo=png_info)
+    return buffer.getvalue()
+
+
 def _bridge_with_generate_context(is_generating=False, queue_empty=True):
     prompt_edit = _TextEdit("main prompt")
     negative_edit = _TextEdit("preset negative")
@@ -149,6 +205,55 @@ def test_studio_generate_overrides_are_preserved_when_queued():
     assert negative_edit.toPlainText() == "preset negative"
     assert generation_controller.executed == []
     assert generation_controller.enqueued == [(overrides, 0)]
+
+
+def test_comfyui_workflow_upload_and_default_endpoints_load_png_metadata():
+    ctx = _ComfyWorkflowContext()
+    bridge = RemoteBridge(ctx)
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    upload = client.post(
+        "/api/comfyui/workflow/upload",
+        content=_comfyui_workflow_png_bytes(),
+        headers={"content-type": "image/png"},
+    )
+
+    assert upload.status_code == 200
+    data = upload.json()
+    assert data["ok"] is True
+    assert data["workflow"]["has_custom"] is True
+    assert data["workflow"]["workflow_label"] == "Custom Workflow"
+    assert ctx.comfyui_workflow_manager.user_workflow is not None
+    assert ctx.main_window.workflow_custom_btn.enabled is True
+    assert ctx.main_window.workflow_custom_btn.checked is True
+
+    reset = client.post("/api/comfyui/workflow/default")
+
+    assert reset.status_code == 200
+    reset_data = reset.json()
+    assert reset_data["workflow"]["has_custom"] is False
+    assert reset_data["workflow"]["workflow_label"] == "Basic Workflow"
+    assert ctx.comfyui_workflow_manager.user_workflow is None
+    assert ctx.main_window.workflow_default_btn.checked is True
+    assert ctx.main_window.workflow_custom_btn.enabled is False
+
+
+def test_comfyui_workflow_upload_rejects_png_without_workflow_metadata():
+    ctx = _ComfyWorkflowContext()
+    bridge = RemoteBridge(ctx)
+    client = TestClient(create_app(bridge, WebSocketManager()))
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), "white").save(buffer, format="PNG")
+
+    response = client.post(
+        "/api/comfyui/workflow/upload",
+        content=buffer.getvalue(),
+        headers={"content-type": "image/png"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["ok"] is False
+    assert ctx.comfyui_workflow_manager.user_workflow is None
 
 
 class _ImageCrud:

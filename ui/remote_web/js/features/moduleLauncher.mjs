@@ -65,14 +65,19 @@ const MODULE_REGISTRY = {
     categoryBadgeLabel: 'V',
     categoryBadgeClass: 'vibe',
   },
-  comfyui_workflow_upload: {
-    label: '워크플로우 업로드 예정',
-    title: 'ComfyUI 워크플로우 업로드는 NAIA 데스크탑 앱에서 제공 예정',
+  comfyui_workflow_default: {
+    label: '기본 워크플로우 전환',
+    title: '기본 ComfyUI 워크플로우로 전환',
     category: 'comfyui_tools',
-    action: 'placeholder',
+    action: 'comfyui_workflow_default',
     modes: ['COMFYUI'],
-    disabled: true,
-    disabledReason: 'NAIA 데스크탑 앱에서 제공 예정',
+  },
+  comfyui_workflow_upload: {
+    label: '커스텀 워크플로우',
+    title: 'ComfyUI 워크플로우 PNG 업로드',
+    category: 'comfyui_tools',
+    action: 'comfyui_workflow_upload',
+    modes: ['COMFYUI'],
   },
   webui_tools_unavailable: {
     label: '사용 가능한 도구 없음',
@@ -116,7 +121,7 @@ const CATEGORY_REGISTRY = [
     id: 'comfyui_tools',
     label: 'COMFYUI 전용 도구',
     title: 'COMFYUI 전용 도구',
-    moduleIds: ['comfyui_workflow_upload'],
+    moduleIds: ['comfyui_workflow_default', 'comfyui_workflow_upload'],
   },
   {
     id: 'webui_tools',
@@ -141,6 +146,9 @@ export function createModuleLauncher({
   openModule,
   openChunkPanel,
   openDanbooruBrowser,
+  getComfyUiWorkflowState,
+  switchComfyUiWorkflowDefault,
+  uploadComfyUiWorkflow,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -214,6 +222,10 @@ export function createModuleLauncher({
     if (!config) return false;
     if (!isVisibleInMode(moduleId)) return true;
     if (config.disabled) return true;
+    if (moduleId === 'comfyui_workflow_default') {
+      const state = typeof getComfyUiWorkflowState === 'function' ? getComfyUiWorkflowState() : null;
+      return !Boolean(state?.has_custom);
+    }
     return false;
   }
 
@@ -295,6 +307,10 @@ export function createModuleLauncher({
       openChunkPanel(null, true);
     } else if (config.action === 'danbooru_browser') {
       openDanbooruBrowser?.();
+    } else if (config.action === 'comfyui_workflow_default') {
+      switchComfyUiWorkflowDefault?.();
+    } else if (config.action === 'comfyui_workflow_upload') {
+      uploadComfyUiWorkflow?.();
     } else {
       openModule(moduleId);
     }

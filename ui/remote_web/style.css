@@ -4181,6 +4181,12 @@ body.resizing-result-info {
 .activated-summary span {
   overflow: visible;
 }
+.activated-summary.comfyui-summary {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
 .activated-summary-part {
   appearance: none;
   border: 0;
@@ -4213,6 +4219,26 @@ body.resizing-result-info {
 }
 .activated-summary-separator {
   color: var(--text-dim);
+}
+.activated-summary-bullet {
+  color: rgba(156,150,188,0.82);
+  padding: 0 5px;
+}
+.activated-summary-static {
+  font: inherit;
+  letter-spacing: inherit;
+}
+.activated-summary-part.comfyui-mode {
+  color: #c8b8ff;
+}
+.activated-summary-static.comfyui-weight {
+  color: #c8b8ff;
+}
+.activated-summary-static.comfyui-workflow-basic {
+  color: #75cfff;
+}
+.activated-summary-static.comfyui-workflow-custom {
+  color: #ff8f88;
 }
 .prompt-token-comment {
   color: #f4df8a;

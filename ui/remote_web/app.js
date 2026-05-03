@@ -53,6 +53,11 @@ let resultEnhanceAssetRequestId = 0;
 let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
+let comfyuiWorkflowState = {
+  has_custom: false,
+  workflow_label: 'Basic Workflow',
+};
+let comfyuiWorkflowFileInput = null;
 let cloudflaredControls = null;
 let img2imgSessionPopup = null;
 let generationProgress = null;
@@ -433,6 +438,7 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
       setCharacterTokenCount: value => { if (tokenDisplayControl) tokenDisplayControl.setCharacterTokenCount(value); },
       updatePromptTokenEstimate,
       openModule,
+      openParamsTab: () => switchTab('params'),
     });
   })
   .catch(error => {
@@ -978,6 +984,7 @@ const wsMessageHandlers = {
     if (resultEnhance) resultEnhance.setConfig(m);
   },
   queue_state: m => { if (queuePanel) queuePanel.handleState(m); },
+  comfyui_workflow_state: onComfyUiWorkflowState,
   mode_result: onModeResult,
   api_status: updateApiStatus,
   verify_result: onVerifyResult,
@@ -1206,6 +1213,28 @@ function populateSelect(el, options, current) {
   if (current !== undefined) el.value = current;
 }
 
+function normalizeComfyUiWorkflowState(m = {}) {
+  const state = m.comfyui_workflow && typeof m.comfyui_workflow === 'object'
+    ? m.comfyui_workflow
+    : m;
+  const hasCustom = 'has_custom' in state
+    ? Boolean(state.has_custom)
+    : Boolean(m.comfyui_workflow_has_custom);
+  return {
+    has_custom: hasCustom,
+    workflow_label: state.workflow_label || m.comfyui_workflow_label || (hasCustom ? 'Custom Workflow' : 'Basic Workflow'),
+    model_compat: state.model_compat || null,
+    locked_loader_class: state.locked_loader_class || null,
+    locked_model_display: state.locked_model_display || null,
+  };
+}
+
+function onComfyUiWorkflowState(m) {
+  comfyuiWorkflowState = normalizeComfyUiWorkflowState(m);
+  if (moduleBadges) moduleBadges.updateComfyUiWorkflowState(comfyuiWorkflowState);
+  if (moduleLauncherControl) moduleLauncherControl.updateState();
+}
+
 function updateParams(m) {
   syncingParams = true;
   populateSelect(paramEls.model, m.options_model, m.model);
@@ -1263,8 +1292,12 @@ function updateParams(m) {
     $('flagVpred').classList.toggle('on', sm === 'v_prediction');
     $('flagAnima').classList.toggle('on', sm === 'anima');
     $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
+    $('comfyuiAnimaWeightRow').style.display = sm === 'anima' ? '' : 'none';
     if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
+    if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
   }
+  if ('comfyui_workflow' in m || 'comfyui_workflow_has_custom' in m) onComfyUiWorkflowState(m);
+  if (moduleBadges) moduleBadges.updateComfyUiParams(m);
   if (studioTabControl) studioTabControl.onParamsChanged();
   syncingParams = false;
 }
@@ -1306,7 +1339,86 @@ function setSamplingMode(mode) {
   $('flagVpred').classList.toggle('on', mode === 'v_prediction');
   $('flagAnima').classList.toggle('on', mode === 'anima');
   $('comfyuiRescaleRow').style.display = mode === 'anima' ? '' : 'none';
+  $('comfyuiAnimaWeightRow').style.display = mode === 'anima' ? '' : 'none';
   setParam('sampling_mode', mode);
+}
+
+function getComfyUiWorkflowFileInput() {
+  if (comfyuiWorkflowFileInput) return comfyuiWorkflowFileInput;
+  comfyuiWorkflowFileInput = document.createElement('input');
+  comfyuiWorkflowFileInput.type = 'file';
+  comfyuiWorkflowFileInput.accept = 'image/png,.png';
+  comfyuiWorkflowFileInput.hidden = true;
+  comfyuiWorkflowFileInput.addEventListener('change', () => {
+    const file = comfyuiWorkflowFileInput.files && comfyuiWorkflowFileInput.files[0];
+    comfyuiWorkflowFileInput.value = '';
+    if (file) uploadComfyUiWorkflowFile(file);
+  });
+  document.body.append(comfyuiWorkflowFileInput);
+  return comfyuiWorkflowFileInput;
+}
+
+async function readJsonResponse(response) {
+  try {
+    return await response.json();
+  } catch (error) {
+    return {};
+  }
+}
+
+function applyComfyUiWorkflowResponse(data) {
+  if (data?.workflow) onComfyUiWorkflowState(data.workflow);
+  if (data?.params && Object.keys(data.params).length) updateParams(data.params);
+}
+
+function uploadComfyUiWorkflow() {
+  if ((currentMode || modeSelect.value) !== 'COMFYUI') {
+    showToast('ComfyUI mode is required', 'error');
+    return;
+  }
+  getComfyUiWorkflowFileInput().click();
+}
+
+async function uploadComfyUiWorkflowFile(file) {
+  if (!file) return;
+  const isPng = file.type === 'image/png' || /\.png$/i.test(file.name || '');
+  if (!isPng) {
+    showToast('PNG workflow image is required', 'error');
+    return;
+  }
+  try {
+    const response = await fetch('/api/comfyui/workflow/upload', {
+      method: 'POST',
+      headers: {'Content-Type': file.type || 'image/png'},
+      body: file,
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || 'Workflow upload failed');
+    }
+    applyComfyUiWorkflowResponse(data);
+    showToast('Custom Workflow enabled', 'success');
+  } catch (error) {
+    showToast(error?.message || 'Workflow upload failed', 'error');
+  }
+}
+
+async function switchComfyUiWorkflowDefault() {
+  if ((currentMode || modeSelect.value) !== 'COMFYUI') {
+    showToast('ComfyUI mode is required', 'error');
+    return;
+  }
+  try {
+    const response = await fetch('/api/comfyui/workflow/default', {method: 'POST'});
+    const data = await readJsonResponse(response);
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || 'Workflow switch failed');
+    }
+    applyComfyUiWorkflowResponse(data);
+    showToast('Basic Workflow enabled', 'success');
+  } catch (error) {
+    showToast(error?.message || 'Workflow switch failed', 'error');
+  }
 }
 
 // ---- Prompt sync ----
@@ -2572,6 +2684,9 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
       openModule,
       openChunkPanel,
       openDanbooruBrowser: openDanbooruBrowserTool,
+      getComfyUiWorkflowState: () => comfyuiWorkflowState,
+      switchComfyUiWorkflowDefault,
+      uploadComfyUiWorkflow,
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();

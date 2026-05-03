@@ -6180,17 +6180,12 @@ class RemoteBridge(QObject):
                 else:
                     self._broadcast_json({"type": "toast", "message": result, "level": "error"})
             elif key == "preset_apply_recommended":
-                if hasattr(self.app_context, "get_api_mode") and self.app_context.get_api_mode() != "NAI":
-                    self._broadcast_json({
-                        "type": "toast",
-                        "message": "추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.",
-                        "level": "error",
-                    })
-                    return
                 ok, result = m.create_and_apply_recommended_preset()
                 if ok:
                     self._broadcast_json({"type": "toast", "message": f"추천 프리셋 적용: {result}", "level": "success"})
                     self._broadcast_prompt_engineering_state()
+                    self._broadcast_params()
+                    self._broadcast_prompts()
                 else:
                     self._broadcast_json({"type": "toast", "message": result, "level": "error"})
             elif key == "preset_delete":

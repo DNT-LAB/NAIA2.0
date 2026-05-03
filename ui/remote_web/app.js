@@ -1301,6 +1301,7 @@ function updateParams(m) {
   if ('comfyui_workflow' in m || 'comfyui_workflow_has_custom' in m) onComfyUiWorkflowState(m);
   if (moduleBadges) moduleBadges.updateComfyUiParams(m);
   if (studioTabControl) studioTabControl.onParamsChanged();
+  updateModuleHeaderAction(currentModuleId);
   syncingParams = false;
 }
 
@@ -1349,6 +1350,7 @@ function setSamplingMode(mode) {
   $('comfyuiRescaleRow').style.display = mode === 'anima' ? '' : 'none';
   $('comfyuiAnimaWeightRow').style.display = mode === 'anima' ? '' : 'none';
   setParam('sampling_mode', mode);
+  updateModuleHeaderAction(currentModuleId);
 }
 
 function getComfyUiWorkflowFileInput() {
@@ -2754,6 +2756,7 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
       closePresetAddPanel: closePePresetAddPanel,
       closePresetManagePanel: closePePresetManagePanel,
       getLastPromptEngineeringState: () => lastPromptEngineeringState,
+      isComfyUiAnimaMode,
     });
   })
   .catch(error => {
@@ -2775,7 +2778,7 @@ function updateModuleHeaderAction(moduleId) {
     }
   }
   if (!modulePopupAction) return;
-  if (moduleId === 'prompt_engineering' && modeSelect.value === 'NAI') {
+  if (moduleId === 'prompt_engineering' && ((currentMode || modeSelect.value) === 'NAI' || isComfyUiAnimaMode())) {
     modulePopupAction.textContent = '추천 설정 적용';
     modulePopupAction.style.display = '';
     modulePopupAction.onclick = applyRecommendedPromptPreset;
@@ -2784,6 +2787,11 @@ function updateModuleHeaderAction(moduleId) {
   modulePopupAction.style.display = 'none';
   modulePopupAction.onclick = null;
   modulePopupAction.textContent = '';
+}
+
+function isComfyUiAnimaMode() {
+  return (currentMode || modeSelect.value) === 'COMFYUI'
+    && Boolean($('flagAnima')?.classList.contains('on'));
 }
 
 function requestModuleState(moduleId) {

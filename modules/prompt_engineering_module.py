@@ -1423,11 +1423,72 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         print(f"⚠️ NAI 추천 프리셋 자동 적용 실패: {preset_name}")
         return False
 
+    def _is_current_comfyui_anima_mode(self) -> bool:
+        if not hasattr(self, 'app_context') or not self.app_context:
+            return False
+        try:
+            if self.app_context.get_api_mode() != "COMFYUI":
+                return False
+            main_window = getattr(self.app_context, 'main_window', None)
+            anima_radio = getattr(main_window, 'anima_radio', None) if main_window else None
+            return bool(anima_radio is not None and anima_radio.isChecked())
+        except Exception:
+            return False
+
+    def _create_and_apply_comfyui_anima_recommended_preset(self, *, save_current: bool = True) -> tuple[bool, str]:
+        preset_name = self._get_unique_preset_name("recommend_anima")
+        current_preset = self.current_preset
+        if save_current and current_preset and current_preset not in ("", "(프리셋 없음)", "*randomized"):
+            self.save_current_preset(current_preset)
+
+        module_settings = {
+            "pre_prompt": "(@myowa), newest, year2024, (best quality), highres, absurdres",
+            "post_prompt": (
+                "(3d background, blurry background:1.5), (musk, oekaki, crosshatching, sketch, "
+                "watercolor \\(medium\\), airbrush \\(medium\\), cel rendering:0.4), "
+                "(delicate colored lineart, highly aesthetic Pixiv style illustration, clean composition, "
+                "high-quality digital art, very thin lineart, low contrast shading, cinematic lighting, "
+                "very beautiful and detailed scene:0.8)"
+            ),
+            "auto_hide_prompt": "",
+        }
+        main_settings = {
+            "negative": (
+                "ai-generated, face in shadow, (worst quality), low quality, cropped, (score_1), "
+                "score_2, score_3, artist logo, unfinished, work-in-progress, blank, letterboxed, "
+                "blurry, jpeg artifacts, sepia, mutated, mutated digits, missing fingers, extra digit, "
+                "fewer digits, artistic error, bad anatomy, watermark, patreon username, web address, "
+                "patreon logo, weibo username, watermark, mature female, adult female, adolescent, "
+                "wide hips, narrow waist, long body, (multiple views:1.3), monochrome, greyscale, "
+                "retro artstyle, (outline, thick outlines:1.15), bold lines, thick borders, messy shading, "
+                "(western comics \\(style\\):1.5), furry, english text, spot color, doodle on background, "
+                "gif artifacts, muted color, high contrast, oversaturated colors, glossy highlights"
+            ),
+            "sampler": "er_sde",
+            "scheduler": "simple",
+            "steps": 30,
+            "cfg_scale": 5.1,
+            "rescale_cfg": 0.5,
+            "anima_weight": "1",
+        }
+        preset_data = {
+            "module_settings": module_settings,
+            "main_settings": main_settings,
+            "api_mode": "COMFYUI",
+        }
+        self._write_preset_data(preset_name, preset_data)
+        self._apply_preset_selection(preset_name)
+        return True, preset_name
+
     def create_and_apply_recommended_preset(self, *, save_current: bool = True) -> tuple[bool, str]:
         """웹 GUI용 추천 프리셋 생성 후 즉시 적용."""
         current_mode = self.app_context.get_api_mode() if hasattr(self, 'app_context') and self.app_context else "NAI"
+        if current_mode == "COMFYUI":
+            if not self._is_current_comfyui_anima_mode():
+                return False, "추천 설정 적용은 COMFYUI ANIMA 모드에서만 지원됩니다."
+            return self._create_and_apply_comfyui_anima_recommended_preset(save_current=save_current)
         if current_mode != "NAI":
-            return False, "추천 설정 적용은 현재 NAI 모드에서만 지원됩니다."
+            return False, "추천 설정 적용은 현재 NAI 또는 COMFYUI ANIMA 모드에서만 지원됩니다."
 
         preset_name = self._get_unique_preset_name("recommend")
         current_preset = self.current_preset
@@ -2968,6 +3029,14 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 if 'steps' in settings and hasattr(main_window, 'steps_spinbox'):
                     main_window.steps_spinbox.setValue(int(settings['steps']))
                     print(f"        ComfyUI steps: {settings['steps']}")
+
+                if 'rescale_cfg' in settings and hasattr(main_window, 'comfyui_rescale_slider'):
+                    main_window.comfyui_rescale_slider.setValue(int(float(settings['rescale_cfg']) * 100))
+                    print(f"        ComfyUI rescale_cfg: {settings['rescale_cfg']}")
+
+                if 'anima_weight' in settings and hasattr(main_window, 'anima_weight_edit'):
+                    main_window.anima_weight_edit.setText(str(settings['anima_weight']))
+                    print(f"        ComfyUI anima_weight: {settings['anima_weight']}")
 
                 # ComfyUI 전용 설정
                 if 'v_prediction' in settings and hasattr(main_window, 'v_prediction_checkbox'):

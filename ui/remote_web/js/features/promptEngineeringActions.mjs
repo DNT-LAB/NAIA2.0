@@ -9,6 +9,7 @@ export function createPromptEngineeringActions({
   closePresetAddPanel,
   closePresetManagePanel,
   getLastPromptEngineeringState,
+  isComfyUiAnimaMode,
 }) {
   function flushPresetSaveState() {
     flushPromptEngineeringEdits();
@@ -39,8 +40,10 @@ export function createPromptEngineeringActions({
   }
 
   async function applyRecommendedPreset() {
-    if (getMode() !== 'NAI') {
-      showToast('추천 설정 적용은 NAI 모드에서만 사용할 수 있습니다.', 'error');
+    const mode = getMode();
+    const isAnima = typeof isComfyUiAnimaMode === 'function' && isComfyUiAnimaMode();
+    if (mode !== 'NAI' && !isAnima) {
+      showToast('추천 설정 적용은 NAI 또는 COMFYUI ANIMA 모드에서만 사용할 수 있습니다.', 'error');
       return;
     }
     if (!await Promise.resolve(confirmDialog('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?'))) return;

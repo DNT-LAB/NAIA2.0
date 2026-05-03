@@ -2449,6 +2449,10 @@ function updateModeSelectAvailability() {
 }
 
 function syncMode(mode) {
+  const previousMode = currentMode || modeSelect.value || prevMode;
+  if (previousMode && previousMode !== mode) {
+    closeOpenModulesForModeSwitch();
+  }
   syncingMode = true;
   modeSelect.value = mode;
   prevMode = mode;
@@ -2464,10 +2468,6 @@ function syncMode(mode) {
     const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
     if (btn) btn.classList.toggle('nai-only-disabled', !isNai);
   });
-  // 비NAI 모드에서 열려있는 NAI 전용 모듈 닫기
-  if (!isNai && naiOnlyModules.includes(currentModuleId)) {
-    closeModule();
-  }
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
   if (resultEnhance) resultEnhance.update();
@@ -2480,6 +2480,9 @@ function setMode(mode) {
     syncMode(prevMode);
     showToast(`${mode} API is not connected`, 'error', true);
     return;
+  }
+  if ((currentMode || prevMode || modeSelect.value) !== mode) {
+    closeOpenModulesForModeSwitch();
   }
   uiLock.classList.add('active');
   modeSwitching = true;
@@ -2874,7 +2877,7 @@ function openModule(moduleId, options = {}) {
   }
 }
 
-function closeModule() {
+function closeModule(options = {}) {
   if (isDetachedModule) {
     if (window.opener) window.close();
     return;
@@ -2886,12 +2889,24 @@ function closeModule() {
   modulePopup.classList.remove('module-popup-img2img');
   modulePopup.classList.remove('module-popup-conditional');
   modulePopup.classList.remove('module-popup-inpaint');
-  closeAuxiliaryPopups(null, { keepChunk: true });
+  closeAuxiliaryPopups(null, { keepChunk: options.keepChunk !== false });
   currentModuleId = null;
   if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
   updateModuleHeaderAction(null);
   updateModuleBtnState();
   if (chunkPanelControl) chunkPanelControl.relayout();
+}
+
+function closeOpenModulesForModeSwitch() {
+  if (isDetachedModule) return;
+  const hasPrimaryModule = Boolean(currentModuleId) || modulePopup.classList.contains('open');
+  if (hasPrimaryModule) {
+    closeModule({ keepChunk: false });
+  } else {
+    closeAuxiliaryPopups(null, { keepChunk: false });
+    if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
+    updateModuleBtnState();
+  }
 }
 
 function updateModuleBtnState() {

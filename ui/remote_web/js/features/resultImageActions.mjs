@@ -360,11 +360,22 @@ export function createResultImageActions({
     return 'naia-result.png';
   }
 
+  function pngFilename(filename) {
+    const base = String(filename || 'naia-result.png').replace(/\.[^.\\/]+$/, '').trim();
+    return `${base || 'naia-result'}.png`;
+  }
+
   function applyOriginalImageDragData(dataTransfer, payload = {}) {
     if (!dataTransfer) return;
     const source = payload.source || (payload.path ? 'saved' : 'current');
-    const originalUrl = absoluteAppUrl(contextImageOriginalUrl({source, path: payload.path || ''}));
-    const filename = filenameFromDragPayload(payload);
+    const usePngExport = source === 'current' && !payload.path;
+    const dragUrl = usePngExport
+      ? contextImagePngUrl({source: 'current'})
+      : contextImageOriginalUrl({source, path: payload.path || ''});
+    const originalUrl = absoluteAppUrl(dragUrl);
+    const filename = usePngExport
+      ? pngFilename(filenameFromDragPayload(payload))
+      : filenameFromDragPayload(payload);
     const mimeType = mimeTypeForFilename(filename);
     try { dataTransfer.clearData(); } catch (_) { /* noop */ }
     try { dataTransfer.effectAllowed = 'copy'; } catch (_) { /* noop */ }

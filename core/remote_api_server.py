@@ -938,6 +938,18 @@ class RemoteBridge(QObject):
                         self._syncing_prompt = False
                 session_overrides = {}
             session_overrides.setdefault("_remote_queue_source", "Web")
+            if (
+                str(session_overrides.get("_comfyui_workflow_mode") or "").lower() == "custom"
+                and self.app_context.get_api_mode() == "COMFYUI"
+            ):
+                manager = self._get_comfyui_workflow_manager()
+                if not manager or not getattr(manager, "user_workflow", None):
+                    self._send_json_to(ws, {
+                        "type": "toast",
+                        "message": "ComfyUI custom workflow is no longer loaded on the server.",
+                        "level": "error",
+                    })
+                    return
 
             # pending overrides에 source 기록 (on_prompt_generated에서 사용)
             if ws is not None:
@@ -1021,7 +1033,7 @@ class RemoteBridge(QObject):
         self._cached_result_enhance_config = {}
 
     def _do_set_result_enhance_config(self, ws=None, payload_json: str = "{}"):
-        """Web Remote에서 전달된 Enhance 설정을 Desktop ImageWindow에 반영."""
+        """Persist Web Remote Enhance config only in the requesting session."""
         try:
             allowed, reason = self._result_enhance_gate(ws)
             if not allowed:
@@ -1039,19 +1051,6 @@ class RemoteBridge(QObject):
                 payload = {}
 
             config = self._normalize_result_enhance_config(payload)
-            image_window._enhance_upscale = config["upscale"]
-            image_window._enhance_strength = config["strength"]
-            image_window._enhance_noise = config["noise"]
-
-            update_text = getattr(image_window, "_update_enhance_button_text", None)
-            if callable(update_text):
-                update_text()
-            update_state = getattr(image_window, "_update_enhance_button_state", None)
-            if callable(update_state):
-                update_state()
-            save_settings = getattr(image_window, "save_settings", None)
-            if callable(save_settings):
-                save_settings()
 
             self._cached_result_enhance_config = {}
             if ws is not None:
@@ -1109,9 +1108,10 @@ class RemoteBridge(QObject):
         item = context["item"]
         image = item.image
 
-        upscale = getattr(image_window, "_enhance_upscale", 1.5)
-        strength = getattr(image_window, "_enhance_strength", 0.2)
-        noise = getattr(image_window, "_enhance_noise", 0.0)
+        config = self._normalize_result_enhance_config(payload)
+        upscale = config["upscale"]
+        strength = config["strength"]
+        noise = config["noise"]
 
         orig_w, orig_h = image.size
         if upscale == 1.0:
@@ -1179,7 +1179,7 @@ class RemoteBridge(QObject):
             context = self._prepare_result_enhance_context(payload)
             image_window = context["image_window"]
 
-            if getattr(image_window, "_enhance_upscale", None) == 1.0:
+            if context["upscale"] == 1.0:
                 gen_ctrl = getattr(self.app_context, "generation_controller", None)
                 if gen_ctrl and getattr(gen_ctrl, "is_generating", False):
                     self._send_result_enhance_error(ws, "Enhance is unavailable while generation is running")

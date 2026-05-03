@@ -393,11 +393,22 @@ class GenerationController:
         try:
             # 🆕 시퀀스 프롬프트 감지 (큐에서 호출된 경우 제외)
             if not from_queue:
-                main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
+                sequence_overrides = overrides
+                if overrides and overrides.get('_remote_web_session_params') and overrides.get('input'):
+                    main_prompt_text = str(overrides.get('input') or '')
+                    sequence_overrides = dict(overrides)
+                    # _handle_sequence_generation injects each parsed prompt into
+                    # params['input']; do not let the original Web prompt override it.
+                    sequence_overrides.pop('input', None)
+                    sequence_overrides.pop('_raw_input', None)
+                    if not sequence_overrides.get('seed_fixed', False):
+                        sequence_overrides.pop('seed', None)
+                else:
+                    main_prompt_text = self.context.main_window.main_prompt_textedit.toPlainText()
 
                 if SequenceParser.is_sequence_prompt(main_prompt_text):
                     print("[SEQUENCE] 시퀀스 프롬프트 감지됨. 시퀀스 모드로 전환합니다.")
-                    self._handle_sequence_generation(main_prompt_text, overrides, priority)
+                    self._handle_sequence_generation(main_prompt_text, sequence_overrides, priority)
                     return
 
             # --- 1 ~ 4 단계: 파라미터 수집 및 유효성 검사 ---
@@ -1560,7 +1571,10 @@ class GenerationController:
 
         # 🆕 API 모드 확인 (시드 처리 분기용)
         api_mode = base_params.get('api_mode', 'NAI')
-        seed_is_fixed = self.context.main_window.seed_fix_checkbox.isChecked()
+        if overrides and 'seed_fixed' in overrides:
+            seed_is_fixed = bool(overrides.get('seed_fixed'))
+        else:
+            seed_is_fixed = self.context.main_window.seed_fix_checkbox.isChecked()
 
         for i, prompt in enumerate(prompt_sets):
             try:

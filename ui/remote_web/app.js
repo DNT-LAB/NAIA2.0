@@ -793,19 +793,98 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
 
 function _collectCurrentParams() {
   const p = {};
-  if (paramEls.resolution.value) p.resolution = paramEls.resolution.value;
-  if (paramEls.steps.value) p.steps = paramEls.steps.value;
-  if (paramEls.cfg_scale.value) p.cfg_scale = paramEls.cfg_scale.value;
-  if (paramEls.cfg_rescale.value) p.cfg_rescale = paramEls.cfg_rescale.value;
-  if (paramEls.seed.value) p.seed = paramEls.seed.value;
+  const mode = currentMode || modeSelect?.value || 'NAI';
+  const parseNumber = (value, fallback = null) => {
+    if (value === undefined || value === null || String(value).trim() === '') return fallback;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const flagState = key => {
+    const el = paramFlags?.querySelector?.(`[data-key="${key}"]`);
+    return !!el?.classList.contains('on');
+  };
+  const randomResolution = flagState('random_resolution') || !!qRndRes?.classList.contains('on');
+  const autoFitResolution = flagState('auto_fit_resolution') || !!qAutoRes?.classList.contains('on');
+  const resolutionOptions = Array.from(paramEls.resolution?.options || [])
+    .map(option => option.value)
+    .filter(Boolean);
+  const resolution = randomResolution && resolutionOptions.length
+    ? resolutionOptions[Math.floor(Math.random() * resolutionOptions.length)]
+    : (paramEls.resolution.value || qResolution?.value || '');
+  if (resolution) {
+    p.resolution = resolution;
+    const match = String(resolution).match(/(\d+)\s*x\s*(\d+)/i);
+    if (match) {
+      p.width = parseInt(match[1], 10);
+      p.height = parseInt(match[2], 10);
+    }
+  }
+  const steps = parseNumber(paramEls.steps.value);
+  const cfgScale = parseNumber(paramEls.cfg_scale.value);
+  const cfgRescale = parseNumber(paramEls.cfg_rescale.value);
+  if (steps !== null) p.steps = Math.trunc(steps);
+  if (cfgScale !== null) p.cfg_scale = cfgScale;
+  if (cfgRescale !== null) p.cfg_rescale = cfgRescale;
+  const seedFixed = flagState('seed_fixed');
+  p.seed_fixed = seedFixed;
+  if (seedFixed && paramEls.seed.value) {
+    const seed = parseNumber(paramEls.seed.value);
+    if (seed !== null) p.seed = Math.max(0, Math.trunc(seed));
+  } else if (!seedFixed) {
+    p.seed = mode === 'NAI' ? Math.floor(Math.random() * 10000000000) : -1;
+  }
   if (paramEls.sampler.value) p.sampler = paramEls.sampler.value;
   if (paramEls.scheduler.value) p.scheduler = paramEls.scheduler.value;
   if (paramEls.model.value) p.model = paramEls.model.value;
-  // flags
   document.querySelectorAll('#paramFlags .param-flag').forEach(el => {
-    p[el.dataset.key] = String(el.classList.contains('on'));
+    p[el.dataset.key] = el.classList.contains('on');
   });
+  p.random_resolution = randomResolution;
+  p.auto_fit_resolution = autoFitResolution;
+  p.prompt_fixed = getOptionChecked('prompt_fixed');
+  p.wildcard_standalone = getOptionChecked('wildcard_standalone');
+
+  if (mode === 'WEBUI') {
+    const enableHr = $('pEnableHr');
+    const hrScale = $('pHrScale');
+    const hrUpscaler = $('pHrUpscaler');
+    const denoise = $('pDenoise');
+    const hiresSteps = $('pHiresSteps');
+    const hrCfg = $('pHrCfg');
+    if (enableHr) p.enable_hr = !!enableHr.checked;
+    if (hrScale) p.hr_scale = parseNumber(hrScale.value, 1.5);
+    if (hrUpscaler?.value) p.hr_upscaler = hrUpscaler.value;
+    if (denoise) p.denoising_strength = parseNumber(denoise.value, 0.5);
+    if (hiresSteps) p.hires_steps = Math.trunc(parseNumber(hiresSteps.value, 0));
+    if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 5.0);
+  }
+
+  if (mode === 'COMFYUI') {
+    const samplingMode = $('flagAnima')?.classList.contains('on')
+      ? 'anima'
+      : ($('flagVpred')?.classList.contains('on') ? 'v_prediction' : 'eps');
+    p.sampling_mode = samplingMode;
+    p.workflow_type = samplingMode === 'anima' ? 'unet' : 'checkpoint';
+    p.filename_prefix = 'NAIA_ComfyUI';
+    if (samplingMode === 'anima') {
+      const rescaleCfg = parseNumber($('pRescaleCfg')?.value);
+      if (rescaleCfg !== null) p.rescale_cfg = rescaleCfg;
+      const animaWeight = $('pAnimaWeight')?.value?.trim();
+      if (animaWeight) p.anima_weight = animaWeight;
+    }
+    p._comfyui_workflow_mode = comfyuiWorkflowState?.has_custom ? 'custom' : 'basic';
+  }
   return p;
+}
+
+function buildWebGenerationOverrides(prompt, negativePrompt) {
+  const overrides = _collectCurrentParams();
+  overrides.input = prompt;
+  overrides.negative_prompt = negativePrompt;
+  overrides._raw_input = prompt;
+  overrides._remote_web_session_params = true;
+  overrides._remote_queue_source = 'Web';
+  return overrides;
 }
 
 const $ = id => document.getElementById(id);
@@ -2272,9 +2351,12 @@ function requestGenerate(payload = {}) {
 function send(cmd) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (cmd === 'generate') {
+    const prompt = promptEdit.value;
+    const negative = negEdit.value;
     requestGenerate({
-      prompt: promptEdit.value,
-      negative_prompt: negEdit.value,
+      prompt,
+      negative_prompt: negative,
+      overrides: buildWebGenerationOverrides(prompt, negative),
     });
     return;
   }

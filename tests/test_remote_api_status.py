@@ -218,6 +218,61 @@ def test_studio_generate_overrides_are_preserved_when_queued():
     assert generation_controller.enqueued == [(overrides, 0)]
 
 
+def test_web_generate_overrides_do_not_mutate_main_prompt_fields():
+    bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context()
+    overrides = {
+        "input": "web session prompt",
+        "negative_prompt": "web session negative",
+        "model": "web-local-model",
+        "steps": 31,
+        "_remote_queue_source": "Web",
+    }
+    bridge._pending_generate_requests.append({
+        "ws": None,
+        "prompt": "legacy prompt field",
+        "negative": "legacy negative field",
+        "overrides": overrides,
+    })
+
+    bridge._do_generate()
+
+    assert prompt_edit.toPlainText() == "main prompt"
+    assert negative_edit.toPlainText() == "preset negative"
+    assert prompt_edit.set_calls == []
+    assert negative_edit.set_calls == []
+    assert generation_controller.executed == [(overrides, 0)]
+
+
+def test_web_generate_missing_custom_workflow_fails_before_starting():
+    bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context()
+    bridge.app_context.get_api_mode = lambda: "COMFYUI"
+    sent = []
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+    overrides = {
+        "input": "web session prompt",
+        "negative_prompt": "web session negative",
+        "_comfyui_workflow_mode": "custom",
+        "_remote_queue_source": "Web",
+    }
+    bridge._pending_generate_requests.append({
+        "ws": _ws("127.0.0.1"),
+        "prompt": "legacy prompt field",
+        "negative": "legacy negative field",
+        "overrides": overrides,
+    })
+
+    bridge._do_generate()
+
+    assert prompt_edit.toPlainText() == "main prompt"
+    assert negative_edit.toPlainText() == "preset negative"
+    assert generation_controller.executed == []
+    assert sent == [{
+        "type": "toast",
+        "message": "ComfyUI custom workflow is no longer loaded on the server.",
+        "level": "error",
+    }]
+
+
 def test_generation_param_schema_strips_desktop_selected_values():
     params = {
         "type": "params",
@@ -296,6 +351,105 @@ def test_desktop_control_state_hooks_do_not_broadcast():
     assert bridge._cached_params == schema
     assert bridge._cached_result_enhance_config == {}
     assert broadcasts == []
+
+
+def test_result_enhance_config_update_is_session_only():
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        _enhance_upscale=1.5,
+        _enhance_strength=0.2,
+        _enhance_noise=0.0,
+    )
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(image_window=image_window)
+    bridge = RemoteBridge(ctx)
+    sent = []
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+
+    bridge._do_set_result_enhance_config(
+        ws=_ws("127.0.0.1"),
+        payload_json=json.dumps({"upscale": 1.0, "strength": 0.7, "noise": 0.1}),
+    )
+
+    assert image_window._enhance_upscale == 1.5
+    assert image_window._enhance_strength == 0.2
+    assert image_window._enhance_noise == 0.0
+    assert sent[0] == {
+        "type": "result_enhance_config",
+        "upscale": 1.0,
+        "strength": 0.7,
+        "noise": 0.1,
+        "_session_echo": True,
+    }
+
+
+def test_result_enhance_request_payload_overrides_desktop_config():
+    image = Image.new("RGB", (64, 64), "white")
+    item = SimpleNamespace(
+        image=image,
+        generation_params={"input": "1girl", "negative_prompt": "", "seed": 123},
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+        _enhance_upscale=1.0,
+        _enhance_strength=0.9,
+        _enhance_noise=0.0,
+    )
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(image_window=image_window)
+    bridge = RemoteBridge(ctx)
+
+    context = bridge._prepare_result_enhance_context({
+        "upscale": 1.5,
+        "strength": 0.4,
+        "noise": 0.1,
+    })
+
+    assert context["upscale"] == 1.5
+    assert context["strength"] == 0.4
+    assert context["noise"] == 0.1
+    assert context["new_w"] == 128
+    assert context["new_h"] == 128
+    assert context["params"]["strength"] == 0.4
+    assert context["params"]["noise"] == 0.1
+
+
+def _comfy_generation_params(**overrides):
+    params = {
+        "input": "1girl",
+        "negative_prompt": "",
+        "model": "model.safetensors",
+        "seed": 1,
+        "steps": 20,
+        "cfg_scale": 5.0,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 512,
+        "height": 512,
+        "workflow_type": "checkpoint",
+        "sampling_mode": "eps",
+    }
+    params.update(overrides)
+    return params
+
+
+def test_comfyui_basic_workflow_mode_ignores_global_custom_workflow():
+    manager = ComfyUIWorkflowManager()
+    manager.user_workflow = {"invalid": {"class_type": "Invalid", "inputs": {}}}
+    manager.user_workflow_node_map = {"positive_prompt": "missing"}
+
+    workflow = manager.apply_params_to_workflow(_comfy_generation_params(_comfyui_workflow_mode="basic"))
+
+    assert workflow is not None
+
+
+def test_comfyui_custom_workflow_mode_requires_loaded_custom_workflow():
+    manager = ComfyUIWorkflowManager()
+
+    workflow = manager.apply_params_to_workflow(_comfy_generation_params(_comfyui_workflow_mode="custom"))
+
+    assert workflow is None
 
 
 def test_comfyui_workflow_upload_and_default_endpoints_load_png_metadata():

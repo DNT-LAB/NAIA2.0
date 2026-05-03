@@ -922,10 +922,17 @@ class ComfyUIWorkflowManager:
         현재 활성화된 워크플로우(사용자 또는 기본)에 UI 파라미터를 적용합니다.
         """
         self.last_applied_workflow_ui = None
-        if self.user_workflow and self.user_workflow_node_map:
+        requested_workflow_mode = str(params.get("_comfyui_workflow_mode") or "").strip().lower()
+        force_basic_workflow = requested_workflow_mode == "basic"
+        require_custom_workflow = requested_workflow_mode == "custom"
+
+        if not force_basic_workflow and self.user_workflow and self.user_workflow_node_map:
             workflow = copy.deepcopy(self.user_workflow)
             node_map = self.user_workflow_node_map
             workflow_ui = copy.deepcopy(self.user_workflow_ui)
+        elif require_custom_workflow:
+            print("❌ 요청한 ComfyUI custom workflow가 현재 서버에 로드되어 있지 않습니다.")
+            return None
         else:
             # 기본 워크플로우 선택 (workflow_type 파라미터 기반)
             workflow_type = params.get('workflow_type', 'checkpoint')

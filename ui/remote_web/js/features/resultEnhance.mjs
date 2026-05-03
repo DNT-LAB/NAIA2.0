@@ -113,6 +113,7 @@ export function createResultEnhanceController({
       return false;
     }
     const payload = normalizeConfig(nextConfig);
+    const previousConfig = {...config};
     setConfig(payload);
     try {
       socket.send(JSON.stringify({
@@ -120,6 +121,7 @@ export function createResultEnhanceController({
         ...payload,
       }));
     } catch (error) {
+      setConfig(previousConfig);
       if (showToast) showToast('Enhance settings update failed', 'error', true);
       return false;
     }
@@ -243,6 +245,7 @@ export function createResultEnhanceController({
         source: currentMeta?.source || '',
         path: currentMeta?.source === 'current' ? '' : (currentMeta?.path || ''),
         file_path: currentMeta?.file_path || currentMeta?.filePath || '',
+        ...normalizeConfig(config),
       };
       socket.send(JSON.stringify(payload));
       if (showToast) showToast('Enhance request sent to server', 'success');

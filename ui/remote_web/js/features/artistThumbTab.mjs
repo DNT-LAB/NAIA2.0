@@ -37,6 +37,7 @@ export function createArtistThumbController({
   const randomGenerateBtn = document.getElementById('artistThumbRandomGenerateBtn');
   const resultPreviewEl = document.getElementById('artistThumbResultPreview');
   const resultTitleEl = document.getElementById('artistThumbResultTitle');
+  const resultExpandBtn = document.getElementById('artistThumbResultExpand');
   const resultCloseBtn = document.getElementById('artistThumbResultClose');
   const resultImageEl = document.getElementById('artistThumbResultImage');
   const resultEmptyEl = document.getElementById('artistThumbResultEmpty');
@@ -59,6 +60,8 @@ export function createArtistThumbController({
   let hasLoadedList = false;
   let positiveAutoValue = '';
   let randomViewActive = false;
+  let pendingResultAutoExpand = false;
+  let resultExpanded = false;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -123,7 +126,34 @@ export function createArtistThumbController({
     resultBlobUrl = '';
   }
 
+  function updateResultExpandButton() {
+    if (!resultExpandBtn) return;
+    const hasImage = Boolean(resultBlobUrl && resultImageEl?.classList.contains('show'));
+    resultExpandBtn.disabled = !hasImage || resultExpanded;
+    resultExpandBtn.textContent = resultExpanded ? '확대 중' : '크게 보기';
+  }
+
+  function collapseResultOnPointer(event) {
+    if (!resultExpanded) return;
+    setResultExpanded(false);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function setResultExpanded(expanded) {
+    const canExpand = Boolean(resultPreviewEl && resultBlobUrl && resultImageEl?.classList.contains('show'));
+    resultExpanded = Boolean(expanded && canExpand);
+    resultPreviewEl?.classList.toggle('is-expanded', resultExpanded);
+    document.body?.classList.toggle('artist-thumb-result-spotlight', resultExpanded);
+    document.removeEventListener('pointerdown', collapseResultOnPointer, true);
+    if (resultExpanded) {
+      document.addEventListener('pointerdown', collapseResultOnPointer, true);
+    }
+    updateResultExpandButton();
+  }
+
   function showResultPreview(message = 'Waiting for generated image...') {
+    setResultExpanded(false);
     if (resultPreviewEl) resultPreviewEl.hidden = false;
     if (resultEmptyEl) {
       resultEmptyEl.hidden = false;
@@ -133,11 +163,14 @@ export function createArtistThumbController({
       resultImageEl.removeAttribute('src');
       resultImageEl.classList.remove('show');
     }
+    updateResultExpandButton();
   }
 
   function closeResultPreview() {
+    setResultExpanded(false);
     pendingResultRequestId = '';
     pendingResultMeta = null;
+    pendingResultAutoExpand = false;
     revokeResultBlobUrl();
     if (resultPreviewEl) resultPreviewEl.hidden = true;
     if (resultImageEl) {
@@ -145,6 +178,7 @@ export function createArtistThumbController({
       resultImageEl.classList.remove('show');
     }
     if (resultEmptyEl) resultEmptyEl.hidden = false;
+    updateResultExpandButton();
   }
 
   function setGenerateBusy(source, label) {
@@ -580,6 +614,7 @@ export function createArtistThumbController({
     if (!item) return;
     const requestId = makeRequestId();
     const artistPrompt = formatArtistPrompt(item.artist);
+    pendingResultAutoExpand = false;
     const payload = {
       request_id: requestId,
       artist: item.artist,
@@ -625,6 +660,7 @@ export function createArtistThumbController({
     try {
       pendingResultRequestId = requestId;
       pendingResultMeta = null;
+      pendingResultAutoExpand = true;
       revokeResultBlobUrl();
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · random prompt`;
       showResultPreview('Generating random prompt...');
@@ -654,6 +690,7 @@ export function createArtistThumbController({
     } catch (error) {
       pendingResultRequestId = '';
       pendingResultMeta = null;
+      pendingResultAutoExpand = false;
       showResultPreview(error.message || 'Random prompt generate failed');
       showToast?.(error.message || 'Random prompt generate failed', 'error');
     } finally {
@@ -687,6 +724,11 @@ export function createArtistThumbController({
     if (resultEmptyEl) resultEmptyEl.hidden = true;
     pendingResultMeta = null;
     pendingResultRequestId = '';
+    updateResultExpandButton();
+    if (pendingResultAutoExpand) {
+      pendingResultAutoExpand = false;
+      setResultExpanded(true);
+    }
     return true;
   }
 
@@ -784,6 +826,11 @@ export function createArtistThumbController({
     insertBtn?.addEventListener('click', insertSelected);
     generateBtn?.addEventListener('click', generateSelected);
     randomGenerateBtn?.addEventListener('click', generateWithRandomPrompt);
+    resultExpandBtn?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setResultExpanded(true);
+    });
     resultCloseBtn?.addEventListener('click', closeResultPreview);
     prefixEl?.addEventListener('input', scheduleSaveOptions);
     postfixEl?.addEventListener('input', scheduleSaveOptions);

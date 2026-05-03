@@ -275,7 +275,10 @@
             <section class="artist-thumb-result" id="artistThumbResultPreview" hidden>
               <header>
                 <span id="artistThumbResultTitle">Generated Result</span>
-                <button type="button" id="artistThumbResultClose" aria-label="Close result preview">Close</button>
+                <div class="artist-thumb-result-actions">
+                  <button type="button" id="artistThumbResultExpand" aria-label="Show generated result larger" disabled>크게 보기</button>
+                  <button type="button" id="artistThumbResultClose" aria-label="Close result preview">Close</button>
+                </div>
               </header>
               <div class="artist-thumb-result-stage">
                 <img id="artistThumbResultImage" alt="">

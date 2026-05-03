@@ -141,6 +141,7 @@ class RemoteBridge(QObject):
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
+    request_send_desktop_sync = pyqtSignal(object, str) # (ws, reason) — desktop authoritative snapshot
     request_result_enhance = pyqtSignal(object, str)    # (ws, json) — 현재/저장 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
@@ -876,9 +877,10 @@ class RemoteBridge(QObject):
     def _update_cache_all(self):
         """WS 초기화용 캐시를 갱신한다.
 
-        Shared Mode의 desktop -> web 설정값 전파는 중단한다. Web Session은
-        자체 입력값을 유지하고, 서버는 모드/API 상태와 파라미터 선택지 schema만
-        제공한다. api_status 는 per-ws 평가(setup_allowed 가 클라이언트 IP에
+        Shared Mode의 지속적인 desktop -> web 설정값 전파는 중단한다. Web Session은
+        자체 입력값을 유지하고, 캐시는 모드/API 상태와 파라미터 선택지 schema만
+        제공한다. 초기 접속/모드 변경/프리셋 로드처럼 명시적인 reset 지점은
+        별도의 desktop snapshot 이벤트가 처리한다. api_status 는 per-ws 평가(setup_allowed 가 클라이언트 IP에
         따라 다름)이므로 캐시하지 않고 WS 초기화 시점에 `get_api_status(ws=ws)`
         로 직접 생성한다.
         """
@@ -3978,7 +3980,7 @@ class RemoteBridge(QObject):
             self._broadcast_api_status()
 
     def on_api_mode_changed(self, data: dict):
-        """api_mode_changed event -> broadcast mode/status and schema only."""
+        """api_mode_changed event -> broadcast schema, then an authoritative desktop snapshot."""
         new_mode = data.get("new_mode", "")
         # NAI 모드 진입/이탈에 맞춰 Anlas 타이머 제어
         if new_mode == "NAI":
@@ -3989,8 +3991,16 @@ class RemoteBridge(QObject):
         if not self._has_clients():
             return
         self._broadcast_json({"type": "mode", "mode": new_mode})
-        # 모드 변경 시 선택지 schema만 갱신 (selected desktop 값은 전파하지 않음)
+        # 먼저 선택지 schema를 갱신하고, preset/mode 적용이 끝난 뒤 full snapshot을 보낸다.
         self._broadcast_params()
+        self._queue_desktop_control_snapshot_broadcast("mode_changed")
+
+    def on_prompt_preset_loaded(self, data: dict):
+        """Prompt preset load is an explicit desktop-authoritative reset point."""
+        reason = "preset_loaded"
+        if isinstance(data, dict) and data.get("reason"):
+            reason = str(data.get("reason") or reason)
+        self._queue_desktop_control_snapshot_broadcast(reason)
 
     def get_options(self) -> dict:
         """현재 옵션 상태 반환"""
@@ -4092,22 +4102,69 @@ class RemoteBridge(QObject):
             mw = self.app_context.main_window
             prompt = mw.main_prompt_textedit.toPlainText()
             negative = mw.negative_prompt_textedit.toPlainText()
-            params = mw.get_main_parameters()
+            resolution = mw.resolution_combo.currentText() if hasattr(mw, "resolution_combo") else ""
+            width = ""
+            height = ""
+            match = re.search(r"(\d+)\s*x\s*(\d+)", str(resolution), re.IGNORECASE)
+            if match:
+                width, height = match.group(1), match.group(2)
             return {
                 "type": "prompt_sync",
                 "prompt": prompt,
                 "negative_prompt": negative,
-                "model": params.get("model", ""),
-                "steps": params.get("steps", ""),
-                "cfg_scale": params.get("cfg_scale", ""),
-                "sampler": params.get("sampler", ""),
-                "width": params.get("width", ""),
-                "height": params.get("height", ""),
-                "seed": params.get("seed", ""),
+                "model": mw.model_combo.currentText() if hasattr(mw, "model_combo") else "",
+                "steps": mw.steps_spinbox.value() if hasattr(mw, "steps_spinbox") else "",
+                "cfg_scale": round(mw.cfg_scale_slider.value() / 10.0, 1) if hasattr(mw, "cfg_scale_slider") else "",
+                "sampler": mw.sampler_combo.currentText() if hasattr(mw, "sampler_combo") else "",
+                "width": width,
+                "height": height,
+                "seed": mw.seed_input.text() if hasattr(mw, "seed_input") else "",
                 **self._build_prompt_token_payload(prompt, negative),
             }
         except Exception:
             return {}
+
+    def _desktop_control_snapshot_payloads(self, reason: str = "desktop_sync") -> list[dict]:
+        """Build an explicit desktop-authoritative snapshot for bootstrap/reset events."""
+        payloads = []
+        try:
+            params = self.get_generation_params()
+            if params:
+                params_payload = dict(params)
+                params_payload["desktop_sync"] = True
+                params_payload["sync_reason"] = reason
+                payloads.append(params_payload)
+        except Exception as e:
+            print(f"🌐 Remote: desktop params snapshot failed — {e}")
+
+        try:
+            prompts = self.get_current_prompts()
+            if prompts:
+                prompt_payload = dict(prompts)
+                prompt_payload["desktop_sync"] = True
+                prompt_payload["sync_reason"] = reason
+                prompt_payload["force"] = True
+                payloads.append(prompt_payload)
+        except Exception as e:
+            print(f"🌐 Remote: desktop prompt snapshot failed — {e}")
+
+        return payloads
+
+    def _send_desktop_control_snapshot_to(self, ws, reason: str = "initial"):
+        for payload in self._desktop_control_snapshot_payloads(reason):
+            self._send_json_to(ws, payload)
+
+    def _broadcast_desktop_control_snapshot(self, reason: str = "desktop_sync"):
+        if not self._has_clients():
+            return
+        for payload in self._desktop_control_snapshot_payloads(reason):
+            self._broadcast_json(payload)
+
+    def _do_send_desktop_control_snapshot(self, ws, reason: str = "initial"):
+        self._send_desktop_control_snapshot_to(ws, reason or "initial")
+
+    def _queue_desktop_control_snapshot_broadcast(self, reason: str):
+        QTimer.singleShot(0, lambda r=reason: self._broadcast_desktop_control_snapshot(r))
 
     def _on_prompt_text_changed(self):
         """Desktop prompt edits no longer push control state to Web Sessions."""
@@ -10154,6 +10211,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             await ws.send_text(json.dumps(bridge._build_queue_state()))
             # api_status 는 per-ws 평가 (setup_allowed 가 클라이언트 IP에 따라 다름)
             await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
+            bridge.request_send_desktop_sync.emit(ws, "initial")
             # 캐시된 Anlas 있으면 바로 송신 (viewer pill 초기화)
             if bridge._anlas_cache:
                 await ws.send_text(json.dumps(bridge._anlas_payload()))
@@ -10197,6 +10255,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         await ws.send_text(json.dumps(bridge._cached_params))
                     await ws.send_text(json.dumps(bridge._build_queue_state()))
                     await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
+                    bridge.request_send_desktop_sync.emit(ws, "manual_sync")
                     if bridge._anlas_cache:
                         await ws.send_text(json.dumps(bridge._anlas_payload()))
                 elif data.startswith("{"):
@@ -10616,6 +10675,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_apply_filters.connect(bridge._do_apply_filters, Qt.ConnectionType.QueuedConnection)
     bridge.request_refresh_cache.connect(bridge._do_refresh_cache, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_desktop_visibility.connect(bridge._do_set_desktop_visibility, Qt.ConnectionType.QueuedConnection)
+    bridge.request_send_desktop_sync.connect(bridge._do_send_desktop_control_snapshot, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_enhance.connect(bridge._do_result_enhance, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_reroll.connect(bridge._do_result_reroll, Qt.ConnectionType.QueuedConnection)
@@ -10658,6 +10718,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("result_enhance_config_changed", bridge.on_result_enhance_config_changed)
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
+    app_context.subscribe("prompt_preset_loaded", bridge.on_prompt_preset_loaded)
     app_context.subscribe("image_saved", bridge._on_image_saved)
     app_context.subscribe("desktop_window_visibility_changed", bridge.on_desktop_window_visibility_changed)
     app_context.subscribe("cloudflared_status_changed", bridge.on_cloudflared_status_changed)
@@ -10836,7 +10897,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed", "comfyui_workflow_changed"]:
+            for event_name in ["generation_result_available", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "prompt_preset_loaded", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed", "comfyui_workflow_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

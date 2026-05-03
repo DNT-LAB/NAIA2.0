@@ -329,6 +329,108 @@ def test_refresh_cache_does_not_replay_desktop_control_state():
     assert broadcasts == [schema]
 
 
+def test_desktop_snapshot_sends_full_params_and_forced_prompts():
+    bridge = RemoteBridge(_AppContext())
+    bridge.get_generation_params = lambda: {
+        "type": "params",
+        "api_mode": "NAI",
+        "model": "desktop-model",
+        "options_model": ["desktop-model"],
+    }
+    bridge.get_current_prompts = lambda: {
+        "type": "prompt_sync",
+        "prompt": "desktop prompt",
+        "negative_prompt": "desktop negative",
+    }
+    sent = []
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+
+    bridge._do_send_desktop_control_snapshot(_ws("127.0.0.1"), "initial")
+
+    assert sent == [
+        {
+            "type": "params",
+            "api_mode": "NAI",
+            "model": "desktop-model",
+            "options_model": ["desktop-model"],
+            "desktop_sync": True,
+            "sync_reason": "initial",
+        },
+        {
+            "type": "prompt_sync",
+            "prompt": "desktop prompt",
+            "negative_prompt": "desktop negative",
+            "desktop_sync": True,
+            "sync_reason": "initial",
+            "force": True,
+        },
+    ]
+
+
+def test_mode_change_broadcasts_schema_then_desktop_snapshot(monkeypatch):
+    import core.remote_api_server as remote_api_server
+
+    bridge = RemoteBridge(_AppContext())
+    schema = {"type": "params", "api_mode": "WEBUI", "schema_only": True}
+    full_params = {
+        "type": "params",
+        "api_mode": "WEBUI",
+        "model": "desktop-webui-model",
+        "options_model": ["desktop-webui-model"],
+    }
+    prompt_payload = {
+        "type": "prompt_sync",
+        "prompt": "webui preset prompt",
+        "negative_prompt": "webui preset negative",
+    }
+    bridge.get_generation_param_schema = lambda: schema
+    bridge.get_generation_params = lambda: full_params
+    bridge.get_current_prompts = lambda: prompt_payload
+    bridge._has_clients = lambda: True
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+    monkeypatch.setattr(remote_api_server.QTimer, "singleShot", lambda _ms, callback: callback())
+
+    bridge.on_api_mode_changed({"new_mode": "WEBUI"})
+
+    assert broadcasts == [
+        {"type": "mode", "mode": "WEBUI"},
+        schema,
+        {**full_params, "desktop_sync": True, "sync_reason": "mode_changed"},
+        {**prompt_payload, "desktop_sync": True, "sync_reason": "mode_changed", "force": True},
+    ]
+
+
+def test_prompt_preset_loaded_broadcasts_desktop_snapshot(monkeypatch):
+    import core.remote_api_server as remote_api_server
+
+    bridge = RemoteBridge(_AppContext())
+    full_params = {
+        "type": "params",
+        "api_mode": "NAI",
+        "model": "preset-model",
+        "steps": 28,
+    }
+    prompt_payload = {
+        "type": "prompt_sync",
+        "prompt": "preset prompt",
+        "negative_prompt": "preset negative",
+    }
+    bridge.get_generation_params = lambda: full_params
+    bridge.get_current_prompts = lambda: prompt_payload
+    bridge._has_clients = lambda: True
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+    monkeypatch.setattr(remote_api_server.QTimer, "singleShot", lambda _ms, callback: callback())
+
+    bridge.on_prompt_preset_loaded({"preset_name": "default", "reason": "preset_loaded"})
+
+    assert broadcasts == [
+        {**full_params, "desktop_sync": True, "sync_reason": "preset_loaded"},
+        {**prompt_payload, "desktop_sync": True, "sync_reason": "preset_loaded", "force": True},
+    ]
+
+
 def test_desktop_control_state_hooks_do_not_broadcast():
     bridge = RemoteBridge(_AppContext())
     schema = {"type": "params", "api_mode": "COMFYUI", "schema_only": True}

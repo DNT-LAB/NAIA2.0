@@ -1598,8 +1598,9 @@ function flushDeferredPromptSync() {
 function syncPrompts(m) {
   const promptChanged = 'prompt' in m && m.prompt !== promptEdit.value;
   const negativeChanged = 'negative_prompt' in m && m.negative_prompt !== negEdit.value;
+  const forceSync = !!m.force || !!m.desktop_sync;
 
-  if (_isPromptEditingActive() && (promptChanged || negativeChanged)) {
+  if (!forceSync && _isPromptEditingActive() && (promptChanged || negativeChanged)) {
     // 편집 중: 서버 값 버림. blur해도 자동 flush 안 함 (사용자 편집 보호).
     // 사용자 편집이 flush되면 서버가 다시 브로드캐스트하여 자연스럽게 동기화됨.
     deferredPromptSync = null;

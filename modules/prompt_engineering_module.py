@@ -2170,6 +2170,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                 print(f"  - main_settings 없음")
 
             print(f"📂 프리셋 로드 완료: {preset_name}")
+            if hasattr(self, 'app_context') and self.app_context and hasattr(self.app_context, 'publish'):
+                self.app_context.publish("prompt_preset_loaded", {
+                    "preset_name": preset_name,
+                    "api_mode": current_mode,
+                    "reason": "preset_loaded",
+                })
 
         except Exception as e:
             import traceback

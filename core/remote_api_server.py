@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import math
+import mimetypes
 import random
 import re
 import time
@@ -9139,6 +9140,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     app = FastAPI(title="NAIA Remote")
 
     web_dir = Path(__file__).parent.parent / "ui" / "remote_web"
+    # Windows registry MIME mappings can report .mjs as text/plain, which
+    # Chromium rejects for module scripts.
+    mimetypes.add_type("text/javascript", ".mjs")
     no_cache_headers = {"Cache-Control": "no-store, max-age=0"}
     image_export_base_headers = {
         "Cache-Control": "no-store",

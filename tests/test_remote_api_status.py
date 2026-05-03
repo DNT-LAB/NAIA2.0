@@ -161,6 +161,16 @@ def _bridge_with_generate_context(is_generating=False, queue_empty=True):
     return RemoteBridge(ctx), generation_controller, prompt_edit, negative_edit
 
 
+def test_remote_web_mjs_files_are_served_as_javascript():
+    bridge = RemoteBridge(_AppContext())
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.get("/js/features/quickFilter.mjs")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+
+
 def test_studio_generate_overrides_do_not_mutate_main_prompt_fields():
     bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context()
     overrides = {

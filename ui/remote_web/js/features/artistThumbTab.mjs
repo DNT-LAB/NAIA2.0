@@ -55,6 +55,7 @@ export function createArtistThumbController({
   let resultBlobUrl = '';
   let hasLoadedList = false;
   let positiveAutoValue = '';
+  let randomViewActive = false;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -303,6 +304,7 @@ export function createArtistThumbController({
     const mode = currentMode();
     const info = currentModeInfo();
     if (info && !info.available) {
+      randomViewActive = false;
       currentPage = 0;
       totalPages = 1;
       renderGrid([]);
@@ -317,6 +319,7 @@ export function createArtistThumbController({
       }
       return;
     }
+    randomViewActive = Boolean(options.random);
     setStatus(mode ? 'Loading artist thumbnails...' : '모드를 선택하면 썸네일을 로드합니다.', mode ? 'busy' : '');
     if (gridEl) gridEl.classList.add('loading');
     try {
@@ -326,6 +329,7 @@ export function createArtistThumbController({
       if (requestId !== listRequestId) return;
       currentPage = Number(data.page || 0);
       totalPages = Math.max(1, Number(data.total_pages || 1));
+      randomViewActive = Boolean(data.random);
       renderGrid(data.items || []);
       updatePager();
       hasLoadedList = true;
@@ -337,6 +341,7 @@ export function createArtistThumbController({
     } catch (error) {
       if (requestId !== listRequestId) return;
       console.error('Artist Thumb list failed', error);
+      randomViewActive = false;
       renderGrid([]);
       updatePager();
       setStatus(error.message || 'Artist list failed', 'error');
@@ -361,6 +366,7 @@ export function createArtistThumbController({
 
   function onGridWheel(event) {
     if (!gridEl || wheelPageLocked) return;
+    if (randomViewActive) return;
     const atTop = gridEl.scrollTop <= 2;
     const atBottom = gridEl.scrollTop + gridEl.clientHeight >= gridEl.scrollHeight - 2;
     if (event.deltaY > 0 && atBottom && currentPage < totalPages - 1) {

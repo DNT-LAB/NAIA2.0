@@ -6,6 +6,8 @@ export function createArtistThumbController({
   promptEdit,
   negEdit,
   onPromptEdit,
+  getGenerationMode = () => 'NAI',
+  isComfyUiAnimaMode = () => false,
 }) {
   const modeEl = document.getElementById('artistThumbMode');
   const filterEl = document.getElementById('artistThumbFilter');
@@ -51,6 +53,8 @@ export function createArtistThumbController({
   let pendingResultRequestId = '';
   let pendingResultMeta = null;
   let resultBlobUrl = '';
+  let hasLoadedList = false;
+  let positiveAutoValue = '';
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -76,6 +80,33 @@ export function createArtistThumbController({
 
   function currentFilter() {
     return String(filterEl?.value || 'all').trim() || 'all';
+  }
+
+  function currentGenerationMode() {
+    return String(getGenerationMode?.() || 'NAI').trim().toUpperCase();
+  }
+
+  function escapeStableDiffusionArtistName(artist) {
+    return String(artist || '').replace(/[()]/g, '\\$&');
+  }
+
+  function formatArtistPrompt(artist) {
+    const name = String(artist || '').trim();
+    if (!name) return '';
+    const generationMode = currentGenerationMode();
+    if (generationMode === 'NAI') return `artist:${name}`;
+    const escaped = escapeStableDiffusionArtistName(name);
+    if (generationMode === 'COMFYUI' && isComfyUiAnimaMode?.()) return `@${escaped}`;
+    return escaped;
+  }
+
+  function syncPromptFormat() {
+    if (!selected || !positiveEl) return;
+    const nextValue = formatArtistPrompt(selected.artist);
+    if (!positiveAutoValue || positiveEl.value === positiveAutoValue) {
+      positiveEl.value = nextValue;
+    }
+    positiveAutoValue = nextValue;
   }
 
   function makeRequestId() {
@@ -297,6 +328,7 @@ export function createArtistThumbController({
       totalPages = Math.max(1, Number(data.total_pages || 1));
       renderGrid(data.items || []);
       updatePager();
+      hasLoadedList = true;
       scrollGrid(options.anchor || 'top');
       const count = Number(data.total || 0).toLocaleString();
       const modeText = mode || '목록';
@@ -367,7 +399,10 @@ export function createArtistThumbController({
 
   function selectArtist(item) {
     selected = item;
-    if (positiveEl) positiveEl.value = `artist:${item.artist}`;
+    if (positiveEl) {
+      positiveAutoValue = formatArtistPrompt(item.artist);
+      positiveEl.value = positiveAutoValue;
+    }
     if (selectedName) selectedName.textContent = item.artist;
     if (selectedMeta) {
       const weight = formatWeight(item.weight);
@@ -473,7 +508,7 @@ export function createArtistThumbController({
   function insertSelected() {
     const item = selectedPayload();
     if (!item || !promptEdit) return;
-    const tag = `artist:${item.artist}`;
+    const tag = formatArtistPrompt(item.artist);
     const text = promptEdit.value || '';
     const start = promptEdit.selectionStart != null ? promptEdit.selectionStart : text.length;
     const end = promptEdit.selectionEnd != null ? promptEdit.selectionEnd : start;
@@ -493,11 +528,12 @@ export function createArtistThumbController({
     const item = selectedPayload();
     if (!item) return;
     const requestId = makeRequestId();
+    const artistPrompt = formatArtistPrompt(item.artist);
     const payload = {
       request_id: requestId,
       artist: item.artist,
       prefix: prefixEl?.value || '',
-      positive: positiveEl?.value || `artist:${item.artist}`,
+      positive: positiveEl?.value || artistPrompt,
       postfix: postfixEl?.value || '',
       negative_prompt: negEdit?.value || '',
       width: 832,
@@ -658,6 +694,12 @@ export function createArtistThumbController({
   async function load(options = {}) {
     try {
       await fetchState(options);
+      if (hasLoadedList && !options.force) {
+        renderState();
+        updatePager();
+        syncPromptFormat();
+        return;
+      }
       await loadPage(currentPage);
     } catch (error) {
       console.error('Artist Thumb load failed', error);
@@ -669,6 +711,7 @@ export function createArtistThumbController({
   return {
     load,
     reload: () => load({force: true}),
+    syncPromptFormat,
     handleResultMeta,
     handleResultBlob,
   };

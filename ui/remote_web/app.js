@@ -177,6 +177,8 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
       promptEdit,
       negEdit,
       onPromptEdit,
+      getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
+      isComfyUiAnimaMode,
     });
   })
   .catch(error => {
@@ -2485,6 +2487,7 @@ function syncMode(mode) {
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
   if (resultEnhance) resultEnhance.update();
+  if (artistThumbControl) artistThumbControl.syncPromptFormat();
 }
 
 function setMode(mode) {

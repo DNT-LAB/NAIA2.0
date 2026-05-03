@@ -8170,6 +8170,124 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: wildcard 검색 실패: {e}")
             return []
 
+    def _search_chunks(self, query: str, limit: int = 12) -> list:
+        """인스턴트 와일드카드 Chunk 검색 ($key / $group: 용)."""
+        try:
+            module = self._find_module("instant_wildcard")
+            if not module:
+                return []
+            self._reload_instant_wildcards(module)
+            flat_dict, tree = module.get_wildcards()
+            raw = str(query or "").strip()
+            if raw.startswith("$"):
+                raw = raw[1:].strip()
+            q = raw.lower()
+
+            def preview_text(value: str, max_len: int = 96) -> str:
+                text = str(value or "").replace("\n", " ").strip()
+                return text[:max_len] + "..." if len(text) > max_len else text
+
+            def match_rank(text: str, needle: str) -> int | None:
+                haystack = str(text or "").lower()
+                if not needle:
+                    return 4
+                if haystack == needle:
+                    return 0
+                if haystack.startswith(needle):
+                    return 1
+                for word in re.split(r"[\s_\-]+", haystack):
+                    if word.startswith(needle):
+                        return 2
+                if needle in haystack:
+                    return 3
+                return None
+
+            def group_result(group_name: str, items: dict) -> dict:
+                samples = []
+                for key, value in list(items.items())[:5]:
+                    samples.append(f"{key}: {preview_text(value, 42)}")
+                if len(items) > 5:
+                    samples.append(f"... +{len(items) - 5}")
+                return {
+                    "tag": group_name,
+                    "value": f"${group_name}:",
+                    "count": len(items),
+                    "desc": f"{len(items)} entries",
+                    "group": "chunk group",
+                    "cat": "",
+                    "preview": "\n".join(samples),
+                    "_wc_type": "chunk_group",
+                }
+
+            def item_result(key: str, value: str, group_name: str) -> dict:
+                return {
+                    "tag": key,
+                    "value": str(value or ""),
+                    "count": 0,
+                    "desc": preview_text(value),
+                    "group": group_name,
+                    "cat": "",
+                    "preview": str(value or ""),
+                    "_wc_type": "chunk",
+                }
+
+            def item_matches(items: dict, group_name: str, needle: str) -> list:
+                ranked = []
+                for index, (key, value) in enumerate(items.items()):
+                    key_rank = match_rank(key, needle)
+                    value_rank = match_rank(value, needle)
+                    rank_values = [r for r in (key_rank, None if value_rank is None else value_rank + 2) if r is not None]
+                    if not rank_values:
+                        continue
+                    ranked.append((min(rank_values), index, item_result(key, value, group_name)))
+                ranked.sort(key=lambda item: (item[0], item[1]))
+                return [item[2] for item in ranked]
+
+            if ":" in raw:
+                group_name, item_query = raw.split(":", 1)
+                group_items = tree.get(group_name)
+                if not group_items:
+                    return []
+                return item_matches(group_items, group_name, item_query.lower())[:limit]
+
+            results = []
+            exact_group_items = []
+            group_ranked = []
+            for index, (group_name, items) in enumerate(tree.items()):
+                rank = match_rank(group_name, q)
+                if rank is None:
+                    continue
+                group_ranked.append((rank, index, group_result(group_name, items)))
+                if q and str(group_name).lower() == q:
+                    exact_group_items = item_matches(items, group_name, "")
+
+            group_ranked.sort(key=lambda item: (item[0], item[1]))
+            results.extend(item[2] for item in group_ranked)
+            results.extend(exact_group_items)
+
+            item_ranked = []
+            for group_name, items in tree.items():
+                for item in item_matches(items, group_name, q):
+                    item_ranked.append(item)
+            seen = {(item["_wc_type"], item["group"], item["tag"]) for item in results}
+            for item in item_ranked:
+                key = (item["_wc_type"], item["group"], item["tag"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append(item)
+
+            if not results and q:
+                for key, value in flat_dict.items():
+                    rank_values = [r for r in (match_rank(key, q), match_rank(value, q)) if r is not None]
+                    if rank_values:
+                        results.append(item_result(key, value, "chunk"))
+
+            return results[:limit]
+        except Exception as e:
+            print(f"🌐 Remote: chunk 검색 실패: {e}")
+            return []
+
     def _read_chunk(self) -> dict:
         """Chunk 모듈: 인스턴트 와일드카드 트리 전체 반환"""
         try:
@@ -10147,6 +10265,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         elif cmd_type == "autocomplete_wildcard":
                             query = cmd.get("query", "")
                             results = await asyncio.to_thread(bridge._search_wildcards, query, 12)
+                            await ws.send_text(json.dumps({
+                                "type": "autocomplete_result",
+                                "query": query,
+                                "results": results,
+                            }))
+                        elif cmd_type == "autocomplete_chunk":
+                            query = cmd.get("query", "")
+                            results = await asyncio.to_thread(bridge._search_chunks, query, 12)
                             await ws.send_text(json.dumps({
                                 "type": "autocomplete_result",
                                 "query": query,

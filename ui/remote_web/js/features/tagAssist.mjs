@@ -437,10 +437,7 @@ export function createTagAssistController({
         const q = s.replace(/^_+/, '').replace(/_+$/, '');
         if (q.length >= 1) sendWs({type: 'autocomplete_wildcard', query: q});
       } else if (allowTriggers && s.startsWith('$')) {
-        window.clearTimeout(acTimer);
-        const chunkPanelControl = getChunkPanelControl();
-        if (chunkPanelControl) chunkPanelControl.setTriggerInfo(info);
-        openChunkPanel(getChunkAnchor(target));
+        sendWs({type: 'autocomplete_chunk', query: s.slice(1).trim()});
       } else {
         sendWs({type: 'autocomplete', query: s});
       }
@@ -450,7 +447,8 @@ export function createTagAssistController({
   function onAutocompleteResult(m) {
     const q = lastAcQuery;
     const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
-    if (!matchesWc && m.query !== q) return;
+    const matchesChunk = q && q.startsWith('$') && m.query === q.slice(1).trim();
+    if (!matchesWc && !matchesChunk && m.query !== q) return;
     const target = acTarget || promptEdit;
     const results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
     if (!results.length) {
@@ -459,32 +457,58 @@ export function createTagAssistController({
       return;
     }
     acResults = results;
-    acSel = -1;
+    acSel = results.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group') ? 0 : -1;
     acMode = true;
     renderAutocomplete();
   }
 
+  function chunkPreviewHtml(result) {
+    if (!result) return '';
+    const title = result._wc_type === 'chunk_group' ? `$${result.tag}` : `$${result.tag}`;
+    const meta = result._wc_type === 'chunk_group'
+      ? `${result.desc || ''}`
+      : `${result.group || ''}`;
+    const body = result.preview || result.value || result.desc || '';
+    return '<div class="chunk-ac-preview-title">' + escHtml(title) + '</div>' +
+      (meta ? '<div class="chunk-ac-preview-meta">' + escHtml(meta) + '</div>' : '') +
+      '<pre class="chunk-ac-preview-body">' + escHtml(body) + '</pre>';
+  }
+
   function renderAutocomplete() {
     hideTagChipInfoTooltip();
-    let html = '<div class="tag-ac-list">';
+    const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group');
+    let html = chunkMode ? '<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list">' : '<div class="tag-ac-list">';
     acResults.forEach((r, i) => {
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
-      const prefix = wcType === 'wildcard' ? '__' : '';
-      const suffix = wcType === 'wildcard' ? '__' : '';
-      html += `<div class="tag-ac-item${sel}" data-idx="${i}">` +
+      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : '');
+      const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
+      const itemClass = chunkMode ? ' chunk-ac-item' : '';
+      html += `<div class="tag-ac-item${itemClass}${sel}" data-idx="${i}">` +
         `<span class="tag-ac-tag"${tagColor}>${escHtml(prefix + r.tag + suffix)}</span>` +
         `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
         `<span class="tag-ac-count">${wcType ? escHtml(r.desc || '') : fmtCount(r.count)}</span>` +
+        (chunkMode ? `<span class="chunk-ac-inline-preview">${escHtml(r.preview || r.value || '')}</span>` : '') +
         '</div>';
     });
-    html += '</div>';
+    html += chunkMode
+      ? `</div><div class="chunk-ac-preview">${chunkPreviewHtml(acResults[Math.max(0, acSel)] || acResults[0])}</div></div>`
+      : '</div>';
     tagTooltip.innerHTML = html;
     tagTooltip.classList.add('open', 'ac-mode');
+    tagTooltip.classList.toggle('chunk-ac-mode', chunkMode);
     syncTooltipSide();
     positionTagTooltip();
     tagTooltip.querySelectorAll('.tag-ac-item').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        if (!chunkMode) return;
+        const idx = +el.dataset.idx;
+        if (Number.isInteger(idx) && idx !== acSel) {
+          acSel = idx;
+          renderAutocomplete();
+        }
+      });
       el.addEventListener('mousedown', e => {
         e.preventDefault();
         selectAutocomplete(+el.dataset.idx);
@@ -502,6 +526,16 @@ export function createTagAssistController({
     if (r._wc_type === 'wildcard') {
       newTag = '__' + r.tag + '__';
       swapToken(target, info, newTag);
+      hideAutocomplete();
+      return;
+    }
+    if (r._wc_type === 'chunk_group') {
+      swapToken(target, info, r.value || `$${r.tag}:`);
+      hideAutocomplete();
+      return;
+    }
+    if (r._wc_type === 'chunk') {
+      swapToken(target, info, r.value || '');
       hideAutocomplete();
       return;
     }
@@ -553,7 +587,7 @@ export function createTagAssistController({
     lastAcQuery = '';
     window.clearTimeout(acTimer);
     hideTagChipInfoTooltip();
-    tagTooltip.classList.remove('open', 'ac-mode');
+    tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode');
   }
 
   function bindTagAssist(textarea, options = {}) {

@@ -179,6 +179,7 @@ class VibeTransferFrame(QFrame):
     
     removed = pyqtSignal(object)  # Signal when frame is removed
     encoding_requested = pyqtSignal(object, float)  # Signal when encoding is requested
+    changed = pyqtSignal()
     
     def __init__(self, file_path: str, app_context: AppContext, parent=None, is_no_image: bool = False, target_model: str = None):
         super().__init__(parent)
@@ -565,6 +566,7 @@ class VibeTransferFrame(QFrame):
         self.ref_strength_label.setText(f"Reference Strength {value:.2f}")
         if self.vibe_encodings:
             self._save_encodings()
+        self.changed.emit()
     
     def _update_model_compatibility_display(self, current_model: str):
         """Update model label color based on compatibility"""
@@ -626,6 +628,7 @@ class VibeTransferFrame(QFrame):
             self._update_encode_button_visibility()
         if self.vibe_encodings:
             self._save_encodings()
+        self.changed.emit()
         
     def _update_encoding_status(self):
         """Update encoding status label based on available encodings"""
@@ -702,6 +705,7 @@ class VibeTransferFrame(QFrame):
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation)
                 self.image_label.setPixmap(scaled_pixmap)
+        self.changed.emit()
                 
     def _create_darkened_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """Create a darkened version of the pixmap"""
@@ -738,6 +742,7 @@ class VibeTransferFrame(QFrame):
         self._save_encodings()
         self._update_encoding_status()
         self._update_encode_button_visibility()
+        self.changed.emit()
         
     def get_vibe_data(self) -> Optional[Dict[str, Any]]:
         """Get vibe data for generation"""
@@ -1194,6 +1199,8 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         # Model tracking for NAID3 switching
         self._previous_model = None
         self._model_combo_connected = False  # Track connection state
+        self._settings_loaded_on_initialize = False
+        self._applying_settings = False
 
         # Volatile file tracking
         self.volatile_files = {}  # {model: [file_hashes]}
@@ -1235,6 +1242,36 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             if self.vibe_frames:
                 print(f"🔄 VibeTransferModule: Refreshing encoding states on initialization")
                 self._refresh_all_encoding_states()
+
+            self._load_settings_after_widget_ready()
+
+    def _load_settings_after_widget_ready(self):
+        if self._settings_loaded_on_initialize:
+            return
+        if not self.widget or not self.scroll_layout or not self.normalize_checkbox:
+            return
+
+        current_mode = self.app_context.get_api_mode() if self.app_context else self.current_mode
+        self.current_mode = current_mode
+        if self.is_compatible_with_mode(current_mode):
+            self.load_mode_settings(current_mode)
+        self._settings_loaded_on_initialize = True
+
+    def _connect_vibe_frame(self, frame: VibeTransferFrame):
+        frame.removed.connect(self._remove_frame)
+        frame.encoding_requested.connect(self._on_encoding_requested)
+        frame.changed.connect(self._autosave_current_mode_settings)
+
+    def _autosave_current_mode_settings(self):
+        if self._applying_settings:
+            return
+        if not self.app_context or not self.widget or not self.scroll_layout:
+            return
+
+        current_mode = self.app_context.get_api_mode()
+        self.current_mode = current_mode
+        if self.is_compatible_with_mode(current_mode):
+            self.save_mode_settings(current_mode)
         
     def collect_current_settings(self) -> Dict[str, Any]:
         """Collect current UI settings"""
@@ -1261,55 +1298,59 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         
     def apply_settings(self, settings: Dict[str, Any]):
         """Apply settings to UI"""
-        if self.normalize_checkbox:
-            self.normalize_checkbox.setChecked(settings.get("normalize_strength", False))
-            
-        # Clear existing frames
-        for frame in self.vibe_frames[:]:
-            self._remove_frame(frame)
+        self._applying_settings = True
+        try:
+            if self.normalize_checkbox:
+                self.normalize_checkbox.setChecked(settings.get("normalize_strength", False))
 
-        # Restore frames
-        for frame_data in settings.get("vibe_frames", []):
-            is_no_image = frame_data.get("is_no_image", False)
+            # Clear existing frames
+            for frame in self.vibe_frames[:]:
+                self._remove_frame(frame)
 
-            if is_no_image:
-                # no_image 프레임: 저장된 인코딩 데이터로 직접 복원
-                saved_encodings = frame_data.get("vibe_encodings", {})
-                if not saved_encodings:
-                    continue
-                file_path = frame_data.get("file_path", "")
-                per_hash = hashlib.sha256(file_path.encode()).hexdigest()[:16]
-                no_image_path = f"no_image_restored_{per_hash}"
-                per_vibe_data = {
-                    'reference_image_multiple': list(saved_encodings.values()),
-                    'reference_strength_multiple': [frame_data.get("reference_strength", 0.6)],
-                    'reference_information_extracted_multiple': [float(k) for k in saved_encodings.keys()],
-                    'source_model': frame_data.get("target_model", self._get_current_model()),
-                }
-                frame = self._add_vibe_frame_from_metadata(no_image_path, per_vibe_data)
-                if frame:
-                    frame.is_enabled = frame_data.get("is_enabled", True)
-                    frame.enable_check.setChecked(frame.is_enabled)
-            else:
-                if not os.path.exists(frame_data["file_path"]):
-                    continue
-                frame = self._add_vibe_frame(frame_data["file_path"])
-                if frame:
-                    frame.reference_strength = frame_data.get("reference_strength", 0.6)
-                    frame.information_extracted = frame_data.get("information_extracted", 1.0)
-                    frame.is_enabled = frame_data.get("is_enabled", True)
+            # Restore frames
+            for frame_data in settings.get("vibe_frames", []):
+                is_no_image = frame_data.get("is_no_image", False)
 
-                    # Update UI
-                    frame.ref_strength_slider.setValue(int(frame.reference_strength * 100))
-                    frame.info_extracted_slider.setValue(int(frame.information_extracted * 100))
-                    frame.enable_check.setChecked(frame.is_enabled)
+                if is_no_image:
+                    # no_image 프레임: 저장된 인코딩 데이터로 직접 복원
+                    saved_encodings = frame_data.get("vibe_encodings", {})
+                    if not saved_encodings:
+                        continue
+                    file_path = frame_data.get("file_path", "")
+                    per_hash = hashlib.sha256(file_path.encode()).hexdigest()[:16]
+                    no_image_path = f"no_image_restored_{per_hash}"
+                    per_vibe_data = {
+                        'reference_image_multiple': list(saved_encodings.values()),
+                        'reference_strength_multiple': [frame_data.get("reference_strength", 0.6)],
+                        'reference_information_extracted_multiple': [float(k) for k in saved_encodings.keys()],
+                        'source_model': frame_data.get("target_model", self._get_current_model()),
+                    }
+                    frame = self._add_vibe_frame_from_metadata(no_image_path, per_vibe_data)
+                    if frame:
+                        frame.is_enabled = frame_data.get("is_enabled", True)
+                        frame.enable_check.setChecked(frame.is_enabled)
+                else:
+                    if not os.path.exists(frame_data["file_path"]):
+                        continue
+                    frame = self._add_vibe_frame(frame_data["file_path"])
+                    if frame:
+                        frame.reference_strength = frame_data.get("reference_strength", 0.6)
+                        frame.information_extracted = frame_data.get("information_extracted", 1.0)
+                        frame.is_enabled = frame_data.get("is_enabled", True)
 
-                    # Update labels
-                    frame.ref_strength_label.setText(f"Reference Strength {frame.reference_strength:.2f}")
-                    frame.info_extracted_label.setText(f"Information Extracted {frame.information_extracted:.2f}")
-        
-        # After applying settings (mode change), refresh encoding states
-        self._refresh_all_encoding_states()
+                        # Update UI
+                        frame.ref_strength_slider.setValue(int(frame.reference_strength * 100))
+                        frame.info_extracted_slider.setValue(int(frame.information_extracted * 100))
+                        frame.enable_check.setChecked(frame.is_enabled)
+
+                        # Update labels
+                        frame.ref_strength_label.setText(f"Reference Strength {frame.reference_strength:.2f}")
+                        frame.info_extracted_label.setText(f"Information Extracted {frame.information_extracted:.2f}")
+
+            # After applying settings (mode change), refresh encoding states
+            self._refresh_all_encoding_states()
+        finally:
+            self._applying_settings = False
                     
     def create_widget(self, parent: QWidget) -> QWidget:
         """Create the module widget"""
@@ -1354,6 +1395,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         
         self.normalize_checkbox = QCheckBox("Normalize Reference Strength Values")
         self.normalize_checkbox.setStyleSheet(dynamic_styles['dark_checkbox'])
+        self.normalize_checkbox.toggled.connect(lambda _: self._autosave_current_mode_settings())
         # Don't set fixed height - let it use natural height
         checkbox_row.addWidget(self.normalize_checkbox)
         checkbox_row.addStretch()
@@ -1762,11 +1804,11 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             
             # Create new frame (will auto-load existing encodings if available)
             frame = VibeTransferFrame(file_path, self.app_context)
-            frame.removed.connect(self._remove_frame)
-            frame.encoding_requested.connect(self._on_encoding_requested)
+            self._connect_vibe_frame(frame)
             
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
+            self._autosave_current_mode_settings()
             
             return frame
             
@@ -1841,12 +1883,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             frame._save_encodings()
 
             # Connect signals
-            frame.removed.connect(self._remove_frame)
-            frame.encoding_requested.connect(self._on_encoding_requested)
+            self._connect_vibe_frame(frame)
 
             # Add to UI
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
+            self._autosave_current_mode_settings()
 
             return frame
 
@@ -1924,12 +1966,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             frame._save_encodings()
 
             # Connect signals
-            frame.removed.connect(self._remove_frame)
-            frame.encoding_requested.connect(self._on_encoding_requested)
+            self._connect_vibe_frame(frame)
 
             # Add to UI
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
+            self._autosave_current_mode_settings()
 
             return frame
 
@@ -1966,6 +2008,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             self.vibe_frames.remove(frame)
             self.scroll_layout.removeWidget(frame)
             frame.deleteLater()
+            self._autosave_current_mode_settings()
             
     def _on_encoding_requested(self, frame: VibeTransferFrame, info_extracted: float):
         """Handle encoding request from frame"""
@@ -2017,6 +2060,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         if success and result:
             for info_str, encoded_data in result.items():
                 frame.add_encoding(float(info_str), encoded_data)
+            self._autosave_current_mode_settings()
             QMessageBox.information(self.widget, "Success", "Vibe encoding completed successfully")
         else:
             QMessageBox.critical(self.widget, "Error", message)

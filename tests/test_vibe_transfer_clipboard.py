@@ -13,6 +13,14 @@ from modules.vibe_transfer_module import (
 )
 
 
+class _FakeContext:
+    def __init__(self, mode="NAI"):
+        self.mode = mode
+
+    def get_api_mode(self):
+        return self.mode
+
+
 def _png_bytes(color=(12, 34, 56)):
     buffer = io.BytesIO()
     Image.new("RGB", (3, 2), color).save(buffer, format="PNG")
@@ -113,3 +121,60 @@ def test_imported_vibe_storage_preserves_existing_strength_when_missing(tmp_path
     assert data["encodings"] == {"1.0": "encoded-again"}
     assert data["reference_strength"] == 0.73
     assert data["information_extracted"] == 0.42
+
+
+def test_vibe_autosave_skips_until_widget_ready(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    calls = []
+    module.save_mode_settings = lambda mode=None: calls.append(mode)
+
+    module._autosave_current_mode_settings()
+
+    assert calls == []
+
+
+def test_vibe_autosave_saves_current_mode_when_ready(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    module.widget = object()
+    module.scroll_layout = object()
+    calls = []
+    module.save_mode_settings = lambda mode=None: calls.append(mode)
+
+    module._autosave_current_mode_settings()
+
+    assert calls == ["NAI"]
+
+
+def test_vibe_autosave_ignores_apply_settings_reentry(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    module.widget = object()
+    module.scroll_layout = object()
+    module._applying_settings = True
+    calls = []
+    module.save_mode_settings = lambda mode=None: calls.append(mode)
+
+    module._autosave_current_mode_settings()
+
+    assert calls == []
+
+
+def test_vibe_load_after_widget_ready_runs_once(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    module.widget = object()
+    module.scroll_layout = object()
+    module.normalize_checkbox = object()
+    calls = []
+    module.load_mode_settings = lambda mode=None: calls.append(mode)
+
+    module._load_settings_after_widget_ready()
+    module._load_settings_after_widget_ready()
+
+    assert calls == ["NAI"]

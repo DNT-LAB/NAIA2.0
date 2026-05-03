@@ -17,7 +17,8 @@ export function createResultImageActions({
   switchRightTab = () => {},
 }) {
   let dragSourceBound = false;
-  let transparentDragImage = null;
+  const dragGhostSize = 50;
+  let compactDragImage = null;
 
   function isMetadataActionObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -386,18 +387,70 @@ export function createResultImageActions({
     try { dataTransfer.setData('DownloadURL', `${mimeType}:${filename}:${originalUrl}`); } catch (_) { /* noop */ }
   }
 
-  function getTransparentDragImage() {
-    if (transparentDragImage) return transparentDragImage;
-    transparentDragImage = document.createElement('canvas');
-    transparentDragImage.width = 1;
-    transparentDragImage.height = 1;
-    return transparentDragImage;
+  function traceRoundedRect(ctx, x, y, width, height, radius) {
+    const clampedRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + clampedRadius, y);
+    ctx.lineTo(x + width - clampedRadius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + clampedRadius);
+    ctx.lineTo(x + width, y + height - clampedRadius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - clampedRadius, y + height);
+    ctx.lineTo(x + clampedRadius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - clampedRadius);
+    ctx.lineTo(x, y + clampedRadius);
+    ctx.quadraticCurveTo(x, y, x + clampedRadius, y);
+    ctx.closePath();
   }
 
-  function suppressNativeDragPreview(dataTransfer) {
+  function getCompactDragImage(sourceImage) {
+    if (!compactDragImage) {
+      compactDragImage = document.createElement('canvas');
+      compactDragImage.width = dragGhostSize;
+      compactDragImage.height = dragGhostSize;
+    }
+    const canvas = compactDragImage;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return canvas;
+
+    ctx.clearRect(0, 0, dragGhostSize, dragGhostSize);
+    ctx.save();
+    traceRoundedRect(ctx, 0, 0, dragGhostSize, dragGhostSize, 8);
+    ctx.fillStyle = 'rgba(18, 16, 28, 0.92)';
+    ctx.fill();
+    ctx.clip();
+
+    const imageWidth = sourceImage?.naturalWidth || sourceImage?.videoWidth || sourceImage?.width || 0;
+    const imageHeight = sourceImage?.naturalHeight || sourceImage?.videoHeight || sourceImage?.height || 0;
+    if (sourceImage && imageWidth > 0 && imageHeight > 0) {
+      const scale = Math.max(dragGhostSize / imageWidth, dragGhostSize / imageHeight);
+      const drawWidth = imageWidth * scale;
+      const drawHeight = imageHeight * scale;
+      try {
+        ctx.drawImage(
+          sourceImage,
+          (dragGhostSize - drawWidth) / 2,
+          (dragGhostSize - drawHeight) / 2,
+          drawWidth,
+          drawHeight
+        );
+      } catch (_) { /* noop */ }
+    }
+    ctx.restore();
+
+    ctx.save();
+    traceRoundedRect(ctx, 1, 1, dragGhostSize - 2, dragGhostSize - 2, 7);
+    ctx.strokeStyle = 'rgba(185, 164, 255, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+    return canvas;
+  }
+
+  function setCompactDragPreview(dataTransfer, sourceImage) {
     if (!dataTransfer || typeof dataTransfer.setDragImage !== 'function') return;
     try {
-      dataTransfer.setDragImage(getTransparentDragImage(), 0, 0);
+      const offset = Math.floor(dragGhostSize / 2);
+      dataTransfer.setDragImage(getCompactDragImage(sourceImage), offset, offset);
     } catch (_) { /* noop */ }
   }
 
@@ -694,7 +747,9 @@ export function createResultImageActions({
       const target = event.target;
       if (!(target instanceof window.Element)) return;
       let payload = null;
+      let dragImageSource = null;
       if (target.id === 'preview') {
+        dragImageSource = target;
         payload = {
           type: 'preview',
           source: target.dataset.source || '',
@@ -703,6 +758,7 @@ export function createResultImageActions({
       } else if (target.closest('.viewer')) {
         const preview = document.getElementById('preview');
         if (preview && preview.classList.contains('show')) {
+          dragImageSource = preview;
           payload = {
             type: 'preview',
             source: preview.dataset.source || 'current',
@@ -710,6 +766,7 @@ export function createResultImageActions({
           };
         }
       } else if (target.classList && target.classList.contains('viewer-thumb')) {
+        dragImageSource = target;
         payload = {
           type: 'history',
           source: 'saved',
@@ -717,7 +774,7 @@ export function createResultImageActions({
         };
       }
       if (!payload || !event.dataTransfer) return;
-      suppressNativeDragPreview(event.dataTransfer);
+      setCompactDragPreview(event.dataTransfer, dragImageSource);
       applyOriginalImageDragData(event.dataTransfer, payload);
       try {
         event.dataTransfer.setData('application/x-naia-source', JSON.stringify(payload));

@@ -85,6 +85,25 @@ def _parse_anima_weight(raw) -> tuple[bool, float]:
     return (False, value)
 
 
+def _is_comfyui_anima_mode(app_context, settings: Dict[str, Any]) -> bool:
+    """Return whether the active prompt formatting target is ComfyUI ANIMA."""
+    if getattr(app_context, 'current_api_mode', None) != 'COMFYUI':
+        return False
+
+    sampling_mode = str(
+        settings.get('comfyui_sampling_mode')
+        or settings.get('sampling_mode')
+        or ''
+    ).strip().lower()
+    workflow_type = str(settings.get('workflow_type') or '').strip().lower()
+    if sampling_mode == 'anima' or workflow_type == 'unet':
+        return True
+
+    main_window = getattr(app_context, 'main_window', None)
+    anima_radio = getattr(main_window, 'anima_radio', None)
+    return bool(anima_radio is not None and anima_radio.isChecked())
+
+
 def _escape_main_tags_parens(tags: list, weighted: set):
     """main_tags 리터럴 괄호를 in-place 이스케이프. weighted 인덱스의 가중치 구문은 보존."""
     for i, tag in enumerate(tags):
@@ -242,14 +261,7 @@ class PromptProcessor:
             _escape_main_tags_parens(context.main_tags, weighted_indices)
 
         # 4-1. 인원수 태그 배치 (ANIMA 모드 고려)
-        # settings에 workflow_type 정보가 없으므로 main_window에서 직접 확인
-        is_anima_mode = False
-        if self.app_context.current_api_mode == 'COMFYUI':
-            # AppContext를 통해 main_window의 라디오 버튼 상태 확인
-            if hasattr(self.app_context, 'main_window'):
-                main_window = self.app_context.main_window
-                if hasattr(main_window, 'anima_radio') and main_window.anima_radio.isChecked():
-                    is_anima_mode = True
+        is_anima_mode = _is_comfyui_anima_mode(self.app_context, context.settings)
 
         is_comfyui = self.app_context.current_api_mode == 'COMFYUI'
 

@@ -37,6 +37,11 @@ class _FakeLabel:
         self.text = text
 
 
+class _FalseyLayout:
+    def __bool__(self):
+        return False
+
+
 class _FakeFrame:
     def __init__(self):
         self.reference_strength = 0.6
@@ -204,6 +209,20 @@ def test_vibe_autosave_saves_current_mode_when_ready(tmp_path, monkeypatch):
     assert calls == ["NAI"]
 
 
+def test_vibe_autosave_accepts_empty_qt_layout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    module.widget = object()
+    module.scroll_layout = _FalseyLayout()
+    calls = []
+    module.save_mode_settings = lambda mode=None: calls.append(mode)
+
+    module._autosave_current_mode_settings()
+
+    assert calls == ["NAI"]
+
+
 def test_vibe_autosave_ignores_apply_settings_reentry(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     module = VibeTransferModule()
@@ -230,6 +249,21 @@ def test_vibe_load_after_widget_ready_runs_once(tmp_path, monkeypatch):
     module.load_mode_settings = lambda mode=None: calls.append(mode)
 
     module._load_settings_after_widget_ready()
+    module._load_settings_after_widget_ready()
+
+    assert calls == ["NAI"]
+
+
+def test_vibe_load_after_widget_ready_accepts_empty_qt_layout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    module.widget = object()
+    module.scroll_layout = _FalseyLayout()
+    module.normalize_checkbox = object()
+    calls = []
+    module.load_mode_settings = lambda mode=None: calls.append(mode)
+
     module._load_settings_after_widget_ready()
 
     assert calls == ["NAI"]

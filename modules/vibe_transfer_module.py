@@ -1256,7 +1256,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
     def _load_settings_after_widget_ready(self):
         if self._settings_loaded_on_initialize:
             return
-        if not self.widget or not self.scroll_layout or not self.normalize_checkbox:
+        if self.widget is None or self.scroll_layout is None or self.normalize_checkbox is None:
             return
 
         current_mode = self.app_context.get_api_mode() if self.app_context else self.current_mode
@@ -1273,7 +1273,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
     def _autosave_current_mode_settings(self):
         if self._applying_settings:
             return
-        if not self.app_context or not self.widget or not self.scroll_layout:
+        if self.app_context is None or self.widget is None or self.scroll_layout is None:
             return
 
         current_mode = self.app_context.get_api_mode()

@@ -2158,6 +2158,16 @@ body.artist-thumb-result-spotlight::before {
 .artist-thumb-card.favorite {
   border-color: rgba(92, 184, 122, 0.42);
 }
+.artist-thumb-card.favorite .artist-thumb-card-info {
+  background: rgba(24, 74, 46, 0.54);
+  border-top: 1px solid rgba(92, 184, 122, 0.28);
+}
+.artist-thumb-card.favorite .artist-thumb-card-name {
+  color: #dfffe8;
+}
+.artist-thumb-card.favorite .artist-thumb-card-weight {
+  color: rgba(179, 235, 196, 0.74);
+}
 .artist-thumb-card-image {
   width: 100%;
   height: 100%;

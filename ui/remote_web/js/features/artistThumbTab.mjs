@@ -64,6 +64,8 @@ export function createArtistThumbController({
   let resultExpanded = false;
   let suppressResultCollapseClick = false;
   let suppressResultCollapseClickTimer = null;
+  let contextMenuEl = null;
+  let contextMenuItem = null;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -361,6 +363,18 @@ export function createArtistThumbController({
     }).join('');
   }
 
+  function itemFromCard(card) {
+    if (!card) return null;
+    const image = card.querySelector('img')?.getAttribute('src') || '';
+    const weight = card.dataset.weight || card.querySelector('.artist-thumb-card-weight')?.textContent || '';
+    return {
+      artist: card.dataset.artist || '',
+      image_url: image,
+      weight,
+      favorite: card.classList.contains('favorite'),
+    };
+  }
+
   function updatePager() {
     if (pageLabel) pageLabel.textContent = `${currentPage + 1} / ${totalPages}`;
     if (prevBtn) prevBtn.disabled = currentPage <= 0;
@@ -510,6 +524,25 @@ export function createArtistThumbController({
     });
   }
 
+  function clearSelectedArtist() {
+    selected = null;
+    if (selectedImage) {
+      selectedImage.removeAttribute('src');
+      selectedImage.classList.remove('show');
+    }
+    if (selectedEmpty) selectedEmpty.hidden = false;
+    if (selectedName) selectedName.textContent = '아티스트를 선택하세요';
+    if (selectedMeta) selectedMeta.textContent = '';
+    if (positiveEl && (!positiveAutoValue || positiveEl.value === positiveAutoValue)) {
+      positiveEl.value = '';
+    }
+    positiveAutoValue = '';
+    [favoriteBtn, banBtn, copyBtn, insertBtn].forEach(button => {
+      if (button) button.disabled = true;
+    });
+    gridEl?.querySelectorAll('.artist-thumb-card.active').forEach(card => card.classList.remove('active'));
+  }
+
   function selectArtist(item) {
     selected = item;
     if (positiveEl) {
@@ -551,6 +584,83 @@ export function createArtistThumbController({
     return data;
   }
 
+  function closeContextMenu() {
+    if (contextMenuEl) {
+      contextMenuEl.remove();
+      contextMenuEl = null;
+    }
+    contextMenuItem = null;
+    document.removeEventListener('pointerdown', onContextMenuPointerDown, true);
+    document.removeEventListener('keydown', onContextMenuKeyDown, true);
+    window.removeEventListener('blur', closeContextMenu);
+    window.removeEventListener('resize', closeContextMenu);
+  }
+
+  function onContextMenuPointerDown(event) {
+    if (contextMenuEl?.contains(event.target)) return;
+    closeContextMenu();
+  }
+
+  function onContextMenuKeyDown(event) {
+    if (event.key === 'Escape') closeContextMenu();
+  }
+
+  function positionContextMenu(menu, x, y) {
+    const margin = 8;
+    const rect = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(margin, x), window.innerWidth - rect.width - margin);
+    const top = Math.min(Math.max(margin, y), window.innerHeight - rect.height - margin);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  function openContextMenu(event, item) {
+    if (!item?.artist) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeContextMenu();
+    contextMenuItem = item;
+    const menu = document.createElement('div');
+    menu.className = 'result-context-menu artist-thumb-context-menu open';
+    menu.setAttribute('role', 'menu');
+    const favoriteLabel = item.favorite ? '관심 해제' : '관심 추가';
+    menu.innerHTML = `
+      <div class="result-context-group">
+        <button type="button" class="result-context-item" data-action="favorite" role="menuitem">
+          <span>${favoriteLabel}</span>
+        </button>
+        <button type="button" class="result-context-item danger" data-action="ban" role="menuitem">
+          <span>제외 추가</span>
+        </button>
+      </div>
+    `;
+    menu.addEventListener('contextmenu', e => e.preventDefault());
+    menu.addEventListener('click', event => {
+      const button = event.target.closest('.result-context-item[data-action]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const action = button.dataset.action || '';
+      const targetItem = contextMenuItem;
+      closeContextMenu();
+      if (action === 'favorite') {
+        setFavoriteForItem(targetItem, !targetItem.favorite).catch(error => {
+          showToast?.(error.message || 'Favorite failed', 'error');
+        });
+      } else if (action === 'ban') {
+        banItem(targetItem).catch(error => {
+          showToast?.(error.message || 'Ban failed', 'error');
+        });
+      }
+    });
+    document.body.appendChild(menu);
+    positionContextMenu(menu, event.clientX, event.clientY);
+    document.addEventListener('pointerdown', onContextMenuPointerDown, true);
+    document.addEventListener('keydown', onContextMenuKeyDown, true);
+    window.addEventListener('blur', closeContextMenu);
+    window.addEventListener('resize', closeContextMenu);
+  }
+
   function scheduleSaveOptions() {
     if (optionsTimer) clearTimeout(optionsTimer);
     optionsTimer = setTimeout(() => {
@@ -562,46 +672,44 @@ export function createArtistThumbController({
     }, 500);
   }
 
+  async function setFavoriteForItem(item, favorite) {
+    if (!item) return;
+    state = await postJson('/api/artist-thumb/favorite', {artist: item.artist, favorite});
+    renderState();
+    applyFavoriteState(item, favorite);
+    showToast?.(favorite ? '관심 작가로 등록했습니다.' : '관심 작가에서 해제했습니다.', 'success');
+  }
+
   async function toggleFavorite() {
     const item = selectedPayload();
     if (!item) return;
     const next = !item.favorite;
     try {
-      state = await postJson('/api/artist-thumb/favorite', {artist: item.artist, favorite: next});
-      renderState();
-      applyFavoriteState(item, next);
-      showToast?.(next ? '관심 작가로 등록했습니다.' : '관심 작가에서 해제했습니다.', 'success');
+      await setFavoriteForItem(item, next);
     } catch (error) {
       showToast?.(error.message || 'Favorite failed', 'error');
     }
+  }
+
+  async function banItem(item) {
+    if (!item) return;
+    state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned: true});
+    const artist = item.artist;
+    renderState();
+    gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+      if (card.dataset.artist === artist) card.remove();
+    });
+    if (selected?.artist === artist) {
+      clearSelectedArtist();
+    }
+    showToast?.('제외 작가에 추가했습니다.', 'success');
   }
 
   async function banSelected() {
     const item = selectedPayload();
     if (!item) return;
     try {
-      state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned: true});
-      const artist = item.artist;
-      selected = null;
-      renderState();
-      gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
-        if (card.dataset.artist === artist) card.remove();
-      });
-      if (selectedImage) {
-        selectedImage.removeAttribute('src');
-        selectedImage.classList.remove('show');
-      }
-      if (selectedEmpty) selectedEmpty.hidden = false;
-      if (selectedName) selectedName.textContent = '아티스트를 선택하세요';
-      if (selectedMeta) selectedMeta.textContent = '';
-      if (positiveEl && (!positiveAutoValue || positiveEl.value === positiveAutoValue)) {
-        positiveEl.value = '';
-      }
-      positiveAutoValue = '';
-      [favoriteBtn, banBtn, copyBtn, insertBtn].forEach(button => {
-        if (button) button.disabled = true;
-      });
-      showToast?.('제외 작가에 추가했습니다.', 'success');
+      await banItem(item);
     } catch (error) {
       showToast?.(error.message || 'Ban failed', 'error');
     }
@@ -839,14 +947,14 @@ export function createArtistThumbController({
     gridEl?.addEventListener('click', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
       if (!card || !gridEl.contains(card)) return;
-      const image = card.querySelector('img')?.getAttribute('src') || '';
-      const weight = card.querySelector('.artist-thumb-card-weight')?.textContent || '';
-      selectArtist({
-        artist: card.dataset.artist || '',
-        image_url: image,
-        weight: card.dataset.weight || weight,
-        favorite: card.classList.contains('favorite'),
-      });
+      const item = itemFromCard(card);
+      if (item) selectArtist(item);
+    });
+    gridEl?.addEventListener('contextmenu', event => {
+      const card = event.target.closest('.artist-thumb-card[data-artist]');
+      if (!card || !gridEl.contains(card)) return;
+      const item = itemFromCard(card);
+      if (item) openContextMenu(event, item);
     });
     favoriteBtn?.addEventListener('click', toggleFavorite);
     banBtn?.addEventListener('click', banSelected);

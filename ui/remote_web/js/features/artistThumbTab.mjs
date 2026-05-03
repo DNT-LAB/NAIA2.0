@@ -62,6 +62,8 @@ export function createArtistThumbController({
   let randomViewActive = false;
   let pendingResultAutoExpand = false;
   let resultExpanded = false;
+  let suppressResultCollapseClick = false;
+  let suppressResultCollapseClickTimer = null;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -133,9 +135,33 @@ export function createArtistThumbController({
     resultExpandBtn.textContent = resultExpanded ? '확대 중' : '크게 보기';
   }
 
+  function clearResultCollapseClickBlock() {
+    suppressResultCollapseClick = false;
+    if (suppressResultCollapseClickTimer) {
+      clearTimeout(suppressResultCollapseClickTimer);
+      suppressResultCollapseClickTimer = null;
+    }
+    document.removeEventListener('click', blockResultCollapseClick, true);
+  }
+
+  function blockResultCollapseClick(event) {
+    if (!suppressResultCollapseClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    clearResultCollapseClickBlock();
+  }
+
+  function armResultCollapseClickBlock() {
+    clearResultCollapseClickBlock();
+    suppressResultCollapseClick = true;
+    document.addEventListener('click', blockResultCollapseClick, true);
+    suppressResultCollapseClickTimer = setTimeout(clearResultCollapseClickBlock, 350);
+  }
+
   function collapseResultOnPointer(event) {
     if (!resultExpanded) return;
     setResultExpanded(false);
+    armResultCollapseClickBlock();
     event.preventDefault();
     event.stopPropagation();
   }
@@ -147,6 +173,7 @@ export function createArtistThumbController({
     document.body?.classList.toggle('artist-thumb-result-spotlight', resultExpanded);
     document.removeEventListener('pointerdown', collapseResultOnPointer, true);
     if (resultExpanded) {
+      clearResultCollapseClickBlock();
       document.addEventListener('pointerdown', collapseResultOnPointer, true);
     }
     updateResultExpandButton();
@@ -168,6 +195,7 @@ export function createArtistThumbController({
 
   function closeResultPreview() {
     setResultExpanded(false);
+    clearResultCollapseClickBlock();
     pendingResultRequestId = '';
     pendingResultMeta = null;
     pendingResultAutoExpand = false;

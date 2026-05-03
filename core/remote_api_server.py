@@ -2415,24 +2415,36 @@ class RemoteBridge(QObject):
             if not mw:
                 raise RuntimeError("main window is not available")
             auto_generate_checkbox = getattr(mw, "generation_checkboxes", {}).get("자동 생성") if mw else None
-            if auto_generate_checkbox and auto_generate_checkbox.isChecked():
-                auto_generate_checkbox.setChecked(False)
+            auto_generate_was_checked = None
 
             gc = getattr(mw, "generation_controller", None)
             queue_manager = getattr(self.app_context, "generation_queue_manager", None)
             if not gc or not queue_manager:
                 raise RuntimeError("generation controller is not available")
-            if gc.is_generating or not queue_manager.is_empty():
-                gc._enqueue_current_request(overrides, priority=0)
-                if not gc.is_generating and not queue_manager.is_paused():
-                    QTimer.singleShot(0, gc._process_next_queue_request)
-                self._broadcast_json({"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
-                self._broadcast_queue_state()
-                return
+            try:
+                if auto_generate_checkbox:
+                    auto_generate_was_checked = bool(auto_generate_checkbox.isChecked())
+                    if auto_generate_was_checked:
+                        auto_generate_checkbox.setChecked(False)
 
-            gc.execute_generation_pipeline(overrides=overrides, priority=0)
-            self._broadcast_json({"type": "status", "is_generating": True})
-            self._broadcast_queue_state()
+                if gc.is_generating or not queue_manager.is_empty():
+                    gc._enqueue_current_request(overrides, priority=0)
+                    if not gc.is_generating and not queue_manager.is_paused():
+                        QTimer.singleShot(0, gc._process_next_queue_request)
+                    self._broadcast_json({"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                    self._broadcast_queue_state()
+                    return
+
+                gc.execute_generation_pipeline(overrides=overrides, priority=0)
+                self._broadcast_json({"type": "status", "is_generating": True})
+                self._broadcast_queue_state()
+            finally:
+                if (
+                    auto_generate_checkbox
+                    and auto_generate_was_checked is not None
+                    and bool(auto_generate_checkbox.isChecked()) != auto_generate_was_checked
+                ):
+                    auto_generate_checkbox.setChecked(auto_generate_was_checked)
         except Exception as e:
             print(f"🌐 Remote: Artist Thumb 생성 실패 — {e}")
             self._broadcast_json({
@@ -2440,6 +2452,29 @@ class RemoteBridge(QObject):
                 "message": f"Artist Thumb 생성 실패: {e}",
                 "level": "error",
             })
+
+    def _clear_comfyui_random_request(self, request_id: str):
+        cf_id = str(request_id or "")
+        if not cf_id:
+            return None
+        override_key = ("comfyui", cf_id)
+        cf_pending = self._pending_overrides.pop(override_key, None)
+        if isinstance(cf_pending, dict):
+            peng_ref = cf_pending.get("_peng_override_ref")
+            if peng_ref is not None and self.app_context.session_p_eng_override is peng_ref:
+                self.app_context.session_p_eng_override = None
+        with self._comfyui_requests_lock:
+            return self._pending_comfyui_requests.pop(cf_id, None)
+
+    def _fail_comfyui_random_request(self, request_id: str, message: str):
+        future = self._clear_comfyui_random_request(request_id)
+        if future is None or self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(
+            lambda f=future, m=message: (
+                f.set_exception(RuntimeError(m)) if not f.done() else None
+            )
+        )
 
     def _img2img_manager(self):
         main_window = getattr(self.app_context, "main_window", None)
@@ -3528,6 +3563,8 @@ class RemoteBridge(QObject):
         if not self._pending_random_requests:
             return
         req = self._pending_random_requests.popleft()
+        ws = None
+        comfyui_request_id = None
         try:
             ws = req.get("ws")
             source_row = req.get("source_row")
@@ -3590,7 +3627,9 @@ class RemoteBridge(QObject):
                                      source_row_override=source_row)
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
-            if ws is not None:
+            if comfyui_request_id:
+                self._fail_comfyui_random_request(comfyui_request_id, f"Random failed: {e}")
+            elif ws is not None:
                 self._pending_overrides.pop(ws, None)
                 self._send_json_to(ws, {"type": "random_failed",
                                         "message": f"Random failed: {e}",
@@ -9457,9 +9496,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             result = await asyncio.wait_for(future, timeout=timeout)
             return result
         except asyncio.TimeoutError:
-            with bridge._comfyui_requests_lock:
-                bridge._pending_comfyui_requests.pop(request_id, None)
+            bridge._clear_comfyui_random_request(request_id)
             return JSONResponse({"error": "timeout"}, status_code=504)
+        except Exception as e:
+            bridge._clear_comfyui_random_request(request_id)
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     @app.get("/api/comfyui/health")
     async def api_comfyui_health():
@@ -9881,9 +9922,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         try:
             return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
-            with bridge._comfyui_requests_lock:
-                bridge._pending_comfyui_requests.pop(request_id, None)
+            bridge._clear_comfyui_random_request(request_id)
             return JSONResponse({"error": "timeout"}, status_code=504)
+        except Exception as e:
+            bridge._clear_comfyui_random_request(request_id)
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     @app.post("/api/artist-thumb/generate")
     async def api_artist_thumb_generate(req: Request):

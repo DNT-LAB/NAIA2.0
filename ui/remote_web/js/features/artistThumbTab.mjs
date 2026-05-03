@@ -519,9 +519,12 @@ export function createArtistThumbController({
     if (!item) return;
     try {
       state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned: true});
+      const artist = item.artist;
       selected = null;
       renderState();
-      await loadPage(currentPage);
+      gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+        if (card.dataset.artist === artist) card.remove();
+      });
       if (selectedImage) {
         selectedImage.removeAttribute('src');
         selectedImage.classList.remove('show');
@@ -529,6 +532,10 @@ export function createArtistThumbController({
       if (selectedEmpty) selectedEmpty.hidden = false;
       if (selectedName) selectedName.textContent = '아티스트를 선택하세요';
       if (selectedMeta) selectedMeta.textContent = '';
+      if (positiveEl && (!positiveAutoValue || positiveEl.value === positiveAutoValue)) {
+        positiveEl.value = '';
+      }
+      positiveAutoValue = '';
       [favoriteBtn, banBtn, copyBtn, insertBtn].forEach(button => {
         if (button) button.disabled = true;
       });

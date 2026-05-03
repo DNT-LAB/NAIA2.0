@@ -218,6 +218,86 @@ def test_studio_generate_overrides_are_preserved_when_queued():
     assert generation_controller.enqueued == [(overrides, 0)]
 
 
+def test_generation_param_schema_strips_desktop_selected_values():
+    params = {
+        "type": "params",
+        "api_mode": "NAI",
+        "model": "desktop-model",
+        "sampler": "desktop-sampler",
+        "scheduler": "desktop-scheduler",
+        "resolution": "832x1216",
+        "steps": 28,
+        "cfg_scale": 5.0,
+        "cfg_rescale": 0.4,
+        "seed": "1234",
+        "seed_fixed": True,
+        "random_resolution": True,
+        "auto_fit_resolution": True,
+        "SMEA": True,
+        "comfyui_workflow": {"has_custom": True, "workflow_label": "Desktop Workflow"},
+        "comfyui_workflow_has_custom": True,
+        "comfyui_workflow_label": "Desktop Workflow",
+        "options_model": ["desktop-model", "other-model"],
+        "options_sampler": ["desktop-sampler"],
+        "steps_range": [1, 50],
+    }
+
+    schema = RemoteBridge._strip_generation_param_values(params)
+
+    assert schema == {
+        "type": "params",
+        "api_mode": "NAI",
+        "options_model": ["desktop-model", "other-model"],
+        "options_sampler": ["desktop-sampler"],
+        "steps_range": [1, 50],
+        "schema_only": True,
+    }
+
+
+def test_refresh_cache_does_not_replay_desktop_control_state():
+    bridge = RemoteBridge(_AppContext())
+    schema = {"type": "params", "api_mode": "NAI", "schema_only": True}
+    bridge.get_current_prompts = lambda: {"type": "prompt_sync", "prompt": "desktop prompt"}
+    bridge.get_options = lambda: {"prompt_fixed": True}
+    bridge.get_generation_param_schema = lambda: schema
+    bridge._result_enhance_config_payload = lambda: {"type": "result_enhance_config", "strength": 0.7}
+    bridge._has_clients = lambda: True
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._do_refresh_cache()
+
+    assert bridge._cached_prompts == {}
+    assert bridge._cached_options == {}
+    assert bridge._cached_params == schema
+    assert bridge._cached_result_enhance_config == {}
+    assert broadcasts == [schema]
+
+
+def test_desktop_control_state_hooks_do_not_broadcast():
+    bridge = RemoteBridge(_AppContext())
+    schema = {"type": "params", "api_mode": "COMFYUI", "schema_only": True}
+    bridge.get_generation_param_schema = lambda: schema
+    bridge._has_clients = lambda: True
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._on_prompt_text_changed()
+    bridge._on_option_toggled_slot(True)
+    bridge._on_param_changed_slot()
+    bridge._on_params_changed()
+    bridge.on_result_enhance_config_changed()
+    bridge._on_auto_save_settings_changed()
+    bridge.on_save_directory_changed({})
+    bridge.on_comfyui_workflow_changed({})
+
+    assert bridge._cached_prompts == {}
+    assert bridge._cached_options == {}
+    assert bridge._cached_params == schema
+    assert bridge._cached_result_enhance_config == {}
+    assert broadcasts == []
+
+
 def test_comfyui_workflow_upload_and_default_endpoints_load_png_metadata():
     ctx = _ComfyWorkflowContext()
     bridge = RemoteBridge(ctx)

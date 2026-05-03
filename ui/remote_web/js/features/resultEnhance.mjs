@@ -113,6 +113,7 @@ export function createResultEnhanceController({
       return false;
     }
     const payload = normalizeConfig(nextConfig);
+    setConfig(payload);
     try {
       socket.send(JSON.stringify({
         type: 'set_result_enhance_config',

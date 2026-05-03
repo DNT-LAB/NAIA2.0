@@ -874,36 +874,35 @@ class RemoteBridge(QObject):
     # --- 캐시 갱신 (Qt 메인 스레드에서 호출) ---
 
     def _update_cache_all(self):
-        """모든 캐시를 갱신 (서버 시작 시 + WS 연결 시).
+        """WS 초기화용 캐시를 갱신한다.
 
-        api_status 는 per-ws 평가(setup_allowed 가 클라이언트 IP에 따라 다름)이므로
-        캐시하지 않고 WS 초기화 시점에 `get_api_status(ws=ws)` 로 직접 생성한다.
+        Shared Mode의 desktop -> web 설정값 전파는 중단한다. Web Session은
+        자체 입력값을 유지하고, 서버는 모드/API 상태와 파라미터 선택지 schema만
+        제공한다. api_status 는 per-ws 평가(setup_allowed 가 클라이언트 IP에
+        따라 다름)이므로 캐시하지 않고 WS 초기화 시점에 `get_api_status(ws=ws)`
+        로 직접 생성한다.
         """
-        self._cached_prompts = self.get_current_prompts()
-        self._cached_params = self.get_generation_params()
-        self._cached_options = {"type": "options", **self.get_options()}
-        self._cached_result_enhance_config = self._result_enhance_config_payload()
+        self._cached_prompts = {}
+        self._cached_options = {}
+        self._cached_params = self.get_generation_param_schema()
+        self._cached_result_enhance_config = {}
 
     # --- 시그널 슬롯 래퍼 (lambda 대신 disconnect 가능) ---
 
     def _do_refresh_cache(self):
-        """WS 연결 시 메인 스레드에서 캐시 갱신 + broadcast (프롬프트 제외 — 생성/랜덤 시에만 동기화)"""
+        """WS 연결 시 schema cache만 갱신 + broadcast."""
         self._update_cache_all()
         if self._has_clients():
-            if self._cached_options:
-                self._broadcast_json(self._cached_options)
             if self._cached_params:
                 self._broadcast_json(self._cached_params)
-            if self._cached_result_enhance_config:
-                self._broadcast_json(self._cached_result_enhance_config)
 
     def _on_option_toggled_slot(self, checked=None):
-        """체크박스 toggled → 옵션 브로드캐스트"""
-        self.broadcast_options()
+        """Desktop checkbox changes no longer push control state to Web Sessions."""
+        return
 
     def _on_param_changed_slot(self, *args):
-        """파라미터 위젯 변경 → 파라미터 브로드캐스트"""
-        self._on_params_changed()
+        """Desktop parameter changes no longer push control state to Web Sessions."""
+        return
 
     # --- Qt 메인 스레드에서 실행되는 슬롯 ---
 
@@ -1018,8 +1017,8 @@ class RemoteBridge(QObject):
         return self._normalize_result_enhance_config()
 
     def _broadcast_result_enhance_config(self):
-        self._cached_result_enhance_config = self._result_enhance_config_payload()
-        self._broadcast_json(self._cached_result_enhance_config)
+        """Deprecated desktop -> web Enhance settings sync path."""
+        self._cached_result_enhance_config = {}
 
     def _do_set_result_enhance_config(self, ws=None, payload_json: str = "{}"):
         """Web Remote에서 전달된 Enhance 설정을 Desktop ImageWindow에 반영."""
@@ -1054,8 +1053,9 @@ class RemoteBridge(QObject):
             if callable(save_settings):
                 save_settings()
 
-            self._cached_result_enhance_config = config
-            self._broadcast_json(config)
+            self._cached_result_enhance_config = {}
+            if ws is not None:
+                self._send_json_to(ws, {**config, "_session_echo": True})
             self._send_json_to(ws, {"type": "toast", "message": "Enhance settings updated", "level": "success"})
             print(
                 "🌐 Remote: Enhance 설정 갱신 "
@@ -3663,9 +3663,9 @@ class RemoteBridge(QObject):
                 self._sync_detached_option_widget(key, checked)
                 self._refresh_generation_option_ui(key, cb)
             if cb:
-                # setChecked() emits toggled synchronously while _syncing_option is True,
-                # so the normal checkbox-slot broadcast is intentionally skipped.
-                # Send one authoritative echo after the desktop state is applied.
+                # setChecked() emits toggled synchronously while _syncing_option is True.
+                # The legacy authoritative echo is now a no-op so Web Sessions keep
+                # their own local control values.
                 self.broadcast_options()
         except Exception as e:
             self._syncing_option = False
@@ -3948,7 +3948,7 @@ class RemoteBridge(QObject):
             self._broadcast_api_status()
 
     def on_api_mode_changed(self, data: dict):
-        """api_mode_changed 이벤트 → 웹 클라이언트에 브로드캐스트"""
+        """api_mode_changed event -> broadcast mode/status and schema only."""
         new_mode = data.get("new_mode", "")
         # NAI 모드 진입/이탈에 맞춰 Anlas 타이머 제어
         if new_mode == "NAI":
@@ -3959,7 +3959,7 @@ class RemoteBridge(QObject):
         if not self._has_clients():
             return
         self._broadcast_json({"type": "mode", "mode": new_mode})
-        # 모드 변경 시 파라미터도 갱신 (모드별 옵션이 다르므로)
+        # 모드 변경 시 선택지 schema만 갱신 (selected desktop 값은 전파하지 않음)
         self._broadcast_params()
 
     def get_options(self) -> dict:
@@ -3981,14 +3981,8 @@ class RemoteBridge(QObject):
             return {}
 
     def broadcast_options(self):
-        """현재 옵션 상태를 모든 WS 클라이언트에 전송 + 캐시 갱신"""
-        if self._syncing_option:
-            return
-        opts = self.get_options()
-        if opts:
-            self._cached_options = {"type": "options", **opts}
-            if self._has_clients():
-                self._broadcast_json(self._cached_options)
+        """Deprecated desktop -> web option sync path."""
+        self._cached_options = {}
 
     # --- 프롬프트 동기화 (Qt 메인 스레드에서 실행) ---
 
@@ -4086,22 +4080,12 @@ class RemoteBridge(QObject):
             return {}
 
     def _on_prompt_text_changed(self):
-        """메인 UI 프롬프트 변경 시 디바운스 후 웹에 전송"""
-        if self._syncing_prompt:
-            return
-        if self._prompt_debounce_timer is None:
-            self._prompt_debounce_timer = QTimer()
-            self._prompt_debounce_timer.setSingleShot(True)
-            self._prompt_debounce_timer.timeout.connect(self._broadcast_prompts)
-        self._prompt_debounce_timer.start(500)
+        """Desktop prompt edits no longer push control state to Web Sessions."""
+        return
 
     def _broadcast_prompts(self):
-        """현재 프롬프트 캐시 갱신 + 웹 클라이언트에 동기화."""
-        data = self.get_current_prompts()
-        if data:
-            self._cached_prompts = data
-            if self._has_clients():
-                self._broadcast_json(data)
+        """Deprecated desktop -> web prompt sync path."""
+        self._cached_prompts = {}
 
     # --- Viewer: 디스크 이미지 스캔/썸네일 ---
 
@@ -4497,9 +4481,10 @@ class RemoteBridge(QObject):
         return state
 
     def on_comfyui_workflow_changed(self, data: dict):
-        """Desktop/remote ComfyUI workflow changes → Web Remote state sync."""
-        self._broadcast_comfyui_workflow_state(data)
-        self._broadcast_params()
+        """Desktop workflow edits should not push selected state into Web Sessions."""
+        params = self.get_generation_param_schema()
+        if params:
+            self._cached_params = params
 
     def _extract_comfyui_workflow_metadata_from_png_bytes(self, image_bytes: bytes) -> dict:
         if not image_bytes:
@@ -4594,7 +4579,7 @@ class RemoteBridge(QObject):
         self._set_comfyui_workflow_buttons(True)
         self._show_comfyui_workflow_status("✅ 커스텀 워크플로우가 활성화되었습니다.")
         state = self._comfyui_workflow_state_payload()
-        params = self.get_generation_params()
+        params = self.get_generation_param_schema()
         if params:
             self._cached_params = params
         if self._has_clients():
@@ -4617,7 +4602,7 @@ class RemoteBridge(QObject):
         self._set_comfyui_workflow_buttons(False)
         self._show_comfyui_workflow_status("🔄 기본 워크플로우로 전환되었습니다.")
         state = self._comfyui_workflow_state_payload()
-        params = self.get_generation_params()
+        params = self.get_generation_param_schema()
         if params:
             self._cached_params = params
         if self._has_clients():
@@ -4629,6 +4614,26 @@ class RemoteBridge(QObject):
             "workflow": state,
             "params": params,
         }
+
+    @staticmethod
+    def _strip_generation_param_values(params: dict) -> dict:
+        schema = dict(params or {})
+        for key in (
+            "model", "sampler", "scheduler", "resolution", "steps", "cfg_scale",
+            "cfg_rescale", "seed", "seed_fixed", "random_resolution",
+            "auto_fit_resolution", "SMEA", "DYN", "VAR+", "DECRISP",
+            "enable_hr", "hr_scale", "hr_upscaler", "denoising_strength",
+            "hires_steps", "hr_cfg", "sampling_mode", "rescale_cfg",
+            "anima_weight", "anima_weight_raw", "comfyui_workflow",
+            "comfyui_workflow_has_custom", "comfyui_workflow_label",
+        ):
+            schema.pop(key, None)
+        schema["schema_only"] = True
+        return schema
+
+    def get_generation_param_schema(self) -> dict:
+        """Return selectable parameter metadata without desktop-selected values."""
+        return self._strip_generation_param_values(self.get_generation_params())
 
     def get_generation_params(self) -> dict:
         """현재 생성 파라미터 + 선택 가능 옵션 목록 반환"""
@@ -4769,18 +4774,12 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: 파라미터 설정 실패 — {key}={value}: {e}")
 
     def _on_params_changed(self):
-        """파라미터 위젯 변경 시 디바운스 후 웹에 전송"""
-        if self._syncing_param:
-            return
-        if self._params_debounce_timer is None:
-            self._params_debounce_timer = QTimer()
-            self._params_debounce_timer.setSingleShot(True)
-            self._params_debounce_timer.timeout.connect(self._broadcast_params)
-        self._params_debounce_timer.start(300)
+        """Desktop parameter edits no longer push control state to Web Sessions."""
+        return
 
     def _broadcast_params(self):
-        """현재 파라미터 캐시 갱신 + WS 클라이언트에 전송"""
-        data = self.get_generation_params()
+        """파라미터 선택지 schema만 캐시 갱신 + WS 클라이언트에 전송."""
+        data = self.get_generation_param_schema()
         if data:
             self._cached_params = data
             if self._has_clients():
@@ -5015,7 +5014,6 @@ class RemoteBridge(QObject):
 
     def on_save_directory_changed(self, _data: dict):
         self._invalidate_viewer_cache()
-        self._broadcast_save_directory_state()
 
     def _persist_base_save_directory_setting(self, new_path: str):
         """데스크탑 Settings와 동일한 설정 파일에도 base_path를 반영."""
@@ -5082,7 +5080,8 @@ class RemoteBridge(QObject):
             self._broadcast_json(state)
 
     def _on_auto_save_settings_changed(self, *_args):
-        self._broadcast_auto_save_settings()
+        """Desktop auto-save setting edits no longer push module settings to Web."""
+        return
 
     def _read_prompt_engineering(self, ws=None) -> dict:
         try:
@@ -9126,7 +9125,7 @@ class RemoteBridge(QObject):
             self._broadcast_json({"type": "toast", "message": str(message), "level": "error"})
 
     def on_result_enhance_config_changed(self, *_args, **_kwargs):
-        """Desktop Enhance 설정 변경을 Web Remote에 동기화."""
+        """Desktop Enhance setting edits no longer push config to Web."""
         self._broadcast_result_enhance_config()
 
     def _broadcast_json(self, data: dict):
@@ -10072,14 +10071,8 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
             current_mode = bridge.app_context.get_api_mode()
             await ws.send_text(json.dumps({"type": "mode", "mode": current_mode}))
-            if bridge._cached_options:
-                await ws.send_text(json.dumps(bridge._cached_options))
-            if bridge._cached_prompts:
-                await ws.send_text(json.dumps(bridge._cached_prompts))
             if bridge._cached_params:
                 await ws.send_text(json.dumps(bridge._cached_params))
-            if bridge._cached_result_enhance_config:
-                await ws.send_text(json.dumps(bridge._cached_result_enhance_config))
             await ws.send_text(json.dumps(bridge._build_queue_state()))
             # api_status 는 per-ws 평가 (setup_allowed 가 클라이언트 IP에 따라 다름)
             await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
@@ -10118,14 +10111,16 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                     bridge._pending_random_requests.append({"ws": ws, "source_row": None, "active_ratings": set(bridge._active_ratings)})
                     bridge.request_random.emit()
                 elif data == "sync":
-                    if bridge._cached_prompts:
-                        await ws.send_text(json.dumps(bridge._cached_prompts))
-                    if bridge._cached_options:
-                        await ws.send_text(json.dumps(bridge._cached_options))
+                    await ws.send_text(json.dumps({
+                        "type": "mode",
+                        "mode": bridge.app_context.get_api_mode(),
+                    }))
                     if bridge._cached_params:
                         await ws.send_text(json.dumps(bridge._cached_params))
-                    if bridge._cached_result_enhance_config:
-                        await ws.send_text(json.dumps(bridge._cached_result_enhance_config))
+                    await ws.send_text(json.dumps(bridge._build_queue_state()))
+                    await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
+                    if bridge._anlas_cache:
+                        await ws.send_text(json.dumps(bridge._anlas_payload()))
                 elif data.startswith("{"):
                     try:
                         cmd = json.loads(data)
@@ -10616,7 +10611,8 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     ]:
         app_context.subscribe(queue_event, bridge._broadcast_queue_state)
 
-    # 체크박스 변경 → 웹 동기화 (메서드 참조로 disconnect 가능)
+    # Checkbox hooks remain connected, but the slot no longer pushes desktop
+    # control values into Web Sessions.
     _checkbox_connections = []
     _bridge_signal_connections = []
     for key, label in RemoteBridge.OPTION_KEYS.items():
@@ -10625,7 +10621,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
             cb.toggled.connect(bridge._on_option_toggled_slot)
             _checkbox_connections.append((cb, "toggled"))
 
-    # auto_save 체크박스 → 웹 동기화
+    # Auto-save hooks also avoid desktop -> web control-value sync.
     auto_save_checkbox = bridge._get_auto_save_checkbox()
     if auto_save_checkbox:
         auto_save_checkbox.toggled.connect(bridge._on_option_toggled_slot)
@@ -10649,7 +10645,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
         memory_action_group.buttonClicked.connect(bridge._on_auto_save_settings_changed)
         _bridge_signal_connections.append((memory_action_group, "buttonClicked", bridge._on_auto_save_settings_changed))
 
-    # 생성 파라미터 위젯 변경 → 웹 동기화 (메서드 참조로 disconnect 가능)
+    # Parameter hooks keep the schema refresh path without pushing selected values.
     _param_signal_sources.clear()
     _param_signal_sources.extend([
         (mw.model_combo, "currentTextChanged"),

@@ -1225,6 +1225,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
 // ---- Params ----
 
 function populateSelect(el, options, current) {
+  const previous = el.value;
   if (options && options.length) {
     const existing = Array.from(el.options).map(o => o.value);
     if (existing.length !== options.length || existing.some((v, i) => v !== options[i])) {
@@ -1232,6 +1233,7 @@ function populateSelect(el, options, current) {
     }
   }
   if (current !== undefined) el.value = current;
+  else if (previous && Array.from(el.options).some(option => option.value === previous)) el.value = previous;
 }
 
 function normalizeComfyUiWorkflowState(m = {}) {
@@ -1257,6 +1259,7 @@ function onComfyUiWorkflowState(m) {
 }
 
 function updateParams(m) {
+  const schemaOnly = !!m.schema_only;
   syncingParams = true;
   populateSelect(paramEls.model, m.options_model, m.model);
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
@@ -1281,20 +1284,30 @@ function updateParams(m) {
   // 플래그 (공통 + NAI)
   const flags = [];
   const naiFlagsEnabled = m.nai_flags_enabled || {};
+  const currentFlagState = key => {
+    const existing = paramFlags.querySelector(`[data-key="${key}"]`);
+    if (existing) return existing.classList.contains('on');
+    if (key === 'random_resolution') return qRndRes.classList.contains('on');
+    if (key === 'auto_fit_resolution') return qAutoRes.classList.contains('on');
+    return false;
+  };
+  const incomingFlagState = key => schemaOnly ? currentFlagState(key) : !!m[key];
   if (mode === 'NAI') {
     for (const key of ['SMEA', 'DYN', 'VAR+', 'DECRISP']) {
-      if (key in m) flags.push({key, name: key, on: m[key], enabled: naiFlagsEnabled[key] !== false});
+      if (schemaOnly || key in m) flags.push({key, name: key, on: incomingFlagState(key), enabled: naiFlagsEnabled[key] !== false});
     }
   }
-  if ('seed_fixed' in m) flags.push({key: 'seed_fixed', name: 'Seed Fix', on: m.seed_fixed, enabled: true});
-  if ('random_resolution' in m) flags.push({key: 'random_resolution', name: 'Rnd Res', on: m.random_resolution, enabled: true});
-  if ('auto_fit_resolution' in m) flags.push({key: 'auto_fit_resolution', name: 'Auto Res', on: m.auto_fit_resolution, enabled: true});
+  if (schemaOnly || 'seed_fixed' in m) flags.push({key: 'seed_fixed', name: 'Seed Fix', on: incomingFlagState('seed_fixed'), enabled: true});
+  if (schemaOnly || 'random_resolution' in m) flags.push({key: 'random_resolution', name: 'Rnd Res', on: incomingFlagState('random_resolution'), enabled: true});
+  if (schemaOnly || 'auto_fit_resolution' in m) flags.push({key: 'auto_fit_resolution', name: 'Auto Res', on: incomingFlagState('auto_fit_resolution'), enabled: true});
   paramFlags.innerHTML = flags.map(f =>
     `<span class="param-flag${f.on ? ' on' : ''}${f.enabled ? '' : ' disabled'}" data-key="${f.key}" onclick="${f.enabled ? 'toggleFlag(this)' : ''}">${f.name}</span>`
   ).join('');
   // Quick flags 동기화
   if ('random_resolution' in m) qRndRes.classList.toggle('on', m.random_resolution);
+  else if (schemaOnly) qRndRes.classList.toggle('on', incomingFlagState('random_resolution'));
   if ('auto_fit_resolution' in m) qAutoRes.classList.toggle('on', m.auto_fit_resolution);
+  else if (schemaOnly) qAutoRes.classList.toggle('on', incomingFlagState('auto_fit_resolution'));
 
   // WEBUI HR
   if (mode === 'WEBUI') {
@@ -2418,8 +2431,8 @@ function setOption(key, value) {
   }
   if (!applyOptionState(key, next, {clearPending: false})) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    markOptionPending(key, true);
     ws.send(JSON.stringify({type: 'set_option', key, value: next}));
+    markOptionPending(key, false);
   } else {
     markOptionPending(key, false);
   }

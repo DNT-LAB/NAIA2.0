@@ -121,7 +121,14 @@ export function createArtistThumbController({
     if (!randomBtn) return;
     const mode = currentMode();
     const info = currentModeInfo();
-    randomBtn.disabled = !mode || Boolean(info && !info.available);
+    randomBtn.disabled = false;
+    if (!mode) {
+      randomBtn.title = '모드를 선택한 뒤 랜덤 작가를 불러올 수 있습니다.';
+    } else if (info && !info.available) {
+      randomBtn.title = '데이터 다운로드 후 랜덤 작가를 불러올 수 있습니다.';
+    } else {
+      randomBtn.title = '현재 조건에서 한 페이지 분량의 랜덤 작가를 보여줍니다.';
+    }
   }
 
   function updateDownloadUi() {

@@ -986,6 +986,55 @@ def _bridge_with_artist_thumb_lists(tmp_path, monkeypatch):
     return bridge
 
 
+def test_artist_thumb_state_migrates_legacy_files_to_json(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+
+    state_path = Path("artist_thumb/artist_state.json")
+    assert state_path.exists()
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert data["version"] == 1
+    assert data["favorites"] == ["a", "b"]
+    assert data["banned"] == ["b", "missing"]
+    assert bridge._artist_thumb_favorites() == ["a", "b"]
+    assert bridge._artist_thumb_banned() == ["b", "missing"]
+
+
+def test_artist_thumb_state_json_is_source_of_truth(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("wildcards").mkdir()
+    Path("artist_thumb/artist_state.json").write_text(
+        json.dumps({"version": 1, "favorites": ["c"], "banned": ["d"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path("artist_thumb/banned_artist.txt").write_text("b\n", encoding="utf-8")
+    Path("wildcards/favorite_artist.txt").write_text("a\n", encoding="utf-8")
+
+    bridge = RemoteBridge(_AppContext())
+
+    assert bridge._artist_thumb_favorites() == ["c"]
+    assert bridge._artist_thumb_banned() == ["d"]
+    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "c\n"
+    assert Path("artist_thumb/banned_artist.txt").read_text(encoding="utf-8") == "d\n"
+
+
+def test_artist_thumb_state_updates_json_and_text_mirrors(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+
+    bridge._set_artist_thumb_favorite("c", True)
+    data = json.loads(Path("artist_thumb/artist_state.json").read_text(encoding="utf-8"))
+    assert data["favorites"] == ["a", "b", "c"]
+    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "a\nb\nc\n"
+
+    bridge._set_artist_thumb_banned("a", True)
+    data = json.loads(Path("artist_thumb/artist_state.json").read_text(encoding="utf-8"))
+    assert data["favorites"] == ["b", "c"]
+    assert data["banned"] == ["b", "missing", "a"]
+    assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "b\nc\n"
+    assert Path("artist_thumb/banned_artist.txt").read_text(encoding="utf-8") == "b\nmissing\na\n"
+
+
 def test_artist_thumb_state_counts_visible_artists_after_bans(tmp_path, monkeypatch):
     bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
 

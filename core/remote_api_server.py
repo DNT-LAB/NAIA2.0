@@ -264,6 +264,7 @@ class RemoteBridge(QObject):
             "done": False,
             "updated_at": "",
         }
+        self._ensure_artist_thumb_state()
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -2049,9 +2050,14 @@ class RemoteBridge(QObject):
                 continue
             seen.add(text)
             cleaned.append(text)
+        if path.exists() and self._read_artist_thumb_lines(path) == cleaned:
+            return
         with path.open("w", encoding="utf-8") as f:
             for value in cleaned:
                 f.write(f"{value}\n")
+
+    def _artist_thumb_state_path(self) -> Path:
+        return Path("artist_thumb") / "artist_state.json"
 
     def _artist_thumb_favorite_path(self) -> Path:
         return Path("wildcards") / "favorite_artist.txt"
@@ -2062,11 +2068,81 @@ class RemoteBridge(QObject):
     def _artist_thumb_options_path(self) -> Path:
         return Path("artist_thumb") / "generate_options.json"
 
+    def _normalize_artist_thumb_values(self, values) -> list[str]:
+        seen = set()
+        normalized = []
+        if not isinstance(values, (list, tuple, set)):
+            return []
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    def _normalize_artist_thumb_state(self, data, fallback: dict | None = None) -> dict:
+        source = data if isinstance(data, dict) else {}
+        fallback = fallback if isinstance(fallback, dict) else {}
+        favorites_source = source.get("favorites", fallback.get("favorites", []))
+        banned_source = source.get("banned", fallback.get("banned", []))
+        return {
+            "version": 1,
+            "favorites": self._normalize_artist_thumb_values(favorites_source),
+            "banned": self._normalize_artist_thumb_values(banned_source),
+        }
+
+    def _legacy_artist_thumb_state(self) -> dict:
+        return self._normalize_artist_thumb_state({
+            "favorites": self._read_artist_thumb_lines(self._artist_thumb_favorite_path()),
+            "banned": self._read_artist_thumb_lines(self._artist_thumb_banned_path()),
+        })
+
+    def _read_artist_thumb_state_file(self) -> dict | None:
+        path = self._artist_thumb_state_path()
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return self._normalize_artist_thumb_state(data, self._legacy_artist_thumb_state())
+        except Exception as e:
+            print(f"🌐 Remote: artist thumb 상태 JSON 로드 실패 ({path}) — {e}")
+            return None
+
+    def _sync_artist_thumb_state_mirrors(self, state: dict):
+        normalized = self._normalize_artist_thumb_state(state)
+        # favorite_artist.txt는 와일드카드 호출용 공개 미러이므로 JSON 원본에서 항상 복원한다.
+        self._write_artist_thumb_lines(self._artist_thumb_favorite_path(), normalized["favorites"])
+        # 기존 제외 목록 파일도 수동 확인/호환을 위해 유지한다.
+        self._write_artist_thumb_lines(self._artist_thumb_banned_path(), normalized["banned"])
+
+    def _write_artist_thumb_state(self, state: dict) -> dict:
+        normalized = self._normalize_artist_thumb_state(state)
+        path = self._artist_thumb_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f"{path.name}.tmp")
+        with temp_path.open("w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        temp_path.replace(path)
+        self._sync_artist_thumb_state_mirrors(normalized)
+        return normalized
+
+    def _ensure_artist_thumb_state(self) -> dict:
+        with self._artist_thumb_lock:
+            state = self._read_artist_thumb_state_file()
+            if state is None:
+                state = self._write_artist_thumb_state(self._legacy_artist_thumb_state())
+            else:
+                self._sync_artist_thumb_state_mirrors(state)
+            return state
+
     def _artist_thumb_favorites(self) -> list[str]:
-        return self._read_artist_thumb_lines(self._artist_thumb_favorite_path())
+        return list(self._ensure_artist_thumb_state().get("favorites", []))
 
     def _artist_thumb_banned(self) -> list[str]:
-        return self._read_artist_thumb_lines(self._artist_thumb_banned_path())
+        return list(self._ensure_artist_thumb_state().get("banned", []))
 
     def _artist_thumb_custom_filters(self, weights: dict | None = None, banned_set: set[str] | None = None) -> list[dict]:
         base = Path("artist_thumb")
@@ -2376,27 +2452,32 @@ class RemoteBridge(QObject):
         artist_name = str(artist or "").strip()
         if not artist_name:
             raise ValueError("artist is required")
-        favorites = self._artist_thumb_favorites()
-        if favorite and artist_name not in favorites:
-            favorites.append(artist_name)
-        elif not favorite and artist_name in favorites:
-            favorites = [a for a in favorites if a != artist_name]
-        self._write_artist_thumb_lines(self._artist_thumb_favorite_path(), favorites)
+        with self._artist_thumb_lock:
+            state = self._ensure_artist_thumb_state()
+            favorites = list(state.get("favorites", []))
+            if favorite and artist_name not in favorites:
+                favorites.append(artist_name)
+            elif not favorite and artist_name in favorites:
+                favorites = [a for a in favorites if a != artist_name]
+            state["favorites"] = favorites
+            self._write_artist_thumb_state(state)
         return self._build_artist_thumb_state()
 
     def _set_artist_thumb_banned(self, artist: str, banned: bool) -> dict:
         artist_name = str(artist or "").strip()
         if not artist_name:
             raise ValueError("artist is required")
-        banned_list = self._artist_thumb_banned()
-        if banned and artist_name not in banned_list:
-            banned_list.append(artist_name)
-        elif not banned and artist_name in banned_list:
-            banned_list = [a for a in banned_list if a != artist_name]
-        self._write_artist_thumb_lines(self._artist_thumb_banned_path(), banned_list)
-        if banned:
-            favorites = [a for a in self._artist_thumb_favorites() if a != artist_name]
-            self._write_artist_thumb_lines(self._artist_thumb_favorite_path(), favorites)
+        with self._artist_thumb_lock:
+            state = self._ensure_artist_thumb_state()
+            banned_list = list(state.get("banned", []))
+            if banned and artist_name not in banned_list:
+                banned_list.append(artist_name)
+            elif not banned and artist_name in banned_list:
+                banned_list = [a for a in banned_list if a != artist_name]
+            state["banned"] = banned_list
+            if banned:
+                state["favorites"] = [a for a in state.get("favorites", []) if a != artist_name]
+            self._write_artist_thumb_state(state)
         return self._build_artist_thumb_state()
 
     def _artist_thumb_final_prompt(self, payload: dict) -> str:

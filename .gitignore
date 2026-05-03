@@ -163,6 +163,7 @@ NAIA_generation_old.py
 artist_tab_old.py
 artist_thumb/banned_artist.txt
 artist_thumb/generate_options.json
+artist_thumb/artist_state.json
 temp_image.png
 *.naiv4vibebundle
 *.naiv4vibe

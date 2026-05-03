@@ -849,6 +849,9 @@ function handleWsBlob(data) {
   preview.dataset.source = 'current';
   preview.dataset.path = '';
   preview.classList.add('show');
+  if (resultImageActions && typeof resultImageActions.prepareCurrentDragImage === 'function') {
+    resultImageActions.prepareCurrentDragImage({force: true});
+  }
   emptyMsg.style.display = 'none';
   setGen(false);
   // Stats update — init_complete 이후의 blob만 카운트

@@ -17,6 +17,8 @@ export function createResultImageActions({
   switchRightTab = () => {},
 }) {
   let dragSourceBound = false;
+  let currentDragImageCache = null;
+  let currentDragImagePromise = null;
 
   function isMetadataActionObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -365,6 +367,25 @@ export function createResultImageActions({
     return `${base || 'naia-result'}.png`;
   }
 
+  function addDragFile(dataTransfer, file) {
+    if (!dataTransfer || !file || !dataTransfer.items || typeof dataTransfer.items.add !== 'function') {
+      return false;
+    }
+    try {
+      dataTransfer.items.add(file);
+      return true;
+    } catch (error) {
+      console.warn('Could not attach drag image file', error);
+      return false;
+    }
+  }
+
+  function cachedDragFileForPayload(payload = {}) {
+    const source = payload.source || (payload.path ? 'saved' : 'current');
+    if (source !== 'current' || payload.path || !currentDragImageCache) return null;
+    return currentDragImageCache.file || null;
+  }
+
   function applyOriginalImageDragData(dataTransfer, payload = {}) {
     if (!dataTransfer) return;
     const source = payload.source || (payload.path ? 'saved' : 'current');
@@ -379,6 +400,7 @@ export function createResultImageActions({
     const mimeType = mimeTypeForFilename(filename);
     try { dataTransfer.clearData(); } catch (_) { /* noop */ }
     try { dataTransfer.effectAllowed = 'copy'; } catch (_) { /* noop */ }
+    addDragFile(dataTransfer, cachedDragFileForPayload(payload));
     try { dataTransfer.setData('text/uri-list', originalUrl); } catch (_) { /* noop */ }
     try { dataTransfer.setData('text/plain', originalUrl); } catch (_) { /* noop */ }
     try {
@@ -388,6 +410,32 @@ export function createResultImageActions({
       );
     } catch (_) { /* noop */ }
     try { dataTransfer.setData('DownloadURL', `${mimeType}:${filename}:${originalUrl}`); } catch (_) { /* noop */ }
+  }
+
+  async function prepareCurrentDragImage(options = {}) {
+    if (options.force) {
+      currentDragImageCache = null;
+      currentDragImagePromise = null;
+    }
+    if (currentDragImageCache) return currentDragImageCache;
+    if (currentDragImagePromise) return currentDragImagePromise;
+    const context = {source: 'current', label: options.label || 'naia-result'};
+    currentDragImagePromise = fetchContextImageBlob(context, {format: 'png'})
+      .then(blob => {
+        const filename = filenameFromContext(context, 'png');
+        const file = new window.File([blob], filename, {type: 'image/png'});
+        currentDragImageCache = {blob, file, filename};
+        return currentDragImageCache;
+      })
+      .catch(error => {
+        console.warn('Current result drag image preparation failed', error);
+        currentDragImageCache = null;
+        return null;
+      })
+      .finally(() => {
+        currentDragImagePromise = null;
+      });
+    return currentDragImagePromise;
   }
 
   async function fetchContextImageBlob(context = {}, options = {}) {
@@ -693,6 +741,9 @@ export function createResultImageActions({
         };
       }
       if (!payload || !event.dataTransfer) return;
+      if (payload.source === 'current' && !payload.path && !currentDragImageCache) {
+        prepareCurrentDragImage();
+      }
       applyOriginalImageDragData(event.dataTransfer, payload);
       try {
         event.dataTransfer.setData('application/x-naia-source', JSON.stringify(payload));
@@ -715,5 +766,6 @@ export function createResultImageActions({
     requestContextImageAction,
     showMetadataInTab,
     handleInternalImageDrop,
+    prepareCurrentDragImage,
   };
 }

@@ -141,7 +141,7 @@ class RemoteBridge(QObject):
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
     request_refresh_cache = pyqtSignal()               # WS 연결 시 캐시 갱신 + broadcast
     request_set_desktop_visibility = pyqtSignal(bool)  # 메인 데스크탑 창 표시/숨김
-    request_send_desktop_sync = pyqtSignal(object, str) # (ws, reason) — desktop authoritative snapshot
+    request_send_desktop_sync = pyqtSignal(str)        # request_id — ordered desktop snapshot
     request_result_enhance = pyqtSignal(object, str)    # (ws, json) — 현재/저장 ImageWindow 결과 Enhance
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
@@ -269,6 +269,9 @@ class RemoteBridge(QObject):
         # ComfyUI workflow actions: FastAPI request_id → {loop, future, action, metadata}
         self._pending_comfyui_workflow_actions: dict = {}
         self._comfyui_workflow_actions_lock = threading.Lock()
+        # Desktop snapshot requests: FastAPI request_id → {loop, future, reason}
+        self._pending_desktop_snapshot_requests: dict = {}
+        self._desktop_snapshot_requests_lock = threading.Lock()
 
     def _search_filter_state_path(self) -> Path:
         return Path("save") / "remote_web_filter_state.json"
@@ -4150,18 +4153,63 @@ class RemoteBridge(QObject):
 
         return payloads
 
-    def _send_desktop_control_snapshot_to(self, ws, reason: str = "initial"):
-        for payload in self._desktop_control_snapshot_payloads(reason):
-            self._send_json_to(ws, payload)
-
     def _broadcast_desktop_control_snapshot(self, reason: str = "desktop_sync"):
         if not self._has_clients():
             return
         for payload in self._desktop_control_snapshot_payloads(reason):
             self._broadcast_json(payload)
 
-    def _do_send_desktop_control_snapshot(self, ws, reason: str = "initial"):
-        self._send_desktop_control_snapshot_to(ws, reason or "initial")
+    async def _request_desktop_control_snapshot(self, reason: str, timeout: Optional[float] = None) -> list[dict]:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        request_id = uuid.uuid4().hex
+        with self._desktop_snapshot_requests_lock:
+            self._pending_desktop_snapshot_requests[request_id] = {
+                "loop": loop,
+                "future": future,
+                "reason": reason,
+            }
+        self.request_send_desktop_sync.emit(request_id)
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout) if timeout is not None else await future
+            return result if isinstance(result, list) else []
+        except asyncio.TimeoutError:
+            with self._desktop_snapshot_requests_lock:
+                self._pending_desktop_snapshot_requests.pop(request_id, None)
+            print(f"🌐 Remote: desktop snapshot timed out — {reason}")
+            return []
+        except asyncio.CancelledError:
+            with self._desktop_snapshot_requests_lock:
+                self._pending_desktop_snapshot_requests.pop(request_id, None)
+            raise
+
+    async def send_desktop_control_snapshot_to_ws(self, ws, reason: str, timeout: Optional[float] = None) -> list[dict]:
+        payloads = await self._request_desktop_control_snapshot(reason, timeout=timeout)
+        for payload in payloads:
+            await ws.send_text(json.dumps(payload))
+        return payloads
+
+    def _complete_desktop_snapshot_request(self, request: dict, payloads: list[dict]):
+        loop = request.get("loop")
+        future = request.get("future")
+        if loop is None or future is None:
+            return
+        loop.call_soon_threadsafe(
+            lambda f=future, p=payloads: (f.set_result(p) if not f.done() else None)
+        )
+
+    def _do_send_desktop_control_snapshot(self, request_id: str):
+        with self._desktop_snapshot_requests_lock:
+            request = self._pending_desktop_snapshot_requests.pop(request_id, None)
+        if not request:
+            return
+        reason = str(request.get("reason") or "desktop_sync")
+        try:
+            payloads = self._desktop_control_snapshot_payloads(reason)
+        except Exception as e:
+            print(f"🌐 Remote: desktop snapshot request failed — {e}")
+            payloads = []
+        self._complete_desktop_snapshot_request(request, payloads)
 
     def _queue_desktop_control_snapshot_broadcast(self, reason: str):
         QTimer.singleShot(0, lambda r=reason: self._broadcast_desktop_control_snapshot(r))
@@ -10211,7 +10259,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             await ws.send_text(json.dumps(bridge._build_queue_state()))
             # api_status 는 per-ws 평가 (setup_allowed 가 클라이언트 IP에 따라 다름)
             await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
-            bridge.request_send_desktop_sync.emit(ws, "initial")
+            await bridge.send_desktop_control_snapshot_to_ws(ws, "initial")
             # 캐시된 Anlas 있으면 바로 송신 (viewer pill 초기화)
             if bridge._anlas_cache:
                 await ws.send_text(json.dumps(bridge._anlas_payload()))
@@ -10255,7 +10303,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         await ws.send_text(json.dumps(bridge._cached_params))
                     await ws.send_text(json.dumps(bridge._build_queue_state()))
                     await ws.send_text(json.dumps(bridge.get_api_status(ws=ws)))
-                    bridge.request_send_desktop_sync.emit(ws, "manual_sync")
+                    await bridge.send_desktop_control_snapshot_to_ws(ws, "manual_sync")
                     if bridge._anlas_cache:
                         await ws.send_text(json.dumps(bridge._anlas_payload()))
                 elif data.startswith("{"):

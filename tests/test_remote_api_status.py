@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import json
@@ -329,7 +330,7 @@ def test_refresh_cache_does_not_replay_desktop_control_state():
     assert broadcasts == [schema]
 
 
-def test_desktop_snapshot_sends_full_params_and_forced_prompts():
+def test_desktop_snapshot_builds_full_params_and_forced_prompts():
     bridge = RemoteBridge(_AppContext())
     bridge.get_generation_params = lambda: {
         "type": "params",
@@ -342,12 +343,10 @@ def test_desktop_snapshot_sends_full_params_and_forced_prompts():
         "prompt": "desktop prompt",
         "negative_prompt": "desktop negative",
     }
-    sent = []
-    bridge._send_json_to = lambda ws, data: sent.append(data)
 
-    bridge._do_send_desktop_control_snapshot(_ws("127.0.0.1"), "initial")
+    payloads = bridge._desktop_control_snapshot_payloads("initial")
 
-    assert sent == [
+    assert payloads == [
         {
             "type": "params",
             "api_mode": "NAI",
@@ -365,6 +364,54 @@ def test_desktop_snapshot_sends_full_params_and_forced_prompts():
             "force": True,
         },
     ]
+
+
+def test_desktop_snapshot_ws_send_is_ordered_before_followup_messages():
+    class _FakeWs:
+        def __init__(self):
+            self.sent = []
+
+        async def send_text(self, text):
+            self.sent.append(json.loads(text))
+
+    async def _run():
+        bridge = RemoteBridge(_AppContext())
+        bridge.get_generation_params = lambda: {
+            "type": "params",
+            "api_mode": "NAI",
+            "model": "desktop-model",
+        }
+        bridge.get_current_prompts = lambda: {
+            "type": "prompt_sync",
+            "prompt": "desktop prompt",
+            "negative_prompt": "desktop negative",
+        }
+        bridge.request_send_desktop_sync.connect(bridge._do_send_desktop_control_snapshot)
+        ws = _FakeWs()
+
+        await bridge.send_desktop_control_snapshot_to_ws(ws, "initial")
+        await ws.send_text(json.dumps({"type": "init_complete"}))
+
+        assert ws.sent == [
+            {
+                "type": "params",
+                "api_mode": "NAI",
+                "model": "desktop-model",
+                "desktop_sync": True,
+                "sync_reason": "initial",
+            },
+            {
+                "type": "prompt_sync",
+                "prompt": "desktop prompt",
+                "negative_prompt": "desktop negative",
+                "desktop_sync": True,
+                "sync_reason": "initial",
+                "force": True,
+            },
+            {"type": "init_complete"},
+        ]
+
+    asyncio.run(_run())
 
 
 def test_mode_change_broadcasts_schema_then_desktop_snapshot(monkeypatch):

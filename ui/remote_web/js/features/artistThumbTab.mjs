@@ -63,6 +63,7 @@ export function createArtistThumbController({
   let positiveAutoValue = '';
   let randomViewActive = false;
   let pendingResultAutoExpand = false;
+  let pendingResultSuppressPreview = false;
   let resultExpanded = false;
   let suppressResultCollapseClick = false;
   let suppressResultCollapseClickTimer = null;
@@ -203,6 +204,7 @@ export function createArtistThumbController({
     pendingResultRequestId = '';
     pendingResultMeta = null;
     pendingResultAutoExpand = false;
+    pendingResultSuppressPreview = false;
     revokeResultBlobUrl();
     if (resultPreviewEl) resultPreviewEl.hidden = true;
     if (resultImageEl) {
@@ -631,6 +633,7 @@ export function createArtistThumbController({
     const menu = document.createElement('div');
     menu.className = 'result-context-menu artist-thumb-context-menu open';
     menu.setAttribute('role', 'menu');
+    contextMenuEl = menu;
     const favoriteLabel = item.favorite ? '관심 해제' : '관심 추가';
     menu.innerHTML = `
       <div class="result-context-group">
@@ -703,14 +706,17 @@ export function createArtistThumbController({
     if (!item) return;
     state = await postJson('/api/artist-thumb/ban', {artist: item.artist, banned: true});
     const artist = item.artist;
+    const shouldRemoveFromGrid = currentFilter() !== 'banned';
     renderState();
     let removedCount = 0;
-    gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
-      if (card.dataset.artist === artist) {
-        card.remove();
-        removedCount += 1;
-      }
-    });
+    if (shouldRemoveFromGrid) {
+      gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+        if (card.dataset.artist === artist) {
+          card.remove();
+          removedCount += 1;
+        }
+      });
+    }
     if (removedCount > 0) {
       currentListTotal = Math.max(0, currentListTotal - removedCount);
       totalPages = Math.max(1, Math.ceil(currentListTotal / PAGE_SIZE));
@@ -784,6 +790,7 @@ export function createArtistThumbController({
       pendingResultRequestId = requestId;
       pendingResultMeta = null;
       revokeResultBlobUrl();
+      pendingResultSuppressPreview = false;
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
       showResultPreview('Waiting for generated image...');
       setGenerateBusy('manual', 'Requesting...');
@@ -816,9 +823,10 @@ export function createArtistThumbController({
       pendingResultRequestId = requestId;
       pendingResultMeta = null;
       pendingResultAutoExpand = true;
+      pendingResultSuppressPreview = true;
       revokeResultBlobUrl();
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · random prompt`;
-      showResultPreview('Generating random prompt...');
+      if (resultPreviewEl) resultPreviewEl.hidden = true;
       setGenerateBusy('random', 'Randomizing...');
 
       const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
@@ -829,7 +837,6 @@ export function createArtistThumbController({
       if (!positive) throw new Error('Random prompt is empty');
 
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
-      showResultPreview('Waiting for generated image...');
       if (randomGenerateBtn) randomGenerateBtn.textContent = 'Requesting...';
       await postJson('/api/artist-thumb/generate', {
         request_id: requestId,
@@ -846,7 +853,8 @@ export function createArtistThumbController({
       pendingResultRequestId = '';
       pendingResultMeta = null;
       pendingResultAutoExpand = false;
-      showResultPreview(error.message || 'Random prompt generate failed');
+      pendingResultSuppressPreview = false;
+      if (resultPreviewEl) resultPreviewEl.hidden = true;
       showToast?.(error.message || 'Random prompt generate failed', 'error');
     } finally {
       clearGenerateBusy();
@@ -864,7 +872,9 @@ export function createArtistThumbController({
       const size = meta.width && meta.height ? ` · ${meta.width}x${meta.height}` : '';
       resultTitleEl.textContent = `${artist}${size}`;
     }
-    showResultPreview('Receiving generated image...');
+    if (!pendingResultSuppressPreview) {
+      showResultPreview('Receiving generated image...');
+    }
     return true;
   }
 
@@ -872,6 +882,7 @@ export function createArtistThumbController({
     if (!pendingResultMeta || !blob) return false;
     revokeResultBlobUrl();
     resultBlobUrl = URL.createObjectURL(blob);
+    if (resultPreviewEl) resultPreviewEl.hidden = false;
     if (resultImageEl) {
       resultImageEl.src = resultBlobUrl;
       resultImageEl.classList.add('show');
@@ -879,6 +890,7 @@ export function createArtistThumbController({
     if (resultEmptyEl) resultEmptyEl.hidden = true;
     pendingResultMeta = null;
     pendingResultRequestId = '';
+    pendingResultSuppressPreview = false;
     updateResultExpandButton();
     if (pendingResultAutoExpand) {
       pendingResultAutoExpand = false;

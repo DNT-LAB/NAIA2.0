@@ -5231,18 +5231,29 @@ body.detached-metadata .metadata-layout {
 }
 .mod-textarea-lg { min-height: 84px; }
 .mod-textarea.collapsed { display: none; }
-.mod-collapsible {
-  cursor: pointer;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
+.pe-prompt-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.mod-collapse-arrow {
-  font-size: 8px;
-  display: inline-block;
-  transition: transform 0.2s;
-  margin-left: 4px;
+.pe-prompt-field {
+  min-width: 0;
 }
-.mod-collapsible.open .mod-collapse-arrow { transform: rotate(90deg); }
+.pe-textarea {
+  height: 88px;
+  min-height: 88px;
+  max-height: 220px;
+  overflow-y: auto;
+  transition: height 160ms ease, min-height 160ms ease, border-color 0.2s;
+}
+.pe-prompt-stack:focus-within .pe-prompt-field:not(:focus-within) .pe-textarea {
+  height: 42px;
+  min-height: 42px;
+}
+.pe-prompt-stack:focus-within .pe-prompt-field:focus-within .pe-textarea {
+  height: 150px;
+  min-height: 150px;
+}
 .mod-textarea:focus { border-color: var(--accent); }
 .mod-textarea::placeholder { color: var(--text-dim); font-style: italic; }
 .mod-select {

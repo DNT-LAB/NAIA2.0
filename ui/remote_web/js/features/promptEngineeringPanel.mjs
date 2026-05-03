@@ -113,17 +113,19 @@ export function createPromptEngineeringPanel({
 
     moduleBody.innerHTML = `
     ${presetControlHtml}
-    <div>
-      <div class="mod-section-label">Prefix Prompt</div>
-      <textarea class="mod-textarea mod-textarea-lg" id="modPrePrompt" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value)">${escHtml(m.pre_prompt)}</textarea>
-    </div>
-    <div>
-      <div class="mod-section-label">Postfix Prompt</div>
-      <textarea class="mod-textarea mod-textarea-lg" id="modPostPrompt" placeholder="postfix tags..." oninput="onModTextEdit('prompt_engineering','post_prompt',this.value)">${escHtml(m.post_prompt)}</textarea>
-    </div>
-    <div>
-      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')">Auto-Hide (Filter) <span class="mod-collapse-arrow">▶</span></div>
-      <textarea class="mod-textarea collapsed" id="modAutoHide" placeholder="tags to filter out..." oninput="onModTextEdit('prompt_engineering','auto_hide',this.value)">${escHtml(m.auto_hide)}</textarea>
+    <div class="pe-prompt-stack">
+      <div class="pe-prompt-field">
+        <div class="mod-section-label">Prefix Prompt</div>
+        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" placeholder="prefix tags..." oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value)">${escHtml(m.pre_prompt)}</textarea>
+      </div>
+      <div class="pe-prompt-field">
+        <div class="mod-section-label">Postfix Prompt</div>
+        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" placeholder="postfix tags..." oninput="onModTextEdit('prompt_engineering','post_prompt',this.value)">${escHtml(m.post_prompt)}</textarea>
+      </div>
+      <div class="pe-prompt-field">
+        <div class="mod-section-label">Auto-Hide (Filter)</div>
+        <textarea class="mod-textarea pe-textarea" id="modAutoHide" placeholder="tags to filter out..." oninput="onModTextEdit('prompt_engineering','auto_hide',this.value)">${escHtml(m.auto_hide)}</textarea>
+      </div>
     </div>
     <div>
       <div class="mod-section-label">Preprocessing Options</div>
@@ -132,7 +134,7 @@ export function createPromptEngineeringPanel({
     ${advancedHtml}
   `;
 
-    ['modPrePrompt', 'modPostPrompt'].forEach(id => {
+    PE_EDITABLE_IDS.forEach(id => {
       const el = document.getElementById(id);
       if (el) bindTagAssist(el);
     });

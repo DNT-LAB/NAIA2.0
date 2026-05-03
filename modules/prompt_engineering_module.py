@@ -207,8 +207,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.pre_textedit = None
         self.post_textedit = None
         self.auto_hide_textedit = None
-        self.auto_hide_toggle_btn = None
-        self.auto_hide_collapsed = False
         self.preprocessing_checkboxes = {}
         self._debug_window = None
         self._e621_settings_window = None
@@ -286,7 +284,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "pre_prompt": self.pre_textedit.toPlainText(),
             "post_prompt": self.post_textedit.toPlainText(),
             "auto_hide_prompt": self.auto_hide_textedit.toPlainText(),
-            "auto_hide_collapsed": self.auto_hide_collapsed,
             "preprocessing_options": {
                 self.option_key_map.get(text): cb.isChecked()
                 for text, cb in self.preprocessing_checkboxes.items()
@@ -316,10 +313,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.pre_textedit.setText(pre_prompt)
         self.post_textedit.setText(post_prompt)
         self.auto_hide_textedit.setText(auto_hide)
-
-        # 자동 숨김 프롬프트 접기 상태 적용
-        collapsed = settings.get("auto_hide_collapsed", False)
-        self._set_auto_hide_collapsed(collapsed)
 
         # 체크박스 설정 적용
         options = settings.get("preprocessing_options", {})
@@ -503,31 +496,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         setModernStyle(self.post_textedit)
         layout.addWidget(self.post_textedit)
 
-        # 자동 숨김 프롬프트 (접기/펼치기)
-        auto_hide_header = QHBoxLayout()
-        auto_hide_header.setSpacing(4)
+        # 자동 숨김 프롬프트
         auto_hide_label = QLabel("자동 숨김 프롬프트:")
         auto_hide_label.setStyleSheet(dynamic_styles['label_style'])
-        auto_hide_header.addWidget(auto_hide_label)
-        auto_hide_header.addStretch()
-        self.auto_hide_toggle_btn = QPushButton("접기")
-        self.auto_hide_toggle_btn.setFixedSize(get_scaled_size(50), get_scaled_size(20))
-        self.auto_hide_toggle_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK_COLORS['bg_secondary']};
-                color: {DARK_COLORS['text_secondary']};
-                border: 1px solid {DARK_COLORS['border']};
-                border-radius: 3px;
-                font-size: {get_scaled_font_size(11)}px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK_COLORS['bg_hover']};
-            }}
-        """)
-        self.auto_hide_toggle_btn.clicked.connect(self._toggle_auto_hide)
-        auto_hide_header.addWidget(self.auto_hide_toggle_btn)
-        layout.addLayout(auto_hide_header)
+        layout.addWidget(auto_hide_label)
 
         self.auto_hide_textedit = QTextEdit()
         self.auto_hide_textedit.setAcceptRichText(False)  # 서식 붙여넣기 차단
@@ -651,18 +623,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             widget.setVisible(should_be_visible)
 
         return widget
-
-    def _toggle_auto_hide(self):
-        """자동 숨김 프롬프트 접기/펼치기 토글"""
-        self._set_auto_hide_collapsed(not self.auto_hide_collapsed)
-
-    def _set_auto_hide_collapsed(self, collapsed: bool):
-        """자동 숨김 프롬프트 접기 상태 설정"""
-        self.auto_hide_collapsed = collapsed
-        if self.auto_hide_textedit:
-            self.auto_hide_textedit.setVisible(not collapsed)
-        if self.auto_hide_toggle_btn:
-            self.auto_hide_toggle_btn.setText("펼치기" if collapsed else "접기")
 
     def _open_debug_window(self):
         """전처리 디버깅 윈도우 열기"""

@@ -16,6 +16,7 @@ export function createArtistThumbController({
   const prevBtn = document.getElementById('artistThumbPrevBtn');
   const nextBtn = document.getElementById('artistThumbNextBtn');
   const downloadBtn = document.getElementById('artistThumbDownloadBtn');
+  const randomBtn = document.getElementById('artistThumbRandomBtn');
   const pageLabel = document.getElementById('artistThumbPageLabel');
   const gotoInput = document.getElementById('artistThumbGotoInput');
   const gotoBtn = document.getElementById('artistThumbGotoBtn');
@@ -116,6 +117,13 @@ export function createArtistThumbController({
     return (state?.modes || []).find(item => item.key === mode) || null;
   }
 
+  function updateRandomUi() {
+    if (!randomBtn) return;
+    const mode = currentMode();
+    const info = currentModeInfo();
+    randomBtn.disabled = !mode || Boolean(info && !info.available);
+  }
+
   function updateDownloadUi() {
     if (!downloadBtn) return;
     const info = currentModeInfo();
@@ -169,6 +177,7 @@ export function createArtistThumbController({
     }
     setSummary(`${Number(state.artist_count || 0).toLocaleString()} artists`);
     updateDownloadUi();
+    updateRandomUi();
   }
 
   async function fetchState(options = {}) {
@@ -193,7 +202,7 @@ export function createArtistThumbController({
     return statePromise;
   }
 
-  function listUrl(page) {
+  function listUrl(page, options = {}) {
     const params = new URLSearchParams({
       mode: currentMode(),
       filter: currentFilter(),
@@ -201,6 +210,7 @@ export function createArtistThumbController({
       page: String(page),
       per_page: String(PAGE_SIZE),
     });
+    if (options.random) params.set('random_sample', '1');
     return `/api/artist-thumb/list?${params.toString()}`;
   }
 
@@ -260,6 +270,7 @@ export function createArtistThumbController({
       renderGrid([]);
       updatePager();
       updateDownloadUi();
+      updateRandomUi();
       const download = state?.download || {};
       if (download.active && download.mode === mode) {
         setStatus(download.message || 'Artist Thumbnail 데이터 다운로드 중...', 'busy');
@@ -271,7 +282,7 @@ export function createArtistThumbController({
     setStatus(mode ? 'Loading artist thumbnails...' : '모드를 선택하면 썸네일을 로드합니다.', mode ? 'busy' : '');
     if (gridEl) gridEl.classList.add('loading');
     try {
-      const response = await fetch(listUrl(page), {cache: 'no-store'});
+      const response = await fetch(listUrl(page, options), {cache: 'no-store'});
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
       if (requestId !== listRequestId) return;
@@ -282,7 +293,8 @@ export function createArtistThumbController({
       scrollGrid(options.anchor || 'top');
       const count = Number(data.total || 0).toLocaleString();
       const modeText = mode || '목록';
-      setStatus(`${modeText} · ${data.filter_name || '전체 목록'} · ${count} artists`, 'ok');
+      const statusPrefix = data.random ? 'Random artists' : modeText;
+      setStatus(`${statusPrefix} · ${data.filter_name || '전체 목록'} · ${count} artists`, 'ok');
     } catch (error) {
       if (requestId !== listRequestId) return;
       console.error('Artist Thumb list failed', error);
@@ -330,6 +342,20 @@ export function createArtistThumbController({
     }
     const page = Math.max(1, Math.min(totalPages, raw)) - 1;
     loadPage(page, {anchor: page < currentPage ? 'bottom' : 'top'});
+  }
+
+  async function loadRandomArtists() {
+    const mode = currentMode();
+    const info = currentModeInfo();
+    if (!mode) {
+      showToast?.('모드를 먼저 선택하세요.', 'error');
+      return;
+    }
+    if (info && !info.available) {
+      showToast?.('데이터 다운로드 후 사용할 수 있습니다.', 'error');
+      return;
+    }
+    await loadPage(currentPage, {anchor: 'top', random: true});
   }
 
   function selectArtist(item) {
@@ -598,6 +624,7 @@ export function createArtistThumbController({
       }
     });
     downloadBtn?.addEventListener('click', downloadSelectedMode);
+    randomBtn?.addEventListener('click', loadRandomArtists);
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     gridEl?.addEventListener('click', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');

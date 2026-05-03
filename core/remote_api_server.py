@@ -9554,6 +9554,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         query: str = "",
         page: int = 0,
         per_page: int = 48,
+        random_sample: bool = False,
     ):
         try:
             return await asyncio.to_thread(
@@ -9563,6 +9564,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 query,
                 page,
                 per_page,
+                random_sample,
             )
         except FileNotFoundError as e:
             return JSONResponse({"error": str(e)}, status_code=404)

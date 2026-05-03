@@ -1716,6 +1716,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
 }
 .artist-thumb-summary,
 .artist-thumb-status,
+.artist-thumb-random-btn,
 .artist-thumb-selected-meta,
 .artist-thumb-card-weight,
 .artist-thumb-page-btn,
@@ -2008,16 +2009,48 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   background: linear-gradient(135deg, rgba(124, 106, 239, 0.95), rgba(157, 139, 255, 0.86));
   border-color: rgba(157, 139, 255, 0.5);
 }
-.artist-thumb-status {
-  min-height: 32px;
-  padding: 8px 12px;
+.artist-thumb-status-row {
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--border-dim);
+}
+.artist-thumb-status {
+  min-width: 0;
   color: var(--text-dim);
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .artist-thumb-status[data-tone="ok"] { color: var(--success); }
 .artist-thumb-status[data-tone="error"] { color: #ff6b6b; }
 .artist-thumb-status[data-tone="busy"] { color: var(--accent-blue); }
+.artist-thumb-random-btn {
+  min-width: 154px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(92, 184, 122, 0.42);
+  border-radius: 5px;
+  background: rgba(92, 184, 122, 0.14);
+  color: #9ff5b9;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.artist-thumb-random-btn:hover {
+  border-color: rgba(92, 184, 122, 0.72);
+  background: rgba(92, 184, 122, 0.24);
+}
+.artist-thumb-random-btn:disabled {
+  cursor: default;
+  color: var(--text-dim);
+  border-color: var(--border-dim);
+  background: rgba(255, 255, 255, 0.025);
+}
 .artist-thumb-grid {
   --artist-card-height: clamp(205px, 25vh, 250px);
   flex: 1;
@@ -2175,6 +2208,16 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   .artist-thumb-toolbar-controls {
     grid-template-columns: 1fr;
     justify-content: stretch;
+  }
+  .artist-thumb-status-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .artist-thumb-status {
+    white-space: normal;
+  }
+  .artist-thumb-random-btn {
+    width: 100%;
   }
   .artist-thumb-search,
   .artist-thumb-panel-head .artist-thumb-select {

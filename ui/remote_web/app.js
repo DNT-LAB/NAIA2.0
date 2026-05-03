@@ -849,8 +849,8 @@ function handleWsBlob(data) {
   preview.dataset.source = 'current';
   preview.dataset.path = '';
   preview.classList.add('show');
-  if (resultImageActions && typeof resultImageActions.prepareCurrentDragImage === 'function') {
-    resultImageActions.prepareCurrentDragImage({force: true});
+  if (resultImageActions && typeof resultImageActions.clearCurrentDragImage === 'function') {
+    resultImageActions.clearCurrentDragImage();
   }
   emptyMsg.style.display = 'none';
   setGen(false);

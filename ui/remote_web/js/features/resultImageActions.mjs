@@ -381,22 +381,16 @@ export function createResultImageActions({
   }
 
   function cachedDragFileForPayload(payload = {}) {
-    const source = payload.source || (payload.path ? 'saved' : 'current');
-    if (source !== 'current' || payload.path || !currentDragImageCache) return null;
+    if (payload.path || !currentDragImageCache) return null;
     return currentDragImageCache.file || null;
   }
 
   function applyOriginalImageDragData(dataTransfer, payload = {}) {
     if (!dataTransfer) return;
     const source = payload.source || (payload.path ? 'saved' : 'current');
-    const usePngExport = source === 'current' && !payload.path;
-    const dragUrl = usePngExport
-      ? contextImagePngUrl({source: 'current'})
-      : contextImageOriginalUrl({source, path: payload.path || ''});
+    const dragUrl = contextImagePngUrl({source, path: payload.path || ''});
     const originalUrl = absoluteAppUrl(dragUrl);
-    const filename = usePngExport
-      ? pngFilename(filenameFromDragPayload(payload))
-      : filenameFromDragPayload(payload);
+    const filename = pngFilename(filenameFromDragPayload(payload));
     const mimeType = mimeTypeForFilename(filename);
     try { dataTransfer.clearData(); } catch (_) { /* noop */ }
     try { dataTransfer.effectAllowed = 'copy'; } catch (_) { /* noop */ }
@@ -412,10 +406,14 @@ export function createResultImageActions({
     try { dataTransfer.setData('DownloadURL', `${mimeType}:${filename}:${originalUrl}`); } catch (_) { /* noop */ }
   }
 
+  function clearCurrentDragImage() {
+    currentDragImageCache = null;
+    currentDragImagePromise = null;
+  }
+
   async function prepareCurrentDragImage(options = {}) {
     if (options.force) {
-      currentDragImageCache = null;
-      currentDragImagePromise = null;
+      clearCurrentDragImage();
     }
     if (currentDragImageCache) return currentDragImageCache;
     if (currentDragImagePromise) return currentDragImagePromise;
@@ -436,6 +434,16 @@ export function createResultImageActions({
         currentDragImagePromise = null;
       });
     return currentDragImagePromise;
+  }
+
+  function prepareDragImageForPointer(target) {
+    if (!(target instanceof window.Element)) return;
+    if (!target.closest('.viewer')) return;
+    const preview = document.getElementById('preview');
+    if (!preview || !preview.classList.contains('show')) return;
+    if (preview.dataset.source === 'current' && !preview.dataset.path) {
+      prepareCurrentDragImage();
+    }
   }
 
   async function fetchContextImageBlob(context = {}, options = {}) {
@@ -723,6 +731,13 @@ export function createResultImageActions({
   function bindDragSource() {
     if (dragSourceBound) return;
     dragSourceBound = true;
+    const viewer = document.querySelector('.viewer');
+    const preview = document.getElementById('preview');
+    if (preview) preview.draggable = false;
+    if (viewer) viewer.draggable = true;
+    document.addEventListener('pointerdown', event => {
+      prepareDragImageForPointer(event.target);
+    }, true);
     document.addEventListener('dragstart', event => {
       const target = event.target;
       if (!(target instanceof window.Element)) return;
@@ -733,6 +748,15 @@ export function createResultImageActions({
           source: target.dataset.source || '',
           path: target.dataset.path || '',
         };
+      } else if (target.closest('.viewer')) {
+        const preview = document.getElementById('preview');
+        if (preview && preview.classList.contains('show')) {
+          payload = {
+            type: 'preview',
+            source: preview.dataset.source || 'current',
+            path: preview.dataset.path || '',
+          };
+        }
       } else if (target.classList && target.classList.contains('viewer-thumb')) {
         payload = {
           type: 'history',
@@ -767,5 +791,6 @@ export function createResultImageActions({
     showMetadataInTab,
     handleInternalImageDrop,
     prepareCurrentDragImage,
+    clearCurrentDragImage,
   };
 }

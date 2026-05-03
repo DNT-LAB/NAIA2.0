@@ -2660,6 +2660,8 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   position: relative;
   z-index: var(--z-viewer-plane);
   opacity: 0; transition: opacity 0.35s ease;
+  -webkit-user-drag: none;
+  pointer-events: none;
 }
 .viewer img.show { opacity: 1; }
 .viewer.drag-over {

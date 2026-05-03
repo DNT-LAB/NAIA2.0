@@ -12,6 +12,7 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QCoreApplication, QThreadPool
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
+from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 if TYPE_CHECKING:
     from core.context import AppContext
@@ -981,7 +982,15 @@ class APIService:
                     progress_callback(message, current, total, progress_percent)
 
             # 7. 이미지 생성 실행
-            result = self.comfyui_service.generate_image(workflow, _comfyui_progress)
+            extra_pnginfo = build_comfyui_extra_pnginfo(
+                workflow,
+                params.get('_comfyui_workflow_ui'),
+            )
+            result = self.comfyui_service.generate_image(
+                workflow,
+                _comfyui_progress,
+                extra_pnginfo=extra_pnginfo,
+            )
             
             if result and result['status'] == 'success':
                 print(f"✅ ComfyUI 이미지 생성 완료: {result['filename']}")

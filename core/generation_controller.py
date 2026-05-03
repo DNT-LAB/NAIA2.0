@@ -11,6 +11,7 @@ from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication,
 import pandas as pd
 import gc
 import requests
+from utils.comfyui_png_metadata import enrich_comfyui_png_bytes
 
 def _force_cleanup_all_threads():
     """
@@ -135,6 +136,9 @@ class GenerationWorker(QObject):
                 
                 # 🆕 확장된 메타데이터 수집
                 self._collect_enhanced_metadata(processed_result)
+                self._embed_comfyui_result_metadata(processed_result)
+                if self.params.get('api_mode') == 'COMFYUI' and processed_result.get('image'):
+                    processed_result['info'] = self._extract_info_from_image(processed_result['image'])
             
             self.generation_finished.emit(processed_result)
 
@@ -171,11 +175,37 @@ class GenerationWorker(QObject):
                 print(f"NovelAI 메타데이터 파싱 오류: {e}")
                 # 실패 시 다른 방법으로 계속 진행
 
-        # 2. A1111/ComfyUI 등 표준 'parameters' 메타데이터 처리
+        # 2. ComfyUI/NAIA ComfyUI 메타데이터 처리
+        if any(key in image.info for key in ('prompt', 'workflow', 'workflow_api', 'naia_generation_params')):
+            try:
+                from utils.image_info import ImageMetadataExtractor
+
+                metadata = ImageMetadataExtractor.extract_metadata(image) or {}
+                if metadata.get('type') == 'comfyui':
+                    params = metadata.get('parameters', {}) or {}
+                    prompt = metadata.get('prompt', '')
+                    negative = metadata.get('negative_prompt') or metadata.get('negative', '')
+                    parts = [f"[ComfyUI] Prompt: {prompt}"]
+                    if negative:
+                        parts.append(f"Negative prompt: {negative}")
+                    if params:
+                        parts.append(
+                            "Steps: {steps}, Sampler: {sampler}, CFG: {cfg}, Seed: {seed}".format(
+                                steps=params.get('steps', 'N/A'),
+                                sampler=params.get('sampler') or params.get('sampler_name', 'N/A'),
+                                cfg=params.get('cfg_scale') or params.get('cfg', 'N/A'),
+                                seed=params.get('seed', 'N/A'),
+                            )
+                        )
+                    return "\n".join(parts)
+            except Exception as e:
+                print(f"ComfyUI 메타데이터 파싱 오류: {e}")
+
+        # 3. A1111 등 표준 'parameters' 메타데이터 처리
         if 'parameters' in image.info and isinstance(image.info['parameters'], str):
             return image.info['parameters']
             
-        # 3. EXIF 데이터에서 UserComment 추출 시도
+        # 4. EXIF 데이터에서 UserComment 추출 시도
         if 'exif' in image.info:
             try:
                 exif_data = image.info['exif']
@@ -187,7 +217,7 @@ class GenerationWorker(QObject):
             except Exception as e:
                 print(f"EXIF UserComment 추출 오류: {e}")
 
-        # 4. 기타 'Comment' 또는 'comment' 필드 확인
+        # 5. 기타 'Comment' 또는 'comment' 필드 확인
         comment = image.info.get("Comment", image.info.get("comment"))
         if comment and isinstance(comment, str):
             return comment
@@ -204,6 +234,7 @@ class GenerationWorker(QObject):
             params_copy = self.params.copy()
             if 'credential' in params_copy:
                 del params_copy['credential']  # 보안을 위해 토큰 제거
+            params_copy.pop('_comfyui_workflow_ui', None)  # PNG workflow 청크에 별도 저장
             
             result['generation_params'] = params_copy
             
@@ -247,6 +278,32 @@ class GenerationWorker(QObject):
             result.setdefault('api_metadata', {})
             result.setdefault('creation_timestamp', time.strftime('%Y-%m-%d %H:%M:%S'))
             result.setdefault('backend_type', 'NAI')
+
+    def _embed_comfyui_result_metadata(self, result: dict):
+        """ComfyUI 결과 PNG에 ComfyUI/NAIA 복원용 tEXt 청크를 보강합니다."""
+        if self.params.get('api_mode') != 'COMFYUI':
+            return
+
+        workflow_api = self.params.get('workflow')
+        if not workflow_api:
+            return
+
+        try:
+            enriched_bytes, enriched_image, changed = enrich_comfyui_png_bytes(
+                result.get('raw_bytes'),
+                result.get('image'),
+                workflow_api=workflow_api,
+                workflow_ui=self.params.get('_comfyui_workflow_ui'),
+                generation_params=result.get('generation_params', {}),
+                prompt_context=result.get('prompt_context', {}),
+                api_metadata=result.get('api_metadata', {}),
+            )
+            result['raw_bytes'] = enriched_bytes
+            result['image'] = enriched_image
+            if changed:
+                print("✅ ComfyUI PNG 메타데이터 보강 완료")
+        except Exception as e:
+            print(f"⚠️ ComfyUI PNG 메타데이터 보강 실패: {e}")
 
 class GenerationController:
     def __init__(self, context: 'AppContext', module_instances: list):
@@ -307,6 +364,9 @@ class GenerationController:
                 return False
 
             params['workflow'] = final_workflow
+            workflow_ui = self.workflow_manager.get_last_applied_workflow_ui()
+            if workflow_ui:
+                params['_comfyui_workflow_ui'] = workflow_ui
             print(f"✅ [ComfyUI Bridge] 워크플로우 생성 완료 (와일드카드 확장 적용됨)")
             return True
 
@@ -1632,6 +1692,9 @@ class GenerationController:
             final_workflow = self.workflow_manager.apply_params_to_workflow(params)
             if final_workflow:
                 params['workflow'] = final_workflow
+                workflow_ui = self.workflow_manager.get_last_applied_workflow_ui()
+                if workflow_ui:
+                    params['_comfyui_workflow_ui'] = workflow_ui
 
         return params
 

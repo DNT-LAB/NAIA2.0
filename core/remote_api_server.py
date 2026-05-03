@@ -3256,9 +3256,10 @@ class RemoteBridge(QObject):
             return False
 
     def _pil_image_to_png_bytes(self, image) -> bytes:
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return buffer.getvalue()
+        from utils.comfyui_png_metadata import build_pnginfo, image_to_png_bytes
+
+        pnginfo = build_pnginfo(dict(getattr(image, "info", {}) or {}))
+        return image_to_png_bytes(image, pnginfo=pnginfo)
 
     def _build_result_png_payload(self, source: str = "", rel_path: str = "") -> tuple[bytes, str]:
         from PIL import Image

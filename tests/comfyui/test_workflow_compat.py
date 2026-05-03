@@ -287,6 +287,46 @@ def test_native_unet_apply_params_still_swaps_model():
     assert result["44"]["inputs"]["unet_name"] == "new-unet.safetensors"
 
 
+def test_native_workflows_use_save_image_outputs():
+    mgr = ComfyUIWorkflowManager()
+
+    assert mgr.base_workflow["7"]["class_type"] == "SaveImage"
+    assert mgr.base_workflow["7"]["inputs"]["filename_prefix"] == "NAIA_ComfyUI"
+    assert mgr.anima_workflow["1"]["class_type"] == "SaveImage"
+    assert mgr.anima_workflow["1"]["inputs"]["filename_prefix"] == "NAIA_ComfyUI"
+
+
+def test_apply_params_builds_current_ui_workflow_metadata():
+    mgr = ComfyUIWorkflowManager()
+    params = {
+        "model": "new-checkpoint.safetensors",
+        "input": "current prompt",
+        "negative_prompt": "current negative",
+        "seed": 123,
+        "steps": 22,
+        "cfg_scale": 6.5,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 640,
+        "height": 768,
+        "workflow_type": "checkpoint",
+        "sampling_mode": "eps",
+        "filename_prefix": "naia_test",
+    }
+
+    result = mgr.apply_params_to_workflow(params)
+    workflow_ui = mgr.get_last_applied_workflow_ui()
+
+    assert result["7"]["class_type"] == "SaveImage"
+    assert result["7"]["inputs"]["filename_prefix"] == "naia_test"
+    assert workflow_ui and "nodes" in workflow_ui
+    save_node = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "7")
+    prompt_node = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "2")
+    assert save_node["type"] == "SaveImage"
+    assert "workflow" not in result
+    assert prompt_node["widgets_values"][0] == "current prompt"
+
+
 # ---------------------------------------------------------------------------
 # 8. 역추적 견고성 — dangling link / 순환 / max_depth
 # ---------------------------------------------------------------------------
@@ -500,6 +540,8 @@ ALL_TESTS = [
     test_event_no_publish_without_app_context,
     test_native_checkpoint_apply_params_still_swaps_model,
     test_native_unet_apply_params_still_swaps_model,
+    test_native_workflows_use_save_image_outputs,
+    test_apply_params_builds_current_ui_workflow_metadata,
     test_trace_handles_dangling_model_link,
     test_trace_handles_cycle_without_infinite_loop,
     test_trace_respects_max_depth,

@@ -41,6 +41,9 @@ class ImageMetadataExtractor:
             if any(key in info for key in ('prompt', 'workflow', 'workflow_api')):
                 print("ComfyUI metadata detected")
                 return True
+            if any(key in info for key in ('naia_generation_params', 'naia_prompt_context', 'naia_api_metadata')):
+                print("NAIA metadata detected")
+                return True
             if hasattr(img, 'getexif') and img.getexif():
                 print("✅ has_metadata: EXIF 데이터 발견")
                 return True
@@ -86,6 +89,11 @@ class ImageMetadataExtractor:
             # 1. parameters 필드 확인 (Stable Diffusion WebUI) - 우선순위 높음
             if any(key in info for key in ('prompt', 'workflow', 'workflow_api')):
                 parsed = ImageMetadataExtractor._parse_comfyui_metadata(info, img)
+                if parsed:
+                    result.update(parsed)
+
+            if any(key in info for key in ('naia_generation_params', 'naia_prompt_context', 'naia_api_metadata')):
+                parsed = ImageMetadataExtractor._parse_naia_metadata(info, img)
                 if parsed:
                     result.update(parsed)
 
@@ -362,6 +370,77 @@ class ImageMetadataExtractor:
             result['vae'] = parameters['vae']
 
         result['workflow_nodes'] = len(nodes_by_id)
+        return result
+
+    @staticmethod
+    def _parse_naia_metadata(
+        metadata: Dict[str, Any],
+        image: Optional[Image.Image] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Normalize NAIA-specific PNG chunks written for generated results."""
+        generation_params = ImageMetadataExtractor._load_json_data(metadata.get('naia_generation_params')) or {}
+        prompt_context = ImageMetadataExtractor._load_json_data(metadata.get('naia_prompt_context')) or {}
+        api_metadata = ImageMetadataExtractor._load_json_data(metadata.get('naia_api_metadata')) or {}
+
+        if not generation_params and not prompt_context and not api_metadata:
+            return None
+
+        api_mode = (
+            generation_params.get('api_mode')
+            or api_metadata.get('backend')
+            or api_metadata.get('api_mode')
+            or ''
+        )
+        prompt = (
+            prompt_context.get('main_prompt')
+            or prompt_context.get('processed_input')
+            or prompt_context.get('original_input')
+            or generation_params.get('input')
+            or ''
+        )
+        negative = (
+            prompt_context.get('negative_prompt')
+            or generation_params.get('negative_prompt')
+            or ''
+        )
+
+        params: Dict[str, Any] = {}
+        for key in (
+            'steps',
+            'seed',
+            'cfg_scale',
+            'cfg',
+            'sampler',
+            'sampler_name',
+            'scheduler',
+            'denoise',
+            'model',
+            'width',
+            'height',
+            'sampling_mode',
+            'workflow_type',
+            'rescale_cfg',
+            'anima_weight',
+        ):
+            if key in generation_params and generation_params[key] not in (None, ''):
+                params[key] = generation_params[key]
+
+        if image is not None:
+            params.setdefault('width', getattr(image, 'width', None))
+            params.setdefault('height', getattr(image, 'height', None))
+
+        result: Dict[str, Any] = {
+            'type': 'comfyui' if str(api_mode).upper() == 'COMFYUI' else 'naia',
+            'generation_params': generation_params,
+            'prompt_context': prompt_context,
+            'api_metadata': api_metadata,
+            'parameters': params,
+        }
+        if prompt:
+            result['prompt'] = prompt
+        if negative:
+            result['negative_prompt'] = negative
+            result['negative'] = negative
         return result
 
     @staticmethod

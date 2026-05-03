@@ -42,13 +42,15 @@ class ComfyUIService:
             print(f"❌ ComfyUI 서버 연결 실패: {e}")
             return False
     
-    def queue_workflow(self, workflow: Dict[str, Any]) -> Optional[str]:
+    def queue_workflow(self, workflow: Dict[str, Any], extra_pnginfo: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """워크플로우를 실행 큐에 추가"""
         try:
             payload = {
                 "prompt": workflow,
                 "client_id": self.client_id
             }
+            if extra_pnginfo:
+                payload["extra_data"] = {"extra_pnginfo": extra_pnginfo}
             
             headers = {'Content-Type': 'application/json'}
             response = requests.post(
@@ -132,10 +134,16 @@ class ComfyUIService:
             print(f"❌ 워크플로우 완료 대기 중 예외 발생: {e}")
             return False
     
-    def get_generation_result(self, prompt_id: str) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _node_sort_key(node_id: Any):
+        try:
+            return (1, int(str(node_id)))
+        except Exception:
+            return (0, str(node_id))
+
+    def get_generation_result(self, prompt_id: str, workflow: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
-        [수정] 생성 결과를 조회하고, ID가 가장 높은(가장 마지막으로 간주)
-        이미지 노드의 결과만 찾아 리스트로 반환합니다.
+        생성 결과를 조회하고, SaveImage/output 결과를 우선하여 반환합니다.
         """
         image_results = []
         try:
@@ -152,31 +160,48 @@ class ComfyUIService:
             result = history[prompt_id]
             outputs = result.get('outputs', {})
             
-            # 1. 이미지를 실제로 생성한 노드들만 필터링합니다.
-            image_producing_nodes = {}
+            node_types = {}
+            if isinstance(workflow, dict):
+                for node_id, node in workflow.items():
+                    if isinstance(node, dict):
+                        node_types[str(node_id)] = node.get("class_type") or node.get("type") or ""
+
+            # 1. 이미지를 실제로 생성한 노드들만 후보로 수집합니다.
+            candidates = []
             for node_id, node_output in outputs.items():
                 if 'images' in node_output and isinstance(node_output['images'], list):
-                    # node_id를 정수로 변환하여 저장 (비교를 위해)
-                    image_producing_nodes[int(node_id)] = node_output['images']
+                    node_type = node_types.get(str(node_id), "")
+                    for image_info in node_output['images']:
+                        candidates.append({
+                            'filename': image_info.get('filename'),
+                            'subfolder': image_info.get('subfolder', ''),
+                            'type': image_info.get('type', 'output'),
+                            'source_node_id': str(node_id),
+                            'source_node_type': node_type,
+                        })
             
-            if not image_producing_nodes:
+            if not candidates:
                 print("❌ 생성 결과에서 이미지 정보를 찾을 수 없음")
                 return []
 
-            # 2. 찾은 노드들 중에서 ID가 가장 높은 노드를 선택합니다.
-            last_node_id = max(image_producing_nodes.keys())
-            
-            # 3. 해당 노드의 이미지 정보만 최종 결과 리스트에 추가합니다.
-            last_node_images = image_producing_nodes[last_node_id]
-            for image_info in last_node_images:
-                 image_results.append({
-                     'filename': image_info.get('filename'),
-                     'subfolder': image_info.get('subfolder', ''),
-                     'type': image_info.get('type', 'output'),
-                     'source_node_id': str(last_node_id) # 다시 문자열로 변환하여 반환
-                 })
+            def candidate_score(info: Dict[str, Any]):
+                node_type = str(info.get('source_node_type') or '')
+                image_type = str(info.get('type') or '')
+                return (
+                    1 if node_type == "SaveImage" else 0,
+                    1 if image_type == "output" else 0,
+                    0 if image_type == "temp" else 1,
+                    self._node_sort_key(info.get('source_node_id')),
+                )
 
-            print(f"✅ 최종 이미지 노드(ID: {last_node_id})에서 {len(image_results)}개의 결과를 찾았습니다.")
+            best = max(candidates, key=candidate_score)
+            selected_node_id = best['source_node_id']
+            image_results = [item for item in candidates if item['source_node_id'] == selected_node_id]
+
+            print(
+                f"✅ 최종 이미지 노드(ID: {selected_node_id}, type: {best.get('source_node_type') or 'unknown'})"
+                f"에서 {len(image_results)}개의 결과를 찾았습니다."
+            )
             return image_results
 
         except Exception as e:
@@ -215,7 +240,12 @@ class ComfyUIService:
             print(f"❌ 이미지 다운로드 중 예외 발생: {e}")
             return None
     
-    def generate_image(self, workflow: Dict[str, Any], progress_callback: Optional[Callable] = None) -> Optional[Dict[str, Any]]:
+    def generate_image(
+        self,
+        workflow: Dict[str, Any],
+        progress_callback: Optional[Callable] = None,
+        extra_pnginfo: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """완전한 이미지 생성 파이프라인"""
         if progress_callback:
             self.set_progress_callback(progress_callback)
@@ -223,7 +253,7 @@ class ComfyUIService:
         print("🚀 ComfyUI 이미지 생성 시작")
         
         # 1. 워크플로우 큐에 추가
-        prompt_id = self.queue_workflow(workflow)
+        prompt_id = self.queue_workflow(workflow, extra_pnginfo=extra_pnginfo)
         if not prompt_id:
             return {'status': 'error', 'message': '워크플로우 큐 등록 실패'}
         
@@ -233,7 +263,7 @@ class ComfyUIService:
         
         # 3. 결과 조회 (이제 리스트를 반환받음)
         # [수정] 변수명을 복수형(result_infos)으로 변경하여 리스트임을 명시
-        result_infos = self.get_generation_result(prompt_id)
+        result_infos = self.get_generation_result(prompt_id, workflow=workflow)
         if not result_infos:
             return {'status': 'error', 'message': '생성 결과 조회 실패'}
         
@@ -255,7 +285,9 @@ class ComfyUIService:
                 'image': image,
                 'raw_bytes': raw_image_bytes,
                 'prompt_id': prompt_id,
-                'filename': first_image_info['filename']
+                'filename': first_image_info['filename'],
+                'source_node_id': first_image_info.get('source_node_id'),
+                'source_node_type': first_image_info.get('source_node_type'),
             }
         else:
             return {'status': 'error', 'message': '이미지 다운로드 실패'}

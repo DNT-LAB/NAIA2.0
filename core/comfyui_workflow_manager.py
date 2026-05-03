@@ -16,6 +16,7 @@ class ComfyUIWorkflowManager:
         self.user_workflow: Optional[Dict[str, Any]] = None
         self.user_workflow_ui: Optional[Dict[str, Any]] = None # [추가] UI 형식 워크플로우 저장
         self.user_workflow_node_map: Optional[Dict[str, str]] = None # 검증 후 생성된 노드 맵
+        self.last_applied_workflow_ui: Optional[Dict[str, Any]] = None
 
         # [179.5] 워크플로우 변경 이벤트 발행용 AppContext 참조 (weakref)
         self._app_context_ref: Optional[weakref.ReferenceType] = None
@@ -51,10 +52,11 @@ class ComfyUIWorkflowManager:
         return {
             "1": {
                 "inputs": {
-                    "images": ["8", 0]
+                    "images": ["8", 0],
+                    "filename_prefix": "NAIA_ComfyUI"
                 },
-                "class_type": "PreviewImage",
-                "_meta": {"title": "이미지 미리보기"}
+                "class_type": "SaveImage",
+                "_meta": {"title": "이미지 저장"}
             },
             "8": {
                 "inputs": {
@@ -200,10 +202,11 @@ class ComfyUIWorkflowManager:
             },
             "7": {
                 "inputs": {
-                    "images": ["6", 0]
+                    "images": ["6", 0],
+                    "filename_prefix": "NAIA_ComfyUI"
                 },
-                "class_type": "PreviewImage",
-                "_meta": {"title": "Preview Image"} 
+                "class_type": "SaveImage",
+                "_meta": {"title": "Save Image"}
             },
             "8": {
                 "inputs": {
@@ -288,9 +291,9 @@ class ComfyUIWorkflowManager:
         if 'height' in params:
             latent_image["height"] = params['height']
 
-        # 6. 파일명 접두사 설정 (PreviewImage는 filename_prefix 지원 안 함)
-        if 'filename_prefix' in params and workflow_type != 'unet':
-            workflow["7"]["inputs"]["filename_prefix"] = params['filename_prefix']
+        # 6. 파일명 접두사 설정 (SaveImage 출력)
+        output_node_id = "1" if workflow_type == 'unet' else "7"
+        workflow[output_node_id]["inputs"]["filename_prefix"] = params.get('filename_prefix') or "NAIA_ComfyUI"
 
         # 6-1. RescaleCFG 설정 (ANIMA/unet 워크플로우에서만 사용)
         if workflow_type == 'unet' and 'rescale_cfg' in params:
@@ -320,6 +323,7 @@ class ComfyUIWorkflowManager:
         self.user_workflow = None
         self.user_workflow_ui = None
         self.user_workflow_node_map = None
+        self.last_applied_workflow_ui = None
         print("🔄 사용자 워크플로우가 초기화되었습니다. 기본 워크플로우를 사용합니다.")
         self._publish_workflow_changed()
 
@@ -585,6 +589,10 @@ class ComfyUIWorkflowManager:
             return False, {"error": f"필수 샘플러 노드({'/'.join(recognized_sampler_types)})를 찾을 수 없습니다."}
 
         sampler_node_id = found_sampler_nodes[0]
+        if found_nodes["SaveImage"]:
+            node_map["save_image"] = found_nodes["SaveImage"][0]
+        if found_nodes["PreviewImage"]:
+            node_map["preview_image"] = found_nodes["PreviewImage"][0]
 
         # 3-3. 샘플러의 model 입력을 역추적해 terminal 로더 식별
         #      표준 로더가 terminal 이면 NATIVE_* 로 등록하여 모델 치환 허용,
@@ -701,6 +709,201 @@ class ComfyUIWorkflowManager:
             return False
         
         return True
+
+    _INPUT_TYPE_BY_NAME = {
+        "model": "MODEL",
+        "clip": "CLIP",
+        "vae": "VAE",
+        "samples": "LATENT",
+        "latent_image": "LATENT",
+        "positive": "CONDITIONING",
+        "negative": "CONDITIONING",
+        "images": "IMAGE",
+    }
+
+    _OUTPUT_TYPES_BY_CLASS = {
+        "CheckpointLoaderSimple": [("MODEL", "MODEL"), ("CLIP", "CLIP"), ("VAE", "VAE")],
+        "UNETLoader": [("MODEL", "MODEL")],
+        "CLIPLoader": [("CLIP", "CLIP")],
+        "VAELoader": [("VAE", "VAE")],
+        "ModelSamplingDiscrete": [("MODEL", "MODEL")],
+        "RescaleCFG": [("MODEL", "MODEL")],
+        "CLIPTextEncode": [("CONDITIONING", "CONDITIONING")],
+        "EmptyLatentImage": [("LATENT", "LATENT")],
+        "KSampler": [("LATENT", "LATENT")],
+        "SamplerCustom": [("LATENT", "LATENT")],
+        "VAEDecode": [("IMAGE", "IMAGE")],
+    }
+
+    _WIDGET_KEYS_BY_CLASS = {
+        "CheckpointLoaderSimple": ["ckpt_name"],
+        "UNETLoader": ["unet_name", "weight_dtype"],
+        "CLIPLoader": ["clip_name", "type", "device"],
+        "VAELoader": ["vae_name"],
+        "CLIPTextEncode": ["text"],
+        "EmptyLatentImage": ["width", "height", "batch_size"],
+        "ModelSamplingDiscrete": ["sampling", "zsnr"],
+        "RescaleCFG": ["multiplier"],
+        "SaveImage": ["filename_prefix"],
+    }
+
+    @staticmethod
+    def _node_sort_key(node_id: Any):
+        try:
+            return (0, int(str(node_id)))
+        except Exception:
+            return (1, str(node_id))
+
+    @staticmethod
+    def _ui_node_id(node_id: Any):
+        try:
+            return int(str(node_id))
+        except Exception:
+            return str(node_id)
+
+    def _input_type_for(self, input_name: str) -> str:
+        return self._INPUT_TYPE_BY_NAME.get(input_name, "*")
+
+    def _output_defs_for(self, class_type: str, output_count: int = 1) -> List[Dict[str, Any]]:
+        if output_count <= 0:
+            return []
+        defs = self._OUTPUT_TYPES_BY_CLASS.get(class_type)
+        if not defs:
+            defs = [("*", "*") for _ in range(max(1, output_count))]
+        while len(defs) < output_count:
+            defs.append(("*", "*"))
+        return [
+            {"name": name, "type": type_name, "links": []}
+            for name, type_name in defs
+        ]
+
+    def _widgets_from_api_node(self, class_type: str, inputs: Dict[str, Any]) -> List[Any]:
+        if class_type == "KSampler":
+            return [
+                inputs.get("seed"),
+                inputs.get("control_after_generate", "randomize"),
+                inputs.get("steps"),
+                inputs.get("cfg"),
+                inputs.get("sampler_name"),
+                inputs.get("scheduler"),
+                inputs.get("denoise", 1.0),
+            ]
+        widget_keys = self._WIDGET_KEYS_BY_CLASS.get(class_type, [])
+        return [inputs.get(key) for key in widget_keys if key in inputs]
+
+    def api_workflow_to_ui_workflow(self, workflow: Dict[str, Any]) -> Dict[str, Any]:
+        """API 형식 워크플로우를 PNG `workflow` 청크용 최소 UI 그래프로 변환."""
+        nodes = []
+        links = []
+        link_id = 1
+        output_links: Dict[str, Dict[int, List[int]]] = {}
+        input_slots: Dict[str, List[Dict[str, Any]]] = {}
+
+        sorted_items = sorted(workflow.items(), key=lambda item: self._node_sort_key(item[0]))
+
+        for target_id, node in sorted_items:
+            inputs = node.get("inputs", {}) or {}
+            target_inputs = []
+            for input_name, value in inputs.items():
+                if not (isinstance(value, list) and len(value) >= 2):
+                    continue
+                source_id = str(value[0])
+                try:
+                    source_slot = int(value[1])
+                except Exception:
+                    source_slot = 0
+                input_type = self._input_type_for(str(input_name))
+                target_slot = len(target_inputs)
+                current_link_id = link_id
+                link_id += 1
+                target_inputs.append({
+                    "name": str(input_name),
+                    "type": input_type,
+                    "link": current_link_id,
+                })
+                links.append([
+                    current_link_id,
+                    self._ui_node_id(source_id),
+                    source_slot,
+                    self._ui_node_id(target_id),
+                    target_slot,
+                    input_type,
+                ])
+                output_links.setdefault(source_id, {}).setdefault(source_slot, []).append(current_link_id)
+            input_slots[str(target_id)] = target_inputs
+
+        for index, (node_id, node) in enumerate(sorted_items):
+            class_type = node.get("class_type") or node.get("type") or "Unknown"
+            outputs_by_slot = output_links.get(str(node_id), {})
+            output_count = max(outputs_by_slot.keys(), default=-1) + 1
+            outputs = self._output_defs_for(class_type, output_count)
+            for slot, slot_links in outputs_by_slot.items():
+                if slot >= len(outputs):
+                    outputs.extend(self._output_defs_for(class_type, slot - len(outputs) + 1))
+                outputs[slot]["links"] = slot_links
+            nodes.append({
+                "id": self._ui_node_id(node_id),
+                "type": class_type,
+                "pos": [80 + (index % 4) * 360, 80 + (index // 4) * 260],
+                "size": [320, 160],
+                "flags": {},
+                "order": index,
+                "mode": 0,
+                "inputs": input_slots.get(str(node_id), []),
+                "outputs": outputs,
+                "properties": {"Node name for S&R": class_type},
+                "widgets_values": self._widgets_from_api_node(class_type, node.get("inputs", {}) or {}),
+            })
+
+        return {
+            "id": str(uuid.uuid4()),
+            "revision": 0,
+            "last_node_id": max((self._ui_node_id(node_id) for node_id, _ in sorted_items if isinstance(self._ui_node_id(node_id), int)), default=0),
+            "last_link_id": link_id - 1,
+            "nodes": nodes,
+            "links": links,
+            "groups": [],
+            "config": {},
+            "extra": {"ds": {"scale": 1, "offset": [0, 0]}},
+            "version": 0.4,
+        }
+
+    def _sync_ui_workflow_from_api(self, workflow_ui: Optional[Dict[str, Any]], workflow_api: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not workflow_ui or "nodes" not in workflow_ui:
+            return workflow_ui
+
+        for node in workflow_ui.get("nodes", []):
+            node_id = str(node.get("id"))
+            api_node = workflow_api.get(node_id)
+            if not api_node:
+                continue
+            class_type = api_node.get("class_type") or node.get("type")
+            api_inputs = api_node.get("inputs", {}) or {}
+            widgets = node.get("widgets_values")
+            if not isinstance(widgets, list):
+                continue
+
+            if class_type == "KSampler":
+                ksampler_positions = {
+                    0: "seed",
+                    2: "steps",
+                    3: "cfg",
+                    4: "sampler_name",
+                    5: "scheduler",
+                    6: "denoise",
+                }
+                for index, key in ksampler_positions.items():
+                    if index < len(widgets) and key in api_inputs:
+                        widgets[index] = api_inputs[key]
+                continue
+
+            for index, key in enumerate(self._WIDGET_KEYS_BY_CLASS.get(class_type, [])):
+                if index < len(widgets) and key in api_inputs:
+                    widgets[index] = api_inputs[key]
+        return workflow_ui
+
+    def get_last_applied_workflow_ui(self) -> Optional[Dict[str, Any]]:
+        return copy.deepcopy(self.last_applied_workflow_ui)
     
     def create_v_prediction_workflow(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """v-prediction 전용 워크플로우 생성 (편의 메서드)"""
@@ -718,6 +921,7 @@ class ComfyUIWorkflowManager:
         """
         현재 활성화된 워크플로우(사용자 또는 기본)에 UI 파라미터를 적용합니다.
         """
+        self.last_applied_workflow_ui = None
         if self.user_workflow and self.user_workflow_node_map:
             workflow = copy.deepcopy(self.user_workflow)
             node_map = self.user_workflow_node_map
@@ -883,6 +1087,16 @@ class ComfyUIWorkflowManager:
                     else:
                         model_sampler_node["zsnr"] = False
                         print(f"✅ ModelSamplingDiscrete ZSNR 설정: False")
+
+            if "save_image" in node_map and node_map["save_image"] in workflow:
+                save_inputs = workflow[node_map["save_image"]].setdefault("inputs", {})
+                save_inputs["filename_prefix"] = params.get("filename_prefix") or save_inputs.get("filename_prefix") or "NAIA_ComfyUI"
+
+            if workflow_ui:
+                workflow_ui = self._sync_ui_workflow_from_api(workflow_ui, workflow)
+            else:
+                workflow_ui = self.api_workflow_to_ui_workflow(workflow)
+            self.last_applied_workflow_ui = workflow_ui
 
             return workflow
             

@@ -11,6 +11,7 @@ utils/.cloudflared_bin/
 
 # 가상환경 폴더
 temp/
+tmp/.bin0/
 save/
 venv/
 env/

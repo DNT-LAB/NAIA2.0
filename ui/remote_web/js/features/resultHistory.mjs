@@ -171,7 +171,10 @@ export function createResultHistoryController({
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        onPromptInfoTagLookup(button.dataset.tag || button.textContent || '');
+        onPromptInfoTagLookup(button.dataset.tag || button.textContent || '', {
+          anchor: button,
+          rawTag: button.dataset.copyTag || button.textContent || button.dataset.tag || '',
+        });
       });
     });
   }

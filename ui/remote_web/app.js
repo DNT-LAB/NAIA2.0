@@ -232,7 +232,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260504_geninfo_popup2')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -4033,8 +4033,8 @@ function renderPromptInfoHtml(label, text) {
     `<span class="generation-info-tags">${escHtml(text)}</span></div>`;
 }
 
-function lookupPromptInfoTag(tag) {
-  if (tagAssist) tagAssist.lookupPromptInfoTag(tag);
+function lookupPromptInfoTag(tag, options = {}) {
+  if (tagAssist) tagAssist.lookupPromptInfoTag(tag, options);
 }
 
 function bindTagAssist(textarea, options = {}) {
@@ -4059,7 +4059,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260504_geninfo_popup2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

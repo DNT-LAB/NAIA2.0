@@ -23,6 +23,9 @@ export function createTagAssistController({
   let tagLookupTimer = null;
   let tagLookupReadOnly = false;
   let tagChipInfoTooltip = null;
+  let promptInfoTooltip = null;
+  let promptInfoAnchor = null;
+  let lastPromptInfoRawTag = '';
   let acMode = false;
   let acResults = [];
   let acSel = -1;
@@ -88,6 +91,95 @@ export function createTagAssistController({
     tagTooltip.style.setProperty('--tag-tooltip-max-width', `${Math.round(maxWidth)}px`);
   }
 
+  function ensurePromptInfoTooltip() {
+    if (!promptInfoTooltip) {
+      promptInfoTooltip = document.createElement('div');
+      promptInfoTooltip.className = 'result-info-tag-popup';
+      document.body.appendChild(promptInfoTooltip);
+    }
+    return promptInfoTooltip;
+  }
+
+  function hidePromptInfoTooltip() {
+    if (promptInfoTooltip) promptInfoTooltip.classList.remove('open');
+  }
+
+  function copyTextFallback(text) {
+    if (typeof document.execCommand !== 'function') return false;
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch (_) {
+      copied = false;
+    }
+    textarea.remove();
+    return copied;
+  }
+
+  async function copyTextToClipboard(text) {
+    const value = String(text || '');
+    if (!value) return false;
+    if (copyTextFallback(value)) return true;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  function positionPromptInfoTooltip() {
+    if (!promptInfoTooltip || !promptInfoTooltip.classList.contains('open')) return;
+    const panel = document.getElementById('resultInfoPanel');
+    const header = panel?.querySelector('.result-info-header');
+    const label = header?.querySelector('span');
+    const anchor = label || header || promptInfoAnchor || panel;
+    if (!anchor) return;
+
+    const viewport = window.visualViewport || {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetLeft: 0,
+      offsetTop: 0,
+    };
+    const margin = 10;
+    const gap = 8;
+    const panelRect = panel?.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const maxWidth = Math.max(260, Math.min(680, (panelRect?.width || viewport.width) - margin * 2));
+    const maxHeight = Math.min(420, Math.max(140, anchorRect.top - viewport.offsetTop - margin - gap));
+    promptInfoTooltip.style.maxWidth = `${Math.round(maxWidth)}px`;
+    promptInfoTooltip.style.maxHeight = `${Math.round(maxHeight)}px`;
+
+    const popupRect = promptInfoTooltip.getBoundingClientRect();
+    const minLeft = viewport.offsetLeft + margin;
+    const maxLeft = viewport.offsetLeft + viewport.width - popupRect.width - margin;
+    let left = panelRect ? panelRect.left + 18 : anchorRect.left;
+    left = Math.max(minLeft, Math.min(left, maxLeft));
+
+    const minTop = viewport.offsetTop + margin;
+    let top = anchorRect.top - popupRect.height - gap;
+    if (top < minTop) top = Math.min(anchorRect.bottom + gap, viewport.offsetTop + viewport.height - popupRect.height - margin);
+    top = Math.max(minTop, top);
+
+    promptInfoTooltip.style.left = `${Math.round(left)}px`;
+    promptInfoTooltip.style.top = `${Math.round(top)}px`;
+  }
+
   function extraTagInfoFor(infoMap, tag) {
     if (!infoMap || !tag) return null;
     const key = String(tag);
@@ -140,7 +232,7 @@ export function createTagAssistController({
     const lookupTag = normalizePromptInfoLookupTag(core);
     if (!lookupTag) return escHtml(source);
     return escHtml(leading) +
-      `<button type="button" class="generation-info-tag" data-tag="${escHtml(lookupTag)}" title="Show tag info">${escHtml(core)}</button>` +
+      `<button type="button" class="generation-info-tag" data-tag="${escHtml(lookupTag)}" data-copy-tag="${escHtml(core)}" title="Show tag info">${escHtml(core)}</button>` +
       escHtml(trailing);
   }
 
@@ -157,19 +249,23 @@ export function createTagAssistController({
       `<span class="generation-info-tags">${renderPromptInfoText(text)}</span></div>`;
   }
 
-  function lookupPromptInfoTag(tag) {
+  function lookupPromptInfoTag(tag, options = {}) {
+    const lookupOptions = options && options.nodeType ? {anchor: options} : options;
     const lookupTag = normalizePromptInfoLookupTag(tag);
     if (!lookupTag) return;
     acMode = false;
     acTarget = null;
     lastLookupTag = lookupTag;
     tagLookupReadOnly = true;
+    promptInfoAnchor = lookupOptions?.anchor || null;
+    lastPromptInfoRawTag = String(lookupOptions?.rawTag || tag || lookupTag).trim();
     hideTagChipInfoTooltip();
     window.clearTimeout(tagLookupTimer);
     tagTooltip.classList.remove('open', 'ac-mode', 'left-side');
-    tagTooltip.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">loading...</span></div>';
-    tagTooltip.classList.add('open');
-    positionTagTooltip();
+    const promptPopup = ensurePromptInfoTooltip();
+    promptPopup.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">loading...</span></div>';
+    promptPopup.classList.add('open');
+    positionPromptInfoTooltip();
     sendWs({type: 'tag_lookup', tag: lookupTag});
   }
 
@@ -294,6 +390,7 @@ export function createTagAssistController({
     if (tag === lastLookupTag) return;
     lastLookupTag = tag;
     tagLookupReadOnly = false;
+    hidePromptInfoTooltip();
     if (!tag) {
       hideTagChipInfoTooltip();
       tagTooltip.classList.remove('open', 'ac-mode');
@@ -311,7 +408,11 @@ export function createTagAssistController({
     if (acMode) return;
     hideTagChipInfoTooltip();
     if (!m.tag) {
-      tagTooltip.classList.remove('open', 'ac-mode');
+      if (tagLookupReadOnly) {
+        hidePromptInfoTooltip();
+      } else {
+        tagTooltip.classList.remove('open', 'ac-mode');
+      }
       return;
     }
     if (m.tag.toLowerCase() !== lastLookupTag.toLowerCase()) return;
@@ -330,6 +431,12 @@ export function createTagAssistController({
     if (m.related && m.related.length) {
       html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">related</span>' +
         m.related.map(t => renderTooltipExtraTag(t, extraTagInfo)).join('') + '</div>';
+    }
+    if (tagLookupReadOnly) {
+      const copyText = lastPromptInfoRawTag || m.tag;
+      html += '<div class="tag-tooltip-copy-row">' +
+        `<button type="button" class="tag-tooltip-copy-btn" data-copy-tag="${escHtml(copyText)}">Copy Tag</button>` +
+        '</div>';
     }
     const cd = m.character_details;
     if (cd) {
@@ -351,13 +458,20 @@ export function createTagAssistController({
       html += `<div class="char-copy-row"><button class="char-copy-btn" data-tags="${escHtml(allTags.join(', '))}">\u{1F4CB} Copy All</button>` +
         `<small class="char-sample-count">${cd.total_rows || 0} samples</small></div>`;
     }
-    tagTooltip.innerHTML = html;
-    tagTooltip.classList.remove('ac-mode');
-    tagTooltip.classList.add('open');
-    syncTooltipSide();
-    positionTagTooltip();
-    bindTagChipInfoHover(tagTooltip);
-    tagTooltip.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
+    const tooltipRoot = tagLookupReadOnly ? ensurePromptInfoTooltip() : tagTooltip;
+    tooltipRoot.innerHTML = html;
+    tooltipRoot.classList.remove('ac-mode');
+    tooltipRoot.classList.add('open');
+    if (tagLookupReadOnly) {
+      tagTooltip.classList.remove('open', 'ac-mode', 'left-side');
+      positionPromptInfoTooltip();
+    } else {
+      hidePromptInfoTooltip();
+      syncTooltipSide();
+      positionTagTooltip();
+    }
+    bindTagChipInfoHover(tooltipRoot);
+    tooltipRoot.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
       el.addEventListener('mousedown', e => {
         e.preventDefault();
         hideTagChipInfoTooltip();
@@ -380,14 +494,23 @@ export function createTagAssistController({
         checkTagHint();
       });
     });
-    const copyBtn = tagTooltip.querySelector('.char-copy-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('mousedown', e => {
+    const tagCopyBtn = tooltipRoot.querySelector('.tag-tooltip-copy-btn');
+    if (tagCopyBtn) {
+      tagCopyBtn.addEventListener('click', e => {
         e.preventDefault();
-        navigator.clipboard.writeText(copyBtn.dataset.tags).then(() => {
-          showToast('Copied to clipboard', 'success');
-        }).catch(() => {
-          showToast('Copy failed', 'error');
+        e.stopPropagation();
+        copyTextToClipboard(tagCopyBtn.dataset.copyTag || '').then(copied => {
+          showToast(copied ? 'Copied to clipboard' : 'Copy failed', copied ? 'success' : 'error');
+        });
+      });
+    }
+    const copyBtn = tooltipRoot.querySelector('.char-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        copyTextToClipboard(copyBtn.dataset.tags).then(copied => {
+          showToast(copied ? 'Copied to clipboard' : 'Copy failed', copied ? 'success' : 'error');
         });
       });
     }
@@ -670,6 +793,16 @@ export function createTagAssistController({
     bindTagAssist(promptEdit);
     bindTagAssist(negEdit);
   }
+
+  document.addEventListener('mousedown', e => {
+    if (!promptInfoTooltip || !promptInfoTooltip.classList.contains('open')) return;
+    const target = e.target;
+    if (promptInfoTooltip.contains(target)) return;
+    if (target?.closest?.('.generation-info-tag')) return;
+    hidePromptInfoTooltip();
+  }, true);
+  window.addEventListener('resize', positionPromptInfoTooltip);
+  window.addEventListener('scroll', positionPromptInfoTooltip, true);
 
   return {
     bindDefaultTextareas,

@@ -6491,6 +6491,31 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   -webkit-backdrop-filter: blur(6px);
 }
 .tag-tooltip.open { display: flex; flex-direction: column; gap: 3px; max-height: 50vh; overflow-y: auto; }
+.result-info-tag-popup {
+  display: none;
+  position: fixed;
+  z-index: var(--z-floating-module-tooltip);
+  min-width: 260px;
+  max-width: min(680px, calc(100vw - 20px));
+  max-height: min(360px, calc(100dvh - 80px));
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  background: rgba(20, 20, 26, 0.97);
+  border: 1px solid rgba(157,139,255,0.34);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.03) inset;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.result-info-tag-popup.open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .tag-tooltip-main {
   line-height: 1.5;
 }
@@ -6613,7 +6638,8 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .ct-pc  { border-color: rgba(245,194,231,0.45); }
 .ct-ch  { border-color: rgba(166,227,161,0.45); }
 .ct-body { border-color: rgba(249,226,175,0.45); }
-.char-copy-row {
+.char-copy-row,
+.tag-tooltip-copy-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6621,7 +6647,11 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   border-top: 1px solid rgba(255,255,255,0.06);
   margin-top: 2px;
 }
-.char-copy-btn {
+.tag-tooltip-copy-row {
+  justify-content: flex-end;
+}
+.char-copy-btn,
+.tag-tooltip-copy-btn {
   font-family: var(--font-mono);
   font-size: 9px;
   padding: 3px 10px;
@@ -6633,7 +6663,14 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   pointer-events: auto;
   transition: background 0.15s, color 0.15s;
 }
-.char-copy-btn:hover { background: rgba(100,140,255,0.15); color: var(--text-primary); }
+.tag-tooltip-copy-btn {
+  border-color: rgba(157,139,255,0.38);
+  background: rgba(157,139,255,0.12);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.char-copy-btn:hover,
+.tag-tooltip-copy-btn:hover { background: rgba(100,140,255,0.15); color: var(--text-primary); }
 .char-sample-count { color: var(--text-dim); font-family: var(--font-mono); font-size: 8px; }
 .char-more { color: var(--text-dim); font-family: var(--font-mono); font-size: 8px; margin-left: 4px; }
 

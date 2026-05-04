@@ -2088,7 +2088,7 @@ class RemoteBridge(QObject):
             return True
         if width % 64 != 0 or height % 64 != 0:
             return False
-        return max(width, height) <= 2048 and min(width, height) <= 1536
+        return width * height <= 1024 * 1024
 
     def _artist_thumb_resolution_options(self) -> list[tuple[int, int]]:
         defaults = [
@@ -2117,59 +2117,25 @@ class RemoteBridge(QObject):
         width, height = random.SystemRandom().choice(self._artist_thumb_resolution_options())
         return width, height, "random"
 
-    @staticmethod
-    def _round_to_multiple(value: float, multiple_of: int = 64) -> int:
-        return max(multiple_of, int(round(float(value) / multiple_of)) * multiple_of)
-
     def _fit_nai_resolution_to_limits(self, width: int, height: int) -> tuple[int, int]:
         """비율을 유지하면서 NAI 허용 범위 안의 64배수 해상도로 보정합니다."""
         width = max(1, int(width))
         height = max(1, int(height))
         multiple_of = 64
-        max_long = 2048
-        max_short = 1536
-
-        if height > width:
-            max_width, max_height = max_short, max_long
-        else:
-            max_width, max_height = max_long, max_short
-
-        scale = min(1.0, max_width / width, max_height / height)
-        target_width = width * scale
-        target_height = height * scale
-
-        fit_width = self._round_to_multiple(target_width, multiple_of)
-        fit_height = self._round_to_multiple(target_height, multiple_of)
-
-        fit_width = min(max_width, max(multiple_of, fit_width))
-        fit_height = min(max_height, max(multiple_of, fit_height))
-        fit_width = (fit_width // multiple_of) * multiple_of
-        fit_height = (fit_height // multiple_of) * multiple_of
-
-        if self._resolution_allowed_for_current_mode(fit_width, fit_height):
-            return fit_width, fit_height
+        max_pixels = 1024 * 1024
 
         ratio = width / height
-        best: tuple[float, int, int] | None = None
-        for candidate_width in range(multiple_of, max_width + 1, multiple_of):
-            ideal_height = candidate_width / ratio
-            for candidate_height in {
-                (int(ideal_height) // multiple_of) * multiple_of,
-                self._round_to_multiple(ideal_height, multiple_of),
-            }:
-                if candidate_height < multiple_of or candidate_height > max_height:
-                    continue
-                if not self._resolution_allowed_for_current_mode(candidate_width, candidate_height):
-                    continue
-                aspect_error = abs((candidate_width / candidate_height) - ratio)
-                area_loss = abs((candidate_width * candidate_height) - (target_width * target_height))
-                score = aspect_error * 1_000_000 + area_loss
-                if best is None or score < best[0]:
-                    best = (score, candidate_width, candidate_height)
+        target_width = int((max_pixels * ratio) ** 0.5)
+        target_height = int((max_pixels / ratio) ** 0.5)
 
-        if best is not None:
-            return best[1], best[2]
-        return (832, 1216)
+        fit_width = max(multiple_of, (target_width // multiple_of) * multiple_of)
+        fit_height = max(multiple_of, (target_height // multiple_of) * multiple_of)
+
+        while fit_width * fit_height > max_pixels:
+            fit_width = max(multiple_of, fit_width - multiple_of)
+            fit_height = max(multiple_of, int(fit_width / ratio) // multiple_of * multiple_of)
+
+        return fit_width, fit_height
 
     def _coerce_artist_thumb_resolution(self, width, height) -> tuple[int, int]:
         try:

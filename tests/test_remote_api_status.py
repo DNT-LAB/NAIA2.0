@@ -1111,11 +1111,11 @@ def test_artist_thumb_random_resolution_filters_unsafe_nai_sizes(tmp_path, monke
         ])
     )
 
-    assert bridge._artist_thumb_resolution_options() == [(1536, 2048), (832, 1216)]
-    assert bridge._coerce_artist_thumb_resolution(4096, 4096) == (1536, 1536)
+    assert bridge._artist_thumb_resolution_options() == [(832, 1216)]
+    assert bridge._coerce_artist_thumb_resolution(4096, 4096) == (1024, 1024)
     assert bridge._coerce_artist_thumb_resolution(1000, 1000) == (1024, 1024)
-    assert bridge._coerce_artist_thumb_resolution(4096, 6144) == (1344, 2048)
-    assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (1536, 2048)
+    assert bridge._coerce_artist_thumb_resolution(4096, 6144) == (832, 1216)
+    assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (832, 1152)
 
 
 def test_artist_thumb_random_prompt_fits_detected_nai_resolution(tmp_path, monkeypatch):
@@ -1141,8 +1141,8 @@ def test_artist_thumb_random_prompt_fits_detected_nai_resolution(tmp_path, monke
         source_row={"image_width": 4096, "image_height": 6144},
     ))
 
-    assert future.value["width"] == 1344
-    assert future.value["height"] == 2048
+    assert future.value["width"] == 832
+    assert future.value["height"] == 1216
     assert future.value["resolution_source"] == "detected_fit"
 
 
@@ -1170,8 +1170,8 @@ def test_artist_thumb_generate_coerces_invalid_nai_resolution(tmp_path, monkeypa
 
     overrides, priority = ctx.main_window.generation_controller.executed[0]
     assert priority == 0
-    assert overrides["width"] == 1536
-    assert overrides["height"] == 1536
+    assert overrides["width"] == 1024
+    assert overrides["height"] == 1024
 
 
 def test_artist_thumb_state_counts_visible_artists_after_bans(tmp_path, monkeypatch):

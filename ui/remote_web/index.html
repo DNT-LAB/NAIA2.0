@@ -664,7 +664,17 @@
           </header>
           <div class="artist-thumb-status-row">
             <div class="artist-thumb-status" id="artistThumbStatus">Select a thumbnail mode.</div>
-            <button type="button" class="artist-thumb-random-btn" id="artistThumbRandomBtn">Get Random Artist</button>
+            <div class="artist-thumb-bulk-controls">
+              <button type="button" class="artist-thumb-bulk-btn" id="artistThumbSelectBtn">선택</button>
+              <div class="artist-thumb-bulk-wrap">
+                <button type="button" class="artist-thumb-bulk-btn" id="artistThumbBatchBtn">일괄생성</button>
+                <div class="artist-thumb-batch-menu" id="artistThumbBatchMenu" hidden>
+                  <button type="button" data-artist-batch-mode="fixed">고정 프롬프트 생성</button>
+                  <button type="button" data-artist-batch-mode="random">랜덤 프롬프트 생성</button>
+                </div>
+              </div>
+              <button type="button" class="artist-thumb-random-btn" id="artistThumbRandomBtn">Get Random Artist</button>
+            </div>
           </div>
           <div class="artist-thumb-grid" id="artistThumbGrid"></div>
           <footer class="artist-thumb-pager">

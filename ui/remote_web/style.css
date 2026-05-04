@@ -2154,6 +2154,17 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 .artist-thumb-status[data-tone="ok"] { color: var(--success); }
 .artist-thumb-status[data-tone="error"] { color: #ff6b6b; }
 .artist-thumb-status[data-tone="busy"] { color: var(--accent-blue); }
+.artist-thumb-bulk-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.artist-thumb-bulk-wrap {
+  position: relative;
+}
+.artist-thumb-bulk-btn,
 .artist-thumb-random-btn {
   min-width: 154px;
   min-height: 30px;
@@ -2166,10 +2177,58 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   font-weight: 800;
   cursor: pointer;
 }
+.artist-thumb-bulk-btn {
+  min-width: 76px;
+  border-color: rgba(157, 139, 255, 0.36);
+  background: rgba(124, 106, 239, 0.14);
+  color: var(--text-primary);
+}
 .artist-thumb-random-btn:hover {
   border-color: rgba(92, 184, 122, 0.72);
   background: rgba(92, 184, 122, 0.24);
 }
+.artist-thumb-bulk-btn:hover,
+.artist-thumb-bulk-btn.active {
+  border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.24);
+}
+.artist-thumb-bulk-btn.danger {
+  border-color: rgba(244, 67, 54, 0.42);
+  background: rgba(120, 36, 36, 0.28);
+  color: #ffd6d2;
+}
+.artist-thumb-batch-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 180px;
+  display: grid;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: rgba(16, 16, 24, 0.98);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.42);
+}
+.artist-thumb-batch-menu[hidden] {
+  display: none !important;
+}
+.artist-thumb-batch-menu button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.artist-thumb-batch-menu button:hover {
+  border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.2);
+}
+.artist-thumb-bulk-btn:disabled,
 .artist-thumb-random-btn:disabled {
   cursor: default;
   color: var(--text-dim);
@@ -2195,6 +2254,7 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   opacity: 0.72;
 }
 .artist-thumb-card {
+  position: relative;
   min-width: 0;
   height: var(--artist-card-height);
   display: grid;
@@ -2230,7 +2290,95 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 .artist-thumb-card.favorite .artist-thumb-card-weight {
   color: rgba(179, 235, 196, 0.74);
 }
+.artist-thumb-card.remembered {
+  border-color: rgba(255, 122, 188, 0.58);
+  background: rgba(255, 90, 170, 0.16);
+}
+.artist-thumb-card.remembered .artist-thumb-card-image {
+  background: #211018;
+}
+.artist-thumb-card.remembered .artist-thumb-card-info {
+  background: rgba(92, 26, 65, 0.62);
+  border-top: 1px solid rgba(255, 122, 188, 0.28);
+}
+.artist-thumb-card.in-queue {
+  border-color: rgba(112, 200, 255, 0.62);
+}
+.artist-thumb-card.batch-dim {
+  opacity: 0.66;
+  filter: saturate(0.82) brightness(0.92);
+}
+.artist-thumb-card.batch-selected {
+  opacity: 1;
+  filter: none;
+  box-shadow: 0 0 0 1px rgba(157, 139, 255, 0.38);
+}
+.artist-thumb-check,
+.artist-thumb-memory-mark,
+.artist-thumb-queue-mark {
+  position: absolute;
+  top: 7px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(8, 9, 15, 0.72);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
+}
+.artist-thumb-check {
+  right: 7px;
+  width: 22px;
+  min-height: 22px;
+  border-color: rgba(235, 230, 255, 0.46);
+  background: rgba(8, 9, 15, 0.64);
+}
+.artist-thumb-check::after {
+  content: "";
+  width: 6px;
+  height: 11px;
+  margin-top: -2px;
+  border-right: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  opacity: 0;
+  transform: rotate(45deg) scale(0.82);
+}
+.artist-thumb-check.checked,
+.artist-thumb-card.batch-selected .artist-thumb-check {
+  border-color: rgba(255, 255, 255, 0.7);
+  background: rgba(124, 106, 239, 0.9);
+}
+.artist-thumb-check.checked::after,
+.artist-thumb-card.batch-selected .artist-thumb-check::after {
+  opacity: 1;
+}
+.artist-thumb-memory-mark {
+  left: 7px;
+  padding: 0 7px;
+  color: #ffd3e8;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+.artist-thumb-queue-mark {
+  left: 7px;
+  padding: 0 7px;
+  color: #cbeeff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+  border-color: rgba(112, 200, 255, 0.34);
+  background: rgba(18, 60, 86, 0.78);
+}
+.artist-thumb-card.remembered .artist-thumb-queue-mark {
+  top: 33px;
+}
 .artist-thumb-card-image {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -2351,7 +2499,18 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   .artist-thumb-status {
     white-space: normal;
   }
+  .artist-thumb-bulk-controls {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+  .artist-thumb-bulk-wrap {
+    flex: 1 1 120px;
+  }
+  .artist-thumb-bulk-btn {
+    width: 100%;
+  }
   .artist-thumb-random-btn {
+    flex: 1 1 180px;
     width: 100%;
   }
   .artist-thumb-search,
@@ -3367,6 +3526,27 @@ body.resizing-result-info {
 }
 .result-context-item.danger:not(:disabled) {
   color: #ff6b6b;
+}
+.artist-thumb-context-menu .result-context-item.artist-thumb-queue-fixed:not(:disabled) {
+  color: #9fe4ff;
+  background: rgba(54, 144, 210, 0.12);
+}
+.artist-thumb-context-menu .result-context-item.artist-thumb-queue-fixed:not(:disabled):hover {
+  background: rgba(54, 144, 210, 0.24);
+}
+.artist-thumb-context-menu .result-context-item.artist-thumb-queue-random:not(:disabled) {
+  color: #f3c7ff;
+  background: rgba(177, 108, 220, 0.13);
+}
+.artist-thumb-context-menu .result-context-item.artist-thumb-queue-random:not(:disabled):hover {
+  background: rgba(213, 130, 218, 0.24);
+}
+.artist-thumb-context-menu .result-context-item.artist-thumb-queue-cancel:not(:disabled) {
+  color: #d8ebff;
+  background: rgba(74, 122, 170, 0.14);
+}
+.artist-thumb-context-menu .result-context-item.artist-thumb-queue-cancel:not(:disabled):hover {
+  background: rgba(74, 122, 170, 0.28);
 }
 .result-context-arrow {
   display: inline-flex;

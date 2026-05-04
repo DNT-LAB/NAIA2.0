@@ -20,6 +20,9 @@ export function createArtistThumbController({
   const nextBtn = document.getElementById('artistThumbNextBtn');
   const downloadBtn = document.getElementById('artistThumbDownloadBtn');
   const randomBtn = document.getElementById('artistThumbRandomBtn');
+  const selectBtn = document.getElementById('artistThumbSelectBtn');
+  const batchBtn = document.getElementById('artistThumbBatchBtn');
+  const batchMenu = document.getElementById('artistThumbBatchMenu');
   const pageLabel = document.getElementById('artistThumbPageLabel');
   const gotoInput = document.getElementById('artistThumbGotoInput');
   const gotoBtn = document.getElementById('artistThumbGotoBtn');
@@ -44,8 +47,12 @@ export function createArtistThumbController({
   const resultEmptyEl = document.getElementById('artistThumbResultEmpty');
 
   const PAGE_SIZE = 48;
+  const MAX_RESULT_MEMORY = 128;
+  const ARTIST_QUEUE_RESULT_TIMEOUT_MS = 20 * 60 * 1000;
   const GENERATE_LABEL = 'Generate 832 x 1216';
   const RANDOM_GENERATE_LABEL = 'Generate with Random Prompt';
+  const BATCH_LABEL = '일괄생성';
+  const BATCH_CANCEL_LABEL = '생성 취소';
   let state = null;
   let statePromise = null;
   let listRequestId = 0;
@@ -65,6 +72,7 @@ export function createArtistThumbController({
   let randomViewActive = false;
   let pendingResultAutoExpand = false;
   let pendingResultSuppressPreview = false;
+  let pendingResultKeepPreview = false;
   let resultPreviewOpen = false;
   let resultExpanded = false;
   let artistTabActive = document.querySelector('[data-right-pane="artists"]')?.classList.contains('active') || false;
@@ -72,6 +80,17 @@ export function createArtistThumbController({
   let suppressResultCollapseClickTimer = null;
   let contextMenuEl = null;
   let contextMenuItem = null;
+  const resultMemory = new Map();
+  const resultWaiters = new Map();
+  const artistQueueEntries = [];
+  const selectedBatchArtists = new Map();
+  let resultBlobUrlManaged = false;
+  let selectionMode = false;
+  let artistQueueRunning = false;
+  let artistQueueCancelRequested = false;
+  let artistQueueMode = '';
+  let artistQueueSerial = 0;
+  let activeArtistQueueEntry = null;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -132,8 +151,147 @@ export function createArtistThumbController({
 
   function revokeResultBlobUrl() {
     if (!resultBlobUrl) return;
-    URL.revokeObjectURL(resultBlobUrl);
+    if (resultBlobUrlManaged) URL.revokeObjectURL(resultBlobUrl);
     resultBlobUrl = '';
+    resultBlobUrlManaged = false;
+  }
+
+  function setResultBlobUrl(url, managed = false) {
+    revokeResultBlobUrl();
+    resultBlobUrl = String(url || '');
+    resultBlobUrlManaged = Boolean(managed);
+  }
+
+  function clearResultMemoryEntry(artist) {
+    const key = String(artist || '').trim();
+    const entry = resultMemory.get(key);
+    if (!entry) return;
+    URL.revokeObjectURL(entry.url);
+    resultMemory.delete(key);
+  }
+
+  function pruneResultMemory() {
+    while (resultMemory.size > MAX_RESULT_MEMORY) {
+      const oldestKey = resultMemory.keys().next().value;
+      clearResultMemoryEntry(oldestKey);
+    }
+  }
+
+  function rememberArtistResult(artist, blob, meta = {}) {
+    const key = String(artist || '').trim();
+    if (!key || !blob) return null;
+    clearResultMemoryEntry(key);
+    const entry = {
+      artist: key,
+      url: URL.createObjectURL(blob),
+      meta: {...meta, artist_thumb_artist: key},
+      createdAt: Date.now(),
+    };
+    resultMemory.set(key, entry);
+    pruneResultMemory();
+    updateRememberedCards();
+    return entry;
+  }
+
+  function rememberedResultForArtist(artist) {
+    return resultMemory.get(String(artist || '').trim()) || null;
+  }
+
+  function titleForResultMemory(entry) {
+    const meta = entry?.meta || {};
+    const size = meta.width && meta.height ? ` · ${meta.width}x${meta.height}` : '';
+    return `${entry?.artist || 'Artist Thumb'}${size}`;
+  }
+
+  function showRememberedResult(artist) {
+    const entry = rememberedResultForArtist(artist);
+    if (!entry) return false;
+    setResultExpanded(false);
+    setResultBlobUrl(entry.url, false);
+    resultPreviewOpen = true;
+    applyResultPreviewVisibility();
+    if (resultTitleEl) resultTitleEl.textContent = titleForResultMemory(entry);
+    if (resultImageEl) {
+      resultImageEl.src = entry.url;
+      resultImageEl.classList.add('show');
+    }
+    if (resultEmptyEl) resultEmptyEl.hidden = true;
+    updateResultExpandButton();
+    return true;
+  }
+
+  function updateRememberedCards() {
+    gridEl?.querySelectorAll('.artist-thumb-card[data-artist]').forEach(card => {
+      const remembered = resultMemory.has(card.dataset.artist || '');
+      card.classList.toggle('remembered', remembered);
+      let mark = card.querySelector('.artist-thumb-memory-mark');
+      if (remembered && !mark) {
+        mark = document.createElement('span');
+        mark.className = 'artist-thumb-memory-mark';
+        mark.textContent = 'RESULT';
+        card.prepend(mark);
+      } else if (!remembered && mark) {
+        mark.remove();
+      }
+    });
+  }
+
+  function hasQueuedArtist(artist) {
+    const key = String(artist || '').trim();
+    return Boolean(key && artistQueueEntries.some(entry => entry.item?.artist === key));
+  }
+
+  function updateQueuedCards() {
+    gridEl?.querySelectorAll('.artist-thumb-card[data-artist]').forEach(card => {
+      const queued = !selectionMode && hasQueuedArtist(card.dataset.artist || '');
+      card.classList.toggle('in-queue', queued);
+      let mark = card.querySelector('.artist-thumb-queue-mark');
+      if (queued && !mark) {
+        mark = document.createElement('span');
+        mark.className = 'artist-thumb-queue-mark';
+        mark.textContent = 'IN QUEUE';
+        card.prepend(mark);
+      } else if (!queued && mark) {
+        mark.remove();
+      }
+    });
+  }
+
+  function updateSelectionCards() {
+    gridEl?.querySelectorAll('.artist-thumb-card[data-artist]').forEach(card => {
+      const artist = card.dataset.artist || '';
+      const checked = selectedBatchArtists.has(artist);
+      card.classList.toggle('selectable', selectionMode);
+      card.classList.toggle('batch-selected', checked);
+      card.classList.toggle('batch-dim', selectionMode && !checked);
+      let mark = card.querySelector('.artist-thumb-check');
+      if (selectionMode && !mark) {
+        mark = document.createElement('span');
+        mark.className = 'artist-thumb-check';
+        mark.setAttribute('aria-hidden', 'true');
+        card.prepend(mark);
+      } else if (!selectionMode && mark) {
+        mark.remove();
+        return;
+      }
+      if (mark) mark.classList.toggle('checked', checked);
+    });
+    if (selectBtn) selectBtn.classList.toggle('active', selectionMode);
+    updateQueuedCards();
+  }
+
+  function selectedBatchItemsInGridOrder() {
+    if (!gridEl) return [];
+    return [...gridEl.querySelectorAll('.artist-thumb-card.batch-selected[data-artist]')]
+      .map(card => selectedBatchArtists.get(card.dataset.artist || '') || itemFromCard(card))
+      .filter(Boolean);
+  }
+
+  function visibleGridItemsInGridOrder() {
+    if (!gridEl) return [];
+    return [...gridEl.querySelectorAll('.artist-thumb-card[data-artist]')]
+      .map(card => itemFromCard(card))
+      .filter(Boolean);
   }
 
   function updateResultExpandButton() {
@@ -215,6 +373,7 @@ export function createArtistThumbController({
     pendingResultMeta = null;
     pendingResultAutoExpand = false;
     pendingResultSuppressPreview = false;
+    pendingResultKeepPreview = false;
     resultPreviewOpen = false;
     revokeResultBlobUrl();
     if (resultPreviewEl) resultPreviewEl.hidden = true;
@@ -239,9 +398,28 @@ export function createArtistThumbController({
       generateBtn.textContent = GENERATE_LABEL;
     }
     if (randomGenerateBtn) {
-      randomGenerateBtn.disabled = false;
+      randomGenerateBtn.disabled = artistQueueRunning;
       randomGenerateBtn.textContent = RANDOM_GENERATE_LABEL;
     }
+    updateArtistActionAvailability();
+  }
+
+  function updateArtistActionAvailability() {
+    const locked = artistQueueRunning;
+    [modeEl, filterEl, searchEl, downloadBtn, selectBtn, randomBtn, prevBtn, nextBtn, gotoBtn, gotoInput].forEach(control => {
+      if (control) control.disabled = locked;
+    });
+    if (generateBtn) generateBtn.disabled = false;
+    if (randomGenerateBtn) randomGenerateBtn.disabled = false;
+    updatePager();
+    if (batchBtn) {
+      batchBtn.disabled = false;
+      batchBtn.textContent = locked ? BATCH_CANCEL_LABEL : BATCH_LABEL;
+      batchBtn.classList.toggle('danger', locked);
+    }
+    if (batchMenu && locked) batchMenu.hidden = true;
+    updateRandomUi();
+    updateDownloadUi();
   }
 
   function currentModeInfo() {
@@ -260,7 +438,7 @@ export function createArtistThumbController({
     if (!randomBtn) return;
     const mode = currentMode();
     const info = currentModeInfo();
-    randomBtn.disabled = false;
+    randomBtn.disabled = artistQueueRunning;
     if (!mode) {
       randomBtn.title = '모드를 선택한 뒤 랜덤 작가를 불러올 수 있습니다.';
     } else if (info && !info.available) {
@@ -278,7 +456,7 @@ export function createArtistThumbController({
     const activeForMode = Boolean(download.active && download.mode === mode);
     const needsDownload = Boolean(info && !info.available);
     downloadBtn.hidden = !needsDownload && !activeForMode;
-    downloadBtn.disabled = activeForMode || !mode;
+    downloadBtn.disabled = artistQueueRunning || activeForMode || !mode;
     if (activeForMode) {
       const percent = Number(download.percent || 0);
       downloadBtn.textContent = percent > 0 ? `${percent}%` : 'Downloading...';
@@ -323,7 +501,7 @@ export function createArtistThumbController({
     }
     setSummary(`${Number(state.artist_count || 0).toLocaleString()} artists`);
     updateDownloadUi();
-    updateRandomUi();
+    updateArtistActionAvailability();
   }
 
   async function fetchState(options = {}) {
@@ -370,11 +548,24 @@ export function createArtistThumbController({
     gridEl.innerHTML = items.map(item => {
       const active = item.artist === selectedArtist ? ' active' : '';
       const favorite = item.favorite ? ' favorite' : '';
+      const remembered = resultMemory.has(item.artist) ? ' remembered' : '';
+      const queued = !selectionMode && hasQueuedArtist(item.artist) ? ' in-queue' : '';
+      const selectable = selectionMode ? ' selectable' : '';
+      const batchSelected = selectedBatchArtists.has(item.artist) ? ' batch-selected' : '';
+      const batchDim = selectionMode && !selectedBatchArtists.has(item.artist) ? ' batch-dim' : '';
       const imageHtml = item.image_url
         ? `<img loading="lazy" src="${escHtml(item.image_url)}" alt="${escHtml(item.artist)}">`
         : '<span>No Image</span>';
+      const checkHtml = selectionMode
+        ? `<span class="artist-thumb-check${selectedBatchArtists.has(item.artist) ? ' checked' : ''}" aria-hidden="true"></span>`
+        : '';
+      const memoryHtml = remembered ? '<span class="artist-thumb-memory-mark">RESULT</span>' : '';
+      const queueHtml = queued ? '<span class="artist-thumb-queue-mark">IN QUEUE</span>' : '';
       return `
-        <button type="button" class="artist-thumb-card${active}${favorite}" data-artist="${escHtml(item.artist)}" data-weight="${escHtml(String(item.weight || 0))}">
+        <button type="button" class="artist-thumb-card${active}${favorite}${remembered}${queued}${selectable}${batchSelected}${batchDim}" data-artist="${escHtml(item.artist)}" data-weight="${escHtml(String(item.weight || 0))}">
+          ${checkHtml}
+          ${memoryHtml}
+          ${queueHtml}
           <div class="artist-thumb-card-image">${imageHtml}</div>
           <div class="artist-thumb-card-info">
             <span class="artist-thumb-card-name" title="${escHtml(item.artist)}">${escHtml(item.artist)}</span>
@@ -399,14 +590,15 @@ export function createArtistThumbController({
 
   function updatePager() {
     if (pageLabel) pageLabel.textContent = `${currentPage + 1} / ${totalPages}`;
-    if (prevBtn) prevBtn.disabled = currentPage <= 0;
-    if (nextBtn) nextBtn.disabled = currentPage >= totalPages - 1;
+    if (prevBtn) prevBtn.disabled = artistQueueRunning || currentPage <= 0;
+    if (nextBtn) nextBtn.disabled = artistQueueRunning || currentPage >= totalPages - 1;
     if (gotoInput) {
       gotoInput.max = String(totalPages);
       gotoInput.placeholder = String(currentPage + 1);
       gotoInput.value = '';
+      gotoInput.disabled = artistQueueRunning;
     }
-    if (gotoBtn) gotoBtn.disabled = totalPages <= 1;
+    if (gotoBtn) gotoBtn.disabled = artistQueueRunning || totalPages <= 1;
   }
 
   function scrollGrid(anchor = 'top') {
@@ -418,6 +610,8 @@ export function createArtistThumbController({
   }
 
   async function loadPage(page = 0, options = {}) {
+    if (artistQueueRunning && !options.force) return;
+    if (selectionMode) setSelectionMode(false);
     await fetchState();
     const requestId = ++listRequestId;
     const mode = currentMode();
@@ -470,6 +664,7 @@ export function createArtistThumbController({
   }
 
   async function loadAdjacentPage(direction) {
+    if (artistQueueRunning) return;
     const nextPage = currentPage + direction;
     if (wheelPageLocked || nextPage < 0 || nextPage >= totalPages) return;
     wheelPageLocked = true;
@@ -497,6 +692,7 @@ export function createArtistThumbController({
   }
 
   function gotoPage() {
+    if (artistQueueRunning) return;
     if (!gotoInput) return;
     const raw = Number.parseInt(String(gotoInput.value || '').trim(), 10);
     if (!Number.isFinite(raw)) {
@@ -508,6 +704,8 @@ export function createArtistThumbController({
   }
 
   async function loadRandomArtists() {
+    if (artistQueueRunning) return;
+    if (selectionMode) setSelectionMode(false);
     const mode = currentMode();
     const info = currentModeInfo();
     if (!mode) {
@@ -519,6 +717,39 @@ export function createArtistThumbController({
       return;
     }
     await loadPage(currentPage, {anchor: 'top', random: true});
+  }
+
+  function setSelectionMode(enabled) {
+    if (artistQueueRunning) return;
+    selectionMode = Boolean(enabled);
+    if (!selectionMode) selectedBatchArtists.clear();
+    updateSelectionCards();
+  }
+
+  function toggleSelectionMode() {
+    setSelectionMode(!selectionMode);
+  }
+
+  function toggleBatchSelection(item) {
+    if (!item?.artist || artistQueueRunning) return;
+    if (selectedBatchArtists.has(item.artist)) selectedBatchArtists.delete(item.artist);
+    else selectedBatchArtists.set(item.artist, item);
+    updateSelectionCards();
+  }
+
+  function closeBatchMenu() {
+    if (batchMenu) batchMenu.hidden = true;
+  }
+
+  function toggleBatchMenu(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (artistQueueRunning) {
+      cancelArtistQueue();
+      return;
+    }
+    if (!batchMenu) return;
+    batchMenu.hidden = !batchMenu.hidden;
   }
 
   function renderSelectedMeta(item) {
@@ -564,7 +795,7 @@ export function createArtistThumbController({
     gridEl?.querySelectorAll('.artist-thumb-card.active').forEach(card => card.classList.remove('active'));
   }
 
-  function selectArtist(item) {
+  function selectArtist(item, options = {}) {
     selected = item;
     if (positiveEl) {
       positiveAutoValue = formatArtistPrompt(item.artist);
@@ -584,6 +815,7 @@ export function createArtistThumbController({
     gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
       card.classList.toggle('active', card.dataset.artist === item.artist);
     });
+    if (options.showRemembered !== false) showRememberedResult(item.artist);
   }
 
   function selectedPayload() {
@@ -603,6 +835,35 @@ export function createArtistThumbController({
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     return data;
+  }
+
+  function waitForArtistResult(requestId, artist) {
+    const key = String(requestId || '');
+    if (!key) return Promise.reject(new Error('missing request id'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        resultWaiters.delete(key);
+        reject(new Error(`${artist || 'Artist Thumb'} 결과 수신 시간이 초과되었습니다.`));
+      }, ARTIST_QUEUE_RESULT_TIMEOUT_MS);
+      resultWaiters.set(key, {resolve, reject, timer});
+    });
+  }
+
+  function resolveArtistResultWaiter(requestId, entry) {
+    const key = String(requestId || '');
+    const waiter = resultWaiters.get(key);
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    resultWaiters.delete(key);
+    waiter.resolve(entry);
+  }
+
+  function rejectAllArtistResultWaiters(error) {
+    resultWaiters.forEach(waiter => {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    });
+    resultWaiters.clear();
   }
 
   function closeContextMenu() {
@@ -646,7 +907,25 @@ export function createArtistThumbController({
     menu.setAttribute('role', 'menu');
     contextMenuEl = menu;
     const favoriteLabel = item.favorite ? '관심 해제' : '관심 추가';
+    const queued = hasQueuedArtist(item.artist);
+    const queueGroupHtml = queued
+      ? `
+        <button type="button" class="result-context-item artist-thumb-queue-cancel" data-action="queue-cancel" role="menuitem">
+          <span>생성 예약 취소</span>
+        </button>
+      `
+      : `
+        <button type="button" class="result-context-item artist-thumb-queue-fixed" data-action="queue-fixed" role="menuitem">
+          <span>생성 예약 (고정)</span>
+        </button>
+        <button type="button" class="result-context-item artist-thumb-queue-random" data-action="queue-random" role="menuitem">
+          <span>생성 예약 (랜덤)</span>
+        </button>
+      `;
     menu.innerHTML = `
+      <div class="result-context-group">
+        ${queueGroupHtml}
+      </div>
       <div class="result-context-group">
         <button type="button" class="result-context-item" data-action="favorite" role="menuitem">
           <span>${favoriteLabel}</span>
@@ -669,6 +948,12 @@ export function createArtistThumbController({
         setFavoriteForItem(targetItem, !targetItem.favorite).catch(error => {
           showToast?.(error.message || 'Favorite failed', 'error');
         });
+      } else if (action === 'queue-fixed') {
+        enqueueArtistGeneration(targetItem, 'fixed');
+      } else if (action === 'queue-random') {
+        enqueueArtistGeneration(targetItem, 'random');
+      } else if (action === 'queue-cancel') {
+        cancelQueuedArtist(targetItem?.artist);
       } else if (action === 'ban') {
         banItem(targetItem).catch(error => {
           showToast?.(error.message || 'Ban failed', 'error');
@@ -798,41 +1083,56 @@ export function createArtistThumbController({
     onPromptEdit?.();
   }
 
+  function generationPayloadForItem(item, requestId, overrides = {}) {
+    const artistPrompt = formatArtistPrompt(item.artist);
+    return {
+      request_id: requestId,
+      artist: item.artist,
+      prefix: overrides.prefix != null ? overrides.prefix : (prefixEl?.value || ''),
+      positive: overrides.positive != null ? overrides.positive : (positiveEl?.value || artistPrompt),
+      postfix: overrides.postfix != null ? overrides.postfix : (postfixEl?.value || ''),
+      negative_prompt: overrides.negative_prompt != null ? overrides.negative_prompt : (negEdit?.value || ''),
+      width: overrides.width != null ? overrides.width : 832,
+      height: overrides.height != null ? overrides.height : 1216,
+    };
+  }
+
+  async function requestArtistGeneration(payload, options = {}) {
+    const keepPreview = Boolean(options.keepPreview && resultBlobUrl && resultImageEl?.classList.contains('show'));
+    pendingResultRequestId = payload.request_id;
+    pendingResultMeta = null;
+    if (!keepPreview) revokeResultBlobUrl();
+    pendingResultSuppressPreview = Boolean(options.suppressPreview);
+    pendingResultKeepPreview = keepPreview;
+    pendingResultAutoExpand = Boolean(options.autoExpand);
+    if (resultTitleEl && !keepPreview) resultTitleEl.textContent = `${payload.artist} · generating`;
+    if (!pendingResultSuppressPreview && !keepPreview) showResultPreview('Waiting for generated image...');
+    await postJson('/api/artist-thumb/options', {
+      prefix: payload.prefix,
+      postfix: payload.postfix,
+    });
+    await postJson('/api/artist-thumb/generate', payload);
+  }
+
   async function generateSelected() {
     const item = selectedPayload();
     if (!item) return;
+    if (artistGenerationActive() || artistQueueRunning) {
+      enqueueArtistGeneration(item, 'fixed');
+      return;
+    }
     const requestId = makeRequestId();
-    const artistPrompt = formatArtistPrompt(item.artist);
     pendingResultAutoExpand = false;
-    const payload = {
-      request_id: requestId,
-      artist: item.artist,
-      prefix: prefixEl?.value || '',
-      positive: positiveEl?.value || artistPrompt,
-      postfix: postfixEl?.value || '',
-      negative_prompt: negEdit?.value || '',
-      width: 832,
-      height: 1216,
-    };
+    const payload = generationPayloadForItem(item, requestId);
     try {
-      pendingResultRequestId = requestId;
-      pendingResultMeta = null;
-      revokeResultBlobUrl();
-      pendingResultSuppressPreview = false;
-      if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
-      showResultPreview('Waiting for generated image...');
       setGenerateBusy('manual', 'Requesting...');
-      await postJson('/api/artist-thumb/options', {
-        prefix: payload.prefix,
-        postfix: payload.postfix,
-      });
-      await postJson('/api/artist-thumb/generate', payload);
+      await requestArtistGeneration(payload);
       showToast?.('Artist Thumbnail 생성 요청을 보냈습니다.', 'success');
     } catch (error) {
-      pendingResultRequestId = '';
-      pendingResultMeta = null;
+      clearPendingArtistRequest();
       showResultPreview(error.message || 'Generate failed');
       showToast?.(error.message || 'Generate failed', 'error');
+      resumeArtistQueueIfReady();
     } finally {
       clearGenerateBusy();
     }
@@ -841,6 +1141,10 @@ export function createArtistThumbController({
   async function generateWithRandomPrompt() {
     const item = selectedPayload();
     if (!item) return;
+    if (artistGenerationActive() || artistQueueRunning) {
+      enqueueArtistGeneration(item, 'random');
+      return;
+    }
     const artistPrompt = String(positiveEl?.value || formatArtistPrompt(item.artist) || '').trim();
     if (!artistPrompt) {
       showToast?.('Artist Prompt가 비어 있습니다.', 'error');
@@ -870,26 +1174,242 @@ export function createArtistThumbController({
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
       if (randomGenerateBtn) randomGenerateBtn.textContent = 'Requesting...';
       applyGeneratedPromptToEditor(positive, negative);
-      await postJson('/api/artist-thumb/generate', {
-        request_id: requestId,
-        artist: item.artist,
+      await requestArtistGeneration(generationPayloadForItem(item, requestId, {
         prefix: '',
         positive,
         postfix: '',
         negative_prompt: negative,
         width,
         height,
-      });
+      }), {suppressPreview: true, autoExpand: true});
       showToast?.('랜덤 프롬프트 생성 요청을 보냈습니다.', 'success');
     } catch (error) {
-      pendingResultRequestId = '';
-      pendingResultMeta = null;
-      pendingResultAutoExpand = false;
-      pendingResultSuppressPreview = false;
+      clearPendingArtistRequest();
       if (resultPreviewEl) resultPreviewEl.hidden = true;
       showToast?.(error.message || 'Random prompt generate failed', 'error');
+      resumeArtistQueueIfReady();
     } finally {
       clearGenerateBusy();
+    }
+  }
+
+  async function buildQueuedPayload(item, requestId, mode) {
+    if (mode !== 'random') {
+      return generationPayloadForItem(item, requestId, {
+        positive: formatArtistPrompt(item.artist),
+      });
+    }
+    const artistPrompt = String(formatArtistPrompt(item.artist) || '').trim();
+    if (!artistPrompt) throw new Error(`${item.artist} Artist Prompt가 비어 있습니다.`);
+    const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
+      artist_prompt: artistPrompt,
+      timeout: 45,
+    });
+    const positive = String(randomPrompt.prompt || '');
+    if (!positive.trim()) throw new Error(`${item.artist} random prompt is empty`);
+    const negative = String(randomPrompt.negative_prompt || negEdit?.value || '');
+    return generationPayloadForItem(item, requestId, {
+      prefix: '',
+      positive,
+      postfix: '',
+      negative_prompt: negative,
+      width: Number.parseInt(randomPrompt.width, 10) || 832,
+      height: Number.parseInt(randomPrompt.height, 10) || 1216,
+    });
+  }
+
+  function normalizeQueueMode(mode) {
+    return mode === 'random' ? 'random' : 'fixed';
+  }
+
+  function queueModeLabel(mode) {
+    return normalizeQueueMode(mode) === 'random' ? '랜덤' : '고정';
+  }
+
+  function artistGenerationActive() {
+    return Boolean(pendingResultRequestId);
+  }
+
+  function updateWaitingQueueStatus() {
+    if (artistQueueEntries.length && !artistQueueRunning) {
+      setStatus(`Artist queue waiting · ${artistQueueEntries.length}`, 'busy');
+    }
+  }
+
+  function resumeArtistQueueIfReady() {
+    if (!artistQueueEntries.length || artistQueueRunning || artistGenerationActive()) return;
+    startArtistQueueRunner();
+  }
+
+  function clearPendingArtistRequest() {
+    pendingResultRequestId = '';
+    pendingResultMeta = null;
+    pendingResultAutoExpand = false;
+    pendingResultSuppressPreview = false;
+    pendingResultKeepPreview = false;
+  }
+
+  function enqueueArtistGeneration(item, mode = 'fixed', options = {}) {
+    if (!item?.artist) return null;
+    if (artistQueueCancelRequested) {
+      if (!options.silent) showToast?.('Artist queue cancellation is pending.', 'error');
+      return null;
+    }
+    const queueMode = normalizeQueueMode(mode);
+    const entry = {
+      id: `artist-queue-${++artistQueueSerial}`,
+      item: {...item},
+      mode: queueMode,
+    };
+    artistQueueEntries.push(entry);
+    updateQueuedCards();
+    updateArtistActionAvailability();
+    if (!options.silent) {
+      showToast?.(`${item.artist} 생성 예약 (${queueModeLabel(queueMode)})`, 'success');
+    }
+    if (options.start !== false) {
+      if (!artistGenerationActive() && !artistQueueRunning) {
+        startArtistQueueRunner();
+      } else {
+        updateWaitingQueueStatus();
+      }
+    }
+    return entry;
+  }
+
+  function cancelQueuedArtist(artist) {
+    const key = String(artist || '').trim();
+    if (!key) return 0;
+    const before = artistQueueEntries.length;
+    for (let index = artistQueueEntries.length - 1; index >= 0; index -= 1) {
+      if (artistQueueEntries[index]?.item?.artist === key) {
+        artistQueueEntries.splice(index, 1);
+      }
+    }
+    const removed = before - artistQueueEntries.length;
+    if (!removed) return 0;
+    updateQueuedCards();
+    updateArtistActionAvailability();
+    if (artistQueueEntries.length) {
+      setStatus(`Artist queue waiting · ${artistQueueEntries.length}`, 'busy');
+    } else if (!artistQueueRunning) {
+      setStatus('Artist queue reservation cancelled.', 'ok');
+    }
+    showToast?.(`${key} 예약을 취소했습니다.`, 'success');
+    return removed;
+  }
+
+  function enqueueArtistBatch(items, mode) {
+    const queueMode = normalizeQueueMode(mode);
+    let count = 0;
+    items.forEach(item => {
+      if (enqueueArtistGeneration(item, queueMode, {silent: true, start: false})) count += 1;
+    });
+    updateQueuedCards();
+    if (count > 0) {
+      showToast?.(`Artist queue reserved (${count})`, 'success');
+      if (!artistGenerationActive() && !artistQueueRunning) {
+        startArtistQueueRunner();
+      } else {
+        updateWaitingQueueStatus();
+      }
+    }
+    return count;
+  }
+
+  async function runQueuedArtistGeneration(entry, index, total) {
+    const item = entry?.item;
+    const mode = normalizeQueueMode(entry?.mode);
+    if (!item?.artist) throw new Error('Artist queue item is invalid');
+    const requestId = makeRequestId();
+    setStatus(`Artist queue ${index + 1} / ${total} · ${item.artist} (${queueModeLabel(mode)})`, 'busy');
+    let resultPromise = null;
+    try {
+      const payload = await buildQueuedPayload(item, requestId, mode);
+      resultPromise = waitForArtistResult(requestId, item.artist);
+      await requestArtistGeneration(payload, {keepPreview: true});
+      return await resultPromise;
+    } catch (error) {
+      const waiter = resultWaiters.get(requestId);
+      if (waiter) {
+        clearTimeout(waiter.timer);
+        resultWaiters.delete(requestId);
+      }
+      throw error;
+    }
+  }
+
+  function cancelArtistQueue() {
+    if (!artistQueueRunning && !artistQueueEntries.length) return;
+    artistQueueCancelRequested = true;
+    artistQueueEntries.length = 0;
+    updateQueuedCards();
+    if (batchBtn) batchBtn.textContent = '취소 대기...';
+    setStatus('Artist queue cancellation requested. Current generation will finish first.', 'busy');
+  }
+
+  function startArtistQueue(mode) {
+    if (artistQueueRunning) return;
+    const items = selectionMode ? selectedBatchItemsInGridOrder() : visibleGridItemsInGridOrder();
+    if (!items.length) {
+      showToast?.(selectionMode ? '일괄 생성할 아티스트를 선택하세요.' : '일괄 생성할 썸네일이 없습니다.', 'error');
+      if (!selectionMode) setSelectionMode(true);
+      return;
+    }
+    closeBatchMenu();
+    setSelectionMode(false);
+    enqueueArtistBatch(items, mode);
+  }
+
+  async function startArtistQueueRunner() {
+    if (artistQueueRunning) return;
+    if (artistGenerationActive()) {
+      updateWaitingQueueStatus();
+      return;
+    }
+    if (!artistQueueEntries.length) {
+      updateArtistActionAvailability();
+      return;
+    }
+    artistQueueRunning = true;
+    artistQueueCancelRequested = false;
+    artistQueueMode = '';
+    updateArtistActionAvailability();
+    let completed = 0;
+    try {
+      while (artistQueueEntries.length) {
+        if (artistQueueCancelRequested) break;
+        const entry = artistQueueEntries.shift();
+        activeArtistQueueEntry = entry;
+        artistQueueMode = normalizeQueueMode(entry?.mode);
+        updateQueuedCards();
+        const total = completed + 1 + artistQueueEntries.length;
+        await runQueuedArtistGeneration(entry, completed, total);
+        completed += 1;
+        activeArtistQueueEntry = null;
+      }
+      if (artistQueueCancelRequested) {
+        showToast?.(`Artist queue cancelled (${completed})`, 'success');
+        setStatus(`Artist queue cancelled · ${completed}`, 'ok');
+      } else {
+        showToast?.(`Artist queue completed (${completed})`, 'success');
+        setStatus(`Artist queue completed · ${completed}`, 'ok');
+      }
+    } catch (error) {
+      console.error('Artist queue failed', error);
+      clearPendingArtistRequest();
+      artistQueueEntries.length = 0;
+      showToast?.(error.message || 'Artist queue failed', 'error');
+      setStatus(error.message || 'Artist queue failed', 'error');
+    } finally {
+      artistQueueRunning = false;
+      artistQueueCancelRequested = false;
+      artistQueueMode = '';
+      activeArtistQueueEntry = null;
+      rejectAllArtistResultWaiters(new Error('Artist queue stopped'));
+      clearGenerateBusy();
+      updateQueuedCards();
+      updateArtistActionAvailability();
     }
   }
 
@@ -900,11 +1420,11 @@ export function createArtistThumbController({
     if (!pendingResultRequestId && requestId) pendingResultRequestId = requestId;
     pendingResultMeta = meta;
     const artist = meta.artist_thumb_artist || selected?.artist || 'Artist Thumb';
-    if (resultTitleEl) {
+    if (resultTitleEl && !pendingResultKeepPreview) {
       const size = meta.width && meta.height ? ` · ${meta.width}x${meta.height}` : '';
       resultTitleEl.textContent = `${artist}${size}`;
     }
-    if (!pendingResultSuppressPreview) {
+    if (!pendingResultSuppressPreview && !pendingResultKeepPreview) {
       showResultPreview('Receiving generated image...');
     }
     return true;
@@ -912,23 +1432,31 @@ export function createArtistThumbController({
 
   function handleResultBlob(blob) {
     if (!pendingResultMeta || !blob) return false;
-    revokeResultBlobUrl();
-    resultBlobUrl = URL.createObjectURL(blob);
+    const meta = pendingResultMeta;
+    const requestId = String(meta.artist_thumb_request_id || pendingResultRequestId || '');
+    const artist = String(meta.artist_thumb_artist || selected?.artist || '').trim();
+    const rememberedEntry = rememberArtistResult(artist, blob, meta);
+    setResultBlobUrl(rememberedEntry?.url || URL.createObjectURL(blob), !rememberedEntry);
     resultPreviewOpen = true;
     applyResultPreviewVisibility();
+    if (resultTitleEl) resultTitleEl.textContent = titleForResultMemory(rememberedEntry || {artist, meta});
     if (resultImageEl) {
       resultImageEl.src = resultBlobUrl;
       resultImageEl.classList.add('show');
     }
     if (resultEmptyEl) resultEmptyEl.hidden = true;
+    const skipAutoExpandForQueuedNext = artistQueueEntries.length > 0;
     pendingResultMeta = null;
     pendingResultRequestId = '';
     pendingResultSuppressPreview = false;
+    pendingResultKeepPreview = false;
     updateResultExpandButton();
     if (pendingResultAutoExpand) {
       pendingResultAutoExpand = false;
-      if (artistTabActive) setResultExpanded(true);
+      if (artistTabActive && !skipAutoExpandForQueuedNext) setResultExpanded(true);
     }
+    resolveArtistResultWaiter(requestId, rememberedEntry);
+    resumeArtistQueueIfReady();
     return true;
   }
 
@@ -1014,13 +1542,32 @@ export function createArtistThumbController({
       }
     });
     downloadBtn?.addEventListener('click', downloadSelectedMode);
+    selectBtn?.addEventListener('click', toggleSelectionMode);
+    batchBtn?.addEventListener('click', toggleBatchMenu);
+    batchMenu?.addEventListener('click', event => {
+      const button = event.target.closest('[data-artist-batch-mode]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      startArtistQueue(button.dataset.artistBatchMode || 'fixed');
+    });
+    document.addEventListener('click', event => {
+      if (batchMenu?.hidden) return;
+      if (event.target.closest('.artist-thumb-bulk-wrap')) return;
+      closeBatchMenu();
+    });
     randomBtn?.addEventListener('click', loadRandomArtists);
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
     gridEl?.addEventListener('click', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');
       if (!card || !gridEl.contains(card)) return;
       const item = itemFromCard(card);
-      if (item) selectArtist(item);
+      if (!item) return;
+      if (selectionMode) {
+        toggleBatchSelection(item);
+        return;
+      }
+      selectArtist(item);
     });
     gridEl?.addEventListener('contextmenu', event => {
       const card = event.target.closest('.artist-thumb-card[data-artist]');

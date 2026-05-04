@@ -2117,14 +2117,72 @@ class RemoteBridge(QObject):
         width, height = random.SystemRandom().choice(self._artist_thumb_resolution_options())
         return width, height, "random"
 
+    @staticmethod
+    def _round_to_multiple(value: float, multiple_of: int = 64) -> int:
+        return max(multiple_of, int(round(float(value) / multiple_of)) * multiple_of)
+
+    def _fit_nai_resolution_to_limits(self, width: int, height: int) -> tuple[int, int]:
+        """비율을 유지하면서 NAI 허용 범위 안의 64배수 해상도로 보정합니다."""
+        width = max(1, int(width))
+        height = max(1, int(height))
+        multiple_of = 64
+        max_long = 2048
+        max_short = 1536
+
+        if height > width:
+            max_width, max_height = max_short, max_long
+        else:
+            max_width, max_height = max_long, max_short
+
+        scale = min(1.0, max_width / width, max_height / height)
+        target_width = width * scale
+        target_height = height * scale
+
+        fit_width = self._round_to_multiple(target_width, multiple_of)
+        fit_height = self._round_to_multiple(target_height, multiple_of)
+
+        fit_width = min(max_width, max(multiple_of, fit_width))
+        fit_height = min(max_height, max(multiple_of, fit_height))
+        fit_width = (fit_width // multiple_of) * multiple_of
+        fit_height = (fit_height // multiple_of) * multiple_of
+
+        if self._resolution_allowed_for_current_mode(fit_width, fit_height):
+            return fit_width, fit_height
+
+        ratio = width / height
+        best: tuple[float, int, int] | None = None
+        for candidate_width in range(multiple_of, max_width + 1, multiple_of):
+            ideal_height = candidate_width / ratio
+            for candidate_height in {
+                (int(ideal_height) // multiple_of) * multiple_of,
+                self._round_to_multiple(ideal_height, multiple_of),
+            }:
+                if candidate_height < multiple_of or candidate_height > max_height:
+                    continue
+                if not self._resolution_allowed_for_current_mode(candidate_width, candidate_height):
+                    continue
+                aspect_error = abs((candidate_width / candidate_height) - ratio)
+                area_loss = abs((candidate_width * candidate_height) - (target_width * target_height))
+                score = aspect_error * 1_000_000 + area_loss
+                if best is None or score < best[0]:
+                    best = (score, candidate_width, candidate_height)
+
+        if best is not None:
+            return best[1], best[2]
+        return (832, 1216)
+
     def _coerce_artist_thumb_resolution(self, width, height) -> tuple[int, int]:
         try:
             pair = (int(width), int(height))
         except (TypeError, ValueError):
             pair = (832, 1216)
+        if pair[0] <= 0 or pair[1] <= 0:
+            pair = (832, 1216)
         if self._resolution_allowed_for_current_mode(*pair):
             return pair
-        return (832, 1216)
+        if str(self._current_api_mode() or "").upper() == "NAI":
+            return self._fit_nai_resolution_to_limits(*pair)
+        return pair
 
     def _normalize_artist_thumb_values(self, values) -> list[str]:
         seen = set()
@@ -9299,19 +9357,20 @@ class RemoteBridge(QObject):
                 # NAIA combo 텍스트 포맷: "1024 x 1024" (공백 포함)
                 cf_width, cf_height, cf_res_source = None, None, "unknown"
                 try:
-                    artist_thumb_random_prompt = bool(cf_pending.get("artist_thumb_random_prompt"))
                     src_row = getattr(prompt_context, "source_row", None)
                     if (
-                        not artist_thumb_random_prompt
-                        and src_row is not None
+                        src_row is not None
                         and "image_width" in src_row
                         and "image_height" in src_row
                     ):
                         try:
                             w = int(src_row["image_width"])
                             h = int(src_row["image_height"])
-                            if w > 0 and h > 0 and self._resolution_allowed_for_current_mode(w, h):
-                                cf_width, cf_height, cf_res_source = w, h, "detected"
+                            if w > 0 and h > 0:
+                                fitted_w, fitted_h = self._coerce_artist_thumb_resolution(w, h)
+                                if self._resolution_allowed_for_current_mode(fitted_w, fitted_h):
+                                    cf_width, cf_height = fitted_w, fitted_h
+                                    cf_res_source = "detected" if (fitted_w, fitted_h) == (w, h) else "detected_fit"
                         except (ValueError, TypeError):
                             pass
                     if cf_width is None:

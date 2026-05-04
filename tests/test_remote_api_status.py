@@ -120,6 +120,24 @@ class _ToggleButton:
         self.enabled = bool(value)
 
 
+class _ImmediateLoop:
+    def call_soon_threadsafe(self, fn, *args):
+        fn(*args)
+
+
+class _DoneFuture:
+    def __init__(self):
+        self.value = None
+        self._done = False
+
+    def done(self):
+        return self._done
+
+    def set_result(self, value):
+        self.value = value
+        self._done = True
+
+
 class _StatusBar:
     def __init__(self):
         self.messages = []
@@ -1094,8 +1112,38 @@ def test_artist_thumb_random_resolution_filters_unsafe_nai_sizes(tmp_path, monke
     )
 
     assert bridge._artist_thumb_resolution_options() == [(1536, 2048), (832, 1216)]
-    assert bridge._coerce_artist_thumb_resolution(4096, 4096) == (832, 1216)
+    assert bridge._coerce_artist_thumb_resolution(4096, 4096) == (1536, 1536)
+    assert bridge._coerce_artist_thumb_resolution(1000, 1000) == (1024, 1024)
+    assert bridge._coerce_artist_thumb_resolution(4096, 6144) == (1344, 2048)
     assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (1536, 2048)
+
+
+def test_artist_thumb_random_prompt_fits_detected_nai_resolution(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        negative_prompt_textedit=_TextEdit("negative"),
+        search_results=None,
+        resolution_combo=_ResolutionCombo(["832 x 1216"]),
+    )
+    ctx.current_prompt_context = None
+    bridge = RemoteBridge(ctx)
+    bridge._loop = _ImmediateLoop()
+    future = _DoneFuture()
+    bridge._pending_comfyui_requests["req"] = future
+    bridge._pending_overrides[("comfyui", "req")] = {
+        "comfyui_request_id": "req",
+        "artist_thumb_random_prompt": True,
+    }
+
+    bridge.on_prompt_generated(SimpleNamespace(
+        final_prompt="prompt",
+        source_row={"image_width": 4096, "image_height": 6144},
+    ))
+
+    assert future.value["width"] == 1344
+    assert future.value["height"] == 2048
+    assert future.value["resolution_source"] == "detected_fit"
 
 
 def test_artist_thumb_generate_coerces_invalid_nai_resolution(tmp_path, monkeypatch):
@@ -1122,8 +1170,8 @@ def test_artist_thumb_generate_coerces_invalid_nai_resolution(tmp_path, monkeypa
 
     overrides, priority = ctx.main_window.generation_controller.executed[0]
     assert priority == 0
-    assert overrides["width"] == 832
-    assert overrides["height"] == 1216
+    assert overrides["width"] == 1536
+    assert overrides["height"] == 1536
 
 
 def test_artist_thumb_state_counts_visible_artists_after_bans(tmp_path, monkeypatch):

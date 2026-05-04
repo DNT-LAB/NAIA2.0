@@ -128,6 +128,7 @@ class _ImmediateLoop:
 class _DoneFuture:
     def __init__(self):
         self.value = None
+        self.exception = None
         self._done = False
 
     def done(self):
@@ -135,6 +136,10 @@ class _DoneFuture:
 
     def set_result(self, value):
         self.value = value
+        self._done = True
+
+    def set_exception(self, exception):
+        self.exception = exception
         self._done = True
 
 
@@ -1146,6 +1151,39 @@ def test_artist_thumb_random_prompt_fits_detected_nai_resolution(tmp_path, monke
     assert future.value["width"] == 832
     assert future.value["height"] == 1216
     assert future.value["resolution_source"] == "detected_fit"
+
+
+def test_artist_thumb_random_prompt_empty_source_fails_pending_request(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    triggered = []
+    ctx = _AppContext()
+    ctx.session_p_eng_override = None
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"자동 생성": _ToggleButton(False)},
+        trigger_random_prompt=lambda **kwargs: triggered.append(kwargs),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._loop = _ImmediateLoop()
+    bridge._pick_from_snapshot = lambda active_ratings: None
+    future = _DoneFuture()
+    bridge._pending_comfyui_requests["req"] = future
+    bridge._pending_random_requests.append({
+        "ws": None,
+        "source_row": None,
+        "active_ratings": {"s"},
+        "comfyui_request_id": "req",
+        "respect_naia_autogen": False,
+        "force_naia_skip_generate": True,
+    })
+
+    bridge._do_random()
+
+    assert triggered == []
+    assert future.done()
+    assert isinstance(future.exception, RuntimeError)
+    assert "source is empty" in str(future.exception)
+    assert "req" not in bridge._pending_comfyui_requests
+    assert ("comfyui", "req") not in bridge._pending_overrides
 
 
 def test_artist_thumb_generate_coerces_invalid_nai_resolution(tmp_path, monkeypatch):

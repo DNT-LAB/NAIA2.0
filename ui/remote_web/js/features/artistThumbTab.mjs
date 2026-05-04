@@ -49,6 +49,7 @@ export function createArtistThumbController({
   const PAGE_SIZE = 48;
   const MAX_RESULT_MEMORY = 128;
   const ARTIST_QUEUE_RESULT_TIMEOUT_MS = 20 * 60 * 1000;
+  const ARTIST_RANDOM_PROMPT_TIMEOUT_MS = 55 * 1000;
   const GENERATE_LABEL = 'Generate 832 x 1216';
   const RANDOM_GENERATE_LABEL = 'Generate with Random Prompt';
   const BATCH_LABEL = '일괄생성';
@@ -826,15 +827,31 @@ export function createArtistThumbController({
     return selected;
   }
 
-  async function postJson(url, payload) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload || {}),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-    return data;
+  async function postJson(url, payload, options = {}) {
+    const timeoutMs = Number(options.timeoutMs || 0);
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    let timer = null;
+    if (controller) {
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+    }
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload || {}),
+        signal: controller?.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(options.timeoutMessage || 'Request timed out');
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   function waitForArtistResult(requestId, artist) {
@@ -1169,6 +1186,9 @@ export function createArtistThumbController({
       const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
         artist_prompt: artistPrompt,
         timeout: 45,
+      }, {
+        timeoutMs: ARTIST_RANDOM_PROMPT_TIMEOUT_MS,
+        timeoutMessage: 'Random prompt request timed out',
       });
       const positive = String(randomPrompt.prompt || '');
       if (!positive.trim()) throw new Error('Random prompt is empty');
@@ -1209,6 +1229,9 @@ export function createArtistThumbController({
     const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
       artist_prompt: artistPrompt,
       timeout: 45,
+    }, {
+      timeoutMs: ARTIST_RANDOM_PROMPT_TIMEOUT_MS,
+      timeoutMessage: `${item.artist} random prompt request timed out`,
     });
     const positive = String(randomPrompt.prompt || '');
     if (!positive.trim()) throw new Error(`${item.artist} random prompt is empty`);

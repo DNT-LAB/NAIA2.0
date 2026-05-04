@@ -3942,6 +3942,15 @@ class RemoteBridge(QObject):
                                                 "level": "error"})
                         return
 
+            if comfyui_request_id and source_row is None:
+                if self._pick_from_snapshot(active_ratings) is None:
+                    self._fail_comfyui_random_request(
+                        comfyui_request_id,
+                        "Random prompt source is empty",
+                    )
+                    print("🌐 Remote: 랜덤 프롬프트 생성 실패 — 후보 없음")
+                    return
+
             mw.trigger_random_prompt(active_ratings=active_ratings,
                                      source_row_override=source_row)
             print("🌐 Remote: 랜덤 프롬프트 생성됨")

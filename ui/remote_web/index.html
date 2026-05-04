@@ -198,6 +198,14 @@
   <div class="pe-popup-body"></div>
 </div>
 
+<div class="resolution-manager-popup" id="resolutionManagerPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-title">Manage Resolution</span>
+    <button class="history-close" onclick="closeResolutionManager()">&times;</button>
+  </div>
+  <div class="resolution-manager-body" data-resolution-manager-body></div>
+</div>
+
 <div class="pe-popup" id="chunkPanel">
   <div class="module-popup-header">
     <span class="module-popup-title">Chunk</span>
@@ -313,7 +321,10 @@
             </div>
             <div class="param-row">
               <span class="param-label">Resolution</span>
-              <select class="param-select" id="pResolution" onchange="setParam('resolution',this.value)"></select>
+              <div class="param-inline">
+                <select class="param-select" id="pResolution" onchange="setParam('resolution',this.value)"></select>
+                <button type="button" class="param-manage-btn" onclick="openResolutionManager()">Manage</button>
+              </div>
             </div>
             <div class="param-row">
               <span class="param-label">Steps</span>

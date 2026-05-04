@@ -98,6 +98,7 @@ let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
 let danbooruFeedbackControl = null;
+let resolutionManagerPanel = null;
 let danbooruTabControl = null;
 let thumbTabControl = null;
 let artistThumbControl = null;
@@ -790,6 +791,26 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
+  });
+const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs')
+  .then(({createResolutionManagerPanel}) => {
+    resolutionManagerPanel = createResolutionManagerPanel({
+      document,
+      showToast,
+      getApiMode: () => currentMode || modeSelect?.value || '',
+      getCurrentResolution: () => paramEls.resolution?.value || qResolution?.value || '',
+      onSaved: payload => {
+        updateParams({
+          schema_only: true,
+          api_mode: payload.api_mode || currentMode || modeSelect?.value || '',
+          options_resolution: payload.resolutions || [],
+          resolution: payload.current_resolution,
+        });
+      },
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize resolution manager module', error);
   });
 
 function _collectCurrentParams() {
@@ -3112,11 +3133,23 @@ function closeAuxiliaryPopups(exceptPanel = null, options = {}) {
   if (exceptPanel !== peE621Panel && promptEngineeringPopups?.isOpen('e621')) closePeE621Panel();
   if (exceptPanel !== peDanbooruPanel && promptEngineeringPopups?.isOpen('danbooru')) closePeDanbooruPanel();
   if (exceptPanel !== peDebugPanel && promptEngineeringPopups?.isOpen('debug')) closePeDebugPanel();
+  const resolutionPanel = document.getElementById('resolutionManagerPanel');
+  if (exceptPanel !== resolutionPanel && resolutionManagerPanel?.isOpen()) closeResolutionManager();
 
   const tagFilterPopup = document.getElementById('tagFilterPopup');
   if (exceptPanel !== tagFilterPopup && tagFilterPopup?.classList.contains('open')) {
     closeTagFilter();
   }
+}
+
+function openResolutionManager() {
+  const panel = document.getElementById('resolutionManagerPanel');
+  closeAuxiliaryPopups(panel);
+  if (resolutionManagerPanel) resolutionManagerPanel.open();
+}
+
+function closeResolutionManager() {
+  if (resolutionManagerPanel) resolutionManagerPanel.close();
 }
 
 function openPePresetAddPanel() {
@@ -4181,6 +4214,7 @@ Promise.all([
   searchPanelReady,
   chunkPanelReady,
   danbooruFeedbackReady,
+  resolutionManagerReady,
   promptEngineeringPopupRenderersReady,
   promptEngineeringPanelReady,
   promptEngineeringActionsReady,

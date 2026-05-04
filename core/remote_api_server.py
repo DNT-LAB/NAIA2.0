@@ -132,6 +132,7 @@ class RemoteBridge(QObject):
     request_set_api_url = pyqtSignal(str, str)    # (mode, url) — WebUI/ComfyUI URL 설정
     request_test_api = pyqtSignal(str)            # mode — API 연결 테스트
     request_set_param = pyqtSignal(str, str)      # (key, value) — 생성 파라미터 변경
+    request_resolution_action = pyqtSignal(str)   # request_id — 해상도 목록 조회/저장
     request_get_module = pyqtSignal(object, str)    # (ws, module_id) — 모듈 상태 요청
     request_set_module = pyqtSignal(str, str, str) # (module_id, key, value) — 모듈 파라미터 변경
     request_artist_thumb_random_peng = pyqtSignal(str, str)  # (request_id, artist_prompt)
@@ -179,6 +180,10 @@ class RemoteBridge(QObject):
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
         },
     }
+    DEFAULT_RESOLUTIONS = [
+        "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
+        "1088 x 960", "1152 x 896", "1216 x 832",
+    ]
 
     def __init__(self, app_context):
         super().__init__()
@@ -275,6 +280,9 @@ class RemoteBridge(QObject):
         # Desktop snapshot requests: FastAPI request_id → {loop, future, reason}
         self._pending_desktop_snapshot_requests: dict = {}
         self._desktop_snapshot_requests_lock = threading.Lock()
+        # Resolution manager actions: FastAPI request_id → {loop, future, payload}
+        self._pending_resolution_actions: dict = {}
+        self._resolution_actions_lock = threading.Lock()
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
 
@@ -5270,6 +5278,139 @@ class RemoteBridge(QObject):
             if self._has_clients():
                 self._broadcast_json(data)
 
+    async def _request_resolution_action(self, payload: dict, timeout: float = 5.0) -> dict:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        request_id = uuid.uuid4().hex
+        with self._resolution_actions_lock:
+            self._pending_resolution_actions[request_id] = {
+                "loop": loop,
+                "future": future,
+                "payload": dict(payload or {}),
+            }
+        self.request_resolution_action.emit(request_id)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            with self._resolution_actions_lock:
+                self._pending_resolution_actions.pop(request_id, None)
+
+    def _complete_resolution_action(self, request: dict, result: dict):
+        loop = request.get("loop")
+        future = request.get("future")
+        if loop is None or future is None:
+            return
+        loop.call_soon_threadsafe(
+            lambda f=future, r=result: (f.set_result(r) if not f.done() else None)
+        )
+
+    def _resolution_multiple_for_current_mode(self) -> int:
+        return 64 if str(self._current_api_mode() or "").upper() == "NAI" else 8
+
+    def _current_resolution_items(self) -> list[str]:
+        mw = getattr(self.app_context, "main_window", None)
+        combo = getattr(mw, "resolution_combo", None)
+        items = self._combo_items(combo) if combo is not None else []
+        if items:
+            return items
+        stored = getattr(mw, "resolutions", None)
+        if isinstance(stored, list) and stored:
+            return [str(item) for item in stored if str(item).strip()]
+        return list(self.DEFAULT_RESOLUTIONS)
+
+    def _resolution_manager_state(self) -> dict:
+        mw = getattr(self.app_context, "main_window", None)
+        combo = getattr(mw, "resolution_combo", None)
+        current = ""
+        try:
+            current = combo.currentText() if combo is not None else ""
+        except Exception:
+            current = ""
+        resolutions = self._current_resolution_items()
+        if current not in resolutions:
+            current = resolutions[0] if resolutions else ""
+        return {
+            "ok": True,
+            "api_mode": self._current_api_mode(),
+            "multiple": self._resolution_multiple_for_current_mode(),
+            "max_value": 8192,
+            "warning_pixel_area": 1024 * 1024,
+            "defaults": list(self.DEFAULT_RESOLUTIONS),
+            "resolutions": resolutions,
+            "current_resolution": current,
+        }
+
+    def _normalize_resolution_items_for_save(self, raw_items) -> list[str]:
+        if not isinstance(raw_items, list):
+            raise ValueError("resolutions must be a list")
+        multiple = self._resolution_multiple_for_current_mode()
+        normalized = []
+        seen = set()
+        for item in raw_items:
+            pair = self._parse_resolution_pair(item)
+            if not pair:
+                raise ValueError(f"invalid resolution: {item}")
+            width, height = pair
+            if width > 8192 or height > 8192:
+                raise ValueError("width and height must be 8192 or less")
+            if width % multiple != 0 or height % multiple != 0:
+                raise ValueError(f"width and height must be multiples of {multiple}")
+            label = f"{width} x {height}"
+            if label in seen:
+                continue
+            seen.add(label)
+            normalized.append(label)
+        if not normalized:
+            raise ValueError("resolution list cannot be empty")
+        return normalized
+
+    def _apply_resolution_items(self, resolutions: list[str]) -> dict:
+        mw = getattr(self.app_context, "main_window", None)
+        if mw is None:
+            raise RuntimeError("main window is unavailable")
+        combo = getattr(mw, "resolution_combo", None)
+        current = combo.currentText() if combo is not None else ""
+        mw.resolutions = list(resolutions)
+        if hasattr(mw, "_save_resolutions"):
+            mw._save_resolutions(mw.resolutions)
+
+        for target_combo in (combo, getattr(mw, "detached_resolution_combo", None)):
+            if target_combo is None:
+                continue
+            try:
+                target_combo.clear()
+                target_combo.addItems(mw.resolutions)
+                if current in mw.resolutions:
+                    target_combo.setCurrentText(current)
+                else:
+                    target_combo.setCurrentIndex(0)
+            except Exception as exc:
+                print(f"🌐 Remote: 해상도 콤보 갱신 실패 — {exc}")
+
+        if hasattr(mw, "status_bar") and mw.status_bar:
+            mw.status_bar.showMessage("✅ 해상도 목록이 저장되었습니다.", 3000)
+        self._broadcast_params()
+        return self._resolution_manager_state()
+
+    def _do_resolution_action(self, request_id: str):
+        with self._resolution_actions_lock:
+            request = self._pending_resolution_actions.pop(request_id, None)
+        if not request:
+            return
+        payload = request.get("payload") or {}
+        action = str(payload.get("action") or "get").strip().lower()
+        try:
+            if action == "get":
+                result = self._resolution_manager_state()
+            elif action == "save":
+                resolutions = self._normalize_resolution_items_for_save(payload.get("resolutions"))
+                result = self._apply_resolution_items(resolutions)
+            else:
+                result = {"ok": False, "error": "unsupported resolution action"}
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)}
+        self._complete_resolution_action(request, result)
+
     # --- 생성 상태 동기화 (메인 UI 포함) ---
 
     def _on_generation_started_signal(self, data=None):
@@ -9687,6 +9828,29 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     async def api_queue_state():
         return await asyncio.to_thread(bridge._build_queue_state)
 
+    @app.get("/api/resolutions")
+    async def api_resolutions():
+        result = await bridge._request_resolution_action({"action": "get"})
+        if not result.get("ok"):
+            return JSONResponse({"error": result.get("error") or "Resolution state unavailable"}, status_code=500)
+        return result
+
+    @app.post("/api/resolutions")
+    async def api_save_resolutions(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        result = await bridge._request_resolution_action({
+            "action": "save",
+            "resolutions": payload.get("resolutions"),
+        })
+        if not result.get("ok"):
+            return JSONResponse({"error": result.get("error") or "Resolution save failed"}, status_code=400)
+        return result
+
     @app.post("/api/queue/action")
     async def api_queue_action(req: Request):
         try:
@@ -11067,6 +11231,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_set_api_url.connect(bridge._do_set_api_url, Qt.ConnectionType.QueuedConnection)
     bridge.request_test_api.connect(bridge._do_test_api, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_param.connect(bridge._do_set_param, Qt.ConnectionType.QueuedConnection)
+    bridge.request_resolution_action.connect(bridge._do_resolution_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_get_module.connect(bridge._do_get_module, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_module.connect(bridge._do_set_module, Qt.ConnectionType.QueuedConnection)
     bridge.request_artist_thumb_random_peng.connect(

@@ -968,14 +968,22 @@ export function createArtistThumbController({
     window.addEventListener('resize', closeContextMenu);
   }
 
+  function currentOptionsPayload() {
+    return {
+      prefix: prefixEl?.value || '',
+      postfix: postfixEl?.value || '',
+    };
+  }
+
+  function saveCurrentOptions() {
+    return postJson('/api/artist-thumb/options', currentOptionsPayload());
+  }
+
   function scheduleSaveOptions() {
     if (optionsTimer) clearTimeout(optionsTimer);
     optionsTimer = setTimeout(() => {
       optionsTimer = null;
-      postJson('/api/artist-thumb/options', {
-        prefix: prefixEl?.value || '',
-        postfix: postfixEl?.value || '',
-      }).catch(error => console.warn('Artist Thumb options save failed', error));
+      saveCurrentOptions().catch(error => console.warn('Artist Thumb options save failed', error));
     }, 500);
   }
 
@@ -1107,10 +1115,7 @@ export function createArtistThumbController({
     pendingResultAutoExpand = Boolean(options.autoExpand);
     if (resultTitleEl && !keepPreview) resultTitleEl.textContent = `${payload.artist} · generating`;
     if (!pendingResultSuppressPreview && !keepPreview) showResultPreview('Waiting for generated image...');
-    await postJson('/api/artist-thumb/options', {
-      prefix: payload.prefix,
-      postfix: payload.postfix,
-    });
+    await saveCurrentOptions();
     await postJson('/api/artist-thumb/generate', payload);
   }
 

@@ -1116,6 +1116,8 @@ def test_artist_thumb_random_resolution_filters_unsafe_nai_sizes(tmp_path, monke
     assert bridge._coerce_artist_thumb_resolution(1000, 1000) == (1024, 1024)
     assert bridge._coerce_artist_thumb_resolution(4096, 6144) == (832, 1216)
     assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (832, 1152)
+    assert bridge._coerce_artist_thumb_resolution(1, 100000) == (64, 16384)
+    assert bridge._coerce_artist_thumb_resolution(100000, 1) == (16384, 64)
 
 
 def test_artist_thumb_random_prompt_fits_detected_nai_resolution(tmp_path, monkeypatch):

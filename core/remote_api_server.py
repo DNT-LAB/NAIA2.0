@@ -134,6 +134,7 @@ class RemoteBridge(QObject):
     request_set_param = pyqtSignal(str, str)      # (key, value) — 생성 파라미터 변경
     request_get_module = pyqtSignal(object, str)    # (ws, module_id) — 모듈 상태 요청
     request_set_module = pyqtSignal(str, str, str) # (module_id, key, value) — 모듈 파라미터 변경
+    request_artist_thumb_random_peng = pyqtSignal(str, str)  # (request_id, artist_prompt)
     request_search = pyqtSignal(str)               # search_params JSON
     request_load_parquet = pyqtSignal(str)          # filename
     request_depth_action = pyqtSignal(str)          # depth search action JSON
@@ -274,6 +275,8 @@ class RemoteBridge(QObject):
         # Desktop snapshot requests: FastAPI request_id → {loop, future, reason}
         self._pending_desktop_snapshot_requests: dict = {}
         self._desktop_snapshot_requests_lock = threading.Lock()
+        self._pending_artist_thumb_random_peng_requests: dict = {}
+        self._artist_thumb_random_peng_requests_lock = threading.Lock()
 
     def _search_filter_state_path(self) -> Path:
         return Path("save") / "remote_web_filter_state.json"
@@ -2124,16 +2127,35 @@ class RemoteBridge(QObject):
         multiple_of = 64
         max_pixels = 1024 * 1024
 
-        ratio = width / height
-        target_width = int((max_pixels * ratio) ** 0.5)
-        target_height = int((max_pixels / ratio) ** 0.5)
+        def snap_nearest(value: float) -> int:
+            return max(multiple_of, int(round(value / multiple_of)) * multiple_of)
 
-        fit_width = max(multiple_of, (target_width // multiple_of) * multiple_of)
-        fit_height = max(multiple_of, (target_height // multiple_of) * multiple_of)
+        def snap_floor(value: float) -> int:
+            return max(multiple_of, int(value // multiple_of) * multiple_of)
 
-        while fit_width * fit_height > max_pixels:
-            fit_width = max(multiple_of, fit_width - multiple_of)
-            fit_height = max(multiple_of, int(fit_width / ratio) // multiple_of * multiple_of)
+        if width * height > max_pixels:
+            scale = math.sqrt(max_pixels / float(width * height))
+            fit_width = snap_floor(width * scale)
+            fit_height = snap_floor(height * scale)
+        else:
+            fit_width = snap_nearest(width)
+            fit_height = snap_nearest(height)
+
+        if fit_width * fit_height > max_pixels:
+            if fit_width >= fit_height:
+                limit = (max_pixels // fit_height // multiple_of) * multiple_of
+                fit_width = max(multiple_of, limit)
+            else:
+                limit = (max_pixels // fit_width // multiple_of) * multiple_of
+                fit_height = max(multiple_of, limit)
+
+        while fit_width * fit_height > max_pixels and (fit_width > multiple_of or fit_height > multiple_of):
+            if fit_width >= fit_height and fit_width > multiple_of:
+                fit_width -= multiple_of
+            elif fit_height > multiple_of:
+                fit_height -= multiple_of
+            else:
+                break
 
         return fit_width, fit_height
 
@@ -2611,6 +2633,55 @@ class RemoteBridge(QObject):
             "auto_hide": auto_hide,
             "preprocessing_options": preprocessing,
         }
+
+    async def _request_artist_thumb_random_peng_override(self, artist_prompt: str, timeout: float = 5.0) -> dict:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        request_id = uuid.uuid4().hex
+        with self._artist_thumb_random_peng_requests_lock:
+            self._pending_artist_thumb_random_peng_requests[request_id] = {
+                "loop": loop,
+                "future": future,
+            }
+        self.request_artist_thumb_random_peng.emit(request_id, artist_prompt)
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result if isinstance(result, dict) else {}
+        except asyncio.TimeoutError:
+            with self._artist_thumb_random_peng_requests_lock:
+                self._pending_artist_thumb_random_peng_requests.pop(request_id, None)
+            raise
+        except asyncio.CancelledError:
+            with self._artist_thumb_random_peng_requests_lock:
+                self._pending_artist_thumb_random_peng_requests.pop(request_id, None)
+            raise
+
+    def _complete_artist_thumb_random_peng_request(self, request: dict, result: dict = None, error: Exception = None):
+        loop = request.get("loop")
+        future = request.get("future")
+        if loop is None or future is None:
+            return
+
+        def finish():
+            if future.done():
+                return
+            if error is not None:
+                future.set_exception(error)
+            else:
+                future.set_result(result or {})
+
+        loop.call_soon_threadsafe(finish)
+
+    def _do_build_artist_thumb_random_peng_override(self, request_id: str, artist_prompt: str):
+        with self._artist_thumb_random_peng_requests_lock:
+            request = self._pending_artist_thumb_random_peng_requests.pop(request_id, None)
+        if not request:
+            return
+        try:
+            result = self._build_artist_thumb_random_peng_override(artist_prompt)
+            self._complete_artist_thumb_random_peng_request(request, result=result)
+        except Exception as e:
+            self._complete_artist_thumb_random_peng_request(request, error=e)
 
     def _do_artist_thumb_generate(self, payload: dict):
         try:
@@ -10131,10 +10202,12 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             timeout = 30.0
 
         try:
-            peng_override = await asyncio.to_thread(
-                bridge._build_artist_thumb_random_peng_override,
+            peng_override = await bridge._request_artist_thumb_random_peng_override(
                 artist_prompt,
+                timeout=min(5.0, timeout),
             )
+        except asyncio.TimeoutError:
+            return JSONResponse({"error": "prompt_engineering snapshot timeout"}, status_code=504)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -10996,6 +11069,10 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_set_param.connect(bridge._do_set_param, Qt.ConnectionType.QueuedConnection)
     bridge.request_get_module.connect(bridge._do_get_module, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_module.connect(bridge._do_set_module, Qt.ConnectionType.QueuedConnection)
+    bridge.request_artist_thumb_random_peng.connect(
+        bridge._do_build_artist_thumb_random_peng_override,
+        Qt.ConnectionType.QueuedConnection,
+    )
     bridge.request_search.connect(bridge._do_search, Qt.ConnectionType.QueuedConnection)
     bridge.request_load_parquet.connect(bridge._do_load_parquet, Qt.ConnectionType.QueuedConnection)
     bridge.request_depth_action.connect(bridge._do_depth_action, Qt.ConnectionType.QueuedConnection)

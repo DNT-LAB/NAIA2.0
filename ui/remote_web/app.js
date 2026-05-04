@@ -1723,6 +1723,9 @@ function switchRightTab(tabName, options = {}) {
   const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
   if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
+  if (artistThumbControl && typeof artistThumbControl.setActive === 'function') {
+    artistThumbControl.setActive(activeTab === 'artists');
+  }
   if (activeTab === 'artists' && artistThumbControl) artistThumbControl.load();
 }
 

@@ -8051,18 +8051,6 @@ class RemoteBridge(QObject):
             if ctx and ctx.wildcard_state:
                 for name, state in ctx.wildcard_state.items():
                     state_lines.append({"name": name, "current": state['current'], "total": state['total']})
-            # 인스턴트 와일드카드 그룹 정보
-            instant_groups = []
-            iw_module = self._find_module("instant_wildcard")
-            if iw_module:
-                try:
-                    flat_dict, tree = iw_module.get_wildcards()
-                    for fname, items in tree.items():
-                        group_name = fname.replace('.json', '') if fname.endswith('.json') else fname
-                        keys = list(items.keys())
-                        instant_groups.append({"name": group_name, "count": len(keys), "keys": keys[:20]})
-                except Exception:
-                    pass
             return {
                 "type": "module_state",
                 "module_id": "wildcard",
@@ -8070,7 +8058,6 @@ class RemoteBridge(QObject):
                 "state": state_lines,
                 "prompt_squeeze": getattr(self.app_context, 'prompt_squeeze_enabled', True),
                 "wildcard_count": len(self.app_context.wildcard_manager.wildcard_dict_tree),
-                "instant_groups": instant_groups,
             }
         except Exception as e:
             print(f"🌐 Remote: wildcard 상태 읽기 실패: {e}")
@@ -8897,7 +8884,15 @@ class RemoteBridge(QObject):
 
             if ":" in raw:
                 group_name, item_query = raw.split(":", 1)
+                group_name = group_name.strip()
+                item_query = item_query.strip()
                 group_items = tree.get(group_name)
+                if group_items is None:
+                    group_items = next(
+                        (items for existing_name, items in tree.items()
+                         if str(existing_name).lower() == group_name.lower()),
+                        None,
+                    )
                 if not group_items:
                     return []
                 return item_matches(group_items, group_name, item_query.lower())[:limit]

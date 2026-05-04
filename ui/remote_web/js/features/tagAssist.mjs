@@ -585,9 +585,18 @@ export function createTagAssistController({
     renderAutocomplete();
   }
 
+  function requestChunkAutocomplete(query) {
+    const normalized = String(query || '').trim();
+    if (!normalized) return false;
+    lastAcQuery = normalized.startsWith('$') ? normalized : `$${normalized}`;
+    window.clearTimeout(acTimer);
+    window.clearTimeout(tagLookupTimer);
+    return sendWs({type: 'autocomplete_chunk', query: lastAcQuery.slice(1).trim()});
+  }
+
   function chunkPreviewHtml(result) {
     if (!result) return '';
-    const title = result._wc_type === 'chunk_group' ? `$${result.tag}` : `$${result.tag}`;
+    const title = result._wc_type === 'chunk_group' ? `$${result.tag}:` : `$${result.tag}`;
     const meta = result._wc_type === 'chunk_group'
       ? `${result.desc || ''}`
       : `${result.group || ''}`;
@@ -608,11 +617,15 @@ export function createTagAssistController({
       const prefix = wcType === 'wildcard' ? '__' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : '');
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
+      const metaText = wcType === 'chunk'
+        ? (r.group || '')
+        : (wcType ? (r.desc || '') : fmtCount(r.count));
+      const inlinePreview = wcType === 'chunk_group' ? (r.preview || '') : '';
       html += `<div class="tag-ac-item${itemClass}${sel}" data-idx="${i}">` +
         `<span class="tag-ac-tag"${tagColor}>${escHtml(prefix + r.tag + suffix)}</span>` +
         `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
-        `<span class="tag-ac-count">${wcType ? escHtml(r.desc || '') : fmtCount(r.count)}</span>` +
-        (chunkMode ? `<span class="chunk-ac-inline-preview">${escHtml(r.preview || r.value || '')}</span>` : '') +
+        `<span class="tag-ac-count">${escHtml(metaText)}</span>` +
+        (chunkMode && inlinePreview ? `<span class="chunk-ac-inline-preview">${escHtml(inlinePreview)}</span>` : '') +
         '</div>';
     });
     html += chunkMode
@@ -653,8 +666,16 @@ export function createTagAssistController({
       return;
     }
     if (r._wc_type === 'chunk_group') {
-      swapToken(target, info, r.value || `$${r.tag}:`);
-      hideAutocomplete();
+      const groupToken = r.value || `$${r.tag}:`;
+      swapToken(target, info, groupToken);
+      acMode = true;
+      acResults = [];
+      acSel = -1;
+      tagTooltip.innerHTML = '<div class="chunk-ac-loading">Loading chunk items...</div>';
+      tagTooltip.classList.add('open', 'ac-mode', 'chunk-ac-mode');
+      syncTooltipSide();
+      positionTagTooltip();
+      requestChunkAutocomplete(groupToken);
       return;
     }
     if (r._wc_type === 'chunk') {

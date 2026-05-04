@@ -611,6 +611,7 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
     wildcardPanel = createWildcardPanel({
       document,
       escHtml,
+      renderInlineBrowser: () => wildcardManagerPanel?.renderInlineBrowser(),
     });
   })
   .catch(error => {
@@ -621,9 +622,12 @@ const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs
     wildcardManagerPanel = createWildcardManagerPanel({
       document,
       moduleBody,
+      modulePopup,
       escHtml,
       setModuleParam,
       showToast,
+      closeAuxiliaryPopups,
+      positionFloatingPanel,
     });
   })
   .catch(error => {
@@ -3135,6 +3139,8 @@ function closeAuxiliaryPopups(exceptPanel = null, options = {}) {
   if (exceptPanel !== peDebugPanel && promptEngineeringPopups?.isOpen('debug')) closePeDebugPanel();
   const resolutionPanel = document.getElementById('resolutionManagerPanel');
   if (exceptPanel !== resolutionPanel && resolutionManagerPanel?.isOpen()) closeResolutionManager();
+  const wildcardEditorPanel = document.getElementById('wildcardEditorPopup');
+  if (exceptPanel !== wildcardEditorPanel && wildcardManagerPanel?.isEditorOpen()) wildcardManagerPanel.closeEditor();
 
   const tagFilterPopup = document.getElementById('tagFilterPopup');
   if (exceptPanel !== tagFilterPopup && tagFilterPopup?.classList.contains('open')) {
@@ -3714,6 +3720,18 @@ function wcPromptNewFile() {
   if (wildcardManagerPanel) wildcardManagerPanel.promptNewFile();
 }
 
+function wcCloseEditor() {
+  if (wildcardManagerPanel) wildcardManagerPanel.closeEditor();
+}
+
+function wcToggleFolder(element) {
+  if (wildcardManagerPanel) wildcardManagerPanel.toggleFolder(element);
+}
+
+function wcOpenFile(element) {
+  if (wildcardManagerPanel) wildcardManagerPanel.openFile(element);
+}
+
 // ---- Image upload helper ----
 function pasteModuleImage(moduleId) {
   if (imageModulePanels) imageModulePanels.pasteImage(moduleId);
@@ -3931,6 +3949,7 @@ function getFloatingPanelWidth(panel) {
   if (panel === chunkPanel) return 420;
   if (panel === peDebugPanel) return 520;
   if (panel === refinePanel) return 400;
+  if (panel?.classList?.contains('wc-editor-popup')) return 560;
   return 420;
 }
 
@@ -4003,6 +4022,7 @@ function relayoutFloatingPanels() {
   positionFloatingPanel(peE621Panel, modulePopup);
   positionFloatingPanel(peDanbooruPanel, modulePopup);
   positionFloatingPanel(peDebugPanel, modulePopup);
+  if (wildcardManagerPanel) wildcardManagerPanel.relayout();
 }
 
 function openRefine() {

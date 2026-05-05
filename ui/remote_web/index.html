@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260505-search-parquet-v5">
+<link rel="stylesheet" href="style.css?v=20260505-characters-v7">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -465,6 +465,9 @@
     <button class="right-tab-btn" data-right-tab="artists" onclick="switchRightTab('artists')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🎨</span><span>Artists</span>
     </button>
+    <button class="right-tab-btn" data-right-tab="characters" onclick="switchRightTab('characters')" role="tab" aria-selected="false">
+      <span class="right-tab-icon">👤</span><span>Characters</span>
+    </button>
     <button class="right-tab-btn" data-right-tab="studio" onclick="switchRightTab('studio')" role="tab" aria-selected="false">
       <span class="right-tab-icon">▣</span><span>Studio</span>
     </button>
@@ -691,6 +694,112 @@
       </div>
     </div>
   </div>
+  <div class="right-tab-pane" id="rightTabCharacters" data-right-pane="characters" hidden role="tabpanel">
+    <div class="character-viewer-tab">
+      <aside class="character-viewer-browser">
+        <label class="character-viewer-field">
+          <span>Groups</span>
+          <input class="character-viewer-input" id="characterViewerGroupSearch" type="search" placeholder="Search groups..." autocomplete="off" spellcheck="false">
+        </label>
+        <nav class="character-viewer-group-list" id="characterViewerGroupList" aria-label="Character groups"></nav>
+      </aside>
+      <section class="character-viewer-workspace">
+        <div class="character-viewer-subtabs" role="tablist" aria-label="Character Viewer views">
+          <button type="button" class="character-viewer-subtab active" data-character-viewer-tab="characters" aria-selected="true">Characters</button>
+          <button type="button" class="character-viewer-subtab" data-character-viewer-tab="detail" aria-selected="false">Detail</button>
+        </div>
+        <section class="character-viewer-pane active" id="characterViewerCharactersPane" data-character-viewer-pane="characters" role="tabpanel">
+          <header class="character-viewer-head">
+            <div>
+              <div class="character-viewer-kicker">Character Viewer</div>
+              <div class="character-viewer-summary" id="characterViewerSummary">Character data</div>
+            </div>
+            <div class="character-viewer-tools">
+              <input class="character-viewer-input character-viewer-character-search" id="characterViewerSearch" type="search" placeholder="Search characters or tags..." autocomplete="off" spellcheck="false">
+              <label class="character-viewer-check"><input id="characterViewerThumbFirst" type="checkbox" checked> 썸네일 우선</label>
+              <span class="character-viewer-status" id="characterViewerStatus">Loading characters...</span>
+            </div>
+          </header>
+          <div class="character-viewer-grid" id="characterViewerGrid"></div>
+          <footer class="character-viewer-pager">
+            <button type="button" class="character-viewer-page-btn" id="characterViewerPrevBtn">Prev</button>
+            <span id="characterViewerPageLabel">0 / 0</span>
+            <label class="character-viewer-goto">
+              <span>Go To</span>
+              <input id="characterViewerGotoInput" type="number" min="1" inputmode="numeric" autocomplete="off">
+              <button type="button" id="characterViewerGotoBtn">Go</button>
+            </label>
+            <button type="button" class="character-viewer-page-btn" id="characterViewerNextBtn">Next</button>
+          </footer>
+        </section>
+        <section class="character-viewer-pane character-viewer-detail" id="characterViewerDetailPane" data-character-viewer-pane="detail" role="tabpanel" hidden>
+          <div class="character-viewer-detail-layout">
+            <section class="character-viewer-detail-media">
+              <section class="character-viewer-preview">
+                <div class="character-viewer-selected-stage">
+                  <img id="characterViewerSelectedImage" alt="">
+                  <span id="characterViewerSelectedEmpty">No character selected</span>
+                </div>
+                <div class="character-viewer-selected-name" id="characterViewerSelectedName">캐릭터를 선택하세요</div>
+                <div class="character-viewer-selected-meta" id="characterViewerSelectedMeta"></div>
+              </section>
+              <section class="character-viewer-result" id="characterViewerResultPreview" hidden>
+                <header>
+                  <span id="characterViewerResultTitle">Generated Result</span>
+                  <div class="character-viewer-result-actions">
+                    <button type="button" id="characterViewerResultExpand" aria-label="Show generated result larger" disabled>크게 보기</button>
+                    <button type="button" id="characterViewerResultClose" aria-label="Close result preview">Close</button>
+                  </div>
+                </header>
+                <div class="character-viewer-result-stage">
+                  <img id="characterViewerResultImage" alt="">
+                  <span id="characterViewerResultEmpty">Waiting for generated image...</span>
+                </div>
+              </section>
+            </section>
+            <section class="character-viewer-detail-editor">
+              <section class="character-viewer-section">
+                <label class="character-viewer-field">
+                  <span>Variant</span>
+                  <select class="character-viewer-select" id="characterViewerVariant"></select>
+                </label>
+                <div class="character-viewer-tag-sections" id="characterViewerTagSections"></div>
+              </section>
+              <section class="character-viewer-prompt">
+                <label class="character-viewer-field">
+                  <span>Character Prompt</span>
+                  <textarea class="character-viewer-textarea character-viewer-character-prompt" id="characterViewerPrompt" spellcheck="false"></textarea>
+                </label>
+                <label class="character-viewer-field">
+                  <span>Prefix</span>
+                  <textarea class="character-viewer-textarea" id="characterViewerPrefix" spellcheck="false"></textarea>
+                </label>
+                <label class="character-viewer-field">
+                  <span>Postfix</span>
+                  <textarea class="character-viewer-textarea" id="characterViewerPostfix" spellcheck="false"></textarea>
+                </label>
+                <div class="character-viewer-options">
+                  <label><input id="characterViewerAutoCopyright" type="checkbox"> copyright 자동 추가</label>
+                  <label><input id="characterViewerAutoCharacteristics" type="checkbox" checked> characteristics 자동 추가</label>
+                  <label><input id="characterViewerHideName" type="checkbox"> 캐릭터명 숨김</label>
+                  <label><input id="characterViewerNoSave" type="checkbox"> 이미지 저장 안함</label>
+                </div>
+                <div class="character-viewer-cosplay">
+                  <label><input id="characterViewerCosplay" type="checkbox"> 캐릭터 cosplay 적용</label>
+                  <input class="character-viewer-input" id="characterViewerCosplayName" type="text" placeholder="e.g. nahida (genshin impact), green eyes" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="character-viewer-actions">
+                  <button type="button" class="character-viewer-btn" id="characterViewerCopyBtn" disabled>Copy</button>
+                  <button type="button" class="character-viewer-btn" id="characterViewerInsertBtn" disabled>프롬프트 삽입</button>
+                </div>
+                <button type="button" class="character-viewer-generate" id="characterViewerGenerateBtn" disabled>Generate 896 x 1152</button>
+              </section>
+            </section>
+          </div>
+        </section>
+      </section>
+    </div>
+  </div>
   <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" hidden role="tabpanel">
     <div id="studioRoot" class="studio-root"></div>
   </div>
@@ -727,6 +836,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260505-search-parquet-v4"></script>
+<script src="app.js?v=20260505-vibe-cluster1"></script>
 </body>
 </html>

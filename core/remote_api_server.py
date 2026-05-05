@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core import api_verification
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
+from core.character_viewer_service import CharacterViewerService
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.tag_search_index import TagSearchIndex, normalize_search_query
@@ -157,6 +158,7 @@ class RemoteBridge(QObject):
     request_danbooru_prompt_preview = pyqtSignal(object)  # request dict with event/tags/prompt
     request_open_danbooru_browser = pyqtSignal(str)     # URL — 기존 PyQt6 Danbooru WebView 탭 열기
     request_artist_thumb_generate = pyqtSignal(object)  # Artist Thumbnail generate payload
+    request_character_viewer_generate = pyqtSignal(object)  # Character Viewer generate payload
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
     request_comfyui_workflow_action = pyqtSignal(str)   # request_id — ComfyUI workflow load/clear
@@ -273,6 +275,7 @@ class RemoteBridge(QObject):
             "updated_at": "",
         }
         self._ensure_artist_thumb_state()
+        self._character_viewer_service = CharacterViewerService(Path(__file__).resolve().parent.parent)
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -2771,6 +2774,148 @@ class RemoteBridge(QObject):
             self._broadcast_json({
                 "type": "toast",
                 "message": f"Artist Thumb 생성 실패: {e}",
+                "level": "error",
+            })
+
+    # --- Character Viewer service / generation ---
+
+    def _character_viewer_state(self) -> dict:
+        return self._character_viewer_service.state()
+
+    def _character_viewer_groups(self, query: str = "") -> dict:
+        return self._character_viewer_service.build_groups(query)
+
+    def _character_viewer_list(
+        self,
+        group: str = "",
+        query: str = "",
+        page: int = 0,
+        per_page: int = 48,
+        thumb_first: bool = True,
+    ) -> dict:
+        group_key = str(group or CharacterViewerService.GROUP_ALL)
+        return self._character_viewer_service.build_list(group_key, query, page, per_page, thumb_first)
+
+    def _character_viewer_detail(
+        self,
+        group: str,
+        character: str,
+        variant: str = "",
+        options: dict | None = None,
+    ) -> dict:
+        api_mode = self.app_context.get_api_mode() if hasattr(self.app_context, "get_api_mode") else "NAI"
+        return self._character_viewer_service.build_detail(
+            str(group or ""),
+            str(character or ""),
+            str(variant or ""),
+            options or {},
+            api_mode,
+        )
+
+    def _character_viewer_prompt(self, payload: dict) -> dict:
+        api_mode = self.app_context.get_api_mode() if hasattr(self.app_context, "get_api_mode") else "NAI"
+        payload = payload if isinstance(payload, dict) else {}
+        return self._character_viewer_service.build_prompt(
+            str(payload.get("group") or ""),
+            str(payload.get("character") or ""),
+            str(payload.get("variant") or ""),
+            payload.get("options") if isinstance(payload.get("options"), dict) else payload,
+            api_mode,
+        )
+
+    def _character_viewer_save_options(self, payload: dict) -> dict:
+        return self._character_viewer_service.save_options(payload if isinstance(payload, dict) else {})
+
+    def _character_viewer_thumbnail_payload(self, group: str, character: str, variant: str = "") -> tuple[bytes, str]:
+        path = self._character_viewer_service.thumbnail_path(
+            str(group or ""),
+            str(character or ""),
+            str(variant or ""),
+        )
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        if raw.startswith(b"\xff\xd8"):
+            media_type = "image/jpeg"
+        elif raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            media_type = "image/png"
+        elif raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+            media_type = "image/webp"
+        else:
+            media_type = "application/octet-stream"
+        return raw, media_type
+
+    def _broadcast_character_viewer_error(self, request_id: str, message: str) -> None:
+        self._broadcast_json({
+            "type": "character_viewer_error",
+            "request_id": str(request_id or ""),
+            "message": str(message or "Character Viewer generation failed"),
+            "level": "error",
+        })
+
+    def _do_character_viewer_generate(self, payload: dict):
+        try:
+            payload = payload if isinstance(payload, dict) else {}
+            request_id = str(payload.get("request_id") or "")
+            api_mode = self.app_context.get_api_mode() if hasattr(self.app_context, "get_api_mode") else "NAI"
+            overrides = self._character_viewer_service.build_generation_overrides(payload, api_mode)
+            if "negative_prompt" not in overrides:
+                negative = payload.get("negative_prompt")
+                if negative is None:
+                    try:
+                        negative = self.app_context.main_window.negative_prompt_textedit.toPlainText().strip()
+                    except Exception:
+                        negative = ""
+                overrides["negative_prompt"] = str(negative or "")
+
+            mw = getattr(self.app_context, "main_window", None)
+            if not mw:
+                raise RuntimeError("main window is not available")
+            gc = getattr(mw, "generation_controller", None)
+            queue_manager = getattr(self.app_context, "generation_queue_manager", None)
+            if not gc or not queue_manager:
+                raise RuntimeError("generation controller is not available")
+
+            token_key = "nai_token" if api_mode == "NAI" else ("comfyui_url" if api_mode == "COMFYUI" else "webui_url")
+            token_manager = getattr(self.app_context, "secure_token_manager", None)
+            if token_manager is not None and not token_manager.get_token(token_key):
+                self._broadcast_character_viewer_error(request_id, f"{api_mode} 인증 정보가 없습니다.")
+                return
+
+            auto_generate_checkbox = getattr(mw, "generation_checkboxes", {}).get("자동 생성") if mw else None
+            auto_generate_was_checked = None
+            try:
+                if auto_generate_checkbox:
+                    auto_generate_was_checked = bool(auto_generate_checkbox.isChecked())
+                    if auto_generate_was_checked:
+                        auto_generate_checkbox.setChecked(False)
+
+                if gc.is_generating or not queue_manager.is_empty():
+                    gc._enqueue_current_request(overrides, priority=0)
+                    if not gc.is_generating and not queue_manager.is_paused():
+                        QTimer.singleShot(0, gc._process_next_queue_request)
+                    self._broadcast_json({"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                    self._broadcast_queue_state()
+                    return
+
+                gc.execute_generation_pipeline(overrides=overrides, priority=0)
+                self._broadcast_json({"type": "status", "is_generating": True})
+                self._broadcast_queue_state()
+            finally:
+                if (
+                    auto_generate_checkbox
+                    and auto_generate_was_checked is not None
+                    and bool(auto_generate_checkbox.isChecked()) != auto_generate_was_checked
+                ):
+                    auto_generate_checkbox.setChecked(auto_generate_was_checked)
+        except Exception as e:
+            print(f"🌐 Remote: Character Viewer 생성 실패 — {e}")
+            self._broadcast_character_viewer_error(
+                str(payload.get("request_id") or "") if isinstance(payload, dict) else "",
+                f"Character Viewer 생성 실패: {e}",
+            )
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"Character Viewer 생성 실패: {e}",
                 "level": "error",
             })
 
@@ -7658,6 +7803,27 @@ class RemoteBridge(QObject):
                     model, file_hash, ie_str = parts[0], parts[1], parts[2]
                     m._on_apply_vibe_from_storage(model, file_hash, "", float(ie_str))
                     self._disable_all_char_ref_frames()
+            elif key == "cluster_list":
+                self._broadcast_json(self._scan_vibe_clusters())
+                return
+            elif key == "cluster_save":
+                self._save_current_vibe_cluster(m, value)
+                self._broadcast_json(self._scan_vibe_clusters())
+                return
+            elif key == "cluster_load":
+                self._load_vibe_cluster(m, value)
+            elif key == "cluster_delete":
+                self._delete_vibe_cluster(value)
+                self._broadcast_json(self._scan_vibe_clusters())
+                return
+            elif key == "cluster_rename":
+                self._rename_vibe_cluster(value)
+                self._broadcast_json(self._scan_vibe_clusters())
+                return
+            elif key == "cluster_thumbnail":
+                self._update_vibe_cluster_thumbnail(value)
+                self._broadcast_json(self._scan_vibe_clusters())
+                return
             elif key == "restore_metadata":
                 self._restore_vibe_transfer_from_metadata(m, value)
             # 변경 후 상태 브로드캐스트
@@ -7687,6 +7853,312 @@ class RemoteBridge(QObject):
         if callable(getter):
             return str(getter() or "")
         return ""
+
+    def _vibe_cluster_root(self) -> Path:
+        return Path("save/vibe_transfer_clusters")
+
+    def _vibe_cluster_thumb_root(self) -> Path:
+        return self._vibe_cluster_root() / "thumbnails"
+
+    def _safe_vibe_cluster_id(self, raw_id: str) -> str:
+        text = Path(str(raw_id or "")).name
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "", text)
+        if safe in {"", ".", ".."}:
+            return ""
+        return safe
+
+    def _vibe_cluster_json_path(self, raw_id: str) -> Optional[Path]:
+        cluster_id = self._safe_vibe_cluster_id(raw_id)
+        if not cluster_id:
+            return None
+        return self._vibe_cluster_root() / f"{cluster_id}.json"
+
+    def _read_vibe_cluster_json(self, raw_id: str) -> Optional[dict]:
+        path = self._vibe_cluster_json_path(raw_id)
+        if not path or not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+        except Exception as e:
+            print(f"🌐 Remote: vibe cluster 읽기 실패 — {path}: {e}")
+            return None
+
+    def _save_vibe_cluster_thumbnail(self, cluster_id: str, thumbnail_data: str) -> bool:
+        if not thumbnail_data:
+            return False
+        try:
+            from PIL import Image
+
+            data_text = str(thumbnail_data)
+            if "," in data_text and "base64" in data_text.split(",", 1)[0]:
+                data_text = data_text.split(",", 1)[1]
+            image_bytes = base64.b64decode(data_text)
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                img = img.convert("RGB")
+                canvas = Image.new("RGB", (512, 512), "black")
+                ratio = min(512 / img.width, 512 / img.height)
+                new_size = (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
+                resized = img.resize(new_size, Image.Resampling.LANCZOS)
+                pos = ((512 - new_size[0]) // 2, (512 - new_size[1]) // 2)
+                canvas.paste(resized, pos)
+                thumb_root = self._vibe_cluster_thumb_root()
+                thumb_root.mkdir(parents=True, exist_ok=True)
+                canvas.save(thumb_root / f"{cluster_id}.png", "PNG")
+            return True
+        except Exception as e:
+            print(f"🌐 Remote: vibe cluster 썸네일 저장 실패 — {cluster_id}: {e}")
+            return False
+
+    def _vibe_cluster_thumbnail_b64(self, cluster_id: str) -> str:
+        try:
+            from PIL import Image
+
+            thumb_path = self._vibe_cluster_thumb_root() / f"{cluster_id}.png"
+            if not thumb_path.exists():
+                return ""
+            with Image.open(thumb_path) as img:
+                return self._generate_thumbnail_b64(img, max_side=160)
+        except Exception:
+            return ""
+
+    def _scan_vibe_clusters(self) -> dict:
+        root = self._vibe_cluster_root()
+        items = []
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            for json_file in sorted(root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    cluster_id = self._safe_vibe_cluster_id(data.get("id") or json_file.stem)
+                    if not cluster_id:
+                        continue
+                    frames = data.get("frames") if isinstance(data.get("frames"), list) else []
+                    enabled_count = sum(1 for frame in frames if frame.get("is_enabled", True))
+                    items.append({
+                        "id": cluster_id,
+                        "name": str(data.get("name") or cluster_id),
+                        "description": str(data.get("description") or ""),
+                        "created_at": data.get("created_at") or "",
+                        "updated_at": data.get("updated_at") or "",
+                        "model": data.get("model") or "",
+                        "frame_count": len(frames),
+                        "enabled_count": enabled_count,
+                        "normalize": bool(data.get("normalize_strength", False)),
+                        "thumbnail": self._vibe_cluster_thumbnail_b64(cluster_id),
+                    })
+                except Exception as e:
+                    print(f"🌐 Remote: vibe cluster 스캔 항목 실패 — {json_file}: {e}")
+        except Exception as e:
+            print(f"🌐 Remote: vibe cluster 스캔 실패 — {e}")
+
+        current_count = 0
+        try:
+            module = self._find_module("vibe_transfer")
+            current_count = len(getattr(module, "vibe_frames", []) or [])
+        except Exception:
+            pass
+        return {
+            "type": "storage_list",
+            "module_id": "vibe_cluster",
+            "items": items,
+            "current_frame_count": current_count,
+            "max_frames": 8,
+        }
+
+    def _save_current_vibe_cluster(self, module, value: str) -> bool:
+        try:
+            payload = json.loads(value) if isinstance(value, str) else (value or {})
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        root = self._vibe_cluster_root()
+        root.mkdir(parents=True, exist_ok=True)
+        now = datetime.now().isoformat(timespec="seconds")
+        cluster_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+        name = str(payload.get("name") or "").strip() or f"Vibe Cluster {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        description = str(payload.get("description") or "").strip()
+        current_model = self._current_vibe_model(module)
+        frames = []
+
+        for frame in getattr(module, "vibe_frames", []) or []:
+            encodings = {
+                str(float(key)): value
+                for key, value in getattr(frame, "vibe_encodings", {}).items()
+                if value
+            }
+            if not encodings:
+                continue
+            target_model = getattr(frame, "target_model", None) or current_model
+            frames.append({
+                "encodings": encodings,
+                "reference_strength": float(getattr(frame, "reference_strength", 0.6)),
+                "information_extracted": float(getattr(frame, "information_extracted", 1.0)),
+                "is_enabled": bool(getattr(frame, "is_enabled", True)),
+                "is_no_image": bool(getattr(frame, "is_no_image", False)),
+                "target_model": target_model,
+            })
+
+        if not frames:
+            self._broadcast_json({"type": "toast", "message": "No encoded Vibe Transfer frames to save", "level": "error"})
+            return False
+
+        data = {
+            "id": cluster_id,
+            "name": name,
+            "description": description,
+            "created_at": now,
+            "updated_at": now,
+            "model": current_model,
+            "normalize_strength": bool(
+                getattr(getattr(module, "normalize_checkbox", None), "isChecked", lambda: False)()
+            ),
+            "frames": frames,
+        }
+        with open(root / f"{cluster_id}.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        self._save_vibe_cluster_thumbnail(cluster_id, payload.get("thumbnail_data") or "")
+        self._broadcast_json({"type": "toast", "message": f"Saved Vibe cluster: {name}", "level": "success"})
+        return True
+
+    def _delete_vibe_cluster(self, cluster_id: str) -> bool:
+        safe_id = self._safe_vibe_cluster_id(cluster_id)
+        path = self._vibe_cluster_json_path(safe_id)
+        if not safe_id or not path:
+            return False
+        deleted = False
+        if path.exists():
+            path.unlink()
+            deleted = True
+        thumb_path = self._vibe_cluster_thumb_root() / f"{safe_id}.png"
+        if thumb_path.exists():
+            thumb_path.unlink()
+        if deleted:
+            self._broadcast_json({"type": "toast", "message": "Deleted Vibe cluster", "level": "success"})
+        return deleted
+
+    def _rename_vibe_cluster(self, value: str) -> bool:
+        try:
+            payload = json.loads(value) if isinstance(value, str) else value
+        except Exception:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        cluster_id = self._safe_vibe_cluster_id(payload.get("id"))
+        data = self._read_vibe_cluster_json(cluster_id)
+        if not data:
+            return False
+        name = str(payload.get("name") or "").strip()
+        description = str(payload.get("description") or "").strip()
+        if name:
+            data["name"] = name
+        data["description"] = description
+        data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        path = self._vibe_cluster_json_path(cluster_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        self._broadcast_json({"type": "toast", "message": "Updated Vibe cluster", "level": "success"})
+        return True
+
+    def _update_vibe_cluster_thumbnail(self, value: str) -> bool:
+        try:
+            payload = json.loads(value) if isinstance(value, str) else value
+        except Exception:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        cluster_id = self._safe_vibe_cluster_id(payload.get("id"))
+        data = self._read_vibe_cluster_json(cluster_id)
+        if not data:
+            return False
+        changed = self._save_vibe_cluster_thumbnail(cluster_id, payload.get("thumbnail_data") or "")
+        if changed:
+            data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            path = self._vibe_cluster_json_path(cluster_id)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            self._broadcast_json({"type": "toast", "message": "Updated Vibe cluster thumbnail", "level": "success"})
+        return changed
+
+    def _load_vibe_cluster(self, module, value: str) -> int:
+        try:
+            payload = json.loads(value) if isinstance(value, str) else value
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        cluster_id = self._safe_vibe_cluster_id(payload.get("id"))
+        mode = str(payload.get("mode") or "append").lower()
+        data = self._read_vibe_cluster_json(cluster_id)
+        if not data:
+            self._broadcast_json({"type": "toast", "message": "Vibe cluster not found", "level": "error"})
+            return 0
+
+        if mode == "clean":
+            for frame in list(getattr(module, "vibe_frames", []) or []):
+                module._remove_frame(frame)
+
+        frames = data.get("frames") if isinstance(data.get("frames"), list) else []
+        added = 0
+        skipped = 0
+        for frame_data in frames:
+            if len(getattr(module, "vibe_frames", []) or []) >= 8:
+                skipped += 1
+                continue
+            encodings = frame_data.get("encodings") if isinstance(frame_data.get("encodings"), dict) else {}
+            if not encodings:
+                skipped += 1
+                continue
+            pairs = []
+            for key, encoding in encodings.items():
+                try:
+                    pairs.append((float(key), encoding))
+                except Exception:
+                    continue
+            if not pairs:
+                skipped += 1
+                continue
+            pairs.sort(key=lambda item: item[0])
+            target_model = frame_data.get("target_model") or data.get("model") or self._current_vibe_model(module)
+            vibe_data = {
+                "reference_image_multiple": [encoding for _, encoding in pairs],
+                "reference_strength_multiple": [float(frame_data.get("reference_strength", 0.6))],
+                "reference_information_extracted_multiple": [key for key, _ in pairs],
+                "source_model": target_model,
+            }
+            frame = module._add_vibe_frame_from_metadata(f"cluster_{cluster_id}_{added}", vibe_data)
+            if not frame:
+                skipped += 1
+                continue
+            selected_ie = frame_data.get("information_extracted", pairs[0][0])
+            setter = getattr(module, "_set_frame_information_extracted", None)
+            if callable(setter):
+                setter(frame, selected_ie)
+            else:
+                frame.information_extracted = float(selected_ie)
+            strength_setter = getattr(module, "_set_frame_reference_strength", None)
+            if callable(strength_setter):
+                strength_setter(frame, frame_data.get("reference_strength", 0.6))
+            is_enabled = bool(frame_data.get("is_enabled", True))
+            frame.is_enabled = is_enabled
+            enable_check = getattr(frame, "enable_check", None)
+            if enable_check is not None:
+                enable_check.setChecked(is_enabled)
+            added += 1
+
+        if added:
+            self._disable_all_char_ref_frames()
+            message = f"Loaded {added} Vibe cluster frame(s)"
+            if skipped:
+                message += f" ({skipped} skipped)"
+            self._broadcast_json({"type": "toast", "message": message, "level": "success"})
+        else:
+            self._broadcast_json({"type": "toast", "message": "No Vibe cluster frames loaded", "level": "error"})
+        return added
 
     def _restore_vibe_transfer_from_metadata(self, module, value: str):
         try:
@@ -9794,6 +10266,14 @@ class RemoteBridge(QObject):
             webp_bytes = buf.getvalue()
 
             gen_params = result.get("generation_params", {})
+            character_viewer_thumbnail = None
+            if gen_params.get("character_viewer_request"):
+                try:
+                    snapshot = gen_params.get("_character_viewer_snapshot") or {}
+                    if isinstance(snapshot, dict) and not snapshot.get("save_blocked"):
+                        character_viewer_thumbnail = self._character_viewer_service.save_thumbnail(image, snapshot)
+                except Exception as e:
+                    print(f"🌐 Remote: Character Viewer 썸네일 저장 실패 — {e}")
             metadata = {
                 "width": image.width,
                 "height": image.height,
@@ -9810,6 +10290,14 @@ class RemoteBridge(QObject):
                 "artist_thumb_request": bool(gen_params.get("artist_thumb_request")),
                 "artist_thumb_request_id": str(gen_params.get("artist_thumb_request_id") or ""),
                 "artist_thumb_artist": str(gen_params.get("_remote_queue_label") or ""),
+                "character_viewer_request": bool(gen_params.get("character_viewer_request")),
+                "character_viewer_request_id": str(gen_params.get("character_viewer_request_id") or ""),
+                "character_viewer_character": str(gen_params.get("_remote_queue_label") or ""),
+                "character_viewer_thumbnail_saved": bool(character_viewer_thumbnail),
+                "character_viewer_thumbnail_url": (
+                    str(character_viewer_thumbnail.get("url") or "")
+                    if isinstance(character_viewer_thumbnail, dict) else ""
+                ),
                 "remote_queue_source": str(gen_params.get("_remote_queue_source") or ""),
             }
 
@@ -10515,6 +11003,125 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         if not bridge._artist_thumb_final_prompt(payload):
             return JSONResponse({"error": "prompt is empty"}, status_code=400)
         bridge.request_artist_thumb_generate.emit(payload)
+        return {"ok": True}
+
+    @app.get("/api/character-viewer/state")
+    async def api_character_viewer_state():
+        try:
+            return await asyncio.to_thread(bridge._character_viewer_state)
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer state failed: {e}"}, status_code=500)
+
+    @app.get("/api/character-viewer/groups")
+    async def api_character_viewer_groups(query: str = ""):
+        try:
+            return await asyncio.to_thread(bridge._character_viewer_groups, query)
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer groups failed: {e}"}, status_code=500)
+
+    @app.get("/api/character-viewer/list")
+    async def api_character_viewer_list(
+        group: str = "",
+        query: str = "",
+        page: int = 0,
+        per_page: int = 48,
+        thumb_first: bool = True,
+    ):
+        try:
+            return await asyncio.to_thread(
+                bridge._character_viewer_list,
+                group,
+                query,
+                page,
+                per_page,
+                thumb_first,
+            )
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer list failed: {e}"}, status_code=500)
+
+    @app.post("/api/character-viewer/detail")
+    async def api_character_viewer_detail(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(
+                bridge._character_viewer_detail,
+                payload.get("group", ""),
+                payload.get("character", ""),
+                payload.get("variant", ""),
+                payload.get("options") if isinstance(payload.get("options"), dict) else {},
+            )
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer detail failed: {e}"}, status_code=500)
+
+    @app.post("/api/character-viewer/prompt")
+    async def api_character_viewer_prompt(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._character_viewer_prompt, payload)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer prompt failed: {e}"}, status_code=500)
+
+    @app.post("/api/character-viewer/options")
+    async def api_character_viewer_options(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._character_viewer_save_options, payload)
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer options failed: {e}"}, status_code=500)
+
+    @app.get("/api/character-viewer/thumbnail")
+    async def api_character_viewer_thumbnail(group: str = "", character: str = "", variant: str = ""):
+        try:
+            image_bytes, media_type = await asyncio.to_thread(
+                bridge._character_viewer_thumbnail_payload,
+                group,
+                character,
+                variant,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except (FileNotFoundError, KeyError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Character Viewer thumbnail failed: {e}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.post("/api/character-viewer/generate")
+    async def api_character_viewer_generate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if not payload.get("request_id"):
+            return JSONResponse({"error": "request_id is required"}, status_code=400)
+        if not (payload.get("character_prompt") or payload.get("prefix") or payload.get("postfix")):
+            return JSONResponse({"error": "prompt is empty"}, status_code=400)
+        bridge.request_character_viewer_generate.emit(payload)
         return {"ok": True}
 
     @app.get("/api/result/asset/current")
@@ -11366,6 +11973,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_open_danbooru_browser.connect(bridge._do_open_danbooru_browser, Qt.ConnectionType.QueuedConnection)
     bridge._danbooru_prompt_preview_bridge_connected = True
     bridge.request_artist_thumb_generate.connect(bridge._do_artist_thumb_generate, Qt.ConnectionType.QueuedConnection)
+    bridge.request_character_viewer_generate.connect(bridge._do_character_viewer_generate, Qt.ConnectionType.QueuedConnection)
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
     bridge.request_comfyui_workflow_action.connect(bridge._do_comfyui_workflow_action, Qt.ConnectionType.QueuedConnection)

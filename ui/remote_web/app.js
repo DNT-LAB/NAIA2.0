@@ -102,6 +102,7 @@ let resolutionManagerPanel = null;
 let danbooruTabControl = null;
 let thumbTabControl = null;
 let artistThumbControl = null;
+let characterViewerControl = null;
 let studioTabControl = null;
 let customSelectsControl = null;
 let promptEngineeringPopupRenderers = null;
@@ -185,6 +186,23 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
+  });
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260505-interactions1')
+  .then(({createCharacterViewerController}) => {
+    characterViewerControl = createCharacterViewerController({
+      document,
+      fetch: window.fetch.bind(window),
+      escHtml,
+      showToast,
+      promptEdit,
+      negEdit,
+      onPromptEdit,
+      setPromptFields: applyPromptFields,
+      getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Character Viewer tab module', error);
   });
 const studioTabReady = import('./js/features/studioTab.mjs')
   .then(({createStudioTabController}) => {
@@ -673,7 +691,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -966,6 +984,9 @@ function handleWsBlob(data) {
   if (artistThumbControl && typeof artistThumbControl.handleResultBlob === 'function') {
     artistThumbControl.handleResultBlob(data);
   }
+  if (characterViewerControl && typeof characterViewerControl.handleResultBlob === 'function') {
+    characterViewerControl.handleResultBlob(data);
+  }
   preview.src = url;
   preview.dataset.source = 'current';
   preview.dataset.path = '';
@@ -1132,6 +1153,13 @@ const wsMessageHandlers = {
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,
   toast: m => showToast(m.message, m.level || 'success'),
+  character_viewer_error: m => {
+    if (characterViewerControl && typeof characterViewerControl.handleGenerationError === 'function') {
+      characterViewerControl.handleGenerationError(m);
+    } else {
+      showToast(m.message || 'Character Viewer generation failed', 'error');
+    }
+  },
   load_prompt: m => onLoadPrompt(m.prompt),
   viewer_new_image: onViewerNewImage,
   session: onSession,
@@ -1195,6 +1223,9 @@ function updateMeta(m) {
   updateMetaChips(m);
   if (artistThumbControl && typeof artistThumbControl.handleResultMeta === 'function') {
     artistThumbControl.handleResultMeta(m);
+  }
+  if (characterViewerControl && typeof characterViewerControl.handleResultMeta === 'function') {
+    characterViewerControl.handleResultMeta(m);
   }
   if (resultEnhance) {
     resultEnhanceAssetRequestId += 1;
@@ -1752,6 +1783,10 @@ function switchRightTab(tabName, options = {}) {
     artistThumbControl.setActive(activeTab === 'artists');
   }
   if (activeTab === 'artists' && artistThumbControl) artistThumbControl.load();
+  if (characterViewerControl && typeof characterViewerControl.setActive === 'function') {
+    characterViewerControl.setActive(activeTab === 'characters');
+  }
+  if (activeTab === 'characters' && characterViewerControl) characterViewerControl.load();
 }
 
 function buildDetachedUrl(kind, params = {}) {
@@ -3780,6 +3815,58 @@ function renderVibeTransfer(m) {
   if (imageModulePanels) imageModulePanels.renderVibeTransfer(m);
 }
 
+function openVibeClusterPanel() {
+  if (imageModulePanels) imageModulePanels.openVibeClusterPanel();
+}
+
+function closeVibeClusterPanel() {
+  if (imageModulePanels) imageModulePanels.closeVibeClusterPanel();
+}
+
+function saveVibeCluster() {
+  if (imageModulePanels) imageModulePanels.saveVibeCluster();
+}
+
+function pasteVibeClusterThumbnail(targetId = '') {
+  if (imageModulePanels) imageModulePanels.pasteVibeClusterThumbnail(targetId);
+}
+
+function setVibeClusterSaveThumbnail(file) {
+  if (imageModulePanels) imageModulePanels.setVibeClusterSaveThumbnail(file);
+}
+
+function toggleVibeClusterLoadMenu(id, event) {
+  if (imageModulePanels) imageModulePanels.toggleVibeClusterLoadMenu(id, event);
+}
+
+function toggleVibeClusterManageMenu(id, event) {
+  if (imageModulePanels) imageModulePanels.toggleVibeClusterManageMenu(id, event);
+}
+
+function loadVibeCluster(id, mode) {
+  if (imageModulePanels) imageModulePanels.loadVibeCluster(id, mode);
+}
+
+function renameVibeCluster(id) {
+  if (imageModulePanels) imageModulePanels.renameVibeCluster(id);
+}
+
+function deleteVibeCluster(id) {
+  if (imageModulePanels) imageModulePanels.deleteVibeCluster(id);
+}
+
+function chooseVibeClusterThumbnail(id) {
+  if (imageModulePanels) imageModulePanels.chooseVibeClusterThumbnail(id);
+}
+
+function updateVibeClusterThumbnailFromFile(id, file) {
+  if (imageModulePanels) imageModulePanels.updateVibeClusterThumbnailFromFile(id, file);
+}
+
+function vibeClusterThumbTarget() {
+  return imageModulePanels ? imageModulePanels.vibeClusterThumbTargetValue() : '';
+}
+
 // ---- Img2Img module ----
 function renderImg2Img(m) {
   const mode = String(m?.mode || '').toLowerCase();
@@ -4206,6 +4293,7 @@ Promise.all([
   danbooruTabReady,
   thumbTabReady,
   artistThumbReady,
+  characterViewerReady,
   studioTabReady,
   customSelectsReady,
   resultInfoResizerReady,

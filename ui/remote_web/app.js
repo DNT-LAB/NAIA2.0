@@ -769,7 +769,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260505-search-parquet-v4')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260505-search-parquet-upload1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -4043,6 +4043,10 @@ function loadParquet(filename) {
 
 function toggleSearchParquetMenu(event) {
   if (searchPanelControl) searchPanelControl.toggleParquetMenu(event);
+}
+
+function openSearchParquetUpload(action) {
+  if (searchPanelControl) searchPanelControl.openParquetUpload(action);
 }
 
 function selectSearchParquetMode(mode) {

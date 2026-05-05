@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -73,6 +74,40 @@ def test_remote_merge_custom_parquet_appends_results(monkeypatch, tmp_path):
     result = bridge.app_context.main_window.search_results.get_dataframe()
     assert result["id"].tolist() == [1, 2, 3]
     assert bridge.app_context.main_window.result_label2.text == "남음: 3"
+
+
+def test_remote_uploaded_parquet_replaces_results_and_deletes_temp(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    uploaded_path = tmp_path / "uploaded.parquet"
+    _df(5, 6).to_parquet(uploaded_path, index=False)
+    bridge = _bridge(_df(1))
+
+    bridge._do_uploaded_parquet(json.dumps({
+        "action": "load",
+        "filename": "picked.parquet",
+        "temp_path": str(uploaded_path),
+    }))
+
+    result = bridge.app_context.main_window.search_results.get_dataframe()
+    assert result["id"].tolist() == [5, 6]
+    assert not uploaded_path.exists()
+
+
+def test_remote_uploaded_parquet_merge_appends_results(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    uploaded_path = tmp_path / "uploaded.parquet"
+    _df(5, 6).to_parquet(uploaded_path, index=False)
+    bridge = _bridge(_df(1))
+
+    bridge._do_uploaded_parquet(json.dumps({
+        "action": "merge",
+        "filename": "picked.parquet",
+        "temp_path": str(uploaded_path),
+    }))
+
+    result = bridge.app_context.main_window.search_results.get_dataframe()
+    assert result["id"].tolist() == [1, 5, 6]
+    assert not uploaded_path.exists()
 
 
 def test_remote_parquet_actions_export_and_save_runner(monkeypatch, tmp_path):

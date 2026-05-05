@@ -109,6 +109,48 @@ export function createSearchPanel({
     if (menu) menu.classList.toggle('open');
   }
 
+  function openParquetUpload(action) {
+    const mode = action === 'merge' ? 'merge' : 'load';
+    closeParquetMenu();
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.parquet';
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (file) uploadParquetFile(file, mode);
+    }, {once: true});
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  async function uploadParquetFile(file, mode) {
+    const params = new URLSearchParams({
+      action: mode === 'merge' ? 'merge' : 'load',
+      filename: file.name || 'uploaded.parquet',
+    });
+    try {
+      const response = await fetch(`/api/search/parquet/upload?${params}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/octet-stream'},
+        body: file,
+      });
+      if (!response.ok) {
+        let message = 'Parquet upload failed';
+        try {
+          const data = await response.json();
+          if (data && data.error) message = data.error;
+        } catch (error) {
+          // Keep the generic message when the server did not return JSON.
+        }
+        console.error(message);
+      }
+    } catch (error) {
+      console.error('Parquet upload failed', error);
+    }
+  }
+
   function selectParquetMode(mode) {
     parquetPickMode = mode === 'merge' ? 'merge' : 'load';
     closeParquetMenu();
@@ -239,8 +281,8 @@ export function createSearchPanel({
         <div class="search-parquet-control">
           <button class="mod-action-btn mod-parquet" onclick="toggleSearchParquetMenu(event)">Parquet</button>
           <div class="search-parquet-menu">
-            <button type="button" onclick="selectSearchParquetMode('load')">불러오기</button>
-            <button type="button" onclick="selectSearchParquetMode('merge')">합치기</button>
+            <button type="button" onclick="openSearchParquetUpload('load')">불러오기</button>
+            <button type="button" onclick="openSearchParquetUpload('merge')">합치기</button>
             <button type="button" onclick="searchParquetAction('export_results')">내보내기</button>
             <button type="button" onclick="searchParquetAction('save_runner')">실행파일 저장</button>
           </div>
@@ -353,6 +395,7 @@ export function createSearchPanel({
     renderSearch,
     doSearch,
     toggleParquetMenu,
+    openParquetUpload,
     selectParquetMode,
     runParquetAction,
     loadParquet,

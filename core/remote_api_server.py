@@ -13,6 +13,7 @@ import math
 import mimetypes
 import random
 import re
+import tempfile
 import time
 import threading
 import uuid
@@ -140,6 +141,7 @@ class RemoteBridge(QObject):
     request_search = pyqtSignal(str)               # search_params JSON
     request_load_parquet = pyqtSignal(str)          # filename
     request_merge_parquet = pyqtSignal(str)         # filename
+    request_uploaded_parquet = pyqtSignal(str)      # upload payload JSON
     request_search_parquet_action = pyqtSignal(str) # action JSON
     request_depth_action = pyqtSignal(str)          # depth search action JSON
     request_restore_snapshot = pyqtSignal()          # 메인 검색 결과 스냅샷 복원
@@ -9677,17 +9679,20 @@ class RemoteBridge(QObject):
         self._load_or_merge_custom_parquet(filename, merge=True)
 
     def _load_or_merge_custom_parquet(self, filename: str, *, merge: bool = False):
+        file_path = self._resolve_custom_parquet_path(filename)
+        if not file_path:
+            self._broadcast_json({"type": "toast", "message": "Invalid parquet filename", "level": "error"})
+            return
+        if not file_path.exists():
+            self._broadcast_json({"type": "toast", "message": f"Parquet not found: {filename}", "level": "error"})
+            return
+        self._load_or_merge_parquet_path(file_path, display_name=file_path.name, merge=merge)
+
+    def _load_or_merge_parquet_path(self, file_path: Path, *, display_name: str = "", merge: bool = False):
         try:
             import pandas as pd
             mw = self.app_context.main_window
             if not mw:
-                return
-            file_path = self._resolve_custom_parquet_path(filename)
-            if not file_path:
-                self._broadcast_json({"type": "toast", "message": "Invalid parquet filename", "level": "error"})
-                return
-            if not file_path.exists():
-                self._broadcast_json({"type": "toast", "message": f"Parquet not found: {filename}", "level": "error"})
                 return
             df = pd.read_parquet(file_path)
             if merge:
@@ -9698,17 +9703,34 @@ class RemoteBridge(QObject):
             # 웹 클라이언트에 전체 상태 전송
             state = self._read_search_state()
             if state:
-                state["merged" if merge else "loaded"] = file_path.name
+                state["merged" if merge else "loaded"] = display_name or file_path.name
                 self._broadcast_json(state)
             verb = "merged" if merge else "loaded"
             self._broadcast_json({
                 "type": "toast",
-                "message": f"{file_path.name} {verb} ({count:,})",
+                "message": f"{display_name or file_path.name} {verb} ({count:,})",
                 "level": "success",
             })
         except Exception as e:
             print(f"🌐 Remote: parquet 로드 실패 — {e}")
             self._broadcast_json({"type": "toast", "message": f"Parquet action failed: {e}", "level": "error"})
+
+    def _do_uploaded_parquet(self, payload_json: str):
+        """브라우저에서 업로드된 parquet 파일을 로드/병합."""
+        params = json.loads(payload_json or "{}")
+        temp_path = Path(str(params.get("temp_path") or ""))
+        filename = self._normalize_custom_parquet_filename(params.get("filename") or temp_path.name)
+        merge = str(params.get("action") or "").strip() == "merge"
+        try:
+            if not temp_path.exists():
+                self._broadcast_json({"type": "toast", "message": "Uploaded parquet is unavailable", "level": "error"})
+                return
+            self._load_or_merge_parquet_path(temp_path, display_name=filename, merge=merge)
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _do_search_parquet_action(self, payload_json: str):
         """SEARCH Parquet 메뉴 액션: export / runner 저장."""
@@ -10493,6 +10515,30 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": "request_id is required"}, status_code=400)
         bridge.request_queue_action.emit(json.dumps(payload))
         return {"ok": True, "action": action}
+
+    @app.post("/api/search/parquet/upload")
+    async def api_search_parquet_upload(req: Request):
+        action = str(req.query_params.get("action") or "").strip().lower()
+        if action not in {"load", "merge"}:
+            return JSONResponse({"error": "action must be load or merge"}, status_code=400)
+        filename = Path(str(req.query_params.get("filename") or "uploaded.parquet")).name
+        if not filename.lower().endswith(".parquet"):
+            return JSONResponse({"error": "Only .parquet files are supported"}, status_code=400)
+        content = await req.body()
+        if not content:
+            return JSONResponse({"error": "Uploaded parquet is empty"}, status_code=400)
+
+        upload_dir = Path("save/tmp_remote_uploads")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet", dir=str(upload_dir)) as tmp:
+            tmp.write(content)
+            temp_path = Path(tmp.name)
+        bridge.request_uploaded_parquet.emit(json.dumps({
+            "action": action,
+            "filename": filename,
+            "temp_path": str(temp_path),
+        }))
+        return {"ok": True, "action": action, "filename": filename}
 
     @app.post("/api/random")
     async def api_random():
@@ -11993,6 +12039,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_search.connect(bridge._do_search, Qt.ConnectionType.QueuedConnection)
     bridge.request_load_parquet.connect(bridge._do_load_parquet, Qt.ConnectionType.QueuedConnection)
     bridge.request_merge_parquet.connect(bridge._do_merge_parquet, Qt.ConnectionType.QueuedConnection)
+    bridge.request_uploaded_parquet.connect(bridge._do_uploaded_parquet, Qt.ConnectionType.QueuedConnection)
     bridge.request_search_parquet_action.connect(bridge._do_search_parquet_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_depth_action.connect(bridge._do_depth_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_restore_snapshot.connect(bridge._do_restore_snapshot, Qt.ConnectionType.QueuedConnection)

@@ -703,7 +703,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260505-search-parquet-v4')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -749,7 +749,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260505-search-parquet-v4')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -3936,6 +3936,18 @@ function doSearch() {
 
 function loadParquet(filename) {
   if (searchPanelControl) searchPanelControl.loadParquet(filename);
+}
+
+function toggleSearchParquetMenu(event) {
+  if (searchPanelControl) searchPanelControl.toggleParquetMenu(event);
+}
+
+function selectSearchParquetMode(mode) {
+  if (searchPanelControl) searchPanelControl.selectParquetMode(mode);
+}
+
+function searchParquetAction(action) {
+  if (searchPanelControl) searchPanelControl.runParquetAction(action);
 }
 
 function restoreSnapshot() {

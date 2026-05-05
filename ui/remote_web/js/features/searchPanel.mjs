@@ -12,6 +12,11 @@ export function createSearchPanel({
   let searchingActive = false;
   let ratingState = { g: true, s: true, q: true, e: true };
   let cachedRatingCounts = null;
+  let parquetPickMode = 'load';
+
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.search-parquet-control')) closeParquetMenu();
+  });
 
   function getRatingState() {
     return ratingState;
@@ -83,6 +88,49 @@ export function createSearchPanel({
       ...collectFilterState(),
       ...extra,
     }));
+  }
+
+  function jsString(value) {
+    return JSON.stringify(String(value || ''))
+      .replace(/&/g, '\\u0026')
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/"/g, '&quot;');
+  }
+
+  function closeParquetMenu() {
+    const menu = moduleBody.querySelector('.search-parquet-menu');
+    if (menu) menu.classList.remove('open');
+  }
+
+  function toggleParquetMenu(event) {
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    const menu = moduleBody.querySelector('.search-parquet-menu');
+    if (menu) menu.classList.toggle('open');
+  }
+
+  function selectParquetMode(mode) {
+    parquetPickMode = mode === 'merge' ? 'merge' : 'load';
+    closeParquetMenu();
+    const section = moduleBody.querySelector('.search-parquet-section');
+    if (section) section.dataset.parquetMode = parquetPickMode;
+    const hint = moduleBody.querySelector('.search-parquet-mode-label');
+    if (hint) {
+      hint.textContent = parquetPickMode === 'merge'
+        ? '합칠 parquet을 아래에서 선택하세요'
+        : '불러올 parquet을 아래에서 선택하세요';
+    }
+    const header = moduleBody.querySelector('.mod-section-label.mod-collapsible');
+    const list = moduleBody.querySelector('.search-parquet-list');
+    if (header) header.classList.add('open');
+    if (list) list.classList.remove('collapsed');
+  }
+
+  function runParquetAction(action) {
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    closeParquetMenu();
+    ws.send(JSON.stringify({type: 'search_parquet_action', action}));
   }
 
   function toggleRating(rating) {
@@ -178,7 +226,7 @@ export function createSearchPanel({
     ).join('');
 
     const parquets = (message.parquets || []).map(file =>
-      `<div class="search-parquet-item" onclick="loadParquet('${escHtml(file)}')">${escHtml(file)}</div>`
+      `<div class="search-parquet-item" onclick="loadParquet(${jsString(file)})">${escHtml(file)}</div>`
     ).join('');
 
     moduleBody.innerHTML = `
@@ -188,8 +236,17 @@ export function createSearchPanel({
         <div class="search-count-display">${message.count || 0}</div>
       </div>
       <div class="search-top-actions">
-        <button class="mod-action-btn mod-refine" onclick="openRefine()">Refine</button>
-        <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()">Restore</button>
+        <div class="search-parquet-control">
+          <button class="mod-action-btn mod-parquet" onclick="toggleSearchParquetMenu(event)">Parquet</button>
+          <div class="search-parquet-menu">
+            <button type="button" onclick="selectSearchParquetMode('load')">불러오기</button>
+            <button type="button" onclick="selectSearchParquetMode('merge')">합치기</button>
+            <button type="button" onclick="searchParquetAction('export_results')">내보내기</button>
+            <button type="button" onclick="searchParquetAction('save_runner')">실행파일 저장</button>
+          </div>
+        </div>
+        <button class="mod-action-btn mod-refine" onclick="openRefine()">심층검색</button>
+        <button class="mod-action-btn mod-restore" onclick="restoreSnapshot()">복원</button>
       </div>
     </div>
     <div>
@@ -205,13 +262,14 @@ export function createSearchPanel({
       <div class="mod-checkbox-grid">${ratingItems}</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="mod-action-btn mod-start" onclick="doSearch()" ${searchingActive ? 'disabled' : ''}>Search</button>
+      <button class="mod-action-btn mod-start" onclick="doSearch()" ${searchingActive ? 'disabled' : ''}>검색</button>
       <span class="search-progress" style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)"></span>
     </div>
-    ${parquets.length ? `<div>
-      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')">
+    ${parquets.length ? `<div class="search-parquet-section" data-parquet-mode="${parquetPickMode}">
+      <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.parentElement.querySelector('.search-parquet-list')?.classList.toggle('collapsed')">
         Custom Parquets (${message.parquets.length}) <span class="mod-collapse-arrow">\u25B6</span>
       </div>
+      <div class="search-parquet-mode-label"></div>
       <div class="search-parquet-list collapsed">${parquets}</div>
     </div>` : ''}
   `;
@@ -264,7 +322,10 @@ export function createSearchPanel({
   function loadParquet(filename) {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: 'load_parquet', filename }));
+    ws.send(JSON.stringify({
+      type: parquetPickMode === 'merge' ? 'merge_parquet' : 'load_parquet',
+      filename,
+    }));
   }
 
   function restoreSnapshot() {
@@ -291,6 +352,9 @@ export function createSearchPanel({
     onSearchProgress,
     renderSearch,
     doSearch,
+    toggleParquetMenu,
+    selectParquetMode,
+    runParquetAction,
     loadParquet,
     restoreSnapshot,
   };

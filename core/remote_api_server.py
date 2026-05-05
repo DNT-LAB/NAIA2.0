@@ -138,6 +138,8 @@ class RemoteBridge(QObject):
     request_artist_thumb_random_peng = pyqtSignal(str, str)  # (request_id, artist_prompt)
     request_search = pyqtSignal(str)               # search_params JSON
     request_load_parquet = pyqtSignal(str)          # filename
+    request_merge_parquet = pyqtSignal(str)         # filename
+    request_search_parquet_action = pyqtSignal(str) # action JSON
     request_depth_action = pyqtSignal(str)          # depth search action JSON
     request_restore_snapshot = pyqtSignal()          # 메인 검색 결과 스냅샷 복원
     request_apply_filters = pyqtSignal()            # GSQE + Tag Filter → master에서 재적용
@@ -9125,33 +9127,129 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: search 실행 실패 — {e}")
 
+    def _custom_parquet_dir(self) -> Path:
+        return Path("save/custom_tags")
+
+    def _normalize_custom_parquet_filename(self, filename: str, *, fallback_prefix: str = "search_export") -> str:
+        clean = Path(str(filename or "").strip()).name
+        if not clean:
+            clean = f"{fallback_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+        if not clean.lower().endswith(".parquet"):
+            clean += ".parquet"
+        return clean
+
+    def _next_custom_parquet_path(self, filename: str, *, fallback_prefix: str = "search_export") -> Path:
+        explicit_filename = bool(str(filename or "").strip())
+        clean = self._normalize_custom_parquet_filename(filename, fallback_prefix=fallback_prefix)
+        path = self._custom_parquet_dir() / clean
+        if explicit_filename or not path.exists():
+            return path
+        stem = path.stem
+        suffix = path.suffix
+        for index in range(2, 1000):
+            candidate = path.with_name(f"{stem}_{index}{suffix}")
+            if not candidate.exists():
+                return candidate
+        return path.with_name(f"{stem}_{uuid.uuid4().hex[:8]}{suffix}")
+
+    def _resolve_custom_parquet_path(self, filename: str) -> Path | None:
+        raw = str(filename or "").strip()
+        clean = self._normalize_custom_parquet_filename(raw)
+        if raw and clean != raw:
+            return None
+        return self._custom_parquet_dir() / clean
+
+    def _set_search_dataframe(self, df, *, snapshot: bool = True):
+        mw = self.app_context.main_window
+        mw.search_results.set_dataframe(df)
+        if snapshot and hasattr(mw, '_save_search_snapshot'):
+            mw._save_search_snapshot()
+        count = mw.search_results.get_count()
+        if hasattr(mw, 'result_label1'):
+            mw.result_label1.setText(f"검색: {count}")
+        if hasattr(mw, 'result_label2'):
+            mw.result_label2.setText(f"남음: {count}")
+        return count
+
     def _do_load_parquet(self, filename: str):
         """커스텀 parquet 로드"""
+        self._load_or_merge_custom_parquet(filename, merge=False)
+
+    def _do_merge_parquet(self, filename: str):
+        """커스텀 parquet 를 현재 검색 결과에 병합"""
+        self._load_or_merge_custom_parquet(filename, merge=True)
+
+    def _load_or_merge_custom_parquet(self, filename: str, *, merge: bool = False):
         try:
             import pandas as pd
             mw = self.app_context.main_window
             if not mw:
                 return
-            file_path = Path("save/custom_tags") / filename
+            file_path = self._resolve_custom_parquet_path(filename)
+            if not file_path:
+                self._broadcast_json({"type": "toast", "message": "Invalid parquet filename", "level": "error"})
+                return
             if not file_path.exists():
+                self._broadcast_json({"type": "toast", "message": f"Parquet not found: {filename}", "level": "error"})
                 return
             df = pd.read_parquet(file_path)
-            mw.search_results.set_dataframe(df)
-            if hasattr(mw, '_save_search_snapshot'):
-                mw._save_search_snapshot()
-            count = mw.search_results.get_count()
-            # UI 레이블 업데이트
-            if hasattr(mw, 'result_label1'):
-                mw.result_label1.setText(f"검색: {count}")
-            if hasattr(mw, 'result_label2'):
-                mw.result_label2.setText(f"남음: {count}")
+            if merge:
+                current_df = mw.search_results.get_dataframe() if mw.search_results else pd.DataFrame()
+                if current_df is not None and not current_df.empty:
+                    df = pd.concat([current_df, df], ignore_index=True)
+            count = self._set_search_dataframe(df)
             # 웹 클라이언트에 전체 상태 전송
             state = self._read_search_state()
             if state:
-                state["loaded"] = filename
+                state["merged" if merge else "loaded"] = file_path.name
                 self._broadcast_json(state)
+            verb = "merged" if merge else "loaded"
+            self._broadcast_json({
+                "type": "toast",
+                "message": f"{file_path.name} {verb} ({count:,})",
+                "level": "success",
+            })
         except Exception as e:
             print(f"🌐 Remote: parquet 로드 실패 — {e}")
+            self._broadcast_json({"type": "toast", "message": f"Parquet action failed: {e}", "level": "error"})
+
+    def _do_search_parquet_action(self, payload_json: str):
+        """SEARCH Parquet 메뉴 액션: export / runner 저장."""
+        try:
+            params = json.loads(payload_json or "{}")
+            action = str(params.get("action") or "").strip()
+            mw = self.app_context.main_window
+            if not mw or not mw.search_results:
+                return
+            current_df = mw.search_results.get_dataframe()
+            if current_df is None or current_df.empty:
+                self._broadcast_json({"type": "toast", "message": "No search results to save", "level": "error"})
+                return
+
+            if action == "export_results":
+                export_dir = self._custom_parquet_dir()
+                export_dir.mkdir(parents=True, exist_ok=True)
+                path = self._next_custom_parquet_path(
+                    params.get("filename") or "",
+                    fallback_prefix="search_export",
+                )
+                current_df.to_parquet(path, index=False)
+                message = f"Exported {path.name} ({len(current_df):,})"
+            elif action == "save_runner":
+                path = Path("naia_temp_rows.parquet")
+                current_df.to_parquet(path, index=False)
+                message = f"Saved runner parquet ({len(current_df):,})"
+            else:
+                self._broadcast_json({"type": "toast", "message": "Unsupported parquet action", "level": "error"})
+                return
+
+            state = self._read_search_state()
+            if state:
+                self._broadcast_json(state)
+            self._broadcast_json({"type": "toast", "message": message, "level": "success"})
+        except Exception as e:
+            print(f"🌐 Remote: search parquet action 실패 — {e}")
+            self._broadcast_json({"type": "toast", "message": f"Parquet action failed: {e}", "level": "error"})
 
     def _on_search_progress(self, completed: int, total: int):
         """검색 진행률 브로드캐스트"""
@@ -10888,14 +10986,18 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 bridge.request_set_module.emit(mid, mkey, mval)
                                 continue
                             bridge.request_set_module.emit(mid, mkey, mval)
-                        elif cmd_type in ("get_search_state", "search", "load_parquet",
-                                           "depth_action", "get_depth_state", "restore_snapshot"):
+                        elif cmd_type in ("get_search_state", "search", "load_parquet", "merge_parquet",
+                                           "search_parquet_action", "depth_action", "get_depth_state", "restore_snapshot"):
                             if cmd_type == "get_search_state":
                                 bridge.request_get_module.emit(None, "__search__")
                             elif cmd_type == "search":
                                 bridge.request_search.emit(json.dumps(cmd))
                             elif cmd_type == "load_parquet":
                                 bridge.request_load_parquet.emit(cmd.get("filename", ""))
+                            elif cmd_type == "merge_parquet":
+                                bridge.request_merge_parquet.emit(cmd.get("filename", ""))
+                            elif cmd_type == "search_parquet_action":
+                                bridge.request_search_parquet_action.emit(json.dumps(cmd))
                             elif cmd_type == "depth_action":
                                 bridge.request_depth_action.emit(json.dumps(cmd))
                             elif cmd_type == "get_depth_state":
@@ -11244,6 +11346,8 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     )
     bridge.request_search.connect(bridge._do_search, Qt.ConnectionType.QueuedConnection)
     bridge.request_load_parquet.connect(bridge._do_load_parquet, Qt.ConnectionType.QueuedConnection)
+    bridge.request_merge_parquet.connect(bridge._do_merge_parquet, Qt.ConnectionType.QueuedConnection)
+    bridge.request_search_parquet_action.connect(bridge._do_search_parquet_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_depth_action.connect(bridge._do_depth_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_restore_snapshot.connect(bridge._do_restore_snapshot, Qt.ConnectionType.QueuedConnection)
     bridge.request_apply_filters.connect(bridge._do_apply_filters, Qt.ConnectionType.QueuedConnection)

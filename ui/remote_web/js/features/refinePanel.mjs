@@ -35,8 +35,8 @@ export function createRefinePanel({
     if (!open) return;
     if (!message.open) {
       const msg = message.error === 'no_search_results'
-        ? 'No search results loaded.<br><span style="font-size:10px">Run a search first</span>'
-        : 'Preparing data...';
+        ? '검색 결과가 없습니다.<br><span style="font-size:10px">먼저 검색을 실행하세요</span>'
+        : '심층 검색 데이터 준비 중...';
       panel.querySelector('.refine-body').innerHTML =
         `<div style="text-align:center;color:var(--text-dim);padding:20px">${msg}</div>`;
       return;
@@ -67,36 +67,36 @@ export function createRefinePanel({
     body.innerHTML = `
     <div class="search-top-row">
       <div>
-        <div class="mod-section-label">Filtered</div>
+        <div class="mod-section-label">표시된 행</div>
         <div class="search-count-display" style="font-size:18px">${message.count || 0}</div>
       </div>
       <div>
-        <div class="mod-section-label">Original</div>
+        <div class="mod-section-label">원본 행</div>
         <div class="search-count-display" style="font-size:18px;color:var(--text-muted)">${message.original || 0}</div>
       </div>
     </div>
     <div>
-      <div class="mod-section-label">Filter Tags</div>
-      <input class="mod-input" id="depthQuery" type="text" value="${escHtml(message.query)}" placeholder="filter tags...">
+      <div class="mod-section-label">검색 키워드</div>
+      <input class="mod-input" id="depthQuery" type="text" value="${escHtml(message.query)}" placeholder="검색 태그...">
     </div>
     <div>
-      <div class="mod-section-label">Exclude Tags</div>
-      <input class="mod-input" id="depthExclude" type="text" value="${escHtml(message.exclude)}" placeholder="exclude tags...">
+      <div class="mod-section-label">제외 키워드</div>
+      <input class="mod-input" id="depthExclude" type="text" value="${escHtml(message.exclude)}" placeholder="제외 태그...">
     </div>
     <div>
-      <div class="mod-section-label">Ratings</div>
+      <div class="mod-section-label">등급</div>
       <div class="mod-checkbox-grid">
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_e" ${ratings.e?'checked':''}><span class="mod-checkbox-label">E</span></label>
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_q" ${ratings.q?'checked':''}><span class="mod-checkbox-label">Q</span></label>
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_s" ${ratings.s?'checked':''}><span class="mod-checkbox-label">S</span></label>
-        <label class="mod-checkbox-item"><input type="checkbox" id="dr_g" ${ratings.g?'checked':''}><span class="mod-checkbox-label">G</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_e" ${ratings.e?'checked':''}><span class="mod-checkbox-label">Explicit</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_q" ${ratings.q?'checked':''}><span class="mod-checkbox-label">NSFW</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_s" ${ratings.s?'checked':''}><span class="mod-checkbox-label">Sensitive</span></label>
+        <label class="mod-checkbox-item"><input type="checkbox" id="dr_g" ${ratings.g?'checked':''}><span class="mod-checkbox-label">General</span></label>
       </div>
     </div>
-    <div class="mod-section-label" style="margin-top:4px">Numeric Filters</div>
+    <div class="mod-section-label" style="margin-top:4px">숫자 필터</div>
     <div class="depth-filter-grid">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_min" ${ck('token_min',false)?'checked':''}><span class="mod-checkbox-label">Tokens \u2265</span></label>
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_min" ${ck('token_min',false)?'checked':''}><span class="mod-checkbox-label">토큰 \u2265</span></label>
       <input class="mod-input mod-input-sm" id="dfv_token_min" type="number" value="${fv('token_min','0')}">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_max" ${ck('token_max',false)?'checked':''}><span class="mod-checkbox-label">Tokens \u2264</span></label>
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_token_max" ${ck('token_max',false)?'checked':''}><span class="mod-checkbox-label">토큰 \u2264</span></label>
       <input class="mod-input mod-input-sm" id="dfv_token_max" type="number" value="${fv('token_max','150')}">
       <label class="mod-checkbox-item"><input type="checkbox" id="df_id_min" ${ck('id_min',false)?'checked':''}><span class="mod-checkbox-label">ID \u2265</span></label>
       <input class="mod-input mod-input-sm" id="dfv_id_min" type="number" value="${fv('id_min','0')}">
@@ -106,30 +106,30 @@ export function createRefinePanel({
       <input class="mod-input mod-input-sm" id="dfv_score_min" type="number" value="${fv('score_min','0')}">
     </div>
     <div class="mod-checkbox-grid" style="margin-top:4px">
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_rem_char" ${filters.rem_char?'checked':''}><span class="mod-checkbox-label">Has Character</span></label>
-      <label class="mod-checkbox-item"><input type="checkbox" id="df_only_empty_char" ${filters.only_empty_char?'checked':''}><span class="mod-checkbox-label">No Character</span></label>
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_rem_char" ${filters.rem_char?'checked':''}><span class="mod-checkbox-label">캐릭터명 없는 행 제외</span></label>
+      <label class="mod-checkbox-item"><input type="checkbox" id="df_only_empty_char" ${filters.only_empty_char?'checked':''}><span class="mod-checkbox-label">캐릭터명 없는 행만 검색</span></label>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
-      <button class="mod-action-btn mod-start" style="flex:1" onclick="depthFilter()">Filtered Search</button>
-      <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('restore')">Restore</button>
+      <button class="mod-action-btn mod-start" style="flex:1" onclick="depthFilter()">결과 내 재검색</button>
+      <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('restore')">초기 상태로 복원</button>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button class="mod-action-btn mod-start" style="flex:1;background:var(--accent)" onclick="depthAction('assign')">Assign to Main</button>
-      <button class="mod-action-btn mod-refine" style="flex:1" onclick="depthAction('promote')" title="Set current filtered results as the new baseline">Set as Baseline</button>
+      <button class="mod-action-btn mod-start" style="flex:1;background:var(--accent)" onclick="depthAction('assign')">현재 결과를 메인에 할당</button>
+      <button class="mod-action-btn mod-refine" style="flex:1" onclick="depthAction('promote')" title="현재 검색 결과를 원본 행으로 설정">현재 검색 결과를 원본 행으로</button>
     </div>
     <div class="mod-section-label mod-collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('collapsed')" style="margin-top:6px">
-      Staging & Export <span class="mod-collapse-arrow">\u25B6</span>
+      스테이징 & 내보내기 <span class="mod-collapse-arrow">\u25B6</span>
     </div>
     <div class="collapsed" style="display:flex;flex-direction:column;gap:6px">
       <div style="display:flex;gap:6px;align-items:center">
-        <button class="mod-action-btn" style="flex:1" onclick="depthAction('stage')">+ Stage Current</button>
-        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">Staged: <span class="depth-staging-count">${message.staging_count||0}</span></span>
+        <button class="mod-action-btn" style="flex:1" onclick="depthAction('stage')">+ 스테이징에 추가</button>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">스테이징: <span class="depth-staging-count">${message.staging_count||0}</span></span>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="mod-action-btn" style="flex:1" onclick="depthAction('merge_staging')">Merge Staged</button>
-        <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('clear_staging')">Clear</button>
+        <button class="mod-action-btn" style="flex:1" onclick="depthAction('merge_staging')">스테이징 병합 → 현재 뷰</button>
+        <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('clear_staging')">스테이징 초기화</button>
       </div>
-      <button class="mod-action-btn" style="width:100%" onclick="depthAction('export')">Export to Custom Parquet</button>
+      <button class="mod-action-btn" style="width:100%" onclick="depthAction('export')">현재 뷰 내보내기 (.parquet)</button>
     </div>
   `;
   }

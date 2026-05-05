@@ -1381,6 +1381,74 @@ def test_artist_thumb_nai_data_load_syncs_missing_favorite_thumbnail_cache(tmp_p
     assert cache["items"]["c"]["thumbnail"] == "thumb_c"
 
 
+def test_artist_thumb_cached_nai_data_syncs_missing_favorite_thumbnail_cache(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("data").mkdir()
+    Path("artist_thumb/artist_state.json").write_text(
+        json.dumps({"version": 1, "favorites": ["a", "c"], "banned": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path("artist_thumb/favorite_thumbnail_cache.json").write_text(
+        json.dumps({
+            "version": 1,
+            "items": {
+                "a": {"mode": "NAID4.5F-31000", "thumbnail": "thumb_a"},
+            },
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    bridge = RemoteBridge(_AppContext())
+    data = {"a": ["thumb_a"], "c": ["thumb_c"]}
+    bridge._artist_thumb_data_cache["NAID4.5F-31000"] = data
+
+    loaded = bridge._load_artist_thumb_data("NAID4.5F-31000")
+
+    cache = json.loads(Path("artist_thumb/favorite_thumbnail_cache.json").read_text(encoding="utf-8"))
+    assert loaded is data
+    assert set(cache["items"]) == {"a", "c"}
+    assert cache["items"]["c"]["thumbnail"] == "thumb_c"
+
+
+def test_artist_thumb_cached_nai_data_skips_complete_thumbnail_cache(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("data").mkdir()
+    Path("artist_thumb/artist_state.json").write_text(
+        json.dumps({"version": 1, "favorites": ["a", "c"], "banned": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path("artist_thumb/favorite_thumbnail_cache.json").write_text(
+        json.dumps({
+            "version": 1,
+            "items": {
+                "a": {"mode": "NAID4.5F-31000", "thumbnail": "thumb_a"},
+                "c": {"mode": "NAID4.5F-31000", "thumbnail": "thumb_c"},
+            },
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    bridge = RemoteBridge(_AppContext())
+    data = {"a": ["new_thumb_a"], "c": ["new_thumb_c"]}
+    bridge._artist_thumb_data_cache["NAID4.5F-31000"] = data
+
+    def fail_if_reindexed(*_args, **_kwargs):
+        raise AssertionError("complete favorite thumbnail cache should not be reindexed")
+
+    def fail_if_rewritten(*_args, **_kwargs):
+        raise AssertionError("complete favorite thumbnail cache should not be rewritten")
+
+    bridge._artist_thumb_cache_entry_from_data = fail_if_reindexed
+    bridge._write_artist_thumb_thumbnail_cache = fail_if_rewritten
+
+    loaded = bridge._load_artist_thumb_data("NAID4.5F-31000")
+
+    cache = json.loads(Path("artist_thumb/favorite_thumbnail_cache.json").read_text(encoding="utf-8"))
+    assert loaded is data
+    assert cache["items"]["a"]["thumbnail"] == "thumb_a"
+    assert cache["items"]["c"]["thumbnail"] == "thumb_c"
+
+
 def test_artist_thumb_state_rejects_corrupt_json_without_legacy_overwrite(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("artist_thumb").mkdir()

@@ -2416,13 +2416,23 @@ class RemoteBridge(QObject):
                     removed += 1
                     changed = True
 
+            missing_artists = [artist for artist in favorites if not items.get(artist, {}).get("thumbnail")]
+            if not changed and not missing_artists:
+                return {
+                    "count": len(items),
+                    "added": 0,
+                    "removed": 0,
+                    "missing": 0,
+                    "changed": False,
+                    "path": str(self._artist_thumb_favorite_thumbnail_cache_path()),
+                    "cache": {"version": 1, "items": items},
+                }
+
             if mode_key and thumb_data is None:
                 thumb_data = self._artist_thumb_data_cache.get(mode_key)
 
             if mode_key and isinstance(thumb_data, dict):
-                for artist in favorites:
-                    if items.get(artist, {}).get("thumbnail"):
-                        continue
+                for artist in missing_artists:
                     entry = self._artist_thumb_cache_entry_from_data(artist, mode_key, thumb_data)
                     if not entry:
                         continue
@@ -2493,6 +2503,11 @@ class RemoteBridge(QObject):
         with self._artist_thumb_lock:
             cached = self._artist_thumb_data_cache.get(key)
             if cached is not None:
+                if key == "NAID4.5F-31000":
+                    try:
+                        self._sync_artist_thumb_favorite_thumbnail_cache(key, cached)
+                    except Exception as e:
+                        print(f"🌐 Remote: artist thumb favorite thumbnail cache sync failed — {e}")
                 return cached
             path = self._artist_thumb_mode_path(key)
             if not path.exists():

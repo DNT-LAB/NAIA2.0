@@ -23,6 +23,8 @@ export function createImageModulePanels({
   let vibeClusterItems = [];
   let vibeClusterPendingThumb = '';
   let vibeClusterThumbTarget = '';
+  const VIBE_CLUSTER_NAME_PATTERN = /^[A-Za-z0-9]+$/;
+  const VIBE_CLUSTER_NAME_HINT = 'Vibe cluster name must use letters and numbers only.';
 
   function getVibeClusterHost() {
     return document.body;
@@ -78,6 +80,18 @@ export function createImageModulePanels({
     closeVibeClusterSavePanel();
   }
 
+  function isValidVibeClusterName(name) {
+    return VIBE_CLUSTER_NAME_PATTERN.test(String(name || ''));
+  }
+
+  function filterVibeClusterNameInput(input) {
+    if (!input) return '';
+    const filtered = String(input.value || '').replace(/[^A-Za-z0-9]/g, '');
+    if (input.value !== filtered) input.value = filtered;
+    input.classList.toggle('invalid', Boolean(input.value) && !isValidVibeClusterName(input.value));
+    return input.value;
+  }
+
   function renderVibeClusterSavePanel() {
     const existing = getVibeClusterSavePanel();
     if (existing) existing.remove();
@@ -90,7 +104,8 @@ export function createImageModulePanels({
         <button class="mod-btn-sm" onclick="closeVibeClusterSavePanel()">Close</button>
       </div>
       <div class="vibe-cluster-save">
-        <input id="vibeClusterName" class="vibe-cluster-input" type="text" placeholder="Name">
+        <input id="vibeClusterName" class="vibe-cluster-input" type="text" placeholder="Name" spellcheck="false"
+          autocomplete="off" pattern="[A-Za-z0-9]+" title="${VIBE_CLUSTER_NAME_HINT}">
         <textarea id="vibeClusterDesc" class="vibe-cluster-textarea" placeholder="Description"></textarea>
         <div class="vibe-cluster-thumb-row">
           <div class="vibe-cluster-save-thumb">${vibeClusterPendingThumb ? `<img src="${vibeClusterPendingThumb}" alt="">` : '<span>Thumb</span>'}</div>
@@ -103,6 +118,9 @@ export function createImageModulePanels({
       </div>
     `;
     getVibeClusterHost().appendChild(panel);
+    panel.querySelector('#vibeClusterName')?.addEventListener('input', event => {
+      filterVibeClusterNameInput(event.currentTarget);
+    });
     relayoutVibeClusterPanel();
   }
 
@@ -622,8 +640,14 @@ export function createImageModulePanels({
 
   function saveVibeCluster() {
     const panel = getVibeClusterSavePanel();
-    const name = panel?.querySelector('#vibeClusterName')?.value.trim() || '';
+    const nameInput = panel?.querySelector('#vibeClusterName');
+    const name = filterVibeClusterNameInput(nameInput).trim();
     const description = panel?.querySelector('#vibeClusterDesc')?.value.trim() || '';
+    if (!isValidVibeClusterName(name)) {
+      nameInput?.classList.add('invalid');
+      showToast?.(VIBE_CLUSTER_NAME_HINT, 'error');
+      return;
+    }
     vibeClusterShowListAfterSave = true;
     setModuleParam('vibe_transfer', 'cluster_save', JSON.stringify({
       name,
@@ -662,8 +686,12 @@ export function createImageModulePanels({
     const item = vibeClusterItems.find(entry => entry.id === id) || {};
     const name = globalThis.prompt?.('Name', item.name || '') ?? '';
     if (!name.trim()) return;
+    if (!isValidVibeClusterName(name.trim())) {
+      showToast?.(VIBE_CLUSTER_NAME_HINT, 'error');
+      return;
+    }
     const description = globalThis.prompt?.('Description', item.description || '') ?? '';
-    setModuleParam('vibe_transfer', 'cluster_rename', JSON.stringify({id, name, description}));
+    setModuleParam('vibe_transfer', 'cluster_rename', JSON.stringify({id, name: name.trim(), description}));
   }
 
   function deleteVibeCluster(id) {

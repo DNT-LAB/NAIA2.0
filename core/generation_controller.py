@@ -1,6 +1,7 @@
 ﻿from core.context import AppContext
 from core.generation_request import GenerationRequest
 from core.sequence_parser import SequenceParser
+from core.vibe_cluster_resolver import VibeClusterPromptError, apply_vibe_cluster_prompt_override
 from core.wildcard_processor import split_tags_smart
 from PIL import Image
 import piexif
@@ -577,6 +578,9 @@ class GenerationController:
             #     params['input'] = processed_input
             #     print(f"🔀 조건부 프롬프트 적용: '{params['input'][:50]}{'...' if len(params['input']) > 50 else ''}'")
 
+            if not self._apply_vibe_cluster_prompt_override(params):
+                return
+
             # 와일드카드 상태 모듈 업데이트를 위한 이벤트 발행
             if self.context.current_prompt_context:
                 self.context.publish("prompt_generated", self.context.current_prompt_context)
@@ -626,6 +630,9 @@ class GenerationController:
             # 덮어쓰기 적용
             if overrides:
                 params.update(overrides)
+
+            if not self._apply_vibe_cluster_prompt_override(params):
+                return
 
             # ✅ Phase 2: NAI 데이터 추출 (Early Binding)
             nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params)
@@ -1566,9 +1573,6 @@ class GenerationController:
         # (캐릭터 리롤이 각 시퀀스마다 반복되지 않도록)
         base_params = self._collect_generation_params()
 
-        # ✅ Phase 2: NAI 데이터를 시퀀스 전체에 대해 한 번만 추출 (Early Binding)
-        nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(base_params)
-
         # 🆕 API 모드 확인 (시드 처리 분기용)
         api_mode = base_params.get('api_mode', 'NAI')
         if overrides and 'seed_fixed' in overrides:
@@ -1609,6 +1613,12 @@ class GenerationController:
                 # 덮어쓰기 적용
                 if overrides:
                     params.update(overrides)
+
+                if not self._apply_vibe_cluster_prompt_override(params):
+                    continue
+
+                # ✅ Phase 2: 프롬프트별 NAI 데이터 추출 (vibe:name override 포함)
+                nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params)
 
                 # source_row 설정
                 source_row = self.context.current_source_row
@@ -1750,9 +1760,15 @@ class GenerationController:
             # 2. Vibe Transfer Module
             vibe_keys = ['reference_image_multiple', 'reference_strength_multiple']
             if all(key in params for key in vibe_keys):
-                nai_vibe_transfer = NAIVibeTransferData.from_params(params)
-                if nai_vibe_transfer:
-                    print(f"✅ [EarlyBinding] Vibe Transfer Data 캡처: {len(nai_vibe_transfer.reference_image_multiple)}개")
+                try:
+                    nai_vibe_transfer = NAIVibeTransferData.from_params(params)
+                    if nai_vibe_transfer:
+                        print(f"✅ [EarlyBinding] Vibe Transfer Data 캡처: {len(nai_vibe_transfer.reference_image_multiple)}개")
+                except ValueError as e:
+                    if params.get('_vibe_cluster_override'):
+                        print(f"⚠️ [EarlyBinding] Vibe cluster는 API 단계에서 직접 적용: {e}")
+                    else:
+                        raise
 
             # 3. Character Reference Module (NAID4.5 Director Tool)
             ref_keys = ['director_reference_descriptions', 'director_reference_images']
@@ -1771,6 +1787,23 @@ class GenerationController:
             traceback.print_exc()
 
         return nai_characters, nai_vibe_transfer, nai_character_reference
+
+    def _apply_vibe_cluster_prompt_override(self, params: dict) -> bool:
+        try:
+            result = apply_vibe_cluster_prompt_override(params)
+        except VibeClusterPromptError as e:
+            message = str(e)
+            print(f"⚠️ [VibeCluster] {message}")
+            self.context.main_window.status_bar.showMessage(f"❌ {message}")
+            return False
+        except Exception as e:
+            message = f"Vibe cluster override failed: {e}"
+            print(f"❌ [VibeCluster] {message}")
+            self.context.main_window.status_bar.showMessage(f"❌ {message}")
+            return False
+        if result.applied:
+            print(f"✅ [VibeCluster] prompt override: {result.cluster_name} ({result.frame_count} frame(s))")
+        return True
 
     def safe_shutdown(self, timeout_ms: int = 5000):
         """

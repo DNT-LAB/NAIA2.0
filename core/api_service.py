@@ -541,6 +541,18 @@ class APIService:
                 print(f"  - {len(nai_vibe_data.reference_image_multiple)} vibe(s) added")
                 print(f"  - Normalization: {nai_vibe_data.normalize}")
                 print(f"  - Strengths: {nai_vibe_data.reference_strength_multiple}")
+            elif params.get('_vibe_cluster_override') and params.get('reference_image_multiple'):
+                cluster_info = params.get('_vibe_cluster_override') or {}
+                print(f"✅ [PromptOverride] Vibe cluster: {cluster_info.get('name', '')}")
+                api_parameters['normalize_reference_strength_multiple'] = params.get('normalize_reference_strength_multiple', False)
+                api_parameters['reference_image_multiple'] = params.get('reference_image_multiple', [])
+                api_parameters['reference_strength_multiple'] = params.get('reference_strength_multiple', [])
+                if params.get('reference_information_extracted_multiple'):
+                    api_parameters['reference_information_extracted_multiple'] = params['reference_information_extracted_multiple']
+                    print(f"  - NAID3 IE values: {params['reference_information_extracted_multiple']}")
+                print(f"  - {len(api_parameters['reference_image_multiple'])} vibe(s) added")
+                print(f"  - Normalization: {api_parameters['normalize_reference_strength_multiple']}")
+                print(f"  - Strengths: {api_parameters['reference_strength_multiple']}")
             else:
                 # 🔄 Late Binding fallback for direct generation (non-queue)
                 vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")

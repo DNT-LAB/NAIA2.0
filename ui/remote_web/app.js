@@ -691,7 +691,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster7')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster8')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -4184,7 +4184,7 @@ function insertTag(tag) {
 
 // ---- Tag tooltip + Autocomplete system ----
 const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
-const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4' };
+const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4', vibe_cluster: '#9d8bff' };
 function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
 
 let tagAssist = null;
@@ -4234,7 +4234,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260504_geninfo_popup2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260505_vibe_cluster_ac1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

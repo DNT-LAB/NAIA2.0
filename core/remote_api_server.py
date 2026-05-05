@@ -38,6 +38,7 @@ from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
+from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
 from core.tag_search_index import TagSearchIndex, normalize_search_query
 
 
@@ -7919,6 +7920,16 @@ class RemoteBridge(QObject):
             return ""
         return safe
 
+    def _is_valid_vibe_cluster_name(self, name: str) -> bool:
+        return is_valid_vibe_cluster_name(name)
+
+    def _broadcast_invalid_vibe_cluster_name(self):
+        self._broadcast_json({
+            "type": "toast",
+            "message": "Vibe cluster name must use letters and numbers only",
+            "level": "error",
+        })
+
     def _vibe_cluster_json_path(self, raw_id: str) -> Optional[Path]:
         cluster_id = self._safe_vibe_cluster_id(raw_id)
         if not cluster_id:
@@ -8028,11 +8039,15 @@ class RemoteBridge(QObject):
         if not isinstance(payload, dict):
             payload = {}
 
+        name = str(payload.get("name") or "").strip()
+        if not self._is_valid_vibe_cluster_name(name):
+            self._broadcast_invalid_vibe_cluster_name()
+            return False
+
         root = self._vibe_cluster_root()
         root.mkdir(parents=True, exist_ok=True)
         now = datetime.now().isoformat(timespec="seconds")
         cluster_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-        name = str(payload.get("name") or "").strip() or f"Vibe Cluster {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         description = str(payload.get("description") or "").strip()
         current_model = self._current_vibe_model(module)
         frames = []
@@ -8107,6 +8122,9 @@ class RemoteBridge(QObject):
         name = str(payload.get("name") or "").strip()
         description = str(payload.get("description") or "").strip()
         if name:
+            if not self._is_valid_vibe_cluster_name(name):
+                self._broadcast_invalid_vibe_cluster_name()
+                return False
             data["name"] = name
         data["description"] = description
         data["updated_at"] = datetime.now().isoformat(timespec="seconds")
@@ -9470,6 +9488,13 @@ class RemoteBridge(QObject):
             return results[:limit]
         except Exception as e:
             print(f"🌐 Remote: chunk 검색 실패: {e}")
+            return []
+
+    def _search_vibe_clusters(self, query: str, limit: int = 12) -> list:
+        try:
+            return search_vibe_clusters(query, limit=limit)
+        except Exception as e:
+            print(f"🌐 Remote: vibe cluster 검색 실패: {e}")
             return []
 
     def _read_chunk(self) -> dict:
@@ -11851,6 +11876,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         elif cmd_type == "autocomplete_chunk":
                             query = cmd.get("query", "")
                             results = await asyncio.to_thread(bridge._search_chunks, query, 12)
+                            await ws.send_text(json.dumps({
+                                "type": "autocomplete_result",
+                                "query": query,
+                                "results": results,
+                            }))
+                        elif cmd_type == "autocomplete_vibe_cluster":
+                            query = cmd.get("query", "")
+                            results = await asyncio.to_thread(bridge._search_vibe_clusters, query, 12)
                             await ws.send_text(json.dumps({
                                 "type": "autocomplete_result",
                                 "query": query,

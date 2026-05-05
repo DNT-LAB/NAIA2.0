@@ -142,7 +142,7 @@ def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, mo
 
     saved = bridge._save_current_vibe_cluster(
         module,
-        json.dumps({"name": "Test Cluster", "description": "desc"}),
+        json.dumps({"name": "TestCluster", "description": "desc"}),
     )
 
     assert saved is True
@@ -150,7 +150,7 @@ def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, mo
     assert listing["module_id"] == "vibe_cluster"
     assert len(listing["items"]) == 1
     item = listing["items"][0]
-    assert item["name"] == "Test Cluster"
+    assert item["name"] == "TestCluster"
     assert item["frame_count"] == 2
     assert item["enabled_count"] == 1
 
@@ -161,6 +161,38 @@ def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, mo
     assert data["frames"][1]["reference_strength"] == 0.17
 
 
+def test_vibe_cluster_save_rejects_invalid_names(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+    module = _FakeVibeModule([_FakeVibeFrame({1.0: "encoded-a"}, 0.21, 1.0, True)])
+
+    saved = bridge._save_current_vibe_cluster(
+        module,
+        json.dumps({"name": "Bad Cluster!", "description": "desc"}),
+    )
+
+    assert saved is False
+    assert broadcasts[-1]["level"] == "error"
+    assert not list((tmp_path / "save" / "vibe_transfer_clusters").glob("*.json"))
+
+
+def test_vibe_cluster_autocomplete_search_returns_vibe_prompt_token(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    bridge._broadcast_json = lambda payload: None
+    module = _FakeVibeModule([_FakeVibeFrame({1.0: "encoded-a"}, 0.21, 1.0, True)])
+    assert bridge._save_current_vibe_cluster(module, json.dumps({"name": "SearchableVibe"}))
+
+    results = bridge._search_vibe_clusters("search")
+
+    assert len(results) == 1
+    assert results[0]["tag"] == "SearchableVibe"
+    assert results[0]["value"] == "vibe:SearchableVibe"
+    assert results[0]["_wc_type"] == "vibe_cluster"
+
+
 def test_vibe_cluster_load_clean_recreates_no_image_frames(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())
@@ -169,7 +201,7 @@ def test_vibe_cluster_load_clean_recreates_no_image_frames(tmp_path, monkeypatch
     source = _FakeVibeModule([
         _FakeVibeFrame({1.0: "encoded-a", 0.5: "encoded-a-half"}, 0.21, 0.5, True),
     ])
-    assert bridge._save_current_vibe_cluster(source, json.dumps({"name": "Load Me"}))
+    assert bridge._save_current_vibe_cluster(source, json.dumps({"name": "LoadMe"}))
     cluster_id = bridge._scan_vibe_clusters()["items"][0]["id"]
 
     existing = _FakeVibeFrame({1.0: "old"}, 0.9, 1.0, True)

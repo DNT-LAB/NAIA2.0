@@ -520,7 +520,7 @@ export function createTagAssistController({
     const query = String(stripped || '').trim();
     if (!query) return '';
     const lower = query.toLowerCase();
-    if (allowTriggers && (lower.startsWith('__') || lower.startsWith('$'))) return query;
+    if (allowTriggers && (lower.startsWith('__') || lower.startsWith('$') || lower.startsWith('vibe:'))) return query;
     for (const namespace of ['artist', 'character']) {
       const prefix = namespace + ':';
       if (prefix.startsWith(lower) && lower.length >= 2) return '';
@@ -539,7 +539,8 @@ export function createTagAssistController({
     const info = getActiveTokenInfo(target);
     const allowTriggers = target !== negEdit;
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
-    if (!info || (!isChunkTrigger && info.stripped.length < 2)) {
+    const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
+    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && info.stripped.length < 2)) {
       hideAutocomplete();
       checkTagHint();
       return;
@@ -561,6 +562,8 @@ export function createTagAssistController({
         if (q.length >= 1) sendWs({type: 'autocomplete_wildcard', query: q});
       } else if (allowTriggers && s.startsWith('$')) {
         sendWs({type: 'autocomplete_chunk', query: s.slice(1).trim()});
+      } else if (allowTriggers && s.toLowerCase().startsWith('vibe:')) {
+        sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
       } else {
         sendWs({type: 'autocomplete', query: s});
       }
@@ -571,7 +574,8 @@ export function createTagAssistController({
     const q = lastAcQuery;
     const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
     const matchesChunk = q && q.startsWith('$') && m.query === q.slice(1).trim();
-    if (!matchesWc && !matchesChunk && m.query !== q) return;
+    const matchesVibeCluster = q && q.toLowerCase().startsWith('vibe:') && m.query === q.slice(5).trim();
+    if (!matchesWc && !matchesChunk && !matchesVibeCluster && m.query !== q) return;
     const target = acTarget || promptEdit;
     const results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
     if (!results.length) {
@@ -580,7 +584,7 @@ export function createTagAssistController({
       return;
     }
     acResults = results;
-    acSel = results.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group') ? 0 : -1;
+    acSel = results.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster') ? 0 : -1;
     acMode = true;
     renderAutocomplete();
   }
@@ -596,10 +600,14 @@ export function createTagAssistController({
 
   function chunkPreviewHtml(result) {
     if (!result) return '';
-    const title = result._wc_type === 'chunk_group' ? `$${result.tag}:` : `$${result.tag}`;
+    const title = result._wc_type === 'vibe_cluster'
+      ? `vibe:${result.tag}`
+      : (result._wc_type === 'chunk_group' ? `$${result.tag}:` : `$${result.tag}`);
     const meta = result._wc_type === 'chunk_group'
       ? `${result.desc || ''}`
-      : `${result.group || ''}`;
+      : (result._wc_type === 'vibe_cluster'
+        ? `${result.group || ''}${result.count ? ` - ${result.count} frame(s)` : ''}`
+        : `${result.group || ''}`);
     const body = result.preview || result.value || result.desc || '';
     return '<div class="chunk-ac-preview-title">' + escHtml(title) + '</div>' +
       (meta ? '<div class="chunk-ac-preview-meta">' + escHtml(meta) + '</div>' : '') +
@@ -608,13 +616,13 @@ export function createTagAssistController({
 
   function renderAutocomplete() {
     hideTagChipInfoTooltip();
-    const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group');
+    const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster');
     let html = chunkMode ? '<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list">' : '<div class="tag-ac-list">';
     acResults.forEach((r, i) => {
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
-      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : '');
+      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : ''));
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const metaText = wcType === 'chunk'
@@ -680,6 +688,11 @@ export function createTagAssistController({
     }
     if (r._wc_type === 'chunk') {
       swapToken(target, info, r.value || '');
+      hideAutocomplete();
+      return;
+    }
+    if (r._wc_type === 'vibe_cluster') {
+      swapToken(target, info, r.value || `vibe:${r.tag}`);
       hideAutocomplete();
       return;
     }

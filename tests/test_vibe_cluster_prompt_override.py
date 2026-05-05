@@ -75,6 +75,21 @@ def test_apply_vibe_cluster_prompt_override_adds_naid3_ie_values(tmp_path):
     assert params["reference_information_extracted_multiple"] == [0.5, 1.0]
 
 
+def test_apply_vibe_cluster_prompt_override_accepts_korean_name(tmp_path):
+    root = tmp_path / "save" / "vibe_transfer_clusters"
+    _write_cluster(root, "테스트Vibe1")
+    params = {
+        "api_mode": "NAI",
+        "model": "NAID4.5F",
+        "input": "solo, vibe:테스트Vibe1",
+    }
+
+    apply_vibe_cluster_prompt_override(params, root=root)
+
+    assert params["input"] == "solo"
+    assert params["_vibe_cluster_override"]["name"] == "테스트Vibe1"
+
+
 def test_apply_vibe_cluster_prompt_override_rejects_unknown_cluster(tmp_path):
     params = {
         "api_mode": "NAI",

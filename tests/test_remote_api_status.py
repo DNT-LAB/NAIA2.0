@@ -178,6 +178,22 @@ def test_vibe_cluster_save_rejects_invalid_names(tmp_path, monkeypatch):
     assert not list((tmp_path / "save" / "vibe_transfer_clusters").glob("*.json"))
 
 
+def test_vibe_cluster_save_accepts_korean_names(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    bridge._broadcast_json = lambda payload: None
+    module = _FakeVibeModule([_FakeVibeFrame({1.0: "encoded-a"}, 0.21, 1.0, True)])
+
+    saved = bridge._save_current_vibe_cluster(
+        module,
+        json.dumps({"name": "테스트Vibe1", "description": "desc"}),
+    )
+
+    assert saved is True
+    item = bridge._scan_vibe_clusters()["items"][0]
+    assert item["name"] == "테스트Vibe1"
+
+
 def test_vibe_cluster_autocomplete_search_returns_vibe_prompt_token(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())

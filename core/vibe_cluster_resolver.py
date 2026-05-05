@@ -8,7 +8,7 @@ from core.wildcard_processor import split_tags_smart
 
 
 VIBE_CLUSTER_ROOT = Path("save/vibe_transfer_clusters")
-VIBE_CLUSTER_NAME_RE = re.compile(r"^[A-Za-z0-9]+$")
+VIBE_CLUSTER_NAME_RE = re.compile(r"^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]+$")
 
 
 class VibeClusterPromptError(ValueError):
@@ -101,7 +101,7 @@ def resolve_vibe_cluster(name: str, root: Path = VIBE_CLUSTER_ROOT) -> dict:
     if not query:
         raise VibeClusterPromptError("vibe: cluster name is empty")
     if not is_valid_vibe_cluster_name(query):
-        raise VibeClusterPromptError("Vibe cluster name must use letters and numbers only")
+        raise VibeClusterPromptError("Vibe cluster name must use letters, numbers, and Korean only")
 
     matches = [
         data for data in list_vibe_clusters(root)

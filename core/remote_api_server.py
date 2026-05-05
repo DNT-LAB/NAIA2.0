@@ -7926,7 +7926,7 @@ class RemoteBridge(QObject):
     def _broadcast_invalid_vibe_cluster_name(self):
         self._broadcast_json({
             "type": "toast",
-            "message": "Vibe cluster name must use letters and numbers only",
+            "message": "Vibe cluster name must use letters, numbers, and Korean only",
             "level": "error",
         })
 

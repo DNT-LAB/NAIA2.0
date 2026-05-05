@@ -691,7 +691,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster8')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster9')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,

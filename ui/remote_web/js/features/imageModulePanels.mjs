@@ -23,8 +23,8 @@ export function createImageModulePanels({
   let vibeClusterItems = [];
   let vibeClusterPendingThumb = '';
   let vibeClusterThumbTarget = '';
-  const VIBE_CLUSTER_NAME_PATTERN = /^[A-Za-z0-9]+$/;
-  const VIBE_CLUSTER_NAME_HINT = 'Vibe cluster name must use letters and numbers only.';
+  const VIBE_CLUSTER_NAME_PATTERN = /^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]+$/;
+  const VIBE_CLUSTER_NAME_HINT = 'Vibe cluster name must use letters, numbers, and Korean only.';
 
   function getVibeClusterHost() {
     return document.body;
@@ -86,7 +86,7 @@ export function createImageModulePanels({
 
   function filterVibeClusterNameInput(input) {
     if (!input) return '';
-    const filtered = String(input.value || '').replace(/[^A-Za-z0-9]/g, '');
+    const filtered = String(input.value || '').replace(/[^A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]/g, '');
     if (input.value !== filtered) input.value = filtered;
     input.classList.toggle('invalid', Boolean(input.value) && !isValidVibeClusterName(input.value));
     return input.value;
@@ -105,7 +105,7 @@ export function createImageModulePanels({
       </div>
       <div class="vibe-cluster-save">
         <input id="vibeClusterName" class="vibe-cluster-input" type="text" placeholder="Name" spellcheck="false"
-          autocomplete="off" pattern="[A-Za-z0-9]+" title="${VIBE_CLUSTER_NAME_HINT}">
+          autocomplete="off" pattern="[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]+" title="${VIBE_CLUSTER_NAME_HINT}">
         <textarea id="vibeClusterDesc" class="vibe-cluster-textarea" placeholder="Description"></textarea>
         <div class="vibe-cluster-thumb-row">
           <div class="vibe-cluster-save-thumb">${vibeClusterPendingThumb ? `<img src="${vibeClusterPendingThumb}" alt="">` : '<span>Thumb</span>'}</div>

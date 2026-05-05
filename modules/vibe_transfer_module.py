@@ -9,8 +9,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QPushButton, QScrollArea, QCheckBox, QFileDialog, QSlider,
-    QMessageBox, QApplication, QDialog, QTabWidget, QGridLayout,
-    QMenu, QInputDialog, QSizePolicy
+    QApplication, QDialog, QTabWidget, QGridLayout,
+    QMenu, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSize, QBuffer, QIODevice
 from PyQt6.QtGui import QPixmap, QImage, QAction
@@ -84,6 +84,31 @@ def _get_current_model_from_context(app_context) -> str:
     except Exception as e:
         print(f"Failed to get current model: {e}")
     return "default"
+
+
+def _notify_vibe_transfer(app_context, title: str, message: str, level: str = "info"):
+    """Report Vibe Transfer issues without opening modal dialogs."""
+    text = f"{title}: {message}" if title else str(message)
+    print(f"[VibeTransfer/{level.upper()}] {text}")
+
+    try:
+        main_window = getattr(app_context, "main_window", None)
+        status_bar = getattr(main_window, "status_bar", None)
+        if status_bar is not None:
+            status_bar.showMessage(text, 5000)
+    except Exception:
+        pass
+
+    try:
+        bridge = getattr(app_context, "remote_bridge", None)
+        if bridge and hasattr(bridge, "_broadcast_json"):
+            bridge._broadcast_json({
+                "type": "toast",
+                "message": text,
+                "level": "error" if level == "error" else ("warning" if level == "warning" else "success"),
+            })
+    except Exception:
+        pass
 
 
 def _is_naid3_model_from_context(app_context) -> bool:
@@ -945,36 +970,10 @@ class VibeStorageItem(QFrame):
         
     def _on_rename(self):
         """Handle rename action.
-        TODO(web-dialog): 원래 QInputDialog "파일명 변경" — Web Shell 입력 모달로 재구현 필요.
+        TODO(web-dialog): 원래 파일명 변경 입력 모달 — Web Shell 입력 모달로 재구현 필요.
         현재는 차단 — 이름 변경은 Web Shell Vibe Transfer 패널에서 처리."""
         print(f"[Dialog/SKIPPED] Vibe 파일명 변경 dialog 차단 (file={self.file_name}) — Web Shell 재구현 예정")
         return
-        # 아래 원본 흐름:
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle("파일명 변경")
-        dialog.setLabelText("새 파일명을 입력하세요:")
-        dialog.setTextValue(self.file_name)
-        ok = dialog.exec()
-        new_name = dialog.textValue()
-
-        if ok and new_name and new_name != self.file_name:
-            # Update JSON file with new name
-            json_path = Path("save/vibe_transfer") / self.model / f"{self.file_hash}.json"
-            if json_path.exists():
-                try:
-                    with open(json_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    
-                    data['file_name'] = new_name
-                    
-                    with open(json_path, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, indent=2, ensure_ascii=False)
-                    
-                    self.file_name = new_name
-                    self.name_label.setText(new_name[:30] + "..." if len(new_name) > 30 else new_name)
-                    QMessageBox.information(self, "성공", "파일명이 변경되었습니다.")
-                except Exception as e:
-                    QMessageBox.critical(self, "오류", f"파일명 변경 실패: {e}")
                     
     def _on_delete(self):
         """Handle delete action"""
@@ -1647,7 +1646,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                     self._add_vibe_frame(file_path)
                     return
 
-        QMessageBox.warning(self.widget, "Warning", "No image found in clipboard")
+        _notify_vibe_transfer(self.app_context, "Warning", "No image found in clipboard", "warning")
     
     def _on_import_vibe(self):
         """Handle .naiv4vibe import button"""
@@ -1679,21 +1678,21 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                                 processed_count += 1
                     
                     if processed_count == 0:
-                        QMessageBox.warning(self.widget, "Warning", "No processable vibes found in bundle")
+                        _notify_vibe_transfer(self.app_context, "Warning", "No processable vibes found in bundle", "warning")
                     else:
                         print(f"Successfully imported {processed_count} vibes from bundle")
                 else:
-                    QMessageBox.warning(self.widget, "Warning", "Invalid bundle file format")
+                    _notify_vibe_transfer(self.app_context, "Warning", "Invalid bundle file format", "warning")
             else:
                 # Handle single vibe file
                 if data.get('identifier') == 'novelai-vibe-transfer':
                     if not self._process_single_vibe(data):
-                        QMessageBox.warning(self.widget, "Warning", "Could not extract vibe data from file")
+                        _notify_vibe_transfer(self.app_context, "Warning", "Could not extract vibe data from file", "warning")
                 else:
-                    QMessageBox.warning(self.widget, "Warning", "Invalid vibe file format")
+                    _notify_vibe_transfer(self.app_context, "Warning", "Invalid vibe file format", "warning")
                     
         except Exception as e:
-            QMessageBox.critical(self.widget, "Error", f"Failed to import file: {e}")
+            _notify_vibe_transfer(self.app_context, "Error", f"Failed to import file: {e}", "error")
     
     def _process_single_vibe(self, vibe_data: dict) -> bool:
         """Process a single vibe data dictionary"""
@@ -1926,7 +1925,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
     def _add_vibe_frame(self, file_path: str, file_hash_override: str = None) -> Optional[VibeTransferFrame]:
         """Add a new vibe transfer frame"""
         if len(self.vibe_frames) >= 8:
-            QMessageBox.warning(self.widget, "Limit Reached", "Maximum 8 vibe frames allowed")
+            _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
             return None
             
         try:
@@ -1969,13 +1968,13 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             return frame
             
         except Exception as e:
-            QMessageBox.critical(self.widget, "Error", f"Failed to add image: {str(e)}")
+            _notify_vibe_transfer(self.app_context, "Error", f"Failed to add image: {str(e)}", "error")
             return None
     
     def _add_vibe_frame_from_noimage_import(self, no_image_path: str, vibe_data: dict) -> Optional[VibeTransferFrame]:
         """Add a vibe frame from imported .naiv4vibe file without image"""
         if len(self.vibe_frames) >= 8:
-            QMessageBox.warning(self.widget, "Limit Reached", "Maximum 8 vibe frames allowed")
+            _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
             return None
 
         try:
@@ -2049,13 +2048,13 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             return frame
 
         except Exception as e:
-            QMessageBox.critical(self.widget, "Error", f"Failed to add vibe from import: {str(e)}")
+            _notify_vibe_transfer(self.app_context, "Error", f"Failed to add vibe from import: {str(e)}", "error")
             return None
     
     def _add_vibe_frame_from_metadata(self, no_image_path: str, vibe_data: dict) -> Optional[VibeTransferFrame]:
         """Add a vibe frame from metadata (no actual image file)"""
         if len(self.vibe_frames) >= 8:
-            QMessageBox.warning(self.widget, "Limit Reached", "Maximum 8 vibe frames allowed")
+            _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
             return None
 
         try:
@@ -2066,7 +2065,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
 
             # Early return if no valid vibe data
             if not ref_img_multiple:
-                QMessageBox.warning(self.widget, "경고", "Metadata에 유효한 Vibe Transfer 데이터가 없습니다.")
+                _notify_vibe_transfer(self.app_context, "경고", "Metadata에 유효한 Vibe Transfer 데이터가 없습니다.", "warning")
                 return None
 
             # Create a special frame for no_image mode
@@ -2132,7 +2131,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             return frame
 
         except Exception as e:
-            QMessageBox.critical(self.widget, "Error", f"Failed to add vibe from metadata: {str(e)}")
+            _notify_vibe_transfer(self.app_context, "Error", f"Failed to add vibe from metadata: {str(e)}", "error")
             return None
     
     def _calculate_file_hash_static(self, file_path: str) -> str:
@@ -2169,11 +2168,11 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
     def _on_encoding_requested(self, frame: VibeTransferFrame, info_extracted: float):
         """Handle encoding request from frame"""
         if not self.app_context.secure_token_manager.get_token('nai_token'):
-            QMessageBox.warning(self.widget, "Error", "Access token not available")
+            _notify_vibe_transfer(self.app_context, "Error", "Access token not available", "error")
             return
             
         if self.encoding_worker and self.encoding_worker.isRunning():
-            QMessageBox.warning(self.widget, "Busy", "Another encoding is in progress")
+            _notify_vibe_transfer(self.app_context, "Busy", "Another encoding is in progress", "warning")
             return
             
         # This shouldn't happen since button is hidden when encoding exists
@@ -2217,9 +2216,9 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             for info_str, encoded_data in result.items():
                 frame.add_encoding(float(info_str), encoded_data)
             self._autosave_current_mode_settings()
-            QMessageBox.information(self.widget, "Success", "Vibe encoding completed successfully")
+            print("[VibeTransfer/INFO] Vibe encoding completed successfully")
         else:
-            QMessageBox.critical(self.widget, "Error", message)
+            _notify_vibe_transfer(self.app_context, "Error", message, "error")
 
         # 원격 웹 세션에 인코딩 결과 브로드캐스트
         try:
@@ -2321,11 +2320,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         
         # Block loading non-NAID3 vibes in NAID3 mode
         if current_is_naid3 and not storage_is_naid3:
-            QMessageBox.warning(
-                self.widget, 
-                "Compatibility Error", 
+            _notify_vibe_transfer(
+                self.app_context,
+                "Compatibility Error",
                 f"Cannot load vibe from '{model}' in NAID3 mode.\n"
-                f"NAID3 can only use vibes created in NAID3 mode."
+                f"NAID3 can only use vibes created in NAID3 mode.",
+                "warning",
             )
             return
         
@@ -2335,7 +2335,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         # Load the vibe data from JSON
         json_path = Path("save/vibe_transfer") / model / f"{file_hash}.json"
         if not json_path.exists():
-            QMessageBox.warning(self.widget, "Error", "Vibe file not found")
+            _notify_vibe_transfer(self.app_context, "Error", "Vibe file not found", "error")
             return
             
         try:
@@ -2355,7 +2355,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 if image_path.exists():
                     file_path = str(image_path)
                 else:
-                    QMessageBox.warning(self.widget, "Error", "Original image not found")
+                    _notify_vibe_transfer(self.app_context, "Error", "Original image not found", "error")
                     return
                     
             # Check if this vibe is already loaded
@@ -2403,7 +2403,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 # Don't close storage window - user can continue selecting
                     
         except Exception as e:
-            QMessageBox.critical(self.widget, "Error", f"Failed to load vibe: {e}")
+            _notify_vibe_transfer(self.app_context, "Error", f"Failed to load vibe: {e}", "error")
             
     def get_vibe_transfer_multiple_data(self) -> dict:
         """

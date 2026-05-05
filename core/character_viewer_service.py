@@ -177,12 +177,14 @@ class CharacterViewerService:
             key += f"::{variant_label}"
         return key
 
-    def _thumb_url(self, group_key: str, name: str, variant_label: str = "") -> str:
+    def _thumb_url(self, group_key: str, name: str, variant_label: str = "", size: str = "") -> str:
         if self._thumb_key(group_key, name, variant_label) not in self.thumb_index():
             return ""
         params = f"group={quote(group_key, safe='')}&character={quote(name, safe='')}"
         if variant_label:
             params += f"&variant={quote(variant_label, safe='')}"
+        if size:
+            params += f"&size={quote(size, safe='')}"
         return f"/api/character-viewer/thumbnail?{params}"
 
     def _serialize_list_item(
@@ -194,6 +196,7 @@ class CharacterViewerService:
         thumbs: dict[str, str],
         include_thumbnail_url: bool = False,
         include_tags: bool = False,
+        thumbnail_size: str = "",
     ) -> dict[str, Any]:
         item = {
             "index": int(index),
@@ -205,7 +208,7 @@ class CharacterViewerService:
         if include_tags:
             item["tags"] = self._tag_search_str(data)
         if include_thumbnail_url:
-            item["thumbnail_url"] = self._thumb_url(group_key, name)
+            item["thumbnail_url"] = self._thumb_url(group_key, name, size=thumbnail_size)
         return item
 
     def build_list(
@@ -262,7 +265,15 @@ class CharacterViewerService:
             "total_pages": total_pages,
             "thumb_first": bool(thumb_first),
             "items": [
-                self._serialize_list_item(index, gk, name, data, thumbs, include_thumbnail_url=True)
+                self._serialize_list_item(
+                    index,
+                    gk,
+                    name,
+                    data,
+                    thumbs,
+                    include_thumbnail_url=True,
+                    thumbnail_size="grid",
+                )
                 for index, gk, name, data in page_items
             ],
             "all_items": all_items,

@@ -87,6 +87,18 @@ export function createCharacterViewerController({
 
   const html = value => escHtml(String(value ?? ''));
 
+  function gridThumbnailUrl(url) {
+    const raw = String(url || '');
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw, window.location.origin);
+      parsed.searchParams.set('size', 'grid');
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      return `${raw}${raw.includes('?') ? '&' : '?'}size=grid`;
+    }
+  }
+
   function setStatus(message, tone = '') {
     if (!statusEl) return;
     statusEl.textContent = message || '';
@@ -241,7 +253,7 @@ export function createCharacterViewerController({
 
   function thumbnailMarkup(item) {
     if (item.thumbnail_url) {
-      return `<img src="${html(item.thumbnail_url)}" alt="${html(item.character)}" loading="lazy">`;
+      return `<img src="${html(item.thumbnail_url)}" alt="${html(item.character)}" loading="lazy" decoding="async">`;
     }
     return `<span class="character-viewer-card-empty">No Thumb</span>`;
   }
@@ -854,9 +866,10 @@ export function createCharacterViewerController({
     if (selected && selected.group !== group && !meta.character_viewer_group) return;
     if (selected && selected.character !== character && !meta.character_viewer_character_name) return;
     const cacheBusted = `${meta.character_viewer_thumbnail_url}&_=${Date.now()}`;
+    const gridUrl = gridThumbnailUrl(cacheBusted);
     allItems = allItems.map(item => (
       item.group === group && item.character === character
-        ? {...item, has_thumbnail: true, thumbnail_url: cacheBusted}
+        ? {...item, has_thumbnail: true, thumbnail_url: gridUrl}
         : item
     ));
     const listItem = listEl?.querySelector(`.character-viewer-list-item[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`);
@@ -871,7 +884,7 @@ export function createCharacterViewerController({
       const stage = card.querySelector('.character-viewer-card-image');
       if (stage) {
         stage.innerHTML = `
-          <img src="${html(cacheBusted)}" alt="${html(character)}" loading="lazy">
+          <img src="${html(gridUrl)}" alt="${html(character)}" loading="lazy" decoding="async">
           <span class="character-viewer-card-group">[${html(group)}]</span>
         `;
       }

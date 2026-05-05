@@ -241,6 +241,7 @@ class RemoteBridge(QObject):
         self._cached_e621_event_key: tuple | None = None
         self._cached_e621_event_state: dict | None = None
         self._thumbnail_b64_cache: dict[tuple, str] = {}
+        self._character_viewer_grid_thumb_cache: dict[tuple, tuple[bytes, str]] = {}
         # NAI Anlas: 주기 + 생성 이벤트 기반 refresh. 웹 viewer 좌하단에 pill로 표시.
         self._anlas_cache: Optional[dict] = None     # {"anlas": int, "opus": bool, "tier": str, "fetched_at": str}
         self._anlas_timer: Optional[QTimer] = None
@@ -2849,12 +2850,38 @@ class RemoteBridge(QObject):
     def _character_viewer_save_options(self, payload: dict) -> dict:
         return self._character_viewer_service.save_options(payload if isinstance(payload, dict) else {})
 
-    def _character_viewer_thumbnail_payload(self, group: str, character: str, variant: str = "") -> tuple[bytes, str]:
+    def _character_viewer_thumbnail_payload(
+        self,
+        group: str,
+        character: str,
+        variant: str = "",
+        size: str = "",
+    ) -> tuple[bytes, str]:
         path = self._character_viewer_service.thumbnail_path(
             str(group or ""),
             str(character or ""),
             str(variant or ""),
         )
+        size_key = str(size or "").strip().lower()
+        if size_key == "grid":
+            stat = path.stat()
+            cache_key = (str(path), stat.st_mtime_ns, stat.st_size, size_key)
+            cached = self._character_viewer_grid_thumb_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            from PIL import Image
+
+            with Image.open(path) as image:
+                image.thumbnail((384, 384), Image.Resampling.BILINEAR)
+                if image.mode not in ("RGB", "RGBA"):
+                    image = image.convert("RGB")
+                buf = io.BytesIO()
+                image.save(buf, "WEBP", quality=72, method=0)
+            payload = (buf.getvalue(), "image/webp")
+            if len(self._character_viewer_grid_thumb_cache) > 256:
+                self._character_viewer_grid_thumb_cache.clear()
+            self._character_viewer_grid_thumb_cache[cache_key] = payload
+            return payload
         with open(path, "rb") as handle:
             raw = handle.read()
         if raw.startswith(b"\xff\xd8"):
@@ -11174,13 +11201,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": f"Character Viewer options failed: {e}"}, status_code=500)
 
     @app.get("/api/character-viewer/thumbnail")
-    async def api_character_viewer_thumbnail(group: str = "", character: str = "", variant: str = ""):
+    async def api_character_viewer_thumbnail(group: str = "", character: str = "", variant: str = "", size: str = ""):
         try:
             image_bytes, media_type = await asyncio.to_thread(
                 bridge._character_viewer_thumbnail_payload,
                 group,
                 character,
                 variant,
+                size,
             )
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)

@@ -6714,14 +6714,54 @@ class RemoteBridge(QObject):
 
     def _e621_wiki_payload(self, module, tag_data: dict | None) -> dict:
         if not tag_data:
-            return {"tag": "", "text": ""}
+            return {"tag": "", "text": "", "translated": False}
         tag_name = tag_data.get("tag", "")
         count = tag_data.get("count", 0)
         body = tag_data.get("wiki_body") or tag_data.get("wiki_preview") or ""
-        clean_body = self._e621_clean_wiki_text(module, body) if body else "No wiki text"
+        clean_body = self._e621_clean_wiki_text(module, body) if body else "위키 정보 없음"
+        translated_body, translated = self._e621_translate_wiki_body(module, tag_name, count, clean_body)
         display = tag_name.replace("_", " ")
-        text = f"Tag: {display}\nCount: {self._e621_format_count(module, count)}\n\n{'=' * 50}\n\n{clean_body}"
-        return {"tag": tag_name, "text": text}
+        text = f"Tag: {display}\nCount: {self._e621_format_count(module, count)}\n\n{'=' * 50}\n\n{translated_body}"
+        return {"tag": tag_name, "text": text, "translated": translated}
+
+    def _e621_translation_cache(self, module) -> dict:
+        cache = getattr(module, "_remote_wiki_translation_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(module, "_remote_wiki_translation_cache", cache)
+        return cache
+
+    def _e621_translate_wiki_body(self, module, tag_name: str, count, body_text: str) -> tuple[str, bool]:
+        if getattr(module, "disable_translation", False):
+            return body_text, False
+        if not body_text or body_text == "위키 정보 없음":
+            return body_text, False
+        try:
+            translatable_text = module._extract_translatable_text(body_text)
+        except Exception:
+            translatable_text = body_text.strip()
+        if not translatable_text or translatable_text == "위키 정보 없음":
+            return body_text, False
+
+        cache = self._e621_translation_cache(module)
+        cache_key = (str(tag_name), str(count), translatable_text)
+        translated_text = cache.get(cache_key)
+        if translated_text is None:
+            try:
+                from utils.translator import english_to_korean
+                translated_text = english_to_korean(translatable_text) or ""
+            except Exception as e:
+                print(f"🌐 Remote: e621 wiki 번역 실패 — {e}")
+                translated_text = ""
+            if translated_text:
+                cache[cache_key] = translated_text
+        if not translated_text:
+            return body_text, False
+
+        remaining_text = body_text[len(translatable_text):].strip() if len(translatable_text) < len(body_text) else ""
+        if remaining_text:
+            return f"{translated_text}\n\n{remaining_text}", True
+        return translated_text, True
 
     def _e621_testbench_text(self, module) -> str:
         edit = getattr(module, "related_tags_edit", None)
@@ -6735,6 +6775,25 @@ class RemoteBridge(QObject):
             "_remote_testbench_text",
             "1girl, 1boy, 2:: e621태그는_강조하여_입력하세요 ::, duo, male/female, nsfw, rating:explicit",
         )
+
+    def _e621_widget_not_hidden(self, widget, default: bool = True) -> bool:
+        if widget is None:
+            return default
+        try:
+            return not bool(widget.isHidden())
+        except Exception:
+            return default
+
+    def _e621_prompt_testbench_visible(self, module) -> bool:
+        edit_visible = self._e621_widget_not_hidden(getattr(module, "related_tags_edit", None), True)
+        button_visible = self._e621_widget_not_hidden(getattr(module, "generate_button", None), True)
+        return bool(edit_visible and button_visible)
+
+    def _e621_translation_control_visible(self, module) -> bool:
+        return self._e621_widget_not_hidden(getattr(module, "disable_translation_checkbox", None), True)
+
+    def _e621_wiki_search_control_visible(self, module) -> bool:
+        return self._e621_widget_not_hidden(getattr(module, "disable_wiki_search_checkbox", None), True)
 
     def _e621_effective_search_text(self, module) -> str:
         remote_text = getattr(module, "_remote_search_text", "")
@@ -6758,6 +6817,9 @@ class RemoteBridge(QObject):
             self._e621_view_mode(module),
             bool(getattr(module, "disable_translation", False)),
             bool(getattr(module, "disable_wiki_search", False)),
+            self._e621_prompt_testbench_visible(module),
+            self._e621_translation_control_visible(module),
+            self._e621_wiki_search_control_visible(module),
             getattr(module, "current_category", None),
             getattr(module, "current_level2", None),
             selected_name,
@@ -6788,6 +6850,9 @@ class RemoteBridge(QObject):
                 "view_mode": self._e621_view_mode(module),
                 "disable_translation": bool(getattr(module, "disable_translation", False)),
                 "disable_wiki_search": bool(getattr(module, "disable_wiki_search", False)),
+                "prompt_testbench_visible": self._e621_prompt_testbench_visible(module),
+                "translation_control_visible": self._e621_translation_control_visible(module),
+                "wiki_search_control_visible": self._e621_wiki_search_control_visible(module),
                 "current_category": getattr(module, "current_category", None),
                 "current_level2": getattr(module, "current_level2", None),
                 "categories": self._e621_categories(module) if loaded else [],

@@ -59,11 +59,11 @@ export function createE621EventPanel({
 
   function renderHiddenList(state) {
     if (!state.hidden_items || !state.hidden_items.length) {
-      return '<div class="mod-empty">No hidden tags</div>';
+      return '<div class="mod-empty">숨긴 태그 없음</div>';
     }
     return state.hidden_items.map(tag => `<button class="e621-hidden-item" data-tag="${attr(tag)}" onclick="e621RestoreHidden(this)">
       <span>${escHtml(tag.replace(/_/g, ' '))}</span>
-      <small>Restore</small>
+      <small>복원</small>
     </button>`).join('');
   }
 
@@ -80,7 +80,7 @@ export function createE621EventPanel({
       moduleBody.innerHTML = `
         <div class="mod-section">
           <div class="mod-section-label">E621 Event Module</div>
-          <div class="mod-empty">E621 data is not loaded.</div>
+          <div class="mod-empty">E621 데이터가 로드되지 않았습니다.</div>
           <div class="mod-status">${escHtml(state.data_path || '')}</div>
         </div>
       `;
@@ -92,12 +92,12 @@ export function createE621EventPanel({
     const species = categories.filter(item => item.section === 'Species').map(renderCategoryButton).join('');
     const folders = state.folders && state.folders.length
       ? state.folders.map(renderFolderButton).join('')
-      : '<div class="mod-empty">Select a category</div>';
+      : '<div class="mod-empty">카테고리를 선택하세요</div>';
     const tags = state.tags && state.tags.length
       ? state.tags.map(renderTagButton).join('')
-      : '<div class="mod-empty">No tags</div>';
+      : '<div class="mod-empty">태그 없음</div>';
     const selected = state.selected;
-    const selectedName = selected ? selected.display : 'No tag selected';
+    const selectedName = selected ? selected.display : '선택된 태그 없음';
     const selectedMeta = selected
       ? `${selected.count_label}${selected.starred ? ' · starred' : ''}`
       : '';
@@ -105,26 +105,34 @@ export function createE621EventPanel({
       ? `<span class="e621-muted">Showing ${state.tag_limit} / ${state.tag_total}</span>`
       : `<span class="e621-muted">${state.tag_total || 0} tags</span>`;
     const wikiText = state.wiki && state.wiki.text ? state.wiki.text : '';
+    const translationControl = state.translation_control_visible === false ? '' : `
+          <label class="mod-check-row">
+            <input type="checkbox" ${state.disable_translation ? 'checked' : ''} oninput="setModuleParam('e621_event','disable_translation',String(this.checked))">
+            <span>자동 번역을 사용하지 않습니다</span>
+          </label>`;
+    const wikiSearchControl = state.wiki_search_control_visible === false ? '' : `
+          <label class="mod-check-row">
+            <input type="checkbox" ${state.disable_wiki_search ? 'checked' : ''} oninput="setModuleParam('e621_event','disable_wiki_search',String(this.checked))">
+            <span>원문 검색을 사용하지 않습니다</span>
+          </label>`;
+    const promptTestbench = state.prompt_testbench_visible === false ? '' : `
+            <div class="mod-section-label">e621 프롬프트 테스트벤치</div>
+            <textarea class="mod-textarea mod-textarea-lg" id="e621Testbench" oninput="e621OnTestbenchInput(this)">${escHtml(state.testbench || '')}</textarea>
+            <button class="mod-action-btn mod-start" onclick="e621Generate()">생성</button>`;
 
     moduleBody.innerHTML = `
       <div class="e621-panel">
         <div class="e621-toolbar">
-          <input class="mod-input" id="e621SearchInput" type="text" value="${attr(state.search_text || '')}" placeholder="Search exact tag/wiki text" onkeydown="if(event.key==='Enter')e621Search()">
-          <button class="mod-btn-sm" onclick="e621Search()">Search</button>
-          <button class="mod-btn-sm" onclick="e621Reset()">Reset</button>
+          <input class="mod-input" id="e621SearchInput" type="text" value="${attr(state.search_text || '')}" placeholder="태그 검색 - 꼭 정확한 단어로 검색하세요" onkeydown="if(event.key==='Enter')e621Search()">
+          <button class="mod-btn-sm" onclick="e621Search()">검색</button>
+          <button class="mod-btn-sm" onclick="e621Reset()">초기화</button>
         </div>
 
         <div class="e621-toolbar compact">
-          <button class="mod-btn-sm${state.view_mode === 'default' ? ' active' : ''}" onclick="e621SetViewMode('default')">Default</button>
-          <button class="mod-btn-sm${state.view_mode === 'starred' ? ' active' : ''}" onclick="e621SetViewMode('starred')">Starred</button>
-          <label class="mod-check-row">
-            <input type="checkbox" ${state.disable_translation ? 'checked' : ''} oninput="setModuleParam('e621_event','disable_translation',String(this.checked))">
-            <span>Disable translation</span>
-          </label>
-          <label class="mod-check-row">
-            <input type="checkbox" ${state.disable_wiki_search ? 'checked' : ''} oninput="setModuleParam('e621_event','disable_wiki_search',String(this.checked))">
-            <span>Disable wiki search</span>
-          </label>
+          <button class="mod-btn-sm${state.view_mode === 'default' ? ' active' : ''}" onclick="e621SetViewMode('default')">기본</button>
+          <button class="mod-btn-sm${state.view_mode === 'starred' ? ' active' : ''}" onclick="e621SetViewMode('starred')">즐겨찾기</button>
+${translationControl}
+${wikiSearchControl}
         </div>
 
         <div class="e621-layout">
@@ -150,25 +158,23 @@ export function createE621EventPanel({
           <section class="e621-detail-card">
             <div class="e621-selected-head">
               <div>
-                <div class="mod-section-label">Selected Tag</div>
+                <div class="mod-section-label">선택된 태그</div>
                 <strong>${escHtml(selectedName)}</strong>
                 <small>${escHtml(selectedMeta)}</small>
               </div>
               <div class="e621-selected-actions">
-                <button class="mod-btn-sm" onclick="e621ToggleStar()" ${selected ? '' : 'disabled'}>${selected && selected.starred ? 'Unstar' : 'Star'}</button>
-                <button class="mod-btn-sm danger" onclick="e621HideSelected()" ${selected ? '' : 'disabled'}>Hide</button>
+                <button class="mod-btn-sm" onclick="e621ToggleStar()" ${selected ? '' : 'disabled'}>${selected && selected.starred ? '즐겨찾기 해제' : '즐겨찾기'}</button>
+                <button class="mod-btn-sm danger" onclick="e621HideSelected()" ${selected ? '' : 'disabled'}>숨김</button>
               </div>
             </div>
             <pre class="e621-wiki">${escHtml(wikiText)}</pre>
           </section>
 
           <section class="e621-detail-card">
-            <div class="mod-section-label">Prompt Testbench</div>
-            <textarea class="mod-textarea mod-textarea-lg" id="e621Testbench" oninput="e621OnTestbenchInput(this)">${escHtml(state.testbench || '')}</textarea>
-            <button class="mod-action-btn mod-start" onclick="e621Generate()">Generate</button>
+${promptTestbench}
 
             <div class="e621-hidden-head">
-              <div class="mod-section-label">Hidden Tags</div>
+              <div class="mod-section-label">숨긴 태그</div>
               <small>${state.hidden_total || 0}</small>
             </div>
             <div class="e621-hidden-list">${renderHiddenList(state)}</div>

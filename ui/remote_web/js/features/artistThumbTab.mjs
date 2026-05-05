@@ -1006,7 +1006,11 @@ export function createArtistThumbController({
 
   async function setFavoriteForItem(item, favorite) {
     if (!item) return;
-    state = await postJson('/api/artist-thumb/favorite', {artist: item.artist, favorite});
+    state = await postJson('/api/artist-thumb/favorite', {
+      artist: item.artist,
+      favorite,
+      mode: currentMode(),
+    });
     renderState();
     applyFavoriteState(item, favorite);
     showToast?.(favorite ? '관심 작가로 등록했습니다.' : '관심 작가에서 해제했습니다.', 'success');

@@ -1298,6 +1298,89 @@ def test_artist_thumb_state_write_preserves_legacy_additions(tmp_path, monkeypat
     assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "c\na\nd\n"
 
 
+def test_artist_thumb_favorite_add_copies_loaded_thumbnail_cache(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+    bridge._artist_thumb_data_cache["NAID4.5F-31000"] = {"c": ["thumb_c"]}
+
+    bridge._set_artist_thumb_favorite("c", True, "NAID4.5F-31000")
+
+    cache = json.loads(Path("artist_thumb/favorite_thumbnail_cache.json").read_text(encoding="utf-8"))
+    assert cache["items"]["c"]["mode"] == "NAID4.5F-31000"
+    assert cache["items"]["c"]["thumbnail"] == "thumb_c"
+
+    bridge._set_artist_thumb_favorite("c", False, "NAID4.5F-31000")
+
+    cache = json.loads(Path("artist_thumb/favorite_thumbnail_cache.json").read_text(encoding="utf-8"))
+    assert "c" not in cache["items"]
+
+
+def test_artist_thumb_favorite_state_survives_corrupt_thumbnail_cache(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+    Path("artist_thumb/favorite_thumbnail_cache.json").write_text("{", encoding="utf-8")
+    bridge._artist_thumb_data_cache["NAID4.5F-31000"] = {"c": ["thumb_c"]}
+
+    bridge._set_artist_thumb_favorite("c", True, "NAID4.5F-31000")
+
+    state = json.loads(Path("artist_thumb/artist_state.json").read_text(encoding="utf-8"))
+    cache = json.loads(Path("artist_thumb/favorite_thumbnail_cache.json").read_text(encoding="utf-8"))
+    assert "c" in state["favorites"]
+    assert cache["items"]["c"]["thumbnail"] == "thumb_c"
+
+
+def test_artist_thumb_favorites_list_uses_cached_thumbnail_without_mode(tmp_path, monkeypatch):
+    bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
+    Path("artist_thumb/favorite_thumbnail_cache.json").write_text(
+        json.dumps({
+            "version": 1,
+            "items": {
+                "a": {
+                    "mode": "NAID4.5F-31000",
+                    "thumbnail": "thumb_a",
+                    "updated_at": "2026-05-05T00:00:00",
+                },
+            },
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    payload = bridge._build_artist_thumb_list("", "favorites", "", 0, 48)
+
+    assert [item["artist"] for item in payload["items"]] == ["a"]
+    assert payload["items"][0]["has_image"] is True
+    assert payload["items"][0]["image_url"] == "/api/artist-thumb/favorite-image?artist=a"
+
+
+def test_artist_thumb_nai_data_load_syncs_missing_favorite_thumbnail_cache(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("artist_thumb").mkdir()
+    Path("data").mkdir()
+    Path("artist_thumb/artist_state.json").write_text(
+        json.dumps({"version": 1, "favorites": ["a", "c"], "banned": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path("artist_thumb/favorite_thumbnail_cache.json").write_text(
+        json.dumps({
+            "version": 1,
+            "items": {
+                "a": {"mode": "NAID4.5F-31000", "thumbnail": "thumb_a"},
+                "stale": {"mode": "NAID4.5F-31000", "thumbnail": "thumb_stale"},
+            },
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path("data/artist_thumbnail_nai.json").write_text(
+        json.dumps({"a": ["thumb_a"], "c": ["thumb_c"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    bridge = RemoteBridge(_AppContext())
+
+    bridge._load_artist_thumb_data("NAID4.5F-31000")
+
+    cache = json.loads(Path("artist_thumb/favorite_thumbnail_cache.json").read_text(encoding="utf-8"))
+    assert set(cache["items"]) == {"a", "c"}
+    assert cache["items"]["c"]["thumbnail"] == "thumb_c"
+
+
 def test_artist_thumb_state_rejects_corrupt_json_without_legacy_overwrite(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("artist_thumb").mkdir()

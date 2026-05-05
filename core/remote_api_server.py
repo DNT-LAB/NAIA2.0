@@ -2088,6 +2088,9 @@ class RemoteBridge(QObject):
     def _artist_thumb_options_path(self) -> Path:
         return Path("artist_thumb") / "generate_options.json"
 
+    def _artist_thumb_favorite_thumbnail_cache_path(self) -> Path:
+        return Path("artist_thumb") / "favorite_thumbnail_cache.json"
+
     def _parse_resolution_pair(self, value) -> tuple[int, int] | None:
         match = re.search(r"(\d+)\s*x\s*(\d+)", str(value or ""))
         if not match:
@@ -2325,6 +2328,164 @@ class RemoteBridge(QObject):
             json.dump(current, f, ensure_ascii=False, indent=2)
         return current
 
+    def _normalize_artist_thumb_thumbnail_cache(self, data) -> dict:
+        source = data if isinstance(data, dict) else {}
+        raw_items = source.get("items", source.get("thumbnails", {}))
+        if not isinstance(raw_items, dict):
+            raw_items = {}
+        items = {}
+        for artist, value in raw_items.items():
+            artist_name = str(artist or "").strip()
+            if not artist_name:
+                continue
+            if isinstance(value, dict):
+                thumbnail = str(value.get("thumbnail") or value.get("image") or "").strip()
+                mode = str(value.get("mode") or "").strip()
+                updated_at = str(value.get("updated_at") or "").strip()
+            elif isinstance(value, (list, tuple)):
+                thumbnail = str(value[0] if value else "").strip()
+                mode = ""
+                updated_at = ""
+            else:
+                thumbnail = str(value or "").strip()
+                mode = ""
+                updated_at = ""
+            if not thumbnail:
+                continue
+            items[artist_name] = {
+                "mode": mode,
+                "thumbnail": thumbnail,
+                "updated_at": updated_at,
+            }
+        return {
+            "version": 1,
+            "items": items,
+        }
+
+    def _load_artist_thumb_thumbnail_cache(self) -> dict:
+        path = self._artist_thumb_favorite_thumbnail_cache_path()
+        if not path.exists():
+            return {"version": 1, "items": {}}
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                return self._normalize_artist_thumb_thumbnail_cache(json.load(f))
+        except Exception as e:
+            raise RuntimeError(f"artist thumb thumbnail cache JSON is invalid: {path}: {e}") from e
+
+    def _write_artist_thumb_thumbnail_cache(self, cache: dict) -> dict:
+        normalized = self._normalize_artist_thumb_thumbnail_cache(cache)
+        path = self._artist_thumb_favorite_thumbnail_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f"{path.name}.tmp")
+        with temp_path.open("w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        temp_path.replace(path)
+        return normalized
+
+    def _artist_thumb_cache_entry_from_data(self, artist: str, mode: str, thumb_data: dict) -> dict | None:
+        artist_name = str(artist or "").strip()
+        if not artist_name or not isinstance(thumb_data, dict):
+            return None
+        encoded_list = thumb_data.get(artist_name)
+        if not isinstance(encoded_list, (list, tuple)) or not encoded_list:
+            return None
+        thumbnail = str(encoded_list[0] or "").strip()
+        if not thumbnail:
+            return None
+        return {
+            "mode": str(mode or "").strip(),
+            "thumbnail": thumbnail,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    def _sync_artist_thumb_favorite_thumbnail_cache(self, mode: str = "", thumb_data: dict | None = None) -> dict:
+        mode_key = str(mode or "").strip()
+        with self._artist_thumb_lock:
+            favorites = self._artist_thumb_favorites()
+            favorite_set = set(favorites)
+            cache = self._load_artist_thumb_thumbnail_cache()
+            items = dict(cache.get("items") or {})
+            changed = False
+            removed = 0
+            added = 0
+
+            for artist in list(items.keys()):
+                if artist not in favorite_set:
+                    items.pop(artist, None)
+                    removed += 1
+                    changed = True
+
+            if mode_key and thumb_data is None:
+                thumb_data = self._artist_thumb_data_cache.get(mode_key)
+
+            if mode_key and isinstance(thumb_data, dict):
+                for artist in favorites:
+                    if items.get(artist, {}).get("thumbnail"):
+                        continue
+                    entry = self._artist_thumb_cache_entry_from_data(artist, mode_key, thumb_data)
+                    if not entry:
+                        continue
+                    items[artist] = entry
+                    added += 1
+                    changed = True
+
+            if changed:
+                cache = self._write_artist_thumb_thumbnail_cache({"version": 1, "items": items})
+            else:
+                cache = {"version": 1, "items": items}
+
+            missing = len([artist for artist in favorites if not items.get(artist, {}).get("thumbnail")])
+            return {
+                "count": len(items),
+                "added": added,
+                "removed": removed,
+                "missing": missing,
+                "changed": changed,
+                "path": str(self._artist_thumb_favorite_thumbnail_cache_path()),
+                "cache": cache,
+            }
+
+    def _cache_artist_thumb_favorite_from_loaded_mode(self, artist: str, mode: str) -> bool:
+        artist_name = str(artist or "").strip()
+        mode_key = str(mode or "").strip()
+        if not artist_name or not mode_key:
+            return False
+        with self._artist_thumb_lock:
+            thumb_data = self._artist_thumb_data_cache.get(mode_key)
+            entry = self._artist_thumb_cache_entry_from_data(artist_name, mode_key, thumb_data or {})
+            if not entry:
+                return False
+            try:
+                cache = self._load_artist_thumb_thumbnail_cache()
+            except Exception as e:
+                print(f"🌐 Remote: artist thumb favorite thumbnail cache reset failed cache — {e}")
+                cache = {"version": 1, "items": {}}
+            items = dict(cache.get("items") or {})
+            current = items.get(artist_name) or {}
+            if current.get("thumbnail") == entry.get("thumbnail") and current.get("mode") == entry.get("mode"):
+                return False
+            items[artist_name] = entry
+            self._write_artist_thumb_thumbnail_cache({"version": 1, "items": items})
+            return True
+
+    def _remove_artist_thumb_favorite_thumbnail_cache(self, artist: str) -> bool:
+        artist_name = str(artist or "").strip()
+        if not artist_name:
+            return False
+        with self._artist_thumb_lock:
+            try:
+                cache = self._load_artist_thumb_thumbnail_cache()
+            except Exception as e:
+                print(f"🌐 Remote: artist thumb favorite thumbnail cache remove skipped — {e}")
+                return False
+            items = dict(cache.get("items") or {})
+            if artist_name not in items:
+                return False
+            items.pop(artist_name, None)
+            self._write_artist_thumb_thumbnail_cache({"version": 1, "items": items})
+            return True
+
     def _load_artist_thumb_data(self, mode: str) -> dict:
         key = str(mode or "").strip()
         if not key:
@@ -2343,6 +2504,11 @@ class RemoteBridge(QObject):
             self._artist_thumb_data_cache.clear()
             self._artist_thumb_image_cache.clear()
             self._artist_thumb_data_cache[key] = data
+            if key == "NAID4.5F-31000":
+                try:
+                    self._sync_artist_thumb_favorite_thumbnail_cache(key, data)
+                except Exception as e:
+                    print(f"🌐 Remote: artist thumb favorite thumbnail cache sync failed — {e}")
             return data
 
     def _artist_thumb_format_count(self, value) -> int:
@@ -2419,6 +2585,19 @@ class RemoteBridge(QObject):
         favorites = self._artist_thumb_favorites()
         banned = self._artist_thumb_banned()
         banned_set = set(banned)
+        try:
+            favorite_thumbnail_cache = self._sync_artist_thumb_favorite_thumbnail_cache()
+            favorite_thumbnail_cache.pop("cache", None)
+        except Exception as e:
+            print(f"🌐 Remote: artist thumb favorite thumbnail cache sync failed — {e}")
+            favorite_thumbnail_cache = {
+                "count": 0,
+                "added": 0,
+                "removed": 0,
+                "missing": len(favorites),
+                "changed": False,
+                "error": str(e),
+            }
         modes = []
         for key, info in self.ARTIST_THUMB_MODES.items():
             path = Path(info["path"])
@@ -2446,6 +2625,7 @@ class RemoteBridge(QObject):
             "banned": banned,
             "options": self._load_artist_thumb_options(),
             "download": self._artist_thumb_download_snapshot(),
+            "favorite_thumbnail_cache": favorite_thumbnail_cache,
         }
 
     def _build_artist_thumb_list(
@@ -2500,6 +2680,18 @@ class RemoteBridge(QObject):
             artists = base_list[start:start + per_page]
         favorite_set = set(self._artist_thumb_favorites())
         banned_set = set(self._artist_thumb_banned())
+        try:
+            favorite_thumb_items = self._load_artist_thumb_thumbnail_cache().get("items", {})
+        except Exception as e:
+            print(f"🌐 Remote: artist thumb favorite thumbnail cache load failed — {e}")
+            favorite_thumb_items = {}
+
+        def item_image_url(artist: str) -> str:
+            if mode_key and artist in thumb_data:
+                return f"/api/artist-thumb/image?mode={quote(mode_key, safe='')}&artist={quote(artist, safe='')}"
+            if artist in favorite_thumb_items:
+                return f"/api/artist-thumb/favorite-image?artist={quote(artist, safe='')}"
+            return ""
 
         return {
             "mode": mode_key,
@@ -2518,11 +2710,8 @@ class RemoteBridge(QObject):
                     "weight": self._artist_thumb_format_count(weights.get(artist, 0)),
                     "favorite": artist in favorite_set,
                     "banned": artist in banned_set,
-                    "has_image": bool(mode_key and artist in thumb_data),
-                    "image_url": (
-                        f"/api/artist-thumb/image?mode={quote(mode_key, safe='')}&artist={quote(artist, safe='')}"
-                        if mode_key and artist in thumb_data else ""
-                    ),
+                    "has_image": bool(item_image_url(artist)),
+                    "image_url": item_image_url(artist),
                 }
                 for artist in artists
             ],
@@ -2536,6 +2725,26 @@ class RemoteBridge(QObject):
         if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
             return "image/webp"
         return "application/octet-stream"
+
+    def _build_artist_thumb_image_payload_from_encoded(self, encoded) -> tuple[bytes, str]:
+        encoded_text = str(encoded or "")
+        if encoded_text.startswith("data:") and "," in encoded_text:
+            encoded_text = encoded_text.split(",", 1)[1]
+        raw = base64.b64decode(encoded_text)
+
+        try:
+            from PIL import Image
+            image = Image.open(io.BytesIO(raw))
+            image.load()
+            if image.width > 170:
+                image = image.crop((85, 0, image.width - 85, image.height))
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=86, optimize=True)
+            return out.getvalue(), "image/jpeg"
+        except Exception:
+            return raw, self._artist_thumb_media_type(raw)
 
     def _build_artist_thumb_image_payload(self, mode: str, artist: str) -> tuple[bytes, str]:
         mode_key = str(mode or "").strip()
@@ -2554,26 +2763,7 @@ class RemoteBridge(QObject):
         encoded_list = data.get(artist_name)
         if not encoded_list or not encoded_list[0]:
             raise FileNotFoundError(f"Artist thumbnail not found: {artist_name}")
-        encoded = str(encoded_list[0])
-        if encoded.startswith("data:") and "," in encoded:
-            encoded = encoded.split(",", 1)[1]
-        raw = base64.b64decode(encoded)
-
-        try:
-            from PIL import Image
-            image = Image.open(io.BytesIO(raw))
-            image.load()
-            if image.width > 170:
-                image = image.crop((85, 0, image.width - 85, image.height))
-            if image.mode not in ("RGB", "L"):
-                image = image.convert("RGB")
-            out = io.BytesIO()
-            image.save(out, format="JPEG", quality=86, optimize=True)
-            image_bytes = out.getvalue()
-            media_type = "image/jpeg"
-        except Exception:
-            image_bytes = raw
-            media_type = self._artist_thumb_media_type(raw)
+        image_bytes, media_type = self._build_artist_thumb_image_payload_from_encoded(encoded_list[0])
 
         with self._artist_thumb_lock:
             if len(self._artist_thumb_image_cache) > 512:
@@ -2581,7 +2771,28 @@ class RemoteBridge(QObject):
             self._artist_thumb_image_cache[cache_key] = (image_bytes, media_type)
         return image_bytes, media_type
 
-    def _set_artist_thumb_favorite(self, artist: str, favorite: bool) -> dict:
+    def _build_artist_thumb_favorite_image_payload(self, artist: str) -> tuple[bytes, str]:
+        artist_name = str(artist or "").strip()
+        if not artist_name:
+            raise ValueError("artist is required")
+        cache_key = ("__favorite_cache__", artist_name)
+        with self._artist_thumb_lock:
+            cached = self._artist_thumb_image_cache.get(cache_key)
+            if cached:
+                return cached
+            thumb_cache = self._load_artist_thumb_thumbnail_cache()
+            entry = (thumb_cache.get("items") or {}).get(artist_name) or {}
+            encoded = entry.get("thumbnail")
+        if not encoded:
+            raise FileNotFoundError(f"Favorite artist thumbnail not found: {artist_name}")
+        image_bytes, media_type = self._build_artist_thumb_image_payload_from_encoded(encoded)
+        with self._artist_thumb_lock:
+            if len(self._artist_thumb_image_cache) > 512:
+                self._artist_thumb_image_cache.pop(next(iter(self._artist_thumb_image_cache)), None)
+            self._artist_thumb_image_cache[cache_key] = (image_bytes, media_type)
+        return image_bytes, media_type
+
+    def _set_artist_thumb_favorite(self, artist: str, favorite: bool, mode: str = "") -> dict:
         artist_name = str(artist or "").strip()
         if not artist_name:
             raise ValueError("artist is required")
@@ -2594,6 +2805,10 @@ class RemoteBridge(QObject):
                 favorites = [a for a in favorites if a != artist_name]
             state["favorites"] = favorites
             self._write_artist_thumb_state(state)
+            if favorite:
+                self._cache_artist_thumb_favorite_from_loaded_mode(artist_name, mode)
+            else:
+                self._remove_artist_thumb_favorite_thumbnail_cache(artist_name)
         return self._build_artist_thumb_state()
 
     def _set_artist_thumb_banned(self, artist: str, banned: bool) -> dict:
@@ -10992,6 +11207,25 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    @app.get("/api/artist-thumb/favorite-image")
+    async def api_artist_thumb_favorite_image(artist: str = ""):
+        try:
+            image_bytes, media_type = await asyncio.to_thread(
+                bridge._build_artist_thumb_favorite_image_payload,
+                artist,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except (FileNotFoundError, KeyError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Artist Thumb favorite image failed: {e}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
     @app.post("/api/artist-thumb/favorite")
     async def api_artist_thumb_favorite(req: Request):
         try:
@@ -11005,6 +11239,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 bridge._set_artist_thumb_favorite,
                 payload.get("artist", ""),
                 bool(payload.get("favorite", True)),
+                payload.get("mode", ""),
             )
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)

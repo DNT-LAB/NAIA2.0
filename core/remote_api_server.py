@@ -7828,8 +7828,10 @@ class RemoteBridge(QObject):
                 self._broadcast_json(self._scan_vibe_clusters())
                 return
             elif key == "cluster_save":
-                self._save_current_vibe_cluster(m, value)
-                self._broadcast_json(self._scan_vibe_clusters())
+                if self._save_current_vibe_cluster(m, value):
+                    listing = self._scan_vibe_clusters()
+                    listing["source"] = "cluster_save"
+                    self._broadcast_json(listing)
                 return
             elif key == "cluster_load":
                 self._load_vibe_cluster(m, value)
@@ -8857,6 +8859,8 @@ class RemoteBridge(QObject):
                         # 썸네일
                         thumb = ""
                         image_path = images_folder / f"{file_hash}.png"
+                        if data.get("is_no_image") or data.get("storage_type") == "metadata_vibe" or not image_path.exists():
+                            continue
                         if image_path.exists():
                             try:
                                 pil = Image.open(image_path)

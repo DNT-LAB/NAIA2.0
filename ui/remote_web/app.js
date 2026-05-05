@@ -187,7 +187,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260505-continuous2')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260505-continuous3')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -691,7 +691,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster7')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -701,6 +701,8 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
       showToast,
       openModule,
       getCurrentModuleId: () => currentModuleId,
+      modulePopup,
+      positionFloatingPanel,
     });
   })
   .catch(error => {
@@ -2990,6 +2992,9 @@ function openModule(moduleId, options = {}) {
     showToast('This module is only available in NAI mode', 'error');
     return;
   }
+  if (imageModulePanels && moduleId !== 'vibe_transfer') {
+    imageModulePanels.closeAllVibeClusterPanels();
+  }
   // Toggle: same module clicked again → close
   if (currentModuleId === moduleId && modulePopup.classList.contains('open')) {
     if (options.forceOpen) {
@@ -3060,6 +3065,9 @@ function closeModule(options = {}) {
     return;
   }
   if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
+  if (currentModuleId === 'vibe_transfer' && imageModulePanels && !options.keepVibeCluster) {
+    imageModulePanels.closeAllVibeClusterPanels();
+  }
   flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
@@ -3819,8 +3827,16 @@ function openVibeClusterPanel() {
   if (imageModulePanels) imageModulePanels.openVibeClusterPanel();
 }
 
+function openVibeClusterListPanel() {
+  if (imageModulePanels) imageModulePanels.openVibeClusterListPanel();
+}
+
 function closeVibeClusterPanel() {
   if (imageModulePanels) imageModulePanels.closeVibeClusterPanel();
+}
+
+function closeVibeClusterSavePanel() {
+  if (imageModulePanels) imageModulePanels.closeVibeClusterSavePanel();
 }
 
 function saveVibeCluster() {
@@ -4048,6 +4064,8 @@ function getFloatingPanelWidth(panel) {
   if (panel === chunkPanel) return 420;
   if (panel === peDebugPanel) return 520;
   if (panel === refinePanel) return 400;
+  if (panel?.classList?.contains('vibe-cluster-popover')) return 560;
+  if (panel?.classList?.contains('vibe-cluster-save-popover')) return 560;
   if (panel?.classList?.contains('wc-editor-popup')) return 560;
   return 420;
 }
@@ -4122,6 +4140,7 @@ function relayoutFloatingPanels() {
   positionFloatingPanel(peDanbooruPanel, modulePopup);
   positionFloatingPanel(peDebugPanel, modulePopup);
   if (wildcardManagerPanel) wildcardManagerPanel.relayout();
+  if (imageModulePanels) imageModulePanels.relayoutVibeClusterPanel();
 }
 
 function openRefine() {

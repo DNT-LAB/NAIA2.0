@@ -33,6 +33,77 @@ class _AppContext:
         return "NAI"
 
 
+class _FakeCheckBox:
+    def __init__(self, checked=False):
+        self.checked = checked
+
+    def isChecked(self):
+        return self.checked
+
+    def setChecked(self, checked):
+        self.checked = checked
+
+
+class _FakeVibeFrame:
+    def __init__(
+        self,
+        encodings=None,
+        reference_strength=0.6,
+        information_extracted=1.0,
+        is_enabled=True,
+        target_model="NAID4.5F",
+    ):
+        self.vibe_encodings = encodings or {1.0: "encoded"}
+        self.reference_strength = reference_strength
+        self.information_extracted = information_extracted
+        self.is_enabled = is_enabled
+        self.is_no_image = True
+        self.target_model = target_model
+        self.enable_check = _FakeCheckBox(is_enabled)
+
+
+class _FakeVibeModule:
+    def __init__(self, frames=None):
+        self.vibe_frames = frames or []
+        self.normalize_checkbox = _FakeCheckBox(False)
+        self.added = []
+        self.removed = []
+
+    def _get_current_model(self):
+        return "NAID4.5F"
+
+    def _remove_frame(self, frame):
+        self.removed.append(frame)
+        if frame in self.vibe_frames:
+            self.vibe_frames.remove(frame)
+
+    def _add_vibe_frame_from_metadata(self, no_image_path, vibe_data):
+        encodings = {
+            float(key): value
+            for key, value in zip(
+                vibe_data["reference_information_extracted_multiple"],
+                vibe_data["reference_image_multiple"],
+            )
+        }
+        frame = _FakeVibeFrame(
+            encodings=encodings,
+            reference_strength=vibe_data["reference_strength_multiple"][0],
+            target_model=vibe_data["source_model"],
+        )
+        frame.no_image_path = no_image_path
+        self.vibe_frames.append(frame)
+        self.added.append(frame)
+        return frame
+
+    def _set_frame_information_extracted(self, frame, value):
+        frame.information_extracted = float(value)
+        return True
+
+    def _set_frame_reference_strength(self, frame, value):
+        frame.reference_strength = float(value)
+        return True
+
+
 def _ws(host):
     return SimpleNamespace(client=SimpleNamespace(host=host))
 
@@ -57,6 +128,95 @@ def test_api_status_does_not_force_setup_when_backend_exists():
     local = bridge.get_api_status(ws=_ws("127.0.0.1"))
     assert local["setup_allowed"] is True
     assert local["setup_required"] is False
+
+
+def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+    module = _FakeVibeModule([
+        _FakeVibeFrame({1.0: "encoded-a", 0.5: "encoded-a-half"}, 0.21, 1.0, True),
+        _FakeVibeFrame({0.6: "encoded-b"}, 0.17, 0.6, False),
+    ])
+
+    saved = bridge._save_current_vibe_cluster(
+        module,
+        json.dumps({"name": "Test Cluster", "description": "desc"}),
+    )
+
+    assert saved is True
+    listing = bridge._scan_vibe_clusters()
+    assert listing["module_id"] == "vibe_cluster"
+    assert len(listing["items"]) == 1
+    item = listing["items"][0]
+    assert item["name"] == "Test Cluster"
+    assert item["frame_count"] == 2
+    assert item["enabled_count"] == 1
+
+    storage_json = tmp_path / "save" / "vibe_transfer_clusters" / f"{item['id']}.json"
+    data = json.loads(storage_json.read_text(encoding="utf-8"))
+    assert data["description"] == "desc"
+    assert data["frames"][0]["encodings"] == {"1.0": "encoded-a", "0.5": "encoded-a-half"}
+    assert data["frames"][1]["reference_strength"] == 0.17
+
+
+def test_vibe_cluster_load_clean_recreates_no_image_frames(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    bridge._broadcast_json = lambda payload: None
+    bridge._disable_all_char_ref_frames = lambda: None
+    source = _FakeVibeModule([
+        _FakeVibeFrame({1.0: "encoded-a", 0.5: "encoded-a-half"}, 0.21, 0.5, True),
+    ])
+    assert bridge._save_current_vibe_cluster(source, json.dumps({"name": "Load Me"}))
+    cluster_id = bridge._scan_vibe_clusters()["items"][0]["id"]
+
+    existing = _FakeVibeFrame({1.0: "old"}, 0.9, 1.0, True)
+    target = _FakeVibeModule([existing])
+    loaded = bridge._load_vibe_cluster(target, json.dumps({"id": cluster_id, "mode": "clean"}))
+
+    assert loaded == 1
+    assert target.removed == [existing]
+    assert len(target.vibe_frames) == 1
+    frame = target.vibe_frames[0]
+    assert frame.vibe_encodings == {0.5: "encoded-a-half", 1.0: "encoded-a"}
+    assert frame.reference_strength == 0.21
+    assert frame.information_extracted == 0.5
+    assert frame.is_enabled is True
+
+
+def test_vibe_storage_scan_skips_no_image_and_missing_thumbnails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    model_dir = tmp_path / "save" / "vibe_transfer" / "NAID4.5F"
+    image_dir = model_dir / "images"
+    image_dir.mkdir(parents=True)
+
+    good_hash = "goodthumb1234567"
+    Image.new("RGB", (64, 64), "white").save(image_dir / f"{good_hash}.png")
+    (model_dir / f"{good_hash}.json").write_text(json.dumps({
+        "file_hash": good_hash,
+        "file_name": "good.png",
+        "encodings": {"1.0": "encoded-good"},
+    }), encoding="utf-8")
+    (model_dir / "metadataonly1234.json").write_text(json.dumps({
+        "file_hash": "metadataonly1234",
+        "file_name": "metadata_vibe_metadataonly1234",
+        "storage_type": "metadata_vibe",
+        "is_no_image": True,
+        "encodings": {"1.0": "encoded-no-image"},
+    }), encoding="utf-8")
+    (model_dir / "missingthumb1234.json").write_text(json.dumps({
+        "file_hash": "missingthumb1234",
+        "file_name": "missing.png",
+        "encodings": {"1.0": "encoded-missing"},
+    }), encoding="utf-8")
+
+    listing = RemoteBridge(_AppContext())._scan_vibe_storage()
+
+    items = listing["models"]["NAID4.5F"]
+    assert [item["file_hash"] for item in items] == [good_hash]
+    assert items[0]["thumbnail"]
 
 
 class _TextEdit:

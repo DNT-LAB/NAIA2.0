@@ -1,11 +1,16 @@
 import io
 import json
+import os
+
+os.environ.setdefault("NAIA_SKIP_AUTO_DOWNLOAD", "true")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PyQt6.QtCore import QByteArray, QMimeData
 from PyQt6.QtGui import QImage
 
 from modules.vibe_transfer_module import (
+    VibeTransferFrame,
     VibeTransferModule,
     _clipboard_mime_png_bytes,
     _coerce_information_extracted,
@@ -37,6 +42,17 @@ class _FakeLabel:
         self.text = text
 
 
+class _FakeCheckBox:
+    def __init__(self, checked=False):
+        self.checked = checked
+
+    def isChecked(self):
+        return self.checked
+
+    def setChecked(self, checked):
+        self.checked = checked
+
+
 class _FalseyLayout:
     def __bool__(self):
         return False
@@ -65,6 +81,22 @@ def _png_bytes(color=(12, 34, 56)):
     buffer = io.BytesIO()
     Image.new("RGB", (3, 2), color).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _metadata_storage_frame(file_hash="abc123metadata"):
+    frame = VibeTransferFrame.__new__(VibeTransferFrame)
+    frame.app_context = _FakeContext()
+    frame.file_path = f"metadata_vibe_{file_hash}"
+    frame.file_name = f"metadata_vibe_{file_hash}"
+    frame.file_hash = file_hash
+    frame.is_no_image = True
+    frame.target_model = "NAID4.5F"
+    frame.storage_type = "metadata_vibe"
+    frame.vibe_encodings = {1.0: "encoded-metadata"}
+    frame.reference_strength = 0.21
+    frame.information_extracted = 1.0
+    frame.is_enabled = True
+    return frame
 
 
 def _write_vibe_storage(tmp_path, model, file_hash, original_path):
@@ -328,3 +360,74 @@ def test_apply_frame_storage_metadata_updates_strength_and_information_extracted
     assert frame.info_extracted_label.text == "Information Extracted 0.37"
     assert frame.status_updates == 1
     assert frame.button_updates == 1
+
+
+def test_no_image_metadata_hash_is_filesystem_safe():
+    assert VibeTransferFrame._calculate_no_image_hash(
+        "temp/no_image_metadata_abcdef1234567890.png"
+    ) == "abcdef1234567890"
+
+
+def test_metadata_vibe_restore_does_not_pollute_vibe_storage(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    frame = _metadata_storage_frame()
+    frame._save_encodings()
+
+    storage_json = tmp_path / "save" / "vibe_transfer" / "NAID4.5F" / f"{frame.file_hash}.json"
+    assert not storage_json.exists()
+    assert not (tmp_path / "save" / "vibe_transfer" / "NAID4.5F" / "images" / f"{frame.file_hash}.png").exists()
+
+
+def test_metadata_vibe_settings_restore_uses_inline_encoding(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    original = _metadata_storage_frame()
+    original._save_encodings()
+
+    module = VibeTransferModule()
+    module.app_context = _FakeContext()
+    module.normalize_checkbox = _FakeCheckBox()
+    module.vibe_frames = [original]
+    settings = module.collect_current_settings()
+    entry = settings["vibe_frames"][0]
+    assert entry["file_hash"] == original.file_hash
+    assert entry["storage_type"] == "metadata_vibe"
+    assert entry["vibe_encodings"] == {"1.0": "encoded-metadata"}
+
+    restored = VibeTransferModule()
+    restored.app_context = _FakeContext()
+    restored.normalize_checkbox = _FakeCheckBox()
+    restored.vibe_frames = []
+    captured = {}
+
+    def fake_add(no_image_path, vibe_data, storage_hash_override=None):
+        captured["no_image_path"] = no_image_path
+        captured["vibe_data"] = vibe_data
+        captured["storage_hash_override"] = storage_hash_override
+        frame = _FakeFrame()
+        frame.file_hash = storage_hash_override
+        frame.vibe_encodings = {
+            float(key): value
+            for key, value in zip(
+                vibe_data["reference_information_extracted_multiple"],
+                vibe_data["reference_image_multiple"],
+            )
+        }
+        frame.reference_strength = vibe_data["reference_strength_multiple"][0]
+        frame.is_no_image = True
+        frame.target_model = vibe_data["source_model"]
+        frame.storage_type = "metadata_vibe"
+        frame.file_name = f"metadata_vibe_{storage_hash_override}"
+        frame._update_model_compatibility_display = lambda current_model: None
+        frame.enable_check = _FakeCheckBox()
+        restored.vibe_frames.append(frame)
+        return frame
+
+    restored._add_vibe_frame_from_metadata = fake_add
+    restored.apply_settings(settings)
+
+    assert len(restored.vibe_frames) == 1
+    frame = restored.vibe_frames[0]
+    assert frame.file_hash == original.file_hash
+    assert frame.vibe_encodings == {1.0: "encoded-metadata"}
+    assert frame.reference_strength == 0.21
+    assert captured["storage_hash_override"] == original.file_hash

@@ -229,11 +229,12 @@ class VibeTransferFrame(QFrame):
             self.image = Image.open(file_path)
             self.image_data = self._image_to_base64(self.image)
         else:
-            # For no_image frames, use the path as hash
-            self.file_hash = file_path.replace("no_image_", "")[:16]
+            # For no_image frames, use a filesystem-safe stable hash.
+            self.file_hash = file_hash_override or self._calculate_no_image_hash(file_path)
             # Create a placeholder black image
             self.image = Image.new('RGB', (512, 512), color='black')
             self.image_data = ""
+        self.storage_type = None
         
         # Vibe data
         self.vibe_encodings = {}  # {info_extracted_value: encoded_data}
@@ -262,6 +263,18 @@ class VibeTransferFrame(QFrame):
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()[:16]  # Use first 16 characters
+
+    @staticmethod
+    def _calculate_no_image_hash(file_path: str) -> str:
+        stem = Path(str(file_path)).stem
+        for prefix in ("no_image_metadata_", "no_image_restored_", "no_image_"):
+            if stem.startswith(prefix):
+                stem = stem[len(prefix):]
+                break
+        safe = "".join(ch for ch in stem if ch.isalnum())
+        if len(safe) >= 16:
+            return safe[:16]
+        return hashlib.sha256(str(file_path).encode("utf-8")).hexdigest()[:16]
         
     def _image_to_base64(self, image: Image.Image) -> str:
         """Convert PIL image to base64 string"""
@@ -307,21 +320,25 @@ class VibeTransferFrame(QFrame):
                 
     def _save_encodings(self):
         """Save vibe encodings to JSON file and save resized image"""
-        current_model = self._get_current_model()
+        storage_type = getattr(self, "storage_type", None)
+        if self.is_no_image and storage_type == "metadata_vibe":
+            return
+
+        current_model = self.target_model if self.is_no_image and self.target_model else self._get_current_model()
         vibe_folder = Path("save/vibe_transfer") / current_model
         vibe_folder.mkdir(parents=True, exist_ok=True)
-        
+
         # Create images subdirectory within model folder
         images_folder = vibe_folder / "images"
         images_folder.mkdir(parents=True, exist_ok=True)
-        
+
         # Save resized image if it doesn't exist
         image_file = images_folder / f"{self.file_hash}.png"
         if not image_file.exists():
             try:
                 # Resize image with longer side to 386px
                 img_copy = self.image.copy()
-                
+
                 # Calculate new size maintaining aspect ratio
                 width, height = img_copy.size
                 if width > height:
@@ -330,14 +347,14 @@ class VibeTransferFrame(QFrame):
                 else:
                     new_height = 386
                     new_width = int(width * (386 / height))
-                
+
                 # Resize and save
                 img_resized = img_copy.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 img_resized.save(image_file, "PNG")
                 print(f"Saved resized image to: {image_file}")
             except Exception as e:
                 print(f"Failed to save resized image: {e}")
-        
+
         # Check if this is a volatile file (no_image_)
         is_volatile = self.file_name.startswith("no_image_")
         
@@ -350,8 +367,11 @@ class VibeTransferFrame(QFrame):
             "encodings": {str(k): v for k, v in self.vibe_encodings.items()},
             "reference_strength": self.reference_strength,
             "information_extracted": self.information_extracted,
+            "is_no_image": self.is_no_image,
             "volatile": is_volatile  # Mark as volatile if no_image_
         }
+        if storage_type:
+            data["storage_type"] = storage_type
         
         try:
             with open(json_file, 'w', encoding='utf-8') as f:
@@ -798,13 +818,25 @@ class VibeStorageItem(QFrame):
     """Storage item widget for vibe display"""
     apply_requested = pyqtSignal(str, str, str, float)  # model, file_hash, file_name, selected_encoding
     
-    def __init__(self, model: str, file_hash: str, file_name: str, image_path: Path, encodings: dict = None, parent=None):
+    def __init__(
+        self,
+        model: str,
+        file_hash: str,
+        file_name: str,
+        image_path: Path,
+        encodings: dict = None,
+        storage_type: str = None,
+        is_no_image: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
         self.model = model
         self.file_hash = file_hash
         self.file_name = file_name
         self.image_path = image_path
         self.encodings = encodings or {}  # Store available encodings
+        self.storage_type = storage_type
+        self.is_no_image = is_no_image
         
         self.setFrameStyle(QFrame.Shape.Box)
         self.setStyleSheet("""
@@ -852,6 +884,10 @@ class VibeStorageItem(QFrame):
     def _load_image(self):
         """Load and display the image with proper cropping"""
         try:
+            if self.is_no_image and self.storage_type == "metadata_vibe":
+                self.image_label.setText("Metadata Vibe\nNo source image")
+                self.image_label.setStyleSheet("QLabel { border: 1px solid #444; background: #121018; color: #c8b8ff; }")
+                return
             if self.image_path.exists():
                 # Open image with PIL
                 img = Image.open(self.image_path)
@@ -1147,12 +1183,22 @@ class VibeStorageWindow(QDialog):
                 file_hash = data.get("file_hash", json_file.stem)
                 file_name = data.get("file_name", "Unknown")
                 encodings = data.get("encodings", {})
+                storage_type = data.get("storage_type")
+                is_no_image = bool(data.get("is_no_image", False))
                 
                 # Image path
                 image_path = images_folder / f"{file_hash}.png"
                 
                 # Create item widget with encodings
-                item = VibeStorageItem(model, file_hash, file_name, image_path, encodings)
+                item = VibeStorageItem(
+                    model,
+                    file_hash,
+                    file_name,
+                    image_path,
+                    encodings,
+                    storage_type=storage_type,
+                    is_no_image=is_no_image,
+                )
                 item.apply_requested.connect(self.apply_vibe.emit)
                 
                 grid_layout.addWidget(item, row, col)
@@ -1315,6 +1361,22 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             print(f"Failed to read vibe storage {json_path}: {e}")
             return None
 
+    @staticmethod
+    def _metadata_vibe_storage_hash(
+        model: str,
+        encodings: List[str],
+        strengths: List[Any],
+        information_extracted: List[Any],
+    ) -> str:
+        payload = {
+            "model": model,
+            "encodings": [str(value) for value in encodings],
+            "strengths": [str(value) for value in strengths],
+            "information_extracted": [str(value) for value in information_extracted],
+        }
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
     def _find_vibe_storage_record(
         self,
         file_hash: Optional[str] = None,
@@ -1438,7 +1500,10 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 "target_model": frame.target_model or self._get_current_model(),
             }
             if frame.is_no_image:
-                # 가상 경로는 파일이 없으므로 인코딩 데이터를 직접 저장
+                entry["storage_type"] = getattr(frame, "storage_type", None)
+                # no-image frames do not have a reliable source image or visible
+                # Vibe Storage thumbnail, so keep their encodings inside mode
+                # settings instead of routing restore through save/vibe_transfer.
                 entry["vibe_encodings"] = {str(k): v for k, v in frame.vibe_encodings.items()}
             settings["vibe_frames"].append(entry)
 
@@ -1460,20 +1525,42 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 is_no_image = frame_data.get("is_no_image", False)
 
                 if is_no_image:
-                    # no_image 프레임: 저장된 인코딩 데이터로 직접 복원
+                    # no_image 프레임: metadata-origin frames prefer the permanent storage JSON.
+                    target_model = frame_data.get("target_model", self._get_current_model())
+                    storage_data = None
+                    if frame_data.get("file_hash"):
+                        _, _, storage_data = self._find_vibe_storage_record(
+                            file_hash=frame_data.get("file_hash"),
+                            preferred_model=target_model,
+                        )
+
                     saved_encodings = frame_data.get("vibe_encodings", {})
+                    if not saved_encodings and storage_data and storage_data.get("encodings"):
+                        saved_encodings = storage_data.get("encodings", {})
                     if not saved_encodings:
                         continue
                     file_path = frame_data.get("file_path", "")
-                    per_hash = hashlib.sha256(file_path.encode()).hexdigest()[:16]
-                    no_image_path = f"no_image_restored_{per_hash}"
+                    storage_hash = (
+                        frame_data.get("file_hash")
+                        or (storage_data or {}).get("file_hash")
+                        or hashlib.sha256(file_path.encode()).hexdigest()[:16]
+                    )
+                    no_image_path = file_path or f"metadata_vibe_{storage_hash}"
+                    reference_strength = frame_data.get(
+                        "reference_strength",
+                        (storage_data or {}).get("reference_strength", 0.6),
+                    )
                     per_vibe_data = {
                         'reference_image_multiple': list(saved_encodings.values()),
-                        'reference_strength_multiple': [frame_data.get("reference_strength", 0.6)],
+                        'reference_strength_multiple': [reference_strength],
                         'reference_information_extracted_multiple': [float(k) for k in saved_encodings.keys()],
-                        'source_model': frame_data.get("target_model", self._get_current_model()),
+                        'source_model': target_model,
                     }
-                    frame = self._add_vibe_frame_from_metadata(no_image_path, per_vibe_data)
+                    frame = self._add_vibe_frame_from_metadata(
+                        no_image_path,
+                        per_vibe_data,
+                        storage_hash_override=storage_hash,
+                    )
                     if frame:
                         frame.is_enabled = frame_data.get("is_enabled", True)
                         frame.enable_check.setChecked(frame.is_enabled)
@@ -2051,7 +2138,12 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             _notify_vibe_transfer(self.app_context, "Error", f"Failed to add vibe from import: {str(e)}", "error")
             return None
     
-    def _add_vibe_frame_from_metadata(self, no_image_path: str, vibe_data: dict) -> Optional[VibeTransferFrame]:
+    def _add_vibe_frame_from_metadata(
+        self,
+        no_image_path: str,
+        vibe_data: dict,
+        storage_hash_override: Optional[str] = None,
+    ) -> Optional[VibeTransferFrame]:
         """Add a vibe frame from metadata (no actual image file)"""
         if len(self.vibe_frames) >= 8:
             _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
@@ -2068,6 +2160,14 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 _notify_vibe_transfer(self.app_context, "경고", "Metadata에 유효한 Vibe Transfer 데이터가 없습니다.", "warning")
                 return None
 
+            target_model = vibe_data.get('source_model', self._get_current_model())
+            storage_hash = storage_hash_override or self._metadata_vibe_storage_hash(
+                target_model,
+                ref_img_multiple,
+                ref_str_multiple,
+                ref_ie_multiple,
+            )
+
             # Create a special frame for no_image mode
             # Since we don't have an actual file, we'll create a minimal VibeTransferFrame
             # that only holds the vibe data
@@ -2080,14 +2180,20 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             temp_image = Image.new('RGB', (512, 512), color='black')
 
             # Save to temp path - ensure metadata is in the path for proper identification
-            temp_path = Path("temp") / f"{no_image_path}.png"
+            temp_path = Path("temp") / f"no_image_metadata_{storage_hash}.png"
             temp_path.parent.mkdir(exist_ok=True)
             temp_image.save(str(temp_path))
 
             # Create frame using the temp path with is_no_image flag
             # Use source model from metadata if available, otherwise current model
-            target_model = vibe_data.get('source_model', self._get_current_model())
-            frame = VibeTransferFrame(str(temp_path), self.app_context, is_no_image=True, target_model=target_model)
+            frame = VibeTransferFrame(
+                str(temp_path),
+                self.app_context,
+                is_no_image=True,
+                target_model=target_model,
+                file_hash_override=storage_hash,
+            )
+            frame.storage_type = "metadata_vibe"
 
             # Override the frame's data with metadata vibe data
             # Store the vibe data directly in the frame's encodings
@@ -2112,8 +2218,8 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 frame.ref_strength_label.setText(f"Reference Strength {strength:.2f}")
 
             # Mark this as a no_image frame by setting special properties
-            frame.file_name = no_image_path
-            frame.file_path = no_image_path
+            frame.file_name = f"metadata_vibe_{storage_hash}"
+            frame.file_path = frame.file_name
 
             # Update UI to show it's from metadata - the label is already set in _setup_ui
 
@@ -2264,9 +2370,14 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             # Update model compatibility display for no_image frames
             if frame.is_no_image:
                 frame._update_model_compatibility_display(current_model)
+                if getattr(frame, "storage_type", None) == "metadata_vibe":
+                    frame._update_encoding_status()
+                    frame._update_encode_button_visibility()
+                    continue
             # Re-check existing encodings for this image and model
             if hasattr(frame, 'file_hash'):
-                vibe_folder = Path("save/vibe_transfer") / current_model
+                storage_model = frame.target_model if frame.is_no_image and frame.target_model else current_model
+                vibe_folder = Path("save/vibe_transfer") / storage_model
                 json_file = vibe_folder / f"{frame.file_hash}.json"
                 
                 if json_file.exists():
@@ -2346,7 +2457,43 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
                 float(info_str): encoded_data
                 for info_str, encoded_data in data.get("encodings", {}).items()
             }
-                
+
+            is_no_image_storage = bool(data.get("is_no_image")) or data.get("storage_type") == "metadata_vibe"
+            if is_no_image_storage:
+                if not stored_encodings:
+                    _notify_vibe_transfer(self.app_context, "Error", "Stored Vibe encoding not found", "error")
+                    return
+
+                selected_key = min(stored_encodings.keys(), key=lambda key: abs(key - selected_encoding))
+
+                for frame in self.vibe_frames:
+                    if frame.file_hash == file_hash:
+                        frame.vibe_encodings = stored_encodings
+                        self._set_frame_information_extracted(frame, selected_key)
+                        self._set_frame_reference_strength(frame, stored_strength)
+                        frame.is_enabled = True
+                        frame.enable_check.setChecked(True)
+                        frame._update_model_compatibility_display(current_model)
+                        self._autosave_current_mode_settings()
+                        return
+
+                vibe_data = {
+                    "reference_image_multiple": [stored_encodings[selected_key]],
+                    "reference_strength_multiple": [stored_strength if stored_strength is not None else 0.6],
+                    "reference_information_extracted_multiple": [selected_key],
+                    "source_model": model,
+                }
+                frame = self._add_vibe_frame_from_metadata(
+                    f"metadata_vibe_{file_hash}",
+                    vibe_data,
+                    storage_hash_override=file_hash,
+                )
+                if frame:
+                    self._set_frame_information_extracted(frame, selected_key)
+                    self._set_frame_reference_strength(frame, stored_strength)
+                    frame._update_model_compatibility_display(current_model)
+                return
+
             # Get original file path or use saved image
             file_path = data.get("file_path")
             if not file_path or not os.path.exists(file_path):

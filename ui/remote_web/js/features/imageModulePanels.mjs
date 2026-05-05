@@ -12,9 +12,118 @@ export function createImageModulePanels({
   FileCtor = globalThis.File,
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
+  modulePopup = null,
+  positionFloatingPanel = null,
 }) {
   const sliderDebounce = {};
   let storageView = null;
+  let vibeClusterListOpen = false;
+  let vibeClusterSaveOpen = false;
+  let vibeClusterShowListAfterSave = false;
+  let vibeClusterItems = [];
+  let vibeClusterPendingThumb = '';
+  let vibeClusterThumbTarget = '';
+
+  function getVibeClusterHost() {
+    return document.body;
+  }
+
+  function getVibeClusterPanel() {
+    return document.querySelector('.vibe-cluster-popover');
+  }
+
+  function getVibeClusterSavePanel() {
+    return document.querySelector('.vibe-cluster-save-popover');
+  }
+
+  function queryVibeClusterPanel(selector) {
+    return getVibeClusterPanel()?.querySelector(selector) || null;
+  }
+
+  function queryVibeClusterSavePanel(selector) {
+    return getVibeClusterSavePanel()?.querySelector(selector) || null;
+  }
+
+  function relayoutVibeClusterPanel() {
+    if (positionFloatingPanel) {
+      const panels = [getVibeClusterPanel(), getVibeClusterSavePanel()].filter(Boolean);
+      panels.forEach(panel => {
+        if (panel.classList.contains('open')) positionFloatingPanel(panel, modulePopup);
+      });
+    }
+  }
+
+  function renderVibeClusterListHiddenInput() {
+    return `
+      <input type="file" id="vibeClusterManageThumbInput" accept="image/*" style="display:none"
+        onchange="updateVibeClusterThumbnailFromFile(vibeClusterThumbTarget(),this.files[0]);this.value=''">`;
+  }
+
+  function closeVibeClusterListPanel() {
+    vibeClusterListOpen = false;
+    const panel = getVibeClusterPanel();
+    if (panel) panel.remove();
+  }
+
+  function closeVibeClusterSavePanel(options = {}) {
+    vibeClusterSaveOpen = false;
+    vibeClusterShowListAfterSave = false;
+    if (options.clearThumb !== false) vibeClusterPendingThumb = '';
+    const panel = getVibeClusterSavePanel();
+    if (panel) panel.remove();
+  }
+
+  function closeAllVibeClusterPanels() {
+    closeVibeClusterListPanel();
+    closeVibeClusterSavePanel();
+  }
+
+  function renderVibeClusterSavePanel() {
+    const existing = getVibeClusterSavePanel();
+    if (existing) existing.remove();
+
+    const panel = document.createElement('div');
+    panel.className = 'vibe-cluster-save-popover open';
+    panel.innerHTML = `
+      <div class="vibe-cluster-header">
+        <h3>Make Vibe Cluster</h3>
+        <button class="mod-btn-sm" onclick="closeVibeClusterSavePanel()">Close</button>
+      </div>
+      <div class="vibe-cluster-save">
+        <input id="vibeClusterName" class="vibe-cluster-input" type="text" placeholder="Name">
+        <textarea id="vibeClusterDesc" class="vibe-cluster-textarea" placeholder="Description"></textarea>
+        <div class="vibe-cluster-thumb-row">
+          <div class="vibe-cluster-save-thumb">${vibeClusterPendingThumb ? `<img src="${vibeClusterPendingThumb}" alt="">` : '<span>Thumb</span>'}</div>
+          <button class="mod-btn-sm" onclick="document.getElementById('vibeClusterSaveThumbInput').click()">Upload Thumb</button>
+          <button class="mod-btn-sm" onclick="pasteVibeClusterThumbnail()">Paste Thumb</button>
+          <button class="mod-btn-upload" onclick="saveVibeCluster()">Save Current</button>
+        </div>
+        <input type="file" id="vibeClusterSaveThumbInput" accept="image/*" style="display:none"
+          onchange="setVibeClusterSaveThumbnail(this.files[0]);this.value=''">
+      </div>
+    `;
+    getVibeClusterHost().appendChild(panel);
+    relayoutVibeClusterPanel();
+  }
+
+  function openVibeClusterListPanel(message = {}) {
+    if (!message || !Object.keys(message).length) {
+      closeVibeClusterSavePanel();
+    }
+    vibeClusterListOpen = true;
+    renderVibeClusterPanel(message);
+    if (!message || !Object.keys(message).length) {
+      setModuleParam('vibe_transfer', 'cluster_list', '');
+    }
+  }
+
+  function openVibeClusterSavePanel() {
+    closeVibeClusterListPanel();
+    vibeClusterSaveOpen = true;
+    vibeClusterShowListAfterSave = false;
+    vibeClusterPendingThumb = '';
+    renderVibeClusterSavePanel();
+  }
 
   function pasteImage(moduleId) {
     navigatorRef.clipboard.read().then(items => {
@@ -69,6 +178,53 @@ export function createImageModulePanels({
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
+  }
+
+  function readVibeClusterThumbnail(file, onDone) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const img = new ImageCtor();
+    const reader = new FileReaderCtor();
+    reader.onload = () => {
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, 512, 512);
+        const scale = Math.min(512 / img.width, 512 / img.height);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        ctx.drawImage(img, Math.round((512 - width) / 2), Math.round((512 - height) / 2), width, height);
+        onDone(canvas.toDataURL('image/png'));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function pasteVibeClusterThumbnail(targetId = '') {
+    navigatorRef.clipboard.read().then(items => {
+      for (const item of items) {
+        const imageType = item.types.find(type => type.startsWith('image/'));
+        if (!imageType) continue;
+        item.getType(imageType).then(blob => {
+          const file = new FileCtor([blob], 'cluster-thumbnail.png', {type: blob.type});
+          if (targetId) updateVibeClusterThumbnailFromFile(targetId, file);
+          else setVibeClusterSaveThumbnail(file);
+        });
+        return;
+      }
+      showToast('No image in clipboard', 'error');
+    }).catch(() => showToast('Clipboard access denied', 'error'));
+  }
+
+  function setVibeClusterSaveThumbnail(file) {
+    readVibeClusterThumbnail(file, dataUrl => {
+      vibeClusterPendingThumb = dataUrl;
+      const preview = queryVibeClusterSavePanel('.vibe-cluster-save-thumb');
+      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="">`;
+    });
   }
 
   function onSlider(moduleId, key, value) {
@@ -365,6 +521,7 @@ export function createImageModulePanels({
       <input type="file" id="vibeFileInput" accept="image/*" style="display:none"
         onchange="uploadModuleImage('vibe_transfer',this.files[0]);this.value=''">
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>
+      <button class="mod-btn-upload mod-btn-storage" onclick="openVibeClusterListPanel()">Cluster</button>
       <span class="mod-frame-count">${message.frame_count}/${message.max_frames}</span>
     </div>
     <label class="mod-checkbox-item" style="margin-bottom:8px">
@@ -373,7 +530,166 @@ export function createImageModulePanels({
       <span class="mod-checkbox-label">Normalize reference strength</span>
     </label>
     ${frames.length ? frames : '<div class="mod-empty">No vibe transfers loaded</div>'}
+    <div class="vibe-cluster-footer">
+      <button class="mod-btn-upload mod-btn-vibe-cluster" onclick="openVibeClusterPanel()">Make Vibe Cluster</button>
+    </div>
   `;
+    if (vibeClusterListOpen || vibeClusterSaveOpen) relayoutVibeClusterPanel();
+  }
+
+  function openVibeClusterPanel() {
+    openVibeClusterSavePanel();
+  }
+
+  function closeVibeClusterPanel() {
+    closeVibeClusterListPanel();
+  }
+
+  function onVibeClusterList(message) {
+    vibeClusterItems = Array.isArray(message.items) ? message.items : [];
+    if (vibeClusterShowListAfterSave && message.source === 'cluster_save') {
+      closeVibeClusterSavePanel();
+      openVibeClusterListPanel(message);
+    } else if (vibeClusterListOpen) {
+      renderVibeClusterPanel(message);
+    }
+  }
+
+  function clusterThumb(item) {
+    if (item.thumbnail) {
+      return `<img src="data:image/jpeg;base64,${item.thumbnail}" alt="">`;
+    }
+    return '<span>No Thumb</span>';
+  }
+
+  function renderVibeClusterPanel(message = {}) {
+    const existing = getVibeClusterPanel();
+    if (existing) existing.remove();
+
+    const items = vibeClusterItems.map(item => {
+      const id = escHtml(item.id);
+      const name = escHtml(item.name || item.id);
+      const description = escHtml(item.description || '');
+      const model = escHtml(item.model || '');
+      const frameCount = Number(item.frame_count || 0);
+      const enabledCount = Number(item.enabled_count || 0);
+      return `
+        <article class="vibe-cluster-card" data-cluster-id="${id}">
+          <div class="vibe-cluster-thumb">${clusterThumb(item)}</div>
+          <div class="vibe-cluster-info">
+            <div class="vibe-cluster-name">${name}</div>
+            ${description ? `<div class="vibe-cluster-desc">${description}</div>` : ''}
+            <div class="vibe-cluster-meta">${model} · ${enabledCount}/${frameCount}</div>
+          </div>
+          <div class="vibe-cluster-actions">
+            <div class="vibe-cluster-menu-wrap">
+              <button class="mod-btn-sm" onclick="toggleVibeClusterLoadMenu('${id}',event)">Load</button>
+              <div class="vibe-cluster-menu" data-load-menu="${id}">
+                <button onclick="loadVibeCluster('${id}','clean')">Clean</button>
+                <button onclick="loadVibeCluster('${id}','append')">Append</button>
+              </div>
+            </div>
+            <div class="vibe-cluster-menu-wrap">
+              <button class="mod-btn-sm" onclick="toggleVibeClusterManageMenu('${id}',event)">Manage</button>
+              <div class="vibe-cluster-menu" data-manage-menu="${id}">
+                <button onclick="renameVibeCluster('${id}')">Rename</button>
+                <button onclick="chooseVibeClusterThumbnail('${id}')">Change Thumb</button>
+                <button class="danger" onclick="deleteVibeCluster('${id}')">Delete</button>
+              </div>
+            </div>
+          </div>
+        </article>`;
+    }).join('');
+
+    const currentCount = message.current_frame_count ?? '';
+    const panel = document.createElement('div');
+    panel.className = 'vibe-cluster-popover open';
+    panel.innerHTML = `
+      <div class="vibe-cluster-header">
+        <h3>Vibe Cluster</h3>
+        <button class="mod-btn-sm" onclick="closeVibeClusterPanel()">Close</button>
+      </div>
+      <div class="vibe-cluster-list-head">
+        <span>Saved</span>
+        ${currentCount !== '' ? `<span>${currentCount}/8 loaded</span>` : ''}
+      </div>
+      <div class="vibe-cluster-list">${items || '<div class="mod-empty">No saved clusters</div>'}</div>
+      ${renderVibeClusterListHiddenInput()}
+    `;
+    getVibeClusterHost().appendChild(panel);
+    relayoutVibeClusterPanel();
+  }
+
+  function saveVibeCluster() {
+    const panel = getVibeClusterSavePanel();
+    const name = panel?.querySelector('#vibeClusterName')?.value.trim() || '';
+    const description = panel?.querySelector('#vibeClusterDesc')?.value.trim() || '';
+    vibeClusterShowListAfterSave = true;
+    setModuleParam('vibe_transfer', 'cluster_save', JSON.stringify({
+      name,
+      description,
+      thumbnail_data: vibeClusterPendingThumb,
+    }));
+  }
+
+  function closeVibeClusterMenus() {
+    getVibeClusterPanel()?.querySelectorAll('.vibe-cluster-menu.open').forEach(menu => menu.classList.remove('open'));
+  }
+
+  function toggleVibeClusterLoadMenu(id, event) {
+    event?.stopPropagation?.();
+    const menu = queryVibeClusterPanel(`[data-load-menu="${id}"]`);
+    const shouldOpen = menu && !menu.classList.contains('open');
+    closeVibeClusterMenus();
+    if (shouldOpen) menu.classList.add('open');
+  }
+
+  function toggleVibeClusterManageMenu(id, event) {
+    event?.stopPropagation?.();
+    const menu = queryVibeClusterPanel(`[data-manage-menu="${id}"]`);
+    const shouldOpen = menu && !menu.classList.contains('open');
+    closeVibeClusterMenus();
+    if (shouldOpen) menu.classList.add('open');
+  }
+
+  function loadVibeCluster(id, mode) {
+    closeVibeClusterMenus();
+    setModuleParam('vibe_transfer', 'cluster_load', JSON.stringify({id, mode}));
+  }
+
+  function renameVibeCluster(id) {
+    closeVibeClusterMenus();
+    const item = vibeClusterItems.find(entry => entry.id === id) || {};
+    const name = globalThis.prompt?.('Name', item.name || '') ?? '';
+    if (!name.trim()) return;
+    const description = globalThis.prompt?.('Description', item.description || '') ?? '';
+    setModuleParam('vibe_transfer', 'cluster_rename', JSON.stringify({id, name, description}));
+  }
+
+  function deleteVibeCluster(id) {
+    closeVibeClusterMenus();
+    if (globalThis.confirm && !globalThis.confirm('Delete this Vibe cluster?')) return;
+    setModuleParam('vibe_transfer', 'cluster_delete', id);
+  }
+
+  function chooseVibeClusterThumbnail(id) {
+    closeVibeClusterMenus();
+    vibeClusterThumbTarget = id;
+    document.getElementById('vibeClusterManageThumbInput')?.click();
+  }
+
+  function updateVibeClusterThumbnailFromFile(id, file) {
+    if (!id) return;
+    readVibeClusterThumbnail(file, dataUrl => {
+      setModuleParam('vibe_transfer', 'cluster_thumbnail', JSON.stringify({
+        id,
+        thumbnail_data: dataUrl,
+      }));
+    });
+  }
+
+  function vibeClusterThumbTargetValue() {
+    return vibeClusterThumbTarget;
   }
 
   function requestStorage(moduleId) {
@@ -384,6 +700,7 @@ export function createImageModulePanels({
   function onStorageList(message) {
     if (message.module_id === 'character_reference') renderCharRefStorage(message);
     else if (message.module_id === 'vibe_transfer') renderVibeStorage(message);
+    else if (message.module_id === 'vibe_cluster') onVibeClusterList(message);
   }
 
   function renderCharRefStorage(message) {
@@ -473,6 +790,23 @@ export function createImageModulePanels({
     commitVibeRefStrength,
     renderCharacterReference,
     renderVibeTransfer,
+    openVibeClusterPanel,
+    openVibeClusterListPanel,
+    closeVibeClusterPanel,
+    closeVibeClusterSavePanel,
+    closeAllVibeClusterPanels,
+    saveVibeCluster,
+    pasteVibeClusterThumbnail,
+    setVibeClusterSaveThumbnail,
+    toggleVibeClusterLoadMenu,
+    toggleVibeClusterManageMenu,
+    loadVibeCluster,
+    renameVibeCluster,
+    deleteVibeCluster,
+    chooseVibeClusterThumbnail,
+    updateVibeClusterThumbnailFromFile,
+    vibeClusterThumbTargetValue,
+    relayoutVibeClusterPanel,
     requestStorage,
     onStorageList,
     renderCharRefStorage,

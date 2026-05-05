@@ -193,6 +193,7 @@ class CharacterViewerService:
         data: dict[str, Any],
         thumbs: dict[str, str],
         include_thumbnail_url: bool = False,
+        include_tags: bool = False,
     ) -> dict[str, Any]:
         item = {
             "index": int(index),
@@ -200,8 +201,9 @@ class CharacterViewerService:
             "character": name,
             "count": int(data.get("total_rows", 0) or 0),
             "has_thumbnail": self._thumb_key(group_key, name) in thumbs,
-            "tags": self._tag_search_str(data),
         }
+        if include_tags:
+            item["tags"] = self._tag_search_str(data)
         if include_thumbnail_url:
             item["thumbnail_url"] = self._thumb_url(group_key, name)
         return item

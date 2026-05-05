@@ -2237,6 +2237,13 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   cursor: pointer;
   text-align: left;
 }
+.character-viewer-list-item {
+  height: 30px;
+}
+.character-viewer-list-spacer {
+  width: 100%;
+  pointer-events: none;
+}
 .character-viewer-group-item:hover,
 .character-viewer-list-item:hover {
   background: rgba(255, 255, 255, 0.055);

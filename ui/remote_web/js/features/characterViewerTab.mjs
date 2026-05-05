@@ -48,10 +48,13 @@ export function createCharacterViewerController({
   const generateBtn = document.getElementById('characterViewerGenerateBtn');
 
   const PAGE_SIZE = 9;
+  const LIST_ITEM_HEIGHT = 30;
+  const LIST_OVERSCAN = 8;
   let state = null;
   let groups = [];
   let allItems = [];
   let listRequestId = 0;
+  let listRenderFrame = 0;
   let groupRequestId = 0;
   let detailRequestId = 0;
   let promptRequestId = 0;
@@ -243,20 +246,44 @@ export function createCharacterViewerController({
     return `<span class="character-viewer-card-empty">No Thumb</span>`;
   }
 
-  function renderListItems(items) {
-    if (listEl) {
-      listEl.innerHTML = items.map(item => {
-        const activeClass = selected && selected.group === item.group && selected.character === item.character ? ' active' : '';
-        const thumbClass = item.has_thumbnail ? ' has-thumb' : ' no-thumb';
-        const index = Number(item.index || 0);
-        return `
-          <button type="button" class="character-viewer-list-item${activeClass}${thumbClass}" data-group="${html(item.group)}" data-character="${html(item.character)}" data-index="${index}" title="${html(item.character)} · ${html(item.group)} · #${index + 1}">
-            <span>${html(item.character)}</span>
-            <b>${formatCount(item.count)}</b>
-          </button>
-        `;
-      }).join('');
-    }
+  function listItemMarkup(item) {
+    const activeClass = selected && selected.group === item.group && selected.character === item.character ? ' active' : '';
+    const thumbClass = item.has_thumbnail ? ' has-thumb' : ' no-thumb';
+    const index = Number(item.index || 0);
+    return `
+      <button type="button" class="character-viewer-list-item${activeClass}${thumbClass}" data-group="${html(item.group)}" data-character="${html(item.character)}" data-index="${index}" title="${html(item.character)} · ${html(item.group)} · #${index + 1}">
+        <span>${html(item.character)}</span>
+        <b>${formatCount(item.count)}</b>
+      </button>
+    `;
+  }
+
+  function renderListItems(items = allItems, options = {}) {
+    if (!listEl) return;
+    if (options.resetScroll) listEl.scrollTop = 0;
+    const count = items.length;
+    const viewportHeight = Math.max(LIST_ITEM_HEIGHT, listEl.clientHeight || 360);
+    const scrollTop = Math.max(0, listEl.scrollTop || 0);
+    const firstVisible = Math.floor(scrollTop / LIST_ITEM_HEIGHT);
+    const visibleCount = Math.ceil(viewportHeight / LIST_ITEM_HEIGHT);
+    const start = Math.max(0, firstVisible - LIST_OVERSCAN);
+    const end = Math.min(count, firstVisible + visibleCount + LIST_OVERSCAN);
+    const topHeight = start * LIST_ITEM_HEIGHT;
+    const bottomHeight = Math.max(0, (count - end) * LIST_ITEM_HEIGHT);
+    const rows = items.slice(start, end).map(listItemMarkup).join('');
+    listEl.innerHTML = `
+      <div class="character-viewer-list-spacer" style="height:${topHeight}px"></div>
+      ${rows}
+      <div class="character-viewer-list-spacer" style="height:${bottomHeight}px"></div>
+    `;
+  }
+
+  function scheduleListRender() {
+    if (listRenderFrame) return;
+    listRenderFrame = requestAnimationFrame(() => {
+      listRenderFrame = 0;
+      renderListItems(allItems);
+    });
   }
 
   function renderGrid(items) {
@@ -286,13 +313,14 @@ export function createCharacterViewerController({
   async function loadPage(page = 0, options = {}) {
     const requestId = ++listRequestId;
     const query = String(searchEl?.value || '').trim();
+    const includeAll = Boolean(options.includeAll);
     const params = new URLSearchParams({
       group: currentGroup,
       query,
       page: String(page),
       per_page: String(PAGE_SIZE),
       thumb_first: String(Boolean(thumbFirstEl?.checked)),
-      include_all: 'true',
+      include_all: String(includeAll),
     });
     setStatus('Loading characters...', 'busy');
     try {
@@ -302,8 +330,10 @@ export function createCharacterViewerController({
       totalPages = Math.max(1, Number(data.total_pages || 1));
       currentTotal = Number(data.total || 0);
       const items = data.items || [];
-      allItems = Array.isArray(data.all_items) ? data.all_items : items;
-      renderListItems(allItems);
+      if (includeAll || Array.isArray(data.all_items)) {
+        allItems = Array.isArray(data.all_items) ? data.all_items : items;
+        renderListItems(allItems, {resetScroll: Boolean(options.resetList)});
+      }
       renderGrid(items);
       updatePager();
       scrollGrid(options.anchor || 'top');
@@ -378,12 +408,14 @@ export function createCharacterViewerController({
     if (!group || !character) return;
     const targetIndex = Number.isFinite(index) && index >= 0 ? index : getItemIndex(group, character);
     const targetPage = targetIndex >= 0 ? Math.floor(targetIndex / PAGE_SIZE) : currentPage;
-    switchCharacterView('characters');
+    const openDetail = activeView === 'detail';
+    if (!openDetail) switchCharacterView('characters');
     if (targetPage !== currentPage) {
       await loadPage(targetPage, {anchor: 'top', skipAutoSelect: true});
     }
-    await selectCharacter(group, character, '', {openDetail: false});
-    focusGridCard(group, character);
+    await selectCharacter(group, character, '', {openDetail});
+    if (openDetail) switchCharacterView('detail');
+    else focusGridCard(group, character);
   }
 
   function renderEmptyDetail() {
@@ -1003,17 +1035,18 @@ export function createCharacterViewerController({
       detail = null;
       renderGroups();
       renderEmptyDetail();
-      loadPage(0, {anchor: 'top'});
+      loadPage(0, {anchor: 'top', includeAll: true, resetList: true});
     });
     searchEl?.addEventListener('input', () => {
       if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => loadPage(0, {anchor: 'top'}), 180);
+      searchTimer = setTimeout(() => loadPage(0, {anchor: 'top', includeAll: true, resetList: true}), 180);
     });
     thumbFirstEl?.addEventListener('change', () => {
       scheduleSaveOptions();
-      loadPage(0, {anchor: 'top'});
+      loadPage(0, {anchor: 'top', includeAll: true, resetList: true});
     });
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
+    listEl?.addEventListener('scroll', scheduleListRender, {passive: true});
     listEl?.addEventListener('click', event => {
       const item = event.target.closest('[data-group][data-character]');
       if (!item || !listEl.contains(item)) return;
@@ -1091,7 +1124,7 @@ export function createCharacterViewerController({
         return;
       }
       await loadGroups();
-      await loadPage(currentPage, {anchor: 'top'});
+      await loadPage(currentPage, {anchor: 'top', includeAll: true, resetList: true});
       loaded = true;
     } catch (error) {
       console.error('Character Viewer load failed', error);

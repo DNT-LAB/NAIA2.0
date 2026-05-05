@@ -1,8 +1,9 @@
 # core/ui_state_manager.py
 # 프로그램 종료 시 UI 레이아웃 상태를 저장하고, 시작 시 복원하는 매니저
 
-import json
 import base64
+import json
+import os
 from pathlib import Path
 from PyQt6.QtCore import QByteArray, QTimer
 
@@ -30,7 +31,10 @@ class UIStateManager:
         # 0. 창 위치/크기
         raw_geo = main_window.saveGeometry()
         state['window_geometry'] = base64.b64encode(bytes(raw_geo)).decode('ascii')
-        state['window_maximized'] = main_window.isMaximized()
+        state['window_maximized'] = (
+            main_window.isMaximized()
+            or bool(getattr(main_window, '_pending_ui_state_show_maximized', False))
+        )
 
         # 1. 스플리터 위치
         if hasattr(main_window, 'main_splitter'):
@@ -93,7 +97,10 @@ class UIStateManager:
                 main_window.restoreGeometry(QByteArray(raw))
                 # 최대화 상태였다면 최대화 복원
                 if state.get('window_maximized', False):
-                    main_window.showMaximized()
+                    if self._should_defer_window_show(main_window):
+                        setattr(main_window, '_pending_ui_state_show_maximized', True)
+                    else:
+                        main_window.showMaximized()
             except Exception as e:
                 print(f"⚠️ [UI STATE] 창 크기 복원 시 오류: {e}")
 
@@ -141,3 +148,11 @@ class UIStateManager:
             scrollbar.setValue(position)
         except Exception:
             pass
+
+    def _should_defer_window_show(self, main_window) -> bool:
+        """Return True when startup must stay hidden until Web Shell requests show."""
+        if os.environ.get('NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW') != '1':
+            return False
+        if os.environ.get('NAIA_CLI_DESKTOP') == '1':
+            return False
+        return not (main_window.isVisible() and not main_window.isHidden())

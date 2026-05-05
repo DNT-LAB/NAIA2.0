@@ -1224,7 +1224,10 @@ class ModernMainWindow(QMainWindow):
     def set_web_session_window_visible(self, visible: bool):
         """Web Session 에서 메인 데스크탑 창 표시/숨김."""
         if visible:
-            if self.isMinimized():
+            if getattr(self, '_pending_ui_state_show_maximized', False):
+                self.showMaximized()
+                self._pending_ui_state_show_maximized = False
+            elif self.isMinimized():
                 self.showNormal()
             else:
                 self.show()

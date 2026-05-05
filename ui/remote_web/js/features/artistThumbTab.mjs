@@ -36,6 +36,8 @@ export function createArtistThumbController({
   const insertBtn = document.getElementById('artistThumbInsertBtn');
   const prefixEl = document.getElementById('artistThumbPrefix');
   const positiveEl = document.getElementById('artistThumbPositive');
+  const weightSlider = document.getElementById('artistThumbWeightSlider');
+  const weightInput = document.getElementById('artistThumbWeightInput');
   const postfixEl = document.getElementById('artistThumbPostfix');
   const generateBtn = document.getElementById('artistThumbGenerateBtn');
   const randomGenerateBtn = document.getElementById('artistThumbRandomGenerateBtn');
@@ -127,7 +129,7 @@ export function createArtistThumbController({
     return String(artist || '').replace(/[()]/g, '\\$&');
   }
 
-  function formatArtistPrompt(artist) {
+  function baseArtistPrompt(artist) {
     const name = String(artist || '').trim();
     if (!name) return '';
     const generationMode = currentGenerationMode();
@@ -135,6 +137,36 @@ export function createArtistThumbController({
     const escaped = escapeStableDiffusionArtistName(name);
     if (generationMode === 'COMFYUI' && isComfyUiAnimaMode?.()) return `@${escaped}`;
     return escaped;
+  }
+
+  function artistWeightValue() {
+    const raw = String(weightInput?.value || weightSlider?.value || '1').trim();
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value === 0 || value === 1) return null;
+    return value;
+  }
+
+  function formatArtistWeight(value) {
+    return Number(value).toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  function formatArtistPrompt(artist) {
+    const name = String(artist || '').trim();
+    if (!name) return '';
+    try {
+      const weight = artistWeightValue();
+      if (weight == null) return baseArtistPrompt(name);
+      const formattedWeight = formatArtistWeight(weight);
+      if (!formattedWeight) return baseArtistPrompt(name);
+      if (currentGenerationMode() === 'NAI') return `${formattedWeight}::artist:${name} ::`;
+      const escaped = escapeStableDiffusionArtistName(name);
+      if (currentGenerationMode() === 'COMFYUI' && isComfyUiAnimaMode?.()) {
+        return `(@${escaped}:${formattedWeight})`;
+      }
+      return `(${escaped}:${formattedWeight})`;
+    } catch (_) {
+      return baseArtistPrompt(name);
+    }
   }
 
   function syncPromptFormat() {
@@ -996,6 +1028,17 @@ export function createArtistThumbController({
     return postJson('/api/artist-thumb/options', currentOptionsPayload());
   }
 
+  function setArtistWeight(value) {
+    const raw = Number.parseFloat(String(value ?? '1'));
+    const next = Number.isFinite(raw) ? Math.max(0, Math.min(5, raw)) : 1;
+    const display = formatArtistWeight(next) || '0';
+    if (weightInput) weightInput.value = display;
+    if (weightSlider) {
+      weightSlider.value = String(Math.max(0, Math.min(2, next)));
+    }
+    syncPromptFormat();
+  }
+
   function scheduleSaveOptions() {
     if (optionsTimer) clearTimeout(optionsTimer);
     optionsTimer = setTimeout(() => {
@@ -1621,6 +1664,8 @@ export function createArtistThumbController({
     resultCloseBtn?.addEventListener('click', closeResultPreview);
     prefixEl?.addEventListener('input', scheduleSaveOptions);
     postfixEl?.addEventListener('input', scheduleSaveOptions);
+    weightSlider?.addEventListener('input', event => setArtistWeight(event.target.value));
+    weightInput?.addEventListener('input', event => setArtistWeight(event.target.value));
   }
 
   async function load(options = {}) {

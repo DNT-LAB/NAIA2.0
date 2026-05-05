@@ -640,7 +640,13 @@
               <textarea class="artist-thumb-textarea" id="artistThumbPrefix" spellcheck="false"></textarea>
             </label>
             <label class="artist-thumb-field">
-              <span>Artist Prompt</span>
+              <span class="artist-thumb-label-row">
+                <span>Artist Prompt</span>
+                <span class="artist-thumb-weight-control" title="Artist tag weight">
+                  <input class="artist-thumb-weight-slider" id="artistThumbWeightSlider" type="range" min="0" max="2" step="0.05" value="1" aria-label="Artist tag weight">
+                  <input class="artist-thumb-weight-input" id="artistThumbWeightInput" type="number" min="0" max="5" step="0.05" value="1" aria-label="Artist tag weight value">
+                </span>
+              </span>
               <textarea class="artist-thumb-textarea artist-thumb-positive" id="artistThumbPositive" spellcheck="false" placeholder="artist:name"></textarea>
             </label>
             <label class="artist-thumb-field">

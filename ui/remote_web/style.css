@@ -1858,6 +1858,40 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   font-weight: 700;
   text-transform: uppercase;
 }
+.artist-thumb-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+.artist-thumb-weight-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+.artist-thumb-weight-slider {
+  width: clamp(78px, 8vw, 118px);
+  accent-color: var(--accent);
+}
+.artist-thumb-weight-input {
+  width: 48px;
+  height: 22px;
+  padding: 2px 4px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  outline: none;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+.artist-thumb-weight-input:focus {
+  border-color: var(--accent);
+}
 .artist-thumb-field .artist-thumb-select {
   width: 100%;
 }

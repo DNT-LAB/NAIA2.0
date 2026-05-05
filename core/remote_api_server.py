@@ -2780,7 +2780,20 @@ class RemoteBridge(QObject):
     # --- Character Viewer service / generation ---
 
     def _character_viewer_state(self) -> dict:
-        return self._character_viewer_service.state()
+        state = self._character_viewer_service.state()
+        state["generation_delay_ms"] = self._character_viewer_generation_delay_ms()
+        return state
+
+    def _character_viewer_generation_delay_ms(self) -> int:
+        try:
+            mw = getattr(self.app_context, "main_window", None)
+            module = getattr(mw, "automation_module", None) if mw is not None else None
+            delay = module.get_generation_delay() if module is not None else 0
+            if delay > 0:
+                return int(float(delay) * 1000)
+        except Exception:
+            pass
+        return 500
 
     def _character_viewer_groups(self, query: str = "") -> dict:
         return self._character_viewer_service.build_groups(query)
@@ -2792,9 +2805,17 @@ class RemoteBridge(QObject):
         page: int = 0,
         per_page: int = 48,
         thumb_first: bool = True,
+        include_all: bool = False,
     ) -> dict:
         group_key = str(group or CharacterViewerService.GROUP_ALL)
-        return self._character_viewer_service.build_list(group_key, query, page, per_page, thumb_first)
+        return self._character_viewer_service.build_list(
+            group_key,
+            query,
+            page,
+            per_page,
+            thumb_first,
+            include_all,
+        )
 
     def _character_viewer_detail(
         self,
@@ -10267,11 +10288,11 @@ class RemoteBridge(QObject):
 
             gen_params = result.get("generation_params", {})
             character_viewer_thumbnail = None
+            character_viewer_snapshot = gen_params.get("_character_viewer_snapshot") or {}
             if gen_params.get("character_viewer_request"):
                 try:
-                    snapshot = gen_params.get("_character_viewer_snapshot") or {}
-                    if isinstance(snapshot, dict) and not snapshot.get("save_blocked"):
-                        character_viewer_thumbnail = self._character_viewer_service.save_thumbnail(image, snapshot)
+                    if isinstance(character_viewer_snapshot, dict) and not character_viewer_snapshot.get("save_blocked"):
+                        character_viewer_thumbnail = self._character_viewer_service.save_thumbnail(image, character_viewer_snapshot)
                 except Exception as e:
                     print(f"🌐 Remote: Character Viewer 썸네일 저장 실패 — {e}")
             metadata = {
@@ -10293,6 +10314,18 @@ class RemoteBridge(QObject):
                 "character_viewer_request": bool(gen_params.get("character_viewer_request")),
                 "character_viewer_request_id": str(gen_params.get("character_viewer_request_id") or ""),
                 "character_viewer_character": str(gen_params.get("_remote_queue_label") or ""),
+                "character_viewer_group": (
+                    str(character_viewer_snapshot.get("group_key") or "")
+                    if isinstance(character_viewer_snapshot, dict) else ""
+                ),
+                "character_viewer_character_name": (
+                    str(character_viewer_snapshot.get("char_name") or "")
+                    if isinstance(character_viewer_snapshot, dict) else ""
+                ),
+                "character_viewer_variant": (
+                    str(character_viewer_snapshot.get("variant_label") or "")
+                    if isinstance(character_viewer_snapshot, dict) else ""
+                ),
                 "character_viewer_thumbnail_saved": bool(character_viewer_thumbnail),
                 "character_viewer_thumbnail_url": (
                     str(character_viewer_thumbnail.get("url") or "")
@@ -11026,6 +11059,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         page: int = 0,
         per_page: int = 48,
         thumb_first: bool = True,
+        include_all: bool = False,
     ):
         try:
             return await asyncio.to_thread(
@@ -11035,6 +11069,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                 page,
                 per_page,
                 thumb_first,
+                include_all,
             )
         except Exception as e:
             return JSONResponse({"error": f"Character Viewer list failed: {e}"}, status_code=500)

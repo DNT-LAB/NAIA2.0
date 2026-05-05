@@ -72,6 +72,7 @@ class CharacterViewerService:
             "auto_characteristics": bool(data.get("auto_characteristics", True)),
             "hide_charname": bool(data.get("hide_charname", False)),
             "no_save": bool(data.get("no_save", False)),
+            "thumb_first": bool(data.get("thumb_first", data.get("empty_thumb_only", True))),
             "empty_thumb_only": bool(data.get("empty_thumb_only", True)),
         }
 
@@ -86,6 +87,7 @@ class CharacterViewerService:
             "auto_characteristics",
             "hide_charname",
             "no_save",
+            "thumb_first",
             "empty_thumb_only",
         ):
             if key in payload:
@@ -183,6 +185,27 @@ class CharacterViewerService:
             params += f"&variant={quote(variant_label, safe='')}"
         return f"/api/character-viewer/thumbnail?{params}"
 
+    def _serialize_list_item(
+        self,
+        index: int,
+        group_key: str,
+        name: str,
+        data: dict[str, Any],
+        thumbs: dict[str, str],
+        include_thumbnail_url: bool = False,
+    ) -> dict[str, Any]:
+        item = {
+            "index": int(index),
+            "group": group_key,
+            "character": name,
+            "count": int(data.get("total_rows", 0) or 0),
+            "has_thumbnail": self._thumb_key(group_key, name) in thumbs,
+            "tags": self._tag_search_str(data),
+        }
+        if include_thumbnail_url:
+            item["thumbnail_url"] = self._thumb_url(group_key, name)
+        return item
+
     def build_list(
         self,
         group_key: str = GROUP_ALL,
@@ -190,6 +213,7 @@ class CharacterViewerService:
         page: int = 0,
         per_page: int = 48,
         thumb_first: bool = True,
+        include_all: bool = False,
     ) -> dict[str, Any]:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
@@ -219,7 +243,14 @@ class CharacterViewerService:
         if page >= total_pages:
             page = total_pages - 1
         start = page * per_page
-        items = chars[start:start + per_page]
+        page_items = [
+            (index, gk, name, data)
+            for index, (gk, name, data) in enumerate(chars[start:start + per_page], start)
+        ]
+        all_items = [
+            self._serialize_list_item(index, gk, name, data, thumbs)
+            for index, (gk, name, data) in enumerate(chars)
+        ] if include_all else None
         return {
             "group": group_key,
             "query": query,
@@ -229,16 +260,10 @@ class CharacterViewerService:
             "total_pages": total_pages,
             "thumb_first": bool(thumb_first),
             "items": [
-                {
-                    "group": gk,
-                    "character": name,
-                    "count": int(data.get("total_rows", 0) or 0),
-                    "has_thumbnail": self._thumb_key(gk, name) in thumbs,
-                    "thumbnail_url": self._thumb_url(gk, name),
-                    "tags": self._tag_search_str(data),
-                }
-                for gk, name, data in items
+                self._serialize_list_item(index, gk, name, data, thumbs, include_thumbnail_url=True)
+                for index, gk, name, data in page_items
             ],
+            "all_items": all_items,
         }
 
     def _get_character(self, group_key: str, name: str) -> dict[str, Any]:

@@ -2129,9 +2129,22 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 }
 .character-viewer-browser {
   display: grid;
-  grid-template-rows: auto minmax(110px, 1fr) auto minmax(160px, 1.5fr);
+  grid-template-rows: minmax(170px, 0.42fr) minmax(220px, 0.58fr);
   gap: 8px;
   border-right: 1px solid var(--border-dim);
+}
+.character-viewer-browser-section {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.character-viewer-browser-label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 .character-viewer-detail {
   border-left: 1px solid var(--border-dim);
@@ -2201,6 +2214,7 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 }
 .character-viewer-group-list,
 .character-viewer-list {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--border-dim);
@@ -2231,6 +2245,12 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 .character-viewer-list-item.active {
   background: rgba(40, 120, 216, 0.72);
   color: #fff;
+}
+.character-viewer-list-item.no-thumb b {
+  color: #ffdda3;
+}
+.character-viewer-list-item.has-thumb b {
+  color: rgba(210, 222, 255, 0.58);
 }
 .character-viewer-group-item span,
 .character-viewer-list-item span {
@@ -2284,7 +2304,8 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 }
 .character-viewer-check,
 .character-viewer-options label,
-.character-viewer-cosplay label {
+.character-viewer-cosplay label,
+.character-viewer-run-controls label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2299,7 +2320,8 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
 }
 .character-viewer-check input,
 .character-viewer-options input,
-.character-viewer-cosplay input[type="checkbox"] {
+.character-viewer-cosplay input[type="checkbox"],
+.character-viewer-run-controls input {
   accent-color: var(--accent-blue);
 }
 .character-viewer-status {
@@ -2328,10 +2350,12 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   align-content: start;
 }
 .character-viewer-card {
+  --character-viewer-card-name-height: 32px;
+  position: relative;
+  isolation: isolate;
   min-width: 0;
   height: 232px;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 32px;
+  display: block;
   border: 1px solid var(--border-dim);
   border-radius: 6px;
   overflow: hidden;
@@ -2349,8 +2373,9 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   box-shadow: inset 0 0 0 1px rgba(40, 120, 216, 0.65);
 }
 .character-viewer-card-image {
-  position: relative;
-  min-height: 0;
+  position: absolute;
+  inset: 0 0 var(--character-viewer-card-name-height) 0;
+  z-index: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2358,6 +2383,8 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   background: #f7f7f8;
 }
 .character-viewer-card-image img {
+  position: relative;
+  z-index: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -2389,7 +2416,13 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.18);
 }
 .character-viewer-card-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
   min-width: 0;
+  height: var(--character-viewer-card-name-height);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2581,10 +2614,20 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   gap: 8px;
   align-items: center;
 }
-.character-viewer-actions {
+.character-viewer-run-controls {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(3, max-content);
+  gap: 8px 14px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.character-viewer-generate-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 7px;
 }
 .character-viewer-generate {
   width: 100%;
@@ -2592,6 +2635,12 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   font-weight: 800;
   background: linear-gradient(135deg, rgba(40, 120, 216, 0.96), rgba(124, 106, 239, 0.86));
   border-color: rgba(157, 139, 255, 0.5);
+}
+.character-viewer-copy-btn {
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 750;
 }
 .character-viewer-result {
   overflow: hidden;
@@ -2723,7 +2772,7 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   grid-template-columns: clamp(230px, 22vw, 300px) minmax(0, 1fr);
 }
 .character-viewer-browser {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(170px, 0.42fr) minmax(220px, 0.58fr);
 }
 .character-viewer-workspace {
   min-width: 0;
@@ -2805,9 +2854,9 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   padding: 10px;
 }
 .character-viewer-card {
+  --character-viewer-card-name-height: 36px;
   height: auto;
   min-height: 0;
-  grid-template-rows: minmax(0, 1fr) 36px;
 }
 .character-viewer-card-name {
   font-size: 12px;
@@ -2874,8 +2923,8 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .character-viewer-prompt .character-viewer-field:first-child,
 .character-viewer-prompt .character-viewer-options,
 .character-viewer-prompt .character-viewer-cosplay,
-.character-viewer-prompt .character-viewer-actions,
-.character-viewer-prompt .character-viewer-generate {
+.character-viewer-prompt .character-viewer-run-controls,
+.character-viewer-prompt .character-viewer-generate-row {
   grid-column: 1 / -1;
 }
 .character-viewer-selected-stage {
@@ -3333,6 +3382,10 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   }
   .character-viewer-detail-layout {
     grid-template-columns: 1fr;
+  }
+  .character-viewer-run-controls {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
   .character-viewer-detail-media,
   .character-viewer-detail-editor {
@@ -9652,14 +9705,28 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   background: var(--bg-elevated); border: 1px solid var(--border-dim); color: var(--text-muted);
 }
 .mod-btn-storage:hover { filter: brightness(1.2); }
-.vibe-cluster-popover {
-  position: fixed;
-  top: 72px;
-  right: 24px;
-  bottom: 24px;
-  width: min(540px, calc(100vw - 48px));
-  z-index: 2600;
+.vibe-cluster-footer {
+  position: sticky;
+  bottom: 0;
   display: flex;
+  justify-content: flex-end;
+  margin: auto -16px -14px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border-dim);
+  background: linear-gradient(180deg, rgba(18,18,26,0.72), rgba(18,18,26,0.98) 42%);
+}
+.vibe-cluster-footer .mod-btn-vibe-cluster {
+  min-width: 180px;
+  white-space: normal;
+  line-height: 1.25;
+}
+.vibe-cluster-popover,
+.vibe-cluster-save-popover {
+  display: none;
+  position: fixed;
+  z-index: var(--z-floating-module-aux);
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
   flex-direction: column;
   gap: 10px;
   padding: 14px;
@@ -9667,6 +9734,16 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   border-radius: 8px;
   background: rgba(18,18,26,0.98);
   box-shadow: 0 18px 56px rgba(0,0,0,0.58);
+}
+.vibe-cluster-popover.open,
+.vibe-cluster-save-popover.open {
+  display: flex;
+}
+@media (max-width: 767px) {
+  .vibe-cluster-popover,
+  .vibe-cluster-save-popover {
+    width: auto;
+  }
 }
 .vibe-cluster-header,
 .vibe-cluster-thumb-row,
@@ -9740,8 +9817,9 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .vibe-cluster-list {
   display: grid;
   gap: 8px;
-  overflow: auto;
+  overflow-y: auto;
   padding-right: 2px;
+  padding-bottom: 52px;
 }
 .vibe-cluster-card {
   display: grid;
@@ -9789,6 +9867,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .vibe-cluster-menu {
   display: none;
   position: absolute;
+  z-index: 1;
   right: 0;
   top: calc(100% + 4px);
   min-width: 120px;

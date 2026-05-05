@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260505-characters-v7">
+<link rel="stylesheet" href="style.css?v=20260505-characters-continuous1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -697,11 +697,17 @@
   <div class="right-tab-pane" id="rightTabCharacters" data-right-pane="characters" hidden role="tabpanel">
     <div class="character-viewer-tab">
       <aside class="character-viewer-browser">
-        <label class="character-viewer-field">
-          <span>Groups</span>
-          <input class="character-viewer-input" id="characterViewerGroupSearch" type="search" placeholder="Search groups..." autocomplete="off" spellcheck="false">
-        </label>
-        <nav class="character-viewer-group-list" id="characterViewerGroupList" aria-label="Character groups"></nav>
+        <section class="character-viewer-browser-section">
+          <label class="character-viewer-field">
+            <span>Groups</span>
+            <input class="character-viewer-input" id="characterViewerGroupSearch" type="search" placeholder="Search groups..." autocomplete="off" spellcheck="false">
+          </label>
+          <nav class="character-viewer-group-list" id="characterViewerGroupList" aria-label="Character groups"></nav>
+        </section>
+        <section class="character-viewer-browser-section">
+          <div class="character-viewer-browser-label">Characters</div>
+          <nav class="character-viewer-list" id="characterViewerList" aria-label="Characters"></nav>
+        </section>
       </aside>
       <section class="character-viewer-workspace">
         <div class="character-viewer-subtabs" role="tablist" aria-label="Character Viewer views">
@@ -782,17 +788,20 @@
                   <label><input id="characterViewerAutoCopyright" type="checkbox"> copyright 자동 추가</label>
                   <label><input id="characterViewerAutoCharacteristics" type="checkbox" checked> characteristics 자동 추가</label>
                   <label><input id="characterViewerHideName" type="checkbox"> 캐릭터명 숨김</label>
-                  <label><input id="characterViewerNoSave" type="checkbox"> 이미지 저장 안함</label>
                 </div>
                 <div class="character-viewer-cosplay">
                   <label><input id="characterViewerCosplay" type="checkbox"> 캐릭터 cosplay 적용</label>
                   <input class="character-viewer-input" id="characterViewerCosplayName" type="text" placeholder="e.g. nahida (genshin impact), green eyes" autocomplete="off" spellcheck="false">
                 </div>
-                <div class="character-viewer-actions">
-                  <button type="button" class="character-viewer-btn" id="characterViewerCopyBtn" disabled>Copy</button>
-                  <button type="button" class="character-viewer-btn" id="characterViewerInsertBtn" disabled>프롬프트 삽입</button>
+                <div class="character-viewer-run-controls">
+                  <label><input id="characterViewerContinuous" type="checkbox"> 연속 생성</label>
+                  <label><input id="characterViewerEmptyOnly" type="checkbox" checked> 빈 썸네일만</label>
+                  <label><input id="characterViewerNoSave" type="checkbox"> 이미지 저장 안함</label>
                 </div>
-                <button type="button" class="character-viewer-generate" id="characterViewerGenerateBtn" disabled>Generate 896 x 1152</button>
+                <div class="character-viewer-generate-row">
+                  <button type="button" class="character-viewer-generate" id="characterViewerGenerateBtn" disabled>Generate 896 x 1152</button>
+                  <button type="button" class="character-viewer-btn character-viewer-copy-btn" id="characterViewerCopyBtn" disabled>Copy</button>
+                </div>
               </section>
             </section>
           </div>
@@ -836,6 +845,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260505-vibe-cluster1"></script>
+<script src="app.js?v=20260505-vibe-cluster6-characters-continuous2"></script>
 </body>
 </html>

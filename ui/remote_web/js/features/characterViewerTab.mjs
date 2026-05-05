@@ -3,10 +3,7 @@ export function createCharacterViewerController({
   fetch,
   escHtml,
   showToast,
-  promptEdit,
   negEdit,
-  onPromptEdit,
-  setPromptFields,
   getGenerationMode = () => 'NAI',
 }) {
   const groupSearchEl = document.getElementById('characterViewerGroupSearch');
@@ -43,15 +40,17 @@ export function createCharacterViewerController({
   const autoCharacteristicsEl = document.getElementById('characterViewerAutoCharacteristics');
   const hideNameEl = document.getElementById('characterViewerHideName');
   const noSaveEl = document.getElementById('characterViewerNoSave');
+  const continuousGenEl = document.getElementById('characterViewerContinuous');
+  const emptyOnlyEl = document.getElementById('characterViewerEmptyOnly');
   const cosplayEl = document.getElementById('characterViewerCosplay');
   const cosplayNameEl = document.getElementById('characterViewerCosplayName');
   const copyBtn = document.getElementById('characterViewerCopyBtn');
-  const insertBtn = document.getElementById('characterViewerInsertBtn');
   const generateBtn = document.getElementById('characterViewerGenerateBtn');
 
   const PAGE_SIZE = 9;
   let state = null;
   let groups = [];
+  let allItems = [];
   let listRequestId = 0;
   let groupRequestId = 0;
   let detailRequestId = 0;
@@ -80,6 +79,8 @@ export function createCharacterViewerController({
   let suppressResultCollapseClickTimer = null;
   let contextMenuEl = null;
   let contextMenuTarget = null;
+  let continuousTimer = null;
+  let continuousScheduleToken = 0;
 
   const html = value => escHtml(String(value ?? ''));
 
@@ -126,7 +127,8 @@ export function createCharacterViewerController({
       auto_characteristics: Boolean(autoCharacteristicsEl?.checked),
       hide_charname: Boolean(hideNameEl?.checked),
       no_save: Boolean(noSaveEl?.checked),
-      empty_thumb_only: Boolean(thumbFirstEl?.checked),
+      thumb_first: Boolean(thumbFirstEl?.checked),
+      empty_thumb_only: Boolean(emptyOnlyEl?.checked),
     };
   }
 
@@ -170,7 +172,8 @@ export function createCharacterViewerController({
     if (autoCharacteristicsEl) autoCharacteristicsEl.checked = Boolean(options.auto_characteristics ?? true);
     if (hideNameEl) hideNameEl.checked = Boolean(options.hide_charname);
     if (noSaveEl) noSaveEl.checked = Boolean(options.no_save);
-    if (thumbFirstEl) thumbFirstEl.checked = Boolean(options.empty_thumb_only ?? true);
+    if (thumbFirstEl) thumbFirstEl.checked = Boolean(options.thumb_first ?? true);
+    if (emptyOnlyEl) emptyOnlyEl.checked = Boolean(options.empty_thumb_only ?? true);
   }
 
   function updatePager() {
@@ -186,7 +189,6 @@ export function createCharacterViewerController({
   function updateActionAvailability() {
     const enabled = Boolean(selected && detail);
     if (copyBtn) copyBtn.disabled = !enabled;
-    if (insertBtn) insertBtn.disabled = !enabled;
     if (generateBtn) generateBtn.disabled = !enabled || Boolean(pendingResultRequestId);
     subtabEls.forEach(button => {
       if (button.dataset.characterViewerTab === 'detail') {
@@ -245,8 +247,10 @@ export function createCharacterViewerController({
     if (listEl) {
       listEl.innerHTML = items.map(item => {
         const activeClass = selected && selected.group === item.group && selected.character === item.character ? ' active' : '';
+        const thumbClass = item.has_thumbnail ? ' has-thumb' : ' no-thumb';
+        const index = Number(item.index || 0);
         return `
-          <button type="button" class="character-viewer-list-item${activeClass}" data-group="${html(item.group)}" data-character="${html(item.character)}">
+          <button type="button" class="character-viewer-list-item${activeClass}${thumbClass}" data-group="${html(item.group)}" data-character="${html(item.character)}" data-index="${index}" title="${html(item.character)} · ${html(item.group)} · #${index + 1}">
             <span>${html(item.character)}</span>
             <b>${formatCount(item.count)}</b>
           </button>
@@ -260,8 +264,9 @@ export function createCharacterViewerController({
     gridEl.innerHTML = items.map(item => {
       const activeClass = selected && selected.group === item.group && selected.character === item.character ? ' active' : '';
       const thumbClass = item.has_thumbnail ? ' has-thumb' : ' no-thumb';
+      const index = Number(item.index || 0);
       return `
-        <button type="button" class="character-viewer-card${activeClass}${thumbClass}" data-group="${html(item.group)}" data-character="${html(item.character)}" title="${html(item.character)} · ${html(item.group)} · ${formatCount(item.count)}">
+        <button type="button" class="character-viewer-card${activeClass}${thumbClass}" data-group="${html(item.group)}" data-character="${html(item.character)}" data-index="${index}" title="${html(item.character)} · ${html(item.group)} · ${formatCount(item.count)}">
           <div class="character-viewer-card-image">
             ${thumbnailMarkup(item)}
             <span class="character-viewer-card-group">[${html(item.group)}]</span>
@@ -287,6 +292,7 @@ export function createCharacterViewerController({
       page: String(page),
       per_page: String(PAGE_SIZE),
       thumb_first: String(Boolean(thumbFirstEl?.checked)),
+      include_all: 'true',
     });
     setStatus('Loading characters...', 'busy');
     try {
@@ -296,7 +302,8 @@ export function createCharacterViewerController({
       totalPages = Math.max(1, Number(data.total_pages || 1));
       currentTotal = Number(data.total || 0);
       const items = data.items || [];
-      renderListItems(items);
+      allItems = Array.isArray(data.all_items) ? data.all_items : items;
+      renderListItems(allItems);
       renderGrid(items);
       updatePager();
       scrollGrid(options.anchor || 'top');
@@ -304,7 +311,7 @@ export function createCharacterViewerController({
       const selectedStillVisible = selected && items.some(item => (
         item.group === selected.group && item.character === selected.character
       ));
-      if (!selected && items.length) {
+      if (!options.skipAutoSelect && !selected && items.length) {
         await selectCharacter(items[0].group, items[0].character);
       } else if (!selectedStillVisible) {
         markSelection();
@@ -353,6 +360,30 @@ export function createCharacterViewerController({
         );
       });
     });
+  }
+
+  function getItemIndex(group, character) {
+    const found = allItems.find(item => item.group === group && item.character === character);
+    return found ? Number(found.index || 0) : -1;
+  }
+
+  function focusGridCard(group, character) {
+    const card = gridEl?.querySelector(`.character-viewer-card[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`);
+    if (!card) return;
+    card.focus({preventScroll: true});
+    card.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  }
+
+  async function selectCharacterFromList(group, character, index) {
+    if (!group || !character) return;
+    const targetIndex = Number.isFinite(index) && index >= 0 ? index : getItemIndex(group, character);
+    const targetPage = targetIndex >= 0 ? Math.floor(targetIndex / PAGE_SIZE) : currentPage;
+    switchCharacterView('characters');
+    if (targetPage !== currentPage) {
+      await loadPage(targetPage, {anchor: 'top', skipAutoSelect: true});
+    }
+    await selectCharacter(group, character, '', {openDetail: false});
+    focusGridCard(group, character);
   }
 
   function renderEmptyDetail() {
@@ -528,24 +559,6 @@ export function createCharacterViewerController({
     }
   }
 
-  function insertPrompt() {
-    const value = String(promptEl?.value || '').trim();
-    if (!value || !promptEdit) return;
-    const text = promptEdit.value || '';
-    const start = promptEdit.selectionStart != null ? promptEdit.selectionStart : text.length;
-    const end = promptEdit.selectionEnd != null ? promptEdit.selectionEnd : start;
-    const before = text.substring(0, start);
-    const after = text.substring(end);
-    const prefix = before.trim() ? (/[,\s]$/.test(before) ? '' : ', ') : '';
-    const insertText = `${prefix}${value}, `;
-    promptEdit.value = before + insertText + after;
-    const nextPos = before.length + insertText.length;
-    promptEdit.focus();
-    promptEdit.selectionStart = promptEdit.selectionEnd = nextPos;
-    onPromptEdit?.();
-    showToast?.('프롬프트에 삽입했습니다.', 'success');
-  }
-
   function buildGenerationPayload() {
     const charPrompt = String(promptEl?.value || '').trim();
     const prefix = String(prefixEl?.value || '').trim();
@@ -568,8 +581,9 @@ export function createCharacterViewerController({
     };
   }
 
-  async function generateSelected() {
+  async function generateSelected(options = {}) {
     if (!selected || !detail) return;
+    clearContinuousTimer();
     const payload = buildGenerationPayload();
     if (!(payload.character_prompt || payload.prefix || payload.postfix)) {
       showToast?.('프롬프트가 비어 있습니다.', 'error');
@@ -585,7 +599,7 @@ export function createCharacterViewerController({
     try {
       await saveCurrentOptions();
       await postJson('/api/character-viewer/generate', payload);
-      showToast?.('Character 생성 요청을 보냈습니다.', 'success');
+      if (!options.automatic) showToast?.('Character 생성 요청을 보냈습니다.', 'success');
     } catch (error) {
       pendingResultRequestId = '';
       pendingResultMeta = null;
@@ -594,6 +608,96 @@ export function createCharacterViewerController({
       showToast?.(error.message || 'Generate failed', 'error');
       updateActionAvailability();
     }
+  }
+
+  function clearContinuousTimer() {
+    continuousScheduleToken += 1;
+    if (continuousTimer) {
+      clearTimeout(continuousTimer);
+      continuousTimer = null;
+    }
+  }
+
+  function continuousEnabled() {
+    return Boolean(active && continuousGenEl?.checked);
+  }
+
+  function continuousDelayMs() {
+    const value = Number(state?.generation_delay_ms ?? 500);
+    return Number.isFinite(value) && value >= 0 ? value : 500;
+  }
+
+  async function refreshGenerationDelay() {
+    try {
+      const data = await getJson('/api/character-viewer/state');
+      if (data && typeof data === 'object') {
+        state = {
+          ...(state || {}),
+          generation_delay_ms: data.generation_delay_ms,
+        };
+      }
+    } catch (error) {
+      console.warn('Character Viewer generation delay refresh failed', error);
+    }
+  }
+
+  function nextGenerableItem() {
+    if (!allItems.length) return null;
+    const selectedIndex = selected ? getItemIndex(selected.group, selected.character) : -1;
+    const start = selectedIndex >= 0 ? selectedIndex + 1 : Math.max(0, currentPage * PAGE_SIZE);
+    const emptyOnly = Boolean(emptyOnlyEl?.checked);
+    for (let index = start; index < allItems.length; index += 1) {
+      const item = allItems[index];
+      if (!item) continue;
+      if (emptyOnly && item.has_thumbnail) continue;
+      return item;
+    }
+    return null;
+  }
+
+  function scheduleContinuousNext(reason = 'result') {
+    clearContinuousTimer();
+    if (!continuousEnabled()) return;
+    const token = ++continuousScheduleToken;
+    refreshGenerationDelay().finally(() => {
+      if (token !== continuousScheduleToken || !continuousEnabled()) return;
+      continuousTimer = setTimeout(() => {
+        continuousTimer = null;
+        generateNextContinuous(reason).catch(error => {
+          console.error('Character continuous generation failed', error);
+          showToast?.(error.message || 'Character continuous generation failed', 'error');
+          if (continuousGenEl) continuousGenEl.checked = false;
+        });
+      }, continuousDelayMs());
+    });
+  }
+
+  async function generateNextContinuous() {
+    if (!continuousEnabled() || pendingResultRequestId) return;
+    const next = nextGenerableItem();
+    if (!next) {
+      if (continuousGenEl) continuousGenEl.checked = false;
+      showToast?.('연속 생성 완료: 생성 가능한 캐릭터가 없습니다.', 'success');
+      return;
+    }
+    const targetPage = Math.floor(Number(next.index || 0) / PAGE_SIZE);
+    if (targetPage !== currentPage) {
+      await loadPage(targetPage, {anchor: 'top', skipAutoSelect: true});
+    }
+    await selectCharacter(next.group, next.character, '', {openDetail: activeView === 'detail'});
+    if (activeView === 'characters') focusGridCard(next.group, next.character);
+    const expectedGroup = next.group;
+    const expectedCharacter = next.character;
+    setTimeout(() => {
+      if (
+        continuousEnabled()
+        && !pendingResultRequestId
+        && selected?.group === expectedGroup
+        && selected?.character === expectedCharacter
+      ) {
+        generateSelected({automatic: true});
+      }
+    }, 300);
   }
 
   function clearPendingResultTimeout() {
@@ -712,20 +816,31 @@ export function createCharacterViewerController({
   }
 
   function refreshThumbnailFromMeta(meta) {
-    if (!meta?.character_viewer_thumbnail_url || !selected) return;
-    if (meta.character_viewer_character && !String(meta.character_viewer_character).includes(selected.character)) return;
+    const group = String(meta?.character_viewer_group || selected?.group || '');
+    const character = String(meta?.character_viewer_character_name || selected?.character || '');
+    if (!meta?.character_viewer_thumbnail_url || !group || !character) return;
+    if (selected && selected.group !== group && !meta.character_viewer_group) return;
+    if (selected && selected.character !== character && !meta.character_viewer_character_name) return;
     const cacheBusted = `${meta.character_viewer_thumbnail_url}&_=${Date.now()}`;
-    if (selectedImage) {
+    allItems = allItems.map(item => (
+      item.group === group && item.character === character
+        ? {...item, has_thumbnail: true, thumbnail_url: cacheBusted}
+        : item
+    ));
+    const listItem = listEl?.querySelector(`.character-viewer-list-item[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`);
+    listItem?.classList.add('has-thumb');
+    listItem?.classList.remove('no-thumb');
+    if (selected?.group === group && selected?.character === character && selectedImage) {
       selectedImage.src = cacheBusted;
       selectedImage.classList.add('show');
       if (selectedEmpty) selectedEmpty.hidden = true;
     }
-    gridEl?.querySelectorAll(`.character-viewer-card[data-group="${CSS.escape(selected.group)}"][data-character="${CSS.escape(selected.character)}"]`).forEach(card => {
+    gridEl?.querySelectorAll(`.character-viewer-card[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`).forEach(card => {
       const stage = card.querySelector('.character-viewer-card-image');
       if (stage) {
         stage.innerHTML = `
-          <img src="${html(cacheBusted)}" alt="${html(selected.character)}" loading="lazy">
-          <span class="character-viewer-card-group">[${html(selected.group)}]</span>
+          <img src="${html(cacheBusted)}" alt="${html(character)}" loading="lazy">
+          <span class="character-viewer-card-group">[${html(group)}]</span>
         `;
       }
       card.classList.add('has-thumb');
@@ -763,6 +878,7 @@ export function createCharacterViewerController({
     pendingResultRequestId = '';
     updateActionAvailability();
     updateResultExpandButton();
+    scheduleContinuousNext('result');
     return true;
   }
 
@@ -775,6 +891,7 @@ export function createCharacterViewerController({
     showResultPreview(message?.message || 'Generate failed');
     showToast?.(message?.message || 'Generate failed', 'error');
     updateActionAvailability();
+    scheduleContinuousNext('error');
     return true;
   }
 
@@ -897,12 +1014,19 @@ export function createCharacterViewerController({
       loadPage(0, {anchor: 'top'});
     });
     gridEl?.addEventListener('wheel', onGridWheel, {passive: false});
-    [listEl, gridEl].forEach(container => {
-      container?.addEventListener('click', event => {
-        const item = event.target.closest('[data-group][data-character]');
-        if (!item || !container.contains(item)) return;
-        selectCharacter(item.dataset.group || '', item.dataset.character || '', '', {openDetail: container === gridEl});
-      });
+    listEl?.addEventListener('click', event => {
+      const item = event.target.closest('[data-group][data-character]');
+      if (!item || !listEl.contains(item)) return;
+      selectCharacterFromList(
+        item.dataset.group || '',
+        item.dataset.character || '',
+        Number(item.dataset.index || -1),
+      );
+    });
+    gridEl?.addEventListener('click', event => {
+      const item = event.target.closest('[data-group][data-character]');
+      if (!item || !gridEl.contains(item)) return;
+      selectCharacter(item.dataset.group || '', item.dataset.character || '', '', {openDetail: true});
     });
     gridEl?.addEventListener('contextmenu', event => {
       const card = event.target.closest('.character-viewer-card[data-group][data-character]');
@@ -935,12 +1059,15 @@ export function createCharacterViewerController({
         schedulePromptRefresh();
       });
     });
+    emptyOnlyEl?.addEventListener('change', scheduleSaveOptions);
+    continuousGenEl?.addEventListener('change', () => {
+      if (!continuousGenEl.checked) clearContinuousTimer();
+    });
     [prefixEl, postfixEl].forEach(control => {
       control?.addEventListener('input', scheduleSaveOptions);
       control?.addEventListener('change', scheduleSaveOptions);
     });
     copyBtn?.addEventListener('click', copyPrompt);
-    insertBtn?.addEventListener('click', insertPrompt);
     generateBtn?.addEventListener('click', generateSelected);
     resultExpandBtn?.addEventListener('click', event => {
       event.preventDefault();

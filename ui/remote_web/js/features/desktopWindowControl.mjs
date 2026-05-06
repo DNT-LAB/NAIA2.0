@@ -27,8 +27,8 @@ export function createDesktopWindowControl({
     button.classList.remove('hidden');
     button.classList.toggle('visible-state', visible);
     button.classList.toggle('hidden-state', !visible);
-    button.textContent = visible ? 'HIDE DESKTOP' : 'SHOW DESKTOP';
-    button.title = visible ? 'Hide desktop app' : 'Show desktop app';
+    button.textContent = visible ? '데스크톱 숨기기' : '데스크톱 표시';
+    button.title = visible ? '데스크톱 앱 숨기기' : '데스크톱 앱 표시';
   }
 
   function toggle() {

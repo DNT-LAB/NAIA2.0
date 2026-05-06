@@ -10504,6 +10504,34 @@ select.setup-input { cursor: pointer; }
 }
 .setup-btn-eye:hover { color: var(--accent-glow); border-color: var(--accent); }
 
+.setup-guide-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.setup-btn-guide {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  background: rgba(124,106,239,0.08);
+  color: var(--accent-glow);
+  border: 1px solid rgba(124,106,239,0.32);
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 160ms, background 160ms, color 160ms;
+}
+.setup-btn-guide:hover {
+  background: rgba(124,106,239,0.14);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .setup-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 .setup-btn-primary {
   padding: 9px 18px;

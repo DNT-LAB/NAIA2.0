@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260505-characters-continuous1">
+<link rel="stylesheet" href="style.css?v=20260506-api-setup-ko2">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -41,13 +41,13 @@
   <div class="setup-dialog" id="setupDialog" role="dialog" aria-labelledby="setupTitle">
     <header class="setup-header">
       <div class="setup-header-titles">
-        <h2 class="setup-title" id="setupTitle">API Configuration</h2>
-        <p class="setup-sub">Connect a generation backend — NovelAI / WebUI / ComfyUI</p>
+        <h2 class="setup-title" id="setupTitle">API 설정</h2>
+        <p class="setup-sub">생성 백엔드를 연결합니다 — NovelAI / WebUI / ComfyUI</p>
       </div>
       <div class="setup-header-actions">
         <button class="setup-desktop-toggle hidden" id="desktopToggleBtn"
-                onclick="toggleDesktopWindow()" title="Show desktop app">SHOW DESKTOP</button>
-        <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="Close">&times;</button>
+                onclick="toggleDesktopWindow()" title="데스크톱 앱 표시">데스크톱 표시</button>
+        <button class="setup-close" id="setupClose" onclick="closeApiPopup()" aria-label="닫기">&times;</button>
       </div>
     </header>
     <div class="setup-body">
@@ -55,71 +55,75 @@
         <button class="setup-nav-item active" data-tab="nai" onclick="switchSetupTab('nai')" role="tab">
           <span class="setup-nav-num">01</span>
           <span class="setup-nav-name">NOVELAI</span>
-          <span class="setup-nav-sub" id="setupNavSubNai">NOT SET</span>
+          <span class="setup-nav-sub" id="setupNavSubNai">미설정</span>
           <span class="setup-nav-dot" id="setupDotNai"></span>
         </button>
         <button class="setup-nav-item" data-tab="webui" onclick="switchSetupTab('webui')" role="tab">
           <span class="setup-nav-num">02</span>
           <span class="setup-nav-name">WEBUI</span>
-          <span class="setup-nav-sub" id="setupNavSubWebui">NOT SET</span>
+          <span class="setup-nav-sub" id="setupNavSubWebui">미설정</span>
           <span class="setup-nav-dot" id="setupDotWebui"></span>
         </button>
         <button class="setup-nav-item" data-tab="comfyui" onclick="switchSetupTab('comfyui')" role="tab">
           <span class="setup-nav-num">03</span>
           <span class="setup-nav-name">COMFYUI</span>
-          <span class="setup-nav-sub" id="setupNavSubComfyui">NOT SET</span>
+          <span class="setup-nav-sub" id="setupNavSubComfyui">미설정</span>
           <span class="setup-nav-dot" id="setupDotComfyui"></span>
         </button>
       </nav>
       <section class="setup-pane" role="tabpanel">
         <!-- NAI -->
         <div class="setup-tab-pane active" data-pane="nai">
-          <div class="setup-meta-line"><span>ENDPOINT</span><span class="setup-meta-val">api.novelai.net</span></div>
-          <div class="setup-meta-line"><span>SAVED TOKEN</span><span class="setup-meta-val" id="setupMetaNaiPreview">—</span></div>
-          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaNai">—</span></div>
-          <label class="setup-field-label" for="setupNaiToken">Persistent Token</label>
+          <div class="setup-meta-line"><span>엔드포인트</span><span class="setup-meta-val">api.novelai.net</span></div>
+          <div class="setup-meta-line"><span>저장된 토큰</span><span class="setup-meta-val" id="setupMetaNaiPreview">—</span></div>
+          <div class="setup-meta-line"><span>마지막 확인</span><span class="setup-meta-val" id="setupMetaNai">—</span></div>
+          <label class="setup-field-label" for="setupNaiToken">영구 토큰</label>
           <div class="setup-input-row">
             <input class="setup-input setup-input-mono" id="setupNaiToken" type="password"
-                   placeholder="paste NovelAI token" autocomplete="off" spellcheck="false">
-            <button class="setup-btn-eye" onclick="toggleSetupReveal('setupNaiToken', this)" type="button" title="Show / Hide">◉</button>
+                   placeholder="NovelAI 토큰 붙여넣기" autocomplete="off" spellcheck="false">
+            <button class="setup-btn-eye" onclick="toggleSetupReveal('setupNaiToken', this)" type="button" title="보기 / 숨기기">◉</button>
+          </div>
+          <div class="setup-guide-row">
+            <a class="setup-btn-guide" id="setupNaiTokenGuide" href="/guides/novelai-token.html">NovelAI 토큰 발급 가이드</a>
+            <a class="setup-btn-guide" id="setupNaiImageLink" href="https://novelai.net/image" target="_blank" rel="noopener noreferrer">NovelAI 열기</a>
           </div>
           <div class="setup-actions">
-            <button class="setup-btn-primary" id="setupBtnVerifyNai" onclick="verifyNai()">VERIFY &amp; SAVE</button>
-            <button class="setup-btn-ghost" onclick="clearApi('NAI')">DISCONNECT</button>
+            <button class="setup-btn-primary" id="setupBtnVerifyNai" onclick="verifyNai()">확인 후 저장</button>
+            <button class="setup-btn-ghost" onclick="clearApi('NAI')">연결 해제</button>
           </div>
           <div class="setup-result" id="setupResultNai"></div>
         </div>
         <!-- WEBUI -->
         <div class="setup-tab-pane" data-pane="webui">
-          <div class="setup-meta-line"><span>COMPAT</span><span class="setup-meta-val">AUTOMATIC1111 / sd-webui</span></div>
-          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaWebui">—</span></div>
-          <label class="setup-field-label" for="setupWebuiUrl">Server URL</label>
+          <div class="setup-meta-line"><span>호환</span><span class="setup-meta-val">AUTOMATIC1111 / sd-webui</span></div>
+          <div class="setup-meta-line"><span>마지막 확인</span><span class="setup-meta-val" id="setupMetaWebui">—</span></div>
+          <label class="setup-field-label" for="setupWebuiUrl">서버 주소</label>
           <input class="setup-input setup-input-mono" id="setupWebuiUrl" type="text"
                  placeholder="127.0.0.1:7860" autocomplete="off" spellcheck="false">
           <div class="setup-actions">
-            <button class="setup-btn-primary" id="setupBtnVerifyWebui" onclick="verifyWebui()">VERIFY &amp; SAVE</button>
-            <button class="setup-btn-ghost" onclick="clearApi('WEBUI')">DISCONNECT</button>
+            <button class="setup-btn-primary" id="setupBtnVerifyWebui" onclick="verifyWebui()">확인 후 저장</button>
+            <button class="setup-btn-ghost" onclick="clearApi('WEBUI')">연결 해제</button>
           </div>
           <div class="setup-result" id="setupResultWebui"></div>
         </div>
         <!-- COMFYUI -->
         <div class="setup-tab-pane" data-pane="comfyui">
-          <div class="setup-meta-line"><span>PROBE</span><span class="setup-meta-val">/system_stats · /object_info</span></div>
-          <div class="setup-meta-line"><span>LAST VERIFIED</span><span class="setup-meta-val" id="setupMetaComfyui">—</span></div>
-          <label class="setup-field-label" for="setupComfyuiUrl">Server URL</label>
+          <div class="setup-meta-line"><span>확인 경로</span><span class="setup-meta-val">/system_stats · /object_info</span></div>
+          <div class="setup-meta-line"><span>마지막 확인</span><span class="setup-meta-val" id="setupMetaComfyui">—</span></div>
+          <label class="setup-field-label" for="setupComfyuiUrl">서버 주소</label>
           <input class="setup-input setup-input-mono" id="setupComfyuiUrl" type="text"
                  placeholder="127.0.0.1:8188" autocomplete="off" spellcheck="false">
           <div class="setup-actions">
-            <button class="setup-btn-primary" id="setupBtnVerifyComfyui" onclick="verifyComfyui()">VERIFY &amp; SAVE</button>
-            <button class="setup-btn-ghost" onclick="clearApi('COMFYUI')">DISCONNECT</button>
+            <button class="setup-btn-primary" id="setupBtnVerifyComfyui" onclick="verifyComfyui()">확인 후 저장</button>
+            <button class="setup-btn-ghost" onclick="clearApi('COMFYUI')">연결 해제</button>
           </div>
           <div class="setup-result" id="setupResultComfyui"></div>
           <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
         </div>
         <div class="setup-cloudflared hidden" id="setupCloudflaredSection">
           <div class="setup-cloudflared-head">
-            <span class="setup-cloudflared-title">Cloudflared Tunnel</span>
-            <span class="setup-cloudflared-status" id="setupCloudflaredStatus">Disconnected</span>
+            <span class="setup-cloudflared-title">Cloudflared 터널</span>
+            <span class="setup-cloudflared-status" id="setupCloudflaredStatus">연결 안 됨</span>
           </div>
           <div class="setup-cloudflared-actions">
             <button class="setup-btn-primary setup-btn-cloudflared" id="setupCloudflaredConnect" onclick="setCloudflaredEnabled(true)">Cloudflared 연결</button>
@@ -127,7 +131,7 @@
           </div>
           <div class="setup-cloudflared-linkrow">
             <a class="setup-cloudflared-link hidden" id="setupCloudflaredLink" href="#" target="_blank" rel="noopener noreferrer"></a>
-            <button class="setup-btn-ghost setup-btn-cloudflared hidden" id="setupCloudflaredCopy" onclick="copyCloudflaredUrl()">Copy</button>
+            <button class="setup-btn-ghost setup-btn-cloudflared hidden" id="setupCloudflaredCopy" onclick="copyCloudflaredUrl()">복사</button>
           </div>
         </div>
       </section>
@@ -851,6 +855,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260505-vibe-cluster9-characters-continuous4-search-parquet-upload1"></script>
+<script src="app.js?v=20260506-api-setup-ko2"></script>
 </body>
 </html>

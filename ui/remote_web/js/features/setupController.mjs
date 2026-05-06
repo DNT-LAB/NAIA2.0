@@ -20,6 +20,10 @@ export function createSetupController({
   const setupMetaEls = { NAI: byId('setupMetaNai'), WEBUI: byId('setupMetaWebui'), COMFYUI: byId('setupMetaComfyui') };
   const setupResultEls = { NAI: byId('setupResultNai'), WEBUI: byId('setupResultWebui'), COMFYUI: byId('setupResultComfyui') };
   const setupVerifyBtns = { NAI: byId('setupBtnVerifyNai'), WEBUI: byId('setupBtnVerifyWebui'), COMFYUI: byId('setupBtnVerifyComfyui') };
+  const SETUP_READY_LABEL = '확인 후 저장';
+  const SETUP_LOADING_LABEL = '확인 중...';
+  const NOT_SET_LABEL = '미설정';
+  const SAVED_LABEL = '저장됨';
 
   let setupForced = false;
   let setupAllowed = true;
@@ -86,7 +90,7 @@ export function createSetupController({
 
   function closeApiPopup() {
     if (setupForced) {
-      showToast('Connect at least one backend first', 'error');
+      showToast('백엔드를 하나 이상 연결하세요.', 'error');
       return;
     }
     setupOverlay.classList.remove('open');
@@ -127,12 +131,12 @@ export function createSetupController({
     const button = setupVerifyBtns[mode];
     if (!button) return;
     button.disabled = !!loading;
-    button.textContent = loading ? 'VERIFYING\u2026' : 'VERIFY & SAVE';
+    button.textContent = loading ? SETUP_LOADING_LABEL : SETUP_READY_LABEL;
   }
 
   function setupGateCheck() {
     if (!setupAllowed) {
-      showToast(setupBlockReason || 'Setup blocked on this client', 'error');
+      showToast(setupBlockReason || '이 클라이언트에서는 설정이 차단되었습니다.', 'error');
       return false;
     }
     const ws = getWs();
@@ -144,7 +148,7 @@ export function createSetupController({
     if (!setupGateCheck()) return;
     const token = byId('setupNaiToken').value.trim();
     if (!token) {
-      setSetupResult('NAI', 'Paste a token first', 'error');
+      setSetupResult('NAI', '토큰을 먼저 붙여넣으세요.', 'error');
       return;
     }
     setSetupLoading('NAI', true);
@@ -156,7 +160,7 @@ export function createSetupController({
     if (!setupGateCheck()) return;
     const url = byId('setupWebuiUrl').value.trim();
     if (!url) {
-      setSetupResult('WEBUI', 'Enter a server URL first', 'error');
+      setSetupResult('WEBUI', '서버 주소를 먼저 입력하세요.', 'error');
       return;
     }
     setSetupLoading('WEBUI', true);
@@ -168,7 +172,7 @@ export function createSetupController({
     if (!setupGateCheck()) return;
     const url = byId('setupComfyuiUrl').value.trim();
     if (!url) {
-      setSetupResult('COMFYUI', 'Enter a server URL first', 'error');
+      setSetupResult('COMFYUI', '서버 주소를 먼저 입력하세요.', 'error');
       return;
     }
     setSetupLoading('COMFYUI', true);
@@ -178,9 +182,9 @@ export function createSetupController({
 
   function clearApi(mode) {
     if (!setupGateCheck()) return;
-    if (!confirmDialog(`Disconnect ${mode}?`)) return;
+    if (!confirmDialog(`${mode} 연결을 해제할까요?`)) return;
     getWs().send(JSON.stringify({ type: 'clear_api', mode }));
-    setSetupResult(mode, 'Disconnected', '');
+    setSetupResult(mode, '연결 해제됨', '');
     if (mode === 'NAI') byId('setupNaiToken').value = '';
     if (mode === 'WEBUI') byId('setupWebuiUrl').value = '';
     if (mode === 'COMFYUI') byId('setupComfyuiUrl').value = '';
@@ -199,7 +203,7 @@ export function createSetupController({
 
   function onSetupBlocked(message) {
     if (message.command === 'probe_api') return;
-    showToast(message.reason || 'Setup blocked on this client', 'error');
+    showToast(message.reason || '이 클라이언트에서는 설정이 차단되었습니다.', 'error');
   }
 
   function applySetupGate(message) {
@@ -219,7 +223,7 @@ export function createSetupController({
         setupSubTitle.textContent = setupSubDefault;
       } else {
         setupSubTitle.classList.add('blocked');
-        setupSubTitle.textContent = setupBlockReason || 'Setup disabled \u2014 loopback access required.';
+        setupSubTitle.textContent = setupBlockReason || '설정 비활성화 - 로컬 접속이 필요합니다.';
       }
     }
     if (setupLauncherBtn) setupLauncherBtn.classList.toggle('needs-setup', setupForced);
@@ -242,8 +246,8 @@ export function createSetupController({
     const maxSub = 18;
     const trunc = value => (value && value.length > maxSub) ? (value.slice(0, maxSub) + '\u2026') : value;
     const subOf = (configured, preview) => {
-      if (!configured) return 'NOT SET';
-      if (!preview) return 'SAVED';
+      if (!configured) return NOT_SET_LABEL;
+      if (!preview) return SAVED_LABEL;
       return trunc(preview);
     };
 
@@ -276,7 +280,7 @@ export function createSetupController({
     if (naiPreview) naiPreview.textContent = message.nai_token_preview ? (message.nai_token_preview + '\u2026') : '\u2014';
     const naiInput = byId('setupNaiToken');
     if (naiInput) {
-      naiInput.placeholder = hasNai ? 'Saved \u2014 paste new token to replace' : 'paste NovelAI token';
+      naiInput.placeholder = hasNai ? '저장됨 - 새 토큰을 붙여넣으면 교체됩니다' : 'NovelAI 토큰 붙여넣기';
     }
 
     const webuiUrl = byId('setupWebuiUrl');

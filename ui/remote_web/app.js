@@ -485,7 +485,7 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
   .catch(error => {
     console.error('Failed to initialize module badges module', error);
   });
-const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs')
+const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v=20260506-api-setup-ko1')
   .then(({createCloudflaredControls}) => {
     cloudflaredControls = createCloudflaredControls({
       document,
@@ -499,7 +499,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs')
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260506-api-setup-ko2')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,
@@ -527,7 +527,7 @@ const generationProgressReady = import('./js/features/generationProgress.mjs')
   .catch(error => {
     console.error('Failed to initialize generation progress module', error);
   });
-const desktopWindowControlReady = import('./js/features/desktopWindowControl.mjs')
+const desktopWindowControlReady = import('./js/features/desktopWindowControl.mjs?v=20260506-api-setup-ko1')
   .then(({createDesktopWindowControl}) => {
     desktopWindowControl = createDesktopWindowControl({
       document,

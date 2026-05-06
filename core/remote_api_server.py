@@ -10790,6 +10790,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     js_dir = web_dir / "js"
     if js_dir.exists():
         app.mount("/js", StaticFiles(directory=str(js_dir)), name="remote_js")
+    guides_dir = web_dir / "guides"
+    if guides_dir.exists():
+        app.mount("/guides", StaticFiles(directory=str(guides_dir), html=True), name="remote_guides")
 
     @app.get("/")
     async def index():

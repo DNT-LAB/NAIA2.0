@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NovelAI 토큰 발급 가이드</title>
+<style>
+  :root {
+    --bg: #090912;
+    --panel: #121221;
+    --panel-2: #17172a;
+    --line: rgba(154, 139, 255, 0.22);
+    --line-strong: rgba(169, 145, 255, 0.52);
+    --text: #f5f1ff;
+    --muted: #b7b1c8;
+    --dim: #85809a;
+    --accent: #8f5cff;
+    --accent-2: #e37ee6;
+    --good: #72d491;
+    --warn: #f5b45b;
+    --shadow: rgba(0, 0, 0, 0.42);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 18% -8%, rgba(143, 92, 255, 0.24), transparent 34%),
+      radial-gradient(circle at 100% 8%, rgba(227, 126, 230, 0.16), transparent 28%),
+      var(--bg);
+    color: var(--text);
+  }
+
+  a { color: inherit; }
+
+  .page {
+    width: min(1080px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 34px 0 46px;
+  }
+
+  .hero {
+    display: grid;
+    gap: 18px;
+    padding: 26px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: rgba(18, 18, 33, 0.86);
+    box-shadow: 0 22px 60px var(--shadow);
+  }
+
+  .eyebrow {
+    margin: 0;
+    color: var(--accent-2);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(28px, 4vw, 44px);
+    line-height: 1.08;
+    letter-spacing: 0;
+  }
+
+  .lead {
+    max-width: 760px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1.72;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 15px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: rgba(143, 92, 255, 0.16);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .btn.primary {
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 12px 26px rgba(143, 92, 255, 0.32);
+  }
+
+  .notice {
+    display: grid;
+    gap: 7px;
+    margin-top: 18px;
+    padding: 14px 16px;
+    border: 1px solid rgba(245, 180, 91, 0.34);
+    border-radius: 10px;
+    background: rgba(245, 180, 91, 0.08);
+    color: #ffe1ad;
+    line-height: 1.55;
+  }
+
+  .notice strong { color: #fff0cf; }
+
+  .steps {
+    display: grid;
+    gap: 18px;
+    margin-top: 22px;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: minmax(0, 0.86fr) minmax(280px, 1.14fr);
+    gap: 20px;
+    align-items: start;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(18, 18, 33, 0.78);
+  }
+
+  .step-copy {
+    display: grid;
+    gap: 10px;
+  }
+
+  .step-num {
+    width: fit-content;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: rgba(143, 92, 255, 0.18);
+    color: #d5c9ff;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 21px;
+    letter-spacing: 0;
+  }
+
+  .step p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .callout {
+    color: var(--good);
+    font-weight: 800;
+  }
+
+  .image-wrap {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-2);
+  }
+
+  .image-wrap img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .final {
+    margin-top: 18px;
+    padding: 18px;
+    border: 1px solid rgba(114, 212, 145, 0.36);
+    border-radius: 12px;
+    background: rgba(114, 212, 145, 0.08);
+    color: #ccffd9;
+    line-height: 1.62;
+  }
+
+  .footer {
+    margin-top: 24px;
+    color: var(--dim);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 820px) {
+    .page {
+      width: min(100% - 18px, 1080px);
+      padding-top: 14px;
+    }
+
+    .hero,
+    .step {
+      padding: 16px;
+      border-radius: 10px;
+    }
+
+    .step {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="hero">
+    <p class="eyebrow">NAIA API 설정</p>
+    <h1>NovelAI 영구 토큰 발급 가이드</h1>
+    <p class="lead">
+      NAIA에서 NovelAI를 사용하려면 NovelAI 계정의 영구 API 토큰이 필요합니다.
+      아래 순서대로 토큰을 복사한 뒤 NAIA의 API 설정 창에 붙여넣고 저장하세요.
+    </p>
+    <div class="actions">
+      <a class="btn primary" href="https://novelai.net/image" target="_blank" rel="noopener noreferrer">NovelAI 이미지 페이지 열기</a>
+      <a class="btn" href="/">NAIA로 돌아가기</a>
+    </div>
+  </section>
+
+  <aside class="notice">
+    <strong>주의</strong>
+    <span>영구 토큰은 비밀번호처럼 취급하세요. 다른 사람에게 보내거나 공개된 채팅, 문서, 화면 공유에 노출하지 않는 것이 안전합니다.</span>
+  </aside>
+
+  <section class="steps" aria-label="NovelAI 토큰 발급 순서">
+    <article class="step">
+      <div class="step-copy">
+        <span class="step-num">1</span>
+        <h2>NovelAI 이미지 페이지에서 메뉴를 엽니다</h2>
+        <p>
+          <span class="callout">NovelAI 이미지 페이지</span>에 로그인한 뒤, 오른쪽 위의 메뉴 버튼을 누릅니다.
+        </p>
+      </div>
+      <figure class="image-wrap">
+        <img src="assets/novelai-token-step-1-open-menu.png" alt="NovelAI 이미지 페이지에서 오른쪽 위 메뉴 버튼을 선택하는 화면">
+      </figure>
+    </article>
+
+    <article class="step">
+      <div class="step-copy">
+        <span class="step-num">2</span>
+        <h2>계정 설정으로 이동합니다</h2>
+        <p>
+          사용자 메뉴가 열리면 <span class="callout">Account Settings</span> 항목을 선택합니다.
+        </p>
+      </div>
+      <figure class="image-wrap">
+        <img src="assets/novelai-token-step-2-account-menu.png?v=20260506-swap1" alt="NovelAI 사용자 메뉴에서 Account Settings를 선택하는 화면">
+      </figure>
+    </article>
+
+    <article class="step">
+      <div class="step-copy">
+        <span class="step-num">3</span>
+        <h2>영구 API 토큰 발급 창을 엽니다</h2>
+        <p>
+          계정 화면의 아래쪽에서 <span class="callout">Get Persistent API Token</span> 버튼을 누릅니다.
+          현재 구독 등급이 표시되는 계정 화면에서 찾을 수 있습니다.
+        </p>
+      </div>
+      <figure class="image-wrap">
+        <img src="assets/novelai-token-step-3-account-settings.png" alt="NovelAI 계정 설정 화면에서 Get Persistent API Token 버튼을 선택하는 화면">
+      </figure>
+    </article>
+
+    <article class="step">
+      <div class="step-copy">
+        <span class="step-num">4</span>
+        <h2>토큰을 복사합니다</h2>
+        <p>
+          토큰 창이 열리면 복사 버튼을 누릅니다. 토큰 전체를 직접 펼쳐 볼 필요는 없습니다.
+        </p>
+      </div>
+      <figure class="image-wrap">
+        <img src="assets/novelai-token-step-4-copy-token.png?v=20260506-swap1" alt="Persistent API Token 창에서 복사 버튼을 누르는 화면">
+      </figure>
+    </article>
+
+    <article class="step">
+      <div class="step-copy">
+        <span class="step-num">5</span>
+        <h2>NAIA에 붙여넣고 저장합니다</h2>
+        <p>
+          NAIA의 <span class="callout">API 설정</span> 창으로 돌아와 <span class="callout">영구 토큰</span> 입력칸에 붙여넣고
+          <span class="callout">확인 후 저장</span>을 누릅니다.
+        </p>
+      </div>
+      <figure class="image-wrap">
+        <img src="assets/novelai-token-step-5-save-naia.png" alt="NAIA API 설정 창에서 NovelAI 토큰을 붙여넣고 확인 후 저장을 누르는 화면">
+      </figure>
+    </article>
+  </section>
+
+  <section class="final">
+    저장에 성공하면 NAIA가 토큰을 보관하고 NovelAI 연결 상태를 갱신합니다.
+    저장 후에는 입력칸에 토큰 원문이 계속 표시되지 않습니다.
+  </section>
+
+  <p class="footer">
+    이 문서는 NAIA 로컬 서버에서 제공됩니다. 화면 예시는 토큰 발급 위치를 안내하기 위한 참고 이미지입니다.
+  </p>
+</main>
+</body>
+</html>

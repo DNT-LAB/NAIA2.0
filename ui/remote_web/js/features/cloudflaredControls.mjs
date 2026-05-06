@@ -13,6 +13,13 @@ export function createCloudflaredControls({
   const linkEl = document.getElementById('setupCloudflaredLink');
   const copyBtn = document.getElementById('setupCloudflaredCopy');
 
+  function localizeStatus(status, active) {
+    if (!status) return active ? '연결됨' : '연결 안 됨';
+    return status
+      .replace(/^Connected\b/, '연결됨')
+      .replace(/^Disconnected\b/, '연결 안 됨');
+  }
+
   function render(m) {
     if (!section) return;
     const allowed = m.cloudflared_control_allowed === true;
@@ -21,7 +28,7 @@ export function createCloudflaredControls({
 
     const active = !!m.cloudflared_active;
     const url = m.cloudflared_url || '';
-    const status = m.cloudflared_status_text || (active ? 'Connected' : 'Disconnected');
+    const status = localizeStatus(m.cloudflared_status_text, active);
     const isBusy = active && !url;
 
     if (statusEl) statusEl.textContent = status;
@@ -53,9 +60,9 @@ export function createCloudflaredControls({
     const url = status.cloudflared_url || '';
     if (!url) return;
     navigator.clipboard.writeText(url).then(() => {
-      showToast('Copied to clipboard', 'success');
+      showToast('클립보드에 복사했습니다.', 'success');
     }).catch(() => {
-      showToast('Copy failed', 'error');
+      showToast('복사에 실패했습니다.', 'error');
     });
   }
 

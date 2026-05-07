@@ -566,7 +566,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260507-e
       escHtml,
       onGenerateStateChange: updateGenerateButtonMode,
     });
-    updateGenerateButtonMode();
+    syncPromptTabStateFromDom();
   })
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
@@ -1021,7 +1021,7 @@ function handleWsBlob(data) {
     ? imagePresetRequestId === pendingPresetRequestId
     : (!!presetGenerationPending && !!latestImageMeta?.event_preset_request);
   if (isPendingPresetResult) {
-    clearPresetGenerationOptions();
+    clearPresetGenerationOptions({autoGenerate: false});
     eventPresetPanel?.focusResultImage?.();
     presetGenerationPending = null;
   }
@@ -1377,7 +1377,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
       || String(message.event_preset_request_id || '') === String(presetGenerationPending.requestId || '')
     )
   ) {
-    clearPresetGenerationOptions();
+    clearPresetGenerationOptions({autoGenerate: false});
   }
   // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
   if ((source === 'random' && awaitingMyRandom) || source === 'event_preset') {
@@ -2450,6 +2450,23 @@ function switchTab(name) {
   updateGenerateButtonMode();
 }
 
+function currentPromptTabFromDom() {
+  const activeButton = document.querySelector('.tab-btn.active[data-tab]');
+  if (activeButton?.dataset?.tab) return activeButton.dataset.tab;
+  const activePage = document.querySelector('.tab-page.active[id^="tab"]');
+  if (activePage?.id) {
+    const raw = activePage.id.slice(3);
+    if (raw) return raw.charAt(0).toLowerCase() + raw.slice(1);
+  }
+  return activePromptTab || 'prompt';
+}
+
+function syncPromptTabStateFromDom() {
+  activePromptTab = currentPromptTabFromDom();
+  if (eventPresetPanel) eventPresetPanel.setActiveTab(activePromptTab === 'preset');
+  updateGenerateButtonMode();
+}
+
 // ---- Controls ----
 function requestGenerate(payload = {}) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -2542,8 +2559,8 @@ function updateGenerateButtonMode() {
   }
 }
 
-function clearPresetGenerationOptions() {
-  if (getOptionChecked('auto_generate')) setOption('auto_generate', false);
+function clearPresetGenerationOptions({autoGenerate = true} = {}) {
+  if (autoGenerate && getOptionChecked('auto_generate')) setOption('auto_generate', false);
   if (getOptionChecked('wildcard_standalone')) setOption('wildcard_standalone', false);
 }
 
@@ -2556,7 +2573,7 @@ async function generateFromPresetTab() {
     updateGenerateButtonMode();
     return;
   }
-  clearPresetGenerationOptions();
+  clearPresetGenerationOptions({autoGenerate: false});
   presetGenerationPending = {requestId: ''};
   updateGenerateButtonMode();
   const requested = await eventPresetPanel.generateCurrentPreset();

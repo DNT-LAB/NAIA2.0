@@ -11965,6 +11965,13 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         except Exception as e:
             return JSONResponse({"error": f"Event Preset download cancel failed: {e}"}, status_code=500)
 
+    @app.get("/api/tag/lookup")
+    async def api_tag_lookup(tag: str = ""):
+        try:
+            return await asyncio.to_thread(bridge._lookup_tag_info, tag)
+        except Exception as e:
+            return JSONResponse({"error": f"Tag lookup failed: {e}"}, status_code=500)
+
     @app.get("/api/event-preset/bootstrap")
     async def api_event_preset_bootstrap(
         ratingId: str = "s",

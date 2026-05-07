@@ -51,6 +51,7 @@ function createServerEventPresetProvider() {
     downloadState: () => fetch('/api/event-preset/download', {cache: 'no-store'}).then(readJsonResponse),
     startDownload: () => postJson('/api/event-preset/download', {}),
     cancelDownload: () => postJson('/api/event-preset/download/cancel', {}),
+    tagLookup: tag => fetch(`/api/tag/lookup?tag=${encodeURIComponent(tag)}`, {cache: 'no-store'}).then(readJsonResponse),
   };
 }
 
@@ -88,6 +89,7 @@ function createFixtureEventPresetProvider(fixture) {
     },
     promptPreview: () => Promise.resolve({ok: true, prompt: '', atoms: []}),
     generate: payload => Promise.resolve({ok: true, selected: payload || fixture.selected}),
+    tagLookup: tag => Promise.resolve({tag}),
   };
 }
 
@@ -150,6 +152,11 @@ export function createEventPresetPanel({
   let selectRequestSeq = 0;
   let searchTimer = null;
   let downloadPollTimer = null;
+  let tagInfoTooltip = null;
+  let tagInfoHoverTimer = null;
+  let tagInfoRequestSeq = 0;
+  let tagInfoAnchor = null;
+  const tagInfoCache = new Map();
 
   const escapeHtml = typeof escHtml === 'function'
     ? escHtml
@@ -288,6 +295,109 @@ export function createEventPresetPanel({
       text = text.slice(1, -1).trim();
     }
     return text;
+  }
+
+  function tagInfoAttrs(tag) {
+    const clean = cleanPromptAtom(tag);
+    return clean ? ` data-ep-tag-info="${escapeHtml(clean)}"` : '';
+  }
+
+  function renderTagToken(tag, className = 'event-preset-inline-tag') {
+    const clean = cleanPromptAtom(tag);
+    if (!clean) return '';
+    return `<span class="${className}"${tagInfoAttrs(clean)}>${escapeHtml(clean)}</span>`;
+  }
+
+  function renderPromptTagTokens(text) {
+    const tags = splitPromptTags(text);
+    if (!tags.length) return escapeHtml(text || '');
+    return tags.map(tag => renderTagToken(tag)).join('<span class="event-preset-inline-separator">, </span>');
+  }
+
+  function ensureTagInfoTooltip() {
+    if (!tagInfoTooltip) {
+      tagInfoTooltip = document.createElement('div');
+      tagInfoTooltip.className = 'event-preset-tag-tooltip';
+      document.body.appendChild(tagInfoTooltip);
+    }
+    return tagInfoTooltip;
+  }
+
+  function positionTagInfoTooltip(event) {
+    if (!tagInfoTooltip?.classList.contains('open')) return;
+    const viewport = window.visualViewport || {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetLeft: 0,
+      offsetTop: 0,
+    };
+    const margin = 8;
+    const gap = 12;
+    const anchorRect = tagInfoAnchor?.getBoundingClientRect?.();
+    const x = Number.isFinite(event?.clientX) ? event.clientX : (anchorRect?.left || viewport.offsetLeft);
+    const y = Number.isFinite(event?.clientY) ? event.clientY : (anchorRect?.bottom || viewport.offsetTop);
+    const rect = tagInfoTooltip.getBoundingClientRect();
+    const minLeft = viewport.offsetLeft + margin;
+    const maxLeft = viewport.offsetLeft + viewport.width - rect.width - margin;
+    const minTop = viewport.offsetTop + margin;
+    const maxTop = viewport.offsetTop + viewport.height - rect.height - margin;
+    let left = x + gap;
+    let top = y + gap;
+    if (left > maxLeft) left = x - rect.width - gap;
+    if (top > maxTop) top = y - rect.height - gap;
+    tagInfoTooltip.style.left = `${Math.round(Math.max(minLeft, Math.min(left, maxLeft)))}px`;
+    tagInfoTooltip.style.top = `${Math.round(Math.max(minTop, Math.min(top, maxTop)))}px`;
+  }
+
+  function hideTagInfoTooltip() {
+    if (tagInfoHoverTimer) {
+      window.clearTimeout(tagInfoHoverTimer);
+      tagInfoHoverTimer = null;
+    }
+    tagInfoAnchor = null;
+    tagInfoRequestSeq += 1;
+    tagInfoTooltip?.classList.remove('open');
+  }
+
+  function renderTagInfoTooltip(info, tag) {
+    const tooltip = ensureTagInfoTooltip();
+    const groupText = [info?.group, info?.subgroup].filter(Boolean).join(' / ');
+    const desc = info?.desc || '';
+    tooltip.innerHTML = `
+      <div class="tag-tooltip-main">
+        <span class="tag-tooltip-tag">${escapeHtml(info?.tag || tag)}</span>
+        ${info?.count ? `<span class="tag-tooltip-count">${escapeHtml(formatCount(info.count))}</span>` : ''}
+        ${groupText ? `<span class="tag-tooltip-group">${escapeHtml(groupText)}</span>` : ''}
+        ${desc ? `<span class="tag-tooltip-desc">${escapeHtml(desc)}</span>` : '<span class="tag-tooltip-desc">한글 설명 없음</span>'}
+      </div>`;
+    tooltip.classList.add('open');
+  }
+
+  async function showTagInfoTooltip(anchor, event) {
+    const tag = cleanPromptAtom(anchor?.dataset?.epTagInfo || '');
+    if (!tag || typeof provider.tagLookup !== 'function') return;
+    tagInfoAnchor = anchor;
+    const tooltip = ensureTagInfoTooltip();
+    tooltip.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">loading...</span></div>';
+    tooltip.classList.add('open');
+    positionTagInfoTooltip(event);
+    const requestSeq = ++tagInfoRequestSeq;
+    try {
+      let info = tagInfoCache.get(tag.toLowerCase());
+      if (!info) {
+        info = await provider.tagLookup(tag);
+        tagInfoCache.set(tag.toLowerCase(), info || {});
+      }
+      if (requestSeq !== tagInfoRequestSeq || tagInfoAnchor !== anchor) return;
+      if (!info?.tag && !info?.desc && !info?.group) {
+        hideTagInfoTooltip();
+        return;
+      }
+      renderTagInfoTooltip(info, tag);
+      positionTagInfoTooltip(event);
+    } catch (_) {
+      if (requestSeq === tagInfoRequestSeq) hideTagInfoTooltip();
+    }
   }
 
   async function loadBootstrap({showLoading = true} = {}) {
@@ -566,6 +676,11 @@ export function createEventPresetPanel({
     row.scrollIntoView({block: 'nearest'});
   }
 
+  function isEditableKeyTarget(target) {
+    if (!target?.closest) return false;
+    return !!target.closest('input, textarea, select, [contenteditable="true"], .custom-select, .tag-tooltip, .event-preset-search');
+  }
+
   function currentCombo(event = selectedContext().event) {
     return event?.observedCombos?.find(combo => combo.id === state.comboId)
       || event?.observedCombos?.[0]
@@ -749,7 +864,7 @@ export function createEventPresetPanel({
                 data-ep-action="event"
                 data-ep-id="${escapeHtml(context.event.id)}">
           <span class="event-preset-event-index">${index + 1}</span>
-          <span class="event-preset-event-name">${escapeHtml(context.event.label || context.event.tag)}</span>
+          <span class="event-preset-event-name"${tagInfoAttrs(context.event.tag)}>${escapeHtml(context.event.label || context.event.tag)}</span>
           <span class="event-preset-event-count">${escapeHtml(formatCount(context.event.count))}</span>
         </button>`).join('')
       : `<div class="event-preset-empty">${escapeHtml(emptyText)}</div>`;
@@ -768,13 +883,20 @@ export function createEventPresetPanel({
     const combo = currentCombo(event);
     if (selected) {
       const parts = [
-        (viewData.ratings || []).find(rating => rating.id === state.ratingId)?.label,
-        (viewData.persons || []).find(person => person.id === state.personId)?.label,
-        category?.label,
-        event?.tag,
-        combo?.label,
+        {text: (viewData.ratings || []).find(rating => rating.id === state.ratingId)?.label},
+        {text: (viewData.persons || []).find(person => person.id === state.personId)?.label},
+        {text: category?.label},
+        {text: event?.tag, tag: event?.tag},
+        {text: combo?.label, prompt: comboPromptText(combo)},
       ].filter(Boolean);
-      selected.innerHTML = parts.map(part => `<span class="event-preset-selected-chip">${escapeHtml(part)}</span>`).join('');
+      selected.innerHTML = parts
+        .filter(part => part.text || part.prompt)
+        .map(part => {
+          const content = part.prompt
+            ? renderPromptTagTokens(part.prompt)
+            : (part.tag ? renderTagToken(part.tag, 'event-preset-selected-tag') : escapeHtml(part.text));
+          return `<span class="event-preset-selected-chip">${content}</span>`;
+        }).join('');
     }
     if (preview) {
       const fallback = state.selectionLoading
@@ -891,7 +1013,7 @@ export function createEventPresetPanel({
                 class="${rowClass}"
                 ${action}
                 ${options.action ? '' : 'disabled'}>
-          <span class="event-preset-assist-row-name">${escapeHtml(label)}</span>
+          <span class="event-preset-assist-row-name">${options.promptBundle ? renderPromptTagTokens(label) : (renderTagToken(label) || escapeHtml(label))}</span>
           <span>${escapeHtml(formatCount(item.count))}</span>
           ${options.showConfidence ? `<span>${escapeHtml(confidence)}</span>` : ''}
         </button>`;
@@ -921,7 +1043,7 @@ export function createEventPresetPanel({
                       data-ep-action="recommended"
                       data-ep-id="${escapeHtml(item.id)}"
                       aria-pressed="${active ? 'true' : 'false'}">
-                <span>${escapeHtml(item.tag)}</span>
+                <span${tagInfoAttrs(item.tag)}>${escapeHtml(item.tag)}</span>
                 <span>${escapeHtml(formatCount(item.count))}</span>
               </button>`;
           }).join('')}
@@ -959,8 +1081,8 @@ export function createEventPresetPanel({
           ${thumbUrl ? `<img src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(event?.tag || 'Event thumbnail')}" loading="lazy">` : ''}
           <div class="event-preset-thumb-info">
             <span>Preset Assist</span>
-            <strong>${escapeHtml(event?.tag || 'No event')}</strong>
-            <em>${escapeHtml(comboSummary)}</em>
+            <strong${tagInfoAttrs(event?.tag)}>${escapeHtml(event?.tag || 'No event')}</strong>
+            <em>${renderPromptTagTokens(comboSummary)}</em>
           </div>
         </div>
         <div class="event-preset-assist-tabs" role="tablist" aria-label="Event Preset assist sections">
@@ -1019,6 +1141,7 @@ export function createEventPresetPanel({
   }
 
   function hideOverlay() {
+    hideTagInfoTooltip();
     overlay.hidden = true;
     overlay.setAttribute('aria-hidden', 'true');
     viewer?.classList.remove('event-preset-overlay-active');
@@ -1120,6 +1243,7 @@ export function createEventPresetPanel({
       void cancelDownload();
     }
     renderAll({preserveScroll: !(shouldBootstrap || action === 'category')});
+    if (action === 'event') focusEventRow(id);
     if (shouldBootstrap) loadBootstrap({showLoading: provider.mode === 'server'});
     else if (shouldSelect) loadSelection({showLoading: false, resetAssistScroll: shouldResetAssistScroll});
   }
@@ -1143,9 +1267,14 @@ export function createEventPresetPanel({
   }
 
   function handleEventListKeydown(event) {
+    if (event.defaultPrevented) return;
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     const target = event.target;
-    if (!target.closest?.('[data-ep-event-table]')) return;
+    const inEventTable = !!target.closest?.('[data-ep-event-table]');
+    const canUseGlobalNav = state.activeTab
+      && rightResultPane?.classList.contains('active')
+      && !isEditableKeyTarget(target);
+    if (!inEventTable && !canUseGlobalNav) return;
     const rows = currentEventContexts();
     if (!rows.length) return;
 
@@ -1163,6 +1292,27 @@ export function createEventPresetPanel({
     renderAll({preserveScroll: true});
     focusEventRow(nextContext.event.id);
     loadSelection({showLoading: false, resetAssistScroll: true});
+  }
+
+  function handleTagInfoPointerOver(event) {
+    const anchor = event.target.closest?.('[data-ep-tag-info]');
+    if (!anchor || !root.contains(anchor) && !overlay.contains(anchor)) return;
+    if (tagInfoHoverTimer) window.clearTimeout(tagInfoHoverTimer);
+    tagInfoHoverTimer = window.setTimeout(() => {
+      tagInfoHoverTimer = null;
+      void showTagInfoTooltip(anchor, event);
+    }, 180);
+  }
+
+  function handleTagInfoPointerMove(event) {
+    if (!tagInfoAnchor) return;
+    positionTagInfoTooltip(event);
+  }
+
+  function handleTagInfoPointerOut(event) {
+    const anchor = event.target.closest?.('[data-ep-tag-info]');
+    if (!anchor || event.relatedTarget && anchor.contains(event.relatedTarget)) return;
+    hideTagInfoTooltip();
   }
 
   function renderShell() {
@@ -1207,7 +1357,13 @@ export function createEventPresetPanel({
   root.addEventListener('input', handleSearchInput);
   root.addEventListener('change', handleChange);
   root.addEventListener('keydown', handleEventListKeydown);
+  root.addEventListener('pointerover', handleTagInfoPointerOver);
+  root.addEventListener('pointermove', handleTagInfoPointerMove);
+  root.addEventListener('pointerout', handleTagInfoPointerOut);
   overlay.addEventListener('pointerdown', event => event.stopPropagation());
+  overlay.addEventListener('pointerover', handleTagInfoPointerOver);
+  overlay.addEventListener('pointermove', handleTagInfoPointerMove);
+  overlay.addEventListener('pointerout', handleTagInfoPointerOut);
   overlay.addEventListener('click', event => {
     event.stopPropagation();
     handleActionClick(event);
@@ -1221,6 +1377,7 @@ export function createEventPresetPanel({
     hideOverlay();
   });
   document.addEventListener('keydown', event => {
+    handleEventListKeydown(event);
     if (event.key === 'Escape') hideOverlay();
   });
   document.addEventListener('click', event => {

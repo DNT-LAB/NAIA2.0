@@ -24,7 +24,7 @@ function createServerEventPresetProvider() {
       categoryId: params.categoryId,
       subcategoryId: params.subcategoryId,
       eventId: params.eventId,
-      limit: params.limit || 900,
+      limit: params.limit,
     })) {
       if (value != null && value !== '') query.set(key, String(value));
     }
@@ -48,6 +48,9 @@ function createServerEventPresetProvider() {
     select: payload => postJson('/api/event-preset/select', payload),
     promptPreview: payload => postJson('/api/event-preset/prompt-preview', payload),
     generate: payload => postJson('/api/event-preset/generate', payload),
+    downloadState: () => fetch('/api/event-preset/download', {cache: 'no-store'}).then(readJsonResponse),
+    startDownload: () => postJson('/api/event-preset/download', {}),
+    cancelDownload: () => postJson('/api/event-preset/download/cancel', {}),
   };
 }
 
@@ -96,6 +99,7 @@ export function createEventPresetPanel({
   getGenerating,
   showToast,
   escHtml,
+  onGenerateStateChange,
 } = {}) {
   const root = document?.getElementById('eventPresetPanel');
   const overlay = document?.getElementById('eventPresetOverlay');
@@ -109,27 +113,41 @@ export function createEventPresetPanel({
   const provider = useFixtureProvider
     ? createFixtureEventPresetProvider(viewData)
     : createServerEventPresetProvider();
+  const initialSelected = useFixtureProvider
+    ? viewData.selected
+    : {
+      ratingId: 's',
+      personId: '1girl_solo',
+      search: '',
+      categoryId: '',
+      subcategoryId: '',
+      eventId: '',
+      comboId: '',
+      recommendedTagIds: [],
+    };
   const state = {
     activeTab: false,
-    search: viewData.selected.search || '',
-    ratingId: viewData.selected.ratingId,
-    personId: viewData.selected.personId,
-    categoryId: viewData.selected.categoryId,
-    subcategoryId: viewData.selected.subcategoryId || '',
-    eventId: viewData.selected.eventId,
-    comboId: viewData.selected.comboId,
+    search: initialSelected.search || '',
+    ratingId: initialSelected.ratingId,
+    personId: initialSelected.personId,
+    categoryId: initialSelected.categoryId,
+    subcategoryId: initialSelected.subcategoryId || '',
+    eventId: initialSelected.eventId,
+    comboId: initialSelected.comboId,
     assistTab: 'combos',
-    recommendedTagIds: new Set((viewData.selected.recommendedTagIds || []).map(String)),
+    recommendedTagIds: new Set((initialSelected.recommendedTagIds || []).map(String)),
     dataStatus: useFixtureProvider ? 'ready' : 'idle',
     dataMessage: '',
     loaded: useFixtureProvider,
     selectionLoading: false,
     generatePending: false,
     generating: false,
+    download: viewData.download || {},
   };
   let bootstrapRequestSeq = 0;
   let selectRequestSeq = 0;
   let searchTimer = null;
+  let downloadPollTimer = null;
 
   const escapeHtml = typeof escHtml === 'function'
     ? escHtml
@@ -157,6 +175,14 @@ export function createEventPresetPanel({
   function dataReady() {
     const main = dataAvailability().main;
     return state.dataStatus === 'ready' && (main === 'ready' || main === 'fixture');
+  }
+
+  function downloadActive() {
+    return !!state.download?.active;
+  }
+
+  function downloadAvailable() {
+    return provider.mode === 'server';
   }
 
   function setRecommendedTagIds(ids) {
@@ -223,6 +249,13 @@ export function createEventPresetPanel({
     }
   }
 
+  function resetAssistListScroll() {
+    const element = overlay.querySelector('.event-preset-assist-list');
+    if (!element) return;
+    element.scrollTop = 0;
+    element.scrollLeft = 0;
+  }
+
   function applySelectedPayload(selected = {}) {
     if (selected.ratingId) state.ratingId = selected.ratingId;
     if (selected.personId) state.personId = selected.personId;
@@ -243,8 +276,16 @@ export function createEventPresetPanel({
   function splitPromptTags(text) {
     return String(text || '')
       .split(',')
-      .map(part => part.trim())
+      .map(cleanPromptAtom)
       .filter(Boolean);
+  }
+
+  function cleanPromptAtom(value) {
+    let text = String(value || '').trim();
+    while (text.length >= 2 && text.startsWith('[') && text.endsWith(']')) {
+      text = text.slice(1, -1).trim();
+    }
+    return text;
   }
 
   async function loadBootstrap({showLoading = true} = {}) {
@@ -264,7 +305,9 @@ export function createEventPresetPanel({
         ratings: payload.ratings || viewData.ratings || [],
         persons: payload.persons || viewData.persons || [],
         dataAvailability: payload.dataAvailability || viewData.dataAvailability || {},
+        download: payload.download || viewData.download || {},
       };
+      state.download = viewData.download || {};
       applySelectedPayload(payload.selected || {});
       const mainState = dataAvailability().main;
       state.dataStatus = (mainState === 'ready' || mainState === 'fixture')
@@ -273,6 +316,7 @@ export function createEventPresetPanel({
       state.dataMessage = dataAvailability().message || '';
       state.loaded = true;
       renderAll();
+      syncDownloadPolling();
       if (dataReady() && state.eventId) loadSelection({showLoading: false});
     } catch (error) {
       if (requestSeq !== bootstrapRequestSeq) return;
@@ -281,10 +325,11 @@ export function createEventPresetPanel({
       state.loaded = true;
       renderAll();
       showToast?.(state.dataMessage, 'error');
+      syncDownloadPolling();
     }
   }
 
-  async function loadSelection({showLoading = true} = {}) {
+  async function loadSelection({showLoading = true, resetAssistScroll = false} = {}) {
     if (!dataReady() || !state.eventId) return;
     const requestSeq = ++selectRequestSeq;
     if (showLoading) {
@@ -298,6 +343,7 @@ export function createEventPresetPanel({
       mergeEventDetail(payload.event);
       state.selectionLoading = false;
       renderAll();
+      if (resetAssistScroll) resetAssistListScroll();
     } catch (error) {
       if (requestSeq !== selectRequestSeq) return;
       state.selectionLoading = false;
@@ -313,6 +359,88 @@ export function createEventPresetPanel({
     }
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(() => loadBootstrap({showLoading: false}), 260);
+  }
+
+  async function refreshDownloadState({bootstrapOnDone = false} = {}) {
+    if (!downloadAvailable() || typeof provider.downloadState !== 'function') return;
+    try {
+      const payload = await provider.downloadState();
+      state.download = payload || {};
+      if (payload?.availability) {
+        viewData = {
+          ...viewData,
+          dataAvailability: payload.availability,
+          download: payload,
+        };
+        const mainState = dataAvailability().main;
+        state.dataStatus = (mainState === 'ready' || mainState === 'fixture')
+          ? 'ready'
+          : (mainState || state.dataStatus || 'missing');
+        state.dataMessage = dataAvailability().message || state.dataMessage || '';
+      }
+      renderAll({preserveScroll: true});
+      syncDownloadPolling();
+      if (bootstrapOnDone && payload?.done && !payload?.error) {
+        loadBootstrap({showLoading: true});
+      }
+    } catch (error) {
+      showToast?.(error?.message || 'Event Preset 다운로드 상태를 확인하지 못했습니다.', 'error');
+    }
+  }
+
+  function syncDownloadPolling() {
+    if (!downloadAvailable()) return;
+    if (downloadActive()) {
+      if (!downloadPollTimer) {
+        downloadPollTimer = setInterval(() => {
+          void refreshDownloadState({bootstrapOnDone: true});
+        }, 800);
+      }
+      return;
+    }
+    if (downloadPollTimer) {
+      clearInterval(downloadPollTimer);
+      downloadPollTimer = null;
+    }
+  }
+
+  async function startDownload() {
+    if (!downloadAvailable() || typeof provider.startDownload !== 'function') return;
+    try {
+      state.download = {
+        ...(state.download || {}),
+        active: true,
+        phase: 'main',
+        percent: 0,
+        message: '다운로드 준비 중...',
+        error: '',
+      };
+      renderAll({preserveScroll: true});
+      const payload = await provider.startDownload();
+      state.download = payload || state.download;
+      renderAll({preserveScroll: true});
+      syncDownloadPolling();
+    } catch (error) {
+      state.download = {
+        ...(state.download || {}),
+        active: false,
+        error: error?.message || 'Event Preset 다운로드를 시작하지 못했습니다.',
+        message: error?.message || 'Event Preset 다운로드를 시작하지 못했습니다.',
+      };
+      renderAll({preserveScroll: true});
+      showToast?.(state.download.error, 'error');
+    }
+  }
+
+  async function cancelDownload() {
+    if (!downloadAvailable() || typeof provider.cancelDownload !== 'function') return;
+    try {
+      state.download = await provider.cancelDownload();
+      renderAll({preserveScroll: true});
+      syncDownloadPolling();
+    } catch (error) {
+      showToast?.(error?.message || 'Event Preset 다운로드 취소에 실패했습니다.', 'error');
+    }
   }
 
   function categories() {
@@ -476,12 +604,15 @@ export function createEventPresetPanel({
 
   function uniqueTags(tags) {
     const seen = new Set();
-    return tags.filter(tag => {
-      const key = String(tag || '').trim().toLowerCase();
-      if (!key || seen.has(key)) return false;
+    const result = [];
+    for (const tag of tags) {
+      const clean = cleanPromptAtom(tag);
+      const key = clean.toLowerCase();
+      if (!key || seen.has(key)) continue;
       seen.add(key);
-      return true;
-    });
+      result.push(clean);
+    }
+    return result;
   }
 
   function promptPreview() {
@@ -598,7 +729,6 @@ export function createEventPresetPanel({
   function renderSelection() {
     const selected = root.querySelector('[data-ep-selected-chips]');
     const preview = root.querySelector('[data-ep-prompt-preview]');
-    const generateButton = root.querySelector('[data-ep-action="generate"]');
     const {category, event} = selectedContext();
     const combo = currentCombo(event);
     if (selected) {
@@ -617,11 +747,71 @@ export function createEventPresetPanel({
         : (!dataReady() ? (state.dataMessage || 'Event Preset data is not ready.') : 'Select an event preset.');
       preview.textContent = promptPreview() || fallback;
     }
-    if (generateButton) {
-      const blocked = state.generatePending || state.generating || !!getGenerating?.();
-      generateButton.disabled = blocked || !dataReady() || !event;
-      generateButton.textContent = state.generatePending ? '요청 중' : '생성';
+    if (typeof onGenerateStateChange === 'function') onGenerateStateChange(canGenerateCurrentPreset());
+  }
+
+  function renderDownloadOverlay() {
+    const panel = root.querySelector('[data-ep-download-overlay]');
+    if (!panel) return;
+    const availability = dataAvailability();
+    const mainState = availability.main || state.dataStatus;
+    const thumbState = availability.thumbnails || '';
+    const datasetsReady = mainState === 'ready' && thumbState === 'ready';
+    const hasBlockingDownloadError = !!state.download?.error && !datasetsReady;
+    const shouldShow = provider.mode === 'server' && (
+      downloadActive()
+      || mainState === 'missing'
+      || mainState === 'error'
+      || (mainState === 'ready' && thumbState === 'missing')
+      || hasBlockingDownloadError
+    );
+    panel.hidden = !shouldShow;
+    panel.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    if (!shouldShow) {
+      panel.innerHTML = '';
+      return;
     }
+
+    const download = state.download || {};
+    const phase = String(download.phase || (mainState === 'ready' ? 'thumbnail' : 'main'));
+    const percent = Math.max(0, Math.min(100, Number(download.percent || 0)));
+    const message = download.message || availability.message || 'Event Preset data is not installed.';
+    const error = download.error || '';
+    const active = !!download.active;
+    const phaseLabel = phase === 'thumbnail' ? 'THUMBNAILS' : (phase === 'complete' ? 'COMPLETE' : 'DATASET');
+    const title = error ? 'DOWNLOAD FAILED' : (active ? 'DOWNLOADING' : 'MISSING DATA');
+    const mainBadge = mainState === 'ready' ? 'READY' : 'MISSING';
+    const thumbBadge = thumbState === 'ready' ? 'READY' : 'MISSING';
+    const progressText = active
+      ? `${phaseLabel} ${percent}%`
+      : (error ? 'ERROR' : `${mainBadge} / ${thumbBadge}`);
+    panel.innerHTML = `
+      <div class="event-preset-download-card" role="dialog" aria-modal="true" aria-label="Event Preset data download">
+        <div class="event-preset-download-head">
+          <span>Event Preset</span>
+          <strong>${escapeHtml(title)}</strong>
+        </div>
+        <div class="event-preset-download-body">
+          <div class="event-preset-download-status">
+            <span>Main <b class="${mainState === 'ready' ? 'ready' : 'missing'}">${escapeHtml(mainBadge)}</b></span>
+            <span>Thumb <b class="${thumbState === 'ready' ? 'ready' : 'missing'}">${escapeHtml(thumbBadge)}</b></span>
+          </div>
+          <p>${escapeHtml(error || message)}</p>
+          <div class="event-preset-download-progress" aria-label="${escapeHtml(progressText)}">
+            <span style="width:${percent}%"></span>
+          </div>
+          <div class="event-preset-download-meta">
+            <span>${escapeHtml(progressText)}</span>
+            <span>${download.downloaded_mb ? `${escapeHtml(String(download.downloaded_mb))} MB` : ''}</span>
+          </div>
+        </div>
+        <div class="event-preset-download-actions">
+          ${active
+            ? '<button type="button" data-ep-action="cancel-download">Cancel</button>'
+            : '<button type="button" class="primary" data-ep-action="start-download">Download</button>'}
+        </div>
+      </div>
+    `;
   }
 
   const ASSIST_TABS = [
@@ -782,6 +972,7 @@ export function createEventPresetPanel({
     renderEvents();
     renderSelection();
     renderOverlay();
+    renderDownloadOverlay();
     if (scrollSnapshot) restoreScrollState(scrollSnapshot);
   }
 
@@ -798,17 +989,23 @@ export function createEventPresetPanel({
     viewer?.classList.remove('event-preset-overlay-active');
   }
 
+  function focusResultImage() {
+    hideOverlay();
+    viewer?.focus?.({preventScroll: true});
+  }
+
   async function generateCurrentPreset() {
     const preview = promptPreview();
-    if (!preview || state.generatePending) return;
+    if (!preview || state.generatePending) return false;
     if (state.generating || !!getGenerating?.()) {
       showToast?.('이미 생성 중입니다.', 'error');
-      return;
+      return false;
     }
     state.generatePending = true;
     renderAll({preserveScroll: true});
     try {
-      const payload = await provider.generate(selectedPayload());
+      const requestPayload = selectedPayload();
+      const payload = await provider.generate(requestPayload);
       applySelectedPayload(payload.selected || {});
       if (provider.mode === 'fixture') {
         if (typeof applyPromptText === 'function') {
@@ -821,11 +1018,24 @@ export function createEventPresetPanel({
       state.generatePending = false;
       renderAll({preserveScroll: true});
       showToast?.('Event Preset 생성 요청을 전달했습니다.', 'success');
+      return provider.mode === 'server'
+        ? {requestId: String(payload.requestId || requestPayload.requestId || '')}
+        : false;
     } catch (error) {
       state.generatePending = false;
       renderAll({preserveScroll: true});
       showToast?.(error?.message || 'Event Preset 생성 요청에 실패했습니다.', 'error');
+      return false;
     }
+  }
+
+  function canGenerateCurrentPreset() {
+    return !!promptPreview()
+      && !state.generatePending
+      && !state.generating
+      && !getGenerating?.()
+      && dataReady()
+      && !!selectedContext().event;
   }
 
   function handleActionClick(event) {
@@ -835,6 +1045,7 @@ export function createEventPresetPanel({
     const id = button.dataset.epId;
     let shouldBootstrap = false;
     let shouldSelect = false;
+    let shouldResetAssistScroll = false;
     if (state.activeTab) showOverlay();
     if (action === 'rating') {
       state.ratingId = id;
@@ -847,6 +1058,7 @@ export function createEventPresetPanel({
       const context = eventContextsForCategory(findCategory()).find(candidate => candidate.event.id === id);
       selectContext(context);
       shouldSelect = true;
+      shouldResetAssistScroll = true;
     } else if (action === 'combo') {
       state.comboId = id;
       shouldSelect = provider.mode === 'server';
@@ -864,12 +1076,14 @@ export function createEventPresetPanel({
       const input = root.querySelector('[data-ep-search]');
       if (input) input.value = '';
       shouldBootstrap = true;
-    } else if (action === 'generate') {
-      void generateCurrentPreset();
+    } else if (action === 'start-download') {
+      void startDownload();
+    } else if (action === 'cancel-download') {
+      void cancelDownload();
     }
     renderAll({preserveScroll: !(shouldBootstrap || action === 'category')});
     if (shouldBootstrap) loadBootstrap({showLoading: provider.mode === 'server'});
-    else if (shouldSelect) loadSelection({showLoading: false});
+    else if (shouldSelect) loadSelection({showLoading: false, resetAssistScroll: shouldResetAssistScroll});
   }
 
   function handleSearchInput(event) {
@@ -914,11 +1128,9 @@ export function createEventPresetPanel({
       </div>
       <section class="event-preset-footer">
         <div class="event-preset-selected-chips" data-ep-selected-chips></div>
-        <div class="event-preset-preview-strip">
-          <div class="event-preset-preview-text" data-ep-prompt-preview></div>
-          <button type="button" class="event-preset-apply" data-ep-action="generate">생성</button>
-        </div>
+        <div class="event-preset-preview-text" data-ep-prompt-preview></div>
       </section>
+      <section class="event-preset-download-overlay" data-ep-download-overlay aria-hidden="true" hidden></section>
     `;
   }
 
@@ -976,6 +1188,9 @@ export function createEventPresetPanel({
     setActiveTab,
     showOverlay,
     hideOverlay,
+    focusResultImage,
+    generateCurrentPreset,
+    canGenerate: canGenerateCurrentPreset,
     setGeneratingStatus(generating) {
       state.generating = !!generating;
       renderSelection();

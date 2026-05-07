@@ -136,7 +136,7 @@ class EventPresetService:
                 "select": main_state == "ready",
                 "promptPreview": main_state == "ready",
                 "thumbnail": thumb_state == "ready",
-                "download": False,
+                "download": True,
             },
         }
 
@@ -439,7 +439,7 @@ class EventPresetService:
         search_text = str(search or "").strip()
         if search_text:
             visible_events &= set(self._taxonomy.filter_events(search_text))
-        max_events = max(1, min(int(limit or 4000), 8000))
+        max_events = None if limit is None else max(1, min(int(limit), 8000))
 
         categories: list[dict[str, Any]] = []
         emitted = 0
@@ -448,7 +448,7 @@ class EventPresetService:
             events = [event for event in events if event["event_tag"] in visible_events]
             if not events:
                 continue
-            remaining = max_events - emitted
+            remaining = len(events) if max_events is None else max_events - emitted
             subcategories = self._group_events_by_subcategory(subgroup, events, remaining)
             if not subcategories:
                 continue
@@ -463,7 +463,7 @@ class EventPresetService:
                 "subcategories": subcategories,
             })
             emitted += sum(len(subcategory["events"]) for subcategory in subcategories)
-            if emitted >= max_events:
+            if max_events is not None and emitted >= max_events:
                 break
         return categories
 
@@ -831,19 +831,31 @@ class EventPresetService:
     def _split_csv(text: Any) -> list[str]:
         if not isinstance(text, str):
             return []
-        return [part.strip() for part in text.split(",") if part.strip()]
+        return [
+            EventPresetService._prompt_atom(part)
+            for part in text.split(",")
+            if EventPresetService._prompt_atom(part)
+        ]
 
     @staticmethod
     def _unique(tags: list[str]) -> list[str]:
         seen: set[str] = set()
         result: list[str] = []
         for tag in tags:
-            key = str(tag).strip().lower()
+            clean = EventPresetService._prompt_atom(tag)
+            key = clean.lower()
             if not key or key in seen:
                 continue
             seen.add(key)
-            result.append(str(tag).strip())
+            result.append(clean)
         return result
+
+    @staticmethod
+    def _prompt_atom(value: Any) -> str:
+        text = str(value or "").strip()
+        while len(text) >= 2 and text.startswith("[") and text.endswith("]"):
+            text = text[1:-1].strip()
+        return text
 
     @staticmethod
     def _combo_label(tags: list[str], event_tag: str) -> str:

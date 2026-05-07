@@ -962,7 +962,10 @@ class GenerationController:
                 print(f"📋 Event Preset 에러 감지 - 전용 에러 이벤트 발행")
                 error_data = {
                     "message": error_message,
-                    "event_preset_request": True
+                    "event_preset_request": True,
+                    "event_preset_request_id": str(
+                        self.current_generation_params.get("event_preset_request_id") or ""
+                    ),
                 }
                 self.context.publish("generation_error", error_data)
                 self.current_generation_params = None

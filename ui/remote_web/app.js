@@ -6,6 +6,9 @@ let ws, blobUrl = null, latestResultBlob = null, generating = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
+let activePromptTab = 'prompt';
+let presetGenerationPending = null;
+let latestImageMeta = null;
 
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
@@ -551,7 +554,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260507-event-preset-thumbcompact2')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260507-event-preset-download1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,
@@ -561,7 +564,9 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260507-e
       getGenerating: () => generating,
       showToast,
       escHtml,
+      onGenerateStateChange: updateGenerateButtonMode,
     });
+    updateGenerateButtonMode();
   })
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
@@ -1010,6 +1015,16 @@ function handleWsBlob(data) {
   preview.dataset.path = '';
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
+  const pendingPresetRequestId = String(presetGenerationPending?.requestId || '');
+  const imagePresetRequestId = String(latestImageMeta?.event_preset_request_id || '');
+  const isPendingPresetResult = pendingPresetRequestId
+    ? imagePresetRequestId === pendingPresetRequestId
+    : (!!presetGenerationPending && !!latestImageMeta?.event_preset_request);
+  if (isPendingPresetResult) {
+    clearPresetGenerationOptions();
+    eventPresetPanel?.focusResultImage?.();
+    presetGenerationPending = null;
+  }
   setGen(false);
   // Stats update — init_complete 이후의 blob만 카운트
   if (_initDone) {
@@ -1178,6 +1193,7 @@ const wsMessageHandlers = {
       showToast(m.message || 'Character Viewer generation failed', 'error');
     }
   },
+  event_preset_generation_error: onEventPresetGenerationError,
   load_prompt: m => onLoadPrompt(m.prompt),
   viewer_new_image: onViewerNewImage,
   session: onSession,
@@ -1238,6 +1254,7 @@ function updateMetaChips(m) {
 
 function updateMeta(m) {
   // Don't overwrite prompt/negative — preserves user's comments (#) and line breaks
+  latestImageMeta = m && typeof m === 'object' ? m : null;
   updateMetaChips(m);
   if (artistThumbControl && typeof artistThumbControl.handleResultMeta === 'function') {
     artistThumbControl.handleResultMeta(m);
@@ -1352,6 +1369,16 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const prompt = message.prompt;
   const source = message.source;
   if (!prompt) return;
+  if (
+    source === 'event_preset'
+    && presetGenerationPending
+    && (
+      !String(presetGenerationPending.requestId || '')
+      || String(message.event_preset_request_id || '') === String(presetGenerationPending.requestId || '')
+    )
+  ) {
+    clearPresetGenerationOptions();
+  }
   // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
   if ((source === 'random' && awaitingMyRandom) || source === 'event_preset') {
     if (source === 'random') unlockRandomButton();
@@ -2417,8 +2444,10 @@ function toggleDrawer() {
 }
 
 function switchTab(name) {
+  activePromptTab = name || 'prompt';
   if (promptDrawerControl) promptDrawerControl.switchTab(name);
-  if (eventPresetPanel) eventPresetPanel.setActiveTab(name === 'preset');
+  if (eventPresetPanel) eventPresetPanel.setActiveTab(activePromptTab === 'preset');
+  updateGenerateButtonMode();
 }
 
 // ---- Controls ----
@@ -2433,8 +2462,12 @@ function requestGenerate(payload = {}) {
 }
 
 function send(cmd) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (cmd === 'generate') {
+    if (activePromptTab === 'preset') {
+      void generateFromPresetTab();
+      return;
+    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const prompt = promptEdit.value;
     const negative = negEdit.value;
     requestGenerate({
@@ -2444,6 +2477,7 @@ function send(cmd) {
     });
     return;
   }
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (cmd === 'random') {
     btnRnd.disabled = true;
     awaitingMyRandom = true;
@@ -2481,8 +2515,54 @@ function setGen(v) {
     btnGen.classList.remove('generating');
     stopGenTimer();
     finishProgress();
+    updateGenerateButtonMode();
+  }
+}
+
+function updateGenerateButtonMode() {
+  if (!btnGen) return;
+  const presetMode = activePromptTab === 'preset';
+  btnGen.classList.toggle('preset-mode', presetMode);
+  if (!generating) {
+    const promptFixed = getOptionChecked('prompt_fixed');
+    btnGen.disabled = presetMode
+      ? (promptFixed || !!presetGenerationPending || !eventPresetPanel?.canGenerate?.())
+      : false;
     btnGen.innerHTML = '<span class="shortcut-hint">CTRL + ENTER</span>Generate';
   }
+}
+
+function clearPresetGenerationOptions() {
+  if (getOptionChecked('auto_generate')) setOption('auto_generate', false);
+  if (getOptionChecked('wildcard_standalone')) setOption('wildcard_standalone', false);
+}
+
+async function generateFromPresetTab() {
+  if (getOptionChecked('prompt_fixed')) {
+    updateGenerateButtonMode();
+    return;
+  }
+  if (!eventPresetPanel?.canGenerate?.()) {
+    updateGenerateButtonMode();
+    return;
+  }
+  clearPresetGenerationOptions();
+  presetGenerationPending = {requestId: ''};
+  updateGenerateButtonMode();
+  const requested = await eventPresetPanel.generateCurrentPreset();
+  if (requested?.requestId) presetGenerationPending = {requestId: requested.requestId};
+  else presetGenerationPending = null;
+  updateGenerateButtonMode();
+}
+
+function onEventPresetGenerationError(message = {}) {
+  const requestId = String(message.requestId || '');
+  const pendingRequestId = String(presetGenerationPending?.requestId || '');
+  if (!presetGenerationPending || !pendingRequestId || requestId === pendingRequestId) {
+    presetGenerationPending = null;
+    updateGenerateButtonMode();
+  }
+  showToast(message.message || 'Event Preset generation failed', 'error');
 }
 
 function startGenTimer() {
@@ -2528,6 +2608,7 @@ function applyOptionState(key, value, options = {}) {
   if (key === 'prompt_fixed') {
     btnRnd.disabled = next;
     btnRnd.style.opacity = next ? '0.4' : '';
+    updateGenerateButtonMode();
   }
   if (key === 'prompt_fixed' || key === 'wildcard_standalone') {
     syncRatingBarVisibility();

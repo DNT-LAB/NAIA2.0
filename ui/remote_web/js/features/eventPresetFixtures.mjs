@@ -582,12 +582,12 @@ export const EVENT_PRESET_FIXTURE_STATE = {
   selected: {
     ratingId: 's',
     personId: 'solo',
-    search: 'holding',
-    categoryId: 'combat',
-    subcategoryId: 'combat-ranged-weapon',
-    eventId: 'firing',
-    comboId: 'firing-aiming',
-    recommendedTagIds: ['aiming-at-viewer', 'muzzle-flash'],
+    search: '',
+    categoryId: '',
+    subcategoryId: '',
+    eventId: '',
+    comboId: '',
+    recommendedTagIds: [],
   },
 };
 

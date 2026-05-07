@@ -19,6 +19,7 @@ import threading
 import uuid
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -41,6 +42,9 @@ from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_re
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
 from core.tag_search_index import TagSearchIndex, normalize_search_query
+from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
+from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
+from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
 
 
 # ---------------------------------------------------------------------------
@@ -280,8 +284,23 @@ class RemoteBridge(QObject):
             "updated_at": "",
         }
         self._ensure_artist_thumb_state()
-        self._character_viewer_service = CharacterViewerService(Path(__file__).resolve().parent.parent)
-        self._event_preset_service = EventPresetService(Path(__file__).resolve().parent.parent)
+        self._repo_root = Path(__file__).resolve().parent.parent
+        self._character_viewer_service = CharacterViewerService(self._repo_root)
+        self._event_preset_service = EventPresetService(self._repo_root)
+        self._event_preset_download_lock = threading.RLock()
+        self._event_preset_download_thread: Optional[threading.Thread] = None
+        self._event_preset_download_cancel = threading.Event()
+        self._event_preset_download_state = {
+            "active": False,
+            "phase": "",
+            "percent": 0,
+            "downloaded_mb": 0.0,
+            "total_mb": 0.0,
+            "message": "",
+            "error": "",
+            "done": False,
+            "updated_at": "",
+        }
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -2044,6 +2063,215 @@ class RemoteBridge(QObject):
             message = f"다운로드 실패: {e}"
             self._set_artist_thumb_download_state(active=False, mode=mode, message=message, error=message, done=False)
 
+    def _event_preset_download_snapshot(self) -> dict:
+        with self._event_preset_download_lock:
+            state = dict(self._event_preset_download_state)
+        try:
+            state["availability"] = self._event_preset_service.status().get("dataAvailability", {})
+        except Exception:
+            state["availability"] = {}
+        return state
+
+    def _set_event_preset_download_state(self, **updates) -> dict:
+        with self._event_preset_download_lock:
+            self._event_preset_download_state.update(updates)
+            self._event_preset_download_state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            return dict(self._event_preset_download_state)
+
+    def _start_event_preset_download(self) -> dict:
+        status = self._event_preset_service.status()
+        availability = status.get("dataAvailability", {}) if isinstance(status, dict) else {}
+        if availability.get("main") == "ready" and availability.get("thumbnails") == "ready":
+            return self._set_event_preset_download_state(
+                active=False,
+                phase="complete",
+                percent=100,
+                downloaded_mb=0.0,
+                total_mb=0.0,
+                message="Event Preset 데이터가 이미 설치되어 있습니다.",
+                error="",
+                done=True,
+            )
+        with self._event_preset_download_lock:
+            if self._event_preset_download_state.get("active"):
+                return dict(self._event_preset_download_state)
+            self._event_preset_download_cancel.clear()
+            self._event_preset_download_state.update({
+                "active": True,
+                "phase": "main",
+                "percent": 0,
+                "downloaded_mb": 0.0,
+                "total_mb": 0.0,
+                "message": "다운로드 준비 중...",
+                "error": "",
+                "done": False,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            })
+            worker = threading.Thread(
+                target=self._run_event_preset_download,
+                daemon=True,
+                name="event-preset-download",
+            )
+            self._event_preset_download_thread = worker
+            worker.start()
+            return dict(self._event_preset_download_state)
+
+    def _cancel_event_preset_download(self) -> dict:
+        state = self._event_preset_download_snapshot()
+        if state.get("active"):
+            self._event_preset_download_cancel.set()
+            return self._set_event_preset_download_state(message="다운로드 취소 중...")
+        return state
+
+    def _run_event_preset_download(self):
+        main_path = self._repo_root / "ui" / "event_preset" / "naia_prompt_preset"
+        thumb_path = self._repo_root / "data" / "event_preset_thumbnail"
+        try:
+            if not main_path.exists() or not self._validate_event_preset_zip(main_path):
+                self._download_event_preset_file(
+                    phase="main",
+                    target_path=main_path,
+                    url=EVENT_PRESET_DOWNLOAD_URL,
+                    user_agent="NAIA/2.0.0 EventPreset Module",
+                    validator=self._validate_event_preset_zip,
+                    invalid_message="다운로드된 Event Preset 데이터가 손상되었습니다.",
+                )
+            else:
+                self._set_event_preset_download_state(
+                    phase="main",
+                    percent=100,
+                    message="Event Preset 데이터가 이미 존재합니다.",
+                )
+
+            if not thumb_path.exists() or thumb_path.stat().st_size < 1_000_000:
+                self._download_event_preset_file(
+                    phase="thumbnail",
+                    target_path=thumb_path,
+                    url=EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL,
+                    user_agent="NAIA/2.0.0 EventPreset Thumbnail",
+                    validator=lambda path: path.exists() and path.stat().st_size >= 1_000_000,
+                    invalid_message="다운로드된 썸네일 데이터가 손상되었습니다.",
+                )
+            else:
+                self._set_event_preset_download_state(
+                    phase="thumbnail",
+                    percent=100,
+                    message="썸네일 데이터가 이미 존재합니다.",
+                )
+
+            self._event_preset_service = EventPresetService(self._repo_root)
+            self._set_event_preset_download_state(
+                active=False,
+                phase="complete",
+                percent=100,
+                message="Event Preset 데이터 다운로드 완료",
+                error="",
+                done=True,
+            )
+        except InterruptedError as e:
+            self._set_event_preset_download_state(
+                active=False,
+                message=str(e),
+                error=str(e),
+                done=False,
+            )
+        except urllib.error.HTTPError as e:
+            message = f"HTTP 오류 {e.code}: {e.reason}"
+            self._set_event_preset_download_state(active=False, message=message, error=message, done=False)
+        except urllib.error.URLError as e:
+            message = f"네트워크 오류: {e.reason}"
+            self._set_event_preset_download_state(active=False, message=message, error=message, done=False)
+        except Exception as e:
+            message = f"다운로드 실패: {e}"
+            self._set_event_preset_download_state(active=False, message=message, error=message, done=False)
+
+    def _download_event_preset_file(
+        self,
+        *,
+        phase: str,
+        target_path: Path,
+        url: str,
+        user_agent: str,
+        validator,
+        invalid_message: str,
+    ) -> None:
+        temp_path = target_path.with_name(target_path.name + ".download_tmp")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if temp_path.exists():
+            temp_path.unlink()
+        if target_path.exists() and not validator(target_path):
+            target_path.unlink()
+
+        self._set_event_preset_download_state(
+            phase=phase,
+            percent=5,
+            downloaded_mb=0.0,
+            total_mb=0.0,
+            message="다운로드 연결 중...",
+        )
+        request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+        try:
+            with urllib.request.urlopen(request, timeout=30, context=EVENT_PRESET_SSL_CONTEXT) as response:
+                total_size = int(response.headers.get("content-length", 0) or 0)
+                total_mb = round(total_size / (1024 * 1024), 1) if total_size else 0.0
+                downloaded = 0
+                last_update = 0.0
+                with temp_path.open("wb") as out_file:
+                    while True:
+                        if self._event_preset_download_cancel.is_set():
+                            raise InterruptedError("다운로드가 취소되었습니다.")
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out_file.write(chunk)
+                        downloaded += len(chunk)
+                        now = time.time()
+                        if now - last_update >= 0.25:
+                            percent = min(90, 10 + int((downloaded * 80) / total_size)) if total_size else 10
+                            downloaded_mb = round(downloaded / (1024 * 1024), 1)
+                            message = (
+                                f"다운로드 중... {percent}% ({downloaded_mb}/{total_mb} MB)"
+                                if total_size else f"다운로드 중... {downloaded_mb} MB"
+                            )
+                            self._set_event_preset_download_state(
+                                percent=percent,
+                                downloaded_mb=downloaded_mb,
+                                total_mb=total_mb,
+                                message=message,
+                            )
+                            last_update = now
+
+            self._set_event_preset_download_state(percent=92, message="검증 중...")
+            if not validator(temp_path):
+                raise ValueError(invalid_message)
+            temp_path.replace(target_path)
+            size_mb = round(target_path.stat().st_size / (1024 * 1024), 1)
+            self._set_event_preset_download_state(
+                percent=100,
+                downloaded_mb=size_mb,
+                total_mb=size_mb,
+                message="설치 완료",
+            )
+        except Exception:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+            raise
+
+    @staticmethod
+    def _validate_event_preset_zip(path: Path) -> bool:
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                names = set(zf.namelist())
+                return (
+                    "base/event_taxonomy_v2_1.parquet" in names
+                    and "base/tag_catalog.parquet" in names
+                )
+        except (zipfile.BadZipFile, OSError, Exception):
+            return False
+
     def _artist_thumb_artist_weights(self) -> dict:
         try:
             from artist_dictionary import artist_dict
@@ -3130,7 +3358,9 @@ class RemoteBridge(QObject):
     # --- Event Preset service ---
 
     def _event_preset_status(self) -> dict:
-        return self._event_preset_service.status()
+        status = self._event_preset_service.status()
+        status["download"] = self._event_preset_download_snapshot()
+        return status
 
     def _event_preset_bootstrap(
         self,
@@ -3142,7 +3372,7 @@ class RemoteBridge(QObject):
         event_id: str = "",
         limit: int | None = None,
     ) -> dict:
-        return self._event_preset_service.bootstrap(
+        payload = self._event_preset_service.bootstrap(
             rating_id,
             person_id,
             search,
@@ -3151,6 +3381,8 @@ class RemoteBridge(QObject):
             event_id,
             limit,
         )
+        payload["download"] = self._event_preset_download_snapshot()
+        return payload
 
     def _event_preset_select(self, payload: dict) -> dict:
         return self._event_preset_service.select(payload if isinstance(payload, dict) else {})
@@ -3177,7 +3409,10 @@ class RemoteBridge(QObject):
             "source_row": source_row,
             "active_ratings": active_ratings,
             "event_preset_request_id": request_id,
-            "overrides": {"event_preset_request": True},
+            "overrides": {
+                "event_preset_request": True,
+                "event_preset_request_id": request_id,
+            },
         })
         self.request_random.emit()
         return {
@@ -5941,6 +6176,18 @@ class RemoteBridge(QObject):
         if self._has_clients():
             self._broadcast_json({"type": "status", "is_generating": True})
             self._broadcast_queue_state()
+
+    def on_generation_error(self, data=None):
+        """Generation error event -> clear scoped Remote Web pending state."""
+        payload = data if isinstance(data, dict) else {}
+        if not payload.get("event_preset_request"):
+            return
+        self._broadcast_json({
+            "type": "event_preset_generation_error",
+            "requestId": str(payload.get("event_preset_request_id") or ""),
+            "message": str(payload.get("message") or "Event Preset generation failed"),
+        })
+        self._broadcast_json({"type": "status", "is_generating": False})
 
     # --- 모듈 상태 (Qt 메인 스레드에서 실행) ---
 
@@ -10635,16 +10882,39 @@ class RemoteBridge(QObject):
 
             # === 기존 ws 기반 auto_generate 처리 ===
             # _pending_overrides에서 auto_generate=True인 항목 찾아 소비
-            auto_ws = None
-            for ws_key, pending in list(self._pending_overrides.items()):
-                if pending.get("auto_generate"):
-                    auto_ws = ws_key
-                    break
+            prompt_source_row = getattr(prompt_context, "source_row", None)
+            prompt_source_name = str(getattr(prompt_source_row, "name", "") or "")
+            prompt_event_preset_request_id = ""
+            if prompt_source_name.startswith("event_preset:"):
+                prompt_event_preset_request_id = prompt_source_name.split(":", 1)[1]
 
-            source = "random"  # 기본값 (메인 UI에서 직접 트리거 시)
+            auto_ws = None
+            if prompt_event_preset_request_id:
+                event_key = ("event_preset", prompt_event_preset_request_id)
+                if event_key in self._pending_overrides:
+                    auto_ws = event_key
+            if auto_ws is None and not prompt_event_preset_request_id:
+                for ws_key, pending in list(self._pending_overrides.items()):
+                    if (
+                        isinstance(ws_key, tuple)
+                        and len(ws_key) == 2
+                        and ws_key[0] == "event_preset"
+                    ):
+                        continue
+                    if pending.get("auto_generate"):
+                        auto_ws = ws_key
+                        break
+
+            source = "event_preset" if prompt_event_preset_request_id else "random"
+            event_preset_request_id = prompt_event_preset_request_id
             if auto_ws:
                 pending = self._pending_overrides.pop(auto_ws, {})
                 source = pending.get("source", "random")
+                event_preset_request_id = str(
+                    pending.get("event_preset_request_id")
+                    or event_preset_request_id
+                    or ""
+                )
                 pending_neg = pending.get("negative")
                 pending_params = pending.get("params")
                 # seed_fixed가 아닌 경우 → 랜덤 시드로 교체
@@ -10664,9 +10934,21 @@ class RemoteBridge(QObject):
                     gc.execute_generation_pipeline(overrides=pending_params, priority=0)
                     self._broadcast_json({"type": "status", "is_generating": True})
                     print("🌐 Remote: 자동생성 트리거됨")
+                elif source == "event_preset" and event_preset_request_id:
+                    self._broadcast_json({
+                        "type": "event_preset_generation_error",
+                        "requestId": event_preset_request_id,
+                        "message": "Event Preset generation skipped because generation is already running.",
+                    })
             else:
                 # auto_generate 아닌 pending (generate 등) → source만 추출
                 for ws_key, pending in list(self._pending_overrides.items()):
+                    if (
+                        isinstance(ws_key, tuple)
+                        and len(ws_key) == 2
+                        and ws_key[0] == "event_preset"
+                    ):
+                        continue
                     if pending.get("source"):
                         source = pending.pop("source")
                         if not pending:  # 빈 dict면 제거
@@ -10684,6 +10966,8 @@ class RemoteBridge(QObject):
             if self._loop and self._ws_manager:
                 data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining,
                         "source": source, "rating_counts": rating_counts}
+                if event_preset_request_id:
+                    data["event_preset_request_id"] = event_preset_request_id
                 data.update(self._build_prompt_token_payload(prompt, None))
                 asyncio.run_coroutine_threadsafe(
                     self._ws_manager.broadcast_json(data),
@@ -10790,6 +11074,8 @@ class RemoteBridge(QObject):
                     str(character_viewer_thumbnail.get("url") or "")
                     if isinstance(character_viewer_thumbnail, dict) else ""
                 ),
+                "event_preset_request": bool(gen_params.get("event_preset_request")),
+                "event_preset_request_id": str(gen_params.get("event_preset_request_id") or ""),
                 "remote_queue_source": str(gen_params.get("_remote_queue_source") or ""),
             }
 
@@ -11657,6 +11943,27 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return await asyncio.to_thread(bridge._event_preset_status)
         except Exception as e:
             return JSONResponse({"error": f"Event Preset status failed: {e}"}, status_code=500)
+
+    @app.get("/api/event-preset/download")
+    async def api_event_preset_download_state():
+        try:
+            return await asyncio.to_thread(bridge._event_preset_download_snapshot)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset download state failed: {e}"}, status_code=500)
+
+    @app.post("/api/event-preset/download")
+    async def api_event_preset_download():
+        try:
+            return await asyncio.to_thread(bridge._start_event_preset_download)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset download failed: {e}"}, status_code=500)
+
+    @app.post("/api/event-preset/download/cancel")
+    async def api_event_preset_download_cancel():
+        try:
+            return await asyncio.to_thread(bridge._cancel_event_preset_download)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset download cancel failed: {e}"}, status_code=500)
 
     @app.get("/api/event-preset/bootstrap")
     async def api_event_preset_bootstrap(
@@ -12656,6 +12963,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
 
     # AppContext 이벤트 구독
     app_context.subscribe("generation_result_available", bridge.on_generation_result)
+    app_context.subscribe("generation_error", bridge.on_generation_error)
     app_context.subscribe("result_enhance_completed", bridge.on_result_enhance_completed)
     app_context.subscribe("result_enhance_config_changed", bridge.on_result_enhance_config_changed)
     app_context.subscribe("prompt_generated", bridge.on_prompt_generated)
@@ -12839,7 +13147,7 @@ def stop_remote_server():
             mw = ctx.main_window
 
             # AppContext 이벤트 구독 해제
-            for event_name in ["generation_result_available", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "prompt_preset_loaded", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed", "comfyui_workflow_changed"]:
+            for event_name in ["generation_result_available", "generation_error", "result_enhance_completed", "result_enhance_config_changed", "prompt_generated", "api_mode_changed", "prompt_preset_loaded", "generation_started", "image_saved", "desktop_window_visibility_changed", "cloudflared_status_changed", "save_directory_changed", "comfyui_workflow_changed"]:
                 if event_name in ctx.subscribers:
                     ctx.subscribers[event_name] = [
                         cb for cb in ctx.subscribers[event_name]

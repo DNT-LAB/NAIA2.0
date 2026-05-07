@@ -2572,9 +2572,10 @@ async function randomizeFromPresetTab() {
   }
   btnRnd.disabled = true;
   try {
+    const shouldGenerate = getOptionChecked('auto_generate');
     const changed = await eventPresetPanel?.randomizeCurrentCategory?.();
     if (!changed) showToast('랜덤 선택 가능한 Event Preset이 없습니다.', 'error');
-    else await generateFromPresetTab();
+    else if (shouldGenerate) await generateFromPresetTab();
   } catch (error) {
     showToast(error?.message || 'Event Preset 랜덤 생성에 실패했습니다.', 'error');
   } finally {

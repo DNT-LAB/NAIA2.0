@@ -2477,8 +2477,12 @@ function send(cmd) {
     });
     return;
   }
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (cmd === 'random') {
+    if (activePromptTab === 'preset') {
+      void randomizeFromPresetTab();
+      return;
+    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     btnRnd.disabled = true;
     awaitingMyRandom = true;
     // 타임아웃 안전망: 일반 응답은 0.2초 내외이므로 2초면 충분합니다.
@@ -2491,6 +2495,7 @@ function send(cmd) {
     ws.send(JSON.stringify({type: 'random', ratings: getActiveRatings()}));
     return;
   }
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(cmd);
 }
 
@@ -2523,6 +2528,11 @@ function updateGenerateButtonMode() {
   if (!btnGen) return;
   const presetMode = activePromptTab === 'preset';
   btnGen.classList.toggle('preset-mode', presetMode);
+  if (btnRnd) {
+    btnRnd.disabled = presetMode
+      ? (getOptionChecked('prompt_fixed') || !!presetGenerationPending || generating || !eventPresetPanel?.canRandomize?.())
+      : awaitingMyRandom;
+  }
   if (!generating) {
     const promptFixed = getOptionChecked('prompt_fixed');
     btnGen.disabled = presetMode
@@ -2553,6 +2563,23 @@ async function generateFromPresetTab() {
   if (requested?.requestId) presetGenerationPending = {requestId: requested.requestId};
   else presetGenerationPending = null;
   updateGenerateButtonMode();
+}
+
+async function randomizeFromPresetTab() {
+  if (getOptionChecked('prompt_fixed') || !!presetGenerationPending || generating) {
+    updateGenerateButtonMode();
+    return;
+  }
+  btnRnd.disabled = true;
+  try {
+    const changed = await eventPresetPanel?.randomizeCurrentCategory?.();
+    if (!changed) showToast('랜덤 선택 가능한 Event Preset이 없습니다.', 'error');
+    else await generateFromPresetTab();
+  } catch (error) {
+    showToast(error?.message || 'Event Preset 랜덤 생성에 실패했습니다.', 'error');
+  } finally {
+    updateGenerateButtonMode();
+  }
 }
 
 function onEventPresetGenerationError(message = {}) {

@@ -147,6 +147,8 @@ export function createEventPresetPanel({
     generatePending: false,
     generating: false,
     download: viewData.download || {},
+    promptText: '',
+    promptDirty: false,
   };
   let bootstrapRequestSeq = 0;
   let selectRequestSeq = 0;
@@ -199,7 +201,7 @@ export function createEventPresetPanel({
   }
 
   function selectedPayload() {
-    return {
+    const payload = {
       requestId: `event-preset-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       ratingId: state.ratingId,
       personId: state.personId,
@@ -210,6 +212,13 @@ export function createEventPresetPanel({
       search: state.search,
       recommendedTagIds: Array.from(state.recommendedTagIds),
     };
+    if (state.promptDirty) payload.promptOverride = promptPreview();
+    return payload;
+  }
+
+  function randomIndex(length) {
+    if (!length) return -1;
+    return Math.floor(Math.random() * length);
   }
 
   const PERSON_TAGS = {
@@ -656,6 +665,45 @@ export function createEventPresetPanel({
     state.eventId = context.event.id;
     state.comboId = context.event.observedCombos?.[0]?.id || '';
     setRecommendedTagIds(context.event.recommendedTags?.slice(0, 2).map(tag => tag.id) || []);
+    state.promptDirty = false;
+    syncPromptText({force: true});
+  }
+
+  async function selectRandomPresetInCategory() {
+    if (!dataReady()) return false;
+    const category = findCategory(state.categoryId);
+    const rows = visibleEventContexts(category);
+    if (!rows.length) return false;
+    const context = rows[randomIndex(rows.length)];
+    if (!context?.event) return false;
+    selectContext(context);
+    state.selectionLoading = true;
+    renderAll({preserveScroll: true});
+    try {
+      const payload = await provider.select(selectedPayload());
+      applySelectedPayload(payload.selected || {});
+      mergeEventDetail(payload.event);
+    } catch (error) {
+      state.selectionLoading = false;
+      renderAll({preserveScroll: true});
+      showToast?.(error?.message || 'Event Preset 선택 데이터를 불러오지 못했습니다.', 'error');
+      return false;
+    }
+    const selectedEvent = selectedContext().event;
+    const combos = selectedEvent?.observedCombos || [];
+    if (combos.length) state.comboId = combos[randomIndex(combos.length)]?.id || state.comboId;
+    state.promptDirty = false;
+    syncPromptText({force: true});
+    state.selectionLoading = false;
+    renderAll({preserveScroll: true});
+    focusEventRow(selectedEvent?.id || context.event.id);
+    resetAssistListScroll();
+    return true;
+  }
+
+  function canRandomizeCurrentPreset() {
+    if (!dataReady()) return false;
+    return visibleEventContexts(findCategory(state.categoryId)).length > 0;
   }
 
   function ensureVisibleSelection() {
@@ -764,7 +812,7 @@ export function createEventPresetPanel({
     return result;
   }
 
-  function promptPreview() {
+  function computedPromptPreview() {
     const {event} = selectedContext();
     if (!event) return '';
     const combo = currentCombo(event);
@@ -774,6 +822,14 @@ export function createEventPresetPanel({
       ...selectedRecommendedTags(event).map(tag => tag.tag),
       RATING_TAGS[state.ratingId] || '',
     ]).join(', ');
+  }
+
+  function syncPromptText({force = false} = {}) {
+    if (force || !state.promptDirty) state.promptText = computedPromptPreview();
+  }
+
+  function promptPreview() {
+    return (state.promptDirty ? state.promptText : computedPromptPreview()).trim();
   }
 
   function recommendationGroupClass(group) {
@@ -877,32 +933,16 @@ export function createEventPresetPanel({
   }
 
   function renderSelection() {
-    const selected = root.querySelector('[data-ep-selected-chips]');
     const preview = root.querySelector('[data-ep-prompt-preview]');
-    const {category, event} = selectedContext();
-    const combo = currentCombo(event);
-    if (selected) {
-      const parts = [
-        {text: (viewData.ratings || []).find(rating => rating.id === state.ratingId)?.label},
-        {text: (viewData.persons || []).find(person => person.id === state.personId)?.label},
-        {text: category?.label},
-        {text: event?.tag, tag: event?.tag},
-        {text: combo?.label, prompt: comboPromptText(combo)},
-      ].filter(Boolean);
-      selected.innerHTML = parts
-        .filter(part => part.text || part.prompt)
-        .map(part => {
-          const content = part.prompt
-            ? renderPromptTagTokens(part.prompt)
-            : (part.tag ? renderTagToken(part.tag, 'event-preset-selected-tag') : escapeHtml(part.text));
-          return `<span class="event-preset-selected-chip">${content}</span>`;
-        }).join('');
-    }
+    syncPromptText();
     if (preview) {
       const fallback = state.selectionLoading
         ? '선택 데이터를 불러오는 중입니다.'
         : (!dataReady() ? (state.dataMessage || 'Event Preset data is not ready.') : 'Select an event preset.');
-      preview.textContent = promptPreview() || fallback;
+      const nextValue = state.promptText || '';
+      if (document.activeElement !== preview && preview.value !== nextValue) preview.value = nextValue;
+      preview.placeholder = fallback;
+      preview.disabled = !dataReady();
     }
     if (typeof onGenerateStateChange === 'function') onGenerateStateChange(canGenerateCurrentPreset());
   }
@@ -1208,6 +1248,7 @@ export function createEventPresetPanel({
     if (action === 'rating') {
       state.ratingId = id;
       state.searchShowAll = state.search.trim().length >= MIN_SEARCH_LENGTH;
+      state.promptDirty = false;
       shouldBootstrap = true;
     } else if (action === 'category') {
       state.categoryId = id;
@@ -1221,15 +1262,21 @@ export function createEventPresetPanel({
       shouldResetAssistScroll = true;
     } else if (action === 'combo') {
       state.comboId = id;
+      state.promptDirty = false;
+      syncPromptText({force: true});
       shouldSelect = provider.mode === 'server';
     } else if (action === 'assist-tab') {
       state.assistTab = id || 'combos';
     } else if (action === 'recommended') {
       if (state.recommendedTagIds.has(String(id))) state.recommendedTagIds.delete(String(id));
       else state.recommendedTagIds.add(id);
+      state.promptDirty = false;
+      syncPromptText({force: true});
       shouldSelect = provider.mode === 'server';
     } else if (action === 'clear-recommended') {
       state.recommendedTagIds = new Set();
+      state.promptDirty = false;
+      syncPromptText({force: true});
       shouldSelect = provider.mode === 'server';
     } else if (action === 'clear-search') {
       state.search = '';
@@ -1257,11 +1304,20 @@ export function createEventPresetPanel({
     scheduleBootstrap();
   }
 
+  function handlePromptInput(event) {
+    const input = event.target.closest('[data-ep-prompt-preview]');
+    if (!input) return;
+    state.promptText = input.value || '';
+    state.promptDirty = true;
+    if (typeof onGenerateStateChange === 'function') onGenerateStateChange(canGenerateCurrentPreset());
+  }
+
   function handleChange(event) {
     const person = event.target.closest('[data-ep-person]');
     if (!person) return;
     state.personId = person.value || '1girl_solo';
     state.searchShowAll = state.search.trim().length >= MIN_SEARCH_LENGTH;
+    state.promptDirty = false;
     renderAll();
     loadBootstrap({showLoading: provider.mode === 'server'});
   }
@@ -1340,8 +1396,10 @@ export function createEventPresetPanel({
         <section class="event-preset-event-pane" data-ep-event-table></section>
       </div>
       <section class="event-preset-footer">
-        <div class="event-preset-selected-chips" data-ep-selected-chips></div>
-        <div class="event-preset-preview-text" data-ep-prompt-preview></div>
+        <textarea class="event-preset-preview-text"
+                  data-ep-prompt-preview
+                  spellcheck="false"
+                  autocomplete="off"></textarea>
       </section>
       <section class="event-preset-download-overlay" data-ep-download-overlay aria-hidden="true" hidden></section>
     `;
@@ -1355,6 +1413,7 @@ export function createEventPresetPanel({
   root.addEventListener('click', () => { if (state.activeTab) showOverlay(); });
   root.addEventListener('focusin', () => { if (state.activeTab) showOverlay(); });
   root.addEventListener('input', handleSearchInput);
+  root.addEventListener('input', handlePromptInput);
   root.addEventListener('change', handleChange);
   root.addEventListener('keydown', handleEventListKeydown);
   root.addEventListener('pointerover', handleTagInfoPointerOver);
@@ -1412,6 +1471,8 @@ export function createEventPresetPanel({
     focusResultImage,
     generateCurrentPreset,
     canGenerate: canGenerateCurrentPreset,
+    canRandomize: canRandomizeCurrentPreset,
+    randomizeCurrentCategory: selectRandomPresetInCategory,
     setGeneratingStatus(generating) {
       state.generating = !!generating;
       renderSelection();

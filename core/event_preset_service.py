@@ -351,6 +351,9 @@ class EventPresetService:
             rating=rating,
             person=person,
         )
+        prompt_override = str(payload.get("promptOverride") or "").strip()
+        if prompt_override:
+            prompt = prompt_override
         if not prompt:
             raise ValueError("Event Preset prompt is empty.")
         source_row = {

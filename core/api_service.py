@@ -12,6 +12,10 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QCoreApplication, QThreadPool
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
+from core.resolution_utils import (
+    apply_resolution_to_comfyui_workflow,
+    normalize_artist_thumbnail_resolution,
+)
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 if TYPE_CHECKING:
@@ -174,6 +178,26 @@ class APIService:
                 print(f"   - 정리된 프롬프트: '{cleaned_tags_prompt[:100]}...'")
 
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
+
+        if parameters.get('artist_thumb_request') and parameters.get('image_bytes') is None:
+            try:
+                changed, original, normalized = normalize_artist_thumbnail_resolution(parameters)
+                if changed:
+                    print(
+                        f"🛡️ [ArtistThumb] API 진입 전 해상도 보정: "
+                        f"{original[0]}x{original[1]} -> {normalized[0]}x{normalized[1]}"
+                    )
+                    workflow = parameters.get("workflow")
+                    if api_mode == "COMFYUI" and isinstance(workflow, dict):
+                        patched = apply_resolution_to_comfyui_workflow(
+                            workflow,
+                            normalized[0],
+                            normalized[1],
+                        )
+                        if patched:
+                            print(f"🛡️ [ArtistThumb] ComfyUI workflow latent 해상도 {patched}개 갱신")
+            except Exception as e:
+                print(f"⚠️ [ArtistThumb] API 해상도 보정 실패: {e}")
 
         # Auto-Outpainting 인터셉트 (API 모드 분기 전에 처리)
         if parameters.get('type') == 'auto_outpainting':

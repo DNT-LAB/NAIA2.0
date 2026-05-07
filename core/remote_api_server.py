@@ -42,6 +42,12 @@ from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_re
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
 from core.tag_search_index import TagSearchIndex, normalize_search_query
+from core.resolution_utils import (
+    MAX_1MP_PIXELS,
+    STANDARD_1MP_RESOLUTIONS,
+    nearest_standard_1mp_resolution,
+    parse_resolution_pair,
+)
 from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
 from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
 from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
@@ -2322,35 +2328,21 @@ class RemoteBridge(QObject):
         return Path("artist_thumb") / "favorite_thumbnail_cache.json"
 
     def _parse_resolution_pair(self, value) -> tuple[int, int] | None:
-        match = re.search(r"(\d+)\s*x\s*(\d+)", str(value or ""))
-        if not match:
-            return None
-        try:
-            width = int(match.group(1))
-            height = int(match.group(2))
-        except (TypeError, ValueError):
-            return None
-        if width <= 0 or height <= 0:
-            return None
-        return width, height
+        return parse_resolution_pair(value)
 
-    def _resolution_allowed_for_current_mode(self, width: int, height: int) -> bool:
+    def _artist_thumb_resolution_allowed(self, width: int, height: int) -> bool:
         if width <= 0 or height <= 0:
             return False
-        if str(self._current_api_mode() or "").upper() != "NAI":
-            return True
         if width % 64 != 0 or height % 64 != 0:
             return False
-        return width * height <= 1024 * 1024
+        return width * height <= MAX_1MP_PIXELS
 
     def _artist_thumb_resolution_options(self) -> list[tuple[int, int]]:
-        defaults = [
-            (1024, 1024), (960, 1088), (896, 1152), (832, 1216),
-            (1088, 960), (1152, 896), (1216, 832),
-        ]
+        defaults = list(STANDARD_1MP_RESOLUTIONS)
         mw = getattr(self.app_context, "main_window", None)
         combo = getattr(mw, "resolution_combo", None)
         options = []
+        seen = set()
         try:
             count = combo.count() if combo is not None else 0
         except Exception:
@@ -2360,67 +2352,24 @@ class RemoteBridge(QObject):
                 pair = self._parse_resolution_pair(combo.itemText(index))
             except Exception:
                 pair = None
-            if pair and self._resolution_allowed_for_current_mode(*pair):
+            if pair:
+                pair = nearest_standard_1mp_resolution(*pair)
+            if pair and self._artist_thumb_resolution_allowed(*pair) and pair not in seen:
                 options.append(pair)
+                seen.add(pair)
         if not options:
-            options = [pair for pair in defaults if self._resolution_allowed_for_current_mode(*pair)]
+            options = [pair for pair in defaults if self._artist_thumb_resolution_allowed(*pair)]
         return options or [(832, 1216)]
 
     def _artist_thumb_random_resolution(self) -> tuple[int, int, str]:
         width, height = random.SystemRandom().choice(self._artist_thumb_resolution_options())
         return width, height, "random"
 
-    def _fit_nai_resolution_to_limits(self, width: int, height: int) -> tuple[int, int]:
-        """비율을 유지하면서 NAI 허용 범위 안의 64배수 해상도로 보정합니다."""
-        width = max(1, int(width))
-        height = max(1, int(height))
-        multiple_of = 64
-        max_pixels = 1024 * 1024
-
-        def snap_nearest(value: float) -> int:
-            return max(multiple_of, int(round(value / multiple_of)) * multiple_of)
-
-        def snap_floor(value: float) -> int:
-            return max(multiple_of, int(value // multiple_of) * multiple_of)
-
-        if width * height > max_pixels:
-            scale = math.sqrt(max_pixels / float(width * height))
-            fit_width = snap_floor(width * scale)
-            fit_height = snap_floor(height * scale)
-        else:
-            fit_width = snap_nearest(width)
-            fit_height = snap_nearest(height)
-
-        if fit_width * fit_height > max_pixels:
-            if fit_width >= fit_height:
-                limit = (max_pixels // fit_height // multiple_of) * multiple_of
-                fit_width = max(multiple_of, limit)
-            else:
-                limit = (max_pixels // fit_width // multiple_of) * multiple_of
-                fit_height = max(multiple_of, limit)
-
-        while fit_width * fit_height > max_pixels and (fit_width > multiple_of or fit_height > multiple_of):
-            if fit_width >= fit_height and fit_width > multiple_of:
-                fit_width -= multiple_of
-            elif fit_height > multiple_of:
-                fit_height -= multiple_of
-            else:
-                break
-
-        return fit_width, fit_height
-
     def _coerce_artist_thumb_resolution(self, width, height) -> tuple[int, int]:
-        try:
-            pair = (int(width), int(height))
-        except (TypeError, ValueError):
-            pair = (832, 1216)
-        if pair[0] <= 0 or pair[1] <= 0:
-            pair = (832, 1216)
-        if self._resolution_allowed_for_current_mode(*pair):
+        pair = nearest_standard_1mp_resolution(width, height)
+        if self._artist_thumb_resolution_allowed(*pair):
             return pair
-        if str(self._current_api_mode() or "").upper() == "NAI":
-            return self._fit_nai_resolution_to_limits(*pair)
-        return pair
+        return (832, 1216)
 
     def _normalize_artist_thumb_values(self, values) -> list[str]:
         seen = set()
@@ -10847,7 +10796,7 @@ class RemoteBridge(QObject):
                             h = int(src_row["image_height"])
                             if w > 0 and h > 0:
                                 fitted_w, fitted_h = self._coerce_artist_thumb_resolution(w, h)
-                                if self._resolution_allowed_for_current_mode(fitted_w, fitted_h):
+                                if self._artist_thumb_resolution_allowed(fitted_w, fitted_h):
                                     cf_width, cf_height = fitted_w, fitted_h
                                     cf_res_source = "detected" if (fitted_w, fitted_h) == (w, h) else "detected_fit"
                         except (ValueError, TypeError):

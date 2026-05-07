@@ -1463,7 +1463,7 @@ def test_artist_thumb_state_rejects_corrupt_json_without_legacy_overwrite(tmp_pa
     assert Path("wildcards/favorite_artist.txt").read_text(encoding="utf-8") == "a\n"
 
 
-def test_artist_thumb_random_resolution_filters_unsafe_nai_sizes(tmp_path, monkeypatch):
+def test_artist_thumb_random_resolution_normalizes_to_standard_1mp_sizes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())
     bridge.app_context.main_window = SimpleNamespace(
@@ -1475,16 +1475,20 @@ def test_artist_thumb_random_resolution_filters_unsafe_nai_sizes(tmp_path, monke
         ])
     )
 
-    assert bridge._artist_thumb_resolution_options() == [(832, 1216)]
+    assert bridge._artist_thumb_resolution_options() == [
+        (1024, 1024),
+        (896, 1152),
+        (832, 1216),
+    ]
     assert bridge._coerce_artist_thumb_resolution(4096, 4096) == (1024, 1024)
     assert bridge._coerce_artist_thumb_resolution(1000, 1000) == (1024, 1024)
     assert bridge._coerce_artist_thumb_resolution(4096, 6144) == (832, 1216)
-    assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (832, 1152)
-    assert bridge._coerce_artist_thumb_resolution(1, 100000) == (64, 16384)
-    assert bridge._coerce_artist_thumb_resolution(100000, 1) == (16384, 64)
+    assert bridge._coerce_artist_thumb_resolution(1536, 2048) == (896, 1152)
+    assert bridge._coerce_artist_thumb_resolution(1, 100000) == (832, 1216)
+    assert bridge._coerce_artist_thumb_resolution(100000, 1) == (1216, 832)
 
 
-def test_artist_thumb_random_prompt_fits_detected_nai_resolution(tmp_path, monkeypatch):
+def test_artist_thumb_random_prompt_fits_detected_resolution_to_standard_1mp(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctx = _AppContext()
     ctx.main_window = SimpleNamespace(
@@ -1545,7 +1549,7 @@ def test_artist_thumb_random_prompt_empty_source_fails_pending_request(tmp_path,
     assert ("comfyui", "req") not in bridge._pending_overrides
 
 
-def test_artist_thumb_generate_coerces_invalid_nai_resolution(tmp_path, monkeypatch):
+def test_artist_thumb_generate_coerces_invalid_resolution_to_standard_1mp(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctx = _AppContext()
     ctx.generation_queue_manager = _QueueManager(empty=True)

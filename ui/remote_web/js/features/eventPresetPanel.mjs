@@ -106,6 +106,7 @@ export function createEventPresetPanel({
   const viewer = document?.getElementById('resultViewer') || document?.querySelector('.viewer');
   const rightResultPane = document?.getElementById('rightTabResult');
   if (!root || !overlay) return null;
+  const MIN_SEARCH_LENGTH = 2;
 
   let viewData = createEventPresetFixtureState();
   const query = new URLSearchParams(document?.defaultView?.location?.search || '');
@@ -358,8 +359,16 @@ export function createEventPresetPanel({
       renderAll();
       return;
     }
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => loadBootstrap({showLoading: false}), 260);
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+    const query = state.search.trim();
+    if (query && query.length < MIN_SEARCH_LENGTH) return;
+    searchTimer = setTimeout(() => {
+      searchTimer = null;
+      loadBootstrap({showLoading: false});
+    }, 260);
   }
 
   async function refreshDownloadState({bootstrapOnDone = false} = {}) {
@@ -482,7 +491,7 @@ export function createEventPresetPanel({
   function eventMatchesSearch(context) {
     if (viewData.dataMode === 'real') return true;
     const query = state.search.trim().toLowerCase();
-    if (!query) return true;
+    if (!query || query.length < MIN_SEARCH_LENGTH) return true;
     const {category, subcategory, event} = context;
     const haystack = [
       category?.label,
@@ -508,9 +517,14 @@ export function createEventPresetPanel({
   }
 
   function currentEventContexts() {
-    return state.searchShowAll && state.search.trim()
+    return state.searchShowAll && state.search.trim().length >= MIN_SEARCH_LENGTH
       ? allVisibleEventContexts()
       : visibleEventContexts(findCategory());
+  }
+
+  function eventRowButton(eventId = state.eventId) {
+    return Array.from(root.querySelectorAll('[data-ep-action="event"]'))
+      .find(row => row.dataset.epId === eventId) || null;
   }
 
   function selectedContext() {
@@ -543,6 +557,13 @@ export function createEventPresetPanel({
     if (!visible.some(context => context.event.id === state.eventId)) {
       selectContext(visible[0]);
     }
+  }
+
+  function focusEventRow(eventId = state.eventId) {
+    const row = eventRowButton(eventId);
+    if (!row) return;
+    row.focus({preventScroll: true});
+    row.scrollIntoView({block: 'nearest'});
   }
 
   function currentCombo(event = selectedContext().event) {
@@ -737,7 +758,7 @@ export function createEventPresetPanel({
         <span>Events (${escapeHtml(title)})</span>
         <span>Count</span>
       </div>
-      <div class="event-preset-events-body">${body}</div>`;
+      <div class="event-preset-events-body" tabindex="0">${body}</div>`;
   }
 
   function renderSelection() {
@@ -1063,7 +1084,7 @@ export function createEventPresetPanel({
     if (state.activeTab) showOverlay();
     if (action === 'rating') {
       state.ratingId = id;
-      state.searchShowAll = !!state.search.trim();
+      state.searchShowAll = state.search.trim().length >= MIN_SEARCH_LENGTH;
       shouldBootstrap = true;
     } else if (action === 'category') {
       state.categoryId = id;
@@ -1107,7 +1128,7 @@ export function createEventPresetPanel({
     const input = event.target.closest('[data-ep-search]');
     if (!input) return;
     state.search = input.value || '';
-    state.searchShowAll = !!state.search.trim();
+    state.searchShowAll = state.search.trim().length >= MIN_SEARCH_LENGTH;
     renderAll();
     scheduleBootstrap();
   }
@@ -1116,9 +1137,32 @@ export function createEventPresetPanel({
     const person = event.target.closest('[data-ep-person]');
     if (!person) return;
     state.personId = person.value || '1girl_solo';
-    state.searchShowAll = !!state.search.trim();
+    state.searchShowAll = state.search.trim().length >= MIN_SEARCH_LENGTH;
     renderAll();
     loadBootstrap({showLoading: provider.mode === 'server'});
+  }
+
+  function handleEventListKeydown(event) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const target = event.target;
+    if (!target.closest?.('[data-ep-event-table]')) return;
+    const rows = currentEventContexts();
+    if (!rows.length) return;
+
+    event.preventDefault();
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const currentIndex = rows.findIndex(context => context.event.id === state.eventId);
+    const fallbackIndex = direction > 0 ? 0 : rows.length - 1;
+    const nextIndex = currentIndex < 0
+      ? fallbackIndex
+      : Math.max(0, Math.min(rows.length - 1, currentIndex + direction));
+    const nextContext = rows[nextIndex];
+    if (!nextContext?.event) return;
+
+    selectContext(nextContext);
+    renderAll({preserveScroll: true});
+    focusEventRow(nextContext.event.id);
+    loadSelection({showLoading: false, resetAssistScroll: true});
   }
 
   function renderShell() {
@@ -1162,6 +1206,7 @@ export function createEventPresetPanel({
   root.addEventListener('focusin', () => { if (state.activeTab) showOverlay(); });
   root.addEventListener('input', handleSearchInput);
   root.addEventListener('change', handleChange);
+  root.addEventListener('keydown', handleEventListKeydown);
   overlay.addEventListener('pointerdown', event => event.stopPropagation());
   overlay.addEventListener('click', event => {
     event.stopPropagation();

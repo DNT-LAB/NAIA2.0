@@ -379,6 +379,23 @@ class TaxonomyEngine:
         """검색어 기반 이벤트 필터링."""
         if not query.strip():
             return self.taxonomy["event_tag"].tolist()
+        q = norm_text(query)
+        # English Event Preset search should stay literal. Falling through to the
+        # taxonomy/search index can match categories or descriptions and surface
+        # unrelated tags, e.g. every pose_between event for "between".
+        if q.isascii():
+            return [
+                tag for tag in self.search_blob_map
+                if q in norm_text(tag)
+            ]
+
+        literal_matches = [
+            tag for tag, blob in self.search_blob_map.items()
+            if q in blob or q in norm_text(tag)
+        ]
+        if literal_matches:
+            return literal_matches
+
         if self._tag_search_index is not None:
             matches = self._tag_search_index.search_tags(
                 query,
@@ -388,11 +405,7 @@ class TaxonomyEngine:
             if matches:
                 return matches
 
-        q = norm_text(query)
-        return [
-            tag for tag, blob in self.search_blob_map.items()
-            if q in blob or q in norm_text(tag)
-        ]
+        return []
 
     def get_subgroups_sorted(self) -> list[dict]:
         """

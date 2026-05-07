@@ -1379,8 +1379,8 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   ) {
     clearPresetGenerationOptions({autoGenerate: false});
   }
-  // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
-  if ((source === 'random' && awaitingMyRandom) || source === 'event_preset') {
+  // 직접 요청한 Random만 수락하되, 데스크탑 Auto Gen은 전역 프롬프트 상태로 동기화한다.
+  if ((source === 'random' && awaitingMyRandom) || source === 'event_preset' || source === 'auto_generate') {
     if (source === 'random') unlockRandomButton();
     let acceptedPrompt = false;
     if (_isPromptEditingActive() && prompt !== promptEdit.value) {

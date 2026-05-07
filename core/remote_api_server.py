@@ -10853,7 +10853,13 @@ class RemoteBridge(QObject):
                         auto_ws = ws_key
                         break
 
-            source = "event_preset" if prompt_event_preset_request_id else "random"
+            prompt_settings = getattr(prompt_context, "settings", {}) or {}
+            is_auto_generated_prompt = bool(prompt_settings.get("auto_generate"))
+            source = (
+                "event_preset"
+                if prompt_event_preset_request_id
+                else ("auto_generate" if is_auto_generated_prompt else "random")
+            )
             event_preset_request_id = prompt_event_preset_request_id
             if auto_ws:
                 pending = self._pending_overrides.pop(auto_ws, {})

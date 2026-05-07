@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
+import core.remote_api_server as remote_api_server
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 
@@ -42,6 +43,16 @@ class _FakeCheckBox:
 
     def setChecked(self, checked):
         self.checked = checked
+
+
+class _FakeWsManager:
+    active_connections = {object()}
+
+    def __init__(self):
+        self.messages = []
+
+    async def broadcast_json(self, payload):
+        self.messages.append(payload)
 
 
 class _FakeVibeFrame:
@@ -159,6 +170,87 @@ def test_event_preset_generation_error_keeps_scoped_error_and_clears_status():
         },
         {"type": "status", "is_generating": False},
     ]
+
+
+def test_auto_generated_prompt_broadcast_uses_auto_generate_source(monkeypatch):
+    ctx = _AppContext()
+    ctx.current_prompt_context = None
+    bridge = RemoteBridge(ctx)
+    ws_manager = _FakeWsManager()
+    loop = asyncio.new_event_loop()
+    bridge.set_ws_manager(ws_manager)
+    bridge.set_event_loop(loop)
+    bridge._build_prompt_token_payload = lambda *_args, **_kwargs: {}
+    bridge._read_wildcard = lambda: None
+    bridge._read_prompt_engineering = lambda: None
+    bridge._read_character = lambda: None
+
+    def run_now(coro, target_loop):
+        target_loop.run_until_complete(coro)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(remote_api_server.asyncio, "run_coroutine_threadsafe", run_now)
+    prompt_context = SimpleNamespace(
+        final_prompt="auto prompt",
+        settings={"auto_generate": True},
+        source_row=SimpleNamespace(name=""),
+        wildcard_history={},
+        wildcard_state={},
+    )
+
+    try:
+        bridge.on_prompt_generated(prompt_context)
+    finally:
+        loop.close()
+
+    assert ws_manager.messages[0]["type"] == "prompt_generated"
+    assert ws_manager.messages[0]["source"] == "auto_generate"
+    assert ws_manager.messages[0]["prompt"] == "auto prompt"
+
+
+def test_web_random_pending_keeps_random_source_when_auto_gen_checked(monkeypatch):
+    ctx = _AppContext()
+    ctx.current_prompt_context = None
+    ctx.main_window = SimpleNamespace(
+        search_results=None,
+        generation_controller=SimpleNamespace(is_generating=True),
+    )
+    bridge = RemoteBridge(ctx)
+    ws_manager = _FakeWsManager()
+    loop = asyncio.new_event_loop()
+    ws = object()
+    bridge.set_ws_manager(ws_manager)
+    bridge.set_event_loop(loop)
+    bridge._pending_overrides[ws] = {
+        "params": None,
+        "negative": None,
+        "source": "random",
+        "auto_generate": True,
+    }
+    bridge._build_prompt_token_payload = lambda *_args, **_kwargs: {}
+    bridge._read_wildcard = lambda: None
+    bridge._read_prompt_engineering = lambda: None
+    bridge._read_character = lambda: None
+
+    def run_now(coro, target_loop):
+        target_loop.run_until_complete(coro)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(remote_api_server.asyncio, "run_coroutine_threadsafe", run_now)
+    prompt_context = SimpleNamespace(
+        final_prompt="manual web random",
+        settings={"auto_generate": True},
+        source_row=SimpleNamespace(name=""),
+        wildcard_history={},
+        wildcard_state={},
+    )
+
+    try:
+        bridge.on_prompt_generated(prompt_context)
+    finally:
+        loop.close()
+
+    assert ws_manager.messages[0]["source"] == "random"
 
 
 def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, monkeypatch):

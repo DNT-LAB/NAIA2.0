@@ -130,6 +130,37 @@ def test_api_status_does_not_force_setup_when_backend_exists():
     assert local["setup_required"] is False
 
 
+def test_generation_error_clears_remote_generation_status():
+    bridge = RemoteBridge(_AppContext())
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge.on_generation_error({"message": "API failed"})
+
+    assert broadcasts == [{"type": "status", "is_generating": False}]
+
+
+def test_event_preset_generation_error_keeps_scoped_error_and_clears_status():
+    bridge = RemoteBridge(_AppContext())
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge.on_generation_error({
+        "message": "Preset failed",
+        "event_preset_request": True,
+        "event_preset_request_id": "req-1",
+    })
+
+    assert broadcasts == [
+        {
+            "type": "event_preset_generation_error",
+            "requestId": "req-1",
+            "message": "Preset failed",
+        },
+        {"type": "status", "is_generating": False},
+    ]
+
+
 def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())

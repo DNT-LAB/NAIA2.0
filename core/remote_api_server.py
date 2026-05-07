@@ -6127,15 +6127,14 @@ class RemoteBridge(QObject):
             self._broadcast_queue_state()
 
     def on_generation_error(self, data=None):
-        """Generation error event -> clear scoped Remote Web pending state."""
+        """Generation error event -> clear Remote Web generation state."""
         payload = data if isinstance(data, dict) else {}
-        if not payload.get("event_preset_request"):
-            return
-        self._broadcast_json({
-            "type": "event_preset_generation_error",
-            "requestId": str(payload.get("event_preset_request_id") or ""),
-            "message": str(payload.get("message") or "Event Preset generation failed"),
-        })
+        if payload.get("event_preset_request"):
+            self._broadcast_json({
+                "type": "event_preset_generation_error",
+                "requestId": str(payload.get("event_preset_request_id") or ""),
+                "message": str(payload.get("message") or "Event Preset generation failed"),
+            })
         self._broadcast_json({"type": "status", "is_generating": False})
 
     # --- 모듈 상태 (Qt 메인 스레드에서 실행) ---

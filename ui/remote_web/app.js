@@ -2517,11 +2517,22 @@ function send(cmd) {
 }
 
 function setGen(v) {
-  generating = v;
-  if (studioTabControl) studioTabControl.handleGenerationStatus(v);
-  if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(v);
-  btnGen.disabled = v;
-  if (v) {
+  const next = Boolean(v);
+  if (generating === next) {
+    if (next) {
+      btnGen.disabled = true;
+      btnGen.classList.add('generating');
+      if (!genTimer && genStartTime > 0) startGenTimer();
+    } else {
+      updateGenerateButtonMode();
+    }
+    return;
+  }
+  generating = next;
+  if (studioTabControl) studioTabControl.handleGenerationStatus(next);
+  if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(next);
+  btnGen.disabled = next;
+  if (next) {
     genStartTime = Date.now();
     btnGen.classList.add('generating');
     startGenTimer();

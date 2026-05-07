@@ -11,6 +11,28 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
+
+def _append_env_flags(name: str, flags: list[str]) -> None:
+    current = os.environ.get(name, "")
+    parts = current.split()
+    for flag in flags:
+        if flag not in parts:
+            parts.append(flag)
+    os.environ[name] = " ".join(parts).strip()
+
+
+def _configure_webengine_environment() -> None:
+    """Optional QWebEngine GPU-compositing diagnostic switch."""
+    if not sys.platform.startswith("win"):
+        return
+    opt = os.environ.get("NAIA_WEBENGINE_DISABLE_GPU", "0").strip().lower()
+    if opt not in {"1", "true", "yes", "on"}:
+        return
+    _append_env_flags("QTWEBENGINE_CHROMIUM_FLAGS", ["--disable-gpu"])
+
+
+_configure_webengine_environment()
+
 import json
 import pandas as pd
 import random

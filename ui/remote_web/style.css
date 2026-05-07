@@ -3907,8 +3907,15 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .hist-menu-sep { height: 1px; background: var(--border-dim); margin: 3px 8px; }
 
 .viewer-empty {
-  color: var(--text-dim); font-size: 13px;
-  font-family: var(--font-mono); letter-spacing: 1px;
+  display: inline-block;
+  max-width: min(680px, calc(100% - 48px));
+  color: #b7b7cc;
+  font-size: 13px;
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1.75;
+  letter-spacing: 0;
+  text-align: center;
 }
 
 .event-preset-overlay[hidden] {
@@ -7379,7 +7386,7 @@ body.detached-shell {
 body.detached-module {
   --detached-module-width: 720px;
 }
-body.detached-module.detached-module-prompt_engineering { --detached-module-width: 660px; }
+body.detached-module.detached-module-prompt_engineering { --detached-module-width: 640px; }
 body.detached-module.detached-module-character { --detached-module-width: 760px; }
 body.detached-module.detached-module-conditional_prompt { --detached-module-width: 1560px; }
 body.detached-module.detached-module-wildcard,

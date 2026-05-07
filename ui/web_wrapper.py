@@ -73,7 +73,7 @@ class _WebShellPopupWindow(QMainWindow):
     _MODULE_SIZES = {
         "prompt_engineering": (640, 860),
         "character": (760, 860),
-        "conditional_prompt": (720, 780),
+        "conditional_prompt": (1560, 900),
         "wildcard": (680, 780),
         "instant_wildcard": (680, 780),
         "chunk": (620, 700),
@@ -83,23 +83,39 @@ class _WebShellPopupWindow(QMainWindow):
         "automation": (760, 760),
         "character_reference": (900, 780),
         "vibe_transfer": (900, 780),
-        "img2img": (960, 860),
+        "img2img": (1080, 860),
         "e621_event": (1120, 820),
         "ollama": (760, 780),
     }
 
     def __init__(self, owner: "WebWrapperWindow"):
-        super().__init__(owner)
+        super().__init__(None)
         self._owner = owner
         self._geometry_key = ""
+        self._initial_show_timer = QTimer(self)
+        self._initial_show_timer.setSingleShot(True)
+        self._initial_show_timer.timeout.connect(self._show_after_initial_geometry)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowTitleHint
+        )
         self.setWindowTitle("NAIA Web Shell - Detached")
+        self.setStyleSheet("background:#0f0f17;")
         self.setMinimumSize(520, 420)
         self.resize(*self._DEFAULT_SIZE)
 
         self._view = QWebEngineView(self)
         self._page = _WebShellPage(self, popup_factory=owner._create_popup_page)
         self._view.setPage(self._page)
+        self._view.setStyleSheet("background:#0f0f17;")
+        try:
+            self._page.setBackgroundColor(QColor("#0f0f17"))
+        except Exception:
+            pass
         self._configure_settings(self._view.settings())
         self._page.titleChanged.connect(self._on_title_changed)
         self._page.urlChanged.connect(self._apply_url_geometry)
@@ -122,9 +138,14 @@ class _WebShellPopupWindow(QMainWindow):
     def _apply_requested_geometry(self, rect):
         if not rect.isValid():
             return
+        if self._geometry_key:
+            return
         width = max(520, rect.width())
         height = max(420, rect.height())
-        self.resize(width, height)
+        if self.width() != width or self.height() != height:
+            self.resize(width, height)
+        if not self._initial_show_timer.isActive():
+            self._show_after_initial_geometry()
 
     def _apply_url_geometry(self, url: QUrl):
         parsed = urlparse(url.toString())
@@ -141,10 +162,24 @@ class _WebShellPopupWindow(QMainWindow):
             return
 
         if self._geometry_key == key:
+            self._show_after_initial_geometry()
             return
         self._geometry_key = key
-        self.resize(*size)
+        if self.width() != size[0] or self.height() != size[1]:
+            self.resize(*size)
         self._center_on_owner()
+        self._show_after_initial_geometry()
+
+    def defer_initial_show(self, timeout_ms: int = 250):
+        """Avoid flashing the default 720px mobile-sized shell before URL sizing."""
+        if not self.isVisible():
+            self._initial_show_timer.start(timeout_ms)
+
+    def _show_after_initial_geometry(self):
+        if self._initial_show_timer.isActive():
+            self._initial_show_timer.stop()
+        if not self.isVisible():
+            self.show()
 
     def _center_on_owner(self):
         owner = getattr(self, "_owner", None)
@@ -269,7 +304,7 @@ class WebWrapperWindow(QMainWindow):
         popup = _WebShellPopupWindow(self)
         self._popup_windows.add(popup)
         popup.destroyed.connect(lambda _=None, window=popup: self._popup_windows.discard(window))
-        popup.show()
+        popup.defer_initial_show()
         return popup._page
 
     def _start_backend_and_load_shell(self):

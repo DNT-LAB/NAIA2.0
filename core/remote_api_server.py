@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog
 from core import api_verification
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
+from core.event_preset_service import EventPresetService
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
@@ -280,6 +281,7 @@ class RemoteBridge(QObject):
         }
         self._ensure_artist_thumb_state()
         self._character_viewer_service = CharacterViewerService(Path(__file__).resolve().parent.parent)
+        self._event_preset_service = EventPresetService(Path(__file__).resolve().parent.parent)
         # ComfyUI 전용 sync request matching: request_id → asyncio.Future
         self._pending_comfyui_requests: dict = {}
         self._comfyui_requests_lock = threading.Lock()
@@ -3125,6 +3127,80 @@ class RemoteBridge(QObject):
             media_type = "application/octet-stream"
         return raw, media_type
 
+    # --- Event Preset service ---
+
+    def _event_preset_status(self) -> dict:
+        return self._event_preset_service.status()
+
+    def _event_preset_bootstrap(
+        self,
+        rating_id: str = "s",
+        person_id: str = "1girl_solo",
+        search: str = "",
+        category_id: str = "",
+        subcategory_id: str = "",
+        event_id: str = "",
+        limit: int | None = None,
+    ) -> dict:
+        return self._event_preset_service.bootstrap(
+            rating_id,
+            person_id,
+            search,
+            category_id,
+            subcategory_id,
+            event_id,
+            limit,
+        )
+
+    def _event_preset_select(self, payload: dict) -> dict:
+        return self._event_preset_service.select(payload if isinstance(payload, dict) else {})
+
+    def _event_preset_prompt_preview(self, payload: dict) -> dict:
+        return self._event_preset_service.prompt_preview(payload if isinstance(payload, dict) else {})
+
+    def _event_preset_generate(self, payload: dict) -> dict:
+        mw = self.app_context.main_window
+        gc = getattr(mw, "generation_controller", None) if mw else None
+        if gc is not None and getattr(gc, "is_generating", False):
+            raise RuntimeError("이미 생성 중입니다.")
+        result = self._event_preset_service.generation_source(payload if isinstance(payload, dict) else {})
+        source_row_data = result.get("sourceRow") or {}
+        if not isinstance(source_row_data, dict) or not source_row_data.get("general"):
+            raise ValueError("Event Preset prompt source is empty.")
+        import pandas as pd
+        request_id = str(result.get("requestId") or uuid.uuid4().hex)
+        source_row = pd.Series(source_row_data, name=f"event_preset:{request_id}")
+        rating = str(source_row_data.get("rating") or "").strip()
+        active_ratings = {rating} if rating in {"g", "s", "q", "e"} else set(self._active_ratings)
+        self._pending_random_requests.append({
+            "ws": None,
+            "source_row": source_row,
+            "active_ratings": active_ratings,
+            "event_preset_request_id": request_id,
+            "overrides": {"event_preset_request": True},
+        })
+        self.request_random.emit()
+        return {
+            "ok": True,
+            "status": "generation_requested",
+            "requestId": request_id,
+            "selected": result.get("selected") or {},
+            "promptPreview": result.get("promptPreview") or "",
+            "event": result.get("event") or {},
+        }
+
+    def _event_preset_thumbnail_payload(
+        self,
+        event_id: str = "",
+        tag: str = "",
+        size: str = "",
+    ) -> tuple[bytes, str]:
+        return self._event_preset_service.thumbnail_payload(
+            str(event_id or ""),
+            str(tag or ""),
+            str(size or ""),
+        )
+
     def _broadcast_character_viewer_error(self, request_id: str, message: str) -> None:
         self._broadcast_json({
             "type": "character_viewer_error",
@@ -4324,6 +4400,7 @@ class RemoteBridge(QObject):
 
             # ComfyUI sync 요청 처리 — ws=None 이지만 request_id로 격리
             comfyui_request_id = req.get("comfyui_request_id")
+            event_preset_request_id = req.get("event_preset_request_id")
             force_skip = bool(req.get("force_naia_skip_generate", False))
             respect_autogen = bool(req.get("respect_naia_autogen", True))
             comfyui_peng_override = req.get("peng_override")  # dict or None
@@ -4351,6 +4428,15 @@ class RemoteBridge(QObject):
                     pending_entry["_peng_override_ref"] = comfyui_peng_override
 
                 self._pending_overrides[override_key] = pending_entry
+            elif event_preset_request_id:
+                self._pending_overrides[("event_preset", event_preset_request_id)] = {
+                    "params": req.get("overrides") if isinstance(req.get("overrides"), dict) else {"event_preset_request": True},
+                    "negative": req.get("negative"),
+                    "source": "event_preset",
+                    "auto_generate": True,
+                    "event_preset_request_id": event_preset_request_id,
+                }
+                self.app_context.skip_prompt_engineering_auto_hide = True
             elif ws:
                 self._pending_overrides[ws] = {
                     "params": None,
@@ -11559,6 +11645,111 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=404)
         except Exception as e:
             return JSONResponse({"error": f"Character Viewer thumbnail failed: {e}"}, status_code=500)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    @app.get("/api/event-preset/status")
+    async def api_event_preset_status():
+        try:
+            return await asyncio.to_thread(bridge._event_preset_status)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset status failed: {e}"}, status_code=500)
+
+    @app.get("/api/event-preset/bootstrap")
+    async def api_event_preset_bootstrap(
+        ratingId: str = "s",
+        personId: str = "1girl_solo",
+        search: str = "",
+        categoryId: str = "",
+        subcategoryId: str = "",
+        eventId: str = "",
+        limit: int = 0,
+    ):
+        try:
+            return await asyncio.to_thread(
+                bridge._event_preset_bootstrap,
+                ratingId,
+                personId,
+                search,
+                categoryId,
+                subcategoryId,
+                eventId,
+                limit or None,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset bootstrap failed: {e}"}, status_code=500)
+
+    @app.post("/api/event-preset/select")
+    async def api_event_preset_select(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._event_preset_select, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset select failed: {e}"}, status_code=500)
+
+    @app.post("/api/event-preset/prompt-preview")
+    async def api_event_preset_prompt_preview(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._event_preset_prompt_preview, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset prompt preview failed: {e}"}, status_code=500)
+
+    @app.post("/api/event-preset/generate")
+    async def api_event_preset_generate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._event_preset_generate, payload)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset generate failed: {e}"}, status_code=500)
+
+    @app.get("/api/event-preset/thumbnail")
+    async def api_event_preset_thumbnail(eventId: str = "", tag: str = "", size: str = ""):
+        try:
+            image_bytes, media_type = await asyncio.to_thread(
+                bridge._event_preset_thumbnail_payload,
+                eventId,
+                tag,
+                size,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except (FileNotFoundError, KeyError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Event Preset thumbnail failed: {e}"}, status_code=500)
         return Response(
             content=image_bytes,
             media_type=media_type,

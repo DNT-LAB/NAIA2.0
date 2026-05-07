@@ -64,6 +64,7 @@ let generationProgress = null;
 let setupController = null;
 let desktopWindowControl = null;
 let promptDrawerControl = null;
+let eventPresetPanel = null;
 let tokenDisplayControl = null;
 let autoSavePanel = null;
 let saveDirectoryPanel = null;
@@ -549,6 +550,21 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
+  });
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260507-event-preset-thumbcompact2')
+  .then(({createEventPresetPanel}) => {
+    eventPresetPanel = createEventPresetPanel({
+      document,
+      promptEdit,
+      applyPromptText,
+      onPromptEdit,
+      getGenerating: () => generating,
+      showToast,
+      escHtml,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Event Preset panel module', error);
   });
 const autoSavePanelReady = import('./js/features/autoSavePanel.mjs')
   .then(({createAutoSavePanel}) => {
@@ -1337,8 +1353,8 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const source = message.source;
   if (!prompt) return;
   // 내가 요청한 Random일 때만 프롬프트 갱신 (다른 사용자의 Random으로 덮어쓰기 방지)
-  if (source === 'random' && awaitingMyRandom) {
-    unlockRandomButton();
+  if ((source === 'random' && awaitingMyRandom) || source === 'event_preset') {
+    if (source === 'random') unlockRandomButton();
     let acceptedPrompt = false;
     if (_isPromptEditingActive() && prompt !== promptEdit.value) {
       // 편집 중: 사용자 입력을 보호. Random 결과를 다시 받으려면 Random 다시 누르면 됨.
@@ -2402,6 +2418,7 @@ function toggleDrawer() {
 
 function switchTab(name) {
   if (promptDrawerControl) promptDrawerControl.switchTab(name);
+  if (eventPresetPanel) eventPresetPanel.setActiveTab(name === 'preset');
 }
 
 // ---- Controls ----
@@ -2446,6 +2463,7 @@ function send(cmd) {
 function setGen(v) {
   generating = v;
   if (studioTabControl) studioTabControl.handleGenerationStatus(v);
+  if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(v);
   btnGen.disabled = v;
   if (v) {
     genStartTime = Date.now();
@@ -4337,6 +4355,7 @@ Promise.all([
   generationProgressReady,
   desktopWindowControlReady,
   promptDrawerReady,
+  eventPresetReady,
   autoSavePanelReady,
   saveDirectoryPanelReady,
   sessionGenerationStatsReady,

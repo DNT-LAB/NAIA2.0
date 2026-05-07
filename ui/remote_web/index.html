@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260506-api-setup-ko2">
+<link rel="stylesheet" href="style.css?v=20260507-event-preset-thumbcompact2">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -261,6 +261,7 @@
     <div class="prompt-inner">
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="prompt" onclick="switchTab('prompt')"><span class="tab-icon">&#9998;</span><span>Prompt</span></button>
+        <button class="tab-btn" data-tab="preset" onclick="switchTab('preset')"><span class="tab-icon">&#9638;</span><span>Preset</span></button>
         <button class="tab-btn" data-tab="params" onclick="switchTab('params')"><span class="tab-icon">&#9776;</span><span>Params</span></button>
         <button class="tab-btn" data-tab="negative" onclick="switchTab('negative')"><span class="tab-icon">&#8856;</span><span>Negative</span></button>
       </div>
@@ -307,6 +308,10 @@
             <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
             <div class="tag-search-results" id="tagSearchResults"></div>
           </div>
+        </div>
+        <div class="tab-page" id="tabPreset">
+          <span class="section-label">Event Preset</span>
+          <div class="event-preset-panel" id="eventPresetPanel"></div>
         </div>
         <div class="tab-page" id="tabParams">
           <span class="section-label">Parameters</span>
@@ -489,7 +494,7 @@
   <div class="right-tab-pane active" id="rightTabResult" data-right-pane="result" role="tabpanel">
     <div class="viewer-content">
       <div class="result-main">
-        <div class="viewer">
+        <div class="viewer" id="resultViewer" tabindex="0">
           <img id="preview" alt="">
           <span class="viewer-empty" id="emptyMsg">awaiting generation...</span>
           <div class="stats-island" id="statsIsland">
@@ -509,6 +514,7 @@
             </div>
             <div class="queue-panel-body" data-queue-body></div>
           </section>
+          <section class="event-preset-overlay" id="eventPresetOverlay" aria-label="Event Preset context" aria-hidden="true" hidden></section>
         </div>
         <section class="result-info-panel" id="resultInfoPanel" aria-label="Generation info">
           <div class="result-info-resize" id="resultInfoResize" title="Drag to resize generation info"></div>
@@ -855,6 +861,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260506-api-setup-ko2"></script>
+<script src="app.js?v=20260507-event-preset-thumbcompact2"></script>
 </body>
 </html>

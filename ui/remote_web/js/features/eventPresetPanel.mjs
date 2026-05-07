@@ -134,6 +134,7 @@ export function createEventPresetPanel({
     subcategoryId: initialSelected.subcategoryId || '',
     eventId: initialSelected.eventId,
     comboId: initialSelected.comboId,
+    searchShowAll: false,
     assistTab: 'combos',
     recommendedTagIds: new Set((initialSelected.recommendedTagIds || []).map(String)),
     dataStatus: useFixtureProvider ? 'ready' : 'idle',
@@ -499,6 +500,19 @@ export function createEventPresetPanel({
     return searched.length ? searched : partitioned;
   }
 
+  function allVisibleEventContexts() {
+    const contexts = categories().flatMap(category => eventContextsForCategory(category));
+    const partitioned = contexts.filter(context => eventPassesPartition(context.event));
+    const searched = partitioned.filter(eventMatchesSearch);
+    return searched.length ? searched : partitioned;
+  }
+
+  function currentEventContexts() {
+    return state.searchShowAll && state.search.trim()
+      ? allVisibleEventContexts()
+      : visibleEventContexts(findCategory());
+  }
+
   function selectedContext() {
     const context = findEvent(state.eventId);
     if (context.event) return context;
@@ -521,8 +535,7 @@ export function createEventPresetPanel({
   }
 
   function ensureVisibleSelection() {
-    const category = findCategory();
-    const visible = visibleEventContexts(category);
+    const visible = currentEventContexts();
     if (!visible.length) {
       selectContext(null);
       return;
@@ -690,7 +703,7 @@ export function createEventPresetPanel({
       return `
         ${heading}
         <button type="button"
-                class="event-preset-category ${category.id === state.categoryId ? 'active' : ''}"
+                class="event-preset-category ${!state.searchShowAll && category.id === state.categoryId ? 'active' : ''}"
                 data-ep-action="category"
                 data-ep-id="${escapeHtml(category.id)}">
           <span class="event-preset-category-name">${escapeHtml(category.label)}</span>
@@ -703,7 +716,8 @@ export function createEventPresetPanel({
     const target = root.querySelector('[data-ep-event-table]');
     if (!target) return;
     const category = findCategory();
-    const rows = visibleEventContexts(category);
+    const rows = currentEventContexts();
+    const title = state.searchShowAll && state.search.trim() ? 'All' : (category?.label || '-');
     const emptyText = !dataReady()
       ? (state.dataMessage || 'Event Preset data is not ready.')
       : '이 카테고리에 표시할 이벤트가 없습니다.';
@@ -720,7 +734,7 @@ export function createEventPresetPanel({
       : `<div class="event-preset-empty">${escapeHtml(emptyText)}</div>`;
     target.innerHTML = `
       <div class="event-preset-events-head">
-        <span>Events (${escapeHtml(category?.label || '-')})</span>
+        <span>Events (${escapeHtml(title)})</span>
         <span>Count</span>
       </div>
       <div class="event-preset-events-body">${body}</div>`;
@@ -1049,13 +1063,15 @@ export function createEventPresetPanel({
     if (state.activeTab) showOverlay();
     if (action === 'rating') {
       state.ratingId = id;
+      state.searchShowAll = !!state.search.trim();
       shouldBootstrap = true;
     } else if (action === 'category') {
       state.categoryId = id;
+      state.searchShowAll = false;
       selectContext(visibleEventContexts(findCategory(id))[0] || null);
       shouldSelect = true;
     } else if (action === 'event') {
-      const context = eventContextsForCategory(findCategory()).find(candidate => candidate.event.id === id);
+      const context = currentEventContexts().find(candidate => candidate.event.id === id);
       selectContext(context);
       shouldSelect = true;
       shouldResetAssistScroll = true;
@@ -1073,6 +1089,7 @@ export function createEventPresetPanel({
       shouldSelect = provider.mode === 'server';
     } else if (action === 'clear-search') {
       state.search = '';
+      state.searchShowAll = false;
       const input = root.querySelector('[data-ep-search]');
       if (input) input.value = '';
       shouldBootstrap = true;
@@ -1090,6 +1107,7 @@ export function createEventPresetPanel({
     const input = event.target.closest('[data-ep-search]');
     if (!input) return;
     state.search = input.value || '';
+    state.searchShowAll = !!state.search.trim();
     renderAll();
     scheduleBootstrap();
   }
@@ -1098,6 +1116,7 @@ export function createEventPresetPanel({
     const person = event.target.closest('[data-ep-person]');
     if (!person) return;
     state.personId = person.value || '1girl_solo';
+    state.searchShowAll = !!state.search.trim();
     renderAll();
     loadBootstrap({showLoading: provider.mode === 'server'});
   }

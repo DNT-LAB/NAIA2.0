@@ -76,6 +76,8 @@ export function createQuickFilterController(deps) {
   let pendingAssignOnRestore = false;
   let ratingCounts = null;
   let acTarget = 'include';
+  let searchSeq = 0;
+  let latestSearchRequestId = '';
 
   const getEl = id => doc.getElementById(id);
   const isSocketOpen = () => {
@@ -98,6 +100,15 @@ export function createQuickFilterController(deps) {
     });
   };
   const payload = () => [...includeTags, ...excludeTags.map(tag => '-' + tag)];
+  const nextSearchRequestId = () => {
+    searchSeq += 1;
+    latestSearchRequestId = `tf-${Date.now()}-${searchSeq}`;
+    return latestSearchRequestId;
+  };
+  const invalidateSearchRequest = () => {
+    searchSeq += 1;
+    latestSearchRequestId = '';
+  };
   const collectPreferences = () => ({
     ratings: getActiveRatings(),
     tag_filter: [...includeTags],
@@ -294,6 +305,7 @@ export function createQuickFilterController(deps) {
     active = false;
     ratingCounts = null;
     pendingAssignOnRestore = false;
+    invalidateSearchRequest();
     renderIncludeChips();
     renderExcludeChips();
 
@@ -329,6 +341,7 @@ export function createQuickFilterController(deps) {
   function invalidateAssignedState() {
     active = false;
     ratingCounts = null;
+    invalidateSearchRequest();
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
     const countEl = getEl('tagFilterCount');
@@ -362,14 +375,17 @@ export function createQuickFilterController(deps) {
     if (!includeTags.length && !excludeTags.length) return;
     if (!isSocketOpen()) return;
     save();
-    send({type: 'tag_filter_search', tags: payload()});
+    send({type: 'tag_filter_search', tags: payload(), request_id: nextSearchRequestId()});
   }
 
   function assign() {
-    send({type: 'tag_filter_assign'});
+    send({type: 'tag_filter_assign', request_id: latestSearchRequestId});
   }
 
   function onResult(message) {
+    if (message.request_id && message.request_id !== latestSearchRequestId) {
+      return;
+    }
     const assignBtn = getEl('tagFilterAssignBtn');
     ratingCounts = message.rating_counts || null;
     const countEl = getEl('tagFilterCount');
@@ -443,8 +459,10 @@ export function createQuickFilterController(deps) {
     renderExcludeChips();
     deps.syncRatingButtons();
 
-    const localCount = deps.computeLocalFilteredCount();
-    if (localCount !== null && localCount !== undefined) deps.updateSearchCount(localCount);
+    if (options.updateCount !== false) {
+      const localCount = deps.computeLocalFilteredCount();
+      if (localCount !== null && localCount !== undefined) deps.updateSearchCount(localCount);
+    }
 
     const countEl = getEl('tagFilterCount');
     if (countEl) {
@@ -465,7 +483,7 @@ export function createQuickFilterController(deps) {
       const tags = payload();
       if (tags.length) {
         pendingAssignOnRestore = active;
-        send({type: 'tag_filter_search', tags});
+        send({type: 'tag_filter_search', tags, request_id: nextSearchRequestId()});
       }
     }
     return true;

@@ -193,7 +193,7 @@ export function createSearchPanel({
     if (serverPreferences) {
       setRatingsFromList(serverPreferences.ratings);
       if (quickFilter) {
-        quickFilter.applyPreferences(serverPreferences, {send: false});
+        quickFilter.applyPreferences(serverPreferences, {send: false, updateCount: false});
       } else {
         syncRatingButtons();
       }
@@ -240,7 +240,7 @@ export function createSearchPanel({
     const quickFilter = getQuickFilter();
     const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
-      quickFilter.applyPreferences(serverPreferences, {send: false});
+      quickFilter.applyPreferences(serverPreferences, {send: false, updateCount: false});
     } else if (serverPreferences) {
       setRatingsFromList(serverPreferences.ratings);
       syncRatingButtons();

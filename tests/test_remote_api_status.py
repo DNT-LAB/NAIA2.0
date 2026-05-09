@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import pandas as pd
 from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -13,6 +14,7 @@ from PIL.PngImagePlugin import PngInfo
 import core.remote_api_server as remote_api_server
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
+from core.search_result_model import SearchResultModel
 
 
 class _TokenManager:
@@ -617,6 +619,46 @@ def test_prompt_preset_thumbnail_generation_queues_vibe_safe_request(tmp_path, m
     assert overrides["negative_prompt"] == "thumbnail negative"
     assert overrides["_skip_vibe_transfer_late_binding"] is True
     assert overrides["prompt_preset_thumbnail_request"] is True
+
+
+def _bridge_with_search_snapshots(master_df, visible_df):
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        _master_filter_snapshot=master_df.copy(),
+        _search_results_snapshot=visible_df.copy(),
+        search_results=SearchResultModel(visible_df.copy()),
+    )
+    return RemoteBridge(ctx)
+
+
+def test_tag_filter_search_uses_master_snapshot_not_current_rating_subset():
+    master = pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "angel wings blue hair"},
+        {"id": 2, "rating": "e", "general": "angel wings red hair"},
+        {"id": 3, "rating": "q", "general": "solo smile"},
+    ])
+    visible = master[master["rating"] == "s"].copy()
+    bridge = _bridge_with_search_snapshots(master, visible)
+
+    result = bridge._do_tag_filter_search(["angel_wings"])
+
+    assert result["count"] == 2
+    assert result["rating_counts"] == {"g": 0, "s": 1, "q": 0, "e": 1}
+    assert result["_ids"] == {1, 2}
+
+
+def test_tag_filter_random_pick_uses_master_snapshot_after_rating_switch():
+    master = pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "angel wings blue hair"},
+        {"id": 2, "rating": "e", "general": "angel wings red hair"},
+    ])
+    stale_visible = master[master["rating"] == "s"].copy()
+    bridge = _bridge_with_search_snapshots(master, stale_visible)
+
+    picked = bridge._pick_from_tag_filter({"ids": {1, 2}}, {"e"})
+
+    assert picked is not None
+    assert int(picked["id"]) == 2
 
 
 def test_studio_generate_overrides_are_preserved_when_queued():

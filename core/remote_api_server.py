@@ -4652,14 +4652,27 @@ class RemoteBridge(QObject):
 
     # --- Tag Filter ---
 
-    def _pick_from_snapshot(self, active_ratings: set, filter_ids: set = None):
-        """snapshot에서 rating + (선택적) ID 필터 적용하여 랜덤 1개 반환.
-        search_results를 pop하지 않으므로 원격 quick filter에서 안전하다."""
+    def _master_search_dataframe(self):
+        """Return the unfiltered search source used by Remote GSQE/Tag Filter."""
         mw = self.app_context.main_window
+        master = getattr(mw, '_master_filter_snapshot', None)
+        if master is not None and not master.empty:
+            return master
         snapshot = getattr(mw, '_search_results_snapshot', None)
+        if snapshot is not None and not snapshot.empty:
+            mw._master_filter_snapshot = snapshot.copy()
+            return snapshot
+        if mw.search_results and not mw.search_results.is_empty():
+            master = mw.search_results.get_dataframe()
+            mw._master_filter_snapshot = master.copy()
+            return master
+        return None
+
+    def _pick_from_snapshot(self, active_ratings: set, filter_ids: set = None):
+        """master snapshot에서 rating + (선택적) ID 필터 적용하여 랜덤 1개 반환.
+        search_results를 pop하지 않으므로 원격 quick filter에서 안전하다."""
+        snapshot = self._master_search_dataframe()
         if snapshot is None or snapshot.empty:
-            snapshot = mw.search_results.get_dataframe()
-        if snapshot.empty:
             return None
 
         mask = snapshot["rating"].isin(active_ratings) if (active_ratings and 'rating' in snapshot.columns) else None
@@ -4679,13 +4692,10 @@ class RemoteBridge(QObject):
         return self._pick_from_snapshot(active_ratings, filter_ids=tag_filter["ids"])
 
     def _do_tag_filter_search(self, tags: list):
-        """snapshot에서 태그 AND 검색, 매칭 ID를 반환"""
+        """master snapshot에서 태그 AND 검색, 매칭 ID를 반환"""
         import pandas as pd
-        mw = self.app_context.main_window
-        snapshot = getattr(mw, '_search_results_snapshot', None)
+        snapshot = self._master_search_dataframe()
         if snapshot is None or snapshot.empty:
-            snapshot = mw.search_results.get_dataframe()
-        if snapshot.empty:
             return {"type": "tag_filter_result", "count": 0, "tags": tags, "rating_counts": {r: 0 for r in 'gsqe'}}
 
         mask = pd.Series(True, index=snapshot.index)
@@ -12919,8 +12929,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             await asyncio.to_thread(bridge._save_search_filter_state_from_payload, cmd)
                         elif cmd_type == "tag_filter_search":
                             tags = cmd.get("tags", [])
+                            request_id = str(cmd.get("request_id") or "")
                             if tags:
                                 result = await asyncio.to_thread(bridge._do_tag_filter_search, tags)
+                                if request_id:
+                                    result["request_id"] = request_id
                                 # pending에 저장 (Assign 전까지 Random에 미반영)
                                 session = ws_manager.sessions.get(ws)
                                 if session:
@@ -12929,6 +12942,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                         "tags": tags,
                                         "ids": ids,
                                         "count": result["count"],
+                                        "request_id": request_id,
                                     }
                                 else:
                                     result.pop("_ids", None)
@@ -12941,7 +12955,15 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         elif cmd_type == "tag_filter_assign":
                             # pending → 확정: Random에서 사용
                             session = ws_manager.sessions.get(ws)
-                            if session and session.get("tag_filter_pending"):
+                            pending = session.get("tag_filter_pending") if session else None
+                            request_id = str(cmd.get("request_id") or "")
+                            if pending and request_id and str(pending.get("request_id") or "") != request_id:
+                                await ws.send_text(json.dumps({
+                                    "type": "toast",
+                                    "message": "Tag filter search is stale. Search again.",
+                                    "level": "error",
+                                }))
+                            elif session and pending:
                                 session["tag_filter"] = session.pop("tag_filter_pending")
                                 tf = session["tag_filter"]
                                 bridge._active_tag_filter_ids = tf.get("ids")

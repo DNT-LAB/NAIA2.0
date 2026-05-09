@@ -6374,10 +6374,27 @@ body.resizing-result-info {
   background: rgba(255,255,255,0.045);
   color: var(--text-primary);
 }
+.event-preset-category.is-zero-match,
+.event-preset-subcategory.is-zero-match {
+  color: var(--text-dim);
+  opacity: 0.48;
+  cursor: default;
+}
+.event-preset-category.is-zero-match:hover,
+.event-preset-subcategory.is-zero-match:hover {
+  background: transparent;
+  color: var(--text-dim);
+}
 .event-preset-category.active,
 .event-preset-subcategory.active {
   color: #eef5ff;
   background: linear-gradient(90deg, rgba(40,120,216,0.88), rgba(40,120,216,0.58));
+}
+.event-preset-category.active.is-zero-match,
+.event-preset-subcategory.active.is-zero-match {
+  color: rgba(213,217,238,0.58);
+  background: rgba(255,255,255,0.045);
+  box-shadow: inset 2px 0 rgba(157,139,255,0.24);
 }
 .event-preset-category-name,
 .event-preset-subcategory-name {

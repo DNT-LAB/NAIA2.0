@@ -569,7 +569,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260509-expression-random1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260509-preset-search-counts1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,

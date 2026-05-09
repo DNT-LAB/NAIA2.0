@@ -40,8 +40,18 @@ def _fake_service(monkeypatch):
         "long sleeves": "sleeves",
         "skirt": "bottoms",
     }
-    service._assigned_row_by_tag = {}
+    region_cls = modules.data_manager.RegionTag
+    region_rows = {
+        "hair ornament": region_cls("hair ornament", "HEAD", "accessories", 6000, 1.0, "test"),
+        "shirt": region_cls("shirt", "UPPER_BODY", "attire", 12000, 1.0, "test"),
+        "long sleeves": region_cls("long sleeves", "UPPER_BODY", "attire", 9000, 1.0, "test"),
+        "skirt": region_cls("skirt", "WAIST", "attire", 11000, 1.0, "test"),
+    }
+    service._assigned_row_by_tag = region_rows
     service._slot_rows_cache = {slot: [] for slot in modules.engines.DISPLAY_SLOTS}
+    service._slot_rows_cache["HEAD_NECK_FACE"] = [region_rows["hair ornament"]]
+    service._slot_rows_cache["UPPER_BODY"] = [region_rows["shirt"], region_rows["long sleeves"]]
+    service._slot_rows_cache["WAIST_HIP"] = [region_rows["skirt"]]
     service._tag_to_region = {}
     service._reco_by_seed = {}
     service._avoid_by_seed = {}
@@ -100,6 +110,50 @@ def test_bootstrap_defaults_browser_to_upper_body(monkeypatch):
     assert result["selected"]["categoryId"] == "UPPER_BODY"
     assert result["browser"]["selected"]["categoryId"] == "UPPER_BODY"
     assert any(category["id"] == "UPPER_BODY" and category["selected"] for category in result["browser"]["categories"])
+
+
+def test_browser_search_keeps_zero_match_clothes_groups(monkeypatch):
+    service = _fake_service(monkeypatch)
+
+    result = service.bootstrap({
+        "categoryId": "UPPER_BODY",
+        "subcategoryId": "sleeves",
+        "itemSearch": "shirt",
+        "itemLimit": 5,
+    })
+
+    upper_body = next(category for category in result["browser"]["categories"] if category["id"] == "UPPER_BODY")
+    assert upper_body["count"] == 2
+    assert upper_body["matchedCount"] == 1
+    assert upper_body["disabled"] is False
+
+    subcategories = {item["id"]: item for item in result["browser"]["subcategories"]}
+    assert result["browser"]["selected"]["subcategoryId"] == "tops"
+    assert result["browser"]["subcategories"][0]["id"] == "tops"
+    assert subcategories["tops"]["count"] == 1
+    assert subcategories["tops"]["matchedCount"] == 1
+    assert subcategories["tops"]["disabled"] is False
+    assert subcategories["sleeves"]["count"] == 1
+    assert subcategories["sleeves"]["matchedCount"] == 0
+    assert subcategories["sleeves"]["disabled"] is True
+    assert [item["tag"] for item in result["browser"]["items"]] == ["shirt"]
+
+
+def test_browser_search_moves_from_zero_match_clothes_category(monkeypatch):
+    service = _fake_service(monkeypatch)
+
+    result = service.bootstrap({
+        "categoryId": "HEAD_NECK_FACE",
+        "itemSearch": "shirt",
+        "itemLimit": 5,
+    })
+
+    assert result["browser"]["selected"]["categoryId"] == "UPPER_BODY"
+    head = next(category for category in result["browser"]["categories"] if category["id"] == "HEAD_NECK_FACE")
+    upper = next(category for category in result["browser"]["categories"] if category["id"] == "UPPER_BODY")
+    assert head["disabled"] is True
+    assert upper["disabled"] is False
+    assert [item["tag"] for item in result["browser"]["items"]] == ["shirt"]
 
 
 def test_combo_focus_does_not_stage_combo_tags(monkeypatch):

@@ -690,6 +690,7 @@ export function createEventPresetPanel({
     try {
       const payload = await provider.expressionBootstrap(expressionRequest());
       applyExpressionPayload(payload);
+      selectFirstMatchingExpressionSearchResult();
       state.expressionLoading = false;
       renderAll({preserveScroll: true});
     } catch (error) {
@@ -1401,6 +1402,22 @@ export function createEventPresetPanel({
     return [...expressionPrimaryItems(subcategory), ...expressionOverflowItems(subcategory)];
   }
 
+  function expressionCategoryItemStats(category) {
+    const subcategories = category?.subcategories || [];
+    let total = 0;
+    let matched = 0;
+    for (const subcategory of subcategories) {
+      const items = expressionAllItems(subcategory);
+      total += items.length;
+      matched += items.filter(item => expressionItemMatchesSearch(category, subcategory, item)).length;
+    }
+    return {total, matched};
+  }
+
+  function searchCountLabel(matched, total, unit = 'items') {
+    return `${formatCount(matched || 0)} / ${formatCount(total || 0)} ${unit}`;
+  }
+
   function expressionItemMatchesSearch(category, subcategory, item) {
     const query = state.expressionSearch.trim().toLowerCase();
     if (!query || query.length < MIN_SEARCH_LENGTH) return true;
@@ -1419,23 +1436,31 @@ export function createEventPresetPanel({
   }
 
   function visibleExpressionSubcategoryContexts(category = findExpressionCategory()) {
-    return (category?.subcategories || []).map(subcategory => {
+    const contexts = (category?.subcategories || []).map(subcategory => {
       const allItems = expressionAllItems(subcategory);
       const matchedItems = allItems.filter(item => expressionItemMatchesSearch(category, subcategory, item));
       const searchActive = expressionSearchActive();
       const expanded = searchActive || state.expandedExpressionSubcategoryIds.has(String(subcategory.id || ''));
       const primaryCount = expressionPrimaryItems(subcategory).length;
       const items = expanded ? matchedItems : matchedItems.slice(0, primaryCount);
+      const totalItems = Number(subcategory.count || allItems.length);
+      const matchCount = matchedItems.length;
       return {
         category,
         subcategory,
         items,
-        totalItems: searchActive ? matchedItems.length : Number(subcategory.count || allItems.length),
+        totalItems,
+        matchCount,
+        disabled: searchActive && matchCount < 1,
         hiddenCount: searchActive || expanded ? 0 : Math.max(0, matchedItems.length - items.length),
         hasOverflow: expressionOverflowItems(subcategory).length > 0,
         expanded,
       };
-    }).filter(context => context.items.length || context.hiddenCount);
+    }).filter(context => expressionSearchActive() || context.items.length || context.hiddenCount);
+    if (expressionSearchActive()) {
+      contexts.sort((a, b) => Number(a.disabled) - Number(b.disabled));
+    }
+    return contexts;
   }
 
   function currentExpressionSubcategoryContexts() {
@@ -1445,8 +1470,21 @@ export function createEventPresetPanel({
   function findExpressionSubcategoryContext(id = state.expressionSubcategoryId) {
     const contexts = currentExpressionSubcategoryContexts();
     return contexts.find(context => context.subcategory.id === id)
+      || contexts.find(context => !context.disabled)
       || contexts[0]
       || null;
+  }
+
+  function selectFirstMatchingExpressionSearchResult() {
+    if (!expressionSearchActive()) return;
+    const category = expressionCategories().find(candidate => (
+      expressionCategoryItemStats(candidate).matched > 0
+    ));
+    if (!category) return;
+    const contexts = visibleExpressionSubcategoryContexts(category);
+    const context = contexts.find(candidate => !candidate.disabled) || contexts[0];
+    state.expressionCategoryId = category.id || state.expressionCategoryId;
+    state.expressionSubcategoryId = context?.subcategory?.id || '';
   }
 
   function currentExpressionItems() {
@@ -1641,6 +1679,11 @@ export function createEventPresetPanel({
     if (state.activeAxis === 'expressions') return state.expressionSearch;
     if (state.activeAxis === 'clothes') return state.clothesSearch;
     return state.search;
+  }
+
+  function clothesSearchActive() {
+    return !!state.clothesData.browser?.searchActive
+      || state.clothesSearch.trim().length >= MIN_SEARCH_LENGTH;
   }
 
   function activeSearchPlaceholder() {
@@ -1869,15 +1912,24 @@ export function createEventPresetPanel({
       rail.innerHTML = '<div class="event-preset-empty">No expression groups.</div>';
       return;
     }
-    rail.innerHTML = categories.map(category => `
+    const searchActive = expressionSearchActive();
+    rail.innerHTML = categories.map(category => {
+      const stats = expressionCategoryItemStats(category);
+      const disabled = searchActive && stats.matched < 1;
+      const countText = searchActive
+        ? searchCountLabel(stats.matched, stats.total)
+        : `${formatCount(category.count || stats.total || 0)} items`;
+      return `
       <button type="button"
-                class="event-preset-category ${category.id === state.expressionCategoryId ? 'active' : ''}"
+                class="event-preset-category ${category.id === state.expressionCategoryId ? 'active' : ''} ${disabled ? 'is-zero-match' : ''}"
                 data-ep-action="expression-category"
-                data-ep-id="${escapeHtml(category.id)}">
+                data-ep-id="${escapeHtml(category.id)}"
+                ${disabled ? 'disabled aria-disabled="true"' : ''}>
         <span class="event-preset-category-name">${escapeHtml(expressionCategoryLabel(category))}</span>
-        <span class="event-preset-category-count">${escapeHtml(formatCount(category.count || 0))} items</span>
+        <span class="event-preset-category-count">${escapeHtml(countText)}</span>
       </button>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function renderExpressionSubcategories() {
@@ -1896,15 +1948,22 @@ export function createEventPresetPanel({
       rail.innerHTML = '<div class="event-preset-empty">No expression buckets.</div>';
       return;
     }
-    rail.innerHTML = contexts.map(context => `
+    const searchActive = expressionSearchActive();
+    rail.innerHTML = contexts.map(context => {
+      const countText = searchActive
+        ? searchCountLabel(context.matchCount, context.totalItems)
+        : `${formatCount(context.totalItems || 0)} items`;
+      return `
       <button type="button"
-              class="event-preset-subcategory ${context.subcategory.id === state.expressionSubcategoryId ? 'active' : ''}"
+              class="event-preset-subcategory ${context.subcategory.id === state.expressionSubcategoryId ? 'active' : ''} ${context.disabled ? 'is-zero-match' : ''}"
               data-ep-action="expression-subcategory"
-              data-ep-id="${escapeHtml(context.subcategory.id)}">
+              data-ep-id="${escapeHtml(context.subcategory.id)}"
+              ${context.disabled ? 'disabled aria-disabled="true"' : ''}>
         <span class="event-preset-subcategory-name">${escapeHtml(expressionSubcategoryLabel(context.subcategory))}</span>
-        <span class="event-preset-subcategory-count">${escapeHtml(formatCount(context.totalItems || 0))} items</span>
+        <span class="event-preset-subcategory-count">${escapeHtml(countText)}</span>
       </button>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function renderExpressionItems() {
@@ -2052,16 +2111,26 @@ export function createEventPresetPanel({
     const rail = root.querySelector('[data-ep-clothes-category-rail]');
     if (!rail) return;
     const categories = state.clothesData.browser?.categories || [];
+    const searchActive = clothesSearchActive();
     rail.innerHTML = categories.length
-      ? categories.map(category => `
+      ? categories.map(category => {
+        const matchedCount = Number(category.matchedCount || 0);
+        const totalCount = Number(category.count || 0);
+        const disabled = searchActive && matchedCount < 1;
+        const countText = searchActive
+          ? searchCountLabel(matchedCount, totalCount)
+          : `${formatCount(category.subcategoryCount || 0)} groups`;
+        return `
         <button type="button"
-                class="event-preset-category ${category.selected || category.id === state.clothesCategoryId ? 'active' : ''}"
+                class="event-preset-category ${category.selected || category.id === state.clothesCategoryId ? 'active' : ''} ${disabled ? 'is-zero-match' : ''}"
                 data-ep-action="clothes-category"
-                data-ep-id="${escapeHtml(category.id)}">
+                data-ep-id="${escapeHtml(category.id)}"
+                ${disabled ? 'disabled aria-disabled="true"' : ''}>
           <span class="event-preset-category-name">${escapeHtml(category.label || category.id)}</span>
-          <span class="event-preset-category-count">${escapeHtml(formatCount(category.subcategoryCount || 0))} groups</span>
+          <span class="event-preset-category-count">${escapeHtml(countText)}</span>
         </button>
-      `).join('')
+      `;
+      }).join('')
       : `<div class="event-preset-empty">${escapeHtml(state.clothesMessage || 'No clothes categories.')}</div>`;
   }
 
@@ -2069,16 +2138,26 @@ export function createEventPresetPanel({
     const rail = root.querySelector('[data-ep-clothes-subcategory-rail]');
     if (!rail) return;
     const subcategories = state.clothesData.browser?.subcategories || [];
+    const searchActive = clothesSearchActive();
     rail.innerHTML = subcategories.length
-      ? subcategories.map(subcategory => `
+      ? subcategories.map(subcategory => {
+        const matchedCount = Number(subcategory.matchedCount || 0);
+        const totalCount = Number(subcategory.count || 0);
+        const disabled = searchActive && matchedCount < 1;
+        const countText = searchActive
+          ? searchCountLabel(matchedCount, totalCount)
+          : `${formatCount(totalCount)} items`;
+        return `
         <button type="button"
-                class="event-preset-subcategory ${subcategory.selected || subcategory.id === state.clothesSubcategoryId ? 'active' : ''}"
+                class="event-preset-subcategory ${subcategory.selected || subcategory.id === state.clothesSubcategoryId ? 'active' : ''} ${disabled ? 'is-zero-match' : ''}"
                 data-ep-action="clothes-subcategory"
-                data-ep-id="${escapeHtml(subcategory.id)}">
+                data-ep-id="${escapeHtml(subcategory.id)}"
+                ${disabled ? 'disabled aria-disabled="true"' : ''}>
           <span class="event-preset-subcategory-name">${escapeHtml(subcategory.label || subcategory.id)}</span>
-          <span class="event-preset-subcategory-count">${escapeHtml(formatCount(subcategory.count || 0))} items</span>
+          <span class="event-preset-subcategory-count">${escapeHtml(countText)}</span>
         </button>
-      `).join('')
+      `;
+      }).join('')
       : '<div class="event-preset-empty">No clothes subcategories.</div>';
   }
 
@@ -2086,9 +2165,12 @@ export function createEventPresetPanel({
     const target = root.querySelector('[data-ep-clothes-items]');
     if (!target) return;
     const items = state.clothesData.browser?.items || [];
+    const selectedSubcategory = (state.clothesData.browser?.subcategories || [])
+      .find(subcategory => subcategory.selected || subcategory.id === state.clothesSubcategoryId);
+    const title = selectedSubcategory?.label || selectedSubcategory?.id || 'Clothes';
     target.innerHTML = `
       <div class="event-preset-events-head">
-        <span>Main Items</span>
+        <span>Main Items (${escapeHtml(title)})</span>
         <span>Count</span>
       </div>
       <div class="event-preset-events-body" data-ep-clothes-items-body tabindex="0">
@@ -2632,7 +2714,9 @@ export function createEventPresetPanel({
       if (input) input.value = '';
     } else if (action === 'expression-category') {
       state.expressionCategoryId = id;
-      state.expressionSubcategoryId = visibleExpressionSubcategoryContexts(findExpressionCategory(id))[0]?.subcategory?.id || '';
+      const contexts = visibleExpressionSubcategoryContexts(findExpressionCategory(id));
+      const nextContext = contexts.find(context => !context.disabled) || contexts[0];
+      state.expressionSubcategoryId = nextContext?.subcategory?.id || '';
     } else if (action === 'expression-subcategory') {
       const context = currentExpressionSubcategoryContexts().find(candidate => candidate.subcategory.id === id);
       state.expressionCategoryId = context?.category?.id || state.expressionCategoryId;
@@ -2710,6 +2794,7 @@ export function createEventPresetPanel({
     if (!input) return;
     if (state.activeAxis === 'expressions') {
       state.expressionSearch = input.value || '';
+      selectFirstMatchingExpressionSearchResult();
     } else if (state.activeAxis === 'clothes') {
       state.clothesSearch = input.value || '';
       scheduleClothesLoad();

@@ -742,11 +742,60 @@ class ClothesPresetService:
         if category_id not in self._display_slots():
             category_id = self._first_slot()
         item_search = str(payload.get("itemSearch") or payload.get("searchItems") or "")
-        rows, signal_cache = self._slot_candidate_rows(category_id, item_search, normalized)
-        subgroups = self._subgroups_from_rows(rows, signal_cache)
+        search_active = bool(self._normalize_tag(item_search))
+        rule_context = self._slot_candidate_context(normalized)
+        base_rows, base_signal_cache = self._slot_candidate_rows(
+            category_id,
+            "",
+            normalized,
+            limit_rows=False,
+            rule_context=rule_context,
+        )
+        if search_active:
+            rows, signal_cache = self._slot_candidate_rows(
+                category_id,
+                item_search,
+                normalized,
+                limit_rows=False,
+                rule_context=rule_context,
+            )
+        else:
+            rows, signal_cache = base_rows, base_signal_cache
+        if search_active and not rows:
+            for slot in self._display_slots():
+                if slot == category_id:
+                    continue
+                candidate_rows, candidate_signal_cache = self._slot_candidate_rows(
+                    slot,
+                    item_search,
+                    normalized,
+                    limit_rows=False,
+                    rule_context=rule_context,
+                )
+                if not candidate_rows:
+                    continue
+                category_id = slot
+                rows = candidate_rows
+                signal_cache = candidate_signal_cache
+                base_rows, base_signal_cache = self._slot_candidate_rows(
+                    category_id,
+                    "",
+                    normalized,
+                    limit_rows=False,
+                    rule_context=rule_context,
+                )
+                break
+        subgroups = self._merge_browser_subgroups(
+            self._subgroups_from_rows(base_rows, base_signal_cache),
+            self._subgroups_from_rows(rows, signal_cache),
+            search_active=search_active,
+        )
         subcategory_id = normalized["selected"].get("subcategoryId") or ""
-        if not subcategory_id or subcategory_id not in {item["id"] for item in subgroups}:
-            subcategory_id = subgroups[0]["id"] if subgroups else ""
+        subgroup_by_id = {item["id"]: item for item in subgroups}
+        selected_subgroup = subgroup_by_id.get(subcategory_id)
+        if not selected_subgroup or (search_active and selected_subgroup.get("disabled")):
+            first_enabled = next((item for item in subgroups if not item.get("disabled")), None)
+            subcategory_id = (first_enabled or subgroups[0])["id"] if subgroups else ""
         item_limit = self._limit(payload.get("itemLimit"), self._max_items_per_slot())
         items = [
             self._browser_item(row, normalized, signal_cache)
@@ -760,17 +809,43 @@ class ClothesPresetService:
             for group in normalized["staged"]["groups"]
         }
         for slot in self._display_slots():
-            total = len(self._slot_rows_cache.get(slot, []))
+            slot_base_rows, _slot_base_signal = self._slot_candidate_rows(
+                slot,
+                "",
+                normalized,
+                limit_rows=False,
+                rule_context=rule_context,
+            )
+            if search_active and slot == category_id:
+                slot_match_rows = rows
+            elif search_active:
+                slot_match_rows, _slot_match_signal = self._slot_candidate_rows(
+                    slot,
+                    item_search,
+                    normalized,
+                    limit_rows=False,
+                    rule_context=rule_context,
+                )
+            else:
+                slot_match_rows = slot_base_rows
+            total = len(slot_base_rows)
             subcategory_count = len({
                 self._assigned_group_by_tag.get(str(row.tag), "other")
-                for row in self._slot_rows_cache.get(slot, [])
+                for row in slot_base_rows
+            })
+            matched_subcategory_count = len({
+                self._assigned_group_by_tag.get(str(row.tag), "other")
+                for row in slot_match_rows
             })
             categories.append({
                 "id": slot,
                 "label": self._slot_label(slot),
                 "count": total,
+                "matchedCount": len(slot_match_rows),
                 "subcategoryCount": subcategory_count,
+                "matchedSubcategoryCount": matched_subcategory_count,
                 "selectedCount": int(staged_by_slot.get(slot, 0) or 0),
+                "disabled": bool(search_active and not slot_match_rows),
                 "selected": slot == category_id,
             })
 
@@ -786,15 +861,11 @@ class ClothesPresetService:
             ],
             "items": items,
             "search": item_search,
+            "searchActive": search_active,
             "limit": item_limit,
         }
 
-    def _slot_candidate_rows(
-        self,
-        slot: str,
-        search: str,
-        normalized: dict[str, Any],
-    ) -> tuple[list[Any], dict[str, tuple[float, float, int, int]]]:
+    def _slot_candidate_context(self, normalized: dict[str, Any]) -> dict[str, Any]:
         staged = normalized["staged"]
         selected_tags = set(staged["tags"])
         rule_seed_tags = staged["ruleSeedTags"]
@@ -804,6 +875,31 @@ class ClothesPresetService:
         if rule_seed_tags:
             candidate_set.update(reco_agg.keys())
             candidate_set.update(pair_agg.keys())
+        return {
+            "staged": staged,
+            "selectedTags": selected_tags,
+            "ruleSeedTags": rule_seed_tags,
+            "recoAgg": reco_agg,
+            "pairAgg": pair_agg,
+            "candidateSet": candidate_set,
+        }
+
+    def _slot_candidate_rows(
+        self,
+        slot: str,
+        search: str,
+        normalized: dict[str, Any],
+        *,
+        limit_rows: bool = True,
+        rule_context: dict[str, Any] | None = None,
+    ) -> tuple[list[Any], dict[str, tuple[float, float, int, int]]]:
+        context = rule_context or self._slot_candidate_context(normalized)
+        staged = context["staged"]
+        selected_tags = context["selectedTags"]
+        rule_seed_tags = context["ruleSeedTags"]
+        reco_agg = context["recoAgg"]
+        pair_agg = context["pairAgg"]
+        candidate_set = context["candidateSet"]
 
         rows = list(self._slot_rows_cache.get(slot, []))
         if rule_seed_tags:
@@ -851,9 +947,32 @@ class ClothesPresetService:
             )
         )
         max_rows = self._max_items_per_slot()
-        if len(rows) > max_rows:
+        if limit_rows and len(rows) > max_rows:
             rows = rows[:max_rows]
         return rows, signal_cache
+
+    def _merge_browser_subgroups(
+        self,
+        base_subgroups: list[dict[str, Any]],
+        matched_subgroups: list[dict[str, Any]],
+        *,
+        search_active: bool,
+    ) -> list[dict[str, Any]]:
+        matched_by_id = {str(item.get("id") or ""): item for item in matched_subgroups}
+        result: list[dict[str, Any]] = []
+        for subgroup in base_subgroups:
+            subgroup_id = str(subgroup.get("id") or "")
+            matched = matched_by_id.get(subgroup_id)
+            matched_count = int(matched.get("count") or 0) if matched else 0
+            shaped = dict(subgroup)
+            shaped["matchedCount"] = matched_count if search_active else int(subgroup.get("count") or 0)
+            shaped["matchedPostCount"] = int(matched.get("postCount") or 0) if matched else 0
+            shaped["matchedDisplayCount"] = self._format_count(shaped["matchedPostCount"])
+            shaped["disabled"] = bool(search_active and matched_count < 1)
+            result.append(shaped)
+        if search_active:
+            result.sort(key=lambda item: bool(item.get("disabled")))
+        return result
 
     def _subgroups_from_rows(
         self,

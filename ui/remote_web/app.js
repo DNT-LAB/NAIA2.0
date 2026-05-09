@@ -203,7 +203,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260505-continuous4')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260509-mobile-layout1')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,

@@ -46,6 +46,7 @@ export function createCharacterViewerController({
   const cosplayNameEl = document.getElementById('characterViewerCosplayName');
   const copyBtn = document.getElementById('characterViewerCopyBtn');
   const generateBtn = document.getElementById('characterViewerGenerateBtn');
+  const rootEl = document.querySelector('.character-viewer-tab');
 
   const PAGE_SIZE = 9;
   const LIST_ITEM_HEIGHT = 30;
@@ -86,6 +87,15 @@ export function createCharacterViewerController({
   let continuousScheduleToken = 0;
 
   const html = value => escHtml(String(value ?? ''));
+
+  function isCompactViewport() {
+    return Boolean(window.matchMedia?.('(max-width: 767px)').matches);
+  }
+
+  function syncViewState() {
+    if (!rootEl) return;
+    rootEl.dataset.characterViewerView = activeView;
+  }
 
   function gridThumbnailUrl(url) {
     const raw = String(url || '');
@@ -215,6 +225,7 @@ export function createCharacterViewerController({
   function switchCharacterView(view) {
     const nextView = view === 'detail' && detail ? 'detail' : 'characters';
     activeView = nextView;
+    syncViewState();
     subtabEls.forEach(button => {
       const isActive = button.dataset.characterViewerTab === nextView;
       button.classList.toggle('active', isActive);
@@ -420,7 +431,7 @@ export function createCharacterViewerController({
     if (!group || !character) return;
     const targetIndex = Number.isFinite(index) && index >= 0 ? index : getItemIndex(group, character);
     const targetPage = targetIndex >= 0 ? Math.floor(targetIndex / PAGE_SIZE) : currentPage;
-    const openDetail = activeView === 'detail';
+    const openDetail = activeView === 'detail' || isCompactViewport();
     if (!openDetail) switchCharacterView('characters');
     if (targetPage !== currentPage) {
       await loadPage(targetPage, {anchor: 'top', skipAutoSelect: true});
@@ -1153,6 +1164,7 @@ export function createCharacterViewerController({
   }
 
   bind();
+  syncViewState();
 
   return {
     load,

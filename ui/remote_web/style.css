@@ -3570,6 +3570,126 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
     overflow-y: auto;
   }
 }
+@media (max-width: 767px) {
+  .character-viewer-tab {
+    flex: 1;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(168px, 32dvh) minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+  }
+  .character-viewer-tab[data-character-viewer-view="detail"] {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .character-viewer-tab[data-character-viewer-view="detail"] .character-viewer-browser {
+    display: none;
+  }
+  .character-viewer-browser {
+    grid-template-rows: minmax(72px, 0.46fr) minmax(88px, 0.54fr);
+    gap: 7px;
+    padding: 7px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-dim);
+  }
+  .character-viewer-group-list,
+  .character-viewer-list {
+    min-height: 0;
+  }
+  .character-viewer-subtabs {
+    min-height: 34px;
+    overflow-x: auto;
+  }
+  .character-viewer-subtab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 10px;
+  }
+  .character-viewer-head {
+    grid-template-columns: 1fr;
+    min-height: 0;
+    gap: 8px;
+    padding: 8px;
+  }
+  .character-viewer-tools {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+  .character-viewer-status {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+  .character-viewer-grid {
+    overflow-y: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: none;
+    grid-auto-rows: 188px;
+    gap: 8px;
+    padding: 8px;
+  }
+  .character-viewer-card {
+    height: 188px;
+  }
+  .character-viewer-pager {
+    flex-wrap: wrap;
+    min-height: 0;
+  }
+  .character-viewer-detail {
+    flex-direction: column;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .character-viewer-detail-layout {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    min-height: auto;
+    padding: 8px;
+    overflow: visible;
+  }
+  .character-viewer-detail-media,
+  .character-viewer-detail-editor {
+    min-height: auto;
+    overflow: visible;
+  }
+  .character-viewer-detail-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .character-viewer-preview,
+  .character-viewer-section,
+  .character-viewer-prompt {
+    margin-bottom: 0;
+  }
+  .character-viewer-selected-stage {
+    height: clamp(220px, 46dvh, 360px);
+    min-height: 0;
+  }
+  .character-viewer-tag-sections,
+  .character-viewer-prompt,
+  .character-viewer-options,
+  .character-viewer-cosplay,
+  .character-viewer-run-controls,
+  .character-viewer-generate-row {
+    grid-template-columns: 1fr;
+  }
+  .character-viewer-generate-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding-top: 6px;
+    background: var(--bg-deep);
+  }
+  .character-viewer-result-stage {
+    height: min(48dvh, 360px);
+  }
+  .character-viewer-result.is-expanded .character-viewer-result-stage img.show {
+    max-width: 92vw;
+    max-height: calc(100dvh - 32px);
+  }
+}
 .metadata-viewer {
   flex: 1;
   min-height: 0;

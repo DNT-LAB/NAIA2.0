@@ -1,10 +1,17 @@
-export function createCustomSelectController({ document, window, showToast = () => {} }) {
+export function createCustomSelectController({
+  document,
+  window,
+  showToast = () => {},
+  fetchFn = null,
+  useNativeClipboardFallback = () => false,
+}) {
   const SELECTOR = 'select:not([multiple]):not([data-native-select])';
   const enhanced = new WeakMap();
   const states = new Set();
   let openState = null;
   let syncTimer = null;
   let observer = null;
+  const requestFetch = fetchFn || window.fetch?.bind(window);
 
   function selectClasses(select) {
     const classes = Array.from(select.classList)
@@ -445,20 +452,49 @@ export function createCustomSelectController({ document, window, showToast = () 
     }
   }
 
+  async function readBrowserClipboardImageBlob() {
+    if (!window.navigator?.clipboard?.read) {
+      throw new Error('이 브라우저는 이미지 붙여넣기를 지원하지 않습니다.');
+    }
+    const items = await window.navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find(candidate => candidate.startsWith('image/'));
+      if (!type) continue;
+      return item.getType(type);
+    }
+    throw new Error('클립보드에 이미지가 없습니다.');
+  }
+
+  async function readNativeClipboardImageBlob() {
+    if (typeof requestFetch !== 'function') {
+      throw new Error('클립보드 fallback을 사용할 수 없습니다.');
+    }
+    const response = await requestFetch('/api/clipboard/png', {cache: 'no-store'});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `클립보드 이미지 읽기 실패: HTTP ${response.status}`);
+    }
+    return response.blob();
+  }
+
+  async function readClipboardImageBlob() {
+    let browserError = null;
+    try {
+      return await readBrowserClipboardImageBlob();
+    } catch (error) {
+      browserError = error;
+    }
+
+    if (useNativeClipboardFallback()) {
+      return readNativeClipboardImageBlob();
+    }
+    throw browserError || new Error('클립보드에 이미지가 없습니다.');
+  }
+
   async function pastePresetThumbnail(state, option) {
     try {
-      if (!window.navigator?.clipboard?.read) {
-        throw new Error('이 브라우저는 이미지 붙여넣기를 지원하지 않습니다.');
-      }
-      const items = await window.navigator.clipboard.read();
-      for (const item of items) {
-        const type = item.types.find(candidate => candidate.startsWith('image/'));
-        if (!type) continue;
-        const blob = await item.getType(type);
-        await uploadPresetThumbnail(state, option, blob);
-        return;
-      }
-      throw new Error('클립보드에 이미지가 없습니다.');
+      const blob = await readClipboardImageBlob();
+      await uploadPresetThumbnail(state, option, blob);
     } catch (error) {
       console.error('Preset thumbnail paste failed', error);
       showToast(error.message || '썸네일 붙여넣기 실패', 'error');

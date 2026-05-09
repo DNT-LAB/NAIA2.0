@@ -233,12 +233,14 @@ const studioTabReady = import('./js/features/studioTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260508-preset-thumb-actions1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260509-clipboard-fallback1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
       window,
       showToast,
+      fetchFn: window.fetch.bind(window),
+      useNativeClipboardFallback: () => isDesktopShell,
     });
     customSelectsControl.start();
   })
@@ -555,7 +557,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260507-event-preset-download1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260509-expression-random1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,
@@ -713,7 +715,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260505-vibe-cluster9')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260509-clipboard-fallback1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -723,6 +725,8 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
       showToast,
       openModule,
       getCurrentModuleId: () => currentModuleId,
+      fetchFn: window.fetch.bind(window),
+      useNativeClipboardFallback: () => isDesktopShell,
       modulePopup,
       positionFloatingPanel,
     });
@@ -1038,10 +1042,17 @@ function handleWsBlob(data) {
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
   const pendingPresetRequestId = String(presetGenerationPending?.requestId || '');
-  const imagePresetRequestId = String(latestImageMeta?.event_preset_request_id || '');
+  const imagePresetRequestId = String(
+    latestImageMeta?.remote_preset_request_id
+    || latestImageMeta?.event_preset_request_id
+    || ''
+  );
   const isPendingPresetResult = pendingPresetRequestId
     ? imagePresetRequestId === pendingPresetRequestId
-    : (!!presetGenerationPending && !!latestImageMeta?.event_preset_request);
+    : (!!presetGenerationPending && (
+      !!latestImageMeta?.remote_preset_request
+      || !!latestImageMeta?.event_preset_request
+    ));
   if (isPendingPresetResult) {
     clearPresetGenerationOptions({autoGenerate: false});
     eventPresetPanel?.focusResultImage?.();
@@ -1217,6 +1228,7 @@ const wsMessageHandlers = {
     }
   },
   event_preset_generation_error: onEventPresetGenerationError,
+  preset_generation_error: onEventPresetGenerationError,
   load_prompt: m => onLoadPrompt(m.prompt),
   viewer_new_image: onViewerNewImage,
   session: onSession,
@@ -1392,18 +1404,24 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const prompt = message.prompt;
   const source = message.source;
   if (!prompt) return;
+  const isPresetSource = source === 'event_preset' || source === 'preset';
+  const messagePresetRequestId = String(
+    source === 'preset'
+      ? (message.remote_preset_request_id || message.requestId || '')
+      : (message.event_preset_request_id || message.requestId || '')
+  );
   if (
-    source === 'event_preset'
+    isPresetSource
     && presetGenerationPending
     && (
       !String(presetGenerationPending.requestId || '')
-      || String(message.event_preset_request_id || '') === String(presetGenerationPending.requestId || '')
+      || messagePresetRequestId === String(presetGenerationPending.requestId || '')
     )
   ) {
     clearPresetGenerationOptions({autoGenerate: false});
   }
   // 직접 요청한 Random만 수락하되, 데스크탑 Auto Gen은 전역 프롬프트 상태로 동기화한다.
-  if ((source === 'random' && awaitingMyRandom) || source === 'event_preset' || source === 'auto_generate') {
+  if ((source === 'random' && awaitingMyRandom) || isPresetSource || source === 'auto_generate') {
     if (source === 'random') unlockRandomButton();
     let acceptedPrompt = false;
     if (_isPromptEditingActive() && prompt !== promptEdit.value) {
@@ -2625,7 +2643,7 @@ async function randomizeFromPresetTab() {
   try {
     const shouldGenerate = getOptionChecked('auto_generate');
     const changed = await eventPresetPanel?.randomizeCurrentCategory?.();
-    if (!changed) showToast('랜덤 선택 가능한 Event Preset이 없습니다.', 'error');
+    if (!changed) showToast(eventPresetPanel?.randomizeUnavailableMessage?.() || '랜덤 선택 가능한 Preset이 없습니다.', 'error');
     else if (shouldGenerate) await generateFromPresetTab();
   } catch (error) {
     showToast(error?.message || 'Event Preset 랜덤 생성에 실패했습니다.', 'error');

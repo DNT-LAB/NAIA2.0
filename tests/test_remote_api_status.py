@@ -1413,6 +1413,22 @@ def test_clipboard_png_endpoint_uses_saved_path_payload(tmp_path):
     assert response.json()["bytes"] == len(image_path.read_bytes())
 
 
+def test_clipboard_png_read_endpoint_returns_png_bytes():
+    bridge = RemoteBridge(_AppContext())
+
+    async def fake_request_clipboard_png(timeout=2.0):
+        return b"\x89PNG\r\n\x1a\nclipboard-png"
+
+    bridge._request_clipboard_png = fake_request_clipboard_png
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.get("/api/clipboard/png")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content == b"\x89PNG\r\n\x1a\nclipboard-png"
+
+
 def test_original_endpoint_falls_back_for_current_without_path():
     bridge = RemoteBridge(_AppContext())
     bridge.latest_webp = b"latest-webp"

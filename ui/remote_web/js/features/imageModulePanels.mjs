@@ -7,6 +7,8 @@ export function createImageModulePanels({
   openModule,
   getCurrentModuleId,
   navigatorRef = globalThis.navigator,
+  fetchFn = globalThis.fetch,
+  useNativeClipboardFallback = () => false,
   ImageCtor = globalThis.Image,
   FileReaderCtor = globalThis.FileReader,
   FileCtor = globalThis.File,
@@ -143,19 +145,57 @@ export function createImageModulePanels({
     renderVibeClusterSavePanel();
   }
 
-  function pasteImage(moduleId) {
-    navigatorRef.clipboard.read().then(items => {
-      for (const item of items) {
-        const imageType = item.types.find(type => type.startsWith('image/'));
-        if (imageType) {
-          item.getType(imageType).then(blob => {
-            uploadImage(moduleId, new FileCtor([blob], 'clipboard.png', { type: blob.type }));
-          });
-          return;
-        }
-      }
-      showToast('No image in clipboard', 'error');
-    }).catch(() => showToast('Clipboard access denied', 'error'));
+  async function readBrowserClipboardImageBlob() {
+    if (!navigatorRef?.clipboard?.read) {
+      throw new Error('Clipboard image read is unavailable');
+    }
+    const items = await navigatorRef.clipboard.read();
+    for (const item of items) {
+      const imageType = item.types.find(type => type.startsWith('image/'));
+      if (!imageType) continue;
+      return item.getType(imageType);
+    }
+    throw new Error('No image in clipboard');
+  }
+
+  async function readNativeClipboardImageBlob() {
+    if (typeof fetchFn !== 'function') {
+      throw new Error('Clipboard fallback is unavailable');
+    }
+    const response = await fetchFn('/api/clipboard/png', {cache: 'no-store'});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `Clipboard read failed: HTTP ${response.status}`);
+    }
+    return response.blob();
+  }
+
+  async function readClipboardImageBlob() {
+    let browserError = null;
+    try {
+      return await readBrowserClipboardImageBlob();
+    } catch (error) {
+      browserError = error;
+    }
+
+    if (useNativeClipboardFallback()) {
+      return readNativeClipboardImageBlob();
+    }
+    throw browserError || new Error('No image in clipboard');
+  }
+
+  function fileFromClipboardBlob(blob, filename) {
+    return new FileCtor([blob], filename, {type: blob.type || 'image/png'});
+  }
+
+  async function pasteImage(moduleId) {
+    try {
+      const blob = await readClipboardImageBlob();
+      uploadImage(moduleId, fileFromClipboardBlob(blob, 'clipboard.png'));
+    } catch (error) {
+      console.error('Image clipboard paste failed', error);
+      showToast(error.message || 'Clipboard access denied', 'error');
+    }
   }
 
   function uploadImage(moduleId, file) {
@@ -221,20 +261,16 @@ export function createImageModulePanels({
     reader.readAsDataURL(file);
   }
 
-  function pasteVibeClusterThumbnail(targetId = '') {
-    navigatorRef.clipboard.read().then(items => {
-      for (const item of items) {
-        const imageType = item.types.find(type => type.startsWith('image/'));
-        if (!imageType) continue;
-        item.getType(imageType).then(blob => {
-          const file = new FileCtor([blob], 'cluster-thumbnail.png', {type: blob.type});
-          if (targetId) updateVibeClusterThumbnailFromFile(targetId, file);
-          else setVibeClusterSaveThumbnail(file);
-        });
-        return;
-      }
-      showToast('No image in clipboard', 'error');
-    }).catch(() => showToast('Clipboard access denied', 'error'));
+  async function pasteVibeClusterThumbnail(targetId = '') {
+    try {
+      const blob = await readClipboardImageBlob();
+      const file = fileFromClipboardBlob(blob, 'cluster-thumbnail.png');
+      if (targetId) updateVibeClusterThumbnailFromFile(targetId, file);
+      else setVibeClusterSaveThumbnail(file);
+    } catch (error) {
+      console.error('Vibe cluster thumbnail paste failed', error);
+      showToast(error.message || 'Clipboard access denied', 'error');
+    }
   }
 
   function setVibeClusterSaveThumbnail(file) {

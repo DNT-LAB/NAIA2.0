@@ -36,7 +36,10 @@ from PyQt6.QtWidgets import QFileDialog
 from core import api_verification
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
+from core.clothes_preset_service import ClothesPresetService
 from core.event_preset_service import EventPresetService
+from core.expression_preset_service import ExpressionPresetService
+from core.preset_composer_service import PresetComposerService
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
@@ -47,7 +50,7 @@ from core.resolution_utils import (
     nearest_standard_1mp_resolution,
     parse_resolution_pair,
 )
-from utils.clipboard_image import set_png_clipboard_bytes
+from utils.clipboard_image import clipboard_png_bytes, set_png_clipboard_bytes
 from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
 from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
 from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
@@ -169,6 +172,7 @@ class RemoteBridge(QObject):
     request_result_image_action = pyqtSignal(str)       # result context JSON — 숨김 img2img 세션 등
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
     request_copy_png_to_clipboard = pyqtSignal(bytes, str)  # (png_bytes, filename)
+    request_read_clipboard_png = pyqtSignal(str)        # request_id — Qt clipboard PNG read
     request_danbooru_prompt_preview = pyqtSignal(object)  # request dict with event/tags/prompt
     request_open_danbooru_browser = pyqtSignal(str)     # URL — 기존 PyQt6 Danbooru WebView 탭 열기
     request_artist_thumb_generate = pyqtSignal(object)  # Artist Thumbnail generate payload
@@ -295,6 +299,12 @@ class RemoteBridge(QObject):
         self._repo_root = Path(__file__).resolve().parent.parent
         self._character_viewer_service = CharacterViewerService(self._repo_root)
         self._event_preset_service = EventPresetService(self._repo_root)
+        self._clothes_preset_service = ClothesPresetService(self._repo_root)
+        self._expression_preset_service = ExpressionPresetService(self._repo_root)
+        self._preset_composer_service = PresetComposerService(
+            self._event_preset_service,
+            axis_providers={"clothes": self._clothes_preset_service},
+        )
         self._event_preset_download_lock = threading.RLock()
         self._event_preset_download_thread: Optional[threading.Thread] = None
         self._event_preset_download_cancel = threading.Event()
@@ -321,6 +331,8 @@ class RemoteBridge(QObject):
         # Resolution manager actions: FastAPI request_id → {loop, future, payload}
         self._pending_resolution_actions: dict = {}
         self._resolution_actions_lock = threading.Lock()
+        self._pending_clipboard_png_requests: dict = {}
+        self._clipboard_png_requests_lock = threading.Lock()
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
 
@@ -2168,6 +2180,10 @@ class RemoteBridge(QObject):
                 )
 
             self._event_preset_service = EventPresetService(self._repo_root)
+            self._preset_composer_service = PresetComposerService(
+                self._event_preset_service,
+                axis_providers={"clothes": self._clothes_preset_service},
+            )
             self._set_event_preset_download_state(
                 active=False,
                 phase="complete",
@@ -3375,6 +3391,61 @@ class RemoteBridge(QObject):
             "event": result.get("event") or {},
         }
 
+    def _preset_prompt_preview(self, payload: dict) -> dict:
+        return self._preset_composer_service.prompt_preview(payload if isinstance(payload, dict) else {})
+
+    def _preset_generate(self, payload: dict) -> dict:
+        mw = self.app_context.main_window
+        gc = getattr(mw, "generation_controller", None) if mw else None
+        if gc is not None and getattr(gc, "is_generating", False):
+            raise RuntimeError("이미 생성 중입니다.")
+        result = self._preset_composer_service.generation_source(payload if isinstance(payload, dict) else {})
+        source_row_data = result.get("sourceRow") or {}
+        if not isinstance(source_row_data, dict) or not source_row_data.get("general"):
+            raise ValueError("Preset prompt source is empty.")
+        import pandas as pd
+        request_id = str(result.get("requestId") or uuid.uuid4().hex)
+        source_name = str(result.get("sourceName") or f"preset:{request_id}")
+        source_row = pd.Series(source_row_data, name=source_name)
+        rating = str(source_row_data.get("rating") or "").strip()
+        active_ratings = {rating} if rating in {"g", "s", "q", "e"} else set(self._active_ratings)
+        overrides = result.get("overrides") if isinstance(result.get("overrides"), dict) else {}
+        self._pending_random_requests.append({
+            "ws": None,
+            "source_row": source_row,
+            "active_ratings": active_ratings,
+            "remote_preset_request_id": request_id,
+            "overrides": overrides,
+        })
+        self.request_random.emit()
+        return {
+            "ok": True,
+            "status": "generation_requested",
+            "requestId": request_id,
+            "promptPlan": result.get("promptPlan") or {},
+        }
+
+    def _clothes_preset_status(self) -> dict:
+        return self._clothes_preset_service.status()
+
+    def _clothes_preset_bootstrap(self, payload: dict) -> dict:
+        return self._clothes_preset_service.bootstrap(payload if isinstance(payload, dict) else {})
+
+    def _clothes_preset_select(self, payload: dict) -> dict:
+        return self._clothes_preset_service.select(payload if isinstance(payload, dict) else {})
+
+    def _clothes_preset_lucky(self, payload: dict) -> dict:
+        return self._clothes_preset_service.lucky(payload if isinstance(payload, dict) else {})
+
+    def _clothes_preset_prompt_fragment(self, payload: dict) -> dict:
+        return self._clothes_preset_service.prompt_fragment(payload if isinstance(payload, dict) else {})
+
+    def _expression_preset_status(self) -> dict:
+        return self._expression_preset_service.status()
+
+    def _expression_preset_bootstrap(self, payload: dict) -> dict:
+        return self._expression_preset_service.bootstrap(payload if isinstance(payload, dict) else {})
+
     def _event_preset_thumbnail_payload(
         self,
         event_id: str = "",
@@ -4414,6 +4485,56 @@ class RemoteBridge(QObject):
                 "level": "error",
             })
 
+    async def _request_clipboard_png(self, timeout: float = 2.0) -> bytes:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        request_id = uuid.uuid4().hex
+        with self._clipboard_png_requests_lock:
+            self._pending_clipboard_png_requests[request_id] = {
+                "loop": loop,
+                "future": future,
+            }
+        self.request_read_clipboard_png.emit(request_id)
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            with self._clipboard_png_requests_lock:
+                self._pending_clipboard_png_requests.pop(request_id, None)
+
+        if not isinstance(result, dict):
+            raise RuntimeError("Invalid clipboard read result")
+        error = str(result.get("error") or "").strip()
+        if error:
+            raise RuntimeError(error)
+        png_bytes = result.get("png_bytes")
+        if not png_bytes:
+            raise FileNotFoundError("No image in clipboard")
+        return bytes(png_bytes)
+
+    def _complete_clipboard_png_request(self, request: dict, result: dict):
+        loop = request.get("loop")
+        future = request.get("future")
+        if loop is None or future is None:
+            return
+        loop.call_soon_threadsafe(
+            lambda f=future, r=result: (f.set_result(r) if not f.done() else None)
+        )
+
+    def _do_read_clipboard_png(self, request_id: str):
+        with self._clipboard_png_requests_lock:
+            request = self._pending_clipboard_png_requests.pop(request_id, None)
+        if not request:
+            return
+        try:
+            png_bytes = clipboard_png_bytes()
+            result = {
+                "ok": bool(png_bytes),
+                "png_bytes": bytes(png_bytes) if png_bytes else b"",
+            }
+        except Exception as e:
+            result = {"ok": False, "error": str(e), "png_bytes": b""}
+        self._complete_clipboard_png_request(request, result)
+
     def _current_api_mode(self) -> str:
         try:
             if hasattr(self.app_context, "get_api_mode"):
@@ -4560,6 +4681,7 @@ class RemoteBridge(QObject):
         req = self._pending_random_requests.popleft()
         ws = None
         comfyui_request_id = None
+        remote_preset_request_id = None
         try:
             ws = req.get("ws")
             source_row = req.get("source_row")
@@ -4573,6 +4695,7 @@ class RemoteBridge(QObject):
             # ComfyUI sync 요청 처리 — ws=None 이지만 request_id로 격리
             comfyui_request_id = req.get("comfyui_request_id")
             event_preset_request_id = req.get("event_preset_request_id")
+            remote_preset_request_id = req.get("remote_preset_request_id")
             force_skip = bool(req.get("force_naia_skip_generate", False))
             respect_autogen = bool(req.get("respect_naia_autogen", True))
             comfyui_peng_override = req.get("peng_override")  # dict or None
@@ -4609,6 +4732,15 @@ class RemoteBridge(QObject):
                     "event_preset_request_id": event_preset_request_id,
                 }
                 self.app_context.skip_prompt_engineering_auto_hide = True
+            elif remote_preset_request_id:
+                self._pending_overrides[("preset", remote_preset_request_id)] = {
+                    "params": req.get("overrides") if isinstance(req.get("overrides"), dict) else {"remote_preset_request": True},
+                    "negative": req.get("negative"),
+                    "source": "preset",
+                    "auto_generate": True,
+                    "remote_preset_request_id": remote_preset_request_id,
+                }
+                self.app_context.skip_prompt_engineering_auto_hide = True
             elif ws:
                 self._pending_overrides[ws] = {
                     "params": None,
@@ -4643,6 +4775,14 @@ class RemoteBridge(QObject):
         except Exception as e:
             if comfyui_request_id:
                 self._fail_comfyui_random_request(comfyui_request_id, f"Random failed: {e}")
+            elif remote_preset_request_id:
+                self._pending_overrides.pop(("preset", remote_preset_request_id), None)
+                self._broadcast_json({
+                    "type": "preset_generation_error",
+                    "source": "preset",
+                    "requestId": str(remote_preset_request_id or ""),
+                    "message": f"Random failed: {e}",
+                })
             elif ws is not None:
                 self._pending_overrides.pop(ws, None)
                 self._send_json_to(ws, {"type": "random_failed",
@@ -6132,6 +6272,13 @@ class RemoteBridge(QObject):
                 "type": "event_preset_generation_error",
                 "requestId": str(payload.get("event_preset_request_id") or ""),
                 "message": str(payload.get("message") or "Event Preset generation failed"),
+            })
+        if payload.get("remote_preset_request"):
+            self._broadcast_json({
+                "type": "preset_generation_error",
+                "source": "preset",
+                "requestId": str(payload.get("remote_preset_request_id") or ""),
+                "message": str(payload.get("message") or "Preset generation failed"),
             })
         self._broadcast_json({"type": "status", "is_generating": False})
 
@@ -11135,18 +11282,25 @@ class RemoteBridge(QObject):
             prompt_event_preset_request_id = ""
             if prompt_source_name.startswith("event_preset:"):
                 prompt_event_preset_request_id = prompt_source_name.split(":", 1)[1]
+            prompt_remote_preset_request_id = ""
+            if prompt_source_name.startswith("preset:"):
+                prompt_remote_preset_request_id = prompt_source_name.split(":", 1)[1]
 
             auto_ws = None
             if prompt_event_preset_request_id:
                 event_key = ("event_preset", prompt_event_preset_request_id)
                 if event_key in self._pending_overrides:
                     auto_ws = event_key
-            if auto_ws is None and not prompt_event_preset_request_id:
+            if auto_ws is None and prompt_remote_preset_request_id:
+                preset_key = ("preset", prompt_remote_preset_request_id)
+                if preset_key in self._pending_overrides:
+                    auto_ws = preset_key
+            if auto_ws is None and not prompt_event_preset_request_id and not prompt_remote_preset_request_id:
                 for ws_key, pending in list(self._pending_overrides.items()):
                     if (
                         isinstance(ws_key, tuple)
                         and len(ws_key) == 2
-                        and ws_key[0] == "event_preset"
+                        and ws_key[0] in {"event_preset", "preset"}
                     ):
                         continue
                     if pending.get("auto_generate"):
@@ -11158,15 +11312,25 @@ class RemoteBridge(QObject):
             source = (
                 "event_preset"
                 if prompt_event_preset_request_id
-                else ("auto_generate" if is_auto_generated_prompt else "random")
+                else (
+                    "preset"
+                    if prompt_remote_preset_request_id
+                    else ("auto_generate" if is_auto_generated_prompt else "random")
+                )
             )
             event_preset_request_id = prompt_event_preset_request_id
+            remote_preset_request_id = prompt_remote_preset_request_id
             if auto_ws:
                 pending = self._pending_overrides.pop(auto_ws, {})
                 source = pending.get("source", "random")
                 event_preset_request_id = str(
                     pending.get("event_preset_request_id")
                     or event_preset_request_id
+                    or ""
+                )
+                remote_preset_request_id = str(
+                    pending.get("remote_preset_request_id")
+                    or remote_preset_request_id
                     or ""
                 )
                 pending_neg = pending.get("negative")
@@ -11194,13 +11358,20 @@ class RemoteBridge(QObject):
                         "requestId": event_preset_request_id,
                         "message": "Event Preset generation skipped because generation is already running.",
                     })
+                elif source == "preset" and remote_preset_request_id:
+                    self._broadcast_json({
+                        "type": "preset_generation_error",
+                        "source": "preset",
+                        "requestId": remote_preset_request_id,
+                        "message": "Preset generation skipped because generation is already running.",
+                    })
             else:
                 # auto_generate 아닌 pending (generate 등) → source만 추출
                 for ws_key, pending in list(self._pending_overrides.items()):
                     if (
                         isinstance(ws_key, tuple)
                         and len(ws_key) == 2
-                        and ws_key[0] == "event_preset"
+                        and ws_key[0] in {"event_preset", "preset"}
                     ):
                         continue
                     if pending.get("source"):
@@ -11222,6 +11393,9 @@ class RemoteBridge(QObject):
                         "source": source, "rating_counts": rating_counts}
                 if event_preset_request_id:
                     data["event_preset_request_id"] = event_preset_request_id
+                if remote_preset_request_id:
+                    data["requestId"] = remote_preset_request_id
+                    data["remote_preset_request_id"] = remote_preset_request_id
                 data.update(self._build_prompt_token_payload(prompt, None))
                 asyncio.run_coroutine_threadsafe(
                     self._ws_manager.broadcast_json(data),
@@ -11287,6 +11461,9 @@ class RemoteBridge(QObject):
             character_viewer_thumbnail = None
             prompt_preset_thumbnail = None
             character_viewer_snapshot = gen_params.get("_character_viewer_snapshot") or {}
+            remote_preset_axes = gen_params.get("remote_preset_axes") or []
+            if isinstance(remote_preset_axes, str):
+                remote_preset_axes = [item.strip() for item in remote_preset_axes.split(",") if item.strip()]
             if gen_params.get("prompt_preset_thumbnail_request"):
                 try:
                     preset_name = str(gen_params.get("prompt_preset_thumbnail_name") or "")
@@ -11357,6 +11534,9 @@ class RemoteBridge(QObject):
                 ),
                 "event_preset_request": bool(gen_params.get("event_preset_request")),
                 "event_preset_request_id": str(gen_params.get("event_preset_request_id") or ""),
+                "remote_preset_request": bool(gen_params.get("remote_preset_request")),
+                "remote_preset_request_id": str(gen_params.get("remote_preset_request_id") or ""),
+                "remote_preset_axes": list(remote_preset_axes),
                 "remote_queue_source": str(gen_params.get("_remote_queue_source") or ""),
             }
 
@@ -11792,6 +11972,22 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             "filename": filename,
             "bytes": len(png_bytes),
         }
+
+    @app.get("/api/clipboard/png")
+    async def api_clipboard_png():
+        try:
+            png_bytes = await bridge._request_clipboard_png()
+        except FileNotFoundError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except asyncio.TimeoutError:
+            return JSONResponse({"error": "Clipboard read timed out"}, status_code=504)
+        except Exception as e:
+            return JSONResponse({"error": f"Clipboard read failed: {e}"}, status_code=500)
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/result/metadata")
     async def api_result_metadata():
@@ -12310,6 +12506,129 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=400)
         except Exception as e:
             return JSONResponse({"error": f"Event Preset prompt preview failed: {e}"}, status_code=500)
+
+    @app.post("/api/preset/prompt-preview")
+    async def api_preset_prompt_preview(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._preset_prompt_preview, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Preset prompt preview failed: {e}"}, status_code=500)
+
+    @app.post("/api/preset/generate")
+    async def api_preset_generate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._preset_generate, payload)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except KeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": f"Preset generate failed: {e}"}, status_code=500)
+
+    @app.get("/api/clothes-preset/status")
+    async def api_clothes_preset_status():
+        try:
+            return await asyncio.to_thread(bridge._clothes_preset_status)
+        except Exception as e:
+            return JSONResponse({"error": f"Clothes Preset status failed: {e}"}, status_code=500)
+
+    @app.post("/api/clothes-preset/bootstrap")
+    async def api_clothes_preset_bootstrap(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._clothes_preset_bootstrap, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Clothes Preset bootstrap failed: {e}"}, status_code=500)
+
+    @app.post("/api/clothes-preset/select")
+    async def api_clothes_preset_select(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._clothes_preset_select, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Clothes Preset select failed: {e}"}, status_code=500)
+
+    @app.post("/api/clothes-preset/lucky")
+    async def api_clothes_preset_lucky(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._clothes_preset_lucky, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Clothes Preset lucky failed: {e}"}, status_code=500)
+
+    @app.post("/api/clothes-preset/prompt-fragment")
+    async def api_clothes_preset_prompt_fragment(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._clothes_preset_prompt_fragment, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Clothes Preset prompt fragment failed: {e}"}, status_code=500)
+
+    @app.get("/api/expression-preset/status")
+    async def api_expression_preset_status():
+        try:
+            return await asyncio.to_thread(bridge._expression_preset_status)
+        except Exception as e:
+            return JSONResponse({"error": f"Expression Preset status failed: {e}"}, status_code=500)
+
+    @app.post("/api/expression-preset/bootstrap")
+    async def api_expression_preset_bootstrap(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(bridge._expression_preset_bootstrap, payload)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": f"Expression Preset bootstrap failed: {e}"}, status_code=500)
 
     @app.post("/api/event-preset/generate")
     async def api_event_preset_generate(req: Request):
@@ -13285,6 +13604,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_result_image_action.connect(bridge._do_result_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_copy_png_to_clipboard.connect(bridge._do_copy_png_to_clipboard, Qt.ConnectionType.QueuedConnection)
+    bridge.request_read_clipboard_png.connect(bridge._do_read_clipboard_png, Qt.ConnectionType.QueuedConnection)
     bridge.request_danbooru_prompt_preview.connect(bridge._do_danbooru_prompt_preview, Qt.ConnectionType.QueuedConnection)
     bridge.request_open_danbooru_browser.connect(bridge._do_open_danbooru_browser, Qt.ConnectionType.QueuedConnection)
     bridge._danbooru_prompt_preview_bridge_connected = True

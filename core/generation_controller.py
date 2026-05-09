@@ -956,6 +956,25 @@ class GenerationController:
 
         # 특수 요청 에러 라우팅
         if self.current_generation_params:
+            # Composite Remote Preset 요청인 경우 전용 에러 이벤트 발행
+            is_remote_preset = self.current_generation_params.get("remote_preset_request", False)
+            if is_remote_preset:
+                print(f"📋 Remote Preset 에러 감지 - 전용 에러 이벤트 발행")
+                remote_preset_axes = self.current_generation_params.get("remote_preset_axes") or []
+                if isinstance(remote_preset_axes, str):
+                    remote_preset_axes = [item.strip() for item in remote_preset_axes.split(",") if item.strip()]
+                error_data = {
+                    "message": error_message,
+                    "remote_preset_request": True,
+                    "remote_preset_request_id": str(
+                        self.current_generation_params.get("remote_preset_request_id") or ""
+                    ),
+                    "remote_preset_axes": list(remote_preset_axes),
+                }
+                self.context.publish("generation_error", error_data)
+                self.current_generation_params = None
+                return
+
             # Event Preset 요청인 경우 전용 에러 이벤트 발행
             is_event_preset = self.current_generation_params.get("event_preset_request", False)
             if is_event_preset:

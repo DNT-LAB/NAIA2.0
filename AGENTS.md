@@ -1,5 +1,11 @@
 # Codex workspace guidance
 
+## Project Docs
+
+- Additional planning and handoff material can live under `docs/`.
+- Markdown documents are intentionally ignored by the default git flow for distributable builds, so treat `docs/` materials as local reference unless the user explicitly asks to include them.
+- For preset-axis, composer, or desktop/web parity work, check `docs/` for supporting contracts before changing UI/API behavior.
+
 ## Remote Web UI
 
 - UI-related work should use Chrome for inspection and validation.

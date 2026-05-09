@@ -172,15 +172,20 @@ export function createImageModulePanels({
 
   async function readClipboardImageBlob() {
     let browserError = null;
+    if (useNativeClipboardFallback()) {
+      try {
+        return await readNativeClipboardImageBlob();
+      } catch (error) {
+        browserError = error;
+      }
+    }
+
     try {
       return await readBrowserClipboardImageBlob();
     } catch (error) {
       browserError = error;
     }
 
-    if (useNativeClipboardFallback()) {
-      return readNativeClipboardImageBlob();
-    }
     throw browserError || new Error('No image in clipboard');
   }
 

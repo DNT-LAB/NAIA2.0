@@ -18,6 +18,18 @@ let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let sessionId = null;
 const urlParams = new URLSearchParams(location.search);
 const isDesktopShell = urlParams.get('desktop_shell') === '1';
+const isLocalWebHost = (() => {
+  const host = String(location.hostname || '').toLowerCase();
+  return (
+    host === 'localhost'
+    || host === '127.0.0.1'
+    || host === '0.0.0.0'
+    || host === '::1'
+    || host === '[::1]'
+    || host === '::ffff:127.0.0.1'
+  );
+})();
+const canUseHostClipboardBridge = isDesktopShell || isLocalWebHost;
 const detachedMode = urlParams.get('detached') || '';
 const detachedModuleId = urlParams.get('module') || '';
 const detachedMetadataPath = urlParams.get('metadata_path') || urlParams.get('path') || '';
@@ -233,14 +245,14 @@ const studioTabReady = import('./js/features/studioTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260509-clipboard-fallback1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260509-clipboard-native-first1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
       window,
       showToast,
       fetchFn: window.fetch.bind(window),
-      useNativeClipboardFallback: () => isDesktopShell,
+      useNativeClipboardFallback: () => canUseHostClipboardBridge,
     });
     customSelectsControl.start();
   })
@@ -313,7 +325,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs')
       getMode: () => currentMode || modeSelect.value || 'NAI',
       getWs: () => ws,
       getLatestResultBlob: () => latestResultBlob,
-      useNativeClipboard: () => isDesktopShell,
+      useNativeClipboard: () => canUseHostClipboardBridge,
       getPreviewImageUrl: () => (
         preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : ''
       ),
@@ -715,7 +727,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260509-clipboard-fallback1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260509-clipboard-native-first1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -726,7 +738,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
       openModule,
       getCurrentModuleId: () => currentModuleId,
       fetchFn: window.fetch.bind(window),
-      useNativeClipboardFallback: () => isDesktopShell,
+      useNativeClipboardFallback: () => canUseHostClipboardBridge,
       modulePopup,
       positionFloatingPanel,
     });

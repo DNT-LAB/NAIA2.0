@@ -11967,6 +11967,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return JSONResponse({"error": f"PNG clipboard payload failed: {e}"}, status_code=500)
 
         bridge.request_copy_png_to_clipboard.emit(png_bytes, filename)
+        try:
+            copied_bytes = await bridge._request_clipboard_png(timeout=2.0)
+        except asyncio.TimeoutError:
+            return JSONResponse({"error": "PNG clipboard copy timed out"}, status_code=504)
+        except Exception as e:
+            return JSONResponse({"error": f"PNG clipboard copy verification failed: {e}"}, status_code=500)
+        if copied_bytes != png_bytes:
+            return JSONResponse({"error": "PNG clipboard copy verification failed: clipboard payload mismatch"}, status_code=500)
         return {
             "ok": True,
             "filename": filename,

@@ -479,15 +479,20 @@ export function createCustomSelectController({
 
   async function readClipboardImageBlob() {
     let browserError = null;
+    if (useNativeClipboardFallback()) {
+      try {
+        return await readNativeClipboardImageBlob();
+      } catch (error) {
+        browserError = error;
+      }
+    }
+
     try {
       return await readBrowserClipboardImageBlob();
     } catch (error) {
       browserError = error;
     }
 
-    if (useNativeClipboardFallback()) {
-      return readNativeClipboardImageBlob();
-    }
     throw browserError || new Error('클립보드에 이미지가 없습니다.');
   }
 

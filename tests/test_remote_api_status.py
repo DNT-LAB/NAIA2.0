@@ -1401,6 +1401,11 @@ def test_original_endpoint_does_not_fallback_for_invalid_saved_path(tmp_path):
 def test_clipboard_png_endpoint_uses_saved_path_payload(tmp_path):
     bridge, image_path = _bridge_with_history(tmp_path)
     history_key = bridge._scan_memory_history()[0]["rel_path"]
+
+    async def fake_request_clipboard_png(timeout=2.0):
+        return image_path.read_bytes()
+
+    bridge._request_clipboard_png = fake_request_clipboard_png
     client = TestClient(create_app(bridge, WebSocketManager()))
 
     response = client.post(

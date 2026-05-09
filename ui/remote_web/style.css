@@ -532,6 +532,9 @@ header {
   padding: 7px 10px;
   font-size: 11px;
 }
+.custom-select-menu.custom-mod-preset-select .custom-select-option {
+  width: min(220px, calc(100% - 8px));
+}
 .custom-select-menu.custom-setup-input .custom-select-option {
   padding: 8px 10px;
   font-size: 12px;

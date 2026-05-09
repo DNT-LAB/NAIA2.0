@@ -6,13 +6,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
-from PIL import Image, ImageQt, ImageGrab
+from PIL import Image, ImageQt
 from PIL.PngImagePlugin import PngInfo
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size
 from ui.img2img_popup import Img2ImgPopup
 from interfaces.base_tab_module import BaseTabModule
 from utils.image_info import ImageMetadataExtractor
+from utils.clipboard_image import pil_image_from_clipboard
 import json
 import re
 import os
@@ -551,11 +552,10 @@ class PngInfoTab(QWidget):
             clipboard = app.clipboard()
             mime_data = clipboard.mimeData()
             
+            pil_image = pil_image_from_clipboard(clipboard)
+
             # 이미지가 클립보드에 있는지 확인
-            if mime_data.hasImage():
-                # Use ImageGrab.grabclipboard() to preserve EXIF metadata
-                # or one can use clipboard.image()
-                pil_image = ImageGrab.grabclipboard()
+            if pil_image:
 
                 # 메타데이터 추출
                 geninfo, metadata = self.read_info_from_image(pil_image)

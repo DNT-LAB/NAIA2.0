@@ -8,7 +8,6 @@ CharRefTabMixin: 캐릭터 레퍼런스 탭 관련 메서드 모음
 
 import json
 from pathlib import Path
-from PIL import Image
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -17,10 +16,11 @@ from PyQt6.QtWidgets import (
     QCheckBox, QSlider, QFileDialog, QLineEdit, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtGui import QPixmap
 
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from utils.clipboard_image import clipboard_png_bytes
 
 
 # 즐겨찾기 썸네일 기본 크기 상수
@@ -898,15 +898,10 @@ class CharRefTabMixin:
 
         # 클립보드 확인
         clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
+        png_bytes = clipboard_png_bytes(clipboard)
 
-        if not mime_data.hasImage():
+        if not png_bytes:
             self._show_warning("오류", "클립보드에 이미지가 없습니다.\n이미지를 복사한 후 다시 시도하세요.")
-            return
-
-        qimage = clipboard.image()
-        if qimage.isNull():
-            self._show_warning("오류", "클립보드에 유효한 이미지가 없습니다.")
             return
 
         # 기존 프레임 모두 제거
@@ -917,14 +912,7 @@ class CharRefTabMixin:
         temp_folder = Path("save/character_reference/temp")
         temp_folder.mkdir(parents=True, exist_ok=True)
         temp_file = temp_folder / f"clipboard_{int(time.time())}.png"
-
-        # QImage -> PIL Image 변환 및 저장
-        qimage = qimage.convertToFormat(QImage.Format.Format_RGB888)
-        width = qimage.width()
-        height = qimage.height()
-        buffer = qimage.bits().asstring(qimage.sizeInBytes())
-        pil_image = Image.frombytes("RGB", (width, height), buffer)
-        pil_image.save(str(temp_file))
+        temp_file.write_bytes(png_bytes)
 
         # 프레임 추가
         if hasattr(self.character_ref_module, '_add_character_frame'):

@@ -332,26 +332,6 @@ export function createResultHistoryController({
   }
 
   function thumbClick(relPath) {
-    if (window.innerWidth < 768) {
-      const lb = getEl('viewerLightbox');
-      currentViewerPath = relPath;
-      latestImagePath = relPath;
-      onDiskImageSelected(relPath);
-      resetLightbox();
-      const img = getEl('viewerLightboxImg');
-      if (lb && img) {
-        img.src = '/api/viewer/image/' + encodeViewerPath(relPath);
-        img.dataset.source = 'saved';
-        img.dataset.path = relPath;
-        lb.classList.add('open');
-        syncLightboxPromptUi();
-        if (lightboxPromptVisible) {
-          loadPromptForFloat(relPath, 'viewerLightboxPrompt', 'viewerLightboxPromptContent');
-        }
-      }
-      return;
-    }
-
     viewerNavPaths = [];
     const thumbs = viewerGrid ? viewerGrid.querySelectorAll('.viewer-thumb') : [];
     thumbs.forEach(thumb => {

@@ -21,6 +21,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage
 from interfaces.base_module import BaseMiddleModule
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from utils.clipboard_image import pixmap_from_clipboard
 
 
 class PreviewImageWidget(QWidget):
@@ -106,19 +107,16 @@ class PreviewImageWidget(QWidget):
     def paste_from_clipboard(self):
         """클립보드에서 이미지 붙여넣기"""
         clipboard = QApplication.clipboard()
-        mimeData = clipboard.mimeData()
-        
-        if mimeData.hasImage():
-            image = clipboard.image()
-            if not image.isNull():
-                self._pixmap = QPixmap.fromImage(image)
-                self.update()
-                # 자동 저장 (512px 리사이즈)
-                if self.current_file and self.current_key:
-                    self.save_preview_image()
-                    # 리사이즈된 이미지 다시 로드
-                    self.load_preview_image()
-                return True
+        pixmap = pixmap_from_clipboard(clipboard)
+        if not pixmap.isNull():
+            self._pixmap = pixmap
+            self.update()
+            # 자동 저장 (512px 리사이즈)
+            if self.current_file and self.current_key:
+                self.save_preview_image()
+                # 리사이즈된 이미지 다시 로드
+                self.load_preview_image()
+            return True
         return False
     
     def paintEvent(self, event):

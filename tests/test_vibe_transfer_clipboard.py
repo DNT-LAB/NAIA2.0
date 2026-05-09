@@ -150,6 +150,17 @@ def test_clipboard_mime_png_bytes_reads_qt_image_data():
         assert image.size == (4, 4)
 
 
+def test_clipboard_mime_png_bytes_prefers_raw_png_over_qt_image_data():
+    png_bytes = _png_bytes((11, 22, 33))
+    qimage = QImage(4, 4, QImage.Format.Format_RGB32)
+    qimage.fill(0xFF336699)
+    mime_data = QMimeData()
+    mime_data.setImageData(qimage)
+    mime_data.setData("image/png", QByteArray(png_bytes))
+
+    assert _clipboard_mime_png_bytes(mime_data) == png_bytes
+
+
 def test_vibe_reference_strength_coercion_keeps_slider_bounds():
     assert _coerce_reference_strength("0.72") == 0.72
     assert _coerce_reference_strength("2.0") == 1.0

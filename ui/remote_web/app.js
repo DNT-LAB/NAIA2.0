@@ -233,11 +233,12 @@ const studioTabReady = import('./js/features/studioTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260508-preset-thumb-actions1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
       window,
+      showToast,
     });
     customSelectsControl.start();
   })
@@ -255,7 +256,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260504_geninfo_popup2')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260509_mobile_panel_pc_sync1')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -987,9 +988,30 @@ const optBoxes = {
 const pendingOptionValues = Object.create(null);
 
 // ---- Result history wrappers ----
-function setHistoryRailCollapsed(collapsed, persist = true) { if (resultHistory) resultHistory.setRailCollapsed(collapsed, persist); }
-function toggleHistoryRail() { if (resultHistory) resultHistory.toggleRail(); }
-function initHistoryRail() { if (resultHistory) resultHistory.init(); }
+const mobileHistoryMediaQuery = window.matchMedia('(max-width: 767px)');
+function isMobileHistoryViewport() {
+  return mobileHistoryMediaQuery.matches;
+}
+function syncMobileHistoryRailOpen(open) {
+  document.body.classList.toggle('mobile-history-open', Boolean(open) && isMobileHistoryViewport());
+}
+function setHistoryRailCollapsed(collapsed, persist = true) {
+  if (!resultHistory) return;
+  resultHistory.setRailCollapsed(collapsed, persist);
+  syncMobileHistoryRailOpen(!collapsed);
+}
+function toggleHistoryRail() {
+  const viewerPanel = $('viewerPanel');
+  const nextCollapsed = !viewerPanel?.classList.contains('collapsed');
+  setHistoryRailCollapsed(nextCollapsed);
+}
+function toggleMobileHistoryRail() {
+  setHistoryRailCollapsed(document.body.classList.contains('mobile-history-open'), false);
+}
+function initHistoryRail() {
+  if (resultHistory) resultHistory.init();
+  if (isMobileHistoryViewport()) setHistoryRailCollapsed(true, false);
+}
 
 function initResultInfoResizer() {
   if (resultInfoResizer) resultInfoResizer.init();
@@ -1172,6 +1194,7 @@ const wsMessageHandlers = {
   probe_result: onProbeResult,
   anlas_update: onAnlasUpdate,
   module_state: onModuleState,
+  prompt_engineering_preset_thumbnail_updated: onPromptEngineeringPresetThumbnailUpdated,
   search_state: onSearchState,
   rating_update: onRatingUpdate,
   search_progress: onSearchProgress,
@@ -3068,7 +3091,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260508-preset-hover1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -3080,7 +3103,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260508-preset-hover1')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -3264,7 +3287,7 @@ const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260508-preset-hover1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
@@ -3421,6 +3444,11 @@ function onModuleState(m) {
 
   if (m.module_id !== currentModuleId) return;
   renderModuleState(m);
+}
+
+function onPromptEngineeringPresetThumbnailUpdated(m) {
+  document.dispatchEvent(new CustomEvent('prompt-engineering-thumbnail-updated', { detail: m || {} }));
+  if (m?.message) showToast(m.message, 'success');
 }
 
 function renderModuleState(m) {

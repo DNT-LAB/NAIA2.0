@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QApplication, QDialog, QTabWidget, QGridLayout,
     QMenu, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSize, QBuffer, QIODevice
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSize
 from PyQt6.QtGui import QPixmap, QImage, QAction
 from PIL import Image
 from PIL.ImageQt import ImageQt
@@ -21,57 +21,11 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-
-
-IMAGE_CLIPBOARD_FORMATS = (
-    "image/png",
-    'application/x-qt-windows-mime;value="PNG"',
+from utils.clipboard_image import (
+    IMAGE_CLIPBOARD_FORMATS,
+    clipboard_mime_png_bytes as _clipboard_mime_png_bytes,
+    qimage_to_png_bytes as _qimage_to_png_bytes,
 )
-
-
-def _qimage_to_png_bytes(image: QImage) -> Optional[bytes]:
-    if image is None or image.isNull():
-        return None
-    buffer = QBuffer()
-    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
-        return None
-    if not image.save(buffer, "PNG"):
-        return None
-    return bytes(buffer.data())
-
-
-def _clipboard_mime_png_bytes(mime_data, clipboard_image: Optional[QImage] = None) -> Optional[bytes]:
-    """Extract PNG bytes from Qt clipboard MIME data.
-
-    Qt's hasImage()/imageData() can be false when another app, or NAIA's PNG
-    copy path, only provides raw image/png clipboard bytes.
-    """
-    if mime_data is None:
-        return None
-
-    if mime_data.hasImage():
-        image_data = mime_data.imageData()
-        if isinstance(image_data, QImage):
-            png_bytes = _qimage_to_png_bytes(image_data)
-            if png_bytes:
-                return png_bytes
-        elif isinstance(image_data, QPixmap):
-            png_bytes = _qimage_to_png_bytes(image_data.toImage())
-            if png_bytes:
-                return png_bytes
-
-    if clipboard_image is not None and not clipboard_image.isNull():
-        png_bytes = _qimage_to_png_bytes(clipboard_image)
-        if png_bytes:
-            return png_bytes
-
-    for fmt in IMAGE_CLIPBOARD_FORMATS:
-        if mime_data.hasFormat(fmt):
-            data = bytes(mime_data.data(fmt))
-            if data:
-                return data
-
-    return None
 
 
 def _get_current_model_from_context(app_context) -> str:

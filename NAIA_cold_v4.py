@@ -38,7 +38,7 @@ import pandas as pd
 import random
 import requests
 from io import BytesIO
-from PIL import Image, ImageGrab
+from PIL import Image
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
@@ -119,6 +119,7 @@ from ui.img2img_window import Img2ImgWindow
 from core.main_controller import MainController
 from core.ui_state_manager import UIStateManager
 from utils.token_calculator import get_token_calculator
+from utils.clipboard_image import pil_image_from_mime_data
 from core.comfyui_utils import ComfyUIAPIUtils
 from ui.terminal.terminal_widget import TerminalWidget
 
@@ -432,11 +433,10 @@ class PromptTextEdit(QTextEdit):
 
     def insertFromMimeData(self, source: QMimeData):
         # 1. 클립보드 이미지 처리
-        if source.hasImage():
-            pil_img = ImageGrab.grabclipboard()
-            if isinstance(pil_img, Image.Image):
-                self.show_img2img_popup(pil_img)
-                return  # 기본 텍스트 삽입 방지
+        pil_img = pil_image_from_mime_data(source)
+        if isinstance(pil_img, Image.Image):
+            self.show_img2img_popup(pil_img)
+            return  # 기본 텍스트 삽입 방지
 
         # 2. 파일 드롭 처리
         if source.hasUrls():

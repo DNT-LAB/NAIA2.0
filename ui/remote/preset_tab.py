@@ -23,6 +23,7 @@ from PyQt6.QtGui import QPixmap
 
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from utils.clipboard_image import pil_image_from_clipboard
 
 
 # === 상수 정의 ===
@@ -792,23 +793,9 @@ class PresetTabMixin:
             return
 
         clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
+        pil_image = pil_image_from_clipboard(clipboard)
 
-        if mime_data.hasImage():
-            qimage = clipboard.image()
-            if qimage.isNull():
-                self._show_warning("오류", "클립보드에 유효한 이미지가 없습니다.")
-                return
-
-            # QImage -> PIL Image 변환
-            buffer = qimage.bits().asstring(qimage.sizeInBytes())
-            pil_image = Image.frombytes(
-                "RGBA" if qimage.hasAlphaChannel() else "RGB",
-                (qimage.width(), qimage.height()),
-                buffer,
-                "raw",
-                "BGRA" if qimage.hasAlphaChannel() else "BGR"
-            )
+        if pil_image:
 
             # 스마트 크롭 및 리사이즈
             cropped = self._smart_crop_preset_image(pil_image, 368, 512)

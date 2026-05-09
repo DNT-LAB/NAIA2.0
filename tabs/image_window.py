@@ -21,6 +21,12 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from interfaces.base_tab_module import BaseTabModule
 from ui.img2img_popup import Img2ImgPopup
 from ui.metadata_viewer import MetadataViewerWindow
+from utils.clipboard_image import (
+    clipboard_mime_png_bytes,
+    pil_image_from_clipboard,
+    pil_image_from_mime_data,
+    set_png_clipboard_bytes,
+)
 from utils.image_info import ImageMetadataExtractor
 import piexif, io
 import requests
@@ -303,21 +309,19 @@ class ImageLabel(QLabel):
         mime_data = event.mimeData()
         
         # 이미지 파일이나 URL을 받을 수 있는지 확인
-        if mime_data.hasImage() or mime_data.hasUrls():
-            # URL이 있는 경우 이미지 파일인지 확인
-            if mime_data.hasUrls():
-                for url in mime_data.urls():
-                    file_path = url.toLocalFile()
-                    if file_path and file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
-                        event.acceptProposedAction()
-                        return
-                    # 웹 URL인 경우도 처리
-                    if url.scheme() in ['http', 'https']:
-                        event.acceptProposedAction()
-                        return
-            # 직접 이미지 데이터가 있는 경우
-            elif mime_data.hasImage():
-                event.acceptProposedAction()
+        if clipboard_mime_png_bytes(mime_data):
+            event.acceptProposedAction()
+            return
+        if mime_data.hasUrls():
+            for url in mime_data.urls():
+                file_path = url.toLocalFile()
+                if file_path and file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
+                    event.acceptProposedAction()
+                    return
+                # 웹 URL인 경우도 처리
+                if url.scheme() in ['http', 'https']:
+                    event.acceptProposedAction()
+                    return
     
     def dropEvent(self, event: QDropEvent):
         """드롭 이벤트 처리"""
@@ -344,14 +348,8 @@ class ImageLabel(QLabel):
                         break
             
             # 직접 이미지 데이터가 있는 경우
-            elif mime_data.hasImage():
-                qimage = mime_data.imageData()
-                if qimage:
-                    # QImage를 PIL Image로 변환
-                    buffer = BytesIO()
-                    qimage.save(buffer, "PNG")
-                    buffer.seek(0)
-                    pil_image = Image.open(buffer)
+            if pil_image is None:
+                pil_image = pil_image_from_mime_data(mime_data)
             
             # 이미지를 성공적으로 로드했으면 시그널 발생
             if pil_image:
@@ -514,6 +512,26 @@ class HistoryItem:
     api_metadata: Dict[str, Any] = field(default_factory=dict)        # API 응답 메타데이터
     creation_timestamp: str = field(default='')                       # 생성 시각
     backend_type: str = field(default='NAI')                          # NAI/WEBUI/COMFYUI
+
+
+def _history_item_png_clipboard_payload(item: HistoryItem) -> tuple[bytes, str]:
+    if not item or not getattr(item, "image", None):
+        raise ValueError("No image is selected")
+
+    filepath = str(getattr(item, "filepath", "") or "")
+    filename = Path(filepath).name if filepath else "naia-result.png"
+
+    raw_bytes = getattr(item, "raw_bytes", None)
+    if raw_bytes and bytes(raw_bytes).startswith(b"\x89PNG\r\n\x1a\n"):
+        return bytes(raw_bytes), filename
+
+    if filepath and Path(filepath).is_file() and Path(filepath).suffix.lower() == ".png":
+        return Path(filepath).read_bytes(), filename
+
+    buffer = BytesIO()
+    item.image.save(buffer, format="PNG")
+    return buffer.getvalue(), filename
+
 
 class ImageHistoryWindow(QWidget):
     """이미지 히스토리 패널"""
@@ -1093,7 +1111,10 @@ class HistoryItemWidget(QWidget):
         pil_img = self.history_item.image
         buf = io.BytesIO()
         if fmt == 'PNG':
-            pil_img.save(buf, format='PNG')
+            png_bytes, filename = _history_item_png_clipboard_payload(self.history_item)
+            set_png_clipboard_bytes(png_bytes, filename)
+            print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
+            return
         else:
             pil_img.save(buf, format='WEBP', quality=90, method=6)
         buf.seek(0)
@@ -2112,14 +2133,8 @@ class ImageWindow(QWidget):
                         break
             
             # 직접 이미지 데이터가 있는 경우
-            elif mime_data.hasImage():
-                qimage = clipboard.image()
-                if not qimage.isNull():
-                    # QImage를 PIL Image로 변환
-                    buffer = BytesIO()
-                    qimage.save(buffer, "PNG")
-                    buffer.seek(0)
-                    pil_image = Image.open(buffer)
+            if pil_image is None:
+                pil_image = pil_image_from_clipboard(clipboard)
             
             # 이미지를 찾았으면 팝업 표시
             if pil_image:
@@ -2934,7 +2949,10 @@ class ImageWindow(QWidget):
         pil_img = self.current_history_item.image
         buf = io.BytesIO()
         if fmt == 'PNG':
-            pil_img.save(buf, format='PNG')
+            png_bytes, filename = _history_item_png_clipboard_payload(self.current_history_item)
+            set_png_clipboard_bytes(png_bytes, filename)
+            print(f"✅ 이미지가 클립보드에 복사되었습니다. ({fmt})")
+            return
         else:
             pil_img.save(buf, format='WEBP', quality=90, method=6)
         buf.seek(0)

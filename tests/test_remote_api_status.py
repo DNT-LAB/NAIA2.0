@@ -564,6 +564,61 @@ def test_studio_generate_overrides_do_not_mutate_main_prompt_fields():
     assert generation_controller.executed == [(overrides, 0)]
 
 
+def test_prompt_preset_file_rejects_invalid_mode(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    preset_dir = tmp_path / "save" / "presets" / "NAI"
+    preset_dir.mkdir(parents=True)
+    preset_file = preset_dir / "safe.json"
+    preset_file.write_text("{}", encoding="utf-8")
+    bridge = RemoteBridge(_AppContext())
+
+    assert bridge._prompt_engineering_preset_file("safe", "nai").resolve() == preset_file.resolve()
+    with pytest.raises(ValueError, match="Invalid preset mode"):
+        bridge._prompt_engineering_preset_file("safe", "../../NAI")
+
+
+def test_prompt_preset_thumbnail_upload_rejects_invalid_mode_before_write(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+    buffer = io.BytesIO()
+    Image.new("RGB", (4, 4), "white").save(buffer, format="PNG")
+
+    with pytest.raises(ValueError, match="Invalid preset mode"):
+        bridge._save_prompt_engineering_thumbnail_bytes("safe", "../NAI", buffer.getvalue())
+
+    assert not (tmp_path / "save" / "presets" / "previews" / "safe.png").exists()
+
+
+def test_prompt_preset_thumbnail_generation_queues_vibe_safe_request(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    preset_dir = tmp_path / "save" / "presets" / "NAI"
+    preset_dir.mkdir(parents=True)
+    (preset_dir / "safe.json").write_text(
+        json.dumps({"module_settings": {"pre_prompt": "preset prefix"}}),
+        encoding="utf-8",
+    )
+    bridge, _generation_controller, _prompt_edit, negative_edit = _bridge_with_generate_context()
+    negative_edit.text = "thumbnail negative"
+    bridge._broadcast_json = lambda _payload: None
+    bridge._active_vibe_transfer_count_for_generation = lambda: 2
+
+    result = bridge._request_prompt_engineering_thumbnail_generation({
+        "name": "safe",
+        "mode": "nai",
+        "request_id": "req-1",
+    })
+
+    queued = bridge._pending_generate_requests.pop()
+    overrides = queued["overrides"]
+    assert result["mode"] == "NAI"
+    assert result["vibe_active"] is True
+    assert "Vibe Transfer" in result["message"]
+    assert overrides["input"] == "preset prefix, 1girl, original, solo, upper body"
+    assert overrides["negative_prompt"] == "thumbnail negative"
+    assert overrides["_skip_vibe_transfer_late_binding"] is True
+    assert overrides["prompt_preset_thumbnail_request"] is True
+
+
 def test_studio_generate_overrides_are_preserved_when_queued():
     bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context(is_generating=True)
     overrides = {

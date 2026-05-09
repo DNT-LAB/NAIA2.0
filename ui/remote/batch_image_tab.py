@@ -23,6 +23,7 @@ from PyQt6.QtGui import QPixmap
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_size, get_scaled_font_size
 from ui.interactive.interactive_theme import get_button_style
+from utils.clipboard_image import clipboard_png_bytes
 
 # Tagger 관련 import
 from ui.interactive.image_tagger_block import ThresholdButton, TaggerWorker
@@ -302,21 +303,17 @@ class BatchImageTabMixin:
         """클립보드에서 이미지 복사 버튼 클릭"""
         from PyQt6.QtWidgets import QApplication, QMessageBox
         clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
+        png_bytes = clipboard_png_bytes(clipboard)
 
-        if mime_data.hasImage():
-            # 클립보드에서 이미지 가져오기
-            image = clipboard.image()
-            if not image.isNull():
-                # 임시 파일로 저장
-                import tempfile
-                temp_dir = tempfile.gettempdir()
-                temp_path = os.path.join(temp_dir, "clipboard_image.png")
-                image.save(temp_path, "PNG")
-                print(f"[BatchImage] 클립보드에서 이미지 복사: {temp_path}")
-                self._show_single_image_analysis(temp_path, from_clipboard=True)
-            else:
-                QMessageBox.warning(self, "알림", "클립보드에 유효한 이미지가 없습니다.")
+        if png_bytes:
+            # 임시 파일로 저장
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(temp_dir, "clipboard_image.png")
+            with open(temp_path, "wb") as f:
+                f.write(png_bytes)
+            print(f"[BatchImage] 클립보드에서 이미지 복사: {temp_path}")
+            self._show_single_image_analysis(temp_path, from_clipboard=True)
         else:
             QMessageBox.warning(self, "알림", "클립보드에 이미지가 없습니다.")
 

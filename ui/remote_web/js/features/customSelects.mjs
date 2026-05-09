@@ -1,4 +1,4 @@
-export function createCustomSelectController({ document, window }) {
+export function createCustomSelectController({ document, window, showToast = () => {} }) {
   const SELECTOR = 'select:not([multiple]):not([data-native-select])';
   const enhanced = new WeakMap();
   const states = new Set();
@@ -54,6 +54,8 @@ export function createCustomSelectController({ document, window }) {
       button,
       label,
       menu,
+      preview: null,
+      previewHideTimer: null,
       cleanup: [],
     };
     enhanced.set(select, state);
@@ -67,8 +69,21 @@ export function createCustomSelectController({ document, window }) {
       else openSelect(state);
     };
     const onButtonKeydown = event => handleButtonKeydown(state, event);
+    const onPreviewBoundaryEnter = () => cancelPreviewHide(state);
+    const onPreviewBoundaryLeave = event => {
+      if (isInsidePreviewBoundary(state, event.relatedTarget)) return;
+      schedulePreviewHide(state);
+    };
     const onSelectChange = () => syncState(state, { refreshMenu: true });
-    const optionObserver = new MutationObserver(() => syncState(state, { refreshMenu: true }));
+    const optionObserver = new MutationObserver(mutations => {
+      const previewOnly = mutations.length > 0 && mutations.every(mutation => (
+        mutation.type === 'attributes'
+        && typeof mutation.attributeName === 'string'
+        && mutation.attributeName.startsWith('data-preview-')
+      ));
+      if (previewOnly) return;
+      syncState(state, { refreshMenu: true });
+    });
     optionObserver.observe(select, {
       childList: true,
       subtree: true,
@@ -78,10 +93,18 @@ export function createCustomSelectController({ document, window }) {
 
     button.addEventListener('click', onButtonClick);
     button.addEventListener('keydown', onButtonKeydown);
+    wrapper.addEventListener('pointerenter', onPreviewBoundaryEnter);
+    wrapper.addEventListener('pointerleave', onPreviewBoundaryLeave);
+    menu.addEventListener('pointerenter', onPreviewBoundaryEnter);
+    menu.addEventListener('pointerleave', onPreviewBoundaryLeave);
     select.addEventListener('change', onSelectChange);
     state.cleanup.push(
       () => button.removeEventListener('click', onButtonClick),
       () => button.removeEventListener('keydown', onButtonKeydown),
+      () => wrapper.removeEventListener('pointerenter', onPreviewBoundaryEnter),
+      () => wrapper.removeEventListener('pointerleave', onPreviewBoundaryLeave),
+      () => menu.removeEventListener('pointerenter', onPreviewBoundaryEnter),
+      () => menu.removeEventListener('pointerleave', onPreviewBoundaryLeave),
       () => select.removeEventListener('change', onSelectChange),
       () => optionObserver.disconnect(),
     );
@@ -112,6 +135,7 @@ export function createCustomSelectController({ document, window }) {
 
   function renderMenu(state) {
     const { select, menu } = state;
+    hidePreview(state);
     menu.textContent = '';
     Array.from(select.options).forEach((option, index) => {
       const item = document.createElement('button');
@@ -124,7 +148,8 @@ export function createCustomSelectController({ document, window }) {
       item.disabled = option.disabled;
       item.classList.toggle('is-selected', option.selected);
 
-      item.addEventListener('mouseenter', () => setHoveredItem(menu, item));
+      item.addEventListener('mouseenter', () => setHoveredItem(state, item));
+      item.addEventListener('focus', () => setHoveredItem(state, item));
       item.addEventListener('mousedown', event => event.preventDefault());
       item.addEventListener('click', event => {
         event.preventDefault();
@@ -135,11 +160,42 @@ export function createCustomSelectController({ document, window }) {
     });
   }
 
-  function setHoveredItem(menu, item) {
-    menu.querySelectorAll('.custom-select-option.is-hovered').forEach(el => {
+  function setHoveredItem(state, item) {
+    state.menu.querySelectorAll('.custom-select-option.is-hovered').forEach(el => {
       if (el !== item) el.classList.remove('is-hovered');
     });
     item.classList.add('is-hovered');
+    renderPreview(state, item);
+  }
+
+  function clearHoveredItem(state) {
+    state.menu.querySelectorAll('.custom-select-option.is-hovered').forEach(el => {
+      el.classList.remove('is-hovered');
+    });
+    hidePreview(state);
+  }
+
+  function isInsidePreviewBoundary(state, target) {
+    if (!target) return false;
+    return (
+      state.wrapper.contains(target)
+      || state.menu.contains(target)
+      || !!state.preview?.contains(target)
+    );
+  }
+
+  function cancelPreviewHide(state) {
+    if (!state.previewHideTimer) return;
+    window.clearTimeout(state.previewHideTimer);
+    state.previewHideTimer = null;
+  }
+
+  function schedulePreviewHide(state) {
+    cancelPreviewHide(state);
+    state.previewHideTimer = window.setTimeout(() => {
+      state.previewHideTimer = null;
+      clearHoveredItem(state);
+    }, 220);
   }
 
   function openSelect(state) {
@@ -153,8 +209,10 @@ export function createCustomSelectController({ document, window }) {
 
     const selected = state.menu.querySelector('.custom-select-option.is-selected');
     if (selected) {
-      selected.classList.add('is-hovered');
+      setHoveredItem(state, selected);
       selected.scrollIntoView({ block: 'nearest' });
+    } else {
+      hidePreview(state);
     }
   }
 
@@ -166,6 +224,295 @@ export function createCustomSelectController({ document, window }) {
     state.button.setAttribute('aria-expanded', 'false');
     state.menu.hidden = true;
     state.menu.textContent = '';
+    hidePreview(state);
+  }
+
+  function hasPreview(state) {
+    return state.select.dataset.previewKind === 'prompt-preset';
+  }
+
+  function ensurePreview(state) {
+    if (state.preview) return state.preview;
+    const preview = document.createElement('div');
+    preview.className = 'custom-select-preview custom-select-preview-prompt-preset';
+    preview.hidden = true;
+    preview.addEventListener('pointerenter', () => cancelPreviewHide(state));
+    preview.addEventListener('pointerleave', event => {
+      if (isInsidePreviewBoundary(state, event.relatedTarget)) return;
+      schedulePreviewHide(state);
+    });
+    document.body.append(preview);
+    state.preview = preview;
+    return preview;
+  }
+
+  function hidePreview(state) {
+    cancelPreviewHide(state);
+    if (!state.preview) return;
+    state.preview.hidden = true;
+    state.preview.classList.remove('is-busy');
+    state.preview.textContent = '';
+  }
+
+  function optionForItem(state, item) {
+    const index = Number(item?.dataset?.index ?? -1);
+    return Number.isInteger(index) && index >= 0 ? state.select.options[index] : null;
+  }
+
+  function renderPreview(state, item) {
+    if (!hasPreview(state)) return;
+    const option = optionForItem(state, item);
+    if (!option) {
+      hidePreview(state);
+      return;
+    }
+
+    const preview = ensurePreview(state);
+    preview.textContent = '';
+
+    const thumb = document.createElement('div');
+    thumb.className = 'custom-select-preview-thumb';
+    const thumbnailUrl = option.dataset.previewThumbnail || '';
+    if (thumbnailUrl) {
+      thumb.classList.add('has-image');
+      const image = document.createElement('img');
+      image.src = thumbnailUrl;
+      image.alt = '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      const markImageRatio = () => {
+        const isPortrait = image.naturalWidth > 0 && image.naturalHeight / image.naturalWidth >= 1.18;
+        thumb.classList.toggle('is-portrait', isPortrait);
+      };
+      if (image.complete) markImageRatio();
+      else image.addEventListener('load', markImageRatio, { once: true });
+      thumb.append(image);
+    } else {
+      const empty = document.createElement('span');
+      empty.textContent = 'No image';
+      thumb.append(empty);
+    }
+
+    const copy = document.createElement('div');
+    copy.className = 'custom-select-preview-copy';
+    const head = document.createElement('div');
+    head.className = 'custom-select-preview-head';
+    const title = document.createElement('strong');
+    title.textContent = option.dataset.previewName || option.textContent || '';
+    head.append(title);
+    const mode = option.dataset.previewMode || '';
+    if (mode) {
+      const modeEl = document.createElement('span');
+      modeEl.textContent = mode;
+      head.append(modeEl);
+    }
+    copy.append(head);
+
+    const description = option.dataset.previewDescription || '';
+    if (description) {
+      const desc = document.createElement('p');
+      desc.className = 'custom-select-preview-desc';
+      desc.textContent = description;
+      copy.append(desc);
+    }
+
+    const prefix = document.createElement('pre');
+    prefix.className = 'custom-select-preview-prefix';
+    prefix.textContent = option.dataset.previewPrefix || 'No prefix prompt';
+    copy.append(prefix);
+
+    const actions = buildPreviewActions(state, option);
+    preview.append(thumb, copy, actions);
+    preview.hidden = false;
+    positionPreview(state);
+  }
+
+  function buildPreviewActions(state, option) {
+    const actions = document.createElement('div');
+    actions.className = 'custom-select-preview-actions';
+    const identity = previewPresetIdentity(option);
+    const canManage = !!identity.name && identity.name !== '*randomized';
+
+    const generate = document.createElement('button');
+    generate.type = 'button';
+    generate.textContent = '임시 썸네일 생성';
+    generate.disabled = !canManage;
+    generate.dataset.previewCanManage = canManage ? 'true' : 'false';
+    generate.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      requestTemporaryThumbnail(state, option);
+    });
+
+    const upload = document.createElement('button');
+    upload.type = 'button';
+    upload.textContent = '썸네일 업로드';
+    upload.disabled = !canManage;
+    upload.dataset.previewCanManage = canManage ? 'true' : 'false';
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp';
+    input.hidden = true;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (file) uploadPresetThumbnail(state, option, file);
+    });
+    upload.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!upload.disabled) input.click();
+    });
+
+    const paste = document.createElement('button');
+    paste.type = 'button';
+    paste.textContent = '썸네일 붙여넣기';
+    paste.disabled = !canManage;
+    paste.dataset.previewCanManage = canManage ? 'true' : 'false';
+    paste.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      pastePresetThumbnail(state, option);
+    });
+
+    actions.append(generate, upload, paste, input);
+    return actions;
+  }
+
+  function previewPresetIdentity(option) {
+    return {
+      name: String(option?.dataset?.previewName || option?.value || option?.textContent || '').trim(),
+      mode: String(option?.dataset?.previewMode || '').trim(),
+    };
+  }
+
+  async function readActionResponse(response) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.ok === false) {
+      throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
+    }
+    return data;
+  }
+
+  function setPreviewBusy(state, busy) {
+    if (!state.preview) return;
+    state.preview.classList.toggle('is-busy', !!busy);
+    state.preview.querySelectorAll('.custom-select-preview-actions button').forEach(button => {
+      button.disabled = !!busy || button.dataset.previewCanManage !== 'true';
+    });
+  }
+
+  function applyPresetThumbnailUpdate(state, detail = {}) {
+    const name = String(detail.name || '').trim();
+    const mode = String(detail.mode || '').trim();
+    const thumbnailUrl = String(detail.thumbnail_url || detail.thumbnailUrl || '').trim();
+    if (!name || !thumbnailUrl) return;
+
+    Array.from(state.select.options).forEach(option => {
+      const identity = previewPresetIdentity(option);
+      if (identity.name !== name) return;
+      if (mode && identity.mode && identity.mode !== mode) return;
+      option.dataset.previewThumbnail = thumbnailUrl;
+    });
+
+    const hovered = state.menu.querySelector('.custom-select-option.is-hovered');
+    const hoveredOption = optionForItem(state, hovered);
+    if (hoveredOption && previewPresetIdentity(hoveredOption).name === name) {
+      renderPreview(state, hovered);
+    }
+  }
+
+  async function uploadPresetThumbnail(state, option, blob) {
+    const identity = previewPresetIdentity(option);
+    if (!identity.name || identity.name === '*randomized') return;
+    try {
+      setPreviewBusy(state, true);
+      const params = new URLSearchParams({ name: identity.name, mode: identity.mode });
+      const response = await window.fetch(`/api/prompt-engineering/preset-thumbnail/upload?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+        body: blob,
+      });
+      const data = await readActionResponse(response);
+      applyPresetThumbnailUpdate(state, data);
+      showToast('프리셋 썸네일을 저장했습니다.', 'success');
+    } catch (error) {
+      console.error('Preset thumbnail upload failed', error);
+      showToast(error.message || '프리셋 썸네일 저장 실패', 'error');
+    } finally {
+      setPreviewBusy(state, false);
+    }
+  }
+
+  async function pastePresetThumbnail(state, option) {
+    try {
+      if (!window.navigator?.clipboard?.read) {
+        throw new Error('이 브라우저는 이미지 붙여넣기를 지원하지 않습니다.');
+      }
+      const items = await window.navigator.clipboard.read();
+      for (const item of items) {
+        const type = item.types.find(candidate => candidate.startsWith('image/'));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        await uploadPresetThumbnail(state, option, blob);
+        return;
+      }
+      throw new Error('클립보드에 이미지가 없습니다.');
+    } catch (error) {
+      console.error('Preset thumbnail paste failed', error);
+      showToast(error.message || '썸네일 붙여넣기 실패', 'error');
+    }
+  }
+
+  async function requestTemporaryThumbnail(state, option) {
+    const identity = previewPresetIdentity(option);
+    if (!identity.name || identity.name === '*randomized') return;
+    try {
+      setPreviewBusy(state, true);
+      const response = await window.fetch('/api/prompt-engineering/preset-thumbnail/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(identity),
+      });
+      const data = await readActionResponse(response);
+      showToast(data.message || '임시 썸네일 생성을 요청했습니다.', 'success');
+    } catch (error) {
+      console.error('Preset thumbnail generation request failed', error);
+      showToast(error.message || '임시 썸네일 생성 요청 실패', 'error');
+    } finally {
+      setPreviewBusy(state, false);
+    }
+  }
+
+  function positionPreview(state) {
+    if (!state.preview || state.preview.hidden || state.menu.hidden) return;
+    const menuRect = state.menu.getBoundingClientRect();
+    const gap = 8;
+    const viewportGap = 8;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const preferredWidth = Math.min(390, Math.max(280, viewportWidth - viewportGap * 2));
+    state.preview.style.width = `${Math.round(preferredWidth)}px`;
+    state.preview.style.maxHeight = `${Math.max(180, viewportHeight - viewportGap * 2)}px`;
+
+    const previewRect = state.preview.getBoundingClientRect();
+    let left;
+    if (viewportWidth - menuRect.right - gap >= previewRect.width) {
+      left = menuRect.right + gap;
+    } else if (menuRect.left - gap - viewportGap >= previewRect.width) {
+      left = menuRect.left - gap - previewRect.width;
+    } else {
+      left = Math.min(
+        Math.max(viewportGap, menuRect.left),
+        Math.max(viewportGap, viewportWidth - previewRect.width - viewportGap),
+      );
+    }
+
+    const maxTop = Math.max(viewportGap, viewportHeight - previewRect.height - viewportGap);
+    const top = Math.min(Math.max(viewportGap, menuRect.top), maxTop);
+    state.preview.style.left = `${Math.round(left)}px`;
+    state.preview.style.top = `${Math.round(top)}px`;
   }
 
   function positionMenu(state) {
@@ -185,6 +532,7 @@ export function createCustomSelectController({ document, window }) {
     state.menu.style.top = `${Math.round(top)}px`;
     state.menu.style.width = `${Math.round(rect.width)}px`;
     state.menu.style.maxHeight = `${Math.round(height)}px`;
+    positionPreview(state);
   }
 
   function commitValue(state, index) {
@@ -235,13 +583,14 @@ export function createCustomSelectController({ document, window }) {
       ? (direction > 0 ? 0 : items.length - 1)
       : (currentIndex + direction + items.length) % items.length;
 
-    setHoveredItem(state.menu, items[nextIndex]);
+    setHoveredItem(state, items[nextIndex]);
     items[nextIndex].scrollIntoView({ block: 'nearest' });
   }
 
   function destroyState(state) {
     if (openState === state) closeOpen();
     state.cleanup.forEach(fn => fn());
+    if (state.preview) state.preview.remove();
     state.menu.remove();
     state.wrapper.remove();
     states.delete(state);
@@ -279,9 +628,16 @@ export function createCustomSelectController({ document, window }) {
 
   function onDocumentPointerDown(event) {
     if (!openState) return;
-    const { wrapper, menu } = openState;
-    if (wrapper.contains(event.target) || menu.contains(event.target)) return;
+    const { wrapper, menu, preview } = openState;
+    if (wrapper.contains(event.target) || menu.contains(event.target) || preview?.contains(event.target)) return;
     closeOpen();
+  }
+
+  function onPresetThumbnailUpdated(event) {
+    const detail = event?.detail || {};
+    Array.from(states).forEach(state => {
+      if (hasPreview(state)) applyPresetThumbnailUpdate(state, detail);
+    });
   }
 
   function onWindowLayoutChange() {
@@ -296,6 +652,7 @@ export function createCustomSelectController({ document, window }) {
     observer.observe(document.body, { childList: true, subtree: true });
     syncTimer = window.setInterval(scan, 750);
     document.addEventListener('pointerdown', onDocumentPointerDown, true);
+    document.addEventListener('prompt-engineering-thumbnail-updated', onPresetThumbnailUpdated);
     window.addEventListener('resize', onWindowLayoutChange);
     window.addEventListener('scroll', onWindowLayoutChange, true);
   }
@@ -307,6 +664,7 @@ export function createCustomSelectController({ document, window }) {
     if (syncTimer) window.clearInterval(syncTimer);
     syncTimer = null;
     document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+    document.removeEventListener('prompt-engineering-thumbnail-updated', onPresetThumbnailUpdated);
     window.removeEventListener('resize', onWindowLayoutChange);
     window.removeEventListener('scroll', onWindowLayoutChange, true);
     Array.from(states).forEach(destroyState);

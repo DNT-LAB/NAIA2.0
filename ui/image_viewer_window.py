@@ -33,6 +33,7 @@ from PyQt6.QtGui import (
 )
 
 from ui.theme import DARK_COLORS
+from utils.clipboard_image import qimage_to_png_bytes, set_png_clipboard_bytes
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
@@ -1157,11 +1158,19 @@ class NAIAImageViewer(QWidget):
     def _copy_to_clipboard(self, file_path: Path):
         """현재 이미지를 클립보드에 PNG로 복사"""
         try:
+            if file_path.suffix.lower() == ".png":
+                set_png_clipboard_bytes(file_path.read_bytes(), file_path.name)
+                self._show_toast(file_path.name, "clipboard copied", "blue")
+                return
+
             pixmap = self._cache.get(str(file_path))
             if pixmap is None:
                 pixmap = self._load_pixmap_sync(file_path)
             if pixmap and not pixmap.isNull():
-                QApplication.clipboard().setPixmap(pixmap)
+                png_bytes = qimage_to_png_bytes(pixmap.toImage())
+                if not png_bytes:
+                    raise ValueError("QPixmap could not be encoded as PNG")
+                set_png_clipboard_bytes(png_bytes, file_path.name)
                 self._show_toast(file_path.name, "clipboard copied", "blue")
             else:
                 self._show_toast(file_path.name, "clipboard failed", "red")

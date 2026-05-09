@@ -30,9 +30,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from PyQt6.QtCore import QByteArray, QMimeData, QObject, pyqtSignal, Qt, QTimer
-from PyQt6.QtGui import QImage
-from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer, QThread, QCoreApplication
+from PyQt6.QtWidgets import QFileDialog
 
 from core import api_verification
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
@@ -48,6 +47,7 @@ from core.resolution_utils import (
     nearest_standard_1mp_resolution,
     parse_resolution_pair,
 )
+from utils.clipboard_image import set_png_clipboard_bytes
 from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
 from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
 from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
@@ -176,6 +176,7 @@ class RemoteBridge(QObject):
     request_queue_action = pyqtSignal(str)              # queue action JSON — pause/resume/clear/remove
     request_set_cloudflared_enabled = pyqtSignal(bool)  # Cloudflared 연결/해제
     request_comfyui_workflow_action = pyqtSignal(str)   # request_id — ComfyUI workflow load/clear
+    request_prompt_preset_thumbnail_generate = pyqtSignal(object)  # sync request dict — Qt thread generation enqueue
 
     # 동기화 대상 옵션 키 매핑: web_key → checkbox_label
     OPTION_KEYS = {
@@ -202,6 +203,7 @@ class RemoteBridge(QObject):
         "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
         "1088 x 960", "1152 x 896", "1216 x 832",
     ]
+    PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI")
 
     def __init__(self, app_context):
         super().__init__()
@@ -4399,21 +4401,7 @@ class RemoteBridge(QObject):
         raise FileNotFoundError("No image is selected")
 
     def _set_png_clipboard_bytes(self, png_bytes: bytes, filename: str = ""):
-        if not png_bytes:
-            raise ValueError("No PNG data is available")
-
-        byte_array = QByteArray(bytes(png_bytes))
-        mime_data = QMimeData()
-        mime_data.setData("image/png", byte_array)
-        # Windows apps often look for the native registered PNG clipboard format.
-        # Supplying it alongside image/png avoids browser/OS bitmap re-encoding.
-        mime_data.setData('application/x-qt-windows-mime;value="PNG"', byte_array)
-        qimage = QImage()
-        if qimage.loadFromData(bytes(png_bytes), "PNG"):
-            mime_data.setImageData(qimage)
-        if filename:
-            mime_data.setText(str(filename))
-        QApplication.clipboard().setMimeData(mime_data)
+        set_png_clipboard_bytes(png_bytes, filename)
 
     def _do_copy_png_to_clipboard(self, png_bytes: bytes, filename: str = ""):
         try:
@@ -6439,11 +6427,16 @@ class RemoteBridge(QObject):
                 preprocessing[key] = cb.isChecked()
             presets = [m.preset_combo.itemText(i) for i in range(m.preset_combo.count())]
             current_preset = m.preset_combo.currentText()
+            preset_summaries = [
+                self._prompt_engineering_preset_summary(m, preset_name)
+                for preset_name in presets
+            ]
             return {
                 "type": "module_state",
                 "module_id": "prompt_engineering",
                 "preset": current_preset,
                 "preset_options": presets,
+                "preset_summaries": preset_summaries,
                 "pre_prompt": m.pre_textedit.toPlainText(),
                 "post_prompt": m.post_textedit.toPlainText(),
                 "auto_hide": m.auto_hide_textedit.toPlainText(),
@@ -6457,6 +6450,303 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: 모듈 상태 읽기 실패 — {e}")
             return {}
+
+    def _prompt_engineering_preview_candidates(self, preset_name: str, mode: str = "") -> list[Path]:
+        safe_name = Path(str(preset_name or "").strip()).name
+        if not safe_name or safe_name == "*randomized":
+            return []
+        mode_key = self._normalize_prompt_engineering_preset_mode(mode, allow_empty=True)
+
+        candidates = []
+        preview_dir = Path("save") / "presets" / "previews"
+        for ext in (".png", ".webp", ".jpg", ".jpeg"):
+            candidates.append(preview_dir / f"{safe_name}{ext}")
+
+        # Legacy favorite-preset thumbnails are mode-tagged in favorites.json.
+        try:
+            favorites_path = Path("save") / "presets" / "favorites.json"
+            favorite_items = json.loads(favorites_path.read_text(encoding="utf-8")) if favorites_path.exists() else []
+            if any(
+                isinstance(item, dict)
+                and item.get("name") == safe_name
+                and (not mode_key or item.get("mode") == mode_key)
+                for item in favorite_items
+            ):
+                favorite_dir = Path("save") / "presets" / "favorites"
+                for ext in (".png", ".webp", ".jpg", ".jpeg"):
+                    candidates.append(favorite_dir / f"{safe_name}{ext}")
+        except Exception:
+            pass
+        return candidates
+
+    def _prompt_engineering_preview_path(self, preset_name: str, mode: str = "") -> Path | None:
+        for candidate in self._prompt_engineering_preview_candidates(preset_name, mode):
+            try:
+                target = candidate.resolve()
+            except Exception:
+                continue
+            if target.is_file():
+                return target
+        return None
+
+    def _prompt_engineering_thumbnail_target(self, preset_name: str) -> Path:
+        safe_name = Path(str(preset_name or "").strip()).name
+        if not safe_name or safe_name == "*randomized":
+            raise ValueError("Preset name is required")
+        target_dir = Path("save") / "presets" / "previews"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir / f"{safe_name}.png"
+
+    def _prompt_engineering_thumbnail_update_payload(self, preset_name: str, mode: str = "") -> dict:
+        safe_name = Path(str(preset_name or "").strip()).name
+        mode_key = self._normalize_prompt_engineering_preset_mode(mode, allow_empty=True)
+        target = self._prompt_engineering_preview_path(safe_name, mode_key)
+        if not target:
+            target = self._prompt_engineering_thumbnail_target(safe_name)
+        try:
+            version = int(target.stat().st_mtime) if target.exists() else int(time.time())
+        except Exception:
+            version = int(time.time())
+        return {
+            "ok": True,
+            "name": safe_name,
+            "mode": mode_key,
+            "has_thumbnail": target.exists(),
+            "thumbnail_url": (
+                f"/api/prompt-engineering/preset-thumbnail"
+                f"?name={quote(safe_name, safe='')}&mode={quote(mode_key, safe='')}&v={version}"
+            ),
+        }
+
+    def _save_prompt_engineering_thumbnail_image(self, image, preset_name: str, mode: str = "") -> dict:
+        mode_key = self._normalize_prompt_engineering_preset_mode(mode, allow_empty=True)
+        target = self._prompt_engineering_thumbnail_target(preset_name)
+        source = image.convert("RGBA") if hasattr(image, "convert") else image
+        source.save(target, format="PNG")
+        return self._prompt_engineering_thumbnail_update_payload(preset_name, mode_key)
+
+    def _save_prompt_engineering_thumbnail_bytes(self, preset_name: str, mode: str, image_bytes: bytes) -> dict:
+        if not image_bytes:
+            raise ValueError("Image payload is empty")
+        if len(image_bytes) > 24 * 1024 * 1024:
+            raise ValueError("Image is too large")
+        mode_key = self._normalize_prompt_engineering_preset_mode(mode, allow_empty=True)
+        from PIL import Image
+        with Image.open(io.BytesIO(image_bytes)) as opened:
+            opened.load()
+            payload = self._save_prompt_engineering_thumbnail_image(opened, preset_name, mode_key)
+        self._broadcast_json({
+            "type": "prompt_engineering_preset_thumbnail_updated",
+            **payload,
+        })
+        return payload
+
+    def _normalize_prompt_engineering_preset_mode(self, mode: str = "", *, allow_empty: bool = False) -> str:
+        value = str(mode or "").strip().upper()
+        if not value:
+            if allow_empty:
+                return ""
+            current_mode = str(self._current_api_mode() or "").strip().upper()
+            return current_mode if current_mode in self.PROMPT_ENGINEERING_PRESET_MODES else "NAI"
+        if value not in self.PROMPT_ENGINEERING_PRESET_MODES:
+            raise ValueError("Invalid preset mode")
+        return value
+
+    def _active_vibe_transfer_count_for_generation(self) -> int:
+        try:
+            module = self._find_module("vibe_transfer")
+            if not module:
+                return 0
+            frames = getattr(module, "vibe_frames", []) or []
+            if frames:
+                return sum(
+                    1 for frame in frames
+                    if bool(getattr(frame, "is_enabled", False))
+                    and bool(getattr(frame, "vibe_encodings", None))
+                )
+            if hasattr(module, "get_vibe_transfer_multiple_data"):
+                data = module.get_vibe_transfer_multiple_data() or {}
+                vibes = data.get("reference_image_multiple") or []
+                if isinstance(vibes, (list, tuple)):
+                    return len(vibes)
+        except Exception:
+            return 0
+        return 0
+
+    def _prompt_engineering_preset_file(self, preset_name: str, mode: str = "") -> Path | None:
+        safe_name = Path(str(preset_name or "").strip()).name
+        if not safe_name:
+            return None
+        mode_candidates = []
+        if mode:
+            mode_candidates.append(self._normalize_prompt_engineering_preset_mode(mode))
+        try:
+            current_mode = self._normalize_prompt_engineering_preset_mode(
+                self._current_api_mode(),
+                allow_empty=True,
+            )
+            if current_mode and current_mode not in mode_candidates:
+                mode_candidates.append(current_mode)
+        except Exception:
+            pass
+        for fallback_mode in self.PROMPT_ENGINEERING_PRESET_MODES:
+            if fallback_mode not in mode_candidates:
+                mode_candidates.append(fallback_mode)
+        for mode_name in mode_candidates:
+            candidate = Path("save") / "presets" / mode_name / f"{safe_name}.json"
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _prompt_engineering_thumbnail_generation_prompt(self, preset_name: str, mode: str = "") -> str:
+        pieces = []
+        preset_file = self._prompt_engineering_preset_file(preset_name, mode)
+        if preset_file:
+            try:
+                data = json.loads(preset_file.read_text(encoding="utf-8"))
+                settings = data.get("module_settings", {}) if isinstance(data, dict) else {}
+                pre_prompt = str(settings.get("pre_prompt", "") or "").strip()
+                if pre_prompt:
+                    pieces.append(pre_prompt)
+            except Exception as e:
+                print(f"🌐 Remote: 프리셋 썸네일 생성용 프롬프트 읽기 실패 — {preset_name}: {e}")
+        pieces.append("1girl, original, solo, upper body")
+        return ", ".join(piece for piece in pieces if piece)
+
+    def _request_prompt_engineering_thumbnail_generation(self, payload: dict) -> dict:
+        payload = payload if isinstance(payload, dict) else {}
+        name = Path(str(payload.get("name") or "").strip()).name
+        mode = self._normalize_prompt_engineering_preset_mode(payload.get("mode") or "")
+        if not name or name == "*randomized":
+            raise ValueError("Preset name is required")
+        if not self._prompt_engineering_preset_file(name, mode):
+            raise FileNotFoundError(f"Preset not found: {name}")
+
+        prompt = self._prompt_engineering_thumbnail_generation_prompt(name, mode)
+        try:
+            negative = self.app_context.main_window.negative_prompt_textedit.toPlainText().strip()
+        except Exception:
+            negative = ""
+        request_id = str(payload.get("request_id") or uuid.uuid4().hex)
+        overrides = {
+            "input": prompt,
+            "_raw_input": prompt,
+            "negative_prompt": negative,
+            "width": 1088,
+            "height": 960,
+            "random_resolution": False,
+            "prompt_preset_thumbnail_request": True,
+            "prompt_preset_thumbnail_request_id": request_id,
+            "prompt_preset_thumbnail_name": name,
+            "prompt_preset_thumbnail_mode": mode,
+            "_skip_vibe_transfer_late_binding": True,
+            "_remote_queue_source": "Preset Thumb",
+            "_remote_queue_label": name,
+        }
+        vibe_count = self._active_vibe_transfer_count_for_generation()
+        message = f"{name} 임시 썸네일 생성을 요청했습니다."
+        if vibe_count:
+            message += (
+                " 현재 활성 Vibe Transfer는 썸네일 생성에 적용하지 않습니다. "
+                "프리셋 썸네일에 Vibe를 반영하려면 Vibe Cluster로 저장한 뒤 "
+                "프리셋 프롬프트에 vibe:클러스터명을 넣어주세요."
+            )
+        self._pending_generate_requests.append({"ws": None, "overrides": overrides})
+        self.request_generate.emit()
+        return {
+            "ok": True,
+            "status": "generation_requested",
+            "request_id": request_id,
+            "name": name,
+            "mode": mode,
+            "vibe_active": bool(vibe_count),
+            "vibe_count": vibe_count,
+            "message": message,
+        }
+
+    def _request_prompt_engineering_thumbnail_generation_threadsafe(self, payload: dict) -> dict:
+        app = QCoreApplication.instance()
+        if app and self.thread() == QThread.currentThread():
+            return self._request_prompt_engineering_thumbnail_generation(payload)
+
+        done = threading.Event()
+        request = {
+            "payload": payload if isinstance(payload, dict) else {},
+            "done": done,
+            "result": None,
+            "error": None,
+        }
+        self.request_prompt_preset_thumbnail_generate.emit(request)
+        if not done.wait(10):
+            raise TimeoutError("Preset thumbnail generation request timed out")
+        if request["error"]:
+            raise request["error"]
+        return request["result"] or {}
+
+    def _do_request_prompt_engineering_thumbnail_generation(self, request: dict):
+        if not isinstance(request, dict):
+            return
+        try:
+            payload = request.get("payload")
+            request["result"] = self._request_prompt_engineering_thumbnail_generation(payload)
+        except Exception as e:
+            request["error"] = e
+        finally:
+            done = request.get("done")
+            if done:
+                done.set()
+
+    def _prompt_engineering_preset_summary(self, module, preset_name: str) -> dict:
+        name = str(preset_name or "")
+        try:
+            current_mode = self._normalize_prompt_engineering_preset_mode(self._current_api_mode(), allow_empty=True) or "NAI"
+        except ValueError:
+            current_mode = "NAI"
+        summary = {
+            "name": name,
+            "api_mode": current_mode,
+            "description": "",
+            "pre_prompt_preview": "",
+            "post_prompt_preview": "",
+            "auto_hide_preview": "",
+            "has_thumbnail": False,
+            "thumbnail_url": "",
+        }
+        if not name or name == "*randomized":
+            summary["description"] = "Randomly selects from the randomized preset list."
+            return summary
+
+        try:
+            preset_file = module.get_preset_dir() / f"{name}.json"
+            if preset_file.exists():
+                with open(preset_file, "r", encoding="utf-8") as f:
+                    preset_data = json.load(f)
+                module_settings = preset_data.get("module_settings", {}) or {}
+                try:
+                    summary["api_mode"] = self._normalize_prompt_engineering_preset_mode(
+                        preset_data.get("api_mode", current_mode) or current_mode,
+                    )
+                except ValueError:
+                    summary["api_mode"] = current_mode
+                summary["description"] = str(preset_data.get("description", "") or "")
+                summary["pre_prompt_preview"] = str(module_settings.get("pre_prompt", "") or "")
+                summary["post_prompt_preview"] = str(module_settings.get("post_prompt", "") or "")
+                summary["auto_hide_preview"] = str(module_settings.get("auto_hide_prompt", "") or "")
+        except Exception as e:
+            print(f"🌐 Remote: 프리셋 요약 읽기 실패 — {name}: {e}")
+
+        preview_path = self._prompt_engineering_preview_path(name, summary["api_mode"])
+        if preview_path:
+            summary["has_thumbnail"] = True
+            try:
+                version = int(preview_path.stat().st_mtime)
+            except Exception:
+                version = int(time.time())
+            summary["thumbnail_url"] = (
+                f"/api/prompt-engineering/preset-thumbnail"
+                f"?name={quote(name, safe='')}&mode={quote(summary['api_mode'], safe='')}&v={version}"
+            )
+        return summary
 
     def _broadcast_prompt_engineering_state(self):
         state = self._read_prompt_engineering()
@@ -10985,7 +11275,26 @@ class RemoteBridge(QObject):
 
             gen_params = result.get("generation_params", {})
             character_viewer_thumbnail = None
+            prompt_preset_thumbnail = None
             character_viewer_snapshot = gen_params.get("_character_viewer_snapshot") or {}
+            if gen_params.get("prompt_preset_thumbnail_request"):
+                try:
+                    preset_name = str(gen_params.get("prompt_preset_thumbnail_name") or "")
+                    preset_mode = str(gen_params.get("prompt_preset_thumbnail_mode") or "")
+                    prompt_preset_thumbnail = self._save_prompt_engineering_thumbnail_image(image, preset_name, preset_mode)
+                    self._broadcast_json({
+                        "type": "prompt_engineering_preset_thumbnail_updated",
+                        "request_id": str(gen_params.get("prompt_preset_thumbnail_request_id") or ""),
+                        "message": f"{preset_name} 임시 썸네일을 업데이트했습니다.",
+                        **prompt_preset_thumbnail,
+                    })
+                except Exception as e:
+                    print(f"🌐 Remote: 프리셋 썸네일 저장 실패 — {e}")
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": f"프리셋 썸네일 저장 실패: {e}",
+                        "level": "error",
+                    })
             if gen_params.get("character_viewer_request"):
                 try:
                     if isinstance(character_viewer_snapshot, dict) and not character_viewer_snapshot.get("save_blocked"):
@@ -11027,6 +11336,14 @@ class RemoteBridge(QObject):
                 "character_viewer_thumbnail_url": (
                     str(character_viewer_thumbnail.get("url") or "")
                     if isinstance(character_viewer_thumbnail, dict) else ""
+                ),
+                "prompt_preset_thumbnail_request": bool(gen_params.get("prompt_preset_thumbnail_request")),
+                "prompt_preset_thumbnail_request_id": str(gen_params.get("prompt_preset_thumbnail_request_id") or ""),
+                "prompt_preset_thumbnail_name": str(gen_params.get("prompt_preset_thumbnail_name") or ""),
+                "prompt_preset_thumbnail_saved": bool(prompt_preset_thumbnail),
+                "prompt_preset_thumbnail_url": (
+                    str(prompt_preset_thumbnail.get("thumbnail_url") or "")
+                    if isinstance(prompt_preset_thumbnail, dict) else ""
                 ),
                 "event_preset_request": bool(gen_params.get("event_preset_request")),
                 "event_preset_request_id": str(gen_params.get("event_preset_request_id") or ""),
@@ -12024,6 +12341,59 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    @app.get("/api/prompt-engineering/preset-thumbnail")
+    async def api_prompt_engineering_preset_thumbnail(name: str = "", mode: str = ""):
+        try:
+            target = await asyncio.to_thread(
+                bridge._prompt_engineering_preview_path,
+                name,
+                mode,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if not target:
+            return JSONResponse({"error": "Preset thumbnail not found"}, status_code=404)
+        return FileResponse(
+            str(target),
+            media_type=bridge._image_media_type_for_path(target),
+            headers=no_cache_headers,
+        )
+
+    @app.post("/api/prompt-engineering/preset-thumbnail/upload")
+    async def api_prompt_engineering_preset_thumbnail_upload(req: Request, name: str = "", mode: str = ""):
+        try:
+            image_bytes = await req.body()
+            return await asyncio.to_thread(
+                bridge._save_prompt_engineering_thumbnail_bytes,
+                name,
+                mode,
+                image_bytes,
+            )
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Preset thumbnail upload failed: {e}"}, status_code=500)
+
+    @app.post("/api/prompt-engineering/preset-thumbnail/generate")
+    async def api_prompt_engineering_preset_thumbnail_generate(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            return await asyncio.to_thread(
+                bridge._request_prompt_engineering_thumbnail_generation_threadsafe,
+                payload,
+            )
+        except FileNotFoundError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Preset thumbnail generation failed: {e}"}, status_code=500)
+
     @app.post("/api/character-viewer/generate")
     async def api_character_viewer_generate(req: Request):
         try:
@@ -12901,6 +13271,10 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_queue_action.connect(bridge._do_queue_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_set_cloudflared_enabled.connect(bridge._do_set_cloudflared_enabled, Qt.ConnectionType.QueuedConnection)
     bridge.request_comfyui_workflow_action.connect(bridge._do_comfyui_workflow_action, Qt.ConnectionType.QueuedConnection)
+    bridge.request_prompt_preset_thumbnail_generate.connect(
+        bridge._do_request_prompt_engineering_thumbnail_generation,
+        Qt.ConnectionType.QueuedConnection,
+    )
     QTimer.singleShot(0, bridge._restore_saved_search_filter_state)
 
     # 검색 컨트롤러 시그널 연결

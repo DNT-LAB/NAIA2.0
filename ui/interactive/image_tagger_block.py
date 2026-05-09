@@ -37,6 +37,7 @@ from ui.interactive.interactive_theme import (
     FONT_FAMILY
 )
 from ui.scaling_manager import get_scaled_size, get_scaled_font_size
+from utils.clipboard_image import qimage_from_clipboard
 
 # 상수 정의
 # Direct Download URLs
@@ -970,10 +971,9 @@ class ImageTaggerBlock(BlockWidget):
         clipboard = QGuiApplication.clipboard()
         mime_data = clipboard.mimeData()
 
-        if mime_data.hasImage():
-            image = clipboard.image()
-            if not image.isNull():
-                self._load_qimage(image)
+        image = qimage_from_clipboard(clipboard)
+        if not image.isNull():
+            self._load_qimage(image)
         elif mime_data.hasUrls():
             for url in mime_data.urls():
                 if url.isLocalFile():

@@ -28,6 +28,12 @@ const PP_OPTION_TONES = {
 
 const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 
+function compactPreviewText(text, limit = 420) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 3))}...` : normalized;
+}
+
 function labelForPreprocessingKey(key) {
   return String(key || '')
     .replace(/^remove_/, 'Remove ')
@@ -74,9 +80,24 @@ export function createPromptEngineeringPanel({
 
   function render(m) {
     const focusSnap = captureFocus();
+    const summaryMap = new Map();
+    (m.preset_summaries || []).forEach(summary => {
+      if (summary && summary.name) summaryMap.set(String(summary.name), summary);
+    });
 
     const presetOpts = (m.preset_options || [])
-      .map(preset => `<option value="${preset}"${preset === m.preset ? ' selected' : ''}>${preset}</option>`)
+      .map(preset => {
+        const summary = summaryMap.get(String(preset));
+        const title = summary ? compactPreviewText(summary.pre_prompt_preview, 180) : '';
+        const previewAttrs = summary ? [
+          `data-preview-name="${escHtml(summary.name || preset)}"`,
+          `data-preview-mode="${escHtml(summary.api_mode || '')}"`,
+          `data-preview-prefix="${escHtml(compactPreviewText(summary.pre_prompt_preview, 1200))}"`,
+          `data-preview-description="${escHtml(compactPreviewText(summary.description, 300))}"`,
+          `data-preview-thumbnail="${escHtml(summary.thumbnail_url || '')}"`,
+        ].join(' ') : '';
+        return `<option value="${escHtml(preset)}"${preset === m.preset ? ' selected' : ''}${title ? ` title="${escHtml(title)}"` : ''} ${previewAttrs}>${escHtml(preset)}</option>`;
+      })
       .join('');
 
     const preprocessing = m.preprocessing || {};
@@ -91,7 +112,7 @@ export function createPromptEngineeringPanel({
     <div>
       <div class="mod-section-label">Quick Preset</div>
       <div class="mod-preset-toolbar">
-        <select class="mod-select mod-preset-select" id="modPreset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
+        <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetManagePanel()">Manage</button>
       </div>

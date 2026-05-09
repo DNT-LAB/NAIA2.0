@@ -21,6 +21,7 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from utils.clipboard_image import clipboard_png_bytes
 
 
 # VibeEncodingWorker 클래스 제거됨 - Character Reference에서는 인코딩 불필요
@@ -1375,35 +1376,19 @@ class CharacterReferenceModule(BaseMiddleModule, ModeAwareModule):
     
     def _on_clipboard_image(self):
         """Handle clipboard image button click"""
-        from PyQt6.QtGui import QClipboard
-        
         clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
-        
-        if mime_data.hasImage():
-            image = clipboard.image()
-            if not image.isNull():
-                # Save clipboard image to temp file
-                temp_folder = Path("save/character_reference/temp")
-                temp_folder.mkdir(parents=True, exist_ok=True)
-                
-                import time
-                temp_file = temp_folder / f"clipboard_{int(time.time())}.png"
-                
-                # Convert QImage to PIL Image and save
-                qimage = image.convertToFormat(QImage.Format.Format_RGB888)
-                width = qimage.width()
-                height = qimage.height()
-                
-                # Convert to bytes and create PIL Image
-                buffer = qimage.bits().asstring(qimage.sizeInBytes())
-                pil_image = Image.frombytes("RGB", (width, height), buffer)
-                pil_image.save(temp_file)
-                
-                self._add_character_frame(str(temp_file))
-            else:
-                # TODO(web-dialog): 원래 QMessageBox(Warning) "No valid image found in clipboard." — Web Shell 토스트로 재구현.
-                print("[Dialog/WARN] No valid image found in clipboard.")
+        png_bytes = clipboard_png_bytes(clipboard)
+
+        if png_bytes:
+            # Save clipboard image to temp file
+            temp_folder = Path("save/character_reference/temp")
+            temp_folder.mkdir(parents=True, exist_ok=True)
+
+            import time
+            temp_file = temp_folder / f"clipboard_{int(time.time())}.png"
+            temp_file.write_bytes(png_bytes)
+
+            self._add_character_frame(str(temp_file))
         else:
             # TODO(web-dialog): 원래 QMessageBox(Warning) "No image found in clipboard." — Web Shell 토스트로 재구현.
             print("[Dialog/WARN] No image found in clipboard.")

@@ -579,22 +579,25 @@ class APIService:
                 print(f"  - Strengths: {api_parameters['reference_strength_multiple']}")
             else:
                 # 🔄 Late Binding fallback for direct generation (non-queue)
-                vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
-                if vibe_module:
-                    vibe_data = vibe_module.get_vibe_transfer_multiple_data()
-                    if vibe_data and vibe_data.get('reference_image_multiple'):
-                        print("🔄 [LateBinding] Vibe Transfer from module (direct generation)")
+                if params.get('_skip_vibe_transfer_late_binding'):
+                    print("⏭️ [LateBinding] Vibe Transfer skipped")
+                else:
+                    vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
+                    if vibe_module:
+                        vibe_data = vibe_module.get_vibe_transfer_multiple_data()
+                        if vibe_data and vibe_data.get('reference_image_multiple'):
+                            print("🔄 [LateBinding] Vibe Transfer from module (direct generation)")
 
-                        # Update api_parameters with vibe transfer data
-                        api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
-                        api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
-                        api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
+                            # Update api_parameters with vibe transfer data
+                            api_parameters['normalize_reference_strength_multiple'] = vibe_data['normalize_reference_strength_multiple']
+                            api_parameters['reference_image_multiple'] = vibe_data['reference_image_multiple']
+                            api_parameters['reference_strength_multiple'] = vibe_data['reference_strength_multiple']
 
-                        # Add NAID3-specific parameter if present
-                        if 'reference_information_extracted_multiple' in vibe_data:
-                            api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
+                            # Add NAID3-specific parameter if present
+                            if 'reference_information_extracted_multiple' in vibe_data:
+                                api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
 
-                        print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
+                            print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
             if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']: # 다음 모델 제외: 

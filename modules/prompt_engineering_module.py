@@ -10,6 +10,7 @@ from ui.modern_menu import setModernStyle
 from typing import Dict, Any, Optional, Set
 from core.wildcard_processor import split_tags_smart
 from core.tag_filter_helpers import _is_color_exception, apply_tag_filters
+from utils.clipboard_image import pixmap_from_clipboard
 import copy
 import os, json, re
 from pathlib import Path
@@ -86,17 +87,14 @@ class PresetPreviewWidget(QWidget):
     def paste_from_clipboard(self):
         """클립보드에서 이미지 붙여넣기"""
         clipboard = QApplication.clipboard()
-        mimeData = clipboard.mimeData()
-
-        if mimeData.hasImage():
-            image = clipboard.image()
-            if not image.isNull():
-                self._pixmap = QPixmap.fromImage(image)
-                self.update()
-                # 자동 저장
-                if self.preset_name:
-                    self.save_preview_image()
-                return True
+        pixmap = pixmap_from_clipboard(clipboard)
+        if not pixmap.isNull():
+            self._pixmap = pixmap
+            self.update()
+            # 자동 저장
+            if self.preset_name:
+                self.save_preview_image()
+            return True
         return False
 
     def paintEvent(self, event):

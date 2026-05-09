@@ -20,6 +20,7 @@ from ui.interactive.interactive_theme import (
     get_button_style
 )
 from ui.scaling_manager import get_scaled_size, get_scaled_font_size
+from utils.clipboard_image import qimage_from_clipboard
 
 @dataclass
 class CharacterReferenceData:
@@ -371,10 +372,9 @@ class CharacterReferenceBlock(BlockWidget):
         clipboard = QGuiApplication.clipboard()
         mime_data = clipboard.mimeData()
 
-        if mime_data.hasImage():
-            image = clipboard.image()
-            if not image.isNull():
-                self._load_qimage(image)
+        image = qimage_from_clipboard(clipboard)
+        if not image.isNull():
+            self._load_qimage(image)
         elif mime_data.hasUrls(): # 파일 복사 후 붙여넣기
             for url in mime_data.urls():
                 if url.isLocalFile():

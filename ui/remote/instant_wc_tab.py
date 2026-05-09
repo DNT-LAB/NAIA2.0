@@ -20,6 +20,7 @@ from PyQt6.QtGui import QPixmap
 
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size
+from utils.clipboard_image import qimage_from_clipboard
 
 
 # === 상수 정의 ===
@@ -1046,14 +1047,7 @@ class InstantWcTabMixin:
     def _on_wc_clip_image(self, file_key: str, item_key: str):
         """클립보드 이미지를 썸네일로 할당"""
         clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
-
-        if not mime_data.hasImage():
-            self._show_warning("알림", "클립보드에 이미지가 없습니다.")
-            return
-
-        # 이미지 가져오기
-        image = clipboard.image()
+        image = qimage_from_clipboard(clipboard)
         if image.isNull():
             self._show_warning("알림", "클립보드 이미지를 읽을 수 없습니다.")
             return

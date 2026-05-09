@@ -25,6 +25,7 @@ from PyQt6.QtGui import QPixmap, QImage
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from modules.character_module import CharacterSearchDialog
+from utils.clipboard_image import qimage_from_clipboard
 
 
 # 캐릭터 프롬프트 즐겨찾기 상수
@@ -1458,23 +1459,21 @@ class CharPromptTabMixin:
     def _on_manage_paste_thumb_clicked(self):
         """썸네일 붙여넣기 → 클립보드에서 이미지 가져오기"""
         clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
+        image = qimage_from_clipboard(clipboard)
 
-        if mime_data.hasImage():
-            image = clipboard.image()
-            if not image.isNull():
-                # QImage를 썸네일로 표시
-                scaled = image.scaled(
-                    CHAR_PROMPT_MANAGE_THUMB_WIDTH, CHAR_PROMPT_MANAGE_THUMB_HEIGHT,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                pixmap = QPixmap.fromImage(scaled)
-                self.char_prompt_manage_thumb.setPixmap(pixmap)
+        if not image.isNull():
+            # QImage를 썸네일로 표시
+            scaled = image.scaled(
+                CHAR_PROMPT_MANAGE_THUMB_WIDTH, CHAR_PROMPT_MANAGE_THUMB_HEIGHT,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            pixmap = QPixmap.fromImage(scaled)
+            self.char_prompt_manage_thumb.setPixmap(pixmap)
 
-                # 임시 썸네일 경로 저장 (등록 시 사용)
-                self._pending_thumb_image = image
-                return
+            # 임시 썸네일 경로 저장 (등록 시 사용)
+            self._pending_thumb_image = image
+            return
 
         QMessageBox.warning(self, "알림", "클립보드에 이미지가 없습니다.")
 

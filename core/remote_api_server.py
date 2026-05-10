@@ -10972,9 +10972,18 @@ class RemoteBridge(QObject):
             score += min(math.log10(count + 1) * 3.0, 18.0)
         return score
 
-    def _fallback_recommended_rows(self, translated: str, limit: int) -> list[dict]:
+    def _fallback_recommended_rows(
+        self,
+        translated: str,
+        limit: int,
+        *,
+        multiword_only: bool = False,
+    ) -> list[dict]:
         rows: list[dict] = []
-        for query in self._translation_search_queries(translated):
+        queries = self._translation_search_queries(translated)
+        preferred = [query for query in queries if len(query.split()) >= 2]
+        fallback = [] if multiword_only else [query for query in queries if len(query.split()) < 2]
+        for query in preferred + fallback:
             if not query:
                 continue
             rows.append({
@@ -10989,6 +10998,41 @@ class RemoteBridge(QObject):
             if len(rows) >= min(limit, 5):
                 break
         return rows
+
+    @staticmethod
+    def _translated_query_has_actor_context(translated: str) -> bool:
+        tokens = re.findall(
+            r"[a-z0-9]+(?:'[a-z0-9]+)?",
+            normalize_search_query(translated).replace("’", "'").replace("`", "'"),
+        )
+        for token in tokens:
+            base = token[:-2] if token.endswith("'s") else token
+            if base in _AUTOCOMPLETE_TRANSLATION_ACTOR_WORDS:
+                return True
+        return False
+
+    def _has_strong_translated_match(self, rows: list[dict], translated: str) -> bool:
+        levels = self._translation_search_query_levels(translated)
+        strong_queries = {
+            query
+            for level in levels
+            for query in level
+            if len(query.split()) >= 2
+        }
+        if not strong_queries:
+            return False
+        for row in rows:
+            tag = normalize_search_query(row.get("tag", ""))
+            if not tag:
+                continue
+            if tag in strong_queries:
+                return True
+        return False
+
+    def _should_prepend_fallback_recommended(self, translated: str, rows: list[dict]) -> bool:
+        if not translated or not self._translated_query_has_actor_context(translated):
+            return False
+        return not self._has_strong_translated_match(rows, translated)
 
     def _search_kr_tags_with_translation(self, query: str, limit: int = 20) -> tuple[list, str]:
         base_results = self._search_kr_tags(query, limit)
@@ -11117,7 +11161,20 @@ class RemoteBridge(QObject):
             for row in self._fallback_recommended_rows(translated, limit):
                 add_result(row)
 
-        return [merged[tag] for tag in order][:limit], translated
+        results = [merged[tag] for tag in order]
+        if self._should_prepend_fallback_recommended(translated, results):
+            existing_tags = {
+                normalize_search_query(row.get("tag", ""))
+                for row in results
+            }
+            recommended = [
+                row
+                for row in self._fallback_recommended_rows(translated, limit, multiword_only=True)
+                if normalize_search_query(row.get("tag", "")) not in existing_tags
+            ]
+            results = recommended + results
+
+        return results[:limit], translated
 
     def _search_wildcards(self, query: str, limit: int = 12) -> list:
         """와일드카드 이름 검색 (__name__ 용)"""

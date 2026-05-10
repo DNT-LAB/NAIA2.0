@@ -636,3 +636,56 @@ def test_autocomplete_translation_reranks_metadata_over_low_level_generic_match(
 
     assert translated == "a small harp-like instrument"
     assert [row["tag"] for row in merged[:2]] == ["lyre", "harp"]
+
+
+def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_strong_tag(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "girl in white clothes",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "흰 의복을 입은 소녀": [],
+        "girl in white clothes": [],
+        "white clothes": [
+            {"tag": "clothes", "count": 100, "desc": "", "group": "", "cat": ""},
+            {"tag": "white camisole", "count": 80, "desc": "", "group": "", "cat": ""},
+        ],
+        "girl": [
+            {"tag": "girl sandwich", "count": 50, "desc": "", "group": "", "cat": ""},
+        ],
+        "white": [
+            {"tag": "white neckerchief", "count": 40, "desc": "", "group": "", "cat": ""},
+        ],
+        "clothes": [
+            {"tag": "clothes", "count": 100, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20: [
+        {
+            "tag": "full-length zipper",
+            "count": 1247,
+            "desc": "목부터 배꼽 아래까지 이어지는 전체 길이 지퍼가 달린 원피스 의복을 입은 이미지.",
+            "group": "Clothing_Wear",
+            "cat": "",
+            "_metadata": True,
+            "_metadata_score": 725,
+        }
+    ]
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "흰 의복을 입은 소녀",
+        8,
+    )
+
+    assert translated == "girl in white clothes"
+    assert merged[0]["tag"] == "girl in white clothes"
+    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert merged[1]["tag"] == "white clothes"
+    assert merged[1]["_wc_type"] == "fallback_recommended"
+    assert "girl" not in [row["tag"] for row in merged[:3]]
+    assert "full-length zipper" in [row["tag"] for row in merged]

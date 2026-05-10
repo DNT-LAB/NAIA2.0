@@ -702,6 +702,63 @@ export function createTagAssistController({
     return short ? 'Fixed tags' : 'Generation applies exactly these staged tags';
   }
 
+  function encodeClothesSegment(value) {
+    return String(value || '').trim().replace(/&/g, '%26');
+  }
+
+  function clothesTokenFromSegments(segments, {randomize = false} = {}) {
+    const cleanSegments = [];
+    const seen = new Set();
+    for (const segment of segments || []) {
+      const clean = String(segment || '').trim();
+      if (!clean) continue;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cleanSegments.push(clean);
+    }
+    if (!cleanSegments.length) return 'preset:clothes';
+    const body = cleanSegments.map(encodeClothesSegment).join('&');
+    return `preset:clothes/${body}${randomize ? '&' : ''}`;
+  }
+
+  function presetClothesRawSegments(parsed) {
+    return Array.isArray(parsed?.segments)
+      ? parsed.segments.map(segment => String(segment?.raw || '').trim())
+      : [];
+  }
+
+  function clothesSegmentBounds(token, segmentIndex) {
+    const raw = String(token || '');
+    const prefix = 'preset:clothes';
+    if (!raw.toLowerCase().startsWith(prefix)) return null;
+    let tailStart = prefix.length;
+    while (raw[tailStart] === '/') tailStart += 1;
+    const tail = raw.slice(tailStart);
+    const parts = tail.split('&');
+    let start = 0;
+    for (let index = 0; index < parts.length; index += 1) {
+      const end = start + parts[index].length;
+      if (index === segmentIndex) {
+        return {start: tailStart + start, end: tailStart + end};
+      }
+      start = end + 1;
+    }
+    return null;
+  }
+
+  function focusClothesSegment(textarea, tokenInfo, segmentIndex) {
+    const token = String(tokenInfo?.stripped || '');
+    const bounds = clothesSegmentBounds(token, segmentIndex);
+    if (!bounds || !textarea) return false;
+    const tokenOffset = Math.max(0, String(tokenInfo.raw || '').indexOf(token));
+    const tokenStart = tokenInfo.start + tokenOffset;
+    const pos = tokenStart + bounds.end;
+    textarea.selectionStart = textarea.selectionEnd = Math.max(tokenInfo.start, pos);
+    textarea.focus({preventScroll: true});
+    return true;
+  }
+
   function presetClothesTooltipSummary(token, preset, rows, fallbackRow) {
     const parsed = preset?.parsed || {};
     const stage = String(preset?.stage || fallbackRow?.stage || '').toLowerCase();
@@ -1602,6 +1659,62 @@ export function createTagAssistController({
     return true;
   }
 
+  function replaceActivePresetToken(nextToken, {focusEnd = true} = {}) {
+    const target = acTarget || promptEdit;
+    const info = getActiveTokenInfo(target);
+    if (!info) return false;
+    swapToken(target, info, nextToken);
+    target.focus({preventScroll: true});
+    if (focusEnd) {
+      const nextInfo = getActiveTokenInfo(target);
+      if (nextInfo) {
+        target.selectionStart = target.selectionEnd = nextInfo.end;
+      }
+    }
+    presetPersonMenuOpen = false;
+    presetEventSearch = '';
+    requestPresetAutocomplete(nextToken);
+    return true;
+  }
+
+  function clothesTokenFromCurrentSegments(transform, {randomize = null} = {}) {
+    const parsed = presetAutocompleteMeta?.parsed || {};
+    const segments = presetClothesRawSegments(parsed);
+    const nextSegments = typeof transform === 'function' ? transform([...segments], parsed) : segments;
+    const nextRandomize = randomize === null ? !!parsed.randomizeOnResolve : !!randomize;
+    return clothesTokenFromSegments(nextSegments, {randomize: nextRandomize});
+  }
+
+  function removeClothesStageSegment(index) {
+    const nextToken = clothesTokenFromCurrentSegments(segments => {
+      if (index >= 0 && index < segments.length) segments.splice(index, 1);
+      return segments;
+    });
+    return replaceActivePresetToken(nextToken);
+  }
+
+  function addClothesStageSegment() {
+    const parsed = presetAutocompleteMeta?.parsed || {};
+    const nextToken = clothesTokenFromSegments(presetClothesRawSegments(parsed), {randomize: true});
+    return replaceActivePresetToken(nextToken);
+  }
+
+  function toggleClothesResolveMode() {
+    const parsed = presetAutocompleteMeta?.parsed || {};
+    const nextToken = clothesTokenFromCurrentSegments(null, {randomize: !parsed.randomizeOnResolve});
+    return replaceActivePresetToken(nextToken);
+  }
+
+  function focusClothesStageSegment(index) {
+    const target = acTarget || promptEdit;
+    const info = getActiveTokenInfo(target);
+    if (!info) return false;
+    if (!focusClothesSegment(target, info, index)) return false;
+    presetEventSearch = '';
+    requestPresetAutocomplete(info.stripped);
+    return true;
+  }
+
   function presetEventStageText(stage) {
     const normalized = String(stage || '').toLowerCase();
     if (normalized === 'category') return 'Category';
@@ -1659,11 +1772,42 @@ export function createTagAssistController({
       '</div>';
   }
 
+  function renderPresetClothesStagedEditor() {
+    if ((presetAutocompleteMeta?.axis || '') !== 'clothes') return '';
+    const parsed = presetAutocompleteMeta?.parsed || {};
+    if (parsed.mode !== 'staged') return '';
+    const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
+    const chips = segments
+      .filter(segment => segment?.tag)
+      .map(segment => {
+        const active = segment.active ? ' active' : '';
+        const index = Number(segment.index);
+        const label = String(segment.tag || '');
+        return '<span class="preset-clothes-chip-wrap">' +
+          `<button type="button" class="preset-clothes-chip${active}" data-clothes-chip="${index}" title="Replace ${escHtml(label)}">${escHtml(label)}</button>` +
+          `<button type="button" class="preset-clothes-chip-remove" data-clothes-remove="${index}" title="Remove ${escHtml(label)}">×</button>` +
+          '</span>';
+      })
+      .join('');
+    if (!chips && !presetClothesResolveTags(parsed).length) return '';
+    const modeLabel = parsed.randomizeOnResolve ? 'Random seed' : 'Fixed tags';
+    const modeTitle = parsed.randomizeOnResolve
+      ? 'Generation expands staged tags with random Clothes combo'
+      : 'Generation applies staged tags exactly';
+    return '<div class="preset-clothes-staged-editor">' +
+      `<div class="preset-clothes-chips">${chips}` +
+      '<button type="button" class="preset-clothes-chip-add" data-clothes-add title="Add staged clothes">+</button>' +
+      '</div>' +
+      `<button type="button" class="preset-clothes-mode-toggle${parsed.randomizeOnResolve ? ' random' : ' fixed'}" data-clothes-mode-toggle title="${escHtml(modeTitle)}">${escHtml(modeLabel)}</button>` +
+      '</div>';
+  }
+
   function renderPresetEventAutocomplete() {
     const context = presetAutocompleteMeta?.context || {};
     let html = '<div class="preset-event-picker">' +
       renderPresetEventToolbar(context) +
       renderPresetEventStageLine() +
+      renderPresetClothesStagedEditor() +
       '<div class="tag-ac-list preset-event-list">';
     acResults.forEach((r, i) => {
       const sel = i === acSel ? ' selected' : '';
@@ -1688,6 +1832,38 @@ export function createTagAssistController({
 
     const toolbar = tagTooltip.querySelector('.preset-event-toolbar');
     if (toolbar) toolbar.addEventListener('mousedown', e => e.preventDefault());
+    tagTooltip.querySelectorAll('[data-clothes-chip]').forEach(button => {
+      button.addEventListener('mousedown', e => e.preventDefault());
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        const index = Number(button.dataset.clothesChip);
+        if (Number.isInteger(index)) focusClothesStageSegment(index);
+      });
+    });
+    tagTooltip.querySelectorAll('[data-clothes-remove]').forEach(button => {
+      button.addEventListener('mousedown', e => e.preventDefault());
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        const index = Number(button.dataset.clothesRemove);
+        if (Number.isInteger(index)) removeClothesStageSegment(index);
+      });
+    });
+    const clothesAdd = tagTooltip.querySelector('[data-clothes-add]');
+    if (clothesAdd) {
+      clothesAdd.addEventListener('mousedown', e => e.preventDefault());
+      clothesAdd.addEventListener('click', e => {
+        e.preventDefault();
+        addClothesStageSegment();
+      });
+    }
+    const clothesModeToggle = tagTooltip.querySelector('[data-clothes-mode-toggle]');
+    if (clothesModeToggle) {
+      clothesModeToggle.addEventListener('mousedown', e => e.preventDefault());
+      clothesModeToggle.addEventListener('click', e => {
+        e.preventDefault();
+        toggleClothesResolveMode();
+      });
+    }
     const clothesRandom = tagTooltip.querySelector('[data-preset-clothes-random]');
     if (clothesRandom) {
       clothesRandom.addEventListener('mousedown', e => e.preventDefault());

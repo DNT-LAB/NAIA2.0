@@ -9891,6 +9891,88 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .preset-event-inline-search::placeholder {
   color: var(--text-dim);
 }
+.preset-clothes-staged-editor {
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(10,10,16,0.22);
+}
+.preset-clothes-chips {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.preset-clothes-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.preset-clothes-chip,
+.preset-clothes-chip-remove,
+.preset-clothes-chip-add,
+.preset-clothes-mode-toggle {
+  height: 22px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.preset-clothes-chip {
+  max-width: 180px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 5px 0 0 5px;
+  padding: 0 8px;
+}
+.preset-clothes-chip.active {
+  border-color: rgba(130,150,255,0.42);
+  background: rgba(100,140,255,0.18);
+}
+.preset-clothes-chip-remove {
+  width: 22px;
+  border-left: 0;
+  border-radius: 0 5px 5px 0;
+  color: var(--text-muted);
+  padding: 0;
+}
+.preset-clothes-chip-add {
+  width: 26px;
+  border-radius: 5px;
+  color: #9db2ff;
+  padding: 0;
+}
+.preset-clothes-mode-toggle {
+  min-width: 92px;
+  border-radius: 6px;
+  padding: 0 10px;
+}
+.preset-clothes-mode-toggle.random {
+  border-color: rgba(130,150,255,0.36);
+  background: rgba(100,140,255,0.13);
+  color: #b7c3ff;
+}
+.preset-clothes-mode-toggle.fixed {
+  color: var(--text-muted);
+}
+.preset-clothes-chip:hover,
+.preset-clothes-chip-remove:hover,
+.preset-clothes-chip-add:hover,
+.preset-clothes-mode-toggle:hover {
+  border-color: rgba(130,150,255,0.42);
+  background: rgba(100,140,255,0.16);
+  color: var(--text-primary);
+}
 .preset-event-ratings {
   display: inline-flex;
   align-items: center;

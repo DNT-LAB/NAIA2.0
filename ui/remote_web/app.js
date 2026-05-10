@@ -4447,7 +4447,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-clothes-resolve-mode1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-clothes-stage-editor1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

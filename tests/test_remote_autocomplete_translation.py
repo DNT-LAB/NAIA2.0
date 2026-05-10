@@ -56,7 +56,9 @@ def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch)
         "stockings only",
         "base6",
         "base7",
+        "fishnet stockings",
     ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
 
 def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypatch):
@@ -118,7 +120,13 @@ def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypa
     )
 
     assert translated == "kick a soccer ball with foot"
-    assert [row["tag"] for row in merged] == ["soccer ball", "kicking", "foot"]
+    assert [row["tag"] for row in merged] == [
+        "soccer ball",
+        "kicking",
+        "foot",
+        "kick a soccer ball with foot",
+    ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
 
 def test_autocomplete_translation_expands_pose_relation_and_alias(monkeypatch):
@@ -192,7 +200,9 @@ def test_autocomplete_translation_expands_pose_relation_and_alias(monkeypatch):
         "hands on own hips",
         "hands on hips",
         "hands on another's waist",
+        "placed hands on waist",
     ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
 
 def test_autocomplete_translation_handles_headless_relation_samples(monkeypatch):
@@ -275,7 +285,9 @@ def test_autocomplete_translation_handles_headless_relation_samples(monkeypatch)
     assert [row["tag"] for row in merged] == [
         "holding flower",
         "blowing",
+        "hold flower and blow on",
     ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
 
 def test_autocomplete_translation_handles_nsfw_domain_samples(monkeypatch):
@@ -399,7 +411,11 @@ def test_autocomplete_translation_handles_nsfw_domain_samples(monkeypatch):
         "여성의 다리를 강제로 벌림",
         8,
     )
-    assert [row["tag"] for row in merged] == ["legs apart"]
+    assert [row["tag"] for row in merged] == [
+        "legs apart",
+        "forcing a woman's legs apart",
+    ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
     merged, _ = RemoteBridge._search_kr_tags_with_translation(
         bridge,
@@ -410,7 +426,9 @@ def test_autocomplete_translation_handles_nsfw_domain_samples(monkeypatch):
         "panty pull",
         "pulling own clothes",
         "pulling another's clothes",
+        "pull down one panties by force",
     ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
     merged, _ = RemoteBridge._search_kr_tags_with_translation(
         bridge,
@@ -548,7 +566,9 @@ def test_autocomplete_translation_falls_back_by_query_level(monkeypatch):
     assert [row["tag"] for row in merged] == [
         "pulling own clothes",
         "pulling another's clothes",
+        "pulling the hem of clothes",
     ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
     assert calls == [
         "옷 끝자락을 잡아당기기",
         "pulling the hem of clothes",
@@ -590,12 +610,80 @@ def test_autocomplete_translation_generates_action_relation_query(monkeypatch):
     )
 
     assert translated == "look at the screen"
-    assert [row["tag"] for row in merged] == ["looking at screen"]
+    assert [row["tag"] for row in merged] == ["looking at screen", "look at the screen"]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
     assert calls == [
         "화면을 바라보다",
         "look at the screen",
         "looking at screen",
     ]
+
+
+def test_autocomplete_translation_keeps_recommended_tail_when_results_fill_limit(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "black book and crystal ball",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "검은 책과 수정구": [],
+        "black book and crystal ball": [
+            {"tag": "crystal ball", "count": 811, "desc": "", "group": "Food_Object", "cat": ""},
+            {"tag": "grief seed", "count": 87, "desc": "", "group": "Food_Object", "cat": ""},
+            {"tag": "dark orb (madoka magica)", "count": 366, "desc": "", "group": "copyright", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "검은 책과 수정구",
+        3,
+    )
+
+    assert translated == "black book and crystal ball"
+    assert [row["tag"] for row in merged] == [
+        "crystal ball",
+        "grief seed",
+        "black book and crystal ball",
+    ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
+
+
+def test_autocomplete_translation_tail_recommended_skips_duplicate_exact_match(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "fishnet stockings",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "망사 스타킹": [],
+        "fishnet stockings": [
+            {"tag": "fishnet stockings", "count": 100, "desc": "", "group": "", "cat": ""},
+            {"tag": "fishnet pantyhose", "count": 80, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "망사 스타킹",
+        3,
+    )
+
+    assert translated == "fishnet stockings"
+    assert [row["tag"] for row in merged] == [
+        "fishnet stockings",
+        "fishnet pantyhose",
+        "fishnet",
+    ]
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
 
 def test_autocomplete_translation_reranks_metadata_over_low_level_generic_match(monkeypatch):

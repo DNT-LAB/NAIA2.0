@@ -11346,6 +11346,18 @@ class RemoteBridge(QObject):
                 if normalize_search_query(row.get("tag", "")) not in existing_tags
             ]
             results = recommended + results
+        elif not any(row.get("_fallback_recommended") for row in results):
+            existing_tags = {
+                normalize_search_query(row.get("tag", ""))
+                for row in results
+            }
+            recommended = [
+                row
+                for row in self._fallback_recommended_rows(translated, max(limit, 5))
+                if normalize_search_query(row.get("tag", "")) not in existing_tags
+            ][:1]
+            if recommended:
+                results = results[:max(0, limit - len(recommended))] + recommended
 
         return results[:limit], translated
 

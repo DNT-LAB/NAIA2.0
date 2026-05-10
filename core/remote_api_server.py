@@ -51,6 +51,7 @@ from core.resolution_utils import (
     nearest_standard_1mp_resolution,
     parse_resolution_pair,
 )
+from utils.translator import korean_to_english
 from utils.clipboard_image import clipboard_png_bytes, set_png_clipboard_bytes
 from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
 from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
@@ -237,6 +238,7 @@ class RemoteBridge(QObject):
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
         self._tag_search_index: Optional[TagSearchIndex] = None
         self._tag_relation_ranker: Optional[TagRelationRanker] = None
+        self._autocomplete_translation_cache: dict[str, str] = {}
         self._prompt_highlight_index_cache: Optional[dict] = None
         self._kr_tags_lock = threading.Lock()
         self._kr_tags_loaded = False
@@ -10358,6 +10360,75 @@ class RemoteBridge(QObject):
             grp.sort(key=lambda x: x['count'], reverse=True)
         return (exact + starts + kr_kw + contains + desc_m)[:limit]
 
+    @staticmethod
+    def _has_hangul_text(text: str) -> bool:
+        return bool(re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", str(text or "")))
+
+    def _translate_autocomplete_query(self, query: str) -> str:
+        query = normalize_search_query(query)
+        if not query or not self._has_hangul_text(query):
+            return ""
+        cached = self._autocomplete_translation_cache.get(query)
+        if cached is not None:
+            return cached
+        translated = normalize_search_query(korean_to_english(query) or "")
+        if not translated or self._has_hangul_text(translated) or translated == query:
+            translated = ""
+        if len(self._autocomplete_translation_cache) > 256:
+            self._autocomplete_translation_cache.clear()
+        self._autocomplete_translation_cache[query] = translated
+        return translated
+
+    def _translation_search_queries(self, translated: str) -> list[str]:
+        normalized = normalize_search_query(translated)
+        if not normalized:
+            return []
+        queries = [normalized]
+        tokens = [token for token in normalized.split() if len(token) >= 3]
+        if len(tokens) > 1:
+            queries.append(tokens[0])
+        for token in tokens:
+            if token not in queries:
+                queries.append(token)
+        return queries[:4]
+
+    def _search_kr_tags_with_translation(self, query: str, limit: int = 20) -> tuple[list, str]:
+        base_results = self._search_kr_tags(query, limit)
+        translated = self._translate_autocomplete_query(query)
+        if not translated:
+            return base_results, ""
+
+        merged: dict[str, dict] = {}
+        order: list[str] = []
+
+        def add_result(row: dict, translated_match: bool = False):
+            tag = str(row.get("tag") or "")
+            if not tag:
+                return
+            existing = merged.get(tag)
+            if existing is None:
+                item = dict(row)
+                if translated_match:
+                    item["_translated"] = True
+                merged[tag] = item
+                order.append(tag)
+                return
+            if translated_match:
+                existing["_translated"] = True
+                existing["desc"] = existing.get("desc") or row.get("desc", "")
+                existing["group"] = existing.get("group") or row.get("group", "")
+
+        base_head_count = max(3, limit // 2)
+        for row in base_results[:base_head_count]:
+            add_result(row)
+        for translated_query in self._translation_search_queries(translated):
+            for row in self._search_kr_tags(translated_query, limit):
+                add_result(row, translated_match=True)
+        for row in base_results[base_head_count:]:
+            add_result(row)
+
+        return [merged[tag] for tag in order][:limit], translated
+
     def _search_wildcards(self, query: str, limit: int = 12) -> list:
         """와일드카드 이름 검색 (__name__ 용)"""
         try:
@@ -13415,6 +13486,19 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "type": "autocomplete_result",
                                 "query": query,
                                 "results": results,
+                            }))
+                        elif cmd_type == "autocomplete_translate":
+                            query = cmd.get("query", "")
+                            results, translated = await asyncio.to_thread(
+                                bridge._search_kr_tags_with_translation,
+                                query,
+                                12,
+                            )
+                            await ws.send_text(json.dumps({
+                                "type": "autocomplete_result",
+                                "query": query,
+                                "results": results,
+                                "translated_query": translated,
                             }))
                         elif cmd_type == "autocomplete_wildcard":
                             query = cmd.get("query", "")

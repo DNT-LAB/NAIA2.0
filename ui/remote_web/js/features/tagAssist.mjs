@@ -31,7 +31,9 @@ export function createTagAssistController({
   let acResults = [];
   let acSel = -1;
   let acTimer = null;
+  let acTranslationTimer = null;
   let lastAcQuery = '';
+  let lastTranslationRequestQuery = '';
   let acTarget = null;
   let presetAutocompleteMeta = null;
   let presetEventContext = {ratingId: 's', personId: '1girl_solo'};
@@ -710,6 +712,34 @@ export function createTagAssistController({
     return query;
   }
 
+  function isAutocompleteControlQuery(query, allowTriggers) {
+    if (!allowTriggers) return false;
+    const lower = String(query || '').toLowerCase();
+    return lower.startsWith('__') ||
+      lower.startsWith('$') ||
+      lower.startsWith('vibe:') ||
+      lower.startsWith('preset:');
+  }
+
+  function clearAutocompleteTranslationTimer() {
+    if (acTranslationTimer) {
+      window.clearTimeout(acTranslationTimer);
+      acTranslationTimer = null;
+    }
+  }
+
+  function scheduleAutocompleteTranslation(query, allowTriggers) {
+    clearAutocompleteTranslationTimer();
+    if (!query || !hangulRe.test(query) || isAutocompleteControlQuery(query, allowTriggers)) return;
+    if (lastTranslationRequestQuery === query) return;
+    acTranslationTimer = window.setTimeout(() => {
+      acTranslationTimer = null;
+      if (lastAcQuery !== query) return;
+      lastTranslationRequestQuery = query;
+      sendWs({type: 'autocomplete_translate', query});
+    }, 2000);
+  }
+
   function scheduleAutocomplete(options = {}) {
     const target = options.target || acTarget || promptEdit;
     const info = options.info || getActiveTokenInfo(target);
@@ -730,6 +760,7 @@ export function createTagAssistController({
     }
     if (query === lastAcQuery && !options.force) return;
     lastAcQuery = query;
+    scheduleAutocompleteTranslation(query, allowTriggers);
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
     acTimer = window.setTimeout(() => {
@@ -1243,11 +1274,13 @@ export function createTagAssistController({
     acResults = [];
     acSel = -1;
     lastAcQuery = '';
+    lastTranslationRequestQuery = '';
     presetAutocompleteMeta = null;
     presetPersonMenuOpen = false;
     presetEventSourceResults = [];
     presetEventSearch = '';
     window.clearTimeout(acTimer);
+    clearAutocompleteTranslationTimer();
     hideTagChipInfoTooltip();
     tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode');
     clearAutocompletePositionStyles();

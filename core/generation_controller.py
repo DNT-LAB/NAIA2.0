@@ -8,6 +8,7 @@ import piexif
 import piexif.helper
 import json
 import re, random
+from pathlib import Path
 from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool
 import pandas as pd
 import gc
@@ -1380,7 +1381,7 @@ class GenerationController:
                     # 일반 태그
                     cleaned_tags.append(processed_tag)
 
-            input_tags = cleaned_tags
+            input_tags = self._expand_preset_tokens_in_tags(cleaned_tags, prompt_context)
 
             # 2. expand_tags 호출하여 완전한 와일드카드 확장 수행 (기존 방식과 동일)
             expanded_tags = wildcard_processor.expand_tags(input_tags, prompt_context)
@@ -1401,6 +1402,40 @@ class GenerationController:
             print(f"⚠️ 와일드카드 확장 중 오류 발생: {e}")
             # 오류 발생 시 원본 텍스트 반환
             return input_text, negative_prompt
+
+    def _expand_preset_tokens_in_tags(self, tags: list[str], prompt_context) -> list[str]:
+        """Expand preset shortcut tokens before the regular wildcard pass."""
+        if not tags:
+            return tags
+        expanded: list[str] = []
+        bridge = getattr(self, "_preset_input_bridge", None)
+        if bridge is None:
+            try:
+                from core.preset_input_bridge import PresetInputBridge
+
+                bridge = PresetInputBridge(Path(__file__).resolve().parent.parent)
+                self._preset_input_bridge = bridge
+            except Exception as exc:
+                print(f"⚠️ Preset token bridge 초기화 실패: {exc}")
+                return tags
+
+        for tag in tags:
+            token = str(tag or "").strip()
+            if not token.lower().startswith("preset:"):
+                expanded.append(tag)
+                continue
+            try:
+                result = bridge.resolve_prompt_token(token)
+                if hasattr(prompt_context, "metadata"):
+                    prompt_context.metadata.setdefault("preset_prompt_resolutions", []).append(result)
+                if result.get("applied"):
+                    expanded.extend(str(item).strip() for item in result.get("tags") or [] if str(item).strip())
+                else:
+                    expanded.append(tag)
+            except Exception as exc:
+                print(f"⚠️ Preset token 확장 실패 ({token}): {exc}")
+                expanded.append(tag)
+        return expanded
 
     def _apply_conditional_prompts(self, input_text: str) -> str:
         """generation_controller 전용 조건부 프롬프트 처리 (와일드카드 확장 후 실행)"""

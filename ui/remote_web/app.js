@@ -4447,7 +4447,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260505_vibe_cluster_ac1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-mobile-native-text-menu3')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -752,17 +752,49 @@ export function createTagAssistController({
     textarea._excludeE621Autocomplete = !!options.excludeE621;
     let composing = false;
     const allowChunkBridge = !options.disableChunkBridge;
+    let lastContextPointer = {type: '', time: 0};
     function hasTextSelection() {
       return textarea.selectionStart != null
         && textarea.selectionEnd != null
         && textarea.selectionStart !== textarea.selectionEnd
         && textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).trim().length > 0;
     }
+    function rememberContextPointer(event) {
+      lastContextPointer = {
+        type: String(event.pointerType || ''),
+        time: Date.now(),
+      };
+    }
+    function isMobileTextContextSurface() {
+      const vv = window.visualViewport;
+      const viewportWidth = vv ? vv.width : window.innerWidth;
+      if (viewportWidth <= 767) return true;
+      const mediaQuery = window.matchMedia?.('(hover: none), (pointer: coarse)');
+      if (mediaQuery?.matches) return true;
+      return Number(window.navigator?.maxTouchPoints || 0) > 0 && window.innerWidth <= 900;
+    }
+    function isDesktopSecondaryTextContextMenu(event) {
+      const eventPointerType = typeof event.pointerType === 'string' ? event.pointerType : '';
+      if (eventPointerType && eventPointerType !== 'mouse') return false;
+      if (event.button !== 2 && event.buttons !== 2) return false;
+      return !isMobileTextContextSurface();
+    }
+    function shouldUseNativeTextContextMenu(event) {
+      if (!isDesktopSecondaryTextContextMenu(event)) return true;
+      const eventPointerType = typeof event.pointerType === 'string' ? event.pointerType : '';
+      if (eventPointerType) return eventPointerType !== 'mouse';
+      const elapsed = Date.now() - (lastContextPointer.time || 0);
+      if (elapsed >= 0 && elapsed < 2500 && lastContextPointer.type) {
+        return lastContextPointer.type !== 'mouse';
+      }
+      return false;
+    }
     textarea.addEventListener('compositionstart', () => { composing = true; });
     textarea.addEventListener('compositionend', () => {
       composing = false;
       scheduleAutocomplete();
     });
+    textarea.addEventListener('pointerdown', rememberContextPointer, true);
     textarea.addEventListener('input', () => {
       acTarget = textarea;
       if (!composing) scheduleAutocomplete();
@@ -786,6 +818,10 @@ export function createTagAssistController({
       const chunkPanelControl = getChunkPanelControl();
       if (!allowChunkBridge || textarea === negEdit || textarea.classList.contains('mod-uc')) return;
       if (!hasTextSelection() || !chunkPanelControl) return;
+      if (shouldUseNativeTextContextMenu(e)) {
+        chunkPanelControl.hideSelectionMenu?.();
+        return;
+      }
       acTarget = textarea;
       hideAutocomplete();
       if (chunkPanelControl.showSelectionMenu(textarea, e)) {

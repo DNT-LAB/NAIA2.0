@@ -4,6 +4,11 @@ const EMPTY_SET = new Set();
 const NAMESPACE_RE = /^(artist|character|copyright|general|meta):(.+)$/i;
 const NAI_WEIGHT_PREFIX_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*/;
 const NAI_WEIGHT_SUFFIX_RE = /\s*::\s*$/;
+const PRESET_TOKEN_STYLES = [
+  {prefix: 'preset:events', className: 'prompt-token-preset-events'},
+  {prefix: 'preset:clothes', className: 'prompt-token-preset-clothes'},
+  {prefix: 'preset:expressions', className: 'prompt-token-preset-expressions'},
+];
 
 function makeLookupSet(values) {
   if (!values) return EMPTY_SET;
@@ -128,6 +133,30 @@ export function splitPromptTextForClassification(text) {
     .filter(Boolean);
 }
 
+function presetTokenStyle(core) {
+  const text = String(core || '');
+  const lower = text.toLowerCase();
+  return PRESET_TOKEN_STYLES.find(style => {
+    if (!lower.startsWith(style.prefix)) return false;
+    const next = lower[style.prefix.length] || '';
+    return !next || next === '/' || next === '(' || next === '&';
+  }) || null;
+}
+
+function matchPresetPromptToken(text, index) {
+  const previous = index > 0 ? text[index - 1] : '';
+  if (previous && !/[\s,([{]/.test(previous)) return null;
+  if (!presetTokenStyle(String(text || '').slice(index))) return null;
+  let end = text.length;
+  for (let cursor = index; cursor < text.length; cursor += 1) {
+    if (text[cursor] === ',' || text[cursor] === '\n') {
+      end = cursor;
+      break;
+    }
+  }
+  return text.substring(index, end);
+}
+
 export function createPromptHighlighter({document, promptEdit, escHtml}) {
   const highlight = document.getElementById('promptHighlight');
   const wrap = highlight ? highlight.parentElement : null;
@@ -160,6 +189,17 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     const trailing = segment.match(/\s*$/)?.[0] || '';
     const core = segment.substring(leading.length, segment.length - trailing.length);
     if (!core) return escHtml(segment);
+    const presetStyle = presetTokenStyle(core);
+    if (presetStyle) {
+      const slashIndex = core.indexOf('/');
+      const headEnd = slashIndex >= 0 ? slashIndex : core.length;
+      const head = core.substring(0, headEnd);
+      const tail = core.substring(headEnd);
+      return escHtml(leading) +
+        `<span class="${presetStyle.className}">${escHtml(head)}</span>` +
+        escHtml(tail) +
+        escHtml(trailing);
+    }
     const classification = tagClassifier.classify(core);
     if (!classification.className) return escHtml(segment);
     return escHtml(leading) +
@@ -230,6 +270,14 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
         flushTextBuffer();
         html += `<span class="webui-angle">${escHtml(angleToken)}</span>`;
         cursor += angleToken.length;
+        continue;
+      }
+
+      const presetToken = matchPresetPromptToken(text, cursor);
+      if (presetToken) {
+        flushTextBuffer();
+        html += formatTagTokenSegment(presetToken);
+        cursor += presetToken.length;
         continue;
       }
 

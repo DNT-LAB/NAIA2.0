@@ -813,6 +813,14 @@ export function createEventPresetPanel({
     return comboPromptText(node);
   }
 
+  function eventPresetRowTags(node, stage, options = {}) {
+    if (stage === 'combo') {
+      const comboTags = node?.prompt ? splitPromptTags(node.prompt) : (node?.tags || []);
+      return eventBaseTags(options.event || {}, comboTags);
+    }
+    return node?.tags || node?.promptAtoms || [];
+  }
+
   function eventPresetSuggestionRows(nodes, stage, parentSegments, limit, options = {}) {
     const query = String(parentSegments.query || '');
     const pathParents = parentSegments.path || [];
@@ -826,6 +834,7 @@ export function createEventPresetPanel({
         const segment = presetNodePathSegment(node);
         const final = stage === 'combo';
         const value = presetPath('events', [...pathParents, segment]);
+        const tags = eventPresetRowTags(node, stage, options);
         return {
           tag: eventPresetRowLabel(node),
           value,
@@ -838,8 +847,8 @@ export function createEventPresetPanel({
           stage,
           final,
           id: String(node?.id || node?.tag || node?.label || segment),
-          prompt: comboPromptText(node) || (node?.promptAtoms || []).join(', '),
-          tags: node?.tags || node?.promptAtoms || [],
+          prompt: tags.length ? tags.join(', ') : (comboPromptText(node) || (node?.promptAtoms || []).join(', ')),
+          tags,
           shortcutScore: node?._shortcutScore,
           shortcutEligible: node?._shortcutEligible,
           shortcutReason: node?._shortcutReason,

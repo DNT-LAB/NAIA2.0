@@ -54,6 +54,18 @@ export function createTagAssistController({
     return String(query || '').trim().toLowerCase().startsWith('preset:events');
   }
 
+  function presetEventTokenStage(token) {
+    const raw = String(token || '').trim();
+    if (!isPresetEventsQuery(raw)) return '';
+    const tail = raw.slice('preset:events'.length).replace(/^\/+/, '');
+    const count = tail ? tail.split('/').filter(Boolean).length : 0;
+    if (count >= 4) return 'combo';
+    if (count === 3) return 'item';
+    if (count === 2) return 'subcategory';
+    if (count === 1) return 'category';
+    return 'axis';
+  }
+
   function presetRequestPayload(query) {
     const payload = {type: 'autocomplete_preset', query};
     if (isPresetEventsQuery(query)) {
@@ -402,6 +414,14 @@ export function createTagAssistController({
     const lookupOptions = options && options.nodeType ? {anchor: options} : options;
     const lookupTag = normalizePromptInfoLookupTag(tag);
     if (!lookupTag) return;
+    if (isPresetEventsQuery(lookupTag)) {
+      void lookupPresetEventTokenInfo(lookupTag, {
+        readOnly: true,
+        anchor: lookupOptions?.anchor || null,
+        rawTag: lookupOptions?.rawTag || tag || lookupTag,
+      });
+      return;
+    }
     acMode = false;
     acTarget = null;
     lastLookupTag = lookupTag;
@@ -416,6 +436,141 @@ export function createTagAssistController({
     promptPopup.classList.add('open');
     positionPromptInfoTooltip();
     sendWs({type: 'tag_lookup', tag: lookupTag});
+  }
+
+  function presetEventTooltipRoot(readOnly) {
+    return readOnly ? ensurePromptInfoTooltip() : tagTooltip;
+  }
+
+  function showPresetEventTooltipLoading(token, {readOnly = false, anchor = null, rawTag = ''} = {}) {
+    acMode = false;
+    acTarget = readOnly ? null : acTarget;
+    lastLookupTag = token;
+    tagLookupReadOnly = !!readOnly;
+    promptInfoAnchor = anchor || null;
+    lastPromptInfoRawTag = String(rawTag || token).trim();
+    hideTagChipInfoTooltip();
+    window.clearTimeout(tagLookupTimer);
+    tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode');
+    const root = presetEventTooltipRoot(readOnly);
+    root.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">Loading preset...</span></div>';
+    root.classList.add('open');
+    if (readOnly) positionPromptInfoTooltip();
+    else {
+      hidePromptInfoTooltip();
+      syncTooltipSide();
+      positionTagTooltip();
+    }
+  }
+
+  function bindPresetEventTooltipActions(root, readOnly) {
+    bindTagChipInfoHover(root);
+    root.querySelectorAll('.tag-tooltip-extra-tag[data-insert]').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        hideTagChipInfoTooltip();
+        const tag = el.dataset.insert || '';
+        if (!tag) return;
+        if (readOnly) {
+          lookupPromptInfoTag(tag);
+          return;
+        }
+        const target = acTarget || promptEdit;
+        const info = getActiveTokenInfo(target);
+        if (!info) return;
+        const text = target.value;
+        target.value = text.substring(0, info.end) + ', ' + tag + text.substring(info.end);
+        const newPos = info.end + 2 + tag.length;
+        target.selectionStart = target.selectionEnd = newPos;
+        target.focus();
+        if (target === promptEdit) onPromptEdit();
+        else fireModuleOninput(target);
+        lastLookupTag = '';
+        checkTagHint();
+      });
+    });
+    const tagCopyBtn = root.querySelector('.tag-tooltip-copy-btn');
+    if (tagCopyBtn) {
+      tagCopyBtn.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        copyTextToClipboard(tagCopyBtn.dataset.copyTag || '').then(copied => {
+          showToast(copied ? 'Copied to clipboard' : 'Copy failed', copied ? 'success' : 'error');
+        });
+      });
+    }
+  }
+
+  function renderPresetEventTokenTooltip(token, payload, {readOnly = false} = {}) {
+    if (lastLookupTag.toLowerCase() !== token.toLowerCase()) return;
+    const rows = Array.isArray(payload?.results) ? payload.results : [];
+    const row = rows.find(item => item && !item.disabled) || rows[0] || null;
+    const preset = payload?.preset || {};
+    const crumbs = Array.isArray(preset.crumbs) ? preset.crumbs : [];
+    const tags = Array.isArray(row?.tags) && row.tags.length
+      ? row.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+      : String(row?.prompt || row?.desc || '').split(',').map(part => part.trim()).filter(Boolean);
+    const groupText = ['preset/events', presetEventTokenStage(token)].filter(Boolean).join(' / ');
+    const pathText = ['Events', ...crumbs.map(crumb => crumb?.label).filter(Boolean)].join(' / ');
+    const descParts = [];
+    if (pathText) descParts.push(pathText);
+    if (row?.prompt) descParts.push(row.prompt);
+    const root = presetEventTooltipRoot(readOnly);
+    let html = '<div class="tag-tooltip-main">' +
+      `<span class="tag-tooltip-tag">${escHtml(row?.tag || 'Event preset')}</span>` +
+      (row?.count ? `<span class="tag-tooltip-count">${fmtCount(row.count || 0)}</span>` : '') +
+      (groupText ? ` <span class="tag-tooltip-group">${escHtml(groupText)}</span>` : '') +
+      (descParts.length ? `<span class="tag-tooltip-desc">${escHtml(descParts.join(' · '))}</span>` : '') +
+      '</div>';
+    if (tags.length) {
+      html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">contains</span>' +
+        tags.map(tag => renderTooltipExtraTag(tag, {})).join('') +
+        '</div>';
+    }
+    if (readOnly) {
+      html += '<div class="tag-tooltip-copy-row">' +
+        `<button type="button" class="tag-tooltip-copy-btn" data-copy-tag="${escHtml(lastPromptInfoRawTag || token)}">Copy Token</button>` +
+        '</div>';
+    }
+    root.innerHTML = html;
+    root.classList.remove('ac-mode');
+    root.classList.add('open');
+    if (readOnly) {
+      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode');
+      positionPromptInfoTooltip();
+    } else {
+      hidePromptInfoTooltip();
+      tagTooltip.classList.remove('ac-mode', 'preset-event-mode');
+      syncTooltipSide();
+      positionTagTooltip();
+    }
+    bindPresetEventTooltipActions(root, readOnly);
+  }
+
+  async function lookupPresetEventTokenInfo(token, {readOnly = false, anchor = null, rawTag = ''} = {}) {
+    const lookupTag = String(token || '').trim();
+    if (!lookupTag) return;
+    const panel = getEventPresetPanel?.();
+    showPresetEventTooltipLoading(lookupTag, {readOnly, anchor, rawTag});
+    if (!panel || typeof panel.getPresetAutocompletePayload !== 'function') {
+      renderPresetEventTokenTooltip(lookupTag, {
+        results: [presetStatusRow(lookupTag, 'Event Preset page is not loaded yet.', 'unavailable')],
+        preset: {axis: 'events', stage: 'status'},
+      }, {readOnly});
+      return;
+    }
+    try {
+      const payload = await panel.getPresetAutocompletePayload(lookupTag, {
+        context: {...presetEventContext},
+        limit: 500,
+      });
+      renderPresetEventTokenTooltip(lookupTag, payload || {}, {readOnly});
+    } catch (error) {
+      renderPresetEventTokenTooltip(lookupTag, {
+        results: [presetStatusRow(lookupTag, error?.message || 'Event Preset lookup failed.', 'error')],
+        preset: {axis: 'events', stage: 'error'},
+      }, {readOnly});
+    }
   }
 
   function ensureTagChipInfoTooltip() {
@@ -573,6 +728,10 @@ export function createTagAssistController({
     tagTooltip.classList.remove('open', 'ac-mode');
     window.clearTimeout(tagLookupTimer);
     tagLookupTimer = window.setTimeout(() => {
+      if (isPresetEventsQuery(tag)) {
+        void lookupPresetEventTokenInfo(tag, {readOnly: false});
+        return;
+      }
       sendWs({type: 'tag_lookup', tag});
     }, 200);
   }

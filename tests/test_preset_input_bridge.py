@@ -466,6 +466,67 @@ class _ExpressionService:
         }
 
 
+class _PlayfulExpressionService:
+    def status(self):
+        return {"dataAvailability": {"main": "ready", "message": "ready"}}
+
+    def bootstrap(self, _payload):
+        return {
+            "categories": [
+                {
+                    "id": "playful_teasing",
+                    "label": "Playful / Teasing",
+                    "subcategories": [
+                        {
+                            "id": "playful_teasing-featured",
+                            "label": "Featured",
+                            "isVirtual": True,
+                            "items": [
+                                {
+                                    "id": "expr-tongue",
+                                    "label": "tongue out",
+                                    "tags": ["tongue out"],
+                                    "count": 1277,
+                                    "featured": True,
+                                }
+                            ],
+                        },
+                        {
+                            "id": "playful_teasing-mouth_smile",
+                            "label": "Mouth / Smile",
+                            "items": [
+                                {
+                                    "id": "expr-tongue",
+                                    "label": "tongue out",
+                                    "tags": ["tongue out"],
+                                    "count": 1277,
+                                },
+                                {
+                                    "id": "expr-fangs",
+                                    "label": "fangs, open mouth",
+                                    "tags": ["fangs", "open mouth"],
+                                    "count": 410,
+                                },
+                            ],
+                        },
+                        {
+                            "id": "playful_teasing-eyes_gaze",
+                            "label": "Eyes / Gaze",
+                            "items": [
+                                {
+                                    "id": "expr-wink",
+                                    "label": ";p, one eye closed",
+                                    "tags": [";p", "one eye closed"],
+                                    "count": 38,
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+
 def _bridge(tmp_path, event_service=None, clothes_service=None):
     return PresetInputBridge(
         tmp_path,
@@ -868,6 +929,64 @@ def test_expression_paths_resolve_to_prompt_tags(tmp_path):
     assert direct["stage"] == "item"
     assert direct["prompt"] == "smile, open mouth"
     assert direct["selected"]["itemId"] == "smile-open-mouth"
+
+
+def test_expression_category_shortcut_randomizes_from_non_featured_items(tmp_path):
+    bridge = PresetInputBridge(
+        tmp_path,
+        event_service=_EventService(),
+        clothes_service=_ClothesService(),
+        expression_service=_PlayfulExpressionService(),
+    )
+
+    resolved = bridge.resolve_prompt_token(
+        "preset:expressions/playful_teasing",
+        chooser=lambda items: items[-1],
+    )
+
+    assert resolved["applied"] is True
+    assert resolved["stage"] == "category"
+    assert resolved["selected"]["subcategoryId"] == "playful_teasing-eyes_gaze"
+    assert resolved["selected"]["itemId"] == "expr-wink"
+    assert resolved["prompt"] == ";p, one eye closed"
+
+
+def test_expression_subcategory_shortcut_randomizes_items(tmp_path):
+    bridge = PresetInputBridge(
+        tmp_path,
+        event_service=_EventService(),
+        clothes_service=_ClothesService(),
+        expression_service=_PlayfulExpressionService(),
+    )
+
+    resolved = bridge.resolve_prompt_token(
+        "preset:expressions/playful_teasing/playful_teasing-mouth_smile",
+        chooser=lambda items: items[-1],
+    )
+
+    assert resolved["applied"] is True
+    assert resolved["stage"] == "subcategory"
+    assert resolved["selected"]["itemId"] == "expr-fangs"
+    assert resolved["prompt"] == "fangs, open mouth"
+
+
+def test_expression_exact_item_shortcut_remains_fixed(tmp_path):
+    bridge = PresetInputBridge(
+        tmp_path,
+        event_service=_EventService(),
+        clothes_service=_ClothesService(),
+        expression_service=_PlayfulExpressionService(),
+    )
+
+    resolved = bridge.resolve_prompt_token(
+        "preset:expressions/playful_teasing/playful_teasing-mouth_smile/expr-tongue",
+        chooser=lambda items: items[-1],
+    )
+
+    assert resolved["applied"] is True
+    assert resolved["stage"] == "item"
+    assert resolved["selected"]["itemId"] == "expr-tongue"
+    assert resolved["prompt"] == "tongue out"
 
 
 def test_prompt_processor_expands_preset_expression_token_during_wildcard_step(tmp_path):

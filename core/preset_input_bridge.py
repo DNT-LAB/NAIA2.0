@@ -434,7 +434,7 @@ class PresetInputBridge:
         if parsed.get("axis") == "clothes":
             return self._resolve_clothes_prompt_token(parsed)
         if parsed.get("axis") == "expressions":
-            return self._resolve_expression_prompt_token(parsed)
+            return self._resolve_expression_prompt_token(parsed, chooser or random.choice)
         if parsed.get("axis") != "events":
             return {"ok": True, "applied": False, "reason": "unsupported_axis", "token": token}
 
@@ -1178,7 +1178,7 @@ class PresetInputBridge:
             final=True,
         )
 
-    def _resolve_expression_prompt_token(self, parsed: dict[str, Any]) -> dict[str, Any]:
+    def _resolve_expression_prompt_token(self, parsed: dict[str, Any], chooser: Any) -> dict[str, Any]:
         status = self._axis_status("expressions")
         if not self._status_ready(status):
             return {
@@ -1196,7 +1196,7 @@ class PresetInputBridge:
             "limit": 50000,
         })
         categories = [item for item in data.get("categories") or [] if isinstance(item, dict)]
-        selection = self._resolve_expression_selection(parsed, categories)
+        selection = self._resolve_expression_selection(parsed, categories, chooser)
         direct_tags = selection.get("directTags")
         if direct_tags:
             prompt = self._join_tags(direct_tags)
@@ -1253,6 +1253,7 @@ class PresetInputBridge:
         self,
         parsed: dict[str, Any],
         categories: list[dict[str, Any]],
+        chooser: Any,
     ) -> dict[str, Any]:
         segments = self._non_empty_segments(parsed)
         if len(segments) == 1:
@@ -1268,7 +1269,7 @@ class PresetInputBridge:
                 direct = self._match_expression_item_globally(categories, segments[0])
                 if direct:
                     return {"stage": "item", **direct}
-            category = self._first_expression_category(categories)
+            category = self._choose_expression_category(categories, chooser)
             if not category:
                 return {"reason": "empty_catalog"}
             stage = "axis"
@@ -1282,7 +1283,7 @@ class PresetInputBridge:
                 return {"reason": "subcategory_not_found"}
             stage = "subcategory"
         else:
-            subcategory = self._first_expression_subcategory(subcategories)
+            subcategory = self._choose_expression_subcategory(subcategories, chooser)
             if not subcategory:
                 return {"reason": "empty_category"}
 
@@ -1293,7 +1294,7 @@ class PresetInputBridge:
                 return {"reason": "item_not_found"}
             stage = "item"
         else:
-            item = self._first_expression_item(items)
+            item = self._choose_expression_item(items, chooser)
             if not item:
                 return {"reason": "empty_subcategory"}
 
@@ -1410,40 +1411,47 @@ class PresetInputBridge:
         return self._event_bootstrap_cache[key]
 
     @staticmethod
-    def _first_expression_category(categories: list[dict[str, Any]]) -> dict[str, Any] | None:
-        for category in categories:
-            if PresetInputBridge._first_expression_subcategory(
+    def _choose_expression_category(categories: list[dict[str, Any]], chooser: Any) -> dict[str, Any] | None:
+        candidates = [
+            category for category in categories
+            if PresetInputBridge._chooseable_expression_subcategories(
                 [item for item in category.get("subcategories") or [] if isinstance(item, dict)]
-            ):
-                return category
-        return None
-
-    @staticmethod
-    def _first_expression_subcategory(subcategories: list[dict[str, Any]]) -> dict[str, Any] | None:
-        featured = [
-            subcategory for subcategory in subcategories
-            if str(subcategory.get("id") or "").endswith("-featured")
-            or str(subcategory.get("id") or "") == "featured"
-            or str(subcategory.get("label") or "").lower() == "featured"
+            )
         ]
-        for subcategory in [*featured, *subcategories]:
-            if PresetInputBridge._expression_items(subcategory):
-                return subcategory
-        return None
+        return chooser(candidates) if candidates else None
 
     @staticmethod
-    def _first_expression_item(items: list[dict[str, Any]]) -> dict[str, Any] | None:
-        if not items:
-            return None
-        return sorted(
-            items,
-            key=lambda item: (
-                0 if item.get("featured") else 1,
-                len(item.get("coreTags") or item.get("tags") or []),
-                -PresetInputBridge._count(item),
-                str(item.get("canonicalLabel") or item.get("label") or item.get("id") or ""),
-            ),
-        )[0]
+    def _choose_expression_subcategory(subcategories: list[dict[str, Any]], chooser: Any) -> dict[str, Any] | None:
+        candidates = PresetInputBridge._chooseable_expression_subcategories(subcategories)
+        return chooser(candidates) if candidates else None
+
+    @staticmethod
+    def _chooseable_expression_subcategories(subcategories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        available = [
+            subcategory for subcategory in subcategories
+            if PresetInputBridge._expression_items(subcategory)
+        ]
+        non_featured = [
+            subcategory for subcategory in available
+            if not PresetInputBridge._expression_subcategory_is_featured(subcategory)
+        ]
+        return non_featured or available
+
+    @staticmethod
+    def _expression_subcategory_is_featured(subcategory: dict[str, Any]) -> bool:
+        subcategory_id = str(subcategory.get("id") or "")
+        label = str(subcategory.get("label") or "").strip().lower()
+        return (
+            bool(subcategory.get("isVirtual"))
+            or subcategory_id.endswith("-featured")
+            or subcategory_id == "featured"
+            or label == "featured"
+        )
+
+    @staticmethod
+    def _choose_expression_item(items: list[dict[str, Any]], chooser: Any) -> dict[str, Any] | None:
+        candidates = [item for item in items if isinstance(item, dict)]
+        return chooser(candidates) if candidates else None
 
     @staticmethod
     def _expression_items(subcategory: dict[str, Any]) -> list[dict[str, Any]]:

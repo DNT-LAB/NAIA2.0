@@ -157,7 +157,7 @@ class PresetInputBridge:
         combo = self._resolve_combo(parsed, combos, chooser, event=event)
         if not combo:
             return {"ok": True, "applied": False, "reason": "combo_not_found", "token": token}
-        prompt = self._join_tags(combo.get("tags") or combo.get("prompt"))
+        prompt = self._join_tags(self._combo_tags_with_event(event, combo))
         return {
             "ok": True,
             "applied": bool(prompt),
@@ -171,7 +171,7 @@ class PresetInputBridge:
             "combo": {
                 "id": combo.get("id") or "",
                 "label": combo.get("label") or "",
-                "prompt": combo.get("prompt") or prompt,
+                "prompt": prompt,
             },
         }
 
@@ -687,6 +687,33 @@ class PresetInputBridge:
             key for key in (PresetInputBridge._tag_key(value) for value in values)
             if key
         }
+
+    @staticmethod
+    def _event_prompt_atoms(event: dict[str, Any]) -> list[str]:
+        atoms = event.get("promptAtoms")
+        if isinstance(atoms, (list, tuple, set)):
+            clean = [str(item).strip() for item in atoms if str(item or "").strip()]
+            if clean:
+                return clean
+        for key in ("tag", "id", "label"):
+            value = str(event.get(key) or "").strip()
+            if value:
+                return [value]
+        return []
+
+    @staticmethod
+    def _combo_tags_with_event(event: dict[str, Any], combo: dict[str, Any]) -> list[str]:
+        combo_tags = PresetInputBridge._combo_tags(combo)
+        combo_keys = {
+            PresetInputBridge._tag_key(tag)
+            for tag in combo_tags
+            if PresetInputBridge._tag_key(tag)
+        }
+        missing_event_tags = [
+            tag for tag in PresetInputBridge._event_prompt_atoms(event)
+            if PresetInputBridge._tag_key(tag) not in combo_keys
+        ]
+        return PresetInputBridge._split_prompt(PresetInputBridge._join_tags([*missing_event_tags, *combo_tags]))
 
     @staticmethod
     def _tag_key(value: Any) -> str:

@@ -316,11 +316,6 @@ export function createEventPresetPanel({
     };
   }
 
-  function splitPromptTags(value) {
-    if (value == null) return [];
-    return String(value).split(',').map(part => part.trim()).filter(Boolean);
-  }
-
   function comboShortcutTags(combo) {
     if (Array.isArray(combo?.tags) && combo.tags.length) {
       const tags = [];
@@ -1646,6 +1641,25 @@ export function createEventPresetPanel({
     return result;
   }
 
+  function eventPromptAtoms(event) {
+    if (Array.isArray(event?.promptAtoms) && event.promptAtoms.length) {
+      const atoms = event.promptAtoms.map(cleanPromptAtom).filter(Boolean);
+      if (atoms.length) return atoms;
+    }
+    for (const key of ['tag', 'id', 'label']) {
+      const value = cleanPromptAtom(event?.[key]);
+      if (value) return [value];
+    }
+    return [];
+  }
+
+  function eventBaseTags(event, baseTags) {
+    const base = uniqueTags(baseTags);
+    const baseKeys = new Set(base.map(normalizePresetMatch).filter(Boolean));
+    const missing = eventPromptAtoms(event).filter(tag => !baseKeys.has(normalizePresetMatch(tag)));
+    return uniqueTags([...missing, ...base]);
+  }
+
   const EXPRESSION_BUCKET_META = {
     smile: {id: 'smile', label: 'Smile'},
     shy: {id: 'shy', label: 'Shy'},
@@ -2033,9 +2047,10 @@ export function createEventPresetPanel({
     const {event} = selectedContext();
     if (!event) return [];
     const combo = currentCombo(event);
-    const baseTags = combo
+    const comboTags = combo
       ? (combo.prompt ? splitPromptTags(combo.prompt) : (combo.tags || []))
       : (event.promptAtoms?.length ? event.promptAtoms : [event.tag || event.label || event.id]);
+    const baseTags = eventBaseTags(event, comboTags);
     const recommendedTags = selectedRecommendedTags(event)
       .map(item => item?.tag || item?.id || '')
       .map(cleanPromptAtom)

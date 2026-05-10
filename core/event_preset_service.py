@@ -668,6 +668,7 @@ class EventPresetService:
             None,
         )
         base = self._split_csv(combo.get("prompt", "")) if combo else list(event.get("promptAtoms", []))
+        base = self._base_tags_with_event(event, base)
         rec_lookup = self._recommendation_lookup(event)
         rec_tags = [rec_lookup[item] for item in recommended_ids if item in rec_lookup]
         return ", ".join(self._prompt_atoms_with_identity(base, rec_tags, rating, person))
@@ -725,6 +726,38 @@ class EventPresetService:
                 if isinstance(item, dict):
                     push(item)
         return lookup
+
+    def _base_tags_with_event(self, event: dict[str, Any], base_tags: list[str]) -> list[str]:
+        base = self._unique(base_tags)
+        base_keys = {self._prompt_key(tag) for tag in base if self._prompt_key(tag)}
+        missing = [
+            tag for tag in self._event_prompt_atoms(event)
+            if self._prompt_key(tag) not in base_keys
+        ]
+        return self._unique([*missing, *base])
+
+    @staticmethod
+    def _event_prompt_atoms(event: dict[str, Any]) -> list[str]:
+        atoms = event.get("promptAtoms")
+        if isinstance(atoms, (list, tuple, set)):
+            clean = [EventPresetService._prompt_atom(item) for item in atoms if EventPresetService._prompt_atom(item)]
+            if clean:
+                return clean
+        for key in ("tag", "id", "label"):
+            value = EventPresetService._prompt_atom(event.get(key))
+            if value:
+                return [value]
+        return []
+
+    @staticmethod
+    def _prompt_key(value: Any) -> str:
+        return " ".join(
+            EventPresetService._prompt_atom(value)
+            .lower()
+            .replace("_", " ")
+            .replace("-", " ")
+            .split()
+        )
 
     def _person_options(self, rating: str) -> list[dict[str, Any]]:
         available = self._data_manager.get_available_partitions()

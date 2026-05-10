@@ -569,7 +569,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260510-preset-shortcut-rank1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260510-preset-main-anchor1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,

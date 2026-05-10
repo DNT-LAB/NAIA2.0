@@ -193,6 +193,46 @@ class _NoisyWildcardEventService(_EventService):
         return {"event": {"observedCombos": combos}}
 
 
+class _MissingAnchorComboEventService(_EventService):
+    def bootstrap(self, **_kwargs):
+        return {
+            "categories": [
+                {
+                    "id": "gaze",
+                    "label": "Gaze",
+                    "subcategories": [
+                        {
+                            "id": "gaze_direction",
+                            "label": "Gaze Direction",
+                            "events": [
+                                {
+                                    "id": "looking_back",
+                                    "label": "looking back",
+                                    "promptAtoms": ["looking back"],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+    def select(self, _payload):
+        return {
+            "event": {
+                "observedCombos": [
+                    {
+                        "id": "sitting-wariza",
+                        "label": "sitting, wariza",
+                        "prompt": "sitting, wariza",
+                        "tags": ["sitting", "wariza"],
+                        "count": 20,
+                    }
+                ]
+            }
+        }
+
+
 class _NamespacedEventService(_EventService):
     def bootstrap(self, **_kwargs):
         return {
@@ -409,6 +449,21 @@ def test_incomplete_event_shortcut_chooses_item_with_useful_combo(tmp_path):
     assert resolved["selected"]["eventId"] == "looking_back"
     assert resolved["combo"]["id"] == "looking-back-sitting"
     assert resolved["tags"] == ["looking back", "sitting"]
+
+
+def test_event_shortcut_keeps_main_item_when_combo_omits_anchor(tmp_path):
+    bridge = _bridge(tmp_path, event_service=_MissingAnchorComboEventService())
+    chooser = lambda items: items[0]
+
+    resolved = bridge.resolve_prompt_token(
+        "preset:events/gaze/gaze_direction/looking_back",
+        chooser=chooser,
+    )
+
+    assert resolved["applied"] is True
+    assert resolved["combo"]["id"] == "sitting-wariza"
+    assert resolved["tags"] == ["looking back", "sitting", "wariza"]
+    assert resolved["combo"]["prompt"] == "looking back, sitting, wariza"
 
 
 def test_prompt_processor_expands_preset_event_token_during_wildcard_step(tmp_path):

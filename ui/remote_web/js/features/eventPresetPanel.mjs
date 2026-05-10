@@ -316,6 +316,108 @@ export function createEventPresetPanel({
     };
   }
 
+  function clothesTokenTail(token) {
+    let raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith('preset:clothes')) raw = 'preset:clothes';
+    let tail = raw.slice('preset:clothes'.length);
+    if (tail.startsWith('/')) tail = tail.slice(1);
+    return tail;
+  }
+
+  function decodeClothesSegment(value) {
+    return decodePresetSegment(value).trim();
+  }
+
+  function encodeClothesSegment(value) {
+    return String(value || '').trim().replace(/&/g, '%26');
+  }
+
+  function canonicalClothesToken(tags, {keepEmpty = false} = {}) {
+    const segments = (tags || [])
+      .map(tag => encodeClothesSegment(tag))
+      .filter((tag, index) => keepEmpty || tag || index < (tags || []).length - 1);
+    if (!segments.length) return 'preset:clothes';
+    return `preset:clothes/${segments.join('&')}${segments[segments.length - 1] ? '&' : ''}`;
+  }
+
+  function parseClothesPresetToken(token, caretOffset = null) {
+    let raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith('preset:clothes')) raw = 'preset:clothes';
+    const tail = clothesTokenTail(raw);
+    if (!tail.includes('&')) {
+      const path = tail ? tail.split('/').filter(Boolean).map(decodeClothesSegment) : [];
+      return {
+        raw,
+        mode: 'browse',
+        activeIndex: null,
+        activeQuery: path[path.length - 1] || '',
+        activePath: path,
+        segments: [],
+        stagedTags: [],
+      };
+    }
+    const rawSegments = tail.split('&');
+    let activeIndex = rawSegments.length - 1;
+    if (Number.isFinite(caretOffset)) {
+      const rel = Math.max(0, Math.min(Number(caretOffset) - ('preset:clothes/'.length), tail.length));
+      let start = 0;
+      rawSegments.some((segment, index) => {
+        const end = start + segment.length;
+        if (rel >= start && rel <= end) {
+          activeIndex = index;
+          return true;
+        }
+        start = end + 1;
+        return false;
+      });
+    }
+    const segments = rawSegments.map((segment, index) => {
+      const decoded = decodeClothesSegment(segment);
+      const path = decoded ? decoded.split('/').filter(Boolean).map(part => part.trim()) : [];
+      const browse = path.length > 1;
+      return {
+        index,
+        raw: decoded,
+        empty: !decoded,
+        browse,
+        path,
+        tag: decoded && !browse ? decoded : '',
+        active: index === activeIndex,
+      };
+    });
+    const active = segments[activeIndex] || null;
+    return {
+      raw,
+      mode: 'staged',
+      activeIndex,
+      activeQuery: active?.browse ? (active.path[active.path.length - 1] || '') : (active?.raw || ''),
+      activePath: active?.browse ? active.path : [],
+      segments,
+      stagedTags: uniqueTags(segments
+        .filter(segment => !segment.active && segment.tag)
+        .map(segment => segment.tag)),
+    };
+  }
+
+  function clothesTokenWithActiveSegment(parsed, value) {
+    if (parsed.mode !== 'staged') return `preset:clothes/${encodeClothesSegment(value)}`;
+    const segments = parsed.segments.map(segment => segment.raw);
+    const activeIndex = Number.isInteger(parsed.activeIndex) ? parsed.activeIndex : Math.max(0, segments.length - 1);
+    segments[activeIndex] = value;
+    return `preset:clothes/${segments.map(encodeClothesSegment).join('&')}`;
+  }
+
+  function clothesTokenAfterItemSelection(parsed, tag) {
+    const clean = String(tag || '').trim();
+    if (!clean) return parsed.raw || 'preset:clothes';
+    if (parsed.mode !== 'staged') return canonicalClothesToken([clean]);
+    const segments = parsed.segments.map(segment => segment.raw);
+    const activeIndex = Number.isInteger(parsed.activeIndex) ? parsed.activeIndex : Math.max(0, segments.length - 1);
+    segments[activeIndex] = clean;
+    if (segments[segments.length - 1]) segments.push('');
+    return `preset:clothes/${segments.map(encodeClothesSegment).join('&')}`;
+  }
+
   function comboShortcutTags(combo) {
     if (Array.isArray(combo?.tags) && combo.tags.length) {
       const tags = [];
@@ -793,6 +895,21 @@ export function createEventPresetPanel({
     };
   }
 
+  function clothesPresetStatusRow(token, message, status = 'preset') {
+    return {
+      tag: String(status || 'preset'),
+      value: token,
+      count: 0,
+      desc: message || 'Clothes Preset data is not ready.',
+      group: 'preset/clothes',
+      cat: 'status',
+      _wc_type: 'preset_status',
+      disabled: true,
+      axis: 'clothes',
+      stage: 'status',
+    };
+  }
+
   function eventPresetRowLabel(node) {
     const raw = stripPresetNamespace(node?.label || node?.tag || node?.id || '').replace(/_/g, ' ').trim();
     return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : '';
@@ -916,6 +1033,29 @@ export function createEventPresetPanel({
     }
   }
 
+  async function ensureClothesPresetAutocompleteData(parsed, limit = 80) {
+    state.activeAxis = 'clothes';
+    const stagedItems = (parsed.stagedTags || []).map(tag => ({tag, source: 'shortcut'}));
+    const activePath = parsed.activePath || [];
+    const extra = {
+      stagedItems,
+      comboLimit: Math.max(80, limit),
+      itemLimit: Math.max(160, limit),
+    };
+    if (activePath.length >= 1) extra.categoryId = activePath[0];
+    if (activePath.length >= 2) extra.subcategoryId = activePath[1];
+    if (activePath.length >= 3) extra.itemSearch = activePath[2];
+    if (parsed.mode === 'staged' && !activePath.length && parsed.activeQuery) {
+      extra.itemSearch = parsed.activeQuery;
+    }
+    if (parsed.mode === 'browse') {
+      if (activePath.length >= 1) extra.categoryId = activePath[0];
+      if (activePath.length >= 2) extra.subcategoryId = activePath[1];
+      if (activePath.length >= 3) extra.itemSearch = activePath[2];
+    }
+    await loadClothes({showLoading: state.clothesStatus === 'idle', extra});
+  }
+
   async function buildEventPresetAutocomplete(token, limit = 12) {
     const parsed = parseEventPresetToken(token);
     const allCategories = categories();
@@ -993,7 +1133,247 @@ export function createEventPresetPanel({
     };
   }
 
-  async function getPresetAutocompletePayload(token, {context = {}, limit = 12} = {}) {
+  function clothesRowLabel(row) {
+    return String(row?.label || row?.tag || row?.comboText || row?.prompt || row?.id || '').trim();
+  }
+
+  function clothesItemTag(row) {
+    return String(row?.tag || row?.label || row?.id || '').trim();
+  }
+
+  function clothesCrumb(id, label, stage) {
+    return {id: String(id || ''), label: String(label || id || ''), stage};
+  }
+
+  function clothesCategoryRows(categories, parsed, limit) {
+    const query = parsed.mode === 'browse' ? (parsed.activePath[0] || '') : parsed.activeQuery;
+    return (categories || [])
+      .filter(category => presetNodeMatches({id: category.id, label: category.label}, query))
+      .slice(0, limit)
+      .map(category => {
+        const path = category.id || category.label || '';
+        const value = parsed.mode === 'staged'
+          ? clothesTokenWithActiveSegment(parsed, path)
+          : presetPath('clothes', [path]);
+        return {
+          tag: category.label || category.id,
+          value,
+          count: Number(category.count || category.matchedCount || 0),
+          desc: `${formatCount(category.subcategoryCount || category.matchedSubcategoryCount || 0)} groups`,
+          group: 'preset/clothes',
+          cat: 'category',
+          _wc_type: 'preset_path',
+          axis: 'clothes',
+          stage: 'category',
+          final: false,
+          id: String(category.id || ''),
+          tags: [],
+          prompt: '',
+        };
+      });
+  }
+
+  function clothesSubcategoryRows(subcategories, parsed, categoryId, limit) {
+    const query = parsed.activePath[1] || '';
+    return (subcategories || [])
+      .filter(subcategory => presetNodeMatches({id: subcategory.id, label: subcategory.label}, query))
+      .slice(0, limit)
+      .map(subcategory => {
+        const pathSegment = [categoryId, subcategory.id || subcategory.label || ''].filter(Boolean).join('/');
+        const value = parsed.mode === 'staged'
+          ? clothesTokenWithActiveSegment(parsed, pathSegment)
+          : presetPath('clothes', [categoryId, subcategory.id || subcategory.label || '']);
+        return {
+          tag: subcategory.label || subcategory.id,
+          value,
+          count: Number(subcategory.count || subcategory.matchedCount || 0),
+          desc: `${formatCount(subcategory.count || 0)} items`,
+          group: 'preset/clothes',
+          cat: 'subcategory',
+          _wc_type: 'preset_path',
+          axis: 'clothes',
+          stage: 'subcategory',
+          final: false,
+          id: String(subcategory.id || ''),
+          tags: [],
+          prompt: '',
+        };
+      });
+  }
+
+  function clothesItemRows(items, parsed, categoryId, subcategoryId, limit) {
+    const query = parsed.activePath[2] || (!parsed.activePath.length ? parsed.activeQuery : '');
+    return (items || [])
+      .filter(item => presetNodeMatches({id: item.id, tag: item.tag, label: item.label}, query))
+      .slice(0, limit)
+      .map(item => {
+        const tag = clothesItemTag(item);
+        const pathValue = [categoryId || item.slot || '', subcategoryId || item.group || '', tag].filter(Boolean).join('/');
+        const value = parsed.mode === 'staged'
+          ? clothesTokenWithActiveSegment(parsed, pathValue)
+          : presetPath('clothes', [categoryId || item.slot || '', subcategoryId || item.group || '', tag]);
+        const tokenValue = clothesTokenAfterItemSelection(parsed, tag);
+        return {
+          tag: clothesRowLabel(item) || tag,
+          value,
+          count: Number(item.postCount || item.count || 0),
+          desc: [item.slotLabel || item.slot, item.group, item.incompatible ? 'incompatible' : ''].filter(Boolean).join(' / '),
+          group: 'preset/clothes',
+          cat: 'item',
+          _wc_type: 'preset_path',
+          axis: 'clothes',
+          stage: 'item',
+          final: false,
+          id: String(item.id || tag),
+          clothesTag: tag,
+          clothesTokenValue: tokenValue,
+          prompt: tag,
+          tags: [tag],
+          selected: !!item.selected,
+          incompatible: !!item.incompatible,
+        };
+      });
+  }
+
+  function clothesComboRows(rows, limit) {
+    return (rows || []).slice(0, limit).map(row => {
+      const comboId = String(row?.id || '');
+      const tags = Array.isArray(row?.tags) && row.tags.length
+        ? row.tags
+        : splitPromptTags(row?.prompt || row?.comboText || '');
+      const readableToken = canonicalClothesToken(tags);
+      return {
+        tag: row.comboText || row.prompt || comboId,
+        value: readableToken,
+        count: Number(row.count || row.postCount || 0),
+        desc: row.prompt || row.comboText || '',
+        group: 'preset/clothes',
+        cat: 'combo',
+        _wc_type: 'preset_path',
+        axis: 'clothes',
+        stage: 'combo',
+        final: true,
+        comboId,
+        clothesTokenValue: readableToken,
+        prompt: tags.join(', '),
+        tags,
+      };
+    });
+  }
+
+  async function buildClothesPresetAutocomplete(token, limit = 12, caretOffset = null) {
+    const parsed = parseClothesPresetToken(token, caretOffset);
+    await ensureClothesPresetAutocompleteData(parsed, limit);
+    const browser = state.clothesData.browser || {};
+    const comboRows = state.clothesData.comboRows || {};
+    const activePath = parsed.activePath || [];
+    const categories = browser.categories || [];
+    const categoryId = activePath[0] || browser.selected?.categoryId || state.clothesCategoryId || '';
+    const category = categories.find(item => item.id === categoryId) || (activePath[0] ? null : categories[0] || null);
+    const subcategories = browser.subcategories || [];
+    const subcategoryId = activePath[1] || browser.selected?.subcategoryId || state.clothesSubcategoryId || '';
+    const subcategory = subcategories.find(item => item.id === subcategoryId) || (activePath[1] ? null : subcategories[0] || null);
+
+    if (parsed.mode === 'browse' && activePath.length === 1 && String(activePath[0] || '').startsWith('combo-')) {
+      const combo = (comboRows.rows || []).find(row => row.id === activePath[0]);
+      return {
+        stage: 'combo',
+        crumbs: [],
+        parsed,
+        rows: combo ? clothesComboRows([combo], limit) : [],
+      };
+    }
+    if (parsed.mode === 'browse' && !activePath.length) {
+      return {
+        stage: 'category',
+        crumbs: [],
+        parsed,
+        rows: clothesCategoryRows(categories, parsed, limit),
+      };
+    }
+    if (parsed.mode === 'staged' && !activePath.length && !parsed.activeQuery) {
+      return {
+        stage: 'category',
+        crumbs: [],
+        parsed,
+        rows: clothesCategoryRows(categories, parsed, limit),
+      };
+    }
+    if (activePath.length < 1 && parsed.activeQuery) {
+      return {
+        stage: 'item',
+        crumbs: [],
+        parsed,
+        rows: clothesItemRows(browser.items || [], parsed, categoryId, subcategoryId, limit),
+      };
+    }
+    if (activePath.length < 2) {
+      return {
+      stage: 'subcategory',
+      crumbs: category
+        ? [clothesCrumb(category.id, category.label, 'category')]
+        : (activePath[0] ? [clothesCrumb(activePath[0], activePath[0], 'category')] : []),
+      parsed,
+      rows: clothesSubcategoryRows(subcategories, parsed, categoryId || activePath[0], limit),
+    };
+  }
+    return {
+      stage: 'item',
+      crumbs: [
+        ...(category
+          ? [clothesCrumb(category.id, category.label, 'category')]
+          : (activePath[0] ? [clothesCrumb(activePath[0], activePath[0], 'category')] : [])),
+        ...(subcategory
+          ? [clothesCrumb(subcategory.id, subcategory.label, 'subcategory')]
+          : (activePath[1] ? [clothesCrumb(activePath[1], activePath[1], 'subcategory')] : [])),
+      ],
+      parsed,
+      rows: clothesItemRows(browser.items || [], parsed, categoryId || activePath[0], subcategoryId || activePath[1], limit),
+    };
+  }
+
+  async function getPresetAutocompletePayload(token, {context = {}, limit = 12, caretOffset = null} = {}) {
+    if (String(token || '').trim().toLowerCase().startsWith('preset:clothes')) {
+      const normalized = String(token || '').trim() || 'preset:clothes';
+      const loadState = {
+        main: state.clothesData?.dataAvailability?.main || state.clothesStatus || '',
+        message: state.clothesData?.dataAvailability?.message || state.clothesMessage || '',
+      };
+      try {
+        const payload = await buildClothesPresetAutocomplete(normalized, limit, caretOffset);
+        const rows = payload.rows?.length
+          ? payload.rows
+          : [clothesPresetStatusRow(normalized, 'No Clothes Preset items for this path.', 'empty')];
+        return {
+          query: normalized,
+          results: rows,
+          preset: {
+            axis: 'clothes',
+            stage: payload.stage || 'category',
+            crumbs: payload.crumbs || [],
+            parsed: payload.parsed || null,
+            context: autocompleteContextPayload(),
+            loadState: {
+              main: state.clothesData?.dataAvailability?.main || state.clothesStatus || '',
+              message: state.clothesData?.dataAvailability?.message || state.clothesMessage || '',
+            },
+            dataReady: clothesReady(),
+          },
+        };
+      } catch (error) {
+        return {
+          query: normalized,
+          results: [clothesPresetStatusRow(normalized, error?.message || loadState.message || 'Clothes Preset lookup failed.', 'error')],
+          preset: {
+            axis: 'clothes',
+            stage: 'status',
+            context: autocompleteContextPayload(),
+            loadState,
+            dataReady: false,
+          },
+        };
+      }
+    }
     const normalized = String(token || '').trim().toLowerCase().startsWith('preset:events')
       ? String(token || '').trim()
       : 'preset:events';

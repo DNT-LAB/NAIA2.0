@@ -58,6 +58,139 @@ from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONT
 from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
 
 
+_AUTOCOMPLETE_TRANSLATION_RULES_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "data"
+    / "tag_index"
+    / "autocomplete_translation_rules.json"
+)
+
+
+def _normalize_autocomplete_rule_token(value) -> str:
+    return str(value or "").strip().lower()
+
+
+def _load_autocomplete_translation_rules() -> dict:
+    try:
+        with _AUTOCOMPLETE_TRANSLATION_RULES_PATH.open("r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception as exc:
+        print(f"Remote: autocomplete translation rules load failed - {exc}")
+        return {}
+
+
+def _autocomplete_rule_list(rules: dict, key: str) -> set[str]:
+    value = rules.get(key, [])
+    if not isinstance(value, list):
+        return set()
+    return {
+        token
+        for token in (_normalize_autocomplete_rule_token(item) for item in value)
+        if token
+    }
+
+
+def _autocomplete_rule_aliases(rules: dict, key: str) -> dict[str, tuple[str, ...]]:
+    value = rules.get(key, {})
+    if not isinstance(value, dict):
+        return {}
+    aliases: dict[str, tuple[str, ...]] = {}
+    for raw_key, raw_values in value.items():
+        alias_key = _normalize_autocomplete_rule_token(raw_key)
+        if not alias_key or not isinstance(raw_values, list):
+            continue
+        alias_values = tuple(
+            token
+            for token in (
+                _normalize_autocomplete_rule_token(item) for item in raw_values
+            )
+            if token
+        )
+        if alias_values:
+            aliases[alias_key] = alias_values
+    return aliases
+
+
+def _autocomplete_action_verbs(rules: dict) -> dict[str, str]:
+    value = rules.get("action_verbs", {})
+    if not isinstance(value, dict):
+        return {}
+    actions: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = _normalize_autocomplete_rule_token(raw_key)
+        action = _normalize_autocomplete_rule_token(raw_value)
+        if key and action:
+            actions[key] = action
+    return actions
+
+
+def _autocomplete_domain_alias_rules(rules: dict) -> list[dict]:
+    value = rules.get("domain_phrase_alias_rules", [])
+    return [rule for rule in value if isinstance(rule, dict)] if isinstance(value, list) else []
+
+
+_AUTOCOMPLETE_TRANSLATION_RULES = _load_autocomplete_translation_rules()
+_AUTOCOMPLETE_TRANSLATION_STOPWORDS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "stopwords",
+)
+_AUTOCOMPLETE_TRANSLATION_PRONOUNS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "pronouns",
+)
+_AUTOCOMPLETE_TRANSLATION_POSSESSIVES = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "possessives",
+)
+_AUTOCOMPLETE_TRANSLATION_ACTOR_WORDS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "actor_words",
+)
+_AUTOCOMPLETE_TRANSLATION_PARTICLES = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "particles",
+)
+_AUTOCOMPLETE_WEAK_POSE_VERBS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "weak_pose_verbs",
+)
+_AUTOCOMPLETE_RELATION_PREPOSITIONS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "relation_prepositions",
+)
+_AUTOCOMPLETE_RELATION_OBJECT_ALIASES = _autocomplete_rule_aliases(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "relation_object_aliases",
+)
+_AUTOCOMPLETE_LOW_VALUE_SINGLE_TOKENS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "low_value_single_tokens",
+)
+_AUTOCOMPLETE_BODY_RELATION_SUBJECTS = _autocomplete_rule_list(
+    _AUTOCOMPLETE_TRANSLATION_RULES,
+    "body_relation_subjects",
+)
+_AUTOCOMPLETE_ACTION_VERBS = _autocomplete_action_verbs(
+    _AUTOCOMPLETE_TRANSLATION_RULES
+)
+_AUTOCOMPLETE_ACTION_FORMS = {
+    **_AUTOCOMPLETE_ACTION_VERBS,
+    **{value: value for value in _AUTOCOMPLETE_ACTION_VERBS.values()},
+}
+_AUTOCOMPLETE_TRANSITIVE_ACTION_FORMS = {
+    _AUTOCOMPLETE_ACTION_VERBS[action]
+    for action in _autocomplete_rule_list(
+        _AUTOCOMPLETE_TRANSLATION_RULES,
+        "transitive_action_verbs",
+    )
+    if action in _AUTOCOMPLETE_ACTION_VERBS
+}
+_AUTOCOMPLETE_DOMAIN_PHRASE_ALIAS_RULES = _autocomplete_domain_alias_rules(
+    _AUTOCOMPLETE_TRANSLATION_RULES
+)
+
+
 # ---------------------------------------------------------------------------
 # WebSocket Manager
 # ---------------------------------------------------------------------------
@@ -10383,14 +10516,299 @@ class RemoteBridge(QObject):
         normalized = normalize_search_query(translated)
         if not normalized:
             return []
-        queries = [normalized]
-        tokens = [token for token in normalized.split() if len(token) >= 3]
-        if len(tokens) > 1:
-            queries.append(tokens[0])
-        for token in tokens:
-            if token not in queries:
-                queries.append(token)
-        return queries[:4]
+        normalized = normalized.replace("’", "'").replace("`", "'")
+        tokens = re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", normalized)
+        normalized = " ".join(tokens)
+        if not normalized:
+            return []
+        queries: list[str] = []
+
+        def add_query(value: str):
+            term = normalize_search_query(value)
+            if term and term not in queries:
+                queries.append(term)
+
+        def possessive_base(token: str) -> str:
+            if token.endswith("'s"):
+                return token[:-2]
+            return token
+
+        def is_pronoun_or_possessive(token: str) -> bool:
+            base = possessive_base(token)
+            return (
+                token in _AUTOCOMPLETE_TRANSLATION_PRONOUNS
+                or token in _AUTOCOMPLETE_TRANSLATION_POSSESSIVES
+                or base in _AUTOCOMPLETE_TRANSLATION_PRONOUNS
+                or base in _AUTOCOMPLETE_TRANSLATION_POSSESSIVES
+                or (token.endswith("'s") and base in _AUTOCOMPLETE_TRANSLATION_ACTOR_WORDS)
+            )
+
+        def is_structural_noise(token: str) -> bool:
+            if is_pronoun_or_possessive(token):
+                return True
+            if token in _AUTOCOMPLETE_TRANSLATION_PARTICLES:
+                return True
+            if token in _AUTOCOMPLETE_WEAK_POSE_VERBS:
+                return True
+            return (
+                token in _AUTOCOMPLETE_TRANSLATION_STOPWORDS
+                and token not in _AUTOCOMPLETE_RELATION_PREPOSITIONS
+            )
+
+        def has_phrase(phrase_tokens: list[str], phrase: tuple[str, ...]) -> bool:
+            if not phrase:
+                return False
+            phrase_length = len(phrase)
+            return any(
+                tuple(phrase_tokens[index:index + phrase_length]) == phrase
+                for index in range(0, len(phrase_tokens) - phrase_length + 1)
+            )
+
+        def add_domain_phrase_aliases():
+            plain_tokens = [possessive_base(token) for token in tokens]
+            token_set = set(plain_tokens)
+
+            def normalized_items(value) -> list[str]:
+                if not isinstance(value, list):
+                    return []
+                return [
+                    token
+                    for token in (
+                        _normalize_autocomplete_rule_token(item) for item in value
+                    )
+                    if token
+                ]
+
+            def rule_group_matches(group: dict) -> bool:
+                if not isinstance(group, dict):
+                    return False
+                if any(token in token_set for token in normalized_items(group.get("tokens_any"))):
+                    return True
+                phrases = group.get("phrases_any", [])
+                if not isinstance(phrases, list):
+                    return False
+                for phrase in phrases:
+                    phrase_tokens = normalized_items(phrase)
+                    if phrase_tokens and has_phrase(plain_tokens, tuple(phrase_tokens)):
+                        return True
+                return False
+
+            def rule_matches(rule: dict) -> bool:
+                groups = rule.get("when_all", [])
+                if not groups:
+                    return True
+                if not isinstance(groups, list):
+                    return False
+                return all(rule_group_matches(group) for group in groups)
+
+            for rule in _AUTOCOMPLETE_DOMAIN_PHRASE_ALIAS_RULES:
+                if not rule_matches(rule):
+                    continue
+                outputs = rule.get("outputs", [])
+                if not isinstance(outputs, list):
+                    continue
+                for output in outputs:
+                    if not isinstance(output, dict) or not rule_matches(output):
+                        continue
+                    for query in normalized_items(output.get("queries")):
+                        add_query(query)
+
+        def add_cleaned_sentence():
+            removed_actor_token = False
+            has_weak_pose_verb = False
+            cleaned = [
+                token for token in tokens
+                if not (
+                    is_pronoun_or_possessive(token)
+                    or (
+                        token in _AUTOCOMPLETE_TRANSLATION_STOPWORDS
+                        and token not in _AUTOCOMPLETE_RELATION_PREPOSITIONS
+                    )
+                )
+            ]
+            for token in tokens:
+                if is_pronoun_or_possessive(token):
+                    removed_actor_token = True
+                if token in _AUTOCOMPLETE_WEAK_POSE_VERBS:
+                    has_weak_pose_verb = True
+            while cleaned and cleaned[-1] in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                cleaned.pop()
+            if len(cleaned) >= 2 and (removed_actor_token or has_weak_pose_verb):
+                add_query(" ".join(cleaned))
+
+        def content_phrase_after(index: int, max_terms: int = 2) -> list[str]:
+            phrase: list[str] = []
+            cursor = index + 1
+            while cursor < len(tokens) and is_structural_noise(tokens[cursor]):
+                cursor += 1
+            while cursor < len(tokens) and len(phrase) < max_terms:
+                token = tokens[cursor]
+                if token in _AUTOCOMPLETE_TRANSLATION_STOPWORDS:
+                    break
+                if _AUTOCOMPLETE_ACTION_FORMS.get(token):
+                    break
+                if len(token) >= 3:
+                    phrase.append(token)
+                cursor += 1
+            return phrase
+
+        def add_content_run_phrases():
+            run: list[str] = []
+
+            def flush_run():
+                if len(run) < 2:
+                    return
+                for size in (3, 2):
+                    if len(run) < size:
+                        continue
+                    for index in range(0, len(run) - size + 1):
+                        phrase_tokens = run[index:index + size]
+                        if any(_AUTOCOMPLETE_ACTION_FORMS.get(token) for token in phrase_tokens):
+                            continue
+                        add_query(" ".join(phrase_tokens))
+
+            for token in tokens:
+                if (
+                    token in _AUTOCOMPLETE_TRANSLATION_STOPWORDS
+                    or is_structural_noise(token)
+                ):
+                    flush_run()
+                    run = []
+                    continue
+                if len(token) >= 3:
+                    run.append(token)
+            flush_run()
+
+        def relation_subject_before(index: int) -> str:
+            def has_prior_content(cursor: int) -> bool:
+                probe = cursor - 1
+                while probe >= 0:
+                    previous = tokens[probe]
+                    if is_structural_noise(previous):
+                        probe -= 1
+                        continue
+                    return (
+                        previous not in _AUTOCOMPLETE_RELATION_PREPOSITIONS
+                        and not _AUTOCOMPLETE_ACTION_FORMS.get(previous)
+                    )
+                return False
+
+            cursor = index - 1
+            while cursor >= 0:
+                token = tokens[cursor]
+                if is_structural_noise(token):
+                    cursor -= 1
+                    continue
+                if token in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                    break
+                if _AUTOCOMPLETE_ACTION_FORMS.get(token):
+                    if has_prior_content(cursor):
+                        cursor -= 1
+                        continue
+                    break
+                if token.endswith("ing") and has_prior_content(cursor):
+                    cursor -= 1
+                    continue
+                return token if len(token) >= 3 else ""
+            return ""
+
+        def relation_object_after(index: int, max_terms: int = 2) -> tuple[list[str], bool]:
+            object_tokens: list[str] = []
+            own_context = False
+            cursor = index + 1
+            while cursor < len(tokens):
+                token = tokens[cursor]
+                if token in _AUTOCOMPLETE_TRANSLATION_POSSESSIVES:
+                    own_context = True
+                if is_structural_noise(token):
+                    cursor += 1
+                    continue
+                break
+            while cursor < len(tokens) and len(object_tokens) < max_terms:
+                token = tokens[cursor]
+                if token in _AUTOCOMPLETE_TRANSLATION_POSSESSIVES:
+                    own_context = True
+                    cursor += 1
+                    continue
+                if is_structural_noise(token):
+                    cursor += 1
+                    continue
+                if token in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                    break
+                if _AUTOCOMPLETE_ACTION_FORMS.get(token):
+                    break
+                if len(token) >= 3:
+                    object_tokens.append(token)
+                cursor += 1
+            return object_tokens, own_context
+
+        def aliased_relation_objects(subject: str, object_tokens: list[str]) -> list[list[str]]:
+            if not object_tokens:
+                return []
+            aliases = _AUTOCOMPLETE_RELATION_OBJECT_ALIASES.get(object_tokens[-1], ())
+            if not aliases:
+                return []
+            preferred_plural = subject.endswith("s")
+            ordered = sorted(
+                aliases,
+                key=lambda alias: 0 if alias.endswith("s") == preferred_plural else 1,
+            )
+            return [object_tokens[:-1] + [alias] for alias in ordered]
+
+        def add_relation_phrases():
+            for index, token in enumerate(tokens):
+                if token not in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                    continue
+                subject = relation_subject_before(index)
+                object_tokens, own_context = relation_object_after(index)
+                if not subject or not object_tokens:
+                    continue
+                aliased_objects = aliased_relation_objects(subject, object_tokens)
+                prefer_own_relation = (
+                    own_context and subject in _AUTOCOMPLETE_BODY_RELATION_SUBJECTS
+                )
+                if prefer_own_relation:
+                    for candidate_objects in aliased_objects:
+                        add_query(" ".join([subject, token, "own", *candidate_objects]))
+                    for candidate_objects in aliased_objects:
+                        add_query(" ".join([subject, token, *candidate_objects]))
+                    add_query(" ".join([subject, token, "own", *object_tokens]))
+                else:
+                    for candidate_objects in aliased_objects:
+                        add_query(" ".join([subject, token, *candidate_objects]))
+                add_query(" ".join([subject, token, *object_tokens]))
+                add_query(" ".join([subject, token]))
+                add_query(" ".join([token, *object_tokens]))
+
+        content_tokens = [
+            token for token in tokens
+            if len(token) >= 3
+            and token not in _AUTOCOMPLETE_TRANSLATION_STOPWORDS
+            and not is_pronoun_or_possessive(token)
+            and token not in _AUTOCOMPLETE_WEAK_POSE_VERBS
+            and token not in _AUTOCOMPLETE_LOW_VALUE_SINGLE_TOKENS
+            and not _AUTOCOMPLETE_ACTION_FORMS.get(token)
+        ]
+
+        add_query(normalized)
+        add_cleaned_sentence()
+        add_domain_phrase_aliases()
+        for index, token in enumerate(tokens):
+            action_variant = _AUTOCOMPLETE_ACTION_FORMS.get(token)
+            if not action_variant:
+                continue
+            object_phrase = content_phrase_after(index)
+            if action_variant in _AUTOCOMPLETE_TRANSITIVE_ACTION_FORMS and object_phrase:
+                add_query(" ".join([action_variant] + object_phrase))
+                if len(object_phrase) > 1:
+                    add_query(" ".join(object_phrase))
+            add_query(action_variant)
+
+        add_relation_phrases()
+        add_content_run_phrases()
+        for token in content_tokens:
+            add_query(token)
+        return queries[:18]
 
     def _search_kr_tags_with_translation(self, query: str, limit: int = 20) -> tuple[list, str]:
         base_results = self._search_kr_tags(query, limit)
@@ -10422,7 +10840,20 @@ class RemoteBridge(QObject):
         for row in base_results[:base_head_count]:
             add_result(row)
         for translated_query in self._translation_search_queries(translated):
-            for row in self._search_kr_tags(translated_query, limit):
+            translated_query_size = len(translated_query.split())
+            if translated_query_size <= 1:
+                translated_query_limit = min(2, limit)
+            elif translated_query_size == 2:
+                translated_query_limit = min(4, limit)
+            else:
+                translated_query_limit = min(6, limit)
+            rows = self._search_kr_tags(translated_query, translated_query_limit)
+            rows.sort(
+                key=lambda row: 0
+                if normalize_search_query(row.get("tag", "")) == translated_query
+                else 1
+            )
+            for row in rows:
                 add_result(row, translated_match=True)
         for row in base_results[base_head_count:]:
             add_result(row)
@@ -10608,7 +11039,12 @@ class RemoteBridge(QObject):
                 "ratingId": str(context.get("ratingId") or "s"),
                 "personId": str(context.get("personId") or "1girl_solo"),
             })
-            payload = bridge.suggest(token, limit=limit)
+            caret_offset = context.get("caretOffset")
+            try:
+                caret_offset = int(caret_offset) if caret_offset is not None else None
+            except (TypeError, ValueError):
+                caret_offset = None
+            payload = bridge.suggest(token, limit=limit, caret_offset=caret_offset)
             rows = payload.get("suggestions") or []
             if payload.get("stage") in {"loading", "unavailable"}:
                 state = payload.get("loadState") or {}

@@ -1,0 +1,348 @@
+{
+  "stopwords": [
+    "a",
+    "an",
+    "and",
+    "are",
+    "at",
+    "be",
+    "been",
+    "being",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "is",
+    "of",
+    "on",
+    "onto",
+    "or",
+    "the",
+    "to",
+    "using",
+    "was",
+    "were",
+    "with",
+    "your"
+  ],
+  "pronouns": [
+    "he",
+    "her",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "i",
+    "it",
+    "its",
+    "itself",
+    "me",
+    "mine",
+    "my",
+    "myself",
+    "our",
+    "ours",
+    "ourselves",
+    "she",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "they",
+    "us",
+    "we",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves"
+  ],
+  "possessives": [
+    "her",
+    "his",
+    "its",
+    "my",
+    "one's",
+    "our",
+    "their",
+    "your"
+  ],
+  "actor_words": [
+    "boy",
+    "girl",
+    "man",
+    "men",
+    "one",
+    "person",
+    "someone",
+    "woman",
+    "women"
+  ],
+  "particles": [
+    "away",
+    "down",
+    "off",
+    "out",
+    "up"
+  ],
+  "weak_pose_verbs": [
+    "keep",
+    "keeps",
+    "keeping",
+    "kept",
+    "place",
+    "placed",
+    "places",
+    "placing",
+    "position",
+    "positioned",
+    "positioning",
+    "positions",
+    "put",
+    "puts",
+    "putting",
+    "rest",
+    "rested",
+    "resting",
+    "rests",
+    "set",
+    "sets",
+    "setting"
+  ],
+  "relation_prepositions": [
+    "above",
+    "across",
+    "against",
+    "around",
+    "behind",
+    "on",
+    "over",
+    "under"
+  ],
+  "relation_object_aliases": {
+    "belly": [
+      "stomach",
+      "abdomen"
+    ],
+    "butt": [
+      "ass",
+      "buttocks"
+    ],
+    "rear": [
+      "ass",
+      "buttocks"
+    ],
+    "waist": [
+      "hips",
+      "hip"
+    ]
+  },
+  "low_value_single_tokens": [
+    "apart",
+    "down",
+    "express",
+    "force",
+    "forced",
+    "forcing",
+    "forcibly",
+    "lightly",
+    "little",
+    "male",
+    "organ",
+    "small",
+    "song"
+  ],
+  "body_relation_subjects": [
+    "arm",
+    "arms",
+    "elbow",
+    "elbows",
+    "feet",
+    "finger",
+    "fingers",
+    "foot",
+    "hand",
+    "hands",
+    "knee",
+    "knees",
+    "leg",
+    "legs"
+  ],
+  "action_verbs": {
+    "aim": "aiming",
+    "blow": "blowing",
+    "carry": "carrying",
+    "catch": "catching",
+    "close": "closing",
+    "cry": "crying",
+    "dance": "dancing",
+    "drink": "drinking",
+    "eat": "eating",
+    "enter": "entering",
+    "fight": "fighting",
+    "hold": "holding",
+    "jump": "jumping",
+    "kick": "kicking",
+    "lie": "lying",
+    "look": "looking",
+    "open": "opening",
+    "pet": "petting",
+    "play": "playing",
+    "point": "pointing",
+    "pull": "pulling",
+    "push": "pushing",
+    "read": "reading",
+    "ride": "riding",
+    "run": "running",
+    "shoot": "shooting",
+    "sing": "singing",
+    "sit": "sitting",
+    "sleep": "sleeping",
+    "smile": "smiling",
+    "stand": "standing",
+    "throw": "throwing",
+    "walk": "walking",
+    "wear": "wearing",
+    "write": "writing"
+  },
+  "transitive_action_verbs": [
+    "aim",
+    "carry",
+    "catch",
+    "drink",
+    "eat",
+    "hold",
+    "kick",
+    "open",
+    "pet",
+    "play",
+    "point",
+    "pull",
+    "push",
+    "read",
+    "ride",
+    "shoot",
+    "throw",
+    "wear",
+    "write"
+  ],
+  "domain_phrase_alias_rules": [
+    {
+      "name": "manual_penis_touch",
+      "when_all": [
+        {
+          "tokens_any": [
+            "penis"
+          ],
+          "phrases_any": [
+            [
+              "male",
+              "organ"
+            ]
+          ]
+        },
+        {
+          "tokens_any": [
+            "caress",
+            "caressing",
+            "stroke",
+            "stroking",
+            "touch",
+            "touching"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "queries": [
+            "touching penis"
+          ]
+        },
+        {
+          "when_all": [
+            {
+              "tokens_any": [
+                "hand",
+                "hands"
+              ]
+            }
+          ],
+          "queries": [
+            "hand on penis"
+          ]
+        },
+        {
+          "queries": [
+            "penis"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "panty_pull",
+      "when_all": [
+        {
+          "tokens_any": [
+            "pull",
+            "pulling"
+          ]
+        },
+        {
+          "tokens_any": [
+            "down"
+          ]
+        },
+        {
+          "tokens_any": [
+            "panties",
+            "panty"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "queries": [
+            "panty pull",
+            "pulling own clothes",
+            "pulling another's clothes",
+            "pulling pants down"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "breast_milk_expression",
+      "when_all": [
+        {
+          "tokens_any": [
+            "breast",
+            "breasts"
+          ]
+        },
+        {
+          "tokens_any": [
+            "milk"
+          ]
+        },
+        {
+          "tokens_any": [
+            "express",
+            "milking",
+            "squeeze"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "queries": [
+            "breast milking",
+            "lactation",
+            "breast milk"
+          ]
+        }
+      ]
+    }
+  ]
+}

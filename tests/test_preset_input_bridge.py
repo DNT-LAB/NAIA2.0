@@ -272,10 +272,15 @@ class _LoadingEventService(_EventService):
 
 
 class _ClothesService:
+    def __init__(self):
+        self.prompt_fragment_payloads = []
+        self.bootstrap_payloads = []
+
     def status(self):
         return {"dataAvailability": {"main": "ready", "message": "ready"}}
 
-    def bootstrap(self, _payload):
+    def bootstrap(self, payload):
+        self.bootstrap_payloads.append(dict(payload or {}))
         return {
             "comboRows": {
                 "rows": [
@@ -287,7 +292,66 @@ class _ClothesService:
                         "count": 5,
                     }
                 ]
+            },
+            "browser": {
+                "selected": {
+                    "categoryId": payload.get("categoryId") or "UPPER",
+                    "subcategoryId": payload.get("subcategoryId") or "tops",
+                },
+                "categories": [
+                    {"id": "UPPER", "label": "Upper", "subcategoryCount": 1, "count": 3},
+                    {"id": "LEGS", "label": "Legs", "subcategoryCount": 1, "count": 1},
+                ],
+                "subcategories": [
+                    {"id": "tops", "label": "tops", "count": 3},
+                ],
+                "items": [
+                    {"id": "tag-shirt", "tag": "shirt", "label": "shirt", "postCount": 10},
+                    {"id": "tag-long-sleeves", "tag": "long sleeves", "label": "long sleeves", "postCount": 8},
+                    {"id": "tag-swimsuit", "tag": "swimsuit under clothes", "label": "swimsuit under clothes", "postCount": 4},
+                ],
+            },
+            "staged": {
+                "items": [
+                    {"tag": item.get("tag"), "slot": item.get("slot") or "UPPER"}
+                    for item in payload.get("stagedItems", [])
+                    if isinstance(item, dict)
+                ],
+                "groups": [],
+                "tags": [
+                    item.get("tag")
+                    for item in payload.get("stagedItems", [])
+                    if isinstance(item, dict) and item.get("tag")
+                ],
+            },
+        }
+
+    def select(self, payload):
+        if payload.get("comboId") == "combo-shirt":
+            return {
+                "combo": {
+                    "id": "combo-shirt",
+                    "comboText": "shirt, long sleeves",
+                    "prompt": "shirt, long sleeves",
+                    "tags": ["shirt", "long sleeves"],
+                    "count": 5,
+                }
             }
+        return {"combo": None}
+
+    def prompt_fragment(self, payload):
+        self.prompt_fragment_payloads.append(dict(payload or {}))
+        tags = [
+            item.get("tag")
+            for item in payload.get("stagedItems", [])
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        return {
+            "ok": True,
+            "promptFragment": {
+                "tags": tags,
+                "prompt": ", ".join(tags),
+            },
         }
 
 
@@ -320,11 +384,11 @@ class _ExpressionService:
         }
 
 
-def _bridge(tmp_path, event_service=None):
+def _bridge(tmp_path, event_service=None, clothes_service=None):
     return PresetInputBridge(
         tmp_path,
         event_service=event_service or _EventService(),
-        clothes_service=_ClothesService(),
+        clothes_service=clothes_service or _ClothesService(),
         expression_service=_ExpressionService(),
     )
 
@@ -489,6 +553,26 @@ def test_prompt_processor_expands_preset_event_token_during_wildcard_step(tmp_pa
     )
 
 
+def test_prompt_processor_expands_preset_clothes_staged_token_during_wildcard_step(tmp_path):
+    processor = PromptProcessor.__new__(PromptProcessor)
+    processor.wildcard_processor = SimpleNamespace(expand_tags=lambda tags, _context: tags)
+    processor._preset_bridge = _bridge(tmp_path)
+    context = PromptContext(
+        source_row={},
+        settings={},
+        main_tags=["best quality", "preset:clothes/shirt&swimsuit under clothes&"],
+    )
+
+    processor._step_3_expand_wildcards(context)
+
+    assert context.main_tags == [
+        "best quality",
+        "shirt",
+        "swimsuit under clothes",
+    ]
+    assert context.metadata["preset_prompt_resolutions"][0]["axis"] == "clothes"
+
+
 def test_unavailable_axis_returns_load_state_without_suggestions(tmp_path):
     result = _bridge(tmp_path, event_service=_UnavailableService()).suggest("preset:events")
 
@@ -522,15 +606,98 @@ def test_loaded_clothes_and_expression_inputs_return_expected_final_rows(tmp_pat
     bridge = _bridge(tmp_path)
 
     clothes = bridge.suggest("preset:clothes")
-    assert clothes["stage"] == "combo"
-    assert clothes["suggestions"][0]["final"] is True
-    assert clothes["suggestions"][0]["prompt"] == "shirt, long sleeves"
+    assert clothes["stage"] == "category"
+    assert clothes["suggestions"][0]["final"] is False
+    assert clothes["suggestions"][0]["tag"] == "Upper"
+    assert clothes["suggestions"][0]["value"] == "preset:clothes/UPPER"
 
     expressions = bridge.suggest("preset:expressions/smile/mouth")
     assert expressions["stage"] == "item"
     assert expressions["suggestions"][0]["final"] is True
     assert expressions["suggestions"][0]["value"] == "preset:expressions/smile/mouth/smile-open-mouth"
     assert expressions["suggestions"][0]["tags"] == ["smile", "open mouth"]
+
+
+def test_clothes_staged_token_parser_preserves_empty_and_active_segments(tmp_path):
+    bridge = _bridge(tmp_path)
+    token = "preset:clothes/shirt&swim&pants&"
+    parsed = bridge.parse_clothes_token(token, caret_offset=token.index("swim") + 2)
+
+    assert parsed["mode"] == "staged"
+    assert parsed["activeIndex"] == 1
+    assert parsed["activeQuery"] == "swim"
+    assert parsed["stagedTags"] == ["shirt", "pants"]
+    assert parsed["segments"][3]["empty"] is True
+
+    deleted = bridge.parse_clothes_token("preset:clothes/shirt&&pants&", caret_offset=len("preset:clothes/shirt&"))
+    assert deleted["activeIndex"] == 1
+    assert deleted["segments"][1]["empty"] is True
+    assert deleted["stagedTags"] == ["shirt", "pants"]
+
+
+def test_clothes_staged_token_expands_through_prompt_fragment(tmp_path):
+    service = _ClothesService()
+    bridge = _bridge(tmp_path, clothes_service=service)
+
+    resolved = bridge.resolve_prompt_token("preset:clothes/shirt&swimsuit under clothes&")
+
+    assert resolved["applied"] is True
+    assert resolved["axis"] == "clothes"
+    assert resolved["tags"] == ["shirt", "swimsuit under clothes"]
+    assert service.prompt_fragment_payloads[-1]["stagedItems"] == [
+        {"tag": "shirt", "source": "shortcut"},
+        {"tag": "swimsuit under clothes", "source": "shortcut"},
+    ]
+
+
+def test_clothes_staged_token_ignores_empty_segments(tmp_path):
+    resolved = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&&pants&")
+
+    assert resolved["applied"] is True
+    assert resolved["tags"] == ["shirt", "pants"]
+    assert resolved["stagedTags"] == ["shirt", "pants"]
+
+
+def test_clothes_combo_token_expands_to_combo_tags(tmp_path):
+    resolved = _bridge(tmp_path).resolve_prompt_token("preset:clothes/combo-shirt")
+
+    assert resolved["applied"] is True
+    assert resolved["stage"] == "combo"
+    assert resolved["tags"] == ["shirt", "long sleeves"]
+
+
+def test_clothes_combo_suggestion_uses_readable_token(tmp_path):
+    row = _bridge(tmp_path).suggest("preset:clothes/combo-shirt")["suggestions"][0]
+
+    assert row["stage"] == "combo"
+    assert row["comboId"] == "combo-shirt"
+    assert row["value"] == "preset:clothes/shirt&long sleeves&"
+    assert row["clothesTokenValue"] == "preset:clothes/shirt&long sleeves&"
+
+
+def test_clothes_item_suggestion_appends_staged_readable_token(tmp_path):
+    token = "preset:clothes/shirt&swim&"
+    row = _bridge(tmp_path).suggest(
+        token,
+        caret_offset=token.index("swim") + 2,
+    )["suggestions"][0]
+
+    assert row["stage"] == "item"
+    assert row["clothesTokenValue"] == "preset:clothes/shirt&swimsuit under clothes&"
+
+
+def test_clothes_browse_segment_resolves_exact_item_and_reports_partial(tmp_path):
+    exact = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&UPPER/tops/swimsuit under clothes&")
+
+    assert exact["applied"] is True
+    assert exact["tags"] == ["shirt", "swimsuit under clothes"]
+    assert exact["resolvedSegments"][0]["tag"] == "swimsuit under clothes"
+
+    partial = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&UPPER/tops/swi&")
+    assert partial["applied"] is True
+    assert partial["tags"] == ["shirt"]
+    assert partial["reason"] == "partial_unresolved"
+    assert partial["unresolvedSegments"][0]["raw"] == "UPPER/tops/swi"
 
 
 def test_convenience_search_returns_vibe_style_rows(tmp_path):
@@ -542,5 +709,5 @@ def test_convenience_search_returns_vibe_style_rows(tmp_path):
         expression_service=_ExpressionService(),
     )
 
-    assert rows[0]["value"] == "preset:clothes/combo-shirt"
+    assert rows[0]["value"] == "preset:clothes/UPPER"
     assert rows[0]["_wc_type"] == "preset_path"

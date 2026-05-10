@@ -70,7 +70,7 @@ class PresetInputBridge:
         self._expression_service = expression_service
         self.context = {**self.DEFAULT_CONTEXT, **(context or {})}
 
-    def suggest(self, token: str, limit: int = 24) -> dict[str, Any]:
+    def suggest(self, token: str, limit: int = 24, caret_offset: int | None = None) -> dict[str, Any]:
         """Return the next completion layer for a partially typed ``preset:`` token."""
         parsed = self.parse_token(token)
         if not parsed["active"]:
@@ -96,7 +96,7 @@ class PresetInputBridge:
         if axis == "events":
             return self._event_payload(parsed, limit, status)
         if axis == "clothes":
-            return self._clothes_payload(parsed, limit, status)
+            return self._clothes_payload(parsed, limit, status, caret_offset)
         if axis == "expressions":
             return self._expression_payload(parsed, limit, status)
 
@@ -112,6 +112,8 @@ class PresetInputBridge:
         parsed = self.parse_token(token)
         if not parsed["active"]:
             return {"ok": True, "applied": False, "reason": "inactive", "token": token}
+        if parsed.get("axis") == "clothes":
+            return self._resolve_clothes_prompt_token(parsed)
         if parsed.get("axis") != "events":
             return {"ok": True, "applied": False, "reason": "unsupported_axis", "token": token}
 
@@ -173,6 +175,77 @@ class PresetInputBridge:
                 "label": combo.get("label") or "",
                 "prompt": prompt,
             },
+        }
+
+    def parse_clothes_token(self, token: str, caret_offset: int | None = None) -> dict[str, Any]:
+        """Parse a Clothes Preset shortcut while preserving staged segment slots."""
+        parsed = self.parse_token(token)
+        if not parsed.get("active") or parsed.get("axis") != "clothes":
+            return {
+                "axis": "clothes",
+                "mode": "inactive",
+                "segments": [],
+                "activeIndex": None,
+                "activeQuery": "",
+                "activePath": [],
+                "stagedTags": [],
+                "unresolvedSegments": [],
+            }
+        tail = self._clothes_tail(parsed)
+        if "&" not in tail:
+            path = [segment for segment in parsed.get("segments") or [] if str(segment or "").strip()]
+            return {
+                "axis": "clothes",
+                "mode": "browse",
+                "segments": [],
+                "activeIndex": None,
+                "activeQuery": str(path[-1] if path else ""),
+                "activePath": path,
+                "stagedTags": [],
+                "unresolvedSegments": [],
+            }
+
+        active_index = self._clothes_active_segment_index(parsed.get("raw", ""), tail, caret_offset)
+        raw_segments = tail.split("&")
+        segments = []
+        staged_tags = []
+        unresolved = []
+        active_query = ""
+        active_path: list[str] = []
+        for index, raw_segment in enumerate(raw_segments):
+            decoded = unquote(str(raw_segment or "").strip())
+            path = [part.strip() for part in decoded.split("/") if part.strip()]
+            browse = bool(path and "/" in decoded)
+            empty = not decoded
+            active = active_index == index
+            tag = "" if empty or browse else decoded
+            item = {
+                "index": index,
+                "raw": decoded,
+                "tag": tag,
+                "empty": empty,
+                "browse": browse,
+                "path": path,
+                "active": active,
+            }
+            segments.append(item)
+            if active:
+                active_path = path if browse else []
+                active_query = path[-1] if browse and path else decoded
+                continue
+            if tag:
+                staged_tags.append(tag)
+            elif browse:
+                unresolved.append({"index": index, "raw": decoded, "path": path})
+        return {
+            "axis": "clothes",
+            "mode": "staged",
+            "segments": segments,
+            "activeIndex": active_index,
+            "activeQuery": active_query,
+            "activePath": active_path,
+            "stagedTags": self._ordered_unique(staged_tags),
+            "unresolvedSegments": unresolved,
         }
 
     def parse_token(self, token: str) -> dict[str, Any]:
@@ -316,41 +389,350 @@ class PresetInputBridge:
             "suggestions": suggestions[:limit],
         }
 
-    def _clothes_payload(self, parsed: dict[str, Any], limit: int, status: dict[str, Any]) -> dict[str, Any]:
+    def _clothes_payload(
+        self,
+        parsed: dict[str, Any],
+        limit: int,
+        status: dict[str, Any],
+        caret_offset: int | None = None,
+    ) -> dict[str, Any]:
         service = self._clothes_service or self._make_clothes_service()
+        clothes = self.parse_clothes_token(parsed.get("raw", ""), caret_offset=caret_offset)
         data = service.bootstrap({
             "ratingId": self.context["ratingId"],
             "personId": self.context["personId"],
             "comboLimit": limit,
+            "itemLimit": max(160, limit),
         })
         combo_rows = data.get("comboRows") if isinstance(data, dict) else {}
-        suggestions = []
-        for row in (combo_rows or {}).get("rows") or []:
-            if not isinstance(row, dict):
-                continue
-            combo_id = str(row.get("id") or "")
-            suggestions.append({
-                "tag": row.get("comboText") or row.get("prompt") or combo_id,
-                "value": self._path("clothes", [combo_id]),
-                "count": self._count(row),
-                "desc": row.get("prompt") or "",
-                "group": "preset/clothes",
-                "cat": "combo",
-                "_wc_type": "preset_path",
-                "axis": "clothes",
-                "stage": "combo",
-                "final": True,
-                "comboId": combo_id,
-                "prompt": row.get("prompt") or row.get("comboText") or "",
-                "tags": row.get("tags") or [],
-            })
+        browser = data.get("browser") if isinstance(data, dict) else {}
+        active_path = list(clothes.get("activePath") or [])
+        categories = [item for item in (browser or {}).get("categories") or [] if isinstance(item, dict)]
+        subcategories = [item for item in (browser or {}).get("subcategories") or [] if isinstance(item, dict)]
+        items = [item for item in (browser or {}).get("items") or [] if isinstance(item, dict)]
+
+        def combo_suggestions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            suggestions = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                combo_id = str(row.get("id") or "")
+                tags = self._combo_tags(row)
+                readable_token = self._clothes_canonical_token(tags)
+                suggestions.append({
+                    "tag": row.get("comboText") or row.get("prompt") or combo_id,
+                    "value": readable_token,
+                    "count": self._count(row),
+                    "desc": row.get("prompt") or row.get("comboText") or "",
+                    "group": "preset/clothes",
+                    "cat": "combo",
+                    "_wc_type": "preset_path",
+                    "axis": "clothes",
+                    "stage": "combo",
+                    "final": True,
+                    "comboId": combo_id,
+                    "clothesTokenValue": readable_token,
+                    "prompt": self._join_tags(tags),
+                    "tags": tags,
+                })
+            return suggestions[:limit]
+
+        if clothes["mode"] == "browse" and len(active_path) == 1 and str(active_path[0] or "").startswith("combo-"):
+            combo = next(
+                (row for row in (combo_rows or {}).get("rows") or [] if isinstance(row, dict) and str(row.get("id") or "") == active_path[0]),
+                None,
+            )
+            return {
+                **self._base_payload(parsed, "combo"),
+                "dataReady": True,
+                "loadState": self._load_state(status),
+                "lockInput": True,
+                "suggestions": combo_suggestions([combo] if combo else []),
+            }
+
+        if clothes["mode"] == "browse" and not active_path:
+            return self._clothes_suggestions_payload(
+                parsed,
+                status,
+                "category",
+                self._clothes_category_rows(categories, clothes, limit),
+            )
+
+        if clothes["mode"] == "staged" and not active_path and not clothes.get("activeQuery"):
+            return self._clothes_suggestions_payload(
+                parsed,
+                status,
+                "category",
+                self._clothes_category_rows(categories, clothes, limit),
+            )
+
+        if len(active_path) < 1 and clothes.get("activeQuery"):
+            return self._clothes_suggestions_payload(
+                parsed,
+                status,
+                "item",
+                self._clothes_item_rows(items, clothes, "", "", limit),
+            )
+
+        category_id = str(active_path[0] if active_path else (browser or {}).get("selected", {}).get("categoryId") or "")
+        subcategory_id = str(active_path[1] if len(active_path) > 1 else (browser or {}).get("selected", {}).get("subcategoryId") or "")
+
+        if len(active_path) < 2:
+            return self._clothes_suggestions_payload(
+                parsed,
+                status,
+                "subcategory",
+                self._clothes_subcategory_rows(subcategories, clothes, category_id, limit),
+            )
+
+        return self._clothes_suggestions_payload(
+            parsed,
+            status,
+            "item",
+            self._clothes_item_rows(items, clothes, category_id, subcategory_id, limit),
+        )
+
+    def _clothes_suggestions_payload(
+        self,
+        parsed: dict[str, Any],
+        status: dict[str, Any],
+        stage: str,
+        suggestions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         return {
-            **self._base_payload(parsed, "combo"),
+            **self._base_payload(parsed, stage),
             "dataReady": True,
             "loadState": self._load_state(status),
             "lockInput": True,
-            "suggestions": suggestions[:limit],
+            "suggestions": suggestions,
         }
+
+    def _clothes_category_rows(self, categories: list[dict[str, Any]], clothes: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+        query = (clothes.get("activePath") or [""])[0] if clothes.get("mode") == "browse" else clothes.get("activeQuery", "")
+        suggestions = []
+        for category in categories:
+            if not self._matches_node(category, str(query or "")):
+                continue
+            category_id = str(category.get("id") or category.get("label") or "")
+            value = self._clothes_token_with_active_segment(clothes, category_id) if clothes.get("mode") == "staged" else self._path("clothes", [category_id])
+            suggestions.append({
+                "tag": category.get("label") or category_id,
+                "value": value,
+                "count": self._count(category),
+                "desc": f"{self._count({'count': category.get('subcategoryCount') or category.get('matchedSubcategoryCount') or 0})} groups",
+                "group": "preset/clothes",
+                "cat": "category",
+                "_wc_type": "preset_path",
+                "axis": "clothes",
+                "stage": "category",
+                "final": False,
+                "id": category_id,
+                "tags": [],
+                "prompt": "",
+            })
+        return suggestions[:limit]
+
+    def _clothes_subcategory_rows(self, subcategories: list[dict[str, Any]], clothes: dict[str, Any], category_id: str, limit: int) -> list[dict[str, Any]]:
+        active_path = clothes.get("activePath") or []
+        query = active_path[1] if len(active_path) > 1 else ""
+        suggestions = []
+        for subcategory in subcategories:
+            if not self._matches_node(subcategory, str(query or "")):
+                continue
+            subcategory_id = str(subcategory.get("id") or subcategory.get("label") or "")
+            path = "/".join(part for part in [category_id, subcategory_id] if part)
+            value = self._clothes_token_with_active_segment(clothes, path) if clothes.get("mode") == "staged" else self._path("clothes", [category_id, subcategory_id])
+            suggestions.append({
+                "tag": subcategory.get("label") or subcategory_id,
+                "value": value,
+                "count": self._count(subcategory),
+                "desc": f"{self._count(subcategory)} items",
+                "group": "preset/clothes",
+                "cat": "subcategory",
+                "_wc_type": "preset_path",
+                "axis": "clothes",
+                "stage": "subcategory",
+                "final": False,
+                "id": subcategory_id,
+                "tags": [],
+                "prompt": "",
+            })
+        return suggestions[:limit]
+
+    def _clothes_item_rows(self, items: list[dict[str, Any]], clothes: dict[str, Any], category_id: str, subcategory_id: str, limit: int) -> list[dict[str, Any]]:
+        active_path = clothes.get("activePath") or []
+        query = active_path[2] if len(active_path) > 2 else (clothes.get("activeQuery") if not active_path else "")
+        suggestions = []
+        for item in items:
+            if not self._matches_node(item, str(query or "")):
+                continue
+            tag = str(item.get("tag") or item.get("label") or item.get("id") or "").strip()
+            if not tag:
+                continue
+            category = category_id or str(item.get("slot") or "")
+            subcategory = subcategory_id or str(item.get("group") or "")
+            path = "/".join(part for part in [category, subcategory, tag] if part)
+            value = self._clothes_token_with_active_segment(clothes, path) if clothes.get("mode") == "staged" else self._path("clothes", [category, subcategory, tag])
+            token_value = self._clothes_token_after_item_selection(clothes, tag)
+            suggestions.append({
+                "tag": str(item.get("label") or tag),
+                "value": value,
+                "count": self._count(item),
+                "desc": " / ".join(str(part) for part in [item.get("slotLabel") or item.get("slot"), item.get("group"), "incompatible" if item.get("incompatible") else ""] if part),
+                "group": "preset/clothes",
+                "cat": "item",
+                "_wc_type": "preset_path",
+                "axis": "clothes",
+                "stage": "item",
+                "final": False,
+                "id": str(item.get("id") or tag),
+                "clothesTag": tag,
+                "clothesTokenValue": token_value,
+                "tags": [tag],
+                "prompt": tag,
+            })
+        return suggestions[:limit]
+
+    def _resolve_clothes_prompt_token(self, parsed: dict[str, Any]) -> dict[str, Any]:
+        token = str(parsed.get("raw") or "")
+        status = self._axis_status("clothes")
+        if not self._status_ready(status):
+            return {
+                "ok": True,
+                "applied": False,
+                "reason": "not_ready",
+                "token": token,
+                "axis": "clothes",
+                "loadState": self._load_state(status),
+            }
+
+        service = self._clothes_service or self._make_clothes_service()
+        clothes = self.parse_clothes_token(token)
+        if clothes["mode"] == "browse":
+            combo = self._resolve_clothes_combo(parsed, service)
+            if combo:
+                tags = self._combo_tags(combo)
+                prompt = self._join_tags(tags)
+                return {
+                    "ok": True,
+                    "applied": bool(prompt),
+                    "reason": "",
+                    "token": token,
+                    "axis": "clothes",
+                    "stage": "combo",
+                    "tags": self._split_prompt(prompt),
+                    "prompt": prompt,
+                    "combo": {
+                        "id": combo.get("id") or combo.get("comboId") or "",
+                        "prompt": prompt,
+                    },
+                }
+            return {"ok": True, "applied": False, "reason": "unsupported_clothes_browse_path", "token": token, "axis": "clothes"}
+
+        staged_tags = list(clothes.get("stagedTags") or [])
+        unresolved = list(clothes.get("unresolvedSegments") or [])
+        resolved_from_path = []
+        for segment in unresolved:
+            tag = self._resolve_clothes_browse_item_tag(service, segment.get("path") or [], staged_tags)
+            if tag:
+                staged_tags.append(tag)
+                resolved_from_path.append({**segment, "tag": tag})
+        unresolved = [
+            segment for segment in unresolved
+            if not any(item.get("index") == segment.get("index") for item in resolved_from_path)
+        ]
+        staged_tags = self._ordered_unique(staged_tags)
+        if not staged_tags:
+            return {
+                "ok": True,
+                "applied": False,
+                "reason": "empty_clothes_staging",
+                "token": token,
+                "axis": "clothes",
+                "unresolvedSegments": unresolved,
+            }
+
+        payload = {
+            "ratingId": self.context["ratingId"],
+            "personId": self.context["personId"],
+            "stagedItems": [
+                {"tag": tag, "source": "shortcut"}
+                for tag in staged_tags
+            ],
+        }
+        try:
+            fragment = service.prompt_fragment(payload)
+        except Exception as exc:
+            return {
+                "ok": True,
+                "applied": False,
+                "reason": "clothes_fragment_failed",
+                "message": str(exc),
+                "token": token,
+                "axis": "clothes",
+                "stagedTags": staged_tags,
+                "unresolvedSegments": unresolved,
+            }
+        prompt_fragment = fragment.get("promptFragment") if isinstance(fragment, dict) else {}
+        tags = self._combo_tags(prompt_fragment or {"tags": staged_tags})
+        prompt = self._join_tags(tags)
+        return {
+            "ok": True,
+            "applied": bool(prompt),
+            "reason": "partial_unresolved" if unresolved else "",
+            "token": token,
+            "axis": "clothes",
+            "stage": "staged",
+            "tags": self._split_prompt(prompt),
+            "prompt": prompt,
+            "stagedTags": staged_tags,
+            "unresolvedSegments": unresolved,
+            "resolvedSegments": resolved_from_path,
+        }
+
+    def _resolve_clothes_combo(self, parsed: dict[str, Any], service: Any) -> dict[str, Any] | None:
+        segments = self._non_empty_segments(parsed)
+        if len(segments) != 1:
+            return None
+        combo_id = str(segments[0] or "").strip()
+        if not combo_id.startswith("combo-"):
+            return None
+        data = service.bootstrap({
+            "ratingId": self.context["ratingId"],
+            "personId": self.context["personId"],
+            "comboId": combo_id,
+            "comboLimit": 500,
+        })
+        combo_rows = data.get("comboRows") if isinstance(data, dict) else {}
+        for row in (combo_rows or {}).get("rows") or []:
+            if isinstance(row, dict) and str(row.get("id") or "") == combo_id:
+                return row
+        selected = service.select({"comboId": combo_id}) if hasattr(service, "select") else {}
+        combo = selected.get("combo") if isinstance(selected, dict) else None
+        return combo if isinstance(combo, dict) else None
+
+    def _resolve_clothes_browse_item_tag(self, service: Any, path: list[str], staged_tags: list[str]) -> str:
+        if len(path) < 3:
+            return ""
+        slot, subgroup, query = path[0], path[1], path[2]
+        payload = {
+            "ratingId": self.context["ratingId"],
+            "personId": self.context["personId"],
+            "categoryId": slot,
+            "subcategoryId": subgroup,
+            "itemSearch": query,
+            "itemLimit": 500,
+            "stagedItems": [{"tag": tag, "source": "shortcut"} for tag in staged_tags],
+        }
+        data = service.bootstrap(payload)
+        browser = data.get("browser") if isinstance(data, dict) else {}
+        for item in (browser or {}).get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            tag = str(item.get("tag") or item.get("label") or "").strip()
+            if self._normalize_match(tag) == self._normalize_match(query):
+                return tag
+        return ""
 
     def _expression_payload(self, parsed: dict[str, Any], limit: int, status: dict[str, Any]) -> dict[str, Any]:
         service = self._expression_service or self._make_expression_service()
@@ -757,6 +1139,89 @@ class PresetInputBridge:
         ]
 
     @staticmethod
+    def _clothes_tail(parsed: dict[str, Any]) -> str:
+        body = str(parsed.get("body") or "")
+        if not body.lower().startswith("clothes"):
+            return ""
+        tail = body[len("clothes"):]
+        return tail[1:] if tail.startswith("/") else tail
+
+    @staticmethod
+    def _clothes_active_segment_index(raw: str, tail: str, caret_offset: int | None) -> int | None:
+        if caret_offset is None:
+            return None
+        token = str(raw or "")
+        try:
+            rel = max(0, int(caret_offset) - (len(token) - len(tail)))
+        except (TypeError, ValueError):
+            return None
+        rel = max(0, min(rel, len(tail)))
+        start = 0
+        for index, part in enumerate(tail.split("&")):
+            end = start + len(part)
+            if start <= rel <= end:
+                return index
+            start = end + 1
+        return max(0, len(tail.split("&")) - 1)
+
+    @staticmethod
+    def _clothes_segment(value: Any) -> str:
+        return str(value or "").strip().replace("&", "%26")
+
+    @staticmethod
+    def _clothes_canonical_token(tags: list[Any]) -> str:
+        segments = [
+            PresetInputBridge._clothes_segment(tag)
+            for tag in tags
+            if str(tag or "").strip()
+        ]
+        if not segments:
+            return f"{PRESET_PREFIX}clothes"
+        return f"{PRESET_PREFIX}clothes/" + "&".join(segments) + "&"
+
+    @staticmethod
+    def _clothes_token_with_active_segment(clothes: dict[str, Any], value: Any) -> str:
+        text = str(value or "").strip()
+        if clothes.get("mode") != "staged":
+            return f"{PRESET_PREFIX}clothes/{PresetInputBridge._clothes_segment(text)}"
+
+        segments = [
+            str(segment.get("raw") or "")
+            for segment in clothes.get("segments") or []
+            if isinstance(segment, dict)
+        ]
+        active_index = clothes.get("activeIndex")
+        if not isinstance(active_index, int):
+            active_index = max(0, len(segments) - 1)
+        while active_index >= len(segments):
+            segments.append("")
+        segments[active_index] = text
+        return f"{PRESET_PREFIX}clothes/" + "&".join(PresetInputBridge._clothes_segment(segment) for segment in segments)
+
+    @staticmethod
+    def _clothes_token_after_item_selection(clothes: dict[str, Any], tag: Any) -> str:
+        clean = str(tag or "").strip()
+        if not clean:
+            return str(clothes.get("raw") or f"{PRESET_PREFIX}clothes")
+        if clothes.get("mode") != "staged":
+            return PresetInputBridge._clothes_canonical_token([clean])
+
+        segments = [
+            str(segment.get("raw") or "")
+            for segment in clothes.get("segments") or []
+            if isinstance(segment, dict)
+        ]
+        active_index = clothes.get("activeIndex")
+        if not isinstance(active_index, int):
+            active_index = max(0, len(segments) - 1)
+        while active_index >= len(segments):
+            segments.append("")
+        segments[active_index] = clean
+        if segments and segments[-1]:
+            segments.append("")
+        return f"{PRESET_PREFIX}clothes/" + "&".join(PresetInputBridge._clothes_segment(segment) for segment in segments)
+
+    @staticmethod
     def _selected_event_payload(selected: dict[str, Any]) -> dict[str, str]:
         return {
             "axis": "events",
@@ -1008,6 +1473,19 @@ class PresetInputBridge:
         if isinstance(value, (list, tuple, set)):
             return ", ".join(str(item).strip() for item in value if str(item).strip())
         return str(value or "").strip()
+
+    @staticmethod
+    def _ordered_unique(values: list[Any]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            text = str(value or "").strip()
+            key = text.lower()
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            result.append(text)
+        return result
 
     @staticmethod
     def _split_prompt(value: Any) -> list[str]:

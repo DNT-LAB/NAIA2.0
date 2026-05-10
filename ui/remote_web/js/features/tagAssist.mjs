@@ -54,6 +54,20 @@ export function createTagAssistController({
     return String(query || '').trim().toLowerCase().startsWith('preset:events');
   }
 
+  function isPresetClothesQuery(query) {
+    return String(query || '').trim().toLowerCase().startsWith('preset:clothes');
+  }
+
+  function isLocalPresetQuery(query) {
+    return isPresetEventsQuery(query) || isPresetClothesQuery(query);
+  }
+
+  function presetQueryAxis(query) {
+    if (isPresetClothesQuery(query)) return 'clothes';
+    if (isPresetEventsQuery(query)) return 'events';
+    return '';
+  }
+
   function presetEventTokenStage(token) {
     const raw = String(token || '').trim();
     if (!isPresetEventsQuery(raw)) return '';
@@ -66,6 +80,41 @@ export function createTagAssistController({
     return 'axis';
   }
 
+  function presetEventStageLabel(stage) {
+    const normalized = String(stage || '').toLowerCase();
+    if (normalized === 'combo') return 'Observed combo';
+    if (normalized === 'item') return 'Main item';
+    if (normalized === 'subcategory') return 'Subcategory';
+    if (normalized === 'category') return 'Category';
+    if (normalized === 'axis') return 'Events';
+    if (normalized === 'status') return 'Status';
+    if (normalized === 'error') return 'Error';
+    return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Preset';
+  }
+
+  function presetEventNextStageLabel(stage) {
+    const normalized = String(stage || '').toLowerCase();
+    if (normalized === 'combo') return 'observed combos';
+    if (normalized === 'item') return 'main items';
+    if (normalized === 'subcategory') return 'subcategories';
+    if (normalized === 'category') return 'categories';
+    return 'items';
+  }
+
+  function presetEventTokenTail(token) {
+    const raw = String(token || '').trim();
+    if (!isPresetEventsQuery(raw)) return '';
+    return raw.slice('preset:events'.length).replace(/^\/+/, '');
+  }
+
+  function presetEventTokenLabel(token, crumbs = []) {
+    const lastCrumb = crumbs[crumbs.length - 1]?.label;
+    if (lastCrumb) return lastCrumb;
+    const tail = presetEventTokenTail(token);
+    const last = tail ? tail.split('/').filter(Boolean).pop() : 'events';
+    return String(last || 'events').replace(/[_-]+/g, ' ').replace(/^./, ch => ch.toUpperCase());
+  }
+
   function presetRequestPayload(query) {
     const payload = {type: 'autocomplete_preset', query};
     if (isPresetEventsQuery(query)) {
@@ -74,30 +123,30 @@ export function createTagAssistController({
     return payload;
   }
 
-  function presetStatusRow(query, message, status = 'preset') {
+  function presetStatusRow(query, message, status = 'preset', axis = 'events') {
     return {
       tag: String(status || 'preset'),
       value: query,
       count: 0,
-      desc: message || 'Event Preset data is not ready.',
-      group: 'preset/events',
+      desc: message || `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset data is not ready.`,
+      group: `preset/${axis || 'events'}`,
       cat: 'status',
       _wc_type: 'preset_status',
       disabled: true,
-      axis: 'events',
+      axis: axis || 'events',
       stage: 'status',
     };
   }
 
-  function showPresetEventStatus(query, message, status = 'loading') {
+  function showPresetEventStatus(query, message, status = 'loading', axis = 'events') {
     presetAutocompleteMeta = {
-      axis: 'events',
+      axis,
       stage: status,
       context: {...presetEventContext},
       loadState: {main: status, message},
       dataReady: false,
     };
-    acResults = [presetStatusRow(query, message, status)];
+    acResults = [presetStatusRow(query, message, status, axis)];
     acSel = 0;
     acMode = true;
     renderAutocomplete();
@@ -371,6 +420,30 @@ export function createTagAssistController({
     return `<span ${attrs.join(' ')}>${escHtml(tagText)}</span>`;
   }
 
+  function autocompleteInfoAttrs(result, title, descOverride = null) {
+    const desc = String(descOverride ?? result?.desc ?? result?.prompt ?? '').trim();
+    if (!desc) return '';
+    const groupText = [result?.group, result?.subgroup].filter(Boolean).join(' / ');
+    const countValue = Number(result?.count || 0);
+    const countText = countValue > 0 ? fmtCount(countValue) : '';
+    const attrs = [
+      `data-tooltip-title="${escHtml(title || result?.tag || '')}"`,
+      `data-tooltip-desc="${escHtml(desc)}"`,
+    ];
+    if (groupText) attrs.push(`data-tooltip-group="${escHtml(groupText)}"`);
+    if (countText) attrs.push(`data-tooltip-count="${escHtml(countText)}"`);
+    if (result?.cat) attrs.push(`data-tooltip-cat="${escHtml(result.cat)}"`);
+    return ` ${attrs.join(' ')}`;
+  }
+
+  function bindAutocompleteInfoHover(root) {
+    root.querySelectorAll('.tag-ac-item[data-tooltip-desc]').forEach(el => {
+      el.addEventListener('mouseenter', () => showTagChipInfoTooltip(el));
+      el.addEventListener('mousemove', () => positionTagChipInfoTooltip(el));
+      el.addEventListener('mouseleave', hideTagChipInfoTooltip);
+    });
+  }
+
   function normalizePromptInfoLookupTag(raw) {
     let text = String(raw || '').trim();
     if (!text || text.startsWith('#')) return '';
@@ -414,7 +487,7 @@ export function createTagAssistController({
     const lookupOptions = options && options.nodeType ? {anchor: options} : options;
     const lookupTag = normalizePromptInfoLookupTag(tag);
     if (!lookupTag) return;
-    if (isPresetEventsQuery(lookupTag)) {
+    if (isLocalPresetQuery(lookupTag)) {
       void lookupPresetEventTokenInfo(lookupTag, {
         readOnly: true,
         anchor: lookupOptions?.anchor || null,
@@ -440,6 +513,10 @@ export function createTagAssistController({
 
   function presetEventTooltipRoot(readOnly) {
     return readOnly ? ensurePromptInfoTooltip() : tagTooltip;
+  }
+
+  function presetAxisLabel(axis) {
+    return axis === 'clothes' ? 'Clothes' : 'Event';
   }
 
   function showPresetEventTooltipLoading(token, {readOnly = false, anchor = null, rawTag = ''} = {}) {
@@ -504,27 +581,28 @@ export function createTagAssistController({
   function renderPresetEventTokenTooltip(token, payload, {readOnly = false} = {}) {
     if (lastLookupTag.toLowerCase() !== token.toLowerCase()) return;
     const rows = Array.isArray(payload?.results) ? payload.results : [];
-    const row = rows.find(item => item && !item.disabled) || rows[0] || null;
+    const usableRows = rows.filter(item => item && !item.disabled && item._wc_type !== 'preset_status');
+    const row = usableRows[0] || rows[0] || null;
     const preset = payload?.preset || {};
     const crumbs = Array.isArray(preset.crumbs) ? preset.crumbs : [];
-    const tags = Array.isArray(row?.tags) && row.tags.length
-      ? row.tags.map(tag => String(tag || '').trim()).filter(Boolean)
-      : String(row?.prompt || row?.desc || '').split(',').map(part => part.trim()).filter(Boolean);
-    const groupText = ['preset/events', presetEventTokenStage(token)].filter(Boolean).join(' / ');
+    const tokenStage = presetEventTokenStage(token);
+    const payloadStage = String(preset.stage || row?.stage || '').toLowerCase();
+    const summary = presetEventTooltipSummary(token, tokenStage, payloadStage, usableRows, row, crumbs);
+    const groupText = ['preset/events', presetEventStageLabel(tokenStage)].filter(Boolean).join(' / ');
     const pathText = ['Events', ...crumbs.map(crumb => crumb?.label).filter(Boolean)].join(' / ');
     const descParts = [];
     if (pathText) descParts.push(pathText);
-    if (row?.prompt) descParts.push(row.prompt);
+    if (summary.desc) descParts.push(summary.desc);
     const root = presetEventTooltipRoot(readOnly);
     let html = '<div class="tag-tooltip-main">' +
-      `<span class="tag-tooltip-tag">${escHtml(row?.tag || 'Event preset')}</span>` +
-      (row?.count ? `<span class="tag-tooltip-count">${fmtCount(row.count || 0)}</span>` : '') +
+      `<span class="tag-tooltip-tag">${escHtml(summary.title)}</span>` +
+      (summary.countText ? `<span class="tag-tooltip-count">${escHtml(summary.countText)}</span>` : '') +
       (groupText ? ` <span class="tag-tooltip-group">${escHtml(groupText)}</span>` : '') +
       (descParts.length ? `<span class="tag-tooltip-desc">${escHtml(descParts.join(' · '))}</span>` : '') +
       '</div>';
-    if (tags.length) {
-      html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">contains</span>' +
-        tags.map(tag => renderTooltipExtraTag(tag, {})).join('') +
+    if (summary.tags.length) {
+      html += `<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">${escHtml(summary.extraLabel)}</span>` +
+        summary.tags.map(tag => renderTooltipExtraTag(tag, {})).join('') +
         '</div>';
     }
     if (readOnly) {
@@ -547,28 +625,262 @@ export function createTagAssistController({
     bindPresetEventTooltipActions(root, readOnly);
   }
 
+  function presetClothesStageLabel(stage) {
+    const normalized = String(stage || '').toLowerCase();
+    if (normalized === 'combo') return 'Combo';
+    if (normalized === 'item') return 'Clothes item';
+    if (normalized === 'subcategory') return 'Group';
+    if (normalized === 'category') return 'Slot';
+    if (normalized === 'status') return 'Status';
+    if (normalized === 'error') return 'Error';
+    return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Clothes';
+  }
+
+  function presetClothesCurrentSegment(parsed) {
+    if (!parsed || parsed.mode !== 'staged') return null;
+    const index = Number.isInteger(parsed.activeIndex) ? parsed.activeIndex : -1;
+    return Array.isArray(parsed.segments)
+      ? parsed.segments.find(segment => segment.index === index) || null
+      : null;
+  }
+
+  function presetClothesTokenLabel(token, preset, rows) {
+    const parsed = preset?.parsed || {};
+    const crumbs = Array.isArray(preset?.crumbs) ? preset.crumbs : [];
+    const active = presetClothesCurrentSegment(parsed);
+    if (active?.raw) return String(active.raw).replace(/[_-]+/g, ' ');
+    const lastCrumb = crumbs[crumbs.length - 1]?.label;
+    if (lastCrumb) return lastCrumb;
+    const firstRow = rows?.[0];
+    if (parsed.mode === 'staged') return parsed.activeQuery ? parsed.activeQuery : 'Add clothes item';
+    if (firstRow?.tag && preset?.stage === 'combo') return firstRow.tag;
+    const tail = String(token || '').slice('preset:clothes'.length).replace(/^\/+/, '');
+    const last = tail ? tail.split(/[\/&]/).filter(Boolean).pop() : '';
+    return last ? last.replace(/[_-]+/g, ' ') : 'Clothes Preset';
+  }
+
+  function presetClothesTooltipSummary(token, preset, rows, fallbackRow) {
+    const parsed = preset?.parsed || {};
+    const stage = String(preset?.stage || fallbackRow?.stage || '').toLowerCase();
+    const stagedTags = Array.isArray(parsed.stagedTags) ? parsed.stagedTags : [];
+    const rowCount = rows.length;
+    const countText = rowCount ? `${rowCount}${rowCount >= 500 ? '+' : ''}` : '';
+    if (fallbackRow?.disabled || fallbackRow?._wc_type === 'preset_status') {
+      return {
+        title: fallbackRow?.tag || 'Clothes preset',
+        countText: '',
+        desc: fallbackRow?.desc || 'Clothes Preset data is not ready.',
+        extraLabel: 'contains',
+        tags: [],
+      };
+    }
+    if (stage === 'combo') {
+      return {
+        title: fallbackRow?.tag || presetClothesTokenLabel(token, preset, rows),
+        countText: fallbackRow?.count ? fmtCount(fallbackRow.count || 0) : countText,
+        desc: fallbackRow?.prompt || fallbackRow?.desc || '',
+        extraLabel: 'contains',
+        tags: rowTags(fallbackRow),
+      };
+    }
+    if (parsed.mode === 'staged') {
+      const active = presetClothesCurrentSegment(parsed);
+      const activeText = String(active?.raw || parsed.activeQuery || '').trim();
+      const parts = [];
+      parts.push(`${stagedTags.length} staged ${stagedTags.length === 1 ? 'item' : 'items'}`);
+      if (activeText) parts.push(`editing "${activeText}"`);
+      if (rowCount) parts.push(`${countText} ${stage === 'item' ? 'candidate items' : 'next options'}`);
+      else parts.push('no matching candidates');
+      const tags = stagedTags.length ? stagedTags : uniqueLimitedTags(rows, 14);
+      return {
+        title: activeText || 'Add clothes item',
+        countText,
+        desc: parts.join(' · '),
+        extraLabel: stagedTags.length ? 'staged context' : 'examples',
+        tags,
+      };
+    }
+    if (stage === 'category' || stage === 'subcategory') {
+      const examples = rows
+        .map(row => String(row?.tag || '').trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      return {
+        title: presetClothesTokenLabel(token, preset, rows),
+        countText,
+        desc: rowCount ? `${countText} ${stage === 'category' ? 'slots' : 'groups'}` : 'No child items loaded',
+        extraLabel: stage === 'category' ? 'slots' : 'groups',
+        tags: examples,
+      };
+    }
+    return {
+      title: presetClothesTokenLabel(token, preset, rows),
+      countText,
+      desc: rowCount ? `${countText} ${stage === 'item' ? 'candidate items' : 'items'}` : 'No matching items loaded',
+      extraLabel: 'examples',
+      tags: uniqueLimitedTags(rows, 14),
+    };
+  }
+
+  function renderPresetClothesTokenTooltip(token, payload, {readOnly = false} = {}) {
+    if (lastLookupTag.toLowerCase() !== token.toLowerCase()) return;
+    const rows = Array.isArray(payload?.results) ? payload.results : [];
+    const usableRows = rows.filter(item => item && !item.disabled && item._wc_type !== 'preset_status');
+    const row = usableRows[0] || rows[0] || null;
+    const preset = payload?.preset || {};
+    const crumbs = Array.isArray(preset.crumbs) ? preset.crumbs : [];
+    const stage = String(preset.stage || row?.stage || '').toLowerCase();
+    const summary = presetClothesTooltipSummary(token, preset, usableRows, row);
+    const groupText = ['preset/clothes', presetClothesStageLabel(stage)].filter(Boolean).join(' / ');
+    const pathText = ['Clothes', ...crumbs.map(crumb => crumb?.label).filter(Boolean)].join(' / ');
+    const descParts = [];
+    if (pathText) descParts.push(pathText);
+    if (summary.desc) descParts.push(summary.desc);
+    const root = presetEventTooltipRoot(readOnly);
+    let html = '<div class="tag-tooltip-main">' +
+      `<span class="tag-tooltip-tag">${escHtml(summary.title)}</span>` +
+      (summary.countText ? `<span class="tag-tooltip-count">${escHtml(summary.countText)}</span>` : '') +
+      (groupText ? ` <span class="tag-tooltip-group">${escHtml(groupText)}</span>` : '') +
+      (descParts.length ? `<span class="tag-tooltip-desc">${escHtml(descParts.join(' · '))}</span>` : '') +
+      '</div>';
+    if (summary.tags.length) {
+      html += `<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">${escHtml(summary.extraLabel)}</span>` +
+        summary.tags.map(tag => renderTooltipExtraTag(tag, {})).join('') +
+        '</div>';
+    }
+    if (readOnly) {
+      html += '<div class="tag-tooltip-copy-row">' +
+        `<button type="button" class="tag-tooltip-copy-btn" data-copy-tag="${escHtml(lastPromptInfoRawTag || token)}">Copy Token</button>` +
+        '</div>';
+    }
+    root.innerHTML = html;
+    root.classList.remove('ac-mode');
+    root.classList.add('open');
+    if (readOnly) {
+      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode');
+      positionPromptInfoTooltip();
+    } else {
+      hidePromptInfoTooltip();
+      tagTooltip.classList.remove('ac-mode', 'preset-event-mode');
+      syncTooltipSide();
+      positionTagTooltip();
+    }
+    bindPresetEventTooltipActions(root, readOnly);
+  }
+
+  function rowTags(row) {
+    if (Array.isArray(row?.tags) && row.tags.length) {
+      return row.tags.map(tag => String(tag || '').trim()).filter(Boolean);
+    }
+    return String(row?.prompt || '').split(',').map(part => part.trim()).filter(Boolean);
+  }
+
+  function uniqueLimitedTags(rows, limit = 12) {
+    const seen = new Set();
+    const tags = [];
+    for (const row of rows || []) {
+      for (const tag of rowTags(row)) {
+        const key = tag.toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        tags.push(tag);
+        if (tags.length >= limit) return tags;
+      }
+    }
+    return tags;
+  }
+
+  function presetEventTooltipSummary(token, tokenStage, payloadStage, rows, fallbackRow, crumbs) {
+    const title = presetEventTokenLabel(token, crumbs);
+    const rowCount = rows.length;
+    const countText = rowCount ? `${rowCount}${rowCount >= 500 ? '+' : ''}` : '';
+    if (fallbackRow?.disabled || fallbackRow?._wc_type === 'preset_status') {
+      return {
+        title: fallbackRow?.tag || 'Event preset',
+        countText: '',
+        desc: fallbackRow?.desc || 'Event Preset data is not ready.',
+        extraLabel: 'contains',
+        tags: [],
+      };
+    }
+    if (tokenStage === 'combo') {
+      const tags = rowTags(fallbackRow);
+      return {
+        title: fallbackRow?.tag || title,
+        countText: fallbackRow?.count ? fmtCount(fallbackRow.count || 0) : '',
+        desc: fallbackRow?.prompt || fallbackRow?.desc || '',
+        extraLabel: 'contains',
+        tags,
+      };
+    }
+    if (tokenStage === 'item') {
+      return {
+        title,
+        countText,
+        desc: rowCount ? `${rowCount}${rowCount >= 500 ? '+' : ''} in observed combos` : 'No observed combos loaded',
+        extraLabel: 'example tags',
+        tags: uniqueLimitedTags(rows, 14),
+      };
+    }
+    if (tokenStage === 'subcategory') {
+      return {
+        title,
+        countText,
+        desc: rowCount ? `${rowCount}${rowCount >= 500 ? '+' : ''} ${presetEventNextStageLabel(payloadStage)}` : 'No main items loaded',
+        extraLabel: 'example tags',
+        tags: uniqueLimitedTags(rows, 14),
+      };
+    }
+    if (tokenStage === 'category' || tokenStage === 'axis') {
+      const examples = rows
+        .map(row => String(row?.tag || '').trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      return {
+        title,
+        countText,
+        desc: rowCount ? `${rowCount}${rowCount >= 500 ? '+' : ''} ${presetEventNextStageLabel(payloadStage)}` : 'No child items loaded',
+        extraLabel: tokenStage === 'axis' ? 'categories' : 'subcategories',
+        tags: examples,
+      };
+    }
+    return {
+      title: fallbackRow?.tag || title,
+      countText,
+      desc: fallbackRow?.prompt || fallbackRow?.desc || '',
+      extraLabel: 'contains',
+      tags: uniqueLimitedTags(rows, 12),
+    };
+  }
+
   async function lookupPresetEventTokenInfo(token, {readOnly = false, anchor = null, rawTag = ''} = {}) {
     const lookupTag = String(token || '').trim();
     if (!lookupTag) return;
+    const axis = presetQueryAxis(lookupTag) || 'events';
+    const renderTooltip = axis === 'clothes' ? renderPresetClothesTokenTooltip : renderPresetEventTokenTooltip;
     const panel = getEventPresetPanel?.();
     showPresetEventTooltipLoading(lookupTag, {readOnly, anchor, rawTag});
     if (!panel || typeof panel.getPresetAutocompletePayload !== 'function') {
-      renderPresetEventTokenTooltip(lookupTag, {
-        results: [presetStatusRow(lookupTag, 'Event Preset page is not loaded yet.', 'unavailable')],
-        preset: {axis: 'events', stage: 'status'},
+      renderTooltip(lookupTag, {
+        results: [presetStatusRow(lookupTag, `${presetAxisLabel(axis)} Preset page is not loaded yet.`, 'unavailable', axis)],
+        preset: {axis, stage: 'status'},
       }, {readOnly});
       return;
     }
     try {
+      const target = readOnly ? null : (acTarget || promptEdit);
+      const info = target ? getActiveTokenInfo(target) : null;
+      const caretOffset = info ? Math.max(0, (target?.selectionStart || 0) - info.start) : null;
       const payload = await panel.getPresetAutocompletePayload(lookupTag, {
         context: {...presetEventContext},
         limit: 500,
+        caretOffset,
       });
-      renderPresetEventTokenTooltip(lookupTag, payload || {}, {readOnly});
+      renderTooltip(lookupTag, payload || {}, {readOnly});
     } catch (error) {
-      renderPresetEventTokenTooltip(lookupTag, {
-        results: [presetStatusRow(lookupTag, error?.message || 'Event Preset lookup failed.', 'error')],
-        preset: {axis: 'events', stage: 'error'},
+      renderTooltip(lookupTag, {
+        results: [presetStatusRow(lookupTag, error?.message || `${presetAxisLabel(axis)} Preset lookup failed.`, 'error', axis)],
+        preset: {axis, stage: 'error'},
       }, {readOnly});
     }
   }
@@ -728,7 +1040,7 @@ export function createTagAssistController({
     tagTooltip.classList.remove('open', 'ac-mode');
     window.clearTimeout(tagLookupTimer);
     tagLookupTimer = window.setTimeout(() => {
-      if (isPresetEventsQuery(tag)) {
+      if (isLocalPresetQuery(tag)) {
         void lookupPresetEventTokenInfo(tag, {readOnly: false});
         return;
       }
@@ -949,7 +1261,7 @@ export function createTagAssistController({
     const target = acTarget || promptEdit;
     let results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
     presetAutocompleteMeta = matchesPreset ? (m.preset || null) : null;
-    if (presetAutocompleteMeta?.axis === 'events') {
+    if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes') {
       presetEventSourceResults = results;
       results = filteredPresetEventResults();
     } else {
@@ -1002,7 +1314,7 @@ export function createTagAssistController({
     lastAcQuery = nextQuery;
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
-    if (isPresetEventsQuery(lastAcQuery)) {
+    if (isLocalPresetQuery(lastAcQuery)) {
       void requestEventPresetAutocomplete(lastAcQuery);
       return true;
     }
@@ -1011,16 +1323,21 @@ export function createTagAssistController({
 
   async function requestEventPresetAutocomplete(query) {
     const requestQuery = String(query || '').trim();
+    const axis = presetQueryAxis(requestQuery) || 'events';
     const panel = getEventPresetPanel?.();
     if (!panel || typeof panel.getPresetAutocompletePayload !== 'function') {
-      showPresetEventStatus(requestQuery, 'Event Preset page is not loaded yet.', 'unavailable');
+      showPresetEventStatus(requestQuery, `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page is not loaded yet.`, 'unavailable', axis);
       return false;
     }
-    showPresetEventStatus(requestQuery, 'Loading Event Preset page...', 'loading');
+    showPresetEventStatus(requestQuery, `Loading ${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page...`, 'loading', axis);
     try {
+      const target = acTarget || promptEdit;
+      const info = getActiveTokenInfo(target);
+      const caretOffset = info ? Math.max(0, (target?.selectionStart || 0) - info.start) : null;
       const payload = await panel.getPresetAutocompletePayload(requestQuery, {
         context: {...presetEventContext},
         limit: 500,
+        caretOffset,
       });
       if (lastAcQuery !== requestQuery) return true;
       return applyAutocompleteResult({
@@ -1031,7 +1348,7 @@ export function createTagAssistController({
       });
     } catch (error) {
       if (lastAcQuery !== requestQuery) return false;
-      showPresetEventStatus(requestQuery, error?.message || 'Event Preset page load failed.', 'error');
+      showPresetEventStatus(requestQuery, error?.message || `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page load failed.`, 'error', axis);
       return false;
     }
   }
@@ -1105,6 +1422,41 @@ export function createTagAssistController({
     return `preset:events${parent.length ? '/' + parent.join('/') : ''}`;
   }
 
+  function presetClothesParentToken(token, parsed) {
+    const raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith('preset:clothes')) return '';
+    const prefix = 'preset:clothes';
+    const tail = raw.slice(prefix.length).replace(/^\/+/, '');
+    if (!tail) return '';
+    if (tail.includes('&')) {
+      const segments = tail.split('&');
+      const activeIndex = Number.isInteger(parsed?.activeIndex)
+        ? Math.max(0, Math.min(parsed.activeIndex, segments.length - 1))
+        : Math.max(0, segments.length - 1);
+      const active = segments[activeIndex] || '';
+      const parts = active.split('/').filter(Boolean);
+      if (parts.length > 1) {
+        segments[activeIndex] = parts.slice(0, -1).join('/');
+        return `${prefix}/${segments.join('&')}`;
+      }
+      if (active) {
+        segments[activeIndex] = '';
+        return `${prefix}/${segments.join('&')}`;
+      }
+      return '';
+    }
+    const parts = tail.split('/').filter(Boolean);
+    if (!parts.length) return '';
+    const parent = parts.slice(0, -1);
+    return `${prefix}${parent.length ? '/' + parent.join('/') : ''}`;
+  }
+
+  function presetParentToken(token) {
+    const axis = presetAutocompleteMeta?.axis || presetQueryAxis(token);
+    if (axis === 'clothes') return presetClothesParentToken(token, presetAutocompleteMeta?.parsed || null);
+    return presetEventParentToken(token);
+  }
+
   function presetEventResultMatches(row, query) {
     const needle = String(query || '').trim().toLowerCase();
     if (!needle) return true;
@@ -1137,11 +1489,29 @@ export function createTagAssistController({
     return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Preset';
   }
 
-  function renderPresetEventStageLine() {
-    const stage = presetAutocompleteMeta?.stage || '';
+  function presetAutocompleteStageText(axis, stage) {
+    return axis === 'clothes' ? presetClothesStageLabel(stage) : presetEventStageText(stage);
+  }
+
+  function presetAutocompletePathParts() {
+    const axis = presetAutocompleteMeta?.axis || 'events';
     const crumbs = Array.isArray(presetAutocompleteMeta?.crumbs) ? presetAutocompleteMeta.crumbs : [];
-    const path = ['Events', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
-    const canBack = !!presetEventParentToken(lastAcQuery);
+    if (axis === 'clothes') {
+      const parsed = presetAutocompleteMeta?.parsed || {};
+      const stagedTags = Array.isArray(parsed.stagedTags) ? parsed.stagedTags : [];
+      const stagedLabel = stagedTags.length
+        ? stagedTags.slice(0, 3).join(' + ') + (stagedTags.length > 3 ? ' + ...' : '')
+        : '';
+      return ['Clothes', stagedLabel, ...crumbs.map(crumb => crumb?.label).filter(Boolean)].filter(Boolean);
+    }
+    return ['Events', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
+  }
+
+  function renderPresetEventStageLine() {
+    const axis = presetAutocompleteMeta?.axis || 'events';
+    const stage = presetAutocompleteMeta?.stage || '';
+    const path = presetAutocompletePathParts();
+    const canBack = !!presetParentToken(lastAcQuery);
     const total = presetEventSourceResults.length;
     const visible = acResults.length;
     const countText = presetEventSearch && total !== visible ? ` ${visible}/${total}` : (total ? ` ${total}` : '');
@@ -1152,7 +1522,7 @@ export function createTagAssistController({
     return '<div class="preset-event-stage-line">' +
       `<button type="button" class="preset-event-back" data-preset-event-back ${canBack ? '' : 'disabled'} title="Back">‹</button>` +
       `<span class="preset-event-stage-path">${pathHtml}</span>` +
-      `<span class="preset-event-stage-next">${escHtml(presetEventStageText(stage) + countText)}</span>` +
+      `<span class="preset-event-stage-next">${escHtml(presetAutocompleteStageText(axis, stage) + countText)}</span>` +
       `<input class="preset-event-inline-search" data-preset-event-search value="${escHtml(presetEventSearch)}" placeholder="search" autocomplete="off" spellcheck="false">` +
       '</div>';
   }
@@ -1168,8 +1538,10 @@ export function createTagAssistController({
       const disabled = r._wc_type === 'preset_status' || r.disabled;
       const itemClass = disabled ? ' disabled' : '';
       const countText = r.count ? fmtCount(r.count || 0) : '';
-      html += `<div class="tag-ac-item preset-event-item${itemClass}${sel}" data-idx="${i}">` +
-        `<span class="tag-ac-tag">${escHtml(eventPresetDisplayTag(r))}</span>` +
+      const displayTag = eventPresetDisplayTag(r);
+      const descText = r.desc || r.prompt || rowTags(r).join(', ');
+      html += `<div class="tag-ac-item preset-event-item${itemClass}${sel}" data-idx="${i}"${autocompleteInfoAttrs(r, displayTag, descText)}>` +
+        `<span class="tag-ac-tag">${escHtml(displayTag)}</span>` +
         `<span class="tag-ac-count">${escHtml(countText)}</span>` +
         '</div>';
     });
@@ -1190,7 +1562,7 @@ export function createTagAssistController({
       backButton.addEventListener('click', e => {
         e.preventDefault();
         if (backButton.disabled) return;
-        const parentToken = presetEventParentToken(lastAcQuery);
+        const parentToken = presetParentToken(lastAcQuery);
         if (!parentToken) return;
         const target = acTarget || promptEdit;
         const info = getActiveTokenInfo(target);
@@ -1273,11 +1645,12 @@ export function createTagAssistController({
         if (Number.isInteger(idx)) selectAutocomplete(idx);
       });
     });
+    bindAutocompleteInfoHover(tagTooltip);
   }
 
   function renderAutocomplete() {
     hideTagChipInfoTooltip();
-    if (presetAutocompleteMeta?.axis === 'events') {
+    if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes') {
       renderPresetEventAutocomplete();
       return;
     }
@@ -1297,7 +1670,8 @@ export function createTagAssistController({
         ? (r.group || '')
         : (wcType ? (r.desc || '') : fmtCount(r.count));
       const inlinePreview = wcType === 'chunk_group' ? (r.preview || '') : '';
-      html += `<div class="tag-ac-item${itemClass}${sel}" data-idx="${i}">` +
+      const hoverTitle = wcType === 'preset_status' ? (r.tag || '') : displayTag;
+      html += `<div class="tag-ac-item${itemClass}${sel}" data-idx="${i}"${autocompleteInfoAttrs(r, hoverTitle)}>` +
         `<span class="tag-ac-tag"${tagColor}>${escHtml(displayTag)}</span>` +
         `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
         `<span class="tag-ac-count">${escHtml(metaText)}</span>` +
@@ -1314,6 +1688,11 @@ export function createTagAssistController({
     syncTooltipSide();
     positionTagTooltip();
     tagTooltip.querySelectorAll('.tag-ac-item').forEach(el => {
+      if (el.dataset.tooltipDesc) {
+        el.addEventListener('mouseenter', () => showTagChipInfoTooltip(el));
+        el.addEventListener('mousemove', () => positionTagChipInfoTooltip(el));
+        el.addEventListener('mouseleave', hideTagChipInfoTooltip);
+      }
       el.addEventListener('mouseenter', () => {
         if (!chunkMode) return;
         const idx = +el.dataset.idx;
@@ -1371,7 +1750,9 @@ export function createTagAssistController({
       return;
     }
     if (r._wc_type === 'preset_path') {
-      const presetToken = r.value || `preset:${r.tag}`;
+      const presetToken = r.axis === 'clothes' && r.clothesTokenValue
+        ? r.clothesTokenValue
+        : (r.value || `preset:${r.tag}`);
       swapToken(target, info, presetToken);
       if (r.final) {
         hideAutocomplete();

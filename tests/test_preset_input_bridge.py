@@ -275,6 +275,7 @@ class _ClothesService:
     def __init__(self):
         self.prompt_fragment_payloads = []
         self.bootstrap_payloads = []
+        self.lucky_payloads = []
 
     def status(self):
         return {"dataAvailability": {"main": "ready", "message": "ready"}}
@@ -348,6 +349,27 @@ class _ClothesService:
         ]
         return {
             "ok": True,
+            "promptFragment": {
+                "tags": tags,
+                "prompt": ", ".join(tags),
+            },
+        }
+
+    def lucky(self, payload):
+        self.lucky_payloads.append(dict(payload or {}))
+        tags = [
+            item.get("tag")
+            for item in payload.get("stagedItems", [])
+            if isinstance(item, dict) and item.get("tag")
+        ]
+        tags = [*tags, "random jacket"]
+        return {
+            "ok": True,
+            "lucky": {
+                "comboId": "combo-random",
+                "tags": tags,
+                "basis": "staged",
+            },
             "promptFragment": {
                 "tags": tags,
                 "prompt": ", ".join(tags),
@@ -560,7 +582,7 @@ def test_prompt_processor_expands_preset_clothes_staged_token_during_wildcard_st
     context = PromptContext(
         source_row={},
         settings={},
-        main_tags=["best quality", "preset:clothes/shirt&swimsuit under clothes&"],
+        main_tags=["best quality", "preset:clothes/shirt&swimsuit under clothes"],
     )
 
     processor._step_3_expand_wildcards(context)
@@ -571,6 +593,23 @@ def test_prompt_processor_expands_preset_clothes_staged_token_during_wildcard_st
         "swimsuit under clothes",
     ]
     assert context.metadata["preset_prompt_resolutions"][0]["axis"] == "clothes"
+    assert context.metadata["preset_prompt_resolutions"][0]["resolveMode"] == "fixed_tags"
+
+
+def test_prompt_processor_randomizes_trailing_clothes_staged_token(tmp_path):
+    processor = PromptProcessor.__new__(PromptProcessor)
+    processor.wildcard_processor = SimpleNamespace(expand_tags=lambda tags, _context: tags)
+    processor._preset_bridge = _bridge(tmp_path)
+    context = PromptContext(
+        source_row={},
+        settings={},
+        main_tags=["preset:clothes/necktie&underwear&underwear only&"],
+    )
+
+    processor._step_3_expand_wildcards(context)
+
+    assert context.main_tags == ["necktie", "underwear", "underwear only", "random jacket"]
+    assert context.metadata["preset_prompt_resolutions"][0]["resolveMode"] == "random_seed"
 
 
 def test_unavailable_axis_returns_load_state_without_suggestions(tmp_path):
@@ -627,6 +666,8 @@ def test_clothes_staged_token_parser_preserves_empty_and_active_segments(tmp_pat
     assert parsed["activeIndex"] == 1
     assert parsed["activeQuery"] == "swim"
     assert parsed["stagedTags"] == ["shirt", "pants"]
+    assert parsed["resolveTags"] == ["shirt", "swim", "pants"]
+    assert parsed["randomizeOnResolve"] is True
     assert parsed["segments"][3]["empty"] is True
 
     deleted = bridge.parse_clothes_token("preset:clothes/shirt&&pants&", caret_offset=len("preset:clothes/shirt&"))
@@ -639,31 +680,70 @@ def test_clothes_staged_token_expands_through_prompt_fragment(tmp_path):
     service = _ClothesService()
     bridge = _bridge(tmp_path, clothes_service=service)
 
-    resolved = bridge.resolve_prompt_token("preset:clothes/shirt&swimsuit under clothes&")
+    resolved = bridge.resolve_prompt_token("preset:clothes/shirt&swimsuit under clothes")
 
     assert resolved["applied"] is True
     assert resolved["axis"] == "clothes"
+    assert resolved["resolveMode"] == "fixed_tags"
     assert resolved["tags"] == ["shirt", "swimsuit under clothes"]
     assert service.prompt_fragment_payloads[-1]["stagedItems"] == [
         {"tag": "shirt", "source": "shortcut"},
         {"tag": "swimsuit under clothes", "source": "shortcut"},
     ]
+    assert "personId" not in service.prompt_fragment_payloads[-1]
+    assert service.lucky_payloads == []
+
+
+def test_clothes_trailing_ampersand_resolves_with_lucky_seed(tmp_path):
+    service = _ClothesService()
+    bridge = _bridge(tmp_path, clothes_service=service)
+
+    resolved = bridge.resolve_prompt_token("preset:clothes/necktie&underwear&underwear only&")
+
+    assert resolved["applied"] is True
+    assert resolved["stage"] == "staged_random"
+    assert resolved["resolveMode"] == "random_seed"
+    assert resolved["stagedTags"] == ["necktie", "underwear", "underwear only"]
+    assert resolved["tags"] == ["necktie", "underwear", "underwear only", "random jacket"]
+    assert service.lucky_payloads[-1]["stagedItems"] == [
+        {"tag": "necktie", "source": "shortcut"},
+        {"tag": "underwear", "source": "shortcut"},
+        {"tag": "underwear only", "source": "shortcut"},
+    ]
+    assert service.prompt_fragment_payloads == []
 
 
 def test_clothes_staged_token_ignores_empty_segments(tmp_path):
-    resolved = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&&pants&")
+    resolved = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&&pants")
 
     assert resolved["applied"] is True
     assert resolved["tags"] == ["shirt", "pants"]
     assert resolved["stagedTags"] == ["shirt", "pants"]
 
 
+def test_clothes_staged_token_does_not_apply_incomplete_category(tmp_path):
+    bridge = _bridge(tmp_path)
+    parsed = bridge.parse_clothes_token("preset:clothes/off shoulder&HEAD_NECK_FACE")
+
+    assert parsed["stagedTags"] == ["off shoulder"]
+    assert parsed["unresolvedSegments"][0]["raw"] == "HEAD_NECK_FACE"
+
+    resolved = bridge.resolve_prompt_token("preset:clothes/off shoulder&HEAD_NECK_FACE")
+
+    assert resolved["applied"] is True
+    assert resolved["tags"] == ["off shoulder"]
+    assert resolved["reason"] == "partial_unresolved"
+    assert resolved["unresolvedSegments"][0]["raw"] == "HEAD_NECK_FACE"
+
+
 def test_clothes_combo_token_expands_to_combo_tags(tmp_path):
-    resolved = _bridge(tmp_path).resolve_prompt_token("preset:clothes/combo-shirt")
+    service = _ClothesService()
+    resolved = _bridge(tmp_path, clothes_service=service).resolve_prompt_token("preset:clothes/combo-shirt")
 
     assert resolved["applied"] is True
     assert resolved["stage"] == "combo"
     assert resolved["tags"] == ["shirt", "long sleeves"]
+    assert "personId" not in service.bootstrap_payloads[-1]
 
 
 def test_clothes_combo_suggestion_uses_readable_token(tmp_path):
@@ -687,13 +767,15 @@ def test_clothes_item_suggestion_appends_staged_readable_token(tmp_path):
 
 
 def test_clothes_browse_segment_resolves_exact_item_and_reports_partial(tmp_path):
-    exact = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&UPPER/tops/swimsuit under clothes&")
+    service = _ClothesService()
+    exact = _bridge(tmp_path, clothes_service=service).resolve_prompt_token("preset:clothes/shirt&UPPER/tops/swimsuit under clothes")
 
     assert exact["applied"] is True
     assert exact["tags"] == ["shirt", "swimsuit under clothes"]
     assert exact["resolvedSegments"][0]["tag"] == "swimsuit under clothes"
+    assert "personId" not in service.bootstrap_payloads[-1]
 
-    partial = _bridge(tmp_path).resolve_prompt_token("preset:clothes/shirt&UPPER/tops/swi&")
+    partial = _bridge(tmp_path, clothes_service=service).resolve_prompt_token("preset:clothes/shirt&UPPER/tops/swi")
     assert partial["applied"] is True
     assert partial["tags"] == ["shirt"]
     assert partial["reason"] == "partial_unresolved"

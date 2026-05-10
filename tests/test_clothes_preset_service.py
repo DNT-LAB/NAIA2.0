@@ -156,6 +156,23 @@ def test_browser_search_moves_from_zero_match_clothes_category(monkeypatch):
     assert [item["tag"] for item in result["browser"]["items"]] == ["shirt"]
 
 
+def test_browser_all_slot_search_returns_cross_slot_items(monkeypatch):
+    service = _fake_service(monkeypatch)
+
+    result = service.bootstrap({
+        "categoryId": "HEAD_NECK_FACE",
+        "itemSearch": "irt",
+        "searchScope": "all",
+        "itemLimit": 10,
+    })
+
+    tags = [item["tag"] for item in result["browser"]["items"]]
+    assert result["browser"]["searchScope"] == "all"
+    assert "shirt" in tags
+    assert "skirt" in tags
+    assert result["browser"]["selected"]["categoryId"] == "UPPER_BODY"
+
+
 def test_combo_focus_does_not_stage_combo_tags(monkeypatch):
     service = _fake_service(monkeypatch)
     combo_id = service._combo_id("shirt, skirt")

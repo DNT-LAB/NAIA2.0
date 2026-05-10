@@ -9916,6 +9916,23 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   background: rgba(100,140,255,0.16);
   color: var(--text-primary);
 }
+.preset-event-random {
+  height: 28px;
+  min-width: 74px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px;
+  background: rgba(100,140,255,0.10);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 12px;
+}
+.preset-event-random:hover {
+  border-color: rgba(130,150,255,0.42);
+  background: rgba(100,140,255,0.18);
+}
 .preset-event-person-menu {
   position: relative;
   min-width: 148px;

@@ -744,6 +744,8 @@ class ClothesPresetService:
         item_search = str(payload.get("itemSearch") or payload.get("searchItems") or "")
         search_active = bool(self._normalize_tag(item_search))
         rule_context = self._slot_candidate_context(normalized)
+        if search_active and self._all_slot_browser_search_requested(payload):
+            return self._browser_for_all_slot_search(payload, normalized, item_search, rule_context)
         base_rows, base_signal_cache = self._slot_candidate_rows(
             category_id,
             "",
@@ -862,6 +864,145 @@ class ClothesPresetService:
             "items": items,
             "search": item_search,
             "searchActive": search_active,
+            "limit": item_limit,
+        }
+
+    def _all_slot_browser_search_requested(self, payload: dict[str, Any]) -> bool:
+        scope = str(payload.get("searchScope") or "").strip().lower().replace("-", "").replace("_", "")
+        if scope in {"all", "allslots", "global", "catalog"}:
+            return True
+        flag = payload.get("allSlots")
+        if isinstance(flag, str):
+            return flag.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(flag)
+
+    def _browser_for_all_slot_search(
+        self,
+        payload: dict[str, Any],
+        normalized: dict[str, Any],
+        item_search: str,
+        rule_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        display_slots = self._display_slots()
+        selected_category_id = normalized["selected"].get("categoryId") or ""
+        if selected_category_id not in display_slots:
+            selected_category_id = ""
+
+        base_rows_by_slot: dict[str, list[Any]] = {}
+        base_signal_by_slot: dict[str, dict[str, tuple[float, float, int, int]]] = {}
+        match_rows_by_slot: dict[str, list[Any]] = {}
+        match_signal_by_slot: dict[str, dict[str, tuple[float, float, int, int]]] = {}
+        first_match_slot = ""
+        row_by_tag: dict[str, Any] = {}
+        signal_cache: dict[str, tuple[float, float, int, int]] = {}
+
+        for slot in display_slots:
+            base_rows, base_signal = self._slot_candidate_rows(
+                slot,
+                "",
+                normalized,
+                limit_rows=False,
+                rule_context=rule_context,
+            )
+            match_rows, match_signal = self._slot_candidate_rows(
+                slot,
+                item_search,
+                normalized,
+                limit_rows=False,
+                rule_context=rule_context,
+            )
+            base_rows_by_slot[slot] = base_rows
+            base_signal_by_slot[slot] = base_signal
+            match_rows_by_slot[slot] = match_rows
+            match_signal_by_slot[slot] = match_signal
+            if match_rows and not first_match_slot:
+                first_match_slot = slot
+            for row in match_rows:
+                tag = str(row.tag)
+                row_by_tag.setdefault(tag, row)
+                signal_cache[tag] = match_signal.get(tag, (0.0, 0.0, 0, 0))
+
+        if selected_category_id and match_rows_by_slot.get(selected_category_id):
+            category_id = selected_category_id
+        else:
+            category_id = first_match_slot or selected_category_id or self._first_slot()
+
+        base_rows = base_rows_by_slot.get(category_id, [])
+        match_rows = match_rows_by_slot.get(category_id, [])
+        subgroups = self._merge_browser_subgroups(
+            self._subgroups_from_rows(base_rows, base_signal_by_slot.get(category_id, {})),
+            self._subgroups_from_rows(match_rows, match_signal_by_slot.get(category_id, {})),
+            search_active=True,
+        )
+        subcategory_id = normalized["selected"].get("subcategoryId") or ""
+        subgroup_by_id = {item["id"]: item for item in subgroups}
+        selected_subgroup = subgroup_by_id.get(subcategory_id)
+        if not selected_subgroup or selected_subgroup.get("disabled"):
+            first_enabled = next((item for item in subgroups if not item.get("disabled")), None)
+            subcategory_id = (first_enabled or subgroups[0])["id"] if subgroups else ""
+
+        selected_tags = rule_context["selectedTags"]
+        all_rows = list(row_by_tag.values())
+        all_rows.sort(
+            key=lambda row: (
+                0 if str(row.tag) in selected_tags else 1,
+                -signal_cache.get(str(row.tag), (0.0, 0.0, 0, 0))[0],
+                -signal_cache.get(str(row.tag), (0.0, 0.0, 0, 0))[1],
+                -signal_cache.get(str(row.tag), (0.0, 0.0, 0, 0))[2],
+                -signal_cache.get(str(row.tag), (0.0, 0.0, 0, 0))[3],
+                -int(row.post_count),
+                str(row.tag),
+            )
+        )
+        item_limit = self._limit(payload.get("itemLimit"), self._max_items_per_slot())
+        items = [
+            self._browser_item(row, normalized, signal_cache)
+            for row in all_rows[:item_limit]
+        ]
+
+        staged_by_slot = {
+            group["id"]: len(group.get("items") or [])
+            for group in normalized["staged"]["groups"]
+        }
+        categories = []
+        for slot in display_slots:
+            slot_base_rows = base_rows_by_slot.get(slot, [])
+            slot_match_rows = match_rows_by_slot.get(slot, [])
+            total = len(slot_base_rows)
+            subcategory_count = len({
+                self._assigned_group_by_tag.get(str(row.tag), "other")
+                for row in slot_base_rows
+            })
+            matched_subcategory_count = len({
+                self._assigned_group_by_tag.get(str(row.tag), "other")
+                for row in slot_match_rows
+            })
+            categories.append({
+                "id": slot,
+                "label": self._slot_label(slot),
+                "count": total,
+                "matchedCount": len(slot_match_rows),
+                "subcategoryCount": subcategory_count,
+                "matchedSubcategoryCount": matched_subcategory_count,
+                "selectedCount": int(staged_by_slot.get(slot, 0) or 0),
+                "disabled": not bool(slot_match_rows),
+                "selected": slot == category_id,
+            })
+
+        return {
+            "selected": {
+                "categoryId": category_id,
+                "subcategoryId": subcategory_id,
+            },
+            "categories": categories,
+            "subcategories": [
+                dict(item, selected=item["id"] == subcategory_id)
+                for item in subgroups
+            ],
+            "items": items,
+            "search": item_search,
+            "searchActive": True,
+            "searchScope": "all",
             "limit": item_limit,
         }
 

@@ -48,6 +48,22 @@ EVENT_SHORTCUT_IDENTITY_TAGS: frozenset[str] = frozenset({
     "multiple girls multiple boys",
     "1girl 1boy",
 })
+CLOTHES_SLOT_IDS: frozenset[str] = frozenset({
+    "HEAD_NECK_FACE",
+    "UPPER_BODY",
+    "WAIST_HIP",
+    "ARMS_HANDS",
+    "LEGS_FEET",
+    "STYLE",
+})
+CLOTHES_SLOT_LABEL_KEYS: frozenset[str] = frozenset({
+    "head neck face",
+    "upper body",
+    "waist hip",
+    "arms hands",
+    "legs feet",
+    "style",
+})
 
 
 class PresetInputBridge:
@@ -189,7 +205,10 @@ class PresetInputBridge:
                 "activeQuery": "",
                 "activePath": [],
                 "stagedTags": [],
+                "resolveTags": [],
                 "unresolvedSegments": [],
+                "randomizeOnResolve": False,
+                "resolveMode": "inactive",
             }
         tail = self._clothes_tail(parsed)
         if "&" not in tail:
@@ -202,20 +221,25 @@ class PresetInputBridge:
                 "activeQuery": str(path[-1] if path else ""),
                 "activePath": path,
                 "stagedTags": [],
+                "resolveTags": [],
                 "unresolvedSegments": [],
+                "randomizeOnResolve": False,
+                "resolveMode": "browse",
             }
 
         active_index = self._clothes_active_segment_index(parsed.get("raw", ""), tail, caret_offset)
         raw_segments = tail.split("&")
         segments = []
         staged_tags = []
+        resolve_tags = []
         unresolved = []
         active_query = ""
         active_path: list[str] = []
+        trailing_ampersand = tail.endswith("&")
         for index, raw_segment in enumerate(raw_segments):
             decoded = unquote(str(raw_segment or "").strip())
             path = [part.strip() for part in decoded.split("/") if part.strip()]
-            browse = bool(path and "/" in decoded)
+            browse = bool(path and ("/" in decoded or self._is_clothes_slot_segment(decoded)))
             empty = not decoded
             active = active_index == index
             tag = "" if empty or browse else decoded
@@ -229,6 +253,8 @@ class PresetInputBridge:
                 "active": active,
             }
             segments.append(item)
+            if tag:
+                resolve_tags.append(tag)
             if active:
                 active_path = path if browse else []
                 active_query = path[-1] if browse and path else decoded
@@ -245,7 +271,10 @@ class PresetInputBridge:
             "activeQuery": active_query,
             "activePath": active_path,
             "stagedTags": self._ordered_unique(staged_tags),
+            "resolveTags": self._ordered_unique(resolve_tags),
             "unresolvedSegments": unresolved,
+            "randomizeOnResolve": bool(trailing_ampersand and resolve_tags),
+            "resolveMode": "random_seed" if trailing_ampersand and resolve_tags else "fixed_tags",
         }
 
     def parse_token(self, token: str) -> dict[str, Any]:
@@ -629,7 +658,7 @@ class PresetInputBridge:
                 }
             return {"ok": True, "applied": False, "reason": "unsupported_clothes_browse_path", "token": token, "axis": "clothes"}
 
-        staged_tags = list(clothes.get("stagedTags") or [])
+        staged_tags = list(clothes.get("resolveTags") or clothes.get("stagedTags") or [])
         unresolved = list(clothes.get("unresolvedSegments") or [])
         resolved_from_path = []
         for segment in unresolved:
@@ -654,12 +683,39 @@ class PresetInputBridge:
 
         payload = {
             "ratingId": self.context["ratingId"],
-            "personId": self.context["personId"],
             "stagedItems": [
                 {"tag": tag, "source": "shortcut"}
                 for tag in staged_tags
             ],
         }
+        if clothes.get("randomizeOnResolve") and hasattr(service, "lucky"):
+            try:
+                lucky = service.lucky(payload)
+                prompt_fragment = (lucky.get("promptFragment") if isinstance(lucky, dict) else {}) or {}
+                tags = self._combo_tags(prompt_fragment or {"tags": staged_tags})
+                prompt = self._join_tags(tags)
+                return {
+                    "ok": True,
+                    "applied": bool(prompt),
+                    "reason": "partial_unresolved" if unresolved else "",
+                    "token": token,
+                    "axis": "clothes",
+                    "stage": "staged_random",
+                    "resolveMode": "random_seed",
+                    "randomizeOnResolve": True,
+                    "tags": self._split_prompt(prompt),
+                    "prompt": prompt,
+                    "stagedTags": staged_tags,
+                    "unresolvedSegments": unresolved,
+                    "resolvedSegments": resolved_from_path,
+                    "lucky": (lucky.get("lucky") if isinstance(lucky, dict) else {}) or {},
+                }
+            except Exception as exc:
+                lucky_error = str(exc)
+            else:
+                lucky_error = ""
+        else:
+            lucky_error = ""
         try:
             fragment = service.prompt_fragment(payload)
         except Exception as exc:
@@ -679,10 +735,13 @@ class PresetInputBridge:
         return {
             "ok": True,
             "applied": bool(prompt),
-            "reason": "partial_unresolved" if unresolved else "",
+            "reason": "partial_unresolved" if unresolved else ("clothes_lucky_failed_fallback" if lucky_error else ""),
             "token": token,
             "axis": "clothes",
             "stage": "staged",
+            "resolveMode": "random_seed_fallback" if clothes.get("randomizeOnResolve") else "fixed_tags",
+            "randomizeOnResolve": bool(clothes.get("randomizeOnResolve")),
+            "luckyError": lucky_error,
             "tags": self._split_prompt(prompt),
             "prompt": prompt,
             "stagedTags": staged_tags,
@@ -699,7 +758,6 @@ class PresetInputBridge:
             return None
         data = service.bootstrap({
             "ratingId": self.context["ratingId"],
-            "personId": self.context["personId"],
             "comboId": combo_id,
             "comboLimit": 500,
         })
@@ -717,7 +775,6 @@ class PresetInputBridge:
         slot, subgroup, query = path[0], path[1], path[2]
         payload = {
             "ratingId": self.context["ratingId"],
-            "personId": self.context["personId"],
             "categoryId": slot,
             "subcategoryId": subgroup,
             "itemSearch": query,
@@ -1163,6 +1220,17 @@ class PresetInputBridge:
                 return index
             start = end + 1
         return max(0, len(tail.split("&")) - 1)
+
+    @staticmethod
+    def _is_clothes_slot_segment(value: Any) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return False
+        if text.upper() in CLOTHES_SLOT_IDS:
+            return True
+        normalized = text.replace("/", " ").replace("_", " ").replace("-", " ")
+        normalized = " ".join(normalized.lower().split())
+        return normalized in CLOTHES_SLOT_LABEL_KEYS
 
     @staticmethod
     def _clothes_segment(value: Any) -> str:

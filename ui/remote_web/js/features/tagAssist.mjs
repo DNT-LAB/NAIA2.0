@@ -32,6 +32,7 @@ export function createTagAssistController({
   let acSel = -1;
   let acTimer = null;
   let acTranslationTimer = null;
+  let presetInlineSearchTimer = null;
   let lastAcQuery = '';
   let lastTranslationRequestQuery = '';
   let acTarget = null;
@@ -40,6 +41,7 @@ export function createTagAssistController({
   let presetPersonMenuOpen = false;
   let presetEventSourceResults = [];
   let presetEventSearch = '';
+  let presetInlineSearchRequestId = 0;
   const hangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
   const imeStates = new WeakMap();
 
@@ -60,6 +62,31 @@ export function createTagAssistController({
 
   function isLocalPresetQuery(query) {
     return isPresetEventsQuery(query) || isPresetClothesQuery(query);
+  }
+
+  function isClothesEmptyStagedSegmentAtCursor(info, textarea) {
+    const token = String(info?.stripped || '');
+    if (!textarea || !isPresetClothesQuery(token)) return false;
+    const prefix = 'preset:clothes';
+    let tailStart = prefix.length;
+    while (token[tailStart] === '/') tailStart += 1;
+    const tail = token.slice(tailStart);
+    if (!tail.includes('&')) return false;
+
+    const cursor = textarea.selectionStart != null ? Number(textarea.selectionStart) : info.end;
+    const tokenOffset = Math.max(0, String(info.raw || '').indexOf(token));
+    const tokenCursor = Math.max(0, Math.min(cursor - info.start - tokenOffset, token.length));
+    const tailCursor = Math.max(0, Math.min(tokenCursor - tailStart, tail.length));
+    const segments = tail.split('&');
+    let start = 0;
+    for (const segment of segments) {
+      const end = start + segment.length;
+      if (tailCursor >= start && tailCursor <= end) {
+        return segment.length === 0;
+      }
+      start = end + 1;
+    }
+    return false;
   }
 
   function presetQueryAxis(query) {
@@ -659,10 +686,26 @@ export function createTagAssistController({
     return last ? last.replace(/[_-]+/g, ' ') : 'Clothes Preset';
   }
 
+  function presetClothesResolveTags(parsed) {
+    if (!parsed || parsed.mode !== 'staged') return [];
+    return Array.isArray(parsed.resolveTags) && parsed.resolveTags.length
+      ? parsed.resolveTags
+      : (Array.isArray(parsed.stagedTags) ? parsed.stagedTags : []);
+  }
+
+  function presetClothesGenerationText(parsed, {short = false} = {}) {
+    const tags = presetClothesResolveTags(parsed);
+    if (!tags.length) return '';
+    if (parsed?.randomizeOnResolve) {
+      return short ? 'Random seed' : 'Generation uses these staged tags as a random Clothes seed';
+    }
+    return short ? 'Fixed tags' : 'Generation applies exactly these staged tags';
+  }
+
   function presetClothesTooltipSummary(token, preset, rows, fallbackRow) {
     const parsed = preset?.parsed || {};
     const stage = String(preset?.stage || fallbackRow?.stage || '').toLowerCase();
-    const stagedTags = Array.isArray(parsed.stagedTags) ? parsed.stagedTags : [];
+    const stagedTags = presetClothesResolveTags(parsed);
     const rowCount = rows.length;
     const countText = rowCount ? `${rowCount}${rowCount >= 500 ? '+' : ''}` : '';
     if (fallbackRow?.disabled || fallbackRow?._wc_type === 'preset_status') {
@@ -688,6 +731,8 @@ export function createTagAssistController({
       const activeText = String(active?.raw || parsed.activeQuery || '').trim();
       const parts = [];
       parts.push(`${stagedTags.length} staged ${stagedTags.length === 1 ? 'item' : 'items'}`);
+      const generationText = presetClothesGenerationText(parsed);
+      if (generationText) parts.push(generationText);
       if (activeText) parts.push(`editing "${activeText}"`);
       if (rowCount) parts.push(`${countText} ${stage === 'item' ? 'candidate items' : 'next options'}`);
       else parts.push('no matching candidates');
@@ -1048,6 +1093,19 @@ export function createTagAssistController({
     }, 200);
   }
 
+  function openClothesStagedAutocompleteAtCursor(textarea) {
+    const target = textarea || acTarget || promptEdit;
+    const info = getActiveTokenInfo(target);
+    if (!isClothesEmptyStagedSegmentAtCursor(info, target)) return false;
+    acTarget = target;
+    lastLookupTag = '';
+    window.clearTimeout(tagLookupTimer);
+    hidePromptInfoTooltip();
+    hideTagChipInfoTooltip();
+    scheduleAutocomplete({target, info, force: true});
+    return true;
+  }
+
   function onTagLookupResult(m) {
     if (acMode) return;
     hideTagChipInfoTooltip();
@@ -1310,7 +1368,10 @@ export function createTagAssistController({
     const normalized = String(query || '').trim();
     if (!normalized) return false;
     const nextQuery = normalized.toLowerCase().startsWith('preset:') ? normalized : `preset:${normalized}`;
-    if (nextQuery !== lastAcQuery) presetEventSearch = '';
+    if (nextQuery !== lastAcQuery) {
+      presetEventSearch = '';
+      presetInlineSearchRequestId += 1;
+    }
     lastAcQuery = nextQuery;
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
@@ -1321,15 +1382,18 @@ export function createTagAssistController({
     return sendWs(presetRequestPayload(lastAcQuery));
   }
 
-  async function requestEventPresetAutocomplete(query) {
+  async function requestEventPresetAutocomplete(query, {search = '', showLoading = true, restoreSearchFocus = false, inlineSearchRequestId = null} = {}) {
     const requestQuery = String(query || '').trim();
+    const requestSearch = String(search || '');
     const axis = presetQueryAxis(requestQuery) || 'events';
     const panel = getEventPresetPanel?.();
     if (!panel || typeof panel.getPresetAutocompletePayload !== 'function') {
       showPresetEventStatus(requestQuery, `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page is not loaded yet.`, 'unavailable', axis);
       return false;
     }
-    showPresetEventStatus(requestQuery, `Loading ${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page...`, 'loading', axis);
+    if (showLoading) {
+      showPresetEventStatus(requestQuery, `Loading ${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page...`, 'loading', axis);
+    }
     try {
       const target = acTarget || promptEdit;
       const info = getActiveTokenInfo(target);
@@ -1338,16 +1402,33 @@ export function createTagAssistController({
         context: {...presetEventContext},
         limit: 500,
         caretOffset,
+        search: axis === 'clothes' ? requestSearch : '',
       });
       if (lastAcQuery !== requestQuery) return true;
-      return applyAutocompleteResult({
+      if (axis === 'clothes') {
+        if (inlineSearchRequestId !== null && inlineSearchRequestId !== presetInlineSearchRequestId) return true;
+        if ((restoreSearchFocus || inlineSearchRequestId !== null) && requestSearch !== presetEventSearch) return true;
+      }
+      const applied = applyAutocompleteResult({
         type: 'autocomplete_result',
         query: payload?.query || requestQuery,
         results: payload?.results || [],
         preset: payload?.preset || {},
       });
+      if (restoreSearchFocus && axis === 'clothes') {
+        const searchInput = tagTooltip.querySelector('[data-preset-event-search]');
+        if (searchInput) {
+          searchInput.focus({preventScroll: true});
+          searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+        }
+      }
+      return applied;
     } catch (error) {
       if (lastAcQuery !== requestQuery) return false;
+      if (axis === 'clothes') {
+        if (inlineSearchRequestId !== null && inlineSearchRequestId !== presetInlineSearchRequestId) return false;
+        if ((restoreSearchFocus || inlineSearchRequestId !== null) && requestSearch !== presetEventSearch) return false;
+      }
       showPresetEventStatus(requestQuery, error?.message || `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page load failed.`, 'error', axis);
       return false;
     }
@@ -1370,6 +1451,7 @@ export function createTagAssistController({
   }
 
   function renderPresetEventToolbar(context) {
+    const axis = presetAutocompleteMeta?.axis || 'events';
     const ratingOptions = Array.isArray(context?.ratingOptions) && context.ratingOptions.length
       ? context.ratingOptions
       : [
@@ -1397,14 +1479,20 @@ export function createTagAssistController({
       const label = option.label || id.replace(/_/g, ' ');
       return `<button type="button" class="preset-event-person-option${selected}" data-person="${escHtml(id)}" role="option" aria-selected="${id === selectedPerson ? 'true' : 'false'}">${escHtml(label)}</button>`;
     }).join('');
-    return '<div class="preset-event-toolbar">' +
-      `<div class="preset-event-ratings">${ratingHtml}</div>` +
+    const personMenuHtml = axis === 'clothes' ? '' :
       `<div class="preset-event-person-menu${presetPersonMenuOpen ? ' open' : ''}">` +
         `<button type="button" class="preset-event-person-trigger" aria-haspopup="listbox" aria-expanded="${presetPersonMenuOpen ? 'true' : 'false'}">` +
           `<span>${escHtml(selectedPersonLabel)}</span><span class="preset-event-person-caret" aria-hidden="true"></span>` +
         '</button>' +
         `<div class="preset-event-person-options" role="listbox">${personHtml}</div>` +
-      '</div>' +
+      '</div>';
+    const randomHtml = axis === 'clothes'
+      ? '<button type="button" class="preset-event-random" data-preset-clothes-random title="Random Clothes">Random</button>'
+      : '';
+    return '<div class="preset-event-toolbar">' +
+      `<div class="preset-event-ratings">${ratingHtml}</div>` +
+      personMenuHtml +
+      randomHtml +
       '</div>';
   }
 
@@ -1477,6 +1565,43 @@ export function createTagAssistController({
     return (presetEventSourceResults || []).filter(row => presetEventResultMatches(row, presetEventSearch));
   }
 
+  function refreshClothesInlineSearch() {
+    const query = String(lastAcQuery || '').trim();
+    if (!isPresetClothesQuery(query)) return;
+    const requestId = ++presetInlineSearchRequestId;
+    void requestEventPresetAutocomplete(query, {
+      search: presetEventSearch,
+      showLoading: false,
+      restoreSearchFocus: true,
+      inlineSearchRequestId: requestId,
+    });
+  }
+
+  async function randomizeClothesAutocomplete() {
+    const panel = getEventPresetPanel?.();
+    if (!panel || typeof panel.getClothesRandomAutocompleteSelection !== 'function') return false;
+    const target = acTarget || promptEdit;
+    const info = getActiveTokenInfo(target);
+    if (!info) return false;
+    const caretOffset = Math.max(0, (target?.selectionStart || 0) - info.start);
+    const result = await panel.getClothesRandomAutocompleteSelection(lastAcQuery || info.stripped, {
+      context: {...presetEventContext},
+      caretOffset,
+      search: presetEventSearch,
+      limit: 500,
+    });
+    if (!result?.ok || !result.token) {
+      showToast?.(result?.message || 'No random Clothes candidates.', 'warning');
+      return false;
+    }
+    presetPersonMenuOpen = false;
+    presetEventSearch = '';
+    swapToken(target, info, result.token);
+    target.focus();
+    requestPresetAutocomplete(result.token);
+    return true;
+  }
+
   function presetEventStageText(stage) {
     const normalized = String(stage || '').toLowerCase();
     if (normalized === 'category') return 'Category';
@@ -1498,7 +1623,7 @@ export function createTagAssistController({
     const crumbs = Array.isArray(presetAutocompleteMeta?.crumbs) ? presetAutocompleteMeta.crumbs : [];
     if (axis === 'clothes') {
       const parsed = presetAutocompleteMeta?.parsed || {};
-      const stagedTags = Array.isArray(parsed.stagedTags) ? parsed.stagedTags : [];
+      const stagedTags = presetClothesResolveTags(parsed);
       const stagedLabel = stagedTags.length
         ? stagedTags.slice(0, 3).join(' + ') + (stagedTags.length > 3 ? ' + ...' : '')
         : '';
@@ -1515,6 +1640,13 @@ export function createTagAssistController({
     const total = presetEventSourceResults.length;
     const visible = acResults.length;
     const countText = presetEventSearch && total !== visible ? ` ${visible}/${total}` : (total ? ` ${total}` : '');
+    const generationText = axis === 'clothes'
+      ? presetClothesGenerationText(presetAutocompleteMeta?.parsed || {}, {short: true})
+      : '';
+    const stageText = [
+      generationText,
+      presetAutocompleteStageText(axis, stage) + countText,
+    ].filter(Boolean).join(' · ');
     const pathHtml = path.map((part, index) => {
       const cls = index === path.length - 1 ? ' current' : '';
       return `<span class="preset-event-stage-part${cls}">${escHtml(part)}</span>`;
@@ -1522,7 +1654,7 @@ export function createTagAssistController({
     return '<div class="preset-event-stage-line">' +
       `<button type="button" class="preset-event-back" data-preset-event-back ${canBack ? '' : 'disabled'} title="Back">‹</button>` +
       `<span class="preset-event-stage-path">${pathHtml}</span>` +
-      `<span class="preset-event-stage-next">${escHtml(presetAutocompleteStageText(axis, stage) + countText)}</span>` +
+      `<span class="preset-event-stage-next">${escHtml(stageText)}</span>` +
       `<input class="preset-event-inline-search" data-preset-event-search value="${escHtml(presetEventSearch)}" placeholder="search" autocomplete="off" spellcheck="false">` +
       '</div>';
   }
@@ -1556,6 +1688,14 @@ export function createTagAssistController({
 
     const toolbar = tagTooltip.querySelector('.preset-event-toolbar');
     if (toolbar) toolbar.addEventListener('mousedown', e => e.preventDefault());
+    const clothesRandom = tagTooltip.querySelector('[data-preset-clothes-random]');
+    if (clothesRandom) {
+      clothesRandom.addEventListener('mousedown', e => e.preventDefault());
+      clothesRandom.addEventListener('click', e => {
+        e.preventDefault();
+        void randomizeClothesAutocomplete();
+      });
+    }
     const backButton = tagTooltip.querySelector('[data-preset-event-back]');
     if (backButton) {
       backButton.addEventListener('mousedown', e => e.preventDefault());
@@ -1578,13 +1718,18 @@ export function createTagAssistController({
       searchInput.addEventListener('click', e => e.stopPropagation());
       searchInput.addEventListener('input', () => {
         presetEventSearch = searchInput.value || '';
-        acResults = filteredPresetEventResults();
-        acSel = acResults.length ? 0 : -1;
-        renderAutocomplete();
-        const nextInput = tagTooltip.querySelector('[data-preset-event-search]');
-        if (nextInput) {
-          nextInput.focus({preventScroll: true});
-          nextInput.selectionStart = nextInput.selectionEnd = nextInput.value.length;
+        window.clearTimeout(presetInlineSearchTimer);
+        if (presetAutocompleteMeta?.axis === 'clothes') {
+          presetInlineSearchTimer = window.setTimeout(refreshClothesInlineSearch, 180);
+        } else {
+          acResults = filteredPresetEventResults();
+          acSel = acResults.length ? 0 : -1;
+          renderAutocomplete();
+          const nextInput = tagTooltip.querySelector('[data-preset-event-search]');
+          if (nextInput) {
+            nextInput.focus({preventScroll: true});
+            nextInput.selectionStart = nextInput.selectionEnd = nextInput.value.length;
+          }
         }
       });
       searchInput.addEventListener('keydown', e => {
@@ -1595,10 +1740,15 @@ export function createTagAssistController({
         } else if (e.key === 'Escape') {
           e.preventDefault();
           presetEventSearch = '';
-          acResults = filteredPresetEventResults();
-          acSel = acResults.length ? 0 : -1;
-          renderAutocomplete();
-          (acTarget || promptEdit)?.focus?.({preventScroll: true});
+          window.clearTimeout(presetInlineSearchTimer);
+          if (presetAutocompleteMeta?.axis === 'clothes') {
+            refreshClothesInlineSearch();
+          } else {
+            acResults = filteredPresetEventResults();
+            acSel = acResults.length ? 0 : -1;
+            renderAutocomplete();
+            (acTarget || promptEdit)?.focus?.({preventScroll: true});
+          }
         }
       });
     }
@@ -1819,7 +1969,9 @@ export function createTagAssistController({
     presetPersonMenuOpen = false;
     presetEventSourceResults = [];
     presetEventSearch = '';
+    presetInlineSearchRequestId += 1;
     window.clearTimeout(acTimer);
+    window.clearTimeout(presetInlineSearchTimer);
     clearAutocompleteTranslationTimer();
     hideTagChipInfoTooltip();
     tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode');
@@ -1977,17 +2129,19 @@ export function createTagAssistController({
     textarea.addEventListener('click', () => {
       acTarget = textarea;
       if (acMode) hideAutocomplete();
+      if (openClothesStagedAutocompleteAtCursor(textarea)) return;
       checkTagHint();
     });
     textarea.addEventListener('keyup', e => {
       if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) {
         if (acMode) hideAutocomplete();
+        if (openClothesStagedAutocompleteAtCursor(textarea)) return;
         checkTagHint();
       }
     });
     textarea.addEventListener('focus', () => {
       acTarget = textarea;
-      if (!acMode) checkTagHint();
+      if (!acMode && !openClothesStagedAutocompleteAtCursor(textarea)) checkTagHint();
     });
     textarea.addEventListener('contextmenu', e => {
       const chunkPanelControl = getChunkPanelControl();

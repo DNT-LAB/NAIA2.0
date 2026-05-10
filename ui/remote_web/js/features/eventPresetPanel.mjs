@@ -271,7 +271,15 @@ export function createEventPresetPanel({
   }
 
   function presetNodeCandidates(node) {
-    const rawValues = [node?.id, node?.tag, node?.label].filter(value => value != null && value !== '');
+    const rawValues = [
+      node?.id,
+      node?.tag,
+      node?.label,
+      node?.labelKo,
+      node?.displayLabelKo,
+      node?.krDesc,
+      node?.krCategory,
+    ].filter(value => value != null && value !== '');
     const values = new Set();
     for (const raw of rawValues) {
       const text = String(raw);
@@ -1201,10 +1209,14 @@ export function createEventPresetPanel({
   async function ensureClothesPresetAutocompleteData(parsed, limit = 80, inlineSearch = '') {
     state.activeAxis = 'clothes';
     const stagedItems = (parsed.stagedTags || []).map(tag => ({tag, source: 'shortcut'}));
+    const comboStagedTags = parsed.mode === 'staged'
+      ? (parsed.resolveTags || parsed.stagedTags || [])
+      : (parsed.stagedTags || []);
     const activePath = parsed.activePath || [];
     const searchQuery = String(inlineSearch || '').trim();
     const extra = {
       stagedItems,
+      comboStagedTags,
       comboLimit: Math.max(80, limit),
       itemLimit: Math.max(160, limit),
     };
@@ -1351,12 +1363,38 @@ export function createEventPresetPanel({
     return String(row?.label || row?.tag || row?.comboText || row?.prompt || row?.id || '').trim();
   }
 
+  function clothesRowLabelKo(row) {
+    return String(row?.displayLabelKo || row?.labelKo || '').trim();
+  }
+
+  function clothesDescParts(row, fallbackParts = []) {
+    const parts = [];
+    const labelKo = clothesRowLabelKo(row);
+    const krDesc = String(row?.krDesc || '').trim();
+    if (labelKo) parts.push(labelKo);
+    if (krDesc && krDesc !== labelKo) parts.push(krDesc);
+    for (const part of fallbackParts) {
+      const clean = String(part || '').trim();
+      if (clean && !parts.includes(clean)) parts.push(clean);
+    }
+    return parts;
+  }
+
+  function renderClothesDisplayLabel(row, label) {
+    const labelText = String(label || '').trim();
+    const labelKo = clothesRowLabelKo(row);
+    return `
+      <span class="event-preset-clothes-label-main">${escapeHtml(labelText)}</span>
+      ${labelKo ? `<small class="event-preset-ko-label">${escapeHtml(labelKo)}</small>` : ''}
+    `;
+  }
+
   function clothesItemTag(row) {
     return String(row?.tag || row?.label || row?.id || '').trim();
   }
 
-  function clothesCrumb(id, label, stage) {
-    return {id: String(id || ''), label: String(label || id || ''), stage};
+  function clothesCrumb(id, label, stage, labelKo = '') {
+    return {id: String(id || ''), label: String(label || id || ''), labelKo: String(labelKo || ''), stage};
   }
 
   function matchingClothesCategoryRows(categories, parsed, limit) {
@@ -1379,11 +1417,13 @@ export function createEventPresetPanel({
     const browser = state.clothesData.browser || {};
     const categoryId = browser.selected?.categoryId || state.clothesCategoryId || '';
     const subcategoryId = browser.selected?.subcategoryId || state.clothesSubcategoryId || '';
+    const category = browser.categories?.find(item => item.id === categoryId);
+    const subcategory = browser.subcategories?.find(item => item.id === subcategoryId);
     return {
       stage: 'item',
       crumbs: [
-        ...(categoryId ? [clothesCrumb(categoryId, browser.categories?.find(item => item.id === categoryId)?.label || categoryId, 'category')] : []),
-        ...(subcategoryId ? [clothesCrumb(subcategoryId, browser.subcategories?.find(item => item.id === subcategoryId)?.label || subcategoryId, 'subcategory')] : []),
+        ...(categoryId ? [clothesCrumb(categoryId, category?.label || categoryId, 'category', category?.labelKo)] : []),
+        ...(subcategoryId ? [clothesCrumb(subcategoryId, subcategory?.label || subcategoryId, 'subcategory', subcategory?.labelKo)] : []),
       ],
       parsed: rowParsed,
       rows: clothesItemRows(searchItems, rowParsed, categoryId, subcategoryId, limit),
@@ -1404,7 +1444,7 @@ export function createEventPresetPanel({
           tag: category.label || category.id,
           value,
           count: Number(category.count || category.matchedCount || 0),
-          desc: `${formatCount(category.subcategoryCount || category.matchedSubcategoryCount || 0)} groups`,
+          desc: clothesDescParts(category, [`${formatCount(category.subcategoryCount || category.matchedSubcategoryCount || 0)} groups`]).join(' · '),
           group: 'preset/clothes',
           cat: 'category',
           _wc_type: 'preset_path',
@@ -1412,6 +1452,8 @@ export function createEventPresetPanel({
           stage: 'category',
           final: false,
           id: String(category.id || ''),
+          rawLabel: category.label || category.id || '',
+          labelKo: category.labelKo || '',
           tags: [],
           prompt: '',
         };
@@ -1432,7 +1474,7 @@ export function createEventPresetPanel({
           tag: subcategory.label || subcategory.id,
           value,
           count: Number(subcategory.count || subcategory.matchedCount || 0),
-          desc: `${formatCount(subcategory.count || 0)} items`,
+          desc: clothesDescParts(subcategory, [`${formatCount(subcategory.count || 0)} items`]).join(' · '),
           group: 'preset/clothes',
           cat: 'subcategory',
           _wc_type: 'preset_path',
@@ -1440,6 +1482,8 @@ export function createEventPresetPanel({
           stage: 'subcategory',
           final: false,
           id: String(subcategory.id || ''),
+          rawLabel: subcategory.label || subcategory.id || '',
+          labelKo: subcategory.labelKo || '',
           tags: [],
           prompt: '',
         };
@@ -1464,7 +1508,10 @@ export function createEventPresetPanel({
           tag: clothesRowLabel(item) || tag,
           value,
           count: Number(item.postCount || item.count || 0),
-          desc: [item.slotLabel || item.slot, item.group, item.incompatible ? 'incompatible' : ''].filter(Boolean).join(' / '),
+          desc: clothesDescParts(item, [
+            [item.slotLabelKo || item.slotLabel || item.slot, item.groupLabelKo || item.group].filter(Boolean).join(' / '),
+            item.incompatible ? 'incompatible' : '',
+          ]).join(' · '),
           group: 'preset/clothes',
           cat: 'item',
           _wc_type: 'preset_path',
@@ -1472,6 +1519,12 @@ export function createEventPresetPanel({
           stage: 'item',
           final: false,
           id: String(item.id || tag),
+          rawLabel: item.label || item.tag || item.id || tag,
+          labelKo: item.labelKo || '',
+          krDesc: item.krDesc || '',
+          krCategory: item.krCategory || '',
+          slotLabelKo: item.slotLabelKo || '',
+          groupLabelKo: item.groupLabelKo || '',
           clothesTag: tag,
           clothesTokenValue: tokenValue,
           prompt: tag,
@@ -1509,7 +1562,7 @@ export function createEventPresetPanel({
         tag: row.comboText || row.prompt || comboId,
         value: readableToken,
         count: Number(row.count || row.postCount || 0),
-        desc: row.prompt || row.comboText || '',
+        desc: clothesDescParts(row, [row.prompt || row.comboText || '']).join(' · '),
         group: 'preset/clothes',
         cat: 'combo',
         _wc_type: 'preset_path',
@@ -1517,6 +1570,7 @@ export function createEventPresetPanel({
         stage: 'combo',
         final: true,
         comboId,
+        labelKo: row.labelKo || '',
         clothesTokenValue: readableToken,
         prompt: tags.join(', '),
         tags,
@@ -1814,14 +1868,19 @@ export function createEventPresetPanel({
         const rows = payload.rows?.length
           ? payload.rows
           : [clothesPresetStatusRow(normalized, 'No Clothes Preset items for this path.', 'empty')];
+        const parsed = payload.parsed || null;
+        const secondaryRows = parsed?.mode === 'staged'
+          ? clothesComboRows((state.clothesData.comboRows || {}).rows || [], limit)
+          : [];
         return {
           query: normalized,
           results: rows,
+          secondaryResults: secondaryRows,
           preset: {
             axis: 'clothes',
             stage: payload.stage || 'category',
             crumbs: payload.crumbs || [],
-            parsed: payload.parsed || null,
+            parsed,
             context: clothesAutocompleteContextPayload(),
             loadState: {
               main: state.clothesData?.dataAvailability?.main || state.clothesStatus || '',
@@ -2951,6 +3010,54 @@ export function createEventPresetPanel({
     ].filter(Boolean);
   }
 
+  function expressionShortcutSegment(item, tags = expressionItemTags(item)) {
+    const cleanTags = (tags || [])
+      .map(tag => cleanPromptAtom(tag))
+      .filter(Boolean);
+    const text = cleanTags.length > 1
+      ? cleanTags.join(' + ')
+      : (cleanTags[0] || expressionItemTitle(item));
+    return String(text || '')
+      .replace(/\//g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function expressionShortcutToken(item, tags = expressionItemTags(item)) {
+    const segment = expressionShortcutSegment(item, tags);
+    return `preset:expressions${segment ? '/' + segment : ''}`;
+  }
+
+  function expressionDirectQueryTags(value) {
+    const text = String(value || '').trim();
+    if (!text.includes('+')) return [];
+    return text.split('+').map(part => cleanPromptAtom(part)).filter(Boolean);
+  }
+
+  function expressionItemHasTags(item, tags) {
+    const keys = new Set(expressionItemTags(item).map(tag => normalizePresetMatch(tag)).filter(Boolean));
+    return (tags || []).every(tag => keys.has(normalizePresetMatch(tag)));
+  }
+
+  function findExpressionDirectItemContext(categories, value) {
+    const needle = normalizePresetMatch(value);
+    if (!needle) return null;
+    const requiredTags = expressionDirectQueryTags(value);
+    for (const category of categories || []) {
+      for (const subcategory of category.subcategories || []) {
+        for (const item of expressionAllItems(subcategory)) {
+          if (requiredTags.length && expressionItemHasTags(item, requiredTags)) {
+            return {category, subcategory, item};
+          }
+          if (!requiredTags.length && expressionNodeCandidates(item).some(candidate => normalizePresetMatch(candidate) === needle)) {
+            return {category, subcategory, item};
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   function expressionDetailPayload(item, category, subcategory) {
     const tags = expressionItemTags(item);
     const title = expressionItemTitle(item);
@@ -3100,9 +3207,10 @@ export function createEventPresetPanel({
       .map(item => {
         const tags = expressionItemTags(item);
         const prompt = tags.join(', ');
+        const internalPath = presetPath('expressions', expressionItemPath(category, subcategory, item));
         return {
           tag: expressionItemTitle(item),
-          value: presetPath('expressions', expressionItemPath(category, subcategory, item)),
+          value: expressionShortcutToken(item, tags),
           count: Number(item.count || 0),
           desc: prompt || expressionItemTitle(item),
           group: 'preset/expressions',
@@ -3112,11 +3220,13 @@ export function createEventPresetPanel({
           stage: 'item',
           final: true,
           id: String(item.id || item.tag || ''),
+          internalPath,
           rawLabel: item.label || item.tag || item.id || '',
           labelKo: item.displayLabelKo || item.labelKo || '',
           tags,
           prompt,
           insertText: prompt,
+          detail: expressionDetailPayload(item, category, subcategory),
           active: !!activeItem && normalizePresetMatch(activeItem.id || activeItem.tag || activeItem.label) === normalizePresetMatch(item.id || item.tag || item.label),
         };
       });
@@ -3160,6 +3270,26 @@ export function createEventPresetPanel({
     }
 
     const category = findExpressionNode(categories, segments[0] || '');
+    const directContext = segments.length === 1 ? findExpressionDirectItemContext(categories, segments[0] || '') : null;
+    if (!category && directContext) {
+      const rows = expressionItemRows(
+        directContext.category,
+        directContext.subcategory,
+        '',
+        limit,
+        directContext.item,
+      );
+      return {
+        stage: 'item',
+        crumbs: [
+          expressionCrumb(directContext.category.id, expressionCategoryLabel(directContext.category), 'category'),
+          expressionCrumb(directContext.subcategory.id, expressionSubcategoryLabel(directContext.subcategory), 'subcategory'),
+        ],
+        parsed,
+        rows,
+        detail: expressionDetailPayload(directContext.item, directContext.category, directContext.subcategory),
+      };
+    }
     if (segments.length < 1 || !category) {
       const rows = expressionCategoryRows(categories, segments[0] || '', limit);
       return {
@@ -3832,6 +3962,7 @@ export function createEventPresetPanel({
                 data-ep-id="${escapeHtml(category.id)}"
                 ${disabled ? 'disabled aria-disabled="true"' : ''}>
           <span class="event-preset-category-name">${escapeHtml(category.label || category.id)}</span>
+          ${category.labelKo ? `<small class="event-preset-ko-label">${escapeHtml(category.labelKo)}</small>` : ''}
           <span class="event-preset-category-count">${escapeHtml(countText)}</span>
         </button>
       `;
@@ -3859,6 +3990,7 @@ export function createEventPresetPanel({
                 data-ep-id="${escapeHtml(subcategory.id)}"
                 ${disabled ? 'disabled aria-disabled="true"' : ''}>
           <span class="event-preset-subcategory-name">${escapeHtml(subcategory.label || subcategory.id)}</span>
+          ${subcategory.labelKo ? `<small class="event-preset-ko-label">${escapeHtml(subcategory.labelKo)}</small>` : ''}
           <span class="event-preset-subcategory-count">${escapeHtml(countText)}</span>
         </button>
       `;
@@ -3887,7 +4019,9 @@ export function createEventPresetPanel({
                   data-ep-tag="${escapeHtml(item.tag || item.id || '')}"
                   aria-pressed="${item.selected ? 'true' : 'false'}">
             <span class="event-preset-event-index">${index + 1}</span>
-            <span class="event-preset-event-name"${tagInfoAttrs(item.tag)}>${escapeHtml(item.label || item.tag)}</span>
+            <span class="event-preset-event-name event-preset-clothes-name"${tagInfoAttrs(item.tag)}>
+              ${renderClothesDisplayLabel(item, item.label || item.tag)}
+            </span>
             <span class="event-preset-event-count">${escapeHtml(item.displayCount || formatCount(item.postCount || item.count))}</span>
           </button>
         `).join('') : '<div class="event-preset-empty">No clothes items.</div>'}
@@ -3907,7 +4041,10 @@ export function createEventPresetPanel({
       <div class="event-preset-clothes-chip-groups">
         ${groups.length ? groups.map(group => `
           <div class="event-preset-clothes-chip-group">
-            <span>${escapeHtml(group.label || group.id)}</span>
+            <span>
+              ${escapeHtml(group.label || group.id)}
+              ${group.labelKo ? `<small class="event-preset-ko-label">${escapeHtml(group.labelKo)}</small>` : ''}
+            </span>
             <div class="event-preset-expression-chips">
               ${(group.items || []).map(item => `
                 <button type="button"
@@ -3915,7 +4052,7 @@ export function createEventPresetPanel({
                         data-ep-action="clothes-remove-item"
                         data-ep-id="${escapeHtml(item.id || item.tag)}"
                         data-ep-tag="${escapeHtml(item.tag)}">
-                  <span>${escapeHtml(item.tag)}</span>
+                  <span>${renderClothesDisplayLabel(item, item.tag)}</span>
                   <b aria-hidden="true">&times;</b>
                 </button>
               `).join('')}

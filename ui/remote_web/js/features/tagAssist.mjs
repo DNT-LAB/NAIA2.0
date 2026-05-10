@@ -43,6 +43,7 @@ export function createTagAssistController({
   let presetEventSourceResults = [];
   let presetEventSecondarySourceResults = [];
   let presetEventSecondaryResults = [];
+  let presetExpressionHoverRow = null;
   let presetEventSearch = '';
   let presetInlineSearchRequestId = 0;
   const hangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
@@ -308,7 +309,7 @@ export function createTagAssistController({
     const observedPresetPopup = tagTooltip.classList.contains('preset-event-observed-mode');
     const stagedPresetPopup = tagTooltip.classList.contains('preset-event-staged-mode');
     const expressionPresetPopup = tagTooltip.classList.contains('preset-event-expression-mode');
-    const widthCeiling = observedPresetPopup ? 760 : (stagedPresetPopup ? 720 : (expressionPresetPopup ? 680 : 560));
+    const widthCeiling = stagedPresetPopup ? 700 : (observedPresetPopup ? 760 : (expressionPresetPopup ? 680 : 560));
     const widthFloor = (observedPresetPopup || stagedPresetPopup || expressionPresetPopup) ? 430 : 280;
     const maxWidth = Math.max(widthFloor, Math.min(widthCeiling, viewport.width - margin * 2));
     const measured = tagTooltip.getBoundingClientRect();
@@ -516,6 +517,7 @@ export function createTagAssistController({
   }
 
   function bindAutocompleteInfoHover(root) {
+    if (root?.classList?.contains('preset-event-expression-mode')) return;
     root.querySelectorAll('.tag-ac-item[data-tooltip-desc]').forEach(el => {
       el.addEventListener('mouseenter', e => showTagChipInfoTooltip(el, e));
       el.addEventListener('mousemove', e => positionTagChipInfoTooltip(el, e));
@@ -1522,13 +1524,16 @@ export function createTagAssistController({
     }
     presetAutocompleteMeta = matchesPreset ? (m.preset || null) : null;
     if (['events', 'clothes', 'expressions'].includes(presetAutocompleteMeta?.axis)) {
+      const secondaryAxis = presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes';
+      presetExpressionHoverRow = null;
       presetEventSourceResults = results;
-      presetEventSecondarySourceResults = presetAutocompleteMeta?.axis === 'events' ? secondaryResults : [];
+      presetEventSecondarySourceResults = secondaryAxis ? secondaryResults : [];
       results = filteredPresetEventResults();
-      presetEventSecondaryResults = presetAutocompleteMeta?.axis === 'events'
+      presetEventSecondaryResults = secondaryAxis
         ? filteredPresetEventSecondaryResults()
         : [];
     } else {
+      presetExpressionHoverRow = null;
       presetEventSourceResults = [];
       presetEventSecondarySourceResults = [];
       presetEventSecondaryResults = [];
@@ -1718,6 +1723,19 @@ export function createTagAssistController({
 
   function eventPresetDisplayTag(row) {
     return row.tag || row.label || row.value || '';
+  }
+
+  function presetRowKoLabel(row) {
+    return String(row?.displayLabelKo || row?.labelKo || '').trim();
+  }
+
+  function renderPresetAutocompleteTag(row, displayTag, axis) {
+    const labelKo = axis === 'clothes' ? presetRowKoLabel(row) : '';
+    if (!labelKo) return `<span class="tag-ac-tag">${escHtml(displayTag)}</span>`;
+    return `<span class="tag-ac-tag preset-event-tag-with-ko">` +
+      `<span class="preset-event-tag-main">${escHtml(displayTag)}</span>` +
+      `<small class="preset-event-tag-ko">${escHtml(labelKo)}</small>` +
+      `</span>`;
   }
 
   function presetEventParentToken(token) {
@@ -1927,12 +1945,7 @@ export function createTagAssistController({
     const axis = presetAutocompleteMeta?.axis || 'events';
     const crumbs = Array.isArray(presetAutocompleteMeta?.crumbs) ? presetAutocompleteMeta.crumbs : [];
     if (axis === 'clothes') {
-      const parsed = presetAutocompleteMeta?.parsed || {};
-      const stagedTags = presetClothesResolveTags(parsed);
-      const stagedLabel = stagedTags.length
-        ? stagedTags.slice(0, 3).join(' + ') + (stagedTags.length > 3 ? ' + ...' : '')
-        : '';
-      return ['Clothes', stagedLabel, ...crumbs.map(crumb => crumb?.label).filter(Boolean)].filter(Boolean);
+      return ['Clothes', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
     }
     if (axis === 'expressions') {
       return ['Expressions', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
@@ -2022,7 +2035,7 @@ export function createTagAssistController({
     if (parsed.mode !== 'staged') return '';
     const resolveTags = presetClothesResolveTags(parsed);
     const title = resolveTags.length === 1 ? '1 tag' : `${resolveTags.length} tags`;
-    return '<section class="preset-event-staged-panel">' +
+    return '<section class="preset-clothes-primary-staged">' +
       `<div class="preset-clothes-staged-head"><span>Selected Clothes</span><span>${escHtml(title)}</span></div>` +
       renderPresetClothesStagedControls({panel: true}) +
       '</section>';
@@ -2030,7 +2043,9 @@ export function createTagAssistController({
 
   function renderPresetExpressionPanel() {
     if ((presetAutocompleteMeta?.axis || '') !== 'expressions') return '';
-    const detail = presetAutocompleteMeta?.detail || {};
+    const detail = presetExpressionHoverRow
+      ? presetExpressionDetailFromRow(presetExpressionHoverRow)
+      : (presetAutocompleteMeta?.detail || {});
     const tags = Array.isArray(detail.tags) && detail.tags.length
       ? detail.tags.map(tag => String(tag || '').trim()).filter(Boolean)
       : uniqueLimitedTags(acResults, 12);
@@ -2059,11 +2074,41 @@ export function createTagAssistController({
       '</section>';
   }
 
+  function presetExpressionDetailFromRow(row) {
+    const tags = rowTags(row);
+    const detail = row?.detail && typeof row.detail === 'object' ? row.detail : {};
+    const title = String(detail.title || eventPresetDisplayTag(row) || row?.tag || 'Expression Detail').trim();
+    const subtitle = String(detail.subtitle || row?.desc || '').trim();
+    const prompt = String(detail.prompt || row?.prompt || tags.join(', ')).trim();
+    return {
+      type: detail.type || row?.stage || 'item',
+      title,
+      subtitle,
+      count: Number(detail.count || row?.count || 0) || 0,
+      tags: Array.isArray(detail.tags) && detail.tags.length ? detail.tags : tags,
+      prompt,
+      source: detail.source || row?.group || '',
+    };
+  }
+
+  function updatePresetExpressionHoverDetail(row) {
+    if ((presetAutocompleteMeta?.axis || '') !== 'expressions') return;
+    presetExpressionHoverRow = row || null;
+    const panel = tagTooltip.querySelector('.preset-event-expression-panel');
+    if (!panel) return;
+    const html = renderPresetExpressionPanel();
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const next = template.content.firstElementChild;
+    if (next) panel.replaceWith(next);
+  }
+
   function renderPresetEventAutocomplete() {
     const context = presetAutocompleteMeta?.context || {};
     const axis = presetAutocompleteMeta?.axis || 'events';
-    const hasObservedPanel = axis === 'events';
-    const hasStagedPanel = axis === 'clothes' && (presetAutocompleteMeta?.parsed || {}).mode === 'staged';
+    const clothesStagedMode = axis === 'clothes' && (presetAutocompleteMeta?.parsed || {}).mode === 'staged';
+    const hasObservedPanel = axis === 'events' || clothesStagedMode;
+    const hasStagedPanel = clothesStagedMode;
     const hasExpressionPanel = axis === 'expressions';
     let html = `<div class="preset-event-picker${hasObservedPanel ? ' has-observed-panel' : ''}${hasStagedPanel ? ' has-staged-panel' : ''}${hasExpressionPanel ? ' has-expression-panel' : ''}">` +
       renderPresetEventToolbar(context) +
@@ -2080,20 +2125,28 @@ export function createTagAssistController({
       const descText = r.desc || r.prompt || rowTags(r).join(', ');
       const active = r.active ? ' active' : '';
       html += `<div class="tag-ac-item preset-event-item${itemClass}${sel}${active}" data-idx="${i}"${autocompleteInfoAttrs(r, displayTag, descText)}>` +
-        `<span class="tag-ac-tag">${escHtml(displayTag)}</span>` +
+        renderPresetAutocompleteTag(r, displayTag, axis) +
         `<span class="tag-ac-count">${escHtml(countText)}</span>` +
         '</div>';
     });
     if (!acResults.length) {
       html += '<div class="preset-event-empty">No matches</div>';
     }
-    html += '</div></section>';
+    html += '</div>';
+    if (hasStagedPanel) {
+      html += renderPresetClothesStagedPanel();
+    }
+    html += '</section>';
     if (hasObservedPanel) {
       const observedCount = presetEventSecondaryResults.length;
       const observedSourceCount = presetEventSecondarySourceResults.length;
+      const observedLabel = axis === 'clothes' ? 'Observed Combos' : 'Observed Combos';
       const observedTitle = observedSourceCount
-        ? `Observed Combos ${presetEventSearch && observedCount !== observedSourceCount ? `${observedCount}/${observedSourceCount}` : observedSourceCount}`
-        : 'Observed Combos';
+        ? `${observedLabel} ${presetEventSearch && observedCount !== observedSourceCount ? `${observedCount}/${observedSourceCount}` : observedSourceCount}`
+        : observedLabel;
+      const observedEmpty = axis === 'clothes'
+        ? 'No compatible observed combos for selected clothes.'
+        : 'Select a main item to inspect observed combos.';
       html += '<section class="preset-event-observed-panel">' +
         `<div class="preset-event-observed-head"><span>${escHtml(observedTitle)}</span><span>Count</span></div>` +
         '<div class="tag-ac-list preset-event-list preset-event-observed-list">';
@@ -2104,17 +2157,14 @@ export function createTagAssistController({
         const displayTag = eventPresetDisplayTag(r);
         const descText = r.desc || r.prompt || rowTags(r).join(', ');
         html += `<div class="tag-ac-item preset-event-item preset-event-observed-item${itemClass}" data-observed-idx="${i}"${autocompleteInfoAttrs(r, displayTag, descText)}>` +
-          `<span class="tag-ac-tag">${escHtml(displayTag)}</span>` +
+          renderPresetAutocompleteTag(r, displayTag, axis) +
           `<span class="tag-ac-count">${escHtml(countText)}</span>` +
           '</div>';
       });
       if (!presetEventSecondaryResults.length) {
-        html += '<div class="preset-event-empty">Select a main item to inspect observed combos.</div>';
+        html += `<div class="preset-event-empty">${escHtml(observedEmpty)}</div>`;
       }
       html += '</div></section>';
-    }
-    if (hasStagedPanel) {
-      html += renderPresetClothesStagedPanel();
     }
     if (hasExpressionPanel) {
       html += renderPresetExpressionPanel();
@@ -2250,6 +2300,11 @@ export function createTagAssistController({
       });
     });
     tagTooltip.querySelectorAll('.preset-event-item').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        if (presetAutocompleteMeta?.axis !== 'expressions' || !el.hasAttribute('data-idx')) return;
+        const idx = +el.dataset.idx;
+        if (Number.isInteger(idx)) updatePresetExpressionHoverDetail(acResults[idx]);
+      });
       el.addEventListener('mousedown', e => {
         if (el.hasAttribute('data-observed-idx')) return;
         e.preventDefault();
@@ -2371,18 +2426,6 @@ export function createTagAssistController({
       return;
     }
     if (r._wc_type === 'preset_path') {
-      if (r.axis === 'expressions' && r.final) {
-        const expressionPrompt = String(r.insertText || r.prompt || '').trim();
-        const expressionTags = Array.isArray(r.tags)
-          ? r.tags.map(tag => String(tag || '').trim()).filter(Boolean)
-          : [];
-        const replacement = expressionPrompt || expressionTags.join(', ');
-        if (replacement) {
-          swapToken(target, info, replacement);
-          hideAutocomplete();
-          return;
-        }
-      }
       const presetToken = r.axis === 'clothes' && r.clothesTokenValue
         ? r.clothesTokenValue
         : (r.value || `preset:${r.tag}`);

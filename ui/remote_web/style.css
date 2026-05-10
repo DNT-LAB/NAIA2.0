@@ -4441,6 +4441,31 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .event-preset-assist-row.active .event-preset-assist-row-name {
   color: #e8c977;
 }
+.preset-event-tag-with-ko {
+  display: grid;
+  gap: 1px;
+  line-height: 1.12;
+}
+.preset-event-tag-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preset-event-tag-ko {
+  min-width: 0;
+  color: rgba(190,196,224,0.72);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag-ac-item.selected .preset-event-tag-ko {
+  color: rgba(238,245,255,0.80);
+}
 .event-preset-assist-row-name {
   min-width: 0;
   overflow: hidden;
@@ -6403,11 +6428,36 @@ body.resizing-result-info {
   overflow-wrap: anywhere;
   line-height: 1.25;
 }
+.event-preset-ko-label {
+  display: block;
+  min-width: 0;
+  color: rgba(190,196,224,0.78);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-preset-category.active .event-preset-ko-label,
+.event-preset-subcategory.active .event-preset-ko-label,
+.event-preset-clothes-row.active .event-preset-ko-label {
+  color: rgba(238,245,255,0.78);
+}
 .event-preset-event-name {
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.28;
+}
+.event-preset-clothes-name {
+  display: grid;
+  gap: 2px;
+}
+.event-preset-clothes-label-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .event-preset-category-count,
 .event-preset-subcategory-count {
@@ -6812,6 +6862,8 @@ body.resizing-result-info {
 }
 .event-preset-clothes-chip-group > span {
   min-width: 0;
+  display: grid;
+  gap: 2px;
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -9873,7 +9925,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 }
 .preset-event-picker.has-staged-panel .preset-event-popup-body {
   display: grid;
-  grid-template-columns: minmax(0, 430px) minmax(220px, 290px);
+  grid-template-columns: minmax(0, 385px) minmax(260px, 315px);
   overflow: hidden;
 }
 .preset-event-picker.has-expression-panel .preset-event-popup-body {
@@ -10027,6 +10079,23 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-size: 10px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+.preset-clothes-primary-staged {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 136px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255,255,255,0.075);
+  background: rgba(93,193,255,0.025);
+  overflow: hidden;
+}
+.preset-clothes-primary-staged .preset-clothes-staged-head {
+  min-height: 26px;
+  background: rgba(0,0,0,0.08);
+}
+.preset-clothes-primary-staged .preset-clothes-chip {
+  max-width: 150px;
 }
 .preset-event-toolbar {
   display: flex;
@@ -10228,6 +10297,20 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-size: 9px;
   line-height: 1.35;
 }
+.preset-clothes-primary-staged .preset-clothes-staged-controls.panel {
+  flex: 0 1 auto;
+  max-height: 110px;
+  padding: 7px 9px;
+  gap: 6px;
+}
+.preset-clothes-primary-staged .preset-clothes-staged-controls.panel .preset-clothes-mode-toggle {
+  width: auto;
+  min-width: 118px;
+  order: 0;
+}
+.preset-clothes-primary-staged .preset-clothes-staged-controls.panel .preset-clothes-staged-hint {
+  display: none;
+}
 .preset-clothes-chip:hover,
 .preset-clothes-chip-remove:hover,
 .preset-clothes-chip-add:hover,
@@ -10388,6 +10471,26 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .preset-event-item.active .tag-ac-tag,
 .preset-event-observed-item .tag-ac-tag {
   color: var(--text-primary);
+}
+.preset-event-observed-item {
+  align-items: start;
+}
+.preset-event-observed-item .tag-ac-tag {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.28;
+}
+.preset-event-observed-item .preset-event-tag-main,
+.preset-event-observed-item .preset-event-tag-ko {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.preset-event-observed-item .tag-ac-count {
+  padding-top: 2px;
 }
 .preset-event-item.disabled {
   cursor: default;

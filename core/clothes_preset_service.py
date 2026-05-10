@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import importlib.util
+import json
 import random
 import sys
 import threading
@@ -69,6 +70,8 @@ class ClothesPresetService:
     def __init__(self, repo_root: Path | str):
         self.repo_root = Path(repo_root)
         self.data_path = self.repo_root / "ui" / "clothes_preset"
+        self.translation_path = self.data_path / "clothes_preset_translations_ko.json"
+        self.kr_tags_path = self.repo_root / "data" / "KR_tags.parquet"
         self._lock = threading.RLock()
         self._modules: _RuntimeModules | None = None
         self._data_manager: Any | None = None
@@ -94,6 +97,8 @@ class ClothesPresetService:
         self._pair_by_seed: dict[str, list[dict[str, Any]]] = {}
         self._conflict_pairs: set[tuple[str, str]] = set()
         self._conflict_exclusion_score: dict[tuple[str, str], float] = {}
+        self._translation_payload: dict[str, Any] | None = None
+        self._kr_tag_payload: dict[str, dict[str, str]] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -277,7 +282,7 @@ class ClothesPresetService:
 
     def _lucky_seed_tags(self, normalized: dict[str, Any]) -> list[str]:
         staged = normalized.get("staged") or {}
-        return self._ordered_unique(staged.get("ruleSeedTags") or staged.get("tags") or [])
+        return self._ordered_unique(staged.get("tags") or staged.get("ruleSeedTags") or [])
 
     def _lucky_candidates(self, seed_tags: list[str]) -> list[Any]:
         def eligible(combo: Any, min_tags: int) -> bool:
@@ -534,6 +539,7 @@ class ClothesPresetService:
             groups.append({
                 "id": slot,
                 "label": self._slot_label(slot),
+                "labelKo": self._slot_label_ko(slot),
                 "tags": [item["tag"] for item in slot_items],
                 "items": slot_items,
             })
@@ -594,12 +600,15 @@ class ClothesPresetService:
             "tag": tag,
             "slot": slot,
             "slotLabel": self._slot_label(slot),
+            "slotLabelKo": self._slot_label_ko(slot),
             "group": subgroup,
+            "groupLabelKo": self._group_label_ko(subgroup),
             "source": source,
             "sourceId": str(item.get("sourceId") or ""),
             "sourceLabel": str(item.get("sourceLabel") or ""),
             "postCount": post_count,
             "displayCount": self._format_count(post_count),
+            **self._tag_translation_fields(tag),
         }
 
     def _remove_tags(self, payload: dict[str, Any]) -> set[str]:
@@ -631,14 +640,15 @@ class ClothesPresetService:
             or ""
         )
         limit = self._limit(payload.get("comboLimit"), self._max_combo_rows())
+        staged_tags = self._combo_staged_tags(payload, normalized)
         rows, base_count, hidden_exact, ignored_search = self._filter_combo_rows(
             search=search,
-            staged_tags=normalized["staged"]["ruleSeedTags"],
+            staged_tags=staged_tags,
             selected_combo_id=normalized["selected"].get("comboId", ""),
             limit=limit,
         )
         suffix = ""
-        if normalized["staged"]["ruleSeedTags"]:
+        if staged_tags:
             suffix = "match staged"
             if hidden_exact:
                 suffix += f", exact hidden={hidden_exact:,}"
@@ -653,6 +663,13 @@ class ClothesPresetService:
             "summary": f"{len(rows):,} / {int(base_count):,} observed combos"
             + (f" ({suffix})" if suffix else ""),
         }
+
+    def _combo_staged_tags(self, payload: dict[str, Any], normalized: dict[str, Any]) -> list[str]:
+        explicit = payload.get("comboStagedTags")
+        if isinstance(explicit, list):
+            tags = [self._normalize_tag(tag) for tag in explicit]
+            return self._ordered_unique([tag for tag in tags if tag])
+        return self._ordered_unique(normalized["staged"].get("tags") or normalized["staged"].get("ruleSeedTags") or [])
 
     def _filter_combo_rows(
         self,
@@ -722,6 +739,7 @@ class ClothesPresetService:
             "comboText": str(combo.clothing_combo),
             "prompt": str(combo.clothing_combo),
             "tags": tags,
+            "labelKo": ", ".join(self._translated_tag_labels(tags)[:4]),
             "count": int(combo.post_count),
             "displayCount": self._format_count(int(combo.post_count)),
             "tagCount": int(combo.tag_count),
@@ -842,6 +860,7 @@ class ClothesPresetService:
             categories.append({
                 "id": slot,
                 "label": self._slot_label(slot),
+                "labelKo": self._slot_label_ko(slot),
                 "count": total,
                 "matchedCount": len(slot_match_rows),
                 "subcategoryCount": subcategory_count,
@@ -980,6 +999,7 @@ class ClothesPresetService:
             categories.append({
                 "id": slot,
                 "label": self._slot_label(slot),
+                "labelKo": self._slot_label_ko(slot),
                 "count": total,
                 "matchedCount": len(slot_match_rows),
                 "subcategoryCount": subcategory_count,
@@ -1165,6 +1185,7 @@ class ClothesPresetService:
             result.append({
                 "id": subgroup,
                 "label": subgroup,
+                "labelKo": self._group_label_ko(subgroup),
                 "count": len(items),
                 "postCount": post_count,
                 "displayCount": self._format_count(post_count),
@@ -1188,9 +1209,12 @@ class ClothesPresetService:
             "id": self._item_id(tag),
             "tag": tag,
             "label": tag,
+            **self._tag_translation_fields(tag),
             "slot": self._assigned_slot_by_tag.get(tag, ""),
             "slotLabel": self._slot_label(self._assigned_slot_by_tag.get(tag, "")),
+            "slotLabelKo": self._slot_label_ko(self._assigned_slot_by_tag.get(tag, "")),
             "group": self._assigned_group_by_tag.get(tag, "other"),
+            "groupLabelKo": self._group_label_ko(self._assigned_group_by_tag.get(tag, "other")),
             "postCount": int(row.post_count),
             "displayCount": self._format_count(int(row.post_count)),
             "selected": selected,
@@ -1222,11 +1246,14 @@ class ClothesPresetService:
             groups.append({
                 "id": group["id"],
                 "label": group["label"],
+                "labelKo": group.get("labelKo", ""),
                 "tags": [item["tag"] for item in items],
                 "items": [
                     {
                         "id": item["id"],
                         "tag": item["tag"],
+                        "labelKo": item.get("labelKo", ""),
+                        "krDesc": item.get("krDesc", ""),
                         "source": item["source"],
                         "sourceId": item["sourceId"],
                         "group": item["group"],
@@ -1299,7 +1326,10 @@ class ClothesPresetService:
                 "kind": kind,
                 "slot": slot,
                 "slotLabel": self._slot_label(slot),
+                "slotLabelKo": self._slot_label_ko(slot),
                 "group": self._assigned_group_by_tag.get(tag, "other"),
+                "groupLabelKo": self._group_label_ko(self._assigned_group_by_tag.get(tag, "other")),
+                **self._tag_translation_fields(tag),
                 "metrics": self._json_metrics(metrics),
             })
         return result
@@ -1412,6 +1442,117 @@ class ClothesPresetService:
             "LEGS_FEET": "Legs / Feet",
             "STYLE": "Style",
         }.get(slot, slot)
+
+    def _slot_label_ko(self, slot: str) -> str:
+        return str(self._translation_item("slots", slot).get("labelKo") or "").strip()
+
+    def _group_label_ko(self, group: str) -> str:
+        return str(self._translation_item("groups", group).get("labelKo") or "").strip()
+
+    def _load_translations(self) -> dict[str, Any]:
+        if self._translation_payload is not None:
+            return self._translation_payload
+        try:
+            with self.translation_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except FileNotFoundError:
+            data = {}
+        except Exception:
+            data = {}
+        self._translation_payload = data if isinstance(data, dict) else {}
+        return self._translation_payload
+
+    def _translation_item(self, section: str, key: Any) -> dict[str, Any]:
+        section_data = self._load_translations().get(section)
+        if not isinstance(section_data, dict):
+            return {}
+        item = section_data.get(str(key or "").strip())
+        return item if isinstance(item, dict) else {}
+
+    def _load_kr_tag_payload(self) -> dict[str, dict[str, str]]:
+        if self._kr_tag_payload is not None:
+            return self._kr_tag_payload
+        if not self.kr_tags_path.exists():
+            self._kr_tag_payload = {}
+            return self._kr_tag_payload
+        try:
+            import pandas as pd
+
+            df = pd.read_parquet(self.kr_tags_path, columns=["tag", "category", "desc", "keywords"])
+        except Exception:
+            self._kr_tag_payload = {}
+            return self._kr_tag_payload
+
+        payload: dict[str, dict[str, str]] = {}
+        for row in df.to_dict(orient="records"):
+            tag = self._normalize_plain_text(row.get("tag"))
+            if not tag:
+                continue
+            label = self._short_kr_label(row.get("keywords"), row.get("desc"))
+            desc = str(row.get("desc") or "").strip()
+            category = str(row.get("category") or "").strip()
+            if label or desc or category:
+                payload[tag] = {
+                    "labelKo": label,
+                    "krDesc": desc,
+                    "krCategory": category,
+                }
+        self._kr_tag_payload = payload
+        return self._kr_tag_payload
+
+    def _tag_translation_fields(self, tag: str) -> dict[str, str]:
+        info = self._load_kr_tag_payload().get(self._normalize_plain_text(tag), {})
+        return {
+            key: value
+            for key, value in {
+                "labelKo": info.get("labelKo", ""),
+                "krDesc": info.get("krDesc", ""),
+                "krCategory": info.get("krCategory", ""),
+            }.items()
+            if value
+        }
+
+    def _translated_tag_labels(self, tags: list[str]) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        payload = self._load_kr_tag_payload()
+        for tag in tags:
+            label = str(payload.get(self._normalize_plain_text(tag), {}).get("labelKo") or "").strip()
+            if not label:
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            labels.append(label)
+        return labels
+
+    @staticmethod
+    def _short_kr_label(keywords: Any, desc: Any) -> str:
+        raw_keywords = str(keywords or "").strip()
+        plain: list[str] = []
+        bracketed: list[str] = []
+        for token in raw_keywords.split(","):
+            clean = token.strip()
+            if not clean:
+                continue
+            if clean.startswith("<") and clean.endswith(">"):
+                bracketed.append(clean[1:-1].strip())
+            else:
+                plain.append(clean.strip("<>").strip())
+        for candidate in [*plain, *bracketed]:
+            if candidate:
+                return candidate
+        raw_desc = str(desc or "").strip()
+        if not raw_desc:
+            return ""
+        return raw_desc.split(".")[0].strip()
+
+    @staticmethod
+    def _normalize_plain_text(value: Any) -> str:
+        if value is None:
+            return ""
+        return " ".join(str(value).strip().lower().replace("_", " ").split())
 
     def _first_slot(self) -> str:
         slots = self._display_slots()

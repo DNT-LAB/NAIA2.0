@@ -1197,6 +1197,27 @@ class PresetInputBridge:
         })
         categories = [item for item in data.get("categories") or [] if isinstance(item, dict)]
         selection = self._resolve_expression_selection(parsed, categories)
+        direct_tags = selection.get("directTags")
+        if direct_tags:
+            prompt = self._join_tags(direct_tags)
+            return {
+                "ok": True,
+                "applied": bool(prompt),
+                "reason": "",
+                "token": parsed.get("raw") or "",
+                "axis": "expressions",
+                "stage": "direct",
+                "tags": direct_tags,
+                "prompt": prompt,
+                "selected": {
+                    "categoryId": "",
+                    "subcategoryId": "",
+                    "itemId": "",
+                    "label": prompt,
+                    "tagSummary": prompt,
+                    "source": "expression_direct",
+                },
+            }
         item = selection.get("item")
         if not isinstance(item, dict):
             return {
@@ -1234,8 +1255,19 @@ class PresetInputBridge:
         categories: list[dict[str, Any]],
     ) -> dict[str, Any]:
         segments = self._non_empty_segments(parsed)
+        if len(segments) == 1:
+            direct_tags = self._expression_direct_tags(segments[0])
+            if direct_tags:
+                direct = self._match_expression_item_globally(categories, segments[0])
+                if direct:
+                    return {"stage": "item", **direct}
+                return {"stage": "direct", "directTags": direct_tags}
         category = self._match_node(categories, segments[0] if len(segments) >= 1 else "")
         if not category:
+            if len(segments) == 1:
+                direct = self._match_expression_item_globally(categories, segments[0])
+                if direct:
+                    return {"stage": "item", **direct}
             category = self._first_expression_category(categories)
             if not category:
                 return {"reason": "empty_catalog"}
@@ -1272,6 +1304,43 @@ class PresetInputBridge:
             "item": item,
         }
 
+    def _match_expression_item_globally(
+        self,
+        categories: list[dict[str, Any]],
+        value: str,
+    ) -> dict[str, Any] | None:
+        direct_tags = self._expression_direct_tags(value)
+        direct_keys = {self._normalize_match(tag) for tag in direct_tags}
+        needle = self._normalize_match(value)
+        if not needle:
+            return None
+        for category in categories:
+            subcategories = [item for item in category.get("subcategories") or [] if isinstance(item, dict)]
+            for subcategory in subcategories:
+                for item in self._expression_items(subcategory):
+                    if direct_keys:
+                        item_keys = {self._normalize_match(tag) for tag in self._expression_item_tags(item)}
+                        if direct_keys.issubset(item_keys):
+                            return {"category": category, "subcategory": subcategory, "item": item}
+                    elif needle in {
+                        self._normalize_match(candidate)
+                        for candidate in self._node_match_candidates(item)
+                        if candidate
+                    }:
+                        return {"category": category, "subcategory": subcategory, "item": item}
+        return None
+
+    @staticmethod
+    def _expression_direct_tags(value: Any) -> list[str]:
+        text = unquote(str(value or "")).strip()
+        if "+" not in text:
+            return []
+        return PresetInputBridge._ordered_unique([
+            part.strip()
+            for part in text.split("+")
+            if part.strip()
+        ])
+
     def _suggest_nodes(
         self,
         parsed: dict[str, Any],
@@ -1293,9 +1362,10 @@ class PresetInputBridge:
             prefer_ko_label = axis == "expressions" and stage in {"category", "subcategory"}
             label = self._display_label(node, prefer_ko=prefer_ko_label)
             prompt = self._prompt_from_node(node)
+            value = self._expression_shortcut_token(node) if axis == "expressions" and final else path
             suggestions.append({
                 "tag": label,
-                "value": path,
+                "value": value,
                 "count": self._count(node),
                 "desc": self._node_desc(node, stage),
                 "group": f"preset/{axis}",
@@ -1305,6 +1375,7 @@ class PresetInputBridge:
                 "stage": stage,
                 "final": final,
                 "id": node_id,
+                "internalPath": path if value != path else "",
                 "rawLabel": node.get("label") or node.get("tag") or node_id,
                 "labelKo": node.get("labelKo") or node.get("displayLabelKo") or "",
                 "tags": node.get("tags") or node.get("promptAtoms") or [],
@@ -1388,6 +1459,12 @@ class PresetInputBridge:
         if isinstance(tags, (list, tuple, set)):
             return [str(tag).strip() for tag in tags if str(tag or "").strip()]
         return PresetInputBridge._split_prompt(item.get("prompt") or item.get("label") or item.get("tag") or "")
+
+    def _expression_shortcut_token(self, item: dict[str, Any]) -> str:
+        tags = self._expression_item_tags(item)
+        segment = " + ".join(tags) if len(tags) > 1 else (tags[0] if tags else self._display_label(item))
+        segment = str(segment or "").replace("/", " ").strip()
+        return self._axis_token("expressions") + ("/" + segment if segment else "")
 
     def _resolve_event_selection(self, parsed: dict[str, Any], chooser: Any) -> dict[str, Any]:
         service = self._event_service or self._make_event_service()

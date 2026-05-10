@@ -823,7 +823,8 @@ def test_loaded_clothes_and_expression_inputs_return_expected_final_rows(tmp_pat
     expressions = bridge.suggest("preset:expressions/smile/mouth")
     assert expressions["stage"] == "item"
     assert expressions["suggestions"][0]["final"] is True
-    assert expressions["suggestions"][0]["value"] == "preset:expressions/smile/mouth/smile-open-mouth"
+    assert expressions["suggestions"][0]["value"] == "preset:expressions/smile + open mouth"
+    assert expressions["suggestions"][0]["internalPath"] == "preset:expressions/smile/mouth/smile-open-mouth"
     assert expressions["suggestions"][0]["insertText"] == "smile, open mouth"
     assert expressions["suggestions"][0]["tags"] == ["smile", "open mouth"]
 
@@ -862,6 +863,12 @@ def test_expression_paths_resolve_to_prompt_tags(tmp_path):
     assert item["prompt"] == "smile, open mouth"
     assert item["selected"]["itemId"] == "smile-open-mouth"
 
+    direct = bridge.resolve_prompt_token("preset:expressions/smile + open mouth")
+    assert direct["applied"] is True
+    assert direct["stage"] == "item"
+    assert direct["prompt"] == "smile, open mouth"
+    assert direct["selected"]["itemId"] == "smile-open-mouth"
+
 
 def test_prompt_processor_expands_preset_expression_token_during_wildcard_step(tmp_path):
     processor = PromptProcessor.__new__(PromptProcessor)
@@ -870,7 +877,7 @@ def test_prompt_processor_expands_preset_expression_token_during_wildcard_step(t
     context = PromptContext(
         source_row={},
         settings={},
-        main_tags=["best quality", "preset:expressions/smile/mouth/smile-open-mouth"],
+        main_tags=["best quality", "preset:expressions/smile + open mouth"],
     )
 
     processor._step_3_expand_wildcards(context)

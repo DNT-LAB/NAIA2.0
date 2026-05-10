@@ -440,6 +440,47 @@ def test_tag_search_metadata_fallback_does_not_scan_every_entry(monkeypatch):
     assert calls < 20
 
 
+def test_tag_search_metadata_fallback_loads_prebuilt_index_without_runtime_build(
+    monkeypatch,
+    tmp_path,
+):
+    entries = [
+        TagSearchEntry(
+            tag="holding wine glass",
+            freq=300,
+            desc="와인 잔을 손에 들고 있음.",
+            keywords=("와인잔", "잔 들기"),
+            search_blob="holding wine glass 와인 잔 손에 들고 있음",
+        ),
+        TagSearchEntry(
+            tag="wine",
+            freq=5000,
+            desc="와인.",
+            keywords=("와인",),
+            search_blob="wine 와인",
+        ),
+    ]
+    artifact = tmp_path / "kr_metadata_fallback_index.json.gz"
+    writer = TagSearchIndex(entries)
+    stats = writer.write_metadata_fallback_index(artifact)
+    assert stats["term_count"] > 0
+
+    cold = TagSearchIndex(entries)
+
+    def fail_build():
+        raise AssertionError("prebuilt metadata fallback index should be loaded")
+
+    monkeypatch.setattr(cold, "_build_metadata_candidate_index", fail_build)
+    assert cold.load_metadata_fallback_index(artifact)
+
+    results = [
+        result.tag
+        for result in cold.search_metadata_fallback("와인 잔을 손에 쥐고있음", limit=5)
+    ]
+
+    assert results[0] == "holding wine glass"
+
+
 def test_event_semantic_entrypoint_requires_event_by_default():
     index = TagSearchIndex(
         [

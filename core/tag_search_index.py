@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import math
 import re
@@ -19,6 +20,8 @@ from core.tag_knowledge import has_hangul
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KR_TAGS_PATH = PROJECT_ROOT / "data" / "KR_tags.parquet"
 KR_METADATA_SEARCH_RULES_PATH = PROJECT_ROOT / "data" / "tag_index" / "kr_metadata_search_rules.json"
+KR_METADATA_FALLBACK_INDEX_PATH = PROJECT_ROOT / "data" / "tag_index" / "kr_metadata_fallback_index.json.gz"
+KR_METADATA_FALLBACK_INDEX_SCHEMA_VERSION = 1
 _WEIGHT_PREFIX_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*")
 _WEIGHT_ONLY_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?::+)?$")
 _TRAILING_WEIGHT_MARK_RE = re.compile(r"\s*::$")
@@ -473,9 +476,9 @@ class TagSearchIndex:
         }
         self._sorted_tags = tuple(sorted(self._entries))
         self._term_to_tags = self._build_candidate_index()
-        self._metadata_term_to_tags: dict[str, frozenset[str]] | None = None
-        self._metadata_terms_by_tag: dict[str, dict[str, frozenset[str]]] | None = None
-        self._metadata_text_by_tag: dict[str, dict[str, str]] | None = None
+        self._metadata_term_to_tags: Mapping[str, Iterable[str]] | None = None
+        self._metadata_terms_by_tag: dict[str, dict[str, frozenset[str]]] = {}
+        self._metadata_text_by_tag: dict[str, dict[str, str]] = {}
         self._metadata_index_lock = threading.Lock()
 
     @classmethod
@@ -826,7 +829,8 @@ class TagSearchIndex:
         if not query_terms:
             return []
         anchor_terms = _metadata_anchor_terms(q)
-        self._ensure_metadata_candidate_index()
+        if not self._ensure_metadata_candidate_index():
+            return []
         term_to_tags = self._metadata_term_to_tags or {}
 
         candidate_tags: set[str] = set()
@@ -837,7 +841,9 @@ class TagSearchIndex:
 
         results: list[TagSearchResult] = []
         for tag in candidate_tags:
-            entry = self._entries[tag]
+            entry = self._entries.get(tag)
+            if entry is None:
+                continue
             if require_event is True and not entry.is_event:
                 continue
             if require_event is False and entry.is_event:
@@ -862,20 +868,117 @@ class TagSearchIndex:
     def metadata_fallback_index_ready(self) -> bool:
         return self._metadata_term_to_tags is not None
 
-    def warm_metadata_fallback_index(self) -> None:
-        self._ensure_metadata_candidate_index()
+    def warm_metadata_fallback_index(self, *, allow_build: bool = True) -> bool:
+        return self._ensure_metadata_candidate_index(allow_build=allow_build)
 
-    def _ensure_metadata_candidate_index(self) -> None:
+    def load_metadata_fallback_index(
+        self,
+        path: str | Path = KR_METADATA_FALLBACK_INDEX_PATH,
+    ) -> bool:
+        loaded = self._load_metadata_candidate_index(path)
+        if loaded is None:
+            return False
+        self._metadata_term_to_tags = loaded
+        self._metadata_terms_by_tag.clear()
+        self._metadata_text_by_tag.clear()
+        return True
+
+    def write_metadata_fallback_index(
+        self,
+        path: str | Path = KR_METADATA_FALLBACK_INDEX_PATH,
+    ) -> dict[str, int]:
+        term_to_tags = self._build_metadata_candidate_index()
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": KR_METADATA_FALLBACK_INDEX_SCHEMA_VERSION,
+            "kind": "kr_metadata_fallback_terms",
+            "entry_count": len(self._entries),
+            "term_count": len(term_to_tags),
+            "posting_count": sum(len(tags) for tags in term_to_tags.values()),
+            "term_to_tags": {
+                term: sorted(tags)
+                for term, tags in sorted(term_to_tags.items())
+            },
+        }
+        self._write_metadata_index_payload(output_path, payload)
+        self._metadata_term_to_tags = term_to_tags
+        self._metadata_terms_by_tag.clear()
+        self._metadata_text_by_tag.clear()
+        return {
+            "entry_count": int(payload["entry_count"]),
+            "term_count": int(payload["term_count"]),
+            "posting_count": int(payload["posting_count"]),
+        }
+
+    def _ensure_metadata_candidate_index(self, *, allow_build: bool = True) -> bool:
         if self._metadata_term_to_tags is not None:
-            return
+            return True
         with self._metadata_index_lock:
             if self._metadata_term_to_tags is not None:
-                return
-            (
-                self._metadata_term_to_tags,
-                self._metadata_terms_by_tag,
-                self._metadata_text_by_tag,
-            ) = self._build_metadata_candidate_index()
+                return True
+            if self.load_metadata_fallback_index():
+                return True
+            if not allow_build:
+                return False
+            self._metadata_term_to_tags = self._build_metadata_candidate_index()
+            self._metadata_terms_by_tag.clear()
+            self._metadata_text_by_tag.clear()
+            return True
+
+    def _load_metadata_candidate_index(
+        self,
+        path: str | Path = KR_METADATA_FALLBACK_INDEX_PATH,
+    ) -> Mapping[str, Iterable[str]] | None:
+        input_path = Path(path)
+        if not input_path.exists():
+            return None
+        try:
+            payload = self._read_metadata_index_payload(input_path)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("schema_version") != KR_METADATA_FALLBACK_INDEX_SCHEMA_VERSION:
+            return None
+        if payload.get("kind") != "kr_metadata_fallback_terms":
+            return None
+        raw_index = payload.get("term_to_tags")
+        if not isinstance(raw_index, dict):
+            return None
+
+        sample = list(raw_index.items())[:16]
+        if any(
+            not isinstance(term, str) or not isinstance(tags, list)
+            for term, tags in sample
+        ):
+            return None
+        # This artifact is generated from normalized repo data; stale tags are
+        # ignored later when candidates are resolved against self._entries.
+        return raw_index
+
+    @staticmethod
+    def _read_metadata_index_payload(path: Path) -> dict[str, Any]:
+        if path.suffix == ".gz":
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                return json.load(fh)
+        with path.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    @staticmethod
+    def _write_metadata_index_payload(path: Path, payload: Mapping[str, Any]) -> None:
+        if path.suffix == ".gz":
+            with gzip.GzipFile(path, "wb", mtime=0) as gz:
+                gz.write(
+                    json.dumps(
+                        payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+            return
+        with path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
 
     def _search(
         self,
@@ -951,45 +1054,52 @@ class TagSearchIndex:
 
         return {term: frozenset(tags) for term, tags in term_to_tags.items()}
 
-    def _build_metadata_candidate_index(
+    @staticmethod
+    def _metadata_fields_for_entry(
+        entry: TagSearchEntry,
+    ) -> tuple[dict[str, frozenset[str]], dict[str, str]]:
+        field_text = {
+            "tag": _norm(entry.tag),
+            "keywords": _norm(" ".join(entry.keywords)),
+            "desc": _norm(entry.desc),
+            "category": _norm(entry.category),
+        }
+        field_terms = {
+            field: _metadata_terms(
+                text,
+                expand_substrings=True,
+                expand_aliases=False,
+            )
+            for field, text in field_text.items()
+            if text
+        }
+        return field_terms, field_text
+
+    def _metadata_entry_fields(
         self,
-    ) -> tuple[
-        dict[str, frozenset[str]],
-        dict[str, dict[str, frozenset[str]]],
-        dict[str, dict[str, str]],
-    ]:
+        tag: str,
+        entry: TagSearchEntry,
+    ) -> tuple[dict[str, frozenset[str]], dict[str, str]]:
+        field_terms = self._metadata_terms_by_tag.get(tag)
+        field_text = self._metadata_text_by_tag.get(tag)
+        if field_terms is not None and field_text is not None:
+            return field_terms, field_text
+        field_terms, field_text = self._metadata_fields_for_entry(entry)
+        self._metadata_terms_by_tag[tag] = field_terms
+        self._metadata_text_by_tag[tag] = field_text
+        return field_terms, field_text
+
+    def _build_metadata_candidate_index(self) -> dict[str, frozenset[str]]:
         term_to_tags: dict[str, set[str]] = defaultdict(set)
-        terms_by_tag: dict[str, dict[str, frozenset[str]]] = {}
-        text_by_tag: dict[str, dict[str, str]] = {}
 
         for tag, entry in self._entries.items():
-            field_text = {
-                "tag": _norm(entry.tag),
-                "keywords": _norm(" ".join(entry.keywords)),
-                "desc": _norm(entry.desc),
-                "category": _norm(entry.category),
-            }
-            field_terms = {
-                field: _metadata_terms(
-                    text,
-                    expand_substrings=True,
-                    expand_aliases=False,
-                )
-                for field, text in field_text.items()
-                if text
-            }
-            terms_by_tag[tag] = field_terms
-            text_by_tag[tag] = field_text
+            field_terms, _ = self._metadata_fields_for_entry(entry)
 
             for terms in field_terms.values():
                 for term in terms:
                     term_to_tags[term].add(tag)
 
-        return (
-            {term: frozenset(tags) for term, tags in term_to_tags.items()},
-            terms_by_tag,
-            text_by_tag,
-        )
+        return {term: frozenset(tags) for term, tags in term_to_tags.items()}
 
     def _candidate_tags(
         self,
@@ -1155,8 +1265,7 @@ class TagSearchIndex:
         tag: str,
         entry: TagSearchEntry,
     ) -> float:
-        field_terms = (self._metadata_terms_by_tag or {}).get(tag, {})
-        field_text = (self._metadata_text_by_tag or {}).get(tag, {})
+        field_terms, field_text = self._metadata_entry_fields(tag, entry)
         if not field_terms:
             return 0.0
 

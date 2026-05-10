@@ -14688,14 +14688,14 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge._update_cache_all()
 
     # KR_tags 인덱스 + character_analysis 는 부팅 main thread 가 끝난 직후
-    # daemon thread 에서 워밍업한다. 부팅 자체는 이미 lazy 라 안 늦지만,
-    # "사용자 사용 가능 시점"은 이 인덱스가 빌드 완료되어야 검색/자동완성/태그 lookup 이
-    # 정상 동작. 완료 시 모든 WS 클라이언트에 broadcast 하여 boot indicator 와 동기화.
+    # daemon thread 에서 워밍업한다. metadata fallback 은 prebuilt artifact 만 읽고,
+    # artifact 가 없으면 라이브 프로세스에서 무거운 빌드를 시도하지 않는다.
+    # 완료 시 모든 WS 클라이언트에 broadcast 하여 boot indicator 와 동기화.
     def _bg_warmup_lazy_indices():
         try:
             bridge._load_kr_tags()
             if bridge._tag_search_index is not None:
-                bridge._tag_search_index.warm_metadata_fallback_index()
+                bridge._tag_search_index.warm_metadata_fallback_index(allow_build=False)
         except Exception as e:
             print(f"🌐 Remote: KR_tags warmup 실패 — {e}")
         try:

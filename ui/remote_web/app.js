@@ -315,7 +315,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260510-mobile-drag1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,

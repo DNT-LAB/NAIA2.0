@@ -19,6 +19,7 @@ export function createResultImageActions({
   let dragSourceBound = false;
   const dragGhostSize = 50;
   let compactDragImage = null;
+  let lastDragPointer = {type: '', time: 0};
 
   function isMetadataActionObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -736,6 +737,30 @@ export function createResultImageActions({
     return false;
   }
 
+  function isResultDragSourceTarget(target) {
+    if (!(target instanceof window.Element)) return false;
+    return target.id === 'preview'
+      || Boolean(target.closest('.viewer'))
+      || Boolean(target.classList && target.classList.contains('viewer-thumb'));
+  }
+
+  function rememberDragPointer(event) {
+    if (!isResultDragSourceTarget(event.target)) return;
+    lastDragPointer = {
+      type: String(event.pointerType || ''),
+      time: Date.now(),
+    };
+  }
+
+  function isMobileInitiatedDrag() {
+    const elapsed = Date.now() - (lastDragPointer.time || 0);
+    if (elapsed >= 0 && elapsed < 2500 && lastDragPointer.type) {
+      return lastDragPointer.type !== 'mouse';
+    }
+    const mediaQuery = window.matchMedia?.('(hover: none), (pointer: coarse)');
+    return Boolean(mediaQuery?.matches);
+  }
+
   function bindDragSource() {
     if (dragSourceBound) return;
     dragSourceBound = true;
@@ -743,9 +768,14 @@ export function createResultImageActions({
     const preview = document.getElementById('preview');
     if (preview) preview.draggable = false;
     if (viewer) viewer.draggable = true;
+    document.addEventListener('pointerdown', rememberDragPointer, true);
     document.addEventListener('dragstart', event => {
       const target = event.target;
       if (!(target instanceof window.Element)) return;
+      if (isResultDragSourceTarget(target) && isMobileInitiatedDrag()) {
+        event.preventDefault();
+        return;
+      }
       let payload = null;
       let dragImageSource = null;
       if (target.id === 'preview') {

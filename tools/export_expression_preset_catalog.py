@@ -27,59 +27,58 @@ SOURCE_RELATIVE_PATH = Path("save") / "custom_tags" / "1girl_solo_only.parquet"
 MIN_TAG_COUNT = 5
 MIN_COMBO_COUNT = 2
 MAX_ITEMS_PER_SUBCATEGORY = 40
+MAX_FEATURED_ITEMS_PER_CATEGORY = 24
 EMOTICON_RE = re.compile(r"^[0-9a-z:;=@!?._+\\/\-^><|() ]{1,10}$")
 SYMBOL_UNDERSCORE_RE = re.compile(r"^[0-9a-z:;=@!?._+\\/\-^><|()]{1,12}$")
 
 CATEGORY_ORDER: list[tuple[str, str]] = [
-    ("cheerful", "Cheerful"),
-    ("playful", "Playful / Teasing"),
-    ("shy", "Shy / Embarrassed"),
-    ("sad", "Sad / Tearful"),
-    ("tense", "Tense / Nervous"),
-    ("surprised", "Surprised / Questioning"),
-    ("angry", "Angry / Frustrated"),
-    ("displeased", "Displeased"),
-    ("neutral", "Neutral / Stoic"),
-    ("sleepy", "Sleepy / Tired"),
-    ("intense", "Intense / Altered"),
-    ("physical", "Physical Condition"),
-    ("other", "Other"),
+    ("positive_smile", "Smile / Happy"),
+    ("playful_teasing", "Playful / Teasing"),
+    ("shy_flustered", "Shy / Flustered"),
+    ("sad_tears", "Sad / Tearful"),
+    ("angry_displeased", "Angry / Displeased"),
+    ("surprise_fear", "Surprise / Fear"),
+    ("neutral_tired", "Neutral / Tired"),
+    ("physical_condition", "Physical Condition"),
+    ("stylized_symbol", "Stylized Symbol"),
+    ("other_review", "Review Needed"),
 ]
 CATEGORY_INDEX = {group_id: index for index, (group_id, _label) in enumerate(CATEGORY_ORDER)}
 CATEGORY_LABELS_KO: dict[str, str] = {
-    "cheerful":   "밝은 표정",
-    "playful":    "장난스러운 표정",
-    "shy":        "부끄러운 표정",
-    "sad":        "슬픈/눈물 표정",
-    "tense":      "긴장된 표정",
-    "surprised":  "놀란 표정",
-    "angry":      "화난 표정",
-    "displeased": "시큰둥한 표정",
-    "neutral":    "무표정/담담한 표정",
-    "sleepy":     "졸린/지친 표정",
-    "intense":    "격앙된 표정",
-    "physical":   "신체 반응",
-    "other":      "기타",
+    "positive_smile":      "웃는 표정",
+    "playful_teasing":     "장난 / 도발",
+    "shy_flustered":       "수줍음 / 당황",
+    "sad_tears":           "슬픔 / 눈물",
+    "angry_displeased":    "화남 / 불쾌",
+    "surprise_fear":       "놀람 / 불안",
+    "neutral_tired":       "무표정 / 피로",
+    "physical_condition":  "신체 반응",
+    "stylized_symbol":     "기호형 표정",
+    "other_review":        "검토 필요",
 }
 
-# Consolidated focus axes (12 → 6). Legacy IDs map onto these for both
-# semantic_for_tag returns and CATEGORY_FOCUS_ORDER lookups.
+# Display-oriented focus axes. `featured` is a virtual first bucket created per
+# category so users see useful representatives before drilling into raw facets.
 FOCUS_ORDER: list[tuple[str, str]] = [
-    ("expression", "Expression"),
-    ("eyes", "Eyes / Gaze"),
-    ("emoticon", "Emoticon"),
+    ("featured", "Featured"),
+    ("mouth_smile", "Mouth / Smile"),
+    ("eyes_gaze", "Eyes / Gaze"),
+    ("symbolic", "Symbolic"),
     ("tears_sweat", "Tears / Sweat"),
     ("mood_state", "Mood State"),
     ("physical", "Physical"),
+    ("special", "Special"),
 ]
 FOCUS_LABELS = dict(FOCUS_ORDER)
 FOCUS_LABELS_KO: dict[str, str] = {
-    "expression":  "표정",
-    "eyes":        "눈/시선",
-    "emoticon":    "이모티콘",
-    "tears_sweat": "눈물·땀",
-    "mood_state":  "분위기",
-    "physical":    "신체",
+    "featured":     "대표",
+    "mouth_smile":  "입 / 미소",
+    "eyes_gaze":         "눈 / 시선",
+    "symbolic":     "기호형",
+    "tears_sweat":  "눈물 / 땀",
+    "mood_state":   "분위기 / 상태",
+    "physical":     "신체",
+    "special":      "특수",
 }
 FOCUS_INDEX = {focus_id: index for index, (focus_id, _label) in enumerate(FOCUS_ORDER)}
 SUBCATEGORY_INDEX = {
@@ -87,21 +86,18 @@ SUBCATEGORY_INDEX = {
     for category_id, _label in CATEGORY_ORDER
 }
 MOOD_PRIORITY = {category_id: index for index, (category_id, _label) in enumerate(CATEGORY_ORDER)}
-DEFAULT_FOCUS_ORDER = ("expression", "eyes", "emoticon", "tears_sweat", "mood_state", "physical")
+DEFAULT_FOCUS_ORDER = ("featured", "mouth_smile", "eyes_gaze", "mood_state", "tears_sweat", "symbolic", "physical", "special")
 CATEGORY_FOCUS_ORDER: dict[str, tuple[str, ...]] = {
-    "cheerful":   ("expression", "emoticon", "eyes", "tears_sweat", "mood_state", "physical"),
-    "playful":    ("expression", "eyes", "emoticon", "tears_sweat", "mood_state", "physical"),
-    "shy":        ("expression", "tears_sweat", "eyes", "emoticon", "mood_state", "physical"),
-    "sad":        ("tears_sweat", "expression", "eyes", "mood_state", "emoticon", "physical"),
-    "tense":      ("expression", "tears_sweat", "eyes", "emoticon", "mood_state", "physical"),
-    "surprised":  ("emoticon", "eyes", "expression", "mood_state", "tears_sweat", "physical"),
-    "angry":      ("expression", "eyes", "emoticon", "mood_state", "tears_sweat", "physical"),
-    "displeased": ("emoticon", "expression", "eyes", "mood_state", "tears_sweat", "physical"),
-    "neutral":    ("expression", "eyes", "mood_state", "emoticon", "tears_sweat", "physical"),
-    "sleepy":     ("eyes", "expression", "mood_state", "physical", "emoticon", "tears_sweat"),
-    "intense":    ("mood_state", "expression", "eyes", "physical", "emoticon", "tears_sweat"),
-    "physical":   ("physical", "expression", "eyes", "mood_state", "emoticon", "tears_sweat"),
-    "other":      DEFAULT_FOCUS_ORDER,
+    "positive_smile":     ("featured", "mouth_smile", "eyes_gaze", "mood_state", "symbolic", "tears_sweat", "physical", "special"),
+    "playful_teasing":    ("featured", "mouth_smile", "eyes_gaze", "mood_state", "symbolic", "physical", "tears_sweat", "special"),
+    "shy_flustered":      ("featured", "mood_state", "tears_sweat", "eyes_gaze", "mouth_smile", "symbolic", "physical", "special"),
+    "sad_tears":          ("featured", "tears_sweat", "mood_state", "mouth_smile", "eyes_gaze", "symbolic", "physical", "special"),
+    "angry_displeased":   ("featured", "mouth_smile", "eyes_gaze", "mood_state", "symbolic", "tears_sweat", "physical", "special"),
+    "surprise_fear":      ("featured", "eyes_gaze", "mood_state", "mouth_smile", "tears_sweat", "symbolic", "physical", "special"),
+    "neutral_tired":      ("featured", "mouth_smile", "eyes_gaze", "mood_state", "physical", "symbolic", "tears_sweat", "special"),
+    "physical_condition": ("featured", "physical", "mood_state", "mouth_smile", "eyes_gaze", "tears_sweat", "symbolic", "special"),
+    "stylized_symbol":    ("featured", "symbolic", "mouth_smile", "eyes_gaze", "mood_state", "tears_sweat", "physical", "special"),
+    "other_review":       DEFAULT_FOCUS_ORDER,
 }
 
 
@@ -710,6 +706,7 @@ def build_catalog(
             "minTagCount": min_tag_count,
             "minComboCount": min_combo_count,
             "maxItemsPerSubcategory": MAX_ITEMS_PER_SUBCATEGORY,
+            "maxFeaturedItemsPerCategory": MAX_FEATURED_ITEMS_PER_CATEGORY,
             "sortPolicy": "category mood order, focus order, fewer core tags first, count descending, concise combo first",
             "representativeVariantPolicy": (
                 "dedupe by core expression tags, then display/apply the highest-scoring prompt variant "
@@ -746,7 +743,7 @@ def build_catalog(
                 "demote `expressionless` to implicit when another expression-bearing tag exists",
                 "strip auxiliary modifiers (tongue/saliva/sweatdrop/breath) when an emoticon is present",
                 "drop low-signal combo tags when stronger expression tags remain",
-                "reroute embarrassed → shy, nervous-smile-only → tense, false/forced smile → displeased, sad smile → sad",
+                "reroute embarrassed → shy/flustered, nervous-smile-only → surprise/fear, false/forced smile → angry/displeased, sad smile → sad/tears",
             ],
             "noiseTags": [
                 {
@@ -799,101 +796,101 @@ def noise_reason_for_tag(tag: str, groups: list[str], count: int, min_tag_count:
 
 def semantic_for_tag(tag: str, groups: list[str]) -> tuple[str, str] | None:
     if tag in TEARS_TAGS or "tear" in tag or "crying" in tag:
-        return ("sad", "tears_sweat")
+        return ("sad_tears", "tears_sweat")
     if tag in ANGRY_TAGS or "frown" in tag or "angry" in tag:
-        return ("angry", "expression")
+        return ("angry_displeased", "mouth_smile")
     if tag in SHY_TAGS or "sweat" in tag:
         if "sweat" in tag:
-            return ("tense", "tears_sweat")
-        return ("tense", "mood_state") if tag == "nervous" else ("shy", "expression")
+            return ("shy_flustered", "tears_sweat")
+        return ("surprise_fear", "mood_state") if tag == "nervous" else ("shy_flustered", "mood_state")
     if tag in SURPRISE_TAGS:
-        return ("surprised", "emoticon" if tag in {":o", ";o"} else "mood_state")
+        return ("surprise_fear", "symbolic" if tag in {":o", ";o"} else "mood_state")
     if tag in DISPLEASED_TAGS:
-        return ("displeased", "emoticon")
+        return ("angry_displeased", "symbolic")
     if tag in GRIN_TAGS or "grin" in tag:
         if "evil" in tag or "crazy" in tag:
-            return ("intense", "expression")
-        return ("playful", "expression")
+            return ("playful_teasing", "mouth_smile")
+        return ("playful_teasing", "mouth_smile")
     if tag in SMILE_TAGS:
-        return ("cheerful", "expression")
+        return ("positive_smile", "mouth_smile")
     if "smile" in tag:
         if tag == "nervous smile":
-            return ("tense", "expression")
+            return ("surprise_fear", "mouth_smile")
         if tag == "sad smile":
-            return ("sad", "expression")
+            return ("sad_tears", "mouth_smile")
         if tag in {"false smile", "forced smile"}:
-            return ("displeased", "expression")
-        return ("cheerful", "expression")
+            return ("angry_displeased", "mouth_smile")
+        return ("positive_smile", "mouth_smile")
     if tag in STOIC_TAGS:
         if tag == "sleepy":
-            return ("sleepy", "mood_state")
+            return ("neutral_tired", "mood_state")
         if tag in {"wavy mouth", "dot mouth", "sideways mouth"}:
-            return ("neutral", "expression")
-        return ("neutral", "mood_state")
+            return ("neutral_tired", "mouth_smile")
+        return ("neutral_tired", "mood_state")
     if tag in BLUSH_TAGS or ("blush" in tag and tag not in NOISE_TAGS):
-        return ("shy", "expression")
+        return ("shy_flustered", "mood_state")
     if tag in EYEBROW_TAGS:
         if "furrow" in tag:
-            return ("angry", "expression")
+            return ("angry_displeased", "eyes_gaze")
         if "raised" in tag or "cocked" in tag:
-            return ("surprised", "expression")
-        return ("neutral", "expression")
+            return ("surprise_fear", "eyes_gaze")
+        return ("neutral_tired", "eyes_gaze")
     if tag in EYE_EXACT or " eyes" in tag or tag.endswith(" eye") or "eyed" in tag:
         if tag in {"closed eyes", "half-closed eyes", "half-closed eye"}:
-            return ("neutral", "eyes")
+            return ("neutral_tired", "eyes_gaze")
         if tag in {"one eye closed", "one eye narrowed"}:
-            return ("playful", "eyes")
+            return ("playful_teasing", "eyes_gaze")
         if tag == "averting eyes":
-            return ("shy", "eyes")
+            return ("shy_flustered", "eyes_gaze")
         if tag == "rolling eyes":
-            return ("displeased", "eyes")
+            return ("angry_displeased", "eyes_gaze")
         if tag in {"sideways glance", "staring"}:
-            return ("neutral", "eyes")
+            return ("neutral_tired", "eyes_gaze")
         if tag == "glaring":
-            return ("angry", "eyes")
+            return ("angry_displeased", "eyes_gaze")
         if tag in {"wide-eyed", "shiny eyes", "twinkle eye", "sparkling eyes"}:
-            return ("surprised", "eyes")
+            return ("surprise_fear", "eyes_gaze")
         if tag == "jitome":
-            return ("displeased", "eyes")
-        return ("neutral", "eyes")
+            return ("angry_displeased", "eyes_gaze")
+        return ("neutral_tired", "eyes_gaze")
     if any(token in tag for token in ("eye", "eyebrow", "stare", "squint", "blink", "glare", "squeans", "pupil")):
-        return ("neutral", "eyes")
+        return ("neutral_tired", "eyes_gaze")
     if tag in MOUTH_EXACT or " mouth" in tag or " lips" in tag:
         return mouth_semantic(tag)
     if any(token in tag for token in ("teeth", "fang", "drool", "saliva", "tongue", "mouth", "cheek", "shout", "grimace")):
         return mouth_semantic(tag)
     if tag in PHYSICAL_TAGS:
         if "blood" in tag or "nosebleed" in tag:
-            return ("physical", "physical")
+            return ("physical_condition", "physical")
         if tag in {"snot", "runny nose"}:
-            return ("physical", "physical")
-        return ("intense", "physical") if tag in {"drunk", "stoned", "tipsy"} else ("physical", "physical")
+            return ("physical_condition", "physical")
+        return ("physical_condition", "physical")
     if tag in MOOD_TAGS or "emotion" in groups or "emotional_state" in groups:
         return mood_semantic(tag)
     if tag in SYMBOL_EXPRESSION_TAGS:
-        return ("surprised", "emoticon")
+        return ("stylized_symbol", "symbolic")
     if tag in EMOTICON_WORD_TAGS:
         if tag in {"xd", "gao", "o3o"}:
-            return ("cheerful", "emoticon")
+            return ("positive_smile", "symbolic")
         if tag == "0 0":
-            return ("surprised", "emoticon")
+            return ("surprise_fear", "symbolic")
         if tag == "u u":
-            return ("sleepy", "emoticon")
-        return ("neutral", "emoticon")
+            return ("neutral_tired", "symbolic")
+        return ("stylized_symbol", "symbolic")
     if looks_like_emoticon(tag, groups):
         if tag in {":d", ";d", ":>", "^^^", "^ ^", "^3^", "^v^", "c:"}:
-            return ("cheerful", "emoticon")
+            return ("positive_smile", "symbolic")
         if tag in {":3", ";3"}:
-            return ("playful", "emoticon")
+            return ("playful_teasing", "symbolic")
         if tag in {":p", ":q", ";p", ";q", ":t", ";t", "3:", "3;"}:
-            return ("playful", "emoticon")
+            return ("playful_teasing", "symbolic")
         if tag in {":o", ";o", "!?"}:
-            return ("surprised", "emoticon")
+            return ("surprise_fear", "symbolic")
         if tag in {":<", ">:(", ";(", "dx"}:
-            return ("displeased", "emoticon")
+            return ("angry_displeased", "symbolic")
         if tag in {":|", ";|", "...", ". ."}:
-            return ("neutral", "emoticon")
-        return ("playful", "emoticon")
+            return ("neutral_tired", "symbolic")
+        return ("stylized_symbol", "symbolic")
     return None
 
 
@@ -905,36 +902,36 @@ def looks_like_emoticon(tag: str, groups: list[str]) -> bool:
 
 def mouth_semantic(tag: str) -> tuple[str, str]:
     if tag in {"tongue", "tongue out", "pulling tongue", "tongue up", "biting tongue"}:
-        return ("playful", "expression")
+        return ("playful_teasing", "mouth_smile")
     if tag in {"fangs", "skin fang", "fang out", "fangs out", "sharp teeth", "skin fangs"}:
-        return ("playful", "expression")
+        return ("playful_teasing", "mouth_smile")
     if tag in {"grimace", "wince", "shouting", "huffing"}:
-        return ("tense", "expression")
+        return ("surprise_fear", "mouth_smile")
     if tag in {"drooling", "saliva", "saliva trail", "saliva drip", "mouth drool", "heavy breathing", "breath", "moaning"}:
-        return ("physical", "physical")
+        return ("physical_condition", "physical")
     if tag == "yawning":
-        return ("sleepy", "expression")
-    return ("neutral", "expression")
+        return ("neutral_tired", "mouth_smile")
+    return ("neutral_tired", "mouth_smile")
 
 
 def mood_semantic(tag: str) -> tuple[str, str]:
     if tag in {"yandere", "corruption", "dark persona", "possessed", "feral instincts", "aroused", "pervert", "threat"}:
-        return ("intense", "mood_state")
+        return ("physical_condition", "mood_state")
     if tag in {"sad", "lonely", "unhappy", "depressed", "sobbing", "gloom (expression)", "pleading face emoji"}:
-        return ("sad", "mood_state")
+        return ("sad_tears", "mood_state")
     if tag in {"scared", "horrified", "panicking", "distress", "desperation", "flinch", "wince", "worried", "clueless", "confused", "uncomfortable", "unsure", "stutter"}:
-        return ("tense", "mood_state")
+        return ("surprise_fear", "mood_state")
     if tag in {"bored", "exhausted", "zzz", "lazy"}:
-        return ("sleepy", "mood_state")
+        return ("neutral_tired", "mood_state")
     if tag in {"disgust", "disdain", "unamused", "skeptical", "sly", "failure", "bitter", "reluctant"}:
-        return ("displeased", "mood_state")
+        return ("angry_displeased", "mood_state")
     if tag in {"laughing", "giggling", "excited", "peaceful", "confident", "amused", "proud", "satisfied"}:
-        return ("cheerful", "mood_state")
+        return ("positive_smile", "mood_state")
     if tag in {"naughty face", "doyagao", "gesugao"}:
-        return ("playful", "mood_state")
+        return ("playful_teasing", "mood_state")
     if tag in {"shaded face", "face in shadow", "turn pale", "partially shaded face"}:
-        return ("intense", "expression")
-    return ("neutral", "mood_state")
+        return ("physical_condition", "mood_state")
+    return ("neutral_tired", "mood_state")
 
 
 def is_emoticon_tag(tag: str, taxonomy_emoticons: set[str] | None = None) -> bool:
@@ -1041,13 +1038,10 @@ def build_categories(
         ))
         subcategories: list[dict[str, Any]] = []
         category_count = 0
+        category_items: list[dict[str, Any]] = []
         for subcategory_id, items in subcategory_rows:
-            items.sort(key=lambda item: (
-                len(item.get("coreTags") or []),
-                -int(item.get("count") or 0),
-                len(item.get("decoratorTags") or []),
-                item.get("label") or "",
-            ))
+            items.sort(key=expression_item_sort_key)
+            category_items.extend(items)
             primary_items = items[:MAX_ITEMS_PER_SUBCATEGORY]
             more_items = items[MAX_ITEMS_PER_SUBCATEGORY:]
             category_count += len(items)
@@ -1062,6 +1056,19 @@ def build_categories(
                 subcategory_payload["moreItems"] = more_items
                 subcategory_payload["moreCount"] = len(more_items)
             subcategories.append(subcategory_payload)
+        featured_items = [
+            {**item, "featured": True}
+            for item in sorted(category_items, key=expression_item_sort_key)[:MAX_FEATURED_ITEMS_PER_CATEGORY]
+        ]
+        if featured_items:
+            subcategories.insert(0, {
+                "id": f"{category_id}-featured",
+                "label": FOCUS_LABELS["featured"],
+                "labelKo": FOCUS_LABELS_KO["featured"],
+                "count": len(featured_items),
+                "items": featured_items,
+                "isVirtual": True,
+            })
         categories.append({
             "id": category_id,
             "label": category_label,
@@ -1072,17 +1079,26 @@ def build_categories(
     return categories
 
 
+def expression_item_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
+    return (
+        len(item.get("coreTags") or []),
+        -int(item.get("count") or 0),
+        len(item.get("decoratorTags") or []),
+        item.get("canonicalLabel") or item.get("label") or "",
+    )
+
+
 # Mood reroute rules. When the combo carries any of these "anchor" tags,
 # the listed category wins regardless of generic smile/grin scoring.
 # Tuned so the user's intuition (embarrassed = shy, not cheerful) matches
-# the picker's mood column.
+# the picker's category rail.
 MOOD_REROUTE_PRIORITY: list[tuple[str, frozenset[str], frozenset[str]]] = [
     # (forced_category, must_contain, must_not_contain)
-    ("intense", frozenset({"yandere", "corruption", "dark persona", "possessed", "feral instincts", "aroused", "pervert"}), frozenset()),
-    ("shy", frozenset({"embarrassed"}), frozenset()),
-    ("tense", frozenset({"nervous smile"}), frozenset({"embarrassed"})),
-    ("displeased", frozenset({"false smile", "forced smile"}), frozenset()),
-    ("sad", frozenset({"sad smile"}), frozenset()),
+    ("physical_condition", frozenset({"yandere", "corruption", "dark persona", "possessed", "feral instincts", "aroused", "pervert"}), frozenset()),
+    ("shy_flustered", frozenset({"embarrassed"}), frozenset()),
+    ("surprise_fear", frozenset({"nervous smile"}), frozenset({"embarrassed"})),
+    ("angry_displeased", frozenset({"false smile", "forced smile"}), frozenset()),
+    ("sad_tears", frozenset({"sad smile"}), frozenset()),
 ]
 
 
@@ -1110,7 +1126,7 @@ def classify_combo(
         ),
     )
     if not ranked_moods:
-        return ("other", "mood_state", combo[0] if combo else "")
+        return ("other_review", "mood_state", combo[0] if combo else "")
 
     forced_category = apply_mood_reroute(set(combo))
     if forced_category is not None:
@@ -1133,9 +1149,9 @@ def tag_mood_strength(tag: str, mood_id: str) -> int:
         return 35
     if tag in {"open mouth", "closed mouth", "parted lips", "teeth", "upper teeth only", "closed eyes", "half-closed eyes"}:
         return 25
-    if mood_id == "neutral":
+    if mood_id == "neutral_tired":
         return 40
-    if mood_id == "physical":
+    if mood_id == "physical_condition":
         return 65
     # Specific mood-bearing tags get the strongest score.
     if tag in {"embarrassed", "shy", "scared", "nervous smile", "yandere", "aroused", "corruption", "dark persona"}:
@@ -1148,14 +1164,13 @@ def tag_mood_strength(tag: str, mood_id: str) -> int:
 def combo_focus(rows: list[tuple[str, str, str]], taxonomy_emoticons: set[str], combo: tuple[str, ...]) -> str:
     """Pick the dominant focus axis for a combo.
 
-    Emoticons win when present (otherwise smile/frown core would steal the
-    focus from a `:d, smile`-style combo). Falls back to the per-tag focus
-    ranked by FOCUS_INDEX and mood strength.
+    Symbol-like tags are now treated as a display format, not as the default
+    dominant meaning. They only win when every semantic signal is symbolic.
     """
-    if any(is_emoticon_tag(t, taxonomy_emoticons) for t in combo):
-        return "emoticon"
+    non_symbolic = [row for row in rows if row[2] != "symbolic"]
+    ranked_rows = non_symbolic or rows
     ranked = sorted(
-        rows,
+        ranked_rows,
         key=lambda row: (
             FOCUS_INDEX.get(row[2], 999),
             -tag_mood_strength(row[0], row[1]),
@@ -1296,12 +1311,15 @@ def combo_item(
     tags = list(pruned_variant)
     label = ", ".join(tags)
     canonical_label = ", ".join(core_tags)
+    display_label = expression_display_label(core_tags, decorator_tags=tuple(tag for tag in tags if tag not in set(core_tags)))
     digest = hashlib.sha1(canonical_label.encode("utf-8")).hexdigest()[:12]
     decorator_tags = [tag for tag in tags if tag not in set(core_tags)]
     return {
         "id": f"expr-{digest}",
         "label": label,
+        "displayLabel": display_label,
         "canonicalLabel": canonical_label,
+        "tagSummary": label,
         "tag": primary_tag or (core_tags[0] if core_tags else label),
         "tags": tags,
         "coreTags": core_tags,
@@ -1315,6 +1333,17 @@ def combo_item(
         "categoryId": category_id,
         "subcategoryId": subcategory_id,
     }
+
+
+def expression_display_label(core_tags: list[str], *, decorator_tags: tuple[str, ...] = ()) -> str:
+    """Readable item title for the UI while preserving raw tags separately."""
+    primary = list(core_tags) or list(decorator_tags)
+    if not primary:
+        return ""
+    pieces = [title_label(tag) for tag in primary[:3]]
+    extra = len(primary) - len(pieces)
+    label = " + ".join(pieces)
+    return f"{label} +{extra}" if extra > 0 else label
 
 
 def build_coverage(

@@ -569,7 +569,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260510-clothes-resolve-mode1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260510-expression-popup-panel1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,
@@ -4447,7 +4447,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-fallback-retry1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-expression-popup-panel1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

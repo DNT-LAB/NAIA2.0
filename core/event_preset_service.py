@@ -73,6 +73,7 @@ class EventPresetService:
     def __init__(self, repo_root: Path | str):
         self.repo_root = Path(repo_root)
         self.data_path = self.repo_root / "ui" / "event_preset" / "naia_prompt_preset"
+        self.translation_path = self.repo_root / "ui" / "event_preset" / "event_preset_category_translations_ko.json"
         self.thumbnail_path = self.repo_root / "data" / "event_preset_thumbnail"
         self._data_manager = EventPresetDataManager(self.data_path)
         self._taxonomy: TaxonomyEngine | None = None
@@ -82,6 +83,7 @@ class EventPresetService:
         self._base_error = ""
         self._thumbnail_lock = threading.RLock()
         self._thumbnail_index: dict[str, Any] | None = None
+        self._translation_payload: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Availability
@@ -310,6 +312,64 @@ class EventPresetService:
             "promptPreview": prompt_preview,
         }
 
+    def observed_combos(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Fast event-combo lookup for generation-time preset expansion."""
+        payload = payload if isinstance(payload, dict) else {}
+        status = self.status()
+        if status["dataAvailability"]["main"] != "ready":
+            return {
+                "ok": True,
+                "dataMode": status["dataMode"],
+                "dataAvailability": status["dataAvailability"],
+                "selected": {},
+                "event": None,
+            }
+
+        self._ensure_ready()
+        rating = self._normalize_rating(str(payload.get("ratingId") or "s"))
+        person = self._normalize_person(str(payload.get("personId") or "1girl_solo"))
+        partition = self._resolve_partition(rating, person)
+        rating, person = parse_partition_name(partition)
+        partition_data = self._load_projected_partition(partition)
+        event_tag = str(payload.get("eventId") or payload.get("eventTag") or "").strip()
+        if not event_tag:
+            return {
+                "ok": True,
+                "dataMode": "real",
+                "dataAvailability": status["dataAvailability"],
+                "selected": {
+                    "ratingId": rating,
+                    "personId": person,
+                    "categoryId": str(payload.get("categoryId") or ""),
+                    "subcategoryId": str(payload.get("subcategoryId") or ""),
+                    "eventId": "",
+                },
+                "event": None,
+            }
+
+        event = {
+            "id": event_tag,
+            "tag": event_tag,
+            "label": event_tag,
+            "ratings": [rating],
+            "persons": [person],
+            "promptAtoms": [event_tag],
+            "observedCombos": self._observed_combos(event_tag, partition_data),
+        }
+        return {
+            "ok": True,
+            "dataMode": "real",
+            "dataAvailability": status["dataAvailability"],
+            "selected": {
+                "ratingId": rating,
+                "personId": person,
+                "categoryId": str(payload.get("categoryId") or ""),
+                "subcategoryId": str(payload.get("subcategoryId") or ""),
+                "eventId": event_tag,
+            },
+            "event": event,
+        }
+
     def prompt_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         payload = payload if isinstance(payload, dict) else {}
         rating = self._normalize_rating(str(payload.get("ratingId") or "s"))
@@ -457,14 +517,19 @@ class EventPresetService:
                 continue
             total_count = sum(int(event.get("post_count", 0) or 0) for event in events)
             category_id = self._category_id(subgroup["group"], subgroup["subgroup"])
-            categories.append({
+            category = {
                 "id": category_id,
+                "groupId": str(subgroup["group"]),
+                "subgroupId": str(subgroup["subgroup"]),
                 "group": str(subgroup.get("group_display") or subgroup["group"]),
                 "label": str(subgroup.get("subgroup_display") or subgroup["subgroup"]),
                 "count": total_count,
                 "displayCount": format_count(total_count),
                 "subcategories": subcategories,
-            })
+            }
+            self._apply_translation(category, "subgroups", category_id)
+            self._apply_translation(category, "groups", str(subgroup["group"]), prefix="group")
+            categories.append(category)
             emitted += sum(len(subcategory["events"]) for subcategory in subcategories)
             if max_events is not None and emitted >= max_events:
                 break
@@ -483,14 +548,17 @@ class EventPresetService:
             subcat_id = self._subcategory_id(category_id, raw_subcat)
             item = grouped.setdefault(subcat_id, {
                 "id": subcat_id,
+                "categoryId": category_id,
+                "subcategoryId": raw_subcat,
                 "label": str(event.get("subcategory_display") or raw_subcat.replace("_", " ").title()),
                 "count": 0,
                 "events": [],
             })
+            self._apply_translation(item, "subcategories", subcat_id)
             count = int(event.get("post_count", 0) or 0)
             item["count"] += count
             tag = str(event["event_tag"])
-            item["events"].append({
+            event_item = {
                 "id": tag,
                 "tag": tag,
                 "label": tag,
@@ -498,7 +566,9 @@ class EventPresetService:
                 "ratings": [key for key in self.RATING_NAMES],
                 "persons": list(PERSON_PARTITION_ORDER),
                 "promptAtoms": [tag],
-            })
+            }
+            self._apply_translation(event_item, "events", tag)
+            item["events"].append(event_item)
         return list(grouped.values())
 
     def _event_detail(
@@ -519,7 +589,7 @@ class EventPresetService:
         recommended = self._recommended_tags(event_tag, slots)
         direct_recommended = self._direct_recommended_tags(event_tag, slots)
         thumbnail_ready = self.thumbnail_path.exists()
-        return {
+        event = {
             "id": event_tag,
             "tag": event_tag,
             "label": event_tag,
@@ -539,6 +609,8 @@ class EventPresetService:
                 "url": f"/api/event-preset/thumbnail?eventId={quote(event_tag, safe='')}" if thumbnail_ready else "",
             },
         }
+        self._apply_translation(event, "events", event_tag)
+        return event
 
     def _observed_combos(
         self,
@@ -553,13 +625,18 @@ class EventPresetService:
         result: list[dict[str, Any]] = []
         for index, (prompt, count) in enumerate(combos):
             tags = self._split_csv(prompt)
-            result.append({
+            combo = {
                 "id": f"combo-{index}",
                 "label": self._combo_label(tags, event_tag),
                 "prompt": prompt,
                 "tags": tags,
                 "count": int(count) if not isinstance(count, float) or math.isfinite(count) else 0,
-            })
+            }
+            translated_tags = self._translated_tag_labels(tags)
+            if translated_tags:
+                combo["labelKo"] = ", ".join(translated_tags[:4])
+                combo["krDesc"] = ", ".join(translated_tags)
+            result.append(combo)
         return result
 
     def _slots(self, event_tag: str, partition_data: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -676,6 +753,82 @@ class EventPresetService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _load_translations(self) -> dict[str, Any]:
+        if self._translation_payload is not None:
+            return self._translation_payload
+        try:
+            with self.translation_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except FileNotFoundError:
+            data = {}
+        except Exception:
+            data = {}
+        self._translation_payload = data if isinstance(data, dict) else {}
+        return self._translation_payload
+
+    def _translation_item(self, section: str, key: Any) -> dict[str, Any]:
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            return {}
+        section_data = self._load_translations().get(section)
+        if not isinstance(section_data, dict):
+            return {}
+        item = section_data.get(clean_key)
+        if item is None and section == "events":
+            item = section_data.get(clean_key.lower())
+        return item if isinstance(item, dict) else {}
+
+    def _apply_translation(
+        self,
+        target: dict[str, Any],
+        section: str,
+        key: Any,
+        *,
+        prefix: str = "",
+    ) -> None:
+        info = self._translation_item(section, key)
+        if not info:
+            return
+        field_prefix = prefix.strip()
+
+        def name(field: str) -> str:
+            return f"{field_prefix}{field[:1].upper()}{field[1:]}" if field_prefix else field
+
+        for src, dst in [
+            ("labelKo", "labelKo"),
+            ("labelEn", "labelEn"),
+            ("krDesc", "krDesc"),
+            ("krCategory", "krCategory"),
+        ]:
+            value = str(info.get(src) or "").strip()
+            if value:
+                target[name(dst)] = value
+        candidates = info.get("labelKoCandidates")
+        if isinstance(candidates, list) and candidates:
+            target[name("labelKoCandidates")] = [
+                str(item).strip()
+                for item in candidates
+                if str(item or "").strip()
+            ]
+        source = info.get("source")
+        if isinstance(source, dict):
+            target[name("translationSource")] = dict(source)
+
+    def _translated_tag_labels(self, tags: list[str]) -> list[str]:
+        labels: list[str] = []
+        seen: set[str] = set()
+        for tag in tags:
+            info = self._translation_item("events", tag)
+            label = str(info.get("labelKo") or "").strip()
+            if not label:
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            labels.append(label)
+        return labels
 
     def _load_thumbnail_index(self) -> dict[str, Any]:
         if not self.thumbnail_path.exists():

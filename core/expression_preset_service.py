@@ -210,6 +210,7 @@ class ExpressionPresetService:
             category_copy = deepcopy(category)
             subcategories: list[dict[str, Any]] = []
             item_total = 0
+            selected_total = 0
             for subcategory in category_copy.get("subcategories") or []:
                 if remaining <= 0:
                     break
@@ -226,7 +227,9 @@ class ExpressionPresetService:
                 selected_primary = selected_items[:len(primary_items)]
                 selected_overflow = selected_items[len(primary_items):]
                 subcategory_count = len(selected_items) if is_truncated else int(subcategory.get("count") or len(all_items))
-                item_total += subcategory_count
+                selected_total += subcategory_count
+                if not subcategory.get("isVirtual"):
+                    item_total += subcategory_count
                 sub_copy = deepcopy(subcategory)
                 sub_copy["items"] = selected_primary
                 if selected_overflow:
@@ -240,7 +243,7 @@ class ExpressionPresetService:
             if not subcategories:
                 continue
             category_copy["subcategories"] = subcategories
-            category_copy["count"] = item_total
+            category_copy["count"] = item_total or selected_total
             output.append(category_copy)
         return output
 

@@ -24,6 +24,10 @@ class _WildcardManager:
 class _PresetBridge:
     def __init__(self):
         self.tokens = []
+        self.contexts = []
+
+    def set_context(self, context):
+        self.contexts.append(context)
 
     def resolve_prompt_token(self, token):
         self.tokens.append(token)
@@ -55,6 +59,23 @@ def test_generation_wildcard_pass_expands_preset_tokens_before_api_prompt():
     ]
     metadata = controller.context.current_prompt_context.metadata
     assert metadata["preset_prompt_resolutions"][0]["applied"] is True
+
+
+def test_generation_wildcard_pass_uses_app_preset_context():
+    controller = GenerationController.__new__(GenerationController)
+    bridge = _PresetBridge()
+    controller.context = SimpleNamespace(
+        current_prompt_context=None,
+        wildcard_manager=_WildcardManager(),
+        preset_input_context={"ratingId": "q", "personId": "2girls"},
+        preset_input_context_source="autocomplete",
+        preset_input_context_fields={"ratingId", "personId"},
+    )
+    controller._preset_input_bridge = bridge
+
+    controller._expand_wildcards_in_input("preset:events/gaze", "")
+
+    assert bridge.contexts[-1] == {"ratingId": "q", "personId": "2girls"}
 
 
 def test_generation_wildcard_pass_keeps_unresolved_preset_token():

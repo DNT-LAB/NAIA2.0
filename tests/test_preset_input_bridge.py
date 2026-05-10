@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from core.preset_input_bridge import PresetInputBridge, search_preset_paths
+from core.preset_input_bridge import PresetInputBridge, preset_context_from_prompt, search_preset_paths
 from core.prompt_context import PromptContext
 from core.prompt_processor import PromptProcessor
 
@@ -233,6 +233,63 @@ class _MissingAnchorComboEventService(_EventService):
         }
 
 
+class _ManyEventService(_EventService):
+    def __init__(self):
+        self.select_calls = 0
+
+    def bootstrap(self, **_kwargs):
+        events = [
+            {"id": f"event-{index}", "label": f"event {index}", "count": 10 - index}
+            for index in range(10)
+        ]
+        events.append({"id": "useful-event", "label": "useful event", "count": 100})
+        return {
+            "categories": [
+                {
+                    "id": "bulk",
+                    "label": "Bulk",
+                    "subcategories": [
+                        {
+                            "id": "bulk::many",
+                            "label": "Many",
+                            "events": events,
+                        }
+                    ],
+                }
+            ]
+        }
+
+    def select(self, payload):
+        self.select_calls += 1
+        event_id = str(payload.get("eventId") or "")
+        combos = []
+        if event_id == "useful-event":
+            combos = [
+                {
+                    "id": "useful-combo",
+                    "label": "useful event, detail",
+                    "prompt": "useful event, detail",
+                    "tags": ["useful event", "detail"],
+                    "count": 10,
+                }
+            ]
+        return {"event": {"observedCombos": combos}}
+
+
+class _ContextEventService(_EventService):
+    def __init__(self):
+        self.bootstrap_calls = []
+        self.select_payloads = []
+
+    def bootstrap(self, **kwargs):
+        self.bootstrap_calls.append(kwargs)
+        return super().bootstrap(**kwargs)
+
+    def select(self, payload):
+        self.select_payloads.append(payload)
+        return super().select(payload)
+
+
 class _NamespacedEventService(_EventService):
     def bootstrap(self, **_kwargs):
         return {
@@ -310,6 +367,7 @@ class _ClothesService:
                     {"id": "tag-shirt", "tag": "shirt", "label": "shirt", "postCount": 10},
                     {"id": "tag-long-sleeves", "tag": "long sleeves", "label": "long sleeves", "postCount": 8},
                     {"id": "tag-swimsuit", "tag": "swimsuit under clothes", "label": "swimsuit under clothes", "postCount": 4},
+                    {"id": "tag-rabbit-hood", "tag": "rabbit hood", "label": "rabbit hood", "postCount": 2},
                 ],
             },
             "staged": {
@@ -387,10 +445,12 @@ class _ExpressionService:
                 {
                     "id": "smile",
                     "label": "Smile",
+                    "labelKo": "웃는 표정",
                     "subcategories": [
                         {
                             "id": "mouth",
                             "label": "Mouth",
+                            "labelKo": "입 / 미소",
                             "items": [
                                 {
                                     "id": "smile-open-mouth",
@@ -415,15 +475,14 @@ def _bridge(tmp_path, event_service=None, clothes_service=None):
     )
 
 
-def test_preset_root_returns_four_axis_choices(tmp_path):
+def test_preset_root_returns_three_visible_axis_choices(tmp_path):
     result = _bridge(tmp_path).suggest("preset:")
 
     assert result["stage"] == "axis"
     assert [item["value"] for item in result["suggestions"]] == [
-        "preset:events",
+        "preset:events(s|1girl_solo)",
         "preset:clothes",
         "preset:expressions",
-        "preset:custom",
     ]
 
 
@@ -432,17 +491,17 @@ def test_events_path_walks_category_subcategory_item_and_combo(tmp_path):
 
     categories = bridge.suggest("preset:events")
     assert categories["stage"] == "category"
-    assert categories["suggestions"][0]["value"] == "preset:events/standing"
+    assert categories["suggestions"][0]["value"] == "preset:events(s|1girl_solo)/standing"
 
-    subcategories = bridge.suggest("preset:events/standing")
+    subcategories = bridge.suggest("preset:events(s|1girl_solo)/standing")
     assert subcategories["stage"] == "subcategory"
-    assert subcategories["suggestions"][0]["value"] == "preset:events/standing/solo"
+    assert subcategories["suggestions"][0]["value"] == "preset:events(s|1girl_solo)/standing/solo"
 
-    items = bridge.suggest("preset:events/standing/solo")
+    items = bridge.suggest("preset:events(s|1girl_solo)/standing/solo")
     assert items["stage"] == "item"
     assert items["suggestions"][0]["value"].endswith("/standing")
 
-    combos = bridge.suggest("preset:events/standing/solo/standing")
+    combos = bridge.suggest("preset:events(s|1girl_solo)/standing/solo/standing")
     assert combos["stage"] == "combo"
     assert combos["suggestions"][0]["final"] is True
     assert combos["suggestions"][0]["prompt"] == "standing, solo, looking at viewer"
@@ -460,7 +519,7 @@ def test_events_payload_exposes_context_and_hides_namespace_label(tmp_path):
         {"id": "2girls", "label": "2girls"},
     ]
     assert result["suggestions"][0]["tag"] == "Gaze"
-    assert result["suggestions"][0]["value"] == "preset:events/gaze"
+    assert result["suggestions"][0]["value"] == "preset:events(e|2girls)/gaze"
 
 
 def test_event_category_subcategory_and_item_paths_resolve_to_observed_combo(tmp_path):
@@ -491,6 +550,42 @@ def test_event_category_subcategory_and_item_paths_resolve_to_observed_combo(tmp
     assert item["applied"] is True
     assert item["stage"] == "item"
     assert item["combo"]["id"] == "combo-0"
+
+
+def test_event_resolution_uses_runtime_preset_context(tmp_path):
+    service = _ContextEventService()
+    bridge = _bridge(tmp_path, event_service=service)
+    bridge.set_context({"ratingId": "q", "personId": "2girls"})
+
+    resolved = bridge.resolve_prompt_token("preset:events/standing", chooser=lambda items: items[0])
+
+    assert resolved["applied"] is True
+    assert service.bootstrap_calls[-1]["rating_id"] == "q"
+    assert service.bootstrap_calls[-1]["person_id"] == "2girls"
+    assert service.select_payloads[-1]["ratingId"] == "q"
+    assert service.select_payloads[-1]["personId"] == "2girls"
+    assert resolved["selected"]["ratingId"] == "q"
+    assert resolved["selected"]["personId"] == "2girls"
+
+
+def test_event_token_embedded_context_overrides_runtime_context(tmp_path):
+    service = _ContextEventService()
+    bridge = _bridge(tmp_path, event_service=service)
+    bridge.set_context({"ratingId": "s", "personId": "1girl_solo"})
+
+    suggestions = bridge.suggest("preset:events(q|2girls)")
+    resolved = bridge.resolve_prompt_token(
+        "preset:events(q|2girls)/standing",
+        chooser=lambda items: items[0],
+    )
+
+    assert suggestions["suggestions"][0]["value"] == "preset:events(q|2girls)/standing"
+    assert service.bootstrap_calls[-1]["rating_id"] == "q"
+    assert service.bootstrap_calls[-1]["person_id"] == "2girls"
+    assert service.select_payloads[-1]["ratingId"] == "q"
+    assert service.select_payloads[-1]["personId"] == "2girls"
+    assert resolved["selected"]["ratingId"] == "q"
+    assert resolved["selected"]["personId"] == "2girls"
 
 
 def test_incomplete_event_path_prefers_items_with_observed_combos(tmp_path):
@@ -537,6 +632,19 @@ def test_incomplete_event_shortcut_chooses_item_with_useful_combo(tmp_path):
     assert resolved["tags"] == ["looking back", "sitting"]
 
 
+def test_incomplete_event_shortcut_uses_bounded_detail_scan(tmp_path):
+    service = _ManyEventService()
+    bridge = _bridge(tmp_path, event_service=service)
+    chooser = lambda items: items[0]
+
+    resolved = bridge.resolve_prompt_token("preset:events/bulk/bulk%3A%3Amany", chooser=chooser)
+
+    assert resolved["applied"] is True
+    assert resolved["selected"]["eventId"] == "useful-event"
+    assert resolved["combo"]["id"] == "useful-combo"
+    assert service.select_calls <= 3
+
+
 def test_event_shortcut_keeps_main_item_when_combo_omits_anchor(tmp_path):
     bridge = _bridge(tmp_path, event_service=_MissingAnchorComboEventService())
     chooser = lambda items: items[0]
@@ -573,6 +681,68 @@ def test_prompt_processor_expands_preset_event_token_during_wildcard_step(tmp_pa
     assert context.metadata["preset_prompt_resolutions"][0]["token"] == (
         "preset:events/standing"
     )
+
+
+def test_prompt_processor_uses_shared_services_and_app_preset_context(tmp_path):
+    service = _ContextEventService()
+    processor = PromptProcessor.__new__(PromptProcessor)
+    processor.app_context = SimpleNamespace(
+        event_preset_service=service,
+        clothes_preset_service=_ClothesService(),
+        expression_preset_service=_ExpressionService(),
+        preset_input_context={"ratingId": "e", "personId": "2girls"},
+        preset_input_context_source="autocomplete",
+        preset_input_context_fields={"ratingId", "personId"},
+    )
+    processor.wildcard_processor = SimpleNamespace(expand_tags=lambda tags, _context: tags)
+    context = PromptContext(
+        source_row={},
+        settings={},
+        main_tags=["preset:events/standing"],
+    )
+
+    processor._step_3_expand_wildcards(context)
+
+    assert context.main_tags == ["standing", "solo", "looking at viewer"]
+    assert service.bootstrap_calls[-1]["rating_id"] == "e"
+    assert service.bootstrap_calls[-1]["person_id"] == "2girls"
+    assert service.select_payloads[-1]["ratingId"] == "e"
+    assert service.select_payloads[-1]["personId"] == "2girls"
+
+
+def test_preset_context_uses_source_rating_and_prompt_person_without_explicit_ui_context():
+    app_context = SimpleNamespace(
+        preset_input_context={"ratingId": "s", "personId": "1girl_solo"},
+        preset_input_context_source="default",
+    )
+    context = PromptContext(
+        source_row={"rating": "e", "general": "2girls, preset:events/gaze"},
+        settings={},
+        main_tags=["2girls", "preset:events/gaze"],
+    )
+
+    assert preset_context_from_prompt(app_context, context) == {
+        "ratingId": "e",
+        "personId": "2girls",
+    }
+
+
+def test_preset_context_does_not_treat_rating_only_context_as_person_selection():
+    app_context = SimpleNamespace(
+        preset_input_context={"ratingId": "q", "personId": "1girl_solo"},
+        preset_input_context_source="clothes_bootstrap",
+        preset_input_context_fields={"ratingId"},
+    )
+    context = PromptContext(
+        source_row={"rating": "e", "general": "2girls, preset:events/gaze"},
+        settings={},
+        main_tags=["2girls", "preset:events/gaze"],
+    )
+
+    assert preset_context_from_prompt(app_context, context) == {
+        "ratingId": "q",
+        "personId": "2girls",
+    }
 
 
 def test_prompt_processor_expands_preset_clothes_staged_token_during_wildcard_step(tmp_path):
@@ -638,7 +808,7 @@ def test_unloaded_axis_starts_loading_then_returns_loaded_suggestions(tmp_path):
 
     assert loaded["stage"] == "category"
     assert loaded["dataReady"] is True
-    assert loaded["suggestions"][0]["value"] == "preset:events/standing"
+    assert loaded["suggestions"][0]["value"] == "preset:events(s|1girl_solo)/standing"
 
 
 def test_loaded_clothes_and_expression_inputs_return_expected_final_rows(tmp_path):
@@ -654,7 +824,59 @@ def test_loaded_clothes_and_expression_inputs_return_expected_final_rows(tmp_pat
     assert expressions["stage"] == "item"
     assert expressions["suggestions"][0]["final"] is True
     assert expressions["suggestions"][0]["value"] == "preset:expressions/smile/mouth/smile-open-mouth"
+    assert expressions["suggestions"][0]["insertText"] == "smile, open mouth"
     assert expressions["suggestions"][0]["tags"] == ["smile", "open mouth"]
+
+
+def test_expression_category_and_subcategory_suggestions_use_korean_labels(tmp_path):
+    bridge = _bridge(tmp_path)
+
+    categories = bridge.suggest("preset:expressions")
+    assert categories["stage"] == "category"
+    assert categories["suggestions"][0]["tag"] == "웃는 표정"
+    assert categories["suggestions"][0]["labelKo"] == "웃는 표정"
+
+    subcategories = bridge.suggest("preset:expressions/smile")
+    assert subcategories["stage"] == "subcategory"
+    assert subcategories["suggestions"][0]["tag"] == "입 / 미소"
+    assert subcategories["suggestions"][0]["labelKo"] == "입 / 미소"
+
+
+def test_expression_paths_resolve_to_prompt_tags(tmp_path):
+    bridge = _bridge(tmp_path)
+
+    root = bridge.resolve_prompt_token("preset:expressions")
+    assert root["applied"] is True
+    assert root["axis"] == "expressions"
+    assert root["stage"] == "axis"
+    assert root["tags"] == ["smile", "open mouth"]
+
+    category = bridge.resolve_prompt_token("preset:expressions/smile")
+    assert category["applied"] is True
+    assert category["stage"] == "category"
+    assert category["selected"]["categoryId"] == "smile"
+
+    item = bridge.resolve_prompt_token("preset:expressions/smile/mouth/smile-open-mouth")
+    assert item["applied"] is True
+    assert item["stage"] == "item"
+    assert item["prompt"] == "smile, open mouth"
+    assert item["selected"]["itemId"] == "smile-open-mouth"
+
+
+def test_prompt_processor_expands_preset_expression_token_during_wildcard_step(tmp_path):
+    processor = PromptProcessor.__new__(PromptProcessor)
+    processor.wildcard_processor = SimpleNamespace(expand_tags=lambda tags, _context: tags)
+    processor._preset_bridge = _bridge(tmp_path)
+    context = PromptContext(
+        source_row={},
+        settings={},
+        main_tags=["best quality", "preset:expressions/smile/mouth/smile-open-mouth"],
+    )
+
+    processor._step_3_expand_wildcards(context)
+
+    assert context.main_tags == ["best quality", "smile", "open mouth"]
+    assert context.metadata["preset_prompt_resolutions"][0]["axis"] == "expressions"
 
 
 def test_clothes_staged_token_parser_preserves_empty_and_active_segments(tmp_path):
@@ -674,6 +896,19 @@ def test_clothes_staged_token_parser_preserves_empty_and_active_segments(tmp_pat
     assert deleted["activeIndex"] == 1
     assert deleted["segments"][1]["empty"] is True
     assert deleted["stagedTags"] == ["shirt", "pants"]
+
+
+def test_clothes_single_trailing_ampersand_uses_empty_add_slot(tmp_path):
+    bridge = _bridge(tmp_path)
+    token = "preset:clothes/open clothes&"
+
+    parsed = bridge.parse_clothes_token(token, caret_offset=token.index("open") + 2)
+    rows = bridge.suggest(token, caret_offset=token.index("open") + 2)["suggestions"]
+
+    assert parsed["activeIndex"] == 1
+    assert parsed["activeQuery"] == ""
+    assert parsed["stagedTags"] == ["open clothes"]
+    assert rows[0]["stage"] == "category"
 
 
 def test_clothes_staged_token_expands_through_prompt_fragment(tmp_path):
@@ -764,6 +999,13 @@ def test_clothes_item_suggestion_appends_staged_readable_token(tmp_path):
 
     assert row["stage"] == "item"
     assert row["clothesTokenValue"] == "preset:clothes/shirt&swimsuit under clothes&"
+
+
+def test_clothes_item_suggestions_exclude_already_staged_tags(tmp_path):
+    token = "preset:clothes/rabbit hood&"
+    rows = _bridge(tmp_path).suggest(token)["suggestions"]
+
+    assert all(row.get("clothesTag") != "rabbit hood" for row in rows)
 
 
 def test_clothes_browse_segment_resolves_exact_item_and_reports_partial(tmp_path):

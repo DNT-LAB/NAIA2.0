@@ -49,6 +49,13 @@ class AppContext:
         self.filter_data_manager = FilterDataManager()
         self.current_source_row: Optional[pd.Series] = None
         self.current_prompt_context: Optional[PromptContext] = None
+        self.preset_input_context: dict = {"ratingId": "s", "personId": "1girl_solo"}
+        self.preset_input_context_source: str = "default"
+        self.preset_input_context_fields: set[str] = set()
+        self.event_preset_service = None
+        self.clothes_preset_service = None
+        self.expression_preset_service = None
+        self.preset_services_revision: int = 0
 
         # ✅ 세션 타임스탬프를 인스턴스 속성으로 명시적 저장
         self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

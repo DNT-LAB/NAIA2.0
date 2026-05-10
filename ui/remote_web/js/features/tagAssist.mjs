@@ -32,6 +32,7 @@ export function createTagAssistController({
   let acSel = -1;
   let acTimer = null;
   let acTranslationTimer = null;
+  let visibleTranslatedAutocompleteQuery = '';
   let presetInlineSearchTimer = null;
   let lastAcQuery = '';
   let lastTranslationRequestQuery = '';
@@ -40,9 +41,13 @@ export function createTagAssistController({
   let presetEventContext = {ratingId: 's', personId: '1girl_solo'};
   let presetPersonMenuOpen = false;
   let presetEventSourceResults = [];
+  let presetEventSecondarySourceResults = [];
+  let presetEventSecondaryResults = [];
   let presetEventSearch = '';
   let presetInlineSearchRequestId = 0;
   const hangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+  const HANGUL_TRANSLATION_POLL_MS = 600;
+  const HANGUL_COMPOSITION_STABLE_RETRY_MS = 600;
   const imeStates = new WeakMap();
 
   function sendWs(payload) {
@@ -56,15 +61,58 @@ export function createTagAssistController({
     return String(query || '').trim().toLowerCase().startsWith('preset:events');
   }
 
+  function presetEventPrefixAndTail(token) {
+    const raw = String(token || '').trim();
+    const base = 'preset:events';
+    if (!raw.toLowerCase().startsWith(base)) return {prefix: '', tail: ''};
+    let tailStart = base.length;
+    if (raw[tailStart] === '(') {
+      const close = raw.indexOf(')', tailStart + 1);
+      if (close > tailStart) tailStart = close + 1;
+    }
+    return {
+      prefix: raw.slice(0, tailStart) || base,
+      tail: raw.slice(tailStart).replace(/^\/+/, ''),
+    };
+  }
+
+  function presetEventTokenWithContext(token, context = {}) {
+    const {tail} = presetEventPrefixAndTail(token);
+    const rating = String(context.ratingId || presetEventContext.ratingId || 's').trim().toLowerCase();
+    const safeRating = ['g', 's', 'q', 'e'].includes(rating) ? rating : 's';
+    const person = String(context.personId || presetEventContext.personId || '1girl_solo').trim() || '1girl_solo';
+    return `preset:events(${safeRating}|${person})${tail ? '/' + tail : ''}`;
+  }
+
+  function switchPresetEventContext(nextContext = {}) {
+    presetPersonMenuOpen = false;
+    presetEventSearch = '';
+    presetEventContext = {...presetEventContext, ...nextContext};
+    const nextQuery = isPresetEventsQuery(lastAcQuery)
+      ? presetEventTokenWithContext(lastAcQuery, presetEventContext)
+      : lastAcQuery;
+    const target = acTarget || promptEdit;
+    const info = getActiveTokenInfo(target);
+    if (info && isPresetEventsQuery(info.stripped)) {
+      swapToken(target, info, nextQuery);
+    }
+    renderAutocomplete();
+    requestPresetAutocomplete(nextQuery);
+  }
+
   function isPresetClothesQuery(query) {
     return String(query || '').trim().toLowerCase().startsWith('preset:clothes');
   }
 
-  function isLocalPresetQuery(query) {
-    return isPresetEventsQuery(query) || isPresetClothesQuery(query);
+  function isPresetExpressionsQuery(query) {
+    return String(query || '').trim().toLowerCase().startsWith('preset:expressions');
   }
 
-  function isClothesEmptyStagedSegmentAtCursor(info, textarea) {
+  function isLocalPresetQuery(query) {
+    return isPresetEventsQuery(query) || isPresetClothesQuery(query) || isPresetExpressionsQuery(query);
+  }
+
+  function isClothesStagedTokenAtCursor(info, textarea) {
     const token = String(info?.stripped || '');
     if (!textarea || !isPresetClothesQuery(token)) return false;
     const prefix = 'preset:clothes';
@@ -82,7 +130,7 @@ export function createTagAssistController({
     for (const segment of segments) {
       const end = start + segment.length;
       if (tailCursor >= start && tailCursor <= end) {
-        return segment.length === 0;
+        return true;
       }
       start = end + 1;
     }
@@ -91,14 +139,13 @@ export function createTagAssistController({
 
   function presetQueryAxis(query) {
     if (isPresetClothesQuery(query)) return 'clothes';
+    if (isPresetExpressionsQuery(query)) return 'expressions';
     if (isPresetEventsQuery(query)) return 'events';
     return '';
   }
 
   function presetEventTokenStage(token) {
-    const raw = String(token || '').trim();
-    if (!isPresetEventsQuery(raw)) return '';
-    const tail = raw.slice('preset:events'.length).replace(/^\/+/, '');
+    const {tail} = presetEventPrefixAndTail(token);
     const count = tail ? tail.split('/').filter(Boolean).length : 0;
     if (count >= 4) return 'combo';
     if (count === 3) return 'item';
@@ -129,9 +176,7 @@ export function createTagAssistController({
   }
 
   function presetEventTokenTail(token) {
-    const raw = String(token || '').trim();
-    if (!isPresetEventsQuery(raw)) return '';
-    return raw.slice('preset:events'.length).replace(/^\/+/, '');
+    return presetEventPrefixAndTail(token).tail;
   }
 
   function presetEventTokenLabel(token, crumbs = []) {
@@ -144,7 +189,7 @@ export function createTagAssistController({
 
   function presetRequestPayload(query) {
     const payload = {type: 'autocomplete_preset', query};
-    if (isPresetEventsQuery(query)) {
+    if (isPresetEventsQuery(query) || isPresetExpressionsQuery(query)) {
       payload.presetContext = {...presetEventContext};
     }
     return payload;
@@ -155,7 +200,7 @@ export function createTagAssistController({
       tag: String(status || 'preset'),
       value: query,
       count: 0,
-      desc: message || `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset data is not ready.`,
+      desc: message || `${presetAxisDisplayLabel(axis)} Preset data is not ready.`,
       group: `preset/${axis || 'events'}`,
       cat: 'status',
       _wc_type: 'preset_status',
@@ -173,6 +218,8 @@ export function createTagAssistController({
       loadState: {main: status, message},
       dataReady: false,
     };
+    presetEventSecondarySourceResults = [];
+    presetEventSecondaryResults = [];
     acResults = [presetStatusRow(query, message, status, axis)];
     acSel = 0;
     acMode = true;
@@ -258,7 +305,12 @@ export function createTagAssistController({
     const fallbackBottom = targetRect ? targetRect.bottom : viewport.offsetTop + 48;
     const anchorLeft = Math.max(viewport.offsetLeft + margin, caret?.left ?? fallbackLeft);
     const anchorBottom = caret?.bottom ?? fallbackBottom;
-    const maxWidth = Math.max(280, Math.min(560, viewport.width - margin * 2));
+    const observedPresetPopup = tagTooltip.classList.contains('preset-event-observed-mode');
+    const stagedPresetPopup = tagTooltip.classList.contains('preset-event-staged-mode');
+    const expressionPresetPopup = tagTooltip.classList.contains('preset-event-expression-mode');
+    const widthCeiling = observedPresetPopup ? 760 : (stagedPresetPopup ? 720 : (expressionPresetPopup ? 680 : 560));
+    const widthFloor = (observedPresetPopup || stagedPresetPopup || expressionPresetPopup) ? 430 : 280;
+    const maxWidth = Math.max(widthFloor, Math.min(widthCeiling, viewport.width - margin * 2));
     const measured = tagTooltip.getBoundingClientRect();
     const width = Math.min(maxWidth, measured.width || maxWidth);
     const maxLeft = viewport.offsetLeft + viewport.width - width - margin;
@@ -465,8 +517,8 @@ export function createTagAssistController({
 
   function bindAutocompleteInfoHover(root) {
     root.querySelectorAll('.tag-ac-item[data-tooltip-desc]').forEach(el => {
-      el.addEventListener('mouseenter', () => showTagChipInfoTooltip(el));
-      el.addEventListener('mousemove', () => positionTagChipInfoTooltip(el));
+      el.addEventListener('mouseenter', e => showTagChipInfoTooltip(el, e));
+      el.addEventListener('mousemove', e => positionTagChipInfoTooltip(el, e));
       el.addEventListener('mouseleave', hideTagChipInfoTooltip);
     });
   }
@@ -530,7 +582,7 @@ export function createTagAssistController({
     lastPromptInfoRawTag = String(lookupOptions?.rawTag || tag || lookupTag).trim();
     hideTagChipInfoTooltip();
     window.clearTimeout(tagLookupTimer);
-    tagTooltip.classList.remove('open', 'ac-mode', 'left-side');
+    tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     const promptPopup = ensurePromptInfoTooltip();
     promptPopup.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">loading...</span></div>';
     promptPopup.classList.add('open');
@@ -543,7 +595,14 @@ export function createTagAssistController({
   }
 
   function presetAxisLabel(axis) {
+    if (axis === 'expressions') return 'Expression';
     return axis === 'clothes' ? 'Clothes' : 'Event';
+  }
+
+  function presetAxisDisplayLabel(axis) {
+    if (axis === 'expressions') return 'Expression';
+    if (axis === 'clothes') return 'Clothes';
+    return 'Event';
   }
 
   function showPresetEventTooltipLoading(token, {readOnly = false, anchor = null, rawTag = ''} = {}) {
@@ -555,7 +614,7 @@ export function createTagAssistController({
     lastPromptInfoRawTag = String(rawTag || token).trim();
     hideTagChipInfoTooltip();
     window.clearTimeout(tagLookupTimer);
-    tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode');
+    tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     const root = presetEventTooltipRoot(readOnly);
     root.innerHTML = '<div class="tag-tooltip-main"><span class="tag-tooltip-tag">Loading preset...</span></div>';
     root.classList.add('open');
@@ -641,11 +700,11 @@ export function createTagAssistController({
     root.classList.remove('ac-mode');
     root.classList.add('open');
     if (readOnly) {
-      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode');
+      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       positionPromptInfoTooltip();
     } else {
       hidePromptInfoTooltip();
-      tagTooltip.classList.remove('ac-mode', 'preset-event-mode');
+      tagTooltip.classList.remove('ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       syncTooltipSide();
       positionTagTooltip();
     }
@@ -657,7 +716,7 @@ export function createTagAssistController({
     if (normalized === 'combo') return 'Combo';
     if (normalized === 'item') return 'Clothes item';
     if (normalized === 'subcategory') return 'Group';
-    if (normalized === 'category') return 'Slot';
+    if (normalized === 'category') return 'Category';
     if (normalized === 'status') return 'Status';
     if (normalized === 'error') return 'Error';
     return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Clothes';
@@ -697,9 +756,9 @@ export function createTagAssistController({
     const tags = presetClothesResolveTags(parsed);
     if (!tags.length) return '';
     if (parsed?.randomizeOnResolve) {
-      return short ? 'Random seed' : 'Generation uses these staged tags as a random Clothes seed';
+      return short ? 'Add random match' : 'Generation keeps these tags and adds one matching random Clothes combo';
     }
-    return short ? 'Fixed tags' : 'Generation applies exactly these staged tags';
+    return short ? 'Use tags only' : 'Generation applies exactly these staged tags';
   }
 
   function encodeClothesSegment(value) {
@@ -859,11 +918,11 @@ export function createTagAssistController({
     root.classList.remove('ac-mode');
     root.classList.add('open');
     if (readOnly) {
-      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode');
+      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       positionPromptInfoTooltip();
     } else {
       hidePromptInfoTooltip();
-      tagTooltip.classList.remove('ac-mode', 'preset-event-mode');
+      tagTooltip.classList.remove('ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       syncTooltipSide();
       positionTagTooltip();
     }
@@ -1000,9 +1059,16 @@ export function createTagAssistController({
     if (tagChipInfoTooltip) tagChipInfoTooltip.classList.remove('open');
   }
 
-  function positionTagChipInfoTooltip(anchor) {
+  function isPresetEventInfoAnchor(anchor) {
+    return !!anchor.closest?.('.tag-tooltip.preset-event-mode');
+  }
+
+  function positionTagChipInfoTooltip(anchor, event = null) {
     if (!tagChipInfoTooltip || !tagChipInfoTooltip.classList.contains('open')) return;
     const rect = anchor.getBoundingClientRect();
+    const presetEventInfo = isPresetEventInfoAnchor(anchor);
+    const acRoot = presetEventInfo ? null : anchor.closest?.('.tag-tooltip.ac-mode');
+    const acRect = acRoot?.getBoundingClientRect?.();
     const viewport = window.visualViewport || {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -1016,16 +1082,36 @@ export function createTagAssistController({
     const tipRect = tagChipInfoTooltip.getBoundingClientRect();
     const minLeft = viewport.offsetLeft + margin;
     const maxLeft = viewport.offsetLeft + viewport.width - tipRect.width - margin;
+    const sideAnchor = acRect || rect;
+    const rightSideLeft = sideAnchor.right + gap;
+    const leftSideLeft = sideAnchor.left - tipRect.width - gap;
     let left = Math.max(minLeft, Math.min(rect.left, maxLeft));
-    let top = rect.bottom + gap;
+    const pointerX = Number(event?.clientX);
+    const pointerY = Number(event?.clientY);
+    if (presetEventInfo && Number.isFinite(pointerX)) {
+      const pointerRight = pointerX + gap;
+      const pointerLeft = pointerX - tipRect.width - gap;
+      left = pointerRight <= maxLeft ? pointerRight : Math.max(minLeft, pointerLeft);
+    } else if (acRect && rightSideLeft <= maxLeft) {
+      left = rightSideLeft;
+    } else if (acRect && leftSideLeft >= minLeft) {
+      left = leftSideLeft;
+    }
     const bottomLimit = viewport.offsetTop + viewport.height - margin;
-    if (top + tipRect.height > bottomLimit) top = rect.top - tipRect.height - gap;
+    let top = presetEventInfo && Number.isFinite(pointerY)
+      ? pointerY + gap
+      : (acRect ? rect.top : rect.bottom + gap);
+    if (presetEventInfo || acRect) {
+      top = Math.min(top, bottomLimit - tipRect.height);
+    } else if (top + tipRect.height > bottomLimit) {
+      top = rect.top - tipRect.height - gap;
+    }
     top = Math.max(viewport.offsetTop + margin, top);
     tagChipInfoTooltip.style.left = `${Math.round(left)}px`;
     tagChipInfoTooltip.style.top = `${Math.round(top)}px`;
   }
 
-  function showTagChipInfoTooltip(anchor) {
+  function showTagChipInfoTooltip(anchor, event = null) {
     const desc = anchor.dataset.tooltipDesc || '';
     if (!desc) {
       hideTagChipInfoTooltip();
@@ -1039,13 +1125,14 @@ export function createTagAssistController({
       (meta ? `<div class="tag-chip-info-meta">${escHtml(meta)}</div>` : '') +
       `<div class="tag-chip-info-desc">${escHtml(desc)}</div>`;
     chipTooltip.classList.add('open');
-    positionTagChipInfoTooltip(anchor);
+    chipTooltip.classList.toggle('preset-event-info-tooltip', isPresetEventInfoAnchor(anchor));
+    positionTagChipInfoTooltip(anchor, event);
   }
 
   function bindTagChipInfoHover(root) {
     root.querySelectorAll('.tag-tooltip-extra-tag[data-tooltip-desc]').forEach(el => {
-      el.addEventListener('mouseenter', () => showTagChipInfoTooltip(el));
-      el.addEventListener('mousemove', () => positionTagChipInfoTooltip(el));
+      el.addEventListener('mouseenter', e => showTagChipInfoTooltip(el, e));
+      el.addEventListener('mousemove', e => positionTagChipInfoTooltip(el, e));
       el.addEventListener('mouseleave', hideTagChipInfoTooltip);
     });
   }
@@ -1135,11 +1222,11 @@ export function createTagAssistController({
     hidePromptInfoTooltip();
     if (!tag) {
       hideTagChipInfoTooltip();
-      tagTooltip.classList.remove('open', 'ac-mode');
+      tagTooltip.classList.remove('open', 'ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       return;
     }
     hideTagChipInfoTooltip();
-    tagTooltip.classList.remove('open', 'ac-mode');
+    tagTooltip.classList.remove('open', 'ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     window.clearTimeout(tagLookupTimer);
     tagLookupTimer = window.setTimeout(() => {
       if (isLocalPresetQuery(tag)) {
@@ -1153,13 +1240,28 @@ export function createTagAssistController({
   function openClothesStagedAutocompleteAtCursor(textarea) {
     const target = textarea || acTarget || promptEdit;
     const info = getActiveTokenInfo(target);
-    if (!isClothesEmptyStagedSegmentAtCursor(info, target)) return false;
+    if (!isClothesStagedTokenAtCursor(info, target)) return false;
     acTarget = target;
     lastLookupTag = '';
     window.clearTimeout(tagLookupTimer);
     hidePromptInfoTooltip();
     hideTagChipInfoTooltip();
     scheduleAutocomplete({target, info, force: true});
+    return true;
+  }
+
+  function openPresetEventsAutocompleteAtCursor(textarea) {
+    const target = textarea || acTarget || promptEdit;
+    const info = getActiveTokenInfo(target);
+    if (!info || (!isPresetEventsQuery(info.stripped) && !isPresetExpressionsQuery(info.stripped))) return false;
+    acTarget = target;
+    lastLookupTag = '';
+    tagLookupReadOnly = false;
+    window.clearTimeout(tagLookupTimer);
+    hidePromptInfoTooltip();
+    hideTagChipInfoTooltip();
+    presetEventSearch = '';
+    requestPresetAutocomplete(info.stripped);
     return true;
   }
 
@@ -1170,7 +1272,7 @@ export function createTagAssistController({
       if (tagLookupReadOnly) {
         hidePromptInfoTooltip();
       } else {
-        tagTooltip.classList.remove('open', 'ac-mode');
+        tagTooltip.classList.remove('open', 'ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       }
       return;
     }
@@ -1222,7 +1324,7 @@ export function createTagAssistController({
     tooltipRoot.classList.remove('ac-mode');
     tooltipRoot.classList.add('open');
     if (tagLookupReadOnly) {
-      tagTooltip.classList.remove('open', 'ac-mode', 'left-side');
+      tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       positionPromptInfoTooltip();
     } else {
       hidePromptInfoTooltip();
@@ -1320,6 +1422,29 @@ export function createTagAssistController({
     }
   }
 
+  function hasPendingAutocompleteTranslation(query) {
+    return !!query
+      && hangulRe.test(query)
+      && (lastTranslationRequestQuery === query || !!acTranslationTimer);
+  }
+
+  function hideAutocompleteWhileTranslationPending() {
+    acMode = false;
+    acResults = [];
+    acSel = -1;
+    visibleTranslatedAutocompleteQuery = '';
+    presetAutocompleteMeta = null;
+    presetPersonMenuOpen = false;
+    presetEventSourceResults = [];
+    presetEventSecondarySourceResults = [];
+    presetEventSecondaryResults = [];
+    presetEventSearch = '';
+    presetInlineSearchRequestId += 1;
+    hideTagChipInfoTooltip();
+    tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
+    clearAutocompletePositionStyles();
+  }
+
   function scheduleAutocompleteTranslation(query, allowTriggers) {
     clearAutocompleteTranslationTimer();
     if (!query || !hangulRe.test(query) || isAutocompleteControlQuery(query, allowTriggers)) return;
@@ -1333,7 +1458,7 @@ export function createTagAssistController({
         return;
       }
       window.setTimeout(() => clearPendingAutocompleteTranslation(query), 10000);
-    }, 2000);
+    }, HANGUL_TRANSLATION_POLL_MS);
   }
 
   function scheduleAutocomplete(options = {}) {
@@ -1355,6 +1480,7 @@ export function createTagAssistController({
       return;
     }
     if (query === lastAcQuery && !options.force) return;
+    if (query !== lastAcQuery) visibleTranslatedAutocompleteQuery = '';
     lastAcQuery = query;
     scheduleAutocompleteTranslation(query, allowTriggers);
     window.clearTimeout(acTimer);
@@ -1378,6 +1504,7 @@ export function createTagAssistController({
 
   function applyAutocompleteResult(m) {
     const q = lastAcQuery;
+    const isTranslatedResponse = Object.prototype.hasOwnProperty.call(m || {}, 'translated_query');
     const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
     const matchesChunk = q && q.startsWith('$') && m.query === q.slice(1).trim();
     const matchesVibeCluster = q && q.toLowerCase().startsWith('vibe:') && m.query === q.slice(5).trim();
@@ -1385,12 +1512,26 @@ export function createTagAssistController({
     if (!matchesWc && !matchesChunk && !matchesVibeCluster && !matchesPreset && m.query !== q) return false;
     const target = acTarget || promptEdit;
     let results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+    const secondaryResults = (
+      Array.isArray(m.secondaryResults) ? m.secondaryResults :
+      (Array.isArray(m?.preset?.secondaryResults) ? m.preset.secondaryResults :
+      (Array.isArray(m.secondarySuggestions) ? m.secondarySuggestions : []))
+    ).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+    if (!isTranslatedResponse && m.query === visibleTranslatedAutocompleteQuery) {
+      return true;
+    }
     presetAutocompleteMeta = matchesPreset ? (m.preset || null) : null;
-    if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes') {
+    if (['events', 'clothes', 'expressions'].includes(presetAutocompleteMeta?.axis)) {
       presetEventSourceResults = results;
+      presetEventSecondarySourceResults = presetAutocompleteMeta?.axis === 'events' ? secondaryResults : [];
       results = filteredPresetEventResults();
+      presetEventSecondaryResults = presetAutocompleteMeta?.axis === 'events'
+        ? filteredPresetEventSecondaryResults()
+        : [];
     } else {
       presetEventSourceResults = [];
+      presetEventSecondarySourceResults = [];
+      presetEventSecondaryResults = [];
       presetEventSearch = '';
     }
     const context = presetAutocompleteMeta?.context || {};
@@ -1400,12 +1541,17 @@ export function createTagAssistController({
         personId: context.personId || presetEventContext.personId,
       };
     }
-    if (!results.length) {
+    if (!results.length && !presetEventSecondaryResults.length) {
+      if (hasPendingAutocompleteTranslation(m.query || q)) {
+        hideAutocompleteWhileTranslationPending();
+        return true;
+      }
       hideAutocomplete();
       checkTagHint();
       return true;
     }
     acResults = results;
+    visibleTranslatedAutocompleteQuery = isTranslatedResponse ? (m.query || '') : '';
     acSel = results.some(r => (
       r._wc_type === 'chunk' ||
       r._wc_type === 'chunk_group' ||
@@ -1459,24 +1605,25 @@ export function createTagAssistController({
     const axis = presetQueryAxis(requestQuery) || 'events';
     const panel = getEventPresetPanel?.();
     if (!panel || typeof panel.getPresetAutocompletePayload !== 'function') {
-      showPresetEventStatus(requestQuery, `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page is not loaded yet.`, 'unavailable', axis);
+      showPresetEventStatus(requestQuery, `${presetAxisDisplayLabel(axis)} Preset page is not loaded yet.`, 'unavailable', axis);
       return false;
     }
     if (showLoading) {
-      showPresetEventStatus(requestQuery, `Loading ${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page...`, 'loading', axis);
+      showPresetEventStatus(requestQuery, `Loading ${presetAxisDisplayLabel(axis)} Preset page...`, 'loading', axis);
     }
     try {
       const target = acTarget || promptEdit;
       const info = getActiveTokenInfo(target);
       const caretOffset = info ? Math.max(0, (target?.selectionStart || 0) - info.start) : null;
+      const usesInlineSearch = axis === 'clothes' || axis === 'events' || axis === 'expressions';
       const payload = await panel.getPresetAutocompletePayload(requestQuery, {
         context: {...presetEventContext},
         limit: 500,
         caretOffset,
-        search: axis === 'clothes' ? requestSearch : '',
+        search: usesInlineSearch ? requestSearch : '',
       });
       if (lastAcQuery !== requestQuery) return true;
-      if (axis === 'clothes') {
+      if (usesInlineSearch) {
         if (inlineSearchRequestId !== null && inlineSearchRequestId !== presetInlineSearchRequestId) return true;
         if ((restoreSearchFocus || inlineSearchRequestId !== null) && requestSearch !== presetEventSearch) return true;
       }
@@ -1484,9 +1631,10 @@ export function createTagAssistController({
         type: 'autocomplete_result',
         query: payload?.query || requestQuery,
         results: payload?.results || [],
+        secondaryResults: payload?.secondaryResults || payload?.preset?.secondaryResults || [],
         preset: payload?.preset || {},
       });
-      if (restoreSearchFocus && axis === 'clothes') {
+      if (restoreSearchFocus && usesInlineSearch) {
         const searchInput = tagTooltip.querySelector('[data-preset-event-search]');
         if (searchInput) {
           searchInput.focus({preventScroll: true});
@@ -1496,11 +1644,12 @@ export function createTagAssistController({
       return applied;
     } catch (error) {
       if (lastAcQuery !== requestQuery) return false;
-      if (axis === 'clothes') {
+      const usesInlineSearch = axis === 'clothes' || axis === 'events' || axis === 'expressions';
+      if (usesInlineSearch) {
         if (inlineSearchRequestId !== null && inlineSearchRequestId !== presetInlineSearchRequestId) return false;
         if ((restoreSearchFocus || inlineSearchRequestId !== null) && requestSearch !== presetEventSearch) return false;
       }
-      showPresetEventStatus(requestQuery, error?.message || `${axis === 'clothes' ? 'Clothes' : 'Event'} Preset page load failed.`, 'error', axis);
+      showPresetEventStatus(requestQuery, error?.message || `${presetAxisDisplayLabel(axis)} Preset page load failed.`, 'error', axis);
       return false;
     }
   }
@@ -1572,13 +1721,12 @@ export function createTagAssistController({
   }
 
   function presetEventParentToken(token) {
-    const raw = String(token || '').trim();
-    if (!raw.toLowerCase().startsWith('preset:events')) return '';
-    const path = raw.slice('preset:events'.length).replace(/^\/+/, '');
+    const {prefix, tail: path} = presetEventPrefixAndTail(token);
+    if (!prefix) return '';
     const segments = path ? path.split('/').filter(Boolean) : [];
     if (!segments.length) return '';
     const parent = segments.slice(0, -1);
-    return `preset:events${parent.length ? '/' + parent.join('/') : ''}`;
+    return `${prefix}${parent.length ? '/' + parent.join('/') : ''}`;
   }
 
   function presetClothesParentToken(token, parsed) {
@@ -1610,9 +1758,21 @@ export function createTagAssistController({
     return `${prefix}${parent.length ? '/' + parent.join('/') : ''}`;
   }
 
+  function simplePresetParentToken(token, axis) {
+    const raw = String(token || '').trim();
+    const prefix = `preset:${axis}`;
+    if (!raw.toLowerCase().startsWith(prefix)) return '';
+    const tail = raw.slice(prefix.length).replace(/^\/+/, '');
+    const parts = tail.split('/').filter(Boolean);
+    if (!parts.length) return '';
+    const parent = parts.slice(0, -1);
+    return `${prefix}${parent.length ? '/' + parent.join('/') : ''}`;
+  }
+
   function presetParentToken(token) {
     const axis = presetAutocompleteMeta?.axis || presetQueryAxis(token);
     if (axis === 'clothes') return presetClothesParentToken(token, presetAutocompleteMeta?.parsed || null);
+    if (axis === 'expressions') return simplePresetParentToken(token, 'expressions');
     return presetEventParentToken(token);
   }
 
@@ -1636,9 +1796,25 @@ export function createTagAssistController({
     return (presetEventSourceResults || []).filter(row => presetEventResultMatches(row, presetEventSearch));
   }
 
+  function filteredPresetEventSecondaryResults() {
+    return (presetEventSecondarySourceResults || []).filter(row => presetEventResultMatches(row, presetEventSearch));
+  }
+
   function refreshClothesInlineSearch() {
     const query = String(lastAcQuery || '').trim();
     if (!isPresetClothesQuery(query)) return;
+    const requestId = ++presetInlineSearchRequestId;
+    void requestEventPresetAutocomplete(query, {
+      search: presetEventSearch,
+      showLoading: false,
+      restoreSearchFocus: true,
+      inlineSearchRequestId: requestId,
+    });
+  }
+
+  function refreshEventInlineSearch() {
+    const query = String(lastAcQuery || '').trim();
+    if (!isPresetEventsQuery(query) && !isPresetExpressionsQuery(query)) return;
     const requestId = ++presetInlineSearchRequestId;
     void requestEventPresetAutocomplete(query, {
       search: presetEventSearch,
@@ -1742,7 +1918,9 @@ export function createTagAssistController({
   }
 
   function presetAutocompleteStageText(axis, stage) {
-    return axis === 'clothes' ? presetClothesStageLabel(stage) : presetEventStageText(stage);
+    if (axis === 'clothes') return presetClothesStageLabel(stage);
+    if (axis === 'expressions') return presetEventStageText(stage).replace('Main item', 'Expression');
+    return presetEventStageText(stage);
   }
 
   function presetAutocompletePathParts() {
@@ -1756,6 +1934,9 @@ export function createTagAssistController({
         : '';
       return ['Clothes', stagedLabel, ...crumbs.map(crumb => crumb?.label).filter(Boolean)].filter(Boolean);
     }
+    if (axis === 'expressions') {
+      return ['Expressions', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
+    }
     return ['Events', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
   }
 
@@ -1767,13 +1948,20 @@ export function createTagAssistController({
     const total = presetEventSourceResults.length;
     const visible = acResults.length;
     const countText = presetEventSearch && total !== visible ? ` ${visible}/${total}` : (total ? ` ${total}` : '');
+    const optionCountLabel = count => `${count} option${count === 1 ? '' : 's'}`;
+    const optionText = presetEventSearch && total !== visible
+      ? `${visible}/${total} options`
+      : (total ? optionCountLabel(total) : '');
     const generationText = axis === 'clothes'
       ? presetClothesGenerationText(presetAutocompleteMeta?.parsed || {}, {short: true})
       : '';
-    const stageText = [
-      generationText,
-      presetAutocompleteStageText(axis, stage) + countText,
-    ].filter(Boolean).join(' · ');
+    const parsed = presetAutocompleteMeta?.parsed || {};
+    const stageText = axis === 'clothes' && parsed.mode === 'staged'
+      ? [generationText, optionText].filter(Boolean).join(' · ')
+      : [
+          generationText,
+          presetAutocompleteStageText(axis, stage) + countText,
+        ].filter(Boolean).join(' · ');
     const pathHtml = path.map((part, index) => {
       const cls = index === path.length - 1 ? ' current' : '';
       return `<span class="preset-event-stage-part${cls}">${escHtml(part)}</span>`;
@@ -1786,11 +1974,13 @@ export function createTagAssistController({
       '</div>';
   }
 
-  function renderPresetClothesStagedEditor() {
+  function renderPresetClothesStagedControls({panel = false} = {}) {
     if ((presetAutocompleteMeta?.axis || '') !== 'clothes') return '';
     const parsed = presetAutocompleteMeta?.parsed || {};
     if (parsed.mode !== 'staged') return '';
     const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
+    const resolveTags = presetClothesResolveTags(parsed);
+    const activeEmpty = segments.some(segment => segment?.active && segment.empty);
     const chips = segments
       .filter(segment => segment?.tag)
       .map(segment => {
@@ -1803,25 +1993,83 @@ export function createTagAssistController({
           '</span>';
       })
       .join('');
-    if (!chips && !presetClothesResolveTags(parsed).length) return '';
-    const modeLabel = parsed.randomizeOnResolve ? 'Random seed' : 'Fixed tags';
+    if (!chips && !resolveTags.length && !panel) return '';
+    const modeLabel = parsed.randomizeOnResolve ? 'Add random match' : 'Use tags only';
     const modeTitle = parsed.randomizeOnResolve
-      ? 'Generation expands staged tags with random Clothes combo'
+      ? 'Generation keeps staged tags and adds one matching random Clothes combo'
       : 'Generation applies staged tags exactly';
-    return '<div class="preset-clothes-staged-editor">' +
-      `<div class="preset-clothes-chips">${chips}` +
-      '<button type="button" class="preset-clothes-chip-add" data-clothes-add title="Add staged clothes">+</button>' +
+    const modeHint = parsed.randomizeOnResolve
+      ? 'Generation keeps selected tags and adds one compatible random clothes match.'
+      : 'Generation uses selected clothes tags exactly.';
+    const addLabel = activeEmpty ? 'Search empty slot' : 'Add item';
+    const addTitle = activeEmpty ? 'Search for a clothes item in the active empty slot' : 'Add another clothes item';
+    const addClass = `preset-clothes-chip-add${activeEmpty ? ' active' : ''}`;
+    const empty = panel && !chips
+      ? '<div class="preset-clothes-panel-empty">No staged clothes selected.</div>'
+      : '';
+    return `<div class="preset-clothes-staged-controls${panel ? ' panel' : ''}">` +
+      `<div class="preset-clothes-chips">${chips}${empty}` +
+      `<button type="button" class="${addClass}" data-clothes-add title="${escHtml(addTitle)}">${escHtml(addLabel)}</button>` +
       '</div>' +
       `<button type="button" class="preset-clothes-mode-toggle${parsed.randomizeOnResolve ? ' random' : ' fixed'}" data-clothes-mode-toggle title="${escHtml(modeTitle)}">${escHtml(modeLabel)}</button>` +
+      (panel ? `<div class="preset-clothes-staged-hint">${escHtml(modeHint)}</div>` : '') +
       '</div>';
+  }
+
+  function renderPresetClothesStagedPanel() {
+    if ((presetAutocompleteMeta?.axis || '') !== 'clothes') return '';
+    const parsed = presetAutocompleteMeta?.parsed || {};
+    if (parsed.mode !== 'staged') return '';
+    const resolveTags = presetClothesResolveTags(parsed);
+    const title = resolveTags.length === 1 ? '1 tag' : `${resolveTags.length} tags`;
+    return '<section class="preset-event-staged-panel">' +
+      `<div class="preset-clothes-staged-head"><span>Selected Clothes</span><span>${escHtml(title)}</span></div>` +
+      renderPresetClothesStagedControls({panel: true}) +
+      '</section>';
+  }
+
+  function renderPresetExpressionPanel() {
+    if ((presetAutocompleteMeta?.axis || '') !== 'expressions') return '';
+    const detail = presetAutocompleteMeta?.detail || {};
+    const tags = Array.isArray(detail.tags) && detail.tags.length
+      ? detail.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+      : uniqueLimitedTags(acResults, 12);
+    const title = String(detail.title || 'Expression Detail').trim();
+    const subtitle = String(detail.subtitle || '').trim();
+    const prompt = String(detail.prompt || tags.join(', ')).trim();
+    const count = detail.type === 'item' ? Number(detail.count || 0) : 0;
+    const tagCount = tags.length;
+    const headText = tagCount === 1 ? '1 tag' : `${tagCount} tags`;
+    const tagHtml = tags.length
+      ? tags.map(tag => `<span class="preset-expression-tag">${escHtml(tag)}</span>`).join('')
+      : '<span class="preset-expression-empty">No expression tags.</span>';
+    const meta = [
+      subtitle,
+      count > 0 ? fmtCount(count) : '',
+      detail.source ? String(detail.source) : '',
+    ].filter(Boolean).join(' · ');
+    return '<section class="preset-event-expression-panel">' +
+      `<div class="preset-expression-detail-head"><span>Expression Detail</span><span>${escHtml(headText)}</span></div>` +
+      '<div class="preset-expression-detail-body">' +
+      `<div class="preset-expression-detail-title">${escHtml(title)}</div>` +
+      (meta ? `<div class="preset-expression-detail-meta">${escHtml(meta)}</div>` : '') +
+      `<div class="preset-expression-tags">${tagHtml}</div>` +
+      (prompt ? `<div class="preset-expression-prompt">${escHtml(prompt)}</div>` : '') +
+      '</div>' +
+      '</section>';
   }
 
   function renderPresetEventAutocomplete() {
     const context = presetAutocompleteMeta?.context || {};
-    let html = '<div class="preset-event-picker">' +
+    const axis = presetAutocompleteMeta?.axis || 'events';
+    const hasObservedPanel = axis === 'events';
+    const hasStagedPanel = axis === 'clothes' && (presetAutocompleteMeta?.parsed || {}).mode === 'staged';
+    const hasExpressionPanel = axis === 'expressions';
+    let html = `<div class="preset-event-picker${hasObservedPanel ? ' has-observed-panel' : ''}${hasStagedPanel ? ' has-staged-panel' : ''}${hasExpressionPanel ? ' has-expression-panel' : ''}">` +
       renderPresetEventToolbar(context) +
       renderPresetEventStageLine() +
-      renderPresetClothesStagedEditor() +
+      '<div class="preset-event-popup-body">' +
+      '<section class="preset-event-primary-panel">' +
       '<div class="tag-ac-list preset-event-list">';
     acResults.forEach((r, i) => {
       const sel = i === acSel ? ' selected' : '';
@@ -1830,7 +2078,8 @@ export function createTagAssistController({
       const countText = r.count ? fmtCount(r.count || 0) : '';
       const displayTag = eventPresetDisplayTag(r);
       const descText = r.desc || r.prompt || rowTags(r).join(', ');
-      html += `<div class="tag-ac-item preset-event-item${itemClass}${sel}" data-idx="${i}"${autocompleteInfoAttrs(r, displayTag, descText)}>` +
+      const active = r.active ? ' active' : '';
+      html += `<div class="tag-ac-item preset-event-item${itemClass}${sel}${active}" data-idx="${i}"${autocompleteInfoAttrs(r, displayTag, descText)}>` +
         `<span class="tag-ac-tag">${escHtml(displayTag)}</span>` +
         `<span class="tag-ac-count">${escHtml(countText)}</span>` +
         '</div>';
@@ -1838,9 +2087,44 @@ export function createTagAssistController({
     if (!acResults.length) {
       html += '<div class="preset-event-empty">No matches</div>';
     }
+    html += '</div></section>';
+    if (hasObservedPanel) {
+      const observedCount = presetEventSecondaryResults.length;
+      const observedSourceCount = presetEventSecondarySourceResults.length;
+      const observedTitle = observedSourceCount
+        ? `Observed Combos ${presetEventSearch && observedCount !== observedSourceCount ? `${observedCount}/${observedSourceCount}` : observedSourceCount}`
+        : 'Observed Combos';
+      html += '<section class="preset-event-observed-panel">' +
+        `<div class="preset-event-observed-head"><span>${escHtml(observedTitle)}</span><span>Count</span></div>` +
+        '<div class="tag-ac-list preset-event-list preset-event-observed-list">';
+      presetEventSecondaryResults.forEach((r, i) => {
+        const disabled = r._wc_type === 'preset_status' || r.disabled;
+        const itemClass = disabled ? ' disabled' : '';
+        const countText = r.count ? fmtCount(r.count || 0) : '';
+        const displayTag = eventPresetDisplayTag(r);
+        const descText = r.desc || r.prompt || rowTags(r).join(', ');
+        html += `<div class="tag-ac-item preset-event-item preset-event-observed-item${itemClass}" data-observed-idx="${i}"${autocompleteInfoAttrs(r, displayTag, descText)}>` +
+          `<span class="tag-ac-tag">${escHtml(displayTag)}</span>` +
+          `<span class="tag-ac-count">${escHtml(countText)}</span>` +
+          '</div>';
+      });
+      if (!presetEventSecondaryResults.length) {
+        html += '<div class="preset-event-empty">Select a main item to inspect observed combos.</div>';
+      }
+      html += '</div></section>';
+    }
+    if (hasStagedPanel) {
+      html += renderPresetClothesStagedPanel();
+    }
+    if (hasExpressionPanel) {
+      html += renderPresetExpressionPanel();
+    }
     html += '</div></div>';
     tagTooltip.innerHTML = html;
     tagTooltip.classList.add('open', 'ac-mode', 'preset-event-mode');
+    tagTooltip.classList.toggle('preset-event-observed-mode', hasObservedPanel);
+    tagTooltip.classList.toggle('preset-event-staged-mode', hasStagedPanel);
+    tagTooltip.classList.toggle('preset-event-expression-mode', hasExpressionPanel);
     tagTooltip.classList.remove('chunk-ac-mode');
     positionTagTooltip();
 
@@ -1911,15 +2195,8 @@ export function createTagAssistController({
         window.clearTimeout(presetInlineSearchTimer);
         if (presetAutocompleteMeta?.axis === 'clothes') {
           presetInlineSearchTimer = window.setTimeout(refreshClothesInlineSearch, 180);
-        } else {
-          acResults = filteredPresetEventResults();
-          acSel = acResults.length ? 0 : -1;
-          renderAutocomplete();
-          const nextInput = tagTooltip.querySelector('[data-preset-event-search]');
-          if (nextInput) {
-            nextInput.focus({preventScroll: true});
-            nextInput.selectionStart = nextInput.selectionEnd = nextInput.value.length;
-          }
+        } else if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'expressions') {
+          presetInlineSearchTimer = window.setTimeout(refreshEventInlineSearch, 180);
         }
       });
       searchInput.addEventListener('keydown', e => {
@@ -1933,8 +2210,11 @@ export function createTagAssistController({
           window.clearTimeout(presetInlineSearchTimer);
           if (presetAutocompleteMeta?.axis === 'clothes') {
             refreshClothesInlineSearch();
+          } else if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'expressions') {
+            refreshEventInlineSearch();
           } else {
             acResults = filteredPresetEventResults();
+            presetEventSecondaryResults = filteredPresetEventSecondaryResults();
             acSel = acResults.length ? 0 : -1;
             renderAutocomplete();
             (acTarget || promptEdit)?.focus?.({preventScroll: true});
@@ -1948,11 +2228,7 @@ export function createTagAssistController({
         e.preventDefault();
         const nextRating = button.dataset.rating || presetEventContext.ratingId;
         if (!nextRating || nextRating === presetEventContext.ratingId) return;
-        presetPersonMenuOpen = false;
-        presetEventSearch = '';
-        presetEventContext = {...presetEventContext, ratingId: nextRating};
-        renderAutocomplete();
-        requestPresetAutocomplete(lastAcQuery);
+        switchPresetEventContext({ratingId: nextRating});
       });
     });
     const personTrigger = tagTooltip.querySelector('.preset-event-person-trigger');
@@ -1970,19 +2246,24 @@ export function createTagAssistController({
         e.preventDefault();
         const nextPerson = button.dataset.person || presetEventContext.personId;
         if (!nextPerson || nextPerson === presetEventContext.personId) return;
-        presetPersonMenuOpen = false;
-        presetEventSearch = '';
-        presetEventContext = {...presetEventContext, personId: nextPerson};
-        renderAutocomplete();
-        requestPresetAutocomplete(lastAcQuery);
+        switchPresetEventContext({personId: nextPerson});
       });
     });
     tagTooltip.querySelectorAll('.preset-event-item').forEach(el => {
       el.addEventListener('mousedown', e => {
+        if (el.hasAttribute('data-observed-idx')) return;
         e.preventDefault();
         presetPersonMenuOpen = false;
         const idx = +el.dataset.idx;
         if (Number.isInteger(idx)) selectAutocomplete(idx);
+      });
+    });
+    tagTooltip.querySelectorAll('[data-observed-idx]').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        presetPersonMenuOpen = false;
+        const idx = +el.dataset.observedIdx;
+        if (Number.isInteger(idx)) selectPresetObservedCombo(idx);
       });
     });
     bindAutocompleteInfoHover(tagTooltip);
@@ -1990,7 +2271,7 @@ export function createTagAssistController({
 
   function renderAutocomplete() {
     hideTagChipInfoTooltip();
-    if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes') {
+    if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes' || presetAutocompleteMeta?.axis === 'expressions') {
       renderPresetEventAutocomplete();
       return;
     }
@@ -2004,7 +2285,7 @@ export function createTagAssistController({
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const displayTag = wcType === 'preset_path'
-        ? (r.value || r.tag || '')
+        ? (r.tag || r.label || r.prompt || r.value || '')
         : (wcType === 'preset_status' ? (r.desc || r.tag || '') : prefix + r.tag + suffix);
       const metaText = wcType === 'chunk'
         ? (r.group || '')
@@ -2023,7 +2304,7 @@ export function createTagAssistController({
       : '</div>';
     tagTooltip.innerHTML = html;
     tagTooltip.classList.add('open', 'ac-mode');
-    tagTooltip.classList.remove('preset-event-mode');
+    tagTooltip.classList.remove('preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     tagTooltip.classList.toggle('chunk-ac-mode', chunkMode);
     syncTooltipSide();
     positionTagTooltip();
@@ -2090,6 +2371,18 @@ export function createTagAssistController({
       return;
     }
     if (r._wc_type === 'preset_path') {
+      if (r.axis === 'expressions' && r.final) {
+        const expressionPrompt = String(r.insertText || r.prompt || '').trim();
+        const expressionTags = Array.isArray(r.tags)
+          ? r.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+          : [];
+        const replacement = expressionPrompt || expressionTags.join(', ');
+        if (replacement) {
+          swapToken(target, info, replacement);
+          hideAutocomplete();
+          return;
+        }
+      }
       const presetToken = r.axis === 'clothes' && r.clothesTokenValue
         ? r.clothesTokenValue
         : (r.value || `preset:${r.tag}`);
@@ -2128,6 +2421,31 @@ export function createTagAssistController({
     sendWs({type: 'tag_lookup', tag: r.tag});
   }
 
+  function selectPresetObservedCombo(idx) {
+    const r = presetEventSecondaryResults[idx];
+    if (!r || r.disabled) return;
+    const target = acTarget || promptEdit;
+    if (isImeComposing(target)) return;
+    const info = getActiveTokenInfo(target);
+    if (!info) return;
+    if (r._wc_type !== 'preset_path') return;
+    const presetToken = r.value || `preset:${r.tag}`;
+    swapToken(target, info, presetToken);
+    if (r.final) {
+      hideAutocomplete();
+      return;
+    }
+    acMode = true;
+    acResults = [];
+    acSel = -1;
+    presetEventSecondaryResults = [];
+    tagTooltip.innerHTML = '<div class="chunk-ac-loading">Loading preset items...</div>';
+    tagTooltip.classList.add('open', 'ac-mode');
+    tagTooltip.classList.remove('chunk-ac-mode');
+    positionTagTooltip();
+    requestPresetAutocomplete(presetToken);
+  }
+
   function swapToken(textarea, tokenInfo, newTag) {
     const text = textarea.value;
     const raw = tokenInfo.raw;
@@ -2155,16 +2473,19 @@ export function createTagAssistController({
     acSel = -1;
     lastAcQuery = '';
     lastTranslationRequestQuery = '';
+    visibleTranslatedAutocompleteQuery = '';
     presetAutocompleteMeta = null;
     presetPersonMenuOpen = false;
     presetEventSourceResults = [];
+    presetEventSecondarySourceResults = [];
+    presetEventSecondaryResults = [];
     presetEventSearch = '';
     presetInlineSearchRequestId += 1;
     window.clearTimeout(acTimer);
     window.clearTimeout(presetInlineSearchTimer);
     clearAutocompleteTranslationTimer();
     hideTagChipInfoTooltip();
-    tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode');
+    tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     clearAutocompletePositionStyles();
   }
 
@@ -2218,7 +2539,7 @@ export function createTagAssistController({
         imeState.stableTimer = null;
         if (!imeState.active || !imeState.data) return;
         scheduleCompositionAutocomplete({force: true});
-      }, 2000);
+      }, HANGUL_COMPOSITION_STABLE_RETRY_MS);
     }
     function scheduleCompositionSettle() {
       if (imeState.settleTimer) window.clearTimeout(imeState.settleTimer);
@@ -2319,19 +2640,21 @@ export function createTagAssistController({
     textarea.addEventListener('click', () => {
       acTarget = textarea;
       if (acMode) hideAutocomplete();
+      if (openPresetEventsAutocompleteAtCursor(textarea)) return;
       if (openClothesStagedAutocompleteAtCursor(textarea)) return;
       checkTagHint();
     });
     textarea.addEventListener('keyup', e => {
       if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) {
         if (acMode) hideAutocomplete();
+        if (openPresetEventsAutocompleteAtCursor(textarea)) return;
         if (openClothesStagedAutocompleteAtCursor(textarea)) return;
         checkTagHint();
       }
     });
     textarea.addEventListener('focus', () => {
       acTarget = textarea;
-      if (!acMode && !openClothesStagedAutocompleteAtCursor(textarea)) checkTagHint();
+      if (!acMode && !openPresetEventsAutocompleteAtCursor(textarea) && !openClothesStagedAutocompleteAtCursor(textarea)) checkTagHint();
     });
     textarea.addEventListener('contextmenu', e => {
       const chunkPanelControl = getChunkPanelControl();
@@ -2352,7 +2675,7 @@ export function createTagAssistController({
         if (document.activeElement !== textarea && !tagTooltip.contains(document.activeElement)) {
           hideAutocomplete();
           hideTagChipInfoTooltip();
-          tagTooltip.classList.remove('open', 'ac-mode');
+          tagTooltip.classList.remove('open', 'ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
         }
       }, 200);
     });
@@ -2374,6 +2697,7 @@ export function createTagAssistController({
       } else if (e.key === 'Escape') {
         e.preventDefault();
         hideAutocomplete();
+        if (isPresetEventsQuery(getTagAtCursor(textarea)) || isPresetExpressionsQuery(getTagAtCursor(textarea))) return;
         checkTagHint();
       }
     });

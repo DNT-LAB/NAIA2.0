@@ -286,11 +286,43 @@ export function createEventPresetPanel({
     return raw.replace(/\s+/g, '_').trim();
   }
 
+  function eventPresetAxisPrefix(context = {}) {
+    const rating = String(context.ratingId || state.ratingId || 's').trim().toLowerCase() || 's';
+    const person = String(context.personId || state.personId || '1girl_solo').trim() || '1girl_solo';
+    return `preset:events(${rating}|${person})`;
+  }
+
+  function eventPresetPrefixAndTail(token) {
+    const base = 'preset:events';
+    let raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith(base)) raw = base;
+    let tailStart = base.length;
+    if (raw[tailStart] === '(') {
+      const close = raw.indexOf(')', tailStart + 1);
+      if (close > tailStart) tailStart = close + 1;
+    }
+    return {
+      prefix: raw.slice(0, tailStart) || base,
+      tail: raw.slice(tailStart),
+    };
+  }
+
+  function eventPresetContextFromToken(token) {
+    const raw = String(token || '').trim();
+    const match = /^preset:events\(([gsqe])\|([^)]+)\)/i.exec(raw);
+    if (!match) return {};
+    return {
+      ratingId: match[1].toLowerCase(),
+      personId: match[2],
+    };
+  }
+
   function presetPath(axis, segments = []) {
     const encoded = segments
       .map(segment => encodeURIComponent(String(segment || '').trim()))
       .filter(Boolean);
-    return `preset:${axis}${encoded.length ? '/' + encoded.join('/') : ''}`;
+    const prefix = axis === 'events' ? eventPresetAxisPrefix() : `preset:${axis}`;
+    return `${prefix}${encoded.length ? '/' + encoded.join('/') : ''}`;
   }
 
   function presetNodeMatches(node, query) {
@@ -308,13 +340,25 @@ export function createEventPresetPanel({
   function parseEventPresetToken(token) {
     let raw = String(token || '').trim();
     if (!raw.toLowerCase().startsWith('preset:events')) raw = 'preset:events';
-    const tail = raw.slice('preset:events'.length);
+    const tail = eventPresetPrefixAndTail(raw).tail;
     const path = tail.startsWith('/') ? tail.slice(1) : tail;
     return {
       raw,
       trailingSlash: path.endsWith('/'),
       segments: path
         ? path.split('/').filter(segment => segment !== '').map(decodePresetSegment)
+        : [],
+    };
+  }
+
+  function parseExpressionPresetToken(token) {
+    let raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith('preset:expressions')) raw = 'preset:expressions';
+    const tail = raw.slice('preset:expressions'.length).replace(/^\/+/, '');
+    return {
+      raw,
+      segments: tail
+        ? tail.split('/').filter(segment => segment !== '').map(decodePresetSegment)
         : [],
     };
   }
@@ -388,6 +432,9 @@ export function createEventPresetPanel({
         start = end + 1;
         return false;
       });
+    }
+    if (tail.endsWith('&') && rawSegments.length === 2 && rawSegments[1] === '') {
+      activeIndex = 1;
     }
     const segments = rawSegments.map((segment, index) => {
       const decoded = decodeClothesSegment(segment);
@@ -964,24 +1011,52 @@ export function createEventPresetPanel({
     };
   }
 
+  function expressionPresetStatusRow(token, message, status = 'preset') {
+    return {
+      tag: String(status || 'preset'),
+      value: token,
+      count: 0,
+      desc: message || 'Expression Preset data is not ready.',
+      group: 'preset/expressions',
+      cat: 'status',
+      _wc_type: 'preset_status',
+      disabled: true,
+      axis: 'expressions',
+      stage: 'status',
+    };
+  }
+
   function eventPresetRowLabel(node) {
     const raw = stripPresetNamespace(node?.label || node?.tag || node?.id || '').replace(/_/g, ' ').trim();
     return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : '';
+  }
+
+  function eventPresetRowLabelKo(node) {
+    return String(node?.displayLabelKo || node?.labelKo || '').trim();
   }
 
   function eventPresetCrumb(node, stage) {
     return {
       id: String(node?.id || node?.tag || node?.label || ''),
       label: eventPresetRowLabel(node),
+      labelKo: eventPresetRowLabelKo(node),
       stage,
     };
   }
 
   function eventPresetRowDesc(node, stage) {
-    if (stage === 'category') return `${(node?.subcategories || []).length} subcategories`;
-    if (stage === 'subcategory') return `${(node?.events || []).length} items`;
-    if (stage === 'item') return (node?.promptAtoms || []).join(', ');
-    return comboPromptText(node);
+    const labelKo = eventPresetRowLabelKo(node);
+    const krDesc = String(node?.krDesc || node?.descKo || '').trim();
+    const fallback = (() => {
+      if (stage === 'category') return `${(node?.subcategories || []).length} subcategories`;
+      if (stage === 'subcategory') return `${(node?.events || []).length} items`;
+      if (stage === 'item') return (node?.promptAtoms || []).join(', ');
+      return comboPromptText(node);
+    })();
+    if (krDesc && labelKo && krDesc !== labelKo) return `${labelKo} · ${krDesc}`;
+    if (krDesc) return krDesc;
+    if (labelKo) return fallback ? `${labelKo} · ${fallback}` : labelKo;
+    return fallback;
   }
 
   function eventPresetRowTags(node, stage, options = {}) {
@@ -1006,6 +1081,7 @@ export function createEventPresetPanel({
         const final = stage === 'combo';
         const value = presetPath('events', [...pathParents, segment]);
         const tags = eventPresetRowTags(node, stage, options);
+        const labelKo = eventPresetRowLabelKo(node);
         return {
           tag: eventPresetRowLabel(node),
           value,
@@ -1018,6 +1094,11 @@ export function createEventPresetPanel({
           stage,
           final,
           id: String(node?.id || node?.tag || node?.label || segment),
+          rawLabel: node?.label || node?.tag || node?.id || segment,
+          labelKo,
+          labelEn: node?.labelEn || node?.displayLabel || '',
+          krDesc: node?.krDesc || '',
+          krCategory: node?.krCategory || '',
           prompt: tags.length ? tags.join(', ') : (comboPromptText(node) || (node?.promptAtoms || []).join(', ')),
           tags,
           shortcutScore: node?._shortcutScore,
@@ -1054,11 +1135,12 @@ export function createEventPresetPanel({
     }
   }
 
-  async function ensureAutocompleteEventDetail(context) {
+  async function ensureAutocompleteEventDetail(context, options = {}) {
     const event = context?.event;
     if (!event?.id) return event || null;
     if (Array.isArray(event.observedCombos) || event._detailLoaded) return event;
     if (typeof provider.select !== 'function') return event;
+    const mutateSelection = options.mutateSelection !== false;
     const payload = {
       ...selectedPayload({includeRecommendedTags: false}),
       categoryId: context.category?.id || '',
@@ -1067,7 +1149,7 @@ export function createEventPresetPanel({
       comboId: '',
     };
     const result = await provider.select(payload);
-    applySelectedPayload(result?.selected || payload);
+    if (mutateSelection) applySelectedPayload(result?.selected || payload);
     if (result?.event) {
       result.event._detailLoaded = true;
       mergeEventDetail(result.event);
@@ -1075,6 +1157,35 @@ export function createEventPresetPanel({
     const merged = findContextInData(viewData, event.id)?.event || result?.event || event;
     merged._detailLoaded = true;
     return merged;
+  }
+
+  function markActiveEventRows(rows, event) {
+    if (!event) return rows || [];
+    const activeEventKeys = new Set([
+      event.id,
+      event.tag,
+      event.label,
+      presetNodePathSegment(event),
+    ].map(normalizePresetMatch).filter(Boolean));
+    (rows || []).forEach(row => {
+      const rowKeys = [row.id, row.tag, row.rawLabel, row.value?.split('/').pop()]
+        .map(normalizePresetMatch)
+        .filter(Boolean);
+      row.active = rowKeys.some(key => activeEventKeys.has(key));
+    });
+    return rows || [];
+  }
+
+  async function eventObservedComboRows(category, subcategory, event, eventPath, query, limit) {
+    if (!event) return [];
+    const detailedEvent = await ensureAutocompleteEventDetail({category, subcategory, event}, {mutateSelection: false});
+    return eventPresetSuggestionRows(
+      detailedEvent?.observedCombos || [],
+      'combo',
+      {query, path: eventPath},
+      limit,
+      {event: detailedEvent || event},
+    );
   }
 
   async function ensureEventPresetAutocompleteData(context = {}) {
@@ -1112,8 +1223,10 @@ export function createEventPresetPanel({
     await loadClothes({showLoading: state.clothesStatus === 'idle', extra});
   }
 
-  async function buildEventPresetAutocomplete(token, limit = 12) {
+  async function buildEventPresetAutocomplete(token, limit = 12, options = {}) {
     const parsed = parseEventPresetToken(token);
+    const inlineSearch = String(options.search || '').trim();
+    const syncSelection = options.syncSelection === true;
     const allCategories = categories();
     const categorySegment = parsed.segments[0] || '';
     const category = findPresetNode(allCategories, categorySegment);
@@ -1121,18 +1234,18 @@ export function createEventPresetPanel({
       return {
         stage: 'category',
         crumbs: [],
-        rows: eventPresetSuggestionRows(allCategories, 'category', {query: categorySegment, path: []}, limit),
+        rows: eventPresetSuggestionRows(allCategories, 'category', {query: inlineSearch || categorySegment, path: []}, limit),
       };
     }
 
     const categoryPath = [presetNodePathSegment(category)];
     const categoryCrumbs = [eventPresetCrumb(category, 'category')];
-    syncAutocompleteSelection(category, null, null);
+    if (syncSelection) syncAutocompleteSelection(category, null, null);
     if (parsed.segments.length < 2) {
       return {
         stage: 'subcategory',
         crumbs: categoryCrumbs,
-        rows: eventPresetSuggestionRows(category.subcategories || [], 'subcategory', {query: '', path: categoryPath}, limit),
+        rows: eventPresetSuggestionRows(category.subcategories || [], 'subcategory', {query: inlineSearch, path: categoryPath}, limit),
       };
     }
 
@@ -1143,7 +1256,7 @@ export function createEventPresetPanel({
         stage: 'subcategory',
         crumbs: categoryCrumbs,
         rows: eventPresetSuggestionRows(category.subcategories || [], 'subcategory', {
-          query: subcategorySegment,
+          query: inlineSearch || subcategorySegment,
           path: categoryPath,
         }, limit),
       };
@@ -1151,40 +1264,85 @@ export function createEventPresetPanel({
 
     const subcategoryPath = [...categoryPath, presetNodePathSegment(subcategory)];
     const subcategoryCrumbs = [...categoryCrumbs, eventPresetCrumb(subcategory, 'subcategory')];
-    syncAutocompleteSelection(category, subcategory, null);
+    if (syncSelection) syncAutocompleteSelection(category, subcategory, null);
     if (parsed.segments.length < 3) {
+      const itemQuery = inlineSearch;
+      const itemRows = eventPresetSuggestionRows(subcategory.events || [], 'item', {query: itemQuery, path: subcategoryPath}, limit);
+      const previewEvent = (subcategory.events || []).find(event => presetNodeMatches(event, itemQuery)) || null;
+      markActiveEventRows(itemRows, previewEvent);
       return {
         stage: 'item',
         crumbs: subcategoryCrumbs,
-        rows: eventPresetSuggestionRows(subcategory.events || [], 'item', {query: '', path: subcategoryPath}, limit),
+        rows: itemRows,
+        secondaryStage: 'combo',
+        secondaryCrumbs: previewEvent ? [...subcategoryCrumbs, eventPresetCrumb(previewEvent, 'item')] : subcategoryCrumbs,
+        secondaryRows: await eventObservedComboRows(
+          category,
+          subcategory,
+          previewEvent,
+          previewEvent ? [...subcategoryPath, presetNodePathSegment(previewEvent)] : subcategoryPath,
+          '',
+          limit,
+        ),
       };
     }
 
     const eventSegment = parsed.segments[2] || '';
     const event = findPresetNode(subcategory.events || [], eventSegment);
     if (!event) {
+      const itemQuery = inlineSearch || eventSegment;
+      const matchingEvents = (subcategory.events || []).filter(candidate => presetNodeMatches(candidate, itemQuery));
+      const previewEvent = matchingEvents[0] || null;
+      const itemRows = eventPresetSuggestionRows(subcategory.events || [], 'item', {
+        query: itemQuery,
+        path: subcategoryPath,
+      }, limit);
+      markActiveEventRows(itemRows, previewEvent);
       return {
         stage: 'item',
         crumbs: subcategoryCrumbs,
-        rows: eventPresetSuggestionRows(subcategory.events || [], 'item', {
-          query: eventSegment,
-          path: subcategoryPath,
-        }, limit),
+        rows: itemRows,
+        secondaryStage: 'combo',
+        secondaryCrumbs: previewEvent ? [...subcategoryCrumbs, eventPresetCrumb(previewEvent, 'item')] : subcategoryCrumbs,
+        secondaryRows: await eventObservedComboRows(
+          category,
+          subcategory,
+          previewEvent,
+          previewEvent ? [...subcategoryPath, presetNodePathSegment(previewEvent)] : subcategoryPath,
+          '',
+          limit,
+        ),
       };
     }
 
-    syncAutocompleteSelection(category, subcategory, event);
-    const detailedEvent = await ensureAutocompleteEventDetail({category, subcategory, event});
-    const eventPath = [...subcategoryPath, presetNodePathSegment(event)];
+    if (syncSelection) syncAutocompleteSelection(category, subcategory, event);
+    const matchingInlineEvents = inlineSearch
+      ? (subcategory.events || []).filter(candidate => presetNodeMatches(candidate, inlineSearch))
+      : [];
+    const previewEvent = inlineSearch && !presetNodeMatches(event, inlineSearch)
+      ? (matchingInlineEvents[0] || event)
+      : event;
+    const previewChanged = previewEvent !== event;
+    const eventPath = [...subcategoryPath, presetNodePathSegment(previewEvent)];
+    const itemRows = markActiveEventRows(eventPresetSuggestionRows(
+      subcategory.events || [],
+      'item',
+      {query: inlineSearch, path: subcategoryPath},
+      limit,
+    ), previewEvent);
     return {
-      stage: 'combo',
-      crumbs: [...subcategoryCrumbs, eventPresetCrumb(event, 'item')],
-      rows: eventPresetSuggestionRows(
-        detailedEvent?.observedCombos || [],
-        'combo',
-        {query: parsed.segments[3] || '', path: eventPath},
+      stage: 'item',
+      crumbs: [...subcategoryCrumbs, eventPresetCrumb(previewEvent, 'item')],
+      rows: itemRows,
+      secondaryStage: 'combo',
+      secondaryCrumbs: [...subcategoryCrumbs, eventPresetCrumb(previewEvent, 'item')],
+      secondaryRows: await eventObservedComboRows(
+        category,
+        subcategory,
+        previewEvent,
+        eventPath,
+        previewChanged ? '' : (inlineSearch || parsed.segments[3] || ''),
         limit,
-        {event: detailedEvent || event},
       ),
     };
   }
@@ -1290,8 +1448,10 @@ export function createEventPresetPanel({
 
   function clothesItemRows(items, parsed, categoryId, subcategoryId, limit) {
     const query = parsed.activePath[2] || (!parsed.activePath.length ? parsed.activeQuery : '');
+    const stagedKeys = clothesCommittedTagKeys(parsed);
     return (items || [])
       .filter(item => presetNodeMatches({id: item.id, tag: item.tag, label: item.label}, query))
+      .filter(item => !stagedKeys.has(normalizePresetMatch(clothesItemTag(item))))
       .slice(0, limit)
       .map(item => {
         const tag = clothesItemTag(item);
@@ -1320,6 +1480,22 @@ export function createEventPresetPanel({
           incompatible: !!item.incompatible,
         };
       });
+  }
+
+  function clothesCommittedTagKeys(parsed) {
+    const activeIndex = Number.isInteger(parsed?.activeIndex) ? parsed.activeIndex : -1;
+    const keys = new Set();
+    for (const segment of parsed?.segments || []) {
+      if (!segment || segment.index === activeIndex) continue;
+      const key = normalizePresetMatch(segment.tag || '');
+      if (key) keys.add(key);
+    }
+    if (keys.size) return keys;
+    for (const tag of parsed?.stagedTags || []) {
+      const key = normalizePresetMatch(tag);
+      if (key) keys.add(key);
+    }
+    return keys;
   }
 
   function clothesComboRows(rows, limit) {
@@ -1585,6 +1761,48 @@ export function createEventPresetPanel({
   }
 
   async function getPresetAutocompletePayload(token, {context = {}, limit = 12, caretOffset = null, search = ''} = {}) {
+    if (String(token || '').trim().toLowerCase().startsWith('preset:expressions')) {
+      const normalized = String(token || '').trim() || 'preset:expressions';
+      const loadState = {
+        main: state.expressionData?.dataAvailability?.main || state.expressionStatus || '',
+        message: state.expressionData?.dataAvailability?.message || state.expressionMessage || '',
+      };
+      try {
+        const payload = await buildExpressionPresetAutocomplete(normalized, limit, context, search);
+        const rows = payload.rows?.length
+          ? payload.rows
+          : [expressionPresetStatusRow(normalized, 'No Expression Preset items for this path.', 'empty')];
+        return {
+          query: normalized,
+          results: rows,
+          preset: {
+            axis: 'expressions',
+            stage: payload.stage || 'category',
+            crumbs: payload.crumbs || [],
+            parsed: payload.parsed || null,
+            detail: payload.detail || null,
+            context: autocompleteContextPayload(),
+            loadState: {
+              main: state.expressionData?.dataAvailability?.main || state.expressionStatus || '',
+              message: state.expressionData?.dataAvailability?.message || state.expressionMessage || '',
+            },
+            dataReady: expressionsReady(),
+          },
+        };
+      } catch (error) {
+        return {
+          query: normalized,
+          results: [expressionPresetStatusRow(normalized, error?.message || loadState.message || 'Expression Preset lookup failed.', 'error')],
+          preset: {
+            axis: 'expressions',
+            stage: 'status',
+            context: autocompleteContextPayload(),
+            loadState,
+            dataReady: false,
+          },
+        };
+      }
+    }
     if (String(token || '').trim().toLowerCase().startsWith('preset:clothes')) {
       const normalized = String(token || '').trim() || 'preset:clothes';
       const loadState = {
@@ -1629,7 +1847,8 @@ export function createEventPresetPanel({
     const normalized = String(token || '').trim().toLowerCase().startsWith('preset:events')
       ? String(token || '').trim()
       : 'preset:events';
-    await ensureEventPresetAutocompleteData(context);
+    const tokenContext = eventPresetContextFromToken(normalized);
+    await ensureEventPresetAutocompleteData({...context, ...tokenContext});
     const loadState = {
       main: dataAvailability().main || state.dataStatus || '',
       message: dataAvailability().message || state.dataMessage || '',
@@ -1647,17 +1866,21 @@ export function createEventPresetPanel({
         },
       };
     }
-    const payload = await buildEventPresetAutocomplete(normalized, limit);
+    const payload = await buildEventPresetAutocomplete(normalized, limit, {search});
     const rows = payload.rows?.length
       ? payload.rows
       : [eventPresetStatusRow(normalized, 'No Event Preset items for this path.', 'empty')];
+    const secondaryRows = Array.isArray(payload.secondaryRows) ? payload.secondaryRows : [];
     return {
       query: normalized,
       results: rows,
+      secondaryResults: secondaryRows,
         preset: {
           axis: 'events',
           stage: payload.stage || 'category',
+          secondaryStage: payload.secondaryStage || '',
           crumbs: payload.crumbs || [],
+          secondaryCrumbs: payload.secondaryCrumbs || [],
           context: autocompleteContextPayload(),
           loadState,
           dataReady: true,
@@ -1818,6 +2041,16 @@ export function createEventPresetPanel({
       renderAll({preserveScroll: true});
       showToast?.(state.expressionMessage, 'error');
     }
+  }
+
+  async function ensureExpressionPresetAutocompleteData(context = {}) {
+    const contextChanged = applyAutocompleteContext(context);
+    state.activeAxis = 'expressions';
+    if (!expressionsReady() || contextChanged) {
+      await loadExpressions({showLoading: state.expressionStatus === 'idle' || contextChanged});
+      return;
+    }
+    renderAll({preserveScroll: true});
   }
 
   function scheduleBootstrap() {
@@ -2527,6 +2760,30 @@ export function createEventPresetPanel({
     return subcategory?.labelKo || subcategory?.label || subcategory?.id || '';
   }
 
+  function expressionItemTitle(item) {
+    return item?.displayLabelKo
+      || item?.displayLabel
+      || item?.canonicalLabel
+      || item?.label
+      || item?.tag
+      || item?.id
+      || '';
+  }
+
+  function expressionItemTags(item) {
+    if (Array.isArray(item?.tags) && item.tags.length) return item.tags;
+    if (Array.isArray(item?.coreTags) && item.coreTags.length) return item.coreTags;
+    const raw = item?.prompt || item?.tagSummary || item?.canonicalLabel || item?.label || item?.tag || '';
+    return String(raw || '')
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  function expressionItemTagSummary(item) {
+    return expressionItemTags(item).join(', ');
+  }
+
   function expressionPrimaryItems(subcategory) {
     return (subcategory?.items || []).filter(item => item && typeof item === 'object');
   }
@@ -2544,6 +2801,7 @@ export function createEventPresetPanel({
     let total = 0;
     let matched = 0;
     for (const subcategory of subcategories) {
+      if (subcategory?.isVirtual) continue;
       const items = expressionAllItems(subcategory);
       total += items.length;
       matched += items.filter(item => expressionItemMatchesSearch(category, subcategory, item)).length;
@@ -2565,8 +2823,14 @@ export function createEventPresetPanel({
       expressionSubcategoryLabel(subcategory),
       subcategory?.label,
       subcategory?.labelKo,
+      item?.displayLabel,
+      item?.displayLabelKo,
+      item?.canonicalLabel,
+      item?.tagSummary,
       item?.label,
       item?.tag,
+      ...(item?.coreTags || []),
+      ...(item?.decoratorTags || []),
       ...(item?.tags || []),
     ].join(' ').toLowerCase();
     return haystack.includes(query);
@@ -2636,6 +2900,305 @@ export function createEventPresetPanel({
       }
     }
     return null;
+  }
+
+  function expressionNodeCandidates(node) {
+    const values = new Set();
+    [
+      node?.id,
+      node?.tag,
+      node?.label,
+      node?.labelKo,
+      node?.displayLabel,
+      node?.displayLabelKo,
+      node?.canonicalLabel,
+      node?.prompt,
+      node?.tagSummary,
+    ].forEach(value => {
+      if (value != null && value !== '') values.add(String(value));
+    });
+    for (const tag of [
+      ...(node?.tags || []),
+      ...(node?.coreTags || []),
+      ...(node?.decoratorTags || []),
+    ]) {
+      if (tag != null && tag !== '') values.add(String(tag));
+    }
+    return Array.from(values).filter(Boolean);
+  }
+
+  function expressionNodeMatches(node, query) {
+    const needle = normalizePresetMatch(query);
+    if (!needle) return true;
+    return expressionNodeCandidates(node).some(candidate => normalizePresetMatch(candidate).includes(needle));
+  }
+
+  function findExpressionNode(nodes, value) {
+    const needle = normalizePresetMatch(value);
+    if (!needle) return null;
+    return (nodes || []).find(node => expressionNodeCandidates(node).some(candidate => normalizePresetMatch(candidate) === needle)) || null;
+  }
+
+  function expressionCrumb(id, label, stage) {
+    return {id: String(id || ''), label: String(label || id || ''), stage};
+  }
+
+  function expressionItemPath(category, subcategory, item) {
+    return [
+      category?.id || category?.label || '',
+      subcategory?.id || subcategory?.label || '',
+      item?.id || item?.tag || item?.label || '',
+    ].filter(Boolean);
+  }
+
+  function expressionDetailPayload(item, category, subcategory) {
+    const tags = expressionItemTags(item);
+    const title = expressionItemTitle(item);
+    return {
+      type: 'item',
+      title,
+      subtitle: [
+        expressionCategoryLabel(category),
+        expressionSubcategoryLabel(subcategory),
+      ].filter(Boolean).join(' / '),
+      count: Number(item?.count || 0) || 0,
+      tags,
+      prompt: tags.join(', '),
+      source: item?.source || '',
+    };
+  }
+
+  function expressionExampleTagsFromCategories(categories, limit = 12) {
+    const tags = [];
+    const seen = new Set();
+    for (const category of categories || []) {
+      for (const subcategory of category.subcategories || []) {
+        for (const item of expressionAllItems(subcategory)) {
+          for (const tag of expressionItemTags(item)) {
+            const clean = cleanPromptAtom(tag);
+            const key = clean.toLowerCase();
+            if (!clean || seen.has(key)) continue;
+            seen.add(key);
+            tags.push(clean);
+            if (tags.length >= limit) return tags;
+          }
+        }
+      }
+    }
+    return tags;
+  }
+
+  function expressionExampleTagsFromSubcategories(subcategories, limit = 12) {
+    return expressionExampleTagsFromCategories([{subcategories: subcategories || []}], limit);
+  }
+
+  function expressionSummaryDetail(rows, title, subtitle = '', fallbackTags = []) {
+    const tags = [];
+    const seen = new Set();
+    for (const source of [rows || [], (fallbackTags || []).map(tag => ({tags: [tag]}))]) {
+      for (const row of source) {
+        for (const tag of row.tags || []) {
+          const clean = cleanPromptAtom(tag);
+          const key = clean.toLowerCase();
+          if (!clean || seen.has(key)) continue;
+          seen.add(key);
+          tags.push(clean);
+          if (tags.length >= 12) break;
+        }
+        if (tags.length >= 12) break;
+      }
+      if (tags.length >= 12) break;
+    }
+    return {
+      type: 'summary',
+      title,
+      subtitle,
+      count: rows?.length || 0,
+      tags,
+      prompt: tags.join(', '),
+    };
+  }
+
+  function expressionRowsDetail(rows, title, subtitle = '') {
+    const tags = [];
+    const seen = new Set();
+    for (const row of rows || []) {
+      for (const tag of row.tags || []) {
+        const clean = cleanPromptAtom(tag);
+        const key = clean.toLowerCase();
+        if (!clean || seen.has(key)) continue;
+        seen.add(key);
+        tags.push(clean);
+        if (tags.length >= 12) break;
+      }
+      if (tags.length >= 12) break;
+    }
+    return {
+      type: 'summary',
+      title,
+      subtitle,
+      count: rows?.length || 0,
+      tags,
+      prompt: tags.join(', '),
+    };
+  }
+
+  function expressionCategoryRows(categories, query, limit) {
+    return (categories || [])
+      .filter(category => expressionNodeMatches(category, query))
+      .slice(0, limit)
+      .map(category => {
+        const stats = expressionCategoryItemStats(category);
+        return {
+          tag: expressionCategoryLabel(category),
+          value: presetPath('expressions', [category.id || category.label || '']),
+          count: Number(category.count || stats.total || 0),
+          desc: `${formatCount((category.subcategories || []).length || 0)} buckets`,
+          group: 'preset/expressions',
+          cat: 'category',
+          _wc_type: 'preset_path',
+          axis: 'expressions',
+          stage: 'category',
+          final: false,
+          id: String(category.id || ''),
+          labelKo: category.labelKo || '',
+          tags: [],
+          prompt: '',
+        };
+      });
+  }
+
+  function expressionSubcategoryRows(category, query, limit) {
+    return (category?.subcategories || [])
+      .filter(subcategory => expressionNodeMatches(subcategory, query))
+      .slice(0, limit)
+      .map(subcategory => {
+        const total = expressionAllItems(subcategory).length || Number(subcategory.count || 0) || 0;
+        return {
+          tag: expressionSubcategoryLabel(subcategory),
+          value: presetPath('expressions', [category.id || category.label || '', subcategory.id || subcategory.label || '']),
+          count: total,
+          desc: `${formatCount(total)} expressions`,
+          group: 'preset/expressions',
+          cat: 'subcategory',
+          _wc_type: 'preset_path',
+          axis: 'expressions',
+          stage: 'subcategory',
+          final: false,
+          id: String(subcategory.id || ''),
+          labelKo: subcategory.labelKo || '',
+          tags: [],
+          prompt: '',
+        };
+      });
+  }
+
+  function expressionItemRows(category, subcategory, query, limit, activeItem = null) {
+    return expressionAllItems(subcategory)
+      .filter(item => expressionNodeMatches(item, query))
+      .slice(0, limit)
+      .map(item => {
+        const tags = expressionItemTags(item);
+        const prompt = tags.join(', ');
+        return {
+          tag: expressionItemTitle(item),
+          value: presetPath('expressions', expressionItemPath(category, subcategory, item)),
+          count: Number(item.count || 0),
+          desc: prompt || expressionItemTitle(item),
+          group: 'preset/expressions',
+          cat: 'item',
+          _wc_type: 'preset_path',
+          axis: 'expressions',
+          stage: 'item',
+          final: true,
+          id: String(item.id || item.tag || ''),
+          rawLabel: item.label || item.tag || item.id || '',
+          labelKo: item.displayLabelKo || item.labelKo || '',
+          tags,
+          prompt,
+          insertText: prompt,
+          active: !!activeItem && normalizePresetMatch(activeItem.id || activeItem.tag || activeItem.label) === normalizePresetMatch(item.id || item.tag || item.label),
+        };
+      });
+  }
+
+  function expressionGlobalItemRows(categories, query, limit) {
+    const rows = [];
+    for (const category of categories || []) {
+      for (const subcategory of category.subcategories || []) {
+        rows.push(...expressionItemRows(category, subcategory, query, Math.max(limit, 1)));
+      }
+    }
+    return rows
+      .filter(row => expressionNodeMatches({
+        id: row.id,
+        label: row.rawLabel || row.tag,
+        tag: row.tag,
+        tags: row.tags,
+        prompt: row.prompt,
+        displayLabelKo: row.labelKo,
+      }, query))
+      .sort((left, right) => Number(right.count || 0) - Number(left.count || 0) || String(left.tag || '').localeCompare(String(right.tag || '')))
+      .slice(0, limit);
+  }
+
+  async function buildExpressionPresetAutocomplete(token, limit = 12, context = {}, inlineSearch = '') {
+    await ensureExpressionPresetAutocompleteData(context);
+    const parsed = parseExpressionPresetToken(token);
+    const categories = expressionCategories();
+    const segments = parsed.segments || [];
+    const searchQuery = String(inlineSearch || '').trim();
+    if (searchQuery) {
+      const rows = expressionGlobalItemRows(categories, searchQuery, limit);
+      return {
+        stage: 'item',
+        crumbs: [],
+        parsed,
+        rows,
+        detail: expressionRowsDetail(rows, `Search: ${searchQuery}`, `${formatCount(rows.length)} matches`),
+      };
+    }
+
+    const category = findExpressionNode(categories, segments[0] || '');
+    if (segments.length < 1 || !category) {
+      const rows = expressionCategoryRows(categories, segments[0] || '', limit);
+      return {
+        stage: 'category',
+        crumbs: [],
+        parsed,
+        rows,
+        detail: expressionSummaryDetail(rows, 'Expression Preset', `${formatCount(categories.length)} groups`, expressionExampleTagsFromCategories(categories)),
+      };
+    }
+
+    const categoryCrumbs = [expressionCrumb(category.id, expressionCategoryLabel(category), 'category')];
+    const subcategories = category.subcategories || [];
+    const subcategory = findExpressionNode(subcategories, segments[1] || '');
+    if (segments.length < 2 || !subcategory) {
+      const rows = expressionSubcategoryRows(category, segments[1] || '', limit);
+      return {
+        stage: 'subcategory',
+        crumbs: categoryCrumbs,
+        parsed,
+        rows,
+        detail: expressionSummaryDetail(rows, expressionCategoryLabel(category), `${formatCount(subcategories.length)} buckets`, expressionExampleTagsFromSubcategories(subcategories)),
+      };
+    }
+
+    const subcategoryCrumbs = [...categoryCrumbs, expressionCrumb(subcategory.id, expressionSubcategoryLabel(subcategory), 'subcategory')];
+    const items = expressionAllItems(subcategory);
+    const activeItem = findExpressionNode(items, segments[2] || '');
+    const rows = expressionItemRows(category, subcategory, segments[2] || '', limit, activeItem);
+    const detailItem = activeItem || rows[0] && findExpressionNode(items, rows[0].id);
+    return {
+      stage: 'item',
+      crumbs: subcategoryCrumbs,
+      parsed,
+      rows,
+      detail: detailItem
+        ? expressionDetailPayload(detailItem, category, subcategory)
+        : expressionRowsDetail(rows, expressionSubcategoryLabel(subcategory), `${formatCount(items.length)} expressions`),
+    };
   }
 
   function selectedExpressionItems() {
@@ -3134,7 +3697,8 @@ export function createEventPresetPanel({
     const rows = items.length
       ? items.map((item, index) => {
         const active = state.selectedExpressionIds.has(item.id);
-        const tags = item.tags?.length ? item.tags.join(', ') : item.tag || item.label;
+        const title = expressionItemTitle(item);
+        const tags = expressionItemTagSummary(item) || title;
         return `
           <button type="button"
                   class="event-preset-event-row event-preset-expression-row ${active ? 'active' : ''}"
@@ -3142,7 +3706,10 @@ export function createEventPresetPanel({
                   data-ep-id="${escapeHtml(item.id)}"
                   aria-pressed="${active ? 'true' : 'false'}">
             <span class="event-preset-event-index">${index + 1}</span>
-            <span class="event-preset-event-name"${tagInfoAttrs(item.tag || tags)}>${renderPromptTagTokens(tags)}</span>
+            <span class="event-preset-event-name event-preset-expression-name"${tagInfoAttrs(item.tag || tags)}>
+              <span class="event-preset-expression-title">${escapeHtml(title)}</span>
+              <span class="event-preset-expression-tags">${renderPromptTagTokens(tags)}</span>
+            </span>
             <span class="event-preset-event-count">${escapeHtml(item.count ? formatCount(item.count) : '+')}</span>
           </button>`;
       }).join('')
@@ -3182,7 +3749,7 @@ export function createEventPresetPanel({
                   class="event-preset-expression-chip"
                   data-ep-action="expression-remove"
                   data-ep-id="${escapeHtml(item.id)}">
-            <span>${escapeHtml((item.tags || []).join(', ') || item.label)}</span>
+            <span>${escapeHtml(expressionItemTitle(item))}</span>
             <b aria-hidden="true">&times;</b>
           </button>
         `).join('') : '<span class="event-preset-expression-empty">No expression tags selected.</span>'}

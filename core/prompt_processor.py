@@ -209,7 +209,7 @@ class PromptProcessor:
             if not token.lower().startswith("preset:"):
                 expanded.append(tag)
                 continue
-            resolver = self._preset_input_bridge()
+            resolver = self._preset_input_bridge(context, tags=tags)
             result = resolver.resolve_prompt_token(token)
             context.metadata.setdefault("preset_prompt_resolutions", []).append(result)
             if result.get("applied"):
@@ -218,13 +218,34 @@ class PromptProcessor:
                 expanded.append(tag)
         return expanded
 
-    def _preset_input_bridge(self):
+    def _preset_input_bridge(self, context: PromptContext | None = None, tags: list[str] | None = None):
         bridge = getattr(self, "_preset_bridge", None)
-        if bridge is None:
+        app_context = getattr(self, "app_context", None)
+        service_key = None
+        service_kwargs = {}
+        preset_context = None
+        if app_context is not None:
+            from core.preset_input_bridge import preset_context_from_prompt, preset_service_kwargs
+
+            service_kwargs = preset_service_kwargs(app_context)
+            service_key = tuple(id(service_kwargs.get(key)) for key in ("event_service", "clothes_service", "expression_service"))
+            preset_context = preset_context_from_prompt(app_context, context, tags=tags)
+        if bridge is None or (
+            service_key is not None
+            and getattr(self, "_preset_bridge_service_key", service_key) != service_key
+        ):
             from pathlib import Path
             from core.preset_input_bridge import PresetInputBridge
-            bridge = PresetInputBridge(Path.cwd())
+
+            bridge = PresetInputBridge(
+                Path(__file__).resolve().parent.parent,
+                **service_kwargs,
+                context=preset_context,
+            )
             self._preset_bridge = bridge
+            self._preset_bridge_service_key = service_key
+        elif preset_context is not None and hasattr(bridge, "set_context"):
+            bridge.set_context(preset_context)
         return bridge
 
     def _step_final_format(self, context: PromptContext) -> str:

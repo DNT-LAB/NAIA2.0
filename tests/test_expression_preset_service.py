@@ -187,6 +187,50 @@ def test_expression_service_preserves_overflow_items_and_total_counts(tmp_path):
     assert limited_subcategory["moreCount"] == 1
 
 
+def test_expression_service_does_not_count_virtual_featured_bucket_twice(tmp_path):
+    catalog_path = tmp_path / CATALOG_RELATIVE_PATH
+    catalog_path.parent.mkdir(parents=True)
+    catalog_path.write_text(
+        json.dumps({
+            "version": 2,
+            "counts": {"expressionCombos": 2},
+            "categories": [
+                {
+                    "id": "positive_smile",
+                    "label": "Smile / Happy",
+                    "count": 2,
+                    "subcategories": [
+                        {
+                            "id": "positive_smile-featured",
+                            "label": "Featured",
+                            "count": 1,
+                            "isVirtual": True,
+                            "items": [
+                                {"id": "expr-1", "label": "smile", "tags": ["smile"], "featured": True},
+                            ],
+                        },
+                        {
+                            "id": "positive_smile-mouth_smile",
+                            "label": "Mouth / Smile",
+                            "count": 2,
+                            "items": [
+                                {"id": "expr-1", "label": "smile", "tags": ["smile"]},
+                                {"id": "expr-2", "label": "happy", "tags": ["happy"]},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    payload = ExpressionPresetService(tmp_path).bootstrap()
+
+    assert payload["categories"][0]["count"] == 2
+    assert payload["categories"][0]["subcategories"][0]["count"] == 1
+
+
 def test_expression_exporter_filters_general_tags_and_flattens_noise(tmp_path):
     pytest.importorskip("pyarrow")
 
@@ -213,19 +257,20 @@ def test_expression_exporter_filters_general_tags_and_flattens_noise(tmp_path):
     assert catalog["coverage"]["noiseTags"] == 3
     assert catalog["coverage"]["missingTagList"] == []
 
-    cheerful_items = items_for_category(catalog, "cheerful")
+    cheerful_items = items_for_category(catalog, "positive_smile")
     assert [item["label"] for item in cheerful_items] == ["smile, blush"]
+    assert [item["displayLabel"] for item in cheerful_items] == ["Smile"]
     assert cheerful_items[0]["count"] == 2
     assert cheerful_items[0]["tags"] == ["smile", "blush"]
     assert cheerful_items[0]["coreTags"] == ["smile"]
     assert cheerful_items[0]["decoratorTags"] == ["blush"]
-    assert cheerful_items[0]["subcategoryId"] == "expression"
+    assert cheerful_items[0]["subcategoryId"] == "mouth_smile"
 
-    surprised_items = items_for_category(catalog, "surprised")
+    surprised_items = items_for_category(catalog, "stylized_symbol")
     assert [item["label"] for item in surprised_items] == ["?, open mouth"]
     assert surprised_items[0]["coreTags"] == ["?"]
     assert surprised_items[0]["decoratorTags"] == ["open mouth"]
-    assert surprised_items[0]["subcategoryId"] == "emoticon"
+    assert surprised_items[0]["subcategoryId"] == "symbolic"
 
     noise_tags = {row["tag"]: row["reason"] for row in catalog["quality"]["noiseTags"]}
     assert noise_tags == {
@@ -251,7 +296,7 @@ def test_expression_exporter_filters_singleton_combos(tmp_path):
     assert catalog["counts"]["expressionTags"] == 1
     assert catalog["counts"]["lowCountCombosRemoved"] == 1
     assert catalog["counts"]["lowCountComboRowsRemoved"] == 1
-    assert [item["label"] for item in items_for_category(catalog, "cheerful")] == ["smile, blush"]
+    assert [item["label"] for item in items_for_category(catalog, "positive_smile")] == ["smile, blush"]
 
     noise_tags = {row["tag"]: row["reason"] for row in catalog["quality"]["noiseTags"]}
     assert noise_tags["?"] == "singleton-only-combo"

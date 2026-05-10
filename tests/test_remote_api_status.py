@@ -341,10 +341,9 @@ def test_preset_autocomplete_root_returns_axis_tokens(tmp_path, monkeypatch):
     results = bridge._search_preset_paths("preset:")
 
     assert [item["value"] for item in results] == [
-        "preset:events",
+        "preset:events(s|1girl_solo)",
         "preset:clothes",
         "preset:expressions",
-        "preset:custom",
     ]
     assert all(item["_wc_type"] == "preset_path" for item in results)
 
@@ -352,6 +351,8 @@ def test_preset_autocomplete_root_returns_axis_tokens(tmp_path, monkeypatch):
 def test_preset_autocomplete_missing_axis_returns_status_row(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())
+    bridge._event_preset_service = remote_api_server.EventPresetService(tmp_path)
+    bridge._publish_preset_services()
 
     results = bridge._search_preset_paths("preset:events")
 
@@ -401,6 +402,9 @@ def test_preset_autocomplete_payload_passes_event_context(tmp_path, monkeypatch)
     )
 
     assert captured["context"] == {"ratingId": "q", "personId": "2girls"}
+    assert bridge.app_context.preset_input_context == {"ratingId": "q", "personId": "2girls"}
+    assert bridge.app_context.preset_input_context_source == "autocomplete"
+    assert bridge.app_context.preset_input_context_fields == {"ratingId", "personId"}
     assert payload["preset"]["axis"] == "events"
     assert payload["preset"]["context"]["personId"] == "2girls"
     assert payload["results"][0]["tag"] == "Gaze"

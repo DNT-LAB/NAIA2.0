@@ -8,7 +8,9 @@ present the same interaction pattern.
 from __future__ import annotations
 
 import math
+import json
 import random
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote
@@ -19,13 +21,47 @@ PRESET_AXES: tuple[dict[str, str], ...] = (
     {"id": "events", "label": "Events", "desc": "Event Preset taxonomy"},
     {"id": "clothes", "label": "Clothes", "desc": "Clothes Preset combos"},
     {"id": "expressions", "label": "Expressions", "desc": "Expression Preset catalog"},
-    {"id": "custom", "label": "Custom", "desc": "User-defined preset bridge slot"},
+    {"id": "custom", "label": "Custom", "desc": "User-defined preset bridge slot", "hidden": "true"},
 )
 RATING_OPTIONS: tuple[dict[str, str], ...] = (
     {"id": "g", "label": "G", "name": "General"},
     {"id": "s", "label": "S", "name": "Sensitive"},
     {"id": "q", "label": "Q", "name": "Questionable"},
     {"id": "e", "label": "E", "name": "Explicit"},
+)
+VALID_RATING_IDS: frozenset[str] = frozenset(item["id"] for item in RATING_OPTIONS)
+DEFAULT_PRESET_CONTEXT: dict[str, str] = {"ratingId": "s", "personId": "1girl_solo"}
+EVENT_PERSON_IDS: frozenset[str] = frozenset({
+    "1girl_solo",
+    "1girl",
+    "1girl_1boy",
+    "1girl_multiple_boys",
+    "2girls",
+    "multiple_girls",
+    "1boy_solo",
+    "1boy",
+    "1boy_multiple_girls",
+    "2boys",
+    "multiple_boys",
+    "multiple_girls_multiple_boys",
+    "other",
+})
+_RATING_ALIASES = {
+    "general": "g",
+    "safe": "g",
+    "sensitive": "s",
+    "question": "q",
+    "questionable": "q",
+    "explicit": "e",
+}
+_PERSON_ALIASES = {
+    "all": "1girl_solo",
+    "solo": "1girl_solo",
+    "pair": "2girls",
+    "group": "multiple_girls",
+}
+_EVENT_AXIS_CONTEXT_RE = re.compile(
+    r"^(?P<axis>[A-Za-z_]+)\((?P<rating>[gGsSqQeE])\|(?P<person>[^)]+)\)$"
 )
 EVENT_SHORTCUT_NOISE_TAGS: frozenset[str] = frozenset({
     "looking at viewer",
@@ -64,12 +100,232 @@ CLOTHES_SLOT_LABEL_KEYS: frozenset[str] = frozenset({
     "legs feet",
     "style",
 })
+EVENT_SHORTCUT_SCAN_LIMIT = 6
+
+
+def _mapping_get(source: Any, key: str, default: Any = None) -> Any:
+    if isinstance(source, dict):
+        return source.get(key, default)
+    getter = getattr(source, "get", None)
+    if callable(getter):
+        try:
+            return getter(key, default)
+        except TypeError:
+            try:
+                return getter(key)
+            except Exception:
+                return default
+        except Exception:
+            return default
+    return getattr(source, key, default)
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _normalize_rating_id(value: Any, fallback: str = "s") -> str:
+    raw = str(value or "").strip().lower()
+    if raw in VALID_RATING_IDS:
+        return raw
+    if raw in _RATING_ALIASES:
+        return _RATING_ALIASES[raw]
+    if fallback in VALID_RATING_IDS:
+        return fallback
+    return "" if fallback == "" else "s"
+
+
+def _normalize_person_id(value: Any, fallback: str = "1girl_solo") -> str:
+    raw = str(value or "").strip()
+    raw = _PERSON_ALIASES.get(raw.lower(), raw)
+    return raw if raw in EVENT_PERSON_IDS else (fallback if fallback in EVENT_PERSON_IDS else "1girl_solo")
+
+
+def normalize_preset_context(
+    context: dict[str, Any] | None,
+    *,
+    default: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    base = {**DEFAULT_PRESET_CONTEXT, **(default or {})}
+    context = context if isinstance(context, dict) else {}
+    return {
+        "ratingId": _normalize_rating_id(
+            context.get("ratingId") or context.get("rating") or context.get("rating_id"),
+            str(base.get("ratingId") or "s"),
+        ),
+        "personId": _normalize_person_id(
+            context.get("personId") or context.get("person") or context.get("person_id"),
+            str(base.get("personId") or "1girl_solo"),
+        ),
+    }
+
+
+def update_app_preset_context(
+    app_context: Any,
+    context: dict[str, Any] | None,
+    *,
+    source: str = "runtime",
+) -> dict[str, str]:
+    raw = context if isinstance(context, dict) else {}
+    current = getattr(app_context, "preset_input_context", DEFAULT_PRESET_CONTEXT)
+    normalized = normalize_preset_context(raw, default=current)
+    fields = set()
+    if raw.get("ratingId") or raw.get("rating") or raw.get("rating_id"):
+        fields.add("ratingId")
+    if raw.get("personId") or raw.get("person") or raw.get("person_id"):
+        fields.add("personId")
+    try:
+        app_context.preset_input_context = normalized
+        app_context.preset_input_context_source = source or "runtime"
+        app_context.preset_input_context_fields = fields
+    except Exception:
+        pass
+    return normalized
+
+
+def preset_service_kwargs(app_context: Any) -> dict[str, Any]:
+    return {
+        "event_service": getattr(app_context, "event_preset_service", None),
+        "clothes_service": getattr(app_context, "clothes_preset_service", None),
+        "expression_service": getattr(app_context, "expression_preset_service", None),
+    }
+
+
+def preset_context_from_prompt(
+    app_context: Any | None,
+    prompt_context: Any | None = None,
+    *,
+    tags: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, str]:
+    context = dict(DEFAULT_PRESET_CONTEXT)
+    rating_set = False
+    person_set = False
+
+    def apply_candidate(candidate: Any, fields: set[str] | None = None) -> None:
+        nonlocal context, rating_set, person_set
+        raw = _coerce_mapping(candidate)
+        if not raw:
+            return
+        rating_value = raw.get("ratingId") or raw.get("rating") or raw.get("rating_id")
+        if rating_value and (fields is None or "ratingId" in fields):
+            context["ratingId"] = _normalize_rating_id(rating_value, context["ratingId"])
+            rating_set = True
+        person_value = raw.get("personId") or raw.get("person") or raw.get("person_id")
+        if person_value and (fields is None or "personId" in fields):
+            context["personId"] = _normalize_person_id(person_value, context["personId"])
+            person_set = True
+
+    source_row = getattr(prompt_context, "source_row", None)
+    if source_row is not None:
+        apply_candidate(_mapping_get(source_row, "remote_preset_context"))
+        apply_candidate({
+            "ratingId": _mapping_get(source_row, "rating"),
+            "personId": (
+                _mapping_get(source_row, "event_preset_person")
+                or _mapping_get(source_row, "preset_person")
+                or _mapping_get(source_row, "personId")
+            ),
+        })
+
+    if not person_set:
+        inferred = _infer_person_id_from_prompt(prompt_context, tags=tags)
+        if inferred:
+            context["personId"] = inferred
+            person_set = True
+
+    if app_context is not None:
+        app_source = str(getattr(app_context, "preset_input_context_source", "") or "")
+        app_preset_context = getattr(app_context, "preset_input_context", None)
+        if app_source and app_source != "default":
+            fields = getattr(app_context, "preset_input_context_fields", None)
+            apply_candidate(app_preset_context, fields if isinstance(fields, set) else None)
+        remote_active = getattr(app_context, "remote_active_ratings", None)
+        if not rating_set and remote_active:
+            active = [_normalize_rating_id(item, "") for item in remote_active]
+            active = [item for item in active if item in VALID_RATING_IDS]
+            if len(set(active)) == 1:
+                context["ratingId"] = active[0]
+
+    metadata = getattr(prompt_context, "metadata", None)
+    if isinstance(metadata, dict):
+        apply_candidate(metadata.get("presetContext") or metadata.get("preset_context"))
+    settings = getattr(prompt_context, "settings", None)
+    if isinstance(settings, dict):
+        apply_candidate(settings.get("presetContext") or settings.get("preset_context"))
+        apply_candidate({
+            "ratingId": settings.get("preset_rating_id") or settings.get("event_preset_rating_id"),
+            "personId": settings.get("preset_person_id") or settings.get("event_preset_person_id"),
+        })
+
+    return normalize_preset_context(context)
+
+
+def _infer_person_id_from_prompt(
+    prompt_context: Any | None,
+    *,
+    tags: list[str] | tuple[str, ...] | None = None,
+) -> str:
+    raw_parts: list[str] = []
+    if tags:
+        raw_parts.extend(str(item) for item in tags if str(item or "").strip())
+    if prompt_context is not None:
+        for attr in ("prefix_tags", "main_tags", "postfix_tags"):
+            values = getattr(prompt_context, attr, None)
+            if isinstance(values, (list, tuple, set)):
+                raw_parts.extend(str(item) for item in values if str(item or "").strip())
+        source_row = getattr(prompt_context, "source_row", None)
+        general = _mapping_get(source_row, "general") if source_row is not None else None
+        if general:
+            raw_parts.append(str(general))
+
+    tag_keys = set()
+    for part in raw_parts:
+        for chunk in re.split(r"[,\n]", str(part)):
+            key = " ".join(chunk.strip().lower().replace("_", " ").split())
+            if key:
+                tag_keys.add(key)
+
+    if "multiple girls multiple boys" in tag_keys or {"multiple girls", "multiple boys"} <= tag_keys:
+        return "multiple_girls_multiple_boys"
+    if {"1girl", "multiple boys"} <= tag_keys:
+        return "1girl_multiple_boys"
+    if {"1boy", "multiple girls"} <= tag_keys:
+        return "1boy_multiple_girls"
+    if {"1girl", "1boy"} <= tag_keys:
+        return "1girl_1boy"
+    if "2girls" in tag_keys:
+        return "2girls"
+    if "2boys" in tag_keys:
+        return "2boys"
+    if "multiple girls" in tag_keys:
+        return "multiple_girls"
+    if "multiple boys" in tag_keys:
+        return "multiple_boys"
+    if {"1girl", "solo"} <= tag_keys:
+        return "1girl_solo"
+    if {"1boy", "solo"} <= tag_keys:
+        return "1boy_solo"
+    if "1girl" in tag_keys:
+        return "1girl"
+    if "1boy" in tag_keys:
+        return "1boy"
+    return ""
 
 
 class PresetInputBridge:
     """Resolve ``preset:`` path tokens into load/status/suggestion payloads."""
 
-    DEFAULT_CONTEXT = {"ratingId": "s", "personId": "1girl_solo"}
+    DEFAULT_CONTEXT = DEFAULT_PRESET_CONTEXT
 
     def __init__(
         self,
@@ -84,13 +340,43 @@ class PresetInputBridge:
         self._event_service = event_service
         self._clothes_service = clothes_service
         self._expression_service = expression_service
-        self.context = {**self.DEFAULT_CONTEXT, **(context or {})}
+        self.context = normalize_preset_context(context)
+        self._event_bootstrap_cache: dict[tuple[str, str, int], dict[str, Any]] = {}
+        self._event_detail_cache: dict[tuple[str, str, str, str, str], tuple[dict[str, Any] | None, list[dict[str, Any]]]] = {}
+
+    def set_context(self, context: dict[str, Any] | None) -> dict[str, str]:
+        """Update the active Event/Expression context without rebuilding services."""
+        self.context = normalize_preset_context(context, default=self.context)
+        return dict(self.context)
+
+    def _context_for_parsed_token(self, parsed: dict[str, Any]) -> dict[str, str] | None:
+        token_context = parsed.get("presetContext")
+        if not isinstance(token_context, dict):
+            return None
+        return normalize_preset_context(token_context, default=self.context)
+
+    def _restore_context(self, context: dict[str, str] | None) -> None:
+        if context is not None:
+            self.context = context
 
     def suggest(self, token: str, limit: int = 24, caret_offset: int | None = None) -> dict[str, Any]:
         """Return the next completion layer for a partially typed ``preset:`` token."""
         parsed = self.parse_token(token)
         if not parsed["active"]:
             return {"ok": True, "active": False, "suggestions": []}
+
+        previous_context = None
+        parsed_context = self._context_for_parsed_token(parsed)
+        if parsed_context is not None:
+            previous_context = dict(self.context)
+            self.context = parsed_context
+        try:
+            return self._suggest_parsed(parsed, limit, caret_offset)
+        finally:
+            self._restore_context(previous_context)
+
+    def _suggest_parsed(self, parsed: dict[str, Any], limit: int, caret_offset: int | None) -> dict[str, Any]:
+        """Resolve suggestions for an already parsed token."""
 
         axis = parsed["axis"]
         if not axis:
@@ -128,8 +414,27 @@ class PresetInputBridge:
         parsed = self.parse_token(token)
         if not parsed["active"]:
             return {"ok": True, "applied": False, "reason": "inactive", "token": token}
+        previous_context = None
+        parsed_context = self._context_for_parsed_token(parsed)
+        if parsed_context is not None:
+            previous_context = dict(self.context)
+            self.context = parsed_context
+        try:
+            return self._resolve_prompt_token_parsed(parsed, token, chooser)
+        finally:
+            self._restore_context(previous_context)
+
+    def _resolve_prompt_token_parsed(
+        self,
+        parsed: dict[str, Any],
+        token: str,
+        chooser: Any | None = None,
+    ) -> dict[str, Any]:
+        """Resolve an already parsed preset token under the active context."""
         if parsed.get("axis") == "clothes":
             return self._resolve_clothes_prompt_token(parsed)
+        if parsed.get("axis") == "expressions":
+            return self._resolve_expression_prompt_token(parsed)
         if parsed.get("axis") != "events":
             return {"ok": True, "applied": False, "reason": "unsupported_axis", "token": token}
 
@@ -152,7 +457,7 @@ class PresetInputBridge:
         event = selected["event"]
         _, combos = self._event_detail_for_selection(service, selected, event)
         if selected.get("stage") in {"category", "subcategory"}:
-            alternate = self._resolve_observed_event_selection(service, selected, chooser)
+            alternate = self._resolve_observed_event_selection(service, selected, chooser, initial_combos=combos)
             if alternate:
                 selected = alternate["selected"]
                 event = selected["event"]
@@ -227,8 +532,10 @@ class PresetInputBridge:
                 "resolveMode": "browse",
             }
 
-        active_index = self._clothes_active_segment_index(parsed.get("raw", ""), tail, caret_offset)
         raw_segments = tail.split("&")
+        active_index = self._clothes_active_segment_index(parsed.get("raw", ""), tail, caret_offset)
+        if tail.endswith("&") and len(raw_segments) == 2 and raw_segments[-1] == "":
+            active_index = 1
         segments = []
         staged_tags = []
         resolve_tags = []
@@ -284,7 +591,17 @@ class PresetInputBridge:
 
         body = raw[len(PRESET_PREFIX):]
         parts = body.split("/") if body else [""]
-        axis_query = parts[0].strip().lower()
+        axis_head = parts[0].strip()
+        axis_context: dict[str, str] = {}
+        match = _EVENT_AXIS_CONTEXT_RE.match(axis_head)
+        if match:
+            axis_query = match.group("axis").strip().lower()
+            axis_context = normalize_preset_context({
+                "ratingId": match.group("rating"),
+                "personId": match.group("person"),
+            }, default=self.context)
+        else:
+            axis_query = axis_head.lower()
         axis = self._axis_id(axis_query)
         return {
             "active": True,
@@ -292,6 +609,7 @@ class PresetInputBridge:
             "body": body,
             "axis": axis,
             "axisQuery": axis_query,
+            "presetContext": axis_context,
             "segments": [unquote(part.strip()) for part in parts[1:]],
             "trailingSlash": body.endswith("/"),
         }
@@ -300,13 +618,15 @@ class PresetInputBridge:
         query = parsed.get("axisQuery") or ""
         items = []
         for axis in PRESET_AXES:
+            if axis.get("hidden"):
+                continue
             axis_id = axis["id"]
             label = axis["label"]
             if query and query not in axis_id and query not in label.lower():
                 continue
             items.append({
                 "tag": label,
-                "value": f"{PRESET_PREFIX}{axis_id}",
+                "value": self._axis_token(axis_id),
                 "count": 0,
                 "desc": axis["desc"],
                 "group": "preset",
@@ -324,12 +644,12 @@ class PresetInputBridge:
 
     def _event_payload(self, parsed: dict[str, Any], limit: int, status: dict[str, Any]) -> dict[str, Any]:
         service = self._event_service or self._make_event_service()
-        data = service.bootstrap(
-            rating_id=self.context["ratingId"],
-            person_id=self.context["personId"],
-            limit=8000,
-        )
+        data = self._event_bootstrap_data(service, limit=8000)
         event_context = self._event_context_payload(data)
+        self.context = normalize_preset_context(
+            (event_context.get("presetContext") or {}) if isinstance(event_context, dict) else {},
+            default=self.context,
+        )
         categories = [item for item in data.get("categories") or [] if isinstance(item, dict)]
         segments = parsed["segments"]
 
@@ -591,12 +911,15 @@ class PresetInputBridge:
     def _clothes_item_rows(self, items: list[dict[str, Any]], clothes: dict[str, Any], category_id: str, subcategory_id: str, limit: int) -> list[dict[str, Any]]:
         active_path = clothes.get("activePath") or []
         query = active_path[2] if len(active_path) > 2 else (clothes.get("activeQuery") if not active_path else "")
+        staged_keys = self._clothes_committed_tag_keys(clothes)
         suggestions = []
         for item in items:
             if not self._matches_node(item, str(query or "")):
                 continue
             tag = str(item.get("tag") or item.get("label") or item.get("id") or "").strip()
             if not tag:
+                continue
+            if self._normalize_match(tag) in staged_keys:
                 continue
             category = category_id or str(item.get("slot") or "")
             subcategory = subcategory_id or str(item.get("group") or "")
@@ -621,6 +944,30 @@ class PresetInputBridge:
                 "prompt": tag,
             })
         return suggestions[:limit]
+
+    @staticmethod
+    def _clothes_committed_tag_keys(clothes: dict[str, Any]) -> set[str]:
+        active_index = clothes.get("activeIndex")
+        keys = set()
+        for segment in clothes.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            if isinstance(active_index, int) and segment.get("index") == active_index:
+                continue
+            tag = str(segment.get("tag") or "").strip()
+            if tag:
+                key = PresetInputBridge._normalize_match(tag)
+                if key:
+                    keys.add(key)
+        if keys:
+            return keys
+        return {
+            key for key in (
+                PresetInputBridge._normalize_match(tag)
+                for tag in clothes.get("stagedTags") or []
+            )
+            if key
+        }
 
     def _resolve_clothes_prompt_token(self, parsed: dict[str, Any]) -> dict[str, Any]:
         token = str(parsed.get("raw") or "")
@@ -831,6 +1178,100 @@ class PresetInputBridge:
             final=True,
         )
 
+    def _resolve_expression_prompt_token(self, parsed: dict[str, Any]) -> dict[str, Any]:
+        status = self._axis_status("expressions")
+        if not self._status_ready(status):
+            return {
+                "ok": True,
+                "applied": False,
+                "reason": "not_ready",
+                "token": parsed.get("raw") or "",
+                "loadState": self._load_state(status),
+            }
+
+        service = self._expression_service or self._make_expression_service()
+        data = service.bootstrap({
+            "ratingId": self.context["ratingId"],
+            "personId": self.context["personId"],
+            "limit": 50000,
+        })
+        categories = [item for item in data.get("categories") or [] if isinstance(item, dict)]
+        selection = self._resolve_expression_selection(parsed, categories)
+        item = selection.get("item")
+        if not isinstance(item, dict):
+            return {
+                "ok": True,
+                "applied": False,
+                "reason": selection.get("reason") or "not_found",
+                "token": parsed.get("raw") or "",
+                "axis": "expressions",
+            }
+
+        tags = self._expression_item_tags(item)
+        prompt = self._join_tags(tags)
+        return {
+            "ok": True,
+            "applied": bool(prompt),
+            "reason": "",
+            "token": parsed.get("raw") or "",
+            "axis": "expressions",
+            "stage": selection.get("stage") or "item",
+            "tags": tags,
+            "prompt": prompt,
+            "selected": {
+                "categoryId": (selection.get("category") or {}).get("id") or "",
+                "subcategoryId": (selection.get("subcategory") or {}).get("id") or "",
+                "itemId": item.get("id") or item.get("tag") or "",
+                "label": item.get("displayLabel") or item.get("label") or item.get("tag") or "",
+                "tagSummary": item.get("tagSummary") or item.get("canonicalLabel") or item.get("label") or "",
+                "source": item.get("source") or "expression_catalog",
+            },
+        }
+
+    def _resolve_expression_selection(
+        self,
+        parsed: dict[str, Any],
+        categories: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        segments = self._non_empty_segments(parsed)
+        category = self._match_node(categories, segments[0] if len(segments) >= 1 else "")
+        if not category:
+            category = self._first_expression_category(categories)
+            if not category:
+                return {"reason": "empty_catalog"}
+            stage = "axis"
+        else:
+            stage = "category"
+
+        subcategories = [item for item in category.get("subcategories") or [] if isinstance(item, dict)]
+        if len(segments) >= 2:
+            subcategory = self._match_node(subcategories, segments[1])
+            if not subcategory:
+                return {"reason": "subcategory_not_found"}
+            stage = "subcategory"
+        else:
+            subcategory = self._first_expression_subcategory(subcategories)
+            if not subcategory:
+                return {"reason": "empty_category"}
+
+        items = self._expression_items(subcategory)
+        if len(segments) >= 3:
+            item = self._match_node(items, segments[2])
+            if not item:
+                return {"reason": "item_not_found"}
+            stage = "item"
+        else:
+            item = self._first_expression_item(items)
+            if not item:
+                return {"reason": "empty_subcategory"}
+
+        return {
+            "stage": stage,
+            "category": category,
+            "subcategory": subcategory,
+            "item": item,
+        }
+
     def _suggest_nodes(
         self,
         parsed: dict[str, Any],
@@ -849,7 +1290,9 @@ class PresetInputBridge:
                 continue
             node_id = str(node.get("id") or node.get("tag") or node.get("label") or "")
             path = self._path(axis, [*(parent_segments or []), node_id])
-            label = self._display_label(node)
+            prefer_ko_label = axis == "expressions" and stage in {"category", "subcategory"}
+            label = self._display_label(node, prefer_ko=prefer_ko_label)
+            prompt = self._prompt_from_node(node)
             suggestions.append({
                 "tag": label,
                 "value": path,
@@ -863,8 +1306,10 @@ class PresetInputBridge:
                 "final": final,
                 "id": node_id,
                 "rawLabel": node.get("label") or node.get("tag") or node_id,
+                "labelKo": node.get("labelKo") or node.get("displayLabelKo") or "",
                 "tags": node.get("tags") or node.get("promptAtoms") or [],
-                "prompt": self._prompt_from_node(node),
+                "prompt": prompt,
+                "insertText": prompt if axis == "expressions" and final else "",
             })
         return {
             **self._base_payload(parsed, stage),
@@ -883,13 +1328,70 @@ class PresetInputBridge:
             return (self._expression_service or self._make_expression_service()).status()
         return {"dataAvailability": {"main": "ready", "message": ""}}
 
+    def _event_bootstrap_data(self, service: Any, *, limit: int = 8000) -> dict[str, Any]:
+        key = (self.context["ratingId"], self.context["personId"], int(limit))
+        if key not in self._event_bootstrap_cache:
+            self._event_bootstrap_cache[key] = service.bootstrap(
+                rating_id=self.context["ratingId"],
+                person_id=self.context["personId"],
+                limit=limit,
+            )
+        return self._event_bootstrap_cache[key]
+
+    @staticmethod
+    def _first_expression_category(categories: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for category in categories:
+            if PresetInputBridge._first_expression_subcategory(
+                [item for item in category.get("subcategories") or [] if isinstance(item, dict)]
+            ):
+                return category
+        return None
+
+    @staticmethod
+    def _first_expression_subcategory(subcategories: list[dict[str, Any]]) -> dict[str, Any] | None:
+        featured = [
+            subcategory for subcategory in subcategories
+            if str(subcategory.get("id") or "").endswith("-featured")
+            or str(subcategory.get("id") or "") == "featured"
+            or str(subcategory.get("label") or "").lower() == "featured"
+        ]
+        for subcategory in [*featured, *subcategories]:
+            if PresetInputBridge._expression_items(subcategory):
+                return subcategory
+        return None
+
+    @staticmethod
+    def _first_expression_item(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not items:
+            return None
+        return sorted(
+            items,
+            key=lambda item: (
+                0 if item.get("featured") else 1,
+                len(item.get("coreTags") or item.get("tags") or []),
+                -PresetInputBridge._count(item),
+                str(item.get("canonicalLabel") or item.get("label") or item.get("id") or ""),
+            ),
+        )[0]
+
+    @staticmethod
+    def _expression_items(subcategory: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in [*(subcategory.get("items") or []), *(subcategory.get("moreItems") or [])]
+            if isinstance(item, dict)
+        ]
+
+    @staticmethod
+    def _expression_item_tags(item: dict[str, Any]) -> list[str]:
+        tags = item.get("tags")
+        if isinstance(tags, (list, tuple, set)):
+            return [str(tag).strip() for tag in tags if str(tag or "").strip()]
+        return PresetInputBridge._split_prompt(item.get("prompt") or item.get("label") or item.get("tag") or "")
+
     def _resolve_event_selection(self, parsed: dict[str, Any], chooser: Any) -> dict[str, Any]:
         service = self._event_service or self._make_event_service()
-        data = service.bootstrap(
-            rating_id=self.context["ratingId"],
-            person_id=self.context["personId"],
-            limit=8000,
-        )
+        data = self._event_bootstrap_data(service, limit=8000)
         categories = [item for item in data.get("categories") or [] if isinstance(item, dict)]
         segments = self._non_empty_segments(parsed)
         category = self._match_node(categories, segments[0] if len(segments) >= 1 else "")
@@ -953,6 +1455,8 @@ class PresetInputBridge:
         service: Any,
         selected: dict[str, Any],
         chooser: Any,
+        *,
+        initial_combos: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         candidates = []
         category = selected.get("category") if isinstance(selected.get("category"), dict) else None
@@ -966,30 +1470,62 @@ class PresetInputBridge:
         elif selected.get("stage") == "subcategory" and subcategory:
             subcategories = [subcategory]
 
+        def add_candidate(candidate: dict[str, Any], event: dict[str, Any], combos: list[dict[str, Any]]) -> bool:
+            if not combos:
+                return False
+            ranked_combos = self._rank_event_combos(event, combos)
+            if not ranked_combos:
+                return False
+            candidates.append({
+                "selected": candidate,
+                "combos": ranked_combos,
+                "_shortcutScore": float(ranked_combos[0].get("_shortcutScore", 0.0) or 0.0),
+                "_shortcutEligible": bool(ranked_combos[0].get("_shortcutEligible")),
+            })
+            return bool(ranked_combos[0].get("_shortcutEligible"))
+
+        selected_event = selected.get("event") if isinstance(selected.get("event"), dict) else None
+        selected_event_id = str(
+            selected.get("eventId")
+            or (selected_event.get("id") if selected_event else "")
+            or (selected_event.get("tag") if selected_event else "")
+        )
+        if selected_event:
+            if add_candidate(selected, selected_event, initial_combos or []):
+                return candidates[-1]
+
+        scan_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for candidate_subcategory in subcategories:
             events = [
                 item for item in candidate_subcategory.get("events") or []
                 if isinstance(item, dict)
             ]
             for event in events:
-                candidate = {
-                    **selected,
-                    "subcategory": candidate_subcategory,
-                    "event": event,
-                    "subcategoryId": candidate_subcategory.get("id") or "",
-                    "eventId": event.get("id") or event.get("tag") or "",
-                }
-                _, combos = self._event_detail_for_selection(service, candidate, event)
-                if combos:
-                    ranked_combos = self._rank_event_combos(event, combos)
-                    if not ranked_combos:
-                        continue
-                    candidates.append({
-                        "selected": candidate,
-                        "combos": ranked_combos,
-                        "_shortcutScore": float(ranked_combos[0].get("_shortcutScore", 0.0) or 0.0),
-                        "_shortcutEligible": bool(ranked_combos[0].get("_shortcutEligible")),
-                    })
+                event_id = str(event.get("id") or event.get("tag") or "")
+                if event_id and event_id == selected_event_id:
+                    continue
+                scan_rows.append((candidate_subcategory, event))
+        scan_rows.sort(
+            key=lambda row: (
+                -self._count(row[1]),
+                str(row[1].get("id") or row[1].get("tag") or ""),
+            )
+        )
+
+        for candidate_subcategory, event in scan_rows[:EVENT_SHORTCUT_SCAN_LIMIT]:
+            event_id = event.get("id") or event.get("tag") or ""
+            if not event_id:
+                continue
+            candidate = {
+                **selected,
+                "subcategory": candidate_subcategory,
+                "event": event,
+                "subcategoryId": candidate_subcategory.get("id") or "",
+                "eventId": event_id,
+            }
+            _, combos = self._event_detail_for_selection(service, candidate, event)
+            if add_candidate(candidate, event, combos):
+                break
         ranked_candidates = sorted(
             candidates,
             key=lambda item: (
@@ -1168,16 +1704,32 @@ class PresetInputBridge:
         selected: dict[str, Any],
         event: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-        event_payload = service.select({
+        event_id = str(event.get("id") or event.get("tag") or selected.get("eventId") or "")
+        cache_key = (
+            self.context["ratingId"],
+            self.context["personId"],
+            str(selected.get("categoryId") or ""),
+            str(selected.get("subcategoryId") or ""),
+            event_id,
+        )
+        if cache_key in self._event_detail_cache:
+            return self._event_detail_cache[cache_key]
+        payload = {
             "ratingId": self.context["ratingId"],
             "personId": self.context["personId"],
             "categoryId": selected.get("categoryId") or "",
             "subcategoryId": selected.get("subcategoryId") or "",
-            "eventId": event.get("id") or event.get("tag"),
-        })
+            "eventId": event_id,
+        }
+        if hasattr(service, "observed_combos"):
+            event_payload = service.observed_combos(payload)
+        else:
+            event_payload = service.select(payload)
         event_detail = event_payload.get("event") if isinstance(event_payload, dict) else None
         combos = event_detail.get("observedCombos") if isinstance(event_detail, dict) else []
-        return event_detail, [item for item in combos or [] if isinstance(item, dict)]
+        result = (event_detail, [item for item in combos or [] if isinstance(item, dict)])
+        self._event_detail_cache[cache_key] = result
+        return result
 
     @staticmethod
     def _choose_non_empty(nodes: list[dict[str, Any]], child_key: str, chooser: Any) -> dict[str, Any] | None:
@@ -1289,10 +1841,11 @@ class PresetInputBridge:
             segments.append("")
         return f"{PRESET_PREFIX}clothes/" + "&".join(PresetInputBridge._clothes_segment(segment) for segment in segments)
 
-    @staticmethod
-    def _selected_event_payload(selected: dict[str, Any]) -> dict[str, str]:
+    def _selected_event_payload(self, selected: dict[str, Any]) -> dict[str, str]:
         return {
             "axis": "events",
+            "ratingId": str(selected.get("ratingId") or self.context["ratingId"] or "s"),
+            "personId": str(selected.get("personId") or self.context["personId"] or "1girl_solo"),
             "categoryId": str(selected.get("categoryId") or ""),
             "subcategoryId": str(selected.get("subcategoryId") or ""),
             "eventId": str(selected.get("eventId") or ""),
@@ -1481,13 +2034,17 @@ class PresetInputBridge:
     @staticmethod
     def _node_match_candidates(node: dict[str, Any]) -> list[str]:
         values: list[str] = []
-        for key in ("id", "tag", "label"):
+        for key in ("id", "tag", "label", "labelKo", "displayLabel", "displayLabelKo", "canonicalLabel", "tagSummary"):
             raw = str(node.get(key) or "")
             if not raw:
                 continue
             values.append(raw)
             if "::" in raw:
                 values.append(raw.split("::")[-1])
+        for key in ("tags", "coreTags", "decoratorTags", "promptAtoms"):
+            raw_values = node.get(key)
+            if isinstance(raw_values, (list, tuple, set)):
+                values.extend(str(item) for item in raw_values if str(item or "").strip())
         return values
 
     @staticmethod
@@ -1513,11 +2070,23 @@ class PresetInputBridge:
             return f"{len(node.get('subcategories') or [])} subcategories"
         if stage == "subcategory":
             return f"{len(node.get('events') or node.get('items') or [])} items"
-        return str(node.get("prompt") or node.get("canonicalLabel") or "")
+        prompt = PresetInputBridge._prompt_from_node(node)
+        return str(prompt or node.get("canonicalLabel") or node.get("tagSummary") or "")
 
     @staticmethod
-    def _display_label(node: dict[str, Any]) -> str:
-        raw = str(node.get("label") or node.get("tag") or node.get("id") or "").strip()
+    def _display_label(node: dict[str, Any], *, prefer_ko: bool = False) -> str:
+        if prefer_ko:
+            raw = str(
+                node.get("displayLabelKo")
+                or node.get("labelKo")
+                or node.get("displayLabel")
+                or node.get("label")
+                or node.get("tag")
+                or node.get("id")
+                or ""
+            ).strip()
+        else:
+            raw = str(node.get("displayLabel") or node.get("label") or node.get("tag") or node.get("id") or "").strip()
         if "::" in raw:
             raw = raw.split("::")[-1]
         raw = raw.replace("_", " ").strip()
@@ -1568,14 +2137,20 @@ class PresetInputBridge:
             text = text.split("::")[-1]
         return "_".join(text.split())
 
-    @staticmethod
-    def _path(axis: str, segments: list[Any]) -> str:
+    def _axis_token(self, axis: str) -> str:
+        if axis == "events":
+            rating = self.context["ratingId"] or "s"
+            person = self.context["personId"] or "1girl_solo"
+            return f"{PRESET_PREFIX}events({rating}|{person})"
+        return f"{PRESET_PREFIX}{axis}"
+
+    def _path(self, axis: str, segments: list[Any]) -> str:
         clean_segments = [
             quote(PresetInputBridge._path_segment(segment), safe="")
             for segment in segments
             if PresetInputBridge._path_segment(segment)
         ]
-        return f"{PRESET_PREFIX}{axis}" + ("/" + "/".join(clean_segments) if clean_segments else "")
+        return self._axis_token(axis) + ("/" + "/".join(clean_segments) if clean_segments else "")
 
 
 def search_preset_paths(

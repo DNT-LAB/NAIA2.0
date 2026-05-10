@@ -1409,15 +1409,37 @@ class GenerationController:
             return tags
         expanded: list[str] = []
         bridge = getattr(self, "_preset_input_bridge", None)
-        if bridge is None:
+        service_key = None
+        service_kwargs = {}
+        preset_context = None
+        try:
+            from core.preset_input_bridge import preset_context_from_prompt, preset_service_kwargs
+
+            service_kwargs = preset_service_kwargs(self.context)
+            service_key = tuple(id(service_kwargs.get(key)) for key in ("event_service", "clothes_service", "expression_service"))
+            preset_context = preset_context_from_prompt(self.context, prompt_context, tags=tags)
+        except Exception as exc:
+            print(f"⚠️ Preset context 계산 실패: {exc}")
+
+        if bridge is None or (
+            service_key is not None
+            and getattr(self, "_preset_bridge_service_key", service_key) != service_key
+        ):
             try:
                 from core.preset_input_bridge import PresetInputBridge
 
-                bridge = PresetInputBridge(Path(__file__).resolve().parent.parent)
+                bridge = PresetInputBridge(
+                    Path(__file__).resolve().parent.parent,
+                    **service_kwargs,
+                    context=preset_context,
+                )
                 self._preset_input_bridge = bridge
+                self._preset_bridge_service_key = service_key
             except Exception as exc:
                 print(f"⚠️ Preset token bridge 초기화 실패: {exc}")
                 return tags
+        elif preset_context is not None and hasattr(bridge, "set_context"):
+            bridge.set_context(preset_context)
 
         for tag in tags:
             token = str(tag or "").strip()

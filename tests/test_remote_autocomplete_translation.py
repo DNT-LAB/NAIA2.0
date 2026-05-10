@@ -691,6 +691,105 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
     assert "full-length zipper" in [row["tag"] for row in merged]
 
 
+def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phrase(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "witch trial",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "마녀 재판": [],
+        "witch trial": [],
+        "witch": [
+            {"tag": "witch hat", "count": 100, "desc": "", "group": "", "cat": ""},
+        ],
+        "trial": [
+            {"tag": "trial of the sword", "count": 80, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "마녀 재판",
+        8,
+    )
+
+    assert translated == "witch trial"
+    assert merged[0]["tag"] == "witch trial"
+    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert [row["tag"] for row in merged[1:3]] == ["witch hat", "trial of the sword"]
+
+
+def test_autocomplete_translation_prepends_simple_recommended_for_single_word_noun_translation(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "inquisition",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "이단 심문": [],
+        "inquisition": [
+            {
+                "tag": "dragon age: inquisition",
+                "count": 13,
+                "desc": "",
+                "group": "copyright",
+                "cat": "",
+            },
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "이단 심문",
+        8,
+    )
+
+    assert translated == "inquisition"
+    assert merged[0]["tag"] == "inquisition"
+    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert merged[1]["tag"] == "dragon age: inquisition"
+
+
+def test_autocomplete_translation_simple_recommended_removes_pronouns_but_keeps_actor_nouns(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "he is a boy witch trial",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "소년 마녀 재판": [],
+        "he is a boy witch trial": [],
+        "boy witch trial": [],
+        "boy": [
+            {"tag": "boy", "count": 100, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "소년 마녀 재판",
+        8,
+    )
+
+    assert translated == "he is a boy witch trial"
+    assert merged[0]["tag"] == "boy witch trial"
+    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert "he is a boy witch trial" not in [row["tag"] for row in merged]
+
+
 def test_autocomplete_translation_does_not_build_metadata_index_on_live_path(monkeypatch):
     monkeypatch.setattr(
         remote_api_server,

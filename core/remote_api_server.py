@@ -39,7 +39,7 @@ from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
 from core.event_preset_service import EventPresetService
 from core.expression_preset_service import ExpressionPresetService
-from core.preset_input_bridge import PresetInputBridge
+from core.preset_input_bridge import PresetInputBridge, update_app_preset_context
 from core.preset_composer_service import PresetComposerService
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
@@ -441,6 +441,7 @@ class RemoteBridge(QObject):
             self._event_preset_service,
             axis_providers={"clothes": self._clothes_preset_service},
         )
+        self._publish_preset_services()
         self._event_preset_download_lock = threading.RLock()
         self._event_preset_download_thread: Optional[threading.Thread] = None
         self._event_preset_download_cancel = threading.Event()
@@ -471,6 +472,24 @@ class RemoteBridge(QObject):
         self._clipboard_png_requests_lock = threading.Lock()
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
+
+    def _publish_preset_services(self) -> None:
+        """Expose already-loaded preset services to prompt-time shortcut expansion."""
+        try:
+            self.app_context.event_preset_service = self._event_preset_service
+            self.app_context.clothes_preset_service = self._clothes_preset_service
+            self.app_context.expression_preset_service = self._expression_preset_service
+            self.app_context.preset_services_revision = int(getattr(self.app_context, "preset_services_revision", 0) or 0) + 1
+            self._preset_autocomplete_bridge = None
+            if not hasattr(self.app_context, "preset_input_context"):
+                self.app_context.preset_input_context = {"ratingId": "s", "personId": "1girl_solo"}
+                self.app_context.preset_input_context_source = "default"
+                self.app_context.preset_input_context_fields = set()
+        except Exception:
+            pass
+
+    def _set_preset_input_context(self, context: dict | None, source: str) -> dict[str, str]:
+        return update_app_preset_context(self.app_context, context if isinstance(context, dict) else {}, source=source)
 
     def _search_filter_state_path(self) -> Path:
         return Path("save") / "remote_web_filter_state.json"
@@ -2320,6 +2339,7 @@ class RemoteBridge(QObject):
                 self._event_preset_service,
                 axis_providers={"clothes": self._clothes_preset_service},
             )
+            self._publish_preset_services()
             self._set_event_preset_download_state(
                 active=False,
                 phase="complete",
@@ -3475,6 +3495,10 @@ class RemoteBridge(QObject):
         event_id: str = "",
         limit: int | None = None,
     ) -> dict:
+        self._set_preset_input_context(
+            {"ratingId": rating_id, "personId": person_id},
+            "event_bootstrap",
+        )
         payload = self._event_preset_service.bootstrap(
             rating_id,
             person_id,
@@ -3488,17 +3512,23 @@ class RemoteBridge(QObject):
         return payload
 
     def _event_preset_select(self, payload: dict) -> dict:
-        return self._event_preset_service.select(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "event_select")
+        return self._event_preset_service.select(payload)
 
     def _event_preset_prompt_preview(self, payload: dict) -> dict:
-        return self._event_preset_service.prompt_preview(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "event_preview")
+        return self._event_preset_service.prompt_preview(payload)
 
     def _event_preset_generate(self, payload: dict) -> dict:
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "event_generate")
         mw = self.app_context.main_window
         gc = getattr(mw, "generation_controller", None) if mw else None
         if gc is not None and getattr(gc, "is_generating", False):
             raise RuntimeError("이미 생성 중입니다.")
-        result = self._event_preset_service.generation_source(payload if isinstance(payload, dict) else {})
+        result = self._event_preset_service.generation_source(payload)
         source_row_data = result.get("sourceRow") or {}
         if not isinstance(source_row_data, dict) or not source_row_data.get("general"):
             raise ValueError("Event Preset prompt source is empty.")
@@ -3528,14 +3558,20 @@ class RemoteBridge(QObject):
         }
 
     def _preset_prompt_preview(self, payload: dict) -> dict:
-        return self._preset_composer_service.prompt_preview(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
+        self._set_preset_input_context(context, "preset_preview")
+        return self._preset_composer_service.prompt_preview(payload)
 
     def _preset_generate(self, payload: dict) -> dict:
+        payload = payload if isinstance(payload, dict) else {}
+        context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
+        self._set_preset_input_context(context, "preset_generate")
         mw = self.app_context.main_window
         gc = getattr(mw, "generation_controller", None) if mw else None
         if gc is not None and getattr(gc, "is_generating", False):
             raise RuntimeError("이미 생성 중입니다.")
-        result = self._preset_composer_service.generation_source(payload if isinstance(payload, dict) else {})
+        result = self._preset_composer_service.generation_source(payload)
         source_row_data = result.get("sourceRow") or {}
         if not isinstance(source_row_data, dict) or not source_row_data.get("general"):
             raise ValueError("Preset prompt source is empty.")
@@ -3565,22 +3601,32 @@ class RemoteBridge(QObject):
         return self._clothes_preset_service.status()
 
     def _clothes_preset_bootstrap(self, payload: dict) -> dict:
-        return self._clothes_preset_service.bootstrap(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "clothes_bootstrap")
+        return self._clothes_preset_service.bootstrap(payload)
 
     def _clothes_preset_select(self, payload: dict) -> dict:
-        return self._clothes_preset_service.select(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "clothes_select")
+        return self._clothes_preset_service.select(payload)
 
     def _clothes_preset_lucky(self, payload: dict) -> dict:
-        return self._clothes_preset_service.lucky(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "clothes_lucky")
+        return self._clothes_preset_service.lucky(payload)
 
     def _clothes_preset_prompt_fragment(self, payload: dict) -> dict:
-        return self._clothes_preset_service.prompt_fragment(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "clothes_fragment")
+        return self._clothes_preset_service.prompt_fragment(payload)
 
     def _expression_preset_status(self) -> dict:
         return self._expression_preset_service.status()
 
     def _expression_preset_bootstrap(self, payload: dict) -> dict:
-        return self._expression_preset_service.bootstrap(payload if isinstance(payload, dict) else {})
+        payload = payload if isinstance(payload, dict) else {}
+        self._set_preset_input_context(payload, "expression_bootstrap")
+        return self._expression_preset_service.bootstrap(payload)
 
     def _event_preset_thumbnail_payload(
         self,
@@ -10949,6 +10995,66 @@ class RemoteBridge(QObject):
         return queries
 
     @staticmethod
+    def _fallback_translation_tokens(translated: str) -> list[str]:
+        normalized = normalize_search_query(translated)
+        normalized = normalized.replace("’", "'").replace("`", "'")
+        return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", normalized)
+
+    @staticmethod
+    def _fallback_possessive_base(token: str) -> str:
+        return token[:-2] if token.endswith("'s") else token
+
+    @staticmethod
+    def _fallback_token_is_pronoun_or_possessive(token: str) -> bool:
+        base = RemoteBridge._fallback_possessive_base(token)
+        return (
+            token in _AUTOCOMPLETE_TRANSLATION_PRONOUNS
+            or token in _AUTOCOMPLETE_TRANSLATION_POSSESSIVES
+            or base in _AUTOCOMPLETE_TRANSLATION_PRONOUNS
+            or base in _AUTOCOMPLETE_TRANSLATION_POSSESSIVES
+        )
+
+    @staticmethod
+    def _simple_fallback_recommended_query(translated: str) -> str:
+        tokens = RemoteBridge._fallback_translation_tokens(translated)
+        has_pronoun_or_possessive = any(
+            RemoteBridge._fallback_token_is_pronoun_or_possessive(token)
+            for token in tokens
+        )
+        if not has_pronoun_or_possessive:
+            return normalize_search_query(" ".join(tokens))
+        cleaned: list[str] = []
+        for token in tokens:
+            base = RemoteBridge._fallback_possessive_base(token)
+            if RemoteBridge._fallback_token_is_pronoun_or_possessive(token):
+                if token.endswith("'s") and base in _AUTOCOMPLETE_TRANSLATION_ACTOR_WORDS:
+                    cleaned.append(base)
+                continue
+            if token in {"a", "an", "the", "be", "been", "being", "is", "are", "was", "were"}:
+                continue
+            cleaned.append(token)
+        return normalize_search_query(" ".join(cleaned))
+
+    @staticmethod
+    def _fallback_query_has_pronoun_or_possessive(query: str) -> bool:
+        return any(
+            RemoteBridge._fallback_token_is_pronoun_or_possessive(token)
+            for token in RemoteBridge._fallback_translation_tokens(query)
+        )
+
+    @staticmethod
+    def _fallback_recommended_row(query: str) -> dict:
+        return {
+            "tag": query,
+            "count": 0,
+            "desc": "fallback recommended",
+            "group": "[fallback recommended]",
+            "cat": "",
+            "_wc_type": "fallback_recommended",
+            "_fallback_recommended": True,
+        }
+
+    @staticmethod
     def _translated_query_row_allowed(row: dict, translated_query: str) -> bool:
         query = normalize_search_query(translated_query)
         query_tokens = query.split()
@@ -10992,20 +11098,18 @@ class RemoteBridge(QObject):
     ) -> list[dict]:
         rows: list[dict] = []
         queries = self._translation_search_queries(translated)
+        simple_query = self._simple_fallback_recommended_query(translated)
+        if simple_query:
+            queries = [simple_query] + [
+                query for query in queries
+                if query != simple_query and not self._fallback_query_has_pronoun_or_possessive(query)
+            ]
         preferred = [query for query in queries if len(query.split()) >= 2]
         fallback = [] if multiword_only else [query for query in queries if len(query.split()) < 2]
         for query in preferred + fallback:
             if not query:
                 continue
-            rows.append({
-                "tag": query,
-                "count": 0,
-                "desc": "fallback recommended",
-                "group": "[fallback recommended]",
-                "cat": "",
-                "_wc_type": "fallback_recommended",
-                "_fallback_recommended": True,
-            })
+            rows.append(self._fallback_recommended_row(query))
             if len(rows) >= min(limit, 5):
                 break
         return rows
@@ -11044,6 +11148,52 @@ class RemoteBridge(QObject):
         if not translated or not self._translated_query_has_actor_context(translated):
             return False
         return not self._has_strong_translated_match(rows, translated)
+
+    def _should_prepend_simple_fallback_recommended(
+        self,
+        query: str,
+        translated: str,
+        rows: list[dict],
+    ) -> bool:
+        simple_query = self._simple_fallback_recommended_query(translated)
+        simple_tokens = simple_query.split()
+        if not simple_query or not (1 <= len(simple_tokens) <= 4):
+            return False
+        normalized_query = normalize_search_query(query)
+        if not normalized_query or not self._has_hangul_text(normalized_query):
+            return False
+        hangul_terms = re.findall(r"[가-힣ㄱ-ㅎㅏ-ㅣ]+", normalized_query)
+        if len(hangul_terms) < 2:
+            return False
+        if len(hangul_terms) > 3 or sum(len(term) for term in hangul_terms) > 12:
+            return False
+        action_suffixes = (
+            "고있다",
+            "고있는",
+            "고있음",
+            "하다",
+            "한다",
+            "했다",
+            "하는",
+            "하기",
+            "하게",
+            "하다",
+            "함",
+            "음",
+            "다",
+            "기",
+        )
+        if any(term.endswith(action_suffixes) for term in hangul_terms):
+            return False
+        if any(_AUTOCOMPLETE_ACTION_FORMS.get(token) for token in simple_tokens):
+            return False
+        row_tags = {
+            normalize_search_query(row.get("tag", ""))
+            for row in rows
+        }
+        if simple_query in row_tags:
+            return False
+        return not self._has_strong_translated_match(rows, simple_query)
 
     def _search_kr_tags_with_translation(self, query: str, limit: int = 20) -> tuple[list, str]:
         base_results = self._search_kr_tags(query, limit)
@@ -11181,6 +11331,10 @@ class RemoteBridge(QObject):
                 add_result(row)
 
         results = [merged[tag] for tag in order]
+        if self._should_prepend_simple_fallback_recommended(query, translated, results):
+            simple_query = self._simple_fallback_recommended_query(translated)
+            if simple_query:
+                results = [self._fallback_recommended_row(simple_query)] + results
         if self._should_prepend_fallback_recommended(translated, results):
             existing_tags = {
                 normalize_search_query(row.get("tag", ""))
@@ -11370,16 +11524,34 @@ class RemoteBridge(QObject):
             if not token.lower().startswith("preset:"):
                 token = "preset:" + token
             context = context if isinstance(context, dict) else {}
-            bridge = PresetInputBridge(Path.cwd(), context={
+            preset_context = self._set_preset_input_context({
                 "ratingId": str(context.get("ratingId") or "s"),
                 "personId": str(context.get("personId") or "1girl_solo"),
-            })
+            }, "autocomplete")
+            bridge = getattr(self, "_preset_autocomplete_bridge", None)
+            if bridge is None:
+                try:
+                    bridge = PresetInputBridge(
+                        self._repo_root,
+                        event_service=self._event_preset_service,
+                        clothes_service=self._clothes_preset_service,
+                        expression_service=self._expression_preset_service,
+                        context=preset_context,
+                    )
+                except TypeError:
+                    bridge = PresetInputBridge(self._repo_root, context=preset_context)
+                self._preset_autocomplete_bridge = bridge
+            elif hasattr(bridge, "set_context"):
+                bridge.set_context(preset_context)
             caret_offset = context.get("caretOffset")
             try:
                 caret_offset = int(caret_offset) if caret_offset is not None else None
             except (TypeError, ValueError):
                 caret_offset = None
-            payload = bridge.suggest(token, limit=limit, caret_offset=caret_offset)
+            try:
+                payload = bridge.suggest(token, limit=limit, caret_offset=caret_offset)
+            except TypeError:
+                payload = bridge.suggest(token, limit=limit)
             rows = payload.get("suggestions") or []
             if payload.get("stage") in {"loading", "unavailable"}:
                 state = payload.get("loadState") or {}

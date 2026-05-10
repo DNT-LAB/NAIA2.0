@@ -10493,6 +10493,31 @@ class RemoteBridge(QObject):
             grp.sort(key=lambda x: x['count'], reverse=True)
         return (exact + starts + kr_kw + contains + desc_m)[:limit]
 
+    def _search_kr_metadata_fallback(self, query: str, limit: int = 20) -> list:
+        query = normalize_search_query(query)
+        if not query or not self._has_hangul_text(query):
+            return []
+        try:
+            object.__getattribute__(self, "_kr_tags_lock")
+        except (AttributeError, RuntimeError):
+            return []
+        self._load_kr_tags()
+        if getattr(self, "_tag_search_index", None) is None:
+            return []
+        matches = self._tag_search_index.search_metadata_fallback(query, limit=limit)
+        return [
+            {
+                "tag": result.tag,
+                "count": result.entry.freq,
+                "desc": result.entry.desc,
+                "group": result.entry.category,
+                "cat": result.entry.cat,
+                "_metadata": True,
+                "_metadata_score": result.score,
+            }
+            for result in matches
+        ]
+
     @staticmethod
     def _has_hangul_text(text: str) -> bool:
         return bool(re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", str(text or "")))
@@ -10512,7 +10537,7 @@ class RemoteBridge(QObject):
         self._autocomplete_translation_cache[query] = translated
         return translated
 
-    def _translation_search_queries(self, translated: str) -> list[str]:
+    def _translation_search_query_levels(self, translated: str) -> list[list[str]]:
         normalized = normalize_search_query(translated)
         if not normalized:
             return []
@@ -10521,12 +10546,17 @@ class RemoteBridge(QObject):
         normalized = " ".join(tokens)
         if not normalized:
             return []
-        queries: list[str] = []
+        query_levels: list[list[str]] = []
 
-        def add_query(value: str):
+        def add_query(value: str, level: int = 0):
             term = normalize_search_query(value)
-            if term and term not in queries:
-                queries.append(term)
+            if not term:
+                return
+            if any(term in queries for queries in query_levels):
+                return
+            while len(query_levels) <= level:
+                query_levels.append([])
+            query_levels[level].append(term)
 
         def possessive_base(token: str) -> str:
             if token.endswith("'s"):
@@ -10611,7 +10641,7 @@ class RemoteBridge(QObject):
                     if not isinstance(output, dict) or not rule_matches(output):
                         continue
                     for query in normalized_items(output.get("queries")):
-                        add_query(query)
+                        add_query(query, 2)
 
         def add_cleaned_sentence():
             removed_actor_token = False
@@ -10634,7 +10664,7 @@ class RemoteBridge(QObject):
             while cleaned and cleaned[-1] in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
                 cleaned.pop()
             if len(cleaned) >= 2 and (removed_actor_token or has_weak_pose_verb):
-                add_query(" ".join(cleaned))
+                add_query(" ".join(cleaned), 1)
 
         def content_phrase_after(index: int, max_terms: int = 2) -> list[str]:
             phrase: list[str] = []
@@ -10652,6 +10682,83 @@ class RemoteBridge(QObject):
                 cursor += 1
             return phrase
 
+        def action_object_phrase_after_preposition(
+            index: int,
+            immediate_object: list[str],
+            max_terms: int = 2,
+        ) -> list[str]:
+            if not immediate_object:
+                return []
+            cursor = index + 1
+            found_immediate = False
+            while cursor < len(tokens):
+                token = tokens[cursor]
+                if _AUTOCOMPLETE_ACTION_FORMS.get(token):
+                    return []
+                if token == "of":
+                    if not found_immediate:
+                        return []
+                    cursor += 1
+                    break
+                if is_structural_noise(token):
+                    cursor += 1
+                    continue
+                if token in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                    return []
+                found_immediate = True
+                cursor += 1
+            else:
+                return []
+
+            phrase: list[str] = []
+            while cursor < len(tokens) and len(phrase) < max_terms:
+                token = tokens[cursor]
+                if is_structural_noise(token):
+                    cursor += 1
+                    continue
+                if token in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                    break
+                if _AUTOCOMPLETE_ACTION_FORMS.get(token):
+                    break
+                if len(token) >= 3:
+                    phrase.append(token)
+                cursor += 1
+            return phrase
+
+        def action_relation_phrase_after(index: int, max_terms: int = 2) -> list[str]:
+            action_relation_prepositions = {
+                *_AUTOCOMPLETE_RELATION_PREPOSITIONS,
+                "at",
+                "in",
+            }
+            cursor = index + 1
+            while (
+                cursor < len(tokens)
+                and tokens[cursor] not in action_relation_prepositions
+                and is_structural_noise(tokens[cursor])
+            ):
+                cursor += 1
+            if cursor >= len(tokens):
+                return []
+            preposition = tokens[cursor]
+            if preposition not in action_relation_prepositions:
+                return []
+            cursor += 1
+            object_tokens: list[str] = []
+            while cursor < len(tokens) and len(object_tokens) < max_terms:
+                token = tokens[cursor]
+                if is_structural_noise(token):
+                    cursor += 1
+                    continue
+                if token in _AUTOCOMPLETE_RELATION_PREPOSITIONS:
+                    break
+                if _AUTOCOMPLETE_ACTION_FORMS.get(token):
+                    break
+                if len(token) >= 3:
+                    object_tokens.append(token)
+                cursor += 1
+            return [preposition, *object_tokens] if object_tokens else []
+
         def add_content_run_phrases():
             run: list[str] = []
 
@@ -10665,7 +10772,7 @@ class RemoteBridge(QObject):
                         phrase_tokens = run[index:index + size]
                         if any(_AUTOCOMPLETE_ACTION_FORMS.get(token) for token in phrase_tokens):
                             continue
-                        add_query(" ".join(phrase_tokens))
+                        add_query(" ".join(phrase_tokens), 2)
 
             for token in tokens:
                 if (
@@ -10769,16 +10876,16 @@ class RemoteBridge(QObject):
                 )
                 if prefer_own_relation:
                     for candidate_objects in aliased_objects:
-                        add_query(" ".join([subject, token, "own", *candidate_objects]))
+                        add_query(" ".join([subject, token, "own", *candidate_objects]), 2)
                     for candidate_objects in aliased_objects:
-                        add_query(" ".join([subject, token, *candidate_objects]))
-                    add_query(" ".join([subject, token, "own", *object_tokens]))
+                        add_query(" ".join([subject, token, *candidate_objects]), 2)
+                    add_query(" ".join([subject, token, "own", *object_tokens]), 2)
                 else:
                     for candidate_objects in aliased_objects:
-                        add_query(" ".join([subject, token, *candidate_objects]))
-                add_query(" ".join([subject, token, *object_tokens]))
-                add_query(" ".join([subject, token]))
-                add_query(" ".join([token, *object_tokens]))
+                        add_query(" ".join([subject, token, *candidate_objects]), 2)
+                add_query(" ".join([subject, token, *object_tokens]), 2)
+                add_query(" ".join([subject, token]), 3)
+                add_query(" ".join([token, *object_tokens]), 3)
 
         content_tokens = [
             token for token in tokens
@@ -10790,36 +10897,112 @@ class RemoteBridge(QObject):
             and not _AUTOCOMPLETE_ACTION_FORMS.get(token)
         ]
 
-        add_query(normalized)
+        add_query(normalized, 0)
         add_cleaned_sentence()
         add_domain_phrase_aliases()
         for index, token in enumerate(tokens):
             action_variant = _AUTOCOMPLETE_ACTION_FORMS.get(token)
             if not action_variant:
                 continue
+            relation_phrase = action_relation_phrase_after(index)
+            if relation_phrase:
+                add_query(" ".join([action_variant, *relation_phrase]), 2)
             object_phrase = content_phrase_after(index)
             if action_variant in _AUTOCOMPLETE_TRANSITIVE_ACTION_FORMS and object_phrase:
-                add_query(" ".join([action_variant] + object_phrase))
+                add_query(" ".join([action_variant] + object_phrase), 2)
+                prepositional_object = action_object_phrase_after_preposition(index, object_phrase)
+                if prepositional_object:
+                    add_query(" ".join([action_variant] + prepositional_object), 2)
                 if len(object_phrase) > 1:
-                    add_query(" ".join(object_phrase))
-            add_query(action_variant)
+                    add_query(" ".join(object_phrase), 3)
+                add_query(action_variant, 3)
+            elif relation_phrase:
+                add_query(action_variant, 3)
+            else:
+                add_query(action_variant, 2)
 
         add_relation_phrases()
         add_content_run_phrases()
         for token in content_tokens:
-            add_query(token)
-        return queries[:18]
+            add_query(token, 3)
+        return [queries for queries in query_levels if queries]
+
+    def _translation_search_queries(self, translated: str) -> list[str]:
+        queries: list[str] = []
+        for level in RemoteBridge._translation_search_query_levels(self, translated):
+            for query in level:
+                if query not in queries:
+                    queries.append(query)
+                if len(queries) >= 18:
+                    return queries
+        return queries
+
+    @staticmethod
+    def _translated_query_row_allowed(row: dict, translated_query: str) -> bool:
+        query = normalize_search_query(translated_query)
+        query_tokens = query.split()
+        if len(query_tokens) != 1:
+            return True
+        tag = normalize_search_query(row.get("tag", ""))
+        return query_tokens[0] in tag.split()
+
+    @staticmethod
+    def _translated_fallback_row_score(row: dict, translated_query: str, level_index: int) -> float:
+        query = normalize_search_query(translated_query)
+        tag = normalize_search_query(row.get("tag", ""))
+        if not query or not tag:
+            return 0.0
+        query_size = len(query.split())
+        score = 660.0 - (level_index * 170.0)
+        if tag == query:
+            score += 130.0
+        elif tag.startswith(query):
+            score += 70.0
+        elif query in tag:
+            score += 45.0
+        elif query_size == 1 and query in tag.split():
+            score += 20.0
+        if query_size <= 1:
+            score -= 110.0
+        try:
+            count = int(row.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            score += min(math.log10(count + 1) * 3.0, 18.0)
+        return score
+
+    def _fallback_recommended_rows(self, translated: str, limit: int) -> list[dict]:
+        rows: list[dict] = []
+        for query in self._translation_search_queries(translated):
+            if not query:
+                continue
+            rows.append({
+                "tag": query,
+                "count": 0,
+                "desc": "fallback recommended",
+                "group": "[fallback recommended]",
+                "cat": "",
+                "_wc_type": "fallback_recommended",
+                "_fallback_recommended": True,
+            })
+            if len(rows) >= min(limit, 5):
+                break
+        return rows
 
     def _search_kr_tags_with_translation(self, query: str, limit: int = 20) -> tuple[list, str]:
         base_results = self._search_kr_tags(query, limit)
         translated = self._translate_autocomplete_query(query)
         if not translated:
+            metadata_rows = self._search_kr_metadata_fallback(query, min(limit, 8))
+            if metadata_rows:
+                return (metadata_rows + base_results)[:limit], ""
             return base_results, ""
 
         merged: dict[str, dict] = {}
         order: list[str] = []
 
-        def add_result(row: dict, translated_match: bool = False):
+        def add_result(row: dict, translated_match: bool = False, metadata_match: bool = False):
             tag = str(row.get("tag") or "")
             if not tag:
                 return
@@ -10828,6 +11011,8 @@ class RemoteBridge(QObject):
                 item = dict(row)
                 if translated_match:
                     item["_translated"] = True
+                if metadata_match:
+                    item["_metadata"] = True
                 merged[tag] = item
                 order.append(tag)
                 return
@@ -10835,28 +11020,102 @@ class RemoteBridge(QObject):
                 existing["_translated"] = True
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
+            if metadata_match:
+                existing["_metadata"] = True
+                existing["desc"] = existing.get("desc") or row.get("desc", "")
+                existing["group"] = existing.get("group") or row.get("group", "")
 
+        natural_hangul_query = self._has_hangul_text(query) and len(normalize_search_query(query).split()) >= 2
         base_head_count = max(3, limit // 2)
-        for row in base_results[:base_head_count]:
-            add_result(row)
-        for translated_query in self._translation_search_queries(translated):
-            translated_query_size = len(translated_query.split())
-            if translated_query_size <= 1:
-                translated_query_limit = min(2, limit)
-            elif translated_query_size == 2:
-                translated_query_limit = min(4, limit)
-            else:
-                translated_query_limit = min(6, limit)
-            rows = self._search_kr_tags(translated_query, translated_query_limit)
-            rows.sort(
-                key=lambda row: 0
-                if normalize_search_query(row.get("tag", "")) == translated_query
-                else 1
+        if not natural_hangul_query:
+            for row in base_results[:base_head_count]:
+                add_result(row)
+
+        evidence_rows: list[dict] = []
+        for level_index, query_level in enumerate(self._translation_search_query_levels(translated)):
+            level_rows: list[dict] = []
+            for translated_query in query_level:
+                translated_query_size = len(translated_query.split())
+                if translated_query_size <= 1:
+                    translated_query_limit = min(2, limit)
+                elif translated_query_size == 2:
+                    translated_query_limit = min(4, limit)
+                else:
+                    translated_query_limit = min(6, limit)
+                rows = [
+                    row for row in self._search_kr_tags(translated_query, translated_query_limit)
+                    if self._translated_query_row_allowed(row, translated_query)
+                ]
+                rows.sort(
+                    key=lambda row: 0
+                    if normalize_search_query(row.get("tag", "")) == translated_query
+                    else 1
+                )
+                for row in rows:
+                    item = dict(row)
+                    item["_translated"] = True
+                    item["_translated_query"] = translated_query
+                    item["_rank_score"] = self._translated_fallback_row_score(
+                        row,
+                        translated_query,
+                        level_index,
+                    )
+                    level_rows.append(item)
+            if not level_rows:
+                continue
+            evidence_rows.extend(level_rows)
+            break
+
+        metadata_evidence_rows: list[dict] = []
+        for row in self._search_kr_metadata_fallback(query, min(limit, 8)):
+            item = dict(row)
+            item["_metadata"] = True
+            item["_rank_score"] = float(item.get("_metadata_score") or 0.0)
+            metadata_evidence_rows.append(item)
+            evidence_rows.append(item)
+
+        if evidence_rows:
+            if not metadata_evidence_rows:
+                for row in evidence_rows:
+                    add_result(row, translated_match=bool(row.get("_translated")))
+                evidence_rows = []
+
+        if evidence_rows:
+            best_by_tag: dict[str, dict] = {}
+            for row in evidence_rows:
+                tag = str(row.get("tag") or "")
+                if not tag:
+                    continue
+                previous = best_by_tag.get(tag)
+                if previous is None or float(row.get("_rank_score") or 0.0) > float(previous.get("_rank_score") or 0.0):
+                    best_by_tag[tag] = row
+                else:
+                    if row.get("_translated"):
+                        previous["_translated"] = True
+                    if row.get("_metadata"):
+                        previous["_metadata"] = True
+            ranked_rows = sorted(
+                best_by_tag.values(),
+                key=lambda row: (
+                    -float(row.get("_rank_score") or 0.0),
+                    -int(row.get("count") or 0),
+                    str(row.get("tag") or ""),
+                ),
             )
-            for row in rows:
-                add_result(row, translated_match=True)
-        for row in base_results[base_head_count:]:
+            for row in ranked_rows:
+                add_result(
+                    row,
+                    translated_match=bool(row.get("_translated")),
+                    metadata_match=bool(row.get("_metadata")),
+                )
+
+        base_tail = base_results if natural_hangul_query else base_results[base_head_count:]
+        for row in base_tail:
             add_result(row)
+
+        if not merged:
+            for row in self._fallback_recommended_rows(translated, limit):
+                add_result(row)
 
         return [merged[tag] for tag in order][:limit], translated
 

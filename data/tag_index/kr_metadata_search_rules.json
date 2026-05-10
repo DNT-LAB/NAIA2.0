@@ -1,0 +1,43 @@
+{
+  "aliases": {
+    "건네줌": ["offering", "handing"],
+    "녹아": ["dissolving", "melting"],
+    "녹음": ["dissolving", "melting"],
+    "드러냄": ["revealing", "exposing"],
+    "드러내": ["revealing", "exposing"],
+    "빨개짐": ["blush", "blushing"],
+    "성기": ["penis", "genitalia", "genitals"],
+    "슈타게": ["steins", "gate"],
+    "수인": ["anthro"],
+    "요도": ["urethral", "urethra"],
+    "입력": ["keyboard", "input"],
+    "자판": ["keyboard"],
+    "전구": ["bulb", "light"],
+    "절정": ["orgasm", "climax"],
+    "좀비": ["zombie", "zombification"],
+    "좀비로": ["zombie", "zombification"],
+    "카이니스": ["caenis"],
+    "키보드": ["keyboard"],
+    "투명": ["invisible", "transparent"],
+    "투명함": ["invisible", "transparent"]
+  },
+  "single_char_terms": ["꿀", "후"],
+  "weak_query_terms": [
+    "건네줌",
+    "녹아",
+    "녹음",
+    "드러냄",
+    "드러내",
+    "몸이",
+    "빨개짐",
+    "성기",
+    "성기를",
+    "상태",
+    "좀비",
+    "좀비로",
+    "출렁",
+    "출렁거림",
+    "후"
+  ],
+  "scoreless_query_terms": ["몸이", "성기", "성기를"]
+}

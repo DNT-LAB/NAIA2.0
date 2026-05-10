@@ -349,6 +349,97 @@ def test_tag_search_entrypoints_split_fast_and_semantic_recall():
     assert "medium support meme" in semantic_tags
 
 
+def test_tag_search_metadata_fallback_uses_field_evidence_and_coverage():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="lyre",
+                freq=798,
+                category="Food_Object",
+                desc="작은 현악기. 하프보다 작고 U자형인 경우가 많음.",
+                keywords=("악기", "리라"),
+                search_blob="lyre 작은 현악기 하프보다 작은 악기 리라",
+            ),
+            TagSearchEntry(
+                tag="harp",
+                freq=20000,
+                category="Food_Object",
+                desc="큰 하프 악기.",
+                keywords=("하프",),
+                search_blob="harp 큰 하프 악기",
+            ),
+            TagSearchEntry(
+                tag="yamaha",
+                freq=100000,
+                category="Copyright",
+                desc="악기 브랜드.",
+                keywords=("악기",),
+                search_blob="yamaha 악기 브랜드",
+            ),
+        ]
+    )
+
+    results = [result.tag for result in index.search_metadata_fallback("작은 하프 같은 악기", limit=5)]
+
+    assert results[:2] == ["lyre", "harp"]
+    assert "yamaha" not in results[:2]
+
+
+def test_tag_search_metadata_fallback_handles_korean_verb_aliases():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="looking at screen",
+                freq=300,
+                desc="캐릭터가 화면을 보고 있는 자세.",
+                keywords=("화면 보기",),
+                search_blob="looking at screen 화면 보기 화면을 보고 있는 자세",
+            ),
+            TagSearchEntry(
+                tag="watching television",
+                freq=5000,
+                desc="텔레비전을 보고 있음.",
+                keywords=("티비 보기",),
+                search_blob="watching television 티비 보기",
+            ),
+        ]
+    )
+
+    results = [result.tag for result in index.search_metadata_fallback("화면을 바라보다", limit=5)]
+
+    assert results[0] == "looking at screen"
+
+
+def test_tag_search_metadata_fallback_does_not_scan_every_entry(monkeypatch):
+    entries = [
+        TagSearchEntry(tag=f"noise tag {idx}", desc="무관한 설명", search_blob="무관한 설명")
+        for idx in range(1000)
+    ]
+    entries.append(
+        TagSearchEntry(
+            tag="brooch",
+            freq=250,
+            desc="옷에 다는 보석 장식 핀인 브로치임.",
+            keywords=("브로치",),
+            search_blob="brooch 옷에 다는 보석 장식 핀 브로치",
+        )
+    )
+    index = TagSearchIndex(entries)
+
+    calls = 0
+    original_score = TagSearchIndex._metadata_score
+
+    def counting_score(*args):
+        nonlocal calls
+        calls += 1
+        return original_score(*args)
+
+    monkeypatch.setattr(TagSearchIndex, "_metadata_score", counting_score)
+
+    assert [result.tag for result in index.search_metadata_fallback("옷에 단 장식 핀", limit=5)][0] == "brooch"
+    assert calls < 20
+
+
 def test_event_semantic_entrypoint_requires_event_by_default():
     index = TagSearchIndex(
         [

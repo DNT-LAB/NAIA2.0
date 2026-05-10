@@ -203,8 +203,8 @@ def test_autocomplete_translation_handles_headless_relation_samples(monkeypatch)
         "hold a flower and blow on it",
         "hold flower blow",
         "holding flower",
-        "holding",
         "blowing",
+        "holding",
         "flower",
     ]
 
@@ -227,8 +227,8 @@ def test_autocomplete_translation_handles_headless_relation_samples(monkeypatch)
         "a little bird is chirping on my hand",
         "little bird chirping on hand",
         "bird on hand",
+        "little bird",
         "bird on",
-        "on hand",
     ]
     assert "chirping on hand" not in bird_queries
     assert "bird on own hand" not in bird_queries
@@ -274,10 +274,7 @@ def test_autocomplete_translation_handles_headless_relation_samples(monkeypatch)
     assert translated == "hold a flower and blow on it"
     assert [row["tag"] for row in merged] == [
         "holding flower",
-        "holding ball",
-        "holding wand",
         "blowing",
-        "flower",
     ]
 
 
@@ -451,8 +448,9 @@ def test_autocomplete_translation_handles_action_object_samples():
         ],
         "walk in the rain holding an umbrella": [
             "walk in the rain holding an umbrella",
-            "walking",
+            "walking in rain",
             "holding umbrella",
+            "walking",
             "holding",
             "rain",
             "umbrella",
@@ -460,14 +458,15 @@ def test_autocomplete_translation_handles_action_object_samples():
         "hold a gun and aim": [
             "hold a gun and aim",
             "holding gun",
-            "holding",
             "aiming",
+            "holding",
             "gun",
         ],
         "lie on bed and sleep": [
             "lie on bed and sleep",
-            "lying",
+            "lying on bed",
             "sleeping",
+            "lying",
             "bed",
         ],
         "put hand on chest": [
@@ -478,6 +477,12 @@ def test_autocomplete_translation_handles_action_object_samples():
             "hand",
             "chest",
         ],
+        "look at the screen": [
+            "look at the screen",
+            "looking at screen",
+            "looking",
+            "screen",
+        ],
     }
 
     for translated, expected in samples.items():
@@ -485,3 +490,149 @@ def test_autocomplete_translation_handles_action_object_samples():
         assert queries == expected
         assert "rain holding" not in queries
         assert "putting hand" not in queries
+
+
+def test_autocomplete_translation_falls_back_by_query_level(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "pulling the hem of clothes",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "옷 끝자락을 잡아당기기": [],
+        "pulling the hem of clothes": [],
+        "pulling hem": [],
+        "pulling clothes": [
+            {"tag": "pulling own clothes", "count": 100, "desc": "", "group": "", "cat": ""},
+            {"tag": "pulling another's clothes", "count": 80, "desc": "", "group": "", "cat": ""},
+        ],
+        "pulling": [
+            {"tag": "pulling", "count": 70, "desc": "", "group": "", "cat": ""},
+        ],
+        "hem": [
+            {"tag": "hemokinesis", "count": 60, "desc": "", "group": "", "cat": ""},
+        ],
+        "clothes": [
+            {"tag": "clothes grab", "count": 50, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    calls = []
+
+    def fake_search(query, limit=20):
+        calls.append(query)
+        return rows.get(query, [])[:limit]
+
+    bridge._search_kr_tags = fake_search
+
+    assert RemoteBridge._translation_search_queries(
+        None,
+        "pulling the hem of clothes",
+    ) == [
+        "pulling the hem of clothes",
+        "pulling hem",
+        "pulling clothes",
+        "pulling",
+        "hem",
+        "clothes",
+    ]
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "옷 끝자락을 잡아당기기",
+        12,
+    )
+
+    assert translated == "pulling the hem of clothes"
+    assert [row["tag"] for row in merged] == [
+        "pulling own clothes",
+        "pulling another's clothes",
+    ]
+    assert calls == [
+        "옷 끝자락을 잡아당기기",
+        "pulling the hem of clothes",
+        "pulling hem",
+        "pulling clothes",
+    ]
+
+
+def test_autocomplete_translation_generates_action_relation_query(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "look at the screen",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "화면을 바라보다": [],
+        "look at the screen": [],
+        "looking at screen": [
+            {"tag": "looking at screen", "count": 100, "desc": "", "group": "", "cat": ""},
+        ],
+        "looking": [
+            {"tag": "looking at viewer", "count": 90, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    calls = []
+
+    def fake_search(query, limit=20):
+        calls.append(query)
+        return rows.get(query, [])[:limit]
+
+    bridge._search_kr_tags = fake_search
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "화면을 바라보다",
+        12,
+    )
+
+    assert translated == "look at the screen"
+    assert [row["tag"] for row in merged] == ["looking at screen"]
+    assert calls == [
+        "화면을 바라보다",
+        "look at the screen",
+        "looking at screen",
+    ]
+
+
+def test_autocomplete_translation_reranks_metadata_over_low_level_generic_match(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "a small harp-like instrument",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "작은 하프 같은 악기": [],
+        "a small harp like instrument": [],
+        "small harp like": [],
+        "harp like instrument": [],
+        "harp": [
+            {"tag": "harp", "count": 20000, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20: [
+        {
+            "tag": "lyre",
+            "count": 798,
+            "desc": "작은 현악기. 하프보다 작고 U자형인 경우가 많음.",
+            "group": "Food_Object",
+            "cat": "",
+            "_metadata": True,
+            "_metadata_score": 520,
+        }
+    ]
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "작은 하프 같은 악기",
+        8,
+    )
+
+    assert translated == "a small harp-like instrument"
+    assert [row["tag"] for row in merged[:2]] == ["lyre", "harp"]

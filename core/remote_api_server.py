@@ -39,6 +39,7 @@ from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
 from core.event_preset_service import EventPresetService
 from core.expression_preset_service import ExpressionPresetService
+from core.preset_input_bridge import PresetInputBridge
 from core.preset_composer_service import PresetComposerService
 from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
@@ -10520,6 +10521,60 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: vibe cluster 검색 실패: {e}")
             return []
 
+    def _preset_autocomplete_payload(
+        self,
+        query: str,
+        limit: int = 12,
+        context: dict | None = None,
+    ) -> dict:
+        """preset: path autocomplete payload for Remote Web prompt inputs."""
+        try:
+            token = str(query or "").strip()
+            if not token.lower().startswith("preset:"):
+                token = "preset:" + token
+            context = context if isinstance(context, dict) else {}
+            bridge = PresetInputBridge(Path.cwd(), context={
+                "ratingId": str(context.get("ratingId") or "s"),
+                "personId": str(context.get("personId") or "1girl_solo"),
+            })
+            payload = bridge.suggest(token, limit=limit)
+            rows = payload.get("suggestions") or []
+            if payload.get("stage") in {"loading", "unavailable"}:
+                state = payload.get("loadState") or {}
+                message = str(state.get("message") or "Preset data is not ready.")
+                rows = [{
+                    "tag": str(state.get("main") or payload.get("stage") or "preset"),
+                    "value": token,
+                    "count": 0,
+                    "desc": message,
+                    "group": "preset",
+                    "cat": "preset",
+                    "_wc_type": "preset_status",
+                    "disabled": True,
+                }]
+            return {
+                "query": token,
+                "results": rows,
+                "preset": {
+                    "axis": payload.get("axis") or "",
+                    "stage": payload.get("stage") or "",
+                    "context": payload.get("presetContext") or {},
+                    "loadState": payload.get("loadState") or {},
+                    "dataReady": bool(payload.get("dataReady")),
+                },
+            }
+        except Exception as e:
+            print(f"🌐 Remote: preset path 검색 실패: {e}")
+            return {"query": str(query or ""), "results": [], "preset": {}}
+
+    def _search_preset_paths(
+        self,
+        query: str,
+        limit: int = 12,
+        context: dict | None = None,
+    ) -> list:
+        return self._preset_autocomplete_payload(query, limit=limit, context=context).get("results", [])
+
     def _read_chunk(self) -> dict:
         """Chunk 모듈: 인스턴트 와일드카드 트리 전체 반환"""
         try:
@@ -13384,6 +13439,20 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "type": "autocomplete_result",
                                 "query": query,
                                 "results": results,
+                            }))
+                        elif cmd_type == "autocomplete_preset":
+                            query = cmd.get("query", "")
+                            payload = await asyncio.to_thread(
+                                bridge._preset_autocomplete_payload,
+                                query,
+                                12,
+                                cmd.get("presetContext") if isinstance(cmd, dict) else None,
+                            )
+                            await ws.send_text(json.dumps({
+                                "type": "autocomplete_result",
+                                "query": payload.get("query", query),
+                                "results": payload.get("results", []),
+                                "preset": payload.get("preset") or {},
                             }))
                         elif cmd_type == "tag_lookup":
                             # 태그 상세 정보 조회

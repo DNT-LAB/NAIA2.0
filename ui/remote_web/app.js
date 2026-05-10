@@ -569,7 +569,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260509-preset-search-counts1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260510-preset-shortcut-rank1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,
@@ -4447,7 +4447,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-mobile-native-text-menu3')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-preset-stage-tools1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -4468,6 +4468,7 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-mobile-nat
       fmtCount,
       catStyle,
       showToast,
+      getEventPresetPanel: () => eventPresetPanel,
     });
     tagAssist.bindDefaultTextareas();
     pendingTagAssistBinds.splice(0).forEach(([textarea, options]) => {

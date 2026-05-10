@@ -94,6 +94,8 @@ class AutoCompleteManager(QObject):
         # 현재 활성 위젯
         self.current_widget = None
         self.current_suggestions = []
+        self._preset_bridge = None
+        self._pending_completion_meta = None
         
         # 인스턴트 와일드카드 딕셔너리 캐시
         self.instant_wildcards = {}
@@ -348,6 +350,11 @@ class AutoCompleteManager(QObject):
         if target_text.startswith('$'):
             self._show_instant_wildcard_completions(target_text[1:])  # $ 제거하고 전달
             return
+
+        # preset: 입력 모드 처리
+        if target_text.lower().startswith('preset:'):
+            self._show_preset_completions(target_text)
+            return
         
         # 인스턴트 와일드카드가 아닌 경우 값 표시 패널 숨기기
         if self.value_container:
@@ -591,6 +598,14 @@ class AutoCompleteManager(QObject):
     
     def on_item_clicked(self, item):
         """팝업 아이템 클릭 시 텍스트 완성 - 실제 태그명만 사용"""
+        self._complete_popup_item(item)
+
+    def _complete_popup_item(self, item):
+        """팝업 아이템의 저장된 completion 값을 적용합니다."""
+        if not item or item.data(Qt.ItemDataRole.UserRole + 3):
+            return
+
+        self._pending_completion_meta = item.data(Qt.ItemDataRole.UserRole + 4)
         # UserRole에 저장된 실제 태그명 사용
         actual_tag = item.data(Qt.ItemDataRole.UserRole)
         if actual_tag:
@@ -600,7 +615,7 @@ class AutoCompleteManager(QObject):
             display_text = item.text()
             tag_name = display_text.split()[0] if display_text else ""
             self.complete_text(tag_name)
-        
+
     def complete_text(self, completion_text: str):
         """활성 토큰을 선택된 텍스트로 교체"""
         if not self.current_widget or not self.active_token_info:
@@ -608,10 +623,14 @@ class AutoCompleteManager(QObject):
 
         widget = self.current_widget
         info = self.active_token_info
-        
+        completion_meta = self._pending_completion_meta if isinstance(self._pending_completion_meta, dict) else {}
+        self._pending_completion_meta = None
+
         # 그룹 아이템 선택 여부 확인 ($groupname: 형태)
         is_group_selection = completion_text.startswith('$') and completion_text.endswith(':')
-        
+        is_preset_path = completion_text.lower().startswith('preset:')
+        is_preset_final = bool(completion_meta.get('final'))
+
         # 원본 텍스트의 뒤 공백/줄바꿈 추출 (모든 모드에서 동일하게 처리)
         original_text = info['text']
         trailing_whitespace = ''
@@ -625,6 +644,9 @@ class AutoCompleteManager(QObject):
         # 인스턴트 와일드카드인 경우 값이 그대로 삽입됨 ($ 없이)
         if info['stripped_text'].startswith('$'):
             # completion_text는 이미 값이므로 그대로 사용
+            pass
+        elif is_preset_path:
+            # preset path는 파이프라인 토큰이므로 일반 태그 escape/comma 규칙을 적용하지 않음
             pass
         else:
             # 일반 태그인 경우 괄호 구조 복원
@@ -653,7 +675,7 @@ class AutoCompleteManager(QObject):
             # QLineEdit인 경우 쉼표 추가 안함
             final_text = final_text + trailing_whitespace
             added_comma_space = False
-        elif is_instant_wildcard:
+        elif is_instant_wildcard or is_preset_path:
             # $로 시작하는 instant wildcard인 경우 쉼표 추가 안함
             final_text = final_text + trailing_whitespace
             added_comma_space = False
@@ -719,7 +741,7 @@ class AutoCompleteManager(QObject):
         widget.setFocus() # 텍스트 완성 후 원래 위젯으로 포커스 복귀
         
         # 그룹 아이템을 선택한 경우, 자동으로 해당 그룹의 아이템들을 표시
-        if is_group_selection:
+        if is_group_selection or (is_preset_path and not is_preset_final):
             # 약간의 지연을 주어 텍스트 삽입이 완료된 후 실행
             QTimer.singleShot(50, self.show_completions)
 
@@ -737,16 +759,7 @@ class AutoCompleteManager(QObject):
                     self.active_token_info = fresh_token_info
 
             if current_item:
-                # UserRole에서 실제 값/태그명 가져오기
-                # 인스턴트 와일드카드의 경우 값이, 일반 태그의 경우 태그명이 저장됨
-                actual_value = current_item.data(Qt.ItemDataRole.UserRole)
-                if actual_value:
-                    self.complete_text(actual_value)
-                else:
-                    # 폴백: 텍스트에서 태그명 추출
-                    display_text = current_item.text()
-                    tag_name = display_text.split()[0] if display_text else ""
-                    self.complete_text(tag_name)
+                self._complete_popup_item(current_item)
             else:
                 self._hide_all_popups()
             return True
@@ -1044,6 +1057,7 @@ class AutoCompleteManager(QObject):
 
     def _hide_all_popups(self):
         """모든 팝업(리스트와 값 표시)을 숨깁니다."""
+        self._release_preset_input_lock()
         if self.popup:
             self.popup.hide()
         if self.value_container:
@@ -1184,6 +1198,117 @@ class AutoCompleteManager(QObject):
                     filtered.append((tag, count))
 
         return filtered
+
+    def _get_preset_bridge(self):
+        """preset: 입력 모드용 브릿지를 지연 생성합니다."""
+        if self._preset_bridge is None:
+            from core.preset_input_bridge import PresetInputBridge
+            self._preset_bridge = PresetInputBridge(Path.cwd())
+        return self._preset_bridge
+
+    def _show_preset_completions(self, token: str):
+        """preset: 경로 자동완성을 기존 autocomplete 팝업 스타일로 표시합니다."""
+        try:
+            payload = self._get_preset_bridge().suggest(token, limit=self.max_suggestions)
+        except Exception as e:
+            print(f"⚠️ preset 자동완성 검색 중 오류: {e}")
+            self._hide_all_popups()
+            return
+
+        rows = payload.get("suggestions") or []
+        if not rows and payload.get("stage") not in {"loading", "unavailable"}:
+            self._hide_all_popups()
+            return
+
+        if self.value_container:
+            self.value_container.hide()
+        if self.image_container:
+            self.image_container.hide()
+        if self.popup:
+            self.popup.setMinimumWidth(350)
+            self.popup.setMaximumWidth(500)
+
+        self.popup.clear()
+        if rows:
+            self._populate_preset_popup(rows)
+        else:
+            self._populate_preset_status_row(payload)
+
+        self.popup_at_cursor()
+
+        if payload.get("lockInput") and not payload.get("dataReady"):
+            self._set_current_input_locked(True)
+            QTimer.singleShot(700, self._release_preset_input_lock)
+            QTimer.singleShot(750, self.show_completions)
+
+    def _populate_preset_popup(self, rows: list[dict]):
+        """preset suggestion rows를 QListWidget에 채웁니다."""
+        from PyQt6.QtWidgets import QListWidgetItem
+        from PyQt6.QtCore import Qt
+
+        for row in rows:
+            label = str(row.get("tag") or row.get("value") or "")
+            value = str(row.get("value") or label)
+            count = self._format_count(row.get("count", 0))
+            stage = str(row.get("stage") or row.get("cat") or "preset")
+            display_text = f"{label:<34} {stage:<10} {count:>8}".rstrip()
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, value)
+            item.setData(Qt.ItemDataRole.UserRole + 4, {
+                "type": "preset_path",
+                "final": bool(row.get("final")),
+                "stage": stage,
+            })
+            tooltip_parts = [
+                str(row.get("value") or ""),
+                str(row.get("desc") or row.get("prompt") or ""),
+            ]
+            item.setToolTip("\n".join(part for part in tooltip_parts if part))
+            self.popup.addItem(item)
+
+    def _populate_preset_status_row(self, payload: dict):
+        """로딩/미사용 상태를 선택 불가 행으로 표시합니다."""
+        from PyQt6.QtWidgets import QListWidgetItem
+        from PyQt6.QtCore import Qt
+
+        state = payload.get("loadState") if isinstance(payload, dict) else {}
+        main = str((state or {}).get("main") or payload.get("stage") or "preset")
+        message = str((state or {}).get("message") or "Preset data is not ready.")
+        item = QListWidgetItem(f"{main:<34} {message}")
+        item.setData(Qt.ItemDataRole.UserRole, "")
+        item.setData(Qt.ItemDataRole.UserRole + 3, True)
+        item.setToolTip(message)
+        self.popup.addItem(item)
+
+    @staticmethod
+    def _format_count(value) -> str:
+        try:
+            count = int(float(value or 0))
+        except (TypeError, ValueError):
+            count = 0
+        if count >= 1000000:
+            return f"{count / 1000000:.1f}M"
+        if count >= 1000:
+            return f"{count / 1000:.0f}k"
+        return str(count)
+
+    def _set_current_input_locked(self, locked: bool):
+        """preset 로딩 중인 입력을 일시적으로 읽기 전용으로 전환합니다."""
+        widget = self.current_widget
+        if not widget or not hasattr(widget, "setReadOnly"):
+            return
+        if locked:
+            if widget.property("preset_ac_prev_readonly") is None:
+                widget.setProperty("preset_ac_prev_readonly", bool(widget.isReadOnly()))
+            widget.setReadOnly(True)
+        else:
+            previous = widget.property("preset_ac_prev_readonly")
+            if previous is not None:
+                widget.setReadOnly(bool(previous))
+                widget.setProperty("preset_ac_prev_readonly", None)
+
+    def _release_preset_input_lock(self):
+        self._set_current_input_locked(False)
 
     def _show_instant_wildcard_completions(self, search_text: str):
         """인스턴트 와일드카드 자동완성을 표시합니다."""

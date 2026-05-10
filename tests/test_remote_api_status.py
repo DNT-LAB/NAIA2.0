@@ -334,6 +334,78 @@ def test_vibe_cluster_autocomplete_search_returns_vibe_prompt_token(tmp_path, mo
     assert results[0]["_wc_type"] == "vibe_cluster"
 
 
+def test_preset_autocomplete_root_returns_axis_tokens(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+
+    results = bridge._search_preset_paths("preset:")
+
+    assert [item["value"] for item in results] == [
+        "preset:events",
+        "preset:clothes",
+        "preset:expressions",
+        "preset:custom",
+    ]
+    assert all(item["_wc_type"] == "preset_path" for item in results)
+
+
+def test_preset_autocomplete_missing_axis_returns_status_row(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+
+    results = bridge._search_preset_paths("preset:events")
+
+    assert len(results) == 1
+    assert results[0]["_wc_type"] == "preset_status"
+    assert results[0]["disabled"] is True
+
+
+def test_preset_autocomplete_payload_passes_event_context(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    captured = {}
+
+    class _FakePresetInputBridge:
+        def __init__(self, _root, *, context=None):
+            captured["context"] = context
+
+        def suggest(self, token, limit=12):
+            captured["token"] = token
+            captured["limit"] = limit
+            return {
+                "axis": "events",
+                "stage": "category",
+                "dataReady": True,
+                "loadState": {"main": "ready", "message": "ready"},
+                "presetContext": {
+                    "ratingId": "q",
+                    "personId": "2girls",
+                    "ratingOptions": [{"id": "q", "label": "Q"}],
+                    "personOptions": [{"id": "2girls", "label": "2girls"}],
+                },
+                "suggestions": [
+                    {
+                        "tag": "Gaze",
+                        "value": "preset:events/expression%20action%3A%3Agaze",
+                        "_wc_type": "preset_path",
+                        "axis": "events",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(remote_api_server, "PresetInputBridge", _FakePresetInputBridge)
+    bridge = RemoteBridge(_AppContext())
+
+    payload = bridge._preset_autocomplete_payload(
+        "preset:events",
+        context={"ratingId": "q", "personId": "2girls"},
+    )
+
+    assert captured["context"] == {"ratingId": "q", "personId": "2girls"}
+    assert payload["preset"]["axis"] == "events"
+    assert payload["preset"]["context"]["personId"] == "2girls"
+    assert payload["results"][0]["tag"] == "Gaze"
+
+
 def test_vibe_cluster_load_clean_recreates_no_image_frames(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())

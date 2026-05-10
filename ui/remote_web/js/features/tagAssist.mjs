@@ -17,6 +17,7 @@ export function createTagAssistController({
   fmtCount,
   catStyle,
   showToast,
+  getEventPresetPanel,
 }) {
   const tagTooltip = tooltip;
   let lastLookupTag = '';
@@ -32,6 +33,11 @@ export function createTagAssistController({
   let acTimer = null;
   let lastAcQuery = '';
   let acTarget = null;
+  let presetAutocompleteMeta = null;
+  let presetEventContext = {ratingId: 's', personId: '1girl_solo'};
+  let presetPersonMenuOpen = false;
+  let presetEventSourceResults = [];
+  let presetEventSearch = '';
 
   function sendWs(payload) {
     const ws = getWs();
@@ -40,13 +46,152 @@ export function createTagAssistController({
     return true;
   }
 
+  function isPresetEventsQuery(query) {
+    return String(query || '').trim().toLowerCase().startsWith('preset:events');
+  }
+
+  function presetRequestPayload(query) {
+    const payload = {type: 'autocomplete_preset', query};
+    if (isPresetEventsQuery(query)) {
+      payload.presetContext = {...presetEventContext};
+    }
+    return payload;
+  }
+
+  function presetStatusRow(query, message, status = 'preset') {
+    return {
+      tag: String(status || 'preset'),
+      value: query,
+      count: 0,
+      desc: message || 'Event Preset data is not ready.',
+      group: 'preset/events',
+      cat: 'status',
+      _wc_type: 'preset_status',
+      disabled: true,
+      axis: 'events',
+      stage: 'status',
+    };
+  }
+
+  function showPresetEventStatus(query, message, status = 'loading') {
+    presetAutocompleteMeta = {
+      axis: 'events',
+      stage: status,
+      context: {...presetEventContext},
+      loadState: {main: status, message},
+      dataReady: false,
+    };
+    acResults = [presetStatusRow(query, message, status)];
+    acSel = 0;
+    acMode = true;
+    renderAutocomplete();
+  }
+
   function syncTooltipSide() {
     if (!tagTooltip || window.innerWidth < 768) return;
     const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
     tagTooltip.classList.toggle('left-side', !!inModule);
   }
 
+  function clearAutocompletePositionStyles() {
+    if (!tagTooltip) return;
+    tagTooltip.style.removeProperty('top');
+    tagTooltip.style.removeProperty('left');
+    tagTooltip.style.removeProperty('right');
+    tagTooltip.style.removeProperty('max-width');
+    tagTooltip.style.removeProperty('max-height');
+  }
+
+  function copyCaretMirrorStyle(source, mirror) {
+    const style = window.getComputedStyle(source);
+    [
+      'boxSizing', 'width', 'height', 'fontFamily', 'fontSize', 'fontWeight',
+      'fontStyle', 'letterSpacing', 'textTransform', 'lineHeight', 'paddingTop',
+      'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth',
+      'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+    ].forEach(name => {
+      mirror.style[name] = style[name];
+    });
+    mirror.style.whiteSpace = source.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre';
+    mirror.style.wordBreak = 'break-word';
+    mirror.style.overflowWrap = 'break-word';
+  }
+
+  function getInputCaretPoint(target) {
+    if (!target || target.selectionStart == null) return null;
+    const rect = target.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const mirror = document.createElement('div');
+    const marker = document.createElement('span');
+    mirror.setAttribute('aria-hidden', 'true');
+    mirror.style.position = 'fixed';
+    mirror.style.visibility = 'hidden';
+    mirror.style.pointerEvents = 'none';
+    mirror.style.left = `${rect.left}px`;
+    mirror.style.top = `${rect.top}px`;
+    mirror.style.width = `${rect.width}px`;
+    mirror.style.height = `${rect.height}px`;
+    mirror.style.overflow = 'hidden';
+    copyCaretMirrorStyle(target, mirror);
+    mirror.textContent = String(target.value || '').slice(0, target.selectionStart);
+    marker.textContent = '\u200b';
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    mirror.scrollTop = target.scrollTop || 0;
+    mirror.scrollLeft = target.scrollLeft || 0;
+    const markerRect = marker.getBoundingClientRect();
+    const point = {
+      left: markerRect.left,
+      top: markerRect.top,
+      bottom: markerRect.bottom,
+    };
+    mirror.remove();
+    return point;
+  }
+
+  function positionAutocompleteTooltip() {
+    if (!tagTooltip) return;
+    const target = acTarget || promptEdit;
+    const targetRect = target?.getBoundingClientRect?.();
+    const caret = getInputCaretPoint(target);
+    const viewport = window.visualViewport || {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetLeft: 0,
+      offsetTop: 0,
+    };
+    const margin = 8;
+    const gap = 5;
+    const fallbackLeft = targetRect ? targetRect.left : viewport.offsetLeft + margin;
+    const fallbackBottom = targetRect ? targetRect.bottom : viewport.offsetTop + 48;
+    const anchorLeft = Math.max(viewport.offsetLeft + margin, caret?.left ?? fallbackLeft);
+    const anchorBottom = caret?.bottom ?? fallbackBottom;
+    const maxWidth = Math.max(280, Math.min(560, viewport.width - margin * 2));
+    const measured = tagTooltip.getBoundingClientRect();
+    const width = Math.min(maxWidth, measured.width || maxWidth);
+    const maxLeft = viewport.offsetLeft + viewport.width - width - margin;
+    const left = Math.max(viewport.offsetLeft + margin, Math.min(anchorLeft, maxLeft));
+    const belowTop = anchorBottom + gap;
+    const maxHeightBelow = viewport.offsetTop + viewport.height - belowTop - margin;
+    const height = measured.height || 220;
+    const top = maxHeightBelow >= Math.min(height, 160)
+      ? belowTop
+      : Math.max(viewport.offsetTop + margin, (caret?.top ?? fallbackBottom) - height - gap);
+    const maxHeight = Math.max(120, viewport.offsetTop + viewport.height - top - margin);
+    tagTooltip.classList.remove('left-side');
+    tagTooltip.style.top = `${Math.round(top)}px`;
+    tagTooltip.style.left = `${Math.round(left)}px`;
+    tagTooltip.style.right = 'auto';
+    tagTooltip.style.maxWidth = `${Math.round(maxWidth)}px`;
+    tagTooltip.style.maxHeight = `${Math.round(maxHeight)}px`;
+  }
+
   function positionTagTooltip() {
+    if (acMode) {
+      positionAutocompleteTooltip();
+      return;
+    }
+    clearAutocompletePositionStyles();
     if (!tagTooltip || window.innerWidth < 768) {
       tagTooltip?.style.removeProperty('--tag-tooltip-top');
       tagTooltip?.style.removeProperty('--tag-tooltip-left');
@@ -520,7 +665,12 @@ export function createTagAssistController({
     const query = String(stripped || '').trim();
     if (!query) return '';
     const lower = query.toLowerCase();
-    if (allowTriggers && (lower.startsWith('__') || lower.startsWith('$') || lower.startsWith('vibe:'))) return query;
+    if (allowTriggers && (
+      lower.startsWith('__') ||
+      lower.startsWith('$') ||
+      lower.startsWith('vibe:') ||
+      lower.startsWith('preset:')
+    )) return query;
     for (const namespace of ['artist', 'character']) {
       const prefix = namespace + ':';
       if (prefix.startsWith(lower) && lower.length >= 2) return '';
@@ -540,7 +690,8 @@ export function createTagAssistController({
     const allowTriggers = target !== negEdit;
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
-    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && info.stripped.length < 2)) {
+    const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
+    if (!info || (!isChunkTrigger && !isVibeClusterTrigger && !isPresetTrigger && info.stripped.length < 2)) {
       hideAutocomplete();
       checkTagHint();
       return;
@@ -564,29 +715,58 @@ export function createTagAssistController({
         sendWs({type: 'autocomplete_chunk', query: s.slice(1).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('vibe:')) {
         sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
+      } else if (allowTriggers && s.toLowerCase().startsWith('preset:')) {
+        requestPresetAutocomplete(s);
       } else {
         sendWs({type: 'autocomplete', query: s});
       }
     }, 150);
   }
 
-  function onAutocompleteResult(m) {
+  function applyAutocompleteResult(m) {
     const q = lastAcQuery;
     const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
     const matchesChunk = q && q.startsWith('$') && m.query === q.slice(1).trim();
     const matchesVibeCluster = q && q.toLowerCase().startsWith('vibe:') && m.query === q.slice(5).trim();
-    if (!matchesWc && !matchesChunk && !matchesVibeCluster && m.query !== q) return;
+    const matchesPreset = q && q.toLowerCase().startsWith('preset:') && m.query === q;
+    if (!matchesWc && !matchesChunk && !matchesVibeCluster && !matchesPreset && m.query !== q) return false;
     const target = acTarget || promptEdit;
-    const results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+    let results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+    presetAutocompleteMeta = matchesPreset ? (m.preset || null) : null;
+    if (presetAutocompleteMeta?.axis === 'events') {
+      presetEventSourceResults = results;
+      results = filteredPresetEventResults();
+    } else {
+      presetEventSourceResults = [];
+      presetEventSearch = '';
+    }
+    const context = presetAutocompleteMeta?.context || {};
+    if (context.ratingId || context.personId) {
+      presetEventContext = {
+        ratingId: context.ratingId || presetEventContext.ratingId,
+        personId: context.personId || presetEventContext.personId,
+      };
+    }
     if (!results.length) {
       hideAutocomplete();
       checkTagHint();
-      return;
+      return true;
     }
     acResults = results;
-    acSel = results.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster') ? 0 : -1;
+    acSel = results.some(r => (
+      r._wc_type === 'chunk' ||
+      r._wc_type === 'chunk_group' ||
+      r._wc_type === 'vibe_cluster' ||
+      r._wc_type === 'preset_path' ||
+      r._wc_type === 'preset_status'
+    )) ? 0 : -1;
     acMode = true;
     renderAutocomplete();
+    return true;
+  }
+
+  function onAutocompleteResult(m) {
+    applyAutocompleteResult(m);
   }
 
   function requestChunkAutocomplete(query) {
@@ -596,6 +776,48 @@ export function createTagAssistController({
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
     return sendWs({type: 'autocomplete_chunk', query: lastAcQuery.slice(1).trim()});
+  }
+
+  function requestPresetAutocomplete(query) {
+    const normalized = String(query || '').trim();
+    if (!normalized) return false;
+    const nextQuery = normalized.toLowerCase().startsWith('preset:') ? normalized : `preset:${normalized}`;
+    if (nextQuery !== lastAcQuery) presetEventSearch = '';
+    lastAcQuery = nextQuery;
+    window.clearTimeout(acTimer);
+    window.clearTimeout(tagLookupTimer);
+    if (isPresetEventsQuery(lastAcQuery)) {
+      void requestEventPresetAutocomplete(lastAcQuery);
+      return true;
+    }
+    return sendWs(presetRequestPayload(lastAcQuery));
+  }
+
+  async function requestEventPresetAutocomplete(query) {
+    const requestQuery = String(query || '').trim();
+    const panel = getEventPresetPanel?.();
+    if (!panel || typeof panel.getPresetAutocompletePayload !== 'function') {
+      showPresetEventStatus(requestQuery, 'Event Preset page is not loaded yet.', 'unavailable');
+      return false;
+    }
+    showPresetEventStatus(requestQuery, 'Loading Event Preset page...', 'loading');
+    try {
+      const payload = await panel.getPresetAutocompletePayload(requestQuery, {
+        context: {...presetEventContext},
+        limit: 500,
+      });
+      if (lastAcQuery !== requestQuery) return true;
+      return applyAutocompleteResult({
+        type: 'autocomplete_result',
+        query: payload?.query || requestQuery,
+        results: payload?.results || [],
+        preset: payload?.preset || {},
+      });
+    } catch (error) {
+      if (lastAcQuery !== requestQuery) return false;
+      showPresetEventStatus(requestQuery, error?.message || 'Event Preset page load failed.', 'error');
+      return false;
+    }
   }
 
   function chunkPreviewHtml(result) {
@@ -614,8 +836,235 @@ export function createTagAssistController({
       '<pre class="chunk-ac-preview-body">' + escHtml(body) + '</pre>';
   }
 
+  function renderPresetEventToolbar(context) {
+    const ratingOptions = Array.isArray(context?.ratingOptions) && context.ratingOptions.length
+      ? context.ratingOptions
+      : [
+          {id: 'g', label: 'G', name: 'General'},
+          {id: 's', label: 'S', name: 'Sensitive'},
+          {id: 'q', label: 'Q', name: 'Questionable'},
+          {id: 'e', label: 'E', name: 'Explicit'},
+        ];
+    const personOptions = Array.isArray(context?.personOptions) && context.personOptions.length
+      ? context.personOptions
+      : [{id: presetEventContext.personId, label: presetEventContext.personId.replace(/_/g, ' ')}];
+    const selectedRating = presetEventContext.ratingId || context?.ratingId || 's';
+    const selectedPerson = presetEventContext.personId || context?.personId || '1girl_solo';
+    const selectedPersonOption = personOptions.find(option => String(option.id || '') === selectedPerson) || personOptions[0] || {};
+    const selectedPersonLabel = selectedPersonOption.label || selectedPerson.replace(/_/g, ' ');
+    const ratingHtml = ratingOptions.map(option => {
+      const id = String(option.id || '').toLowerCase();
+      const label = option.label || id.toUpperCase();
+      const active = id === selectedRating ? ' active' : '';
+      return `<button type="button" class="preset-event-rating${active}" data-rating="${escHtml(id)}" title="${escHtml(option.name || label)}">${escHtml(label)}</button>`;
+    }).join('');
+    const personHtml = personOptions.map(option => {
+      const id = String(option.id || '');
+      const selected = id === selectedPerson ? ' active' : '';
+      const label = option.label || id.replace(/_/g, ' ');
+      return `<button type="button" class="preset-event-person-option${selected}" data-person="${escHtml(id)}" role="option" aria-selected="${id === selectedPerson ? 'true' : 'false'}">${escHtml(label)}</button>`;
+    }).join('');
+    return '<div class="preset-event-toolbar">' +
+      `<div class="preset-event-ratings">${ratingHtml}</div>` +
+      `<div class="preset-event-person-menu${presetPersonMenuOpen ? ' open' : ''}">` +
+        `<button type="button" class="preset-event-person-trigger" aria-haspopup="listbox" aria-expanded="${presetPersonMenuOpen ? 'true' : 'false'}">` +
+          `<span>${escHtml(selectedPersonLabel)}</span><span class="preset-event-person-caret" aria-hidden="true"></span>` +
+        '</button>' +
+        `<div class="preset-event-person-options" role="listbox">${personHtml}</div>` +
+      '</div>' +
+      '</div>';
+  }
+
+  function eventPresetDisplayTag(row) {
+    return row.tag || row.label || row.value || '';
+  }
+
+  function presetEventParentToken(token) {
+    const raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith('preset:events')) return '';
+    const path = raw.slice('preset:events'.length).replace(/^\/+/, '');
+    const segments = path ? path.split('/').filter(Boolean) : [];
+    if (!segments.length) return '';
+    const parent = segments.slice(0, -1);
+    return `preset:events${parent.length ? '/' + parent.join('/') : ''}`;
+  }
+
+  function presetEventResultMatches(row, query) {
+    const needle = String(query || '').trim().toLowerCase();
+    if (!needle) return true;
+    const tags = Array.isArray(row?.tags) ? row.tags.join(' ') : '';
+    const haystack = [
+      row?.tag,
+      row?.label,
+      row?.desc,
+      row?.prompt,
+      row?.value,
+      row?.id,
+      tags,
+    ].join(' ').toLowerCase();
+    return haystack.includes(needle);
+  }
+
+  function filteredPresetEventResults() {
+    return (presetEventSourceResults || []).filter(row => presetEventResultMatches(row, presetEventSearch));
+  }
+
+  function presetEventStageText(stage) {
+    const normalized = String(stage || '').toLowerCase();
+    if (normalized === 'category') return 'Category';
+    if (normalized === 'subcategory') return 'Subcategory';
+    if (normalized === 'item') return 'Main item';
+    if (normalized === 'combo') return 'Observed combos';
+    if (normalized === 'loading') return 'Loading';
+    if (normalized === 'error') return 'Error';
+    if (normalized === 'status') return 'Status';
+    return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Preset';
+  }
+
+  function renderPresetEventStageLine() {
+    const stage = presetAutocompleteMeta?.stage || '';
+    const crumbs = Array.isArray(presetAutocompleteMeta?.crumbs) ? presetAutocompleteMeta.crumbs : [];
+    const path = ['Events', ...crumbs.map(crumb => crumb?.label).filter(Boolean)];
+    const canBack = !!presetEventParentToken(lastAcQuery);
+    const total = presetEventSourceResults.length;
+    const visible = acResults.length;
+    const countText = presetEventSearch && total !== visible ? ` ${visible}/${total}` : (total ? ` ${total}` : '');
+    const pathHtml = path.map((part, index) => {
+      const cls = index === path.length - 1 ? ' current' : '';
+      return `<span class="preset-event-stage-part${cls}">${escHtml(part)}</span>`;
+    }).join('<span class="preset-event-stage-sep">/</span>');
+    return '<div class="preset-event-stage-line">' +
+      `<button type="button" class="preset-event-back" data-preset-event-back ${canBack ? '' : 'disabled'} title="Back">‹</button>` +
+      `<span class="preset-event-stage-path">${pathHtml}</span>` +
+      `<span class="preset-event-stage-next">${escHtml(presetEventStageText(stage) + countText)}</span>` +
+      `<input class="preset-event-inline-search" data-preset-event-search value="${escHtml(presetEventSearch)}" placeholder="search" autocomplete="off" spellcheck="false">` +
+      '</div>';
+  }
+
+  function renderPresetEventAutocomplete() {
+    const context = presetAutocompleteMeta?.context || {};
+    let html = '<div class="preset-event-picker">' +
+      renderPresetEventToolbar(context) +
+      renderPresetEventStageLine() +
+      '<div class="tag-ac-list preset-event-list">';
+    acResults.forEach((r, i) => {
+      const sel = i === acSel ? ' selected' : '';
+      const disabled = r._wc_type === 'preset_status' || r.disabled;
+      const itemClass = disabled ? ' disabled' : '';
+      const countText = r.count ? fmtCount(r.count || 0) : '';
+      html += `<div class="tag-ac-item preset-event-item${itemClass}${sel}" data-idx="${i}">` +
+        `<span class="tag-ac-tag">${escHtml(eventPresetDisplayTag(r))}</span>` +
+        `<span class="tag-ac-count">${escHtml(countText)}</span>` +
+        '</div>';
+    });
+    if (!acResults.length) {
+      html += '<div class="preset-event-empty">No matches</div>';
+    }
+    html += '</div></div>';
+    tagTooltip.innerHTML = html;
+    tagTooltip.classList.add('open', 'ac-mode', 'preset-event-mode');
+    tagTooltip.classList.remove('chunk-ac-mode');
+    positionTagTooltip();
+
+    const toolbar = tagTooltip.querySelector('.preset-event-toolbar');
+    if (toolbar) toolbar.addEventListener('mousedown', e => e.preventDefault());
+    const backButton = tagTooltip.querySelector('[data-preset-event-back]');
+    if (backButton) {
+      backButton.addEventListener('mousedown', e => e.preventDefault());
+      backButton.addEventListener('click', e => {
+        e.preventDefault();
+        if (backButton.disabled) return;
+        const parentToken = presetEventParentToken(lastAcQuery);
+        if (!parentToken) return;
+        const target = acTarget || promptEdit;
+        const info = getActiveTokenInfo(target);
+        if (info) swapToken(target, info, parentToken);
+        presetPersonMenuOpen = false;
+        presetEventSearch = '';
+        requestPresetAutocomplete(parentToken);
+      });
+    }
+    const searchInput = tagTooltip.querySelector('[data-preset-event-search]');
+    if (searchInput) {
+      searchInput.addEventListener('mousedown', e => e.stopPropagation());
+      searchInput.addEventListener('click', e => e.stopPropagation());
+      searchInput.addEventListener('input', () => {
+        presetEventSearch = searchInput.value || '';
+        acResults = filteredPresetEventResults();
+        acSel = acResults.length ? 0 : -1;
+        renderAutocomplete();
+        const nextInput = tagTooltip.querySelector('[data-preset-event-search]');
+        if (nextInput) {
+          nextInput.focus({preventScroll: true});
+          nextInput.selectionStart = nextInput.selectionEnd = nextInput.value.length;
+        }
+      });
+      searchInput.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if ((e.key === 'Enter' || e.key === 'Tab') && acSel >= 0) {
+          e.preventDefault();
+          selectAutocomplete(acSel);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          presetEventSearch = '';
+          acResults = filteredPresetEventResults();
+          acSel = acResults.length ? 0 : -1;
+          renderAutocomplete();
+          (acTarget || promptEdit)?.focus?.({preventScroll: true});
+        }
+      });
+    }
+    tagTooltip.querySelectorAll('.preset-event-rating').forEach(button => {
+      button.addEventListener('mousedown', e => e.preventDefault());
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        const nextRating = button.dataset.rating || presetEventContext.ratingId;
+        if (!nextRating || nextRating === presetEventContext.ratingId) return;
+        presetPersonMenuOpen = false;
+        presetEventSearch = '';
+        presetEventContext = {...presetEventContext, ratingId: nextRating};
+        renderAutocomplete();
+        requestPresetAutocomplete(lastAcQuery);
+      });
+    });
+    const personTrigger = tagTooltip.querySelector('.preset-event-person-trigger');
+    if (personTrigger) {
+      personTrigger.addEventListener('mousedown', e => e.preventDefault());
+      personTrigger.addEventListener('click', e => {
+        e.preventDefault();
+        presetPersonMenuOpen = !presetPersonMenuOpen;
+        renderAutocomplete();
+      });
+    }
+    tagTooltip.querySelectorAll('.preset-event-person-option').forEach(button => {
+      button.addEventListener('mousedown', e => e.preventDefault());
+      button.addEventListener('click', e => {
+        e.preventDefault();
+        const nextPerson = button.dataset.person || presetEventContext.personId;
+        if (!nextPerson || nextPerson === presetEventContext.personId) return;
+        presetPersonMenuOpen = false;
+        presetEventSearch = '';
+        presetEventContext = {...presetEventContext, personId: nextPerson};
+        renderAutocomplete();
+        requestPresetAutocomplete(lastAcQuery);
+      });
+    });
+    tagTooltip.querySelectorAll('.preset-event-item').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        presetPersonMenuOpen = false;
+        const idx = +el.dataset.idx;
+        if (Number.isInteger(idx)) selectAutocomplete(idx);
+      });
+    });
+  }
+
   function renderAutocomplete() {
     hideTagChipInfoTooltip();
+    if (presetAutocompleteMeta?.axis === 'events') {
+      renderPresetEventAutocomplete();
+      return;
+    }
     const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster');
     let html = chunkMode ? '<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list">' : '<div class="tag-ac-list">';
     acResults.forEach((r, i) => {
@@ -625,12 +1074,15 @@ export function createTagAssistController({
       const prefix = wcType === 'wildcard' ? '__' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : ''));
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
+      const displayTag = wcType === 'preset_path'
+        ? (r.value || r.tag || '')
+        : (wcType === 'preset_status' ? (r.desc || r.tag || '') : prefix + r.tag + suffix);
       const metaText = wcType === 'chunk'
         ? (r.group || '')
         : (wcType ? (r.desc || '') : fmtCount(r.count));
       const inlinePreview = wcType === 'chunk_group' ? (r.preview || '') : '';
       html += `<div class="tag-ac-item${itemClass}${sel}" data-idx="${i}">` +
-        `<span class="tag-ac-tag"${tagColor}>${escHtml(prefix + r.tag + suffix)}</span>` +
+        `<span class="tag-ac-tag"${tagColor}>${escHtml(displayTag)}</span>` +
         `<span class="tag-ac-group">${escHtml(r.group || '')}</span>` +
         `<span class="tag-ac-count">${escHtml(metaText)}</span>` +
         (chunkMode && inlinePreview ? `<span class="chunk-ac-inline-preview">${escHtml(inlinePreview)}</span>` : '') +
@@ -641,6 +1093,7 @@ export function createTagAssistController({
       : '</div>';
     tagTooltip.innerHTML = html;
     tagTooltip.classList.add('open', 'ac-mode');
+    tagTooltip.classList.remove('preset-event-mode');
     tagTooltip.classList.toggle('chunk-ac-mode', chunkMode);
     syncTooltipSide();
     positionTagTooltip();
@@ -663,6 +1116,7 @@ export function createTagAssistController({
   function selectAutocomplete(idx) {
     const r = acResults[idx];
     if (!r) return;
+    if (r.disabled) return;
     const target = acTarget || promptEdit;
     const info = getActiveTokenInfo(target);
     if (!info) return;
@@ -694,6 +1148,26 @@ export function createTagAssistController({
     if (r._wc_type === 'vibe_cluster') {
       swapToken(target, info, r.value || `vibe:${r.tag}`);
       hideAutocomplete();
+      return;
+    }
+    if (r._wc_type === 'preset_status') {
+      return;
+    }
+    if (r._wc_type === 'preset_path') {
+      const presetToken = r.value || `preset:${r.tag}`;
+      swapToken(target, info, presetToken);
+      if (r.final) {
+        hideAutocomplete();
+        return;
+      }
+      acMode = true;
+      acResults = [];
+      acSel = -1;
+      tagTooltip.innerHTML = '<div class="chunk-ac-loading">Loading preset items...</div>';
+      tagTooltip.classList.add('open', 'ac-mode');
+      tagTooltip.classList.remove('chunk-ac-mode');
+      positionTagTooltip();
+      requestPresetAutocomplete(presetToken);
       return;
     }
     if (getMode() !== 'NAI') {
@@ -742,9 +1216,14 @@ export function createTagAssistController({
     acResults = [];
     acSel = -1;
     lastAcQuery = '';
+    presetAutocompleteMeta = null;
+    presetPersonMenuOpen = false;
+    presetEventSourceResults = [];
+    presetEventSearch = '';
     window.clearTimeout(acTimer);
     hideTagChipInfoTooltip();
-    tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode');
+    tagTooltip.classList.remove('open', 'ac-mode', 'chunk-ac-mode', 'preset-event-mode');
+    clearAutocompletePositionStyles();
   }
 
   function bindTagAssist(textarea, options = {}) {
@@ -830,7 +1309,7 @@ export function createTagAssistController({
     });
     textarea.addEventListener('blur', () => {
       window.setTimeout(() => {
-        if (document.activeElement !== textarea) {
+        if (document.activeElement !== textarea && !tagTooltip.contains(document.activeElement)) {
           hideAutocomplete();
           hideTagChipInfoTooltip();
           tagTooltip.classList.remove('open', 'ac-mode');

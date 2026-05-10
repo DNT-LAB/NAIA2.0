@@ -124,6 +124,27 @@ export function createEventPresetPanel({
   if (!root || !overlay) return null;
   const MIN_SEARCH_LENGTH = 2;
   const CLOTHES_PAIR_MODE = 'Balanced';
+  const EVENT_SHORTCUT_NOISE_TAGS = new Set([
+    'looking at viewer',
+    'solo',
+    'simple background',
+    'white background',
+    'transparent background',
+    'upper body',
+    'portrait',
+    'cowboy shot',
+    'full body',
+  ]);
+  const EVENT_SHORTCUT_IDENTITY_TAGS = new Set([
+    '1girl',
+    '1boy',
+    '2girls',
+    '2boys',
+    'multiple girls',
+    'multiple boys',
+    'multiple girls multiple boys',
+    '1girl 1boy',
+  ]);
 
   let viewData = createEventPresetFixtureState();
   const query = new URLSearchParams(document?.defaultView?.location?.search || '');
@@ -225,6 +246,178 @@ export function createEventPresetPanel({
     return String(number);
   }
 
+  function decodePresetSegment(value) {
+    try {
+      return decodeURIComponent(String(value || ''));
+    } catch (_) {
+      return String(value || '');
+    }
+  }
+
+  function stripPresetNamespace(value) {
+    const raw = String(value || '').trim();
+    return raw.includes('::') ? raw.split('::').pop() : raw;
+  }
+
+  function normalizePresetMatch(value) {
+    return stripPresetNamespace(decodePresetSegment(value))
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function presetNodeCandidates(node) {
+    const rawValues = [node?.id, node?.tag, node?.label].filter(value => value != null && value !== '');
+    const values = new Set();
+    for (const raw of rawValues) {
+      const text = String(raw);
+      values.add(text);
+      values.add(stripPresetNamespace(text));
+    }
+    return Array.from(values).filter(Boolean);
+  }
+
+  function presetNodePathSegment(node) {
+    const raw = stripPresetNamespace(node?.id || node?.tag || node?.label || '');
+    return raw.replace(/\s+/g, '_').trim();
+  }
+
+  function presetPath(axis, segments = []) {
+    const encoded = segments
+      .map(segment => encodeURIComponent(String(segment || '').trim()))
+      .filter(Boolean);
+    return `preset:${axis}${encoded.length ? '/' + encoded.join('/') : ''}`;
+  }
+
+  function presetNodeMatches(node, query) {
+    const needle = normalizePresetMatch(query);
+    if (!needle) return true;
+    return presetNodeCandidates(node).some(candidate => normalizePresetMatch(candidate).includes(needle));
+  }
+
+  function findPresetNode(nodes, value) {
+    const needle = normalizePresetMatch(value);
+    if (!needle) return null;
+    return (nodes || []).find(node => presetNodeCandidates(node).some(candidate => normalizePresetMatch(candidate) === needle)) || null;
+  }
+
+  function parseEventPresetToken(token) {
+    let raw = String(token || '').trim();
+    if (!raw.toLowerCase().startsWith('preset:events')) raw = 'preset:events';
+    const tail = raw.slice('preset:events'.length);
+    const path = tail.startsWith('/') ? tail.slice(1) : tail;
+    return {
+      raw,
+      trailingSlash: path.endsWith('/'),
+      segments: path
+        ? path.split('/').filter(segment => segment !== '').map(decodePresetSegment)
+        : [],
+    };
+  }
+
+  function splitPromptTags(value) {
+    if (value == null) return [];
+    return String(value).split(',').map(part => part.trim()).filter(Boolean);
+  }
+
+  function comboShortcutTags(combo) {
+    if (Array.isArray(combo?.tags) && combo.tags.length) {
+      const tags = [];
+      combo.tags.forEach(tag => {
+        const text = String(tag || '').trim();
+        if (!text) return;
+        if (text.includes(',')) tags.push(...splitPromptTags(text));
+        else tags.push(text);
+      });
+      if (tags.length) return tags;
+    }
+    for (const key of ['prompt', 'comboText', 'label', 'tag', 'id']) {
+      const value = combo?.[key];
+      if (!value) continue;
+      const split = splitPromptTags(value);
+      return split.length ? split : [String(value).trim()];
+    }
+    return [];
+  }
+
+  function shortcutTagKey(value) {
+    return normalizePresetMatch(value);
+  }
+
+  function eventAnchorKeys(event) {
+    const values = [];
+    ['id', 'tag', 'label', 'canonicalLabel', 'prompt'].forEach(key => {
+      const value = event?.[key];
+      if (!value) return;
+      const split = splitPromptTags(value);
+      values.push(...(split.length ? split : [String(value)]));
+    });
+    if (Array.isArray(event?.promptAtoms)) values.push(...event.promptAtoms);
+    return new Set(values.map(shortcutTagKey).filter(Boolean));
+  }
+
+  function eventComboShortcutProfile(event, combo) {
+    const seen = new Set();
+    const tagKeys = [];
+    comboShortcutTags(combo).forEach(tag => {
+      const key = shortcutTagKey(tag);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      tagKeys.push(key);
+    });
+    const anchors = eventAnchorKeys(event || {});
+    const anchorHits = tagKeys.filter(tag => anchors.has(tag));
+    const noiseHits = tagKeys.filter(tag => EVENT_SHORTCUT_NOISE_TAGS.has(tag) && !anchors.has(tag));
+    const identityHits = tagKeys.filter(tag => EVENT_SHORTCUT_IDENTITY_TAGS.has(tag) && !anchors.has(tag));
+    const informativeTags = tagKeys.filter(tag => (
+      !anchors.has(tag) &&
+      !EVENT_SHORTCUT_NOISE_TAGS.has(tag) &&
+      !EVENT_SHORTCUT_IDENTITY_TAGS.has(tag)
+    ));
+    const singleton = tagKeys.length <= 1;
+    const count = Number(combo?.count || combo?.postCount || combo?.confidence || 0);
+    const score =
+      Math.log1p(Math.max(0, Number.isFinite(count) ? count : 0)) +
+      informativeTags.length * 4 +
+      anchorHits.length * 2 +
+      Math.min(tagKeys.length, 6) * 0.2 -
+      noiseHits.length * 2.5 -
+      identityHits.length * 1.5 -
+      (singleton ? 9 : 0) -
+      (anchorHits.length ? 0 : 3);
+    return {
+      score: Math.round(score * 10000) / 10000,
+      eligible: tagKeys.length >= 2 && informativeTags.length > 0,
+      reason: singleton ? 'single_tag' : (informativeTags.length ? 'shortcut' : 'low_information'),
+      tags: tagKeys,
+    };
+  }
+
+  function rankEventCombosForShortcut(event, combos) {
+    return (combos || [])
+      .filter(combo => combo && typeof combo === 'object')
+      .map((combo, index) => {
+        const profile = eventComboShortcutProfile(event, combo);
+        return {
+          ...combo,
+          _shortcutScore: profile.score,
+          _shortcutEligible: profile.eligible,
+          _shortcutReason: profile.reason,
+          _shortcutTags: profile.tags,
+          _shortcutOriginalIndex: index,
+        };
+      })
+      .sort((left, right) => {
+        const leftEligible = left._shortcutEligible ? 0 : 1;
+        const rightEligible = right._shortcutEligible ? 0 : 1;
+        if (leftEligible !== rightEligible) return leftEligible - rightEligible;
+        if (right._shortcutScore !== left._shortcutScore) return right._shortcutScore - left._shortcutScore;
+        if (Number(right.count || 0) !== Number(left.count || 0)) return Number(right.count || 0) - Number(left.count || 0);
+        return left._shortcutOriginalIndex - right._shortcutOriginalIndex;
+      });
+  }
+
   function displayCount(item) {
     return item?.displayCount || formatCount(item?.count || 0);
   }
@@ -267,6 +460,49 @@ export function createEventPresetPanel({
       payload.promptPlan = promptPlan();
     }
     return payload;
+  }
+
+  function autocompleteContextPayload() {
+    const ratingOptions = Array.isArray(viewData?.ratings) && viewData.ratings.length
+      ? viewData.ratings
+      : [
+        {id: 'g', label: 'G'},
+        {id: 's', label: 'S'},
+        {id: 'q', label: 'Q'},
+        {id: 'e', label: 'E'},
+      ];
+    const personOptions = Array.isArray(viewData?.persons) && viewData.persons.length
+      ? viewData.persons
+      : [{id: state.personId || '1girl_solo', label: String(state.personId || '1girl_solo').replace(/_/g, ' ')}];
+    return {
+      ratingId: state.ratingId || 's',
+      personId: state.personId || '1girl_solo',
+      ratingOptions,
+      personOptions,
+    };
+  }
+
+  function applyAutocompleteContext(context = {}) {
+    let changed = false;
+    const nextRating = String(context.ratingId || state.ratingId || 's').toLowerCase();
+    const nextPerson = String(context.personId || state.personId || '1girl_solo');
+    if (nextRating && nextRating !== state.ratingId) {
+      state.ratingId = nextRating;
+      changed = true;
+    }
+    if (nextPerson && nextPerson !== state.personId) {
+      state.personId = nextPerson;
+      changed = true;
+    }
+    if (changed) {
+      state.categoryId = '';
+      state.subcategoryId = '';
+      state.eventId = '';
+      state.comboId = '';
+      state.recommendedTagIds = new Set();
+      state.promptDirty = false;
+    }
+    return changed;
   }
 
   function randomIndex(length) {
@@ -545,6 +781,252 @@ export function createEventPresetPanel({
       renderAll();
       showToast?.(error?.message || 'Event Preset 선택 데이터를 불러오지 못했습니다.', 'error');
     }
+  }
+
+  function eventPresetStatusRow(token, message, status = 'preset') {
+    return {
+      tag: String(status || 'preset'),
+      value: token,
+      count: 0,
+      desc: message || 'Event Preset data is not ready.',
+      group: 'preset/events',
+      cat: 'status',
+      _wc_type: 'preset_status',
+      disabled: true,
+      axis: 'events',
+      stage: 'status',
+    };
+  }
+
+  function eventPresetRowLabel(node) {
+    const raw = stripPresetNamespace(node?.label || node?.tag || node?.id || '').replace(/_/g, ' ').trim();
+    return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : '';
+  }
+
+  function eventPresetCrumb(node, stage) {
+    return {
+      id: String(node?.id || node?.tag || node?.label || ''),
+      label: eventPresetRowLabel(node),
+      stage,
+    };
+  }
+
+  function eventPresetRowDesc(node, stage) {
+    if (stage === 'category') return `${(node?.subcategories || []).length} subcategories`;
+    if (stage === 'subcategory') return `${(node?.events || []).length} items`;
+    if (stage === 'item') return (node?.promptAtoms || []).join(', ');
+    return comboPromptText(node);
+  }
+
+  function eventPresetSuggestionRows(nodes, stage, parentSegments, limit, options = {}) {
+    const query = String(parentSegments.query || '');
+    const pathParents = parentSegments.path || [];
+    const sourceNodes = stage === 'combo'
+      ? rankEventCombosForShortcut(options.event || {}, nodes || [])
+      : (nodes || []);
+    return sourceNodes
+      .filter(node => presetNodeMatches(node, query))
+      .slice(0, limit)
+      .map(node => {
+        const segment = presetNodePathSegment(node);
+        const final = stage === 'combo';
+        const value = presetPath('events', [...pathParents, segment]);
+        return {
+          tag: eventPresetRowLabel(node),
+          value,
+          count: Number(node?.count || 0),
+          desc: eventPresetRowDesc(node, stage),
+          group: 'preset/events',
+          cat: stage,
+          _wc_type: 'preset_path',
+          axis: 'events',
+          stage,
+          final,
+          id: String(node?.id || node?.tag || node?.label || segment),
+          prompt: comboPromptText(node) || (node?.promptAtoms || []).join(', '),
+          tags: node?.tags || node?.promptAtoms || [],
+          shortcutScore: node?._shortcutScore,
+          shortcutEligible: node?._shortcutEligible,
+          shortcutReason: node?._shortcutReason,
+        };
+      });
+  }
+
+  function syncAutocompleteSelection(category = null, subcategory = null, event = null) {
+    let changed = false;
+    if (category?.id && state.categoryId !== category.id) {
+      state.categoryId = category.id;
+      changed = true;
+    }
+    if (subcategory?.id && state.subcategoryId !== subcategory.id) {
+      state.subcategoryId = subcategory.id;
+      changed = true;
+    } else if (!subcategory && changed) {
+      state.subcategoryId = '';
+    }
+    if (event?.id && state.eventId !== event.id) {
+      state.eventId = event.id;
+      state.comboId = event.observedCombos?.[0]?.id || '';
+      state.recommendedTagIds = new Set();
+      changed = true;
+    } else if (!event && changed) {
+      state.eventId = '';
+      state.comboId = '';
+    }
+    if (changed) {
+      state.promptDirty = false;
+      renderAll({preserveScroll: true});
+    }
+  }
+
+  async function ensureAutocompleteEventDetail(context) {
+    const event = context?.event;
+    if (!event?.id) return event || null;
+    if (Array.isArray(event.observedCombos) || event._detailLoaded) return event;
+    if (typeof provider.select !== 'function') return event;
+    const payload = {
+      ...selectedPayload({includeRecommendedTags: false}),
+      categoryId: context.category?.id || '',
+      subcategoryId: context.subcategory?.id || '',
+      eventId: event.id,
+      comboId: '',
+    };
+    const result = await provider.select(payload);
+    applySelectedPayload(result?.selected || payload);
+    if (result?.event) {
+      result.event._detailLoaded = true;
+      mergeEventDetail(result.event);
+    }
+    const merged = findContextInData(viewData, event.id)?.event || result?.event || event;
+    merged._detailLoaded = true;
+    return merged;
+  }
+
+  async function ensureEventPresetAutocompleteData(context = {}) {
+    state.activeAxis = 'events';
+    const contextChanged = applyAutocompleteContext(context);
+    if (contextChanged || !state.loaded) {
+      await loadBootstrap({showLoading: true});
+    } else {
+      renderAll({preserveScroll: true});
+    }
+  }
+
+  async function buildEventPresetAutocomplete(token, limit = 12) {
+    const parsed = parseEventPresetToken(token);
+    const allCategories = categories();
+    const categorySegment = parsed.segments[0] || '';
+    const category = findPresetNode(allCategories, categorySegment);
+    if (!category) {
+      return {
+        stage: 'category',
+        crumbs: [],
+        rows: eventPresetSuggestionRows(allCategories, 'category', {query: categorySegment, path: []}, limit),
+      };
+    }
+
+    const categoryPath = [presetNodePathSegment(category)];
+    const categoryCrumbs = [eventPresetCrumb(category, 'category')];
+    syncAutocompleteSelection(category, null, null);
+    if (parsed.segments.length < 2) {
+      return {
+        stage: 'subcategory',
+        crumbs: categoryCrumbs,
+        rows: eventPresetSuggestionRows(category.subcategories || [], 'subcategory', {query: '', path: categoryPath}, limit),
+      };
+    }
+
+    const subcategorySegment = parsed.segments[1] || '';
+    const subcategory = findPresetNode(category.subcategories || [], subcategorySegment);
+    if (!subcategory) {
+      return {
+        stage: 'subcategory',
+        crumbs: categoryCrumbs,
+        rows: eventPresetSuggestionRows(category.subcategories || [], 'subcategory', {
+          query: subcategorySegment,
+          path: categoryPath,
+        }, limit),
+      };
+    }
+
+    const subcategoryPath = [...categoryPath, presetNodePathSegment(subcategory)];
+    const subcategoryCrumbs = [...categoryCrumbs, eventPresetCrumb(subcategory, 'subcategory')];
+    syncAutocompleteSelection(category, subcategory, null);
+    if (parsed.segments.length < 3) {
+      return {
+        stage: 'item',
+        crumbs: subcategoryCrumbs,
+        rows: eventPresetSuggestionRows(subcategory.events || [], 'item', {query: '', path: subcategoryPath}, limit),
+      };
+    }
+
+    const eventSegment = parsed.segments[2] || '';
+    const event = findPresetNode(subcategory.events || [], eventSegment);
+    if (!event) {
+      return {
+        stage: 'item',
+        crumbs: subcategoryCrumbs,
+        rows: eventPresetSuggestionRows(subcategory.events || [], 'item', {
+          query: eventSegment,
+          path: subcategoryPath,
+        }, limit),
+      };
+    }
+
+    syncAutocompleteSelection(category, subcategory, event);
+    const detailedEvent = await ensureAutocompleteEventDetail({category, subcategory, event});
+    const eventPath = [...subcategoryPath, presetNodePathSegment(event)];
+    return {
+      stage: 'combo',
+      crumbs: [...subcategoryCrumbs, eventPresetCrumb(event, 'item')],
+      rows: eventPresetSuggestionRows(
+        detailedEvent?.observedCombos || [],
+        'combo',
+        {query: parsed.segments[3] || '', path: eventPath},
+        limit,
+        {event: detailedEvent || event},
+      ),
+    };
+  }
+
+  async function getPresetAutocompletePayload(token, {context = {}, limit = 12} = {}) {
+    const normalized = String(token || '').trim().toLowerCase().startsWith('preset:events')
+      ? String(token || '').trim()
+      : 'preset:events';
+    await ensureEventPresetAutocompleteData(context);
+    const loadState = {
+      main: dataAvailability().main || state.dataStatus || '',
+      message: dataAvailability().message || state.dataMessage || '',
+    };
+    if (!dataReady()) {
+      return {
+        query: normalized,
+        results: [eventPresetStatusRow(normalized, loadState.message || 'Event Preset data is not ready.', loadState.main || 'missing')],
+        preset: {
+          axis: 'events',
+          stage: 'status',
+          context: autocompleteContextPayload(),
+          loadState,
+          dataReady: false,
+        },
+      };
+    }
+    const payload = await buildEventPresetAutocomplete(normalized, limit);
+    const rows = payload.rows?.length
+      ? payload.rows
+      : [eventPresetStatusRow(normalized, 'No Event Preset items for this path.', 'empty')];
+    return {
+      query: normalized,
+      results: rows,
+        preset: {
+          axis: 'events',
+          stage: payload.stage || 'category',
+          crumbs: payload.crumbs || [],
+          context: autocompleteContextPayload(),
+          loadState,
+          dataReady: true,
+      },
+    };
   }
 
   function clothesReady() {
@@ -2984,6 +3466,7 @@ export function createEventPresetPanel({
       state.generating = !!generating;
       renderSelection();
     },
+    getPresetAutocompletePayload,
     getFixtureState: () => viewData,
   };
 }

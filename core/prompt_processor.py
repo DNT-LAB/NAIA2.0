@@ -196,8 +196,36 @@ class PromptProcessor:
     def _step_3_expand_wildcards(self, context: PromptContext) -> PromptContext:
         """와일드카드를 실제 태그로 치환하는 단계"""
         context.prefix_tags = self.wildcard_processor.expand_tags(context.prefix_tags, context)
+        context.prefix_tags = self._expand_preset_tokens(context.prefix_tags, context)
+        context.main_tags = self._expand_preset_tokens(context.main_tags, context)
         context.postfix_tags = self.wildcard_processor.expand_tags(context.postfix_tags, context)
+        context.postfix_tags = self._expand_preset_tokens(context.postfix_tags, context)
         return context
+
+    def _expand_preset_tokens(self, tags: list[str], context: PromptContext) -> list[str]:
+        expanded: list[str] = []
+        for tag in tags:
+            token = str(tag or "").strip()
+            if not token.lower().startswith("preset:"):
+                expanded.append(tag)
+                continue
+            resolver = self._preset_input_bridge()
+            result = resolver.resolve_prompt_token(token)
+            context.metadata.setdefault("preset_prompt_resolutions", []).append(result)
+            if result.get("applied"):
+                expanded.extend(result.get("tags") or [])
+            else:
+                expanded.append(tag)
+        return expanded
+
+    def _preset_input_bridge(self):
+        bridge = getattr(self, "_preset_bridge", None)
+        if bridge is None:
+            from pathlib import Path
+            from core.preset_input_bridge import PresetInputBridge
+            bridge = PresetInputBridge(Path.cwd())
+            self._preset_bridge = bridge
+        return bridge
 
     def _step_final_format(self, context: PromptContext) -> str:
         """모든 태그를 조합하여 최종 문자열로 포맷팅하는 단계"""

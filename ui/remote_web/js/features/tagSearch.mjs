@@ -12,16 +12,104 @@ export function createTagSearchController({
 }) {
   let timer = null;
   let composing = false;
+  let stableTimer = null;
+  let settleTimer = null;
+  let compositionState = {
+    active: false,
+    baseValue: '',
+    start: 0,
+    end: 0,
+    data: '',
+  };
+  const hangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+
+  function clearImeTimers() {
+    if (stableTimer) {
+      clearTimeoutFn(stableTimer);
+      stableTimer = null;
+    }
+    if (settleTimer) {
+      clearTimeoutFn(settleTimer);
+      settleTimer = null;
+    }
+  }
+
+  function captureCompositionAnchor() {
+    compositionState.active = true;
+    compositionState.baseValue = String(input.value || '');
+    const start = input.selectionStart != null ? input.selectionStart : compositionState.baseValue.length;
+    const end = input.selectionEnd != null ? input.selectionEnd : start;
+    compositionState.start = Math.max(0, Math.min(start, compositionState.baseValue.length));
+    compositionState.end = Math.max(compositionState.start, Math.min(end, compositionState.baseValue.length));
+  }
+
+  function compositionValue() {
+    if (!compositionState.active || !compositionState.data) return '';
+    const baseValue = String(compositionState.baseValue || '');
+    const start = Math.max(0, Math.min(compositionState.start, baseValue.length));
+    const end = Math.max(start, Math.min(compositionState.end, baseValue.length));
+    return baseValue.substring(0, start) + compositionState.data + baseValue.substring(end);
+  }
+
+  function currentQuery() {
+    const value = compositionState.active && compositionState.data ? compositionValue() : '';
+    return (value || input.value || '').trim();
+  }
+
+  function scheduleStableRetry() {
+    if (stableTimer) clearTimeoutFn(stableTimer);
+    const value = compositionValue();
+    if (!value || !hangulRe.test(value)) return;
+    stableTimer = setTimeoutFn(() => {
+      stableTimer = null;
+      if (!compositionState.active || !compositionState.data) return;
+      fireSearch();
+    }, 2000);
+  }
 
   input.addEventListener('compositionstart', () => {
+    clearImeTimers();
     composing = true;
+    compositionState.data = '';
+    captureCompositionAnchor();
   });
-  input.addEventListener('compositionend', () => {
+  input.addEventListener('compositionupdate', event => {
+    if (!compositionState.active) captureCompositionAnchor();
+    composing = true;
+    compositionState.data = String(event.data || '');
+    fireSearch();
+    scheduleStableRetry();
+  });
+  input.addEventListener('compositionend', event => {
+    if (!compositionState.active) captureCompositionAnchor();
+    compositionState.data = String(event.data || compositionState.data || '');
     composing = false;
     fireSearch();
+    if (stableTimer) {
+      clearTimeoutFn(stableTimer);
+      stableTimer = null;
+    }
+    settleTimer = setTimeoutFn(() => {
+      settleTimer = null;
+      compositionState.active = false;
+      compositionState.data = '';
+      fireSearch();
+    }, 50);
   });
-  input.addEventListener('input', () => {
-    if (!composing) fireSearch();
+  input.addEventListener('input', event => {
+    if (composing || event.isComposing) {
+      if (event.data) compositionState.data = String(event.data);
+      fireSearch();
+      scheduleStableRetry();
+      return;
+    }
+    compositionState.active = false;
+    compositionState.data = '';
+    if (stableTimer) {
+      clearTimeoutFn(stableTimer);
+      stableTimer = null;
+    }
+    fireSearch();
   });
 
   document.addEventListener('click', event => {
@@ -30,7 +118,7 @@ export function createTagSearchController({
 
   function fireSearch() {
     clearTimeoutFn(timer);
-    const query = input.value.trim();
+    const query = currentQuery();
     if (!query) {
       results.classList.remove('open');
       return;

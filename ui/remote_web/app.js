@@ -777,7 +777,7 @@ const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260505-search
   .catch(error => {
     console.error('Failed to initialize refine panel module', error);
   });
-const tagSearchReady = import('./js/features/tagSearch.mjs')
+const tagSearchReady = import('./js/features/tagSearch.mjs?v=20260510-ime-compose1')
   .then(({createTagSearchController}) => {
     tagSearchController = createTagSearchController({
       document,
@@ -4447,7 +4447,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-preset-stage-tools1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260510-ime-compose1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

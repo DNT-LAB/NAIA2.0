@@ -261,6 +261,68 @@ def test_tag_search_index_drops_fast_cache_misses_without_scoring(monkeypatch):
     assert calls == 0
 
 
+def test_tag_search_index_prioritizes_korean_keyword_over_description_text():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="multicolored hair",
+                freq=408728,
+                desc="두 가지 이상의 색으로 이루어진 머리.",
+                keywords=("여러 색 머리",),
+                search_blob="multicolored hair 두 가지 이상의 색으로 이루어진 머리",
+            ),
+            TagSearchEntry(
+                tag="eggplant",
+                freq=1112,
+                desc="보라색 가지 열매.",
+                keywords=("가지",),
+                search_blob="eggplant 가지",
+            ),
+            TagSearchEntry(
+                tag="branch",
+                freq=20000,
+                desc="나무에서 뻗은 가지.",
+                keywords=("나뭇가지",),
+                search_blob="branch 나뭇가지",
+            ),
+        ]
+    )
+
+    assert index.search_tags("가지", limit=5)[0] == "eggplant"
+
+
+def test_tag_search_index_matches_compact_hangul_keywords_without_losing_spaced_rank():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="fishnets",
+                freq=69403,
+                desc="다이아몬드 모양의 그물망 소재임.",
+                keywords=("망사스타킹", "피쉬넷"),
+                search_blob="fishnets 망사스타킹 피쉬넷",
+            ),
+            TagSearchEntry(
+                tag="fishnet pantyhose",
+                freq=29781,
+                desc="그물 모양으로 짜인 팬티스타킹임.",
+                keywords=("팬티스타킹", "망사 스타킹"),
+                search_blob="fishnet pantyhose 팬티스타킹 망사 스타킹",
+            ),
+            TagSearchEntry(
+                tag="fishnet bodystocking",
+                freq=754,
+                desc="망사 소재로 된 바디 스타킹.",
+                keywords=("바디 스타킹", "망사 바디 스타킹"),
+                search_blob="fishnet bodystocking 망사 바디 스타킹",
+            ),
+        ]
+    )
+
+    compact_results = index.search_tags("망사스타킹", limit=5)
+    assert compact_results[:2] == ["fishnets", "fishnet pantyhose"]
+    assert index.search_tags("망사 스타킹", limit=5)[0] == "fishnet pantyhose"
+
+
 def test_tag_search_entrypoints_split_fast_and_semantic_recall():
     entries = [
         TagSearchEntry(

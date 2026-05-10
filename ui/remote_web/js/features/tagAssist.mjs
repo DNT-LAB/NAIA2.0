@@ -38,6 +38,8 @@ export function createTagAssistController({
   let presetPersonMenuOpen = false;
   let presetEventSourceResults = [];
   let presetEventSearch = '';
+  const hangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+  const imeStates = new WeakMap();
 
   function sendWs(payload) {
     const ws = getWs();
@@ -477,9 +479,11 @@ export function createTagAssistController({
     });
   }
 
-  function getActiveTokenInfo(textarea) {
-    const text = textarea.value;
-    const pos = textarea.selectionStart != null ? textarea.selectionStart : -1;
+  function getActiveTokenInfo(textarea, source = null) {
+    const text = source?.text != null ? String(source.text) : textarea.value;
+    const pos = source?.pos != null
+      ? Number(source.pos)
+      : (textarea.selectionStart != null ? textarea.selectionStart : -1);
     if (pos < 0 || text.length === 0) return null;
     let start = text.lastIndexOf(',', pos - 1) + 1;
     let end = text.indexOf(',', pos);
@@ -497,6 +501,28 @@ export function createTagAssistController({
     stripped = stripped.trim();
     if (!stripped) return null;
     return { raw, stripped, start, end: rawEnd };
+  }
+
+  function getImeState(textarea) {
+    return textarea ? imeStates.get(textarea) : null;
+  }
+
+  function isImeComposing(textarea) {
+    const state = getImeState(textarea);
+    return !!(state && state.composing);
+  }
+
+  function compositionTextOverride(textarea) {
+    const state = getImeState(textarea);
+    if (!state?.active || !state.data) return null;
+    const baseValue = String(state.baseValue ?? textarea.value ?? '');
+    const start = Math.max(0, Math.min(Number(state.start || 0), baseValue.length));
+    const end = Math.max(start, Math.min(Number(state.end ?? start), baseValue.length));
+    const data = String(state.data || '');
+    return {
+      text: baseValue.substring(0, start) + data + baseValue.substring(end),
+      pos: start + data.length,
+    };
   }
 
   function stripAutocompleteTokenDecorators(raw) {
@@ -684,9 +710,9 @@ export function createTagAssistController({
     return query;
   }
 
-  function scheduleAutocomplete() {
-    const target = acTarget || promptEdit;
-    const info = getActiveTokenInfo(target);
+  function scheduleAutocomplete(options = {}) {
+    const target = options.target || acTarget || promptEdit;
+    const info = options.info || getActiveTokenInfo(target);
     const allowTriggers = target !== negEdit;
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
@@ -702,7 +728,7 @@ export function createTagAssistController({
       checkTagHint();
       return;
     }
-    if (query === lastAcQuery) return;
+    if (query === lastAcQuery && !options.force) return;
     lastAcQuery = query;
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
@@ -1118,6 +1144,7 @@ export function createTagAssistController({
     if (!r) return;
     if (r.disabled) return;
     const target = acTarget || promptEdit;
+    if (isImeComposing(target)) return;
     const info = getActiveTokenInfo(target);
     if (!info) return;
     let newTag = r.tag;
@@ -1229,9 +1256,74 @@ export function createTagAssistController({
   function bindTagAssist(textarea, options = {}) {
     if (!textarea) return;
     textarea._excludeE621Autocomplete = !!options.excludeE621;
-    let composing = false;
+    const imeState = {
+      composing: false,
+      active: false,
+      baseValue: '',
+      start: 0,
+      end: 0,
+      data: '',
+      stableTimer: null,
+      settleTimer: null,
+    };
+    imeStates.set(textarea, imeState);
     const allowChunkBridge = !options.disableChunkBridge;
     let lastContextPointer = {type: '', time: 0};
+    function clearImeTimers() {
+      if (imeState.stableTimer) {
+        window.clearTimeout(imeState.stableTimer);
+        imeState.stableTimer = null;
+      }
+      if (imeState.settleTimer) {
+        window.clearTimeout(imeState.settleTimer);
+        imeState.settleTimer = null;
+      }
+    }
+    function captureCompositionAnchor() {
+      imeState.active = true;
+      imeState.baseValue = String(textarea.value || '');
+      const start = textarea.selectionStart != null ? textarea.selectionStart : imeState.baseValue.length;
+      const end = textarea.selectionEnd != null ? textarea.selectionEnd : start;
+      imeState.start = Math.max(0, Math.min(start, imeState.baseValue.length));
+      imeState.end = Math.max(imeState.start, Math.min(end, imeState.baseValue.length));
+    }
+    function scheduleCompositionAutocomplete({force = false} = {}) {
+      const override = compositionTextOverride(textarea);
+      if (!override) return;
+      const info = getActiveTokenInfo(textarea, override);
+      if (!info) return;
+      acTarget = textarea;
+      scheduleAutocomplete({target: textarea, info, force});
+    }
+    function scheduleCompositionStableRetry() {
+      if (imeState.stableTimer) window.clearTimeout(imeState.stableTimer);
+      const override = compositionTextOverride(textarea);
+      if (!override || !hangulRe.test(override.text)) return;
+      imeState.stableTimer = window.setTimeout(() => {
+        imeState.stableTimer = null;
+        if (!imeState.active || !imeState.data) return;
+        scheduleCompositionAutocomplete({force: true});
+      }, 2000);
+    }
+    function scheduleCompositionSettle() {
+      if (imeState.settleTimer) window.clearTimeout(imeState.settleTimer);
+      const settle = () => {
+        imeState.settleTimer = null;
+        imeState.active = false;
+        imeState.data = '';
+        scheduleAutocomplete({target: textarea, force: true});
+      };
+      const requestFrame = typeof window.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame.bind(window)
+        : null;
+      if (requestFrame) {
+        requestFrame(() => {
+          imeState.settleTimer = window.setTimeout(settle, 50);
+        });
+      } else {
+        imeState.settleTimer = window.setTimeout(settle, 50);
+      }
+    }
     function hasTextSelection() {
       return textarea.selectionStart != null
         && textarea.selectionEnd != null
@@ -1268,15 +1360,46 @@ export function createTagAssistController({
       }
       return false;
     }
-    textarea.addEventListener('compositionstart', () => { composing = true; });
-    textarea.addEventListener('compositionend', () => {
-      composing = false;
-      scheduleAutocomplete();
+    textarea.addEventListener('compositionstart', () => {
+      clearImeTimers();
+      imeState.composing = true;
+      imeState.data = '';
+      captureCompositionAnchor();
+    });
+    textarea.addEventListener('compositionupdate', e => {
+      if (!imeState.active) captureCompositionAnchor();
+      imeState.composing = true;
+      imeState.data = String(e.data || '');
+      scheduleCompositionAutocomplete();
+      scheduleCompositionStableRetry();
+    });
+    textarea.addEventListener('compositionend', e => {
+      if (!imeState.active) captureCompositionAnchor();
+      imeState.data = String(e.data || imeState.data || '');
+      imeState.composing = false;
+      if (imeState.stableTimer) {
+        window.clearTimeout(imeState.stableTimer);
+        imeState.stableTimer = null;
+      }
+      scheduleCompositionAutocomplete({force: true});
+      scheduleCompositionSettle();
     });
     textarea.addEventListener('pointerdown', rememberContextPointer, true);
-    textarea.addEventListener('input', () => {
+    textarea.addEventListener('input', e => {
       acTarget = textarea;
-      if (!composing) scheduleAutocomplete();
+      if (imeState.composing || e.isComposing) {
+        if (e.data) imeState.data = String(e.data);
+        scheduleCompositionAutocomplete();
+        scheduleCompositionStableRetry();
+        return;
+      }
+      imeState.active = false;
+      imeState.data = '';
+      if (imeState.stableTimer) {
+        window.clearTimeout(imeState.stableTimer);
+        imeState.stableTimer = null;
+      }
+      scheduleAutocomplete({target: textarea});
     });
     textarea.addEventListener('click', () => {
       acTarget = textarea;
@@ -1317,6 +1440,7 @@ export function createTagAssistController({
       }, 200);
     });
     textarea.addEventListener('keydown', e => {
+      if (imeState.composing || e.isComposing || e.keyCode === 229) return;
       if (!acMode || !acResults.length) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();

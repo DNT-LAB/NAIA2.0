@@ -18,6 +18,7 @@ DEFAULT_KR_TAGS_PATH = PROJECT_ROOT / "data" / "KR_tags.parquet"
 _WEIGHT_PREFIX_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::\s*")
 _WEIGHT_ONLY_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?::+)?$")
 _TRAILING_WEIGHT_MARK_RE = re.compile(r"\s*::$")
+_HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 
 
 def _norm(value: Any) -> str:
@@ -29,6 +30,13 @@ def _norm(value: Any) -> str:
     except (TypeError, ValueError):
         pass
     return " ".join(str(value).replace("_", " ").strip().lower().split())
+
+
+def _compact_hangul(value: Any) -> str:
+    text = _norm(value)
+    if not text or not _HANGUL_RE.search(text):
+        return ""
+    return "".join(text.split())
 
 
 def _split_keywords(value: Any) -> list[str]:
@@ -557,6 +565,9 @@ class TagSearchIndex:
                 if not term:
                     continue
                 term_to_tags[term].add(tag)
+                compact_term = _compact_hangul(term)
+                if compact_term and compact_term != term:
+                    term_to_tags[compact_term].add(tag)
 
         return {term: frozenset(tags) for term, tags in term_to_tags.items()}
 
@@ -570,6 +581,7 @@ class TagSearchIndex:
         scan_substrings: bool = False,
     ) -> set[str]:
         candidates: set[str] = set()
+        compact_query = _compact_hangul(query)
 
         if query in self._entries:
             candidates.add(query)
@@ -596,6 +608,10 @@ class TagSearchIndex:
         term_matches = self._term_to_tags.get(query)
         if term_matches:
             candidates.update(term_matches)
+        if compact_query and compact_query != query:
+            compact_matches = self._term_to_tags.get(compact_query)
+            if compact_matches:
+                candidates.update(compact_matches)
 
         should_scan_terms = force_term_scan or (
             scan_substrings and not self._has_enough_candidates(candidates, limit)
@@ -664,12 +680,38 @@ class TagSearchIndex:
         elif query in tag:
             score += 650
 
-        if query in blob:
-            score += 300
-        elif query_tokens and all(token in blob for token in query_tokens):
+        keyword_terms = [_norm(keyword) for keyword in entry.keywords if _norm(keyword)]
+        keyword_blob = _norm(" ".join(keyword_terms))
+        compact_query = _compact_hangul(query)
+        compact_keywords = {
+            compact
+            for compact in (_compact_hangul(keyword) for keyword in keyword_terms)
+            if compact
+        }
+        desc = _norm(entry.desc)
+        category = _norm(entry.category)
+        search_blob = _norm(entry.search_blob)
+
+        if query in keyword_terms:
+            score += 760
+        elif compact_query and compact_query in compact_keywords:
+            score += 600
+        elif any(term.startswith(query) for term in keyword_terms):
+            score += 560
+        elif keyword_blob and query in keyword_blob:
+            score += 500
+        elif query_tokens and keyword_blob and all(token in keyword_blob for token in query_tokens):
+            score += 430
+        elif desc and query in desc:
             score += 220
+        elif query_tokens and desc and all(token in desc for token in query_tokens):
+            score += 160
         elif query_tokens and all(token in tag for token in query_tokens):
             score += 180
+        elif search_blob and query in search_blob:
+            score += 140
+        elif category and query in category:
+            score += 100
 
         if query_tokens:
             matched_tokens = sum(1 for token in query_tokens if token in blob)

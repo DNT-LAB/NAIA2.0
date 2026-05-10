@@ -10493,7 +10493,13 @@ class RemoteBridge(QObject):
             grp.sort(key=lambda x: x['count'], reverse=True)
         return (exact + starts + kr_kw + contains + desc_m)[:limit]
 
-    def _search_kr_metadata_fallback(self, query: str, limit: int = 20) -> list:
+    def _search_kr_metadata_fallback(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        allow_build: bool = True,
+    ) -> list:
         query = normalize_search_query(query)
         if not query or not self._has_hangul_text(query):
             return []
@@ -10503,6 +10509,11 @@ class RemoteBridge(QObject):
             return []
         self._load_kr_tags()
         if getattr(self, "_tag_search_index", None) is None:
+            return []
+        if (
+            not allow_build
+            and not self._tag_search_index.metadata_fallback_index_ready()
+        ):
             return []
         matches = self._tag_search_index.search_metadata_fallback(query, limit=limit)
         return [
@@ -11038,7 +11049,11 @@ class RemoteBridge(QObject):
         base_results = self._search_kr_tags(query, limit)
         translated = self._translate_autocomplete_query(query)
         if not translated:
-            metadata_rows = self._search_kr_metadata_fallback(query, min(limit, 8))
+            metadata_rows = self._search_kr_metadata_fallback(
+                query,
+                min(limit, 8),
+                allow_build=False,
+            )
             if metadata_rows:
                 return (metadata_rows + base_results)[:limit], ""
             return base_results, ""
@@ -11111,7 +11126,11 @@ class RemoteBridge(QObject):
             break
 
         metadata_evidence_rows: list[dict] = []
-        for row in self._search_kr_metadata_fallback(query, min(limit, 8)):
+        for row in self._search_kr_metadata_fallback(
+            query,
+            min(limit, 8),
+            allow_build=False,
+        ):
             item = dict(row)
             item["_metadata"] = True
             item["_rank_score"] = float(item.get("_metadata_score") or 0.0)
@@ -14675,6 +14694,8 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     def _bg_warmup_lazy_indices():
         try:
             bridge._load_kr_tags()
+            if bridge._tag_search_index is not None:
+                bridge._tag_search_index.warm_metadata_fallback_index()
         except Exception as e:
             print(f"🌐 Remote: KR_tags warmup 실패 — {e}")
         try:

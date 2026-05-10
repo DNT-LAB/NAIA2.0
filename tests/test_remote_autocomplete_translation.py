@@ -616,7 +616,7 @@ def test_autocomplete_translation_reranks_metadata_over_low_level_generic_match(
         ],
     }
     bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
-    bridge._search_kr_metadata_fallback = lambda query, limit=20: [
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: [
         {
             "tag": "lyre",
             "count": 798,
@@ -664,7 +664,7 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
         ],
     }
     bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
-    bridge._search_kr_metadata_fallback = lambda query, limit=20: [
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: [
         {
             "tag": "full-length zipper",
             "count": 1247,
@@ -689,3 +689,50 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
     assert merged[1]["_wc_type"] == "fallback_recommended"
     assert "girl" not in [row["tag"] for row in merged[:3]]
     assert "full-length zipper" in [row["tag"] for row in merged]
+
+
+def test_autocomplete_translation_does_not_build_metadata_index_on_live_path(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "a sharp spear is aimed at the girl.",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    rows = {
+        "날카로운 창이 소녀에게 노려지고 있음": [],
+        "a sharp spear is aimed at the girl": [],
+        "sharp spear": [],
+        "spear": [
+            {"tag": "spear", "count": 100, "desc": "", "group": "", "cat": ""},
+        ],
+        "sharp": [
+            {"tag": "sharp teeth", "count": 80, "desc": "", "group": "", "cat": ""},
+        ],
+        "girl": [
+            {"tag": "girl sandwich", "count": 50, "desc": "", "group": "", "cat": ""},
+        ],
+    }
+    bridge._search_kr_tags = lambda query, limit=20: rows.get(query, [])[:limit]
+    calls = []
+
+    def fake_metadata(query, limit=20, *, allow_build=True):
+        calls.append(allow_build)
+        if allow_build:
+            raise AssertionError("live autocomplete should not build metadata fallback index")
+        return []
+
+    bridge._search_kr_metadata_fallback = fake_metadata
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "날카로운 창이 소녀에게 노려지고 있음",
+        8,
+    )
+
+    assert translated == "a sharp spear is aimed at the girl."
+    assert calls == [False]
+    assert merged[0]["tag"] == "a sharp spear is aimed at the girl"
+    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert merged[1]["tag"] == "sharp spear"
+    assert merged[1]["_wc_type"] == "fallback_recommended"

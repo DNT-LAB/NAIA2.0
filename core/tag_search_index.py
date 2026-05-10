@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import dataclass
@@ -475,6 +476,7 @@ class TagSearchIndex:
         self._metadata_term_to_tags: dict[str, frozenset[str]] | None = None
         self._metadata_terms_by_tag: dict[str, dict[str, frozenset[str]]] | None = None
         self._metadata_text_by_tag: dict[str, dict[str, str]] | None = None
+        self._metadata_index_lock = threading.Lock()
 
     @classmethod
     def from_event_preset_assets(
@@ -857,14 +859,23 @@ class TagSearchIndex:
             return results[:limit]
         return results
 
+    def metadata_fallback_index_ready(self) -> bool:
+        return self._metadata_term_to_tags is not None
+
+    def warm_metadata_fallback_index(self) -> None:
+        self._ensure_metadata_candidate_index()
+
     def _ensure_metadata_candidate_index(self) -> None:
         if self._metadata_term_to_tags is not None:
             return
-        (
-            self._metadata_term_to_tags,
-            self._metadata_terms_by_tag,
-            self._metadata_text_by_tag,
-        ) = self._build_metadata_candidate_index()
+        with self._metadata_index_lock:
+            if self._metadata_term_to_tags is not None:
+                return
+            (
+                self._metadata_term_to_tags,
+                self._metadata_terms_by_tag,
+                self._metadata_text_by_tag,
+            ) = self._build_metadata_candidate_index()
 
     def _search(
         self,

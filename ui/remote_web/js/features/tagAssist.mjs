@@ -1314,6 +1314,12 @@ export function createTagAssistController({
     }
   }
 
+  function clearPendingAutocompleteTranslation(query = '') {
+    if (!query || lastTranslationRequestQuery === query) {
+      lastTranslationRequestQuery = '';
+    }
+  }
+
   function scheduleAutocompleteTranslation(query, allowTriggers) {
     clearAutocompleteTranslationTimer();
     if (!query || !hangulRe.test(query) || isAutocompleteControlQuery(query, allowTriggers)) return;
@@ -1322,7 +1328,11 @@ export function createTagAssistController({
       acTranslationTimer = null;
       if (lastAcQuery !== query) return;
       lastTranslationRequestQuery = query;
-      sendWs({type: 'autocomplete_translate', query});
+      if (!sendWs({type: 'autocomplete_translate', query})) {
+        clearPendingAutocompleteTranslation(query);
+        return;
+      }
+      window.setTimeout(() => clearPendingAutocompleteTranslation(query), 10000);
     }, 2000);
   }
 
@@ -1400,6 +1410,7 @@ export function createTagAssistController({
       r._wc_type === 'chunk' ||
       r._wc_type === 'chunk_group' ||
       r._wc_type === 'vibe_cluster' ||
+      r._wc_type === 'fallback_recommended' ||
       r._wc_type === 'preset_path' ||
       r._wc_type === 'preset_status'
     )) ? 0 : -1;
@@ -1409,6 +1420,9 @@ export function createTagAssistController({
   }
 
   function onAutocompleteResult(m) {
+    if (Object.prototype.hasOwnProperty.call(m || {}, 'translated_query')) {
+      clearPendingAutocompleteTranslation(m.query || '');
+    }
     applyAutocompleteResult(m);
   }
 

@@ -140,6 +140,7 @@ def make_bridge() -> RemoteBridge:
     bridge._kr_tags_loaded = False
     bridge._char_analysis = {}
     bridge._autocomplete_translation_cache = {}
+    bridge._autocomplete_result_cache = {}
     return bridge
 
 
@@ -268,6 +269,22 @@ def final_recommended_queries(translated: str, limit: int = 6) -> list[str]:
     return queries
 
 
+def search_with_fixed_translation(
+    bridge: RemoteBridge,
+    query: str,
+    limit: int = 12,
+    *,
+    reset_result_cache: bool = False,
+) -> list[dict[str, Any]]:
+    translated = FIXED_TRANSLATIONS.get(query, "")
+    if translated:
+        bridge._autocomplete_translation_cache[normalize_search_query(query)] = translated
+    if reset_result_cache:
+        bridge._autocomplete_result_cache.pop((normalize_search_query(query), int(limit or 0)), None)
+    rows, _ = bridge._search_kr_tags_with_translation(query, limit)
+    return rows
+
+
 def search_translation_levels_with_fixed_translation(bridge: RemoteBridge, query: str) -> list[dict[str, Any]]:
     translated = normalize_search_query(FIXED_TRANSLATIONS.get(query, ""))
     if not translated:
@@ -295,6 +312,24 @@ def first_tags(rows: list[dict[str, Any]], limit: int = 3) -> str:
     return ", ".join(tags) if tags else "-"
 
 
+def schema_rows(rows: list[dict[str, Any]], limit: int = 3) -> str:
+    values: list[str] = []
+    for row in rows[:limit]:
+        tag = str(row.get("tag") or "")
+        if not tag:
+            continue
+        candidate = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+        candidate_type = row.get("candidateType") or candidate.get("type") or "-"
+        source = row.get("source") or candidate.get("source") or "-"
+        score = row.get("autocompleteScore") or candidate.get("score")
+        try:
+            score_text = f"{float(score):.3f}"
+        except (TypeError, ValueError):
+            score_text = "-"
+        values.append(f"{tag} ({candidate_type}/{source}/{score_text})")
+    return ", ".join(values) if values else "-"
+
+
 def print_cost_table(blocks: list[TimedBlock]) -> None:
     print("\nCost summary")
     print("| block | calls | total ms | median ms | p95 ms | max ms |")
@@ -308,13 +343,14 @@ def print_cost_table(blocks: list[TimedBlock]) -> None:
 
 def print_sample_results(bridge: RemoteBridge, queries: list[str]) -> None:
     print("\nSample result comparison")
-    print("| query | current | fixed translation levels | indexed KR metadata | loose KR metadata | final recommended |")
-    print("|---|---|---|---|---|---|")
+    print("| query | current | fixed translation levels | indexed KR metadata | loose KR metadata | schema-aware final | final recommended |")
+    print("|---|---|---|---|---|---|---|")
     for query in queries:
         current = bridge._search_kr_tags(query, 12)
         translated_rows = search_translation_levels_with_fixed_translation(bridge, query)
         indexed_rows = bridge._search_kr_metadata_fallback(query, 12)
         loose_rows = loose_kr_metadata_search(bridge, query, 12)
+        final_rows = search_with_fixed_translation(bridge, query, 12, reset_result_cache=True)
         fallback = final_recommended_queries(FIXED_TRANSLATIONS.get(query, ""))
         print(
             "| "
@@ -325,6 +361,7 @@ def print_sample_results(bridge: RemoteBridge, queries: list[str]) -> None:
                     first_tags(translated_rows),
                     first_tags(indexed_rows),
                     first_tags(loose_rows),
+                    schema_rows(final_rows),
                     ", ".join(fallback[:3]) if fallback else "-",
                 ]
             )
@@ -376,13 +413,33 @@ def main() -> int:
         ),
         timed_block("indexed KR metadata fallback", queries, lambda q: bridge._search_kr_metadata_fallback(q, args.limit), args.repeats),
         timed_block("loose KR metadata scan", queries, lambda q: loose_kr_metadata_search(bridge, q, args.limit), args.repeats),
+    ]
+    blocks.append(
+        timed_block(
+            "schema-aware final fallback",
+            queries,
+            lambda q: search_with_fixed_translation(bridge, q, args.limit, reset_result_cache=True),
+            args.repeats,
+        )
+    )
+    for query in queries:
+        search_with_fixed_translation(bridge, query, args.limit, reset_result_cache=True)
+    blocks.append(
+        timed_block(
+            "schema-aware cached result",
+            queries,
+            lambda q: search_with_fixed_translation(bridge, q, args.limit),
+            args.repeats,
+        )
+    )
+    blocks.append(
         timed_block(
             "final recommended generation",
             queries,
             lambda q: final_recommended_queries(FIXED_TRANSLATIONS.get(q, "")),
             args.repeats,
-        ),
-    ]
+        )
+    )
     if args.network_translation:
         blocks.append(
             timed_block(

@@ -143,6 +143,26 @@ def test_api_status_does_not_force_setup_when_backend_exists():
     assert local["setup_required"] is False
 
 
+def test_api_status_exposes_autocomplete_warmup_and_cache_state():
+    bridge = RemoteBridge(_AppContext())
+    bridge._kr_tags_loaded = True
+    bridge._tag_search_index = SimpleNamespace(metadata_fallback_index_ready=lambda: True)
+    bridge._autocomplete_translation_cache = {"원본": "translated"}
+    bridge._autocomplete_result_cache = {("원본", 12): ([], "translated")}
+
+    local = bridge.get_api_status(ws=_ws("127.0.0.1"))
+
+    assert local["autocomplete"] == {
+        "kr_tags_loaded": True,
+        "metadata_fallback": {
+            "ready": True,
+            "live_path_allows_build": False,
+        },
+        "translation_cache_size": 1,
+        "result_cache_size": 1,
+    }
+
+
 def test_generation_error_clears_remote_generation_status():
     bridge = RemoteBridge(_AppContext())
     broadcasts = []

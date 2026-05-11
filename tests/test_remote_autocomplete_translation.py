@@ -181,6 +181,59 @@ def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch)
     )
 
 
+def test_autocomplete_translation_result_cache_reuses_scored_rows(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "fishnet stockings",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    bridge._autocomplete_result_cache = {}
+
+    calls = []
+    rows = {
+        "망사스타킹": [],
+        "fishnet stockings": [],
+        "fishnet": [
+            {
+                "tag": "fishnet pantyhose",
+                "count": 10,
+                "desc": "translated",
+                "group": "legwear",
+                "cat": "",
+            }
+        ],
+    }
+
+    def search(query, limit=20):
+        calls.append((query, limit))
+        return [dict(row) for row in rows.get(query, [])[:limit]]
+
+    bridge._search_kr_tags = search
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    first, first_translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "망사스타킹",
+        12,
+    )
+    call_count = len(calls)
+    first[0]["tag"] = "mutated"
+
+    second, second_translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "망사스타킹",
+        12,
+    )
+
+    assert first_translated == second_translated == "fishnet stockings"
+    assert len(calls) == call_count
+    assert second[0]["tag"] == "fishnet pantyhose"
+    assert second is not first
+    assert second[0] is not first[0]
+
+
 def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypatch):
     monkeypatch.setattr(
         remote_api_server,

@@ -36,6 +36,8 @@ export function createTagAssistController({
   let presetInlineSearchTimer = null;
   let lastAcQuery = '';
   let lastTranslationRequestQuery = '';
+  let lastTranslationRequestId = '';
+  let autocompleteTranslationRequestSeq = 0;
   let acTarget = null;
   let presetAutocompleteMeta = null;
   let presetEventContext = {ratingId: 's', personId: '1girl_solo'};
@@ -1380,10 +1382,16 @@ export function createTagAssistController({
     }
   }
 
-  function clearPendingAutocompleteTranslation(query = '') {
-    if (!query || lastTranslationRequestQuery === query) {
+  function clearPendingAutocompleteTranslation(query = '', requestId = '') {
+    if (!query && !requestId) {
       lastTranslationRequestQuery = '';
+      lastTranslationRequestId = '';
+      return;
     }
+    if (query && lastTranslationRequestQuery !== query) return;
+    if (requestId && lastTranslationRequestId !== requestId) return;
+    lastTranslationRequestQuery = '';
+    lastTranslationRequestId = '';
   }
 
   function hasPendingAutocompleteTranslation(query) {
@@ -1417,11 +1425,13 @@ export function createTagAssistController({
       acTranslationTimer = null;
       if (lastAcQuery !== query) return;
       lastTranslationRequestQuery = query;
-      if (!sendWs({type: 'autocomplete_translate', query})) {
-        clearPendingAutocompleteTranslation(query);
+      const requestId = `ac-tr-${Date.now()}-${++autocompleteTranslationRequestSeq}`;
+      lastTranslationRequestId = requestId;
+      if (!sendWs({type: 'autocomplete_translate', query, requestId})) {
+        clearPendingAutocompleteTranslation(query, requestId);
         return;
       }
-      window.setTimeout(() => clearPendingAutocompleteTranslation(query), 10000);
+      window.setTimeout(() => clearPendingAutocompleteTranslation(query, requestId), 10000);
     }, HANGUL_TRANSLATION_POLL_MS);
   }
 
@@ -1527,7 +1537,11 @@ export function createTagAssistController({
 
   function onAutocompleteResult(m) {
     if (Object.prototype.hasOwnProperty.call(m || {}, 'translated_query')) {
-      clearPendingAutocompleteTranslation(m.query || '');
+      const requestId = String(m.requestId || '');
+      if (requestId && requestId !== lastTranslationRequestId) {
+        return true;
+      }
+      clearPendingAutocompleteTranslation(m.query || '', requestId);
     }
     applyAutocompleteResult(m);
   }
@@ -2514,6 +2528,7 @@ export function createTagAssistController({
     acSel = -1;
     lastAcQuery = '';
     lastTranslationRequestQuery = '';
+    lastTranslationRequestId = '';
     visibleTranslatedAutocompleteQuery = '';
     presetAutocompleteMeta = null;
     presetPersonMenuOpen = false;

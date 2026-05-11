@@ -8,6 +8,7 @@ import io
 import json
 import asyncio
 import base64
+import copy
 import hashlib
 import math
 import mimetypes
@@ -64,6 +65,7 @@ _AUTOCOMPLETE_TRANSLATION_RULES_PATH = (
     / "tag_index"
     / "autocomplete_translation_rules.json"
 )
+_AUTOCOMPLETE_RESULT_CACHE_MAX = 128
 
 
 def _normalize_autocomplete_rule_token(value) -> str:
@@ -372,6 +374,7 @@ class RemoteBridge(QObject):
         self._tag_search_index: Optional[TagSearchIndex] = None
         self._tag_relation_ranker: Optional[TagRelationRanker] = None
         self._autocomplete_translation_cache: dict[str, str] = {}
+        self._autocomplete_result_cache: dict[tuple[str, int], tuple[list[dict], str]] = {}
         self._prompt_highlight_index_cache: Optional[dict] = None
         self._kr_tags_lock = threading.Lock()
         self._kr_tags_loaded = False
@@ -5285,6 +5288,7 @@ class RemoteBridge(QObject):
                 "webui": timestamps.get("webui_url_last_verified", ""),
                 "comfyui": timestamps.get("comfyui_url_last_verified", ""),
             },
+            "autocomplete": self._autocomplete_status_payload(),
         }
         cloudflared = self._get_cloudflared_status()
         payload["cloudflared_active"] = cloudflared["active"]
@@ -5299,6 +5303,30 @@ class RemoteBridge(QObject):
             payload["cloudflared_control_allowed"] = cf_allowed
             payload["cloudflared_control_block_reason"] = cf_reason
         return payload
+
+    def _autocomplete_status_payload(self) -> dict:
+        def safe_attr(name: str, default=None):
+            try:
+                return object.__getattribute__(self, name)
+            except (AttributeError, RuntimeError):
+                return default
+
+        index = safe_attr("_tag_search_index")
+        try:
+            metadata_ready = bool(index and index.metadata_fallback_index_ready())
+        except Exception:
+            metadata_ready = False
+        translation_cache = safe_attr("_autocomplete_translation_cache", {})
+        result_cache = safe_attr("_autocomplete_result_cache", {})
+        return {
+            "kr_tags_loaded": bool(safe_attr("_kr_tags_loaded", False)),
+            "metadata_fallback": {
+                "ready": metadata_ready,
+                "live_path_allows_build": False,
+            },
+            "translation_cache_size": len(translation_cache) if isinstance(translation_cache, dict) else 0,
+            "result_cache_size": len(result_cache) if isinstance(result_cache, dict) else 0,
+        }
 
     def _broadcast_api_status(self):
         """api_status 를 per-client 송신 (`setup_allowed` 가 IP별로 다름)."""
@@ -10738,6 +10766,40 @@ class RemoteBridge(QObject):
         self._autocomplete_translation_cache[query] = translated
         return translated
 
+    def _autocomplete_result_cache_get(self, query: str, limit: int) -> tuple[list[dict], str] | None:
+        try:
+            cache = object.__getattribute__(self, "_autocomplete_result_cache")
+        except (AttributeError, RuntimeError):
+            return None
+        if not isinstance(cache, dict):
+            return None
+        key = (normalize_search_query(query), int(limit or 0))
+        cached = cache.get(key)
+        if cached is None:
+            return None
+        rows, translated = cached
+        return copy.deepcopy(rows), translated
+
+    def _autocomplete_result_cache_set(
+        self,
+        query: str,
+        limit: int,
+        rows: list[dict],
+        translated: str,
+    ) -> tuple[list[dict], str]:
+        try:
+            cache = object.__getattribute__(self, "_autocomplete_result_cache")
+        except (AttributeError, RuntimeError):
+            cache = None
+        if not isinstance(cache, dict):
+            cache = {}
+            self._autocomplete_result_cache = cache
+        if len(cache) >= _AUTOCOMPLETE_RESULT_CACHE_MAX:
+            cache.clear()
+        key = (normalize_search_query(query), int(limit or 0))
+        cache[key] = (copy.deepcopy(rows), translated)
+        return rows, translated
+
     def _translation_search_query_levels(self, translated: str) -> list[list[str]]:
         normalized = normalize_search_query(translated)
         if not normalized:
@@ -11460,6 +11522,9 @@ class RemoteBridge(QObject):
         return not self._has_strong_translated_match(rows, simple_query)
 
     def _search_kr_tags_with_translation(self, query: str, limit: int = 20) -> tuple[list, str]:
+        cached_result = self._autocomplete_result_cache_get(query, limit)
+        if cached_result is not None:
+            return cached_result
         base_results = self._search_kr_tags(query, limit)
         translated = self._translate_autocomplete_query(query)
         if not translated:
@@ -11469,11 +11534,13 @@ class RemoteBridge(QObject):
                 allow_build=False,
             )
             if metadata_rows:
-                return self._score_autocomplete_candidates(
+                rows = self._score_autocomplete_candidates(
                     metadata_rows + base_results,
                     sort=True,
-                )[:limit], ""
-            return self._score_autocomplete_candidates(base_results), ""
+                )[:limit]
+                return self._autocomplete_result_cache_set(query, limit, rows, "")
+            rows = self._score_autocomplete_candidates(base_results)
+            return self._autocomplete_result_cache_set(query, limit, rows, "")
 
         merged: dict[str, dict] = {}
         order: list[str] = []
@@ -11691,7 +11758,8 @@ class RemoteBridge(QObject):
             if recommended:
                 results = results[:max(0, limit - len(recommended))] + recommended
 
-        return self._score_autocomplete_candidates(results, sort=True)[:limit], translated
+        rows = self._score_autocomplete_candidates(results, sort=True)[:limit]
+        return self._autocomplete_result_cache_set(query, limit, rows, translated)
 
     def _search_wildcards(self, query: str, limit: int = 12) -> list:
         """와일드카드 이름 검색 (__name__ 용)"""
@@ -13314,9 +13382,14 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             return {
                 "is_generating": gc.is_generating,
                 "api_mode": bridge.app_context.get_api_mode(),
+                "autocomplete": bridge._autocomplete_status_payload(),
             }
         except Exception:
-            return {"is_generating": False, "api_mode": "unknown"}
+            return {
+                "is_generating": False,
+                "api_mode": "unknown",
+                "autocomplete": bridge._autocomplete_status_payload(),
+            }
 
     @app.get("/api/latest-image")
     async def api_latest_image():
@@ -14784,17 +14857,21 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             }))
                         elif cmd_type == "autocomplete_translate":
                             query = cmd.get("query", "")
+                            request_id = str(cmd.get("requestId") or cmd.get("request_id") or "")
                             results, translated = await asyncio.to_thread(
                                 bridge._search_kr_tags_with_translation,
                                 query,
                                 12,
                             )
-                            await ws.send_text(json.dumps({
+                            payload = {
                                 "type": "autocomplete_result",
                                 "query": query,
                                 "results": results,
                                 "translated_query": translated,
-                            }))
+                            }
+                            if request_id:
+                                payload["requestId"] = request_id
+                            await ws.send_text(json.dumps(payload))
                         elif cmd_type == "autocomplete_wildcard":
                             query = cmd.get("query", "")
                             results = await asyncio.to_thread(bridge._search_wildcards, query, 12)

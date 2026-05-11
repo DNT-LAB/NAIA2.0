@@ -10188,7 +10188,11 @@ class RemoteBridge(QObject):
             if self._kr_tags_loaded:
                 return
             try:
-                result = load_kr_tag_records(getattr(self, "_repo_root", Path(__file__).resolve().parent.parent))
+                try:
+                    repo_root = object.__getattribute__(self, "_repo_root")
+                except (AttributeError, RuntimeError):
+                    repo_root = Path(__file__).resolve().parent.parent
+                result = load_kr_tag_records(repo_root)
                 for warning in result.warnings:
                     print(f"🌐 Remote: {warning}")
                 raw = result.raw

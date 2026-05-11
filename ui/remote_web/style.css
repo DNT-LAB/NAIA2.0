@@ -8217,6 +8217,29 @@ body.resizing-result-info {
   padding: 12px 14px;
 }
 
+/* ---- QWebEngine desktop shell anti-flicker ---- */
+/*
+ * `backdrop-filter` repeatedly forces Chromium to resample the layer behind
+ * the element. On Windows QWebEngine + DirectComposition the resample step
+ * lags one frame behind the backing-store invalidation that happens on
+ * window focus / occlusion changes, which shows up as the floating UI in
+ * the right column flashing while the rest of the window stays stable.
+ *
+ * Regular browsers (Chrome, Edge, Firefox) handle this fine, so we keep
+ * the blur effect for browser users and only neutralize it inside the
+ * QWebEngine shell. Backgrounds already use 0.55+ alpha, so removing the
+ * blur leaves the panels perfectly readable — only the cosmetic blur is
+ * lost, which is the same trade-off the user is asked to accept by the
+ * "브라우저에서 열기" hint.
+ */
+body.desktop-shell,
+body.desktop-shell *,
+body.desktop-shell *::before,
+body.desktop-shell *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* ---- Detached popout windows ---- */
 body.detached-shell {
   display: block !important;

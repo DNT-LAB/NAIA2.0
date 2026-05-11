@@ -22,13 +22,33 @@ def _append_env_flags(name: str, flags: list[str]) -> None:
 
 
 def _configure_webengine_environment() -> None:
-    """Optional QWebEngine GPU-compositing diagnostic switch."""
+    """Tune QWebEngine Chromium flags on Windows.
+
+    `CalculateNativeWinOcclusion` repeatedly pauses compositing whenever a
+    QWebEngine popup loses focus or is partially covered. The popup then
+    flashes back when occlusion is re-evaluated. We turn that off (and the
+    matching backgrounding throttle) by default on Windows so detached
+    popups stay stable while keeping GPU acceleration intact.
+
+    Opt-out: NAIA_WEBENGINE_KEEP_OCCLUSION=1
+    Opt-in extra diagnostic: NAIA_WEBENGINE_DISABLE_GPU=1
+    """
     if not sys.platform.startswith("win"):
         return
-    opt = os.environ.get("NAIA_WEBENGINE_DISABLE_GPU", "0").strip().lower()
-    if opt not in {"1", "true", "yes", "on"}:
-        return
-    _append_env_flags("QTWEBENGINE_CHROMIUM_FLAGS", ["--disable-gpu"])
+
+    keep_occlusion = os.environ.get("NAIA_WEBENGINE_KEEP_OCCLUSION", "0").strip().lower()
+    if keep_occlusion not in {"1", "true", "yes", "on"}:
+        _append_env_flags(
+            "QTWEBENGINE_CHROMIUM_FLAGS",
+            [
+                "--disable-features=CalculateNativeWinOcclusion",
+                "--disable-backgrounding-occluded-windows",
+            ],
+        )
+
+    disable_gpu = os.environ.get("NAIA_WEBENGINE_DISABLE_GPU", "0").strip().lower()
+    if disable_gpu in {"1", "true", "yes", "on"}:
+        _append_env_flags("QTWEBENGINE_CHROMIUM_FLAGS", ["--disable-gpu"])
 
 
 _configure_webengine_environment()

@@ -21,6 +21,8 @@ export function createConditionalPromptPanel({
   let currentState = null;
   let selectedRuleId = null;
   let presetPopoverOpen = false;
+  let presetDialogOpen = false;
+  let presetDialogName = '';
   let dirty = false;
   let bound = false;
 
@@ -524,7 +526,8 @@ export function createConditionalPromptPanel({
   function savePreset(nameOverride = null) {
     const input = document.getElementById('condPresetNameInput');
     const select = document.getElementById('condPresetSelect');
-    const name = safeText(nameOverride ?? (input?.value || select?.value)).trim();
+    const rawName = nameOverride !== null ? nameOverride : (input ? input.value : select?.value);
+    const name = safeText(rawName).trim();
     if (!name) {
       if (typeof globalThis.showToast === 'function') globalThis.showToast('프리셋 이름을 입력하세요', 'error');
       return;
@@ -536,6 +539,42 @@ export function createConditionalPromptPanel({
     }));
     dirty = false;
     updateDynamicText();
+  }
+
+  function focusPresetDialogInput() {
+    const input = document.getElementById('condPresetDialogName');
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }
+
+  function beginNewPreset() {
+    presetDialogName = '';
+    presetDialogOpen = true;
+    render(currentState);
+    globalThis.requestAnimationFrame?.(focusPresetDialogInput);
+  }
+
+  function closePresetDialog() {
+    presetDialogOpen = false;
+    presetDialogName = '';
+    render(currentState);
+  }
+
+  function confirmPresetDialog() {
+    const input = document.getElementById('condPresetDialogName');
+    const name = safeText(input?.value ?? presetDialogName).trim();
+    if (!name) {
+      if (typeof globalThis.showToast === 'function') globalThis.showToast('프리셋 이름을 입력하세요', 'error');
+      focusPresetDialogInput();
+      return;
+    }
+    presetDialogOpen = false;
+    presetDialogName = '';
+    if (currentState) currentState.active_preset = name;
+    savePreset(name);
+    render(currentState);
   }
 
   function updateDynamicText() {
@@ -654,8 +693,28 @@ export function createConditionalPromptPanel({
           <div class="mod-section-label">Execution Log</div>
           <div class="mod-log-viewer" id="condLogViewer">${formatLog(m.log)}</div>
         </div>
+        ${renderPresetDialog()}
       </div>`;
     updateDynamicText();
+  }
+
+  function renderPresetDialog() {
+    if (!presetDialogOpen) return '';
+    return `
+      <div class="cond-preset-dialog-backdrop" role="presentation">
+        <section class="cond-preset-dialog" role="dialog" aria-modal="true" aria-labelledby="condPresetDialogTitle">
+          <div class="cond-preset-dialog-title-row">
+            <div class="cond-preset-dialog-title" id="condPresetDialogTitle">새 프리셋</div>
+            <button type="button" class="cond-preset-dialog-close" data-cond-action="cancel-new-preset" aria-label="닫기">×</button>
+          </div>
+          <label class="cond-preset-dialog-label" for="condPresetDialogName">프리셋 이름</label>
+          <input class="mod-input cond-preset-dialog-input" id="condPresetDialogName" data-cond-preset-dialog-name="1" value="${escapeAttr(presetDialogName)}" autocomplete="off">
+          <div class="cond-preset-dialog-actions">
+            <button type="button" data-cond-action="cancel-new-preset">취소</button>
+            <button type="button" class="primary" data-cond-action="confirm-new-preset">저장</button>
+          </div>
+        </section>
+      </div>`;
   }
 
   function renderPresetPane(m) {
@@ -1254,10 +1313,11 @@ export function createConditionalPromptPanel({
     } else if (action === 'save-preset') {
       savePreset();
     } else if (action === 'new-preset') {
-      const name = typeof globalThis.prompt === 'function'
-        ? safeText(globalThis.prompt('새 조건부 프리셋 이름', '')).trim()
-        : '';
-      if (name) savePreset(name);
+      beginNewPreset();
+    } else if (action === 'cancel-new-preset') {
+      closePresetDialog();
+    } else if (action === 'confirm-new-preset') {
+      confirmPresetDialog();
     } else if (action === 'delete-preset') {
       const select = document.getElementById('condPresetSelect');
       const name = safeText(select?.value).trim();
@@ -1293,6 +1353,10 @@ export function createConditionalPromptPanel({
   function handleInput(event) {
     const target = event.target;
     if (!target.closest?.('.cond-root')) return;
+    if (target.dataset.condPresetDialogName) {
+      presetDialogName = target.value;
+      return;
+    }
     if (target.dataset.condRuleField === 'raw_dsl') {
       const rule = selectedRule();
       if (rule) {
@@ -1346,6 +1410,18 @@ export function createConditionalPromptPanel({
 
   function handleKeydown(event) {
     const target = event.target;
+    if (presetDialogOpen) {
+      if (target?.dataset?.condPresetDialogName && event.key === 'Enter') {
+        event.preventDefault();
+        confirmPresetDialog();
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePresetDialog();
+        return;
+      }
+    }
     if (!target?.dataset?.tagInput) return;
     if (event.key !== 'Enter' && event.key !== ',') return;
     event.preventDefault();

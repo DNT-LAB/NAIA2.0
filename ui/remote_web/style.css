@@ -10985,6 +10985,78 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .cond-button-row {
   grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
 }
+.cond-preset-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 7, 14, 0.68);
+  backdrop-filter: blur(2px);
+}
+.cond-preset-dialog {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid rgba(95, 151, 255, 0.48);
+  border-radius: 8px;
+  padding: 16px;
+  background: #12121b;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+}
+.cond-preset-dialog-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cond-preset-dialog-title {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+}
+.cond-preset-dialog-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.cond-preset-dialog-label {
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+}
+.cond-preset-dialog-input {
+  width: 100%;
+}
+.cond-preset-dialog-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cond-preset-dialog-actions button {
+  min-height: 34px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cond-preset-dialog-actions button.primary {
+  border-color: rgba(95, 151, 255, 0.72);
+  background: rgba(35, 77, 145, 0.82);
+}
 .cond-bottom-actions {
   flex: 0 0 auto;
   width: min(100%, 880px);

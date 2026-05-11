@@ -32,6 +32,74 @@ def assert_translation_hints_are_tail(rows):
     assert all(row["candidateType"] == "translation_hint" for row in rows[first_hint:])
 
 
+def assert_prompt_phrase(row, tag):
+    assert row["tag"] == tag
+    assert_autocomplete_candidate_schema(
+        row,
+        "prompt_phrase",
+        "phrase_normalizer",
+        "default",
+    )
+
+
+def test_phrase_normalizer_eval_promotes_quality_phrases(monkeypatch):
+    samples = [
+        {
+            "query": "팔을 들어올리다",
+            "translation": "raise one arms",
+            "must_include": ["arms raised", "raising arms"],
+            "must_not_top": "raise one arms",
+        },
+        {
+            "query": "와인잔을 들고 있음",
+            "translation": "holding a wine glass in hand",
+            "must_include": ["holding wine glass"],
+            "must_not_top": "holding a wine glass in hand",
+        },
+        {
+            "query": "손목에 따로 달린 소매",
+            "translation": "separate sleeves attached to the wrist",
+            "must_include": ["detached sleeves", "wrist cuffs"],
+            "must_not_top": "separate sleeves attached to the wrist",
+        },
+    ]
+
+    translations = {sample["query"]: sample["translation"] for sample in samples}
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: translations.get(query, ""),
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    bridge._search_kr_tags = lambda query, limit=20: []
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    for sample in samples:
+        merged, translated = RemoteBridge._search_kr_tags_with_translation(
+            bridge,
+            sample["query"],
+            8,
+        )
+
+        assert translated == sample["translation"]
+        tags = [row["tag"] for row in merged]
+        assert tags[0] != sample["must_not_top"]
+        assert all(tag in tags for tag in sample["must_include"])
+        for tag in sample["must_include"]:
+            row = next(item for item in merged if item["tag"] == tag)
+            assert_prompt_phrase(row, tag)
+        hint = next(item for item in merged if item["tag"] == sample["must_not_top"])
+        assert hint["candidateType"] == "translation_hint"
+        assert hint["insertPolicy"] == "manual"
+        assert min(
+            row["autocompleteScore"]
+            for row in merged
+            if row["candidateType"] == "prompt_phrase"
+        ) > hint["autocompleteScore"]
+        assert_translation_hints_are_tail(merged)
+
+
 def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch):
     monkeypatch.setattr(
         remote_api_server,
@@ -176,9 +244,12 @@ def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypa
         "soccer ball",
         "kicking",
         "foot",
+        "kicking soccer ball",
         "kick a soccer ball with foot",
     ]
+    assert_prompt_phrase(merged[3], "kicking soccer ball")
     assert merged[-1]["_wc_type"] == "fallback_recommended"
+    assert_translation_hints_are_tail(merged)
 
 
 def test_autocomplete_translation_expands_pose_relation_and_alias(monkeypatch):
@@ -478,9 +549,14 @@ def test_autocomplete_translation_handles_nsfw_domain_samples(monkeypatch):
         "panty pull",
         "pulling own clothes",
         "pulling another's clothes",
+        "pulling pants down",
+        "pulling panties",
         "pull down one panties by force",
     ]
+    assert_prompt_phrase(merged[3], "pulling pants down")
+    assert_prompt_phrase(merged[4], "pulling panties")
     assert merged[-1]["_wc_type"] == "fallback_recommended"
+    assert_translation_hints_are_tail(merged)
 
     merged, _ = RemoteBridge._search_kr_tags_with_translation(
         bridge,
@@ -618,9 +694,14 @@ def test_autocomplete_translation_falls_back_by_query_level(monkeypatch):
     assert [row["tag"] for row in merged] == [
         "pulling own clothes",
         "pulling another's clothes",
+        "pulling hem",
+        "pulling clothes",
         "pulling the hem of clothes",
     ]
+    assert_prompt_phrase(merged[2], "pulling hem")
+    assert_prompt_phrase(merged[3], "pulling clothes")
     assert merged[-1]["_wc_type"] == "fallback_recommended"
+    assert_translation_hints_are_tail(merged)
     assert calls == [
         "옷 끝자락을 잡아당기기",
         "pulling the hem of clothes",

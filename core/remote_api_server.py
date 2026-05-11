@@ -11187,6 +11187,120 @@ class RemoteBridge(QObject):
         )
 
     @staticmethod
+    def _prompt_phrase_row(
+        phrase: str,
+        *,
+        confidence: float = 0.72,
+        reason: str = "phrase normalizer",
+    ) -> dict:
+        return {
+            "tag": normalize_search_query(phrase),
+            "count": 0,
+            "desc": reason,
+            "group": "[prompt phrase]",
+            "cat": "",
+            "_wc_type": "prompt_phrase",
+            "_prompt_phrase": True,
+            **RemoteBridge._autocomplete_candidate_fields(
+                "prompt_phrase",
+                "phrase_normalizer",
+                confidence=confidence,
+                insert_policy="default",
+            ),
+        }
+
+    @staticmethod
+    def _prompt_phrase_quality_ok(phrase: str, *, force: bool = False) -> bool:
+        normalized = normalize_search_query(phrase)
+        tokens = RemoteBridge._fallback_translation_tokens(normalized)
+        if not tokens:
+            return False
+        if not force and not (2 <= len(tokens) <= 5):
+            return False
+        if force and len(tokens) > 5:
+            return False
+        if any(RemoteBridge._fallback_token_is_pronoun_or_possessive(token) for token in tokens):
+            return False
+        if any(token in {"a", "an", "the", "be", "been", "being", "is", "are", "was", "were"} for token in tokens):
+            return False
+        if not force:
+            canonical_actions = set(_AUTOCOMPLETE_ACTION_FORMS.values())
+            has_action = any(token in canonical_actions for token in tokens)
+            if not has_action:
+                return False
+        return True
+
+    def _normalized_prompt_phrase_rows(self, translated: str, limit: int = 20) -> list[dict]:
+        tokens = self._fallback_translation_tokens(translated)
+        token_set = {self._fallback_possessive_base(token) for token in tokens}
+        candidates: list[tuple[str, float, str, bool]] = []
+
+        def add(phrase: str, confidence: float = 0.72, reason: str = "phrase normalizer", *, force: bool = False):
+            normalized = normalize_search_query(phrase)
+            if not normalized:
+                return
+            candidates.append((normalized, confidence, reason, force))
+
+        if token_set & {"raise", "raises", "raised", "raising", "lift", "lifts", "lifted", "lifting"} and token_set & {"arm", "arms"}:
+            add("arms raised", 0.86, "raise/lift arms", force=True)
+            add("raising arms", 0.82, "raise/lift arms", force=True)
+
+        if token_set & {"separate", "separated", "detached"} and token_set & {"sleeve", "sleeves"}:
+            add("detached sleeves", 0.86, "detached sleeve rule", force=True)
+            if token_set & {"wrist", "wrists"}:
+                add("wrist cuffs", 0.78, "detached sleeve rule", force=True)
+
+        if token_set & {"pin", "pins"} and token_set & {"clothes", "clothing", "lapel", "decorative", "attached"}:
+            add("lapel pin", 0.78, "clothing pin rule", force=True)
+            add("brooch", 0.74, "clothing pin rule", force=True)
+            add("decorative pin on clothes", 0.70, "clothing pin rule", force=True)
+
+        for query in self._translation_search_queries(translated):
+            add(query, 0.68, "translation query phrase")
+
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for phrase, confidence, reason, force in candidates:
+            key = normalize_search_query(phrase)
+            if not key or key in seen:
+                continue
+            if not self._prompt_phrase_quality_ok(key, force=force):
+                continue
+            seen.add(key)
+            rows.append(self._prompt_phrase_row(key, confidence=confidence, reason=reason))
+            if len(rows) >= min(limit, 5):
+                break
+        return rows
+
+    def _append_prompt_phrase_rows(
+        self,
+        rows: list[dict],
+        translated: str,
+        limit: int,
+    ) -> list[dict]:
+        normalized_rows: dict[str, int] = {}
+        for index, row in enumerate(rows):
+            key = normalize_search_query(row.get("tag", ""))
+            if key and key not in normalized_rows:
+                normalized_rows[key] = index
+        next_rows = list(rows)
+        prompt_rows: list[dict] = []
+        for row in self._normalized_prompt_phrase_rows(translated, limit):
+            key = normalize_search_query(row.get("tag", ""))
+            if not key:
+                continue
+            existing_index = normalized_rows.get(key)
+            if existing_index is not None:
+                if next_rows[existing_index].get("candidateType") == "translation_hint":
+                    next_rows[existing_index] = row
+                continue
+            normalized_rows[key] = len(next_rows) + len(prompt_rows)
+            prompt_rows.append(row)
+        if not prompt_rows:
+            return next_rows
+        return next_rows + prompt_rows
+
+    @staticmethod
     def _fallback_recommended_row(query: str) -> dict:
         return {
             "tag": query,
@@ -11548,6 +11662,7 @@ class RemoteBridge(QObject):
                 add_result(row)
 
         results = [merged[tag] for tag in order]
+        results = self._append_prompt_phrase_rows(results, translated, limit)
         if self._should_prepend_simple_fallback_recommended(query, translated, results):
             simple_query = self._simple_fallback_recommended_query(translated)
             if simple_query:

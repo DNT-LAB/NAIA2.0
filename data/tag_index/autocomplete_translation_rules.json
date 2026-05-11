@@ -228,6 +228,25 @@
     "wear",
     "write"
   ],
+  "protected_kr_phrases": [
+    {
+      "source": "잠자리채",
+      "target": "butterfly net",
+      "bad_phrases": [
+        "bed for sleeping",
+        "sleeping bed",
+        "bed"
+      ],
+      "source_exclusion_terms": [
+        "침대",
+        "수면",
+        "자는",
+        "자고",
+        "잠든",
+        "잠자는"
+      ]
+    }
+  ],
   "domain_phrase_alias_rules": [
     {
       "name": "manual_penis_touch",

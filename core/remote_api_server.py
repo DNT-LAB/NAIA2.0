@@ -45,6 +45,8 @@ from core.preset_input_bridge import PresetInputBridge, update_app_preset_contex
 from core.preset_composer_service import PresetComposerService
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
+from core.kr_phrase_canonicalizer import match_kr_phrase_canonical_tags
+from core.kr_sentence_reconstructor import reconstruct_kr_tag_queries
 from core.tag_search_index import TagSearchIndex, normalize_search_query
 from core.resolution_utils import (
     MAX_1MP_PIXELS,
@@ -132,6 +134,49 @@ def _autocomplete_domain_alias_rules(rules: dict) -> list[dict]:
     return [rule for rule in value if isinstance(rule, dict)] if isinstance(value, list) else []
 
 
+def _autocomplete_protected_kr_phrases(rules: dict) -> tuple[dict[str, object], ...]:
+    value = rules.get("protected_kr_phrases", [])
+    if not isinstance(value, list):
+        return ()
+    protected = []
+    for raw_rule in value:
+        if not isinstance(raw_rule, dict):
+            continue
+        source = _normalize_autocomplete_rule_token(raw_rule.get("source"))
+        target = _normalize_autocomplete_rule_token(raw_rule.get("target"))
+        if not source or not target:
+            continue
+        bad_phrases = raw_rule.get("bad_phrases", [])
+        if isinstance(bad_phrases, str):
+            bad_phrases = [bad_phrases]
+        source_exclusion_terms = raw_rule.get("source_exclusion_terms", [])
+        if isinstance(source_exclusion_terms, str):
+            source_exclusion_terms = [source_exclusion_terms]
+        protected.append(
+            {
+                "source": source,
+                "target": target,
+                "bad_phrases": tuple(
+                    token
+                    for token in (
+                        _normalize_autocomplete_rule_token(item)
+                        for item in bad_phrases
+                    )
+                    if token
+                ),
+                "source_exclusion_terms": tuple(
+                    token
+                    for token in (
+                        _normalize_autocomplete_rule_token(item)
+                        for item in source_exclusion_terms
+                    )
+                    if token
+                ),
+            }
+        )
+    return tuple(protected)
+
+
 _AUTOCOMPLETE_TRANSLATION_RULES = _load_autocomplete_translation_rules()
 _AUTOCOMPLETE_TRANSLATION_STOPWORDS = _autocomplete_rule_list(
     _AUTOCOMPLETE_TRANSLATION_RULES,
@@ -190,6 +235,169 @@ _AUTOCOMPLETE_TRANSITIVE_ACTION_FORMS = {
 }
 _AUTOCOMPLETE_DOMAIN_PHRASE_ALIAS_RULES = _autocomplete_domain_alias_rules(
     _AUTOCOMPLETE_TRANSLATION_RULES
+)
+_AUTOCOMPLETE_PROTECTED_KR_PHRASES = _autocomplete_protected_kr_phrases(
+    _AUTOCOMPLETE_TRANSLATION_RULES
+)
+_AUTOCOMPLETE_EXPLICIT_QUERY_MARKERS = (
+    "sex",
+    "sexual",
+    "penis",
+    "pussy",
+    "vulva",
+    "genital",
+    "genitals",
+    "anus",
+    "anal",
+    "cum",
+    "semen",
+    "ejaculation",
+    "fellatio",
+    "cunnilingus",
+    "masturbation",
+    "handjob",
+    "penetration",
+    "orgasm",
+    "dildo",
+    "vibrator",
+    "섹스",
+    "성행위",
+    "성관계",
+    "성교",
+    "삽입",
+    "펠라",
+    "펠라치오",
+    "커닐링구스",
+    "자위",
+    "사정",
+    "정액",
+    "남성기",
+    "여성기",
+    "성기",
+    "음부",
+    "보지",
+    "자지",
+    "항문",
+    "애널",
+    "딜도",
+    "바이브레이터",
+    "스팽킹",
+)
+_AUTOCOMPLETE_SENSITIVE_QUERY_MARKERS = (
+    "breast",
+    "breasts",
+    "nipple",
+    "nipples",
+    "panty",
+    "panties",
+    "bra",
+    "nude",
+    "naked",
+    "cleavage",
+    "crotch",
+    "thigh",
+    "ass",
+    "butt",
+    "armpit",
+    "navel",
+    "censor",
+    "censored",
+    "mosaic",
+    "see-through",
+    "가슴",
+    "유두",
+    "젖꼭지",
+    "팬티",
+    "브라",
+    "브래지어",
+    "나체",
+    "알몸",
+    "누드",
+    "노출",
+    "가랑이",
+    "엉덩이",
+    "허벅지",
+    "겨드랑이",
+    "배꼽",
+    "복부",
+    "검열",
+    "모자이크",
+    "검은 막대",
+    "막대 검열",
+    "시스루",
+    "블루머",
+    "부르마",
+    "포켓몬",
+)
+_AUTOCOMPLETE_EXPLICIT_CANDIDATE_MARKERS = (
+    *_AUTOCOMPLETE_EXPLICIT_QUERY_MARKERS,
+    "bdsm",
+    "bondage",
+    "fetish",
+    "threesome",
+    "foursome",
+    "fivesome",
+    "harem",
+    "gangbang",
+    "rape",
+    "molestation",
+    "chikan",
+    "spanking",
+    "pokephilia",
+    "upskirt",
+    "crotch",
+    "nipple",
+    "nipples",
+    "areola",
+    "clitoris",
+    "labia",
+    "glans",
+    "testicles",
+    "scrotum",
+    "erection",
+    "urination",
+    "feces",
+    "scat",
+    "guro",
+    "vore",
+    "성인",
+    "성적",
+    "페티시",
+    "강간",
+    "치한",
+    "스팽킹",
+)
+_AUTOCOMPLETE_SENSITIVE_CANDIDATE_MARKERS = (
+    *_AUTOCOMPLETE_SENSITIVE_QUERY_MARKERS,
+    "underwear",
+    "lingerie",
+    "bloomers",
+    "buruma",
+    "swimsuit",
+    "bikini",
+    "topless",
+    "bottomless",
+    "sideboob",
+    "underboob",
+    "cameltoe",
+    "see-through",
+    "wardrobe malfunction",
+    "속옷",
+    "수영복",
+    "비키니",
+)
+_AUTOCOMPLETE_EXPLICIT_GROUP_MARKERS = (
+    "nsfw",
+    "danger",
+    "h >",
+    "h>",
+    "explicit",
+    "sexual",
+    "adult",
+    "성인",
+    "성적",
+    "성행위",
+    "페티시",
 )
 
 
@@ -10546,6 +10754,7 @@ class RemoteBridge(QObject):
             or "default"
         ).lower()
         type_weight = {
+            "tag_canonical": 900.0,
             "tag_exact": 820.0,
             "tag_metadata": 760.0,
             "tag_translated": 680.0,
@@ -10583,13 +10792,144 @@ class RemoteBridge(QObject):
             - manual_penalty
         )
 
+    @staticmethod
+    def _canonical_base_tags_for_rows(rows: list[dict]) -> set[str]:
+        return {
+            normalize_search_query(row.get("tag", ""))
+            for row in rows
+            if (
+                str(RemoteBridge._autocomplete_candidate_value(row, "type", ""))
+                == "tag_canonical"
+                and normalize_search_query(row.get("tag", ""))
+            )
+        }
+
+    @staticmethod
+    def _canonical_variant_of(tag: str, canonical_tags: set[str]) -> str:
+        normalized = normalize_search_query(tag)
+        if not normalized or normalized in canonical_tags:
+            return ""
+        tag_tokens = set(normalized.split())
+        for canonical in sorted(canonical_tags, key=lambda item: (-len(item.split()), item)):
+            canonical_tokens = set(canonical.split())
+            if not canonical_tokens:
+                continue
+            if len(canonical_tokens) == 1:
+                token = next(iter(canonical_tokens))
+                if token in tag_tokens:
+                    return canonical
+                continue
+            if canonical_tokens.issubset(tag_tokens):
+                return canonical
+        return ""
+
+    @staticmethod
+    def _canonical_base_boost_bucket(row: dict, canonical_tags: set[str]) -> tuple[int, str]:
+        candidate_type = str(RemoteBridge._autocomplete_candidate_value(row, "type", ""))
+        tag = normalize_search_query(row.get("tag", ""))
+        if candidate_type == "tag_canonical" and tag in canonical_tags:
+            return (0, "")
+        variant_of = RemoteBridge._canonical_variant_of(tag, canonical_tags)
+        if variant_of:
+            row["_canonical_variant_of"] = variant_of
+            return (2, variant_of)
+        return (1, "")
+
+    @staticmethod
+    def _autocomplete_contains_domain_marker(text: str, markers: tuple[str, ...]) -> bool:
+        normalized = normalize_search_query(text)
+        if not normalized:
+            return False
+        compact = normalized.replace(" ", "")
+        for marker in markers:
+            marker_norm = normalize_search_query(marker)
+            if not marker_norm:
+                continue
+            if any("\uac00" <= char <= "\ud7a3" for char in marker_norm):
+                if marker_norm.replace(" ", "") in compact:
+                    return True
+                continue
+            if " " in marker_norm:
+                if marker_norm in normalized:
+                    return True
+                continue
+            if re.search(
+                rf"(?<![a-z0-9]){re.escape(marker_norm)}(?![a-z0-9])",
+                normalized,
+            ):
+                return True
+        return False
+
+    @classmethod
+    def _autocomplete_query_intent(cls, query: str | None) -> str:
+        if cls._autocomplete_contains_domain_marker(
+            query or "",
+            _AUTOCOMPLETE_EXPLICIT_QUERY_MARKERS,
+        ):
+            return "explicit"
+        if cls._autocomplete_contains_domain_marker(
+            query or "",
+            _AUTOCOMPLETE_SENSITIVE_QUERY_MARKERS,
+        ):
+            return "sensitive"
+        return "general"
+
+    @classmethod
+    def _autocomplete_candidate_domain(cls, row: dict) -> str:
+        tag_text = str(row.get("tag") or "")
+        group_text = str(row.get("group") or "")
+        cat_text = str(row.get("cat") or "")
+        tag_is_explicit = cls._autocomplete_contains_domain_marker(
+            tag_text,
+            _AUTOCOMPLETE_EXPLICIT_CANDIDATE_MARKERS,
+        )
+        if tag_is_explicit:
+            return "explicit"
+        tag_is_sensitive = cls._autocomplete_contains_domain_marker(
+            tag_text,
+            _AUTOCOMPLETE_SENSITIVE_CANDIDATE_MARKERS,
+        )
+        group_blob = " ".join((group_text, cat_text))
+        if cls._autocomplete_contains_domain_marker(
+            group_blob,
+            _AUTOCOMPLETE_EXPLICIT_GROUP_MARKERS,
+        ):
+            return "sensitive" if tag_is_sensitive else "explicit"
+        if tag_is_sensitive or cls._autocomplete_contains_domain_marker(
+            group_blob,
+            _AUTOCOMPLETE_SENSITIVE_CANDIDATE_MARKERS,
+        ):
+            return "sensitive"
+        return "general"
+
+    @classmethod
+    def _autocomplete_domain_demote_bucket(
+        cls,
+        row: dict,
+        query_intent: str,
+    ) -> int:
+        candidate_domain = cls._autocomplete_candidate_domain(row)
+        row["_query_intent"] = query_intent
+        row["_candidate_domain"] = candidate_domain
+        if query_intent != "general":
+            return 0
+        if candidate_domain == "explicit":
+            row["_domain_demoted"] = True
+            return 2
+        if candidate_domain == "sensitive":
+            return 1
+        return 0
+
     def _score_autocomplete_candidates(
         self,
         rows: list[dict],
         *,
         sort: bool = False,
+        query: str | None = None,
+        score_sort: bool = False,
     ) -> list[dict]:
         scored: list[dict] = []
+        query_intent = self._autocomplete_query_intent(query) if query else "unknown"
         for row in rows:
             item = dict(row)
             score = self._autocomplete_nai_standard_score(item)
@@ -10604,6 +10944,22 @@ class RemoteBridge(QObject):
                 rank_score=rank_score,
             )
             scored.append(item)
+        canonical_tags = self._canonical_base_tags_for_rows(scored)
+        should_domain_sort = query_intent == "general" and bool(query)
+        if not sort and (canonical_tags or should_domain_sort):
+            return [
+                row for _, row in sorted(
+                    enumerate(scored),
+                    key=lambda indexed_row: (
+                        0
+                        if self._canonical_base_boost_bucket(indexed_row[1], canonical_tags)[0] == 0
+                        else 1,
+                        self._autocomplete_domain_demote_bucket(indexed_row[1], query_intent),
+                        self._canonical_base_boost_bucket(indexed_row[1], canonical_tags)[0],
+                        indexed_row[0],
+                    ),
+                )
+            ]
         if not sort:
             return scored
 
@@ -10615,7 +10971,17 @@ class RemoteBridge(QObject):
                 or "default"
             ).lower()
             manual_bucket = 1 if candidate_type in {"translation_hint", "debug"} or insert_policy == "manual" else 0
-            return (manual_bucket, index)
+            canonical_bucket, _ = self._canonical_base_boost_bucket(row, canonical_tags)
+            domain_bucket = self._autocomplete_domain_demote_bucket(row, query_intent)
+            autocomplete_score = self._autocomplete_float(row.get("autocompleteScore"))
+            return (
+                manual_bucket,
+                0 if canonical_bucket == 0 else 1,
+                domain_bucket,
+                canonical_bucket,
+                -autocomplete_score if score_sort else 0.0,
+                index,
+            )
 
         return [row for _, row in sorted(enumerate(scored), key=sort_key)]
 
@@ -10659,7 +11025,7 @@ class RemoteBridge(QObject):
                 }
                 for result in matches
             ]
-            return self._score_autocomplete_candidates(rows)
+            return self._score_autocomplete_candidates(rows, query=query)
 
         exact, starts, kr_kw, contains, desc_m = [], [], [], [], []
         for tag_lower, info in self._kr_tags_raw.items():
@@ -10702,7 +11068,10 @@ class RemoteBridge(QObject):
                 desc_m.append(entry)
         for grp in [exact, starts, kr_kw, contains, desc_m]:
             grp.sort(key=lambda x: x['count'], reverse=True)
-        return self._score_autocomplete_candidates((exact + starts + kr_kw + contains + desc_m)[:limit])
+        return self._score_autocomplete_candidates(
+            (exact + starts + kr_kw + contains + desc_m)[:limit],
+            query=query,
+        )
 
     def _search_kr_metadata_fallback(
         self,
@@ -10724,6 +11093,7 @@ class RemoteBridge(QObject):
         if (
             not allow_build
             and not self._tag_search_index.metadata_fallback_index_ready()
+            and not self._tag_search_index.warm_metadata_fallback_index(allow_build=False)
         ):
             return []
         matches = self._tag_search_index.search_metadata_fallback(
@@ -10749,7 +11119,12 @@ class RemoteBridge(QObject):
             }
             for result in matches
         ]
-        return self._score_autocomplete_candidates(rows, sort=True)
+        return self._score_autocomplete_candidates(
+            rows,
+            sort=True,
+            query=query,
+            score_sort=True,
+        )
 
     @staticmethod
     def _has_hangul_text(text: str) -> bool:
@@ -10765,10 +11140,52 @@ class RemoteBridge(QObject):
         translated = normalize_search_query(korean_to_english(query) or "")
         if not translated or self._has_hangul_text(translated) or translated == query:
             translated = ""
+        if translated:
+            translated = self._protect_autocomplete_translation_terms(query, translated)
         if len(self._autocomplete_translation_cache) > 256:
             self._autocomplete_translation_cache.clear()
         self._autocomplete_translation_cache[query] = translated
         return translated
+
+    @staticmethod
+    def _translation_phrase_pattern(phrase: str) -> str:
+        escaped = re.escape(phrase).replace(r"\ ", r"\s+")
+        return rf"(?<![a-z0-9]){escaped}(?![a-z0-9])"
+
+    @staticmethod
+    def _protect_autocomplete_translation_terms(query: str, translated: str) -> str:
+        protected = _AUTOCOMPLETE_PROTECTED_KR_PHRASES
+        if not protected:
+            return translated
+        normalized_query = normalize_search_query(query)
+        normalized_translated = normalize_search_query(translated)
+        if not normalized_query or not normalized_translated:
+            return normalized_translated
+        compact_query = normalized_query.replace(" ", "")
+        for rule in protected:
+            source = str(rule.get("source") or "")
+            target = str(rule.get("target") or "")
+            if not source or not target:
+                continue
+            compact_source = source.replace(" ", "")
+            if source not in normalized_query and compact_source not in compact_query:
+                continue
+            exclusions = tuple(str(item) for item in rule.get("source_exclusion_terms", ()))
+            if any(term and term in normalized_query for term in exclusions):
+                continue
+            for bad_phrase in sorted(
+                (str(item) for item in rule.get("bad_phrases", ())),
+                key=len,
+                reverse=True,
+            ):
+                if not bad_phrase:
+                    continue
+                normalized_translated = re.sub(
+                    RemoteBridge._translation_phrase_pattern(bad_phrase),
+                    target,
+                    normalized_translated,
+                )
+        return normalize_search_query(normalized_translated)
 
     def _autocomplete_result_cache_get(self, query: str, limit: int) -> tuple[list[dict], str] | None:
         try:
@@ -10864,6 +11281,86 @@ class RemoteBridge(QObject):
             for row in rows
             if not self._is_noisy_autocomplete_category(row)
         ]
+
+    def _canonical_autocomplete_rows(self, query: str, limit: int = 20) -> list[dict]:
+        reconstructed_queries = reconstruct_kr_tag_queries(query, limit=8)
+        if not reconstructed_queries:
+            return []
+        match_items = []
+        seen_match_tags: set[str] = set()
+        for reconstructed in reconstructed_queries:
+            matches = match_kr_phrase_canonical_tags(reconstructed.query, limit=limit)
+            for match in matches:
+                key = normalize_search_query(match.tag)
+                if not key or key in seen_match_tags:
+                    continue
+                seen_match_tags.add(key)
+                match_items.append((match, reconstructed))
+                if len(match_items) >= limit:
+                    break
+            if len(match_items) >= limit:
+                break
+        if not match_items:
+            return []
+        try:
+            bridge_state = object.__getattribute__(self, "__dict__")
+        except Exception:
+            bridge_state = {}
+        if "_kr_tags_raw" not in bridge_state:
+            self._kr_tags_raw = {}
+            bridge_state = object.__getattribute__(self, "__dict__")
+        if "_kr_tags_loaded" in bridge_state:
+            self._load_kr_tags()
+            bridge_state = object.__getattribute__(self, "__dict__")
+        raw_tags = bridge_state.get("_kr_tags_raw", {})
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for match, reconstructed in match_items:
+            key = normalize_search_query(match.tag)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            info = raw_tags.get(key) or raw_tags.get(match.tag.lower())
+            if info is None:
+                exact_rows = [
+                    row for row in self._search_kr_tags(match.tag, limit=5)
+                    if normalize_search_query(row.get("tag", "")) == key
+                ]
+                if exact_rows:
+                    row = dict(exact_rows[0])
+                else:
+                    row = {
+                        "tag": match.tag,
+                        "count": 0,
+                        "desc": "",
+                        "group": "",
+                        "cat": "",
+                    }
+            else:
+                row = {
+                    "tag": info.get("_tag", match.tag),
+                    "count": info.get("freq", info.get("count", 0)),
+                    "desc": info.get("description", info.get("desc", "")),
+                    "group": info.get("group", ""),
+                    "cat": info.get("_cat", ""),
+                }
+            row["_canonical"] = True
+            row["_canonical_rule"] = match.rule_id
+            row["_canonical_axis"] = match.axis
+            row["_canonical_query"] = reconstructed.query
+            row["_canonical_query_form"] = reconstructed.form
+            confidence = min(max(match.confidence * reconstructed.confidence, 0.0), 1.0)
+            row["_rank_score"] = 920.0 * confidence
+            row.update(
+                self._autocomplete_candidate_fields(
+                    "tag_canonical",
+                    "kr_phrase_canonical",
+                    confidence=confidence,
+                    rank_score=row["_rank_score"],
+                )
+            )
+            rows.append(row)
+        return rows
 
     def _translation_search_query_levels(self, translated: str) -> list[list[str]]:
         normalized = normalize_search_query(translated)
@@ -11590,8 +12087,20 @@ class RemoteBridge(QObject):
         cached_result = self._autocomplete_result_cache_get(query, limit)
         if cached_result is not None:
             return cached_result
+        canonical_results = self._filter_noisy_autocomplete_rows(
+            self._canonical_autocomplete_rows(query, min(limit, 8)),
+            query,
+        )
+        canonical_tags = {
+            normalize_search_query(row.get("tag", ""))
+            for row in canonical_results
+            if normalize_search_query(row.get("tag", ""))
+        }
         base_results = self._filter_noisy_autocomplete_rows(
-            self._search_kr_tags(query, limit),
+            [
+                row for row in self._search_kr_tags(query, limit)
+                if normalize_search_query(row.get("tag", "")) not in canonical_tags
+            ],
             query,
         )
         translated = self._translate_autocomplete_query(query)
@@ -11603,15 +12112,20 @@ class RemoteBridge(QObject):
             )
             if metadata_rows:
                 combined_rows = self._filter_noisy_autocomplete_rows(
-                    metadata_rows + base_results,
+                    canonical_results + metadata_rows + base_results,
                     query,
                 )
                 rows = self._score_autocomplete_candidates(
                     combined_rows,
                     sort=True,
+                    query=query,
+                    score_sort=True,
                 )[:limit]
                 return self._autocomplete_result_cache_set(query, limit, rows, "")
-            rows = self._score_autocomplete_candidates(base_results)
+            rows = self._score_autocomplete_candidates(
+                canonical_results + base_results,
+                query=query,
+            )
             return self._autocomplete_result_cache_set(query, limit, rows, "")
 
         merged: dict[str, dict] = {}
@@ -11674,7 +12188,7 @@ class RemoteBridge(QObject):
                 copy_best_score(existing, row, "_rank_score")
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
-                if existing.get("candidateType") not in {"tag_exact", "tag_metadata"}:
+                if existing.get("candidateType") not in {"tag_canonical", "tag_exact", "tag_metadata"}:
                     existing["candidateType"] = "tag_translated"
                     existing["source"] = "translation_search"
                     existing["confidence"] = 0.75
@@ -11692,9 +12206,10 @@ class RemoteBridge(QObject):
                 copy_best_score(existing, row, "_rank_score")
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
-                existing["candidateType"] = "tag_metadata"
-                existing["source"] = "kr_metadata"
-                existing["confidence"] = 0.85
+                if existing.get("candidateType") != "tag_canonical":
+                    existing["candidateType"] = "tag_metadata"
+                    existing["source"] = "kr_metadata"
+                    existing["confidence"] = 0.85
                 self._apply_autocomplete_candidate_schema(
                     existing,
                     rank_score=(
@@ -11706,6 +12221,8 @@ class RemoteBridge(QObject):
 
         natural_hangul_query = self._has_hangul_text(query) and len(normalize_search_query(query).split()) >= 2
         base_head_count = max(3, limit // 2)
+        for row in canonical_results:
+            add_result(row)
         if not natural_hangul_query:
             for row in base_results[:base_head_count]:
                 add_result(row)
@@ -11831,7 +12348,7 @@ class RemoteBridge(QObject):
             if recommended:
                 results = results[:max(0, limit - len(recommended))] + recommended
 
-        rows = self._score_autocomplete_candidates(results, sort=True)[:limit]
+        rows = self._score_autocomplete_candidates(results, sort=True, query=query)[:limit]
         return self._autocomplete_result_cache_set(query, limit, rows, translated)
 
     def _search_wildcards(self, query: str, limit: int = 12) -> list:

@@ -1,0 +1,1290 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "count_1girl_solo",
+      "axis": "composition",
+      "patterns": ["여자 한 명", "여성 한 명", "여자 1명", "여자 한명"],
+      "forbiddenTerms": ["남자"],
+      "tags": ["1girl", "solo"],
+      "confidence": 0.96
+    },
+    {
+      "id": "count_1boy_solo",
+      "axis": "composition",
+      "patterns": ["남자 한 명", "남성 한 명", "남자 1명", "남자 한명"],
+      "forbiddenTerms": ["여자"],
+      "tags": ["1boy", "solo"],
+      "confidence": 0.96
+    },
+    {
+      "id": "count_2girls",
+      "axis": "composition",
+      "patterns": ["여자 두 명", "여성 두 명", "여자 2명", "여자 둘"],
+      "forbiddenTerms": ["남자"],
+      "tags": ["2girls"],
+      "confidence": 0.96
+    },
+    {
+      "id": "count_2boys",
+      "axis": "composition",
+      "patterns": ["남자 두 명", "남성 두 명", "남자 2명", "남자 둘"],
+      "forbiddenTerms": ["여자"],
+      "tags": ["2boys"],
+      "confidence": 0.96
+    },
+    {
+      "id": "count_multiple_girls",
+      "axis": "composition",
+      "patterns": ["여러 명의 여자", "여러 여자", "여성 여러 명"],
+      "forbiddenTerms": ["남자"],
+      "tags": ["multiple girls"],
+      "confidence": 0.94
+    },
+    {
+      "id": "count_multiple_boys",
+      "axis": "composition",
+      "patterns": ["여러 명의 남자", "여러 남자", "남성 여러 명"],
+      "forbiddenTerms": ["여자"],
+      "tags": ["multiple boys"],
+      "confidence": 0.94
+    },
+    {
+      "id": "composition_no_humans",
+      "axis": "composition",
+      "patterns": ["사람 없이", "인간 없음", "인물 없이"],
+      "tags": ["no humans"],
+      "confidence": 0.94
+    },
+    {
+      "id": "composition_faceless",
+      "axis": "composition",
+      "patterns": ["얼굴 없는", "얼굴이 없는"],
+      "tags": ["faceless"],
+      "confidence": 0.92
+    },
+    {
+      "id": "shot_upper_body",
+      "axis": "composition",
+      "patterns": ["상반신"],
+      "tags": ["upper body"],
+      "confidence": 0.92
+    },
+    {
+      "id": "shot_full_body",
+      "axis": "composition",
+      "patterns": ["전신이 전부", "전신이 보", "전신 포즈"],
+      "tags": ["full body"],
+      "confidence": 0.90
+    },
+    {
+      "id": "shot_cowboy",
+      "axis": "composition",
+      "patterns": ["허벅지까지 보이는", "허벅지까지 나온"],
+      "tags": ["cowboy shot"],
+      "confidence": 0.91
+    },
+    {
+      "id": "shot_close_up",
+      "axis": "composition",
+      "patterns": ["클로즈업", "가까이 클로즈업"],
+      "tags": ["close-up"],
+      "confidence": 0.91
+    },
+    {
+      "id": "shot_profile",
+      "axis": "composition",
+      "patterns": ["옆얼굴", "프로필"],
+      "tags": ["profile"],
+      "confidence": 0.90
+    },
+    {
+      "id": "gaze_viewer",
+      "axis": "gaze",
+      "patterns": ["정면을 바라", "카메라를 보"],
+      "tags": ["looking at viewer"],
+      "confidence": 0.94
+    },
+    {
+      "id": "gaze_side",
+      "axis": "gaze",
+      "patterns": ["옆을 보고", "옆을 바라", "측면을 보"],
+      "tags": ["looking to the side"],
+      "confidence": 0.92
+    },
+    {
+      "id": "gaze_down",
+      "axis": "gaze",
+      "patterns": ["아래를 내려다", "내려다봄", "내려다보"],
+      "tags": ["looking down"],
+      "confidence": 0.92
+    },
+    {
+      "id": "gaze_up",
+      "axis": "gaze",
+      "patterns": ["위를 올려다", "올려다봄", "올려다보"],
+      "tags": ["looking up"],
+      "confidence": 0.92
+    },
+    {
+      "id": "gaze_back",
+      "axis": "gaze",
+      "patterns": ["뒤돌아보", "뒤돌아 보는"],
+      "tags": ["looking back"],
+      "confidence": 0.91
+    },
+    {
+      "id": "gaze_another",
+      "axis": "gaze",
+      "patterns": ["서로를 바라", "다른 사람을 바라"],
+      "tags": ["looking at another"],
+      "confidence": 0.90
+    },
+    {
+      "id": "gaze_away",
+      "axis": "gaze",
+      "patterns": ["화면 밖을 보", "시선을 피", "다른 곳을 보"],
+      "tags": ["looking away"],
+      "confidence": 0.90
+    },
+    {
+      "id": "eyes_closed",
+      "axis": "expression",
+      "patterns": ["눈을 감", "감은 눈"],
+      "tags": ["closed eyes"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_one_closed",
+      "axis": "expression",
+      "patterns": ["한쪽 눈만 감", "윙크"],
+      "tags": ["one eye closed"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_half_closed",
+      "axis": "expression",
+      "patterns": ["반쯤 감은 눈", "반쯤 감긴 눈"],
+      "tags": ["half-closed eyes"],
+      "confidence": 0.91
+    },
+    {
+      "id": "eyes_wide",
+      "axis": "expression",
+      "patterns": ["동그랗게 뜬 눈", "눈을 크게 뜬", "휘둥그레"],
+      "tags": ["wide-eyed"],
+      "confidence": 0.91
+    },
+    {
+      "id": "eyes_red",
+      "axis": "color",
+      "patterns": ["빨간 눈", "붉은 눈", "빨간 눈동자"],
+      "tags": ["red eyes"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_blue",
+      "axis": "color",
+      "patterns": ["파란 눈", "파란 눈동자"],
+      "tags": ["blue eyes"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_green",
+      "axis": "color",
+      "patterns": ["초록색 눈", "초록 눈", "녹색 눈"],
+      "tags": ["green eyes"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_purple",
+      "axis": "color",
+      "patterns": ["보라색 눈", "보라 눈"],
+      "tags": ["purple eyes"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_yellow",
+      "axis": "color",
+      "patterns": ["노란 눈", "노란색 눈"],
+      "tags": ["yellow eyes"],
+      "confidence": 0.94
+    },
+    {
+      "id": "eyes_heterochromia",
+      "axis": "color",
+      "patterns": ["이질적인 양쪽 눈색", "오드아이"],
+      "tags": ["heterochromia"],
+      "confidence": 0.93
+    },
+    {
+      "id": "expression_blush",
+      "axis": "expression",
+      "patterns": ["붉어진 뺨", "얼굴 붉", "블러시"],
+      "tags": ["blush"],
+      "confidence": 0.93
+    },
+    {
+      "id": "expression_light_smile",
+      "axis": "expression",
+      "patterns": ["살짝 웃", "희미하게 웃"],
+      "tags": ["light smile"],
+      "confidence": 0.91
+    },
+    {
+      "id": "expression_smile",
+      "axis": "expression",
+      "patterns": ["활짝 웃", "웃고 있음", "웃는 표정"],
+      "forbiddenTerms": ["살짝"],
+      "tags": ["smile"],
+      "confidence": 0.90
+    },
+    {
+      "id": "expression_mouth_open",
+      "axis": "expression",
+      "patterns": ["입을 크게 벌", "입 벌린", "입을 벌림"],
+      "tags": ["open mouth"],
+      "confidence": 0.91
+    },
+    {
+      "id": "expression_parted_lips",
+      "axis": "expression",
+      "patterns": ["입을 살짝 벌", "입술이 살짝"],
+      "tags": ["parted lips"],
+      "confidence": 0.91
+    },
+    {
+      "id": "expression_tongue",
+      "axis": "expression",
+      "patterns": ["혀가 살짝 보", "혀가 보"],
+      "tags": ["tongue"],
+      "confidence": 0.89
+    },
+    {
+      "id": "expression_tears",
+      "axis": "expression",
+      "patterns": ["눈물이", "눈물 흘"],
+      "tags": ["tears"],
+      "confidence": 0.91
+    },
+    {
+      "id": "expression_sweatdrop",
+      "axis": "expression",
+      "patterns": ["땀방울", "식은땀"],
+      "tags": ["sweatdrop"],
+      "confidence": 0.91
+    },
+    {
+      "id": "expression_embarrassed",
+      "axis": "expression",
+      "patterns": ["당황한 얼굴", "당황한 표정"],
+      "tags": ["embarrassed"],
+      "confidence": 0.90
+    },
+    {
+      "id": "expression_angry",
+      "axis": "expression",
+      "patterns": ["화난 얼굴", "화난 표정"],
+      "tags": ["angry"],
+      "confidence": 0.90
+    },
+    {
+      "id": "expression_surprised",
+      "axis": "expression",
+      "patterns": ["놀란 표정", "놀란 얼굴"],
+      "tags": ["surprised"],
+      "confidence": 0.90
+    },
+    {
+      "id": "expression_expressionless",
+      "axis": "expression",
+      "patterns": ["무표정", "표정이 없음"],
+      "tags": ["expressionless"],
+      "confidence": 0.90
+    },
+    {
+      "id": "hair_long",
+      "axis": "hair",
+      "patterns": ["긴 머리", "허리까지 내려오는"],
+      "tags": ["long hair"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_short",
+      "axis": "hair",
+      "patterns": ["짧은 머리", "단발머리", "어깨 위 짧은"],
+      "tags": ["short hair"],
+      "confidence": 0.90
+    },
+    {
+      "id": "hair_very_long",
+      "axis": "hair",
+      "patterns": ["아주 긴 머리", "발목까지 오는"],
+      "tags": ["very long hair"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_black",
+      "axis": "hair",
+      "patterns": ["검은 머리", "검은 긴 생머리", "흑발"],
+      "tags": ["black hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_blonde",
+      "axis": "hair",
+      "patterns": ["금발"],
+      "tags": ["blonde hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_pink",
+      "axis": "hair",
+      "patterns": ["분홍색 머리", "분홍 머리"],
+      "tags": ["pink hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_blue",
+      "axis": "hair",
+      "patterns": ["파란색 머리", "파란 머리"],
+      "tags": ["blue hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_white",
+      "axis": "hair",
+      "patterns": ["하얀 머리", "흰 머리", "백발"],
+      "tags": ["white hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_grey",
+      "axis": "hair",
+      "patterns": ["회색 머리"],
+      "tags": ["grey hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_brown",
+      "axis": "hair",
+      "patterns": ["갈색 머리"],
+      "tags": ["brown hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_green",
+      "axis": "hair",
+      "patterns": ["초록 머리", "초록색 머리", "녹색 머리"],
+      "tags": ["green hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_purple",
+      "axis": "hair",
+      "patterns": ["보라색 머리", "보라 머리"],
+      "tags": ["purple hair"],
+      "confidence": 0.92
+    },
+    {
+      "id": "hair_twintails",
+      "axis": "hair",
+      "patterns": ["양갈래", "트윈테일"],
+      "tags": ["twintails"],
+      "confidence": 0.93
+    },
+    {
+      "id": "hair_ponytail",
+      "axis": "hair",
+      "patterns": ["포니테일로", "포니테일"],
+      "forbiddenTerms": ["옆으로"],
+      "tags": ["ponytail"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_side_ponytail",
+      "axis": "hair",
+      "patterns": ["옆으로 묶은 포니테일", "사이드 포니테일"],
+      "tags": ["side ponytail"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_braid",
+      "axis": "hair",
+      "patterns": ["머리를 땋", "땋아"],
+      "tags": ["braid"],
+      "confidence": 0.90
+    },
+    {
+      "id": "hair_between_eyes",
+      "axis": "hair",
+      "patterns": ["눈 사이", "머리카락이 눈 사이"],
+      "tags": ["hair between eyes"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_over_eyes",
+      "axis": "hair",
+      "patterns": ["눈을 가리는 앞머리", "눈을 가린 앞머리"],
+      "tags": ["hair over eyes"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_over_one_eye",
+      "axis": "hair",
+      "patterns": ["한쪽 눈을 가린 머리", "한쪽 눈을 가리는"],
+      "tags": ["hair over one eye"],
+      "confidence": 0.91
+    },
+    {
+      "id": "hair_ribbon",
+      "axis": "accessory",
+      "patterns": ["머리에 리본", "헤어 리본"],
+      "tags": ["hair ribbon"],
+      "confidence": 0.90
+    },
+    {
+      "id": "hairclip",
+      "axis": "accessory",
+      "patterns": ["머리핀"],
+      "tags": ["hairclip"],
+      "confidence": 0.90
+    },
+    {
+      "id": "hair_ornament",
+      "axis": "accessory",
+      "patterns": ["머리 장식", "헤어 장식"],
+      "tags": ["hair ornament"],
+      "confidence": 0.90
+    },
+    {
+      "id": "clothes_school_uniform",
+      "axis": "clothing",
+      "patterns": ["교복"],
+      "tags": ["school uniform"],
+      "confidence": 0.91
+    },
+    {
+      "id": "clothes_white_shirt",
+      "axis": "clothing",
+      "patterns": ["흰 셔츠", "흰색 셔츠"],
+      "tags": ["white shirt"],
+      "confidence": 0.92
+    },
+    {
+      "id": "clothes_black_skirt",
+      "axis": "clothing",
+      "patterns": ["검은 치마", "검은색 치마"],
+      "tags": ["black skirt"],
+      "confidence": 0.92
+    },
+    {
+      "id": "clothes_hoodie",
+      "axis": "clothing",
+      "patterns": ["후드티"],
+      "tags": ["hoodie"],
+      "confidence": 0.90
+    },
+    {
+      "id": "clothes_sweater",
+      "axis": "clothing",
+      "patterns": ["스웨터"],
+      "tags": ["sweater"],
+      "confidence": 0.90
+    },
+    {
+      "id": "clothes_cardigan",
+      "axis": "clothing",
+      "patterns": ["가디건"],
+      "tags": ["cardigan"],
+      "confidence": 0.90
+    },
+    {
+      "id": "clothes_jacket",
+      "axis": "clothing",
+      "patterns": ["재킷", "자켓"],
+      "tags": ["jacket"],
+      "confidence": 0.89
+    },
+    {
+      "id": "clothes_coat",
+      "axis": "clothing",
+      "patterns": ["코트"],
+      "tags": ["coat"],
+      "confidence": 0.89
+    },
+    {
+      "id": "clothes_dress",
+      "axis": "clothing",
+      "patterns": ["드레스"],
+      "tags": ["dress"],
+      "confidence": 0.90
+    },
+    {
+      "id": "clothes_maid",
+      "axis": "clothing",
+      "patterns": ["메이드복", "메이드 복"],
+      "tags": ["maid"],
+      "confidence": 0.89
+    },
+    {
+      "id": "clothes_swimsuit",
+      "axis": "clothing",
+      "patterns": ["수영복"],
+      "forbiddenTerms": ["학교"],
+      "tags": ["swimsuit"],
+      "confidence": 0.90
+    },
+    {
+      "id": "clothes_school_swimsuit",
+      "axis": "clothing",
+      "patterns": ["학교 수영복"],
+      "tags": ["school swimsuit"],
+      "confidence": 0.92
+    },
+    {
+      "id": "clothes_bikini",
+      "axis": "clothing",
+      "patterns": ["비키니"],
+      "tags": ["bikini"],
+      "confidence": 0.90
+    },
+    {
+      "id": "accessory_glasses",
+      "axis": "accessory",
+      "patterns": ["안경 착용", "안경 쓴"],
+      "forbiddenTerms": ["선글라스"],
+      "tags": ["glasses"],
+      "confidence": 0.90
+    },
+    {
+      "id": "accessory_sunglasses",
+      "axis": "accessory",
+      "patterns": ["선글라스"],
+      "tags": ["sunglasses"],
+      "confidence": 0.90
+    },
+    {
+      "id": "accessory_necklace",
+      "axis": "accessory",
+      "patterns": ["목걸이"],
+      "tags": ["necklace"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_sitting",
+      "axis": "pose",
+      "patterns": ["앉아 있음", "낮게 앉"],
+      "tags": ["sitting"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_chair",
+      "axis": "object",
+      "patterns": ["의자에 앉", "의자"],
+      "tags": ["chair"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_kneeling",
+      "axis": "pose",
+      "patterns": ["무릎 꿇"],
+      "tags": ["kneeling"],
+      "confidence": 0.91
+    },
+    {
+      "id": "pose_standing",
+      "axis": "pose",
+      "patterns": ["서 있는", "서 있음"],
+      "tags": ["standing"],
+      "confidence": 0.89
+    },
+    {
+      "id": "pose_lying",
+      "axis": "pose",
+      "patterns": ["누워 있음", "누움"],
+      "tags": ["lying"],
+      "confidence": 0.89
+    },
+    {
+      "id": "object_bed",
+      "axis": "object",
+      "patterns": ["침대"],
+      "tags": ["bed"],
+      "confidence": 0.89
+    },
+    {
+      "id": "object_holding_butterfly_net",
+      "axis": "object",
+      "patterns": ["잠자리채를 들고", "잠자리채 들고", "잠자리채를 잡고", "잠자리채 잡고"],
+      "tags": ["holding butterfly net", "butterfly net", "hand net"],
+      "confidence": 0.97
+    },
+    {
+      "id": "object_butterfly_net",
+      "axis": "object",
+      "patterns": ["잠자리채", "포충망", "뜰채"],
+      "tags": ["butterfly net", "hand net"],
+      "confidence": 0.94
+    },
+    {
+      "id": "pose_on_stomach",
+      "axis": "pose",
+      "patterns": ["엎드려"],
+      "tags": ["on stomach"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_on_back",
+      "axis": "pose",
+      "patterns": ["등을 대고"],
+      "tags": ["on back"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_squatting",
+      "axis": "pose",
+      "patterns": ["쪼그려"],
+      "tags": ["squatting"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_running",
+      "axis": "pose",
+      "patterns": ["달리는"],
+      "tags": ["running"],
+      "confidence": 0.89
+    },
+    {
+      "id": "pose_jumping",
+      "axis": "pose",
+      "patterns": ["점프"],
+      "tags": ["jumping"],
+      "confidence": 0.89
+    },
+    {
+      "id": "pose_waving",
+      "axis": "pose",
+      "patterns": ["손을 흔"],
+      "tags": ["waving"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_hand_up",
+      "axis": "pose",
+      "patterns": ["손을 들", "한 손을 들"],
+      "tags": ["hand up"],
+      "confidence": 0.88
+    },
+    {
+      "id": "pose_arms_up",
+      "axis": "pose",
+      "patterns": ["양손을 올", "팔을 들어", "팔을 올"],
+      "tags": ["arms up"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_crossed_arms",
+      "axis": "pose",
+      "patterns": ["팔짱"],
+      "tags": ["crossed arms"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_pointing",
+      "axis": "pose",
+      "patterns": ["손가락으로 가리"],
+      "tags": ["pointing"],
+      "confidence": 0.89
+    },
+    {
+      "id": "pose_finger_to_mouth",
+      "axis": "pose",
+      "patterns": ["입가에 손가락"],
+      "tags": ["finger to mouth"],
+      "confidence": 0.89
+    },
+    {
+      "id": "pose_covering_own_mouth",
+      "axis": "pose",
+      "patterns": ["자기 입을 가림", "입을 손으로 가림"],
+      "tags": ["covering own mouth"],
+      "confidence": 0.90
+    },
+    {
+      "id": "pose_holding",
+      "axis": "pose",
+      "patterns": ["무언가를 들고"],
+      "tags": ["holding"],
+      "confidence": 0.86
+    },
+    {
+      "id": "object_sword",
+      "axis": "object",
+      "patterns": ["칼을 들", "검을 들"],
+      "tags": ["holding sword", "sword"],
+      "confidence": 0.90
+    },
+    {
+      "id": "object_gun",
+      "axis": "object",
+      "patterns": ["총을 들"],
+      "tags": ["holding gun", "gun"],
+      "confidence": 0.90
+    },
+    {
+      "id": "object_phone",
+      "axis": "object",
+      "patterns": ["휴대폰", "핸드폰"],
+      "tags": ["phone"],
+      "confidence": 0.88
+    },
+    {
+      "id": "object_bag",
+      "axis": "object",
+      "patterns": ["가방"],
+      "tags": ["bag"],
+      "confidence": 0.88
+    },
+    {
+      "id": "object_desk",
+      "axis": "object",
+      "patterns": ["책상"],
+      "tags": ["desk"],
+      "confidence": 0.88
+    },
+    {
+      "id": "object_window",
+      "axis": "object",
+      "patterns": ["창문"],
+      "tags": ["window"],
+      "confidence": 0.88
+    },
+    {
+      "id": "object_door",
+      "axis": "object",
+      "patterns": ["문 앞", "문이 보"],
+      "tags": ["door"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_tree",
+      "axis": "background",
+      "patterns": ["나무가", "나무 배경"],
+      "tags": ["tree"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_flower",
+      "axis": "background",
+      "patterns": ["꽃이 가득", "꽃 배경"],
+      "tags": ["flower"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_underwater",
+      "axis": "background",
+      "patterns": ["물속"],
+      "tags": ["underwater"],
+      "confidence": 0.89
+    },
+    {
+      "id": "background_sky",
+      "axis": "background",
+      "patterns": ["하늘 배경"],
+      "tags": ["sky"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_cloud",
+      "axis": "background",
+      "patterns": ["구름"],
+      "tags": ["cloud"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_night_sky",
+      "axis": "background",
+      "patterns": ["밤하늘"],
+      "tags": ["night sky"],
+      "confidence": 0.90
+    },
+    {
+      "id": "background_city",
+      "axis": "background",
+      "patterns": ["도시 배경"],
+      "tags": ["city"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_street",
+      "axis": "background",
+      "patterns": ["거리에서", "거리 배경"],
+      "tags": ["street"],
+      "confidence": 0.88
+    },
+    {
+      "id": "background_classroom",
+      "axis": "background",
+      "patterns": ["교실"],
+      "tags": ["classroom"],
+      "confidence": 0.89
+    },
+    {
+      "id": "background_kitchen",
+      "axis": "background",
+      "patterns": ["부엌", "주방"],
+      "tags": ["kitchen"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_highres",
+      "axis": "meta",
+      "patterns": ["고해상도"],
+      "tags": ["highres"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_lowres",
+      "axis": "meta",
+      "patterns": ["낮은 해상도"],
+      "tags": ["lowres"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_monochrome",
+      "axis": "style",
+      "patterns": ["흑백"],
+      "tags": ["monochrome"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_greyscale",
+      "axis": "style",
+      "patterns": ["회색조"],
+      "tags": ["greyscale"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_transparent_background",
+      "axis": "style",
+      "patterns": ["투명 배경"],
+      "tags": ["transparent background"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_simple_background",
+      "axis": "style",
+      "patterns": ["단색 배경"],
+      "tags": ["simple background"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_gradient_background",
+      "axis": "style",
+      "patterns": ["그라데이션 배경"],
+      "tags": ["gradient background"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_floral_print",
+      "axis": "style",
+      "patterns": ["꽃무늬"],
+      "tags": ["floral print"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_striped_clothes",
+      "axis": "style",
+      "patterns": ["줄무늬 의상", "줄무늬 옷"],
+      "tags": ["striped clothes"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_watercolor",
+      "axis": "style",
+      "patterns": ["수채화"],
+      "tags": ["watercolor \\(medium\\)"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_marker",
+      "axis": "style",
+      "patterns": ["마커로 칠"],
+      "tags": ["marker \\(medium\\)"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_speech_bubble",
+      "axis": "meta",
+      "patterns": ["말풍선"],
+      "tags": ["speech bubble"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_watermark",
+      "axis": "meta",
+      "patterns": ["워터마크"],
+      "tags": ["watermark"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_censored",
+      "axis": "meta",
+      "patterns": ["검열"],
+      "tags": ["censored"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_blurry",
+      "axis": "style",
+      "patterns": ["흐림 효과", "흐릿한"],
+      "tags": ["blurry"],
+      "confidence": 0.86
+    },
+    {
+      "id": "meta_sparkle",
+      "axis": "effect",
+      "patterns": ["반짝이는"],
+      "tags": ["sparkle"],
+      "confidence": 0.86
+    },
+    {
+      "id": "meta_heart",
+      "axis": "effect",
+      "patterns": ["하트 모양"],
+      "tags": ["heart"],
+      "confidence": 0.86
+    },
+    {
+      "id": "view_from_above",
+      "axis": "composition",
+      "patterns": ["위에서 내려다본", "카메라 위에서 내려다"],
+      "tags": ["from above"],
+      "confidence": 0.90
+    },
+    {
+      "id": "view_from_behind",
+      "axis": "composition",
+      "patterns": ["뒤쪽에서 본", "뒤에서 본"],
+      "tags": ["from behind"],
+      "confidence": 0.90
+    },
+    {
+      "id": "view_from_side",
+      "axis": "composition",
+      "patterns": ["옆에서 본"],
+      "tags": ["from side"],
+      "confidence": 0.90
+    },
+    {
+      "id": "composition_depth_of_field",
+      "axis": "composition",
+      "patterns": ["배경이 흐릿한 사진", "배경 흐림 사진"],
+      "tags": ["depth of field"],
+      "confidence": 0.90
+    },
+    {
+      "id": "footwear_boots",
+      "axis": "clothing",
+      "patterns": ["부츠"],
+      "tags": ["boots"],
+      "confidence": 0.89
+    },
+    {
+      "id": "footwear_sneakers",
+      "axis": "clothing",
+      "patterns": ["운동화"],
+      "tags": ["sneakers"],
+      "confidence": 0.89
+    },
+    {
+      "id": "object_cup",
+      "axis": "object",
+      "patterns": ["음료를 들고", "컵을 들고"],
+      "tags": ["holding cup", "cup"],
+      "confidence": 0.90
+    },
+    {
+      "id": "object_couch",
+      "axis": "object",
+      "patterns": ["소파"],
+      "tags": ["couch"],
+      "confidence": 0.89
+    },
+    {
+      "id": "background_water",
+      "axis": "background",
+      "patterns": ["물가"],
+      "tags": ["water"],
+      "confidence": 0.87
+    },
+    {
+      "id": "background_bathroom",
+      "axis": "background",
+      "patterns": ["욕실"],
+      "tags": ["bathroom"],
+      "confidence": 0.89
+    },
+    {
+      "id": "background_beach",
+      "axis": "background",
+      "patterns": ["해변"],
+      "tags": ["beach"],
+      "confidence": 0.89
+    },
+    {
+      "id": "background_forest",
+      "axis": "background",
+      "patterns": ["숲속", "숲 배경"],
+      "tags": ["forest"],
+      "confidence": 0.89
+    },
+    {
+      "id": "object_food",
+      "axis": "object",
+      "patterns": ["음식이"],
+      "tags": ["food"],
+      "confidence": 0.88
+    },
+    {
+      "id": "object_cake",
+      "axis": "object",
+      "patterns": ["케이크"],
+      "tags": ["cake"],
+      "confidence": 0.88
+    },
+    {
+      "id": "creature_cat",
+      "axis": "object",
+      "patterns": ["고양이"],
+      "tags": ["cat"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_white_background",
+      "axis": "style",
+      "patterns": ["흰 배경", "흰색 배경"],
+      "tags": ["white background"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_patterned_background",
+      "axis": "style",
+      "patterns": ["무늬가 있는 배경", "무늬 배경"],
+      "tags": ["patterned background"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_plaid",
+      "axis": "style",
+      "patterns": ["격자무늬"],
+      "tags": ["plaid"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_colored_pencil",
+      "axis": "style",
+      "patterns": ["색연필"],
+      "tags": ["colored pencil \\(medium\\)"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_lineart",
+      "axis": "style",
+      "patterns": ["선화"],
+      "tags": ["lineart"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_chibi",
+      "axis": "style",
+      "patterns": ["치비", "데포르메"],
+      "tags": ["chibi"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_realistic",
+      "axis": "style",
+      "patterns": ["사실적인"],
+      "tags": ["realistic"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_flat_color",
+      "axis": "style",
+      "patterns": ["평평한 색감"],
+      "tags": ["flat color"],
+      "confidence": 0.88
+    },
+    {
+      "id": "meta_comic",
+      "axis": "style",
+      "patterns": ["만화 컷"],
+      "tags": ["comic"],
+      "confidence": 0.87
+    },
+    {
+      "id": "meta_english_text",
+      "axis": "meta",
+      "patterns": ["영어 글자", "영어 텍스트"],
+      "tags": ["english text"],
+      "confidence": 0.89
+    },
+    {
+      "id": "meta_korean_text",
+      "axis": "meta",
+      "patterns": ["한국어 글자", "한국어 텍스트"],
+      "tags": ["korean text"],
+      "confidence": 0.89
+    },
+    {
+      "id": "effect_glowing",
+      "axis": "effect",
+      "patterns": ["빛나는 효과"],
+      "tags": ["glowing"],
+      "confidence": 0.87
+    },
+    {
+      "id": "effect_motion_lines",
+      "axis": "effect",
+      "patterns": ["움직임 선"],
+      "tags": ["motion lines"],
+      "confidence": 0.87
+    },
+    {
+      "id": "symbol_star",
+      "axis": "effect",
+      "patterns": ["별 모양"],
+      "tags": ["star \\(symbol\\)"],
+      "confidence": 0.88
+    },
+    {
+      "id": "shape_circle",
+      "axis": "composition",
+      "patterns": ["원형 프레임"],
+      "tags": ["circle"],
+      "confidence": 0.86
+    },
+    {
+      "id": "meta_cropped",
+      "axis": "composition",
+      "patterns": ["잘린 가장자리", "잘린 구도"],
+      "tags": ["cropped"],
+      "confidence": 0.87
+    },
+    {
+      "id": "quality_bad_anatomy",
+      "axis": "meta",
+      "patterns": ["나쁜 해부학"],
+      "tags": ["bad anatomy"],
+      "confidence": 0.90
+    },
+    {
+      "id": "quality_bad_hands",
+      "axis": "meta",
+      "patterns": ["나쁜 손"],
+      "tags": ["bad hands"],
+      "confidence": 0.90
+    },
+    {
+      "id": "meta_spot_color",
+      "axis": "style",
+      "patterns": ["스팟 컬러"],
+      "tags": ["spot color"],
+      "confidence": 0.88
+    },
+    {
+      "id": "nsfw_large_breasts",
+      "axis": "sensitive",
+      "patterns": ["큰 가슴"],
+      "tags": ["large breasts", "breasts"],
+      "confidence": 0.91
+    },
+    {
+      "id": "nsfw_huge_breasts",
+      "axis": "sensitive",
+      "patterns": ["거대한 가슴"],
+      "tags": ["huge breasts"],
+      "confidence": 0.91
+    },
+    {
+      "id": "nsfw_nipples",
+      "axis": "sensitive",
+      "patterns": ["유두"],
+      "tags": ["nipples"],
+      "confidence": 0.91
+    },
+    {
+      "id": "nsfw_nude",
+      "axis": "sensitive",
+      "patterns": ["알몸", "나체"],
+      "tags": ["nude"],
+      "confidence": 0.91
+    },
+    {
+      "id": "nsfw_naked_apron",
+      "axis": "sensitive",
+      "patterns": ["앞치마만"],
+      "tags": ["naked apron"],
+      "confidence": 0.90
+    },
+    {
+      "id": "nsfw_panties",
+      "axis": "sensitive",
+      "patterns": ["팬티"],
+      "forbiddenTerms": ["잡아", "내리", "당기"],
+      "tags": ["panties"],
+      "confidence": 0.88
+    },
+    {
+      "id": "nsfw_bra",
+      "axis": "sensitive",
+      "patterns": ["브래지어", "브라"],
+      "tags": ["bra"],
+      "confidence": 0.89
+    },
+    {
+      "id": "nsfw_ass",
+      "axis": "sensitive",
+      "patterns": ["엉덩이가 강조", "엉덩이 강조"],
+      "tags": ["ass"],
+      "confidence": 0.89
+    },
+    {
+      "id": "nsfw_thighs",
+      "axis": "sensitive",
+      "patterns": ["허벅지가 강조", "허벅지 강조"],
+      "tags": ["thighs"],
+      "confidence": 0.89
+    },
+    {
+      "id": "nsfw_pussy",
+      "axis": "explicit",
+      "patterns": ["음부가 보", "음부 노출"],
+      "tags": ["pussy"],
+      "confidence": 0.90
+    },
+    {
+      "id": "nsfw_sex",
+      "axis": "explicit",
+      "patterns": ["성행위", "섹스"],
+      "tags": ["sex"],
+      "confidence": 0.89
+    },
+    {
+      "id": "nsfw_oral",
+      "axis": "explicit",
+      "patterns": ["구강성교"],
+      "tags": ["oral"],
+      "confidence": 0.89
+    },
+    {
+      "id": "nsfw_cum",
+      "axis": "explicit",
+      "patterns": ["정액"],
+      "tags": ["cum"],
+      "confidence": 0.88
+    }
+  ]
+}

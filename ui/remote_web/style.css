@@ -7357,16 +7357,35 @@ body.resizing-result-info {
   color: rgba(255, 255, 255, 0.78);
 }
 .prompt-token-preset-events {
-  color: #f2e08f;
-  font-weight: 650;
+  color: #dacd90;
 }
 .prompt-token-preset-clothes {
-  color: #9fdcff;
-  font-weight: 650;
+  color: #abd8e5;
 }
 .prompt-token-preset-expressions {
-  color: #a9e8a0;
+  color: #b6d9b2;
+}
+.prompt-token-preset-axis {
   font-weight: 650;
+}
+.prompt-token-preset-part {
+  font-weight: 400;
+}
+.prompt-token-preset-context {
+  color: rgba(218, 222, 232, 0.62);
+  font-weight: 500;
+}
+.prompt-token-preset-separator {
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 750;
+}
+.prompt-token-preset-separator-amp {
+  color: #fff;
+  font-weight: 900;
+  -webkit-text-stroke: 0.22px rgba(255, 255, 255, 0.72);
+  text-shadow:
+    0 0 0 currentColor,
+    0 0 5px rgba(255, 255, 255, 0.24);
 }
 .nai-wt-open { color: #f1dec8; }
 .nai-wt-mark { color: #5cb87a; }

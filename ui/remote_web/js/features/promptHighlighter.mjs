@@ -191,13 +191,8 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     if (!core) return escHtml(segment);
     const presetStyle = presetTokenStyle(core);
     if (presetStyle) {
-      const slashIndex = core.indexOf('/');
-      const headEnd = slashIndex >= 0 ? slashIndex : core.length;
-      const head = core.substring(0, headEnd);
-      const tail = core.substring(headEnd);
       return escHtml(leading) +
-        `<span class="${presetStyle.className}">${escHtml(head)}</span>` +
-        escHtml(tail) +
+        formatPresetPromptToken(core, presetStyle) +
         escHtml(trailing);
     }
     const classification = tagClassifier.classify(core);
@@ -205,6 +200,44 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     return escHtml(leading) +
       `<span class="${classification.className}">${escHtml(core)}</span>` +
       escHtml(trailing);
+  }
+
+  function formatPresetPromptToken(core, presetStyle) {
+    const splitIndex = (() => {
+      const slash = core.indexOf('/');
+      const amp = core.indexOf('&');
+      if (slash < 0) return amp < 0 ? core.length : amp;
+      if (amp < 0) return slash;
+      return Math.min(slash, amp);
+    })();
+    const head = core.substring(0, splitIndex);
+    const tail = core.substring(splitIndex);
+    const contextIndex = head.indexOf('(');
+    const axis = contextIndex >= 0 ? head.substring(0, contextIndex) : head;
+    const context = contextIndex >= 0 ? head.substring(contextIndex) : '';
+    return `<span class="${presetStyle.className} prompt-token-preset-axis">${escHtml(axis)}</span>` +
+      (context ? `<span class="prompt-token-preset-context">${escHtml(context)}</span>` : '') +
+      formatPresetTail(tail, presetStyle.className);
+  }
+
+  function formatPresetTail(tail, axisClassName) {
+    if (!tail) return '';
+    let html = '';
+    let start = 0;
+    for (let index = 0; index < tail.length; index += 1) {
+      const ch = tail[index];
+      if (ch !== '/' && ch !== '&') continue;
+      if (index > start) {
+        html += `<span class="${axisClassName} prompt-token-preset-part">${escHtml(tail.substring(start, index))}</span>`;
+      }
+      const separatorKind = ch === '&' ? 'amp' : 'slash';
+      html += `<span class="prompt-token-preset-separator prompt-token-preset-separator-${separatorKind}">${escHtml(ch)}</span>`;
+      start = index + 1;
+    }
+    if (start < tail.length) {
+      html += `<span class="${axisClassName} prompt-token-preset-part">${escHtml(tail.substring(start))}</span>`;
+    }
+    return html;
   }
 
   function formatNai(text) {

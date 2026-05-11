@@ -230,8 +230,7 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
       if (index > start) {
         html += `<span class="${axisClassName} prompt-token-preset-part">${escHtml(tail.substring(start, index))}</span>`;
       }
-      const separatorKind = ch === '&' ? 'amp' : 'slash';
-      html += `<span class="prompt-token-preset-separator prompt-token-preset-separator-${separatorKind}">${escHtml(ch)}</span>`;
+      html += `<span class="prompt-token-preset-separator">${escHtml(ch)}</span>`;
       start = index + 1;
     }
     if (start < tail.length) {

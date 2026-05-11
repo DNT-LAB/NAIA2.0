@@ -1023,6 +1023,8 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
 
     assert translated == "girl in white clothes"
     assert [row["tag"] for row in merged] == [
+        "1girl",
+        "solo",
         "full-length zipper",
         "clothes",
         "white camisole",
@@ -1030,7 +1032,7 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
         "white clothes",
     ]
     assert_translation_hints_are_tail(merged)
-    metadata_row = merged[0]
+    metadata_row = merged[2]
     assert_autocomplete_candidate_schema(
         metadata_row,
         "tag_metadata",
@@ -1053,7 +1055,7 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
         "manual",
         confidence=0.2,
     )
-    assert "girl" not in [row["tag"] for row in merged[:3]]
+    assert "girl" not in [row["tag"] for row in merged[:5]]
 
 
 def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phrase(monkeypatch):

@@ -10983,7 +10983,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .cond-button-row {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
 }
 .cond-bottom-actions {
   flex: 0 0 auto;

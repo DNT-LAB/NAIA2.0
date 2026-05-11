@@ -128,6 +128,9 @@ class PresetPanel(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(get_scaled_size(4))
+        self._new_btn = QPushButton("새 프리셋")
+        self._new_btn.clicked.connect(self._on_new_clicked)
+        btn_row.addWidget(self._new_btn)
         self._load_btn = QPushButton("불러오기")
         self._load_btn.clicked.connect(self._on_load_clicked)
         btn_row.addWidget(self._load_btn)
@@ -147,6 +150,7 @@ class PresetPanel(QWidget):
     def _update_preset_button_state(self) -> None:
         bundled = self.is_selected_preset_bundled()
         has_selection = self.get_selected_preset_name() is not None
+        self._new_btn.setEnabled(True)
         self._load_btn.setEnabled(has_selection)
         # 저장은 새 이름으로도 가능
         self._save_btn.setEnabled(True)
@@ -164,6 +168,9 @@ class PresetPanel(QWidget):
         name = self.get_selected_preset_name()
         if name:
             self.preset_load_requested.emit(name)
+
+    def _on_new_clicked(self) -> None:
+        self.preset_save_requested.emit("")
 
     def _on_save_clicked(self) -> None:
         name = self.get_selected_preset_name() or ""

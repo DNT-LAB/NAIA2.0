@@ -521,14 +521,15 @@ export function createConditionalPromptPanel({
     }
   }
 
-  function savePreset() {
+  function savePreset(nameOverride = null) {
     const input = document.getElementById('condPresetNameInput');
     const select = document.getElementById('condPresetSelect');
-    const name = safeText(input?.value || select?.value).trim();
+    const name = safeText(nameOverride ?? (input?.value || select?.value)).trim();
     if (!name) {
       if (typeof globalThis.showToast === 'function') globalThis.showToast('프리셋 이름을 입력하세요', 'error');
       return;
     }
+    if (input) input.value = name;
     sendModuleParam('conditional_prompt', 'preset_save', JSON.stringify({
       name,
       book: currentBookPayload(),
@@ -687,6 +688,7 @@ export function createConditionalPromptPanel({
         <div class="cond-preset-list">${presetItems || '<div class="cond-empty">저장된 프리셋 없음</div>'}</div>
         <input class="mod-input" id="condPresetNameInput" placeholder="프리셋 이름" value="${escapeAttr(m.active_preset)}">
         <div class="cond-button-row">
+          <button type="button" data-cond-action="new-preset">새 프리셋</button>
           <button type="button" data-cond-action="load-selected-preset">불러오기</button>
           <button type="button" data-cond-action="save-preset">저장</button>
           <button type="button" data-cond-action="delete-preset">삭제</button>
@@ -1251,6 +1253,11 @@ export function createConditionalPromptPanel({
       }
     } else if (action === 'save-preset') {
       savePreset();
+    } else if (action === 'new-preset') {
+      const name = typeof globalThis.prompt === 'function'
+        ? safeText(globalThis.prompt('새 조건부 프리셋 이름', '')).trim()
+        : '';
+      if (name) savePreset(name);
     } else if (action === 'delete-preset') {
       const select = document.getElementById('condPresetSelect');
       const name = safeText(select?.value).trim();

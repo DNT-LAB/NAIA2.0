@@ -175,6 +175,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # 매 hook 사이클 시작 시 fresh, generation_finished/error 에서 복원.
         # 설계: docs/CONDITIONAL_CHAR_ACTION_RESTORATION.md
         self._char_snapshot = None  # type: Optional[CharStateSnapshot]
+        # neg 액션은 PromptContext가 아니라 메인 negative_prompt_textedit를
+        # 직접 바꾸므로, char 슬롯처럼 사이클 단위 원본을 보존해야 한다.
+        self._negative_snapshot: Optional[str] = None
         # M1: initialize_with_context 가 중복 호출돼도 핸들러가 한 번만 등록되도록.
         self._gen_event_subscribed: bool = False
         # 시뮬레이션 인스트루먼트: None 이 아니면 _apply_rules_single_pass 가
@@ -753,9 +756,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # Phase 1.1: Skip 카운터 초기화 (타 모드 char/uc 건너뜀 집계용)
         self._skip_counters = {}
 
-        # 179 SDLC P2: 새 사이클 진입 — char snapshot fresh 시작.
-        # 이전 사이클의 generation_finished 가 누락된 경로(R1 fallback)에서
-        # snapshot 이 살아남았으면 여기서 강제 복원하여 누수 차단.
+        # 새 사이클 진입 — 이전 generation_finished 가 누락된 경로(R1
+        # fallback)에서 남은 일회성 mutation 을 먼저 되돌리고 fresh 시작.
         if self._char_snapshot is not None and not self._char_snapshot.is_empty():
             try:
                 n = self._char_snapshot.restore()
@@ -763,6 +765,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                     print(f"[Conditional] 이전 사이클 누수 복원: {n} 슬롯")
             except Exception as e:
                 print(f"[Conditional] 누수 복원 실패: {e}")
+        if self._negative_snapshot is not None:
+            if self._restore_negative_snapshot():
+                print("[Conditional] 이전 사이클 네거티브 원상복원")
         self._char_snapshot = CharStateSnapshot(self._get_character_module())
 
         rules = self._parse_rules(rules_text)
@@ -1838,6 +1843,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             return
 
         try:
+            if self._negative_snapshot is None:
+                self._negative_snapshot = current
             widget.setPlainText(new_text)
         except Exception as e:
             self._record_skip("neg", f"위젯 write 실패: {e}")
@@ -2350,6 +2357,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             # 네거티브 위젯 원복 (neg+=/neg= 액션이 건드렸을 수 있음)
             if saved_neg_text is not None:
                 self._restore_negative_text(mw, saved_neg_text)
+            self._negative_snapshot = None
             # session_cond_override 원복
             try:
                 app_ctx.session_cond_override = saved_override
@@ -2472,10 +2480,23 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             except Exception:
                 pass
 
+    def _restore_negative_snapshot(self) -> bool:
+        """런타임 neg 액션으로 변경된 negative_prompt_textedit 를 원복."""
+        saved = self._negative_snapshot
+        if saved is None:
+            return False
+        app_ctx = getattr(self, 'app_context', None)
+        mw = getattr(app_ctx, 'main_window', None) if app_ctx is not None else None
+        try:
+            self._restore_negative_text(mw, saved)
+            return True
+        finally:
+            self._negative_snapshot = None
+
     def initialize_with_context(self, app_context):
         """AppContext 주입"""
         self.app_context = app_context
-        # 179 SDLC P2: char 액션 변경을 generate 종료 후 복원하기 위해 이벤트 구독.
+        # char/neg 액션 변경을 generate 종료 후 복원하기 위해 이벤트 구독.
         # generation_finished + generation_error 둘 다 — 실패해도 복원 보장.
         # M1 가드: 같은 인스턴스가 재초기화돼도 핸들러가 중복 등록되지 않게.
         if self._gen_event_subscribed:
@@ -2487,29 +2508,33 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             app_context.subscribe(
                 "generation_error", self._on_generate_done
             )
+            app_context.subscribe(
+                "generation_failed", self._on_generate_done
+            )
             self._gen_event_subscribed = True
         except Exception as e:
             print(f"[Conditional] generate 이벤트 구독 실패: {e}")
 
     def _on_generate_done(self, _data):
-        """generate 완료/실패 핸들러 — 캐릭터 슬롯 변경분 일괄 복원.
+        """generate 완료/실패 핸들러 — 일회성 조건부 변경분 복원.
 
         179 SDLC P2 (설계 §5.2.2): 모든 generate 종료 채널에서 호출됨.
-        request 타입 무관 — snapshot 이 비어 있어도 None 으로 정리해 다음
-        사이클이 깨끗하게 시작되도록 한다.
+        request 타입 무관 — snapshot 을 정리해 다음 사이클이 깨끗하게 시작되도록 한다.
         """
         snap = self._char_snapshot
-        if snap is None:
-            return
-        try:
-            if not snap.is_empty():
-                n = snap.restore()
-                if n > 0:
-                    print(f"[Conditional] {n} 캐릭터 슬롯 원상복원")
-        except Exception as e:
-            print(f"[Conditional] 슬롯 복원 실패: {e}")
-        finally:
-            self._char_snapshot = None
+        if snap is not None:
+            try:
+                if not snap.is_empty():
+                    n = snap.restore()
+                    if n > 0:
+                        print(f"[Conditional] {n} 캐릭터 슬롯 원상복원")
+            except Exception as e:
+                print(f"[Conditional] 슬롯 복원 실패: {e}")
+            finally:
+                self._char_snapshot = None
+        if self._negative_snapshot is not None:
+            if self._restore_negative_snapshot():
+                print("[Conditional] 네거티브 원상복원")
 
     def on_initialize(self):
         """모듈 초기화"""

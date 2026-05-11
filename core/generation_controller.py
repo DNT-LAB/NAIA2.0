@@ -919,6 +919,8 @@ class GenerationController:
         self.context.session_p_eng_override = None
         self.context.session_cond_override = None
 
+        self.context.publish("generation_finished", result)
+
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         self.context.main_window.update_ui_with_result(result)
 
@@ -942,6 +944,7 @@ class GenerationController:
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
         print(f"❌ 생성 오류 발생: {error_message}")
+        self.context.publish("generation_failed", {"message": error_message})
         if isinstance(self.current_generation_params, dict):
             current_request = self.current_generation_params.get("_generation_request")
             if current_request:

@@ -5,6 +5,9 @@
     "녹음": ["dissolving", "melting"],
     "드러냄": ["revealing", "exposing"],
     "드러내": ["revealing", "exposing"],
+    "남성기": ["성기", "penis", "genitalia", "genitals"],
+    "어루만지": ["자극", "핸드잡", "handjob"],
+    "어루만지다": ["자극", "핸드잡", "handjob"],
     "빨개짐": ["blush", "blushing"],
     "성기": ["penis", "genitalia", "genitals"],
     "슈타게": ["steins", "gate"],
@@ -22,6 +25,7 @@
     "투명함": ["invisible", "transparent"]
   },
   "single_char_terms": ["꿀", "후"],
+  "stopwords": ["가볍게"],
   "weak_query_terms": [
     "건네줌",
     "녹아",

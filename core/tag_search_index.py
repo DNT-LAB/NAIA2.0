@@ -28,6 +28,7 @@ _TRAILING_WEIGHT_MARK_RE = re.compile(r"\s*::$")
 _HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 _METADATA_TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9]+")
 _KR_METADATA_STOPWORDS = {
+    "가볍게",
     "것",
     "같은",
     "그",
@@ -122,6 +123,9 @@ _KR_METADATA_ALIASES = {
     "당기기": ("당기",),
     "단지": ("jar", "pot", "honeypot"),
     "성기": ("penis", "genitalia", "genitals"),
+    "남성기": ("성기", "penis", "genitalia", "genitals"),
+    "어루만지": ("자극", "핸드잡", "handjob"),
+    "어루만지다": ("자극", "핸드잡", "handjob"),
     "슈타게": ("steins", "gate"),
     "장치": ("device",),
     "앉음": ("앉", "앉는", "앉아"),
@@ -270,10 +274,34 @@ _NOISY_METADATA_CATEGORY_MARKERS = (
     "저작권",
     "캐릭터",
     "등장인물",
+    "버튜버",
+    "버추얼 유튜버",
+    "virtual youtuber",
+    "hololive",
+    "nijisanji",
     "작품",
     "시리즈",
     "미디어",
 )
+_NOISY_METADATA_SOURCE_MARKERS = (
+    "프랜차이즈",
+    "극장판",
+)
+_NOISY_METADATA_APPAREL_SOURCE_MARKERS = (
+    "작품",
+    "시리즈",
+    "프랜차이즈",
+    "특정",
+    "캐릭터들이 입는",
+    "등이 입는",
+)
+_GENERIC_UNIFORM_TAGS = {
+    "school uniform",
+    "kindergarten uniform",
+    "military uniform",
+    "uniform",
+}
+_SAFE_PARENTHESES_QUALIFIERS = {"medium", "meme"}
 
 
 def _metadata_token_variants(
@@ -417,8 +445,23 @@ def _is_noisy_metadata_entry(entry: TagSearchEntry) -> bool:
     cat = _norm(entry.cat)
     if cat in _NOISY_METADATA_CATS:
         return True
+    tag = _norm(entry.tag).replace("\\", "")
+    parenthetical_parts = re.findall(r"\(([^)]*)\)", tag)
+    if parenthetical_parts and any(_norm(part) not in _SAFE_PARENTHESES_QUALIFIERS for part in parenthetical_parts):
+        return True
+    if " uniform" in tag and len(tag.split()) > 2 and tag not in _GENERIC_UNIFORM_TAGS:
+        return True
     category = _norm(entry.category)
-    return any(marker in category for marker in _NOISY_METADATA_CATEGORY_MARKERS)
+    if any(marker in category for marker in _NOISY_METADATA_CATEGORY_MARKERS):
+        return True
+    desc = _norm(entry.desc)
+    tag_tokens = set(tag.split())
+    is_apparel_variant = bool(tag_tokens.intersection({"uniform", "dress", "costume", "outfit"}))
+    if is_apparel_variant and any(marker in desc for marker in _NOISY_METADATA_APPAREL_SOURCE_MARKERS):
+        return True
+    if any(marker in desc for marker in _NOISY_METADATA_SOURCE_MARKERS):
+        return True
+    return False
 
 
 def _should_replace_duplicate(entry: TagSearchEntry, previous: TagSearchEntry) -> bool:

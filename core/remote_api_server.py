@@ -10809,8 +10809,21 @@ class RemoteBridge(QObject):
         cat = normalize_search_query(row.get("cat", ""))
         if cat in {"artist", "character", "copyright"}:
             return True
+        tag = normalize_search_query(row.get("tag", "")).replace("\\", "")
+        parenthetical_parts = re.findall(r"\(([^)]*)\)", tag)
+        if parenthetical_parts and any(
+            normalize_search_query(part) not in {"medium", "meme"}
+            for part in parenthetical_parts
+        ):
+            return True
+        if (
+            " uniform" in tag
+            and len(tag.split()) > 2
+            and tag not in {"school uniform", "kindergarten uniform", "military uniform", "uniform"}
+        ):
+            return True
         group = normalize_search_query(row.get("group", ""))
-        return any(
+        if any(
             marker in group
             for marker in (
                 "artist",
@@ -10822,11 +10835,26 @@ class RemoteBridge(QObject):
                 "저작권",
                 "캐릭터",
                 "등장인물",
+                "버튜버",
+                "버추얼 유튜버",
+                "virtual youtuber",
+                "hololive",
+                "nijisanji",
                 "작품",
                 "시리즈",
                 "미디어",
             )
-        )
+        ):
+            return True
+        desc = normalize_search_query(row.get("desc", ""))
+        is_apparel_variant = bool(set(tag.split()).intersection({"uniform", "dress", "costume", "outfit"}))
+        apparel_source_markers = ("작품", "시리즈", "프랜차이즈", "특정", "캐릭터들이 입는", "등이 입는")
+        if is_apparel_variant and any(marker in desc for marker in apparel_source_markers):
+            return True
+        source_markers = ("프랜차이즈", "극장판")
+        if any(marker in desc for marker in source_markers):
+            return True
+        return False
 
     def _filter_noisy_autocomplete_rows(self, rows: list[dict], query: str) -> list[dict]:
         if not self._has_hangul_text(query):

@@ -454,6 +454,25 @@ def test_tag_search_metadata_fallback_can_skip_noisy_categories_before_scoring(m
     ]
     entries.append(
         TagSearchEntry(
+            tag="sakae general school uniform",
+            freq=10000,
+            category="의상 > 교복",
+            desc="마기아 레코드의 사카에 종합 학원 교복. 흰 셔츠로 구성됨.",
+            keywords=("흰 셔츠",),
+            search_blob="sakae general school uniform 흰 셔츠",
+        )
+    )
+    entries.append(
+        TagSearchEntry(
+            tag="sample outfit (casual)",
+            freq=10000,
+            category="패션 > 의상",
+            keywords=("흰 셔츠",),
+            search_blob="sample outfit casual 흰 셔츠",
+        )
+    )
+    entries.append(
+        TagSearchEntry(
             tag="white shirt",
             freq=400,
             category="패션 > 상의",
@@ -484,6 +503,36 @@ def test_tag_search_metadata_fallback_can_skip_noisy_categories_before_scoring(m
 
     assert results == ["white shirt"]
     assert calls == 1
+
+
+def test_tag_search_metadata_fallback_understands_nsfw_body_aliases():
+    index = TagSearchIndex(
+        [
+            TagSearchEntry(
+                tag="handjob",
+                freq=40000,
+                category="행위 > 성행위",
+                desc="손으로 성기를 자극하는 행위임.",
+                keywords=("핸드잡", "수음"),
+                search_blob="handjob 손으로 성기를 자극하는 행위 핸드잡 수음",
+            ),
+            TagSearchEntry(
+                tag="hands on another's shoulders",
+                freq=50000,
+                category="포즈 > 손",
+                desc="다른 사람의 어깨에 손을 올리고 있는 자세.",
+                keywords=("손", "어깨"),
+                search_blob="hands on another's shoulders 손 어깨",
+            ),
+        ]
+    )
+
+    results = index.search_metadata_fallback(
+        "남성기를 손으로 가볍게 어루만지다",
+        limit=5,
+    )
+
+    assert [result.tag for result in results[:1]] == ["handjob"]
 
 
 def test_tag_search_metadata_fallback_loads_prebuilt_index_without_runtime_build(

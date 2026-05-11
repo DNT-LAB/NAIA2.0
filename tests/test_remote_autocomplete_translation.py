@@ -258,6 +258,34 @@ def test_autocomplete_translation_filters_noisy_categories_for_hangul_queries(mo
             "group": "캐릭터 > 테스트",
             "cat": "character",
         },
+        {
+            "tag": "sakae general school uniform",
+            "count": 10000,
+            "desc": "마기아 레코드의 사카에 종합 학원 교복. 흰 셔츠로 구성됨.",
+            "group": "패션 > 교복",
+            "cat": "",
+        },
+        {
+            "tag": "dress of heaven",
+            "count": 10000,
+            "desc": "페이트 시리즈에서 등장하는 흰색 드레스.",
+            "group": "패션 > 드레스",
+            "cat": "",
+        },
+        {
+            "tag": "sample vtuber casual",
+            "count": 10000,
+            "desc": "",
+            "group": "버튜버 > hololive",
+            "cat": "",
+        },
+        {
+            "tag": "sample outfit (casual)",
+            "count": 10000,
+            "desc": "",
+            "group": "패션 > 의상",
+            "cat": "",
+        },
     ]
     bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
 

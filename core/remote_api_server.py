@@ -39,9 +39,9 @@ from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
 from core.event_preset_service import EventPresetService
 from core.expression_preset_service import ExpressionPresetService
+from core.kr_tag_loader import format_kr_tag_load_summary, load_kr_tag_records
 from core.preset_input_bridge import PresetInputBridge, update_app_preset_context
 from core.preset_composer_service import PresetComposerService
-from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
 from core.tag_search_index import TagSearchIndex, normalize_search_query
@@ -10187,124 +10187,14 @@ class RemoteBridge(QObject):
         with self._kr_tags_lock:
             if self._kr_tags_loaded:
                 return
-            import os
-            path = 'ui/interactive/interactive'
             try:
-                if not os.path.exists(path):
-                    print(f"🌐 Remote: tag data not found at {path}")
+                result = load_kr_tag_records(getattr(self, "_repo_root", Path(__file__).resolve().parent.parent))
+                for warning in result.warnings:
+                    print(f"🌐 Remote: {warning}")
+                raw = result.raw
+                if not raw:
                     self._kr_tags_loaded = True
                     return
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                # NAI 이스케이프 정규화 헬퍼
-                def _norm(s):
-                    return s.replace('\\(', '(').replace('\\)', ')') if s else s
-                # --- Source 0: interactive (가장 풍부한 데이터) ---
-                raw = {}
-                for tag, info in data.items():
-                    kw_str = info.get('keywords_kr', '')
-                    tag_n = _norm(tag)
-                    raw[tag_n.lower()] = {
-                        **info,
-                        '_tag': tag_n,
-                        '_src': 0,
-                        '_kw_lower': kw_str.replace('<', '').replace('>', '').lower() if kw_str else '',
-                        '_desc_lower': info.get('description', '').lower(),
-                    }
-                src0 = len(raw)
-                # --- Source 1-2: KR_tags / e621 parquet fallback ---
-                pq_sources = [
-                    ('data/KR_tags.parquet', 1),
-                    ('data/e621_KR_tags.parquet', 2),
-                ]
-                pq_stats = merge_parquet_tag_records(raw, pq_sources)
-                override_stats = apply_translation_overrides(raw, 'data/tag_index/tag_translation_overrides.json')
-                for err in pq_stats.errors + override_stats.errors:
-                    print(f"🌐 Remote: tag metadata merge warning — {err}")
-                # --- Source 3-10: prompt engineering filter lists (그룹 소속만) ---
-                filter_sources = [
-                    ('data/characteristic_list.txt', 3, '특징'),
-                    ('data/clothes_list.txt', 4, '의상'),
-                    ('data/taglist/expression_tags.json', 5, '표정'),
-                    ('data/taglist/pose_action_tags.json', 6, '자세/행동'),
-                    ('data/taglist/location_tags.json', 7, '장소'),
-                    ('data/taglist/meta_tags.json', 8, '메타'),
-                    ('data/taglist/object_tags.json', 9, '물체'),
-                    ('data/color.txt', 10, '색상'),
-                ]
-                filter_count = 0
-                for fpath, src_key, group_name in filter_sources:
-                    if not os.path.exists(fpath):
-                        continue
-                    try:
-                        tags = []
-                        if fpath.endswith('.json'):
-                            with open(fpath, 'r', encoding='utf-8') as f:
-                                jdata = json.load(f)
-                            # JSON taglist 구조 파싱: tags/modifiers/groups/categories/uncategorized
-                            if isinstance(jdata, dict):
-                                collected = []
-                                for key in ('tags', 'modifiers', 'uncategorized'):
-                                    v = jdata.get(key, [])
-                                    if isinstance(v, list):
-                                        collected.extend(v)
-                                for key in ('groups', 'categories'):
-                                    v = jdata.get(key, {})
-                                    if isinstance(v, dict):
-                                        for sub_tags in v.values():
-                                            if isinstance(sub_tags, list):
-                                                collected.extend(sub_tags)
-                                tags = collected
-                            else:
-                                tags = jdata
-                        else:
-                            with open(fpath, 'r', encoding='utf-8') as f:
-                                tags = [line.strip() for line in f if line.strip()]
-                        for tag_raw in tags:
-                            tag_n = _norm(tag_raw.replace('_', ' '))
-                            tag_lower = tag_n.lower()
-                            if tag_lower in raw:
-                                continue
-                            raw[tag_lower] = {
-                                '_tag': tag_n, '_src': src_key,
-                                'freq': 0, 'description': '', 'group': group_name,
-                                'subgroup': '', 'keywords_kr': '',
-                                '_kw_lower': '', '_desc_lower': '',
-                            }
-                            filter_count += 1
-                    except Exception as e:
-                        print(f"🌐 Remote: filter {fpath} 로드 실패 — {e}")
-                # --- Source 11-13: artist / character / copyright dicts ---
-                dict_sources = [
-                    ('artist_dictionary', 'artist_dict', 11, 'artist'),
-                    ('danbooru_character', 'character_dict_count', 12, 'character'),
-                    ('result_dict_copyright', 'copyright_dict', 13, 'copyright'),
-                ]
-                dict_count = 0
-                for mod_name, var_name, src_key, cat in dict_sources:
-                    try:
-                        import importlib
-                        mod = importlib.import_module(mod_name)
-                        d = getattr(mod, var_name, {})
-                        for tag_raw, freq in d.items():
-                            # NAI 이스케이프 정규화: \( → (, \) → )
-                            tag_norm = tag_raw.replace('\\(', '(').replace('\\)', ')')
-                            tag_lower = tag_norm.lower()
-                            if tag_lower in raw:
-                                # 기존 엔트리에 cat만 보강
-                                if '_cat' not in raw[tag_lower]:
-                                    raw[tag_lower]['_cat'] = cat
-                                continue
-                            raw[tag_lower] = {
-                                '_tag': tag_norm, '_src': src_key, '_cat': cat,
-                                'freq': int(freq) if isinstance(freq, (int, float)) else 0,
-                                'description': '', 'group': cat,
-                                'subgroup': '', 'keywords_kr': '',
-                                '_kw_lower': '', '_desc_lower': '',
-                            }
-                            dict_count += 1
-                    except Exception as e:
-                        print(f"🌐 Remote: dict {mod_name} 로드 실패 — {e}")
                 self._kr_tags_raw = raw
                 try:
                     self._tag_search_index = TagSearchIndex.from_raw_tag_records(raw)
@@ -10315,11 +10205,7 @@ class RemoteBridge(QObject):
                     print(f"🌐 Remote: shared tag index build failed — {e}")
                 print(
                     "🌐 Remote: tag index — "
-                    f"{src0} interactive + {pq_stats.added} parquet "
-                    f"+ {pq_stats.records_updated} KR merges "
-                    f"(desc fill {pq_stats.description_filled}, desc replace {pq_stats.description_replaced}, "
-                    f"kw fill {pq_stats.keywords_filled}, kw replace {pq_stats.keywords_replaced}) "
-                    f"+ {override_stats.applied} overrides + {filter_count} filter + {dict_count} dict = {len(raw)} total"
+                    f"{format_kr_tag_load_summary(result)}"
                 )
                 self._kr_tags_loaded = True
             except Exception as e:
@@ -11604,6 +11490,11 @@ class RemoteBridge(QObject):
             except TypeError:
                 payload = bridge.suggest(token, limit=limit)
             rows = payload.get("suggestions") or []
+            secondary_rows = (
+                payload.get("secondaryResults")
+                or payload.get("secondarySuggestions")
+                or []
+            )
             if payload.get("stage") in {"loading", "unavailable"}:
                 state = payload.get("loadState") or {}
                 message = str(state.get("message") or "Preset data is not ready.")
@@ -11617,15 +11508,18 @@ class RemoteBridge(QObject):
                     "_wc_type": "preset_status",
                     "disabled": True,
                 }]
+                secondary_rows = []
             return {
                 "query": token,
                 "results": rows,
+                "secondaryResults": secondary_rows,
                 "preset": {
                     "axis": payload.get("axis") or "",
                     "stage": payload.get("stage") or "",
                     "context": payload.get("presetContext") or {},
                     "loadState": payload.get("loadState") or {},
                     "dataReady": bool(payload.get("dataReady")),
+                    "secondaryResults": secondary_rows,
                 },
             }
         except Exception as e:
@@ -14530,6 +14424,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 "type": "autocomplete_result",
                                 "query": payload.get("query", query),
                                 "results": payload.get("results", []),
+                                "secondaryResults": payload.get("secondaryResults", []),
                                 "preset": payload.get("preset") or {},
                             }))
                         elif cmd_type == "tag_lookup":

@@ -391,6 +391,14 @@ def test_preset_autocomplete_payload_passes_event_context(tmp_path, monkeypatch)
                         "axis": "events",
                     }
                 ],
+                "secondaryResults": [
+                    {
+                        "tag": "Looking Back",
+                        "value": "preset:events(e|2girls)/gaze/gaze_direction/looking_back",
+                        "_wc_type": "preset_path",
+                        "axis": "events",
+                    }
+                ],
             }
 
     monkeypatch.setattr(remote_api_server, "PresetInputBridge", _FakePresetInputBridge)
@@ -408,6 +416,8 @@ def test_preset_autocomplete_payload_passes_event_context(tmp_path, monkeypatch)
     assert payload["preset"]["axis"] == "events"
     assert payload["preset"]["context"]["personId"] == "2girls"
     assert payload["results"][0]["tag"] == "Gaze"
+    assert payload["secondaryResults"][0]["tag"] == "Looking Back"
+    assert payload["preset"]["secondaryResults"] == payload["secondaryResults"]
 
 
 def test_vibe_cluster_load_clean_recreates_no_image_frames(tmp_path, monkeypatch):

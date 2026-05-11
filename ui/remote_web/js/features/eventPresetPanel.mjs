@@ -688,7 +688,7 @@ export function createEventPresetPanel({
     };
   }
 
-  function applyAutocompleteContext(context = {}) {
+  function applyAutocompleteContext(context = {}, options = {}) {
     let changed = false;
     const nextRating = String(context.ratingId || state.ratingId || 's').toLowerCase();
     const nextPerson = String(context.personId || state.personId || '1girl_solo');
@@ -700,7 +700,7 @@ export function createEventPresetPanel({
       state.personId = nextPerson;
       changed = true;
     }
-    if (changed) {
+    if (changed && options.resetSelection) {
       state.categoryId = '';
       state.subcategoryId = '';
       state.eventId = '';

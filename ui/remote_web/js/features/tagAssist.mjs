@@ -113,31 +113,6 @@ export function createTagAssistController({
     return isPresetEventsQuery(query) || isPresetClothesQuery(query) || isPresetExpressionsQuery(query);
   }
 
-  function isClothesStagedTokenAtCursor(info, textarea) {
-    const token = String(info?.stripped || '');
-    if (!textarea || !isPresetClothesQuery(token)) return false;
-    const prefix = 'preset:clothes';
-    let tailStart = prefix.length;
-    while (token[tailStart] === '/') tailStart += 1;
-    const tail = token.slice(tailStart);
-    if (!tail.includes('&')) return false;
-
-    const cursor = textarea.selectionStart != null ? Number(textarea.selectionStart) : info.end;
-    const tokenOffset = Math.max(0, String(info.raw || '').indexOf(token));
-    const tokenCursor = Math.max(0, Math.min(cursor - info.start - tokenOffset, token.length));
-    const tailCursor = Math.max(0, Math.min(tokenCursor - tailStart, tail.length));
-    const segments = tail.split('&');
-    let start = 0;
-    for (const segment of segments) {
-      const end = start + segment.length;
-      if (tailCursor >= start && tailCursor <= end) {
-        return true;
-      }
-      start = end + 1;
-    }
-    return false;
-  }
-
   function presetQueryAxis(query) {
     if (isPresetClothesQuery(query)) return 'clothes';
     if (isPresetExpressionsQuery(query)) return 'expressions';
@@ -1239,23 +1214,10 @@ export function createTagAssistController({
     }, 200);
   }
 
-  function openClothesStagedAutocompleteAtCursor(textarea) {
+  function openPresetAutocompleteAtCursor(textarea) {
     const target = textarea || acTarget || promptEdit;
     const info = getActiveTokenInfo(target);
-    if (!isClothesStagedTokenAtCursor(info, target)) return false;
-    acTarget = target;
-    lastLookupTag = '';
-    window.clearTimeout(tagLookupTimer);
-    hidePromptInfoTooltip();
-    hideTagChipInfoTooltip();
-    scheduleAutocomplete({target, info, force: true});
-    return true;
-  }
-
-  function openPresetEventsAutocompleteAtCursor(textarea) {
-    const target = textarea || acTarget || promptEdit;
-    const info = getActiveTokenInfo(target);
-    if (!info || (!isPresetEventsQuery(info.stripped) && !isPresetExpressionsQuery(info.stripped))) return false;
+    if (!info || !isLocalPresetQuery(info.stripped)) return false;
     acTarget = target;
     lastLookupTag = '';
     tagLookupReadOnly = false;
@@ -2683,21 +2645,19 @@ export function createTagAssistController({
     textarea.addEventListener('click', () => {
       acTarget = textarea;
       if (acMode) hideAutocomplete();
-      if (openPresetEventsAutocompleteAtCursor(textarea)) return;
-      if (openClothesStagedAutocompleteAtCursor(textarea)) return;
+      if (openPresetAutocompleteAtCursor(textarea)) return;
       checkTagHint();
     });
     textarea.addEventListener('keyup', e => {
       if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) {
         if (acMode) hideAutocomplete();
-        if (openPresetEventsAutocompleteAtCursor(textarea)) return;
-        if (openClothesStagedAutocompleteAtCursor(textarea)) return;
+        if (openPresetAutocompleteAtCursor(textarea)) return;
         checkTagHint();
       }
     });
     textarea.addEventListener('focus', () => {
       acTarget = textarea;
-      if (!acMode && !openPresetEventsAutocompleteAtCursor(textarea) && !openClothesStagedAutocompleteAtCursor(textarea)) checkTagHint();
+      if (!acMode && !openPresetAutocompleteAtCursor(textarea)) checkTagHint();
     });
     textarea.addEventListener('contextmenu', e => {
       const chunkPanelControl = getChunkPanelControl();

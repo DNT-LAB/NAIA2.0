@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -10,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.remote_api_server import RemoteBridge
+from core.kr_tag_loader import format_kr_tag_load_summary, load_kr_tag_records
 from core.tag_search_index import KR_METADATA_FALLBACK_INDEX_PATH
 
 
@@ -27,18 +26,6 @@ def configure_stdout() -> None:
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
-
-
-def make_bridge() -> RemoteBridge:
-    bridge = RemoteBridge.__new__(RemoteBridge)
-    bridge._kr_tags_raw = {}
-    bridge._tag_search_index = None
-    bridge._tag_relation_ranker = None
-    bridge._kr_tags_lock = threading.Lock()
-    bridge._kr_tags_loaded = False
-    bridge._char_analysis = {}
-    bridge._autocomplete_translation_cache = {}
-    return bridge
 
 
 def main() -> int:
@@ -61,15 +48,17 @@ def main() -> int:
     args = parser.parse_args()
 
     total_start = time.perf_counter()
-    bridge = make_bridge()
-
     load_start = time.perf_counter()
-    bridge._load_kr_tags()
+    result = load_kr_tag_records(ROOT)
     load_ms = (time.perf_counter() - load_start) * 1000
+    if not result.raw:
+        for warning in result.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        raise SystemExit("KR tag corpus was not loaded.")
 
-    index = bridge._tag_search_index
-    if index is None:
-        raise SystemExit("TagSearchIndex was not created.")
+    from core.tag_search_index import TagSearchIndex
+
+    index = TagSearchIndex.from_raw_tag_records(result.raw)
 
     build_start = time.perf_counter()
     stats = index.write_metadata_fallback_index(args.output)
@@ -77,6 +66,7 @@ def main() -> int:
     size_bytes = args.output.stat().st_size
 
     print(f"KR tag load: {load_ms:.1f} ms")
+    print(f"KR tag corpus: {format_kr_tag_load_summary(result)}")
     print(f"metadata index build+write: {build_ms:.1f} ms")
     print(f"output: {args.output}")
     print(f"size: {size_bytes:,} bytes")

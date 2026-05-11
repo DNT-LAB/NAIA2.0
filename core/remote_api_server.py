@@ -10726,7 +10726,11 @@ class RemoteBridge(QObject):
             and not self._tag_search_index.metadata_fallback_index_ready()
         ):
             return []
-        matches = self._tag_search_index.search_metadata_fallback(query, limit=limit)
+        matches = self._tag_search_index.search_metadata_fallback(
+            query,
+            limit=limit,
+            exclude_noisy_categories=True,
+        )
         rows = [
             {
                 "tag": result.tag,
@@ -10799,6 +10803,39 @@ class RemoteBridge(QObject):
         key = (normalize_search_query(query), int(limit or 0))
         cache[key] = (copy.deepcopy(rows), translated)
         return rows, translated
+
+    @staticmethod
+    def _is_noisy_autocomplete_category(row: dict) -> bool:
+        cat = normalize_search_query(row.get("cat", ""))
+        if cat in {"artist", "character", "copyright"}:
+            return True
+        group = normalize_search_query(row.get("group", ""))
+        return any(
+            marker in group
+            for marker in (
+                "artist",
+                "character",
+                "copyright",
+                "작가",
+                "아티스트",
+                "창작자",
+                "저작권",
+                "캐릭터",
+                "등장인물",
+                "작품",
+                "시리즈",
+                "미디어",
+            )
+        )
+
+    def _filter_noisy_autocomplete_rows(self, rows: list[dict], query: str) -> list[dict]:
+        if not self._has_hangul_text(query):
+            return rows
+        return [
+            row
+            for row in rows
+            if not self._is_noisy_autocomplete_category(row)
+        ]
 
     def _translation_search_query_levels(self, translated: str) -> list[list[str]]:
         normalized = normalize_search_query(translated)
@@ -11525,7 +11562,10 @@ class RemoteBridge(QObject):
         cached_result = self._autocomplete_result_cache_get(query, limit)
         if cached_result is not None:
             return cached_result
-        base_results = self._search_kr_tags(query, limit)
+        base_results = self._filter_noisy_autocomplete_rows(
+            self._search_kr_tags(query, limit),
+            query,
+        )
         translated = self._translate_autocomplete_query(query)
         if not translated:
             metadata_rows = self._search_kr_metadata_fallback(
@@ -11534,8 +11574,12 @@ class RemoteBridge(QObject):
                 allow_build=False,
             )
             if metadata_rows:
-                rows = self._score_autocomplete_candidates(
+                combined_rows = self._filter_noisy_autocomplete_rows(
                     metadata_rows + base_results,
+                    query,
+                )
+                rows = self._score_autocomplete_candidates(
+                    combined_rows,
                     sort=True,
                 )[:limit]
                 return self._autocomplete_result_cache_set(query, limit, rows, "")
@@ -11730,6 +11774,7 @@ class RemoteBridge(QObject):
 
         results = [merged[tag] for tag in order]
         results = self._append_prompt_phrase_rows(results, translated, limit)
+        results = self._filter_noisy_autocomplete_rows(results, query)
         if self._should_prepend_simple_fallback_recommended(query, translated, results):
             simple_query = self._simple_fallback_recommended_query(translated)
             if simple_query:

@@ -234,6 +234,43 @@ def test_autocomplete_translation_result_cache_reuses_scored_rows(monkeypatch):
     assert second[0] is not first[0]
 
 
+def test_autocomplete_translation_filters_noisy_categories_for_hangul_queries(monkeypatch):
+    monkeypatch.setattr(
+        remote_api_server,
+        "korean_to_english",
+        lambda query: "",
+    )
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._autocomplete_translation_cache = {}
+    bridge._autocomplete_result_cache = {}
+    bridge._search_kr_tags = lambda query, limit=20: [
+        {
+            "tag": "white shirt",
+            "count": 100,
+            "desc": "",
+            "group": "패션 > 상의",
+            "cat": "",
+        },
+        {
+            "tag": "sample character",
+            "count": 100000,
+            "desc": "",
+            "group": "캐릭터 > 테스트",
+            "cat": "character",
+        },
+    ]
+    bridge._search_kr_metadata_fallback = lambda query, limit=20, allow_build=True: []
+
+    merged, translated = RemoteBridge._search_kr_tags_with_translation(
+        bridge,
+        "흰 셔츠",
+        12,
+    )
+
+    assert translated == ""
+    assert [row["tag"] for row in merged] == ["white shirt"]
+
+
 def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypatch):
     monkeypatch.setattr(
         remote_api_server,
@@ -1064,7 +1101,7 @@ def test_autocomplete_translation_prepends_simple_recommended_for_single_word_no
     )
 
     assert translated == "inquisition"
-    assert [row["tag"] for row in merged] == ["dragon age: inquisition", "inquisition"]
+    assert [row["tag"] for row in merged] == ["inquisition"]
     assert_translation_hints_are_tail(merged)
     assert merged[-1]["_wc_type"] == "fallback_recommended"
 

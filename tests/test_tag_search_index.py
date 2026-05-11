@@ -440,6 +440,52 @@ def test_tag_search_metadata_fallback_does_not_scan_every_entry(monkeypatch):
     assert calls < 20
 
 
+def test_tag_search_metadata_fallback_can_skip_noisy_categories_before_scoring(monkeypatch):
+    entries = [
+        TagSearchEntry(
+            tag=f"sample character {idx}",
+            freq=10000 + idx,
+            cat="character",
+            category="저작권 > 테스트",
+            keywords=("흰 셔츠",),
+            search_blob="sample character 흰 셔츠",
+        )
+        for idx in range(1000)
+    ]
+    entries.append(
+        TagSearchEntry(
+            tag="white shirt",
+            freq=400,
+            category="패션 > 상의",
+            keywords=("흰 셔츠",),
+            search_blob="white shirt 흰 셔츠",
+        )
+    )
+    index = TagSearchIndex(entries)
+
+    calls = 0
+    original_score = TagSearchIndex._metadata_score
+
+    def counting_score(*args):
+        nonlocal calls
+        calls += 1
+        return original_score(*args)
+
+    monkeypatch.setattr(TagSearchIndex, "_metadata_score", counting_score)
+
+    results = [
+        result.tag
+        for result in index.search_metadata_fallback(
+            "흰 셔츠",
+            limit=5,
+            exclude_noisy_categories=True,
+        )
+    ]
+
+    assert results == ["white shirt"]
+    assert calls == 1
+
+
 def test_tag_search_metadata_fallback_loads_prebuilt_index_without_runtime_build(
     monkeypatch,
     tmp_path,

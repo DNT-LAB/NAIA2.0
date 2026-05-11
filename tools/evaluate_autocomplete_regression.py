@@ -35,6 +35,7 @@ EXCLUDED_CATEGORY_NEEDLES = (
     "게임 > 캐릭터",
 )
 DEFAULT_TOP_LIMIT = 12
+EXCLUDED_RESULT_TOP_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,11 @@ def validate_fixture_shape(data: dict[str, Any]) -> None:
                 nsfw_count += 1
     if nsfw_count < 200:
         raise AssertionError("autocomplete eval fixture must keep at least four NSFW bundles")
+
+
+def has_excluded_category(value: Any) -> bool:
+    category = str(value or "").lower()
+    return any(needle.lower() in category for needle in EXCLUDED_CATEGORY_NEEDLES)
 
 
 def iter_samples(
@@ -144,6 +150,11 @@ def evaluate_fixture(
             if top_row.get("candidateType") == "translation_hint" or top_row.get("insertPolicy") == "manual":
                 failures.append(
                     EvalFailure(bundle_id, query, expected_tags, actual_tags, "manual hint ranked first")
+                )
+                continue
+            if any(has_excluded_category(row.get("group", "")) for row in rows[:EXCLUDED_RESULT_TOP_LIMIT]):
+                failures.append(
+                    EvalFailure(bundle_id, query, expected_tags, actual_tags, "excluded category ranked top3")
                 )
     finally:
         remote_api_server.korean_to_english = original_translator

@@ -259,6 +259,22 @@ _extend_rule_set(_KR_METADATA_WEAK_QUERY_TERMS, _KR_METADATA_SEARCH_RULES, "weak
 _extend_rule_set(_KR_METADATA_SCORELESS_QUERY_TERMS, _KR_METADATA_SEARCH_RULES, "scoreless_query_terms")
 _extend_aliases(_KR_METADATA_ALIASES, _KR_METADATA_SEARCH_RULES)
 
+_NOISY_METADATA_CATS = {"artist", "character", "copyright"}
+_NOISY_METADATA_CATEGORY_MARKERS = (
+    "artist",
+    "character",
+    "copyright",
+    "작가",
+    "아티스트",
+    "창작자",
+    "저작권",
+    "캐릭터",
+    "등장인물",
+    "작품",
+    "시리즈",
+    "미디어",
+)
+
 
 def _metadata_token_variants(
     value: Any,
@@ -397,6 +413,14 @@ def _entry_has_hangul(entry: TagSearchEntry) -> bool:
     )
 
 
+def _is_noisy_metadata_entry(entry: TagSearchEntry) -> bool:
+    cat = _norm(entry.cat)
+    if cat in _NOISY_METADATA_CATS:
+        return True
+    category = _norm(entry.category)
+    return any(marker in category for marker in _NOISY_METADATA_CATEGORY_MARKERS)
+
+
 def _should_replace_duplicate(entry: TagSearchEntry, previous: TagSearchEntry) -> bool:
     if entry.is_event != previous.is_event:
         return entry.is_event
@@ -479,6 +503,9 @@ class TagSearchIndex:
         self._metadata_term_to_tags: Mapping[str, Iterable[str]] | None = None
         self._metadata_terms_by_tag: dict[str, dict[str, frozenset[str]]] = {}
         self._metadata_text_by_tag: dict[str, dict[str, str]] = {}
+        self._noisy_metadata_tags = frozenset(
+            tag for tag, entry in self._entries.items() if _is_noisy_metadata_entry(entry)
+        )
         self._metadata_index_lock = threading.Lock()
 
     @classmethod
@@ -811,6 +838,7 @@ class TagSearchIndex:
         require_event: bool | None = None,
         sources: set[str] | None = None,
         cats: set[str] | None = None,
+        exclude_noisy_categories: bool = False,
     ) -> list[TagSearchResult]:
         """Evidence-ranked fallback for natural Korean metadata queries.
 
@@ -838,6 +866,10 @@ class TagSearchIndex:
             candidate_tags.update(term_to_tags.get(term, ()))
         if not candidate_tags:
             return []
+        if exclude_noisy_categories and self._noisy_metadata_tags:
+            candidate_tags.difference_update(self._noisy_metadata_tags)
+            if not candidate_tags:
+                return []
 
         results: list[TagSearchResult] = []
         for tag in candidate_tags:

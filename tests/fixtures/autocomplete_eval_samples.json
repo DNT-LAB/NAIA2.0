@@ -3,7 +3,7 @@
   "source": "data/KR_tags.parquet",
   "sourceRows": 33895,
   "bundleSize": 50,
-  "bundleCount": 10,
+  "bundleCount": 12,
   "excludedCategoryPatterns": [
     "캐릭터",
     "작품",
@@ -19,7 +19,7 @@
   ],
   "notes": [
     "Fixed regression corpus derived from KR_tags.parquet after excluding character, copyright, work, artist, creator, and series categories.",
-    "b06 and b07 intentionally include NSFW samples; all samples use short Korean autocomplete queries and 1 expected English tag."
+    "b06, b07, b11, and b12 intentionally include NSFW samples; all samples use short Korean autocomplete queries and 1 expected English tag."
   ],
   "bundles": [
     {
@@ -5599,6 +5599,1122 @@
           "sourceKeywords": "<원피스>, 짧은 드레스",
           "nsfw": false,
           "reason": "KR_tags.parquet 패션 > 의상 keyword sample"
+        }
+      ]
+    },
+    {
+      "bundleId": "b11_nsfw_clothing_interaction",
+      "label": "NSFW clothing and exposure interaction",
+      "targetSize": 50,
+      "nsfw": true,
+      "samples": [
+        {
+          "query": "맨발",
+          "expectedTags": [
+            "barefoot"
+          ],
+          "sourceCategory": "신체 > 노출",
+          "sourceCount": 402952,
+          "sourceKeywords": "<맨발>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 신체 > 노출 keyword sample"
+        },
+        {
+          "query": "옷들추기",
+          "expectedTags": [
+            "clothes lift"
+          ],
+          "sourceCategory": "성적 > 의상 노출",
+          "sourceCount": 225037,
+          "sourceKeywords": "<옷들추기>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 > 의상 노출 keyword sample"
+        },
+        {
+          "query": "시스루",
+          "expectedTags": [
+            "see-through clothes"
+          ],
+          "sourceCategory": "성적 > 의상 노출",
+          "sourceCount": 167653,
+          "sourceKeywords": "<시스루>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 > 의상 노출 keyword sample"
+        },
+        {
+          "query": "절대영역",
+          "expectedTags": [
+            "zettai ryouiki"
+          ],
+          "sourceCategory": "성적 > 의상 노출",
+          "sourceCount": 142446,
+          "sourceKeywords": "<절대영역>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 > 의상 노출 keyword sample"
+        },
+        {
+          "query": "노브라",
+          "expectedTags": [
+            "no bra"
+          ],
+          "sourceCategory": "성적 > 의상 노출",
+          "sourceCount": 108496,
+          "sourceKeywords": "<노브라>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 > 의상 노출 keyword sample"
+        },
+        {
+          "query": "하의실종",
+          "expectedTags": [
+            "bottomless"
+          ],
+          "sourceCategory": "성적 > 노출",
+          "sourceCount": 103038,
+          "sourceKeywords": "<하의실종>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 > 노출 keyword sample"
+        },
+        {
+          "query": "노팬티",
+          "expectedTags": [
+            "no panties"
+          ],
+          "sourceCategory": "성적 > 의상 노출",
+          "sourceCount": 101684,
+          "sourceKeywords": "<노팬티>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 > 의상 노출 keyword sample"
+        },
+        {
+          "query": "란제리",
+          "expectedTags": [
+            "lingerie"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 59320,
+          "sourceKeywords": "<란제리>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "코르셋",
+          "expectedTags": [
+            "corset"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 49879,
+          "sourceKeywords": "<코르셋>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "리본팬티",
+          "expectedTags": [
+            "bow panties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 45726,
+          "sourceKeywords": "<리본팬티>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "상체탈의",
+          "expectedTags": [
+            "topless male"
+          ],
+          "sourceCategory": "성 > 노출",
+          "sourceCount": 44988,
+          "sourceKeywords": "<상체탈의>, 상의 탈의",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성 > 노출 keyword sample"
+        },
+        {
+          "query": "팬티",
+          "expectedTags": [
+            "thong"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 35954,
+          "sourceKeywords": "<팬티>, 티팬티, 끈팬티",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "가터벨트",
+          "expectedTags": [
+            "garter belt"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 31070,
+          "sourceKeywords": "<가터벨트>, 가터벨트",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "붕대",
+          "expectedTags": [
+            "sarashi"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 28396,
+          "sourceKeywords": "<붕대>, 사라시, 가슴붕대",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "블루머",
+          "expectedTags": [
+            "bloomers"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 23840,
+          "sourceKeywords": "<블루머>, 호박바지",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "하이레그팬티",
+          "expectedTags": [
+            "highleg panties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 23277,
+          "sourceKeywords": "<하이레그팬티>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "한쪽어깨노출",
+          "expectedTags": [
+            "single bare shoulder"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 23041,
+          "sourceKeywords": "<한쪽어깨노출>, 원숄더",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        },
+        {
+          "query": "옆구리노출",
+          "expectedTags": [
+            "midriff peek"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 22891,
+          "sourceKeywords": "<옆구리노출>, 허리 노출",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        },
+        {
+          "query": "가슴가리기",
+          "expectedTags": [
+            "covering breasts"
+          ],
+          "sourceCategory": "행위 > 노출",
+          "sourceCount": 22646,
+          "sourceKeywords": "<가슴가리기>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 행위 > 노출 keyword sample"
+        },
+        {
+          "query": "가슴트임",
+          "expectedTags": [
+            "center opening"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 22574,
+          "sourceKeywords": "<가슴트임>, 중앙트임",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        },
+        {
+          "query": "한쪽다리팬티",
+          "expectedTags": [
+            "panties around one leg"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 22238,
+          "sourceKeywords": "<한쪽다리팬티>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "보지틈새",
+          "expectedTags": [
+            "partially visible vulva"
+          ],
+          "sourceCategory": "신체 > 노출",
+          "sourceCount": 22125,
+          "sourceKeywords": "<보지틈새>, 음부 노출",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 신체 > 노출 keyword sample"
+        },
+        {
+          "query": "분홍브라",
+          "expectedTags": [
+            "pink bra"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 21949,
+          "sourceKeywords": "<분홍브라>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "페티코트",
+          "expectedTags": [
+            "petticoat"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 19916,
+          "sourceKeywords": "<페티코트>, 속치마",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "유두노출",
+          "expectedTags": [
+            "nipple slip"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 18892,
+          "sourceKeywords": "<유두노출>, 니플슬립",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        },
+        {
+          "query": "등노출",
+          "expectedTags": [
+            "bare back"
+          ],
+          "sourceCategory": "신체 > 노출",
+          "sourceCount": 18769,
+          "sourceKeywords": "<등노출>, 백리스",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 신체 > 노출 keyword sample"
+        },
+        {
+          "query": "남성속옷",
+          "expectedTags": [
+            "male underwear"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 17981,
+          "sourceKeywords": "<남성속옷>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "로우레그",
+          "expectedTags": [
+            "lowleg"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 17651,
+          "sourceKeywords": "<로우레그>, 골반바지",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        },
+        {
+          "query": "가슴근육 노출",
+          "expectedTags": [
+            "bare pectorals"
+          ],
+          "sourceCategory": "H > 노출",
+          "sourceCount": 15993,
+          "sourceKeywords": "<노출>, [대흉근 노출], 가슴근육 노출",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 노출 keyword sample"
+        },
+        {
+          "query": "편유",
+          "expectedTags": [
+            "one breast out"
+          ],
+          "sourceCategory": "H > 노출",
+          "sourceCount": 15454,
+          "sourceKeywords": "<노출>, [한쪽 가슴 노출], 편유",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 노출 keyword sample"
+        },
+        {
+          "query": "흉근골",
+          "expectedTags": [
+            "pectoral cleavage"
+          ],
+          "sourceCategory": "H > 노출",
+          "sourceCount": 15023,
+          "sourceKeywords": "<노출>, [가슴골], 흉근골",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 노출 keyword sample"
+        },
+        {
+          "query": "옷 위로 발기",
+          "expectedTags": [
+            "erection under clothes"
+          ],
+          "sourceCategory": "상황 > 노출",
+          "sourceCount": 11828,
+          "sourceKeywords": "<노출>, erection under clothes, 옷 위로 발기, 텐트",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 상황 > 노출 keyword sample"
+        },
+        {
+          "query": "훈도시",
+          "expectedTags": [
+            "fundoshi"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 10524,
+          "sourceKeywords": "<속옷>, fundoshi, 훈도시, 일본 샅바",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "브라 올리기",
+          "expectedTags": [
+            "bra lift"
+          ],
+          "sourceCategory": "행위 > 노출",
+          "sourceCount": 10256,
+          "sourceKeywords": "<노출>, bra lift, 브라 올리기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 행위 > 노출 keyword sample"
+        },
+        {
+          "query": "치마 내리기",
+          "expectedTags": [
+            "skirt pull"
+          ],
+          "sourceCategory": "행위 > 노출",
+          "sourceCount": 10003,
+          "sourceKeywords": "<노출>, skirt pull, 치마 내리기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 행위 > 노출 keyword sample"
+        },
+        {
+          "query": "가슴 붕대",
+          "expectedTags": [
+            "chest sarashi"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9787,
+          "sourceKeywords": "<속옷>, chest sarashi, 가슴 붕대, 흉부 사라시",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "의상 사고",
+          "expectedTags": [
+            "wardrobe malfunction"
+          ],
+          "sourceCategory": "상황 > 노출",
+          "sourceCount": 9783,
+          "sourceKeywords": "<노출>, wardrobe malfunction, 의상 사고, 옷 터짐",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 상황 > 노출 keyword sample"
+        },
+        {
+          "query": "벗은 팬티",
+          "expectedTags": [
+            "unworn panties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9549,
+          "sourceKeywords": "<속옷>, unworn panties, 벗은 팬티",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "프릴 팬티",
+          "expectedTags": [
+            "frilled panties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9507,
+          "sourceKeywords": "<속옷>, frilled panties, 프릴 팬티",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "프릴 브라",
+          "expectedTags": [
+            "frilled bra"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9486,
+          "sourceKeywords": "<속옷>, frilled bra, 프릴 브라",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "비키니 내리기",
+          "expectedTags": [
+            "bikini pull"
+          ],
+          "sourceCategory": "행위 > 노출",
+          "sourceCount": 9474,
+          "sourceKeywords": "<노출>, bikini pull, 비키니 내리기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 행위 > 노출 keyword sample"
+        },
+        {
+          "query": "하트 니플패치",
+          "expectedTags": [
+            "heart pasties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9448,
+          "sourceKeywords": "<속옷>, heart pasties, 하트 니플패치, 하트 패스티",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "녹색 팬티",
+          "expectedTags": [
+            "green panties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9429,
+          "sourceKeywords": "<속옷>, green panties, 녹색 팬티",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "브래지어 끈",
+          "expectedTags": [
+            "bra strap"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9289,
+          "sourceKeywords": "<속옷>, bra strap, 브래지어 끈, 브라끈",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "프린팅 팬티",
+          "expectedTags": [
+            "print panties"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 9236,
+          "sourceKeywords": "<속옷>, print panties, 프린팅 팬티, 무늬 팬티",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "비치는 브라",
+          "expectedTags": [
+            "bra visible through clothes"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 8883,
+          "sourceKeywords": "<비치는 브라>, bra visible through clothes, 시스루 브라",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        },
+        {
+          "query": "빨간 브라",
+          "expectedTags": [
+            "red bra"
+          ],
+          "sourceCategory": "패션 > 속옷",
+          "sourceCount": 8806,
+          "sourceKeywords": "<빨간 브라>, red bra, 레드 브라",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 속옷 keyword sample"
+        },
+        {
+          "query": "스웨터 들추기",
+          "expectedTags": [
+            "sweater lift"
+          ],
+          "sourceCategory": "포즈 > 노출",
+          "sourceCount": 8662,
+          "sourceKeywords": "<스웨터 들추기>, sweater lift, 스웨터 리프트",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 포즈 > 노출 keyword sample"
+        },
+        {
+          "query": "다운블라우스",
+          "expectedTags": [
+            "downblouse"
+          ],
+          "sourceCategory": "포즈 > 노출",
+          "sourceCount": 8536,
+          "sourceKeywords": "<다운블라우스>, downblouse, 셔츠 속 엿보기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 포즈 > 노출 keyword sample"
+        },
+        {
+          "query": "팬티 엿보기",
+          "expectedTags": [
+            "panty peek"
+          ],
+          "sourceCategory": "패션 > 노출",
+          "sourceCount": 8293,
+          "sourceKeywords": "<팬티 엿보기>, panty peek, 팬티 보일락말락",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 노출 keyword sample"
+        }
+      ]
+    },
+    {
+      "bundleId": "b12_nsfw_fetish_pose",
+      "label": "NSFW fetish, restraint, and pose",
+      "targetSize": 50,
+      "nsfw": true,
+      "samples": [
+        {
+          "query": "결박",
+          "expectedTags": [
+            "bound"
+          ],
+          "sourceCategory": "성 > 속박",
+          "sourceCount": 85568,
+          "sourceKeywords": "<결박>, 속박, 구속",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성 > 속박 keyword sample"
+        },
+        {
+          "query": "본디지",
+          "expectedTags": [
+            "bondage"
+          ],
+          "sourceCategory": "성 > 속박",
+          "sourceCount": 59863,
+          "sourceKeywords": "<본디지>, 속박, 결박",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성 > 속박 keyword sample"
+        },
+        {
+          "query": "섹스토이",
+          "expectedTags": [
+            "sex toy"
+          ],
+          "sourceCategory": "성 > 도구",
+          "sourceCount": 56780,
+          "sourceKeywords": "<섹스토이>, 성인용품",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성 > 도구 keyword sample"
+        },
+        {
+          "query": "구속",
+          "expectedTags": [
+            "restrained"
+          ],
+          "sourceCategory": "성 > 속박",
+          "sourceCount": 49049,
+          "sourceKeywords": "<구속>, 제압",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성 > 속박 keyword sample"
+        },
+        {
+          "query": "재갈",
+          "expectedTags": [
+            "gag"
+          ],
+          "sourceCategory": "사물 > BDSM",
+          "sourceCount": 23637,
+          "sourceKeywords": "<재갈>, 개그",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 사물 > BDSM keyword sample"
+        },
+        {
+          "query": "손목결박",
+          "expectedTags": [
+            "bound wrists"
+          ],
+          "sourceCategory": "행위 > 속박",
+          "sourceCount": 22062,
+          "sourceKeywords": "<손목결박>, 손목묶기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 행위 > 속박 keyword sample"
+        },
+        {
+          "query": "재갈물림",
+          "expectedTags": [
+            "gagged"
+          ],
+          "sourceCategory": "행위 > 속박",
+          "sourceCount": 20886,
+          "sourceKeywords": "<재갈물림>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 행위 > 속박 keyword sample"
+        },
+        {
+          "query": "펨돔",
+          "expectedTags": [
+            "femdom"
+          ],
+          "sourceCategory": "장르 > BDSM",
+          "sourceCount": 17939,
+          "sourceKeywords": "<펨돔>, 여성지배",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > BDSM keyword sample"
+        },
+        {
+          "query": "시바리",
+          "expectedTags": [
+            "shibari"
+          ],
+          "sourceCategory": "장르 > BDSM",
+          "sourceCount": 17077,
+          "sourceKeywords": "<시바리>, 일본식 결박",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > BDSM keyword sample"
+        },
+        {
+          "query": "속박",
+          "expectedTags": [
+            "bound arms"
+          ],
+          "sourceCategory": "H > 속박",
+          "sourceCount": 15760,
+          "sourceKeywords": "<속박>, [팔 묶기]",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 속박 keyword sample"
+        },
+        {
+          "query": "다리 묶기",
+          "expectedTags": [
+            "bound legs"
+          ],
+          "sourceCategory": "H > 속박",
+          "sourceCount": 9099,
+          "sourceKeywords": "<다리 묶기>, bound legs, 양다리 속박",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 속박 keyword sample"
+        },
+        {
+          "query": "노출증",
+          "expectedTags": [
+            "exhibitionism"
+          ],
+          "sourceCategory": "H > 페티시",
+          "sourceCount": 8265,
+          "sourceKeywords": "<노출증>, exhibitionism, 공공노출",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 페티시 keyword sample"
+        },
+        {
+          "query": "네토라레",
+          "expectedTags": [
+            "netorare"
+          ],
+          "sourceCategory": "H > 페티시",
+          "sourceCount": 7951,
+          "sourceKeywords": "<네토라레>, netorare, NTR",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 페티시 keyword sample"
+        },
+        {
+          "query": "분리된 성기",
+          "expectedTags": [
+            "disembodied penis"
+          ],
+          "sourceCategory": "H > 페티시",
+          "sourceCount": 7532,
+          "sourceKeywords": "<분리된 성기>, disembodied penis, 허공 페니스",
+          "nsfw": true,
+          "reason": "KR_tags.parquet H > 페티시 keyword sample"
+        },
+        {
+          "query": "알몸 리본",
+          "expectedTags": [
+            "naked ribbon"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 6768,
+          "sourceKeywords": "<노출>, 알몸 리본",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "리버스 바니걸",
+          "expectedTags": [
+            "reverse bunnysuit"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 6522,
+          "sourceKeywords": "<의상>, 리버스 바니걸, 역바니",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "브레스트 커튼",
+          "expectedTags": [
+            "breast curtains"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 6191,
+          "sourceKeywords": "<노출>, 브레스트 커튼",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "애널",
+          "expectedTags": [
+            "butt plug"
+          ],
+          "sourceCategory": "성행위 > 장난감",
+          "sourceCount": 5640,
+          "sourceKeywords": "<애널>, 버트 플러그",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 장난감 keyword sample"
+        },
+        {
+          "query": "고어",
+          "expectedTags": [
+            "guro"
+          ],
+          "sourceCategory": "성행위 > 페티시",
+          "sourceCount": 5351,
+          "sourceKeywords": "<고어>, 료나, 그로테스크",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 페티시 keyword sample"
+        },
+        {
+          "query": "이중 삽입",
+          "expectedTags": [
+            "spitroast"
+          ],
+          "sourceCategory": "성행위 > 자세",
+          "sourceCount": 5195,
+          "sourceKeywords": "<이중 삽입>, 스핏로스트",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 자세 keyword sample"
+        },
+        {
+          "query": "처녀",
+          "expectedTags": [
+            "defloration"
+          ],
+          "sourceCategory": "성행위 > 페티시",
+          "sourceCount": 5191,
+          "sourceKeywords": "<처녀>, 처녀 상실, 초야",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 페티시 keyword sample"
+        },
+        {
+          "query": "포켓몬",
+          "expectedTags": [
+            "pokephilia"
+          ],
+          "sourceCategory": "성행위 > 페티시",
+          "sourceCount": 5184,
+          "sourceKeywords": "<포켓몬>, 수간",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 페티시 keyword sample"
+        },
+        {
+          "query": "냄새 맡기",
+          "expectedTags": [
+            "smell"
+          ],
+          "sourceCategory": "장르 > 페티시",
+          "sourceCount": 4468,
+          "sourceKeywords": "<페티시>, 냄새 맡기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > 페티시 keyword sample"
+        },
+        {
+          "query": "알몸 코트",
+          "expectedTags": [
+            "naked coat"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 3133,
+          "sourceKeywords": "<알몸 코트>, 나체 코트, 네이키드 코트",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "불가능한 드레스",
+          "expectedTags": [
+            "impossible dress"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 3046,
+          "sourceKeywords": "<불가능한 드레스>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "알몸 붕대",
+          "expectedTags": [
+            "naked bandage"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 3018,
+          "sourceKeywords": "<알몸 붕대>, 붕대 의상",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "속박 의상",
+          "expectedTags": [
+            "bondage outfit"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 2953,
+          "sourceKeywords": "<속박 의상>, 본디지 복장",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "불가능한 레오타드",
+          "expectedTags": [
+            "impossible leotard"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 2947,
+          "sourceKeywords": "<불가능한 레오타드>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "가슴 가리개",
+          "expectedTags": [
+            "breast curtain"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 2909,
+          "sourceKeywords": "<가슴 가리개>, 브레스트 커튼",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "가슴 속박",
+          "expectedTags": [
+            "breast bondage"
+          ],
+          "sourceCategory": "성행위 > 속박",
+          "sourceCount": 2901,
+          "sourceKeywords": "<가슴 속박>, 유방 속박",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 속박 keyword sample"
+        },
+        {
+          "query": "팽팽한 드레스",
+          "expectedTags": [
+            "taut dress"
+          ],
+          "sourceCategory": "패션 > 페티시",
+          "sourceCount": 2828,
+          "sourceKeywords": "<팽팽한 드레스>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 패션 > 페티시 keyword sample"
+        },
+        {
+          "query": "고정형 속박구",
+          "expectedTags": [
+            "stationary restraints"
+          ],
+          "sourceCategory": "성행위 > 속박",
+          "sourceCount": 2826,
+          "sourceKeywords": "<고정형 속박구>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 속박 keyword sample"
+        },
+        {
+          "query": "펫 플레이",
+          "expectedTags": [
+            "pet play"
+          ],
+          "sourceCategory": "성행위 > 페티시",
+          "sourceCount": 2805,
+          "sourceKeywords": "<펫 플레이>, 주인님과 펫",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 페티시 keyword sample"
+        },
+        {
+          "query": "스팽킹",
+          "expectedTags": [
+            "spanking"
+          ],
+          "sourceCategory": "성행위 > BDSM",
+          "sourceCount": 2774,
+          "sourceKeywords": "<스팽킹>, 엉덩이 때리기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > BDSM keyword sample"
+        },
+        {
+          "query": "메스가키",
+          "expectedTags": [
+            "mesugaki"
+          ],
+          "sourceCategory": "페티시즘",
+          "sourceCount": 2605,
+          "sourceKeywords": "<메스가키>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 페티시즘 keyword sample"
+        },
+        {
+          "query": "팽창",
+          "expectedTags": [
+            "inflation"
+          ],
+          "sourceCategory": "페티시즘",
+          "sourceCount": 2563,
+          "sourceKeywords": "<팽창>, 배빵빵",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 페티시즘 keyword sample"
+        },
+        {
+          "query": "리본 속박",
+          "expectedTags": [
+            "ribbon bondage"
+          ],
+          "sourceCategory": "페티시즘",
+          "sourceCount": 2505,
+          "sourceKeywords": "<리본 속박>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 페티시즘 keyword sample"
+        },
+        {
+          "query": "료나",
+          "expectedTags": [
+            "ryona"
+          ],
+          "sourceCategory": "장르 > 페티시",
+          "sourceCount": 2391,
+          "sourceKeywords": "<료나>, 가학",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > 페티시 keyword sample"
+        },
+        {
+          "query": "관음",
+          "expectedTags": [
+            "voyeurism"
+          ],
+          "sourceCategory": "장르 > 페티시",
+          "sourceCount": 2217,
+          "sourceKeywords": "<관음>, 훔쳐보기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > 페티시 keyword sample"
+        },
+        {
+          "query": "옷위로핑거링",
+          "expectedTags": [
+            "fingering through clothes"
+          ],
+          "sourceCategory": "성행위 > 애무",
+          "sourceCount": 2167,
+          "sourceKeywords": "<옷위로핑거링>, 옷 위로 손가락 애무",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 애무 keyword sample"
+        },
+        {
+          "query": "입으로유혹",
+          "expectedTags": [
+            "oral invitation"
+          ],
+          "sourceCategory": "포즈 > 성적",
+          "sourceCount": 2149,
+          "sourceKeywords": "<입으로유혹>, 정액구걸, 정액받이 자세",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 포즈 > 성적 keyword sample"
+        },
+        {
+          "query": "합의된 촉수",
+          "expectedTags": [
+            "consensual tentacles"
+          ],
+          "sourceCategory": "장르 > 페티시",
+          "sourceCount": 1527,
+          "sourceKeywords": "<페티시>, 합의된 촉수, 동의하의 촉수",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > 페티시 keyword sample"
+        },
+        {
+          "query": "보어",
+          "expectedTags": [
+            "vore"
+          ],
+          "sourceCategory": "장르 > 페티시",
+          "sourceCount": 1506,
+          "sourceKeywords": "<페티시>, 보어, 잡아먹기",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 장르 > 페티시 keyword sample"
+        },
+        {
+          "query": "함께묶기",
+          "expectedTags": [
+            "bound together"
+          ],
+          "sourceCategory": "BDSM > 속박",
+          "sourceCount": 1412,
+          "sourceKeywords": "<함께묶기>, 2인 속박, 다인 속박",
+          "nsfw": true,
+          "reason": "KR_tags.parquet BDSM > 속박 keyword sample"
+        },
+        {
+          "query": "암시적핑거링",
+          "expectedTags": [
+            "implied fingering"
+          ],
+          "sourceCategory": "성행위 > 애무",
+          "sourceCount": 1382,
+          "sourceKeywords": "<암시적핑거링>, 간접적 핑거링",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성행위 > 애무 keyword sample"
+        },
+        {
+          "query": "재갈하네스",
+          "expectedTags": [
+            "gag harness"
+          ],
+          "sourceCategory": "BDSM > 재갈",
+          "sourceCount": 1374,
+          "sourceKeywords": "<재갈하네스>, 개그 하네스",
+          "nsfw": true,
+          "reason": "KR_tags.parquet BDSM > 재갈 keyword sample"
+        },
+        {
+          "query": "스프레더바",
+          "expectedTags": [
+            "spreader bar"
+          ],
+          "sourceCategory": "BDSM > 도구",
+          "sourceCount": 1369,
+          "sourceKeywords": "<스프레더바>, 다리벌리기봉",
+          "nsfw": true,
+          "reason": "KR_tags.parquet BDSM > 도구 keyword sample"
+        },
+        {
+          "query": "마조히즘",
+          "expectedTags": [
+            "masochism"
+          ],
+          "sourceCategory": "성적 페티시",
+          "sourceCount": 1367,
+          "sourceKeywords": "<마조히즘>, 피학증",
+          "nsfw": true,
+          "reason": "KR_tags.parquet 성적 페티시 keyword sample"
+        },
+        {
+          "query": "유두클램프",
+          "expectedTags": [
+            "nipple clamps"
+          ],
+          "sourceCategory": "BDSM > 도구",
+          "sourceCount": 1352,
+          "sourceKeywords": "<유두클램프>, 니플 클램프",
+          "nsfw": true,
+          "reason": "KR_tags.parquet BDSM > 도구 keyword sample"
+        },
+        {
+          "query": "유두바이브레이터",
+          "expectedTags": [
+            "vibrator on nipple"
+          ],
+          "sourceCategory": "BDSM > 도구",
+          "sourceCount": 1339,
+          "sourceKeywords": "<유두바이브레이터>",
+          "nsfw": true,
+          "reason": "KR_tags.parquet BDSM > 도구 keyword sample"
         }
       ]
     }

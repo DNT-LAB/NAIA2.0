@@ -60,8 +60,10 @@ def load_fixture(path: str | Path = FIXTURE_PATH) -> dict[str, Any]:
 
 def validate_fixture_shape(data: dict[str, Any]) -> None:
     bundles = data.get("bundles")
-    if not isinstance(bundles, list) or len(bundles) != 10:
-        raise AssertionError("autocomplete eval fixture must contain 10 bundles")
+    if not isinstance(bundles, list) or len(bundles) != 12:
+        raise AssertionError("autocomplete eval fixture must contain 12 bundles")
+    if data.get("bundleCount") != 12:
+        raise AssertionError("autocomplete eval fixture bundleCount must be 12")
     if data.get("bundleSize") != 50:
         raise AssertionError("autocomplete eval fixture bundleSize must be 50")
     nsfw_count = 0
@@ -78,8 +80,8 @@ def validate_fixture_shape(data: dict[str, Any]) -> None:
                 raise AssertionError(f"excluded category leaked into fixture: {category}")
             if bundle.get("nsfw") or sample.get("nsfw"):
                 nsfw_count += 1
-    if nsfw_count < 100:
-        raise AssertionError("autocomplete eval fixture must keep at least two NSFW bundles")
+    if nsfw_count < 200:
+        raise AssertionError("autocomplete eval fixture must keep at least four NSFW bundles")
 
 
 def iter_samples(

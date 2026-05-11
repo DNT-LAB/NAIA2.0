@@ -18,7 +18,7 @@ def test_autocomplete_eval_fixture_shape_and_filters():
 
     validate_fixture_shape(data)
 
-    assert sum(len(bundle["samples"]) for bundle in data["bundles"]) == 500
+    assert sum(len(bundle["samples"]) for bundle in data["bundles"]) == 600
     assert [bundle["bundleId"] for bundle in data["bundles"]] == [
         "b01_identity_composition",
         "b02_hair_face_expression",
@@ -30,6 +30,8 @@ def test_autocomplete_eval_fixture_shape_and_filters():
         "b08_background_object",
         "b09_meta_style_text",
         "b10_phrase_normalizer_combo",
+        "b11_nsfw_clothing_interaction",
+        "b12_nsfw_fetish_pose",
     ]
 
 
@@ -38,7 +40,7 @@ def test_autocomplete_eval_representative_candidates_and_timing_budget():
 
     summary = evaluate_fixture(data, per_bundle=5)
 
-    assert summary["checked"] == 50
+    assert summary["checked"] == 60
     assert summary["failed"] == 0
     assert summary["p95_ms"] <= 250.0
 

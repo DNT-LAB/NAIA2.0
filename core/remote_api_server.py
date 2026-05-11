@@ -10431,6 +10431,10 @@ class RemoteBridge(QObject):
                     "desc": result.entry.desc,
                     "group": result.entry.category,
                     "cat": result.entry.cat,
+                    "candidateType": "tag_exact",
+                    "source": "tag_index",
+                    "confidence": 1.0,
+                    "insertPolicy": "default",
                 }
                 for result in matches
             ]
@@ -10444,7 +10448,17 @@ class RemoteBridge(QObject):
             freq = info.get('freq', 0)
             d = info.get('description', '')
             g = info.get('group', '')
-            entry = {"tag": tag, "count": freq, "desc": d, "group": g, "cat": cat}
+            entry = {
+                "tag": tag,
+                "count": freq,
+                "desc": d,
+                "group": g,
+                "cat": cat,
+                "candidateType": "tag_exact",
+                "source": "tag_index",
+                "confidence": 1.0,
+                "insertPolicy": "default",
+            }
             # prefix 검색 시 tag_lower에서 prefix 제거하여 매칭
             match_key = tag_lower
             if cat_filter and match_key.startswith(cat_filter + ':'):
@@ -10500,6 +10514,10 @@ class RemoteBridge(QObject):
                 "cat": result.entry.cat,
                 "_metadata": True,
                 "_metadata_score": result.score,
+                "candidateType": "tag_metadata",
+                "source": "kr_metadata",
+                "confidence": result.score,
+                "insertPolicy": "default",
             }
             for result in matches
         ]
@@ -10976,11 +10994,15 @@ class RemoteBridge(QObject):
         return {
             "tag": query,
             "count": 0,
-            "desc": "fallback recommended",
-            "group": "[fallback recommended]",
+            "desc": "translation hint",
+            "group": "[translation hint]",
             "cat": "",
             "_wc_type": "fallback_recommended",
             "_fallback_recommended": True,
+            "candidateType": "translation_hint",
+            "source": "translation_fallback",
+            "confidence": 0.2,
+            "insertPolicy": "manual",
         }
 
     @staticmethod
@@ -11149,8 +11171,20 @@ class RemoteBridge(QObject):
                 item = dict(row)
                 if translated_match:
                     item["_translated"] = True
+                    if item.get("candidateType") in {None, "", "tag_exact"}:
+                        item["candidateType"] = "tag_translated"
+                    if item.get("source") in {None, "", "tag_index"}:
+                        item["source"] = "translation_search"
+                    item.setdefault("insertPolicy", "default")
                 if metadata_match:
                     item["_metadata"] = True
+                    item["candidateType"] = "tag_metadata"
+                    item["source"] = "kr_metadata"
+                    item.setdefault("insertPolicy", "default")
+                item.setdefault("candidateType", "tag_exact")
+                item.setdefault("source", "tag_index")
+                item.setdefault("confidence", float(item.get("_rank_score") or item.get("_metadata_score") or 1.0))
+                item.setdefault("insertPolicy", "default")
                 merged[tag] = item
                 order.append(tag)
                 return
@@ -11158,10 +11192,15 @@ class RemoteBridge(QObject):
                 existing["_translated"] = True
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
+                if existing.get("candidateType") not in {"tag_exact", "tag_metadata"}:
+                    existing["candidateType"] = "tag_translated"
+                    existing["source"] = "translation_search"
             if metadata_match:
                 existing["_metadata"] = True
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
+                existing["candidateType"] = "tag_metadata"
+                existing["source"] = "kr_metadata"
 
         natural_hangul_query = self._has_hangul_text(query) and len(normalize_search_query(query).split()) >= 2
         base_head_count = max(3, limit // 2)

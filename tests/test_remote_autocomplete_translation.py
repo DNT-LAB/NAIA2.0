@@ -58,7 +58,11 @@ def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch)
         "base7",
         "fishnet stockings",
     ]
+    assert merged[6]["candidateType"] == "tag_translated"
+    assert merged[6]["insertPolicy"] == "default"
     assert merged[-1]["_wc_type"] == "fallback_recommended"
+    assert merged[-1]["candidateType"] == "translation_hint"
+    assert merged[-1]["insertPolicy"] == "manual"
 
 
 def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypatch):
@@ -773,10 +777,16 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
     assert translated == "girl in white clothes"
     assert merged[0]["tag"] == "girl in white clothes"
     assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert merged[0]["candidateType"] == "translation_hint"
+    assert merged[0]["insertPolicy"] == "manual"
     assert merged[1]["tag"] == "white clothes"
     assert merged[1]["_wc_type"] == "fallback_recommended"
+    assert merged[1]["candidateType"] == "translation_hint"
+    assert merged[1]["insertPolicy"] == "manual"
     assert "girl" not in [row["tag"] for row in merged[:3]]
-    assert "full-length zipper" in [row["tag"] for row in merged]
+    metadata_row = next(row for row in merged if row["tag"] == "full-length zipper")
+    assert metadata_row["candidateType"] == "tag_metadata"
+    assert metadata_row["insertPolicy"] == "default"
 
 
 def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phrase(monkeypatch):
@@ -809,6 +819,8 @@ def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phr
     assert translated == "witch trial"
     assert merged[0]["tag"] == "witch trial"
     assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert merged[0]["candidateType"] == "translation_hint"
+    assert merged[0]["insertPolicy"] == "manual"
     assert [row["tag"] for row in merged[1:3]] == ["witch hat", "trial of the sword"]
 
 

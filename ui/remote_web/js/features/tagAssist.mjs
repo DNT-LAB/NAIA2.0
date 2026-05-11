@@ -1519,14 +1519,7 @@ export function createTagAssistController({
     }
     acResults = results;
     visibleTranslatedAutocompleteQuery = isTranslatedResponse ? (m.query || '') : '';
-    acSel = results.some(r => (
-      r._wc_type === 'chunk' ||
-      r._wc_type === 'chunk_group' ||
-      r._wc_type === 'vibe_cluster' ||
-      r._wc_type === 'fallback_recommended' ||
-      r._wc_type === 'preset_path' ||
-      r._wc_type === 'preset_status'
-    )) ? 0 : -1;
+    acSel = firstDefaultAutocompleteIndex(results);
     acMode = true;
     renderAutocomplete();
     return true;
@@ -2227,7 +2220,7 @@ export function createTagAssistController({
           } else {
             acResults = filteredPresetEventResults();
             presetEventSecondaryResults = filteredPresetEventSecondaryResults();
-            acSel = acResults.length ? 0 : -1;
+            acSel = firstDefaultAutocompleteIndex(acResults);
             renderAutocomplete();
             (acTarget || promptEdit)?.focus?.({preventScroll: true});
           }
@@ -2272,7 +2265,7 @@ export function createTagAssistController({
         e.preventDefault();
         presetPersonMenuOpen = false;
         const idx = +el.dataset.idx;
-        if (Number.isInteger(idx)) selectAutocomplete(idx);
+        if (Number.isInteger(idx)) selectAutocomplete(idx, {manual: true});
       });
     });
     tagTooltip.querySelectorAll('[data-observed-idx]').forEach(el => {
@@ -2341,15 +2334,53 @@ export function createTagAssistController({
       });
       el.addEventListener('mousedown', e => {
         e.preventDefault();
-        selectAutocomplete(+el.dataset.idx);
+        selectAutocomplete(+el.dataset.idx, {manual: true});
       });
     });
   }
 
-  function selectAutocomplete(idx) {
+  function autocompleteInsertPolicy(row) {
+    if (!row || row.disabled || row._wc_type === 'preset_status') return 'none';
+    return String(row.insertPolicy || 'default').toLowerCase();
+  }
+
+  function canSelectAutocomplete(row, {manual = false} = {}) {
+    const policy = autocompleteInsertPolicy(row);
+    if (policy === 'none') return false;
+    if (manual) return policy === 'default' || policy === 'insert' || policy === 'manual';
+    return policy === 'default' || policy === 'insert';
+  }
+
+  function firstDefaultAutocompleteIndex(rows = acResults) {
+    const index = rows.findIndex(row => canSelectAutocomplete(row));
+    return index >= 0 ? index : -1;
+  }
+
+  function moveAutocompleteSelection(delta) {
+    if (!acResults.length) {
+      acSel = -1;
+      return;
+    }
+    const direction = delta >= 0 ? 1 : -1;
+    let index = acSel;
+    for (let step = 0; step < acResults.length; step++) {
+      index += direction;
+      if (index < 0 || index >= acResults.length) {
+        acSel = -1;
+        return;
+      }
+      if (canSelectAutocomplete(acResults[index])) {
+        acSel = index;
+        return;
+      }
+    }
+    acSel = -1;
+  }
+
+  function selectAutocomplete(idx, options = {}) {
     const r = acResults[idx];
     if (!r) return;
-    if (r.disabled) return;
+    if (!canSelectAutocomplete(r, options)) return;
     const target = acTarget || promptEdit;
     if (isImeComposing(target)) return;
     const info = getActiveTokenInfo(target);
@@ -2687,11 +2718,11 @@ export function createTagAssistController({
       if (!acMode || !acResults.length) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        acSel = Math.min(acSel + 1, acResults.length - 1);
+        moveAutocompleteSelection(1);
         renderAutocomplete();
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        acSel = Math.max(acSel - 1, -1);
+        moveAutocompleteSelection(-1);
         renderAutocomplete();
       } else if ((e.key === 'Enter' || e.key === 'Tab') && acSel >= 0) {
         e.preventDefault();

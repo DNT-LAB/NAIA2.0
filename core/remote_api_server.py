@@ -8540,6 +8540,12 @@ class RemoteBridge(QObject):
                 if not isinstance(payload, dict):
                     payload = {}
                 name = str(payload.get("name") or "").strip()
+                source_preset = str(payload.get("source_preset") or "").strip()
+                activate_raw = payload.get("activate", False)
+                activate = activate_raw is True or (
+                    isinstance(activate_raw, str)
+                    and activate_raw.strip().lower() == "true"
+                )
                 book_data = payload.get("book") if isinstance(payload.get("book"), dict) else None
                 if not name:
                     self._broadcast_json({
@@ -8560,24 +8566,57 @@ class RemoteBridge(QObject):
                             "level": "error",
                         })
                     else:
-                        if book_data is not None:
-                            book = rulebook_from_dict(book_data)
-                        else:
-                            from modules.conditional.dsl_parser import parse_rulebook
+                        book = None
+                        try:
+                            if book_data is not None:
+                                book = rulebook_from_dict(book_data)
+                            elif source_preset:
+                                book = storage.load(source_preset)
+                            else:
+                                from modules.conditional.dsl_parser import parse_rulebook
 
-                            current_dsl = m.get_v2_dsl() if hasattr(m, "get_v2_dsl") else getattr(m, "_rules_v2_dsl", "")
-                            book = parse_rulebook(current_dsl or "")
-                            opts = self._cond_engine_options(m)
-                            book.max_passes = opts["max_passes"]
-                            book.stop_on_match = opts["stop_on_match"]
-                        storage.save(name, book)
-                        m._active_preset_name = name
-                        should_broadcast = True
-                        self._broadcast_json({
-                            "type": "toast",
-                            "message": f"조건부 프리셋 저장: {name}",
-                            "level": "success",
-                        })
+                                current_dsl = m.get_v2_dsl() if hasattr(m, "get_v2_dsl") else getattr(m, "_rules_v2_dsl", "")
+                                book = parse_rulebook(current_dsl or "")
+                                opts = self._cond_engine_options(m)
+                                book.max_passes = opts["max_passes"]
+                                book.stop_on_match = opts["stop_on_match"]
+                        except FileNotFoundError:
+                            self._broadcast_json({
+                                "type": "toast",
+                                "message": f"복제할 조건부 프리셋을 찾을 수 없습니다: {source_preset}",
+                                "level": "error",
+                            })
+                        if book is not None:
+                            storage.save(name, book)
+                            m._active_preset_name = name
+                            if activate:
+                                from modules.conditional.dsl_serializer import serialize_rulebook
+
+                                dsl = serialize_rulebook(book)
+                                if hasattr(m, "set_engine_options"):
+                                    m.set_engine_options(
+                                        max_passes=book.max_passes,
+                                        stop_on_match=book.stop_on_match,
+                                    )
+                                else:
+                                    m._engine_options = {
+                                        "max_passes": book.max_passes,
+                                        "stop_on_match": book.stop_on_match,
+                                    }
+                                if hasattr(m, "set_v2_dsl"):
+                                    m.set_v2_dsl(dsl)
+                                else:
+                                    m._rules_v2_dsl = dsl
+                                if hasattr(m, "set_editor_mode"):
+                                    m.set_editor_mode("v2")
+                                else:
+                                    m._editor_mode = "v2"
+                            should_broadcast = True
+                            self._broadcast_json({
+                                "type": "toast",
+                                "message": f"조건부 프리셋 저장: {name}",
+                                "level": "success",
+                            })
             elif key == "preset_delete":
                 from modules.conditional.preset_io import get_default_storage
 

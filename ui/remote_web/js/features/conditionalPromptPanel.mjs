@@ -23,6 +23,8 @@ export function createConditionalPromptPanel({
   let presetPopoverOpen = false;
   let presetDialogOpen = false;
   let presetDialogName = '';
+  let presetDialogMode = 'empty';
+  let presetDialogSource = '';
   let dirty = false;
   let bound = false;
 
@@ -506,6 +508,16 @@ export function createConditionalPromptPanel({
     };
   }
 
+  function emptyPresetBook(name = '') {
+    return {
+      schema_version: 1,
+      name,
+      description: '',
+      engine_options: normalizeEngineOptions(),
+      rules: [],
+    };
+  }
+
   function applyBook({showToast = true} = {}) {
     if (!currentState) return;
     const book = currentBookPayload();
@@ -523,7 +535,7 @@ export function createConditionalPromptPanel({
     }
   }
 
-  function savePreset(nameOverride = null) {
+  function savePreset(nameOverride = null, options = {}) {
     const input = document.getElementById('condPresetNameInput');
     const select = document.getElementById('condPresetSelect');
     const rawName = nameOverride !== null ? nameOverride : (input ? input.value : select?.value);
@@ -533,10 +545,23 @@ export function createConditionalPromptPanel({
       return;
     }
     if (input) input.value = name;
-    sendModuleParam('conditional_prompt', 'preset_save', JSON.stringify({
-      name,
-      book: currentBookPayload(),
-    }));
+    const sourcePreset = safeText(options.sourcePreset).trim();
+    const book = options.book ? normalizeBook(options.book) : currentBookPayload();
+    const payload = {name};
+    if (sourcePreset) payload.source_preset = sourcePreset;
+    else payload.book = book;
+    if (options.activate) payload.activate = true;
+    sendModuleParam('conditional_prompt', 'preset_save', JSON.stringify(payload));
+    if (options.activate && currentState && !sourcePreset) {
+      currentState.active_preset = name;
+      currentState.editor_mode = 'v2';
+      currentState.rules_v2_book = normalizeBook(book);
+      currentState.rules_v2 = serializeRulebook(currentState.rules_v2_book);
+      currentState.rules = currentState.rules_v2;
+      currentState.active_rules = currentState.rules_v2;
+      currentState.engine_options = normalizeEngineOptions(currentState.rules_v2_book.engine_options);
+      selectedRuleId = null;
+    }
     dirty = false;
     updateDynamicText();
   }
@@ -551,6 +576,10 @@ export function createConditionalPromptPanel({
 
   function beginNewPreset() {
     presetDialogName = '';
+    presetDialogMode = 'empty';
+    presetDialogSource = safeText(currentState?.active_preset).trim()
+      || safeText(document.getElementById('condPresetSelect')?.value).trim()
+      || safeText(currentState?.presets?.[0]?.name).trim();
     presetDialogOpen = true;
     render(currentState);
     globalThis.requestAnimationFrame?.(focusPresetDialogInput);
@@ -559,6 +588,8 @@ export function createConditionalPromptPanel({
   function closePresetDialog() {
     presetDialogOpen = false;
     presetDialogName = '';
+    presetDialogMode = 'empty';
+    presetDialogSource = '';
     render(currentState);
   }
 
@@ -570,10 +601,19 @@ export function createConditionalPromptPanel({
       focusPresetDialogInput();
       return;
     }
+    const mode = presetDialogMode === 'clone' ? 'clone' : 'empty';
+    const source = safeText(document.getElementById('condPresetDialogSource')?.value || presetDialogSource).trim();
+    if (mode === 'clone' && !source) {
+      if (typeof globalThis.showToast === 'function') globalThis.showToast('복제할 프리셋을 선택하세요', 'error');
+      return;
+    }
     presetDialogOpen = false;
     presetDialogName = '';
-    if (currentState) currentState.active_preset = name;
-    savePreset(name);
+    if (mode === 'clone') {
+      savePreset(name, {sourcePreset: source, activate: true});
+    } else {
+      savePreset(name, {book: emptyPresetBook(name), activate: true});
+    }
     render(currentState);
   }
 
@@ -700,6 +740,14 @@ export function createConditionalPromptPanel({
 
   function renderPresetDialog() {
     if (!presetDialogOpen) return '';
+    const presets = Array.isArray(currentState?.presets) ? currentState.presets : [];
+    const sourceOptions = presets.map(preset => {
+      const name = safeText(preset.name);
+      const suffix = preset.is_bundled ? ' bundle' : ' user';
+      const count = Number.isFinite(Number(preset.rule_count)) ? ` (${Number(preset.rule_count)})` : '';
+      return `<option value="${escapeAttr(name)}"${name === presetDialogSource ? ' selected' : ''}>${escHtml(name + count + suffix)}</option>`;
+    }).join('');
+    const cloneDisabled = presets.length ? '' : 'disabled';
     return `
       <div class="cond-preset-dialog-backdrop" role="presentation">
         <section class="cond-preset-dialog" role="dialog" aria-modal="true" aria-labelledby="condPresetDialogTitle">
@@ -709,6 +757,20 @@ export function createConditionalPromptPanel({
           </div>
           <label class="cond-preset-dialog-label" for="condPresetDialogName">프리셋 이름</label>
           <input class="mod-input cond-preset-dialog-input" id="condPresetDialogName" data-cond-preset-dialog-name="1" value="${escapeAttr(presetDialogName)}" autocomplete="off">
+          <div class="cond-preset-dialog-mode" role="radiogroup" aria-label="새 프리셋 시작 방식">
+            <label class="cond-preset-mode-option${presetDialogMode === 'empty' ? ' selected' : ''}">
+              <input type="radio" name="condPresetDialogMode" value="empty" data-cond-preset-dialog-mode="empty" ${presetDialogMode === 'empty' ? 'checked' : ''}>
+              <span>빈 프리셋</span>
+            </label>
+            <label class="cond-preset-mode-option${presetDialogMode === 'clone' ? ' selected' : ''}${presets.length ? '' : ' disabled'}">
+              <input type="radio" name="condPresetDialogMode" value="clone" data-cond-preset-dialog-mode="clone" ${presetDialogMode === 'clone' ? 'checked' : ''} ${cloneDisabled}>
+              <span>프리셋 복제</span>
+            </label>
+          </div>
+          <label class="cond-preset-dialog-label" for="condPresetDialogSource">복제할 프리셋</label>
+          <select class="mod-select cond-preset-dialog-source" id="condPresetDialogSource" data-cond-preset-dialog-source="1" ${presetDialogMode === 'clone' && presets.length ? '' : 'disabled'}>
+            ${sourceOptions || '<option value="">프리셋 없음</option>'}
+          </select>
           <div class="cond-preset-dialog-actions">
             <button type="button" data-cond-action="cancel-new-preset">취소</button>
             <button type="button" class="primary" data-cond-action="confirm-new-preset">저장</button>
@@ -1384,6 +1446,16 @@ export function createConditionalPromptPanel({
   function handleChange(event) {
     const target = event.target;
     if (!target.closest?.('.cond-root')) return;
+    if (target.dataset.condPresetDialogMode) {
+      presetDialogMode = target.dataset.condPresetDialogMode === 'clone' ? 'clone' : 'empty';
+      render(currentState);
+      globalThis.requestAnimationFrame?.(focusPresetDialogInput);
+      return;
+    }
+    if (target.dataset.condPresetDialogSource) {
+      presetDialogSource = target.value;
+      return;
+    }
     if (target.dataset.condGlobal === 'enabled') {
       sendModuleParam('conditional_prompt', 'enabled', String(target.checked));
       if (currentState) currentState.enabled = target.checked;

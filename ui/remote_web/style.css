@@ -11037,6 +11037,42 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .cond-preset-dialog-input {
   width: 100%;
 }
+.cond-preset-dialog-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cond-preset-mode-option {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cond-preset-mode-option input {
+  margin: 0;
+  accent-color: var(--accent-blue);
+}
+.cond-preset-mode-option.selected {
+  border-color: rgba(95, 151, 255, 0.72);
+  background: rgba(35, 77, 145, 0.46);
+  color: var(--text-primary);
+}
+.cond-preset-mode-option.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cond-preset-dialog-source {
+  width: 100%;
+}
 .cond-preset-dialog-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

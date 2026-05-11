@@ -2339,9 +2339,14 @@ export function createTagAssistController({
     });
   }
 
+  function autocompleteCandidate(row) {
+    return row?.candidate && typeof row.candidate === 'object' ? row.candidate : null;
+  }
+
   function autocompleteInsertPolicy(row) {
     if (!row || row.disabled || row._wc_type === 'preset_status') return 'none';
-    return String(row.insertPolicy || 'default').toLowerCase();
+    const candidate = autocompleteCandidate(row);
+    return String(candidate?.insertPolicy || row.insertPolicy || 'default').toLowerCase();
   }
 
   function canSelectAutocomplete(row, {manual = false} = {}) {

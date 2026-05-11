@@ -2,6 +2,25 @@ from core import remote_api_server
 from core.remote_api_server import RemoteBridge
 
 
+def assert_autocomplete_candidate_schema(
+    row,
+    candidate_type,
+    source,
+    insert_policy,
+    *,
+    confidence=None,
+):
+    assert row["candidateType"] == candidate_type
+    assert row["source"] == source
+    assert row["insertPolicy"] == insert_policy
+    assert row["candidate"]["type"] == candidate_type
+    assert row["candidate"]["source"] == source
+    assert row["candidate"]["insertPolicy"] == insert_policy
+    assert row["candidate"]["confidence"] == row["confidence"]
+    if confidence is not None:
+        assert row["confidence"] == confidence
+
+
 def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch):
     monkeypatch.setattr(
         remote_api_server,
@@ -58,11 +77,29 @@ def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch)
         "base7",
         "fishnet stockings",
     ]
-    assert merged[6]["candidateType"] == "tag_translated"
-    assert merged[6]["insertPolicy"] == "default"
+    assert_autocomplete_candidate_schema(
+        merged[0],
+        "tag_exact",
+        "tag_index",
+        "default",
+        confidence=1.0,
+    )
+    assert_autocomplete_candidate_schema(
+        merged[6],
+        "tag_translated",
+        "translation_search",
+        "default",
+        confidence=0.75,
+    )
+    assert "rankScore" in merged[6]["candidate"]
     assert merged[-1]["_wc_type"] == "fallback_recommended"
-    assert merged[-1]["candidateType"] == "translation_hint"
-    assert merged[-1]["insertPolicy"] == "manual"
+    assert_autocomplete_candidate_schema(
+        merged[-1],
+        "translation_hint",
+        "translation_fallback",
+        "manual",
+        confidence=0.2,
+    )
 
 
 def test_autocomplete_translation_expands_sentence_to_phrase_and_action(monkeypatch):
@@ -777,16 +814,32 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
     assert translated == "girl in white clothes"
     assert merged[0]["tag"] == "girl in white clothes"
     assert merged[0]["_wc_type"] == "fallback_recommended"
-    assert merged[0]["candidateType"] == "translation_hint"
-    assert merged[0]["insertPolicy"] == "manual"
+    assert_autocomplete_candidate_schema(
+        merged[0],
+        "translation_hint",
+        "translation_fallback",
+        "manual",
+        confidence=0.2,
+    )
     assert merged[1]["tag"] == "white clothes"
     assert merged[1]["_wc_type"] == "fallback_recommended"
-    assert merged[1]["candidateType"] == "translation_hint"
-    assert merged[1]["insertPolicy"] == "manual"
+    assert_autocomplete_candidate_schema(
+        merged[1],
+        "translation_hint",
+        "translation_fallback",
+        "manual",
+        confidence=0.2,
+    )
     assert "girl" not in [row["tag"] for row in merged[:3]]
     metadata_row = next(row for row in merged if row["tag"] == "full-length zipper")
-    assert metadata_row["candidateType"] == "tag_metadata"
-    assert metadata_row["insertPolicy"] == "default"
+    assert_autocomplete_candidate_schema(
+        metadata_row,
+        "tag_metadata",
+        "kr_metadata",
+        "default",
+        confidence=0.85,
+    )
+    assert metadata_row["candidate"]["rankScore"] == 725.0
 
 
 def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phrase(monkeypatch):
@@ -819,8 +872,13 @@ def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phr
     assert translated == "witch trial"
     assert merged[0]["tag"] == "witch trial"
     assert merged[0]["_wc_type"] == "fallback_recommended"
-    assert merged[0]["candidateType"] == "translation_hint"
-    assert merged[0]["insertPolicy"] == "manual"
+    assert_autocomplete_candidate_schema(
+        merged[0],
+        "translation_hint",
+        "translation_fallback",
+        "manual",
+        confidence=0.2,
+    )
     assert [row["tag"] for row in merged[1:3]] == ["witch hat", "trial of the sword"]
 
 

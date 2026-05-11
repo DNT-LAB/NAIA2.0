@@ -10398,6 +10398,78 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: character_analysis 로드 실패 — {e}")
 
+    @staticmethod
+    def _autocomplete_candidate_fields(
+        candidate_type: str,
+        source: str,
+        *,
+        confidence: float = 1.0,
+        insert_policy: str = "default",
+        rank_score: float | None = None,
+    ) -> dict:
+        candidate = {
+            "type": candidate_type,
+            "source": source,
+            "confidence": float(confidence),
+            "insertPolicy": insert_policy,
+        }
+        fields = {
+            "candidate": candidate,
+            "candidateType": candidate_type,
+            "source": source,
+            "confidence": candidate["confidence"],
+            "insertPolicy": insert_policy,
+        }
+        if rank_score is not None:
+            candidate["rankScore"] = float(rank_score)
+            fields["rankScore"] = candidate["rankScore"]
+        return fields
+
+    @staticmethod
+    def _apply_autocomplete_candidate_schema(
+        row: dict,
+        candidate_type: str | None = None,
+        source: str | None = None,
+        *,
+        confidence: float | None = None,
+        insert_policy: str | None = None,
+        rank_score: float | None = None,
+    ) -> None:
+        candidate = row.get("candidate")
+        if not isinstance(candidate, dict):
+            candidate = {}
+        resolved_type = candidate_type or row.get("candidateType") or candidate.get("type") or "tag_exact"
+        resolved_source = source or row.get("source") or candidate.get("source") or "tag_index"
+        resolved_confidence = (
+            confidence
+            if confidence is not None
+            else row.get("confidence", candidate.get("confidence", 1.0))
+        )
+        resolved_policy = (
+            insert_policy
+            or row.get("insertPolicy")
+            or candidate.get("insertPolicy")
+            or "default"
+        )
+        resolved_rank_score = (
+            rank_score
+            if rank_score is not None
+            else row.get("rankScore", candidate.get("rankScore"))
+        )
+        row.update(
+            RemoteBridge._autocomplete_candidate_fields(
+                str(resolved_type),
+                str(resolved_source),
+                confidence=float(resolved_confidence or 0.0),
+                insert_policy=str(resolved_policy),
+                rank_score=(
+                    float(resolved_rank_score)
+                    if resolved_rank_score is not None
+                    else None
+                ),
+            )
+        )
+
     def _search_kr_tags(self, query: str, limit: int = 20) -> list:
         """5단계 우선순위 태그 검색: exact → starts_with → kr_keyword → contains → desc
         prefix 라우팅: 'artist:x' → artist만, 'character:x' → character만"""
@@ -10431,10 +10503,10 @@ class RemoteBridge(QObject):
                     "desc": result.entry.desc,
                     "group": result.entry.category,
                     "cat": result.entry.cat,
-                    "candidateType": "tag_exact",
-                    "source": "tag_index",
-                    "confidence": 1.0,
-                    "insertPolicy": "default",
+                    **self._autocomplete_candidate_fields(
+                        "tag_exact",
+                        "tag_index",
+                    ),
                 }
                 for result in matches
             ]
@@ -10454,10 +10526,10 @@ class RemoteBridge(QObject):
                 "desc": d,
                 "group": g,
                 "cat": cat,
-                "candidateType": "tag_exact",
-                "source": "tag_index",
-                "confidence": 1.0,
-                "insertPolicy": "default",
+                **self._autocomplete_candidate_fields(
+                    "tag_exact",
+                    "tag_index",
+                ),
             }
             # prefix 검색 시 tag_lower에서 prefix 제거하여 매칭
             match_key = tag_lower
@@ -10514,10 +10586,12 @@ class RemoteBridge(QObject):
                 "cat": result.entry.cat,
                 "_metadata": True,
                 "_metadata_score": result.score,
-                "candidateType": "tag_metadata",
-                "source": "kr_metadata",
-                "confidence": result.score,
-                "insertPolicy": "default",
+                **self._autocomplete_candidate_fields(
+                    "tag_metadata",
+                    "kr_metadata",
+                    confidence=0.85,
+                    rank_score=result.score,
+                ),
             }
             for result in matches
         ]
@@ -10999,10 +11073,12 @@ class RemoteBridge(QObject):
             "cat": "",
             "_wc_type": "fallback_recommended",
             "_fallback_recommended": True,
-            "candidateType": "translation_hint",
-            "source": "translation_fallback",
-            "confidence": 0.2,
-            "insertPolicy": "manual",
+            **RemoteBridge._autocomplete_candidate_fields(
+                "translation_hint",
+                "translation_fallback",
+                confidence=0.2,
+                insert_policy="manual",
+            ),
         }
 
     @staticmethod
@@ -11162,6 +11238,21 @@ class RemoteBridge(QObject):
         merged: dict[str, dict] = {}
         order: list[str] = []
 
+        def copy_best_score(target: dict, source: dict, key: str) -> None:
+            score = source.get(key)
+            if score is None:
+                return
+            try:
+                next_score = float(score)
+            except (TypeError, ValueError):
+                return
+            try:
+                previous_score = float(target.get(key) or 0.0)
+            except (TypeError, ValueError):
+                previous_score = 0.0
+            if key not in target or next_score > previous_score:
+                target[key] = next_score
+
         def add_result(row: dict, translated_match: bool = False, metadata_match: bool = False):
             tag = str(row.get("tag") or "")
             if not tag:
@@ -11175,32 +11266,64 @@ class RemoteBridge(QObject):
                         item["candidateType"] = "tag_translated"
                     if item.get("source") in {None, "", "tag_index"}:
                         item["source"] = "translation_search"
+                    if item.get("candidateType") == "tag_translated":
+                        item["confidence"] = 0.75
                     item.setdefault("insertPolicy", "default")
                 if metadata_match:
                     item["_metadata"] = True
                     item["candidateType"] = "tag_metadata"
                     item["source"] = "kr_metadata"
+                    item["confidence"] = 0.85
                     item.setdefault("insertPolicy", "default")
                 item.setdefault("candidateType", "tag_exact")
                 item.setdefault("source", "tag_index")
-                item.setdefault("confidence", float(item.get("_rank_score") or item.get("_metadata_score") or 1.0))
+                item.setdefault("confidence", 1.0)
                 item.setdefault("insertPolicy", "default")
+                self._apply_autocomplete_candidate_schema(
+                    item,
+                    rank_score=(
+                        item.get("_rank_score")
+                        if item.get("_rank_score") is not None
+                        else item.get("_metadata_score")
+                    ),
+                )
                 merged[tag] = item
                 order.append(tag)
                 return
             if translated_match:
                 existing["_translated"] = True
+                copy_best_score(existing, row, "_rank_score")
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
                 if existing.get("candidateType") not in {"tag_exact", "tag_metadata"}:
                     existing["candidateType"] = "tag_translated"
                     existing["source"] = "translation_search"
+                    existing["confidence"] = 0.75
+                self._apply_autocomplete_candidate_schema(
+                    existing,
+                    rank_score=(
+                        existing.get("_rank_score")
+                        if existing.get("_rank_score") is not None
+                        else existing.get("_metadata_score")
+                    ),
+                )
             if metadata_match:
                 existing["_metadata"] = True
+                copy_best_score(existing, row, "_metadata_score")
+                copy_best_score(existing, row, "_rank_score")
                 existing["desc"] = existing.get("desc") or row.get("desc", "")
                 existing["group"] = existing.get("group") or row.get("group", "")
                 existing["candidateType"] = "tag_metadata"
                 existing["source"] = "kr_metadata"
+                existing["confidence"] = 0.85
+                self._apply_autocomplete_candidate_schema(
+                    existing,
+                    rank_score=(
+                        existing.get("_metadata_score")
+                        if existing.get("_metadata_score") is not None
+                        else existing.get("_rank_score")
+                    ),
+                )
 
         natural_hangul_query = self._has_hangul_text(query) and len(normalize_search_query(query).split()) >= 2
         base_head_count = max(3, limit // 2)

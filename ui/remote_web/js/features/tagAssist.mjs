@@ -1,3 +1,25 @@
+export function autocompleteCandidateForRow(row) {
+  return row?.candidate && typeof row.candidate === 'object' ? row.candidate : null;
+}
+
+export function autocompleteInsertPolicyForRow(row) {
+  if (!row || row.disabled || row._wc_type === 'preset_status') return 'none';
+  const candidate = autocompleteCandidateForRow(row);
+  return String(candidate?.insertPolicy || row.insertPolicy || 'default').toLowerCase();
+}
+
+export function canSelectAutocompleteRow(row, {manual = false} = {}) {
+  const policy = autocompleteInsertPolicyForRow(row);
+  if (policy === 'none') return false;
+  if (manual) return policy === 'default' || policy === 'insert' || policy === 'manual';
+  return policy === 'default' || policy === 'insert';
+}
+
+export function firstDefaultAutocompleteIndexForRows(rows = []) {
+  const index = rows.findIndex(row => canSelectAutocompleteRow(row));
+  return index >= 0 ? index : -1;
+}
+
 export function createTagAssistController({
   document,
   window,
@@ -2353,26 +2375,12 @@ export function createTagAssistController({
     });
   }
 
-  function autocompleteCandidate(row) {
-    return row?.candidate && typeof row.candidate === 'object' ? row.candidate : null;
-  }
-
-  function autocompleteInsertPolicy(row) {
-    if (!row || row.disabled || row._wc_type === 'preset_status') return 'none';
-    const candidate = autocompleteCandidate(row);
-    return String(candidate?.insertPolicy || row.insertPolicy || 'default').toLowerCase();
-  }
-
   function canSelectAutocomplete(row, {manual = false} = {}) {
-    const policy = autocompleteInsertPolicy(row);
-    if (policy === 'none') return false;
-    if (manual) return policy === 'default' || policy === 'insert' || policy === 'manual';
-    return policy === 'default' || policy === 'insert';
+    return canSelectAutocompleteRow(row, {manual});
   }
 
   function firstDefaultAutocompleteIndex(rows = acResults) {
-    const index = rows.findIndex(row => canSelectAutocomplete(row));
-    return index >= 0 ? index : -1;
+    return firstDefaultAutocompleteIndexForRows(rows);
   }
 
   function moveAutocompleteSelection(delta) {

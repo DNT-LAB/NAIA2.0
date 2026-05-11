@@ -17,8 +17,19 @@ def assert_autocomplete_candidate_schema(
     assert row["candidate"]["source"] == source
     assert row["candidate"]["insertPolicy"] == insert_policy
     assert row["candidate"]["confidence"] == row["confidence"]
+    assert row["candidate"]["score"] == row["autocompleteScore"]
     if confidence is not None:
         assert row["confidence"] == confidence
+
+
+def assert_translation_hints_are_tail(rows):
+    first_hint = next(
+        (index for index, row in enumerate(rows) if row["candidateType"] == "translation_hint"),
+        None,
+    )
+    assert first_hint is not None
+    assert all(row["candidateType"] != "translation_hint" for row in rows[:first_hint])
+    assert all(row["candidateType"] == "translation_hint" for row in rows[first_hint:])
 
 
 def test_autocomplete_translation_merges_delayed_english_candidates(monkeypatch):
@@ -812,26 +823,15 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
     )
 
     assert translated == "girl in white clothes"
-    assert merged[0]["tag"] == "girl in white clothes"
-    assert merged[0]["_wc_type"] == "fallback_recommended"
-    assert_autocomplete_candidate_schema(
-        merged[0],
-        "translation_hint",
-        "translation_fallback",
-        "manual",
-        confidence=0.2,
-    )
-    assert merged[1]["tag"] == "white clothes"
-    assert merged[1]["_wc_type"] == "fallback_recommended"
-    assert_autocomplete_candidate_schema(
-        merged[1],
-        "translation_hint",
-        "translation_fallback",
-        "manual",
-        confidence=0.2,
-    )
-    assert "girl" not in [row["tag"] for row in merged[:3]]
-    metadata_row = next(row for row in merged if row["tag"] == "full-length zipper")
+    assert [row["tag"] for row in merged] == [
+        "full-length zipper",
+        "clothes",
+        "white camisole",
+        "girl in white clothes",
+        "white clothes",
+    ]
+    assert_translation_hints_are_tail(merged)
+    metadata_row = merged[0]
     assert_autocomplete_candidate_schema(
         metadata_row,
         "tag_metadata",
@@ -840,6 +840,21 @@ def test_autocomplete_translation_prepends_recommended_for_actor_phrase_without_
         confidence=0.85,
     )
     assert metadata_row["candidate"]["rankScore"] == 725.0
+    assert_autocomplete_candidate_schema(
+        merged[-2],
+        "translation_hint",
+        "translation_fallback",
+        "manual",
+        confidence=0.2,
+    )
+    assert_autocomplete_candidate_schema(
+        merged[-1],
+        "translation_hint",
+        "translation_fallback",
+        "manual",
+        confidence=0.2,
+    )
+    assert "girl" not in [row["tag"] for row in merged[:3]]
 
 
 def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phrase(monkeypatch):
@@ -870,16 +885,19 @@ def test_autocomplete_translation_prepends_simple_recommended_for_short_noun_phr
     )
 
     assert translated == "witch trial"
-    assert merged[0]["tag"] == "witch trial"
-    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert [row["tag"] for row in merged] == [
+        "witch hat",
+        "trial of the sword",
+        "witch trial",
+    ]
+    assert_translation_hints_are_tail(merged)
     assert_autocomplete_candidate_schema(
-        merged[0],
+        merged[-1],
         "translation_hint",
         "translation_fallback",
         "manual",
         confidence=0.2,
     )
-    assert [row["tag"] for row in merged[1:3]] == ["witch hat", "trial of the sword"]
 
 
 def test_autocomplete_translation_prepends_simple_recommended_for_single_word_noun_translation(monkeypatch):
@@ -912,9 +930,9 @@ def test_autocomplete_translation_prepends_simple_recommended_for_single_word_no
     )
 
     assert translated == "inquisition"
-    assert merged[0]["tag"] == "inquisition"
-    assert merged[0]["_wc_type"] == "fallback_recommended"
-    assert merged[1]["tag"] == "dragon age: inquisition"
+    assert [row["tag"] for row in merged] == ["dragon age: inquisition", "inquisition"]
+    assert_translation_hints_are_tail(merged)
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
 
 
 def test_autocomplete_translation_simple_recommended_removes_pronouns_but_keeps_actor_nouns(monkeypatch):
@@ -943,8 +961,9 @@ def test_autocomplete_translation_simple_recommended_removes_pronouns_but_keeps_
     )
 
     assert translated == "he is a boy witch trial"
-    assert merged[0]["tag"] == "boy witch trial"
-    assert merged[0]["_wc_type"] == "fallback_recommended"
+    assert [row["tag"] for row in merged] == ["boy", "boy witch trial"]
+    assert_translation_hints_are_tail(merged)
+    assert merged[-1]["_wc_type"] == "fallback_recommended"
     assert "he is a boy witch trial" not in [row["tag"] for row in merged]
 
 
@@ -989,7 +1008,13 @@ def test_autocomplete_translation_does_not_build_metadata_index_on_live_path(mon
 
     assert translated == "a sharp spear is aimed at the girl."
     assert calls == [False]
-    assert merged[0]["tag"] == "a sharp spear is aimed at the girl"
-    assert merged[0]["_wc_type"] == "fallback_recommended"
-    assert merged[1]["tag"] == "sharp spear"
-    assert merged[1]["_wc_type"] == "fallback_recommended"
+    assert [row["candidateType"] for row in merged[:3]] == [
+        "tag_translated",
+        "tag_translated",
+        "tag_translated",
+    ]
+    assert [row["tag"] for row in merged[-2:]] == [
+        "a sharp spear is aimed at the girl",
+        "sharp spear",
+    ]
+    assert_translation_hints_are_tail(merged)

@@ -10406,6 +10406,7 @@ class RemoteBridge(QObject):
         confidence: float = 1.0,
         insert_policy: str = "default",
         rank_score: float | None = None,
+        score: float | None = None,
     ) -> dict:
         candidate = {
             "type": candidate_type,
@@ -10423,6 +10424,9 @@ class RemoteBridge(QObject):
         if rank_score is not None:
             candidate["rankScore"] = float(rank_score)
             fields["rankScore"] = candidate["rankScore"]
+        if score is not None:
+            candidate["score"] = float(score)
+            fields["autocompleteScore"] = candidate["score"]
         return fields
 
     @staticmethod
@@ -10434,6 +10438,7 @@ class RemoteBridge(QObject):
         confidence: float | None = None,
         insert_policy: str | None = None,
         rank_score: float | None = None,
+        score: float | None = None,
     ) -> None:
         candidate = row.get("candidate")
         if not isinstance(candidate, dict):
@@ -10456,6 +10461,11 @@ class RemoteBridge(QObject):
             if rank_score is not None
             else row.get("rankScore", candidate.get("rankScore"))
         )
+        resolved_score = (
+            score
+            if score is not None
+            else row.get("autocompleteScore", candidate.get("score"))
+        )
         row.update(
             RemoteBridge._autocomplete_candidate_fields(
                 str(resolved_type),
@@ -10467,8 +10477,119 @@ class RemoteBridge(QObject):
                     if resolved_rank_score is not None
                     else None
                 ),
+                score=(
+                    float(resolved_score)
+                    if resolved_score is not None
+                    else None
+                ),
             )
         )
+
+    @staticmethod
+    def _autocomplete_candidate_value(row: dict, key: str, fallback=None):
+        candidate = row.get("candidate")
+        if isinstance(candidate, dict) and candidate.get(key) is not None:
+            return candidate.get(key)
+        if key == "type":
+            return row.get("candidateType", fallback)
+        if key == "source":
+            return row.get("source", fallback)
+        if key == "insertPolicy":
+            return row.get("insertPolicy", fallback)
+        if key == "score":
+            return row.get("autocompleteScore", fallback)
+        return row.get(key, fallback)
+
+    @staticmethod
+    def _autocomplete_float(value, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _autocomplete_nai_standard_score(row: dict) -> float:
+        candidate_type = str(
+            RemoteBridge._autocomplete_candidate_value(row, "type", "tag_exact")
+            or "tag_exact"
+        )
+        insert_policy = str(
+            RemoteBridge._autocomplete_candidate_value(row, "insertPolicy", "default")
+            or "default"
+        ).lower()
+        type_weight = {
+            "tag_exact": 820.0,
+            "tag_metadata": 760.0,
+            "tag_translated": 680.0,
+            "prompt_phrase": 640.0,
+            "translation_hint": 120.0,
+            "debug": 0.0,
+        }.get(candidate_type, 500.0)
+        rank_score = RemoteBridge._autocomplete_float(
+            RemoteBridge._autocomplete_candidate_value(
+                row,
+                "rankScore",
+                row.get("_rank_score", row.get("_metadata_score", 0.0)),
+            )
+        )
+        confidence = RemoteBridge._autocomplete_float(
+            RemoteBridge._autocomplete_candidate_value(row, "confidence", 1.0),
+            1.0,
+        )
+        try:
+            count = max(0, int(row.get("count") or 0))
+        except (TypeError, ValueError):
+            count = 0
+        count_score = min(math.log10(count + 1) * 12.0, 72.0) if count else 0.0
+        tag_tokens = normalize_search_query(row.get("tag", "")).split()
+        length_penalty = max(0, len(tag_tokens) - 3) * 24.0
+        if candidate_type == "translation_hint":
+            length_penalty += max(0, len(tag_tokens) - 2) * 16.0
+        manual_penalty = 520.0 if insert_policy == "manual" else 0.0
+        return (
+            type_weight
+            + min(max(rank_score, 0.0), 900.0)
+            + (max(0.0, min(confidence, 1.0)) * 60.0)
+            + count_score
+            - length_penalty
+            - manual_penalty
+        )
+
+    def _score_autocomplete_candidates(
+        self,
+        rows: list[dict],
+        *,
+        sort: bool = False,
+    ) -> list[dict]:
+        scored: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            score = self._autocomplete_nai_standard_score(item)
+            rank_score = self._autocomplete_candidate_value(
+                item,
+                "rankScore",
+                item.get("_rank_score", item.get("_metadata_score")),
+            )
+            self._apply_autocomplete_candidate_schema(
+                item,
+                score=score,
+                rank_score=rank_score,
+            )
+            scored.append(item)
+        if not sort:
+            return scored
+
+        def sort_key(indexed_row):
+            index, row = indexed_row
+            candidate_type = str(self._autocomplete_candidate_value(row, "type", ""))
+            insert_policy = str(
+                self._autocomplete_candidate_value(row, "insertPolicy", "default")
+                or "default"
+            ).lower()
+            manual_bucket = 1 if candidate_type in {"translation_hint", "debug"} or insert_policy == "manual" else 0
+            return (manual_bucket, index)
+
+        return [row for _, row in sorted(enumerate(scored), key=sort_key)]
 
     def _search_kr_tags(self, query: str, limit: int = 20) -> list:
         """5단계 우선순위 태그 검색: exact → starts_with → kr_keyword → contains → desc
@@ -10496,7 +10617,7 @@ class RemoteBridge(QObject):
         if self._tag_search_index is not None:
             cats = {cat_filter} if cat_filter else None
             matches = self._tag_search_index.search_autocomplete(ql, limit=limit, cats=cats)
-            return [
+            rows = [
                 {
                     "tag": result.tag,
                     "count": result.entry.freq,
@@ -10510,6 +10631,7 @@ class RemoteBridge(QObject):
                 }
                 for result in matches
             ]
+            return self._score_autocomplete_candidates(rows)
 
         exact, starts, kr_kw, contains, desc_m = [], [], [], [], []
         for tag_lower, info in self._kr_tags_raw.items():
@@ -10552,7 +10674,7 @@ class RemoteBridge(QObject):
                 desc_m.append(entry)
         for grp in [exact, starts, kr_kw, contains, desc_m]:
             grp.sort(key=lambda x: x['count'], reverse=True)
-        return (exact + starts + kr_kw + contains + desc_m)[:limit]
+        return self._score_autocomplete_candidates((exact + starts + kr_kw + contains + desc_m)[:limit])
 
     def _search_kr_metadata_fallback(
         self,
@@ -10577,7 +10699,7 @@ class RemoteBridge(QObject):
         ):
             return []
         matches = self._tag_search_index.search_metadata_fallback(query, limit=limit)
-        return [
+        rows = [
             {
                 "tag": result.tag,
                 "count": result.entry.freq,
@@ -10595,6 +10717,7 @@ class RemoteBridge(QObject):
             }
             for result in matches
         ]
+        return self._score_autocomplete_candidates(rows, sort=True)
 
     @staticmethod
     def _has_hangul_text(text: str) -> bool:
@@ -11232,8 +11355,11 @@ class RemoteBridge(QObject):
                 allow_build=False,
             )
             if metadata_rows:
-                return (metadata_rows + base_results)[:limit], ""
-            return base_results, ""
+                return self._score_autocomplete_candidates(
+                    metadata_rows + base_results,
+                    sort=True,
+                )[:limit], ""
+            return self._score_autocomplete_candidates(base_results), ""
 
         merged: dict[str, dict] = {}
         order: list[str] = []
@@ -11450,7 +11576,7 @@ class RemoteBridge(QObject):
             if recommended:
                 results = results[:max(0, limit - len(recommended))] + recommended
 
-        return results[:limit], translated
+        return self._score_autocomplete_candidates(results, sort=True)[:limit], translated
 
     def _search_wildcards(self, query: str, limit: int = 12) -> list:
         """와일드카드 이름 검색 (__name__ 용)"""

@@ -12,6 +12,9 @@ def test_secure_token_manager_uses_memory_store_when_keyring_init_fails(monkeypa
         def set_password(self, _service, _key, _value):
             raise AssertionError("set_password should not be called")
 
+        def delete_password(self, _service, _key):
+            raise AssertionError("delete_password should not be called")
+
     monkeypatch.setattr(secure_token_manager, "keyring", FailingKeyring())
 
     manager = SecureTokenManager()
@@ -21,6 +24,10 @@ def test_secure_token_manager_uses_memory_store_when_keyring_init_fails(monkeypa
     assert "vault down" in manager.last_error
     assert manager.get_token("nai_token") == "secret"
     assert "in-memory" in capsys.readouterr().err
+
+    assert manager.delete_token("nai_token") is True
+
+    assert manager.get_token("nai_token") == ""
 
 
 def test_secure_token_manager_stops_keyring_writes_after_save_failure(monkeypatch):
@@ -38,6 +45,9 @@ def test_secure_token_manager_stops_keyring_writes_after_save_failure(monkeypatc
             self.write_count += 1
             raise RuntimeError("write blocked")
 
+        def delete_password(self, _service, _key):
+            raise AssertionError("delete_password should not be called after fallback")
+
     keyring = WriteFailingKeyring()
     monkeypatch.setattr(secure_token_manager, "keyring", keyring)
     manager = SecureTokenManager()
@@ -51,3 +61,60 @@ def test_secure_token_manager_stops_keyring_writes_after_save_failure(monkeypatc
     assert manager.get_token("nai_token") == "secret"
     assert manager.get_token("webui_token") == "another"
     assert keyring.write_count == write_count_after_failure
+
+
+def test_secure_token_manager_deletes_persistent_token(monkeypatch):
+    class Keyring:
+        def __init__(self):
+            self.key = Fernet.generate_key().decode()
+            self.values = {"encryption_key": self.key}
+            self.deleted = []
+
+        def get_password(self, _service, key):
+            return self.values.get(key)
+
+        def set_password(self, _service, key, value):
+            self.values[key] = value
+
+        def delete_password(self, _service, key):
+            self.deleted.append(key)
+            self.values.pop(key, None)
+
+    keyring = Keyring()
+    monkeypatch.setattr(secure_token_manager, "keyring", keyring)
+    manager = SecureTokenManager()
+
+    manager.save_token("nai_token", "secret")
+    assert manager.get_token("nai_token") == "secret"
+
+    assert manager.delete_token("nai_token") is True
+
+    assert manager.get_token("nai_token") == ""
+    assert keyring.deleted == ["nai_token"]
+
+
+def test_secure_token_manager_preserves_persistent_token_on_delete_failure(monkeypatch):
+    class DeleteFailingKeyring:
+        def __init__(self):
+            self.key = Fernet.generate_key().decode()
+            self.values = {"encryption_key": self.key}
+
+        def get_password(self, _service, key):
+            return self.values.get(key)
+
+        def set_password(self, _service, key, value):
+            self.values[key] = value
+
+        def delete_password(self, _service, _key):
+            raise RuntimeError("delete blocked")
+
+    keyring = DeleteFailingKeyring()
+    monkeypatch.setattr(secure_token_manager, "keyring", keyring)
+    manager = SecureTokenManager()
+
+    manager.save_token("nai_token", "secret")
+
+    assert manager.delete_token("nai_token") is False
+    assert manager.persistent is True
+    assert "delete blocked" in manager.last_error
+    assert manager.get_token("nai_token") == "secret"

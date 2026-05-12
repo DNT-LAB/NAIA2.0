@@ -7,7 +7,7 @@ export function createSetupController({
   renderCloudflaredControls,
   setupLauncherBtn,
   modeApiCombo,
-  confirmDialog = message => globalThis.confirm(message),
+  confirmDialog = async () => false,
 }) {
   const byId = id => document.getElementById(id);
   const setupOverlay = byId('apiPopupOverlay');
@@ -28,9 +28,15 @@ export function createSetupController({
   let setupForced = false;
   let setupAllowed = true;
   let setupBlockReason = '';
+  let serverSetupForced = false;
+  let runtimeSetupForced = false;
+  let runtimeSetupReason = '';
   let apiStatusLast = null;
   let initialProbeDone = false;
+  let probeCompleted = false;
   const probeState = { NAI: null, WEBUI: null, COMFYUI: null };
+  const clearPending = { NAI: false, WEBUI: false, COMFYUI: false };
+  const clearTimers = { NAI: null, WEBUI: null, COMFYUI: null };
 
   function getApiStatus() {
     return apiStatusLast;
@@ -42,6 +48,48 @@ export function createSetupController({
 
   function isModeConnected(mode) {
     return probeState && probeState[mode] === 'ok';
+  }
+
+  function hasConnectedMode() {
+    return Object.values(probeState).some(state => state === 'ok');
+  }
+
+  function isProbePending() {
+    return Object.values(probeState).some(state => state === 'probing');
+  }
+
+  function hasProbeCompleted() {
+    return probeCompleted;
+  }
+
+  function setRuntimeSetupForced(forced, reason = '') {
+    runtimeSetupForced = !!forced;
+    runtimeSetupReason = reason || '';
+    refreshSetupGateDisplay();
+  }
+
+  function refreshSetupGateDisplay() {
+    setupForced = serverSetupForced || runtimeSetupForced;
+    setupDialog.classList.toggle('blocked', !setupAllowed);
+    if (setupForced) {
+      setupCloseBtn.classList.add('hidden');
+      setupOverlay.classList.add('open');
+    } else {
+      setupCloseBtn.classList.remove('hidden');
+    }
+    if (setupSubTitle) {
+      if (setupAllowed) {
+        setupSubTitle.classList.remove('blocked');
+        setupSubTitle.textContent = runtimeSetupForced
+          ? (runtimeSetupReason || '연결된 백엔드가 없습니다. API 설정을 확인하세요.')
+          : setupSubDefault;
+      } else {
+        setupSubTitle.classList.add('blocked');
+        setupSubTitle.textContent = setupBlockReason || '설정 비활성화 - 로컬 접속이 필요합니다.';
+      }
+    }
+    if (setupLauncherBtn) setupLauncherBtn.classList.toggle('needs-setup', setupForced);
+    if (modeApiCombo) modeApiCombo.classList.toggle('needs-setup', setupForced);
   }
 
   function openApiPopup() {
@@ -56,6 +104,7 @@ export function createSetupController({
   function probeApi() {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    probeCompleted = false;
     const last = apiStatusLast || {};
     probeState.NAI = last.nai_configured ? 'probing' : null;
     probeState.WEBUI = (last.webui_url && last.webui_url.length) ? 'probing' : null;
@@ -65,6 +114,7 @@ export function createSetupController({
   }
 
   function onProbeResult(message) {
+    probeCompleted = true;
     const results = message.results || {};
     ['NAI', 'WEBUI', 'COMFYUI'].forEach(mode => {
       if (results[mode] === true) probeState[mode] = 'ok';
@@ -180,14 +230,52 @@ export function createSetupController({
     getWs().send(JSON.stringify({ type: 'verify_comfyui', url }));
   }
 
-  function clearApi(mode) {
+  async function clearApi(mode) {
     if (!setupGateCheck()) return;
-    if (!confirmDialog(`${mode} 연결을 해제할까요?`)) return;
+    const confirmed = await Promise.resolve(confirmDialog(`${mode} 연결을 해제할까요?`, {
+      title: '연결 해제',
+      okText: '연결 해제',
+      cancelText: '취소',
+    }));
+    if (!confirmed) return;
+    setSetupLoading(mode, true);
+    setSetupResult(mode, '연결 해제 중...', 'info');
+    clearPending[mode] = true;
+    if (clearTimers[mode]) clearTimeout(clearTimers[mode]);
+    clearTimers[mode] = setTimeout(() => {
+      if (!clearPending[mode]) return;
+      clearPending[mode] = false;
+      clearTimers[mode] = null;
+      setSetupLoading(mode, false);
+      setSetupResult(mode, '연결 해제 응답 시간이 초과되었습니다. 상태를 다시 확인해주세요.', 'error');
+    }, 8000);
     getWs().send(JSON.stringify({ type: 'clear_api', mode }));
-    setSetupResult(mode, '연결 해제됨', '');
+    return true;
+  }
+
+  function clearInputForMode(mode) {
     if (mode === 'NAI') byId('setupNaiToken').value = '';
     if (mode === 'WEBUI') byId('setupWebuiUrl').value = '';
     if (mode === 'COMFYUI') byId('setupComfyuiUrl').value = '';
+  }
+
+  function finishClearApi(mode, success, message, messageType) {
+    if (clearTimers[mode]) {
+      clearTimeout(clearTimers[mode]);
+      clearTimers[mode] = null;
+    }
+    clearPending[mode] = false;
+    setSetupLoading(mode, false);
+    setSetupResult(mode, message, messageType);
+    if (!success) return;
+    clearInputForMode(mode);
+    probeState[mode] = null;
+    refreshDotsFromProbe();
+  }
+
+  function onClearApiResult(message) {
+    const mode = message.mode;
+    finishClearApi(mode, !!message.success, message.message, message.message_type);
   }
 
   function onVerifyResult(message) {
@@ -208,26 +296,9 @@ export function createSetupController({
 
   function applySetupGate(message) {
     setupAllowed = message.setup_allowed !== false;
-    setupForced = !!message.setup_required;
+    serverSetupForced = !!message.setup_required;
     setupBlockReason = message.setup_block_reason || '';
-    setupDialog.classList.toggle('blocked', !setupAllowed);
-    if (setupForced) {
-      setupCloseBtn.classList.add('hidden');
-      setupOverlay.classList.add('open');
-    } else {
-      setupCloseBtn.classList.remove('hidden');
-    }
-    if (setupSubTitle) {
-      if (setupAllowed) {
-        setupSubTitle.classList.remove('blocked');
-        setupSubTitle.textContent = setupSubDefault;
-      } else {
-        setupSubTitle.classList.add('blocked');
-        setupSubTitle.textContent = setupBlockReason || '설정 비활성화 - 로컬 접속이 필요합니다.';
-      }
-    }
-    if (setupLauncherBtn) setupLauncherBtn.classList.toggle('needs-setup', setupForced);
-    if (modeApiCombo) modeApiCombo.classList.toggle('needs-setup', setupForced);
+    refreshSetupGateDisplay();
   }
 
   function setLauncherConn(on) {
@@ -272,6 +343,16 @@ export function createSetupController({
       refreshDotsFromProbe();
     }
 
+    if (clearPending.NAI && !hasNai) {
+      finishClearApi('NAI', true, '연결 해제됨', 'info');
+    }
+    if (clearPending.WEBUI && !hasWebui) {
+      finishClearApi('WEBUI', true, '연결 해제됨', 'info');
+    }
+    if (clearPending.COMFYUI && !hasComfy) {
+      finishClearApi('COMFYUI', true, '연결 해제됨', 'info');
+    }
+
     if (setupMetaEls.NAI) setupMetaEls.NAI.textContent = lastVerified.nai || '\u2014';
     if (setupMetaEls.WEBUI) setupMetaEls.WEBUI.textContent = lastVerified.webui || '\u2014';
     if (setupMetaEls.COMFYUI) setupMetaEls.COMFYUI.textContent = lastVerified.comfyui || '\u2014';
@@ -308,6 +389,10 @@ export function createSetupController({
     getApiStatus,
     resetInitialProbe,
     isModeConnected,
+    hasConnectedMode,
+    isProbePending,
+    hasProbeCompleted,
+    setRuntimeSetupForced,
     openApiPopup,
     probeApi,
     onProbeResult,
@@ -321,6 +406,7 @@ export function createSetupController({
     verifyWebui,
     verifyComfyui,
     clearApi,
+    onClearApiResult,
     onVerifyResult,
     onSetupBlocked,
     applySetupGate,

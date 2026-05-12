@@ -2,7 +2,7 @@ export function createPromptEngineeringActions({
   document,
   getMode,
   showToast,
-  confirmDialog = message => globalThis.confirm(message),
+  confirmDialog = async () => false,
   flushPromptEngineeringEdits,
   flushMainPromptAndParams,
   setModuleParam,

@@ -5,6 +5,8 @@ export function createInstantWildcardPanel({
   setModuleParam,
   bindTagAssist,
   showToast,
+  confirmDialog = async () => false,
+  promptDialog = async () => null,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
   let lastState = null;
@@ -102,8 +104,13 @@ export function createInstantWildcardPanel({
     setModuleParam('instant_wildcard', 'reload', '1');
   }
 
-  function addGroup() {
-    const name = window.prompt('New instant wildcard group name');
+  async function addGroup() {
+    const name = await Promise.resolve(promptDialog('New instant wildcard group name', {
+      title: 'Instant Wildcard',
+      okText: '추가',
+      cancelText: '취소',
+      placeholder: 'group name',
+    }));
     if (!name) return;
     setModuleParam('instant_wildcard', 'add_group', name);
   }
@@ -124,10 +131,15 @@ export function createInstantWildcardPanel({
     }));
   }
 
-  function rename() {
+  async function rename() {
     const oldKey = currentKey();
     if (!oldKey) return;
-    const newKey = window.prompt('New key name', oldKey);
+    const newKey = await Promise.resolve(promptDialog('New key name', {
+      title: 'Rename wildcard key',
+      okText: '변경',
+      cancelText: '취소',
+      defaultValue: oldKey,
+    }));
     if (!newKey || newKey === oldKey) return;
     setModuleParam('instant_wildcard', 'rename', JSON.stringify({
       file: currentFile(),
@@ -136,10 +148,15 @@ export function createInstantWildcardPanel({
     }));
   }
 
-  function deleteCurrent() {
+  async function deleteCurrent() {
     const key = currentKey();
     if (!key) return;
-    if (!window.confirm(`Delete '${key}'?`)) return;
+    const confirmed = await Promise.resolve(confirmDialog(`Delete '${key}'?`, {
+      title: 'Delete wildcard key',
+      okText: '삭제',
+      cancelText: '취소',
+    }));
+    if (!confirmed) return;
     setModuleParam('instant_wildcard', 'delete', JSON.stringify({
       file: currentFile(),
       key,

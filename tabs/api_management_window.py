@@ -66,6 +66,7 @@ class APIManagementWindow(QWidget):
         main_layout.addStretch(1)
 
         self.nai_verify_btn.clicked.connect(self._verify_nai_token)
+        self.nai_clear_btn.clicked.connect(self._clear_nai_token)
         self.webui_verify_btn.clicked.connect(self._verify_webui_url)
         self.comfyui_verify_btn.clicked.connect(self._verify_comfyui_url)  # 🆕 ComfyUI 검증
         self.comfyui_refresh_models_btn.clicked.connect(self._refresh_comfyui_models)  # 🆕 모델 새로고침
@@ -205,10 +206,15 @@ class APIManagementWindow(QWidget):
         self.nai_verify_btn.setStyleSheet(DARK_STYLES['primary_button'])
         self.nai_verify_btn.setFixedWidth(80)
 
+        self.nai_clear_btn = QPushButton("NAI 토큰 제거")
+        self.nai_clear_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.nai_clear_btn.setFixedWidth(130)
+
         main_layout.addWidget(self.main_account_checkbox)
         main_layout.addWidget(self.main_account_label)
         main_layout.addWidget(self.nai_token_input)
         main_layout.addWidget(self.nai_verify_btn)
+        main_layout.addWidget(self.nai_clear_btn)
         layout.addLayout(main_layout)
 
         self.nai_last_verified_label = QLabel("마지막 검증 일자: 정보 없음")
@@ -369,16 +375,19 @@ class APIManagementWindow(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        # keyring 또는 in-memory 저장소에서 토큰 삭제
+        if not self.token_manager.delete_token(account_id):
+            QMessageBox.warning(
+                self,
+                "계정 삭제 실패",
+                "저장된 토큰을 삭제하지 못해 계정 삭제를 중단했습니다.\n"
+                f"원인: {self.token_manager.last_error or '알 수 없는 오류'}"
+            )
+            return
+
         # 데이터에서 제거
         self.accounts_data['accounts'] = [acc for acc in self.accounts_data['accounts'] if acc['id'] != account_id]
         self._save_accounts()
-
-        # keyring에서 토큰 삭제
-        try:
-            import keyring
-            keyring.delete_password(self.token_manager.SERVICE_NAME, account_id)
-        except Exception as e:
-            print(f"⚠️ keyring 토큰 삭제 실패: {e}")
 
         # UI에서 제거
         if account_id in self.account_rows:
@@ -479,6 +488,86 @@ class APIManagementWindow(QWidget):
         self._save_accounts()
         self._update_round_robin_status()
         print(f"🔄 라운드-로빈 모드: {'활성화' if enabled else '비활성화'}")
+
+    def _clear_nai_token(self):
+        """메인 NAI 토큰을 삭제하고 API 설정 UI를 즉시 갱신."""
+        reply = QMessageBox.question(
+            self,
+            "NAI 토큰 제거",
+            "저장된 메인 NAI 토큰을 제거하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if not self.token_manager.delete_token('nai_token'):
+            QMessageBox.warning(
+                self,
+                "NAI 토큰 제거 실패",
+                "저장된 NAI 토큰을 삭제하지 못했습니다.\n"
+                f"원인: {self.token_manager.last_error or '알 수 없는 오류'}"
+            )
+            self.main_window.status_bar.showMessage("NAI 토큰 제거에 실패했습니다.", 5000)
+            return
+
+        self.nai_token_input.clear()
+        self.main_account_label.setText("메인 계정:")
+        self._clear_timestamp('nai_token')
+        self._update_round_robin_status()
+        self._switch_from_cleared_nai_if_needed()
+        print("✅ 메인 NAI 토큰 제거 완료")
+
+    def _switch_from_cleared_nai_if_needed(self):
+        """현재 모드가 NAI이면 연결 가능한 다른 백엔드로 안전하게 이동."""
+        if self.app_context.get_api_mode() != "NAI":
+            self.main_window.status_bar.showMessage("NAI 토큰이 제거되었습니다.", 5000)
+            return
+
+        for mode in ("WEBUI", "COMFYUI"):
+            url = self._configured_backend_url(mode)
+            if not url:
+                continue
+
+            result = self._verify_backend_url(mode, url)
+            if not result.success:
+                continue
+
+            previous_stealth = self.app_context.stealth_mode
+            self.app_context.stealth_mode = True
+            try:
+                self.main_window.toggle_search_mode(mode)
+            finally:
+                self.app_context.stealth_mode = previous_stealth
+
+            if self.app_context.get_api_mode() == mode:
+                self.main_window.status_bar.showMessage(
+                    f"NAI 토큰이 제거되어 {mode} 모드로 전환했습니다.",
+                    5000
+                )
+                return
+
+            self.main_window.status_bar.showMessage(
+                "NAI 토큰이 제거되었지만 API 모드 전환이 취소되었습니다.",
+                7000
+            )
+            return
+
+        self.main_window.status_bar.showMessage(
+            "NAI 토큰이 제거되었습니다. 연결 가능한 다른 API를 설정해주세요.",
+            7000
+        )
+
+    def _configured_backend_url(self, mode: str) -> str:
+        if mode == "WEBUI":
+            return self.webui_url_input.text().strip() or self.token_manager.get_token('webui_url')
+        if mode == "COMFYUI":
+            return self.comfyui_url_input.text().strip() or self.token_manager.get_token('comfyui_url')
+        return ""
+
+    def _verify_backend_url(self, mode: str, url: str):
+        if mode == "WEBUI":
+            return api_verification.verify_webui_url(url)
+        return api_verification.verify_comfyui_url(url)
 
     def _update_round_robin_status(self):
         """🆕 라운드-로빈 상태 라벨 업데이트"""
@@ -658,6 +747,27 @@ class APIManagementWindow(QWidget):
             self.webui_last_verified_label.setText(f"마지막 검증 일자: {timestamp}")
         elif key == 'comfyui_url':  # 🆕 ComfyUI 타임스탬프 업데이트
             self.comfyui_last_verified_label.setText(f"마지막 검증 일자: {timestamp}")
+
+    def _clear_timestamp(self, key: str):
+        """검증 타임스탬프를 제거하고 라벨을 초기화."""
+        data = {}
+        if os.path.exists(self.TIMESTAMP_FILE):
+            with open(self.TIMESTAMP_FILE, 'r') as f:
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError:
+                    data = {}
+
+        data.pop(f"{key}_last_verified", None)
+        with open(self.TIMESTAMP_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+
+        if key == 'nai_token':
+            self.nai_last_verified_label.setText("마지막 검증 일자: 정보 없음")
+        elif key == 'webui_url':
+            self.webui_last_verified_label.setText("마지막 검증 일자: 정보 없음")
+        elif key == 'comfyui_url':
+            self.comfyui_last_verified_label.setText("마지막 검증 일자: 정보 없음")
 
     def _verify_nai_token(self):
         """메인 NAI 토큰 검증"""

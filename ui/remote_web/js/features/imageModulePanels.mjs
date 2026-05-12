@@ -16,6 +16,8 @@ export function createImageModulePanels({
   clearTimeoutFn = globalThis.clearTimeout,
   modulePopup = null,
   positionFloatingPanel = null,
+  confirmDialog = async () => false,
+  promptDialog = async () => null,
 }) {
   const sliderDebounce = {};
   let storageView = null;
@@ -722,22 +724,38 @@ export function createImageModulePanels({
     setModuleParam('vibe_transfer', 'cluster_load', JSON.stringify({id, mode}));
   }
 
-  function renameVibeCluster(id) {
+  async function renameVibeCluster(id) {
     closeVibeClusterMenus();
     const item = vibeClusterItems.find(entry => entry.id === id) || {};
-    const name = globalThis.prompt?.('Name', item.name || '') ?? '';
-    if (!name.trim()) return;
+    const name = await Promise.resolve(promptDialog('Name', {
+      title: 'Rename Vibe cluster',
+      okText: '저장',
+      cancelText: '취소',
+      defaultValue: item.name || '',
+    }));
+    if (!name || !name.trim()) return;
     if (!isValidVibeClusterName(name.trim())) {
       showToast?.(VIBE_CLUSTER_NAME_HINT, 'error');
       return;
     }
-    const description = globalThis.prompt?.('Description', item.description || '') ?? '';
+    const description = await Promise.resolve(promptDialog('Description', {
+      title: 'Rename Vibe cluster',
+      okText: '저장',
+      cancelText: '취소',
+      defaultValue: item.description || '',
+    }));
+    if (description === null || description === undefined) return;
     setModuleParam('vibe_transfer', 'cluster_rename', JSON.stringify({id, name: name.trim(), description}));
   }
 
-  function deleteVibeCluster(id) {
+  async function deleteVibeCluster(id) {
     closeVibeClusterMenus();
-    if (globalThis.confirm && !globalThis.confirm('Delete this Vibe cluster?')) return;
+    const confirmed = await Promise.resolve(confirmDialog('Delete this Vibe cluster?', {
+      title: 'Delete Vibe cluster',
+      okText: '삭제',
+      cancelText: '취소',
+    }));
+    if (!confirmed) return;
     setModuleParam('vibe_transfer', 'cluster_delete', id);
   }
 

@@ -13,6 +13,7 @@ export function createStudioTabController({
   generate,
   showToast,
   escHtml,
+  confirmDialog = async () => false,
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
 }) {
@@ -642,8 +643,13 @@ export function createStudioTabController({
     render();
   }
 
-  function resetFrames() {
-    if (!window.confirm('Studio 프레임을 9칸 기본 상태로 초기화할까요?')) return;
+  async function resetFrames() {
+    const confirmed = await Promise.resolve(confirmDialog('Studio 프레임을 9칸 기본 상태로 초기화할까요?', {
+      title: 'Studio 초기화',
+      okText: '초기화',
+      cancelText: '취소',
+    }));
+    if (!confirmed) return;
     frameImages.forEach(url => URL.revokeObjectURL(url));
     frameImages.clear();
     queue = [];

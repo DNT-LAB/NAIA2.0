@@ -15644,16 +15644,57 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
                             elif cmd_type == "clear_api":
                                 mode = (cmd.get("mode") or "").upper()
+                                failed_keys = []
                                 if mode == "NAI":
-                                    stm.save_token("nai_token", "")
-                                    bridge._anlas_cache = None
-                                    bridge._broadcast_json(bridge._anlas_payload())
+                                    if not stm.delete_token("nai_token"):
+                                        failed_keys.append("nai_token")
+                                    else:
+                                        bridge._anlas_cache = None
+                                        bridge._broadcast_json(bridge._anlas_payload())
                                 elif mode == "WEBUI":
-                                    stm.save_token("webui_url", "")
+                                    if not stm.delete_token("webui_url"):
+                                        failed_keys.append("webui_url")
                                 elif mode == "COMFYUI":
-                                    stm.save_token("comfyui_url", "")
-                                    stm.save_token("comfyui_default_model", "")
-                                    stm.save_token("comfyui_sampling_mode", "")
+                                    for key in ("comfyui_url", "comfyui_default_model", "comfyui_sampling_mode"):
+                                        if not stm.delete_token(key):
+                                            failed_keys.append(key)
+                                else:
+                                    await ws.send_text(json.dumps({
+                                        "type": "clear_api_result",
+                                        "mode": mode,
+                                        "success": False,
+                                        "message": "알 수 없는 API 모드입니다.",
+                                        "message_type": "error",
+                                    }))
+                                    continue
+
+                                if failed_keys:
+                                    message = (
+                                        "연결 해제 실패: 저장된 설정을 삭제하지 못했습니다 "
+                                        f"({', '.join(failed_keys)})."
+                                    )
+                                    await ws.send_text(json.dumps({
+                                        "type": "clear_api_result",
+                                        "mode": mode,
+                                        "success": False,
+                                        "message": message,
+                                        "message_type": "error",
+                                    }))
+                                    await ws.send_text(json.dumps({
+                                        "type": "toast",
+                                        "message": message,
+                                        "level": "error",
+                                    }))
+                                    bridge._broadcast_api_status()
+                                    continue
+
+                                await ws.send_text(json.dumps({
+                                    "type": "clear_api_result",
+                                    "mode": mode,
+                                    "success": True,
+                                    "message": "연결 해제됨",
+                                    "message_type": "info",
+                                }))
                                 bridge._broadcast_api_status()
 
                             elif cmd_type == "set_cloudflared_enabled":

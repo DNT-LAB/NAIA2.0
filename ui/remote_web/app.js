@@ -220,7 +220,7 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const studioTabReady = import('./js/features/studioTab.mjs')
+const studioTabReady = import('./js/features/studioTab.mjs?v=20260512-api-dialog-fallback1')
   .then(({createStudioTabController}) => {
     studioTabControl = createStudioTabController({
       document,
@@ -239,6 +239,7 @@ const studioTabReady = import('./js/features/studioTab.mjs')
       generate: requestGenerate,
       showToast,
       escHtml,
+      confirmDialog: showConfirmDialog,
     });
     studioTabControl.init();
   })
@@ -518,7 +519,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs?v=20260506-api-setup-ko2')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260512-api-dialog-fallback1')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,
@@ -529,6 +530,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026050
       renderCloudflaredControls,
       setupLauncherBtn,
       modeApiCombo,
+      confirmDialog: showConfirmDialog,
     });
   })
   .catch(error => {
@@ -671,7 +673,7 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
   });
-const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs')
+const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260512-api-dialog-fallback1')
   .then(({createWildcardManagerPanel}) => {
     wildcardManagerPanel = createWildcardManagerPanel({
       document,
@@ -682,12 +684,14 @@ const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs
       showToast,
       closeAuxiliaryPopups,
       positionFloatingPanel,
+      confirmDialog: showConfirmDialog,
+      promptDialog: showPromptDialog,
     });
   })
   .catch(error => {
     console.error('Failed to initialize wildcard manager panel module', error);
   });
-const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs')
+const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs?v=20260512-api-dialog-fallback1')
   .then(({createInstantWildcardPanel}) => {
     instantWildcardPanel = createInstantWildcardPanel({
       document,
@@ -696,6 +700,8 @@ const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs
       setModuleParam,
       bindTagAssist,
       showToast,
+      confirmDialog: showConfirmDialog,
+      promptDialog: showPromptDialog,
     });
   })
   .catch(error => {
@@ -727,7 +733,7 @@ const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Ollama panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260509-clipboard-native-first1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260512-api-dialog-fallback1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -741,6 +747,8 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
       useNativeClipboardFallback: () => canUseHostClipboardBridge,
       modulePopup,
       positionFloatingPanel,
+      confirmDialog: showConfirmDialog,
+      promptDialog: showPromptDialog,
     });
   })
   .catch(error => {
@@ -1213,6 +1221,7 @@ const wsMessageHandlers = {
   mode_result: onModeResult,
   api_status: updateApiStatus,
   verify_result: onVerifyResult,
+  clear_api_result: onClearApiResult,
   setup_blocked: onSetupBlocked,
   probe_result: onProbeResult,
   anlas_update: onAnlasUpdate,
@@ -2803,6 +2812,8 @@ let syncingMode = false;
 let modeSwitching = false;
 let prevMode = modeSelect.value;
 let toastTimer = null;
+let autoModeFallbackInFlight = false;
+let autoModeFallbackTarget = '';
 const API_MODES = ['NAI', 'WEBUI', 'COMFYUI'];
 
 function isModeConnected(mode) {
@@ -2832,6 +2843,40 @@ function updateModeSelectAvailability() {
     modeApiCombo.classList.toggle('mode-unavailable', !currentConnected);
   }
   if (moduleLauncherControl) moduleLauncherControl.updateState();
+}
+
+function findConnectedFallbackMode(activeMode = '') {
+  return API_MODES.find(mode => mode !== activeMode && isModeConnected(mode)) || '';
+}
+
+function reconcileActiveApiMode(reason = '') {
+  if (!setupController || !modeSelect) return;
+  const apiStatus = setupController.getApiStatus ? setupController.getApiStatus() : null;
+  const activeMode = String(apiStatus?.active_mode || currentMode || modeSelect.value || '').toUpperCase();
+  if (activeMode && isModeConnected(activeMode)) {
+    setupController.setRuntimeSetupForced?.(false);
+    return;
+  }
+
+  const fallbackMode = findConnectedFallbackMode(activeMode);
+  if (fallbackMode) {
+    setupController.setRuntimeSetupForced?.(false);
+    if (!autoModeFallbackInFlight && !modeSwitching && activeMode !== fallbackMode
+        && ws && ws.readyState === WebSocket.OPEN) {
+      autoModeFallbackInFlight = true;
+      autoModeFallbackTarget = fallbackMode;
+      const source = activeMode || '현재 모드';
+      showToast(`${source} 연결이 해제되어 ${fallbackMode}로 전환합니다.`, 'success');
+      setMode(fallbackMode);
+    }
+    return;
+  }
+
+  const probeSettled = setupController.hasProbeCompleted?.() && !setupController.isProbePending?.();
+  if (probeSettled && !setupController.hasConnectedMode?.()) {
+    setupController.setRuntimeSetupForced?.(true, '연결된 백엔드가 없습니다. API 설정을 확인하세요.');
+    if (reason !== 'api_status') openApiPopup();
+  }
 }
 
 function syncMode(mode) {
@@ -2878,15 +2923,27 @@ function setMode(mode) {
 }
 
 function onModeResult(m) {
+  const wasAutoFallback = autoModeFallbackInFlight;
   uiLock.classList.remove('active');
   modeSwitching = false;
+  autoModeFallbackInFlight = false;
   if (m.success) {
+    autoModeFallbackTarget = '';
     prevMode = m.mode;
     syncMode(m.mode);
     showToast(m.message || `${m.mode} mode active`, 'success');
   } else {
     syncMode(prevMode);
     showToast(m.message || 'Mode change failed', 'error', true);
+    if (wasAutoFallback) {
+      setupController?.setRuntimeSetupForced?.(
+        true,
+        `${autoModeFallbackTarget || 'fallback'} 전환 실패 - API 설정을 확인하세요.`
+      );
+      setupController?.probeApi?.();
+      openApiPopup();
+      autoModeFallbackTarget = '';
+    }
   }
   updateModeSelectAvailability();
 }
@@ -2905,65 +2962,92 @@ function showToast(msg, type, showConfigure) {
   }, showConfigure ? 4000 : 2500);
 }
 
-let confirmDialogResolve = null;
-function showConfirmDialog(message, options = {}) {
-  if (confirmDialogResolve) {
-    confirmDialogResolve(false);
-    confirmDialogResolve = null;
+let appDialogCleanup = null;
+function showAppDialog(message, options = {}) {
+  if (appDialogCleanup) {
+    appDialogCleanup(null);
+    appDialogCleanup = null;
   }
+
+  const isPrompt = options.type === 'prompt';
+  const title = options.title || (isPrompt ? '입력' : '확인');
+  const okText = options.okText || '확인';
+  const cancelText = options.cancelText || '취소';
+  const defaultValue = String(options.defaultValue ?? '');
+  const inputHtml = isPrompt ? `
+          <input class="app-confirm-input" type="text" data-dialog-input value="${escHtml(defaultValue)}" placeholder="${escHtml(options.placeholder || '')}">
+        ` : '';
 
   return new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.className = 'app-confirm-overlay';
     overlay.innerHTML = `
-      <section class="app-confirm-dialog" role="dialog" aria-modal="true" aria-label="${escHtml(options.title || 'Confirm')}">
+      <section class="app-confirm-dialog" role="dialog" aria-modal="true" aria-label="${escHtml(title)}">
         <div class="app-confirm-icon" aria-hidden="true">i</div>
         <div class="app-confirm-copy">
-          <div class="app-confirm-title">${escHtml(options.title || '확인')}</div>
+          <div class="app-confirm-title">${escHtml(title)}</div>
           <div class="app-confirm-message">${escHtml(message)}</div>
+          ${inputHtml}
         </div>
         <div class="app-confirm-actions">
-          <button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(options.okText || 'OK')}</button>
-          <button class="app-confirm-btn" data-confirm-action="cancel" type="button">${escHtml(options.cancelText || 'Cancel')}</button>
+          <button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(okText)}</button>
+          <button class="app-confirm-btn" data-confirm-action="cancel" type="button">${escHtml(cancelText)}</button>
         </div>
       </section>
     `;
 
     const cleanup = result => {
-      if (confirmDialogResolve !== cleanup) return;
-      confirmDialogResolve = null;
+      if (appDialogCleanup !== cleanup) return;
+      appDialogCleanup = null;
       document.removeEventListener('keydown', onKeyDown, true);
       overlay.remove();
       resolve(result);
     };
+    const finishOk = () => {
+      const input = overlay.querySelector('[data-dialog-input]');
+      cleanup(isPrompt ? (input?.value ?? '') : true);
+    };
+    const cancel = () => cleanup(isPrompt ? null : false);
     const onKeyDown = event => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        cleanup(false);
-      } else if (event.key === 'Enter') {
+        cancel();
+      } else if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
-        cleanup(true);
+        finishOk();
       }
     };
 
     overlay.addEventListener('click', event => {
       if (event.target === overlay) {
-        cleanup(false);
+        cancel();
         return;
       }
       const button = event.target.closest('[data-confirm-action]');
       if (!button) return;
-      cleanup(button.dataset.confirmAction === 'ok');
+      if (button.dataset.confirmAction === 'ok') finishOk();
+      else cancel();
     });
 
-    confirmDialogResolve = cleanup;
+    appDialogCleanup = cleanup;
     document.addEventListener('keydown', onKeyDown, true);
     document.body.appendChild(overlay);
     requestAnimationFrame(() => {
       overlay.classList.add('open');
-      overlay.querySelector('[data-confirm-action="ok"]')?.focus();
+      const initialFocus = overlay.querySelector('[data-dialog-input]')
+        || overlay.querySelector('[data-confirm-action="ok"]');
+      initialFocus?.focus();
+      if (initialFocus?.select) initialFocus.select();
     });
   });
+}
+
+function showConfirmDialog(message, options = {}) {
+  return showAppDialog(message, { ...options, type: 'confirm' });
+}
+
+function showPromptDialog(message, options = {}) {
+  return showAppDialog(message, { ...options, type: 'prompt' });
 }
 
 // ---- Setup / Initial Configuration ----
@@ -2980,6 +3064,7 @@ function probeApi() {
 
 function onProbeResult(m) {
   if (setupController) setupController.onProbeResult(m);
+  reconcileActiveApiMode('probe_result');
 }
 
 function closeApiPopup() {
@@ -3022,8 +3107,14 @@ function clearApi(mode) {
   if (setupController) setupController.clearApi(mode);
 }
 
+function onClearApiResult(m) {
+  if (setupController) setupController.onClearApiResult(m);
+  if (m && m.success) reconcileActiveApiMode('clear_api_result');
+}
+
 function onVerifyResult(m) {
   if (setupController) setupController.onVerifyResult(m);
+  reconcileActiveApiMode('verify_result');
 }
 
 function onSetupBlocked(m) {
@@ -3070,6 +3161,7 @@ function onAnlasUpdate(m) {
 
 function updateApiStatus(m) {
   if (setupController) setupController.updateApiStatus(m);
+  reconcileActiveApiMode('api_status');
 }
 
 // ---- Module floating panel ----
@@ -3133,7 +3225,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260508-preset-hover1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260512-api-dialog-fallback1')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,

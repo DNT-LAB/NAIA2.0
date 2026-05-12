@@ -1,6 +1,7 @@
 import sys
 
 import keyring
+from keyring.errors import PasswordDeleteError
 from cryptography.fernet import Fernet
 
 
@@ -68,6 +69,31 @@ class SecureTokenManager:
                 )
 
         self._memory_store[service_key] = encrypted_token
+
+    def delete_token(self, service_key: str) -> bool:
+        """저장된 토큰을 삭제. 실패 시 in-memory 상태와 오류 정보를 보존."""
+        if self.persistent:
+            try:
+                keyring.delete_password(self.SERVICE_NAME, service_key)
+                self._memory_store.pop(service_key, None)
+                print(f"✅ {service_key} 토큰을 삭제했습니다.")
+                return True
+            except PasswordDeleteError:
+                self._memory_store.pop(service_key, None)
+                print(f"ℹ️ {service_key} 토큰이 이미 비어 있습니다.")
+                return True
+            except Exception as exc:
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                print(
+                    f"⚠️ {service_key} 토큰을 자격 증명 저장소에서 삭제하지 못했습니다 "
+                    f"(원인: {self.last_error}).",
+                    file=sys.stderr,
+                )
+                return False
+
+        self._memory_store.pop(service_key, None)
+        print(f"✅ {service_key} 토큰을 삭제했습니다.")
+        return True
 
     def get_token(self, service_key: str) -> str:
         """시스템 키링에서 토큰을 복호화하여 반환. in-memory 폴백 우선 조회."""

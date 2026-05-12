@@ -7,8 +7,8 @@ export function createWildcardManagerPanel({
   showToast,
   closeAuxiliaryPopups = () => {},
   positionFloatingPanel = () => {},
-  confirmDialog = message => globalThis.confirm(message),
-  promptDialog = message => globalThis.prompt(message),
+  confirmDialog = async () => false,
+  promptDialog = async () => null,
 }) {
   let currentPath = '';
   let currentContent = '';
@@ -224,9 +224,14 @@ export function createWildcardManagerPanel({
     setModuleParam('wildcard', 'save_file', JSON.stringify({ path: currentPath, content: editor.value }));
   }
 
-  function deleteFile() {
+  async function deleteFile() {
     if (!currentPath) return;
-    if (!confirmDialog('Delete ' + currentPath + '?')) return;
+    const confirmed = await Promise.resolve(confirmDialog('Delete ' + currentPath + '?', {
+      title: 'Delete wildcard file',
+      okText: '삭제',
+      cancelText: '취소',
+    }));
+    if (!confirmed) return;
     setModuleParam('wildcard', 'delete_file', currentPath);
     setModuleParam('wildcard', 'get_file_tree', '');
   }
@@ -256,8 +261,13 @@ export function createWildcardManagerPanel({
     if (element) element.innerHTML = escHtml(result).replace(/\n/g, '<br>');
   }
 
-  function promptNewFile() {
-    const name = promptDialog('New wildcard filename (e.g. "my_tags" or "folder/my_tags"):');
+  async function promptNewFile() {
+    const name = await Promise.resolve(promptDialog('New wildcard filename (e.g. "my_tags" or "folder/my_tags"):', {
+      title: 'New wildcard file',
+      okText: '생성',
+      cancelText: '취소',
+      placeholder: 'folder/my_tags',
+    }));
     if (!name || !name.trim()) return;
     setModuleParam('wildcard', 'create_file', name.trim());
   }

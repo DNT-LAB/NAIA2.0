@@ -13186,6 +13186,14 @@ select.setup-input { cursor: pointer; }
   transition: all 160ms;
 }
 .setup-btn-ghost:hover { color: #f04040; border-color: #f04040; background: rgba(240,64,64,0.06); }
+.setup-btn-ghost:disabled,
+.setup-btn-ghost:disabled:hover {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-muted);
+  border-color: var(--border-dim);
+  background: transparent;
+}
 
 .setup-result {
   margin-top: 12px;

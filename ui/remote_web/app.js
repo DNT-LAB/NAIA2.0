@@ -519,7 +519,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs?v=20260512-api-dialog-fallback1')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260512-api-disconnect-disabled1')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,

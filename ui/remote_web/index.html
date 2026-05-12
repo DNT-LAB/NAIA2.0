@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260511-expression-hover-shortcut1">
+<link rel="stylesheet" href="style.css?v=20260512-api-disconnect-disabled1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -89,7 +89,7 @@
           </div>
           <div class="setup-actions">
             <button class="setup-btn-primary" id="setupBtnVerifyNai" onclick="verifyNai()">확인 후 저장</button>
-            <button class="setup-btn-ghost" onclick="clearApi('NAI')">연결 해제</button>
+            <button class="setup-btn-ghost" id="setupBtnClearNai" onclick="clearApi('NAI')" disabled>연결 해제</button>
           </div>
           <div class="setup-result" id="setupResultNai"></div>
         </div>
@@ -102,7 +102,7 @@
                  placeholder="127.0.0.1:7860" autocomplete="off" spellcheck="false">
           <div class="setup-actions">
             <button class="setup-btn-primary" id="setupBtnVerifyWebui" onclick="verifyWebui()">확인 후 저장</button>
-            <button class="setup-btn-ghost" onclick="clearApi('WEBUI')">연결 해제</button>
+            <button class="setup-btn-ghost" id="setupBtnClearWebui" onclick="clearApi('WEBUI')" disabled>연결 해제</button>
           </div>
           <div class="setup-result" id="setupResultWebui"></div>
         </div>
@@ -115,7 +115,7 @@
                  placeholder="127.0.0.1:8188" autocomplete="off" spellcheck="false">
           <div class="setup-actions">
             <button class="setup-btn-primary" id="setupBtnVerifyComfyui" onclick="verifyComfyui()">확인 후 저장</button>
-            <button class="setup-btn-ghost" onclick="clearApi('COMFYUI')">연결 해제</button>
+            <button class="setup-btn-ghost" id="setupBtnClearComfyui" onclick="clearApi('COMFYUI')" disabled>연결 해제</button>
           </div>
           <div class="setup-result" id="setupResultComfyui"></div>
           <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
@@ -864,6 +864,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260512-api-dialog-fallback1"></script>
+<script src="app.js?v=20260512-api-disconnect-disabled1"></script>
 </body>
 </html>

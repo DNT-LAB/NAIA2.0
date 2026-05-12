@@ -20,6 +20,7 @@ export function createSetupController({
   const setupMetaEls = { NAI: byId('setupMetaNai'), WEBUI: byId('setupMetaWebui'), COMFYUI: byId('setupMetaComfyui') };
   const setupResultEls = { NAI: byId('setupResultNai'), WEBUI: byId('setupResultWebui'), COMFYUI: byId('setupResultComfyui') };
   const setupVerifyBtns = { NAI: byId('setupBtnVerifyNai'), WEBUI: byId('setupBtnVerifyWebui'), COMFYUI: byId('setupBtnVerifyComfyui') };
+  const setupClearBtns = { NAI: byId('setupBtnClearNai'), WEBUI: byId('setupBtnClearWebui'), COMFYUI: byId('setupBtnClearComfyui') };
   const SETUP_READY_LABEL = '확인 후 저장';
   const SETUP_LOADING_LABEL = '확인 중...';
   const NOT_SET_LABEL = '미설정';
@@ -68,6 +69,25 @@ export function createSetupController({
     refreshSetupGateDisplay();
   }
 
+  function isModeConfigured(mode) {
+    const last = apiStatusLast || {};
+    if (mode === 'NAI') return !!last.nai_configured;
+    if (mode === 'WEBUI') return !!(last.webui_url && last.webui_url.length);
+    if (mode === 'COMFYUI') return !!(last.comfyui_url && last.comfyui_url.length);
+    return false;
+  }
+
+  function refreshClearButtons() {
+    Object.keys(setupClearBtns).forEach(mode => {
+      const button = setupClearBtns[mode];
+      if (!button) return;
+      const configured = isModeConfigured(mode);
+      const pending = !!clearPending[mode];
+      button.disabled = !setupAllowed || pending || !configured;
+      button.title = configured ? '저장된 연결 정보를 제거합니다.' : '저장된 연결 정보가 없습니다.';
+    });
+  }
+
   function refreshSetupGateDisplay() {
     setupForced = serverSetupForced || runtimeSetupForced;
     setupDialog.classList.toggle('blocked', !setupAllowed);
@@ -90,6 +110,7 @@ export function createSetupController({
     }
     if (setupLauncherBtn) setupLauncherBtn.classList.toggle('needs-setup', setupForced);
     if (modeApiCombo) modeApiCombo.classList.toggle('needs-setup', setupForced);
+    refreshClearButtons();
   }
 
   function openApiPopup() {
@@ -232,6 +253,11 @@ export function createSetupController({
 
   async function clearApi(mode) {
     if (!setupGateCheck()) return;
+    if (!isModeConfigured(mode)) {
+      refreshClearButtons();
+      setSetupResult(mode, '이미 연결 해제된 상태입니다.', 'warning');
+      return false;
+    }
     const confirmed = await Promise.resolve(confirmDialog(`${mode} 연결을 해제할까요?`, {
       title: '연결 해제',
       okText: '연결 해제',
@@ -241,6 +267,7 @@ export function createSetupController({
     setSetupLoading(mode, true);
     setSetupResult(mode, '연결 해제 중...', 'info');
     clearPending[mode] = true;
+    refreshClearButtons();
     if (clearTimers[mode]) clearTimeout(clearTimers[mode]);
     clearTimers[mode] = setTimeout(() => {
       if (!clearPending[mode]) return;
@@ -248,6 +275,7 @@ export function createSetupController({
       clearTimers[mode] = null;
       setSetupLoading(mode, false);
       setSetupResult(mode, '연결 해제 응답 시간이 초과되었습니다. 상태를 다시 확인해주세요.', 'error');
+      refreshClearButtons();
     }, 8000);
     getWs().send(JSON.stringify({ type: 'clear_api', mode }));
     return true;
@@ -267,10 +295,14 @@ export function createSetupController({
     clearPending[mode] = false;
     setSetupLoading(mode, false);
     setSetupResult(mode, message, messageType);
-    if (!success) return;
+    if (!success) {
+      refreshClearButtons();
+      return;
+    }
     clearInputForMode(mode);
     probeState[mode] = null;
     refreshDotsFromProbe();
+    refreshClearButtons();
   }
 
   function onClearApiResult(message) {
@@ -356,6 +388,7 @@ export function createSetupController({
     if (setupMetaEls.NAI) setupMetaEls.NAI.textContent = lastVerified.nai || '\u2014';
     if (setupMetaEls.WEBUI) setupMetaEls.WEBUI.textContent = lastVerified.webui || '\u2014';
     if (setupMetaEls.COMFYUI) setupMetaEls.COMFYUI.textContent = lastVerified.comfyui || '\u2014';
+    refreshClearButtons();
 
     const naiPreview = byId('setupMetaNaiPreview');
     if (naiPreview) naiPreview.textContent = message.nai_token_preview ? (message.nai_token_preview + '\u2026') : '\u2014';

@@ -31,8 +31,8 @@ export function createAutoSavePanel({
 
   function setState(state) {
     lastState = state;
-    if (lastState) lastState.auto_save = true;
-    enabled = true;
+    enabled = !!state?.auto_save;
+    updateSaveUi();
   }
 
   function open() {
@@ -40,24 +40,31 @@ export function createAutoSavePanel({
   }
 
   function setEnabled(value) {
-    enabled = true;
-    if (lastState) lastState.auto_save = true;
+    enabled = !!value;
+    if (lastState) lastState.auto_save = enabled;
     updateSaveUi();
-    showToast('Auto Save is always enabled to preserve history.', 'success');
+    setModuleParam('auto_save', 'auto_save', enabled ? 'true' : 'false');
+    showToast(enabled ? 'Auto Save enabled.' : 'Auto Save disabled.', 'success');
   }
 
   function syncEnabled(value) {
-    enabled = true;
-    if (lastState) lastState.auto_save = true;
+    enabled = !!value;
+    if (lastState) lastState.auto_save = enabled;
     updateSaveUi();
   }
 
   function render(state = lastState) {
     const panelState = state || defaultState();
-    panelState.auto_save = true;
+    panelState.auto_save = !!panelState.auto_save;
+    enabled = panelState.auto_save;
     lastState = panelState;
     const statusText = panelState.auto_save ? 'Enabled' : 'Disabled';
-    const desc = 'Auto Save는 히스토리 보존을 위해 항상 켜져 있습니다.';
+    const desc = panelState.auto_save
+      ? '이미지를 생성할 때 저장 폴더에도 자동 저장합니다.'
+      : '이미지를 저장하지 않고 Desktop/Web 히스토리에만 유지합니다.';
+    const toggleLabel = panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save';
+    const toggleValue = panelState.auto_save ? 'false' : 'true';
+    const toggleClass = panelState.auto_save ? 'mod-stop' : 'mod-start';
     const actionOptions = (panelState.memory_action_options || []).map(opt =>
       `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
@@ -73,8 +80,8 @@ export function createAutoSavePanel({
           <div class="mod-status" style="text-align:left;line-height:1.6">${desc}</div>
         </div>
         <div class="mod-inline-row">
-          <button class="mod-action-btn mod-start" type="button" disabled>
-            Auto Save Locked
+          <button class="mod-action-btn ${toggleClass}" type="button" onclick="onAutoSaveToggle(${toggleValue})">
+            ${toggleLabel}
           </button>
           <button class="mod-btn-secondary" type="button" onclick="openSaveDirectoryPanel()">
             Save Directory Settings

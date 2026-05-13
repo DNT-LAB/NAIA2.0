@@ -535,6 +535,7 @@ class RemoteBridge(QObject):
         "wildcard_standalone": "와일드카드 단독 모드",
     }
     MEMORY_HISTORY_PATH_PREFIX = "__history__/"
+    HISTORY_ITEM_PATH_PREFIX = "__history_item__/"
     STYLE_THUMBNAILS_PATH = Path("data/taglist/style_thumbnails.json")
     STYLE_META_TAGS_PATH = Path("data/taglist/style_meta_tags.json")
     ARTIST_THUMB_MODES = {
@@ -4522,10 +4523,29 @@ class RemoteBridge(QObject):
     def _source_row_available(self, source_row) -> bool:
         if source_row is None:
             return False
+        if isinstance(source_row, dict):
+            prompt_source_keys = {
+                "general",
+                "character",
+                "copyright",
+                "artist",
+                "meta",
+                "rating",
+                "image_width",
+                "image_height",
+            }
+            return bool(source_row) and any(key in source_row for key in prompt_source_keys)
         try:
             return not bool(source_row.empty)
         except Exception:
             return True
+
+    def _mark_result_reroll_prompt_pending(self):
+        request_id = uuid.uuid4().hex
+        self._pending_overrides[("result_reroll", request_id)] = {
+            "source": "result_reroll",
+        }
+        return request_id
 
     def _get_current_result_source_row(self):
         image_window = self._get_image_window_widget()
@@ -4645,12 +4665,19 @@ class RemoteBridge(QObject):
             if not self._source_row_available(source_row):
                 self._broadcast_json({"type": "toast", "message": "Reroll source is unavailable", "level": "error"})
                 return
+            self._mark_result_reroll_prompt_pending()
             image_window.instant_generation_requested.emit(source_row)
             print("🌐 Remote: saved result 프롬프트 다시개봉 실행")
             return
 
         reroll_current_prompt = getattr(image_window, "_reroll_current_prompt", None)
         if callable(reroll_current_prompt):
+            item = getattr(image_window, "current_history_item", None)
+            source_row = getattr(item, "source_row", None) if item else None
+            if not self._source_row_available(source_row):
+                self._broadcast_json({"type": "toast", "message": "Reroll source is unavailable", "level": "error"})
+                return
+            self._mark_result_reroll_prompt_pending()
             reroll_current_prompt()
             print("🌐 Remote: desktop 프롬프트 다시개봉 실행")
             return
@@ -4660,6 +4687,7 @@ class RemoteBridge(QObject):
         if not self._source_row_available(source_row):
             self._broadcast_json({"type": "toast", "message": "Reroll source is unavailable", "level": "error"})
             return
+        self._mark_result_reroll_prompt_pending()
         image_window.instant_generation_requested.emit(source_row)
         print("🌐 Remote: desktop 프롬프트 다시개봉 fallback 실행")
 
@@ -4788,6 +4816,17 @@ class RemoteBridge(QObject):
             ".bmp": "image/bmp",
         }.get(ext, "image/png")
 
+    def _image_media_type_for_bytes(self, image_bytes: bytes) -> str:
+        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if image_bytes.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if image_bytes.startswith(b"RIFF") and len(image_bytes) >= 12 and image_bytes[8:12] == b"WEBP":
+            return "image/webp"
+        if image_bytes.startswith(b"GIF87a") or image_bytes.startswith(b"GIF89a"):
+            return "image/gif"
+        return "application/octet-stream"
+
     def _resolve_result_original_file(self, source: str = "", rel_path: str = "") -> 'Path | None':
         source = str(source or "").strip().lower()
         rel_path = str(rel_path or "").strip()
@@ -4832,6 +4871,19 @@ class RemoteBridge(QObject):
         rel_path = str(rel_path or "").strip()
 
         if rel_path:
+            history_item = self._find_history_item_by_rel_path(rel_path)
+            if history_item and getattr(history_item, "image", None):
+                label = str(getattr(history_item, "filepath", "") or self._history_item_filename(history_item))
+                raw_bytes = getattr(history_item, "raw_bytes", None)
+                if raw_bytes:
+                    raw_bytes = bytes(raw_bytes)
+                    if self._is_png_bytes(raw_bytes):
+                        return raw_bytes, self._result_png_filename(label)
+                filepath = str(getattr(history_item, "filepath", "") or "")
+                if filepath and Path(filepath).is_file() and Path(filepath).suffix.lower() == ".png":
+                    return Path(filepath).read_bytes(), self._result_png_filename(filepath)
+                return self._pil_image_to_png_bytes(history_item.image), self._result_png_filename(label)
+
             target = self._validate_viewer_path(rel_path)
             if not target and source != "current":
                 raise FileNotFoundError("Image file is unavailable")
@@ -4962,9 +5014,10 @@ class RemoteBridge(QObject):
         filepath = str(getattr(item, "filepath", "") or "") if item else ""
         has_file = bool(filepath and Path(filepath).is_file())
         rel_path = ""
-        if has_file:
-            rel_path = self._memory_history_path_key(Path(filepath))
-        encoded_rel_path = quote(rel_path, safe="/") if rel_path else ""
+        if item:
+            rel_path = self._history_item_path_key(item)
+        history_urls = self._history_item_public_urls(item) if item else {}
+        label = Path(filepath).name if filepath else (self._history_item_filename(item) if item else "Current Result")
         has_generation_params = bool(generation_params)
         has_source_row = self._source_row_available(source_row)
         has_prompt = bool(
@@ -4984,9 +5037,9 @@ class RemoteBridge(QObject):
             "source": "current",
             "path": rel_path,
             "file_path": filepath if has_file else "",
-            "label": Path(filepath).name if rel_path else "Current Result",
-            "image_url": ("/api/viewer/image/" + encoded_rel_path) if rel_path else ("/api/latest-image" if has_latest_image else ""),
-            "metadata_url": "/api/result/metadata",
+            "label": label,
+            "image_url": history_urls.get("image_url") or ("/api/latest-image" if has_latest_image else ""),
+            "metadata_url": history_urls.get("metadata_url") or "/api/result/metadata",
             "has_image": has_image,
             "has_metadata": has_metadata,
             "can_enhance": can_enhance,
@@ -5012,21 +5065,23 @@ class RemoteBridge(QObject):
 
     def _build_saved_result_asset_payload(self, rel_path: str) -> dict | None:
         """저장 폴더 이미지의 ResultAsset 계약. HistoryItem 정보가 없으면 보수적으로 제한."""
+        matched_item = self._find_history_item_by_path(rel_path=rel_path)
         target = self._validate_viewer_path(rel_path)
-        if not target:
+        if not target and not matched_item:
             return None
-        try:
-            stat = target.stat()
-        except Exception:
-            stat = None
-        if self._is_memory_history_path(rel_path):
+        stat = None
+        if target:
+            try:
+                stat = target.stat()
+            except Exception:
+                stat = None
+        if self._is_history_item_path(rel_path) or self._is_memory_history_path(rel_path):
             normalized_path = rel_path.replace("\\", "/")
         else:
             try:
                 normalized_path = target.relative_to(self._get_viewer_save_dir().resolve()).as_posix()
             except Exception:
                 normalized_path = rel_path.replace("\\", "/")
-        matched_item = self._find_history_item_by_path(rel_path=normalized_path)
         matched_source_row = getattr(matched_item, "source_row", None) if matched_item else None
         has_source_row = self._source_row_available(matched_source_row)
         has_generation_params = bool(getattr(matched_item, "generation_params", None)) if matched_item else False
@@ -5034,15 +5089,18 @@ class RemoteBridge(QObject):
         nai_mode = str(self._current_api_mode() or "").upper() == "NAI"
         can_use_nai_img2img = bool(has_history_image and nai_mode)
         can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params and nai_mode)
+        history_urls = self._history_item_public_urls(matched_item) if matched_item else {}
+        label = target.name if target else self._history_item_filename(matched_item)
+        file_path = str(target) if target else ""
 
         return {
             "id": f"saved:{normalized_path}",
             "source": "saved",
             "path": normalized_path,
-            "file_path": str(target),
-            "label": target.name,
-            "image_url": "",
-            "metadata_url": "",
+            "file_path": file_path,
+            "label": label,
+            "image_url": history_urls.get("image_url", ""),
+            "metadata_url": history_urls.get("metadata_url", ""),
             "has_image": True,
             "has_metadata": True,
             "can_enhance": can_enhance,
@@ -5055,7 +5113,7 @@ class RemoteBridge(QObject):
                 "restore_params": True,
                 "metadata": True,
                 "paste_image": True,
-                "open_file": True,
+                "open_file": bool(target),
                 "save_image": True,
                 "copy_png": True,
                 "image_action": can_use_nai_img2img,
@@ -5268,13 +5326,13 @@ class RemoteBridge(QObject):
             # auto_save: image_window 체크박스 (OPTION_KEYS 외)
             if key == "auto_save":
                 auto_save_checkbox = self._get_auto_save_checkbox()
-                if auto_save_checkbox and not auto_save_checkbox.isChecked():
+                if auto_save_checkbox and auto_save_checkbox.isChecked() != checked:
                     self._syncing_option = True
                     try:
-                        auto_save_checkbox.setChecked(True)
+                        auto_save_checkbox.setChecked(checked)
                     finally:
                         self._syncing_option = False
-                print("🌐 Remote: 자동 저장은 항상 활성화됩니다.")
+                print(f"🌐 Remote: 자동 저장 → {checked}")
                 self.broadcast_options()
                 self._broadcast_auto_save_settings()
                 return
@@ -5638,9 +5696,7 @@ class RemoteBridge(QObject):
             }
             # auto_save: image_window의 체크박스
             auto_save_checkbox = self._get_auto_save_checkbox()
-            if auto_save_checkbox and not auto_save_checkbox.isChecked():
-                auto_save_checkbox.setChecked(True)
-            opts["auto_save"] = True
+            opts["auto_save"] = bool(auto_save_checkbox and auto_save_checkbox.isChecked())
             return opts
         except Exception:
             return {}
@@ -5922,51 +5978,114 @@ class RemoteBridge(QObject):
         self._viewer_cache_dir = save_dir_str
         return entries
 
+    def _ensure_history_id(self, item) -> str:
+        history_id = str(getattr(item, "history_id", "") or "").strip()
+        if not history_id:
+            history_id = uuid.uuid4().hex
+            try:
+                setattr(item, "history_id", history_id)
+            except Exception:
+                pass
+        return re.sub(r"[^A-Za-z0-9_.-]+", "_", history_id)[:96] or uuid.uuid4().hex
+
+    def _history_item_filename(self, item) -> str:
+        filepath = str(getattr(item, "filepath", "") or "")
+        if filepath:
+            filename = Path(filepath).name
+            if filename:
+                return filename
+        raw_bytes = getattr(item, "raw_bytes", None)
+        extension = "webp" if isinstance(raw_bytes, (bytes, bytearray)) and bytes(raw_bytes).startswith(b"RIFF") and bytes(raw_bytes)[8:12] == b"WEBP" else "png"
+        return f"history-{self._ensure_history_id(item)[:12]}.{extension}"
+
+    def _history_item_path_key(self, item) -> str:
+        return f"{self.HISTORY_ITEM_PATH_PREFIX}{self._ensure_history_id(item)}/{self._history_item_filename(item)}"
+
+    def _history_item_public_urls(self, item) -> dict:
+        history_id = quote(self._ensure_history_id(item), safe="")
+        return {
+            "thumb_url": f"/api/history/thumb/{history_id}",
+            "image_url": f"/api/history/image/{history_id}",
+            "metadata_url": f"/api/history/meta/{history_id}",
+        }
+
+    def _is_history_item_path(self, rel_path: str) -> bool:
+        return str(rel_path or "").replace("\\", "/").startswith(self.HISTORY_ITEM_PATH_PREFIX)
+
+    def _history_id_from_path(self, rel_path: str) -> str:
+        rel_path = str(rel_path or "").replace("\\", "/")
+        if not self._is_history_item_path(rel_path):
+            return ""
+        rest = rel_path[len(self.HISTORY_ITEM_PATH_PREFIX):]
+        return rest.split("/", 1)[0].strip()
+
+    def _find_history_item_by_id(self, history_id: str):
+        history_id = str(history_id or "").strip()
+        if not history_id:
+            return None
+        for item in self._iter_memory_history_items() or ():
+            if self._ensure_history_id(item) == history_id:
+                return item
+        return None
+
+    def _find_history_item_by_rel_path(self, rel_path: str):
+        history_id = self._history_id_from_path(rel_path)
+        return self._find_history_item_by_id(history_id) if history_id else None
+
+    def _history_item_file_path(self, item) -> 'Path | None':
+        filepath = str(getattr(item, "filepath", "") or "")
+        if not filepath:
+            return None
+        try:
+            path = Path(filepath).resolve()
+        except Exception:
+            return None
+        return path if self._is_viewer_image_file(path) else None
+
+    def _history_item_summary(self, item, index: int = 0) -> dict:
+        from datetime import datetime
+
+        path = self._history_item_file_path(item)
+        raw_bytes = getattr(item, "raw_bytes", None)
+        size_bytes = len(raw_bytes) if isinstance(raw_bytes, (bytes, bytearray)) else 0
+        mtime = time.time()
+        if path:
+            try:
+                stat = path.stat()
+                size_bytes = stat.st_size
+                mtime = stat.st_mtime
+            except OSError:
+                pass
+        summary = {
+            "rel_path": self._history_item_path_key(item),
+            "history_id": self._ensure_history_id(item),
+            "filename": self._history_item_filename(item),
+            "file_path": str(path) if path else "",
+            "source": "memory",
+            "size_bytes": size_bytes,
+            "mtime": mtime,
+            "mtime_iso": datetime.fromtimestamp(mtime).isoformat(),
+            "index": index,
+        }
+        summary.update(self._history_item_public_urls(item))
+        return summary
+
+    def _history_count(self) -> int:
+        return sum(1 for _ in (self._iter_memory_history_items() or ()))
+
     def _scan_memory_history(self) -> list:
         """현재 ImageWindow 히스토리에 남아있는 이미지 목록만 반환.
 
         Web Shell의 History는 데스크탑 ImageHistoryWindow와 동일하게 현재 저장
         폴더 설정이 아니라 메모리 HistoryItem을 기준으로 동작해야 한다. 따라서
-        URL path는 현재 저장 루트 상대경로가 아니라 HistoryItem.filepath에서 만든
-        안정 키를 사용한다. 실제 파일 접근은 키를 다시 메모리 히스토리에 대조해
-        허용하므로 임의 절대경로 노출 없이 저장 경로 변경에도 추적이 유지된다.
+        URL path는 현재 저장 루트 상대경로가 아니라 HistoryItem.history_id에서 만든
+        안정 키를 사용한다. Auto Save가 꺼져 filepath가 없어도 Web History가
+        Desktop History의 기능적 복제체로 남도록 한다.
         """
-        from pathlib import Path
-        from datetime import datetime
-
         entries = []
-        seen_paths = set()
-
-        for item in self._iter_memory_history_items():
-            filepath = str(getattr(item, "filepath", "") or "") if item else ""
-            if not filepath:
-                continue
-
-            try:
-                path = Path(filepath).resolve()
-            except Exception:
-                continue
-
-            if path in seen_paths or not path.is_file():
-                continue
-            seen_paths.add(path)
-
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-
-            entries.append({
-                "rel_path": self._memory_history_path_key(path),
-                "filename": path.name,
-                "file_path": str(path),
-                "source": "memory",
-                "size_bytes": stat.st_size,
-                "mtime": stat.st_mtime,
-                "mtime_iso": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            })
-
-        entries.sort(key=lambda e: e["mtime"], reverse=True)
+        for index, item in enumerate(self._iter_memory_history_items() or ()):
+            if item is not None:
+                entries.append(self._history_item_summary(item, index=index))
         return entries
 
     def _invalidate_viewer_cache(self):
@@ -5988,6 +6107,9 @@ class RemoteBridge(QObject):
                 continue
             seen_ids.add(id(item))
             yield item
+
+        if history_window is not None:
+            return
 
         current_item = getattr(image_window, "current_history_item", None)
         if current_item is not None and id(current_item) not in seen_ids:
@@ -6069,6 +6191,10 @@ class RemoteBridge(QObject):
         """상대/히스토리 경로를 검증하고 실제 이미지 파일로 해석한다."""
         from pathlib import Path
 
+        history_item = self._find_history_item_by_rel_path(rel_path)
+        if history_item:
+            return self._history_item_file_path(history_item)
+
         history_target = self._resolve_memory_history_path(rel_path)
         if history_target:
             return history_target
@@ -6137,30 +6263,106 @@ class RemoteBridge(QObject):
         cache_root = Path(tempfile.gettempdir()) / "NAIA2" / "remote_web_thumbnails"
         return cache_root / digest[:2] / f"{digest}.{size_token}.thumb.webp"
 
+    def _history_item_image_payload(self, item) -> tuple[bytes, str]:
+        raw_bytes = getattr(item, "raw_bytes", None)
+        if isinstance(raw_bytes, bytearray):
+            raw_bytes = bytes(raw_bytes)
+        if isinstance(raw_bytes, bytes) and raw_bytes:
+            return raw_bytes, self._image_media_type_for_bytes(raw_bytes)
+
+        image = getattr(item, "image", None)
+        if image is None:
+            raise FileNotFoundError("History image is unavailable")
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return buf.getvalue(), "image/png"
+
+    def _history_item_thumbnail(self, item, max_side: int = 0) -> bytes:
+        path = self._history_item_file_path(item)
+        if path:
+            return self._get_or_create_thumbnail(path, max_side)
+
+        image = getattr(item, "image", None)
+        if image is None:
+            return b""
+        try:
+            from PIL import Image
+
+            thumb = image.copy()
+            if max_side <= 0:
+                max_side = 256
+            max_side = min(max(max_side, 50), 1024)
+            thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            thumb.save(buf, format="WEBP", quality=85, method=4)
+            return buf.getvalue()
+        except Exception as e:
+            print(f"🌐 Viewer: 메모리 히스토리 썸네일 생성 실패 — {e}")
+            return b""
+
+    def _history_item_meta_payload(self, item, include_full: bool = False) -> dict:
+        gen_params = getattr(item, "generation_params", {}) or {}
+        prompt_context = getattr(item, "prompt_context", {}) or {}
+        raw = {
+            "generation_params": gen_params,
+            "prompt_context": prompt_context,
+            "api_metadata": getattr(item, "api_metadata", {}) or {},
+        }
+        prompt = ""
+        negative = ""
+        if isinstance(prompt_context, dict):
+            prompt = str(prompt_context.get("main_prompt") or prompt_context.get("final_prompt") or "")
+        if isinstance(gen_params, dict):
+            prompt = prompt or str(gen_params.get("input") or gen_params.get("prompt") or "")
+            negative = str(gen_params.get("negative_prompt") or gen_params.get("uc") or "")
+
+        result = {}
+        if prompt:
+            result["prompt"] = prompt
+        if negative:
+            result["negative"] = negative
+        characters = prompt_context.get("characters") if isinstance(prompt_context, dict) else None
+        if characters:
+            result["characters"] = characters
+        if include_full:
+            result["summary"] = dict(result)
+            result["raw"] = self._metadata_json_safe(raw)
+        return result
+
     def _on_image_saved(self, data: dict):
-        """image_saved 이벤트 핸들러 → viewer_new_image WS broadcast"""
+        """image_saved는 저장 폴더 캐시만 무효화한다.
+
+        Web History의 원본은 Desktop HistoryItem이므로 저장 완료 이벤트가
+        히스토리 항목을 직접 추가하면 Auto Save off/큐 제한 상태와 갈라진다.
+        """
         self._invalidate_viewer_cache()
-        if not self._has_clients():
+
+    def on_history_item_added(self, history_item):
+        self._invalidate_viewer_cache()
+        if not history_item or not self._has_clients():
             return
-        filepath = data.get("filepath", "")
-        if filepath:
-            import os
-            from datetime import datetime
-            viewer_root = str(self._get_viewer_save_dir())
-            rel = os.path.relpath(filepath, viewer_root).replace('\\', '/')
-            filename = os.path.basename(filepath)
-            try:
-                mtime = os.path.getmtime(filepath)
-                mtime_iso = datetime.fromtimestamp(mtime).isoformat()
-            except OSError:
-                mtime_iso = ""
-            self._broadcast_json({
-                "type": "viewer_new_image",
-                "rel_path": rel,
-                "file_path": str(filepath),
-                "filename": filename,
-                "mtime_iso": mtime_iso,
-            })
+        payload = self._history_item_summary(history_item)
+        payload.update({
+            "type": "viewer_new_image",
+            "total": self._history_count(),
+        })
+        self._broadcast_json(payload)
+
+    def on_history_item_removed(self, history_item):
+        self._invalidate_viewer_cache()
+        if not history_item or not self._has_clients():
+            return
+        self._broadcast_json({
+            "type": "viewer_history_removed",
+            "rel_path": self._history_item_path_key(history_item),
+            "history_id": self._ensure_history_id(history_item),
+            "total": self._history_count(),
+        })
+
+    def on_history_cleared(self):
+        self._invalidate_viewer_cache()
+        if self._has_clients():
+            self._broadcast_json({"type": "viewer_history_cleared", "total": 0})
 
     # --- 생성 파라미터 동기화 ---
 
@@ -6767,6 +6969,10 @@ class RemoteBridge(QObject):
         rel_path = str(rel_path or "").strip()
         file_path = str(file_path or "").strip()
         if rel_path:
+            history_item = self._find_history_item_by_rel_path(rel_path)
+            if history_item:
+                return history_item
+        if rel_path:
             target = self._validate_viewer_path(rel_path)
         elif file_path:
             try:
@@ -6957,6 +7163,8 @@ class RemoteBridge(QObject):
     def _read_auto_save_settings(self) -> dict:
         try:
             auto_save_checkbox = self._get_auto_save_checkbox()
+            if auto_save_checkbox is None:
+                return {}
             save_as_webp_checkbox = self._get_save_as_webp_checkbox()
             history_limit_enabled, max_history_length, memory_action_group = self._get_history_limit_widgets()
 
@@ -6967,7 +7175,7 @@ class RemoteBridge(QObject):
             return {
                 "type": "module_state",
                 "module_id": "auto_save",
-                "auto_save": True,
+                "auto_save": bool(auto_save_checkbox and auto_save_checkbox.isChecked()),
                 "save_as_webp": bool(save_as_webp_checkbox and save_as_webp_checkbox.isChecked()),
                 "history_limit_enabled": bool(history_limit_enabled and history_limit_enabled.isChecked()),
                 "max_history_length": int(max_history_length.value()) if max_history_length else 2000,
@@ -6988,8 +7196,9 @@ class RemoteBridge(QObject):
             self._broadcast_json(state)
 
     def _on_auto_save_settings_changed(self, *_args):
-        """Desktop auto-save setting edits no longer push module settings to Web."""
-        return
+        if self._syncing_option:
+            return
+        self._broadcast_auto_save_settings()
 
     def _read_prompt_engineering(self, ws=None) -> dict:
         try:
@@ -8377,17 +8586,38 @@ class RemoteBridge(QObject):
             if key == "save_as_webp":
                 checkbox = self._get_save_as_webp_checkbox()
                 if checkbox and checkbox.isChecked() != (value == "true"):
-                    checkbox.setChecked(value == "true")
+                    self._syncing_option = True
+                    try:
+                        checkbox.setChecked(value == "true")
+                    finally:
+                        self._syncing_option = False
+            elif key == "auto_save":
+                checkbox = self._get_auto_save_checkbox()
+                enabled = self._coerce_bool(value)
+                if checkbox and checkbox.isChecked() != enabled:
+                    self._syncing_option = True
+                    try:
+                        checkbox.setChecked(enabled)
+                    finally:
+                        self._syncing_option = False
             elif key == "history_limit_enabled":
                 checkbox, _, _ = self._get_history_limit_widgets()
                 if checkbox and checkbox.isChecked() != (value == "true"):
-                    checkbox.setChecked(value == "true")
+                    self._syncing_option = True
+                    try:
+                        checkbox.setChecked(value == "true")
+                    finally:
+                        self._syncing_option = False
             elif key == "max_history_length":
                 _, spinbox, _ = self._get_history_limit_widgets()
                 if spinbox:
                     new_value = max(spinbox.minimum(), min(spinbox.maximum(), int(value)))
                     if spinbox.value() != new_value:
-                        spinbox.setValue(new_value)
+                        self._syncing_option = True
+                        try:
+                            spinbox.setValue(new_value)
+                        finally:
+                            self._syncing_option = False
                     else:
                         image_window.save_memory_settings()
             elif key == "memory_action":
@@ -8396,7 +8626,11 @@ class RemoteBridge(QObject):
                     action_id = int(value)
                     button = action_group.button(action_id)
                     if button and not button.isChecked():
-                        button.setChecked(True)
+                        self._syncing_option = True
+                        try:
+                            button.setChecked(True)
+                        finally:
+                            self._syncing_option = False
                     if hasattr(image_window, "save_memory_settings"):
                         image_window.save_memory_settings()
             else:
@@ -15071,6 +15305,57 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+    # --- History REST API ---
+
+    @app.get("/api/history/list")
+    async def history_list(page: int = 0, per_page: int = 30):
+        page = max(0, int(page or 0))
+        per_page = min(max(1, int(per_page or 30)), 100)
+        entries = await asyncio.to_thread(bridge._scan_memory_history)
+        start = page * per_page
+        end = start + per_page
+        return {
+            "total": len(entries),
+            "page": page,
+            "per_page": per_page,
+            "scope": "memory",
+            "images": entries[start:end],
+        }
+
+    @app.get("/api/history/thumb/{history_id}")
+    async def history_thumb(history_id: str, size: int = 0):
+        item = await asyncio.to_thread(bridge._find_history_item_by_id, history_id)
+        if not item:
+            return JSONResponse({"error": "not found"}, 404)
+        if size > 0:
+            size = min(max(size, 50), 1024)
+        thumb_bytes = await asyncio.to_thread(bridge._history_item_thumbnail, item, size)
+        if not thumb_bytes:
+            return JSONResponse({"error": "thumbnail failed"}, 500)
+        return Response(content=thumb_bytes, media_type="image/webp")
+
+    @app.get("/api/history/image/{history_id}")
+    async def history_image(history_id: str):
+        item = await asyncio.to_thread(bridge._find_history_item_by_id, history_id)
+        if not item:
+            return JSONResponse({"error": "not found"}, 404)
+        try:
+            image_bytes, media_type = await asyncio.to_thread(bridge._history_item_image_payload, item)
+        except FileNotFoundError:
+            return JSONResponse({"error": "not found"}, 404)
+        return Response(content=image_bytes, media_type=media_type)
+
+    @app.get("/api/history/meta/{history_id}")
+    async def history_meta(history_id: str, full: bool = False):
+        item = await asyncio.to_thread(bridge._find_history_item_by_id, history_id)
+        if not item:
+            return JSONResponse({"error": "not found"}, 404)
+        return await asyncio.to_thread(bridge._history_item_meta_payload, item, full)
+
+    @app.post("/api/history/open-folder")
+    async def history_open_folder():
+        return await viewer_open_folder()
+
     @app.post("/api/result/open-location")
     async def api_result_open_location(req: Request):
         try:
@@ -15104,20 +15389,31 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
     @app.get("/api/viewer/thumb/{path:path}")
     async def viewer_thumb(path: str, size: int = 0):
-        target = bridge._validate_viewer_path(path)
-        if not target:
+        history_item = await asyncio.to_thread(bridge._find_history_item_by_rel_path, path)
+        target = await asyncio.to_thread(bridge._validate_viewer_path, path)
+        if not target and not history_item:
             return JSONResponse({"error": "not found"}, 404)
         # size=0: 원본의 절반 (서버에서 자동 결정)
         if size > 0:
             size = min(max(size, 50), 1024)
-        thumb_bytes = await asyncio.to_thread(bridge._get_or_create_thumbnail, target, size)
+        if history_item:
+            thumb_bytes = await asyncio.to_thread(bridge._history_item_thumbnail, history_item, size)
+        else:
+            thumb_bytes = await asyncio.to_thread(bridge._get_or_create_thumbnail, target, size)
         if not thumb_bytes:
             return JSONResponse({"error": "thumbnail failed"}, 500)
         return Response(content=thumb_bytes, media_type="image/webp")
 
     @app.get("/api/viewer/image/{path:path}")
     async def viewer_image(path: str):
-        target = bridge._validate_viewer_path(path)
+        history_item = await asyncio.to_thread(bridge._find_history_item_by_rel_path, path)
+        target = await asyncio.to_thread(bridge._validate_viewer_path, path)
+        if history_item and not target:
+            try:
+                image_bytes, media_type = await asyncio.to_thread(bridge._history_item_image_payload, history_item)
+            except FileNotFoundError:
+                return JSONResponse({"error": "not found"}, 404)
+            return Response(content=image_bytes, media_type=media_type)
         if not target:
             return JSONResponse({"error": "not found"}, 404)
         return FileResponse(str(target), media_type=bridge._image_media_type_for_path(target))
@@ -15128,7 +15424,10 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
     @app.get("/api/viewer/meta/{path:path}")
     async def viewer_meta(path: str, full: bool = False):
-        target = bridge._validate_viewer_path(path)
+        history_item = await asyncio.to_thread(bridge._find_history_item_by_rel_path, path)
+        target = await asyncio.to_thread(bridge._validate_viewer_path, path)
+        if history_item and not target:
+            return await asyncio.to_thread(bridge._history_item_meta_payload, history_item, full)
         if not target:
             return JSONResponse({"error": "not found"}, 404)
 
@@ -15848,6 +16147,9 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("api_mode_changed", bridge.on_api_mode_changed)
     app_context.subscribe("prompt_preset_loaded", bridge.on_prompt_preset_loaded)
     app_context.subscribe("image_saved", bridge._on_image_saved)
+    app_context.subscribe("history_item_added", bridge.on_history_item_added)
+    app_context.subscribe("history_item_removed", bridge.on_history_item_removed)
+    app_context.subscribe("history_cleared", bridge.on_history_cleared)
     app_context.subscribe("desktop_window_visibility_changed", bridge.on_desktop_window_visibility_changed)
     app_context.subscribe("cloudflared_status_changed", bridge.on_cloudflared_status_changed)
     app_context.subscribe("save_directory_changed", bridge.on_save_directory_changed)

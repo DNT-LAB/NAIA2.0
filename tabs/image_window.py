@@ -2,6 +2,7 @@ import os
 import json
 import math
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Any
 from io import BytesIO
@@ -500,7 +501,7 @@ class HistoryItem:
     image: Image.Image
     thumbnail: QPixmap
     info_text: str
-    source_row: pd.Series
+    source_row: Any
     raw_bytes: bytes | None = None
     filepath: str | None = None 
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -512,6 +513,29 @@ class HistoryItem:
     api_metadata: Dict[str, Any] = field(default_factory=dict)        # API 응답 메타데이터
     creation_timestamp: str = field(default='')                       # 생성 시각
     backend_type: str = field(default='NAI')                          # NAI/WEBUI/COMFYUI
+    history_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+def _source_row_available(source_row: Any) -> bool:
+    """Return whether a history source row can drive prompt reopening."""
+    if source_row is None:
+        return False
+    if isinstance(source_row, dict):
+        prompt_source_keys = {
+            "general",
+            "character",
+            "copyright",
+            "artist",
+            "meta",
+            "rating",
+            "image_width",
+            "image_height",
+        }
+        return bool(source_row) and any(key in source_row for key in prompt_source_keys)
+    try:
+        return not bool(source_row.empty)
+    except Exception:
+        return True
 
 
 def _history_item_png_clipboard_payload(item: HistoryItem) -> tuple[bytes, str]:
@@ -536,8 +560,10 @@ def _history_item_png_clipboard_payload(item: HistoryItem) -> tuple[bytes, str]:
 class ImageHistoryWindow(QWidget):
     """이미지 히스토리 패널"""
     history_item_selected = pyqtSignal(HistoryItem)
+    history_item_added = pyqtSignal(HistoryItem)
+    history_item_removed = pyqtSignal(HistoryItem)
     load_prompt_requested = pyqtSignal(str)
-    reroll_requested = pyqtSignal(pd.Series)
+    reroll_requested = pyqtSignal(object)
     history_cleared = pyqtSignal()
     save_to_remote_event_requested = pyqtSignal(HistoryItem)  # 🆕 리모트 이벤트 저장 시그널
 
@@ -546,6 +572,22 @@ class ImageHistoryWindow(QWidget):
         self.history_widgets: list[HistoryItemWidget] = []
         self.current_selected_widget: HistoryItemWidget | None = None
         self.init_ui()
+
+    def _get_app_context(self):
+        parent_widget = self.parent()
+        while parent_widget:
+            if hasattr(parent_widget, 'app_context'):
+                return parent_widget.app_context
+            parent_widget = parent_widget.parent()
+        return None
+
+    def _publish_history_event(self, event_name: str, payload=None):
+        app_context = self._get_app_context()
+        if app_context and hasattr(app_context, 'publish'):
+            if payload is None:
+                app_context.publish(event_name)
+            else:
+                app_context.publish(event_name, payload)
 
     def init_ui(self):
         # [수정] 메인 레이아웃 및 제목 추가
@@ -600,14 +642,7 @@ class ImageHistoryWindow(QWidget):
 
     def add_history_item(self, history_item: HistoryItem):
         """새로운 히스토리 아이템을 받아 위젯을 생성하고 목록 최상단에 추가"""
-        # app_context를 찾기 위해 부모 체인을 탐색
-        app_context = None
-        parent_widget = self.parent()
-        while parent_widget:
-            if hasattr(parent_widget, 'app_context'):
-                app_context = parent_widget.app_context
-                break
-            parent_widget = parent_widget.parent()
+        app_context = self._get_app_context()
         
         item_widget = HistoryItemWidget(history_item, parent=None, app_context=app_context)
         item_widget.item_selected.connect(self.on_item_selected)
@@ -626,6 +661,8 @@ class ImageHistoryWindow(QWidget):
         
         # 새로 추가된 아이템을 선택 상태로 만듦
         self.on_item_selected(history_item, "generated")
+        self.history_item_added.emit(history_item)
+        self._publish_history_event("history_item_added", history_item)
 
     def on_item_selected(self, history_item: HistoryItem, _message = None):
         """히스토리 아이템이 선택되었을 때 처리"""
@@ -649,11 +686,14 @@ class ImageHistoryWindow(QWidget):
             return False
         idx = self.history_widgets.index(self.current_selected_widget)
         widget_to_remove = self.current_selected_widget
+        removed_item = widget_to_remove.history_item
 
         self.history_widgets.remove(widget_to_remove)
         self.history_layout.removeWidget(widget_to_remove)
         widget_to_remove.deleteLater()
         self.current_selected_widget = None
+        self.history_item_removed.emit(removed_item)
+        self._publish_history_event("history_item_removed", removed_item)
 
         # ↓ 삭제 후 아래(또는 위) 자동 선택
         if self.history_widgets:
@@ -678,10 +718,13 @@ class ImageHistoryWindow(QWidget):
             idx = self.history_widgets.index(widget_to_remove)
         except ValueError:
             return
+        removed_item = widget_to_remove.history_item
 
         self.history_widgets.pop(idx)
         self.history_layout.removeWidget(widget_to_remove)
         widget_to_remove.deleteLater()
+        self.history_item_removed.emit(removed_item)
+        self._publish_history_event("history_item_removed", removed_item)
 
         # 삭제된 아이템이 현재 선택된 아이템이었을 경우 후처리
         if is_current:
@@ -724,12 +767,13 @@ class ImageHistoryWindow(QWidget):
         self.history_widgets.clear()
         self.current_selected_widget = None
         self.history_cleared.emit() # 마지막에 한 번만 신호를 보내 메인 뷰 정리
+        self._publish_history_event("history_cleared")
 
 # [신규] 히스토리 목록의 개별 항목을 표시하는 위젯
 class HistoryItemWidget(QWidget):
     # 위젯이 클릭되었을 때 HistoryItem 객체를 전달하는 시그널
     load_prompt_requested = pyqtSignal(str)
-    reroll_requested = pyqtSignal(pd.Series)
+    reroll_requested = pyqtSignal(object)
     item_selected = pyqtSignal(HistoryItem)
     delete_requested = pyqtSignal(object)
     select_previous_requested = pyqtSignal()
@@ -807,7 +851,7 @@ class HistoryItemWidget(QWidget):
         # "프롬프트 다시개봉" 액션
         reroll_action = QAction("프롬프트 다시개봉", self)
         # source_row가 없는 경우 비활성화
-        if self.history_item.source_row is None or self.history_item.source_row.empty:
+        if not _source_row_available(self.history_item.source_row):
             reroll_action.setEnabled(False)
         reroll_action.triggered.connect(self.emit_reroll_prompt)
         menu.addAction(reroll_action)
@@ -878,7 +922,7 @@ class HistoryItemWidget(QWidget):
         menu.addSeparator()
         save_to_remote_action = QAction("📌 리모트에 이벤트 저장", self)
         # source_row가 없는 경우 비활성화
-        if self.history_item.source_row is None or self.history_item.source_row.empty:
+        if not _source_row_available(self.history_item.source_row):
             save_to_remote_action.setEnabled(False)
         save_to_remote_action.triggered.connect(self._emit_save_to_remote_event)
         menu.addAction(save_to_remote_action)
@@ -911,6 +955,8 @@ class HistoryItemWidget(QWidget):
 
     def emit_reroll_prompt(self):
         """'프롬프트 다시개봉' 시그널을 발생시킵니다."""
+        if not _source_row_available(self.history_item.source_row):
+            return
         self.reroll_requested.emit(self.history_item.source_row)
 
     def _emit_save_to_remote_event(self):
@@ -1234,14 +1280,25 @@ class HistoryItemWidget(QWidget):
             # source_row 가져오기 (원본 이미지의 생성 정보)
             source_row = self.history_item.source_row if hasattr(self.history_item, 'source_row') else None
             
+            generation_result = {
+                'image': upscaled_image,
+                'raw_bytes': image_data,
+                'info': info_text,
+                'source_row': source_row,
+                'generation_params': getattr(self.history_item, 'generation_params', {}) or {},
+                'prompt_context': getattr(self.history_item, 'prompt_context', {}) or {},
+                'api_metadata': metadata,
+                'backend_type': getattr(self.history_item, 'backend_type', 'NAI'),
+            }
+
             # 히스토리에 추가
             if hasattr(app_context, 'add_to_history'):
                 app_context.add_to_history(
                     upscaled_image,
                     image_data,  # raw_bytes 파라미터
                     info_text,
-                    metadata,
-                    source_row
+                    source_row,
+                    generation_result=generation_result
                 )
                 # 성공 메시지 제거 - 사용자 요청에 따라 성공시 메시지 표시 안함
                 print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
@@ -1250,7 +1307,13 @@ class HistoryItemWidget(QWidget):
                 parent_widget = self.parent()
                 while parent_widget:
                     if hasattr(parent_widget, 'add_to_history'):
-                        parent_widget.add_to_history(upscaled_image, image_data, info_text, metadata, source_row)
+                        parent_widget.add_to_history(
+                            upscaled_image,
+                            image_data,
+                            info_text,
+                            source_row,
+                            generation_result=generation_result
+                        )
                         # 성공 메시지 제거
                         print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
                         return
@@ -1594,8 +1657,8 @@ class ImageWindow(QWidget):
         self.auto_save_checkbox = QCheckBox("자동 저장")
         self.auto_save_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
         self.auto_save_checkbox.setChecked(True)
-        self.auto_save_checkbox.setEnabled(False)
-        self.auto_save_checkbox.setToolTip("자동 저장은 히스토리 보존을 위해 항상 활성화됩니다.")
+        self.auto_save_checkbox.setEnabled(True)
+        self.auto_save_checkbox.setToolTip("끄면 이미지는 히스토리에만 보관되고 자동 파일 저장은 수행하지 않습니다.")
         self.auto_save_checkbox.toggled.connect(self.save_settings)
 
         self.toggle_history_button = QPushButton("📜 히스토리 숨기기")
@@ -1862,13 +1925,8 @@ class ImageWindow(QWidget):
 
     def save_settings(self):
         """체크박스 설정을 JSON 파일에 저장합니다."""
-        if self.auto_save_checkbox and not self.auto_save_checkbox.isChecked():
-            self.auto_save_checkbox.blockSignals(True)
-            self.auto_save_checkbox.setChecked(True)
-            self.auto_save_checkbox.blockSignals(False)
-
         settings = {
-            "auto_save": True,
+            "auto_save": self.auto_save_checkbox.isChecked(),
             "save_as_webp": self.save_as_webp_checkbox.isChecked(),
             "enhance_upscale": self._enhance_upscale,
             "enhance_strength": self._enhance_strength,
@@ -1897,12 +1955,12 @@ class ImageWindow(QWidget):
                 self.auto_save_checkbox.blockSignals(True)
                 self.save_as_webp_checkbox.blockSignals(True)
                 
-                self.auto_save_checkbox.setChecked(True)
+                self.auto_save_checkbox.setChecked(settings.get("auto_save", True))
                 self.save_as_webp_checkbox.setChecked(settings.get("save_as_webp", False))
 
                 self.auto_save_checkbox.blockSignals(False)
                 self.save_as_webp_checkbox.blockSignals(False)
-                self.auto_save_checkbox.setEnabled(False)
+                self.auto_save_checkbox.setEnabled(True)
 
                 # Enhance 설정 복원
                 self._enhance_upscale = settings.get("enhance_upscale", 1.5)
@@ -1915,13 +1973,13 @@ class ImageWindow(QWidget):
                 print(f"Failed to load image_window settings: {e}")
                 # 로드 실패시 기본값 사용
                 self.auto_save_checkbox.setChecked(True)
-                self.auto_save_checkbox.setEnabled(False)
+                self.auto_save_checkbox.setEnabled(True)
                 self.save_as_webp_checkbox.setChecked(False)
                 self.save_settings()
         else:
             # 파일이 없으면 기본값으로 설정하고 저장
             self.auto_save_checkbox.setChecked(True)
-            self.auto_save_checkbox.setEnabled(False)
+            self.auto_save_checkbox.setEnabled(True)
             self.save_as_webp_checkbox.setChecked(False)
             self.save_settings()
 
@@ -1969,7 +2027,7 @@ class ImageWindow(QWidget):
         menu.addAction(load_action)
         
         reroll_action = QAction("프롬프트 다시개봉", self)
-        if self.current_history_item.source_row is None or self.current_history_item.source_row.empty:
+        if not _source_row_available(self.current_history_item.source_row):
             reroll_action.setEnabled(False)
         reroll_action.triggered.connect(self._reroll_current_prompt)
         menu.addAction(reroll_action)
@@ -2068,7 +2126,7 @@ class ImageWindow(QWidget):
         menu.addSeparator()
         save_to_remote_action = QAction("📌 리모트에 이벤트 저장", self)
         # source_row가 없는 경우 비활성화
-        if self.current_history_item.source_row is None or self.current_history_item.source_row.empty:
+        if not _source_row_available(self.current_history_item.source_row):
             save_to_remote_action.setEnabled(False)
         save_to_remote_action.triggered.connect(self._emit_save_to_remote_event)
         menu.addAction(save_to_remote_action)
@@ -2284,7 +2342,7 @@ class ImageWindow(QWidget):
 
     def _reroll_current_prompt(self):
         """현재 표시 중인 이미지의 프롬프트로 다시 생성을 요청합니다."""
-        if self.current_history_item and self.current_history_item.source_row is not None:
+        if self.current_history_item and _source_row_available(self.current_history_item.source_row):
             self.instant_generation_requested.emit(self.current_history_item.source_row)
 
     def _show_current_comfyui_workflow(self):

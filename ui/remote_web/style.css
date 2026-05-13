@@ -8390,7 +8390,13 @@ body.detached-metadata .metadata-layout {
   min-height: 88px;
   max-height: 220px;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   transition: height 160ms ease, min-height 160ms ease, border-color 0.2s;
+}
+.pe-textarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 .pe-prompt-stack:focus-within .pe-prompt-field:not(:focus-within) .pe-textarea {
   height: 42px;

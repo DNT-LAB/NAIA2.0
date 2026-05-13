@@ -1091,7 +1091,6 @@ def test_desktop_control_state_hooks_do_not_broadcast():
     bridge._on_param_changed_slot()
     bridge._on_params_changed()
     bridge.on_result_enhance_config_changed()
-    bridge._on_auto_save_settings_changed()
     bridge.on_save_directory_changed({})
     bridge.on_comfyui_workflow_changed({})
 
@@ -1320,7 +1319,7 @@ def test_memory_history_uses_stable_path_when_save_directory_changes(tmp_path):
 
     assert len(entries) == 1
     history_key = entries[0]["rel_path"]
-    assert history_key.startswith(RemoteBridge.MEMORY_HISTORY_PATH_PREFIX)
+    assert history_key.startswith(RemoteBridge.HISTORY_ITEM_PATH_PREFIX)
     assert bridge._validate_viewer_path(history_key) == image_path.resolve()
 
 

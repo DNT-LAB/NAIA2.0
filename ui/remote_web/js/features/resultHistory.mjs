@@ -1,13 +1,45 @@
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const PROMPT_CACHE_MAX = 80;
+const HISTORY_ITEM_PREFIX = '__history_item__/';
 
 function encodeViewerPath(relPath) {
   return String(relPath || '').split('/').map(part => encodeURIComponent(part)).join('/');
 }
 
-function viewerMetaUrl(relPath) {
+function historyIdFromPath(relPath) {
+  const normalized = String(relPath || '').replace(/\\/g, '/');
+  if (!normalized.startsWith(HISTORY_ITEM_PREFIX)) return '';
+  return normalized.slice(HISTORY_ITEM_PREFIX.length).split('/')[0] || '';
+}
+
+function historyAssetUrl(relPath, kind) {
+  const historyId = historyIdFromPath(relPath);
+  if (historyId) return `/api/history/${kind}/${encodeURIComponent(historyId)}`;
+  return `/api/viewer/${kind}/${encodeViewerPath(relPath)}`;
+}
+
+function historyMetaUrl(relPath) {
+  const historyId = historyIdFromPath(relPath);
+  if (historyId) return `/api/history/meta/${encodeURIComponent(historyId)}`;
   const params = new URLSearchParams({path: String(relPath || '')});
   return '/api/viewer/meta?' + params.toString();
+}
+
+function historyListUrl(page, perPage) {
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  });
+  return `/api/history/list?${params.toString()}`;
+}
+
+function legacyViewerListUrl(page, perPage) {
+  const params = new URLSearchParams({
+    scope: 'memory',
+    page: String(page),
+    per_page: String(perPage),
+  });
+  return `/api/viewer/list?${params.toString()}`;
 }
 
 export function createResultHistoryController({
@@ -80,13 +112,41 @@ export function createResultHistoryController({
     return !!viewerGrid.querySelector(`.viewer-thumb[data-path="${CSS.escape(relPath)}"]`);
   }
 
+  function setViewerTotal(total) {
+    const parsed = Number(total);
+    if (Number.isFinite(parsed)) {
+      viewerTotal = Math.max(0, Math.trunc(parsed));
+    }
+    if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
+    if (viewerTab) viewerTab.classList.toggle('visible', viewerTotal > 0);
+  }
+
+  function removeThumb(grid, relPath) {
+    if (!grid || !relPath) return false;
+    const thumb = grid.querySelector(`.viewer-thumb[data-path="${CSS.escape(relPath)}"]`);
+    if (!thumb) return false;
+    thumb.remove();
+    return true;
+  }
+
+  function firstGridPath() {
+    const first = viewerGrid ? viewerGrid.querySelector('.viewer-thumb[data-path]') : null;
+    return first?.dataset?.path || '';
+  }
+
+  async function fetchHistoryList(page, perPage) {
+    const resp = await fetch(historyListUrl(page, perPage));
+    if (resp.status !== 404) return resp;
+    return fetch(legacyViewerListUrl(page, perPage));
+  }
+
   function appendThumb(relPath) {
     if (!viewerGrid) return;
     const img = document.createElement('img');
     img.className = 'viewer-thumb';
     img.loading = 'lazy';
     img.dataset.path = relPath;
-    img.src = '/api/viewer/thumb/' + encodeViewerPath(relPath);
+    img.src = historyAssetUrl(relPath, 'thumb');
     img.onclick = () => thumbClick(relPath);
     viewerGrid.appendChild(img);
   }
@@ -97,18 +157,9 @@ export function createResultHistoryController({
     img.className = 'viewer-thumb';
     img.loading = 'lazy';
     img.dataset.path = relPath;
-    img.src = '/api/viewer/thumb/' + encodeViewerPath(relPath);
+    img.src = historyAssetUrl(relPath, 'thumb');
     img.onclick = () => thumbClick(relPath);
     viewerGrid.prepend(img);
-  }
-
-  function viewerListUrl(page, perPage) {
-    const params = new URLSearchParams({
-      scope: 'memory',
-      page: String(page),
-      per_page: String(perPage),
-    });
-    return `/api/viewer/list?${params.toString()}`;
   }
 
   async function loadPage(page) {
@@ -116,7 +167,7 @@ export function createResultHistoryController({
     viewerLoadingMore = true;
     if (viewerLoading) viewerLoading.style.display = '';
     try {
-      const resp = await fetch(viewerListUrl(page, 30));
+      const resp = await fetchHistoryList(page, 30);
       const data = await resp.json();
       viewerTotal = data.total;
       if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
@@ -142,7 +193,7 @@ export function createResultHistoryController({
   }
 
   function prepareInitialHistory() {
-    fetch(viewerListUrl(0, 1)).then(resp => resp.json()).then(data => {
+    fetchHistoryList(0, 1).then(resp => resp.json()).then(data => {
       viewerTotal = data.total;
       if (viewerCountEl) viewerCountEl.textContent = data.total;
       if (data.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
@@ -181,7 +232,7 @@ export function createResultHistoryController({
 
   async function getPromptMetaHtml(relPath) {
     if (promptFloatCache[relPath]) return promptFloatCache[relPath];
-    const resp = await fetch(viewerMetaUrl(relPath));
+    const resp = await fetch(historyMetaUrl(relPath));
     const meta = await resp.json();
     let html = '';
     if (meta.prompt) {
@@ -320,7 +371,7 @@ export function createResultHistoryController({
   function showImage(relPath) {
     currentViewerPath = relPath;
     onDiskImageSelected(relPath);
-    preview.src = '/api/viewer/image/' + encodeViewerPath(relPath);
+    preview.src = historyAssetUrl(relPath, 'image');
     preview.dataset.source = 'saved';
     preview.dataset.path = relPath;
     preview.classList.add('show');
@@ -374,11 +425,13 @@ export function createResultHistoryController({
   function onNewImage(message) {
     if (!message.rel_path) return;
     latestImagePath = message.rel_path;
-    viewerTotal++;
-    if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
-    if (viewerTab) viewerTab.classList.add('visible');
-
     const alreadyInGrid = hasThumb(message.rel_path);
+    if (Number.isFinite(Number(message.total))) {
+      setViewerTotal(message.total);
+    } else if (!alreadyInGrid) {
+      setViewerTotal(viewerTotal + 1);
+    }
+
     const didPrepend = !alreadyInGrid && !!viewerGrid;
     if (didPrepend) prependThumb(message.rel_path);
 
@@ -407,13 +460,69 @@ export function createResultHistoryController({
         img.className = 'viewer-thumb';
         img.loading = 'lazy';
         img.dataset.path = message.rel_path;
-        img.src = '/api/viewer/thumb/' + encodeViewerPath(message.rel_path);
+        img.src = historyAssetUrl(message.rel_path, 'thumb');
         img.onclick = () => selectPopupImage(message.rel_path, img);
         vpGrid.prepend(img);
       }
       const count = getEl('vpCount');
       if (count) count.textContent = viewerTotal;
     }
+  }
+
+  function onRemoved(message) {
+    const relPath = message?.rel_path || '';
+    if (!relPath) return;
+    const removedMain = removeThumb(viewerGrid, relPath);
+    removeThumb(getEl('vpGrid'), relPath);
+    viewerNavPaths = viewerNavPaths.filter(path => path !== relPath);
+    if (currentViewerPath === relPath) {
+      currentViewerPath = '';
+      viewerNavIdx = -1;
+      if (preview?.dataset?.source === 'saved' && preview.dataset.path === relPath) {
+        preview.removeAttribute('src');
+        preview.classList.remove('show');
+        preview.dataset.path = '';
+        emptyMsg.style.display = '';
+        if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
+      }
+    } else {
+      viewerNavIdx = viewerNavPaths.indexOf(currentViewerPath);
+    }
+    if (latestImagePath === relPath) latestImagePath = firstGridPath();
+    if (Number.isFinite(Number(message.total))) {
+      setViewerTotal(message.total);
+    } else if (removedMain && viewerTotal > 0) {
+      setViewerTotal(viewerTotal - 1);
+    }
+    const count = getEl('vpCount');
+    if (count) count.textContent = viewerTotal;
+    if (viewerTotal <= 0) hideLatestBadge();
+  }
+
+  function onCleared(message = {}) {
+    viewerPage = 0;
+    viewerTotal = 0;
+    viewerNavPaths = [];
+    viewerNavIdx = -1;
+    currentViewerPath = '';
+    latestImagePath = '';
+    viewerPendingNewCount = 0;
+    promptFloatCache = {};
+    promptFloatCacheKeys = [];
+    if (viewerGrid) viewerGrid.innerHTML = '';
+    const vpGrid = getEl('vpGrid');
+    if (vpGrid) vpGrid.innerHTML = '';
+    const vpPreview = getEl('vpPreview');
+    if (vpPreview) vpPreview.removeAttribute('src');
+    if (preview?.dataset?.source === 'saved') {
+      preview.removeAttribute('src');
+      preview.classList.remove('show');
+      preview.dataset.path = '';
+      emptyMsg.style.display = '';
+    }
+    if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
+    setViewerTotal(message.total ?? 0);
+    hideLatestBadge();
   }
 
   function openPopup() {
@@ -453,7 +562,7 @@ export function createResultHistoryController({
     const loading = getEl('vpLoading');
     if (loading) loading.style.display = '';
     try {
-      const resp = await fetch(viewerListUrl(page, 30));
+      const resp = await fetchHistoryList(page, 30);
       const data = await resp.json();
       const grid = getEl('vpGrid');
       if (grid) {
@@ -463,7 +572,7 @@ export function createResultHistoryController({
           img.className = 'viewer-thumb';
           img.loading = 'lazy';
           img.dataset.path = entry.rel_path;
-          img.src = '/api/viewer/thumb/' + encodeViewerPath(entry.rel_path);
+          img.src = historyAssetUrl(entry.rel_path, 'thumb');
           img.onclick = () => selectPopupImage(entry.rel_path, img);
           grid.appendChild(img);
         }
@@ -482,7 +591,7 @@ export function createResultHistoryController({
     onDiskImageSelected(relPath);
     const previewEl = getEl('vpPreview');
     if (previewEl) {
-      previewEl.src = '/api/viewer/image/' + encodeViewerPath(relPath);
+      previewEl.src = historyAssetUrl(relPath, 'image');
       previewEl.dataset.source = 'saved';
       previewEl.dataset.path = relPath;
     }
@@ -582,7 +691,7 @@ export function createResultHistoryController({
 
   async function openFolder() {
     try {
-      const resp = await fetch('/api/viewer/open-folder', {method: 'POST'});
+      const resp = await fetch('/api/history/open-folder', {method: 'POST'});
       if (!resp.ok) {
         showToast('Open folder failed.', 'error');
         return;
@@ -610,6 +719,8 @@ export function createResultHistoryController({
     closeLightbox,
     onLightboxClick,
     onNewImage,
+    onRemoved,
+    onCleared,
     jumpToLatest,
     openPopup,
     closePopup,

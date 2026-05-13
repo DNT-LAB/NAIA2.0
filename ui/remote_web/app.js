@@ -1252,6 +1252,8 @@ const wsMessageHandlers = {
   preset_generation_error: onEventPresetGenerationError,
   load_prompt: m => onLoadPrompt(m.prompt),
   viewer_new_image: onViewerNewImage,
+  viewer_history_removed: onViewerHistoryRemoved,
+  viewer_history_cleared: onViewerHistoryCleared,
   session: onSession,
   desktop_window_state: onDesktopWindowState,
   init_complete: onInitComplete,
@@ -1441,8 +1443,8 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   ) {
     clearPresetGenerationOptions({autoGenerate: false});
   }
-  // 직접 요청한 Random만 수락하되, 데스크탑 Auto Gen은 전역 프롬프트 상태로 동기화한다.
-  if ((source === 'random' && awaitingMyRandom) || isPresetSource || source === 'auto_generate') {
+  // 직접 요청한 Random만 수락하되, 데스크탑 Auto Gen/Result reroll은 전역 프롬프트 상태로 동기화한다.
+  if ((source === 'random' && awaitingMyRandom) || isPresetSource || source === 'auto_generate' || source === 'result_reroll') {
     if (source === 'random') unlockRandomButton();
     let acceptedPrompt = false;
     if (_isPromptEditingActive() && prompt !== promptEdit.value) {
@@ -2251,11 +2253,13 @@ function initializeDetachedShell() {
   }
 }
 
-// ---- Result history (disk-based image browser) ----
+// ---- Result history (Desktop History mirror) ----
 function initViewer() { if (resultHistory) resultHistory.initViewer(); }
 function closeViewerLightbox() { if (resultHistory) resultHistory.closeLightbox(); }
 function onLightboxClick(event) { if (resultHistory) resultHistory.onLightboxClick(event); }
 function onViewerNewImage(message) { if (resultHistory) resultHistory.onNewImage(message); }
+function onViewerHistoryRemoved(message) { if (resultHistory) resultHistory.onRemoved(message); }
+function onViewerHistoryCleared(message) { if (resultHistory) resultHistory.onCleared(message); }
 function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }
 function openViewerPopup() { if (resultHistory) resultHistory.openPopup(); }
 function closeViewerPopup() { if (resultHistory) resultHistory.closePopup(); }
@@ -2448,6 +2452,10 @@ function setAutoSaveEnabled(enabled) {
   if (autoSavePanel) autoSavePanel.setEnabled(enabled);
 }
 
+function onAutoSaveToggle(enabled) {
+  if (autoSavePanel) autoSavePanel.setEnabled(enabled);
+}
+
 function renderAutoSavePanel(state) {
   if (autoSavePanel) autoSavePanel.render(state);
 }
@@ -2561,6 +2569,10 @@ function send(cmd) {
       void randomizeFromPresetTab();
       return;
     }
+    if (getOptionChecked('prompt_fixed')) {
+      updateGenerateButtonMode();
+      return;
+    }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     btnRnd.disabled = true;
     awaitingMyRandom = true;
@@ -2619,9 +2631,10 @@ function updateGenerateButtonMode() {
   const presetMode = activePromptTab === 'preset';
   btnGen.classList.toggle('preset-mode', presetMode);
   if (btnRnd) {
+    const promptFixed = getOptionChecked('prompt_fixed');
     btnRnd.disabled = presetMode
-      ? (getOptionChecked('prompt_fixed') || !!presetGenerationPending || generating || !eventPresetPanel?.canRandomize?.())
-      : awaitingMyRandom;
+      ? (promptFixed || !!presetGenerationPending || generating || !eventPresetPanel?.canRandomize?.())
+      : (promptFixed || awaitingMyRandom);
   }
   if (!generating) {
     const promptFixed = getOptionChecked('prompt_fixed');

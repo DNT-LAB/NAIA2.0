@@ -542,15 +542,8 @@ class SettingsWidget(QWidget):
         return None
 
     def _force_web_session_autosave(self):
-        """Web Session 시작 전 Auto Save를 강제로 켠다."""
-        image_window = self._get_image_window_widget()
-        if not image_window:
-            return
-
-        auto_save_checkbox = getattr(image_window, "auto_save_checkbox", None)
-        if auto_save_checkbox and not auto_save_checkbox.isChecked():
-            auto_save_checkbox.setChecked(True)
-            print("🌐 Web Session: Auto Save 강제 활성화")
+        """Web Session은 Desktop Auto Save 설정을 존중한다."""
+        return
 
     def _on_web_session_toggled(self, checked: bool):
         """Web Session 활성화/비활성화"""

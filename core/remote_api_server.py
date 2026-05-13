@@ -4825,17 +4825,35 @@ class RemoteBridge(QObject):
             lambda f=future, r=result: (f.set_result(r) if not f.done() else None)
         )
 
-    def _save_result_history_item(self, payload: dict) -> dict:
-        image_window = self._get_image_window_widget()
-        if image_window is None:
-            return {"ok": False, "error": "Image window is unavailable"}
-        item = self._get_result_history_action_item(payload)
+    def _unsaved_history_items(self) -> list:
+        return [
+            item
+            for item in (self._iter_memory_history_items() or ())
+            if item is not None
+            and getattr(item, "image", None) is not None
+            and not self._history_item_file_path(item)
+        ]
+
+    def _unsaved_history_count(self) -> int:
+        return len(self._unsaved_history_items())
+
+    def _save_history_item_to_file(self, item, image_window=None) -> dict:
         if not item or not getattr(item, "image", None):
             return {"ok": False, "error": "History image is unavailable"}
 
         existing_path = self._history_item_file_path(item)
         if existing_path:
-            return {"ok": True, "already_saved": True, "asset": self._build_saved_result_asset_payload(self._history_item_path_key(item))}
+            return {
+                "ok": True,
+                "already_saved": True,
+                "path": self._history_item_path_key(item),
+                "file_path": str(existing_path),
+                "asset": self._build_saved_result_asset_payload(self._history_item_path_key(item)),
+            }
+
+        image_window = image_window or self._get_image_window_widget()
+        if image_window is None:
+            return {"ok": False, "error": "Image window is unavailable"}
 
         raw_bytes = getattr(item, "raw_bytes", None)
         if not raw_bytes:
@@ -4876,21 +4894,87 @@ class RemoteBridge(QObject):
         except Exception:
             pass
 
-        if hasattr(self.app_context, "main_window") and hasattr(self.app_context.main_window, "status_bar"):
-            try:
-                self.app_context.main_window.status_bar.showMessage(f"✅ 이미지 저장 완료: {Path(filepath).name}", 3000)
-            except Exception:
-                pass
-
-        payload = self._history_item_summary(item)
-        payload.update({"type": "viewer_new_image", "total": self._history_count()})
-        self._broadcast_json(payload)
         return {
             "ok": True,
             "saved": True,
             "path": self._history_item_path_key(item),
             "file_path": str(filepath or ""),
             "asset": self._build_saved_result_asset_payload(self._history_item_path_key(item)),
+        }
+
+    def _save_result_history_item(self, payload: dict) -> dict:
+        image_window = self._get_image_window_widget()
+        if image_window is None:
+            return {"ok": False, "error": "Image window is unavailable"}
+        item = self._get_result_history_action_item(payload)
+        result = self._save_history_item_to_file(item, image_window=image_window)
+        if not result.get("ok"):
+            return result
+        if result.get("already_saved"):
+            return result
+
+        if hasattr(self.app_context, "main_window") and hasattr(self.app_context.main_window, "status_bar"):
+            try:
+                self.app_context.main_window.status_bar.showMessage(f"✅ 이미지 저장 완료: {Path(result.get('file_path') or '').name}", 3000)
+            except Exception:
+                pass
+
+        payload = self._history_item_summary(item)
+        payload.update({"type": "viewer_new_image", "total": self._history_count()})
+        self._broadcast_json(payload)
+        self._broadcast_auto_save_settings()
+        return result
+
+    def _save_all_unsaved_history_items(self) -> dict:
+        image_window = self._get_image_window_widget()
+        if image_window is None:
+            return {"ok": False, "error": "Image window is unavailable"}
+        items = self._unsaved_history_items()
+        saved = 0
+        failures = []
+        for item in list(items):
+            result = self._save_history_item_to_file(item, image_window=image_window)
+            if result.get("ok") and not result.get("already_saved"):
+                saved += 1
+                payload = self._history_item_summary(item)
+                payload.update({"type": "viewer_new_image", "total": self._history_count()})
+                self._broadcast_json(payload)
+            elif not result.get("ok"):
+                failures.append({
+                    "path": self._history_item_path_key(item),
+                    "error": result.get("error") or "Image save failed",
+                })
+        remaining = self._unsaved_history_count()
+        if hasattr(self.app_context, "main_window") and hasattr(self.app_context.main_window, "status_bar"):
+            try:
+                self.app_context.main_window.status_bar.showMessage(f"✅ 미저장 히스토리 {saved}장 일괄 저장 완료", 3000)
+            except Exception:
+                pass
+        self._broadcast_auto_save_settings()
+        return {
+            "ok": not failures,
+            "saved": saved,
+            "requested": len(items),
+            "remaining": remaining,
+            "failures": failures,
+        }
+
+    def _collect_unsaved_history_download_entries(self) -> dict:
+        entries = []
+        for item in self._unsaved_history_items():
+            try:
+                image_bytes, media_type = self._history_item_image_payload(item)
+            except Exception as e:
+                return {"ok": False, "error": f"Image bytes are unavailable: {e}"}
+            entries.append({
+                "filename": self._history_item_filename(item),
+                "bytes": bytes(image_bytes),
+                "media_type": media_type,
+            })
+        return {
+            "ok": True,
+            "count": len(entries),
+            "entries": entries,
         }
 
     def _delete_result_history_item(self, payload: dict) -> dict:
@@ -4932,6 +5016,10 @@ class RemoteBridge(QObject):
                 result = self._save_result_history_item(payload)
             elif action == "delete":
                 result = self._delete_result_history_item(payload)
+            elif action == "save_all_unsaved":
+                result = self._save_all_unsaved_history_items()
+            elif action == "collect_unsaved_download":
+                result = self._collect_unsaved_history_download_entries()
             else:
                 result = {"ok": False, "error": "Unsupported result history action"}
         except Exception as e:
@@ -6519,6 +6607,7 @@ class RemoteBridge(QObject):
             "total": self._history_count(),
         })
         self._broadcast_json(payload)
+        self._broadcast_auto_save_settings()
 
     def on_history_item_removed(self, history_item):
         self._invalidate_viewer_cache()
@@ -6530,11 +6619,13 @@ class RemoteBridge(QObject):
             "history_id": self._ensure_history_id(history_item),
             "total": self._history_count(),
         })
+        self._broadcast_auto_save_settings()
 
     def on_history_cleared(self):
         self._invalidate_viewer_cache()
         if self._has_clients():
             self._broadcast_json({"type": "viewer_history_cleared", "total": 0})
+            self._broadcast_auto_save_settings()
 
     # --- 생성 파라미터 동기화 ---
 
@@ -7352,6 +7443,7 @@ class RemoteBridge(QObject):
                 "history_limit_enabled": bool(history_limit_enabled and history_limit_enabled.isChecked()),
                 "max_history_length": int(max_history_length.value()) if max_history_length else 2000,
                 "memory_action": memory_action,
+                "unsaved_history_count": self._unsaved_history_count(),
                 "memory_action_options": [
                     {"value": 1, "label": "[1] 1장씩 자동저장+정리"},
                     {"value": 2, "label": "[2] 1장씩 저장없이 삭제"},
@@ -14313,6 +14405,49 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         if not result.get("ok"):
             return JSONResponse({"error": result.get("error") or "History delete failed"}, status_code=400)
         return result
+
+    @app.post("/api/history/unsaved/save-all")
+    async def api_history_unsaved_save_all():
+        result = await bridge._request_result_history_action("save_all_unsaved", {}, timeout=300.0)
+        if not result.get("ok"):
+            return JSONResponse({
+                "error": result.get("error") or "Some images could not be saved",
+                **{key: result[key] for key in ("saved", "requested", "remaining", "failures") if key in result},
+            }, status_code=400)
+        return result
+
+    @app.get("/api/history/unsaved/download")
+    async def api_history_unsaved_download():
+        result = await bridge._request_result_history_action("collect_unsaved_download", {}, timeout=120.0)
+        if not result.get("ok"):
+            return JSONResponse({"error": result.get("error") or "History download failed"}, status_code=400)
+        entries = result.get("entries") if isinstance(result.get("entries"), list) else []
+        if not entries:
+            return JSONResponse({"error": "No unsaved history images"}, status_code=404)
+
+        zip_buffer = io.BytesIO()
+        used_names = set()
+        with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for index, entry in enumerate(entries, start=1):
+                raw_name = Path(str(entry.get("filename") or f"history-{index:04d}.png")).name
+                if not raw_name:
+                    raw_name = f"history-{index:04d}.png"
+                stem = Path(raw_name).stem or f"history-{index:04d}"
+                suffix = Path(raw_name).suffix or ".png"
+                filename = raw_name
+                counter = 2
+                while filename in used_names:
+                    filename = f"{stem}-{counter}{suffix}"
+                    counter += 1
+                used_names.add(filename)
+                zf.writestr(filename, bytes(entry.get("bytes") or b""))
+        zip_buffer.seek(0)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers=image_export_headers(f"naia-unsaved-history-{timestamp}.zip"),
+        )
 
     @app.post("/api/comfyui/random")
     async def api_comfyui_random(req: Request):

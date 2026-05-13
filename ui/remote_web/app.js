@@ -592,7 +592,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260511-e
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
   });
-const autoSavePanelReady = import('./js/features/autoSavePanel.mjs')
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260514-unsaved-bulk1')
   .then(({createAutoSavePanel}) => {
     autoSavePanel = createAutoSavePanel({
       document,
@@ -3802,6 +3802,14 @@ function onHistoryLimitLengthChange(value) {
 
 function onHistoryLimitActionChange(value) {
   if (autoSavePanel) autoSavePanel.onHistoryLimitActionChange(value);
+}
+
+function saveAllUnsavedHistory() {
+  if (autoSavePanel) autoSavePanel.saveAllUnsavedHistory();
+}
+
+function downloadUnsavedHistory() {
+  if (autoSavePanel) autoSavePanel.downloadUnsavedHistory();
 }
 
 function browseSaveDirectory() {

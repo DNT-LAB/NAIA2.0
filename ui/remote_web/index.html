@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260514-unsaved-actions5">
+<link rel="stylesheet" href="style.css?v=20260514-unsaved-bulk2">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -504,8 +504,8 @@
             <button type="button" class="stats-pill stats-history-toggle" id="statsGenCount" title="Total generations this session" onclick="toggleMobileHistoryRail()" aria-label="Open result history"></button>
           </div>
           <div class="result-unsaved-actions" id="resultUnsavedActions" hidden>
-            <button type="button" class="result-unsaved-btn save" id="resultUnsavedSaveBtn" onclick="saveDisplayedHistoryImage()">저장</button>
-            <button type="button" class="result-unsaved-btn delete" id="resultUnsavedDeleteBtn" onclick="deleteDisplayedHistoryImage()">삭제</button>
+            <button type="button" class="result-unsaved-btn save" id="resultUnsavedSaveBtn" onclick="saveDisplayedHistoryImage()"><span>저장</span></button>
+            <button type="button" class="result-unsaved-btn delete" id="resultUnsavedDeleteBtn" onclick="deleteDisplayedHistoryImage()"><span>삭제</span></button>
           </div>
           <section class="queue-panel" id="queuePanel" aria-label="Generation queue" hidden>
             <div class="queue-panel-header">
@@ -868,6 +868,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260514-unsaved-actions2"></script>
+<script src="app.js?v=20260514-unsaved-bulk1"></script>
 </body>
 </html>

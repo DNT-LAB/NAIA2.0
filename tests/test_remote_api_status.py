@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1357,6 +1358,27 @@ class _ImageCrud:
         return self._use_timestamp_folder
 
 
+class _SavingImageCrud(_ImageCrud):
+    def __init__(self, save_dir):
+        super().__init__(save_dir)
+        self.saved = []
+
+    def get_classification_method(self):
+        return "none"
+
+    def save_image(self, image_bytes, as_webp=False, classification_info=None, metadata=None):
+        self._save_dir.mkdir(parents=True, exist_ok=True)
+        suffix = "webp" if as_webp else "png"
+        path = self._save_dir / f"{len(self.saved) + 1:05d}.{suffix}"
+        path.write_bytes(bytes(image_bytes))
+        self.saved.append({
+            "path": path,
+            "as_webp": as_webp,
+            "classification_info": classification_info,
+        })
+        return True, str(path), None
+
+
 def _bridge_with_history(tmp_path, mode="NAI"):
     old_save_dir = tmp_path / "old_output" / "20260501_120000"
     new_save_dir = tmp_path / "new_output" / "20260501_120000"
@@ -1385,6 +1407,50 @@ def _bridge_with_history(tmp_path, mode="NAI"):
     ctx.main_window = SimpleNamespace(image_window=image_window)
     bridge = RemoteBridge(ctx)
     return bridge, image_path
+
+
+def _png_bytes(color):
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _bridge_with_unsaved_history(tmp_path, count=2):
+    save_dir = tmp_path / "output" / "20260501_120000"
+    crud = _SavingImageCrud(save_dir)
+    items = []
+    for index in range(count):
+        image = Image.new("RGB", (2, 2), (index * 30, 0, 0))
+        items.append(SimpleNamespace(
+            filepath="",
+            image=image,
+            raw_bytes=_png_bytes((index * 30, 0, 0)),
+            info_text=f"prompt {index}",
+            generation_params={"input": f"prompt {index}"},
+            prompt_context={},
+            source_row=None,
+            backend_type="NAI",
+        ))
+    widgets = [SimpleNamespace(history_item=item) for item in items]
+    history_window = SimpleNamespace(history_widgets=widgets)
+    image_window = SimpleNamespace(
+        auto_save_checkbox=_FakeCheckBox(False),
+        save_as_webp_checkbox=_FakeCheckBox(False),
+        image_history_window=history_window,
+        current_history_item=items[0] if items else None,
+    )
+    image_window._create_classification_info = lambda item: {
+        "method": "none",
+        "prompt": getattr(item, "info_text", ""),
+        "image_size": getattr(item.image, "size", (0, 0)),
+        "tags": [],
+        "backend_type": "NAI",
+    }
+    ctx = _AppContext()
+    ctx.image_crud_controller = crud
+    ctx.main_window = SimpleNamespace(image_window=image_window)
+    bridge = RemoteBridge(ctx)
+    return bridge, crud, items
 
 
 def test_memory_history_uses_stable_path_when_save_directory_changes(tmp_path):
@@ -1416,6 +1482,47 @@ def test_saved_result_asset_accepts_memory_history_key(tmp_path):
     assert asset["capabilities"]["enhance"] is True
     assert asset["capabilities"]["copy_png"] is True
     assert "copy_webp" not in asset["capabilities"]
+
+
+def test_auto_save_state_counts_unsaved_history_items(tmp_path):
+    bridge, _crud, _items = _bridge_with_unsaved_history(tmp_path, count=2)
+
+    state = bridge._read_auto_save_settings()
+
+    assert state["unsaved_history_count"] == 2
+
+
+def test_save_all_unsaved_history_items_writes_to_save_folder(tmp_path):
+    bridge, crud, items = _bridge_with_unsaved_history(tmp_path, count=2)
+
+    result = bridge._save_all_unsaved_history_items()
+
+    assert result["ok"] is True
+    assert result["saved"] == 2
+    assert result["remaining"] == 0
+    assert len(crud.saved) == 2
+    assert all(Path(item.filepath).exists() for item in items)
+    assert bridge._read_auto_save_settings()["unsaved_history_count"] == 0
+
+
+def test_unsaved_history_download_endpoint_returns_zip(tmp_path):
+    bridge, _crud, _items = _bridge_with_unsaved_history(tmp_path, count=2)
+
+    async def fake_history_action(action, payload=None, timeout=30.0):
+        assert action == "collect_unsaved_download"
+        return bridge._collect_unsaved_history_download_entries()
+
+    bridge._request_result_history_action = fake_history_action
+    client = TestClient(create_app(bridge, WebSocketManager()))
+
+    response = client.get("/api/history/unsaved/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(response.content), "r") as zf:
+        names = zf.namelist()
+        assert len(names) == 2
+        assert all(name.startswith("history-") for name in names)
 
 
 def test_current_result_asset_does_not_advertise_webp_clipboard_copy(tmp_path):

@@ -13,6 +13,7 @@ export function createAutoSavePanel({
   const moduleBody = document.getElementById('modulePopupBody');
   let enabled = true;
   let lastState = null;
+  let bulkBusy = false;
 
   function defaultState() {
     return {
@@ -21,6 +22,7 @@ export function createAutoSavePanel({
       history_limit_enabled: false,
       max_history_length: 2000,
       memory_action: 1,
+      unsaved_history_count: 0,
       memory_action_options: [
         { value: 1, label: '[1] 1장씩 자동저장+정리' },
         { value: 2, label: '[2] 1장씩 저장없이 삭제' },
@@ -65,6 +67,8 @@ export function createAutoSavePanel({
     const toggleLabel = panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save';
     const toggleValue = panelState.auto_save ? 'false' : 'true';
     const toggleClass = panelState.auto_save ? 'mod-stop' : 'mod-start';
+    const unsavedCount = Math.max(0, Number(panelState.unsaved_history_count || 0));
+    const bulkDisabled = bulkBusy || unsavedCount <= 0;
     const actionOptions = (panelState.memory_action_options || []).map(opt =>
       `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
@@ -74,6 +78,17 @@ export function createAutoSavePanel({
         <div class="mod-field">
           <span class="mod-field-label">Current Status</span>
           <div class="mod-status" style="text-align:left;min-height:0">${statusText}</div>
+        </div>
+        <div class="auto-save-unsaved-section">
+          <span class="auto-save-unsaved-count">저장 안됨 : <b>${escHtml(String(unsavedCount))}</b></span>
+          <button class="mod-btn-secondary mod-btn-compact" type="button"
+                  onclick="saveAllUnsavedHistory()" ${bulkDisabled ? 'disabled' : ''}>
+            ${bulkBusy ? '저장 중...' : '일괄 저장'}
+          </button>
+          <button class="mod-btn-secondary mod-btn-compact" type="button"
+                  onclick="downloadUnsavedHistory()" ${bulkDisabled ? 'disabled' : ''}>
+            ${bulkBusy ? '처리 중...' : '일괄 다운로드'}
+          </button>
         </div>
         <div class="mod-field">
           <span class="mod-field-label">Policy</span>
@@ -160,6 +175,69 @@ export function createAutoSavePanel({
     setModuleParam('auto_save', 'memory_action', value);
   }
 
+  async function readJsonError(response, fallback) {
+    try {
+      const data = await response.json();
+      return data?.error || data?.message || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  async function saveAllUnsavedHistory() {
+    if (bulkBusy) return;
+    bulkBusy = true;
+    render(lastState);
+    try {
+      const response = await fetch('/api/history/unsaved/save-all', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(await readJsonError(response, `HTTP ${response.status}`));
+      }
+      const data = await response.json();
+      if (lastState) lastState.unsaved_history_count = Number(data.remaining || 0);
+      showToast(`미저장 이미지 ${Number(data.saved || 0)}장을 저장했습니다.`, 'success');
+      render(lastState);
+    } catch (error) {
+      showToast(error.message || '일괄 저장 실패', 'error');
+      render(lastState);
+    } finally {
+      bulkBusy = false;
+      render(lastState);
+    }
+  }
+
+  async function downloadUnsavedHistory() {
+    if (bulkBusy) return;
+    bulkBusy = true;
+    render(lastState);
+    try {
+      const response = await fetch('/api/history/unsaved/download', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(await readJsonError(response, `HTTP ${response.status}`));
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      const filename = filenameMatch
+        ? decodeURIComponent(filenameMatch[1] || filenameMatch[2] || 'naia-unsaved-history.zip')
+        : 'naia-unsaved-history.zip';
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast('미저장 히스토리 ZIP 다운로드를 시작했습니다.', 'success');
+    } catch (error) {
+      showToast(error.message || '일괄 다운로드 실패', 'error');
+    } finally {
+      bulkBusy = false;
+      render(lastState);
+    }
+  }
+
   return {
     open,
     setEnabled,
@@ -172,5 +250,7 @@ export function createAutoSavePanel({
     onHistoryLimitToggle,
     onHistoryLimitLengthChange,
     onHistoryLimitActionChange,
+    saveAllUnsavedHistory,
+    downloadUnsavedHistory,
   };
 }

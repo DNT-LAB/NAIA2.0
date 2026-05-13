@@ -487,7 +487,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260513-webui-weight1')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -949,12 +949,15 @@ function _collectCurrentParams() {
     if (denoise) p.denoising_strength = parseNumber(denoise.value, 0.5);
     if (hiresSteps) p.hires_steps = Math.trunc(parseNumber(hiresSteps.value, 0));
     if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 5.0);
+    const promptWeight = $('pAnimaWeight')?.value?.trim();
+    if (promptWeight) {
+      p.anima_weight = promptWeight;
+      p.random_prompt_weight = promptWeight;
+    }
   }
 
   if (mode === 'COMFYUI') {
-    const samplingMode = $('flagAnima')?.classList.contains('on')
-      ? 'anima'
-      : ($('flagVpred')?.classList.contains('on') ? 'v_prediction' : 'eps');
+    const samplingMode = currentComfyUiSamplingMode();
     p.sampling_mode = samplingMode;
     p.workflow_type = samplingMode === 'anima' ? 'unet' : 'checkpoint';
     p.filename_prefix = 'NAIA_ComfyUI';
@@ -967,6 +970,12 @@ function _collectCurrentParams() {
     p._comfyui_workflow_mode = comfyuiWorkflowState?.has_custom ? 'custom' : 'basic';
   }
   return p;
+}
+
+function currentComfyUiSamplingMode() {
+  return $('flagAnima')?.classList.contains('on')
+    ? 'anima'
+    : ($('flagVpred')?.classList.contains('on') ? 'v_prediction' : 'eps');
 }
 
 function buildWebGenerationOverrides(prompt, negativePrompt) {
@@ -1497,6 +1506,17 @@ function normalizeComfyUiWorkflowState(m = {}) {
   };
 }
 
+function updateRandomPromptWeightRow(mode, samplingMode = null) {
+  const row = $('randomPromptWeightRow');
+  if (!row) return;
+  const normalizedMode = String(mode || currentMode || modeSelect?.value || '').toUpperCase();
+  const comfySamplingMode = samplingMode || currentComfyUiSamplingMode();
+  const visible = normalizedMode === 'WEBUI' || (normalizedMode === 'COMFYUI' && comfySamplingMode === 'anima');
+  row.style.display = visible ? '' : 'none';
+  const label = $('randomPromptWeightLabel');
+  if (label) label.textContent = normalizedMode === 'WEBUI' ? 'Prompt Weight' : 'ANIMA Weight';
+}
+
 function onComfyUiWorkflowState(m) {
   comfyuiWorkflowState = normalizeComfyUiWorkflowState(m);
   if (moduleBadges) moduleBadges.updateComfyUiWorkflowState(comfyuiWorkflowState);
@@ -1562,6 +1582,7 @@ function updateParams(m) {
     if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
     if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
+    if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
   }
 
   // ComfyUI sampling mode — 서버가 명시적으로 보낸 경우에만 적용 (EPS 기본값 리셋 방지)
@@ -1571,10 +1592,10 @@ function updateParams(m) {
     $('flagVpred').classList.toggle('on', sm === 'v_prediction');
     $('flagAnima').classList.toggle('on', sm === 'anima');
     $('comfyuiRescaleRow').style.display = sm === 'anima' ? '' : 'none';
-    $('comfyuiAnimaWeightRow').style.display = sm === 'anima' ? '' : 'none';
     if ('rescale_cfg' in m) $('pRescaleCfg').value = m.rescale_cfg;
     if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
   }
+  updateRandomPromptWeightRow(mode, mode === 'COMFYUI' && 'sampling_mode' in m ? m.sampling_mode : null);
   if ('comfyui_workflow' in m || 'comfyui_workflow_has_custom' in m) onComfyUiWorkflowState(m);
   if (moduleBadges) moduleBadges.updateComfyUiParams(m);
   if (studioTabControl) studioTabControl.onParamsChanged();
@@ -1625,7 +1646,7 @@ function setSamplingMode(mode) {
   $('flagVpred').classList.toggle('on', mode === 'v_prediction');
   $('flagAnima').classList.toggle('on', mode === 'anima');
   $('comfyuiRescaleRow').style.display = mode === 'anima' ? '' : 'none';
-  $('comfyuiAnimaWeightRow').style.display = mode === 'anima' ? '' : 'none';
+  updateRandomPromptWeightRow('COMFYUI', mode);
   setParam('sampling_mode', mode);
   updateModuleHeaderAction(currentModuleId);
 }
@@ -2583,7 +2604,11 @@ function send(cmd) {
         unlockRandomButton();
       }
     }, 2000);
-    ws.send(JSON.stringify({type: 'random', ratings: getActiveRatings()}));
+    ws.send(JSON.stringify({
+      type: 'random',
+      ratings: getActiveRatings(),
+      overrides: _collectCurrentParams(),
+    }));
     return;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -2904,6 +2929,7 @@ function syncMode(mode) {
   currentMode = mode;
   setNaiHighlightMode(mode);
   updatePromptTokenEstimate();
+  updateRandomPromptWeightRow(mode);
   if (moduleBadges) moduleBadges.updateModeState();
   // 모드 전용 모듈 상태 갱신 (NAI 전용 도구는 비NAI에서 숨김)
   const isNai = mode === 'NAI';

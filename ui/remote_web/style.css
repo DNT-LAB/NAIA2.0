@@ -7248,7 +7248,8 @@ body.resizing-result-info {
 .activated-summary span {
   overflow: visible;
 }
-.activated-summary.comfyui-summary {
+.activated-summary.comfyui-summary,
+.activated-summary.webui-summary {
   display: flex;
   align-items: center;
   gap: 0;
@@ -7295,7 +7296,8 @@ body.resizing-result-info {
   font: inherit;
   letter-spacing: inherit;
 }
-.activated-summary-part.comfyui-mode {
+.activated-summary-part.comfyui-mode,
+.activated-summary-part.webui-mode {
   color: #c8b8ff;
 }
 .activated-summary-part.comfyui-weight {

@@ -277,6 +277,35 @@ def test_web_random_pending_keeps_random_source_when_auto_gen_checked(monkeypatc
     assert ws_manager.messages[0]["source"] == "random"
 
 
+def test_web_random_auto_generate_respects_boolean_seed_fixed(monkeypatch):
+    ctx = _AppContext()
+    ctx.current_prompt_context = None
+    generation_controller = _GenerationController()
+    ctx.main_window = SimpleNamespace(
+        search_results=None,
+        generation_controller=generation_controller,
+        negative_prompt_textedit=_TextEdit(""),
+    )
+    bridge = RemoteBridge(ctx)
+    monkeypatch.setattr(remote_api_server.random, "randint", lambda *_args: 9999999999)
+    bridge._pending_overrides[object()] = {
+        "params": {"seed": "12345", "seed_fixed": True},
+        "negative": None,
+        "source": "random",
+        "auto_generate": True,
+    }
+
+    bridge.on_prompt_generated(SimpleNamespace(
+        final_prompt="prompt",
+        settings={"auto_generate": True},
+        source_row=SimpleNamespace(name=""),
+    ))
+
+    assert generation_controller.executed == [
+        ({"seed": "12345", "seed_fixed": True}, 0),
+    ]
+
+
 def test_vibe_cluster_save_and_scan_persists_current_encoded_frames(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bridge = RemoteBridge(_AppContext())
@@ -872,6 +901,38 @@ def test_web_generate_missing_custom_workflow_fails_before_starting():
         "message": "ComfyUI custom workflow is no longer loaded on the server.",
         "level": "error",
     }]
+
+
+def test_web_random_passes_session_overrides_to_prompt_generation():
+    triggered = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"자동 생성": _ToggleButton(True)},
+        trigger_random_prompt=lambda **kwargs: triggered.append(kwargs),
+    )
+    bridge = RemoteBridge(ctx)
+    overrides = {
+        "api_mode": "WEBUI",
+        "anima_weight": "0.85",
+        "random_prompt_weight": "0.85",
+    }
+    ws = object()
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": None,
+        "active_ratings": {"g", "s"},
+        "overrides": overrides,
+    })
+
+    bridge._do_random()
+
+    assert triggered == [{
+        "settings_override": overrides,
+        "active_ratings": {"g", "s"},
+        "source_row_override": None,
+    }]
+    assert bridge._pending_overrides[ws]["params"] == overrides
+    assert bridge._pending_overrides[ws]["auto_generate"] is True
 
 
 def test_generation_param_schema_strips_desktop_selected_values():

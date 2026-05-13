@@ -87,7 +87,12 @@ def _parse_anima_weight(raw) -> tuple[bool, float]:
 
 def _is_comfyui_anima_mode(app_context, settings: Dict[str, Any]) -> bool:
     """Return whether the active prompt formatting target is ComfyUI ANIMA."""
-    if getattr(app_context, 'current_api_mode', None) != 'COMFYUI':
+    api_mode = str(
+        settings.get('api_mode')
+        or getattr(app_context, 'current_api_mode', '')
+        or ''
+    ).strip().upper()
+    if api_mode != 'COMFYUI':
         return False
 
     sampling_mode = str(
@@ -102,6 +107,50 @@ def _is_comfyui_anima_mode(app_context, settings: Dict[str, Any]) -> bool:
     main_window = getattr(app_context, 'main_window', None)
     anima_radio = getattr(main_window, 'anima_radio', None)
     return bool(anima_radio is not None and anima_radio.isChecked())
+
+
+def _is_webui_weight_mode(app_context, settings: Dict[str, Any]) -> bool:
+    api_mode = str(
+        settings.get('api_mode')
+        or getattr(app_context, 'current_api_mode', '')
+        or ''
+    ).strip().upper()
+    return api_mode == 'WEBUI'
+
+
+def _get_random_prompt_weight_raw(app_context, settings: Dict[str, Any], *, allow_window_fallback: bool):
+    raw = settings.get('random_prompt_weight')
+    if raw is None:
+        raw = settings.get('anima_weight')
+    if raw is None and allow_window_fallback and hasattr(app_context, 'main_window'):
+        mw = app_context.main_window
+        if hasattr(mw, 'anima_weight_edit'):
+            raw = mw.anima_weight_edit.text().strip() or None
+    return raw
+
+
+def _wrap_unweighted_main_tag_runs(tags: list, first_non_hash: int, weighted_indices: set, weight: float) -> int:
+    if not tags or first_non_hash >= len(tags):
+        return 0
+
+    runs = []
+    run_start = None
+    for i in range(first_non_hash, len(tags)):
+        if i not in weighted_indices:
+            if run_start is None:
+                run_start = i
+        else:
+            if run_start is not None:
+                runs.append((run_start, i - 1))
+                run_start = None
+    if run_start is not None:
+        runs.append((run_start, len(tags) - 1))
+
+    for start, end in runs:
+        tags[start] = f"({tags[start]}"
+        tags[end] = f"{tags[end]}:{weight})"
+
+    return len(runs)
 
 
 def _escape_main_tags_parens(tags: list, weighted: set):
@@ -311,19 +360,17 @@ class PromptProcessor:
 
         # 4-1. 인원수 태그 배치 (ANIMA 모드 고려)
         is_anima_mode = _is_comfyui_anima_mode(self.app_context, context.settings)
-
         is_comfyui = self.app_context.current_api_mode == 'COMFYUI'
+        is_webui_weight_mode = _is_webui_weight_mode(self.app_context, context.settings)
+        apply_prompt_weight = is_webui_weight_mode or (is_comfyui and is_anima_mode)
+        raw_prompt_weight = _get_random_prompt_weight_raw(
+            self.app_context,
+            context.settings,
+            allow_window_fallback=(is_comfyui and is_anima_mode),
+        )
+        prompt_weight_skip, prompt_weight = _parse_anima_weight(raw_prompt_weight)
 
         if is_comfyui and is_anima_mode:
-            # ANIMA 가중치 — 사용자 설정값 (없거나 잘못되면 1, 0/1 이면 래핑 생략)
-            # 우선순위: context.settings > main_window.anima_weight_edit (Interactive/Remote 폴백)
-            raw_anima_weight = context.settings.get('anima_weight')
-            if raw_anima_weight is None and hasattr(self.app_context, 'main_window'):
-                mw = self.app_context.main_window
-                if hasattr(mw, 'anima_weight_edit'):
-                    raw_anima_weight = mw.anima_weight_edit.text().strip() or None
-            anima_skip, anima_weight = _parse_anima_weight(raw_anima_weight)
-
             # ANIMA 모드: @ 태그 앞에 삽입
             at_index = None
             for i, tag in enumerate(context.prefix_tags):
@@ -349,9 +396,9 @@ class PromptProcessor:
                         char_list = [c.replace("(", r"\(").replace(")", r"\)") for c in char_list]
 
                         # 가중치 래핑 (anima_weight — 0/1 또는 잘못된 입력은 _parse_anima_weight 에서 처리)
-                        if not anima_skip:
+                        if not prompt_weight_skip:
                             char_list[0] = f"({char_list[0]}"
-                            char_list[-1] = f"{char_list[-1]}:{anima_weight})"
+                            char_list[-1] = f"{char_list[-1]}:{prompt_weight})"
 
                         # 다시 쉼표로 조인
                         character = ', '.join(char_list)
@@ -392,9 +439,9 @@ class PromptProcessor:
                         char_list = [c.replace("(", r"\(").replace(")", r"\)") for c in char_list]
 
                         # 가중치 래핑 (anima_weight — 0/1 또는 잘못된 입력은 _parse_anima_weight 에서 처리)
-                        if not anima_skip:
+                        if not prompt_weight_skip:
                             char_list[0] = f"({char_list[0]}"
-                            char_list[-1] = f"{char_list[-1]}:{anima_weight})"
+                            char_list[-1] = f"{char_list[-1]}:{prompt_weight})"
 
                         # 다시 쉼표로 조인
                         character = ', '.join(char_list)
@@ -413,37 +460,24 @@ class PromptProcessor:
                 context.prefix_tags = context.prefix_tags + anima_tags
                 print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
 
-            # 🆕 ANIMA 모드: main_tags에 가중치 적용 (사용자 지정, 기본 1)
-            # 이미 가중치가 적용된 태그(Danbooru/e621)는 제외하고 비가중치 연속 구간만 래핑
-            # weighted_indices는 4-0 단계에서 이미 계산됨 (이스케이프 후에도 유효)
-            # anima_skip(0 또는 1)인 경우 래핑 자체를 생략
-            if context.main_tags and first_non_hash < len(context.main_tags) and not anima_skip:
-                # 비가중치 태그의 연속 구간(run) 찾기
-                runs = []
-                run_start = None
-                for i in range(first_non_hash, len(context.main_tags)):
-                    if i not in weighted_indices:
-                        if run_start is None:
-                            run_start = i
-                    else:
-                        if run_start is not None:
-                            runs.append((run_start, i - 1))
-                            run_start = None
-                if run_start is not None:
-                    runs.append((run_start, len(context.main_tags) - 1))
-
-                # 각 연속 구간을 개별 가중치 그룹으로 래핑
-                for start, end in runs:
-                    context.main_tags[start] = f"({context.main_tags[start]}"
-                    context.main_tags[end] = f"{context.main_tags[end]}:{anima_weight})"
-
-                print(f"🎨 ANIMA 모드: main_tags 가중치 {anima_weight} 적용 — {len(runs)}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
-            elif context.main_tags and first_non_hash < len(context.main_tags) and anima_skip:
-                print(f"🎨 ANIMA 모드: main_tags 가중치 입력 {context.settings.get('anima_weight')} → 래핑 생략")
-
         else:
             # 기존 방식: 맨 앞에 삽입
             context.prefix_tags = sorted_person_tags + context.prefix_tags
+
+        # ANIMA/WEBUI 랜덤 프롬프트 가중치: 이미 가중치가 적용된 태그는 제외하고
+        # 비가중치 연속 구간만 A1111 형식으로 래핑한다.
+        if apply_prompt_weight and context.main_tags and first_non_hash < len(context.main_tags):
+            label = "WEBUI" if is_webui_weight_mode else "ANIMA"
+            if not prompt_weight_skip:
+                run_count = _wrap_unweighted_main_tag_runs(
+                    context.main_tags,
+                    first_non_hash,
+                    weighted_indices,
+                    prompt_weight,
+                )
+                print(f"🎨 {label} 모드: main_tags 가중치 {prompt_weight} 적용 — {run_count}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
+            else:
+                print(f"🎨 {label} 모드: main_tags 가중치 입력 {raw_prompt_weight} → 래핑 생략")
 
         # --- 이하 기존 로직 ---
         all_tags = context.get_all_tags()

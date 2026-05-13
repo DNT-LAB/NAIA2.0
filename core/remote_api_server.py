@@ -5151,6 +5151,7 @@ class RemoteBridge(QObject):
             force_skip = bool(req.get("force_naia_skip_generate", False))
             respect_autogen = bool(req.get("respect_naia_autogen", True))
             comfyui_peng_override = req.get("peng_override")  # dict or None
+            request_overrides = req.get("overrides") if isinstance(req.get("overrides"), dict) else None
 
             if comfyui_request_id:
                 will_naia_generate = (
@@ -5195,7 +5196,7 @@ class RemoteBridge(QObject):
                 self.app_context.skip_prompt_engineering_auto_hide = True
             elif ws:
                 self._pending_overrides[ws] = {
-                    "params": None,
+                    "params": request_overrides,
                     "negative": None,
                     "source": "random",
                     "auto_generate": auto_gen_checked,
@@ -5221,7 +5222,8 @@ class RemoteBridge(QObject):
                     print("🌐 Remote: 랜덤 프롬프트 생성 실패 — 후보 없음")
                     return
 
-            mw.trigger_random_prompt(active_ratings=active_ratings,
+            mw.trigger_random_prompt(settings_override=request_overrides,
+                                     active_ratings=active_ratings,
                                      source_row_override=source_row)
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
@@ -13686,7 +13688,7 @@ class RemoteBridge(QObject):
                 pending_params = pending.get("params")
                 # seed_fixed가 아닌 경우 → 랜덤 시드로 교체
                 if pending_params and "seed" in pending_params:
-                    if pending_params.get("seed_fixed") != "true":
+                    if not self._coerce_bool(pending_params.get("seed_fixed")):
                         pending_params["seed"] = str(random.randint(0, 9999999999))
                 # pending negative 반영
                 if pending_neg is not None:
@@ -15581,7 +15583,13 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             ratings = cmd.get("ratings", [])
                             valid = set(r for r in ratings if r in 'gsqe')
                             active = valid if valid else set(bridge._active_ratings)
-                            bridge._pending_random_requests.append({"ws": ws, "source_row": None, "active_ratings": active})
+                            overrides = cmd.get("overrides") if isinstance(cmd.get("overrides"), dict) else None
+                            bridge._pending_random_requests.append({
+                                "ws": ws,
+                                "source_row": None,
+                                "active_ratings": active,
+                                "overrides": overrides,
+                            })
                             bridge.request_random.emit()
                         elif cmd_type == "set_option":
                             opt_key = cmd.get("key", "")

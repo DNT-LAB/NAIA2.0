@@ -112,7 +112,7 @@ export function createModuleBadges({
     weightPopover = document.createElement('div');
     weightPopover.className = 'comfyui-weight-popover';
     weightPopover.innerHTML = `
-      <input class="comfyui-weight-input" type="text" inputmode="decimal" placeholder="1" aria-label="ANIMA weight">
+      <input class="comfyui-weight-input" type="text" inputmode="decimal" placeholder="1" aria-label="Random prompt weight">
       <button class="comfyui-weight-apply" type="button">OK</button>
     `;
     weightInput = weightPopover.querySelector('.comfyui-weight-input');
@@ -158,7 +158,7 @@ export function createModuleBadges({
     part.type = 'button';
     part.className = 'activated-summary-part comfyui-weight';
     part.textContent = text;
-    part.title = 'ANIMA Weight';
+    part.title = 'Random Prompt Weight';
     part.addEventListener('click', event => {
       event.stopPropagation();
       openWeightPopover(part);
@@ -191,6 +191,7 @@ export function createModuleBadges({
     activatedSummary.replaceChildren();
     activatedSummary.classList.remove('hidden');
     activatedSummary.classList.add('comfyui-summary');
+    activatedSummary.classList.remove('webui-summary');
     if (activatedFooter) activatedFooter.classList.add('has-activated');
     if (activatedWrap) activatedWrap.classList.add('has-activated-summary');
 
@@ -204,6 +205,19 @@ export function createModuleBadges({
     activatedSummary.append(createWorkflowPart());
   }
 
+  function renderWebUiSummary() {
+    activatedSummary.replaceChildren();
+    activatedSummary.classList.remove('hidden');
+    activatedSummary.classList.remove('comfyui-summary');
+    activatedSummary.classList.add('webui-summary');
+    if (activatedFooter) activatedFooter.classList.add('has-activated');
+    if (activatedWrap) activatedWrap.classList.add('has-activated-summary');
+
+    activatedSummary.append(createParamsPart('webui-mode', 'Mode : WEBUI'));
+    appendBullet();
+    activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
+  }
+
   function renderActivatedSummary() {
     if (!activatedSummary) return;
     const modeName = getMode();
@@ -211,6 +225,10 @@ export function createModuleBadges({
 
     if (modeName === 'COMFYUI') {
       renderComfyUiSummary();
+      return;
+    }
+    if (modeName === 'WEBUI') {
+      renderWebUiSummary();
       return;
     }
 
@@ -240,6 +258,7 @@ export function createModuleBadges({
     const hasActivated = parts.length > 0;
     activatedSummary.replaceChildren();
     activatedSummary.classList.remove('comfyui-summary');
+    activatedSummary.classList.remove('webui-summary');
     activatedSummary.classList.toggle('hidden', !hasActivated);
     if (activatedFooter) activatedFooter.classList.toggle('has-activated', hasActivated);
     if (activatedWrap) activatedWrap.classList.toggle('has-activated-summary', hasActivated);

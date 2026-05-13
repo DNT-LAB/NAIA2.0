@@ -19,6 +19,7 @@ from PIL.ImageQt import ImageQt
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
+from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from utils.clipboard_image import (
@@ -41,7 +42,7 @@ def _get_current_model_from_context(app_context) -> str:
 
 
 def _notify_vibe_transfer(app_context, title: str, message: str, level: str = "info"):
-    """Report Vibe Transfer issues without opening modal dialogs."""
+    """Report local Vibe Transfer issues without opening modal dialogs."""
     text = f"{title}: {message}" if title else str(message)
     print(f"[VibeTransfer/{level.upper()}] {text}")
 
@@ -50,17 +51,6 @@ def _notify_vibe_transfer(app_context, title: str, message: str, level: str = "i
         status_bar = getattr(main_window, "status_bar", None)
         if status_bar is not None:
             status_bar.showMessage(text, 5000)
-    except Exception:
-        pass
-
-    try:
-        bridge = getattr(app_context, "remote_bridge", None)
-        if bridge and hasattr(bridge, "_broadcast_json"):
-            bridge._broadcast_json({
-                "type": "toast",
-                "message": text,
-                "level": "error" if level == "error" else ("warning" if level == "warning" else "success"),
-            })
     except Exception:
         pass
 
@@ -1962,11 +1952,30 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             
     def _is_naid3_model(self) -> bool:
         return _is_naid3_model_from_context(self.app_context)
+
+    def _has_vibe_capacity(self) -> bool:
+        if len(self.vibe_frames) >= MAX_NAI_VIBE_REFERENCES:
+            _notify_vibe_transfer(
+                self.app_context,
+                "Limit Reached",
+                f"Maximum {MAX_NAI_VIBE_REFERENCES} vibe frames allowed",
+                "warning",
+            )
+            return False
+        return True
+
+    def _notify_multivibe_cost_if_needed(self):
+        if len(self.vibe_frames) == NAI_VIBE_INCLUDED_REFERENCES + 1:
+            _notify_vibe_transfer(
+                self.app_context,
+                "Multivibe",
+                "5+ Vibe references may cost extra Anlas; keep total strength <= 1.0 or enable Normalize.",
+                "warning",
+            )
     
     def _add_vibe_frame(self, file_path: str, file_hash_override: str = None) -> Optional[VibeTransferFrame]:
         """Add a new vibe transfer frame"""
-        if len(self.vibe_frames) >= 8:
-            _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
+        if not self._has_vibe_capacity():
             return None
             
         try:
@@ -2004,6 +2013,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
+            self._notify_multivibe_cost_if_needed()
             self._autosave_current_mode_settings()
             
             return frame
@@ -2014,8 +2024,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
     
     def _add_vibe_frame_from_noimage_import(self, no_image_path: str, vibe_data: dict) -> Optional[VibeTransferFrame]:
         """Add a vibe frame from imported .naiv4vibe file without image"""
-        if len(self.vibe_frames) >= 8:
-            _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
+        if not self._has_vibe_capacity():
             return None
 
         try:
@@ -2084,6 +2093,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             # Add to UI
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
+            self._notify_multivibe_cost_if_needed()
             self._autosave_current_mode_settings()
 
             return frame
@@ -2099,8 +2109,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         storage_hash_override: Optional[str] = None,
     ) -> Optional[VibeTransferFrame]:
         """Add a vibe frame from metadata (no actual image file)"""
-        if len(self.vibe_frames) >= 8:
-            _notify_vibe_transfer(self.app_context, "Limit Reached", "Maximum 8 vibe frames allowed", "warning")
+        if not self._has_vibe_capacity():
             return None
 
         try:
@@ -2186,6 +2195,7 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             # Add to UI
             self.scroll_layout.addWidget(frame)
             self.vibe_frames.append(frame)
+            self._notify_multivibe_cost_if_needed()
             self._autosave_current_mode_settings()
 
             return frame
@@ -2546,16 +2556,6 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
         
         # Get normalization setting
         normalize = self.normalize_checkbox and self.normalize_checkbox.isChecked()
-
-        # Apply normalization if enabled and sum > 1
-        if normalize and reference_strength_multiple:
-            total_strength = sum(reference_strength_multiple)
-            if total_strength > 1.0:
-                # Normalize to sum to 1.0 with 15 decimal places max
-                reference_strength_multiple = [
-                    round(strength / total_strength, 15)
-                    for strength in reference_strength_multiple
-                ]
 
         result = {
             "normalize_reference_strength_multiple": normalize,

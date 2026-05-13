@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES
 from core.wildcard_processor import split_tags_smart
 
 
@@ -159,12 +160,14 @@ def _cluster_to_vibe_params(data: dict, current_model: str) -> dict:
         name = data.get("_cluster_name") or data.get("name") or ""
         raise VibeClusterPromptError(f"Vibe cluster has no enabled encoded frames: {name}")
 
-    normalize = bool(data.get("normalize_strength", False))
-    if normalize:
-        total = sum(reference_strengths)
-        if total > 1.0:
-            reference_strengths = [round(strength / total, 15) for strength in reference_strengths]
+    if len(reference_images) > MAX_NAI_VIBE_REFERENCES:
+        name = data.get("_cluster_name") or data.get("name") or ""
+        raise VibeClusterPromptError(
+            f"Vibe cluster has too many enabled frames: {name} "
+            f"({len(reference_images)}/{MAX_NAI_VIBE_REFERENCES})"
+        )
 
+    normalize = bool(data.get("normalize_strength", False))
     params = {
         "normalize_reference_strength_multiple": normalize,
         "reference_image_multiple": reference_images,

@@ -15,6 +15,7 @@ from modules.vibe_transfer_module import (
     _clipboard_mime_png_bytes,
     _coerce_information_extracted,
     _coerce_reference_strength,
+    _notify_vibe_transfer,
 )
 
 
@@ -24,6 +25,22 @@ class _FakeContext:
 
     def get_api_mode(self):
         return self.mode
+
+
+class _FakeStatusBar:
+    def __init__(self):
+        self.messages = []
+
+    def showMessage(self, text, timeout):
+        self.messages.append((text, timeout))
+
+
+class _FakeRemoteBridge:
+    def __init__(self):
+        self.broadcasts = []
+
+    def _broadcast_json(self, payload):
+        self.broadcasts.append(payload)
 
 
 class _FakeSlider:
@@ -69,6 +86,8 @@ class _FakeFrame:
         self.info_extracted_label = _FakeLabel()
         self.status_updates = 0
         self.button_updates = 0
+        self.is_enabled = True
+        self.vibe_encodings = {1.0: "encoded-frame"}
 
     def _update_encoding_status(self):
         self.status_updates += 1
@@ -173,6 +192,40 @@ def test_vibe_information_extracted_coercion_keeps_slider_bounds():
     assert _coerce_information_extracted("2.0") == 1.0
     assert _coerce_information_extracted("-2.0") == 0.0
     assert _coerce_information_extracted(None, 0.8) == 0.8
+
+
+def test_vibe_transfer_desktop_notification_does_not_broadcast_to_remote():
+    status_bar = _FakeStatusBar()
+    bridge = _FakeRemoteBridge()
+    ctx = _FakeContext()
+    ctx.main_window = type("Window", (), {"status_bar": status_bar})()
+    ctx.remote_bridge = bridge
+
+    _notify_vibe_transfer(ctx, "Limit Reached", "Maximum 16 Vibe Transfer frames allowed", "error")
+
+    assert status_bar.messages == [
+        ("Limit Reached: Maximum 16 Vibe Transfer frames allowed", 5000)
+    ]
+    assert bridge.broadcasts == []
+
+
+def test_vibe_transfer_normalize_preserves_raw_strengths():
+    module = VibeTransferModule()
+    module._get_current_model = lambda: "NAID4.5F"
+    module.normalize_checkbox = _FakeCheckBox(True)
+    first = _FakeFrame()
+    first.reference_strength = 0.8
+    first.vibe_encodings = {1.0: "encoded-a"}
+    second = _FakeFrame()
+    second.reference_strength = 0.4
+    second.vibe_encodings = {1.0: "encoded-b"}
+    module.vibe_frames = [first, second]
+
+    data = module.get_vibe_transfer_multiple_data()
+
+    assert data["normalize_reference_strength_multiple"] is True
+    assert data["reference_strength_multiple"] == [0.8, 0.4]
+    assert data["reference_image_multiple"] == ["encoded-a", "encoded-b"]
 
 
 def test_imported_vibe_storage_persists_reference_strength(tmp_path, monkeypatch):

@@ -71,6 +71,8 @@ class _FakeVibeFrame:
         self.information_extracted = information_extracted
         self.is_enabled = is_enabled
         self.is_no_image = True
+        self.file_hash = "fake-vibe-hash"
+        self.file_name = "fake-vibe.png"
         self.target_model = target_model
         self.enable_check = _FakeCheckBox(is_enabled)
 
@@ -496,6 +498,33 @@ def test_vibe_storage_scan_skips_no_image_and_missing_thumbnails(tmp_path, monke
     items = listing["models"]["NAID4.5F"]
     assert [item["file_hash"] for item in items] == [good_hash]
     assert items[0]["thumbnail"]
+
+
+def test_remote_vibe_upload_capacity_error_is_remote_owned(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    bridge = RemoteBridge(ctx)
+    module = _FakeVibeModule([
+        _FakeVibeFrame()
+        for _ in range(remote_api_server.MAX_NAI_VIBE_REFERENCES)
+    ])
+    bridge._find_module = lambda name: module if name == "vibe_transfer" else None
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (1, 1), "white").save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    bridge._set_vibe_transfer("upload_image", encoded)
+
+    assert broadcasts[0] == {
+        "type": "toast",
+        "message": "Maximum 16 Vibe Transfer frames allowed",
+        "level": "error",
+    }
+    assert broadcasts[-1]["module_id"] == "vibe_transfer"
+    assert len(module.vibe_frames) == remote_api_server.MAX_NAI_VIBE_REFERENCES
 
 
 class _TextEdit:

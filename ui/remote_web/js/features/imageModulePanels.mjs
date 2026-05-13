@@ -574,6 +574,16 @@ export function createImageModulePanels({
       </div>
     </div>`;
     }).join('');
+    const enabledCount = Number(message.enabled_count || 0);
+    const includedFrames = Number(message.included_frames || 4);
+    const extraCostCount = Number(message.extra_cost_count || 0);
+    const strengthTotal = Number(message.strength_total || 0);
+    const vibeNotice = extraCostCount > 0
+      ? `<div class="mod-notice">5+ active Vibe references may cost extra Anlas (${extraCostCount} extra). Keep total strength &lt;= 1.0 or enable Normalize.</div>`
+      : '';
+    const strengthNotice = message.strength_warning
+      ? `<div class="mod-notice">Active Vibe strength total is ${strengthTotal.toFixed(2)}. Enable Normalize or lower strengths for predictable Multivibe results.</div>`
+      : '';
 
     moduleBody.innerHTML = `
     <div class="mod-upload-bar">
@@ -584,12 +594,15 @@ export function createImageModulePanels({
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>
       <button class="mod-btn-upload mod-btn-storage" onclick="openVibeClusterListPanel()">Cluster</button>
       <span class="mod-frame-count">${message.frame_count}/${message.max_frames}</span>
+      ${enabledCount > includedFrames ? `<span class="mod-frame-count">${enabledCount} active</span>` : ''}
     </div>
     <label class="mod-checkbox-item" style="margin-bottom:8px">
       <input type="checkbox" ${message.normalize ? 'checked' : ''}
         oninput="setModuleParam('vibe_transfer','normalize',String(this.checked))">
       <span class="mod-checkbox-label">Normalize reference strength</span>
     </label>
+    ${vibeNotice}
+    ${strengthNotice}
     ${frames.length ? frames : '<div class="mod-empty">No vibe transfers loaded</div>'}
     <div class="vibe-cluster-footer">
       <button class="mod-btn-upload mod-btn-vibe-cluster" onclick="openVibeClusterPanel()">Make Vibe Cluster</button>
@@ -663,6 +676,7 @@ export function createImageModulePanels({
     }).join('');
 
     const currentCount = message.current_frame_count ?? '';
+    const maxFrames = message.max_frames ?? 16;
     const panel = document.createElement('div');
     panel.className = 'vibe-cluster-popover open';
     panel.innerHTML = `
@@ -672,7 +686,7 @@ export function createImageModulePanels({
       </div>
       <div class="vibe-cluster-list-head">
         <span>Saved</span>
-        ${currentCount !== '' ? `<span>${currentCount}/8 loaded</span>` : ''}
+        ${currentCount !== '' ? `<span>${currentCount}/${maxFrames} loaded</span>` : ''}
       </div>
       <div class="vibe-cluster-list">${items || '<div class="mod-empty">No saved clusters</div>'}</div>
       ${renderVibeClusterListHiddenInput()}

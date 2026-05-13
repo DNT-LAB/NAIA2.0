@@ -7,6 +7,7 @@ from core.vibe_cluster_resolver import (
     apply_vibe_cluster_prompt_override,
     search_vibe_clusters,
 )
+from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES
 
 
 def _write_cluster(root, name, *, cluster_id="cluster1", enabled=True):
@@ -56,7 +57,8 @@ def test_apply_vibe_cluster_prompt_override_injects_request_params(tmp_path):
     assert params["input"] == "1girl, best quality"
     assert params["_vibe_cluster_override"]["name"] == "MyVibe"
     assert params["reference_image_multiple"] == ["encoded-half", "encoded-b"]
-    assert params["reference_strength_multiple"] == [0.666666666666667, 0.333333333333333]
+    assert params["reference_strength_multiple"] == [0.8, 0.4]
+    assert params["normalize_reference_strength_multiple"] is True
     assert "reference_information_extracted_multiple" not in params
 
 
@@ -99,6 +101,38 @@ def test_apply_vibe_cluster_prompt_override_rejects_unknown_cluster(tmp_path):
 
     with pytest.raises(VibeClusterPromptError, match="not found"):
         apply_vibe_cluster_prompt_override(params, root=tmp_path / "save" / "vibe_transfer_clusters")
+
+
+def test_apply_vibe_cluster_prompt_override_rejects_clusters_above_vibe_limit(tmp_path):
+    root = tmp_path / "save" / "vibe_transfer_clusters"
+    root.mkdir(parents=True, exist_ok=True)
+    frames = [
+        {
+            "encodings": {"1.0": f"encoded-{index}"},
+            "reference_strength": 0.05,
+            "information_extracted": 1.0,
+            "is_enabled": True,
+            "target_model": "NAID4.5F",
+        }
+        for index in range(MAX_NAI_VIBE_REFERENCES + 1)
+    ]
+    (root / "too-many.json").write_text(
+        json.dumps({
+            "id": "too-many",
+            "name": "TooMany",
+            "model": "NAID4.5F",
+            "frames": frames,
+        }),
+        encoding="utf-8",
+    )
+    params = {
+        "api_mode": "NAI",
+        "model": "NAID4.5F",
+        "input": "vibe:TooMany",
+    }
+
+    with pytest.raises(VibeClusterPromptError, match="too many enabled frames"):
+        apply_vibe_cluster_prompt_override(params, root=root)
 
 
 def test_search_vibe_clusters_returns_prompt_completion_shape(tmp_path):

@@ -47,6 +47,7 @@ from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
 from core.kr_phrase_canonicalizer import match_kr_phrase_canonical_tags
 from core.kr_sentence_reconstructor import reconstruct_kr_tag_queries
+from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 from core.tag_search_index import TagSearchIndex, normalize_search_query
 from core.resolution_utils import (
     MAX_1MP_PIXELS,
@@ -9156,6 +9157,8 @@ class RemoteBridge(QObject):
             frames = []
             encoding_worker = getattr(m, "encoding_worker", None)
             encoding_target = getattr(m, "_encoding_target_frame", None)
+            enabled_count = 0
+            enabled_strength_total = 0.0
             for i, f in enumerate(m.vibe_frames):
                 thumb = ""
                 try:
@@ -9174,6 +9177,12 @@ class RemoteBridge(QObject):
                     active_encoding = min(encoding_keys, key=lambda key: abs(key - information_extracted))
                     has_encoding = abs(active_encoding - information_extracted) < 1e-9
                 is_encoding = bool(encoding_worker and encoding_worker.isRunning() and encoding_target is f)
+                if f.is_enabled and getattr(f, 'vibe_encodings', None):
+                    enabled_count += 1
+                    try:
+                        enabled_strength_total += float(f.reference_strength)
+                    except Exception:
+                        pass
                 frames.append({
                     "index": i,
                     "file_hash": f.file_hash,
@@ -9193,8 +9202,17 @@ class RemoteBridge(QObject):
                 "type": "module_state",
                 "module_id": "vibe_transfer",
                 "normalize": m.normalize_checkbox.isChecked() if hasattr(m, 'normalize_checkbox') else False,
+                "enabled_count": enabled_count,
                 "frame_count": len(m.vibe_frames),
-                "max_frames": 8,
+                "max_frames": MAX_NAI_VIBE_REFERENCES,
+                "included_frames": NAI_VIBE_INCLUDED_REFERENCES,
+                "extra_cost_count": max(0, enabled_count - NAI_VIBE_INCLUDED_REFERENCES),
+                "strength_total": round(enabled_strength_total, 3),
+                "strength_warning": (
+                    enabled_count > 1
+                    and enabled_strength_total > 1.0
+                    and not (m.normalize_checkbox.isChecked() if hasattr(m, 'normalize_checkbox') else False)
+                ),
                 "frames": frames,
             }
         except Exception as e:
@@ -9284,14 +9302,27 @@ class RemoteBridge(QObject):
                     frame._update_encode_button_visibility()
                 return information_extracted
 
+            def _vibe_capacity_full():
+                return len(getattr(m, "vibe_frames", []) or []) >= MAX_NAI_VIBE_REFERENCES
+
+            def _broadcast_vibe_capacity_error():
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed",
+                    "level": "error",
+                })
+
             if key == "upload_image":
-                img_bytes = base64.b64decode(value)
-                temp_dir = Path("temp/remote_upload")
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                temp_path = temp_dir / f"vibe_{int(time.time() * 1000)}.png"
-                temp_path.write_bytes(img_bytes)
-                m._add_vibe_frame(str(temp_path))
-                self._disable_all_char_ref_frames()
+                if _vibe_capacity_full():
+                    _broadcast_vibe_capacity_error()
+                else:
+                    img_bytes = base64.b64decode(value)
+                    temp_dir = Path("temp/remote_upload")
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+                    temp_path = temp_dir / f"vibe_{int(time.time() * 1000)}.png"
+                    temp_path.write_bytes(img_bytes)
+                    m._add_vibe_frame(str(temp_path))
+                    self._disable_all_char_ref_frames()
             elif key.startswith("remove_frame_"):
                 idx = int(key.split("_")[-1])
                 if 0 <= idx < len(m.vibe_frames):
@@ -9330,7 +9361,9 @@ class RemoteBridge(QObject):
             elif key == "apply_storage":
                 # value = "model|file_hash|ie_value"
                 parts = value.split("|")
-                if len(parts) >= 3:
+                if _vibe_capacity_full():
+                    _broadcast_vibe_capacity_error()
+                elif len(parts) >= 3:
                     model, file_hash, ie_str = parts[0], parts[1], parts[2]
                     m._on_apply_vibe_from_storage(model, file_hash, "", float(ie_str))
                     self._disable_all_char_ref_frames()
@@ -9358,7 +9391,10 @@ class RemoteBridge(QObject):
                 self._broadcast_json(self._scan_vibe_clusters())
                 return
             elif key == "restore_metadata":
-                self._restore_vibe_transfer_from_metadata(m, value)
+                if _vibe_capacity_full():
+                    _broadcast_vibe_capacity_error()
+                else:
+                    self._restore_vibe_transfer_from_metadata(m, value)
             # 변경 후 상태 브로드캐스트
             state = self._read_vibe_transfer()
             if state:
@@ -9508,7 +9544,7 @@ class RemoteBridge(QObject):
             "module_id": "vibe_cluster",
             "items": items,
             "current_frame_count": current_count,
-            "max_frames": 8,
+            "max_frames": MAX_NAI_VIBE_REFERENCES,
         }
 
     def _save_current_vibe_cluster(self, module, value: str) -> bool:
@@ -9656,7 +9692,7 @@ class RemoteBridge(QObject):
         added = 0
         skipped = 0
         for frame_data in frames:
-            if len(getattr(module, "vibe_frames", []) or []) >= 8:
+            if len(getattr(module, "vibe_frames", []) or []) >= MAX_NAI_VIBE_REFERENCES:
                 skipped += 1
                 continue
             encodings = frame_data.get("encodings") if isinstance(frame_data.get("encodings"), dict) else {}

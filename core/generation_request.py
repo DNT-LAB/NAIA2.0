@@ -19,6 +19,8 @@ import uuid
 import pandas as pd
 from datetime import datetime
 
+from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES
+
 
 # ============ NAI 데이터 클래스 ============
 
@@ -169,7 +171,7 @@ class NAIVibeTransferData:
     Attributes:
         reference_image_multiple: 인코딩된 이미지 리스트 (base64)
         reference_strength_multiple: 이미지별 강도 리스트 (-1.0 ~ 1.0)
-        normalize: 강도 정규화 여부 (합이 1.0 초과 시 자동 정규화)
+        normalize: NAI API에 전달할 강도 정규화 플래그
         reference_information_extracted_multiple: IE 값 리스트 (NAID3만)
 
     Examples:
@@ -183,16 +185,17 @@ class NAIVibeTransferData:
     reference_image_multiple: List[str]
     reference_strength_multiple: List[float]
     normalize: bool
-    reference_information_extracted_multiple: List[int] = field(default_factory=list)
+    reference_information_extracted_multiple: List[float] = field(default_factory=list)
 
     def __post_init__(self):
         """유효성 검사"""
         if not self.reference_image_multiple:
             raise ValueError("reference_image_multiple cannot be empty")
 
-        if len(self.reference_image_multiple) > 5:
+        if len(self.reference_image_multiple) > MAX_NAI_VIBE_REFERENCES:
             raise ValueError(
-                f"Maximum 5 reference images allowed, got {len(self.reference_image_multiple)}"
+                f"Maximum {MAX_NAI_VIBE_REFERENCES} reference images allowed, "
+                f"got {len(self.reference_image_multiple)}"
             )
 
         if len(self.reference_strength_multiple) != len(self.reference_image_multiple):

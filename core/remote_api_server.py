@@ -514,6 +514,7 @@ class RemoteBridge(QObject):
     request_set_result_enhance_config = pyqtSignal(object, str)  # (ws, json) — Enhance 설정 변경
     request_result_reroll = pyqtSignal(str)             # result context JSON — desktop reroll 재사용
     request_result_queue = pyqtSignal(str)              # result context JSON — 결과 이미지를 생성 큐에 추가
+    request_result_history_action = pyqtSignal(str)     # request_id — 결과 히스토리 저장/삭제
     request_result_upscale = pyqtSignal(object, str)    # (ws, json) — 현재/저장 결과 NAI 2x upscale
     request_result_image_action = pyqtSignal(str)       # result context JSON — 숨김 img2img 세션 등
     request_image_action = pyqtSignal(str, bytes, str)  # (action, image_bytes, label)
@@ -683,6 +684,8 @@ class RemoteBridge(QObject):
         self._resolution_actions_lock = threading.Lock()
         self._pending_clipboard_png_requests: dict = {}
         self._clipboard_png_requests_lock = threading.Lock()
+        self._pending_result_history_actions: dict = {}
+        self._result_history_actions_lock = threading.Lock()
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
 
@@ -4588,6 +4591,15 @@ class RemoteBridge(QObject):
         image_window = self._get_image_window_widget()
         return getattr(image_window, "current_history_item", None) if image_window else None
 
+    def _get_result_history_action_item(self, payload: dict | None = None):
+        payload = payload if isinstance(payload, dict) else {}
+        rel_path = str(payload.get("path") or "").strip()
+        file_path = str(payload.get("file_path") or payload.get("filePath") or "").strip()
+        if rel_path or file_path:
+            return self._find_history_item_by_path(rel_path=rel_path, file_path=file_path)
+        image_window = self._get_image_window_widget()
+        return getattr(image_window, "current_history_item", None) if image_window else None
+
     def _result_context_generation_params(self, payload: dict | None = None) -> dict:
         item = self._get_result_context_history_item(payload)
         params = getattr(item, "generation_params", None) if item else None
@@ -4784,6 +4796,147 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: result queue failed — {e}")
             self._broadcast_json({"type": "toast", "message": f"Queue result failed: {e}", "level": "error"})
             self._broadcast_queue_state()
+
+    async def _request_result_history_action(self, action: str, payload: dict | None = None, timeout: float = 8.0) -> dict:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        request_id = uuid.uuid4().hex
+        with self._result_history_actions_lock:
+            self._pending_result_history_actions[request_id] = {
+                "loop": loop,
+                "future": future,
+                "action": action,
+                "payload": payload if isinstance(payload, dict) else {},
+            }
+        self.request_result_history_action.emit(request_id)
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result if isinstance(result, dict) else {"ok": False, "error": "Invalid result action response"}
+        finally:
+            with self._result_history_actions_lock:
+                self._pending_result_history_actions.pop(request_id, None)
+
+    def _complete_result_history_action(self, request: dict, result: dict):
+        loop = request.get("loop")
+        future = request.get("future")
+        if loop is None or future is None:
+            return
+        loop.call_soon_threadsafe(
+            lambda f=future, r=result: (f.set_result(r) if not f.done() else None)
+        )
+
+    def _save_result_history_item(self, payload: dict) -> dict:
+        image_window = self._get_image_window_widget()
+        if image_window is None:
+            return {"ok": False, "error": "Image window is unavailable"}
+        item = self._get_result_history_action_item(payload)
+        if not item or not getattr(item, "image", None):
+            return {"ok": False, "error": "History image is unavailable"}
+
+        existing_path = self._history_item_file_path(item)
+        if existing_path:
+            return {"ok": True, "already_saved": True, "asset": self._build_saved_result_asset_payload(self._history_item_path_key(item))}
+
+        raw_bytes = getattr(item, "raw_bytes", None)
+        if not raw_bytes:
+            try:
+                raw_bytes, _media_type = self._history_item_image_payload(item)
+            except Exception as e:
+                return {"ok": False, "error": f"Image bytes are unavailable: {e}"}
+
+        image_crud = getattr(image_window, "image_crud", None) or getattr(self.app_context, "image_crud_controller", None)
+        if image_crud is None or not hasattr(image_crud, "save_image"):
+            return {"ok": False, "error": "Image save controller is unavailable"}
+
+        try:
+            save_as_webp_checkbox = self._get_save_as_webp_checkbox()
+            is_webp = bool(save_as_webp_checkbox and save_as_webp_checkbox.isChecked())
+            create_info = getattr(image_window, "_create_classification_info", None)
+            classification_source = getattr(self.app_context, "image_crud_controller", None) or image_crud
+            classification_info = create_info(item) if callable(create_info) else {
+                "method": getattr(classification_source, "get_classification_method", lambda: "none")(),
+                "prompt": str(getattr(item, "info_text", "") or ""),
+                "image_size": getattr(getattr(item, "image", None), "size", (0, 0)),
+                "tags": [],
+                "backend_type": str(getattr(item, "backend_type", "NAI") or "NAI"),
+            }
+            success, filepath, error = image_crud.save_image(
+                image_bytes=bytes(raw_bytes),
+                as_webp=is_webp,
+                classification_info=classification_info,
+            )
+        except Exception as e:
+            return {"ok": False, "error": f"Image save failed: {e}"}
+
+        if not success:
+            return {"ok": False, "error": error or "Image save failed"}
+
+        try:
+            item.filepath = filepath
+        except Exception:
+            pass
+
+        if hasattr(self.app_context, "main_window") and hasattr(self.app_context.main_window, "status_bar"):
+            try:
+                self.app_context.main_window.status_bar.showMessage(f"✅ 이미지 저장 완료: {Path(filepath).name}", 3000)
+            except Exception:
+                pass
+
+        payload = self._history_item_summary(item)
+        payload.update({"type": "viewer_new_image", "total": self._history_count()})
+        self._broadcast_json(payload)
+        return {
+            "ok": True,
+            "saved": True,
+            "path": self._history_item_path_key(item),
+            "file_path": str(filepath or ""),
+            "asset": self._build_saved_result_asset_payload(self._history_item_path_key(item)),
+        }
+
+    def _delete_result_history_item(self, payload: dict) -> dict:
+        image_window = self._get_image_window_widget()
+        if image_window is None:
+            return {"ok": False, "error": "Image window is unavailable"}
+        history_window = getattr(image_window, "image_history_window", None)
+        if history_window is None:
+            return {"ok": False, "error": "History window is unavailable"}
+        item = self._get_result_history_action_item(payload)
+        if not item:
+            return {"ok": False, "error": "History item is unavailable"}
+        if self._history_item_file_path(item):
+            return {"ok": False, "error": "Only unsaved history images can be deleted from this action"}
+
+        rel_path = self._history_item_path_key(item)
+        for widget in list(getattr(history_window, "history_widgets", []) or []):
+            if getattr(widget, "history_item", None) is item:
+                history_window.on_item_delete_requested(widget)
+                return {
+                    "ok": True,
+                    "deleted": True,
+                    "path": rel_path,
+                    "history_id": self._ensure_history_id(item),
+                    "total": self._history_count(),
+                }
+        return {"ok": False, "error": "History item is not in the visible history queue"}
+
+    def _do_result_history_action(self, request_id: str):
+        with self._result_history_actions_lock:
+            request = self._pending_result_history_actions.pop(request_id, None)
+        if not request:
+            return
+
+        action = str(request.get("action") or "").strip().lower()
+        payload = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+        try:
+            if action == "save":
+                result = self._save_result_history_item(payload)
+            elif action == "delete":
+                result = self._delete_result_history_item(payload)
+            else:
+                result = {"ok": False, "error": "Unsupported result history action"}
+        except Exception as e:
+            result = {"ok": False, "error": f"Result history action failed: {e}"}
+        self._complete_result_history_action(request, result)
 
     def _open_path_location(self, target: Path):
         import subprocess
@@ -5995,14 +6148,27 @@ class RemoteBridge(QObject):
         return re.sub(r"[^A-Za-z0-9_.-]+", "_", history_id)[:96] or uuid.uuid4().hex
 
     def _history_item_filename(self, item) -> str:
+        stable_filename = str(getattr(item, "history_filename", "") or "").strip()
+        if stable_filename:
+            return stable_filename
+
         filepath = str(getattr(item, "filepath", "") or "")
         if filepath:
             filename = Path(filepath).name
             if filename:
+                try:
+                    setattr(item, "history_filename", filename)
+                except Exception:
+                    pass
                 return filename
         raw_bytes = getattr(item, "raw_bytes", None)
         extension = "webp" if isinstance(raw_bytes, (bytes, bytearray)) and bytes(raw_bytes).startswith(b"RIFF") and bytes(raw_bytes)[8:12] == b"WEBP" else "png"
-        return f"history-{self._ensure_history_id(item)[:12]}.{extension}"
+        filename = f"history-{self._ensure_history_id(item)[:12]}.{extension}"
+        try:
+            setattr(item, "history_filename", filename)
+        except Exception:
+            pass
+        return filename
 
     def _history_item_path_key(self, item) -> str:
         return f"{self.HISTORY_ITEM_PATH_PREFIX}{self._ensure_history_id(item)}/{self._history_item_filename(item)}"
@@ -14122,6 +14288,32 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         bridge.request_result_queue.emit(json.dumps(payload))
         return {"ok": True, "action": "queue", "position": position, "queue_mode": queue_mode}
 
+    @app.post("/api/result/action/save")
+    async def api_result_action_save(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        result = await bridge._request_result_history_action("save", payload)
+        if not result.get("ok"):
+            return JSONResponse({"error": result.get("error") or "Image save failed"}, status_code=400)
+        return result
+
+    @app.post("/api/result/action/delete")
+    async def api_result_action_delete(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        result = await bridge._request_result_history_action("delete", payload)
+        if not result.get("ok"):
+            return JSONResponse({"error": result.get("error") or "History delete failed"}, status_code=400)
+        return result
+
     @app.post("/api/comfyui/random")
     async def api_comfyui_random(req: Request):
         """ComfyUI 전용 sync 랜덤 프롬프트 요청.
@@ -16114,6 +16306,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     bridge.request_set_result_enhance_config.connect(bridge._do_set_result_enhance_config, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_reroll.connect(bridge._do_result_reroll, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_queue.connect(bridge._do_result_queue, Qt.ConnectionType.QueuedConnection)
+    bridge.request_result_history_action.connect(bridge._do_result_history_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_upscale.connect(bridge._do_result_upscale, Qt.ConnectionType.QueuedConnection)
     bridge.request_result_image_action.connect(bridge._do_result_image_action, Qt.ConnectionType.QueuedConnection)
     bridge.request_image_action.connect(bridge._do_image_action, Qt.ConnectionType.QueuedConnection)

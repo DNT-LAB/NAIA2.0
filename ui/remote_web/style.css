@@ -4127,6 +4127,84 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .stats-history-toggle:empty::before {
   content: "0";
 }
+.result-unsaved-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 18;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  pointer-events: none;
+}
+.result-unsaved-actions[hidden] {
+  display: none !important;
+}
+.result-unsaved-btn {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  width: 52px;
+  min-width: 52px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 7px 18px rgba(0,0,0,0.34);
+  transition: filter 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.result-unsaved-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 52%);
+  pointer-events: none;
+}
+.result-unsaved-btn.save {
+  background: linear-gradient(135deg, #248653, #5cb87a);
+  box-shadow: 0 7px 18px rgba(0,0,0,0.34), 0 4px 14px rgba(92,184,122,0.24);
+}
+.result-unsaved-btn.delete {
+  background: linear-gradient(135deg, #a82f36, #ef5350);
+  box-shadow: 0 7px 18px rgba(0,0,0,0.34), 0 4px 14px rgba(239,83,80,0.24);
+  transform: translateY(1px);
+}
+.result-unsaved-btn:hover:not(:disabled),
+.result-unsaved-btn:focus-visible:not(:disabled) {
+  outline: none;
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+.result-unsaved-btn.delete:hover:not(:disabled),
+.result-unsaved-btn.delete:focus-visible:not(:disabled) {
+  transform: translateY(0);
+}
+.result-unsaved-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.result-unsaved-btn.delete:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+}
+.result-unsaved-btn:disabled {
+  cursor: wait;
+  opacity: 0.45;
+  transform: none;
+}
+.result-unsaved-btn.delete:disabled {
+  transform: translateY(1px);
+}
 .stats-dot {
   display: inline-block;
   width: 6px; height: 6px;

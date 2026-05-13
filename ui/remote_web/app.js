@@ -65,6 +65,10 @@ let imageActionPopup = null;
 let metadataViewer = null;
 let pendingResultEnhanceConfig = null;
 let resultEnhanceAssetRequestId = 0;
+let resultUnsavedActionRequestId = 0;
+let resultUnsavedActionAsset = null;
+let resultUnsavedActionTimer = null;
+let resultUnsavedActionBusy = false;
 let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
@@ -285,7 +289,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260509_mo
       showToast,
       renderPromptInfoHtml,
       onPromptInfoTagLookup: lookupPromptInfoTag,
-      onDiskImageSelected: updateResultEnhanceForSavedPath,
+      onDiskImageSelected: onResultHistorySelectionChanged,
     });
   })
   .catch(error => {
@@ -1013,6 +1017,9 @@ let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
 const statsSave      = $('statsSave');
+const resultUnsavedActions = $('resultUnsavedActions');
+const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
+const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -1070,6 +1077,7 @@ function handleWsBlob(data) {
   preview.dataset.path = '';
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
+  scheduleResultUnsavedActionRefresh(180);
   const pendingPresetRequestId = String(presetGenerationPending?.requestId || '');
   const imagePresetRequestId = String(
     latestImageMeta?.remote_preset_request_id
@@ -1386,6 +1394,141 @@ async function updateResultEnhanceForSavedPath(relPath = '') {
         can_enhance: false,
       }));
     }
+  }
+}
+
+function onResultHistorySelectionChanged(relPath = '') {
+  updateResultEnhanceForSavedPath(relPath);
+  scheduleResultUnsavedActionRefresh();
+}
+
+function activeResultAssetUrl() {
+  if (!preview || !preview.classList.contains('show')) return '';
+  const source = String(preview.dataset?.source || '').toLowerCase();
+  const path = String(preview.dataset?.path || '');
+  if (source === 'saved' && path) {
+    const params = new URLSearchParams({path});
+    return '/api/result/asset/saved?' + params.toString();
+  }
+  return '/api/result/asset/current';
+}
+
+function isUnsavedHistoryAsset(asset) {
+  if (!asset || typeof asset !== 'object') return false;
+  const path = String(asset.path || '');
+  const filePath = String(asset.file_path || asset.filePath || '');
+  return Boolean(asset.has_image ?? asset.hasImage)
+    && path.startsWith('__history_item__/')
+    && !filePath;
+}
+
+function setResultUnsavedActionBusy(busy) {
+  resultUnsavedActionBusy = !!busy;
+  if (resultUnsavedSaveBtn) resultUnsavedSaveBtn.disabled = resultUnsavedActionBusy;
+  if (resultUnsavedDeleteBtn) resultUnsavedDeleteBtn.disabled = resultUnsavedActionBusy;
+}
+
+function renderResultUnsavedActions(asset = null) {
+  resultUnsavedActionAsset = asset;
+  const visible = isUnsavedHistoryAsset(asset);
+  if (resultUnsavedActions) resultUnsavedActions.hidden = !visible;
+  if (!visible) setResultUnsavedActionBusy(false);
+}
+
+async function refreshResultUnsavedActions() {
+  if (!resultUnsavedActions) return;
+  const url = activeResultAssetUrl();
+  const requestId = ++resultUnsavedActionRequestId;
+  if (!url) {
+    renderResultUnsavedActions(null);
+    return;
+  }
+  try {
+    const response = await fetch(url, {cache: 'no-store'});
+    if (requestId !== resultUnsavedActionRequestId) return;
+    if (!response.ok) {
+      renderResultUnsavedActions(null);
+      return;
+    }
+    renderResultUnsavedActions(await response.json());
+  } catch (error) {
+    if (requestId === resultUnsavedActionRequestId) renderResultUnsavedActions(null);
+  }
+}
+
+function scheduleResultUnsavedActionRefresh(delay = 120) {
+  if (resultUnsavedActionTimer) clearTimeout(resultUnsavedActionTimer);
+  resultUnsavedActionTimer = setTimeout(() => {
+    resultUnsavedActionTimer = null;
+    void refreshResultUnsavedActions();
+  }, delay);
+}
+
+function resultHistoryActionPayload(asset = resultUnsavedActionAsset) {
+  return {
+    source: asset?.source || (preview?.dataset?.source || 'current'),
+    path: asset?.path || preview?.dataset?.path || '',
+    file_path: asset?.file_path || asset?.filePath || '',
+    label: asset?.label || 'Result Image',
+  };
+}
+
+async function saveDisplayedHistoryImage() {
+  if (!isUnsavedHistoryAsset(resultUnsavedActionAsset) || resultUnsavedActionBusy) return;
+  setResultUnsavedActionBusy(true);
+  try {
+    const response = await fetch('/api/result/action/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(resultHistoryActionPayload()),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    renderResultUnsavedActions(data.asset || null);
+    if (data.asset?.path) updateResultEnhanceForSavedPath(data.asset.path);
+    showToast('Image saved to history folder', 'success');
+  } catch (error) {
+    console.error('Result history save failed', error);
+    showToast(error.message || 'Image save failed', 'error');
+  } finally {
+    setResultUnsavedActionBusy(false);
+    scheduleResultUnsavedActionRefresh(250);
+  }
+}
+
+async function deleteDisplayedHistoryImage() {
+  if (!isUnsavedHistoryAsset(resultUnsavedActionAsset) || resultUnsavedActionBusy) return;
+  const deletedPath = String(resultUnsavedActionAsset.path || '');
+  const deletingDisplayedImage = preview?.dataset?.source === 'current' || preview?.dataset?.path === deletedPath;
+  setResultUnsavedActionBusy(true);
+  try {
+    const response = await fetch('/api/result/action/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(resultHistoryActionPayload()),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    renderResultUnsavedActions(null);
+    if (deletingDisplayedImage) {
+      preview.removeAttribute('src');
+      preview.classList.remove('show');
+      preview.dataset.path = '';
+      emptyMsg.style.display = '';
+      if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
+      if (resultEnhance) resultEnhance.clearCurrentMeta();
+    }
+    showToast('History item deleted', 'success');
+  } catch (error) {
+    console.error('Result history delete failed', error);
+    showToast(error.message || 'History delete failed', 'error');
+  } finally {
+    setResultUnsavedActionBusy(false);
+    scheduleResultUnsavedActionRefresh(250);
   }
 }
 
@@ -2282,9 +2425,18 @@ function initializeDetachedShell() {
 function initViewer() { if (resultHistory) resultHistory.initViewer(); }
 function closeViewerLightbox() { if (resultHistory) resultHistory.closeLightbox(); }
 function onLightboxClick(event) { if (resultHistory) resultHistory.onLightboxClick(event); }
-function onViewerNewImage(message) { if (resultHistory) resultHistory.onNewImage(message); }
-function onViewerHistoryRemoved(message) { if (resultHistory) resultHistory.onRemoved(message); }
-function onViewerHistoryCleared(message) { if (resultHistory) resultHistory.onCleared(message); }
+function onViewerNewImage(message) {
+  if (resultHistory) resultHistory.onNewImage(message);
+  scheduleResultUnsavedActionRefresh(180);
+}
+function onViewerHistoryRemoved(message) {
+  if (resultHistory) resultHistory.onRemoved(message);
+  scheduleResultUnsavedActionRefresh(80);
+}
+function onViewerHistoryCleared(message) {
+  if (resultHistory) resultHistory.onCleared(message);
+  renderResultUnsavedActions(null);
+}
 function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }
 function openViewerPopup() { if (resultHistory) resultHistory.openPopup(); }
 function closeViewerPopup() { if (resultHistory) resultHistory.closePopup(); }

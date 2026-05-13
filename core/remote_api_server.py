@@ -1333,8 +1333,10 @@ class RemoteBridge(QObject):
                 self._broadcast_json(self._cached_params)
 
     def _on_option_toggled_slot(self, checked=None):
-        """Desktop checkbox changes no longer push control state to Web Sessions."""
-        return
+        """Desktop checkbox changes update the shared Web Shell option state."""
+        if self._syncing_option:
+            return
+        self.broadcast_options()
 
     def _on_param_changed_slot(self, *args):
         """Desktop parameter changes no longer push control state to Web Sessions."""
@@ -5355,9 +5357,8 @@ class RemoteBridge(QObject):
                 self._sync_detached_option_widget(key, checked)
                 self._refresh_generation_option_ui(key, cb)
             if cb:
-                # setChecked() emits toggled synchronously while _syncing_option is True.
-                # The legacy authoritative echo is now a no-op so Web Sessions keep
-                # their own local control values.
+                # setChecked() emits toggled synchronously while _syncing_option is True;
+                # broadcast the shared server state after the Qt widget has settled.
                 self.broadcast_options()
         except Exception as e:
             self._syncing_option = False
@@ -5704,8 +5705,11 @@ class RemoteBridge(QObject):
             return {}
 
     def broadcast_options(self):
-        """Deprecated desktop -> web option sync path."""
-        self._cached_options = {}
+        """Broadcast the shared generation-option state to all Web Shell sessions."""
+        payload = {"type": "options", **self.get_options()}
+        self._cached_options = payload
+        if self._has_clients():
+            self._broadcast_json(payload)
 
     # --- 프롬프트 동기화 (Qt 메인 스레드에서 실행) ---
 
@@ -15523,6 +15527,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
 
             current_mode = bridge.app_context.get_api_mode()
             await ws.send_text(json.dumps({"type": "mode", "mode": current_mode}))
+            await ws.send_text(json.dumps({"type": "options", **bridge.get_options()}))
             if bridge._cached_params:
                 await ws.send_text(json.dumps(bridge._cached_params))
             await ws.send_text(json.dumps(bridge._build_queue_state()))
@@ -15568,6 +15573,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                         "type": "mode",
                         "mode": bridge.app_context.get_api_mode(),
                     }))
+                    await ws.send_text(json.dumps({"type": "options", **bridge.get_options()}))
                     if bridge._cached_params:
                         await ws.send_text(json.dumps(bridge._cached_params))
                     await ws.send_text(json.dumps(bridge._build_queue_state()))
@@ -16188,8 +16194,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     ]:
         app_context.subscribe(queue_event, bridge._broadcast_queue_state)
 
-    # Checkbox hooks remain connected, but the slot no longer pushes desktop
-    # control values into Web Sessions.
+    # Generation option checkboxes participate in the shared Remote Web state.
     _checkbox_connections = []
     _bridge_signal_connections = []
     for key, label in RemoteBridge.OPTION_KEYS.items():
@@ -16198,7 +16203,7 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
             cb.toggled.connect(bridge._on_option_toggled_slot)
             _checkbox_connections.append((cb, "toggled"))
 
-    # Auto-save hooks also avoid desktop -> web control-value sync.
+    # Auto-save is part of the same shared option snapshot and has extra settings.
     auto_save_checkbox = bridge._get_auto_save_checkbox()
     if auto_save_checkbox:
         auto_save_checkbox.toggled.connect(bridge._on_option_toggled_slot)

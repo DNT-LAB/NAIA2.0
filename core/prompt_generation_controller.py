@@ -44,6 +44,14 @@ class PromptGenerationController(QObject):
     def _handle_processed_context(self, context):
         """처리된 컨텍스트를 받아 시그널과 이벤트를 발생시키는 공통 핸들러"""
         if context:
+            final_prompt = str(context.final_prompt or "")
+            if (
+                not final_prompt.strip(" ,\n\r\t")
+                and not context.settings.get('wildcard_standalone', False)
+            ):
+                self.generation_error.emit("생성된 프롬프트가 비어 있습니다. 다른 검색 결과를 사용해 주세요.")
+                return
+
             # 해상도 자동 맞춤 결과가 있다면 시그널 발생
             if 'detected_resolution' in context.metadata:
                 width, height = context.metadata['detected_resolution']
@@ -56,7 +64,7 @@ class PromptGenerationController(QObject):
                     main_window.resolution_is_detected = False
             
             # 최종 프롬프트 시그널 발생
-            self.prompt_generated.emit(context.final_prompt)
+            self.prompt_generated.emit(final_prompt)
             
             # ✅ 와일드카드 상태 뷰를 위한 이벤트 발행
             self.app_context.publish("prompt_generated", context)

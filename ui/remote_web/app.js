@@ -1433,10 +1433,16 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const message = (typeof messageOrPrompt === 'object' && messageOrPrompt !== null)
     ? messageOrPrompt
     : {prompt: messageOrPrompt, source: sourceArg};
-  const prompt = message.prompt;
+  const prompt = message.prompt == null ? '' : String(message.prompt);
   const source = message.source;
-  if (!prompt) return;
   const isPresetSource = source === 'event_preset' || source === 'preset';
+  const acceptsGeneratedPrompt = (
+    (source === 'random' && awaitingMyRandom)
+    || isPresetSource
+    || source === 'auto_generate'
+    || source === 'result_reroll'
+  );
+  if (!prompt && !acceptsGeneratedPrompt) return;
   const messagePresetRequestId = String(
     source === 'preset'
       ? (message.remote_preset_request_id || message.requestId || '')
@@ -1452,23 +1458,21 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   ) {
     clearPresetGenerationOptions({autoGenerate: false});
   }
-  // 직접 요청한 Random만 수락하되, 데스크탑 Auto Gen/Result reroll은 전역 프롬프트 상태로 동기화한다.
-  if ((source === 'random' && awaitingMyRandom) || isPresetSource || source === 'auto_generate' || source === 'result_reroll') {
+  // 명시적인 prompt 생성 이벤트는 서버의 generation state가 authoritative하다.
+  if (acceptsGeneratedPrompt) {
     if (source === 'random') unlockRandomButton();
-    let acceptedPrompt = false;
-    if (_isPromptEditingActive() && prompt !== promptEdit.value) {
-      // 편집 중: 사용자 입력을 보호. Random 결과를 다시 받으려면 Random 다시 누르면 됨.
-      // (deferredPromptSync는 blur flush 경로 제거로 더 이상 쓰지 않음)
-    } else {
-      syncingPrompt = true;
-      promptEdit.value = prompt;
-      syncingPrompt = false;
-      updatePromptHighlight();
-      applyPromptHighlightState();
-      acceptedPrompt = true;
+    if (promptSendTimer) {
+      clearTimeout(promptSendTimer);
+      promptSendTimer = null;
     }
-    if (acceptedPrompt) applyPromptTokenPayload(message);
-    else updatePromptTokenEstimate();
+    _localPromptDirty = false;
+    deferredPromptSync = null;
+    syncingPrompt = true;
+    promptEdit.value = prompt;
+    syncingPrompt = false;
+    updatePromptHighlight();
+    applyPromptHighlightState();
+    applyPromptTokenPayload(message);
     // Show new-content dot if drawer is closed
     if (promptDrawerControl) promptDrawerControl.showNewContentDot();
   }

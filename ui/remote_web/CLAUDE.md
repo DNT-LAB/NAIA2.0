@@ -173,7 +173,7 @@ NAIA 메인 앱의 모듈을 웹 플로팅 패널로 제어. **오버레이 없�
 
 | module_id | 클래스 | 주요 위젯 |
 |-----------|--------|----------|
-| `prompt_engineering` | `PromptEngineeringModule` | preset, pre/post prompt, auto-hide, 전처리 체크박스 15개 |
+| `prompt_engineering` | `PromptEngineeringModule` | preset, pre/post prompt, auto-hide, 전처리 체크박스 16개 |
 | `automation` | `AutomationModule` | delay, random delay, repeat, 종료조건(radio 3개), start/stop |
 | `character` | `CharacterModule` | activate, reroll_on_generate, 캐릭터별 prompt/uc |
 | `conditional_prompt` | `PromptListModifierModule` | enable, rules (# 하이라이트), test, log |

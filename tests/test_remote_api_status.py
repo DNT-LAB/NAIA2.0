@@ -1139,8 +1139,16 @@ def test_prompt_preset_loaded_broadcasts_desktop_snapshot(monkeypatch):
     ]
 
 
-def test_desktop_control_state_hooks_do_not_broadcast():
-    bridge = RemoteBridge(_AppContext())
+def test_desktop_option_hook_broadcasts_shared_options_only():
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={
+            "프롬프트 고정": _FakeCheckBox(True),
+            "자동 생성": _FakeCheckBox(False),
+            "와일드카드 단독 모드": _FakeCheckBox(True),
+        },
+    )
+    bridge = RemoteBridge(ctx)
     schema = {"type": "params", "api_mode": "COMFYUI", "schema_only": True}
     bridge.get_generation_param_schema = lambda: schema
     bridge._has_clients = lambda: True
@@ -1156,10 +1164,16 @@ def test_desktop_control_state_hooks_do_not_broadcast():
     bridge.on_comfyui_workflow_changed({})
 
     assert bridge._cached_prompts == {}
-    assert bridge._cached_options == {}
+    assert bridge._cached_options == {
+        "type": "options",
+        "prompt_fixed": True,
+        "auto_generate": False,
+        "wildcard_standalone": True,
+        "auto_save": False,
+    }
     assert bridge._cached_params == schema
     assert bridge._cached_result_enhance_config == {}
-    assert broadcasts == []
+    assert broadcasts == [bridge._cached_options]
 
 
 def test_result_enhance_config_update_is_session_only():

@@ -25,6 +25,7 @@ _PERSON_TAGS = frozenset({
 # 가중치 포맷 감지 패턴 (NAI: '1.05::tag ::', WEBUI: '(tag:1.05)')
 _WEIGHT_NAI_DETECT = re.compile(r'^[\d.]+::.*::$')
 _WEIGHT_WEBUI_DETECT = re.compile(r'^\(.*:[\d.]+\)$')
+_WEBUI_WEIGHT_EXTRACT = re.compile(r'^\((.*):[\d.]+\)$')
 
 class PresetPreviewWidget(QWidget):
     """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
@@ -154,6 +155,22 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         def execute_pipeline_hook(self, context):
             return self._parent._execute_e621_after_wildcard(context)
 
+    class _ClosedEyesSyncAfterWildcardHook:
+        """after_wildcard hook 위임 객체.
+
+        랜덤 프롬프트가 closed-eyes 상태일 때 고정 프롬프트/캐릭터 프롬프트의
+        눈 색/동공 태그가 충돌하지 않도록 e621 Auto-Boost 전에 정리한다.
+        """
+
+        def __init__(self, parent: 'PromptEngineeringModule'):
+            self._parent = parent
+
+        def get_title(self):
+            return "Closed Eyes Sync (after_wildcard)"
+
+        def execute_pipeline_hook(self, context):
+            return self._parent._execute_closed_eyes_sync_after_wildcard(context)
+
     class _DanbooruAfterWildcardHook:
         """after_wildcard hook 위임 객체.
         와일드카드 단독 모드 + Danbooru Auto-Weight 동시 사용 시에만 작동.
@@ -221,6 +238,15 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "e621_info": None,
             "implication_info": [],
         }
+        self._closed_eye_state_tags = {
+            "blind",
+            "blindfold",
+            "closed eyes",
+            "covered eyes",
+            "covering eyes",
+            "eyes covered",
+            "no eyes",
+        }
 
         # 기존 설정 파일 경로 유지
         self.settings_file = os.path.join('save', 'PromptEngineeringModule.json')
@@ -240,6 +266,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "랜덤 프롬프트의 메타 태그를 제거": "remove_meta_tags",
             "랜덤 프롬프트의 사물 태그를 제거": "remove_object_tags",
             "랜덤 프롬프트의 저빈도 태그를 제거": "remove_noise_tags",
+            "closed eyes 동기화": "closed_eyes_sync",
             "e621 Auto-Boost": "e621_auto_boost",
             "Danbooru Auto-Weight": "danbooru_auto_weight",
             "태그 함축 압축 (Implication)": "tag_implication_compression",
@@ -348,6 +375,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     def create_widget(self, parent: QWidget) -> QWidget:
         # after_wildcard hook 등록 (와일드카드 단독 + e621 동시 사용 대응)
         if hasattr(self, 'app_context') and self.app_context:
+            self.app_context.register_pipeline_hook(
+                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 5},
+                self._ClosedEyesSyncAfterWildcardHook(self),
+            )
             self.app_context.register_pipeline_hook(
                 {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 10},
                 self._E621AfterWildcardHook(self),
@@ -557,7 +588,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # 첫 3개(작가명/작품명/캐릭터명)는 연노랑색
         yellow_keys = {"remove_author", "remove_work_title", "remove_character_name"}
-        pink_keys = {"e621_auto_boost"}
+        pink_keys = {"closed_eyes_sync", "e621_auto_boost"}
         teal_keys = {"danbooru_auto_weight", "tag_implication_compression"}
         # 설정 버튼이 필요한 항목 — 셀 내 HBoxLayout(체크박스 + 버튼)으로 배치
         _settings_btn_map = {
@@ -1048,6 +1079,154 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             print("⚠️ e621_boost_static not found — Auto-Boost skipped")
         except Exception as e:
             print(f"⚠️ e621 Auto-Boost error: {e}")
+
+    def _normalize_closed_eyes_sync_tag(self, tag: Any) -> str:
+        text = str(tag or "").strip().lower().replace("_", " ")
+        text = re.sub(r'^[\d.]+::\s*', '', text)
+        text = re.sub(r'\s*::$', '', text)
+        match = _WEBUI_WEIGHT_EXTRACT.match(text)
+        if match:
+            text = match.group(1).strip()
+        text = text.strip("{}[]() ")
+        return re.sub(r'\s+', ' ', text)
+
+    def _is_closed_eye_state_tag(self, tag: Any) -> bool:
+        return self._normalize_closed_eyes_sync_tag(tag) in self._closed_eye_state_tags
+
+    def _is_eye_feature_tag(self, tag: Any) -> bool:
+        normalized = self._normalize_closed_eyes_sync_tag(tag)
+        if not normalized or normalized in self._closed_eye_state_tags:
+            return False
+        return bool(re.search(r'\beyes?\b|\bpupils?\b', normalized))
+
+    def _should_apply_closed_eyes_sync(self, context: PromptContext) -> bool:
+        random_prompt_tags = list(getattr(context, 'main_tags', []) or [])
+        random_prompt_tags.extend(list(getattr(context, 'global_append_tags', []) or []))
+        has_closed_state = any(self._is_closed_eye_state_tag(tag) for tag in random_prompt_tags)
+        if not has_closed_state:
+            return False
+        has_explicit_eye_feature = any(self._is_eye_feature_tag(tag) for tag in random_prompt_tags)
+        return not has_explicit_eye_feature
+
+    def _remove_eye_feature_tags(self, tags: list) -> tuple[list, list]:
+        kept = []
+        removed = []
+        for tag in tags or []:
+            if self._is_eye_feature_tag(tag):
+                removed.append(tag)
+            else:
+                kept.append(tag)
+        return kept, removed
+
+    def _sync_closed_eyes_character_list(self, characters: Any) -> list[dict]:
+        if not isinstance(characters, list):
+            return []
+
+        changes = []
+        new_characters = []
+        for idx, prompt in enumerate(characters):
+            if not isinstance(prompt, str):
+                new_characters.append(prompt)
+                continue
+            prompt_tags = split_tags_smart(prompt)
+            kept, removed = self._remove_eye_feature_tags(prompt_tags)
+            if removed:
+                changes.append({"index": idx, "removed": removed})
+                new_characters.append(", ".join(kept))
+            else:
+                new_characters.append(prompt)
+
+        if changes:
+            characters[:] = new_characters
+        return changes
+
+    def _sync_closed_eyes_character_module(
+        self,
+        already_synced: Any = None,
+        *,
+        require_same_source: bool = False,
+    ) -> list[dict]:
+        try:
+            char_mod = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+        except Exception:
+            return []
+        if not char_mod or not getattr(char_mod, 'activate_checkbox', None):
+            return []
+        try:
+            if not char_mod.activate_checkbox.isChecked():
+                return []
+        except Exception:
+            return []
+
+        try:
+            clone = char_mod.get_character_modifiable_clone()
+        except Exception:
+            clone = getattr(char_mod, 'modifiable_clone', None)
+        if not isinstance(clone, dict):
+            return []
+
+        characters = clone.get("characters")
+        if require_same_source and characters is not already_synced:
+            return []
+        if already_synced is not None and characters is already_synced:
+            changes = []
+        else:
+            changes = self._sync_closed_eyes_character_list(characters)
+
+        if changes or characters is already_synced:
+            sync_fn = getattr(char_mod, 'sync_external_prompt_edits', None)
+            if callable(sync_fn):
+                try:
+                    sync_fn()
+                except Exception:
+                    pass
+        return changes
+
+    def _execute_closed_eyes_sync_after_wildcard(self, context) -> 'PromptContext':
+        """after_wildcard hook: closed-eyes 랜덤 프롬프트와 눈 특징 태그 충돌 정리."""
+        if not context.metadata.get('_closed_eyes_sync_enabled'):
+            return context
+        if not self._should_apply_closed_eyes_sync(context):
+            return context
+
+        api_mode = str(context.settings.get('api_mode') or '').upper()
+        sync_info = {
+            "mode": api_mode,
+            "prefix_removed": [],
+            "postfix_removed": [],
+            "character_removed": [],
+        }
+
+        if api_mode == "NAI":
+            characters = context.settings.get("characters")
+            changes = self._sync_closed_eyes_character_list(characters)
+            sync_info["character_removed"].extend(changes)
+
+            generation_request = context.settings.get("_generation_request")
+            nai_characters = getattr(generation_request, 'nai_characters', None) if generation_request else None
+            request_characters = getattr(nai_characters, 'characters', None)
+            if request_characters is not None and request_characters is not characters:
+                sync_info["character_removed"].extend(
+                    self._sync_closed_eyes_character_list(request_characters)
+                )
+
+            sync_info["character_removed"].extend(
+                self._sync_closed_eyes_character_module(
+                    already_synced=characters,
+                    require_same_source=isinstance(characters, list),
+                )
+            )
+        elif api_mode in {"WEBUI", "COMFYUI"}:
+            context.prefix_tags, prefix_removed = self._remove_eye_feature_tags(context.prefix_tags)
+            context.postfix_tags, postfix_removed = self._remove_eye_feature_tags(context.postfix_tags)
+            sync_info["prefix_removed"] = prefix_removed
+            sync_info["postfix_removed"] = postfix_removed
+
+        if any(sync_info[key] for key in ("prefix_removed", "postfix_removed", "character_removed")):
+            context.metadata['closed_eyes_sync'] = sync_info
+            print(f"[closed eyes sync] applied: {sync_info}")
+
+        return context
 
     def _execute_outfit_context_resolver(self, context) -> 'PromptContext':
         """after_wildcard hook: 사용자 의상과 garment-bound 이벤트 region 충돌 해결.
@@ -1688,6 +1867,10 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         if skip_preprocessing:
             print("[DEBUG] 🚫 전처리 옵션 및 Auto Hide 건너뛰기 (EZ Mode 즉시 생성)")
             auto_hide = []
+
+        context.metadata['_closed_eyes_sync_enabled'] = (
+            not skip_preprocessing and checkbox_options.get("closed_eyes_sync", False)
+        )
 
         # 3. Auto Hide + 필터 체크박스 통합 처리 (공유 헬퍼)
         # e621 boost용 원본 태그 보존 (필터링 전 전체 맥락)

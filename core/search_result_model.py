@@ -1,6 +1,17 @@
 import pandas as pd
 from typing import Dict, Any, Optional, List
 
+
+def _has_prompt_text(value) -> bool:
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    text = str(value or "").strip()
+    return bool(text) and text.lower() not in {"nan", "none", "null"}
+
+
 class SearchResultModel:
     """검색 결과를 래핑하고 관리하는 데이터 모델 클래스"""
 
@@ -70,18 +81,23 @@ class SearchResultModel:
         데이터프레임에서 무작위로 행 하나를 선택하여 반환하고, 원본에서는 제거합니다.
         active_ratings가 주어지면 해당 rating만 대상으로 추출합니다.
         비활성 rating row는 삭제하지 않고 보존합니다.
+        general 컬럼이 있으면 빈 프롬프트 row는 랜덤 생성 후보에서 제외합니다.
         """
         if self.is_empty():
             return None
 
+        eligible = self.df
         if active_ratings and 'rating' in self.df.columns:
             mask = self.df['rating'].isin(active_ratings)
-            eligible = self.df[mask]
-            if eligible.empty:
-                return None
-            random_index = eligible.index.to_series().sample(n=1).iloc[0]
-        else:
-            random_index = self.df.index.to_series().sample(n=1).iloc[0]
+            eligible = eligible[mask]
+
+        if 'general' in eligible.columns:
+            eligible = eligible[eligible['general'].map(_has_prompt_text)]
+
+        if eligible.empty:
+            return None
+
+        random_index = eligible.index.to_series().sample(n=1).iloc[0]
 
         # 해당 행 데이터 추출 및 원본에서 삭제
         popped_row = self.df.loc[random_index].copy()

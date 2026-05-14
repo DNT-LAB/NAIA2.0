@@ -26,6 +26,10 @@ _PERSON_TAGS = frozenset({
 _WEIGHT_NAI_DETECT = re.compile(r'^[\d.]+::.*::$')
 _WEIGHT_WEBUI_DETECT = re.compile(r'^\(.*:[\d.]+\)$')
 _WEBUI_WEIGHT_EXTRACT = re.compile(r'^\((.*):[\d.]+\)$')
+_PRESET_RUNTIME_STATE_KEYS = frozenset({
+    "random_resolution",
+    "auto_fit_resolution",
+})
 
 class PresetPreviewWidget(QWidget):
     """프리셋 이미지 미리보기 위젯 - 클립보드 지원"""
@@ -1473,6 +1477,13 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             sanitized = sanitized.replace(char, '')
         return sanitized.strip()
 
+    @staticmethod
+    def _normalize_preset_main_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(settings or {})
+        for key in _PRESET_RUNTIME_STATE_KEYS:
+            normalized.pop(key, None)
+        return normalized
+
     def save_preset_noninteractive(self, preset_name: str) -> tuple[bool, str]:
         """웹/원격용 비대화형 프리셋 저장."""
         sanitized = self.sanitize_preset_name(preset_name)
@@ -1546,6 +1557,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         """지정한 프리셋 데이터를 파일로 저장."""
         preset_dir = self.get_preset_dir()
         preset_file = preset_dir / f"{preset_name}.json"
+        preset_data = copy.deepcopy(preset_data)
+        if isinstance(preset_data.get("main_settings"), dict):
+            preset_data["main_settings"] = self._normalize_preset_main_settings(
+                preset_data["main_settings"]
+            )
 
         with open(preset_file, 'w', encoding='utf-8') as f:
             json.dump(preset_data, f, ensure_ascii=False, indent=2)
@@ -1749,8 +1765,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             ),
             "seed": "8097879955",
             "seed_fixed": False,
-            "random_resolution": True,
-            "auto_fit_resolution": True,
             "SMEA": False,
             "DYN": False,
             "VAR+": True,
@@ -2279,7 +2293,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         module_settings = self.collect_current_settings()
 
         # 메인 UI 설정 수집
-        main_settings = self.collect_main_ui_settings(target_mode)
+        main_settings = self._normalize_preset_main_settings(
+            self.collect_main_ui_settings(target_mode)
+        )
 
         preset_data = {
             "module_settings": module_settings,
@@ -2335,7 +2351,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if "main_settings" in preset_data and main_window:
                 print(f"  - main_settings 적용 중...")
                 # 기존 키 이름 호환성 처리
-                main_settings = preset_data["main_settings"]
+                main_settings = self._normalize_preset_main_settings(
+                    preset_data["main_settings"]
+                )
                 if 'sm' in main_settings:
                     main_settings['SMEA'] = main_settings.pop('sm', False)
                 if 'sm_dyn' in main_settings:
@@ -3653,7 +3671,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             main_window = getattr(self.app_context, 'main_window', None) if hasattr(self, 'app_context') and self.app_context else None
 
             if "main_settings" in preset_data and main_window:
-                main_settings = preset_data["main_settings"].copy()  # 원본 보존을 위해 복사
+                main_settings = self._normalize_preset_main_settings(
+                    preset_data["main_settings"]
+                )
 
                 # prompt는 제외 (랜덤 프리셋에서는 prompt를 변경하지 않음)
                 main_settings.pop('prompt', None)

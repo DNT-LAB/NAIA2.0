@@ -7476,6 +7476,14 @@ class RemoteBridge(QObject):
                 preprocessing[key] = cb.isChecked()
             presets = [m.preset_combo.itemText(i) for i in range(m.preset_combo.count())]
             current_preset = m.preset_combo.currentText()
+            randomized_pool = list(getattr(m, "randomized_preset_list", []) or [])
+            if hasattr(m, "get_randomized_available_presets"):
+                randomized_available = list(m.get_randomized_available_presets())
+            else:
+                randomized_available = [
+                    preset_name for preset_name in getattr(m, "preset_list", [])
+                    if preset_name not in ("", "*randomized", "default", *randomized_pool)
+                ]
             preset_summaries = [
                 self._prompt_engineering_preset_summary(m, preset_name)
                 for preset_name in presets
@@ -7486,6 +7494,9 @@ class RemoteBridge(QObject):
                 "preset": current_preset,
                 "preset_options": presets,
                 "preset_summaries": preset_summaries,
+                "randomized_active": current_preset == "*randomized",
+                "randomized_preset_list": randomized_pool,
+                "randomized_available_presets": randomized_available,
                 "pre_prompt": m.pre_textedit.toPlainText(),
                 "post_prompt": m.post_textedit.toPlainText(),
                 "auto_hide": m.auto_hide_textedit.toPlainText(),
@@ -8992,6 +9003,33 @@ class RemoteBridge(QObject):
                 ok, result = m.delete_preset_noninteractive(target_name)
                 if ok:
                     self._broadcast_json({"type": "toast", "message": f"프리셋 삭제: {result}", "level": "success"})
+                    self._broadcast_prompt_engineering_state()
+                else:
+                    self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+            elif key == "randomized_add":
+                if not hasattr(m, "add_randomized_preset"):
+                    self._broadcast_json({"type": "toast", "message": "랜덤 프리셋 관리를 사용할 수 없습니다.", "level": "error"})
+                    return
+                ok, result = m.add_randomized_preset(value)
+                if ok:
+                    self._broadcast_prompt_engineering_state()
+                else:
+                    self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+            elif key == "randomized_remove":
+                if not hasattr(m, "remove_randomized_preset"):
+                    self._broadcast_json({"type": "toast", "message": "랜덤 프리셋 관리를 사용할 수 없습니다.", "level": "error"})
+                    return
+                ok, result = m.remove_randomized_preset(value)
+                if ok:
+                    self._broadcast_prompt_engineering_state()
+                else:
+                    self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+            elif key == "randomized_clear":
+                if not hasattr(m, "clear_randomized_presets"):
+                    self._broadcast_json({"type": "toast", "message": "랜덤 프리셋 관리를 사용할 수 없습니다.", "level": "error"})
+                    return
+                ok, result = m.clear_randomized_presets()
+                if ok:
                     self._broadcast_prompt_engineering_state()
                 else:
                     self._broadcast_json({"type": "toast", "message": result, "level": "error"})

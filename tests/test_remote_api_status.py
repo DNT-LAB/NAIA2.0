@@ -48,6 +48,84 @@ class _FakeCheckBox:
         self.checked = checked
 
 
+class _FakeTextEdit:
+    def __init__(self, text=""):
+        self.text = text
+
+    def toPlainText(self):
+        return self.text
+
+    def setPlainText(self, text):
+        self.text = text
+
+
+class _FakeComboBox:
+    def __init__(self, items=None, current=""):
+        self.items = list(items or [])
+        self.current = current or (self.items[0] if self.items else "")
+
+    def count(self):
+        return len(self.items)
+
+    def itemText(self, index):
+        return self.items[index]
+
+    def currentText(self):
+        return self.current
+
+    def findText(self, text):
+        try:
+            return self.items.index(text)
+        except ValueError:
+            return -1
+
+    def setCurrentIndex(self, index):
+        self.current = self.items[index]
+
+
+class PromptEngineeringModule:
+    def __init__(self):
+        self.preset_list = ["default", "alpha", "beta", "gamma"]
+        self.randomized_preset_list = ["alpha"]
+        self.preset_combo = _FakeComboBox(["*randomized", "default", "alpha", "beta", "gamma"], "*randomized")
+        self.pre_textedit = _FakeTextEdit("pre")
+        self.post_textedit = _FakeTextEdit("post")
+        self.auto_hide_textedit = _FakeTextEdit("hide")
+        self.preprocessing_checkboxes = {"Remove Artist": _FakeCheckBox(True)}
+        self.option_key_map = {"Remove Artist": "remove_author"}
+        self._e621_settings = {}
+        self._danbooru_weight_settings = {}
+
+    def get_debug_snapshot(self):
+        return {}
+
+    def get_preset_dir(self):
+        return Path("missing-prompt-engineering-presets")
+
+    def get_randomized_available_presets(self):
+        selected = set(self.randomized_preset_list)
+        return [
+            preset for preset in self.preset_list
+            if preset not in ("default", "*randomized") and preset not in selected
+        ]
+
+    def add_randomized_preset(self, preset):
+        if preset not in self.get_randomized_available_presets():
+            return False, "invalid"
+        self.randomized_preset_list.append(preset)
+        return True, preset
+
+    def remove_randomized_preset(self, preset):
+        if preset not in self.randomized_preset_list:
+            return False, "missing"
+        self.randomized_preset_list.remove(preset)
+        return True, preset
+
+    def clear_randomized_presets(self):
+        self.randomized_preset_list = []
+        return True, ""
+
+
 class _FakeWsManager:
     active_connections = {object()}
 
@@ -195,6 +273,47 @@ def test_event_preset_generation_error_keeps_scoped_error_and_clears_status():
         },
         {"type": "status", "is_generating": False},
     ]
+
+
+def test_prompt_engineering_state_exposes_randomized_manage_pool():
+    ctx = _AppContext()
+    module = PromptEngineeringModule()
+    ctx.middle_section_controller = SimpleNamespace(module_instances=[module])
+    bridge = RemoteBridge(ctx)
+
+    state = bridge._read_prompt_engineering()
+
+    assert state["preset"] == "*randomized"
+    assert state["randomized_active"] is True
+    assert state["randomized_preset_list"] == ["alpha"]
+    assert state["randomized_available_presets"] == ["beta", "gamma"]
+    assert state["preset_can_save_current"] is False
+    assert state["preset_can_delete"] is False
+
+
+def test_prompt_engineering_randomized_manage_commands_update_pool():
+    ctx = _AppContext()
+    module = PromptEngineeringModule()
+    ctx.middle_section_controller = SimpleNamespace(module_instances=[module])
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+    bridge._broadcast_prompt_engineering_state = lambda: broadcasts.append({"type": "module_state"})
+
+    bridge._set_prompt_engineering("randomized_add", "beta")
+    assert module.randomized_preset_list == ["alpha", "beta"]
+    assert broadcasts[-1] == {"type": "module_state"}
+
+    bridge._set_prompt_engineering("randomized_remove", "alpha")
+    assert module.randomized_preset_list == ["beta"]
+    assert broadcasts[-1] == {"type": "module_state"}
+
+    bridge._set_prompt_engineering("randomized_clear", "true")
+    assert module.randomized_preset_list == []
+    assert broadcasts[-1] == {"type": "module_state"}
+
+    bridge._set_prompt_engineering("randomized_add", "default")
+    assert broadcasts[-1] == {"type": "toast", "message": "invalid", "level": "error"}
 
 
 def test_auto_generated_prompt_broadcast_uses_auto_generate_source(monkeypatch):

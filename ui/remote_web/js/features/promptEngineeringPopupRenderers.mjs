@@ -3,6 +3,9 @@ export function createPromptEngineeringPopupRenderers({
   requestAnimationFrame,
   escHtml,
   createPromptPreset,
+  addRandomizedPreset,
+  removeRandomizedPreset,
+  clearRandomizedPresets,
   bindDanbooruFeedback,
   panels,
 }) {
@@ -40,6 +43,14 @@ export function createPromptEngineeringPopupRenderers({
   function renderPresetManage(m) {
     const body = getBody(panels.presetManage);
     if (!body) return;
+    const title = panels.presetManage?.querySelector('.module-popup-title');
+    if (title) title.textContent = m.preset === '*randomized' ? 'Manage Randomized' : 'Manage Preset';
+
+    if (m.preset === '*randomized') {
+      renderRandomizedManage(body, m);
+      return;
+    }
+
     const canSaveCurrent = !!m.preset_can_save_current;
     const canDeleteCurrent = !!m.preset_can_delete;
     body.innerHTML = `
@@ -50,6 +61,55 @@ export function createPromptEngineeringPopupRenderers({
       <button class="mod-btn-danger" ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
     </div>
   `;
+  }
+
+  function renderRandomizedManage(body, m) {
+    const pool = Array.isArray(m.randomized_preset_list) ? m.randomized_preset_list : [];
+    const available = Array.isArray(m.randomized_available_presets) ? m.randomized_available_presets : [];
+    const poolHtml = pool.length
+      ? pool.map(preset => `
+        <div class="pe-randomized-row">
+          <span class="pe-randomized-name">${escHtml(preset)}</span>
+          <button class="mod-btn-danger mod-btn-compact" data-randomized-remove="${escHtml(preset)}">Remove</button>
+        </div>
+      `).join('')
+      : '<div class="pe-randomized-empty">No presets selected</div>';
+    const optionsHtml = available
+      .map(preset => `<option value="${escHtml(preset)}">${escHtml(preset)}</option>`)
+      .join('');
+    body.innerHTML = `
+    <div class="mod-section-label">Current Preset</div>
+    <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>
+    <div class="mod-section-label">Randomized Pool</div>
+    <div class="pe-randomized-list">${poolHtml}</div>
+    <div>
+      <div class="mod-section-label">Add Preset</div>
+      <div class="mod-inline-row pe-randomized-add-row">
+        <select class="mod-select" id="modRandomizedPresetAddSelect" ${available.length ? '' : 'disabled'}>${optionsHtml}</select>
+        <button class="mod-btn-secondary mod-btn-compact" id="modRandomizedPresetAddBtn" ${available.length ? '' : 'disabled'}>Add</button>
+      </div>
+    </div>
+    <div class="mod-inline-row">
+      <button class="mod-btn-danger" id="modRandomizedPresetClearBtn" ${pool.length ? '' : 'disabled'}>Clear Pool</button>
+    </div>
+  `;
+
+    const addButton = document.getElementById('modRandomizedPresetAddBtn');
+    const addSelect = document.getElementById('modRandomizedPresetAddSelect');
+    if (addButton) addButton.addEventListener('click', () => addRandomizedPreset());
+    if (addSelect) {
+      addSelect.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          addRandomizedPreset();
+        }
+      });
+    }
+    body.querySelectorAll('[data-randomized-remove]').forEach(button => {
+      button.addEventListener('click', () => removeRandomizedPreset(button.dataset.randomizedRemove || ''));
+    });
+    const clearButton = document.getElementById('modRandomizedPresetClearBtn');
+    if (clearButton) clearButton.addEventListener('click', () => clearRandomizedPresets());
   }
 
   function renderDebugSnapshot(snapshot) {

@@ -2145,6 +2145,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # preset_list는 실제 파일 기반 프리셋만 포함 (*randomized 제외)
         self.preset_list = preset_names
+        self._prune_randomized_preset_list()
 
         # 콤보박스 업데이트
         current_text = self.preset_combo.currentText()
@@ -3366,6 +3367,76 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.current_preset = "default"
         self.last_preset = "default"
 
+    def _is_randomized_candidate(self, preset_name: str) -> bool:
+        """랜덤 풀에 넣을 수 있는 실제 프리셋인지 확인."""
+        return (
+            bool(preset_name)
+            and preset_name not in ["*randomized", "default"]
+            and preset_name in self.preset_list
+        )
+
+    def _sync_randomized_listbox(self):
+        """내부 랜덤 풀 상태를 데스크탑 ListBox에 반영."""
+        if self.randomized_listbox is None:
+            return
+        self.randomized_listbox.clear()
+        for preset_name in self.randomized_preset_list:
+            self.randomized_listbox.addItem(preset_name)
+
+    def _prune_randomized_preset_list(self):
+        """삭제되었거나 현재 모드에 없는 프리셋을 랜덤 풀에서 제거."""
+        current = list(getattr(self, "randomized_preset_list", []) or [])
+        pruned = []
+        seen = set()
+        for preset_name in current:
+            if preset_name in seen or not self._is_randomized_candidate(preset_name):
+                continue
+            pruned.append(preset_name)
+            seen.add(preset_name)
+        if pruned != current:
+            self.randomized_preset_list = pruned
+            self._sync_randomized_listbox()
+        if self.randomized_combo is not None:
+            self._update_randomized_combo()
+
+    def get_randomized_available_presets(self):
+        """랜덤 풀에 추가 가능한 프리셋 목록을 현재 프리셋 순서로 반환."""
+        selected = set(self.randomized_preset_list)
+        return [
+            preset_name
+            for preset_name in self.preset_list
+            if self._is_randomized_candidate(preset_name) and preset_name not in selected
+        ]
+
+    def add_randomized_preset(self, preset_name: str):
+        """랜덤 풀에 프리셋을 추가."""
+        preset_name = self.sanitize_preset_name(str(preset_name or ""))
+        if not self._is_randomized_candidate(preset_name):
+            return False, "랜덤 풀에 추가할 수 없는 프리셋입니다."
+        if preset_name in self.randomized_preset_list:
+            return False, "이미 랜덤 풀에 포함된 프리셋입니다."
+        self.randomized_preset_list.append(preset_name)
+        self._sync_randomized_listbox()
+        self._update_randomized_combo()
+        return True, preset_name
+
+    def remove_randomized_preset(self, preset_name: str):
+        """랜덤 풀에서 프리셋을 제거."""
+        preset_name = self.sanitize_preset_name(str(preset_name or ""))
+        if preset_name not in self.randomized_preset_list:
+            return False, "랜덤 풀에 없는 프리셋입니다."
+        self.randomized_preset_list.remove(preset_name)
+        self._sync_randomized_listbox()
+        self._update_randomized_combo()
+        return True, preset_name
+
+    def clear_randomized_presets(self):
+        """랜덤 풀을 비움."""
+        self.randomized_preset_list = []
+        self._sync_randomized_listbox()
+        self._update_randomized_combo()
+        return True, ""
+
     def _update_randomized_combo(self):
         """복제 콤보박스 업데이트 - *randomized, default, 이미 추가된 항목 제외"""
         if self.randomized_combo is None:
@@ -3375,15 +3446,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.randomized_combo.blockSignals(True)
         self.randomized_combo.clear()
 
-        for preset_name in self.preset_list:
-            # *randomized와 default는 복제 콤보박스에서 제외
-            if preset_name in ["*randomized", "default"]:
-                continue
-
-            # 이미 ListBox에 있는 항목도 제외 (숨김 처리)
-            if preset_name in self.randomized_preset_list:
-                continue
-
+        for preset_name in self.get_randomized_available_presets():
             self.randomized_combo.addItem(preset_name)
 
         # 첫 번째 항목 선택
@@ -3422,14 +3485,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             print(f"⚠️ _add_to_randomized_list: preset_name={preset_name}, already_in_list={preset_name in self.randomized_preset_list}")
             return
 
-        # ListBox에 추가
-        self.randomized_listbox.addItem(preset_name)
-        self.randomized_preset_list.append(preset_name)
+        ok, result = self.add_randomized_preset(preset_name)
+        if not ok:
+            print(f"⚠️ _add_to_randomized_list: {result}")
+            return
 
-        # 복제 콤보박스 업데이트 (해당 항목 숨김 및 +추가 버튼 상태 갱신)
-        self._update_randomized_combo()
-
-        print(f"🎲 랜덤 프리셋 목록에 추가: {preset_name} (총 {len(self.randomized_preset_list)}개)")
+        print(f"🎲 랜덤 프리셋 목록에 추가: {result} (총 {len(self.randomized_preset_list)}개)")
 
     def _remove_from_randomized_list(self):
         """ListBox에서 선택한 프리셋 제거"""
@@ -3443,17 +3504,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         preset_name = current_item.text()
 
-        # ListBox에서 제거
-        row = self.randomized_listbox.row(current_item)
-        self.randomized_listbox.takeItem(row)
+        ok, result = self.remove_randomized_preset(preset_name)
+        if not ok:
+            print(f"⚠️ _remove_from_randomized_list: {result}")
+            return
 
-        if preset_name in self.randomized_preset_list:
-            self.randomized_preset_list.remove(preset_name)
-
-        # 복제 콤보박스 업데이트 (해당 항목 활성화 복원 및 +추가 버튼 상태 갱신)
-        self._update_randomized_combo()
-
-        print(f"🎲 랜덤 프리셋 목록에서 제거: {preset_name}")
+        print(f"🎲 랜덤 프리셋 목록에서 제거: {result}")
 
     def _on_randomized_listbox_item_clicked(self, item):
         """랜덤 프리셋 목록에서 아이템 클릭 시 해당 프리셋 로드"""

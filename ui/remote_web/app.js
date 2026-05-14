@@ -3420,7 +3420,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260512-api-dialog-fallback1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260514-randomized-manage1')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -3604,13 +3604,16 @@ const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260508-preset-hover1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260514-randomized-manage1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,
       createPromptPreset,
+      addRandomizedPromptPreset,
+      removeRandomizedPromptPreset,
+      clearRandomizedPromptPresets,
       bindDanbooruFeedback,
       panels: {
         e621: peE621Panel,
@@ -3945,6 +3948,18 @@ function applyRecommendedPromptPreset() {
 
 function deleteCurrentPromptPreset() {
   if (promptEngineeringActions) promptEngineeringActions.deleteCurrentPreset();
+}
+
+function addRandomizedPromptPreset() {
+  if (promptEngineeringActions) promptEngineeringActions.addRandomizedPreset();
+}
+
+function removeRandomizedPromptPreset(preset) {
+  if (promptEngineeringActions) promptEngineeringActions.removeRandomizedPreset(preset);
+}
+
+function clearRandomizedPromptPresets() {
+  if (promptEngineeringActions) promptEngineeringActions.clearRandomizedPresets();
 }
 
 function savePromptEngineeringE621Settings() {

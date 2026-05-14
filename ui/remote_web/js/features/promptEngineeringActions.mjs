@@ -61,6 +61,26 @@ export function createPromptEngineeringActions({
     closePresetManagePanel();
   }
 
+  function addRandomizedPreset() {
+    const select = document.getElementById('modRandomizedPresetAddSelect');
+    const preset = select ? select.value.trim() : '';
+    if (!preset) {
+      showToast('랜덤 풀에 추가할 프리셋이 없습니다.', 'error');
+      return;
+    }
+    setModuleParam('prompt_engineering', 'randomized_add', preset);
+  }
+
+  function removeRandomizedPreset(preset) {
+    const name = String(preset || '').trim();
+    if (!name) return;
+    setModuleParam('prompt_engineering', 'randomized_remove', name);
+  }
+
+  function clearRandomizedPresets() {
+    setModuleParam('prompt_engineering', 'randomized_clear', 'true');
+  }
+
   function saveE621Settings() {
     const hiddenRaw = document.getElementById('modE621HiddenTags')?.value || '';
     const hiddenTags = hiddenRaw
@@ -118,6 +138,9 @@ export function createPromptEngineeringActions({
     createPreset,
     applyRecommendedPreset,
     deleteCurrentPreset,
+    addRandomizedPreset,
+    removeRandomizedPreset,
+    clearRandomizedPresets,
     saveE621Settings,
     saveDanbooruSettings,
     refreshDebug,

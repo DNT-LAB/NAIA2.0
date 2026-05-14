@@ -102,6 +102,100 @@ function openUrlInSystemBrowser(target) {
   popup.focus?.();
   return true;
 }
+
+function initNaiaTitleTooltips() {
+  if (document.body.dataset.naiaTitleTooltips === '1') return;
+  document.body.dataset.naiaTitleTooltips = '1';
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'naia-title-tooltip';
+  document.body.append(tooltip);
+  let owner = null;
+
+  const shouldKeepNativeTitle = element => {
+    if (!(element instanceof Element)) return true;
+    return element.matches('option, select, datalist, input[pattern], textarea[pattern]');
+  };
+
+  const adoptTitle = element => {
+    if (!(element instanceof Element) || shouldKeepNativeTitle(element)) return;
+    const title = element.getAttribute('title');
+    if (!title) return;
+    element.dataset.naiaTitle = title;
+    if (!element.getAttribute('aria-label')) element.setAttribute('aria-label', title);
+    element.removeAttribute('title');
+  };
+
+  const scanTitles = root => {
+    if (!(root instanceof Element)) return;
+    adoptTitle(root);
+    root.querySelectorAll?.('[title]').forEach(adoptTitle);
+  };
+
+  const positionTooltip = target => {
+    if (!target || !tooltip.classList.contains('open')) return;
+    const rect = target.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const gap = 8;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    let left = rect.left + (rect.width - tipRect.width) / 2;
+    left = Math.max(gap, Math.min(left, viewportWidth - tipRect.width - gap));
+    let top = rect.bottom + gap;
+    if (top + tipRect.height > viewportHeight - gap) top = rect.top - tipRect.height - gap;
+    top = Math.max(gap, Math.min(top, viewportHeight - tipRect.height - gap));
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+  };
+
+  const showTooltip = target => {
+    const text = target?.dataset?.naiaTitle || '';
+    if (!text) return;
+    owner = target;
+    tooltip.textContent = text;
+    tooltip.classList.add('open');
+    requestAnimationFrame(() => {
+      if (owner === target) positionTooltip(target);
+    });
+  };
+
+  const hideTooltip = target => {
+    if (target && owner && target !== owner) return;
+    owner = null;
+    tooltip.classList.remove('open');
+  };
+
+  scanTitles(document.body);
+  new MutationObserver(mutations => {
+    mutations.forEach(mutation => {
+      if (mutation.type === 'attributes') {
+        adoptTitle(mutation.target);
+        return;
+      }
+      mutation.addedNodes.forEach(node => scanTitles(node));
+    });
+  }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
+
+  document.addEventListener('pointerover', event => {
+    const target = event.target?.closest?.('[data-naia-title]');
+    if (target) showTooltip(target);
+  });
+  document.addEventListener('pointerout', event => {
+    const target = event.target?.closest?.('[data-naia-title]');
+    if (target && !target.contains(event.relatedTarget)) hideTooltip(target);
+  });
+  document.addEventListener('focusin', event => {
+    const target = event.target?.closest?.('[data-naia-title]');
+    if (target) showTooltip(target);
+  });
+  document.addEventListener('focusout', event => {
+    const target = event.target?.closest?.('[data-naia-title]');
+    if (target) hideTooltip(target);
+  });
+  window.addEventListener('resize', () => hideTooltip());
+  window.addEventListener('scroll', () => hideTooltip(), true);
+}
+
 let automationPanel = null;
 let characterPanel = null;
 let conditionalPromptPanel = null;
@@ -641,7 +735,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260514-character-cold6')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -649,6 +743,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs')
       bindTagAssist,
       flushCharacterEdits,
       setModuleParam,
+      showPromptDialog,
     });
   })
   .catch(error => {
@@ -3509,6 +3604,7 @@ function openModule(moduleId, options = {}) {
     return;
   }
   if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
+  if (characterPanel && moduleId !== 'character') characterPanel.hideColdPanel();
   flushPendingModuleEdit(currentModuleId);
   // chunk 는 1차 모듈과 공존 — 닫지 않고 새 anchor 로 재정렬만
   closeAuxiliaryPopups(null, { keepChunk: moduleId !== 'chunk' });
@@ -3562,6 +3658,7 @@ function closeModule(options = {}) {
   if (currentModuleId === 'vibe_transfer' && imageModulePanels && !options.keepVibeCluster) {
     imageModulePanels.closeAllVibeClusterPanels();
   }
+  if (currentModuleId === 'character' && characterPanel) characterPanel.hideColdPanel();
   flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
@@ -4049,6 +4146,22 @@ function removeCharacterSlot(index) {
 
 function refreshCharacterPreview() {
   if (characterPanel) characterPanel.refreshPreview();
+}
+
+function setCharacterSlotState(index, slotState) {
+  if (characterPanel) characterPanel.setSlotState(index, slotState);
+}
+
+function toggleCharacterColdPanel() {
+  if (characterPanel) characterPanel.toggleColdPanel();
+}
+
+function renameCharacterSlot(index) {
+  if (characterPanel) characterPanel.renameSlot(index);
+}
+
+function setCharacterColdSearch(value) {
+  if (characterPanel) characterPanel.setColdSearch(value);
 }
 
 // ---- Automation module ----
@@ -4893,6 +5006,7 @@ Promise.all([
   promptEngineeringPopupsReady,
 ])
   .then(() => {
+    initNaiaTitleTooltips();
     initHistoryRail();
     initResultInfoResizer();
     bindMetadataImageDropTarget();

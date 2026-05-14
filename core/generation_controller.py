@@ -1152,6 +1152,7 @@ class GenerationController:
                 # 수동 생성 모드의 일반적인 오류 처리
                 self.context.main_window.status_bar.showMessage(f"❌ 생성 오류: {error_message}")
 
+            self.context.publish("generation_error", {"message": error_message})
             print("[QUEUE] 큐 비어있음. 자동생성 가능.")
 
     def _retry_auto_generation(self):

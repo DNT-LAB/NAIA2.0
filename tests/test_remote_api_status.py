@@ -271,7 +271,10 @@ def test_generation_error_clears_remote_generation_status():
 
     bridge.on_generation_error({"message": "API failed"})
 
-    assert broadcasts == [{"type": "status", "is_generating": False}]
+    assert broadcasts == [
+        {"type": "toast", "message": "API failed", "level": "error"},
+        {"type": "status", "is_generating": False},
+    ]
 
 
 def test_event_preset_generation_error_keeps_scoped_error_and_clears_status():

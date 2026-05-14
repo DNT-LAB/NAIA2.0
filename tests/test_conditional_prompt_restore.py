@@ -156,3 +156,4 @@ def test_generation_controller_publishes_generation_failed_event():
     controller._on_generation_error("boom")
 
     assert ("generation_failed", {"message": "boom"}) in events
+    assert ("generation_error", {"message": "boom"}) in events

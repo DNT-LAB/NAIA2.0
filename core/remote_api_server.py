@@ -7151,18 +7151,27 @@ class RemoteBridge(QObject):
     def on_generation_error(self, data=None):
         """Generation error event -> clear Remote Web generation state."""
         payload = data if isinstance(data, dict) else {}
+        scoped_error = False
         if payload.get("event_preset_request"):
+            scoped_error = True
             self._broadcast_json({
                 "type": "event_preset_generation_error",
                 "requestId": str(payload.get("event_preset_request_id") or ""),
                 "message": str(payload.get("message") or "Event Preset generation failed"),
             })
         if payload.get("remote_preset_request"):
+            scoped_error = True
             self._broadcast_json({
                 "type": "preset_generation_error",
                 "source": "preset",
                 "requestId": str(payload.get("remote_preset_request_id") or ""),
                 "message": str(payload.get("message") or "Preset generation failed"),
+            })
+        if not scoped_error:
+            self._broadcast_json({
+                "type": "toast",
+                "message": str(payload.get("message") or "Generation failed"),
+                "level": "error",
             })
         self._broadcast_json({"type": "status", "is_generating": False})
 
@@ -7914,9 +7923,16 @@ class RemoteBridge(QObject):
                 return {}
             characters = []
             for w in m.character_widgets:
+                if hasattr(m, "_slot_state_for_widget"):
+                    slot_state = m._slot_state_for_widget(w)
+                else:
+                    slot_state = "active" if w.active_checkbox.isChecked() else getattr(w, "slot_state", "inactive")
                 characters.append({
                     "id": w.char_id,
                     "active": w.active_checkbox.isChecked(),
+                    "slot_state": slot_state,
+                    "return_slot_state": str(getattr(w, "return_slot_state", "") or ""),
+                    "custom_name": str(getattr(w, "custom_name", "") or ""),
                     "prompt": w.prompt_textbox.toPlainText(),
                     "uc": w.uc_textbox.toPlainText(),
                 })
@@ -7946,6 +7962,7 @@ class RemoteBridge(QObject):
                 "characters": characters,
                 "character_count": len(characters),
                 "active_count": sum(1 for w in m.character_widgets if w.active_checkbox.isChecked()),
+                "cold_count": sum(1 for item in characters if item.get("slot_state") == "cold"),
                 "processed_characters": processed_characters,
                 "processed_ucs": processed_ucs,
                 "character_token_count": character_token_count,
@@ -9161,7 +9178,11 @@ class RemoteBridge(QObject):
                     m.add_character_widget()
                 for idx, widget in enumerate(m.character_widgets):
                     has_character = idx < len(characters) and bool(str(characters[idx]).strip())
-                    widget.active_checkbox.setChecked(has_character)
+                    if hasattr(m, "set_character_slot_state"):
+                        m.set_character_slot_state(idx, "active" if has_character else "inactive")
+                    else:
+                        widget.slot_state = "active" if has_character else "inactive"
+                        widget.active_checkbox.setChecked(has_character)
                     if idx < len(characters):
                         widget.prompt_textbox.setPlainText(str(characters[idx] or ""))
                         uc_text = str(characters_uc[idx] or "") if idx < len(characters_uc) else ""
@@ -9203,7 +9224,42 @@ class RemoteBridge(QObject):
             elif key.startswith("char_active_"):
                 idx = int(key.split("_")[-1])
                 if idx < len(m.character_widgets):
-                    m.character_widgets[idx].active_checkbox.setChecked(value == "true")
+                    state = "active" if value == "true" else "inactive"
+                    if hasattr(m, "set_character_slot_state"):
+                        m.set_character_slot_state(idx, state)
+                    else:
+                        m.character_widgets[idx].slot_state = state
+                        m.character_widgets[idx].active_checkbox.setChecked(value == "true")
+                    if hasattr(m, "process_and_update_view"):
+                        m.process_and_update_view()
+            elif key.startswith("char_slot_name_"):
+                idx = int(key.split("_")[-1])
+                if idx < len(m.character_widgets):
+                    if hasattr(m, "set_character_custom_name"):
+                        m.set_character_custom_name(idx, value)
+                    else:
+                        m.character_widgets[idx].custom_name = str(value or "").strip()
+                    self._broadcast_character_state()
+            elif key.startswith("char_slot_state_"):
+                idx = int(key.split("_")[-1])
+                if idx < len(m.character_widgets):
+                    if hasattr(m, "set_character_slot_state"):
+                        m.set_character_slot_state(idx, value)
+                    else:
+                        widget = m.character_widgets[idx]
+                        requested = str(value or "").strip().lower()
+                        if requested == "restore":
+                            requested = str(getattr(widget, "return_slot_state", "") or "inactive").strip().lower()
+                        normalized = requested if requested in {"active", "inactive", "cold"} else "inactive"
+                        if normalized == "cold":
+                            widget.return_slot_state = "active" if widget.active_checkbox.isChecked() else "inactive"
+                        else:
+                            widget.return_slot_state = normalized
+                        widget.slot_state = normalized
+                        widget.active_checkbox.setChecked(normalized == "active")
+                    if hasattr(m, "process_and_update_view"):
+                        m.process_and_update_view()
+                    self._broadcast_character_state()
             # Broadcast badge update on activation/active toggle
             if key.startswith("char_active_"):
                 self._broadcast_character_state()

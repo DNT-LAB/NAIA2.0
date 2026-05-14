@@ -1113,10 +1113,14 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         
         char_data = []
         for widget in self.character_widgets:
+            slot_state = self._slot_state_for_widget(widget)
             char_data.append({
                 "prompt": widget.prompt_textbox.toPlainText(),
                 "uc": widget.uc_textbox.toPlainText(),
-                "is_enabled": widget.active_checkbox.isChecked()
+                "is_enabled": slot_state == "active",
+                "slot_state": slot_state,
+                "return_slot_state": str(getattr(widget, "return_slot_state", "") or ""),
+                "custom_name": str(getattr(widget, "custom_name", "") or ""),
             })
         
         return {
@@ -1145,11 +1149,70 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
             self.add_character_widget()  # 기본 위젯 하나 추가
         else:
             for frame_data in character_frames_data:
+                is_enabled = frame_data.get("is_enabled", True)
+                slot_state = self._slot_state_from_settings(frame_data, is_enabled)
                 self.add_character_widget(
                     prompt_text=frame_data.get("prompt", ""),
                     uc_text=frame_data.get("uc", ""),
-                    is_enabled=frame_data.get("is_enabled", True)
+                    is_enabled=slot_state == "active",
+                    slot_state=slot_state,
+                    return_slot_state=frame_data.get("return_slot_state", ""),
+                    custom_name=frame_data.get("custom_name", frame_data.get("slot_name", "")),
                 )
+
+    def _normalize_slot_state(self, slot_state: str = None, is_enabled: bool = False) -> str:
+        state = str(slot_state or "").strip().lower()
+        if state in {"active", "inactive", "cold"}:
+            return state
+        return "active" if is_enabled else "inactive"
+
+    def _slot_state_from_settings(self, frame_data: Dict[str, Any], is_enabled: bool) -> str:
+        if "slot_state" in frame_data:
+            return self._normalize_slot_state(frame_data.get("slot_state"), is_enabled)
+        has_content = bool(str(frame_data.get("prompt", "")).strip() or str(frame_data.get("uc", "")).strip())
+        if is_enabled:
+            return "active"
+        return "cold" if has_content else "inactive"
+
+    def _slot_state_for_widget(self, widget) -> str:
+        checkbox = getattr(widget, "active_checkbox", None)
+        if checkbox is not None and checkbox.isChecked():
+            return "active"
+        state = self._normalize_slot_state(getattr(widget, "slot_state", None), False)
+        return "cold" if state == "cold" else "inactive"
+
+    def _on_character_active_changed(self, widget, state):
+        checkbox = getattr(widget, "active_checkbox", None)
+        widget.slot_state = "active" if checkbox and checkbox.isChecked() else "inactive"
+        self._check_and_update_position_safety()
+
+    def set_character_slot_state(self, index: int, slot_state: str) -> bool:
+        if index < 0 or index >= len(self.character_widgets):
+            return False
+        widget = self.character_widgets[index]
+        checkbox = getattr(widget, "active_checkbox", None)
+        current_work_state = "active" if checkbox and checkbox.isChecked() else "inactive"
+        requested_state = str(slot_state or "").strip().lower()
+        if requested_state == "restore":
+            requested_state = str(getattr(widget, "return_slot_state", "") or "inactive").strip().lower()
+        next_state = self._normalize_slot_state(requested_state, current_work_state == "active")
+        if next_state == "cold":
+            widget.return_slot_state = current_work_state
+        else:
+            widget.return_slot_state = next_state
+        widget.slot_state = next_state
+        if checkbox:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(next_state == "active")
+            checkbox.blockSignals(False)
+        self._check_and_update_position_safety()
+        return True
+
+    def set_character_custom_name(self, index: int, custom_name: str) -> bool:
+        if index < 0 or index >= len(self.character_widgets):
+            return False
+        self.character_widgets[index].custom_name = str(custom_name or "").strip()
+        return True
 
     def create_widget(self, parent: QWidget) -> QWidget:
         widget = QWidget(parent)
@@ -1440,15 +1503,33 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
             display_text.append(f"UC{i+1}: {uc}\n")
         self.processed_prompt_display.setText("\n".join(display_text))
 
-    def add_character_widget(self, prompt_text: str = "", uc_text: str = "", is_enabled: bool = True):
+    def add_character_widget(
+        self,
+        prompt_text: str = "",
+        uc_text: str = "",
+        is_enabled: bool = True,
+        slot_state: str = None,
+        return_slot_state: str = "",
+        custom_name: str = "",
+    ):
         char_id = len(self.character_widgets) + 1
         char_widget = NAID4CharacterInput(char_id, self.remove_character_widget, self.app_context, self.scroll_layout.parentWidget())
+        char_widget.slot_state = self._normalize_slot_state(slot_state, is_enabled)
+        char_widget.return_slot_state = self._normalize_slot_state(
+            return_slot_state,
+            is_enabled,
+        )
+        if char_widget.return_slot_state == "cold":
+            char_widget.return_slot_state = "inactive"
+        char_widget.custom_name = str(custom_name or "").strip()
         char_widget.prompt_textbox.setText(prompt_text)
         char_widget.uc_textbox.setText(uc_text)
-        char_widget.active_checkbox.setChecked(is_enabled)
+        char_widget.active_checkbox.setChecked(char_widget.slot_state == "active")
 
         # 🆕 active_checkbox 변경 시 안전장치 체크 연결
-        char_widget.active_checkbox.stateChanged.connect(lambda: self._check_and_update_position_safety())
+        char_widget.active_checkbox.stateChanged.connect(
+            lambda state, widget=char_widget: self._on_character_active_changed(widget, state)
+        )
 
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, char_widget)
         self.character_widgets.append(char_widget)

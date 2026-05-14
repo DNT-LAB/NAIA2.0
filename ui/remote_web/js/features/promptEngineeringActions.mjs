@@ -61,8 +61,23 @@ export function createPromptEngineeringActions({
     closePresetManagePanel();
   }
 
-  function addRandomizedPreset() {
+  function commitHoveredRandomizedPresetOption() {
     const select = document.getElementById('modRandomizedPresetAddSelect');
+    if (!select) return null;
+    const hovered = document.querySelector(
+      '.custom-select-menu[data-select-id="modRandomizedPresetAddSelect"]:not([hidden]) .custom-select-option.is-hovered',
+    );
+    const index = Number(hovered?.dataset?.index ?? -1);
+    if (Number.isInteger(index) && index >= 0 && index < select.options.length && !select.options[index].disabled) {
+      select.selectedIndex = index;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return select;
+  }
+
+  function addRandomizedPreset() {
+    const select = commitHoveredRandomizedPresetOption();
     const preset = select ? select.value.trim() : '';
     if (!preset) {
       showToast('랜덤 풀에 추가할 프리셋이 없습니다.', 'error');
@@ -75,6 +90,21 @@ export function createPromptEngineeringActions({
     const name = String(preset || '').trim();
     if (!name) return;
     setModuleParam('prompt_engineering', 'randomized_remove', name);
+  }
+
+  function switchRandomizedPreset(preset) {
+    const name = String(preset || '').trim();
+    if (!name) return;
+    closePresetManagePanel();
+    const select = document.getElementById('modPreset');
+    const hasOption = select && Array.from(select.options || []).some(option => option.value === name);
+    if (hasOption) {
+      select.value = name;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    onPresetChange(name);
   }
 
   function clearRandomizedPresets() {
@@ -140,6 +170,7 @@ export function createPromptEngineeringActions({
     deleteCurrentPreset,
     addRandomizedPreset,
     removeRandomizedPreset,
+    switchRandomizedPreset,
     clearRandomizedPresets,
     saveE621Settings,
     saveDanbooruSettings,

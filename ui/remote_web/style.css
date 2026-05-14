@@ -8655,6 +8655,15 @@ body.detached-metadata .metadata-layout {
   font-size: 12px;
   color: var(--text-primary);
 }
+.pe-randomized-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pe-randomized-actions .mod-btn-compact {
+  min-width: 62px;
+  padding-inline: 10px;
+}
 .pe-randomized-empty {
   min-height: 44px;
   display: flex;

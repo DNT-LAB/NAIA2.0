@@ -16,6 +16,7 @@ import core.remote_api_server as remote_api_server
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 from core.search_result_model import SearchResultModel
+from modules.prompt_engineering_module import PromptEngineeringModule as RealPromptEngineeringModule
 
 
 class _TokenManager:
@@ -81,6 +82,25 @@ class _FakeComboBox:
 
     def setCurrentIndex(self, index):
         self.current = self.items[index]
+
+    def setCurrentText(self, text):
+        self.current = text
+
+    def blockSignals(self, _blocked):
+        return None
+
+    def clear(self):
+        self.items = []
+        self.current = ""
+
+    def addItem(self, text):
+        self.items.append(text)
+        if not self.current:
+            self.current = text
+
+    def addItems(self, items):
+        for item in items:
+            self.addItem(item)
 
 
 class PromptEngineeringModule:
@@ -314,6 +334,78 @@ def test_prompt_engineering_randomized_manage_commands_update_pool():
 
     bridge._set_prompt_engineering("randomized_add", "default")
     assert broadcasts[-1] == {"type": "toast", "message": "invalid", "level": "error"}
+
+
+def _bare_real_prompt_engineering_module(mode="NAI"):
+    module = object.__new__(RealPromptEngineeringModule)
+    module.app_context = SimpleNamespace(get_api_mode=lambda: mode)
+    module.preset_list = ["default", "alpha", "beta", "gamma"]
+    module.randomized_preset_list = []
+    module.randomized_listbox = None
+    module.randomized_combo = None
+    module.randomized_add_btn = None
+    return module
+
+
+def test_prompt_engineering_randomized_pool_persists_per_mode(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    module = _bare_real_prompt_engineering_module("NAI")
+    assert module.add_randomized_preset("alpha") == (True, "alpha")
+    assert module.add_randomized_preset("beta") == (True, "beta")
+
+    pool_file = tmp_path / "save" / "presets" / "randomized_pool.json"
+    assert json.loads(pool_file.read_text(encoding="utf-8")) == {"NAI": ["alpha", "beta"]}
+
+    reloaded = _bare_real_prompt_engineering_module("NAI")
+    reloaded._load_randomized_preset_list()
+    reloaded._prune_randomized_preset_list(persist=True)
+    assert reloaded.randomized_preset_list == ["alpha", "beta"]
+
+    webui = _bare_real_prompt_engineering_module("WEBUI")
+    assert webui.add_randomized_preset("gamma") == (True, "gamma")
+    assert json.loads(pool_file.read_text(encoding="utf-8")) == {
+        "NAI": ["alpha", "beta"],
+        "WEBUI": ["gamma"],
+    }
+
+    assert reloaded.remove_randomized_preset("alpha") == (True, "alpha")
+    assert json.loads(pool_file.read_text(encoding="utf-8"))["NAI"] == ["beta"]
+
+    reloaded.current_preset = "*randomized"
+    reloaded.save_current_preset = lambda *args, **kwargs: pytest.fail("should not save *randomized as a preset file")
+    reloaded.save_last_used_preset_info = lambda *args, **kwargs: pytest.fail("should not mark *randomized as last used")
+    reloaded.save_on_exit()
+    assert json.loads(pool_file.read_text(encoding="utf-8"))["NAI"] == ["beta"]
+
+    assert reloaded.clear_randomized_presets() == (True, "")
+    assert json.loads(pool_file.read_text(encoding="utf-8"))["NAI"] == []
+
+
+def test_prompt_engineering_ignores_legacy_randomized_preset_file(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    class _FakePresetPath:
+        def __init__(self, stem):
+            self.stem = stem
+
+        def __lt__(self, other):
+            return self.stem < other.stem
+
+    module = _bare_real_prompt_engineering_module("NAI")
+    module.preset_combo = _FakeComboBox(["*randomized"], "*randomized")
+    module.get_preset_dir = lambda mode=None: SimpleNamespace(
+        glob=lambda _pattern: [
+            _FakePresetPath("*randomized"),
+            _FakePresetPath("default"),
+            _FakePresetPath("alpha"),
+        ]
+    )
+
+    module.load_preset_list()
+
+    assert module.preset_list == ["default", "alpha"]
+    assert module.preset_combo.items == ["*randomized", "default", "alpha"]
 
 
 def test_auto_generated_prompt_broadcast_uses_auto_generate_source(monkeypatch):

@@ -5,10 +5,150 @@ export function createPromptEngineeringPopupRenderers({
   createPromptPreset,
   addRandomizedPreset,
   removeRandomizedPreset,
+  switchRandomizedPreset,
   clearRandomizedPresets,
   bindDanbooruFeedback,
   panels,
 }) {
+  let randomizedPreview = null;
+  let randomizedPreviewHideTimer = null;
+
+  function compactPreviewText(text, limit = 420) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 3))}...` : normalized;
+  }
+
+  function presetSummaryMap(m) {
+    const summaryMap = new Map();
+    (m.preset_summaries || []).forEach(summary => {
+      if (summary && summary.name) summaryMap.set(String(summary.name), summary);
+    });
+    return summaryMap;
+  }
+
+  function presetPreviewAttrs(preset, summaryMap) {
+    const summary = summaryMap.get(String(preset));
+    if (!summary) return '';
+    return [
+      `data-preview-name="${escHtml(summary.name || preset)}"`,
+      `data-preview-mode="${escHtml(summary.api_mode || '')}"`,
+      `data-preview-prefix="${escHtml(compactPreviewText(summary.pre_prompt_preview, 1200))}"`,
+      `data-preview-description="${escHtml(compactPreviewText(summary.description, 300))}"`,
+      `data-preview-thumbnail="${escHtml(summary.thumbnail_url || '')}"`,
+    ].join(' ');
+  }
+
+  function cancelRandomizedPreviewHide() {
+    if (randomizedPreviewHideTimer) {
+      clearTimeout(randomizedPreviewHideTimer);
+      randomizedPreviewHideTimer = null;
+    }
+  }
+
+  function ensureRandomizedPreview() {
+    if (randomizedPreview) return randomizedPreview;
+    const preview = document.createElement('div');
+    preview.className = 'custom-select-preview custom-select-preview-prompt-preset pe-randomized-preview';
+    preview.hidden = true;
+    preview.addEventListener('pointerenter', cancelRandomizedPreviewHide);
+    preview.addEventListener('pointerleave', () => scheduleRandomizedPreviewHide());
+    document.body.append(preview);
+    randomizedPreview = preview;
+    return preview;
+  }
+
+  function hideRandomizedPreview() {
+    cancelRandomizedPreviewHide();
+    if (!randomizedPreview) return;
+    randomizedPreview.hidden = true;
+    randomizedPreview.textContent = '';
+  }
+
+  function scheduleRandomizedPreviewHide() {
+    cancelRandomizedPreviewHide();
+    randomizedPreviewHideTimer = setTimeout(hideRandomizedPreview, 80);
+  }
+
+  function positionRandomizedPreview(anchor, preview) {
+    const margin = 8;
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const width = Math.min(380, Math.max(260, viewportWidth - margin * 2));
+    preview.style.width = `${width}px`;
+    const previewHeight = Math.min(preview.offsetHeight || 0, viewportHeight - margin * 2);
+    let left = rect.right + margin;
+    if (left + width > viewportWidth - margin) left = rect.left - width - margin;
+    if (left < margin) left = Math.max(margin, viewportWidth - width - margin);
+    let top = rect.top;
+    if (top + previewHeight > viewportHeight - margin) top = viewportHeight - previewHeight - margin;
+    if (top < margin) top = margin;
+    preview.style.left = `${Math.round(left)}px`;
+    preview.style.top = `${Math.round(top)}px`;
+  }
+
+  function renderRandomizedPreview(anchor, preset, summaryMap) {
+    const summary = summaryMap.get(String(preset)) || { name: preset };
+    const preview = ensureRandomizedPreview();
+    cancelRandomizedPreviewHide();
+    preview.textContent = '';
+
+    const thumb = document.createElement('div');
+    thumb.className = 'custom-select-preview-thumb';
+    const thumbnailUrl = summary.thumbnail_url || '';
+    if (thumbnailUrl) {
+      thumb.classList.add('has-image');
+      const image = document.createElement('img');
+      image.src = thumbnailUrl;
+      image.alt = '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      const markImageRatio = () => {
+        const isPortrait = image.naturalWidth > 0 && image.naturalHeight / image.naturalWidth >= 1.18;
+        thumb.classList.toggle('is-portrait', isPortrait);
+      };
+      if (image.complete) markImageRatio();
+      else image.addEventListener('load', markImageRatio, { once: true });
+      thumb.append(image);
+    } else {
+      const empty = document.createElement('span');
+      empty.textContent = 'No image';
+      thumb.append(empty);
+    }
+
+    const copy = document.createElement('div');
+    copy.className = 'custom-select-preview-copy';
+    const head = document.createElement('div');
+    head.className = 'custom-select-preview-head';
+    const title = document.createElement('strong');
+    title.textContent = summary.name || preset;
+    head.append(title);
+    if (summary.api_mode) {
+      const mode = document.createElement('span');
+      mode.textContent = summary.api_mode;
+      head.append(mode);
+    }
+    copy.append(head);
+
+    const description = compactPreviewText(summary.description, 300);
+    if (description) {
+      const desc = document.createElement('p');
+      desc.className = 'custom-select-preview-desc';
+      desc.textContent = description;
+      copy.append(desc);
+    }
+
+    const prefix = document.createElement('pre');
+    prefix.className = 'custom-select-preview-prefix';
+    prefix.textContent = compactPreviewText(summary.pre_prompt_preview, 1200) || 'No prefix prompt';
+    copy.append(prefix);
+
+    preview.append(thumb, copy);
+    preview.hidden = false;
+    requestAnimationFrame(() => positionRandomizedPreview(anchor, preview));
+  }
+
   function getBody(panel) {
     return panel ? panel.querySelector('.pe-popup-body') : null;
   }
@@ -66,16 +206,22 @@ export function createPromptEngineeringPopupRenderers({
   function renderRandomizedManage(body, m) {
     const pool = Array.isArray(m.randomized_preset_list) ? m.randomized_preset_list : [];
     const available = Array.isArray(m.randomized_available_presets) ? m.randomized_available_presets : [];
+    const summaryMap = presetSummaryMap(m);
+    hideRandomizedPreview();
     const poolHtml = pool.length
       ? pool.map(preset => `
         <div class="pe-randomized-row">
           <span class="pe-randomized-name">${escHtml(preset)}</span>
-          <button class="mod-btn-danger mod-btn-compact" data-randomized-remove="${escHtml(preset)}">Remove</button>
+          <div class="pe-randomized-actions">
+            <button class="mod-btn-secondary mod-btn-compact" data-randomized-switch="${escHtml(preset)}">Switch</button>
+            <button class="mod-btn-secondary mod-btn-compact" data-randomized-show="${escHtml(preset)}">Show</button>
+            <button class="mod-btn-danger mod-btn-compact" data-randomized-remove="${escHtml(preset)}">Remove</button>
+          </div>
         </div>
       `).join('')
       : '<div class="pe-randomized-empty">No presets selected</div>';
     const optionsHtml = available
-      .map(preset => `<option value="${escHtml(preset)}">${escHtml(preset)}</option>`)
+      .map(preset => `<option value="${escHtml(preset)}" ${presetPreviewAttrs(preset, summaryMap)}>${escHtml(preset)}</option>`)
       .join('');
     body.innerHTML = `
     <div class="mod-section-label">Current Preset</div>
@@ -85,7 +231,7 @@ export function createPromptEngineeringPopupRenderers({
     <div>
       <div class="mod-section-label">Add Preset</div>
       <div class="mod-inline-row pe-randomized-add-row">
-        <select class="mod-select" id="modRandomizedPresetAddSelect" ${available.length ? '' : 'disabled'}>${optionsHtml}</select>
+        <select class="mod-select" id="modRandomizedPresetAddSelect" data-preview-kind="prompt-preset" data-preview-actions="none" ${available.length ? '' : 'disabled'}>${optionsHtml}</select>
         <button class="mod-btn-secondary mod-btn-compact" id="modRandomizedPresetAddBtn" ${available.length ? '' : 'disabled'}>Add</button>
       </div>
     </div>
@@ -107,6 +253,22 @@ export function createPromptEngineeringPopupRenderers({
     }
     body.querySelectorAll('[data-randomized-remove]').forEach(button => {
       button.addEventListener('click', () => removeRandomizedPreset(button.dataset.randomizedRemove || ''));
+    });
+    body.querySelectorAll('[data-randomized-switch]').forEach(button => {
+      button.addEventListener('click', () => {
+        hideRandomizedPreview();
+        switchRandomizedPreset(button.dataset.randomizedSwitch || '');
+      });
+    });
+    body.querySelectorAll('[data-randomized-show]').forEach(button => {
+      const preset = button.dataset.randomizedShow || '';
+      button.addEventListener('mouseenter', () => renderRandomizedPreview(button, preset, summaryMap));
+      button.addEventListener('focus', () => renderRandomizedPreview(button, preset, summaryMap));
+      button.addEventListener('mouseleave', event => {
+        if (randomizedPreview && randomizedPreview.contains(event.relatedTarget)) return;
+        scheduleRandomizedPreviewHide();
+      });
+      button.addEventListener('blur', scheduleRandomizedPreviewHide);
     });
     const clearButton = document.getElementById('modRandomizedPresetClearBtn');
     if (clearButton) clearButton.addEventListener('click', () => clearRandomizedPresets());

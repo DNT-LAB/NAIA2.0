@@ -46,6 +46,7 @@ export function createCustomSelectController({
 
     const menu = document.createElement('div');
     menu.className = `custom-select-menu ${selectClasses(select)}`;
+    menu.dataset.selectId = select.id || '';
     menu.setAttribute('role', 'listbox');
     menu.hidden = true;
     document.body.append(menu);
@@ -328,8 +329,10 @@ export function createCustomSelectController({
     prefix.textContent = option.dataset.previewPrefix || 'No prefix prompt';
     copy.append(prefix);
 
-    const actions = buildPreviewActions(state, option);
-    preview.append(thumb, copy, actions);
+    preview.append(thumb, copy);
+    if (state.select.dataset.previewActions !== 'none') {
+      preview.append(buildPreviewActions(state, option));
+    }
     preview.hidden = false;
     positionPreview(state);
   }

@@ -2136,7 +2136,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # JSON 파일 목록 가져오기
         json_files = sorted(preset_dir.glob("*.json"))
-        preset_names = [f.stem for f in json_files]
+        preset_names = [f.stem for f in json_files if f.stem != "*randomized"]
 
         # default를 맨 앞으로
         if "default" in preset_names:
@@ -2145,7 +2145,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # preset_list는 실제 파일 기반 프리셋만 포함 (*randomized 제외)
         self.preset_list = preset_names
-        self._prune_randomized_preset_list()
+        self._load_randomized_preset_list()
+        self._prune_randomized_preset_list(persist=True)
 
         # 콤보박스 업데이트
         current_text = self.preset_combo.currentText()
@@ -3245,7 +3246,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
     def save_on_exit(self):
         """프로그램 종료 시 현재 프리셋 저장"""
-        if self.current_preset and self.current_preset != "(프리셋 없음)":
+        if self.current_preset == "*randomized":
+            self._save_randomized_preset_list()
+        elif self.current_preset and self.current_preset != "(프리셋 없음)":
             self.save_current_preset()
             self.save_last_used_preset_info()
 
@@ -3383,7 +3386,76 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         for preset_name in self.randomized_preset_list:
             self.randomized_listbox.addItem(preset_name)
 
-    def _prune_randomized_preset_list(self):
+    def _get_randomized_pool_file(self) -> Path:
+        return Path("save") / "presets" / "randomized_pool.json"
+
+    def _randomized_pool_mode(self, mode: Optional[str] = None) -> str:
+        if mode:
+            return str(mode)
+        if hasattr(self, 'app_context') and self.app_context:
+            try:
+                return str(self.app_context.get_api_mode() or "NAI")
+            except Exception:
+                pass
+        return "NAI"
+
+    def _save_randomized_preset_list(self, mode: Optional[str] = None):
+        """Persist the randomized pool per API mode, shared by desktop and Remote Web."""
+        target_mode = self._randomized_pool_mode(mode)
+        pool_file = self._get_randomized_pool_file()
+        pool_file.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+
+        if pool_file.exists():
+            try:
+                with open(pool_file, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data = loaded
+            except Exception:
+                data = {}
+
+        data[target_mode] = list(getattr(self, "randomized_preset_list", []) or [])
+
+        try:
+            with open(pool_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"🎲 랜덤 프리셋 풀 저장: {target_mode} ({len(data[target_mode])}개)")
+        except Exception as e:
+            print(f"⚠️ 랜덤 프리셋 풀 저장 실패: {e}")
+
+    def _load_randomized_preset_list(self, mode: Optional[str] = None):
+        """Load the randomized pool for the current API mode."""
+        target_mode = self._randomized_pool_mode(mode)
+        pool_file = self._get_randomized_pool_file()
+        if not pool_file.exists():
+            self._sync_randomized_listbox()
+            return
+
+        try:
+            with open(pool_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"⚠️ 랜덤 프리셋 풀 로드 실패: {e}")
+            self._sync_randomized_listbox()
+            return
+
+        pool = data.get(target_mode, []) if isinstance(data, dict) else []
+        if not isinstance(pool, list):
+            pool = []
+
+        seen = set()
+        restored = []
+        for preset_name in pool:
+            sanitized = self.sanitize_preset_name(str(preset_name or ""))
+            if sanitized and sanitized not in seen:
+                restored.append(sanitized)
+                seen.add(sanitized)
+
+        self.randomized_preset_list = restored
+        self._sync_randomized_listbox()
+
+    def _prune_randomized_preset_list(self, persist: bool = False):
         """삭제되었거나 현재 모드에 없는 프리셋을 랜덤 풀에서 제거."""
         current = list(getattr(self, "randomized_preset_list", []) or [])
         pruned = []
@@ -3396,6 +3468,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         if pruned != current:
             self.randomized_preset_list = pruned
             self._sync_randomized_listbox()
+            if persist:
+                self._save_randomized_preset_list()
         if self.randomized_combo is not None:
             self._update_randomized_combo()
 
@@ -3417,6 +3491,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             return False, "이미 랜덤 풀에 포함된 프리셋입니다."
         self.randomized_preset_list.append(preset_name)
         self._sync_randomized_listbox()
+        self._save_randomized_preset_list()
         self._update_randomized_combo()
         return True, preset_name
 
@@ -3427,6 +3502,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             return False, "랜덤 풀에 없는 프리셋입니다."
         self.randomized_preset_list.remove(preset_name)
         self._sync_randomized_listbox()
+        self._save_randomized_preset_list()
         self._update_randomized_combo()
         return True, preset_name
 
@@ -3434,6 +3510,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         """랜덤 풀을 비움."""
         self.randomized_preset_list = []
         self._sync_randomized_listbox()
+        self._save_randomized_preset_list()
         self._update_randomized_combo()
         return True, ""
 

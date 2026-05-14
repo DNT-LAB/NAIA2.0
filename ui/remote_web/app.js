@@ -250,7 +250,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260512-api-dialog
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260509-clipboard-native-first1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260514-randomized-preview1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -1026,7 +1026,6 @@ const optBoxes = {
   wildcard_standalone: $('optWcStandalone'),
 };
 const pendingOptionValues = Object.create(null);
-
 // ---- Result history wrappers ----
 const mobileHistoryMediaQuery = window.matchMedia('(max-width: 767px)');
 function isMobileHistoryViewport() {
@@ -3420,7 +3419,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260514-randomized-manage1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260514-randomized-preview3')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -3604,16 +3603,17 @@ const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260514-randomized-manage1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260514-randomized-preview3')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,
       createPromptPreset,
-      addRandomizedPromptPreset,
-      removeRandomizedPromptPreset,
-      clearRandomizedPromptPresets,
+      addRandomizedPreset: addRandomizedPromptPreset,
+      removeRandomizedPreset: removeRandomizedPromptPreset,
+      switchRandomizedPreset: switchRandomizedPromptPreset,
+      clearRandomizedPresets: clearRandomizedPromptPresets,
       bindDanbooruFeedback,
       panels: {
         e621: peE621Panel,
@@ -3956,6 +3956,10 @@ function addRandomizedPromptPreset() {
 
 function removeRandomizedPromptPreset(preset) {
   if (promptEngineeringActions) promptEngineeringActions.removeRandomizedPreset(preset);
+}
+
+function switchRandomizedPromptPreset(preset) {
+  if (promptEngineeringActions) promptEngineeringActions.switchRandomizedPreset(preset);
 }
 
 function clearRandomizedPromptPresets() {

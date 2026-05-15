@@ -3201,6 +3201,7 @@ class ModernMainWindow(QMainWindow):
             info_text = result.get("info", "")
             source_row = result.get("source_row")
             raw_bytes = result.get("raw_bytes")
+            skip_auto_generate_check = bool(result.get("_skip_update_ui_auto_generate_check"))
 
             if image_object is None:
                 print("❌ image_object가 None입니다.")
@@ -3349,38 +3350,41 @@ class ModernMainWindow(QMainWindow):
                     print(f"❌ 자동화 모듈 notify_generation_completed 실패: {e}")
                     return
 
-            # 자동 생성 체크
-            try:
-                # 자동 생성이 활성화되어 있고, 자동화가 실행 중일 때만 지연시간 적용
-                auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
-                if (auto_generate_checkbox and auto_generate_checkbox.isChecked() and 
-                    self.automation_module and self.automation_module.automation_controller.is_running):
-                    delay = self.automation_module.get_generation_delay()
-                    if delay > 0:
-                        print(f"⏱️ 생성 지연: {delay:.1f}초")
-                        # 카운트다운 스레드를 사용하여 지연 시각화
-                        if hasattr(self.automation_module, 'start_delay_countdown'):
-                            # 카운트다운 완료 시 자동 생성 트리거를 연결
-                            self.automation_module.countdown_thread = None  # 기존 연결 해제를 위해 초기화
-                            self.automation_module.start_delay_countdown_for_new_prompt(delay)
+            if skip_auto_generate_check:
+                print("[AUTO] Auto Gen은 스레드 종료 경로에서 이미 예약됨.")
+            else:
+                # 자동 생성 체크
+                try:
+                    # 자동 생성이 활성화되어 있고, 자동화가 실행 중일 때만 지연시간 적용
+                    auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
+                    if (auto_generate_checkbox and auto_generate_checkbox.isChecked() and
+                        self.automation_module and self.automation_module.automation_controller.is_running):
+                        delay = self.automation_module.get_generation_delay()
+                        if delay > 0:
+                            print(f"⏱️ 생성 지연: {delay:.1f}초")
+                            # 카운트다운 스레드를 사용하여 지연 시각화
+                            if hasattr(self.automation_module, 'start_delay_countdown'):
+                                # 카운트다운 완료 시 자동 생성 트리거를 연결
+                                self.automation_module.countdown_thread = None  # 기존 연결 해제를 위해 초기화
+                                self.automation_module.start_delay_countdown_for_new_prompt(delay)
+                            else:
+                                # 폴백: 기존 방식 사용
+                                if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                                    self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
+                                # 모듈 레벨 import (line 40) 사용 — 함수-로컬 import 는
+                                # 같은 함수 위쪽에서 QTimer 참조 시 UnboundLocalError 유발하므로 금지.
+                                QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
                         else:
-                            # 폴백: 기존 방식 사용
                             if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
-                                self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
-                            # 모듈 레벨 import (line 40) 사용 — 함수-로컬 import 는
-                            # 같은 함수 위쪽에서 QTimer 참조 시 UnboundLocalError 유발하므로 금지.
-                            QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
+                                self.automation_module.delay_info_label.setText("⚡ 지연 없음")
+                            self._check_and_trigger_auto_generation()
                     else:
-                        if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
-                            self.automation_module.delay_info_label.setText("⚡ 지연 없음")
+                        # 자동화가 비활성화된 경우 지연 없이 즉시 실행
+                        if self.automation_module and hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                            self.automation_module.delay_info_label.setText("")
                         self._check_and_trigger_auto_generation()
-                else:
-                    # 자동화가 비활성화된 경우 지연 없이 즉시 실행
-                    if self.automation_module and hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
-                        self.automation_module.delay_info_label.setText("")
-                    self._check_and_trigger_auto_generation()
-            except Exception as e:
-                print(f"❌ 자동 생성 체크 실패: {e}")
+                except Exception as e:
+                    print(f"❌ 자동 생성 체크 실패: {e}")
 
             # 🆕 Autosave: 특수 요청이 아닌 일반 생성 완료 시에만 자동 저장
             try:

@@ -967,11 +967,17 @@ class GenerationController:
 
         self.context.publish("generation_finished", result)
 
+        queue_manager = self.context.generation_queue_manager
+        prearmed_auto_gen = self._prearm_auto_generation_after_thread_finish(result, queue_manager)
+
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
-        self.context.main_window.update_ui_with_result(result)
+        # 일반 Auto Gen은 다음 생성 재개가 Qt 이미지/CRUD 후처리에 막히지 않도록 한 틱 뒤로 미룬다.
+        if prearmed_auto_gen:
+            QTimer.singleShot(50, lambda result=result: self.context.main_window.update_ui_with_result(result))
+        else:
+            self.context.main_window.update_ui_with_result(result)
 
         # 🆕 큐에 대기 중인 요청이 있으면 다음 요청 처리
-        queue_manager = self.context.generation_queue_manager
         if not queue_manager.is_empty() and not queue_manager.is_paused():
             # 🔒 큐가 있으면 is_generating을 유지하여 자동생성 차단
             print(f"[QUEUE] 생성 완료. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
@@ -986,6 +992,34 @@ class GenerationController:
                 print("[QUEUE] 큐 비어있음. 자동생성 즉시 가능.")
             else:
                 print("[QUEUE] 큐가 일시정지 상태입니다.")
+
+    def _prearm_auto_generation_after_thread_finish(self, result: dict, queue_manager) -> bool:
+        """일반 Auto Gen을 Qt 결과 UI/CRUD 후처리보다 먼저 재개하도록 준비한다."""
+        try:
+            if not queue_manager.is_empty() and not queue_manager.is_paused():
+                return False
+
+            main_window = getattr(self.context, "main_window", None)
+            if main_window is None:
+                return False
+
+            auto_generate_checkbox = getattr(main_window, "generation_checkboxes", {}).get("자동 생성")
+            if not (auto_generate_checkbox and auto_generate_checkbox.isChecked()):
+                return False
+
+            automation_module = getattr(main_window, "automation_module", None)
+            automation_controller = getattr(automation_module, "automation_controller", None)
+            if automation_controller and getattr(automation_controller, "is_running", False):
+                return False
+
+            main_window._auto_generation_waiting_for_thread = True
+            if isinstance(result, dict):
+                result["_skip_update_ui_auto_generate_check"] = True
+            print("[AUTO] 결과 UI 후처리 전 Auto Gen 재개 예약.")
+            return True
+        except Exception as e:
+            print(f"[AUTO] Auto Gen 사전 예약 실패: {e}")
+            return False
 
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""

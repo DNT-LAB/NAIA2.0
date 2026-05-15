@@ -3313,7 +3313,7 @@ class ModernMainWindow(QMainWindow):
             # 메인 스레드를 ~수백 ms 잡는다. broadcast 가 그 뒤로 밀리면 Web Shell 페인트도 늦어진다.
             self.app_context.publish("generation_result_available", result)
 
-            # 히스토리 추가는 한 frame 늦춰서 broadcast 큐잉 + 첫 페인트가 먼저 일어나게 한다.
+            # 히스토리 추가는 스레드 종료/Auto Gen 재개 뒤로 밀어 메인 이벤트 루프 점유를 피한다.
             def _deferred_add_to_history(
                 _image=image_object,
                 _raw=raw_bytes,
@@ -3337,7 +3337,7 @@ class ModernMainWindow(QMainWindow):
                     print(f"❌ 히스토리 추가 실패: {e}")
                     import traceback
                     traceback.print_exc()
-            QTimer.singleShot(0, _deferred_add_to_history)
+            QTimer.singleShot(50, _deferred_add_to_history)
             
             # 자동화 모듈 처리 (안전하게)
             if self.automation_module:
@@ -3397,7 +3397,7 @@ class ModernMainWindow(QMainWindow):
                 )
 
                 if not is_special_request:
-                    self._perform_autosave_on_generation()
+                    QTimer.singleShot(50, self._perform_autosave_on_generation)
             except Exception as e:
                 # 자동 저장 실패해도 프로그램은 계속 동작
                 print(f"⚠️ [Autosave] 트리거 실패: {e}")

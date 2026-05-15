@@ -9,7 +9,7 @@ import piexif.helper
 import json
 import re, random
 from pathlib import Path
-from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool, Qt
 import pandas as pd
 import gc
 import requests
@@ -308,8 +308,11 @@ class GenerationWorker(QObject):
         except Exception as e:
             print(f"⚠️ ComfyUI PNG 메타데이터 보강 실패: {e}")
 
-class GenerationController:
+class GenerationController(QObject):
+    _thread_finished_signal = pyqtSignal(object, object)
+
     def __init__(self, context: 'AppContext', module_instances: list):
+        super().__init__()
         self.context = context
         self.module_instances = module_instances
         self.workflow_manager = self.context.comfyui_workflow_manager # AppContext에서 참조
@@ -331,6 +334,10 @@ class GenerationController:
         # 🆕 스레드 안전 관리를 위한 추가 변수
         self._thread_cleanup_in_progress = False  # 스레드 정리 중 여부
         self._pending_thread_refs = []  # 정리 대기 중인 스레드 참조
+        self._thread_finished_signal.connect(
+            self._on_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
     def _has_running_generation_thread(self) -> bool:
         thread = self.generation_thread
@@ -841,10 +848,22 @@ class GenerationController:
         self.generation_worker.moveToThread(self.generation_thread)
 
         # 시그널 연결
-        self.generation_worker.generation_started.connect(self._on_generation_started)
-        self.generation_worker.generation_progress.connect(self._on_generation_progress)
-        self.generation_worker.generation_finished.connect(self._on_generation_finished)
-        self.generation_worker.generation_error.connect(self._on_generation_error)
+        self.generation_worker.generation_started.connect(
+            self._on_generation_started,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.generation_worker.generation_progress.connect(
+            self._on_generation_progress,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.generation_worker.generation_finished.connect(
+            self._on_generation_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.generation_worker.generation_error.connect(
+            self._on_generation_error,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # 스레드 시작/종료 연결
         self.generation_thread.started.connect(self.generation_worker.run_generation)
@@ -856,7 +875,7 @@ class GenerationController:
         thread_ref = self.generation_thread
         worker_ref = self.generation_worker
         self.generation_thread.finished.connect(
-            lambda thread=thread_ref, worker=worker_ref: self._on_thread_finished(thread, worker)
+            lambda thread=thread_ref, worker=worker_ref: self._thread_finished_signal.emit(thread, worker)
         )
         # deleteLater는 _on_thread_finished 내부에서 지연 호출로 처리 (아래 참조 해제 후)
 

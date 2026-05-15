@@ -7325,6 +7325,8 @@ class RemoteBridge(QObject):
             return self._read_auto_save_settings()
         elif module_id == "automation":
             return self._read_automation()
+        elif module_id == "webui_fast_auto_gen":
+            return self._read_webui_fast_auto_gen()
         elif module_id == "character":
             return self._read_character()
         elif module_id == "conditional_prompt":
@@ -7914,6 +7916,22 @@ class RemoteBridge(QObject):
             }
         except Exception as e:
             print(f"🌐 Remote: automation 상태 읽기 실패 — {e}")
+            return {}
+
+    def _read_webui_fast_auto_gen(self) -> dict:
+        try:
+            main_window = getattr(self.app_context, "main_window", None)
+            current_mode = str(self._current_api_mode() or "").upper()
+            enabled = bool(getattr(main_window, "webui_fast_auto_gen_enabled", False))
+            return {
+                "type": "module_state",
+                "module_id": "webui_fast_auto_gen",
+                "enabled": enabled,
+                "available": current_mode == "WEBUI",
+                "mode": current_mode,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: WEBUI Fast Auto Gen 상태 읽기 실패 — {e}")
             return {}
 
     def _read_character(self) -> dict:
@@ -8848,6 +8866,8 @@ class RemoteBridge(QObject):
             self._set_auto_save_settings(key, value)
         elif module_id == "automation":
             self._set_automation(key, value)
+        elif module_id == "webui_fast_auto_gen":
+            self._set_webui_fast_auto_gen(key, value)
         elif module_id == "character":
             self._set_character(key, value)
         elif module_id == "conditional_prompt":
@@ -9140,6 +9160,29 @@ class RemoteBridge(QObject):
                 self._broadcast_automation_state()
         except Exception as e:
             print(f"🌐 Remote: automation 설정 실패 — {key}={value}: {e}")
+
+    def _set_webui_fast_auto_gen(self, key: str, value: str):
+        try:
+            main_window = getattr(self.app_context, "main_window", None)
+            if not main_window:
+                return
+            if key == "enabled":
+                enabled = self._coerce_bool(value)
+                main_window.webui_fast_auto_gen_enabled = enabled
+                if not enabled:
+                    if hasattr(main_window, "cancel_webui_fast_auto_generation"):
+                        main_window.cancel_webui_fast_auto_generation()
+                    else:
+                        main_window._webui_fast_auto_gen_prepare_requested = False
+                        main_window._webui_fast_auto_gen_preparing = False
+                self._broadcast_webui_fast_auto_gen_state()
+        except Exception as e:
+            print(f"🌐 Remote: WEBUI Fast Auto Gen 설정 실패 — {key}={value}: {e}")
+
+    def _broadcast_webui_fast_auto_gen_state(self):
+        state = self._read_webui_fast_auto_gen()
+        if state:
+            self._broadcast_json(state)
 
     def _broadcast_automation_state(self):
         state = self._read_automation()

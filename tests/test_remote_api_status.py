@@ -288,6 +288,36 @@ def test_tag_lookup_accepts_webui_escaped_parentheses():
     assert info["count"] == 10000
 
 
+def test_webui_fast_auto_gen_module_state_and_toggle():
+    cancel_calls = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        webui_fast_auto_gen_enabled=False,
+        cancel_webui_fast_auto_generation=lambda: cancel_calls.append("cancel"),
+    )
+    ctx.get_api_mode = lambda: "WEBUI"
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    assert bridge._read_webui_fast_auto_gen() == {
+        "type": "module_state",
+        "module_id": "webui_fast_auto_gen",
+        "enabled": False,
+        "available": True,
+        "mode": "WEBUI",
+    }
+
+    bridge._set_webui_fast_auto_gen("enabled", "true")
+    assert ctx.main_window.webui_fast_auto_gen_enabled is True
+    assert broadcasts[-1]["enabled"] is True
+
+    bridge._set_webui_fast_auto_gen("enabled", "false")
+    assert ctx.main_window.webui_fast_auto_gen_enabled is False
+    assert cancel_calls == ["cancel"]
+    assert broadcasts[-1]["enabled"] is False
+
+
 def test_generation_error_clears_remote_generation_status():
     bridge = RemoteBridge(_AppContext())
     broadcasts = []

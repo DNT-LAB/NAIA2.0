@@ -66,6 +66,9 @@ class _QueueManager:
     def is_paused(self):
         return False
 
+    def peek_next_request(self):
+        return self.requests[0] if self.requests else None
+
 
 class _CheckBox:
     def __init__(self, checked):
@@ -166,7 +169,7 @@ def test_thread_finished_resumes_pending_auto_generation(monkeypatch):
     assert 0 in timer_calls
 
 
-def test_generation_finished_prearms_normal_autogen_before_ui(monkeypatch):
+def test_generation_finished_prearms_normal_autogen_before_ui_when_fast_mode_enabled(monkeypatch):
     scheduled = []
     events = []
 
@@ -180,6 +183,7 @@ def test_generation_finished_prearms_normal_autogen_before_ui(monkeypatch):
     main_window = SimpleNamespace(
         _auto_generation_waiting_for_thread=False,
         generation_checkboxes={"자동 생성": _CheckBox(True)},
+        is_webui_fast_auto_gen_enabled=lambda: True,
         automation_module=SimpleNamespace(
             automation_controller=SimpleNamespace(is_running=False)
         ),
@@ -203,6 +207,97 @@ def test_generation_finished_prearms_normal_autogen_before_ui(monkeypatch):
     controller._on_generation_finished(result)
 
     assert main_window._auto_generation_waiting_for_thread is True
+    assert result["_skip_update_ui_auto_generate_check"] is True
+    assert ("generation_finished", result) in events
+    assert not [event for event in events if event[0] == "ui"]
+    assert scheduled and scheduled[0][0] == 50
+
+    scheduled[0][1]()
+
+    assert ("ui", result) in events
+
+
+def test_generation_finished_does_not_prearm_normal_autogen_when_fast_mode_disabled(monkeypatch):
+    scheduled = []
+    events = []
+
+    monkeypatch.setattr(
+        generation_controller_module.QTimer,
+        "singleShot",
+        lambda ms, fn: scheduled.append((ms, fn)),
+    )
+
+    queue = _QueueManager()
+    main_window = SimpleNamespace(
+        _auto_generation_waiting_for_thread=False,
+        generation_checkboxes={"자동 생성": _CheckBox(True)},
+        is_webui_fast_auto_gen_enabled=lambda: False,
+        automation_module=SimpleNamespace(
+            automation_controller=SimpleNamespace(is_running=False)
+        ),
+        update_ui_with_result=lambda result: events.append(("ui", result)),
+    )
+
+    controller = GenerationController.__new__(GenerationController)
+    controller.context = SimpleNamespace(
+        main_window=main_window,
+        generation_queue_manager=queue,
+        publish=lambda name, payload: events.append((name, payload)),
+        session_p_eng_override=None,
+        session_cond_override=None,
+    )
+    controller.current_generation_params = None
+    controller.auto_retry_count = 1
+    controller._update_button_with_queue_size = lambda: None
+
+    result = {"image": object(), "generation_params": {}}
+
+    controller._on_generation_finished(result)
+
+    assert main_window._auto_generation_waiting_for_thread is False
+    assert "_skip_update_ui_auto_generate_check" not in result
+    assert ("ui", result) in events
+    assert not scheduled
+
+
+def test_generation_finished_defers_ui_for_webui_fast_auto_gen_queue(monkeypatch):
+    scheduled = []
+    events = []
+
+    monkeypatch.setattr(
+        generation_controller_module.QTimer,
+        "singleShot",
+        lambda ms, fn: scheduled.append((ms, fn)),
+    )
+
+    queue = _QueueManager()
+    queue.requests.append(SimpleNamespace(params={"_webui_fast_auto_gen": True}))
+    main_window = SimpleNamespace(
+        _auto_generation_waiting_for_thread=False,
+        generation_checkboxes={"자동 생성": _CheckBox(True)},
+        is_webui_fast_auto_gen_enabled=lambda: True,
+        automation_module=SimpleNamespace(
+            automation_controller=SimpleNamespace(is_running=False)
+        ),
+        update_ui_with_result=lambda result: events.append(("ui", result)),
+    )
+
+    controller = GenerationController.__new__(GenerationController)
+    controller.context = SimpleNamespace(
+        main_window=main_window,
+        generation_queue_manager=queue,
+        publish=lambda name, payload: events.append((name, payload)),
+        session_p_eng_override=None,
+        session_cond_override=None,
+    )
+    controller.current_generation_params = None
+    controller.auto_retry_count = 1
+    controller._update_button_with_queue_size = lambda: None
+
+    result = {"image": object(), "generation_params": {}}
+
+    controller._on_generation_finished(result)
+
     assert result["_skip_update_ui_auto_generate_check"] is True
     assert ("generation_finished", result) in events
     assert not [event for event in events if event[0] == "ui"]

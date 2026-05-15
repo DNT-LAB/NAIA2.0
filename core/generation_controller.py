@@ -955,6 +955,11 @@ class GenerationController(QObject):
         self._update_button_with_queue_size()
 
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
+        try:
+            if hasattr(self.context.main_window, "prepare_fast_webui_auto_generation"):
+                self.context.main_window.prepare_fast_webui_auto_generation()
+        except Exception as e:
+            print(f"⚠️ WEBUI Fast Auto Gen 준비 요청 실패: {e}")
     
     def _on_generation_progress(self, message: str):
         """생성 진행 상황 업데이트 슬롯 (메인 스레드에서 실행)"""
@@ -987,11 +992,14 @@ class GenerationController(QObject):
         self.context.publish("generation_finished", result)
 
         queue_manager = self.context.generation_queue_manager
+        fast_auto_gen_queued = self._has_webui_fast_auto_gen_queue(queue_manager)
+        if fast_auto_gen_queued and isinstance(result, dict):
+            result["_skip_update_ui_auto_generate_check"] = True
         prearmed_auto_gen = self._prearm_auto_generation_after_thread_finish(result, queue_manager)
 
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
-        # 일반 Auto Gen은 다음 생성 재개가 Qt 이미지/CRUD 후처리에 막히지 않도록 한 틱 뒤로 미룬다.
-        if prearmed_auto_gen:
+        # Fast/일반 Auto Gen은 다음 생성 재개가 Qt 이미지/CRUD 후처리에 막히지 않도록 한 틱 뒤로 미룬다.
+        if prearmed_auto_gen or fast_auto_gen_queued:
             QTimer.singleShot(50, lambda result=result: self.context.main_window.update_ui_with_result(result))
         else:
             self.context.main_window.update_ui_with_result(result)
@@ -1025,6 +1033,11 @@ class GenerationController(QObject):
             auto_generate_checkbox = getattr(main_window, "generation_checkboxes", {}).get("자동 생성")
             if not (auto_generate_checkbox and auto_generate_checkbox.isChecked()):
                 return False
+            if not (
+                hasattr(main_window, "is_webui_fast_auto_gen_enabled")
+                and main_window.is_webui_fast_auto_gen_enabled()
+            ):
+                return False
 
             automation_module = getattr(main_window, "automation_module", None)
             automation_controller = getattr(automation_module, "automation_controller", None)
@@ -1038,6 +1051,17 @@ class GenerationController(QObject):
             return True
         except Exception as e:
             print(f"[AUTO] Auto Gen 사전 예약 실패: {e}")
+            return False
+
+    def _has_webui_fast_auto_gen_queue(self, queue_manager) -> bool:
+        try:
+            if queue_manager is None or queue_manager.is_empty() or queue_manager.is_paused():
+                return False
+            peek_next = getattr(queue_manager, "peek_next_request", None)
+            next_request = peek_next() if callable(peek_next) else None
+            params = getattr(next_request, "params", None)
+            return isinstance(params, dict) and bool(params.get("_webui_fast_auto_gen"))
+        except Exception:
             return False
 
     def _on_generation_error(self, error_message: str):

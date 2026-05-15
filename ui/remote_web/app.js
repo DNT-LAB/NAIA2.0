@@ -2129,6 +2129,7 @@ const DETACHED_MODULE_GEOMETRY = {
   auto_save: {width: 620, height: 680},
   save_directory: {width: 620, height: 680},
   automation: {width: 760, height: 760},
+  webui_fast_auto_gen: {width: 560, height: 420},
   character_reference: {width: 900, height: 780},
   vibe_transfer: {width: 900, height: 780},
   img2img: {width: 1080, height: 860},
@@ -3478,7 +3479,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260515-webui-fast-auto1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -3624,6 +3625,7 @@ function openModule(moduleId, options = {}) {
     search: 'Prompt Search',
     prompt_engineering: 'Prompt Engineering',
     automation: 'Automation',
+    webui_fast_auto_gen: 'WEBUI Fast Auto Gen',
     character: 'NAID4 Character',
     character_reference: 'Character Reference',
     vibe_transfer: 'Vibe Transfer',
@@ -3872,6 +3874,7 @@ function renderModuleState(m) {
   if (m.module_id === 'auto_save') renderAutoSavePanel(m);
   else if (m.module_id === 'prompt_engineering') renderPromptEngineering(m);
   else if (m.module_id === 'automation') renderAutomation(m);
+  else if (m.module_id === 'webui_fast_auto_gen') renderWebUiFastAutoGen(m);
   else if (m.module_id === 'character') renderCharacter(m);
   else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
   else if (m.module_id === 'character_reference') renderCharacterReference(m);
@@ -3886,6 +3889,25 @@ function renderModuleState(m) {
 
 function openSaveDirectoryPanel() {
   if (saveDirectoryPanel) saveDirectoryPanel.open();
+}
+
+function renderWebUiFastAutoGen(m) {
+  const enabled = !!m.enabled;
+  const available = m.available !== false;
+  moduleBody.innerHTML = `
+    <div class="mod-section">
+      <div class="mod-section-title">WEBUI Fast Auto Gen</div>
+      <label class="mod-row">
+        <input type="checkbox" ${enabled ? 'checked' : ''} ${available ? '' : 'disabled'}
+          oninput="setModuleParam('webui_fast_auto_gen','enabled',String(this.checked))">
+        <span>Fast Auto Gen</span>
+      </label>
+      <div class="mod-hint">
+        Auto Gen 중 현재 WEBUI 생성이 진행되는 동안 다음 랜덤 프롬프트를 미리 큐에 넣습니다.
+      </div>
+      ${available ? '' : '<div class="mod-hint warn">WEBUI 모드에서만 사용할 수 있습니다.</div>'}
+    </div>
+  `;
 }
 
 function onAutoSaveWebpChange(checked) {

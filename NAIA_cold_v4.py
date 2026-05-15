@@ -1126,6 +1126,7 @@ class ModernMainWindow(QMainWindow):
         self.auto_generation_in_progress = False
         self.last_auto_generation_time = 0
         self.last_image_generation_time = 0
+        self._auto_generation_waiting_for_thread = False
 
         #  검색 결과를 저장할 변수 및 컨트롤러 초기화
         self.search_results = SearchResultModel()
@@ -3414,6 +3415,7 @@ class ModernMainWindow(QMainWindow):
         prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
         
         if not auto_generate_checkbox.isChecked():
+            self._auto_generation_waiting_for_thread = False
             return  # 자동 생성 체크박스가 없으면 종료
 
         try:
@@ -3434,13 +3436,7 @@ class ModernMainWindow(QMainWindow):
             if (hasattr(self, 'generation_controller') and
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
-                # 약간의 지연 후 다시 시도 (최대 재시도 횟수 제한)
-                self._auto_gen_retry_count = getattr(self, '_auto_gen_retry_count', 0) + 1
-                if self._auto_gen_retry_count > 30:
-                    print("⚠️ 자동 생성 재시도 상한 도달. 루프를 중단합니다.")
-                    self._auto_gen_retry_count = 0
-                    return
-                QTimer.singleShot(800, self._check_and_trigger_auto_generation)
+                self._auto_generation_waiting_for_thread = True
                 return
 
             # [추가] 스레드 상태 확인
@@ -3448,11 +3444,12 @@ class ModernMainWindow(QMainWindow):
                 self.generation_controller.generation_thread and
                 self.generation_controller.generation_thread.isRunning()):
                 print("🔄 이전 스레드가 아직 실행 중이므로 잠시 대기...")
-                QTimer.singleShot(200, self._check_and_trigger_auto_generation)
+                self._auto_generation_waiting_for_thread = True
                 return
 
             # 정상 진입 — 재시도 카운터 리셋
             self._auto_gen_retry_count = 0
+            self._auto_generation_waiting_for_thread = False
 
             # [신규] 반복 생성 중인지 확인 - 반복 중이면 자동 생성 건너뛰기
             if (self.automation_module and
@@ -5224,9 +5221,9 @@ class ModernMainWindow(QMainWindow):
             
             self.status_bar.showMessage("🔄 자동 생성: 프롬프트 생성 완료, 이미지 생성 시작...")
             
-            # 자동으로 이미지 생성 실행 (약간의 지연을 두어 UI 업데이트 완료 후 실행)
+            # 자동으로 이미지 생성 실행 (현재 이벤트 처리 직후 실행)
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(100, self._trigger_auto_image_generation)
+            QTimer.singleShot(0, self._trigger_auto_image_generation)
         else:
             # 수동 생성인 경우
             self.status_bar.showMessage("✅ 다음 프롬프트 생성 완료!", 3000)

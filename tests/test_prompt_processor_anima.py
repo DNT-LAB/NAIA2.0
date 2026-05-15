@@ -12,11 +12,22 @@ class _Radio:
         return self._checked
 
 
-def _processor_with_main_radio(checked=False, current_api_mode="COMFYUI"):
+class _LineEdit:
+    def __init__(self, text=""):
+        self._text = text
+
+    def text(self):
+        return self._text
+
+
+def _processor_with_main_radio(checked=False, current_api_mode="COMFYUI", prompt_weight=None):
     processor = PromptProcessor.__new__(PromptProcessor)
+    main_window = SimpleNamespace(anima_radio=_Radio(checked))
+    if prompt_weight is not None:
+        main_window.anima_weight_edit = _LineEdit(prompt_weight)
     processor.app_context = SimpleNamespace(
         current_api_mode=current_api_mode,
-        main_window=SimpleNamespace(anima_radio=_Radio(checked)),
+        main_window=main_window,
     )
     return processor
 
@@ -99,6 +110,28 @@ def test_webui_prompt_formatting_applies_random_prompt_weight_without_anima_mode
         settings={
             "api_mode": "WEBUI",
             "anima_weight": "0.85",
+        },
+        prefix_tags=["quality"],
+        main_tags=["1girl", "blue sky", "solo"],
+    )
+
+    processor._step_final_format(context)
+
+    assert context.prefix_tags[:2] == ["1girl", "quality"]
+    assert context.main_tags[1:3] == ["(blue sky", "solo:0.85)"]
+
+
+def test_webui_prompt_formatting_uses_window_weight_when_auto_generate_settings_omit_it():
+    processor = _processor_with_main_radio(
+        checked=False,
+        current_api_mode="WEBUI",
+        prompt_weight="0.85",
+    )
+    context = PromptContext(
+        source_row={},
+        settings={
+            "api_mode": "WEBUI",
+            "auto_generate": True,
         },
         prefix_tags=["quality"],
         main_tags=["1girl", "blue sky", "solo"],

@@ -366,7 +366,7 @@ class PromptProcessor:
         raw_prompt_weight = _get_random_prompt_weight_raw(
             self.app_context,
             context.settings,
-            allow_window_fallback=(is_comfyui and is_anima_mode),
+            allow_window_fallback=(is_webui_weight_mode or (is_comfyui and is_anima_mode)),
         )
         prompt_weight_skip, prompt_weight = _parse_anima_weight(raw_prompt_weight)
 

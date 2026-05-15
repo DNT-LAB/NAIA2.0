@@ -222,6 +222,39 @@ def _ws(host):
     return SimpleNamespace(client=SimpleNamespace(host=host))
 
 
+def test_select_remote_server_port_keeps_bindable_preferred(monkeypatch):
+    probes = []
+    monkeypatch.setattr(
+        remote_api_server,
+        "_can_bind_remote_port",
+        lambda host, port: probes.append((host, port)) or True,
+    )
+
+    selected = remote_api_server._select_remote_server_port("127.0.0.1", "7243")
+
+    assert selected == 7243
+    assert probes == [("127.0.0.1", 7243)]
+
+
+def test_select_remote_server_port_falls_forward_when_preferred_unavailable(monkeypatch):
+    probes = []
+
+    def can_bind(host, port):
+        probes.append((host, port))
+        return port == 7245
+
+    monkeypatch.setattr(remote_api_server, "_can_bind_remote_port", can_bind)
+
+    selected = remote_api_server._select_remote_server_port("0.0.0.0", 7243)
+
+    assert selected == 7245
+    assert probes == [
+        ("0.0.0.0", 7243),
+        ("0.0.0.0", 7244),
+        ("0.0.0.0", 7245),
+    ]
+
+
 def test_api_status_only_forces_setup_for_allowed_loopback_clients():
     bridge = RemoteBridge(_AppContext())
 

@@ -553,7 +553,12 @@ class SettingsWidget(QWidget):
                 from core.remote_api_server import start_remote_server
                 self._force_web_session_autosave()
                 self.web_session_checkbox.setEnabled(False)
-                start_remote_server(self.app_context, port=port)
+                server = start_remote_server(self.app_context, host="127.0.0.1", port=port)
+                actual_port = getattr(getattr(server, "config", None), "port", port)
+                if actual_port != port:
+                    port = actual_port
+                    self.remote_port_edit.setText(str(port))
+                    self.settings_module.set_setting('web_session.port', port)
                 self.web_session_checkbox.setEnabled(True)
                 self.remote_port_edit.setEnabled(False)
                 url = f"http://localhost:{port}"

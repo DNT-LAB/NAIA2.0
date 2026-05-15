@@ -14,6 +14,7 @@ import math
 import mimetypes
 import random
 import re
+import socket
 import tempfile
 import time
 import threading
@@ -16533,6 +16534,43 @@ _param_signal_sources: list = []  # 파라미터 위젯 시그널 연결 추적
 _bridge_signal_connections: list = []  # (obj, signal_name, callback) 추가 연결 추적
 
 
+def _remote_bind_probe_hosts(host: str) -> list[str]:
+    clean_host = (host or "0.0.0.0").strip()
+    if clean_host in {"0.0.0.0", "::", "*"}:
+        return [clean_host, "127.0.0.1"]
+    return [clean_host]
+
+
+def _can_bind_remote_port(host: str, port: int) -> bool:
+    for probe_host in _remote_bind_probe_hosts(host):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                sock.bind((probe_host, port))
+                sock.listen(1)
+        except OSError:
+            return False
+    return True
+
+
+def _select_remote_server_port(host: str, preferred_port: int, *, max_attempts: int = 25) -> int:
+    try:
+        start_port = int(preferred_port)
+    except (TypeError, ValueError):
+        start_port = 7243
+    start_port = min(65535, max(1024, start_port))
+
+    for offset in range(max_attempts):
+        candidate = start_port + offset
+        if candidate > 65535:
+            break
+        if _can_bind_remote_port(host, candidate):
+            return candidate
+
+    raise OSError(f"No available Remote API port near {start_port}")
+
+
 def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     """Remote API 서버를 daemon thread로 시작."""
     global _server_instance, _bridge_instance, _checkbox_connections, _param_signal_sources, _bridge_signal_connections
@@ -16540,6 +16578,15 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     if _server_instance is not None:
         print("🌐 Remote: 서버가 이미 실행 중")
         return _server_instance
+
+    requested_port = port
+    port = _select_remote_server_port(host, port)
+    try:
+        requested_port_int = int(requested_port)
+    except (TypeError, ValueError):
+        requested_port_int = None
+    if port != requested_port_int:
+        print(f"🌐 Remote: port {requested_port} unavailable on {host}; using {port}")
 
     ws_manager = WebSocketManager()
     bridge = RemoteBridge(app_context)

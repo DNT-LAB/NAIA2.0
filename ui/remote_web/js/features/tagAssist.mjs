@@ -20,6 +20,10 @@ export function firstDefaultAutocompleteIndexForRows(rows = []) {
   return index >= 0 ? index : -1;
 }
 
+export function normalizeWebuiEscapedTagForLookup(text) {
+  return String(text || '').replace(/\\([()])/g, '$1');
+}
+
 export function createTagAssistController({
   document,
   window,
@@ -1193,6 +1197,7 @@ export function createTagAssistController({
       stripped = stripped.substring(1, stripped.length - 1).trim();
     }
     stripped = stripped.replace(/:\d+(?:\.\d+)?$/, '').trim();
+    stripped = normalizeWebuiEscapedTagForLookup(stripped).trim();
     return stripped;
   }
 

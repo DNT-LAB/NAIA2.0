@@ -4874,7 +4874,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260511-expression-hover-shortcut1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260515-webui-escaped-tag1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

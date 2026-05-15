@@ -13251,7 +13251,7 @@ class RemoteBridge(QObject):
         self._load_kr_tags()
         if not self._kr_tags_raw:
             return {}
-        tag_lower = tag.strip().lower()
+        tag_lower = re.sub(r'\\([()])', r'\1', tag.strip()).lower()
         info = self._kr_tags_raw.get(tag_lower)
         if not info:
             return {}

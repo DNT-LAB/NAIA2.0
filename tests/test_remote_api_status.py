@@ -264,6 +264,30 @@ def test_api_status_exposes_autocomplete_warmup_and_cache_state():
     }
 
 
+def test_tag_lookup_accepts_webui_escaped_parentheses():
+    bridge = RemoteBridge.__new__(RemoteBridge)
+    bridge._kr_tags_raw = {
+        "nahida (genshin impact)": {
+            "_tag": "nahida (genshin impact)",
+            "freq": 10000,
+            "description": "character",
+            "group": "character",
+            "subgroup": "genshin impact",
+            "_cat": "character",
+            "relations": {},
+        },
+    }
+    bridge._tag_relation_ranker = None
+    bridge._char_analysis = {}
+    bridge._load_kr_tags = lambda: None
+    bridge._load_char_analysis = lambda: None
+
+    info = bridge._lookup_tag_info(r"nahida \(genshin impact\)")
+
+    assert info["tag"] == "nahida (genshin impact)"
+    assert info["count"] == 10000
+
+
 def test_generation_error_clears_remote_generation_status():
     bridge = RemoteBridge(_AppContext())
     broadcasts = []

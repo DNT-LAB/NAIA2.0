@@ -588,6 +588,7 @@ class RemoteBridge(QObject):
         self._cached_result_enhance_config: dict = {}
         self._remote_web_ui_state: dict = self._load_remote_web_ui_state()
         self._webui_hiresfix_assist: dict = dict(self._remote_web_ui_state["webui_hiresfix_assist"])
+        self._remote_auto_generate_enabled = False
         # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
         # 태그 검색 인덱스 (ui/interactive/interactive 기반)
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
@@ -726,6 +727,7 @@ class RemoteBridge(QObject):
         return {
             "version": 1,
             "webui_hiresfix_assist": {"enabled": True, "target": 512},
+            "hires_preset_swap": "",
             "random_prompt_weight": "1",
         }
 
@@ -740,6 +742,20 @@ class RemoteBridge(QObject):
             "target": target,
         }
 
+    @staticmethod
+    def _normalize_hires_preset_swap_name(raw) -> str:
+        name = str(raw or "").strip()
+        if not name:
+            return ""
+        name = Path(name).name
+        if name.endswith(".json"):
+            name = name[:-5]
+        for char in '<>:"/\\|?*':
+            name = name.replace(char, "")
+        if name in {"", "*randomized", "(프리셋 없음)"}:
+            return ""
+        return name.strip()
+
     def _normalize_remote_web_ui_state(self, raw) -> dict:
         state = self._default_remote_web_ui_state()
         if isinstance(raw, dict):
@@ -749,6 +765,9 @@ class RemoteBridge(QObject):
                 pass
             state["webui_hiresfix_assist"] = self._normalize_webui_hiresfix_assist_state(
                 raw.get("webui_hiresfix_assist")
+            )
+            state["hires_preset_swap"] = self._normalize_hires_preset_swap_name(
+                raw.get("hires_preset_swap", state["hires_preset_swap"])
             )
             state["random_prompt_weight"] = self._format_anima_weight(
                 raw.get("random_prompt_weight", state["random_prompt_weight"])
@@ -822,6 +841,10 @@ class RemoteBridge(QObject):
             state["webui_hiresfix_assist"] = self._normalize_webui_hiresfix_assist_state(
                 updates.get("webui_hiresfix_assist")
             )
+        if "hires_preset_swap" in updates:
+            state["hires_preset_swap"] = self._normalize_hires_preset_swap_name(
+                updates.get("hires_preset_swap")
+            )
         if "random_prompt_weight" in updates:
             state["random_prompt_weight"] = self._format_anima_weight(updates.get("random_prompt_weight"))
         self._remote_web_ui_state = state
@@ -834,6 +857,7 @@ class RemoteBridge(QObject):
             "anima_weight": weight,
             "anima_weight_raw": weight,
             "random_prompt_weight": weight,
+            "hires_preset_swap": state["hires_preset_swap"],
         }
 
     def get_webui_hiresfix_assist_params(self) -> dict:
@@ -844,6 +868,16 @@ class RemoteBridge(QObject):
             "webui_hiresfix_assist": bool(state["enabled"]),
             "webui_hiresfix_assist_target": state["target"],
         }
+
+    def get_webui_hires_preset_swap_params(self) -> dict:
+        state = self._normalize_remote_web_ui_state(
+            getattr(self, "_remote_web_ui_state", None)
+        )
+        swap_name = state.get("hires_preset_swap") or ""
+        return {"hires_preset_swap": swap_name} if swap_name else {}
+
+    def is_remote_auto_generate_enabled(self) -> bool:
+        return bool(getattr(self, "_remote_auto_generate_enabled", False))
 
     def _normalize_rating_list(self, ratings=None) -> list[str]:
         source = ratings if ratings is not None else ['g', 's', 'q', 'e']
@@ -5761,6 +5795,8 @@ class RemoteBridge(QObject):
             label = self.OPTION_KEYS.get(key)
             if not label:
                 return
+            if key == "auto_generate":
+                self._remote_auto_generate_enabled = checked
             mw = self.app_context.main_window
             cb = mw.generation_checkboxes.get(label)
             if cb:
@@ -6123,7 +6159,10 @@ class RemoteBridge(QObject):
 
     def broadcast_options(self):
         """Broadcast the shared generation-option state to all Web Shell sessions."""
-        payload = {"type": "options", **self.get_options()}
+        options = self.get_options()
+        if not bool(options.get("auto_generate")):
+            self._remote_auto_generate_enabled = False
+        payload = {"type": "options", **options}
         self._cached_options = payload
         if self._has_clients():
             self._broadcast_json(payload)
@@ -7107,6 +7146,10 @@ class RemoteBridge(QObject):
         """웹에서 변경한 생성 파라미터를 메인 앱 위젯에 반영"""
         try:
             self._syncing_param = True
+            if key == "hires_preset_swap":
+                self._save_remote_web_ui_state(hires_preset_swap=value)
+                self._syncing_param = False
+                return
             mw = self.app_context.main_window
             if key == "model":
                 idx = mw.model_combo.findText(value)

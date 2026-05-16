@@ -351,6 +351,54 @@ class GenerationController:
         if "webui_hiresfix_assist_target" in defaults:
             params.setdefault("webui_hiresfix_assist_target", defaults["webui_hiresfix_assist_target"])
 
+    def _should_apply_remote_web_hires_preset_swap_default(self, params: dict) -> bool:
+        if "hires_preset_swap" in params:
+            return False
+        if bool(params.get("_remote_web_session_params")):
+            return True
+        if str(params.get("_remote_queue_source") or "") == "Web":
+            return True
+
+        prompt_settings = {}
+        try:
+            prompt_context = getattr(self.context, "current_prompt_context", None)
+            prompt_settings = getattr(prompt_context, "settings", {}) or {}
+        except Exception:
+            prompt_settings = {}
+        is_auto_generate_prompt = bool(params.get("auto_generate")) or bool(
+            prompt_settings.get("auto_generate")
+        )
+        if not is_auto_generate_prompt:
+            return False
+
+        bridge = getattr(self.context, "remote_bridge", None)
+        getter = getattr(bridge, "is_remote_auto_generate_enabled", None)
+        if not callable(getter):
+            return False
+        try:
+            return bool(getter())
+        except Exception:
+            return False
+
+    def _apply_remote_web_hires_preset_swap_default(self, params: dict) -> None:
+        if str(params.get('api_mode') or '').upper() != "WEBUI":
+            return
+        if not self._should_apply_remote_web_hires_preset_swap_default(params):
+            return
+        bridge = getattr(self.context, "remote_bridge", None)
+        swap_getter = getattr(bridge, "get_webui_hires_preset_swap_params", None)
+        if not callable(swap_getter):
+            return
+        try:
+            swap_defaults = swap_getter()
+        except Exception as e:
+            print(f"⚠️ WEBUI Hires Preset Swap 설정 읽기 실패: {e}")
+            return
+        if not isinstance(swap_defaults, dict):
+            return
+        if "hires_preset_swap" in swap_defaults:
+            params.setdefault("hires_preset_swap", swap_defaults["hires_preset_swap"])
+
     def _prepare_comfyui_workflow_with_wildcards(self, params: dict) -> bool:
         """
         🌉 ComfyUI 전용 브릿지: 와일드카드 확장 → 워크플로우 생성
@@ -485,6 +533,7 @@ class GenerationController:
                 if module_params: params.update(module_params)
 
             self._apply_webui_hiresfix_assist_defaults(params)
+            self._apply_remote_web_hires_preset_swap_default(params)
 
             # 랜덤 해상도 처리
             if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
@@ -1954,6 +2003,7 @@ class GenerationController:
                 params.update(module_params)
 
         self._apply_webui_hiresfix_assist_defaults(params)
+        self._apply_remote_web_hires_preset_swap_default(params)
 
         # 랜덤 해상도 처리
         if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:

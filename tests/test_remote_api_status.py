@@ -1269,18 +1269,61 @@ def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_
 
     bridge._set_webui_hiresfix_assist("enabled", "false")
     bridge._set_webui_hiresfix_assist("target", "768")
-    bridge._save_remote_web_ui_state(random_prompt_weight="0.85")
+    bridge._save_remote_web_ui_state(
+        hires_preset_swap="prev5",
+        random_prompt_weight="0.85",
+    )
 
     saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
     assert saved["remote_web"]["webui_hiresfix_assist"] == {"enabled": False, "target": 768}
+    assert saved["remote_web"]["hires_preset_swap"] == "prev5"
     assert saved["remote_web"]["random_prompt_weight"] == "0.85"
 
     restarted = RemoteBridge(ctx)
     assert restarted._read_webui_hiresfix_assist()["enabled"] is False
     assert restarted._read_webui_hiresfix_assist()["target"] == 768
     schema = restarted.get_generation_param_schema()
+    assert schema["hires_preset_swap"] == "prev5"
     assert schema["random_prompt_weight"] == "0.85"
     assert schema["anima_weight"] == "0.85"
+
+
+def test_remote_web_hires_preset_swap_param_is_saved_for_auto_generation(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    bridge = RemoteBridge(ctx)
+
+    bridge._do_set_param("hires_preset_swap", "prev5")
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["hires_preset_swap"] == "prev5"
+    assert bridge.get_webui_hires_preset_swap_params() == {"hires_preset_swap": "prev5"}
+
+    bridge._do_set_param("hires_preset_swap", "")
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["hires_preset_swap"] == ""
+    assert bridge.get_webui_hires_preset_swap_params() == {}
+
+
+def test_remote_auto_generate_owner_tracks_remote_toggle_and_desktop_off(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    auto_generate = _ToggleButton(False)
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"자동 생성": auto_generate}
+    )
+    bridge = RemoteBridge(ctx)
+
+    bridge._do_set_option("auto_generate", True)
+
+    assert auto_generate.isChecked() is True
+    assert bridge.is_remote_auto_generate_enabled() is True
+
+    auto_generate.setChecked(False)
+    bridge.broadcast_options()
+
+    assert bridge.is_remote_auto_generate_enabled() is False
 
 
 def test_remote_web_anima_weight_param_is_saved_for_next_session(tmp_path, monkeypatch):

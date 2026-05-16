@@ -1063,7 +1063,7 @@ function _collectCurrentParams() {
     if (denoise) p.denoising_strength = parseNumber(denoise.value, 0.5);
     if (hiresSteps) p.hires_steps = Math.trunc(parseNumber(hiresSteps.value, 10));
     if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 7.0);
-    const presetSwap = ($('pHiresPresetSwap')?.value || '').trim();
+    const presetSwap = ((_hiresPresetSwapValueKnown ? _hiresPresetSwapValue : $('pHiresPresetSwap')?.value) || '').trim();
     if (presetSwap) p.hires_preset_swap = presetSwap;
     const promptWeight = $('pAnimaWeight')?.value?.trim();
     if (promptWeight) {
@@ -1261,7 +1261,7 @@ function _compactHiresPreviewText(text, limit) {
 function refreshHiresPresetSwapOptions(m) {
   const select = document.getElementById('pHiresPresetSwap');
   if (!select) return;
-  const prevValue = select.value;
+  const prevValue = _hiresPresetSwapValueKnown ? _hiresPresetSwapValue : select.value;
   const presets = Array.isArray(m?.webui_preset_options)
     ? m.webui_preset_options
     : (Array.isArray(m?.preset_options) ? m.preset_options : []);
@@ -1310,6 +1310,8 @@ function refreshHiresPresetSwapOptions(m) {
   }
   select.innerHTML = opts.join('');
   select.value = validValues.has(prevValue) ? prevValue : '';
+  _hiresPresetSwapValue = select.value;
+  _hiresPresetSwapValueKnown = true;
   refreshHiresPresetMismatchBadge();
   refreshHiresEditButtonState();
 }
@@ -1319,6 +1321,8 @@ let _hiresPresetFullTextCache = new Map();
 let _hiresCurrentPresetName = '';
 let _hiresOverlayEditorPreset = '';
 let _hiresOverlayOverlayMap = new Map(); // preset_name → overlay body (서버 응답 캐시)
+let _hiresPresetSwapValue = '';
+let _hiresPresetSwapValueKnown = false;
 
 function refreshHiresEditButtonState() {
   const btn = document.getElementById('hiresPresetEditBtn');
@@ -2352,6 +2356,17 @@ function updateParams(m) {
     if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
     if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
+    if ('hires_preset_swap' in m) {
+      _hiresPresetSwapValue = String(m.hires_preset_swap || '').trim();
+      _hiresPresetSwapValueKnown = true;
+      const swapSelect = $('pHiresPresetSwap');
+      if (swapSelect) {
+        const hasOption = Array.from(swapSelect.options || []).some(option => option.value === _hiresPresetSwapValue);
+        swapSelect.value = hasOption ? _hiresPresetSwapValue : '';
+        refreshHiresPresetMismatchBadge();
+        refreshHiresEditButtonState();
+      }
+    }
     if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
     updateWebUiHiresfixAssistControls();
     updateWebUiHrScaleHint();
@@ -2387,6 +2402,9 @@ function setParam(key, value) {
     updateWebUiHrScaleHint();
   } else if (key === 'hr_scale') {
     updateWebUiHrScaleHint();
+  } else if (key === 'hires_preset_swap') {
+    _hiresPresetSwapValue = String(value || '').trim();
+    _hiresPresetSwapValueKnown = true;
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));

@@ -4,6 +4,17 @@ from typing import List, Optional
 
 class WebuiAPIUtils:
     """WEBUI API와의 통신을 담당하는 유틸리티 클래스"""
+
+    DEFAULT_HIRES_UPSCALERS = [
+        "Latent",
+        "Latent (antialiased)",
+        "Latent (bicubic)",
+        "Latent (bicubic antialiased)",
+        "Latent (nearest)",
+        "Latent (nearest-exact)",
+        "Lanczos",
+        "Nearest",
+    ]
     
     @staticmethod
     def get_current_model(url: str) -> Optional[str]:
@@ -88,21 +99,39 @@ class WebuiAPIUtils:
 
     @staticmethod
     def get_upscaler_list(url: str) -> List[str]:
-        """사용 가능한 업스케일러 리스트를 반환합니다."""
+        """Hires.fix에서 사용 가능한 업스케일러 리스트를 반환합니다."""
+        upscaler_list = []
+        seen = set()
+
+        def add_name(name: str):
+            clean_name = str(name or "").strip()
+            if clean_name and clean_name not in seen:
+                seen.add(clean_name)
+                upscaler_list.append(clean_name)
+
+        try:
+            latent_response = requests.get(f"{url}/sdapi/v1/latent-upscale-modes", timeout=10)
+            latent_response.raise_for_status()
+            for upscaler in latent_response.json():
+                if 'name' in upscaler:
+                    add_name(upscaler['name'])
+        except Exception as e:
+            print(f"⚠️ Latent 업스케일러 리스트 조회 실패: {e}")
+
         try:
             response = requests.get(f"{url}/sdapi/v1/upscalers", timeout=10)
             response.raise_for_status()
-            upscalers_data = response.json()
-            
-            upscaler_list = []
-            for upscaler in upscalers_data:
+            for upscaler in response.json():
                 if 'name' in upscaler:
-                    upscaler_list.append(upscaler['name'])
-                    
-            return upscaler_list
+                    add_name(upscaler['name'])
         except Exception as e:
-            print(f"❌ 업스케일러 리스트 조회 실패: {e}")
-            return []
+            print(f"⚠️ 업스케일러 리스트 조회 실패: {e}")
+
+        if not upscaler_list:
+            for name in WebuiAPIUtils.DEFAULT_HIRES_UPSCALERS:
+                add_name(name)
+
+        return upscaler_list
 
     @staticmethod  
     def get_sampler_list(url: str) -> List[str]:

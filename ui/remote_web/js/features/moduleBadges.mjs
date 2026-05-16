@@ -23,6 +23,10 @@ export function createModuleBadges({
     animaWeight: '1',
     workflowHasCustom: false,
   };
+  const webUiStatus = {
+    enableHr: false,
+    hrScale: '1',
+  };
   let weightPopover = null;
   let weightInput = null;
   let weightAnchor = null;
@@ -47,6 +51,20 @@ export function createModuleBadges({
     const parsed = Number(text);
     if (!Number.isFinite(parsed)) return '1';
     return parsed.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function normalizeBoolean(value) {
+    if (typeof value === 'boolean') return value;
+    const text = String(value ?? '').trim().toLowerCase();
+    return text === 'true' || text === '1' || text === 'yes' || text === 'on';
+  }
+
+  function formatHiresScale(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return '1';
+    const parsed = Number(text);
+    if (!Number.isFinite(parsed)) return '1';
+    return parsed.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   }
 
   function getActivatedTone() {
@@ -214,6 +232,10 @@ export function createModuleBadges({
     if (activatedWrap) activatedWrap.classList.add('has-activated-summary');
 
     activatedSummary.append(createParamsPart('webui-mode', 'Mode : WEBUI'));
+    if (webUiStatus.enableHr) {
+      appendBullet();
+      activatedSummary.append(createParamsPart('webui-hires', `Hirefix x${formatHiresScale(webUiStatus.hrScale)}`));
+    }
     appendBullet();
     activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
   }
@@ -400,6 +422,8 @@ export function createModuleBadges({
     if ('sampling_mode' in m) comfyUiStatus.samplingMode = normalizeSamplingMode(m.sampling_mode);
     if ('anima_weight' in m) comfyUiStatus.animaWeight = formatAnimaWeight(m.anima_weight);
     else if ('anima_weight_raw' in m) comfyUiStatus.animaWeight = formatAnimaWeight(m.anima_weight_raw);
+    if ('enable_hr' in m) webUiStatus.enableHr = normalizeBoolean(m.enable_hr);
+    if ('hr_scale' in m) webUiStatus.hrScale = formatHiresScale(m.hr_scale);
     if (m.comfyui_workflow && typeof m.comfyui_workflow === 'object') {
       updateComfyUiWorkflowState(m.comfyui_workflow);
       return;

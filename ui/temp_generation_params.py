@@ -553,17 +553,86 @@ class TempGenerationParamsWidget(QWidget):
         self.hr_upscaler_combo = QComboBox()
         self.hr_upscaler_combo.addItems([
             "Latent",
+            "Latent (antialiased)",
             "Latent (bicubic)",
+            "Latent (bicubic antialiased)",
             "Latent (nearest)",
-            "ESRGAN_4x",
-            "R-ESRGAN 4x+"
+            "Latent (nearest-exact)",
+            "Lanczos",
+            "Nearest",
+            "ESRGAN",
         ])
+        self.hr_upscaler_combo.setCurrentText("Latent (nearest-exact)")
         self.hr_upscaler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
 
         upscaler_layout.addWidget(upscaler_label)
         upscaler_layout.addWidget(self.hr_upscaler_combo, stretch=1)
 
         container_layout.addWidget(upscaler_row)
+
+        # === Denoising Strength ===
+        denoise_row = QWidget()
+        denoise_layout = QHBoxLayout(denoise_row)
+        denoise_layout.setContentsMargins(0, 0, 0, 0)
+        denoise_layout.setSpacing(get_scaled_size(8))
+
+        denoise_label = QLabel("  Denoise:")
+        denoise_label.setFixedWidth(get_scaled_size(120))
+        denoise_label.setStyleSheet(upscaler_label.styleSheet())
+
+        self.denoising_strength_spinbox = QDoubleSpinBox()
+        self.denoising_strength_spinbox.setRange(0.0, 1.0)
+        self.denoising_strength_spinbox.setSingleStep(0.01)
+        self.denoising_strength_spinbox.setDecimals(2)
+        self.denoising_strength_spinbox.setValue(0.5)
+        self.denoising_strength_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+
+        denoise_layout.addWidget(denoise_label)
+        denoise_layout.addWidget(self.denoising_strength_spinbox, stretch=1)
+
+        container_layout.addWidget(denoise_row)
+
+        # === Hires Steps ===
+        hires_steps_row = QWidget()
+        hires_steps_layout = QHBoxLayout(hires_steps_row)
+        hires_steps_layout.setContentsMargins(0, 0, 0, 0)
+        hires_steps_layout.setSpacing(get_scaled_size(8))
+
+        hires_steps_label = QLabel("  HR Steps:")
+        hires_steps_label.setFixedWidth(get_scaled_size(120))
+        hires_steps_label.setStyleSheet(upscaler_label.styleSheet())
+
+        self.hires_steps_spinbox = QSpinBox()
+        self.hires_steps_spinbox.setRange(0, 150)
+        self.hires_steps_spinbox.setValue(10)
+        self.hires_steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+
+        hires_steps_layout.addWidget(hires_steps_label)
+        hires_steps_layout.addWidget(self.hires_steps_spinbox, stretch=1)
+
+        container_layout.addWidget(hires_steps_row)
+
+        # === Hires CFG ===
+        hr_cfg_row = QWidget()
+        hr_cfg_layout = QHBoxLayout(hr_cfg_row)
+        hr_cfg_layout.setContentsMargins(0, 0, 0, 0)
+        hr_cfg_layout.setSpacing(get_scaled_size(8))
+
+        hr_cfg_label = QLabel("  HR CFG:")
+        hr_cfg_label.setFixedWidth(get_scaled_size(120))
+        hr_cfg_label.setStyleSheet(upscaler_label.styleSheet())
+
+        self.hr_cfg_spinbox = QDoubleSpinBox()
+        self.hr_cfg_spinbox.setRange(0.0, 30.0)
+        self.hr_cfg_spinbox.setSingleStep(0.1)
+        self.hr_cfg_spinbox.setDecimals(1)
+        self.hr_cfg_spinbox.setValue(7.0)
+        self.hr_cfg_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
+
+        hr_cfg_layout.addWidget(hr_cfg_label)
+        hr_cfg_layout.addWidget(self.hr_cfg_spinbox, stretch=1)
+
+        container_layout.addWidget(hr_cfg_row)
 
         return container
 
@@ -641,9 +710,29 @@ class TempGenerationParamsWidget(QWidget):
                 self.hr_scale_spinbox.setValue(
                     main_window.hr_scale_spinbox.value()
                 )
-                self.hr_upscaler_combo.setCurrentText(
-                    main_window.hr_upscaler_combo.currentText()
-                )
+                if hasattr(main_window, 'hr_upscaler_combo'):
+                    upscaler_items = [
+                        main_window.hr_upscaler_combo.itemText(i)
+                        for i in range(main_window.hr_upscaler_combo.count())
+                    ]
+                    if upscaler_items:
+                        self.hr_upscaler_combo.clear()
+                        self.hr_upscaler_combo.addItems(upscaler_items)
+                    self.hr_upscaler_combo.setCurrentText(
+                        main_window.hr_upscaler_combo.currentText()
+                    )
+                if hasattr(main_window, 'denoising_strength_spinbox'):
+                    self.denoising_strength_spinbox.setValue(
+                        main_window.denoising_strength_spinbox.value()
+                    )
+                if hasattr(main_window, 'hires_steps_spinbox'):
+                    self.hires_steps_spinbox.setValue(
+                        main_window.hires_steps_spinbox.value()
+                    )
+                if hasattr(main_window, 'hr_cfg_spinbox'):
+                    self.hr_cfg_spinbox.setValue(
+                        main_window.hr_cfg_spinbox.value()
+                    )
 
             print("[TempGenerationParamsWidget] 초기값 복사 완료")
 
@@ -735,6 +824,9 @@ class TempGenerationParamsWidget(QWidget):
         params['enable_hr'] = self.enable_hr_checkbox.isChecked()
         params['hr_scale'] = self.hr_scale_spinbox.value()
         params['hr_upscaler'] = self.hr_upscaler_combo.currentText()
+        params['denoising_strength'] = self.denoising_strength_spinbox.value()
+        params['hires_steps'] = self.hires_steps_spinbox.value()
+        params['hr_cfg'] = self.hr_cfg_spinbox.value()
 
         return params
 

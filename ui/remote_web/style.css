@@ -7401,6 +7401,9 @@ body.resizing-result-info {
 .activated-summary-part.comfyui-weight {
   color: #a7efa9;
 }
+.activated-summary-part.webui-hires {
+  color: #75cfff;
+}
 .activated-summary-part.comfyui-workflow-basic {
   color: #75cfff;
 }

@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260515-viewer-fit1">
+<link rel="stylesheet" href="style.css?v=20260516-webui-hires1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -365,7 +365,7 @@
               </div>
               <div class="param-row">
                 <span class="param-label">HR Scale</span>
-                <input class="param-input" id="pHrScale" type="number" step="0.1" min="1" max="4" onchange="setParam('hr_scale',this.value)">
+                <input class="param-input" id="pHrScale" type="number" step="0.1" min="1" max="4" value="2" onchange="setParam('hr_scale',this.value)">
               </div>
               <div class="param-row">
                 <span class="param-label">Upscaler</span>
@@ -373,15 +373,15 @@
               </div>
               <div class="param-row">
                 <span class="param-label">Denoise</span>
-                <input class="param-input" id="pDenoise" type="number" step="0.05" min="0" max="1" onchange="setParam('denoising_strength',this.value)">
+                <input class="param-input" id="pDenoise" type="number" step="0.05" min="0" max="1" value="0.5" onchange="setParam('denoising_strength',this.value)">
               </div>
               <div class="param-row">
                 <span class="param-label">HR Steps</span>
-                <input class="param-input" id="pHiresSteps" type="number" min="0" max="150" onchange="setParam('hires_steps',this.value)">
+                <input class="param-input" id="pHiresSteps" type="number" min="0" max="150" value="10" onchange="setParam('hires_steps',this.value)">
               </div>
               <div class="param-row">
                 <span class="param-label">HR CFG</span>
-                <input class="param-input" id="pHrCfg" type="number" step="0.1" min="0" max="30" onchange="setParam('hr_cfg',this.value)">
+                <input class="param-input" id="pHrCfg" type="number" step="0.1" min="0" max="30" value="7" onchange="setParam('hr_cfg',this.value)">
               </div>
             </div>
             <!-- ComfyUI controls -->
@@ -865,6 +865,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260516-search-draft1"></script>
+<script src="app.js?v=20260516-webui-hires2"></script>
 </body>
 </html>

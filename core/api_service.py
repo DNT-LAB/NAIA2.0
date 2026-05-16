@@ -73,6 +73,62 @@ class APIService:
         except Exception:
             pass
 
+    @staticmethod
+    def _coerce_bool_param(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
+                return False
+        return bool(value)
+
+    @staticmethod
+    def _coerce_float_param(value: Any, default: float) -> float:
+        try:
+            if value is None or value == "":
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _coerce_int_param(value: Any, default: int) -> int:
+        try:
+            if value is None or value == "":
+                return default
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+    def _apply_webui_hires_params(self, payload: Dict[str, Any], params: Dict[str, Any], *, is_img2img: bool) -> None:
+        """Apply AUTOMATIC1111 txt2img Hires.fix fields to a payload."""
+        if is_img2img:
+            return
+
+        enable_hr = self._coerce_bool_param(params.get("enable_hr"), False)
+        payload["enable_hr"] = enable_hr
+        if not enable_hr:
+            return
+
+        payload.update({
+            "denoising_strength": self._coerce_float_param(params.get("denoising_strength"), 0.5),
+            "hr_scale": self._coerce_float_param(params.get("hr_scale"), 2.0),
+            "hr_upscaler": params.get("hr_upscaler") or "Latent (nearest-exact)",
+            "hr_second_pass_steps": self._coerce_int_param(
+                params.get("hires_steps", params.get("hr_second_pass_steps")), 10
+            ),
+            # Keep WebUI's scale-based path unless an explicit resize target exists.
+            "hr_resize_x": self._coerce_int_param(params.get("hr_resize_x"), 0),
+            "hr_resize_y": self._coerce_int_param(params.get("hr_resize_y"), 0),
+            "hr_additional_modules": params.get("hr_additional_modules") or ["Use same choices"],
+            "hr_cfg": self._coerce_float_param(params.get("hr_cfg"), 7.0),
+        })
+
     def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
@@ -745,8 +801,6 @@ class APIService:
                 "batch_size": 1,
                 "restore_faces": False,
                 "tiling": False,
-                "enable_hr": params.get('enable_hr', False),
-                "denoising_strength": params.get('denoising_strength', 0.5),
                 "save_images": True,
                 "send_images": True,
                 "do_not_save_samples": False,
@@ -787,15 +841,7 @@ class APIService:
                     print(f"   - inpaint_full_res_padding: {payload['inpaint_full_res_padding']}")
                     print(f"   - inpainting_mask_invert: {payload['inpainting_mask_invert']}")
             
-            if payload["enable_hr"]:
-                payload.update({
-                    "hr_scale": params.get('hr_scale', 1.5),
-                    "hr_upscaler": params.get('hr_upscaler', 'Lanczos'),
-                    "hr_second_pass_steps": params.get('steps', 28) // 2,
-                    "hr_resize_x": int(payload["width"] * params.get('hr_scale', 1.5)),
-                    "hr_resize_y": int(payload["height"] * params.get('hr_scale', 1.5)),
-                    "hr_cfg": params.get('hr_cfg', 0)  # hr_cfg 추가, 기본값 0
-                })
+            self._apply_webui_hires_params(payload, params, is_img2img=is_img2img)
             
             # 🔥 개선된 커스텀 파라미터 처리
             if params.get('use_custom_api_params', False):

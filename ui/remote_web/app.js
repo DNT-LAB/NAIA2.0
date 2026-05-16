@@ -587,7 +587,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260513-webui-weight1')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260516-webui-hires1')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -1056,11 +1056,11 @@ function _collectCurrentParams() {
     const hiresSteps = $('pHiresSteps');
     const hrCfg = $('pHrCfg');
     if (enableHr) p.enable_hr = !!enableHr.checked;
-    if (hrScale) p.hr_scale = parseNumber(hrScale.value, 1.5);
+    if (hrScale) p.hr_scale = parseNumber(hrScale.value, 2.0);
     if (hrUpscaler?.value) p.hr_upscaler = hrUpscaler.value;
     if (denoise) p.denoising_strength = parseNumber(denoise.value, 0.5);
-    if (hiresSteps) p.hires_steps = Math.trunc(parseNumber(hiresSteps.value, 0));
-    if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 5.0);
+    if (hiresSteps) p.hires_steps = Math.trunc(parseNumber(hiresSteps.value, 10));
+    if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 7.0);
     const promptWeight = $('pAnimaWeight')?.value?.trim();
     if (promptWeight) {
       p.anima_weight = promptWeight;
@@ -1746,6 +1746,19 @@ function populateSelect(el, options, current) {
   else if (previous && Array.from(el.options).some(option => option.value === previous)) el.value = previous;
 }
 
+function setSelectWithFallback(el, preferred, fallbacks = []) {
+  if (!el) return '';
+  const values = Array.from(el.options).map(option => option.value);
+  const candidates = [preferred, ...fallbacks].filter(value => value !== undefined && value !== null && String(value).trim() !== '');
+  const match = candidates.find(value => values.includes(String(value)));
+  if (match !== undefined) {
+    el.value = String(match);
+    return el.value;
+  }
+  if (values.length) el.value = values[0];
+  return el.value;
+}
+
 function normalizeComfyUiWorkflowState(m = {}) {
   const state = m.comfyui_workflow && typeof m.comfyui_workflow === 'object'
     ? m.comfyui_workflow
@@ -1834,7 +1847,9 @@ function updateParams(m) {
   if (mode === 'WEBUI') {
     if ('enable_hr' in m) $('pEnableHr').checked = m.enable_hr;
     if ('hr_scale' in m) $('pHrScale').value = m.hr_scale;
-    populateSelect($('pHrUpscaler'), m.options_hr_upscaler, m.hr_upscaler);
+    const hrUpscalerSelect = $('pHrUpscaler');
+    populateSelect(hrUpscalerSelect, m.options_hr_upscaler, undefined);
+    setSelectWithFallback(hrUpscalerSelect, m.hr_upscaler, ['Latent (nearest-exact)', 'Latent', 'Lanczos']);
     if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
     if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
@@ -1871,6 +1886,9 @@ function setParam(key, value) {
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
+  }
+  if (moduleBadges && ['enable_hr', 'hr_scale', 'anima_weight'].includes(key)) {
+    moduleBadges.updateComfyUiParams(_collectCurrentParams());
   }
 }
 

@@ -715,10 +715,22 @@ class GenerationParamsManager:
                     mw.hr_upscaler_combo.setCurrentIndex(index)
                     print(f"✅ 업스케일러 복원: {current_upscaler}")
                 else:
-                    # 기본값 설정 (첫 번째 항목)
-                    if mw.hr_upscaler_combo.count() > 0:
+                    fallback_upscaler = next(
+                        (
+                            candidate for candidate in (
+                                "Latent (nearest-exact)",
+                                "Latent",
+                                "Lanczos",
+                            )
+                            if candidate in upscaler_list
+                        ),
+                        None,
+                    )
+                    if fallback_upscaler:
+                        mw.hr_upscaler_combo.setCurrentText(fallback_upscaler)
+                    elif mw.hr_upscaler_combo.count() > 0:
                         mw.hr_upscaler_combo.setCurrentIndex(0)
-                        print(f"✅ 업스케일러를 기본값으로 설정: {mw.hr_upscaler_combo.currentText()}")
+                    print(f"✅ 업스케일러를 기본값으로 설정: {mw.hr_upscaler_combo.currentText()}")
                 
                 print(f"✅ WEBUI 업스케일러 목록 업데이트: {len(upscaler_list)}개")
             

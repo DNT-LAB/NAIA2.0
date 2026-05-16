@@ -2190,7 +2190,7 @@ class ModernMainWindow(QMainWindow):
         self.hr_scale_spinbox = QDoubleSpinBox()
         self.hr_scale_spinbox.setRange(1.0, 4.0)
         self.hr_scale_spinbox.setSingleStep(0.1)
-        self.hr_scale_spinbox.setValue(1.5)
+        self.hr_scale_spinbox.setValue(2.0)
         self.hr_scale_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
         self.hr_scale_spinbox.setFixedWidth(get_scaled_size(80))
         self.hires_option_layout_row1.addWidget(self.hr_scale_spinbox)
@@ -2204,7 +2204,18 @@ class ModernMainWindow(QMainWindow):
         self.hires_option_layout_row1.addWidget(hr_upscaler_label)
 
         self.hr_upscaler_combo = QComboBox()
-        self.hr_upscaler_combo.addItems(["Lanczos", "Nearest", "ESRGAN_4x", "LDSR", "SwinIR_4x"])
+        self.hr_upscaler_combo.addItems([
+            "Latent",
+            "Latent (antialiased)",
+            "Latent (bicubic)",
+            "Latent (bicubic antialiased)",
+            "Latent (nearest)",
+            "Latent (nearest-exact)",
+            "Lanczos",
+            "Nearest",
+            "ESRGAN",
+        ])
+        self.hr_upscaler_combo.setCurrentText("Latent (nearest-exact)")
         self.hr_upscaler_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.hr_upscaler_combo.setMinimumWidth(get_scaled_size(120))
         self.disable_wheel_event(self.hr_upscaler_combo)
@@ -2221,7 +2232,7 @@ class ModernMainWindow(QMainWindow):
 
         self.hires_steps_spinbox = QSpinBox()
         self.hires_steps_spinbox.setRange(0, 150)
-        self.hires_steps_spinbox.setValue(0)
+        self.hires_steps_spinbox.setValue(10)
         self.hires_steps_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
         self.hires_steps_spinbox.setFixedWidth(get_scaled_size(80))
         self.disable_wheel_event(self.hires_steps_spinbox)
@@ -2257,7 +2268,7 @@ class ModernMainWindow(QMainWindow):
         self.hr_cfg_spinbox.setRange(0.0, 30.0)
         self.hr_cfg_spinbox.setSingleStep(0.1)
         self.hr_cfg_spinbox.setDecimals(1)
-        self.hr_cfg_spinbox.setValue(0.0)
+        self.hr_cfg_spinbox.setValue(7.0)
         self.hr_cfg_spinbox.setStyleSheet(DARK_STYLES['compact_spinbox'])
         self.hr_cfg_spinbox.setFixedWidth(get_scaled_size(80))
         self.disable_wheel_event(self.hr_cfg_spinbox)
@@ -3116,10 +3127,10 @@ class ModernMainWindow(QMainWindow):
             if hasattr(self, 'enable_hr_checkbox'):
                 params.update({
                     "enable_hr": self.enable_hr_checkbox.isChecked(),
-                    "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 1.5,
-                    "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Lanczos",
+                    "hr_scale": self.hr_scale_spinbox.value() if hasattr(self, 'hr_scale_spinbox') else 2.0,
+                    "hr_upscaler": self.hr_upscaler_combo.currentText() if hasattr(self, 'hr_upscaler_combo') else "Latent (nearest-exact)",
                     "denoising_strength": self.denoising_strength_spinbox.value() if hasattr(self, 'denoising_strength_spinbox') else 0.5,
-                    "hires_steps": self.hires_steps_spinbox.value() if hasattr(self, 'hires_steps_spinbox') else 0
+                    "hires_steps": self.hires_steps_spinbox.value() if hasattr(self, 'hires_steps_spinbox') else 10
                 })
                 
                 # WEBUI 모드에서 hr_cfg 추가
@@ -4439,6 +4450,25 @@ class ModernMainWindow(QMainWindow):
                 print(f"✅ WEBUI 모델 리스트 업데이트: {len(models)}개 모델")
             else:
                 print("⚠️ WEBUI 서버에서 모델을 가져올 수 없습니다. 서버가 실행 중인지 확인하세요.")
+
+            upscalers = WebuiAPIUtils.get_upscaler_list(webui_url)
+            if upscalers and hasattr(self, 'hr_upscaler_combo'):
+                current_upscaler = self.hr_upscaler_combo.currentText()
+                self.hr_upscaler_combo.blockSignals(True)
+                self.hr_upscaler_combo.clear()
+                self.hr_upscaler_combo.addItems(upscalers)
+                if current_upscaler in upscalers:
+                    self.hr_upscaler_combo.setCurrentText(current_upscaler)
+                elif "Latent (nearest-exact)" in upscalers:
+                    self.hr_upscaler_combo.setCurrentText("Latent (nearest-exact)")
+                elif "Latent" in upscalers:
+                    self.hr_upscaler_combo.setCurrentText("Latent")
+                elif "Lanczos" in upscalers:
+                    self.hr_upscaler_combo.setCurrentText("Lanczos")
+                elif self.hr_upscaler_combo.count() > 0:
+                    self.hr_upscaler_combo.setCurrentIndex(0)
+                self.hr_upscaler_combo.blockSignals(False)
+                print(f"✅ WEBUI Hires 업스케일러 목록 업데이트: {len(upscalers)}개")
             return
 
         elif current_mode == "COMFYUI":
